@@ -1,0 +1,25 @@
+[package]
+name = "clf-kernel"
+description = "B-rep solid modeling on OpenCASCADE: profiles, extrude, revolve, booleans, fillets, meshing, STEP"
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-only"
+links = "clf-kernel"
+
+[dependencies]
+cxx.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+clf-sketch.workspace = true
+log.workspace = true
+
+[build-dependencies]
+cxx-build = "1"
+occt-sys = "7.8.1"
+
+[lints.rust]
+# The cxx bridge expands to unsafe FFI glue; everything else stays safe.
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"

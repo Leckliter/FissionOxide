@@ -1,0 +1,14 @@
+[package]
+name = "clf-render"
+description = "Software 3D rasterizer: shaded meshes, edges, sketch lines, picking buffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+image.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,156 @@
+use super::*;
+use clf_sketch::{PtSpec, Sketch, find_profiles};
+
+fn rect_profile(w: f64, h: f64) -> Profile {
+  let mut s = Sketch::new();
+  s.add_rectangle([0.0, 0.0], [w, h]).unwrap();
+  find_profiles(&s).remove(0)
+}
+
+fn block() -> Shape {
+  Shape::face(&Plane::XY, &rect_profile(40.0, 20.0)).unwrap().extrude(DVec3::new(0.0, 0.0, 10.0)).unwrap()
+}
+
+fn volume(s: &Shape) -> f64 {
+  s.mass().unwrap().volume
+}
+
+#[test]
+fn extrude_rectangle() {
+  let b = block();
+  assert!((volume(&b) - 8000.0).abs() < 1e-6);
+  assert_eq!(b.faces().unwrap().len(), 6);
+  assert_eq!(b.edges().unwrap().len(), 12);
+  assert!(b.is_valid());
+}
+
+#[test]
+fn extrude_downwards_and_on_other_planes() {
+  let f = Shape::face(&Plane::XZ, &rect_profile(10.0, 10.0)).unwrap();
+  let s = f.extrude(DVec3::new(0.0, -5.0, 0.0)).unwrap();
+  assert!((volume(&s) - 500.0).abs() < 1e-6);
+  let m = s.mass().unwrap();
+  assert!((m.bbox_min.y + 5.0).abs() < 1e-6);
+}
+
+#[test]
+fn ring_profile_with_hole() {
+  let mut s = Sketch::new();
+  s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
+  s.add_circle(PtSpec::At(0.0, 0.0), 4.0).unwrap();
+  let p = find_profiles(&s);
+  let ring = p.iter().find(|p| !p.holes.is_empty()).unwrap();
+  let solid = Shape::face(&Plane::XY, ring).unwrap().extrude(DVec3::Z * 2.0).unwrap();
+  let expected = std::f64::consts::PI * (100.0 - 16.0) * 2.0;
+  assert!((volume(&solid) - expected).abs() < 1e-3, "{}", volume(&solid));
+}
+
+#[test]
+fn coplanar_booleans_that_pure_rust_kernels_fail() {
+  let a = block();
+  // boss standing on the top face
+  let boss = Shape::cylinder(DVec3::new(20.0, 10.0, 10.0), DVec3::Z, 5.0, 8.0).unwrap();
+  let u = a.boolean(&boss, BoolOp::Union).unwrap();
+  let expected = 8000.0 + std::f64::consts::PI * 25.0 * 8.0;
+  assert!((volume(&u) - expected).abs() < 1e-3);
+  assert_eq!(u.solid_count(), 1);
+  // through hole exactly flush with top and bottom
+  let hole = Shape::cylinder(DVec3::new(8.0, 10.0, 0.0), DVec3::Z, 3.0, 10.0).unwrap();
+  let c = u.boolean(&hole, BoolOp::Subtract).unwrap();
+  assert!((volume(&c) - (expected - std::f64::consts::PI * 9.0 * 10.0)).abs() < 1e-3);
+  // box on box sharing faces
+  let top = Shape::make_box(DVec3::new(30.0, 0.0, 10.0), DVec3::new(40.0, 20.0, 15.0)).unwrap();
+  let d = c.boolean(&top, BoolOp::Union).unwrap();
+  assert!(d.is_valid());
+  // coplanar faces were merged: the top block's side faces unify with the base's
+  let faces = d.faces().unwrap().len();
+  assert!(faces < 16, "{faces} faces");
+}
+
+#[test]
+fn cut_splits_into_two_solids() {
+  let a = block();
+  let slab = Shape::make_box(DVec3::new(18.0, -1.0, -1.0), DVec3::new(22.0, 21.0, 11.0)).unwrap();
+  let r = a.boolean(&slab, BoolOp::Subtract).unwrap();
+  assert_eq!(r.solids().unwrap().len(), 2);
+  assert!(matches!(a.boolean(&a, BoolOp::Subtract), Err(KernelError::Empty)));
+}
+
+#[test]
+fn fillet_chamfer_shell() {
+  let a = block();
+  let edges: Vec<u32> = a.edges().unwrap().iter().filter(|e| (e.mid.z - 10.0).abs() < 1e-6).map(|e| e.id).collect();
+  assert_eq!(edges.len(), 4);
+  let f = a.fillet(&edges, 2.0).unwrap();
+  assert!(f.is_valid());
+  assert!(volume(&f) < 8000.0);
+  // an impossible fillet is an error, not a crash
+  assert!(a.fillet(&edges, 50.0).is_err());
+  let c = a.chamfer(&edges, 1.0).unwrap();
+  assert!(volume(&c) < 8000.0);
+  let top = a.faces().unwrap().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  let sh = a.shell(&[top], 1.0).unwrap();
+  let inner = 38.0 * 18.0 * 9.0;
+  assert!((volume(&sh) - (8000.0 - inner)).abs() < 1e-2, "{}", volume(&sh));
+}
+
+#[test]
+fn revolve_profile() {
+  // a 10x5 rectangle offset 5 from the Z axis on the XZ plane → a tube
+  let mut s = Sketch::new();
+  s.add_rectangle([5.0, 0.0], [15.0, 5.0]).unwrap();
+  let p = find_profiles(&s).remove(0);
+  let f = Shape::face(&Plane::XZ, &p).unwrap();
+  let r = f.revolve(DVec3::ZERO, DVec3::Z, std::f64::consts::TAU).unwrap();
+  let expected = std::f64::consts::PI * (225.0 - 25.0) * 5.0;
+  assert!((volume(&r) - expected).abs() < 1e-2, "{}", volume(&r));
+}
+
+#[test]
+fn mesh_edges_and_exchange() {
+  let a = block().fillet(&[1], 2.0).unwrap();
+  let m = a.tessellate(0.05).unwrap();
+  assert!(!m.indices.is_empty());
+  assert_eq!(m.tri_face.len(), m.indices.len() / 3);
+  assert_eq!(m.positions.len(), m.normals.len());
+  let lines = a.edge_lines(0.05).unwrap();
+  assert!(lines.len() >= 12);
+  let dir = std::env::temp_dir().join(format!("clf-kernel-test-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let step = dir.join("part.step");
+  write_step([&a], &step).unwrap();
+  let back = read_step(&step).unwrap();
+  assert_eq!(back.len(), 1);
+  assert!((volume(&back[0]) - volume(&a)).abs() < 1e-3);
+  write_stl(&[m.clone()], &dir.join("part.stl")).unwrap();
+  let brep = a.to_brep().unwrap();
+  let again = Shape::from_brep(&brep).unwrap();
+  assert!((volume(&again) - volume(&a)).abs() < 1e-6);
+  assert!(read_step(&dir.join("missing.step")).is_err());
+  assert!(Shape::from_brep("garbage").is_err());
+  let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn transforms() {
+  let a = block();
+  let t = a.translated(DVec3::new(100.0, 0.0, 0.0)).unwrap();
+  assert!((t.mass().unwrap().bbox_min.x - 100.0).abs() < 1e-6);
+  let r = a.rotated(DVec3::ZERO, DVec3::Z, std::f64::consts::FRAC_PI_2).unwrap();
+  assert!((r.mass().unwrap().bbox_min.x + 20.0).abs() < 1e-6);
+  let m = a.mirrored(DVec3::ZERO, DVec3::X).unwrap();
+  assert!((m.mass().unwrap().bbox_min.x + 40.0).abs() < 1e-6);
+  assert!((volume(&m) - 8000.0).abs() < 1e-6);
+}
+
+#[test]
+fn hostile_inputs_are_errors() {
+  let f = Shape::face(&Plane::XY, &rect_profile(10.0, 10.0)).unwrap();
+  assert!(f.extrude(DVec3::ZERO).is_err());
+  assert!(f.extrude(DVec3::new(f64::NAN, 0.0, 0.0)).is_err());
+  assert!(f.revolve(DVec3::ZERO, DVec3::ZERO, 1.0).is_err());
+  assert!(Shape::make_box(DVec3::ZERO, DVec3::ZERO).is_err());
+  assert!(Shape::sphere(DVec3::ZERO, -1.0).is_err());
+  assert!(block().fillet(&[999], 1.0).is_err());
+  assert!(block().shell(&[1], 100.0).is_err());
+}
