@@ -122,7 +122,7 @@ fn mesh_edges_and_exchange() {
   let back = read_step(&step).unwrap();
   assert_eq!(back.len(), 1);
   assert!((volume(&back[0]) - volume(&a)).abs() < 1e-3);
-  write_stl(&[m.clone()], &dir.join("part.stl")).unwrap();
+  write_stl(std::slice::from_ref(&m), &dir.join("part.stl")).unwrap();
   let brep = a.to_brep().unwrap();
   let again = Shape::from_brep(&brep).unwrap();
   assert!((volume(&again) - volume(&a)).abs() < 1e-6);
@@ -153,4 +153,24 @@ fn hostile_inputs_are_errors() {
   assert!(Shape::sphere(DVec3::ZERO, -1.0).is_err());
   assert!(block().fillet(&[999], 1.0).is_err());
   assert!(block().shell(&[1], 100.0).is_err());
+}
+
+#[test]
+fn mesh_normals_agree_with_triangles() {
+  let a = block();
+  let edges: Vec<u32> = a.edges().unwrap().iter().filter(|e| (e.mid.z - 10.0).abs() < 1e-6).map(|e| e.id).collect();
+  let f = a.fillet(&edges, 3.0).unwrap();
+  let m = f.tessellate(0.05).unwrap();
+  let mut bad = 0;
+  for t in m.indices.chunks_exact(3) {
+    let p: Vec<glam::Vec3> = t.iter().map(|&i| glam::Vec3::from(m.positions[i as usize])).collect();
+    let tn = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+    for &i in t {
+      let n = glam::Vec3::from(m.normals[i as usize]);
+      if (n.length() - 1.0).abs() > 1e-3 || n.dot(tn) < 0.0 {
+        bad += 1;
+      }
+    }
+  }
+  assert_eq!(bad, 0, "{bad} bad normals of {}", m.indices.len());
 }

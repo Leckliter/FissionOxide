@@ -1,6 +1,6 @@
 //! The cxx bridge. Every fallible call returns `Result`; the C++ side converts all kernel
 //! exceptions to errors, so nothing here can abort the process.
-#![allow(unsafe_code, clippy::too_many_arguments)]
+#![allow(unsafe_code, clippy::too_many_arguments, clippy::module_inception)]
 
 #[cxx::bridge(namespace = "clf")]
 pub(crate) mod ffi {

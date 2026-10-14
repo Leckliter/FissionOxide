@@ -1,8 +1,15 @@
 [package]
 name = "clfusion"
+description = "CLFusion: parametric 3D CAD in the style of Fusion 360"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+clf-ui.workspace = true
+eframe.workspace = true
+env_logger.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true

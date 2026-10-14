@@ -35,7 +35,7 @@ impl Default for Camera {
   fn default() -> Self {
     Camera {
       target: [0.0, 0.0, 0.0],
-      yaw: -std::f64::consts::FRAC_PI_4 - std::f64::consts::FRAC_PI_2 * 0.0,
+      yaw: std::f64::consts::FRAC_PI_4,
       pitch: 0.6155,
       distance: 200.0,
       fov: 30f64.to_radians(),
@@ -236,6 +236,9 @@ pub struct Polyline {
   pub on_top: bool,
   /// Dashed (construction geometry).
   pub dashed: bool,
+  /// Pushed back in depth so coincident faces/profiles cover it (the ground grid).
+  #[doc(hidden)]
+  pub behind: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -325,8 +328,9 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let (right, up, _) = cam.basis();
   let key = (back * 0.8 + up * 0.5 - right * 0.3).normalize().as_vec3();
   let head = back.as_vec3();
+  let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
   for m in &scene.meshes {
-    draw_mesh(&mut f, m, &vp, cam, eye, key, head);
+    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill]);
   }
   for l in scene.lines.iter().filter(|l| !l.on_top) {
     draw_polyline(&mut f, l, &vp);
@@ -359,7 +363,7 @@ struct CV {
   wpos: Vec3,
 }
 
-fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, key: Vec3, head: Vec3) {
+fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, lights: [Vec3; 3]) {
   let tris = m.indices.len() / 3;
   for t in 0..tris {
     let idx = [m.indices[t * 3], m.indices[t * 3 + 1], m.indices[t * 3 + 2]];
@@ -385,7 +389,7 @@ fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, key:
       continue;
     }
     for i in 1..poly.len() - 1 {
-      raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, key, head);
+      raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, lights);
     }
   }
 }
@@ -418,7 +422,8 @@ fn clip_near(v: &[CV; 3]) -> Vec<CV> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn raster_tri(f: &mut Frame, v: [CV; 3], id: u32, color: [u8; 4], cam: &Camera, eye: DVec3, key: Vec3, head: Vec3) {
+fn raster_tri(f: &mut Frame, v: [CV; 3], id: u32, color: [u8; 4], cam: &Camera, eye: DVec3, lights: [Vec3; 3]) {
+  let [key, head, fill] = lights;
   let (w, h) = (f.width as f64, f.height as f64);
   let mut sx = [0.0f64; 3];
   let mut sy = [0.0f64; 3];
@@ -486,10 +491,10 @@ fn raster_tri(f: &mut Frame, v: [CV; 3], id: u32, color: [u8; 4], cam: &Camera, 
       let view = if persp { (eye.as_vec3() - wpos).normalize_or_zero() } else { head };
       // two-sided: flip normals facing away
       let n = if n.dot(view) < 0.0 { -n } else { n };
-      let diff = 0.55 * n.dot(key).max(0.0) + 0.35 * n.dot(head).max(0.0);
+      let diff = 0.45 * n.dot(key).max(0.0) + 0.3 * n.dot(head).max(0.0) + 0.2 * n.dot(fill).max(0.0);
       let half = (key + view).normalize_or_zero();
-      let spec = n.dot(half).max(0.0).powf(40.0) * 0.25;
-      let c = base * (0.28 + diff) + Vec3::splat(spec);
+      let spec = n.dot(half).max(0.0).powf(40.0) * 0.2;
+      let c = base * (0.38 + diff) + Vec3::splat(spec);
       if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
         p[0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
         p[1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
@@ -540,8 +545,9 @@ fn draw_polyline(f: &mut Frame, l: &Polyline, vp: &DMat4) {
       }
       let x = x0 + (x1 - x0) * t;
       let y = y0 + (y1 - y0) * t;
-      // lines win depth ties against the faces they lie on
-      let z = (z0 + (z1 - z0) * t) as f32 - 2e-5;
+      // lines win depth ties against the faces they lie on (the grid loses them)
+      let bias = if l.behind { 2e-5 } else { -2e-5 };
+      let z = (z0 + (z1 - z0) * t) as f32 + bias;
       let r = half.ceil() as i64;
       for oy in -r..=r {
         for ox in -r..=r {
@@ -644,9 +650,8 @@ mod tests {
 
   #[test]
   fn camera_behind_geometry_and_hostile_sizes() {
-    let mut cam = Camera::default();
-    cam.distance = 1.0; // inside the quad's extent, near-plane clipping kicks in
-    cam.pitch = 0.0;
+    // inside the quad's extent: near-plane clipping kicks in
+    let cam = Camera { distance: 1.0, pitch: 0.0, ..Camera::default() };
     let scene = Scene { meshes: vec![quad(0.0, [255, 0, 0, 255], 1)], ..Default::default() };
     let _ = render(&scene, &cam, 64, 64);
     let f = render(&scene, &cam, 0, u32::MAX);

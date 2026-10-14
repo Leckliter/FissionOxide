@@ -38,6 +38,9 @@
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_PrinterOStream.hxx>
 #include <Interface_Static.hxx>
 #include <Poly_Triangulation.hxx>
 #include <STEPControl_Reader.hxx>
@@ -84,6 +87,15 @@ namespace {
 #define CLF_CATCH(what)                                                                                                \
   }                                                                                                                    \
   catch (...) { rethrow(what); }
+
+// OCCT's data exchange prints progress to stdout; keep the console (and JSON output) clean.
+void quiet() {
+  static bool done = false;
+  if (!done) {
+    done = true;
+    Message::DefaultMessenger()->RemovePrinters(STANDARD_TYPE(Message_PrinterOStream));
+  }
+}
 
 std::unique_ptr<Shape> wrap(const TopoDS_Shape &s) {
   if (s.IsNull()) {
@@ -607,6 +619,7 @@ bool is_valid(const Shape &s) {
 
 void write_step(const Shape &s, rust::Str path) {
   CLF_TRY
+  quiet();
   STEPControl_Writer w;
   Interface_Static::SetCVal("write.step.unit", "MM");
   Interface_Static::SetCVal("write.step.schema", "AP214IS");
@@ -618,6 +631,7 @@ void write_step(const Shape &s, rust::Str path) {
 
 std::unique_ptr<Shape> read_step(rust::Str path) {
   CLF_TRY
+  quiet();
   STEPControl_Reader r;
   std::string p(path.data(), path.size());
   if (r.ReadFile(p.c_str()) != IFSelect_RetDone) throw std::runtime_error("could not read " + p);

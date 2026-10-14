@@ -1,0 +1,609 @@
+{
+  "version": 1,
+  "name": "Bracket",
+  "parameters": [
+    {
+      "name": "width",
+      "expr": "60 mm",
+      "kind": "length",
+      "comment": "bracket width"
+    },
+    {
+      "name": "thick",
+      "expr": "6 mm",
+      "kind": "length",
+      "comment": "plate thickness"
+    },
+    {
+      "name": "hole",
+      "expr": "8 mm",
+      "kind": "length",
+      "comment": ""
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "Sketch1",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 70.0,
+              "y": 0.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 70.0,
+              "y": 6.0,
+              "fixed": false
+            },
+            {
+              "id": 7,
+              "x": 6.0,
+              "y": 6.0,
+              "fixed": false
+            },
+            {
+              "id": 10,
+              "x": 6.0,
+              "y": 50.0,
+              "fixed": false
+            },
+            {
+              "id": 13,
+              "x": 0.0,
+              "y": 50.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 2,
+              "kind": {
+                "type": "line",
+                "a": 0,
+                "b": 1
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 7
+              },
+              "construction": false
+            },
+            {
+              "id": 11,
+              "kind": {
+                "type": "line",
+                "a": 7,
+                "b": 10
+              },
+              "construction": false
+            },
+            {
+              "id": 14,
+              "kind": {
+                "type": "line",
+                "a": 10,
+                "b": 13
+              },
+              "construction": false
+            },
+            {
+              "id": 16,
+              "kind": {
+                "type": "line",
+                "a": 13,
+                "b": 0
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "horizontal",
+                "line": 2
+              }
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "vertical",
+                "line": 5
+              }
+            },
+            {
+              "id": 9,
+              "kind": {
+                "type": "horizontal",
+                "line": 8
+              }
+            },
+            {
+              "id": 12,
+              "kind": {
+                "type": "vertical",
+                "line": 11
+              }
+            },
+            {
+              "id": 15,
+              "kind": {
+                "type": "horizontal",
+                "line": 14
+              }
+            },
+            {
+              "id": 17,
+              "kind": {
+                "type": "vertical",
+                "line": 16
+              }
+            },
+            {
+              "id": 18,
+              "kind": {
+                "type": "distance",
+                "a": 0,
+                "b": 1,
+                "value": {
+                  "expr": "70",
+                  "value": 70.0
+                }
+              }
+            }
+          ],
+          "next_id": 19
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Extrude1",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 1,
+        "profiles": [],
+        "extent": {
+          "kind": "symmetric",
+          "distance": "width / 2",
+          "distance2": "0",
+          "flip": false
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Sketch2",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "face",
+          "face": {
+            "body": 2000,
+            "point": [
+              40.0,
+              0.0,
+              6.0
+            ],
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "planar": true
+          }
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 45.0,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 3,
+              "x": 45.0,
+              "y": -15.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 2,
+              "kind": {
+                "type": "circle",
+                "center": 1,
+                "radius": 4.0
+              },
+              "construction": false
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "circle",
+                "center": 3,
+                "radius": 4.0
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 5
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Extrude2",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 3,
+        "profiles": [],
+        "extent": {
+          "kind": "through_all",
+          "distance": "0",
+          "distance2": "0",
+          "flip": true
+        },
+        "operation": "cut"
+      }
+    },
+    {
+      "id": 5,
+      "name": "Sketch3",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "face",
+          "face": {
+            "body": 2000,
+            "point": [
+              0.0,
+              0.0,
+              30.0
+            ],
+            "normal": [
+              -1.0,
+              -0.0,
+              -0.0
+            ],
+            "planar": true
+          }
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 32.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 2,
+              "kind": {
+                "type": "circle",
+                "center": 1,
+                "radius": 10.0
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 3
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "Extrude3",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 5,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8",
+          "distance2": "0",
+          "flip": false
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 7,
+      "name": "Sketch4",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "face",
+          "face": {
+            "body": 2000,
+            "point": [
+              -8.0,
+              0.0,
+              32.0
+            ],
+            "normal": [
+              -1.0,
+              -0.0,
+              0.0
+            ],
+            "planar": true
+          }
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 32.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 2,
+              "kind": {
+                "type": "circle",
+                "center": 1,
+                "radius": 4.0
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "diameter",
+                "curve": 2,
+                "value": {
+                  "expr": "hole",
+                  "value": 8.0
+                }
+              }
+            }
+          ],
+          "next_id": 4
+        }
+      }
+    },
+    {
+      "id": 8,
+      "name": "Extrude4",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 7,
+        "profiles": [],
+        "extent": {
+          "kind": "through_all",
+          "distance": "0",
+          "distance2": "0",
+          "flip": true
+        },
+        "operation": "cut"
+      }
+    },
+    {
+      "id": 9,
+      "name": "Fillet1",
+      "suppressed": false,
+      "kind": {
+        "type": "fillet",
+        "edges": [
+          {
+            "body": 2000,
+            "point": [
+              6.0,
+              0.0,
+              6.0
+            ],
+            "dir": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "n1": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "n2": [
+              1.0,
+              -0.0,
+              -0.0
+            ],
+            "circular": false,
+            "radius": 0.0
+          }
+        ],
+        "radius": "4"
+      }
+    },
+    {
+      "id": 10,
+      "name": "Fillet2",
+      "suppressed": false,
+      "kind": {
+        "type": "fillet",
+        "edges": [
+          {
+            "body": 2000,
+            "point": [
+              70.0,
+              30.0,
+              3.0
+            ],
+            "dir": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "n1": [
+              -0.0,
+              1.0,
+              -0.0
+            ],
+            "n2": [
+              1.0,
+              -0.0,
+              -0.0
+            ],
+            "circular": false,
+            "radius": 0.0
+          },
+          {
+            "body": 2000,
+            "point": [
+              70.0,
+              -30.0,
+              3.0
+            ],
+            "dir": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "n1": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "n2": [
+              1.0,
+              -0.0,
+              -0.0
+            ],
+            "circular": false,
+            "radius": 0.0
+          }
+        ],
+        "radius": "6"
+      }
+    },
+    {
+      "id": 11,
+      "name": "Chamfer1",
+      "suppressed": false,
+      "kind": {
+        "type": "chamfer",
+        "edges": [
+          {
+            "body": 2000,
+            "point": [
+              32.0,
+              30.0,
+              0.0
+            ],
+            "dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "n1": [
+              0.0,
+              -0.0,
+              -1.0
+            ],
+            "n2": [
+              -0.0,
+              1.0,
+              -0.0
+            ],
+            "circular": false,
+            "radius": 0.0
+          },
+          {
+            "body": 2000,
+            "point": [
+              32.0,
+              -30.0,
+              0.0
+            ],
+            "dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "n1": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "n2": [
+              0.0,
+              -0.0,
+              -1.0
+            ],
+            "circular": false,
+            "radius": 0.0
+          }
+        ],
+        "distance": "1"
+      }
+    }
+  ],
+  "marker": null,
+  "bodies": [],
+  "next_id": 12
+}

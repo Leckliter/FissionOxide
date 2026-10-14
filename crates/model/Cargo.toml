@@ -3,7 +3,7 @@ name = "clf-model"
 description = "Parametric design: parameters, feature timeline, regeneration"
 version.workspace = true
 edition.workspace = true
-license = "LGPL-2.1-only"
+license.workspace = true
 
 [dependencies]
 clf-expr.workspace = true

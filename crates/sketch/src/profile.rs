@@ -313,7 +313,7 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
   // Half-edges: 2i = u→v, 2i+1 = v→u
   let half = |h: usize| -> (usize, usize, Seg) {
     let (u, v, s) = edges[h / 2];
-    if h % 2 == 0 { (u, v, s) } else { (v, u, s.reversed()) }
+    if h.is_multiple_of(2) { (u, v, s) } else { (v, u, s.reversed()) }
   };
   let mut out_by_vert: HashMap<usize, Vec<(f64, usize)>> = HashMap::new();
   for (i, _) in edges.iter().enumerate().filter(|(i, _)| alive[*i]) {

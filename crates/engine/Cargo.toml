@@ -1,8 +1,20 @@
 [package]
 name = "clf-engine"
+description = "Editing session, undo/redo, JSON command set, render scene building"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+clf-expr.workspace = true
+clf-sketch.workspace = true
+clf-kernel.workspace = true
+clf-model.workspace = true
+clf-render.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true

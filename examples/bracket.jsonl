@@ -1,0 +1,26 @@
+# An L-bracket with a boss, holes, fillets and chamfers — all parametric.
+{"cmd": "new", "name": "Bracket"}
+{"cmd": "param.add", "name": "width", "expr": "60 mm", "comment": "bracket width"}
+{"cmd": "param.add", "name": "thick", "expr": "6 mm", "comment": "plate thickness"}
+{"cmd": "param.add", "name": "hole", "expr": "8 mm"}
+# L profile on the front (XZ) plane, extruded symmetrically
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0, 0], [70, 0], [70, 6], [6, 6], [6, 50], [0, 50]], "closed": true}
+{"cmd": "sketch.dimension", "type": "distance", "curves": [2], "value": "70"}
+{"cmd": "extrude", "distance": "width / 2", "extent": "symmetric"}
+# mounting holes in the base, sketched on its top face
+{"cmd": "sketch.create", "plane": {"point": [40, 0, 6], "normal": [0, 0, 1]}}
+{"cmd": "sketch.circle", "center": [45, 15], "diameter": 8}
+{"cmd": "sketch.circle", "center": [45, -15], "diameter": 8}
+{"cmd": "extrude", "extent": "through_all", "flip": true, "operation": "cut"}
+# a boss on the upright
+{"cmd": "sketch.create", "plane": {"point": [0, 0, 30], "normal": [-1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 32], "diameter": 20}
+{"cmd": "extrude", "distance": 8, "operation": "join"}
+{"cmd": "sketch.create", "plane": {"point": [-8, 0, 32], "normal": [-1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 32], "diameter": "hole"}
+{"cmd": "extrude", "extent": "through_all", "flip": true, "operation": "cut"}
+# round the inside corner and the outer base corners
+{"cmd": "fillet", "edges": [{"point": [6, 0, 6]}], "radius": 4}
+{"cmd": "fillet", "edges": [{"point": [70, 30, 3]}, {"point": [70, -30, 3]}], "radius": 6}
+{"cmd": "chamfer", "edges": [{"point": [35, 30, 0]}, {"point": [35, -30, 0]}], "distance": 1}

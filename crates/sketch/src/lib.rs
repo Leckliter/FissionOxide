@@ -4,6 +4,8 @@
 //! Every sketch carries a fixed origin point ([`ORIGIN`]) so geometry can be dimensioned from it
 //! and become fully constrained, as in Fusion.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
+// `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 mod build;
 mod profile;
@@ -12,7 +14,7 @@ mod solve;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub use build::PtSpec;
+pub use build::{PtSpec, circumcenter};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
 

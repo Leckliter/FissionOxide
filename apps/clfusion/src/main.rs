@@ -1,1 +1,16 @@
-fn main() {}
+//! CLFusion desktop app.
+//!
+//! `clfusion [design.clf]`
+
+fn main() -> eframe::Result<()> {
+  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+  let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+  let options = eframe::NativeOptions {
+    viewport: eframe::egui::ViewportBuilder::default()
+      .with_inner_size([1440.0, 900.0])
+      .with_min_inner_size([900.0, 600.0])
+      .with_title("CLFusion"),
+    ..Default::default()
+  };
+  eframe::run_native("CLFusion", options, Box::new(move |cc| Ok(Box::new(clf_ui::App::new(cc, open)))))
+}
