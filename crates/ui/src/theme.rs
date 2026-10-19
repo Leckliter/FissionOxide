@@ -38,12 +38,8 @@ pub const DIALOG_BODY: Color32 = Color32::from_rgb(247, 247, 247);
 pub const TIMELINE: Color32 = Color32::from_rgb(238, 238, 238);
 
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
-pub const ICON_INK: Color32 = Color32::from_rgb(70, 70, 70);
-pub const ICON_FILL: Color32 = Color32::from_rgb(200, 203, 207);
-pub const ICON_FILL_LIGHT: Color32 = Color32::from_rgb(230, 231, 233);
+pub const ICON_INK: Color32 = Color32::from_rgb(52, 64, 82);
 pub const ICON_BLUE: Color32 = Color32::from_rgb(30, 136, 229);
-pub const ICON_BLUE_LIGHT: Color32 = Color32::from_rgb(132, 192, 245);
-pub const ICON_BLUE_DARK: Color32 = Color32::from_rgb(18, 92, 178);
 pub const ICON_ORANGE: Color32 = Color32::from_rgb(245, 150, 30);
 pub const ICON_GREEN: Color32 = Color32::from_rgb(56, 172, 70);
 pub const ICON_RED: Color32 = Color32::from_rgb(222, 56, 50);

@@ -90,6 +90,9 @@ impl E {
   }
 }
 
+/// Most commands a group shows on the toolbar; every command stays in the group's menu.
+const MAX_QUICK: usize = 8;
+
 pub(crate) struct Group {
   label: &'static str,
   /// Labels of the entries shown as toolbar icons.
@@ -784,7 +787,8 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-      for label in g.quick {
+      // like Fusion, a group shows a handful of its commands; the rest live in its menu
+      for label in g.quick.iter().take(MAX_QUICK) {
         let Some(it) = find(g.menu, label) else { continue };
         let hint = match (it.cmd.is_some(), it.key.is_empty()) {
           (false, _) => "Not in CLFusion yet".to_string(),
@@ -792,8 +796,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
           (true, false) => format!("Shortcut: {}", it.key),
         };
         let active = it.cmd.is_some_and(|c| c.active(app));
-        let compact = g.quick.len() > 8;
-        if icons::tool_button_tinted(ui, it.icon, it.tint, it.label, &hint, active, compact).clicked() {
+        if icons::tool_button_tinted(ui, it.icon, it.tint, it.label, &hint, active).clicked() {
           *pick = Some(it);
         }
       }

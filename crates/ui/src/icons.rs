@@ -259,20 +259,65 @@ enum Tone {
   Amber,
 }
 
-/// Colour family of an icon's solids: blue for solid modelling, orange for surfaces and gold
-/// for meshes, as in Fusion's toolbars.
+/// An icon's accent family. Every icon is a dark slate line drawing with one accent colour:
+/// blue for solid modelling (the default), orange for surfaces, gold for meshes, amber for
+/// construction geometry, green for inspecting and selecting, teal for sketching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tint {
   Blue,
   Orange,
   Gold,
+  Amber,
+  Green,
+  Teal,
 }
+
+impl Tint {
+  fn accent(self) -> Color32 {
+    match self {
+      Tint::Blue => theme::ICON_BLUE,
+      Tint::Orange => Color32::from_rgb(240, 138, 48),
+      Tint::Gold => Color32::from_rgb(214, 168, 52),
+      Tint::Amber => Color32::from_rgb(236, 164, 44),
+      Tint::Green => Color32::from_rgb(52, 168, 83),
+      Tint::Teal => Color32::from_rgb(0, 150, 160),
+    }
+  }
+}
+
+/// The accent family an icon belongs to when no tint is given.
+fn family(icon: Icon) -> Tint {
+  use Icon::*;
+  match icon {
+    Plane | PlaneAlt | Axis | CPoint => Tint::Amber,
+    Measure | Interference | Section | CurvComb | CurvMap | DraftAnalysis | EnvMap | Isocurve | Zebra
+    | Accessibility | CenterOfMass | MinRadius | Navigator | ComponentColors | FaceGroups | History
+    | Sustainability | Select | WindowSel | FreeformSel | PaintSel => Tint::Green,
+    Sketch | SketchSmall | Construction => Tint::Teal,
+    _ => Tint::Blue,
+  }
+}
+
+/// Icons whose colours carry meaning and stay literal (delete red, finish green, RGB axes,
+/// the colour wheel, the traffic light).
+fn literal(icon: Icon) -> bool {
+  use Icon::*;
+  matches!(icon, Finish | FinishAuto | Remove | Origin | Ucs | Appearance | ComputeAll | Untrim | Unstitch)
+}
+
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+  let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+  Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
+}
+
+const SLATE: Color32 = Color32::from_rgb(52, 64, 82);
 
 struct Pen<'a> {
   p: &'a Painter,
   r: Rect,
   mono: Option<Color32>,
   tint: Tint,
+  literal: bool,
   w: f32,
 }
 
@@ -294,54 +339,57 @@ impl Pen<'_> {
         Tone::Amber => c.gamma_multiply(0.4),
         Tone::Ink | Tone::Red => c,
       },
-      None => match t {
-        Tone::Ink => theme::ICON_INK,
-        Tone::Fill => theme::ICON_FILL,
-        Tone::Light => theme::ICON_FILL_LIGHT,
-        Tone::Dark => Color32::from_rgb(150, 154, 160),
-        Tone::Blue => match self.tint {
-          Tint::Blue => theme::ICON_BLUE,
-          Tint::Orange => Color32::from_rgb(240, 138, 48),
-          Tint::Gold => Color32::from_rgb(222, 178, 64),
-        },
-        Tone::BlueLight => match self.tint {
-          Tint::Blue => theme::ICON_BLUE_LIGHT,
-          Tint::Orange => Color32::from_rgb(250, 192, 128),
-          Tint::Gold => Color32::from_rgb(242, 216, 136),
-        },
-        Tone::BlueDark => match self.tint {
-          Tint::Blue => theme::ICON_BLUE_DARK,
-          Tint::Orange => Color32::from_rgb(196, 98, 24),
-          Tint::Gold => Color32::from_rgb(168, 126, 36),
-        },
-        Tone::Orange => theme::ICON_ORANGE,
-        Tone::Green => theme::ICON_GREEN,
-        Tone::Red => theme::ICON_RED,
-        Tone::White => Color32::WHITE,
-        Tone::Purple => Color32::from_rgb(150, 96, 214),
-        Tone::PurpleLight => Color32::from_rgb(204, 172, 240),
-        Tone::Slate => Color32::from_rgb(52, 64, 82),
-        Tone::Teal => Color32::from_rgb(0, 150, 160),
-        Tone::Coral => Color32::from_rgb(236, 98, 72),
-        Tone::Violet => Color32::from_rgb(120, 70, 188),
-        Tone::Amber => Color32::from_rgb(236, 164, 44),
-      },
+      None => {
+        // the unified style: slate lines, white/grey bodies, everything coloured in shades of
+        // the family accent
+        let accent = self.tint.accent();
+        let lit = |c: Color32| if self.literal { c } else { accent };
+        match t {
+          Tone::Ink | Tone::Slate => SLATE,
+          Tone::Fill => Color32::from_rgb(233, 236, 240),
+          Tone::Light | Tone::White => Color32::WHITE,
+          Tone::Dark => Color32::from_rgb(212, 217, 224),
+          Tone::Blue => accent,
+          Tone::BlueLight | Tone::PurpleLight => mix(accent, Color32::WHITE, 0.5),
+          Tone::BlueDark => mix(accent, Color32::WHITE, 0.72),
+          Tone::Orange => lit(theme::ICON_ORANGE),
+          Tone::Green => lit(theme::ICON_GREEN),
+          Tone::Purple => lit(Color32::from_rgb(150, 96, 214)),
+          Tone::Amber => lit(Color32::from_rgb(236, 164, 44)),
+          Tone::Red => theme::ICON_RED,
+          Tone::Teal => Color32::from_rgb(0, 150, 160),
+          Tone::Coral => Color32::from_rgb(236, 98, 72),
+          Tone::Violet => Color32::from_rgb(120, 70, 188),
+        }
+      }
     }
   }
 
-  /// Ink colour for outlines drawn over a tone (blue parts keep a blue outline).
-  fn edge(&self, t: Tone) -> Color32 {
-    match (self.mono, t) {
-      (Some(c), _) => c,
-      (None, Tone::Blue | Tone::BlueLight | Tone::BlueDark) => match self.tint {
-        Tint::Blue => Color32::from_rgb(16, 84, 160),
-        Tint::Orange => Color32::from_rgb(170, 84, 20),
-        Tint::Gold => Color32::from_rgb(140, 104, 30),
-      },
-      (None, Tone::Orange) => Color32::from_rgb(190, 105, 20),
-      (None, Tone::Green) => Color32::from_rgb(40, 125, 40),
-      _ => theme::ICON_INK,
+  /// Fill colour: accent fills are light tints of the accent, so icons stay line drawings
+  /// with the strong accent kept for lines and small details.
+  fn fc(&self, t: Tone) -> Color32 {
+    if self.mono.is_some() || self.literal {
+      return self.col(t);
     }
+    let w = Color32::WHITE;
+    match t {
+      Tone::Blue => mix(self.col(t), w, 0.3),
+      Tone::BlueLight | Tone::PurpleLight => mix(self.tint.accent(), w, 0.62),
+      Tone::BlueDark => mix(self.tint.accent(), w, 0.8),
+      Tone::Orange | Tone::Green | Tone::Purple | Tone::Amber => mix(self.col(t), w, 0.3),
+      _ => self.col(t),
+    }
+  }
+
+  /// A tube-like stroke: a slate outline around a light accent core.
+  fn band(&self, pts: Vec<Pos2>, k: f32) {
+    self.p.add(Shape::line(pts.clone(), Stroke::new(self.w * k, self.edge(Tone::Blue))));
+    self.p.add(Shape::line(pts, Stroke::new(self.w * (k - 1.6), self.fc(Tone::Blue))));
+  }
+
+  /// Outline colour: slate everywhere, so every icon reads as one line drawing.
+  fn edge(&self, _t: Tone) -> Color32 {
+    self.mono.unwrap_or(SLATE)
   }
 
   fn pts(&self, pts: &[(f32, f32)]) -> Vec<Pos2> {
@@ -351,12 +399,12 @@ impl Pen<'_> {
   /// A filled convex shape with an outline.
   fn solid(&self, pts: &[(f32, f32)], t: Tone) {
     let v = self.pts(pts);
-    self.p.add(Shape::convex_polygon(v.clone(), self.col(t), Stroke::NONE));
+    self.p.add(Shape::convex_polygon(v.clone(), self.fc(t), Stroke::NONE));
     self.p.add(Shape::closed_line(v, Stroke::new(self.w * 0.8, self.edge(t))));
   }
 
   fn fill(&self, pts: &[(f32, f32)], t: Tone) {
-    self.p.add(Shape::convex_polygon(self.pts(pts), self.col(t), Stroke::NONE));
+    self.p.add(Shape::convex_polygon(self.pts(pts), self.fc(t), Stroke::NONE));
   }
 
   fn path(&self, pts: &[(f32, f32)], t: Tone) {
@@ -389,7 +437,7 @@ impl Pen<'_> {
     let c = self.u(c.0, c.1);
     let rad = rad * self.r.width();
     if let Some(f) = fill {
-      self.p.circle_filled(c, rad, self.col(f));
+      self.p.circle_filled(c, rad, self.fc(f));
     }
     if let Some(s) = stroke {
       let col = if fill.is_some() { self.edge(s) } else { self.col(s) };
@@ -448,7 +496,7 @@ impl Pen<'_> {
   fn ellipse(&self, c: (f32, f32), rx: f32, ry: f32, fill: Option<Tone>, stroke: Tone) {
     let pts = self.arc_pts(c, rx, ry, 0.0, std::f32::consts::TAU);
     if let Some(f) = fill {
-      self.p.add(Shape::convex_polygon(pts.clone(), self.col(f), Stroke::NONE));
+      self.p.add(Shape::convex_polygon(pts.clone(), self.fc(f), Stroke::NONE));
     }
     self.p.add(Shape::closed_line(pts, Stroke::new(self.w * 0.8, self.edge(stroke))));
   }
@@ -490,19 +538,21 @@ pub fn draw(p: &Painter, r: Rect, icon: Icon, c: Color32) {
 
 /// Draws `icon` in colour with its solids in the `tint` family.
 pub fn draw_tinted(p: &Painter, r: Rect, icon: Icon, tint: Tint) {
+  // blue is the default family: icons from other families keep their own accent
+  let tint = if tint == Tint::Blue { family(icon) } else { tint };
   paint(p, r, icon, None, tint);
 }
 
 /// Draws `icon` into `r` in Fusion's colour style.
 pub fn draw_color(p: &Painter, r: Rect, icon: Icon) {
-  paint(p, r, icon, None, Tint::Blue);
+  paint(p, r, icon, None, family(icon));
 }
 
 fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use Tone::*;
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
   let w = (r.width() / 16.0).clamp(1.0, 1.8);
-  let k = Pen { p, r, mono, tint, w };
+  let k = Pen { p, r, mono, tint, literal: literal(icon), w };
   match icon {
     Icon::Sketch => {
       k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
@@ -519,8 +569,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.37, 0.0), (0.0, -1.0), 0.13, Ink);
     }
     Icon::Revolve => {
-      k.p.add(Shape::line(k.arc_pts((0.5, 0.56), 0.36, 0.3, -2.9, 0.1), Stroke::new(w * 5.0, k.col(Blue))));
-      k.p.add(Shape::line(k.arc_pts((0.5, 0.44), 0.36, 0.3, -2.9, 0.1), Stroke::new(w * 3.0, k.col(BlueLight))));
+      k.band(k.arc_pts((0.5, 0.5), 0.36, 0.3, -2.9, 0.1), 4.6);
+      k.arrow_head((0.92, 0.47), (0.25, -1.0), 0.16, Blue);
       k.dashed((0.5, 0.02), (0.5, 0.98), Ink);
     }
     Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, BlueLight, Blue, BlueDark),
@@ -987,8 +1037,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
         k.fill(&[(0.0, 0.0), (0.22, 0.0), (0.22, 0.2), (0.0, 0.2)], Blue);
       }
       if icon == Icon::ConfigTable {
-        k.circle((0.76, 0.24), 0.2, Some(Blue), None);
-        k.path(&[(0.8, 0.1), (0.72, 0.26), (0.8, 0.26), (0.72, 0.4)], White);
+        k.circle((0.76, 0.24), 0.2, Some(White), Some(Ink));
+        k.path(&[(0.8, 0.1), (0.72, 0.26), (0.8, 0.26), (0.72, 0.4)], Blue);
       }
     }
     Icon::ComputeAll => {
@@ -1008,7 +1058,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.arrow_head((0.52, 0.64), (1.0, 0.0), 0.16, Ink);
     }
     Icon::Sweep => {
-      k.p.add(Shape::line(k.arc_pts((0.12, 0.9), 0.7, 0.7, 0.0, FRAC_PI_2 * 0.9), Stroke::new(w * 5.0, k.col(Blue))));
+      k.band(k.arc_pts((0.12, 0.9), 0.7, 0.7, 0.0, FRAC_PI_2 * 0.9), 5.0);
       k.solid(&[(0.04, 0.08), (0.3, 0.08), (0.3, 0.34), (0.04, 0.34)], White);
     }
     Icon::Loft => {
@@ -1050,8 +1100,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 2.0, k.col(Blue))));
     }
     Icon::Pipe => {
-      k.thick((0.12, 0.88), (0.88, 0.12), Blue, 5.0);
-      k.thick((0.18, 0.82), (0.82, 0.18), BlueLight, 1.6);
+      k.band(k.pts(&[(0.12, 0.88), (0.88, 0.12)]), 5.4);
+      k.line((0.12, 0.88), (0.88, 0.12), Blue);
     }
     Icon::Thicken => {
       k.solid(&[(0.04, 0.6), (0.4, 0.2), (0.96, 0.2), (0.6, 0.6)], BlueLight);
@@ -1076,8 +1126,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       if icon == Icon::ConfigRules {
         k.solid(&[(0.04, 0.3), (0.84, 0.3), (0.84, 0.92), (0.04, 0.92)], BlueLight);
       }
-      let (c, rad) = if icon == Icon::Configure { ((0.5, 0.5), 0.44) } else { ((0.74, 0.26), 0.24) };
-      k.circle(c, rad, Some(Blue), None);
+      let (c, rad) = if icon == Icon::Configure { ((0.5, 0.5), 0.42) } else { ((0.74, 0.26), 0.24) };
+      k.circle(c, rad, Some(White), Some(Ink));
       let s = rad / 0.44;
       k.p.add(Shape::line(
         k.pts(&[
@@ -1086,7 +1136,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
           (c.0 + 0.1 * s, c.1 + 0.0),
           (c.0 - 0.06 * s, c.1 + 0.3 * s),
         ]),
-        Stroke::new(w * 1.6, k.col(White)),
+        Stroke::new(w * 1.6, k.col(Blue)),
       ));
     }
     Icon::Ucs => {
@@ -1126,7 +1176,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::CurvMap | Icon::DraftAnalysis | Icon::FaceGroups | Icon::GenFaceGroups | Icon::CombineFaceGroups => {
-      let bands = [Red, Orange, Green, Blue];
+      let bands = [Blue, BlueLight, BlueDark, Fill];
       if icon == Icon::CurvMap {
         for (i, t) in bands.iter().enumerate() {
           let y = 0.08 + i as f32 * 0.21;
@@ -1139,7 +1189,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
           k.fill(&[(0.5 - half, y), (0.5 + half, y), (0.5 + half, y + 0.2), (0.5 - half, y + 0.2)], *t);
         }
       } else {
-        k.block(0.08, 0.38, 0.62, 0.92, 0.26, Green, Red, Blue);
+        k.block(0.08, 0.38, 0.62, 0.92, 0.26, BlueLight, Blue, BlueDark);
         if icon == Icon::CombineFaceGroups {
           k.fill(&[(0.08, 0.38), (0.62, 0.38), (0.62, 0.92), (0.08, 0.92)], Blue);
         }
@@ -1167,7 +1217,7 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     }
     Icon::Accessibility => {
       k.circle((0.4, 0.62), 0.32, Some(Green), None);
-      k.circle((0.74, 0.28), 0.16, Some(Red), None);
+      k.circle((0.74, 0.28), 0.16, None, Some(Ink));
     }
     Icon::CenterOfMass => {
       k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
@@ -1313,8 +1363,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.06, 0.66), (0.54, 0.66), (0.54, 0.86), (0.06, 0.86)], Blue);
     }
     Icon::SurfOffset => {
-      k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.5, 0.5, 0.5, PI - 0.5), Stroke::new(w * 3.0, k.col(BlueLight))));
-      k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 3.0, k.col(Blue))));
+      k.band(k.arc_pts((0.5, 1.1), 0.5, 0.5, 0.5, PI - 0.5), 3.6);
+      k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 1.3, k.col(Blue))));
     }
     Icon::Trim => {
       k.circle((0.24, 0.78), 0.14, None, Some(Ink));
@@ -1610,15 +1660,13 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     }
     Icon::Flange | Icon::LoftedFlange => {
       let pts = [(0.22, 0.94), (0.22, 0.42), (0.3, 0.24), (0.46, 0.16), (0.92, 0.16)];
-      k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 5.0, k.col(Blue))));
-      k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 1.6, k.col(BlueLight))));
+      k.band(k.pts(&pts), 5.0);
       if icon == Icon::LoftedFlange {
         k.ellipse((0.7, 0.72), 0.22, 0.12, Some(BlueLight), Blue);
       }
     }
     Icon::Hem => {
-      k.thick((0.06, 0.82), (0.82, 0.34), Blue, 4.0);
-      k.thick((0.82, 0.34), (0.5, 0.18), BlueDark, 4.0);
+      k.band(k.pts(&[(0.06, 0.82), (0.82, 0.34), (0.5, 0.18)]), 4.4);
     }
     Icon::Fold | Icon::Unfold => {
       k.solid(&[(0.06, 0.56), (0.5, 0.56), (0.5, 0.9), (0.06, 0.9)], Blue);
@@ -1707,12 +1755,10 @@ pub fn tool_button_tinted(
   label: &str,
   hint: &str,
   active: bool,
-  compact: bool,
 ) -> egui::Response {
-  // compact: narrower buttons for wide groups (sketch constraints), same height
-  let size = if compact { vec2(31.0, 38.0) } else { vec2(35.0, 38.0) };
+  let size = vec2(35.0, 38.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-  let ic = Rect::from_center_size(rect.center(), Vec2::splat(if compact { 23.0 } else { 27.0 }));
+  let ic = Rect::from_center_size(rect.center(), Vec2::splat(27.0));
   if active {
     // Fusion shows the running tool as a white icon on solid blue
     ui.painter().rect_filled(rect, 2.0, theme::ACCENT);
