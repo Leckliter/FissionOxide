@@ -255,7 +255,7 @@ fn appearance(s: &mut Session, p: &Value) -> CmdResult {
   if bodies.is_empty() {
     return Err(CmdError::new("pass 'body', 'bodies' or 'component'"));
   }
-  let color = match (opt_str(p, "appearance"), p.get("color").and_then(Value::as_array)) {
+  let color = match (opt_str(p, "appearance"), p.get("color")) {
     (Some(name), _) => Some(
       APPEARANCES
         .iter()
@@ -263,13 +263,8 @@ fn appearance(s: &mut Session, p: &Value) -> CmdResult {
         .map(|(_, c)| *c)
         .ok_or_else(|| CmdError::new(format!("unknown appearance '{name}' (see 'appearances')")))?,
     ),
-    (None, Some(c)) if c.len() == 3 => {
-      let ch =
-        |i: usize| c[i].as_u64().filter(|v| *v <= 255).map(|v| v as u8).ok_or(CmdError::new("colour values are 0–255"));
-      Some([ch(0)?, ch(1)?, ch(2)?])
-    }
-    (None, Some(_)) => return Err(CmdError::new("color needs [r, g, b]")),
-    (None, None) => None,
+    (None, None | Some(Value::Null)) => None,
+    (None, Some(c)) => Some(crate::commands::parse_color(c)?),
   };
   s.edit(|d| {
     for b in &bodies {

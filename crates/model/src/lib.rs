@@ -68,6 +68,9 @@ pub struct Design {
   /// 2D drawings of the design.
   #[serde(default)]
   pub drawings: Vec<drawing::Drawing>,
+  /// Data that scripts and plugins attach to the design and its parts (Fusion's attributes).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub attributes: Vec<Attribute>,
   /// Manufacture setups (CAM).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cam: Vec<cam::Setup>,
@@ -162,12 +165,50 @@ fn yes() -> bool {
   true
 }
 
+/// What an [`Attribute`] is attached to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AttrTarget {
+  Design,
+  Body { body: BodyId },
+  Component { component: ComponentId },
+  Feature { feature: FeatureId },
+  SketchCurve { sketch: FeatureId, curve: CurveId },
+  SketchPoint { sketch: FeatureId, point: PointId },
+}
+
+impl AttrTarget {
+  /// The feature the target belongs to, if any.
+  pub fn feature(&self) -> Option<FeatureId> {
+    match *self {
+      AttrTarget::Feature { feature } => Some(feature),
+      AttrTarget::SketchCurve { sketch, .. } | AttrTarget::SketchPoint { sketch, .. } => Some(sketch),
+      _ => None,
+    }
+  }
+}
+
+/// A named value in a group (by convention the plugin's id), attached to a target.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Attribute {
+  pub target: AttrTarget,
+  pub group: String,
+  pub name: String,
+  pub value: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Feature {
   pub id: FeatureId,
   pub name: String,
   #[serde(default)]
   pub suppressed: bool,
+  /// Sketches: shown or hidden by the user. `None` = automatic (hidden once a feature uses it).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub visible: Option<bool>,
+  /// Join/cut/intersect features: the bodies they may change (empty = any they touch).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub targets: Vec<BodyId>,
   pub kind: FeatureKind,
 }
 
@@ -204,6 +245,14 @@ pub enum PlaneRef {
   /// A planar face of a body (follows the face as the model changes).
   Face {
     face: FaceRef,
+  },
+  /// A fixed plane through a point (the sketch origin) with a normal; `x` hints the in-plane
+  /// X axis.
+  Free {
+    origin: [f64; 3],
+    normal: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    x: Option<[f64; 3]>,
   },
 }
 
@@ -1157,6 +1206,7 @@ impl Design {
       sheet_metal_rules: Vec::new(),
       components: Vec::new(),
       drawings: Vec::new(),
+      attributes: Vec::new(),
       cam: Vec::new(),
       next_id: 1,
     }
@@ -1209,7 +1259,7 @@ impl Design {
     let id = FeatureId(self.alloc());
     let name = self.unique_name(kind.base_name());
     let at = self.active_len();
-    self.features.insert(at, Feature { id, name, suppressed: false, kind });
+    self.features.insert(at, Feature { id, name, suppressed: false, visible: None, targets: Vec::new(), kind });
     if let Some(m) = self.marker.as_mut() {
       *m += 1;
     }
@@ -1226,6 +1276,21 @@ impl Design {
       }
       k += 1;
     }
+  }
+
+  /// Sets an attribute, replacing one with the same target, group and name.
+  pub fn set_attribute(&mut self, target: AttrTarget, group: &str, name: &str, value: serde_json::Value) {
+    match self.attributes.iter_mut().find(|a| a.target == target && a.group == group && a.name == name) {
+      Some(a) => a.value = value,
+      None => self.attributes.push(Attribute { target, group: group.into(), name: name.into(), value }),
+    }
+  }
+
+  /// Removes matching attributes (`None` matches any name); returns how many.
+  pub fn remove_attributes(&mut self, target: AttrTarget, group: &str, name: Option<&str>) -> usize {
+    let before = self.attributes.len();
+    self.attributes.retain(|a| !(a.target == target && a.group == group && name.is_none_or(|n| a.name == n)));
+    before - self.attributes.len()
   }
 
   /// Deletes a feature. Features that depend on it directly are deleted too (like Fusion's
@@ -1249,6 +1314,7 @@ impl Design {
     }
     let before_marker = self.features.iter().take(self.active_len()).filter(|f| doomed.contains(&f.id)).count();
     self.features.retain(|f| !doomed.contains(&f.id));
+    self.attributes.retain(|a| a.target.feature().is_none_or(|f| !doomed.contains(&f)));
     if let Some(m) = self.marker.as_mut() {
       *m = m.saturating_sub(before_marker);
     }

@@ -6,8 +6,6 @@
 
 use std::io::{BufRead, Write};
 
-use clf_engine::render::{self, Camera, StandardView};
-use clf_engine::scene::{SceneBuilder, ViewOptions};
 use clf_engine::{COMMANDS, Session};
 use serde_json::{Value, json};
 
@@ -18,41 +16,21 @@ fn tool_name(cmd: &str) -> String {
 }
 
 fn tools() -> Vec<Value> {
-  let mut out: Vec<Value> = COMMANDS
+  COMMANDS
     .iter()
     .map(|c| {
+      let help = if c.id == "view.render" {
+        format!("{} Omit 'path' to get the image back. Parameters: {}", c.help, c.params)
+      } else {
+        format!("{} Parameters: {}", c.help, c.params)
+      };
       json!({
         "name": tool_name(c.id),
-        "description": format!("{} Parameters: {}", c.help, c.params),
+        "description": help,
         "inputSchema": {"type": "object", "additionalProperties": true},
       })
     })
-    .collect();
-  out.push(json!({
-    "name": "view_render",
-    "description": "Render the model to a PNG image. Parameters: {view?: home|front|back|top|bottom|left|right, width?, height?, section?: {plane, offset?, flip?}, analysis?: zebra|draft|accessibility|curvature, pull?: x|y|z|[x,y,z], angle?: deg}",
-    "inputSchema": {"type": "object", "properties": {
-      "view": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}
-    }},
-  }));
-  out
-}
-
-fn render_png(s: &Session, p: &Value) -> Result<Vec<u8>, String> {
-  let w = p.get("width").and_then(Value::as_u64).unwrap_or(1000).clamp(64, 4096) as u32;
-  let h = p.get("height").and_then(Value::as_u64).unwrap_or(700).clamp(64, 4096) as u32;
-  let mut cam = Camera::default();
-  if let Some(v) = p.get("view").and_then(Value::as_str) {
-    cam.set_view(StandardView::parse(v).ok_or_else(|| format!("unknown view '{v}'"))?);
-  }
-  let (lo, hi) = s
-    .model
-    .bounds()
-    .unwrap_or((clf_engine::kernel::glam::DVec3::splat(-50.0), clf_engine::kernel::glam::DVec3::splat(50.0)));
-  cam.fit(lo, hi, w as f64 / h as f64);
-  let opts: ViewOptions = clf_engine::scene::view_options(s, p)?;
-  let (scene, _) = SceneBuilder::default().build(s, &opts);
-  render::render(&scene, &cam, w, h).to_png()
+    .collect()
 }
 
 fn base64(data: &[u8]) -> String {
@@ -90,10 +68,10 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
     "tools/call" => {
       let name = params.get("name").and_then(Value::as_str).unwrap_or("");
       let args = params.get("arguments").cloned().unwrap_or(json!({}));
-      Ok(if name == "view_render" {
-        match render_png(s, &args) {
+      Ok(if name == "view_render" && args.get("path").is_none() {
+        match clf_engine::scene::render_png(s, &args) {
           Ok(png) => json!({"content": [{"type": "image", "data": base64(&png), "mimeType": "image/png"}]}),
-          Err(e) => json!({"content": [{"type": "text", "text": e}], "isError": true}),
+          Err(e) => json!({"content": [{"type": "text", "text": e.0}], "isError": true}),
         }
       } else {
         match COMMANDS.iter().find(|c| tool_name(c.id) == name) {
