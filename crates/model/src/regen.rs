@@ -597,18 +597,22 @@ impl Ctx<'_> {
           let mut shape = body.shape.clone();
           for i in idxs {
             let Some(fr) = faces.get_mut(i) else { continue };
-            let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a face could not be found")?;
-            refresh_face(fr, body, fid);
-            let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
-            let face = body.shape.face_shape(fid).map_err(ke)?;
-            // flat faces move along their normal; curved ones are offset (a hole grows or shrinks)
-            let tool = if info.kind == fox_kernel::SurfaceKind::Plane {
-              face.extrude(info.normal * dist).map_err(ke)?
-            } else {
-              face.thicken(dist).map_err(ke)?
-            };
-            let op = if dist > 0.0 { BoolOp::Union } else { BoolOp::Subtract };
-            shape = shape.boolean(&tool, op).map_err(ke)?;
+            let found = resolve_face_pieces(fr, body);
+            if found.is_empty() {
+              return Err("a face could not be found".into());
+            }
+            for fid in found {
+              let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
+              let face = body.shape.face_shape(fid).map_err(ke)?;
+              // flat faces move along their normal; curved ones are offset (a hole grows or shrinks)
+              let tool = if info.kind == fox_kernel::SurfaceKind::Plane {
+                face.extrude(info.normal * dist).map_err(ke)?
+              } else {
+                face.thicken(dist).map_err(ke)?
+              };
+              let op = if dist > 0.0 { BoolOp::Union } else { BoolOp::Subtract };
+              shape = shape.boolean(&tool, op).map_err(ke)?;
+            }
           }
           let shape = shape.unified().map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
@@ -657,17 +661,12 @@ impl Ctx<'_> {
         for (bid, idxs) in by_body {
           let bi = self.body_index(bid)?;
           let body = &self.state.bodies[bi];
-          let scale = body.diagonal();
           let mut ids = Vec::new();
           for i in idxs {
             let Some(fr) = faces.get_mut(i) else { continue };
-            match fr.resolve(body.faces(), body.mesh(), scale) {
-              Some(fid) => {
-                refresh_face(fr, body, fid);
-                ids.push(fid);
-              }
-              None => missing = true,
-            }
+            let found = resolve_face_pieces(fr, body);
+            missing |= found.is_empty();
+            ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
           let shape = body.shape.shell(&ids, t, *round).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
@@ -946,13 +945,9 @@ impl Ctx<'_> {
           let mut ids = Vec::new();
           for i in idxs {
             let Some(fr) = faces.get_mut(i) else { continue };
-            match fr.resolve(body.faces(), body.mesh(), body.diagonal()) {
-              Some(fid) => {
-                refresh_face(fr, body, fid);
-                ids.push(fid);
-              }
-              None => missing = true,
-            }
+            let found = resolve_face_pieces(fr, body);
+            missing |= found.is_empty();
+            ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
           let shape = body.shape.draft(&ids, pl.origin, pull, a).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
@@ -1999,15 +1994,31 @@ impl Ctx<'_> {
 }
 
 fn refresh_face(fr: &mut FaceRef, body: &Body, fid: u32) {
-  if let Some(info) = body.faces().iter().find(|f| f.id == fid) {
-    let p = DVec3::from(fr.point);
-    let q = if info.kind == fox_kernel::SurfaceKind::Plane {
-      p - info.normal * (p - info.origin).dot(info.normal)
-    } else {
-      p
-    };
-    *fr = FaceRef::from_face(fr.body, info, q);
+  refresh_face_pieces(fr, body, &[fid]);
+}
+
+/// Refreshes a face reference to the faces it now stands for (the pieces of a split face): the
+/// point moves onto them and the bounds cover them all.
+fn refresh_face_pieces(fr: &mut FaceRef, body: &Body, ids: &[u32]) {
+  let Some(info) = ids.first().and_then(|id| body.faces().iter().find(|f| f.id == *id)) else { return };
+  let p = DVec3::from(fr.point);
+  let q =
+    if info.kind == fox_kernel::SurfaceKind::Plane { p - info.normal * (p - info.origin).dot(info.normal) } else { p };
+  *fr = FaceRef::from_face(fr.body, info, q);
+  let bounds = body.mesh().map(|m| ids.iter().filter_map(|id| crate::refs::face_bounds(m, *id)).collect::<Vec<_>>());
+  if let Some((lo, hi)) = bounds.unwrap_or_default().into_iter().reduce(|(a, b), (c, d)| (a.min(c), b.max(d))) {
+    fr.lo = lo.to_array();
+    fr.hi = hi.to_array();
   }
+}
+
+/// Every face a face reference stands for on `body` (all pieces of a split face), refreshing it.
+fn resolve_face_pieces(fr: &mut FaceRef, body: &Body) -> Vec<u32> {
+  let ids = fr.resolve_all(body.faces(), body.mesh(), body.diagonal());
+  if !ids.is_empty() {
+    refresh_face_pieces(fr, body, &ids);
+  }
+  ids
 }
 
 /// The sketch plane Fusion would put on a planar face: origin = the world origin projected onto
