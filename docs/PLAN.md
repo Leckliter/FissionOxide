@@ -101,7 +101,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **75 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **76 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
@@ -117,5 +117,7 @@ Wrong results:
 Missing options:
 
 - **37** Fillet at the apex of a loft-to-point (no edge found where expected).
-- **78–81** Variable fillets: radius down to zero, chord length, taper to fit, several radii
-  along the edge.
+- **78** A variable fillet whose radius runs down to zero (OpenCASCADE needs a radius above zero).
+- **80, 81** Fillet radius that follows the room available, and a radius given as B-spline
+  control values: SolidCraft options that Fusion doesn't have. Fusion's own variable fillet
+  (radii at points along the edge) is the version worth adding.

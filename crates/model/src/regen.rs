@@ -524,7 +524,7 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2, setback } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback, chord } => {
         let r = self.len(radius)?;
         let sb = match setback.as_deref().map(str::trim) {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
@@ -539,6 +539,10 @@ impl Ctx<'_> {
             let r2 = self.len(r2)?;
             self.edge_op(id, edges, |s, ids| round(s, s.fillet_variable(ids, r, r2)?, ids))
           }
+          None if *chord => self.edge_op(id, edges, |s, ids| {
+            let radii = chord_radii(s, ids, r)?;
+            round(s, s.fillet_each(&radii)?, ids)
+          }),
           None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
@@ -2003,3 +2007,24 @@ mod assemble;
 mod tests;
 #[cfg(test)]
 mod tests_sheet2;
+
+/// The radius rounding each edge to a round `chord` wide. Across an edge whose faces' normals
+/// turn by α the round is 2 r sin(α/2) wide; edges next to a curved face are taken as square.
+fn chord_radii(s: &Shape, ids: &[u32], chord: f64) -> fox_kernel::Result<Vec<(u32, f64)>> {
+  let (faces, edges) = (s.faces()?, s.edges()?);
+  let normal = |id: u32| faces.iter().find(|f| f.id == id).and_then(|f| f.plane()).map(|p| p.normal());
+  Ok(
+    ids
+      .iter()
+      .map(|&id| {
+        let turn = edges
+          .iter()
+          .find(|e| e.id == id)
+          .and_then(|e| Some(normal(e.faces[0])?.angle_between(normal(e.faces[1])?)))
+          .filter(|a| *a > 1e-6)
+          .unwrap_or(std::f64::consts::FRAC_PI_2);
+        (id, chord / (2.0 * (turn / 2.0).sin()))
+      })
+      .collect(),
+  )
+}

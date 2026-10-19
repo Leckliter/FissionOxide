@@ -816,6 +816,8 @@ class Converter:
       if f.get("start") is not None and norm(sub(f["start"], e["start"])) > 1e-6:
         r1, r2 = r2, r1
       self.cmd("fillet", True, edges=self.edges(f, T), radius=r1, radius2=r2)
+    elif t == "chord_length":
+      self.cmd("fillet", True, edges=self.edges(f, T), radius=f["radius"], chord=True)
     else:
       raise Unsupported(f"fillet type '{t}'")
 

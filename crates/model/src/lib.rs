@@ -518,6 +518,9 @@ pub enum FeatureKind {
     /// smooth patch starting this far from the vertex.
     #[serde(default)]
     setback: Option<String>,
+    /// `radius` is the chord length: the width of the round across the edge.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    chord: bool,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
