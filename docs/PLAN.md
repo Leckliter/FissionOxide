@@ -101,7 +101,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **76 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
@@ -111,12 +111,13 @@ Wrong results:
 - **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
   and each hole wall stays split in two there (the edge joins four faces, so faces can't be
   merged across it). Volume is right; low priority.
-- **69, 75** Sheet metal corners: tray corners and the trimming of a second edge flange differ
-  from the reference convention.
+- **69, 75** Sheet metal corners. Not bugs: these expected values follow SolidCraft's own corner
+  convention (walls stretched until their inner corners are a gap apart, open relief), which their
+  notes say. What matters is Fusion's corner and relief behaviour, which needs references measured
+  against Fusion before these cases mean anything.
 
 Missing options:
 
-- **37** Fillet at the apex of a loft-to-point (no edge found where expected).
 - **78** A variable fillet whose radius runs down to zero (OpenCASCADE needs a radius above zero).
 - **80, 81** Fillet radius that follows the room available, and a radius given as B-spline
   control values: SolidCraft options that Fusion doesn't have. Fusion's own variable fillet

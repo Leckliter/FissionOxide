@@ -35,6 +35,7 @@
 34-chamfer-then-fillet
 35-fillet-curved-curved
 36-corner-blend-two-radii
+37-pyramid-apex-blend
 38-coincident-cylinders
 39-tee-pipe
 40-box-sphere-torus

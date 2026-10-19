@@ -798,9 +798,13 @@ impl Ctx<'_> {
           let prof = match sec.profile {
             Some(p) => pick_profiles(&sk.profiles, &[p]).0.into_iter().next(),
             None => sk.profiles.first().cloned(),
+          };
+          match (prof, lone_point(&sk.sketch)) {
+            (Some(prof), _) => faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?),
+            // a sketch holding just a point: the loft runs to (or from) that point
+            (None, Some(p)) => faces.push(Shape::vertex(sk.plane.to_world(p)).map_err(ke)?),
+            (None, None) => return Err(format!("section {} has no profile", i + 1)),
           }
-          .ok_or(format!("section {} has no profile", i + 1))?;
-          faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?);
         }
         let tool = self.loft_guided(&faces, *ruled, *closed, rails, centerline.as_ref())?;
         self.operate(id, tool, *operation)?;
@@ -2027,4 +2031,14 @@ fn chord_radii(s: &Shape, ids: &[u32], chord: f64) -> fox_kernel::Result<Vec<(u3
       })
       .collect(),
   )
+}
+
+/// The sketch's only point that no curve uses (the origin aside), if it has exactly one.
+fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
+  let used: Vec<_> = sk.curves.iter().flat_map(|c| fox_sketch::curve_points(&c.kind)).collect();
+  let mut lone = sk.points.iter().filter(|p| p.id != fox_sketch::ORIGIN && !used.contains(&p.id));
+  match (lone.next(), lone.next()) {
+    (Some(p), None) => Some([p.x, p.y]),
+    _ => None,
+  }
 }
