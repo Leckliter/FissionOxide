@@ -12,6 +12,7 @@ use clf_kernel::glam::{DMat4, DVec3};
 use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
 use clf_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
+use crate::assembly;
 use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
@@ -200,10 +201,12 @@ impl Regenerator {
       let mut h = DefaultHasher::new();
       serde_json::to_string(&design.parameters).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.sheet_metal_rules).unwrap_or_default().hash(&mut h);
+      serde_json::to_string(&design.components).unwrap_or_default().hash(&mut h);
       h.finish()
     };
     let active = design.active_len();
     let rules = design.clone_rules();
+    let components = design.components.clone();
     let mut state = State::default();
     let mut status = Vec::with_capacity(design.features.len());
     let mut valid_prefix = true;
@@ -230,7 +233,7 @@ impl Regenerator {
       self.cache.truncate(i);
       st.suppressed = feature.suppressed;
       if !feature.suppressed {
-        let mut ctx = Ctx { params: &params, rules: &rules, state: &mut state };
+        let mut ctx = Ctx { params: &params, rules: &rules, components: &components, state: &mut state };
         let id = feature.id;
         let mut kind = feature.kind.clone();
         match ctx.apply(id, &mut kind) {
@@ -314,6 +317,7 @@ fn eval_params(design: &Design) -> (HashMap<String, f64>, HashMap<String, String
 struct Ctx<'a> {
   params: &'a HashMap<String, f64>,
   rules: &'a crate::Rules,
+  components: &'a [crate::Component],
   state: &'a mut State,
 }
 
@@ -899,6 +903,76 @@ impl Ctx<'_> {
         self.state.bodies[bi] = nb;
         Ok(warn)
       }
+      FeatureKind::Joint {
+        moving,
+        moving_origin,
+        fixed,
+        fixed_origin,
+        kind: joint_kind,
+        angle,
+        offset,
+        flip,
+        as_built,
+        rotation,
+        slide,
+        slide2,
+        pitch,
+        limits,
+      } => {
+        let comp = self.components.iter().find(|c| c.id == *moving).ok_or("the moving component no longer exists")?;
+        if comp.grounded {
+          return Err(format!("{} is grounded", comp.name));
+        }
+        if let Some(f) = fixed
+          && !self.components.iter().any(|c| c.id == *f)
+        {
+          return Err("the fixed component no longer exists".into());
+        }
+        let motion = assembly::Motion {
+          rotation: self.angle(rotation)?,
+          slide: self.len(slide)?,
+          slide2: self.len(slide2)?,
+          pitch: self.angle(pitch)?,
+        };
+        if let Some((lo, hi)) = &limits.rotation {
+          let (lo, hi) = (self.angle(lo)?, self.angle(hi)?);
+          if !(lo - 1e-9..=hi + 1e-9).contains(&motion.rotation) {
+            return Err(format!(
+              "rotation {:.2}° is outside the joint's limits ({:.2}° to {:.2}°)",
+              motion.rotation.to_degrees(),
+              lo.to_degrees(),
+              hi.to_degrees()
+            ));
+          }
+        }
+        if let Some((lo, hi)) = &limits.slide {
+          let (lo, hi) = (self.len(lo)?, self.len(hi)?);
+          if !(lo - 1e-9..=hi + 1e-9).contains(&motion.slide) {
+            return Err(format!("slide {:.3} mm is outside the joint's limits ({lo:.3} to {hi:.3} mm)", motion.slide));
+          }
+        }
+        let fixed_frame = self.joint_frame(fixed_origin)?;
+        let moving_frame = self.joint_frame(moving_origin)?;
+        let m = assembly::joint_transform(
+          fixed_frame,
+          moving_frame,
+          *joint_kind,
+          self.angle(angle)?,
+          self.len(offset)?,
+          *flip,
+          *as_built,
+          motion,
+        );
+        let bodies: Vec<usize> = comp.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect();
+        if bodies.is_empty() {
+          return Err(format!("{} has no bodies", comp.name));
+        }
+        for bi in bodies {
+          let s = self.state.bodies[bi].shape.transformed(m).map_err(ke)?;
+          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+        }
+        Ok(None)
+      }
       FeatureKind::Rip { edges, gap } => {
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, e) in edges.iter().enumerate() {
@@ -1195,6 +1269,33 @@ impl Ctx<'_> {
     Ok(missing.then(|| "some edges could not be found".to_string()))
   }
 
+  // ---- assemblies ----
+
+  /// A joint origin's frame, resolving (and refreshing) its face or edge reference.
+  fn joint_frame(&self, g: &mut assembly::JointGeometry) -> Result<DMat4, String> {
+    match g {
+      assembly::JointGeometry::Point { point, z, x } => {
+        assembly::frame(DVec3::from(*point), DVec3::from(*z), DVec3::from(*x))
+      }
+      assembly::JointGeometry::Face { face } => {
+        let bi = self.body_index(face.body)?;
+        let body = &self.state.bodies[bi];
+        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a joint face could not be found")?;
+        refresh_face(face, body, fid);
+        let info = body.faces().iter().find(|f| f.id == fid).ok_or("a joint face could not be found")?;
+        assembly::face_frame(info)
+      }
+      assembly::JointGeometry::Edge { edge } => {
+        let bi = self.body_index(edge.body)?;
+        let body = &self.state.bodies[bi];
+        let eid = edge.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("a joint edge could not be found")?;
+        let info = body.edges().iter().find(|e| e.id == eid).ok_or("a joint edge could not be found")?;
+        *edge = EdgeRef::from_edge(edge.body, info, body.faces());
+        assembly::edge_frame(info, body.faces())
+      }
+    }
+  }
+
   // ---- references ----
 
   fn resolve_plane(&mut self, p: &mut PlaneRef) -> Result<Plane, String> {
@@ -1258,6 +1359,10 @@ impl Ctx<'_> {
     match sel {
       BodySel::All => Ok((0..self.state.bodies.len()).collect()),
       BodySel::Bodies { ids } => ids.iter().map(|id| self.body_index(*id)).collect(),
+      BodySel::Component { id } => {
+        let c = self.components.iter().find(|c| c.id == *id).ok_or(format!("component {} no longer exists", id.0))?;
+        Ok(c.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect())
+      }
     }
   }
 

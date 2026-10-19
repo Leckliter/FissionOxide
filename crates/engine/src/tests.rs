@@ -291,3 +291,62 @@ fn every_listed_command_is_handled() {
     }
   }
 }
+
+#[test]
+fn assembly_with_a_revolute_joint() {
+  let mut s = Session::default();
+  // base plate with a hole at (50, 30); an arm (somewhere else) with a hole near one end
+  run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+  run(&mut s, "cylinder", json!({"radius": 5, "height": 10, "at": [50, 30], "operation": "cut"}));
+  run(&mut s, "box", json!({"width": 80, "depth": 20, "height": 5, "at": [40, 200]}));
+  run(&mut s, "cylinder", json!({"radius": 5, "height": 5, "at": [10, 200], "operation": "cut"}));
+  let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+  let b = run(&mut s, "component.create", json!({"name": "Base", "bodies": [base]}))["component"].clone();
+  run(&mut s, "component.ground", json!({"component": b}));
+  let a = run(&mut s, "component.create", json!({"name": "Arm", "bodies": [arm]}))["component"].clone();
+  run(&mut s, "component.material", json!({"component": a, "material": "aluminum"}));
+  let r = run(
+    &mut s,
+    "joint",
+    json!({
+      "moving": a, "moving_origin": {"edge": {"point": [15, 200, 0]}},
+      "fixed": b, "fixed_origin": {"edge": {"point": [55, 30, 10]}},
+      "kind": "revolute",
+    }),
+  );
+  assert!(r["error"].is_null(), "{r}");
+  let j = r["feature"].as_u64().unwrap();
+  let bbox = |s: &Session| {
+    let m = s.model.bodies.iter().find(|x| x.id.0 == arm).unwrap().shape.mass().unwrap();
+    (m.bbox_min, m.bbox_max)
+  };
+  let near = |a: clf_kernel::glam::DVec3, b: [f64; 3]| (a - clf_kernel::glam::DVec3::from(b)).length() < 1e-3;
+  let (lo, hi) = bbox(&s);
+  assert!(near(lo, [40.0, 20.0, 10.0]) && near(hi, [120.0, 40.0, 15.0]), "{lo:?} {hi:?}");
+  run(&mut s, "joint.drive", json!({"joint": j, "rotation": "90 deg"}));
+  let (lo, hi) = bbox(&s);
+  assert!(near(lo, [40.0, 20.0, 10.0]) && near(hi, [60.0, 100.0, 15.0]), "{lo:?} {hi:?}");
+  assert!(run(&mut s, "assembly.interference", json!({})).as_array().unwrap().is_empty());
+  // limits are checked on every rebuild
+  run(&mut s, "feature.edit", json!({"feature": j, "set": {"limits": {"rotation": ["-45 deg", "45 deg"]}}}));
+  assert!(s.model.errors().iter().any(|e| e.contains("outside the joint's limits")), "{:?}", s.model.errors());
+  run(&mut s, "joint.drive", json!({"joint": j, "rotation": 30}));
+  assert!(s.model.errors().is_empty());
+  let study = run(&mut s, "motion.study", json!({"joint": j, "from": "-45 deg", "to": "45 deg", "steps": 3}));
+  assert_eq!(study.as_array().unwrap().len(), 4);
+  assert!(study.as_array().unwrap().iter().all(|st| st["error"].is_null() && st["interference"] == json!([])));
+  // the grounded base can't be moved by a joint; a clash shows up as interference
+  let bad =
+    s.execute("joint", &json!({"moving": b, "moving_origin": {"at": [0, 0, 0]}, "fixed_origin": {"at": [0, 0, 5]}}));
+  assert!(bad.unwrap()["error"].as_str().unwrap().contains("grounded"));
+  s.undo();
+  run(&mut s, "joint.drive", json!({"joint": j, "slide": 0, "rotation": 0}));
+  run(&mut s, "feature.edit", json!({"feature": j, "set": {"offset": "-3"}}));
+  let clash = run(&mut s, "assembly.interference", json!({}));
+  assert_eq!(clash.as_array().unwrap().len(), 1, "{clash}");
+  let bom = run(&mut s, "assembly.bom", json!({}));
+  let arm_row = bom.as_array().unwrap().iter().find(|r| r["name"] == "Arm").unwrap();
+  let v = 80.0 * 20.0 * 5.0 - std::f64::consts::PI * 25.0 * 5.0;
+  assert!((arm_row["mass_g"].as_f64().unwrap() - v * 2.7 / 1000.0).abs() < 1e-3, "{bom}");
+  assert_eq!(arm_row["material"], "Aluminum");
+}

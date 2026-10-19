@@ -77,7 +77,7 @@ cmds! {
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
-  "move" => "Move/rotate bodies", "{bodies?, translate?: [x,y,z], axis?, angle?}";
+  "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
@@ -89,6 +89,17 @@ cmds! {
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "select" => "Set the selection", "{items: [Sel]}";
+  "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
+  "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
+  "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
+  "component.rename" => "Rename a component", "{component, name}";
+  "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";
+  "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
+  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
+  "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
+  "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
+  "assembly.interference" => "Overlapping bodies of different components", "{}";
+  "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
@@ -105,6 +116,9 @@ cmds! {
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  if let Some(r) = crate::assembly::run(s, name, p) {
+    return r;
+  }
   match name {
     "help" => {
       Ok(json!(COMMANDS.iter().map(|c| json!({"id": c.id, "help": c.help, "params": c.params})).collect::<Vec<_>>()))
@@ -693,15 +707,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
 
 // ---------------------------------------------------------------- parameters helpers
 
-fn req_str<'a>(p: &'a Value, k: &str) -> Result<&'a str, CmdError> {
+pub(crate) fn req_str<'a>(p: &'a Value, k: &str) -> Result<&'a str, CmdError> {
   p.get(k).and_then(Value::as_str).ok_or_else(|| CmdError::new(format!("missing '{k}'")))
 }
 
-fn opt_str<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
+pub(crate) fn opt_str<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
   p.get(k).and_then(Value::as_str)
 }
 
-fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
+pub(crate) fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
   p.get(k)
     .and_then(Value::as_u64)
     .and_then(|v| u32::try_from(v).ok())
@@ -709,7 +723,7 @@ fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
 }
 
 /// An expression: a JSON number or a string ("40 mm", "width/2").
-fn expr_of(v: &Value) -> Result<String, CmdError> {
+pub(crate) fn expr_of(v: &Value) -> Result<String, CmdError> {
   match v {
     Value::String(s) if !s.trim().is_empty() => Ok(s.clone()),
     Value::Number(n) => {
@@ -723,7 +737,7 @@ fn req_expr(p: &Value, k: &str) -> Result<String, CmdError> {
   expr_of(p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))?)
 }
 
-fn opt_expr(p: &Value, k: &str) -> Option<String> {
+pub(crate) fn opt_expr(p: &Value, k: &str) -> Option<String> {
   p.get(k).and_then(|v| expr_of(v).ok())
 }
 
@@ -757,7 +771,7 @@ fn opt_pt(p: &Value, k: &str) -> Result<Option<[f64; 2]>, CmdError> {
   }
 }
 
-fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
+pub(crate) fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
   let a = p.get(k).and_then(Value::as_array).ok_or_else(|| CmdError::new(format!("'{k}' must be [x, y, z]")))?;
   match a.as_slice() {
     [x, y, z] => match (x.as_f64(), y.as_f64(), z.as_f64()) {
@@ -768,7 +782,7 @@ fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
   }
 }
 
-fn ids(p: &Value, k: &str) -> Vec<u32> {
+pub(crate) fn ids(p: &Value, k: &str) -> Vec<u32> {
   p.get(k)
     .and_then(Value::as_array)
     .map(|a| a.iter().filter_map(|v| v.as_u64().and_then(|v| u32::try_from(v).ok())).collect())
@@ -799,6 +813,9 @@ fn operation(p: &Value) -> Result<Operation, CmdError> {
 }
 
 fn body_sel(p: &Value) -> BodySel {
+  if let Some(c) = p.get("component").and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok()) {
+    return BodySel::Component { id: clf_model::ComponentId(c) };
+  }
   let v = ids(p, "bodies");
   if v.is_empty() { BodySel::All } else { BodySel::Bodies { ids: v.into_iter().map(BodyId).collect() } }
 }
@@ -920,7 +937,7 @@ fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
 }
 
 /// {"body", "face"} by index, or {"point": [x,y,z], "normal"?: [x,y,z]} — the face at a point.
-fn face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError> {
+pub(crate) fn face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError> {
   if v.get("point").is_some() {
     let (body, face) =
       face_at(s, DVec3::from(req_vec3(v, "point")?), v.get("normal").map(|_| req_vec3(v, "normal")).transpose()?)?;
@@ -1009,18 +1026,23 @@ fn seg_dist3(a: DVec3, b: DVec3, p: DVec3) -> f64 {
   (a + ab * t - p).length()
 }
 
+/// {"body", "edge"} or {"point": [x,y,z]} on the edge.
+pub(crate) fn edge_ref_of(s: &Session, e: &Value) -> Result<EdgeRef, CmdError> {
+  let (body, edge) = if e.get("point").is_some() {
+    edge_at(s, DVec3::from(req_vec3(e, "point")?))?
+  } else {
+    (BodyId(req_u32(e, "body")?), req_u32(e, "edge")?)
+  };
+  let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
+  let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
+  Ok(EdgeRef::from_edge(body, info, b.faces()))
+}
+
 fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
   let list = p.get("edges").and_then(Value::as_array).ok_or(CmdError::new("missing 'edges'"))?;
   let mut out = Vec::new();
   for e in list {
-    let (body, edge) = if e.get("point").is_some() {
-      edge_at(s, DVec3::from(req_vec3(e, "point")?))?
-    } else {
-      (BodyId(req_u32(e, "body")?), req_u32(e, "edge")?)
-    };
-    let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
-    let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
-    out.push(EdgeRef::from_edge(body, info, b.faces()));
+    out.push(edge_ref_of(s, e)?);
   }
   if out.is_empty() {
     return Err(CmdError::new("no edges given"));
@@ -1453,6 +1475,10 @@ fn info(s: &Session) -> Value {
     "timeline": timeline,
     "bodies": bodies,
     "editing_sketch": s.edit_sketch.map(|f| f.0),
+    "components": s.design.components.iter().map(|c| json!({
+      "id": c.id.0, "name": c.name, "bodies": c.bodies.iter().map(|b| b.0).collect::<Vec<_>>(),
+      "grounded": c.grounded, "material": c.material,
+    })).collect::<Vec<_>>(),
   })
 }
 

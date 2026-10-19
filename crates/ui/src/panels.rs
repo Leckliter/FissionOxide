@@ -438,7 +438,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     | FeatureKind::Rip { .. } => Icon::Shell,
     FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => Icon::Extrude,
     FeatureKind::Hole { .. } => Icon::Cylinder,
-    FeatureKind::SplitBody { .. } => Icon::Combine,
+    FeatureKind::SplitBody { .. } | FeatureKind::Joint { .. } => Icon::Combine,
     FeatureKind::Draft { .. } => Icon::Chamfer,
   }
 }

@@ -9,12 +9,14 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod assembly;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
 
 use serde::{Deserialize, Serialize};
 
+pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
 pub use clf_expr::Kind as ParamKind;
 pub use clf_kernel as kernel;
 pub use clf_sketch as sketch;
@@ -54,6 +56,9 @@ pub struct Design {
   /// one; the first is the default.
   #[serde(default)]
   pub sheet_metal_rules: Vec<SheetMetalRule>,
+  /// Components: named groups of bodies that joints move together.
+  #[serde(default)]
+  pub components: Vec<Component>,
   #[serde(default)]
   next_id: u32,
 }
@@ -294,6 +299,10 @@ pub enum BodySel {
   Bodies {
     ids: Vec<BodyId>,
   },
+  /// Every body of a component.
+  Component {
+    id: ComponentId,
+  },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -307,6 +316,7 @@ pub enum Primitive {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // plain data, cloned rarely
 pub enum FeatureKind {
   Sketch {
     plane: PlaneRef,
@@ -586,6 +596,44 @@ pub enum FeatureKind {
   Refold {
     body: BodyId,
   },
+  /// Positions a component by mating one of its joint origins to another's, leaving the joint's
+  /// motion (rotation / slide) free to drive.
+  Joint {
+    /// The component that moves.
+    moving: ComponentId,
+    moving_origin: JointGeometry,
+    /// The component it attaches to; `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    fixed_origin: JointGeometry,
+    kind: JointKind,
+    /// Fixed rotation about the joint's Z axis.
+    #[serde(default = "zero")]
+    angle: String,
+    /// Fixed offset along the joint's Z axis.
+    #[serde(default = "zero")]
+    offset: String,
+    /// Point the Z axes the same way instead of against each other.
+    #[serde(default)]
+    flip: bool,
+    /// Keep the moving component where it is (an as-built joint): only the motion moves it.
+    #[serde(default)]
+    as_built: bool,
+    /// Motion: rotation about Z (revolute, cylindrical, pin-slot, planar, ball).
+    #[serde(default = "zero")]
+    rotation: String,
+    /// Motion: slide along Z (slider, cylindrical) or X (pin-slot, planar).
+    #[serde(default = "zero")]
+    slide: String,
+    /// Motion: slide along Y (planar).
+    #[serde(default = "zero")]
+    slide2: String,
+    /// Motion: tilt about X (ball).
+    #[serde(default = "zero")]
+    pitch: String,
+    #[serde(default)]
+    limits: JointLimits,
+  },
   /// Flattens a sheet metal body onto its stationary face.
   Unfold {
     body: BodyId,
@@ -657,6 +705,7 @@ impl FeatureKind {
       FeatureKind::ConvertToSheetMetal { .. } => "ConvertToSheetMetal",
       FeatureKind::Unfold { .. } => "Unfold",
       FeatureKind::Rip { .. } => "Rip",
+      FeatureKind::Joint { .. } => "Joint",
       FeatureKind::Refold { .. } => "Refold",
     }
   }
@@ -733,6 +782,7 @@ impl Design {
       marker: None,
       bodies: Vec::new(),
       sheet_metal_rules: Vec::new(),
+      components: Vec::new(),
       next_id: 1,
     }
   }
@@ -937,6 +987,49 @@ impl Design {
     Ok(())
   }
 
+  // ---- components ----
+
+  pub fn component(&self, id: ComponentId) -> Option<&Component> {
+    self.components.iter().find(|c| c.id == id)
+  }
+
+  pub fn component_mut(&mut self, id: ComponentId) -> Option<&mut Component> {
+    self.components.iter_mut().find(|c| c.id == id)
+  }
+
+  /// The component a body belongs to.
+  pub fn component_of(&self, body: BodyId) -> Option<&Component> {
+    self.components.iter().find(|c| c.bodies.contains(&body))
+  }
+
+  /// A new component holding `bodies` (taken out of any component they were in).
+  pub fn add_component(&mut self, name: &str, bodies: Vec<BodyId>) -> Result<ComponentId, DesignError> {
+    if self.components.len() >= MAX_PARAMETERS {
+      return Err(DesignError::TooMany);
+    }
+    let id = ComponentId(self.components.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    for c in &mut self.components {
+      c.bodies.retain(|b| !bodies.contains(b));
+    }
+    let name = if name.trim().is_empty() { format!("Component{}", id.0) } else { name.to_string() };
+    self.components.push(Component { id, name, bodies, grounded: false, material: String::new() });
+    Ok(id)
+  }
+
+  /// Deletes a component (its bodies go back to the root) unless a joint uses it.
+  pub fn remove_component(&mut self, id: ComponentId) -> Result<(), DesignError> {
+    let c = self.component(id).ok_or(DesignError::File(format!("no component {}", id.0)))?;
+    for f in &self.features {
+      if let FeatureKind::Joint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
+    }
+    self.components.retain(|c| c.id != id);
+    Ok(())
+  }
+
   // ---- sheet metal rules ----
 
   fn clone_rules(&self) -> Rules {
@@ -1110,6 +1203,15 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
+    FeatureKind::Joint { angle, offset, rotation, slide, slide2, pitch, limits, .. } => {
+      for e in [angle, offset, rotation, slide, slide2, pitch] {
+        f(e);
+      }
+      for (lo, hi) in [&mut limits.rotation, &mut limits.slide].into_iter().flatten() {
+        f(lo);
+        f(hi);
+      }
+    }
     FeatureKind::Rip { gap, .. } => {
       if !gap.is_empty() {
         f(gap)
