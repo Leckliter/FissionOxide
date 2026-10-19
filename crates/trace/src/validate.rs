@@ -28,7 +28,6 @@ pub(crate) fn finish(prepared: &[Prepared], options: &Options) -> Vec<Contour> {
     for (lv, flags) in levels.iter_mut().zip(&bad) {
       for (l, &f) in lv.iter_mut().zip(flags) {
         if f && *l < LAST_LEVEL {
-          eprintln!("DEBUGBUMP to {}", *l + 1);
           *l += 1;
           bumped = true;
         }

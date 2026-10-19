@@ -508,7 +508,12 @@ fn timing_1000px_logo() {
     println!("{fit:?}: {} contours, {segs} segments in {dt:?}", t.layers[0].contours.len());
     check_layer(&t.layers[0]);
     let l = &t.layers[0];
-    println!("{} lines {} arcs {} cubics", count(l, |s| matches!(s, Seg::Line { .. })), count(l, |s| matches!(s, Seg::Arc { .. })), count(l, |s| matches!(s, Seg::Cubic { .. })));
+    println!(
+      "{} lines {} arcs {} cubics",
+      count(l, |s| matches!(s, Seg::Line { .. })),
+      count(l, |s| matches!(s, Seg::Arc { .. })),
+      count(l, |s| matches!(s, Seg::Cubic { .. }))
+    );
   }
   let t0 = std::time::Instant::now();
   let t = trace(&img, &Options { mode: Mode::Colors { count: 4 }, ..Options::default() }).unwrap();

@@ -28,6 +28,10 @@ const STRAIGHT_TOL: f64 = 0.5;
 const TRIM: f64 = 0.3;
 /// How far two lines meeting at a corner may stray from one line and still be merged, px.
 const CORNER_FLAT: f64 = 0.1;
+/// Most pieces merged into one segment at a time.
+const MERGE_MAX: usize = 5;
+/// Least bulge (px) of an arc that takes in a straight edge.
+const ARC_MIN_SAGITTA: f64 = 1.0;
 /// Samples either side used to estimate a tangent.
 const TANGENT_REACH: usize = 4;
 
@@ -79,6 +83,14 @@ fn seg_dist(p: P, a: P, b: P) -> f64 {
 pub(crate) fn arc_sweep(a: P, b: P, center: P, ccw: bool) -> f64 {
   let full = (angle(sub(b, center)) - angle(sub(a, center))).rem_euclid(TAU);
   if ccw { full } else { TAU - full }
+}
+
+/// Largest distance of an arc from its chord.
+fn sagitta(seg: &Seg) -> f64 {
+  match *seg {
+    Seg::Arc { a, b, center, ccw } => dist(a, center) * (1.0 - (arc_sweep(a, b, center, ccw) / 2.0).cos()),
+    _ => 0.0,
+  }
 }
 
 pub(crate) fn bezier(c: &[P; 4], u: f64) -> P {
@@ -514,28 +526,41 @@ impl Ctx<'_> {
     (Seg::Cubic { a: c[0], c1: c[1], c2: c[2], b: c[3] }, err, idx.get(w).copied().unwrap_or(i))
   }
 
-  /// Merges neighbouring pieces where one segment fits both: lines with lines anywhere,
-  /// otherwise only where they meet away from a corner.
+  /// Merges neighbouring pieces (two at a time, else up to [`MERGE_MAX`]) where one segment
+  /// fits them all:
+  /// lines with lines anywhere, otherwise only where they meet away from a corner.
   fn merge(&self, pieces: &mut Vec<Piece>) {
     let m = self.m();
     loop {
       let mut changed = false;
       let mut k = 0;
-      while pieces.len() >= 2 && k < pieces.len() {
-        let next = (k + 1) % pieces.len();
-        let (a, b) = (pieces[k], pieces[next]);
-        let (i, j) = (a.i, if next == 0 { b.j + m } else { b.j });
-        if j - i >= m {
-          k += 1;
-          continue;
-        }
-        match self.union(i, j, &a, &b) {
-          Some(seg) => {
-            pieces[k] = Piece { i, j, seg, straight: a.straight || b.straight };
-            pieces.remove(next);
-            changed = true;
+      while k < pieces.len() {
+        let mut merged = false;
+        for n in 2..=MERGE_MAX {
+          if pieces.len() <= n {
+            break;
           }
-          None => k += 1,
+          let group: Vec<usize> = (k..k + n).map(|g| g % pieces.len()).collect();
+          let run: Vec<Piece> = group.iter().map(|&g| pieces[g]).collect();
+          let i = run[0].i;
+          let j = i + run.iter().map(|p| p.j - p.i).sum::<usize>();
+          if j - i >= m {
+            continue;
+          }
+          if let Some(seg) = self.union(i, j, &run) {
+            let straight = matches!(seg, Seg::Line { .. }) && run.iter().any(|p| p.straight);
+            pieces[k] = Piece { i, j, seg, straight };
+            let mut rest: Vec<usize> = group[1..].to_vec();
+            rest.sort_unstable_by(|a, b| b.cmp(a));
+            for g in rest {
+              pieces.remove(g);
+            }
+            (merged, changed) = (true, true);
+            break;
+          }
+        }
+        if !merged {
+          k += 1;
         }
       }
       if !changed {
@@ -544,16 +569,17 @@ impl Ctx<'_> {
     }
   }
 
-  fn union(&self, i: usize, j: usize, pa: &Piece, pb: &Piece) -> Option<Seg> {
-    let (a, b) = (&pa.seg, &pb.seg);
-    let is_line = |s: &Seg| matches!(s, Seg::Line { .. });
-    let is_cubic = |s: &Seg| matches!(s, Seg::Cubic { .. });
-    if is_line(a) && is_line(b) {
+  /// One segment for the consecutive pieces `run`, covering samples `i..=j`, if it fits.
+  fn union(&self, i: usize, j: usize, run: &[Piece]) -> Option<Seg> {
+    let is_line = |p: &Piece| matches!(p.seg, Seg::Line { .. });
+    let corner = run[..run.len() - 1].iter().any(|p| self.is_corner(p.j));
+    let edge = run.iter().any(|p| is_line(p) && p.straight);
+    if run.iter().all(is_line) {
+      // across a corner only if the corner is all but flat (keeps diagonal-touch chamfers);
       // a straight edge only takes in what keeps it straight, so it doesn't tilt
-      // across a corner only if the corner is all but flat (keeps diagonal-touch chamfers)
-      let tol = if self.is_corner(pa.j) {
+      let tol = if corner {
         self.tol.min(CORNER_FLAT)
-      } else if pa.straight || pb.straight {
+      } else if edge {
         self.tol.min(TRIM)
       } else {
         self.tol
@@ -562,18 +588,20 @@ impl Ctx<'_> {
         return Some(self.line(i, j));
       }
     }
-    if self.is_corner(pa.j) || self.fit == Fit::Lines {
+    if corner || self.fit == Fit::Lines {
       return None;
     }
-    let curvy = |p: &Piece| matches!(p.seg, Seg::Arc { .. }) || (is_line(&p.seg) && !p.straight);
-    if curvy(pa)
-      && curvy(pb)
+    if run.iter().all(|p| matches!(p.seg, Seg::Line { .. } | Seg::Arc { .. }))
       && let Some((seg, e)) = self.arc(i, j)
-      && e <= self.tol
     {
-      return Some(seg);
+      // a straight edge joins an arc only where the arc bends clearly more than it strays
+      // (chains of lines on a large circle), never to bend a side into a corner
+      let ok = e <= self.tol && (!edge || sagitta(&seg) >= ARC_MIN_SAGITTA.max(2.0 * e));
+      if ok {
+        return Some(seg);
+      }
     }
-    if self.fit == Fit::Curves && is_cubic(a) && is_cubic(b) {
+    if self.fit == Fit::Curves && run.iter().all(|p| matches!(p.seg, Seg::Cubic { .. })) {
       let (seg, e, _) = self.cubic(i, j);
       if e <= self.tol {
         return Some(seg);
