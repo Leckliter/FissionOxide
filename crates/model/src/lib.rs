@@ -22,6 +22,8 @@ pub mod regen;
 pub mod sheet;
 pub mod sheet2;
 pub mod surface;
+pub mod mechanism;
+pub mod subassembly;
 
 use serde::{Deserialize, Serialize};
 
@@ -857,6 +859,9 @@ pub enum FeatureKind {
     pitch: String,
     #[serde(default)]
     limits: JointLimits,
+    /// Screw joints: the advance along Z per full turn of rotation.
+    #[serde(default = "zero")]
+    lead: String,
   },
   /// Another instance of a component: copies of its bodies, rebuilt from the source on every
   /// change (edit the original and every copy follows), placed by `translate`. Joints can then
@@ -1208,6 +1213,9 @@ pub enum FeatureKind {
     breps: Vec<String>,
     #[serde(default = "zeros")]
     translate: [String; 3],
+    /// The source's own components and joints, when it was an assembly (see [`subassembly`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sub: Option<Box<subassembly::SubAssembly>>,
   },
   /// Non-parametric geometry: frozen bodies and direct edits (move face, press-pull, delete
   /// face) replayed in order. See [`direct`].
@@ -1216,6 +1224,22 @@ pub enum FeatureKind {
     bodies: Vec<direct::BaseBody>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     edits: Vec<direct::DirectEdit>,
+  },
+  /// Cam motion: a joint's slide (the follower) is set so the follower stays in contact with
+  /// the cam component's bodies wherever they are (see [`mechanism`]).
+  CamFollower {
+    #[serde(default = "no_component")]
+    cam: ComponentId,
+    /// The follower's joint (slider, cylindrical or pin-slot): its slide is driven.
+    #[serde(default = "no_feature")]
+    follower: FeatureId,
+    /// A flat-faced follower (touches the cam's furthest point along the slide) instead of a
+    /// knife edge (touches where the slide line meets the cam).
+    #[serde(default)]
+    flat: bool,
+    /// Gap kept between the follower and the cam (a roller's radius, or clearance).
+    #[serde(default = "zero")]
+    clearance: String,
   },
 }
 
@@ -1354,6 +1378,7 @@ impl FeatureKind {
       FeatureKind::MotionLink { .. } => "MotionLink",
       FeatureKind::InsertDesign { .. } => "Insert",
       FeatureKind::BaseFeature { .. } => "BaseFeature",
+      FeatureKind::CamFollower { .. } => "Cam",
     }
   }
 
@@ -1424,6 +1449,7 @@ impl FeatureKind {
       }
       FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
+      FeatureKind::CamFollower { follower, .. } => vec![*follower],
       _ => vec![],
     }
   }
@@ -1750,7 +1776,7 @@ impl Design {
       c.bodies.retain(|b| !bodies.contains(b));
     }
     let name = if name.trim().is_empty() { format!("Component{}", id.0) } else { name.to_string() };
-    self.components.push(Component { id, name, bodies, grounded: false, material: String::new() });
+    self.components.push(Component { id, name, bodies, grounded: false, material: String::new(), parent: None });
     Ok(id)
   }
 
@@ -1773,6 +1799,11 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+    }
+    // its sub-components move up a level
+    let up = self.component(id).and_then(|c| c.parent);
+    for c in self.components.iter_mut().filter(|c| c.parent == Some(id)) {
+      c.parent = up;
     }
     self.components.retain(|c| c.id != id);
     for cs in &mut self.contact_sets {
@@ -1971,8 +2002,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
-    FeatureKind::Joint { angle, offset, rotation, slide, slide2, pitch, limits, .. } => {
-      for e in [angle, offset, rotation, slide, slide2, pitch] {
+    FeatureKind::Joint { angle, offset, rotation, slide, slide2, pitch, limits, lead, .. } => {
+      for e in [angle, offset, rotation, slide, slide2, pitch, lead] {
         f(e);
       }
       for (lo, hi) in [&mut limits.rotation, &mut limits.slide].into_iter().flatten() {
@@ -2087,6 +2118,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::RigidGroup { .. } => {}
     FeatureKind::BaseFeature { .. } => {}
+    FeatureKind::CamFollower { clearance, .. } => f(clearance),
   }
 }
 

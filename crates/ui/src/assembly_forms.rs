@@ -71,6 +71,23 @@ pub static CONTACT_SET: Form = Form {
   picks_model: false,
 };
 
+pub static CAM_FOLLOWER: Form = Form {
+  title: "CAM FOLLOWER",
+  name: "Cam Follower",
+  hint: "Keep a sliding joint's component in contact with a cam component as the cam turns: pick the cam's body",
+  icon: Icon::DriveJoint,
+  cmd: "cam_follower",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Cam", required: true },
+    Input::Text { key: "follower", label: "Follower joint (slides)", default: "Joint2" },
+    Input::Check { key: "flat", label: "Flat-faced follower" },
+    Input::Expr { key: "clearance", label: "Clearance (roller radius)", default: "0 mm" },
+    Input::Text { key: "name", label: "Name", default: "" },
+  ],
+  picks_model: false,
+};
+
 #[cfg(test)]
 mod tests {
   use fox_engine::Session;

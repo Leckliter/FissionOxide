@@ -287,6 +287,7 @@ const ASSEMBLE: &[E] = &[
   c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
   c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  c("Cam Follower", Icon::DriveJoint, D(Kind::Form(&assembly_forms::CAM_FOLLOWER))),
 ];
 
 const SELECTION_TOOLS: &[E] = &[

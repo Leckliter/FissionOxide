@@ -22,6 +22,7 @@ mod sheet2;
 mod solid;
 mod surfaces;
 mod trace;
+mod subassembly;
 
 use std::path::PathBuf;
 
@@ -480,3 +481,5 @@ mod tests_solid;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
+#[cfg(test)]
+mod tests_subassembly;

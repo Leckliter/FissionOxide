@@ -118,7 +118,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "motion.study" => motion_study(s, p),
     "assembly.interference" => Ok(json!(interference(&s.model.bodies, s))),
-    "assembly.bom" => Ok(bom(s)),
+    "assembly.bom" => crate::subassembly::bom(s, p),
     _ => return mates::run(s, name, p),
   })
 }
@@ -183,9 +183,10 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
     "pin_slot" => JointKind::PinSlot,
     "planar" => JointKind::Planar,
     "ball" => JointKind::Ball,
+    "screw" => JointKind::Screw,
     o => {
       return Err(CmdError::new(format!(
-        "unknown joint '{o}' (rigid, revolute, slider, cylindrical, pin_slot, planar, ball)"
+        "unknown joint '{o}' (rigid, revolute, slider, cylindrical, pin_slot, planar, ball, screw)"
       )));
     }
   };
@@ -210,7 +211,11 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
     slide2: e("slide2"),
     pitch: e("pitch"),
     limits,
+    lead: e("lead"),
   };
+  if kind_is_screw(&kind) && opt_expr(p, "lead").is_none() {
+    return Err(CmdError::new("a screw joint needs a 'lead' (its advance per turn)"));
+  }
   let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   let st = s.model.status(id);
   Ok(json!({
@@ -218,6 +223,10 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
     "name": s.design.feature(id).map(|f| f.name.clone()),
     "error": st.and_then(|x| x.error.clone()),
   }))
+}
+
+fn kind_is_screw(k: &FeatureKind) -> bool {
+  matches!(k, FeatureKind::Joint { kind: JointKind::Screw, .. })
 }
 
 /// Steps a joint's motion and reports interference at each step (the design is left as it was).
@@ -331,38 +340,6 @@ pub(crate) fn overlaps(
     }
   }
   out
-}
-
-fn bom(s: &Session) -> Value {
-  let body_volume = |b: BodyId| s.model.body(b).and_then(|b| b.shape.mass().ok()).map(|m| m.volume).unwrap_or(0.0);
-  let mut rows: Vec<Value> = s
-    .design
-    .components
-    .iter()
-    .map(|c| {
-      let volume: f64 = c.bodies.iter().map(|b| body_volume(*b)).sum();
-      let material = if c.material.is_empty() { "Steel" } else { c.material.as_str() };
-      json!({
-        "component": c.id.0,
-        "name": c.name,
-        "bodies": c.bodies.len(),
-        "material": material,
-        "volume_mm3": volume,
-        "mass_g": volume * assembly::density(material) / 1000.0,
-        "grounded": c.grounded,
-      })
-    })
-    .collect();
-  let loose: Vec<BodyId> =
-    s.model.bodies.iter().map(|b| b.id).filter(|b| s.design.component_of(*b).is_none()).collect();
-  if !loose.is_empty() {
-    let volume: f64 = loose.iter().map(|b| body_volume(*b)).sum();
-    rows.push(json!({
-      "component": null, "name": "(root bodies)", "bodies": loose.len(), "material": "Steel",
-      "volume_mm3": volume, "mass_g": volume * assembly::density("Steel") / 1000.0, "grounded": true,
-    }));
-  }
-  json!(rows)
 }
 
 /// Density (g/mm³) of a body: its component's physical material, steel for root bodies.
