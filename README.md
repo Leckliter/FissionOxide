@@ -114,6 +114,8 @@ to skip the source build.
 
 On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa/OpenGL).
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature end to end.
+
 ## Using it
 
 | Action                 | How                                                         |
