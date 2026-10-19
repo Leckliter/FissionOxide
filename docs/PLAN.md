@@ -101,8 +101,10 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **79 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
+| 2 | Flat-pattern DXF | layers by role (`CUT`, `BEND_UP`, `BEND_DOWN`, `ETCH`, `NOTES`), bend notes and a `SHEET` note; validator `sheet.check_dxf` / `fissionoxide-cli check-dxf` (closed, unbranched contours, no duplicates, minimum feature size, holes clear of bends); the sheet metal reference DXFs pass it, except 74, whose slot (cut while flat) deliberately crosses a bend and is reported. Splines are still written as short lines |
+| 2 | Sheet metal corners | edge flange `butt` corners (SolidCraft's convention, case 69) and setbacks that trim an earlier flange's bend (case 75); corner references measured against Fusion still to come |
 
 ### Reference part failures to fix
 
@@ -111,10 +113,6 @@ Wrong results:
 - **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
   and each hole wall stays split in two there (the edge joins four faces, so faces can't be
   merged across it). Volume is right; low priority.
-- **69, 75** Sheet metal corners. Not bugs: these expected values follow SolidCraft's own corner
-  convention (walls stretched until their inner corners are a gap apart, open relief), which their
-  notes say. What matters is Fusion's corner and relief behaviour, which needs references measured
-  against Fusion before these cases mean anything.
 
 Missing options:
 

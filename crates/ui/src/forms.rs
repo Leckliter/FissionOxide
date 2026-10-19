@@ -1303,6 +1303,7 @@ pub static LOFTED_FLANGE: Form = Form {
     },
     Input::Expr { key: "bends", label: "Bends (press brake)", default: "8" },
     Input::Check { key: "flip", label: "Flip side" },
+    Input::Check { key: "rounded", label: "Rounded bends (press brake)" },
   ],
   picks_model: false,
 };
@@ -1650,7 +1651,8 @@ pub static FLAT_SKETCH: Form = Form {
   picks_model: false,
 };
 
-const CORNERS: &[(&str, &str)] = &[("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+const CORNERS: &[(&str, &str)] =
+  &[("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap"), ("butt", "Butt")];
 
 pub static CAM_SCALLOP: Form = Form {
   title: "SCALLOP",

@@ -13,7 +13,11 @@
 //! fissionoxide-cli convert IN OUT                 (any readable format to any writable one)
 //! fissionoxide-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
 //! fissionoxide-cli mcp [IN.fox]                   (Model Context Protocol server on stdio)
+//! fissionoxide-cli check-dxf FLAT.dxf|IN.fox [--body N] [--min-feature MM] [--hole-to-bend MM]
 //! ```
+//!
+//! `check-dxf` checks a flat pattern DXF (or a design's sheet metal flat pattern) against shop
+//! rules (`sheet.check_dxf`) and fails when it finds a problem.
 //!
 //! `--hub DIR` (or `FOX_DATA_DIR`) picks the data hub directory for every subcommand.
 //! `--configuration NAME` picks a configuration of the design for `export`, `convert`, `render`,
@@ -88,6 +92,30 @@ fn run(args: &[String]) -> Result<(), String> {
       let mut s = session(Session::default());
       out(&exec(&mut s, "inspect", &json!({"path": rest.first().ok_or_else(usage)?}))?);
       Ok(())
+    }
+    "check-dxf" => {
+      let target = rest.first().ok_or_else(usage)?;
+      let mut params = json!({});
+      for (k, f) in [("min_feature", "--min-feature"), ("hole_to_bend", "--hole-to-bend")] {
+        if let Some(v) = flag(rest, f) {
+          params[k] = json!(v);
+        }
+      }
+      let mut s = if target.to_ascii_lowercase().ends_with(".dxf") {
+        params["path"] = json!(target);
+        session(Session::default())
+      } else {
+        if let Some(b) = flag(rest, "--body") {
+          params["body"] = json!(b.parse::<u64>().map_err(|_| "bad --body")?);
+        }
+        open(target)?
+      };
+      let report = exec(&mut s, "sheet.check_dxf", &params)?;
+      out(&report);
+      match report["issues"].as_array().map(Vec::len).unwrap_or(0) {
+        0 => Ok(()),
+        n => Err(format!("{n} problem(s) in the flat pattern")),
+      }
     }
     "convert" => {
       let mut s = configure(open(rest.first().ok_or_else(usage)?)?, rest)?;
@@ -193,7 +221,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | check-dxf F.dxf|F.fox  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {

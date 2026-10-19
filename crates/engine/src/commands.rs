@@ -238,7 +238,7 @@ cmds! {
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
   "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
-  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap|butt}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
   "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
   "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body); sharp corners become bends", "{body, face?: {body, face} | {point}, rule?, bends?}";
@@ -253,10 +253,10 @@ cmds! {
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
   "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular", "{edges, distance, mode?: natural|tangent|perpendicular}";
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
-  "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?}";
-  "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap}";
+  "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
+  "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
   "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
-  "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap, relief?: none|round|square|tear, relief_size?, rule?}";
+  "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
   "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, flip?, name?}";
   "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
   "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
@@ -291,6 +291,7 @@ cmds! {
   "hub.comments" => "Comments on an item's versions", "{item?, version?}";
   "hub.comment.delete" => "Delete a comment", "{item?, comment}";
   "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
+  "sheet.check_dxf" => "Check a flat pattern DXF (a file, or a sheet metal body's flat pattern) against shop rules: closed contours, no duplicates, minimum feature size, holes clear of bends", "{path? | body?, face?, min_feature?, hole_to_bend?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1505,7 +1506,7 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(path);
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
-      "dxf" => std::fs::write(&path, fox_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
+      "dxf" => std::fs::write(&path, crate::sheet2::flat_dxf(body, &flat)?)?,
       "step" | "stp" => fox_kernel::write_step([&flat.shape], &path)?,
       "stl" => fox_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
       o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),

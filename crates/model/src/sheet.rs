@@ -599,22 +599,53 @@ pub fn flat_pattern(shape: &Shape, faces: &[FaceInfo], face: u32, sheet: &SheetI
 }
 
 /// Flat pattern outline and bend lines as a DXF (R12, millimetres) in the stationary face's
-/// plane, its lower-left corner at the origin.
+/// plane, its lower-left corner at the origin. See [`flat_dxf_for`] for the layers.
 pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
+  write_flat_dxf(flat, None)
+}
+
+/// The flat pattern DXF of a body with sheet settings `sheet`, layered by role: the outline and
+/// holes on `CUT`, bend centre lines on `BEND_UP` / `BEND_DOWN` (dashed), an empty `ETCH` layer
+/// for marking, and on `NOTES` a note at each bend (direction, angle, inside radius) and a
+/// `SHEET T=… R=… K=…` note below the part (which the flat pattern checks read).
+pub fn flat_dxf_for(flat: &FlatPattern, sheet: &SheetInfo) -> Result<String, String> {
+  write_flat_dxf(flat, Some(sheet))
+}
+
+/// The layers of a flat pattern DXF: name, colour, line type.
+const FLAT_LAYERS: [(&str, u8, &str); 5] = [
+  ("CUT", 7, "CONTINUOUS"),
+  ("BEND_UP", 1, "DASHED"),
+  ("BEND_DOWN", 5, "DASHED"),
+  ("ETCH", 3, "CONTINUOUS"),
+  ("NOTES", 2, "CONTINUOUS"),
+];
+
+fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<String, String> {
   use std::fmt::Write as _;
   let pl = &flat.plane;
   let n = pl.normal();
   let edges = flat.shape.edges().map_err(|e| e.to_string())?;
   let on_plane = |p: DVec3| (p - pl.origin).dot(n).abs() < 1e-4;
   let lines = flat.shape.edge_lines(0.01).map_err(|e| e.to_string())?;
+  let faces = flat.shape.faces().map_err(|e| e.to_string())?;
+  // a seam between two faces of the flat's top isn't cut
+  let top = |id: u32| {
+    faces
+      .iter()
+      .any(|f| f.id == id && f.kind == SurfaceKind::Plane && f.normal.dot(n) > 1.0 - 1e-9 && on_plane(f.origin))
+  };
   let mut ents: Vec<Ent> = Vec::new();
   for e in &edges {
     if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == fox_kernel::CurveKind::Degenerate {
       continue;
     }
+    if e.faces[1] != 0 && top(e.faces[0]) && top(e.faces[1]) {
+      continue;
+    }
     let p = |v: DVec3| pl.to_local(v);
     match e.kind {
-      fox_kernel::CurveKind::Line => ents.push(Ent::Line(p(e.start), p(e.end), "OUTLINE")),
+      fox_kernel::CurveKind::Line => ents.push(Ent::Line(p(e.start), p(e.end), "CUT")),
       fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
         ents.push(Ent::Circle(p(e.center), e.radius))
       }
@@ -630,7 +661,7 @@ pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
       _ => {
         if let Some(l) = lines.iter().find(|l| l.id == e.id) {
           for w in l.points.windows(2) {
-            ents.push(Ent::Line(p(w[0]), p(w[1]), "OUTLINE"));
+            ents.push(Ent::Line(p(w[0]), p(w[1]), "CUT"));
           }
         }
       }
@@ -651,7 +682,40 @@ pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
     }
   }
   let o = [x0, y0];
+  // notes: one along each bend, and the sheet below the part
+  let h = 2.5;
+  let mut notes: Vec<(P2, f64, String)> = Vec::new();
+  for b in &flat.bends {
+    let (mut a, mut c) = (pl.to_local(b.start), pl.to_local(b.end));
+    // text reads left to right
+    if c[0] < a[0] - 1e-9 || ((c[0] - a[0]).abs() <= 1e-9 && c[1] < a[1]) {
+      (a, c) = (c, a);
+    }
+    let l = len2(sub(c, a));
+    let Some(u) = unit(sub(c, a)) else { continue };
+    let ang = u[1].atan2(u[0]).to_degrees();
+    let at = add(add(a, mul(u, (l * 0.1).min(5.0))), mul(left(u), h * 0.4));
+    let mut text = format!("{} {}%%d", if b.inner { "UP" } else { "DOWN" }, round3(b.angle.to_degrees()));
+    if let Some(sh) = sheet {
+      let _ = write!(text, " R{}", round3(sh.bend_radius));
+    }
+    notes.push((at, ang, text));
+  }
+  if let Some(sh) = sheet {
+    let text = format!("SHEET T={} R={} K={}", round3(sh.thickness), round3(sh.bend_radius), round3(sh.k_factor));
+    notes.push(([x0, y0 - 2.0 * h], 0.0, text));
+  }
   let mut s = String::from("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n");
+  s.push_str("0\nSECTION\n2\nTABLES\n");
+  s.push_str("0\nTABLE\n2\nLTYPE\n70\n2\n");
+  s.push_str("0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0\n");
+  s.push_str("0\nLTYPE\n2\nDASHED\n70\n0\n3\nDashed __ __\n72\n65\n73\n2\n40\n6\n49\n4\n49\n-2\n");
+  s.push_str("0\nENDTAB\n");
+  let _ = write!(s, "0\nTABLE\n2\nLAYER\n70\n{}\n", FLAT_LAYERS.len());
+  for (name, color, ltype) in FLAT_LAYERS {
+    let _ = write!(s, "0\nLAYER\n2\n{name}\n70\n0\n62\n{color}\n6\n{ltype}\n");
+  }
+  s.push_str("0\nENDTAB\n0\nENDSEC\n");
   s.push_str("0\nSECTION\n2\nENTITIES\n");
   for e in &ents {
     match *e {
@@ -662,16 +726,26 @@ pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
       }
       Ent::Circle(c, r) => {
         let c = sub(c, o);
-        let _ = write!(s, "0\nCIRCLE\n8\nOUTLINE\n10\n{}\n20\n{}\n30\n0\n40\n{r}\n", c[0], c[1]);
+        let _ = write!(s, "0\nCIRCLE\n8\nCUT\n10\n{}\n20\n{}\n30\n0\n40\n{r}\n", c[0], c[1]);
       }
       Ent::Arc(c, r, a0, a1) => {
         let c = sub(c, o);
-        let _ = write!(s, "0\nARC\n8\nOUTLINE\n10\n{}\n20\n{}\n30\n0\n40\n{r}\n50\n{a0}\n51\n{a1}\n", c[0], c[1]);
+        let _ = write!(s, "0\nARC\n8\nCUT\n10\n{}\n20\n{}\n30\n0\n40\n{r}\n50\n{a0}\n51\n{a1}\n", c[0], c[1]);
       }
     }
   }
+  for (at, ang, text) in &notes {
+    let at = sub(*at, o);
+    let _ = write!(s, "0\nTEXT\n8\nNOTES\n10\n{}\n20\n{}\n30\n0\n40\n{h}\n1\n{text}\n50\n{ang}\n", at[0], at[1]);
+  }
   s.push_str("0\nENDSEC\n0\nEOF\n");
   Ok(s)
+}
+
+/// A value rounded to 3 decimals for notes (no trailing zeros).
+fn round3(v: f64) -> String {
+  let s = format!("{:.3}", v);
+  s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 enum Ent {

@@ -66,13 +66,13 @@ change a parameter and watch the whole history rebuild.
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
-  profiles (die-formed or press-brake with a bend count), Miter Flange (a sketch profile swept
+  profiles (die-formed or press-brake with a bend count, sharp or rounded bends), Miter Flange (a sketch profile swept
   along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
   corners become bends, with corner reliefs), Unfold and Refold in the timeline (cuts made while
   flat are carried back onto the bends), corner closures where flanges meet (miter, open,
-  closed, overlap) with round, square or tear corner reliefs, rectangular or round bend reliefs,
-  and a flat pattern with bend lines exported as DXF (also STEP/STL) or made into an editable
-  sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
+  closed, overlap, butt) with round, square or tear corner reliefs, rectangular or round bend
+  reliefs, and a flat pattern with bend lines exported as a layered DXF with bend notes (also
+  STEP/STL), checked against shop rules, or made into an editable sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
   bends running straight into other bends — come out in the flat pattern.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
@@ -219,8 +219,9 @@ fissionoxide-cli exec bracket.fox '{"cmd": "sheet.flat_pattern", "path": "bracke
 Sheet metal bodies are ordinary solids that carry their rule, so every other feature (holes,
 cuts, fillets, patterns) works on them. Bends are true cylinders: the flat length of a bend is
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
-sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
-`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`; `sheet.flat_sketch` makes the same
+sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline and holes
+on layer `CUT` and bend centre lines on `BEND_UP` / `BEND_DOWN` (dashed), with a bend note at
+each bend on `NOTES` and an `ETCH` layer for marking; `sheet.flat_sketch` makes the same
 outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
 XY at the origin, to dimension, extrude or export.
 
@@ -233,16 +234,27 @@ fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
   arc length, keeping the corners of either as facet boundaries, and closed profiles are opened
   at a seam (the rule's gap) so the flange can unfold. *Die formed* is one smooth surface;
   *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
-  pattern is the neutral layer developed facet by facet (later cuts on the flange aren't in it).
+  pattern is the neutral layer developed facet by facet; holes and notches cut in the flange
+  later are carried into it, facet by facet. `rounded` rounds a press-brake flange's bends to
+  the rule's bend radius (folds that converge too tightly to round stay sharp, with a warning).
 - **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
   edge, starting on it, swept along a chain of edges of one face; the profile is where the face
   of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.
 - **Corner closure**: where two flanges of one feature meet, `corners` is `miter` (cut along
   the bisector, leaving the rule's gap), `open`, `closed` (mitred with no gap, a welded seam) or
-  `overlap` (the first flange runs over the end of the second). The rule's `corner_relief`
+  `overlap` (the first flange runs over the end of the second) or `butt` (the walls run on, cut
+  square, until their inside corners are the rule's gap apart; the bends stop with the sheet,
+  leaving an open corner below the walls). The rule's `corner_relief`
   (`round`, `square`, `tear`; `corner_relief_size`) cuts a relief at the corner through the
   sheet and the bends; overlapping corners get a square one unless the rule says otherwise.
   `sheet.corner_closure` changes both on an existing flange.
+- **Setbacks through bends**: a flange whose edge ends where an earlier flange's bend starts
+  trims that bend back with the sheet (the earlier flange's wall keeps its length).
+- **Flat pattern checks** (`sheet.check_dxf`, `fissionoxide-cli check-dxf FILE.dxf|DESIGN.fox`):
+  a flat pattern DXF, or a body's flat pattern, against shop rules: every cut contour closed
+  and unbranched, nothing cut twice, no hole, slot or web narrower than the minimum feature size
+  (default the thickness) and holes at least 2·t + R from a bend line. The rules come from the
+  body or the DXF's `SHEET T=… R=… K=…` note; `min_feature` and `hole_to_bend` override them.
 
 ## Assemblies and drawings
 
