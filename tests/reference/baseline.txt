@@ -73,3 +73,4 @@
 76-sm-thickness-variant
 77-fillet-variable-linear
 82-thin-extrude-frame
+83-boundary-loop-thicken

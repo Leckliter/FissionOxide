@@ -101,7 +101,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **74 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **75 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
@@ -111,7 +111,6 @@ Wrong results:
 - **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
   and each hole wall stays split in two there (the edge joins four faces, so faces can't be
   merged across it). Volume is right; low priority.
-- **83** A symmetric thicken leaves a cylindrical wall as two unrecognised faces.
 - **69, 75** Sheet metal corners: tray corners and the trimming of a second edge flange differ
   from the reference convention.
 

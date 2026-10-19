@@ -300,8 +300,15 @@ impl Ctx<'_> {
         let mut tools = Vec::new();
         for face in faces {
           if *symmetric {
-            tools.push(face.thicken(t / 2.0).map_err(ke)?);
-            tools.push(face.thicken(-t / 2.0).map_err(ke)?);
+            // one slab from the surface offset back by half: two half slabs would leave every
+            // side wall in two pieces
+            match face.offset_surface(-t / 2.0).and_then(|back| back.thicken(t)) {
+              Ok(slab) => tools.push(slab),
+              Err(_) => {
+                tools.push(face.thicken(t / 2.0).map_err(ke)?);
+                tools.push(face.thicken(-t / 2.0).map_err(ke)?);
+              }
+            }
           } else {
             tools.push(face.thicken(t).map_err(ke)?);
           }
