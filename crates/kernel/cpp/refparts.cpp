@@ -1,20 +1,31 @@
-// Fillets whose radius follows a law along each edge: Fusion's variable-radius fillet, with radii
-// given at points along the edge, including radii that run down to nothing.
-#include "fox-kernel/cpp/fillet3.hxx"
+// Reference-part fixes: fillets whose radius follows a law along each edge (Fusion's
+// variable-radius fillet, with radii at points along the edge, down to nothing), and merging hole
+// walls that a tangent neighbour split in two.
+#include "fox-kernel/cpp/refparts.hxx"
 #include "fox-kernel/src/ffi.rs.h"
 
 #include <algorithm>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepTools_ReShape.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Wire.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 #include <TColgp_Array1OfPnt2d.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 
@@ -56,6 +67,10 @@ std::unique_ptr<Shape> valid_shape(const TopoDS_Shape &s, const char *what) {
 // zero everywhere, so a radius of zero becomes a hair-thin round (a thousandth of the largest).
 std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> edges, rust::Slice<const double> at,
                                   rust::Slice<const double> radii) {
+  // OpenCASCADE's fillet code keeps some state in statics, and a radius law built from points
+  // fails now and then when two threads fillet at once; one law fillet at a time.
+  static std::mutex lock;
+  std::lock_guard<std::mutex> hold(lock);
   try {
     if (at.size() != radii.size() || at.size() < 2) throw std::runtime_error("a radius law needs two or more points");
     std::vector<std::pair<double, double>> pts;
@@ -104,6 +119,55 @@ std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> ed
   } catch (...) {
     fail("variable fillet");
   }
+}
+
+// Merges faces lying on one surface across edges that more than two faces share: where a hole is
+// exactly tangent to another, the plate between them is a line, and the boolean splits each hole
+// wall there. The edge stays with the faces that need it (a seam) and the merged wall just touches
+// it. Shapes without such edges, or where the merge doesn't give a valid solid, come back as they
+// were, so ordinary results keep their faces.
+std::unique_ptr<Shape> unify_faces_internal(const Shape &s) {
+  auto out = std::make_unique<Shape>();
+  out->s = s.s;
+  try {
+    TopTools_IndexedDataMapOfShapeListOfShape ef;
+    TopExp::MapShapesAndUniqueAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
+    bool shared = false;
+    for (int i = 1; i <= ef.Extent() && !shared; ++i) shared = ef(i).Extent() > 2;
+    if (!shared) return out;
+    ShapeUpgrade_UnifySameDomain u(s.s, Standard_True, Standard_True, Standard_False);
+    u.AllowInternalEdges(Standard_True);
+    u.Build();
+    TopoDS_Shape merged = u.Shape();
+    // merged faces keep such edges as wires of internal edges; the faces only touch there
+    BRepTools_ReShape reshape;
+    BRep_Builder bb;
+    bool changed = false;
+    for (TopExp_Explorer fx(merged, TopAbs_FACE); fx.More(); fx.Next()) {
+      const TopoDS_Face &f = TopoDS::Face(fx.Current());
+      bool internal = false;
+      for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More() && !internal; ex.Next()) {
+        internal = ex.Current().Orientation() == TopAbs_INTERNAL;
+      }
+      if (!internal) continue;
+      TopoDS_Face nf = TopoDS::Face(f.EmptyCopied().Oriented(TopAbs_FORWARD));
+      for (TopoDS_Iterator wi(f, Standard_False); wi.More(); wi.Next()) {
+        bool all_internal = true;
+        for (TopoDS_Iterator ei(wi.Value(), Standard_False); ei.More() && all_internal; ei.Next()) {
+          all_internal = ei.Value().Orientation() == TopAbs_INTERNAL;
+        }
+        if (!all_internal) bb.Add(nf, wi.Value());
+      }
+      nf.Orientation(f.Orientation());
+      reshape.Replace(f, nf);
+      changed = true;
+    }
+    if (changed) merged = reshape.Apply(merged);
+    if (BRepCheck_Analyzer(merged).IsValid()) out->s = merged;
+  } catch (...) {
+    // keep the shape as it was
+  }
+  return out;
 }
 
 } // namespace fox

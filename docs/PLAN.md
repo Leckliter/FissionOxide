@@ -101,24 +101,20 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **81 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
 
 Wrong results:
 
-- **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
-  and each hole wall stays split in two there (the edge joins four faces, so faces can't be
-  merged across it). Volume is right; low priority.
 - **69, 75** Sheet metal corners. Not bugs: these expected values follow SolidCraft's own corner
   convention (walls stretched until their inner corners are a gap apart, open relief), which their
   notes say. What matters is Fusion's corner and relief behaviour, which needs references measured
   against Fusion before these cases mean anything.
 
-Missing options:
-
-- **78** A variable fillet whose radius runs down to zero (OpenCASCADE needs a radius above zero).
-- **80, 81** Fillet radius that follows the room available, and a radius given as B-spline
-  control values: SolidCraft options that Fusion doesn't have. Fusion's own variable fillet
-  (radii at points along the edge) is the version worth adding.
+Fixed in wave 3: **42** (hole walls split where a patterned hole is exactly tangent to another are
+merged again after the boolean; only shapes with an edge shared by more than two faces are touched),
+**78, 80, 81** (variable fillet with radii at points along the edge, Fusion's version, radii may be
+zero; 80's taper-to-fit and 81's B-spline radius law are given to it as radius points, 80 by hand
+since FissionOxide, like Fusion, has no taper-to-fit option).

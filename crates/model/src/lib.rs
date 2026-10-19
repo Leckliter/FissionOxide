@@ -15,6 +15,7 @@ pub mod config;
 pub mod construct;
 pub mod direct;
 pub mod drawing;
+pub mod fillet;
 pub mod meshops;
 pub mod plot;
 pub mod refs;
@@ -22,16 +23,15 @@ pub mod regen;
 pub mod sheet;
 pub mod sheet2;
 pub mod surface;
-pub mod fillet;
 
 use serde::{Deserialize, Serialize};
 
 pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
+pub use fillet::RadiusPoint;
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
-pub use fillet::RadiusPoint;
 
 use fox_sketch::{CurveId, PointId, Sketch};
 

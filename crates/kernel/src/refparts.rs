@@ -1,5 +1,6 @@
 //! Fillets whose radius follows a law along each edge (Fusion's variable-radius fillet with
-//! radii at points along the edge). The C++ side is `cpp/fillet3.cpp`.
+//! radii at points along the edge), and merging hole walls that a tangent neighbour split in two.
+//! The C++ side is `cpp/refparts.cpp`.
 
 use crate::ffi::ffi as sys;
 use crate::{KernelError, Result, Shape};
@@ -21,5 +22,12 @@ impl Shape {
     }
     let (at, radii): (Vec<f64>, Vec<f64>) = points.iter().copied().unzip();
     Shape::wrap(sys::fillet_law(self.get()?, edges, &at, &radii)?)
+  }
+
+  /// Merges faces that lie on one surface across edges that more than two faces share (where two
+  /// holes are exactly tangent, the boolean splits each wall at the line they touch along). A
+  /// shape without such edges, or that the merge would leave invalid, comes back unchanged.
+  pub fn unify_internal(&self) -> Result<Shape> {
+    Shape::wrap(sys::unify_faces_internal(self.get()?)?)
   }
 }

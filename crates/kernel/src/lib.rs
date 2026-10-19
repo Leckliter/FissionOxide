@@ -363,7 +363,7 @@ impl Shape {
       BoolOp::Intersect => 2,
     };
     let r = Shape::wrap(sys::boolean_op(self.get()?, tool.get()?, code, FUZZY)?)?;
-    if r.solid_count() == 0 { Err(KernelError::Empty) } else { Ok(r) }
+    if r.solid_count() == 0 { Err(KernelError::Empty) } else { r.unify_internal() }
   }
 
   /// The part of `tool` (a face or shell) inside this solid: a section through it. Unlike
@@ -987,6 +987,6 @@ mod tests_features2;
 
 mod sheet2;
 
-mod fillet3;
+mod refparts;
 #[cfg(test)]
-mod tests_fillet3;
+mod tests_refparts;

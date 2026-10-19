@@ -14,6 +14,7 @@ pub mod diff;
 mod drawings;
 mod features;
 pub mod files;
+mod fillet;
 pub mod hub;
 mod inspect;
 mod mates;
@@ -22,7 +23,6 @@ mod sheet2;
 mod solid;
 mod surfaces;
 mod trace;
-mod fillet;
 
 use std::path::PathBuf;
 
@@ -468,6 +468,8 @@ mod tests_config;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]
+mod tests_fillet;
+#[cfg(test)]
 mod tests_more;
 #[cfg(test)]
 mod tests_scene;
@@ -481,5 +483,3 @@ mod tests_solid;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
-#[cfg(test)]
-mod tests_fillet;

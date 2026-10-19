@@ -31,7 +31,8 @@ fn fillet_radii_at_points_and_down_to_zero() {
   run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
   run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 4, "radius2": 0}));
   let removed = 8000.0 - volume(&s);
-  assert!((removed - cut(4.0) * 20.0 / 3.0).abs() < 0.05, "{removed}");
+  // quarter-round sections would cut (1 - pi/4) L a^2 / 3; the rolling ball cuts a little more
+  assert!(removed > cut(4.0) * 20.0 / 3.0 && removed < 1.1 * cut(4.0) * 20.0 / 3.0, "{removed}");
 
   // 1 at the ends, 3 in the middle
   let mut s = Session::default();

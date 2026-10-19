@@ -194,9 +194,10 @@ pub(crate) mod ffi {
     fn step_doc_color(d: &StepDoc, i: usize) -> Vec<f64>;
     fn step_doc_shape(d: &StepDoc, i: usize) -> Result<UniquePtr<Shape>>;
 
-    // fillets with a radius law (cpp/fillet3.cpp)
-    include!("fox-kernel/cpp/fillet3.hxx");
+    // fillets with a radius law, merging split hole walls (cpp/refparts.cpp)
+    include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
   }
 }
 
