@@ -3969,4 +3969,36 @@ mod tests {
     run(&mut s, "cam.generate", json!({}));
     assert_eq!(s.toolpaths.len(), 2);
   }
+
+  #[test]
+  fn text_forms_edit_and_explode() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let mut d = form(&mut s, &SK_TEXT, vec![], &[("text", json!("AB")), ("font", json!("mono"))]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let sketch = s.design.sketch(FeatureId(sk)).unwrap();
+    let (glyph, font) = (sketch.texts[0].curves[0], sketch.texts[0].font.clone());
+    assert_eq!(font, "mono");
+    // Edit Text opens with the picked text's values
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: glyph }];
+    let mut d = form(&mut s, &SK_TEXT_EDIT, sel.clone(), &[]);
+    prefill(&SK_TEXT_EDIT, &mut d.form, &s);
+    let i = SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == "text").unwrap();
+    assert_eq!(d.form.values[i], json!("AB"));
+    d.form.values[i] = json!("ABC");
+    let h = SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == "angle").unwrap();
+    d.form.values[h] = json!("90");
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    assert_eq!((t.text.as_str(), t.font.as_str()), ("ABC", "mono"));
+    assert!((t.angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    let glyph = t.curves[0];
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: glyph }];
+    let mut d = form(&mut s, &SK_TEXT_EXPLODE, sel, &[]);
+    apply(&mut s, &mut d);
+    assert!(s.design.sketch(FeatureId(sk)).unwrap().texts.is_empty());
+  }
 }

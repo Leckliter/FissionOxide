@@ -466,22 +466,33 @@ fn sketch_lines(
     });
   }
   if editing {
-    // spline tangent handles: a thin line from the end to its handle
+    // spline tangent handles and Bézier handles: a thin line from the curve to each handle
     for c in &sk.curves {
-      if let CurveKind::Spline { points, start_handle, end_handle } = &c.kind {
-        for (end, h) in [(points.first(), start_handle), (points.last(), end_handle)] {
-          if let (Some(e), Some(h)) = (end.and_then(|e| sk.pos(*e)), h.and_then(|h| sk.pos(h))) {
-            let points = vec![w(e), w(h)];
-            scene.lines.push(Polyline {
-              points,
-              color: SKETCH_CONSTRUCTION,
-              width: 1.0,
-              id: 0,
-              on_top: true,
-              dashed: true,
-              behind: false,
-            });
+      let mut legs: Vec<(PointId, PointId)> = Vec::new();
+      match &c.kind {
+        CurveKind::Spline { points, start_handle, end_handle } => {
+          legs.extend(points.first().copied().zip(*start_handle));
+          legs.extend(points.last().copied().zip(*end_handle));
+        }
+        CurveKind::Bezier { points } => {
+          for k in (0..points.len().saturating_sub(1)).step_by(3) {
+            legs.push((points[k], points[k + 1]));
+            legs.extend(points.get(k + 3).map(|e| (*e, points[k + 2])));
           }
+        }
+        _ => {}
+      }
+      for (e, h) in legs {
+        if let (Some(e), Some(h)) = (sk.pos(e), sk.pos(h)) {
+          scene.lines.push(Polyline {
+            points: vec![w(e), w(h)],
+            color: SKETCH_CONSTRUCTION,
+            width: 1.0,
+            id: 0,
+            on_top: true,
+            dashed: true,
+            behind: false,
+          });
         }
       }
     }

@@ -16,9 +16,12 @@ change a parameter and watch the whole history rebuild.
 - **Constrained sketches.** Line/polyline and midpoint lines; two-point, centre and 3-point
   rectangles; centre, 2-point and 3-point circles; 3-point, centre and tangent arcs; fit and
   control point splines, ellipses and conics; inscribed, circumscribed and edge polygons; centre,
-  overall, centre-point and arc slots; points and text (glyph outlines you can extrude); 20 constraint types (coincident, horizontal,
+  overall, centre-point and arc slots; 2- and 3-tangent circles; blend curves (tangent or
+  curvature continuous); points and editable text (glyph outlines you can extrude, rebuilt
+  when you change the string, font, size or angle; double-click a letter to edit); 21 constraint types (coincident, horizontal,
   vertical, parallel, perpendicular, tangent, equal, concentric, midpoint, collinear,
-  symmetric, fix, point-on-curve); driving dimensions (distance, horizontal/vertical,
+  symmetric, fix, point-on-curve, curvature; tangency and curvature work on spline ends,
+  which grow tangent handles); driving dimensions (distance, horizontal/vertical,
   radius, diameter, angle, point-to-line). The solver reports degrees of freedom, colours
   free geometry blue, and you can drag points.
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
@@ -79,9 +82,10 @@ change a parameter and watch the whole history rebuild.
   controls (`.nc`). See [Manufacture](#manufacture-cam).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
-- **Sketch tools.** Fillet, chamfer, offset, trim, extend, mirror (symmetry-constrained),
+- **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
-  follows the body when it changes).
+  follows the body when it changes). Trim, break, extend and offset work on splines and
+  ellipses too; what is left of one is an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
@@ -142,6 +146,22 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Data panel             | The data panel icon in the top-left corner, or File → Show data panel |
 | Open / insert files    | Ctrl+O / File → Insert, or drop files on the window         |
 | Fit view               | F6                                                          |
+| Tangent circles        | 2-Tangent Circle: click two curves, then where the circle goes (the cursor sets its size); 3-Tangent: click three curves near where it should touch |
+| Blend curve            | Click near the ends of two curves (G2); Shift+click the second for G1 |
+| Break                  | Click a curve: it splits at the crossings either side of the click, or at the click |
+| Edit text              | Double-click a letter (or Modify → Edit Text); Explode Text makes plain curves |
+
+## Sketch text and blends
+
+```sh
+clfusion-cli run examples/name_plate.jsonl --save plate.clf --png plate.png
+```
+
+A plate outlined by two lines joined with G2 blend curves, with raised text that is edited
+after it was extruded (`sketch.text_edit`): the letters regenerate and the extrusion follows.
+Text stays a text entity in the sketch (string, font, height, angle and an anchor point you can
+dimension or drag); `sketch.text_explode` turns it into plain curves, and older files with
+exploded text open unchanged.
 
 ## Sheet metal
 

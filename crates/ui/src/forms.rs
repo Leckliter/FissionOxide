@@ -1042,7 +1042,7 @@ pub static SK_TEXT_EDIT: Form = Form {
   cmd: "sketch.text_edit.form",
   fixed: &[],
   inputs: &[
-    Input::Curves { key: "curves", label: "Text" },
+    Input::Curves { key: "curves", label: "Letter of the text" },
     Input::Text { key: "text", label: "Text", default: "" },
     Input::Expr { key: "height", label: "Height", default: "" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "" },
@@ -1058,7 +1058,7 @@ pub static SK_TEXT_EXPLODE: Form = Form {
   icon: Icon::SkText,
   cmd: "sketch.text_explode",
   fixed: &[],
-  inputs: &[Input::Curves { key: "curves", label: "Text" }],
+  inputs: &[Input::Curves { key: "curves", label: "Letter of the text" }],
   picks_model: false,
 };
 

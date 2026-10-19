@@ -11,7 +11,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Sketch    | Break; 2/3-tangent circles; blend curve; splines and ellipses in trim/offset; tangency and curvature constraints on splines; editable (not exploded) text |
+| Sketch    | Elliptical arcs as their own curve and fit-point splines that stay fit-point after trim/extend (both become Bézier chains today); fonts from disk for text |
 | Features  | Sweep with guide rails / twist; loft rails; emboss; boundary fill; replace face; extrude to a curved face; setback fillets |
 | Features  | Configurations (table-driven variants); base features (direct editing without history) |
 | Surface   | Extend, untrim; trim with a body or sketch; offset with variable distance     |
