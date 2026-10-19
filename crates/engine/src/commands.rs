@@ -148,8 +148,8 @@ cmds! {
   "surface.unstitch" => "Break bodies into one surface body per face", "{bodies}";
   "surface.reverse" => "Flip surface normals", "{bodies}";
   "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
-  "surface.offset" => "New surfaces offset from faces or bodies", "{faces? | bodies?, distance}";
-  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it; flip for the other)", "{bodies, tool: plane, flip?}";
+  "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset)", "{faces? | bodies?, distance, face_distances?: [{face, distance}]}";
+  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]]}";
   "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
   "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
@@ -241,6 +241,8 @@ cmds! {
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
   "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
+  "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular", "{edges, distance, mode?: natural|tangent|perpendicular}";
+  "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -251,6 +253,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::inspect::run(s, name, p) {
+    return r;
+  }
+  // before features: it takes surface.trim with a body or sketch tool
+  if let Some(r) = crate::surfaces::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::features::run(s, name, p) {

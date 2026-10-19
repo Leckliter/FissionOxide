@@ -4088,4 +4088,54 @@ mod tests {
       assert!(text.texts().contains(&want), "missing {want}: {:?}", text.texts());
     }
   }
+
+  #[test]
+  fn surface_forms() {
+    use crate::forms::*;
+    let area = |s: &Session, b: BodyId| s.model.body(b).unwrap().shape.mass().unwrap().area;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = s.edit_sketch.unwrap().0;
+    run(&mut s, "surface.patch", json!({"sketch": sk}));
+    let b = s.model.bodies[0].id;
+    // extend the edge at x = 10 by the default 5 mm
+    let e = s.model.bodies[0].edges().iter().find(|e| (e.mid.x - 10.0).abs() < 1e-6).unwrap().id;
+    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // trim with a sphere picked by a face: it cuts a round hole and stays itself
+    run(&mut s, "sphere", json!({"at": [5, 5], "radius": 2}));
+    let tool = s.model.bodies[1].id;
+    let sel = vec![Sel::Body { body: b }, Sel::Face { body: tool, face: 1 }];
+    let mut d = form(&mut s, &TRIM_BODY, sel, &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - (150.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-6, "{}", area(&s, b));
+    assert!(s.model.body(tool).is_some());
+    d.applied = false;
+    // untrim the hole
+    let mut d = form(&mut s, &UNTRIM, vec![Sel::Face { body: b, face: 1 }], &[("loops", json!("inner"))]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // trim with a sketch line at x = 5: the side left of it goes
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[5, -1], [5, 11]]}));
+    let sk = s.edit_sketch.unwrap();
+    let curve = s.design.sketch(sk).unwrap().curves[0].id;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = form(&mut s, &TRIM_SKETCH, vec![Sel::Body { body: b }, Sel::SketchCurve { sketch: sk, curve }], &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 100.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // a variable offset: the whole body by 2, its one face by 3
+    let n = s.model.bodies.len();
+    let sel = vec![Sel::Face { body: b, face: 1 }];
+    let mut d = form(&mut s, &VARIABLE_OFFSET, sel, &[("distance2", json!("3 mm"))]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), n + 1);
+    let z = s.model.bodies.last().unwrap().faces()[0].origin.z;
+    assert!((z.abs() - 3.0).abs() < 1e-6, "{z}");
+  }
 }

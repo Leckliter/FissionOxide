@@ -192,7 +192,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "surface.offset" => (|| {
       let faces = if p.get("faces").is_some() { faces(s, p)? } else { Vec::new() };
       let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
-      add_feature(s, FeatureKind::SurfaceOffset { faces, bodies, distance: req_expr(p, "distance")? })
+      let face_distances = crate::surfaces::face_distances(s, p)?;
+      add_feature(s, FeatureKind::SurfaceOffset { faces, bodies, distance: req_expr(p, "distance")?, face_distances })
     })(),
     "surface.trim" => (|| {
       let bodies = body_list(s, p)?;

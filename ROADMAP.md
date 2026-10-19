@@ -14,7 +14,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Sketch    | Break; 2/3-tangent circles; blend curve; splines and ellipses in trim/offset; tangency and curvature constraints on splines; editable (not exploded) text |
 | Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Features  | Configurations (table-driven variants); base features (direct editing without history) |
-| Surface   | Extend, untrim; trim with a body or sketch; offset with variable distance     |
+| Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
 | Sheet     | Lofted and miter flanges; corner closure; flat pattern as a sketch           |
 | Assembly  | Contact sets; motion links; rigid groups; joint origins; insert a component from another design |
 | Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |

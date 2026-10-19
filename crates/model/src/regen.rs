@@ -1942,6 +1942,7 @@ mod solid;
 pub use solid::boundary_cells;
 #[cfg(test)]
 mod tests_solid;
+mod surface;
 
 #[cfg(test)]
 mod tests;

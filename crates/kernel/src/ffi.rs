@@ -172,6 +172,12 @@ pub(crate) mod ffi {
     fn extended_face(face: &Shape, size: f64, offset: f64, at: &[f64], toward: &[f64]) -> Result<UniquePtr<Shape>>;
     fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
+    // surface workspace (cpp/surface2.cpp)
+    include!("clf-kernel/cpp/surface2.hxx");
+    fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
+    fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
+    fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
+    fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

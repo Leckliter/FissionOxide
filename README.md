@@ -47,8 +47,12 @@ change a parameter and watch the whole history rebuild.
   closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
   surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
 - **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
-  sketch, ruled surfaces between edges, offset surfaces, trim with a plane, stitch surfaces into
-  a solid, unstitch, reverse normals, and thicken faces or surfaces into solids.
+  sketch, ruled surfaces between edges, offset surfaces (with per-face distances for a variable
+  offset), trim with a plane, a solid, another surface or sketch curves projected onto them
+  (keep either side, or pick the pieces to keep), untrim (remove holes and/or restore the
+  untrimmed boundary), extend open edges (natural, tangent or perpendicular), stitch surfaces
+  into a solid, unstitch, reverse normals, and thicken faces or surfaces into solids
+  (`examples/surface_shroud.jsonl`).
 - **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
   clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);

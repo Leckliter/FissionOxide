@@ -1974,6 +1974,9 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Emboss { .. } => Icon::Emboss,
     FeatureKind::BoundaryFill { .. } => Icon::BoundaryFill,
     FeatureKind::ReplaceFace { .. } => Icon::ReplaceFace,
+    FeatureKind::SurfaceExtend { .. } => Icon::Extend,
+    FeatureKind::Untrim { .. } => Icon::Untrim,
+    FeatureKind::TrimWith { .. } => Icon::Trim,
   }
 }
 
