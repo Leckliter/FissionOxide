@@ -464,6 +464,10 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::JointOrigin { .. }
+      | FeatureKind::RigidGroup { .. }
+      | FeatureKind::MotionLink { .. }
+      | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

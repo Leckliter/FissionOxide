@@ -457,6 +457,12 @@ fn item_rows(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: boo
         app.open_hub_item(&id, None);
         ui.close();
       }
+      if s(&it, "kind") == "design"
+        && ui.button("Insert into Current Design").on_hover_text("Insert as a linked component").clicked()
+      {
+        insert_component(app, &id, None);
+        ui.close();
+      }
       if ui.button("Rename…").clicked() {
         app.data.prompt = Some(Prompt::RenameItem(id.clone(), s(&it, "name")));
         ui.close();
@@ -492,6 +498,11 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
       if ui.button("Open").clicked() {
         app.open_hub_item(&id, None);
+      }
+      if is_design
+        && ui.button("Insert").on_hover_text("Insert into the current design as a linked component").clicked()
+      {
+        insert_component(app, &id, None);
       }
     });
   });
@@ -863,5 +874,14 @@ pub fn save_window(app: &mut App, ctx: &egui::Context) {
     app.status = Some((format!("Saved {} v{v}", app.s.design.name), false));
     app.data.selected = r.get("item").and_then(Value::as_str).map(str::to_string);
     app.data.stale = true;
+  }
+}
+
+/// Inserts a hub design into the open design as a linked component.
+fn insert_component(app: &mut App, item: &str, version: Option<u32>) {
+  if let Some(r) = app.run("component.insert", json!({"item": item, "version": version})) {
+    let name = app.s.design.components.iter().find(|c| Some(c.id.0 as u64) == r["component"].as_u64());
+    let name = name.map(|c| c.name.clone()).unwrap_or_default();
+    app.status = Some((format!("Inserted {name} (v{})", r["version"]), false));
   }
 }

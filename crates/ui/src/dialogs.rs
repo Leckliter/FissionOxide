@@ -444,6 +444,8 @@ pub struct Dialog {
   view_on: [bool; 7],
   /// A form dialog's values.
   form: crate::forms::State,
+  /// Joint: the saved joint origin (by name) used instead of a pick on each side; empty = the pick.
+  saved: [String; 2],
 }
 
 const VIEWS: [(&str, &str); 7] = [
@@ -533,6 +535,7 @@ impl Dialog {
         Kind::Form(f) => crate::forms::State::new(f),
         _ => crate::forms::State::default(),
       },
+      saved: [String::new(), String::new()],
     }
   }
 
@@ -1043,15 +1046,28 @@ impl Dialog {
       ),
       Kind::NewComponent => ("component.create", json!({"name": self.name, "bodies": self.bodies})),
       Kind::Joint => {
-        let (_, mo) = self.origins.first()?;
-        let (_, fo) = self.origins.get(1)?;
-        (
-          "joint",
-          json!({
-            "moving": (*self.comps.first()?)?, "moving_origin": mo, "fixed": self.comps.get(1).copied().flatten(),
-            "fixed_origin": fo, "kind": self.choice, "angle": self.angle, "offset": self.distance, "flip": self.flip,
-          }),
-        )
+        // a saved joint origin (by name) stands in for that side's pick
+        let mut picks = self.origins.iter().map(|(_, o)| o).zip(&self.comps);
+        let mut side = |saved: &str| {
+          if saved.is_empty() {
+            picks.next().map(|(o, c)| (o.clone(), *c))
+          } else {
+            Some((json!({"origin": saved}), None))
+          }
+        };
+        let (mo, mc) = side(&self.saved[0])?;
+        let (fo, fc) = side(&self.saved[1])?;
+        let mut p = json!({
+          "moving_origin": mo, "fixed_origin": fo, "kind": self.choice, "angle": self.angle, "offset": self.distance,
+          "flip": self.flip,
+        });
+        if self.saved[0].is_empty() {
+          p["moving"] = json!(mc?);
+        }
+        if self.saved[1].is_empty() {
+          p["fixed"] = json!(fc);
+        }
+        ("joint", p)
       }
       Kind::Material => {
         ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
@@ -1315,7 +1331,10 @@ impl Dialog {
       }
       Kind::Hem | Kind::Rip => !self.edges.is_empty(),
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => !self.bodies.is_empty(),
-      Kind::Joint => self.origins.len() >= 2 && self.comps.first().is_some_and(Option::is_some),
+      Kind::Joint => {
+        let need = self.saved.iter().filter(|n| n.is_empty()).count();
+        self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
+      }
       Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
@@ -2433,13 +2452,29 @@ impl Dialog {
         ui.end_row();
       }
       Kind::Joint => {
+        let saved = saved_origins(&app.s);
+        let first = usize::from(self.saved[0].is_empty());
         ui.label("Component 1");
-        chip(ui, self.origins.len().min(1), "origin");
+        if self.saved[0].is_empty() {
+          chip(ui, self.origins.len().min(1), "origin");
+        } else {
+          ui.label(&self.saved[0]);
+        }
         ui.end_row();
+        if !saved.is_empty() {
+          Self::saved_origin(ui, "jo-a", &mut self.saved[0], &saved, dirty);
+        }
         ui.label("Component 2");
-        chip(ui, self.origins.len().saturating_sub(1).min(1), "origin");
+        if self.saved[1].is_empty() {
+          chip(ui, self.origins.len().saturating_sub(first).min(1), "origin");
+        } else {
+          ui.label(&self.saved[1]);
+        }
         ui.end_row();
-        if !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
+        if !saved.is_empty() {
+          Self::saved_origin(ui, "jo-b", &mut self.saved[1], &saved, dirty);
+        }
+        if self.saved[0].is_empty() && !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
           ui.label("");
           ui.label(RichText::new("the first body isn't in a component").color(theme::WARNING));
           ui.end_row();
@@ -2998,6 +3033,25 @@ impl Dialog {
     ui.end_row();
   }
 
+  /// A joint side's choice between the picked geometry and a saved joint origin.
+  fn saved_origin(ui: &mut egui::Ui, id: &str, cur: &mut String, saved: &[String], dirty: &mut bool) {
+    ui.label("");
+    let shown = if cur.is_empty() { "Picked geometry" } else { cur.as_str() };
+    egui::ComboBox::from_id_salt(id).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      if ui.selectable_label(cur.is_empty(), "Picked geometry").clicked() {
+        cur.clear();
+        *dirty = true;
+      }
+      for n in saved {
+        if ui.selectable_label(cur == n, n).clicked() {
+          *cur = n.clone();
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
   fn check(ui: &mut egui::Ui, label: &str, v: &mut bool, dirty: &mut bool) {
     ui.label("");
     if ui.checkbox(v, label).changed() {
@@ -3401,6 +3455,16 @@ fn sel_sections(s: &Session) -> Vec<(u32, [f64; 2])> {
 }
 
 /// Joints in the timeline: id and name.
+/// Names of the saved joint origins.
+fn saved_origins(s: &Session) -> Vec<String> {
+  s.design
+    .features
+    .iter()
+    .filter(|f| matches!(f.kind, FeatureKind::JointOrigin { .. }))
+    .map(|f| f.name.clone())
+    .collect()
+}
+
 fn joints(s: &Session) -> Vec<(u32, String)> {
   s.design
     .features
@@ -3967,5 +4031,28 @@ mod tests {
     assert_eq!(s.design.cam[0].operations[0].tool.diameter, 8.0);
     run(&mut s, "cam.generate", json!({}));
     assert_eq!(s.toolpaths.len(), 2);
+  }
+
+  #[test]
+  fn joint_to_a_saved_joint_origin() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+    run(&mut s, "box", json!({"width": 80, "depth": 20, "height": 5, "at": [40, 200]}));
+    let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    run(&mut s, "component.create", json!({"name": "Base", "bodies": [base]}));
+    run(&mut s, "component.create", json!({"name": "Arm", "bodies": [arm]}));
+    let top = face(&s, 0, |f| f.normal.z > 0.9);
+    run(&mut s, "joint_origin", json!({"face": top, "name": "Top"}));
+    assert_eq!(saved_origins(&s), vec!["Top".to_string()]);
+    // the fixed side is the saved origin: one pick (the moving side) is enough
+    let mut d = Dialog::blank(Kind::Joint);
+    d.choice = "rigid";
+    d.saved[1] = "Top".into();
+    (d.angle, d.distance) = ("0 deg".into(), "0 mm".into());
+    d.origins = vec![(arm, json!({"face": face(&s, 1, |f| f.normal.z < -0.9)}))];
+    d.comps = vec![s.design.component_of(BodyId(arm)).map(|c| c.id.0)];
+    apply(&mut s, &mut d);
+    let m = s.model.bodies.iter().find(|b| b.id.0 == arm).unwrap().shape.mass().unwrap();
+    assert!((m.bbox_min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox_min);
   }
 }

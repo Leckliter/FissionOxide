@@ -214,6 +214,17 @@ cmds! {
   "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
+  "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, flip?, name?}";
+  "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
+  "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
+  "contact_set.create" => "Contact set: components that can't pass through each other; driving a joint stops at contact", "{components?: [id], bodies?: [id], name?}";
+  "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
+  "contact_set.delete" => "Delete a contact set", "{contact_set}";
+  "contact_set.list" => "List the contact sets", "{}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version", "{item, version?, name?, translate?: [x,y,z], link?: bool}";
+  "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
+  "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
+  "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

@@ -316,6 +316,8 @@ pub(crate) enum Cmd {
   CamGenerate,
   CamPost,
   CamDelete,
+  /// Insert a design from the data hub as a component (opens the data panel).
+  InsertComponent,
 }
 
 impl Cmd {
@@ -407,6 +409,9 @@ impl Cmd {
       Cmd::CamGenerate => (Icon::Play, "Generate", "Compute the setup's toolpaths and machining time"),
       Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code (.nc)"),
       Cmd::CamDelete => (Icon::Remove, "Delete Setup", "Delete the last setup and its operations"),
+      Cmd::InsertComponent => {
+        (Icon::InsertComponent, "Insert Component", "Insert a design from the data panel as a linked component")
+      }
       Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
       Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
       Cmd::SelectOther => {
@@ -515,6 +520,13 @@ impl Cmd {
         if app.run("cam.delete", json!({})).is_some() {
           app.status = Some(("Setup deleted".into(), false));
         }
+      }
+      Cmd::InsertComponent => {
+        if !app.data.open {
+          app.data.toggle();
+        }
+        app.status =
+          Some(("Right-click a design in the Data Panel and choose Insert into Current Design".into(), false));
       }
       Cmd::SelectAll => {
         app.run("select.all", json!({}));
@@ -979,6 +991,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   sketches_section(app, ui);
   planes_section(app, ui);
   joints_section(app, ui);
+  browser_assembly::sections(app, ui);
   drawings_section(app, ui);
 }
 
@@ -1971,6 +1984,10 @@ fn feature_icon(k: &FeatureKind) -> Icon {
       clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
       clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
     },
+    FeatureKind::JointOrigin { .. } => Icon::JointOrigin,
+    FeatureKind::RigidGroup { .. } => Icon::Component,
+    FeatureKind::MotionLink { .. } => Icon::DriveJoint,
+    FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
   }
 }
 
@@ -2112,3 +2129,5 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
     app.show_params = false;
   }
 }
+
+mod browser_assembly;
