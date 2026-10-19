@@ -283,3 +283,16 @@ fn sketch_tools_make_profiles() {
   assert!(t["profiles"].as_u64().unwrap() >= 2, "{t}");
   assert!(s.model.sketches.values().all(|r| r.report.ok()));
 }
+
+#[test]
+fn section_view_is_capped() {
+  let mut s = Session::default();
+  block(&mut s, 40.0, 20.0, 10.0);
+  let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": -10}})).unwrap();
+  let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
+  // the body mesh, clipped, and the cap
+  let caps: Vec<_> = scene.meshes.iter().filter(|m| !m.analyze && !m.indices.is_empty()).collect();
+  assert!(!caps.is_empty(), "no cap");
+  let cut = scene.meshes.iter().find(|m| m.analyze).unwrap();
+  assert!(cut.positions.iter().enumerate().all(|(i, p)| !cut.indices.contains(&(i as u32)) || p[1] >= 10.0 - 1e-4));
+}

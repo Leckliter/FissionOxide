@@ -78,6 +78,10 @@ pub enum Kind {
   DrawingSettings,
   /// A declarative command dialog (see [`crate::forms`]).
   Form(&'static crate::forms::Form),
+  /// Section analysis: cut the view open along a plane.
+  Section,
+  /// Surface analysis: zebra, draft, accessibility or curvature.
+  Analysis(&'static str),
 }
 
 impl Kind {
@@ -133,6 +137,11 @@ impl Kind {
       Kind::CopyComponent => "DUPLICATE COMPONENT",
       Kind::NewDrawing => "CREATE DRAWING",
       Kind::Form(f) => f.title,
+      Kind::Section => "SECTION ANALYSIS",
+      Kind::Analysis("zebra") => "ZEBRA ANALYSIS",
+      Kind::Analysis("draft") => "DRAFT ANALYSIS",
+      Kind::Analysis("accessibility") => "ACCESSIBILITY ANALYSIS",
+      Kind::Analysis(_) => "CURVATURE MAP ANALYSIS",
       Kind::DrawingView => "DRAWING VIEW",
       Kind::DrawingMoveView => "MOVE VIEW",
       Kind::DrawingDimension => "DIMENSION",
@@ -181,6 +190,11 @@ impl Kind {
       Kind::Interference => Icon::Interference,
       Kind::Bom => Icon::Bom,
       Kind::Form(f) => f.icon,
+      Kind::Section => Icon::Section,
+      Kind::Analysis("zebra") => Icon::Zebra,
+      Kind::Analysis("draft") => Icon::DraftAnalysis,
+      Kind::Analysis("accessibility") => Icon::Accessibility,
+      Kind::Analysis(_) => Icon::CurvMap,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
       Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
@@ -226,6 +240,11 @@ impl Kind {
       Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
       Kind::Form(f) => (f.name, f.hint),
+      Kind::Section => ("Section Analysis", "Cut the view open along a plane"),
+      Kind::Analysis("zebra") => ("Zebra Analysis", "Reflected stripes show how smoothly surfaces join"),
+      Kind::Analysis("draft") => ("Draft Analysis", "Which faces have draft for moulding along a pull direction"),
+      Kind::Analysis("accessibility") => ("Accessibility Analysis", "Which faces a tool can reach from a direction"),
+      Kind::Analysis(_) => ("Curvature Map Analysis", "Colour by how sharply surfaces curve"),
       Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
@@ -278,7 +297,14 @@ impl Kind {
   fn reports(self) -> bool {
     matches!(
       self,
-      Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::MotionStudy | Kind::CenterOfMass
+      Kind::Inspect
+        | Kind::FlatPattern
+        | Kind::Interference
+        | Kind::Bom
+        | Kind::MotionStudy
+        | Kind::CenterOfMass
+        | Kind::Section
+        | Kind::Analysis(_)
     )
   }
 
@@ -771,6 +797,21 @@ impl Dialog {
     if let Kind::Form(f) = kind {
       d.form.sync(f, &app.s, app.last_sketch.or_else(|| last_unconsumed_sketch(&app.s)));
     }
+    if kind == Kind::Section && app.section.is_none() {
+      // a picked planar face, else the front plane through the middle of the model
+      let face = app.s.selection.iter().find_map(|x| match x {
+        Sel::Face { body, face } if is_planar(&app.s, *body, *face) => Some(json!({"body": body.0, "face": face})),
+        _ => None,
+      });
+      let mid = app.s.model.bounds().map(|(a, b)| -(a.y + b.y) / 2.0).unwrap_or(0.0);
+      app.section = Some(match face {
+        Some(f) => json!({"plane": f, "offset": 0.0, "flip": true}),
+        None => json!({"plane": "xz", "offset": (mid * 1000.0).round() / 1000.0, "flip": false}),
+      });
+    }
+    if let Kind::Analysis(a) = kind {
+      app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
+    }
     d.dirty = !d.picks();
     d
   }
@@ -885,7 +926,14 @@ impl Dialog {
     let op = self.op;
     Some(match self.kind {
       Kind::Form(f) => crate::forms::engine_command(f, self.form.params(f)),
-      Kind::PickPlane | Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::CenterOfMass => {
+      Kind::PickPlane
+      | Kind::Inspect
+      | Kind::FlatPattern
+      | Kind::Interference
+      | Kind::Bom
+      | Kind::CenterOfMass
+      | Kind::Section
+      | Kind::Analysis(_) => {
         return None;
       }
       Kind::Loft => (
@@ -1959,6 +2007,8 @@ impl Dialog {
         ui.end_row();
       }
       Kind::Inspect => inspect(app, ui),
+      Kind::Section => section_fields(app, ui),
+      Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
         let mut dirty = false;
         self.form_fields(f, app, ui, &mut dirty);
@@ -3170,6 +3220,86 @@ fn inspect(app: &mut App, ui: &mut egui::Ui) {
       _ => {}
     }
   }
+}
+
+/// The section analysis settings, edited in place (the view updates as they change).
+fn section_fields(app: &mut App, ui: &mut egui::Ui) {
+  let mut on = app.section.is_some();
+  let mut sec = app.section.clone().unwrap_or(json!({"plane": "xz", "offset": 0.0, "flip": false}));
+  ui.label("");
+  ui.checkbox(&mut on, "Show section");
+  ui.end_row();
+  ui.label("Plane");
+  let cur = sec["plane"].clone();
+  let mut options: Vec<(Value, String)> = [("xy", "XY plane"), ("xz", "XZ plane"), ("yz", "YZ plane")]
+    .iter()
+    .map(|(k, l)| (json!(k), l.to_string()))
+    .collect();
+  for id in app.s.model.planes.keys() {
+    options.push((json!({"feature": id.0}), app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default()));
+  }
+  let shown = options.iter().find(|(k, _)| *k == cur).map(|(_, l)| l.clone()).unwrap_or("Picked face".into());
+  egui::ComboBox::from_id_salt("section-plane").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+    for (k, l) in &options {
+      if ui.selectable_label(*k == cur, l).clicked() {
+        sec["plane"] = k.clone();
+      }
+    }
+  });
+  ui.end_row();
+  ui.label("Offset");
+  let mut off = sec["offset"].as_f64().unwrap_or(0.0);
+  ui.add(egui::DragValue::new(&mut off).speed(0.5).suffix(" mm"));
+  sec["offset"] = json!(off);
+  ui.end_row();
+  ui.label("");
+  let mut flip = sec["flip"].as_bool().unwrap_or(false);
+  ui.checkbox(&mut flip, "Flip (keep the other side)");
+  sec["flip"] = json!(flip);
+  ui.end_row();
+  app.section = on.then_some(sec);
+}
+
+/// Surface analysis settings: the pull direction and draft angle where they apply.
+fn analysis_fields(app: &mut App, ui: &mut egui::Ui, kind: &'static str) {
+  let mut on = app.analysis.as_ref().is_some_and(|a| a["analysis"] == kind);
+  let mut a = app
+    .analysis
+    .clone()
+    .filter(|a| a["analysis"] == kind)
+    .unwrap_or(json!({"analysis": kind, "pull": "z", "angle": 1.0}));
+  ui.label("");
+  ui.checkbox(&mut on, "Show analysis");
+  ui.end_row();
+  if matches!(kind, "draft" | "accessibility") {
+    ui.label(if kind == "draft" { "Pull direction" } else { "Tool direction" });
+    let cur = a["pull"].as_str().unwrap_or("z").to_string();
+    egui::ComboBox::from_id_salt("pull").selected_text(axis_label(&cur)).width(140.0).show_ui(ui, |ui| {
+      for k in ["x", "y", "z"] {
+        if ui.selectable_label(cur == k, axis_label(k)).clicked() {
+          a["pull"] = json!(k);
+        }
+      }
+    });
+    ui.end_row();
+  }
+  if kind == "draft" {
+    ui.label("Draft angle");
+    let mut ang = a["angle"].as_f64().unwrap_or(1.0);
+    ui.add(egui::DragValue::new(&mut ang).speed(0.1).range(0.0..=45.0).suffix("°"));
+    a["angle"] = json!(ang);
+    ui.end_row();
+  }
+  let legend = match kind {
+    "zebra" => "Stripes that kink or jump show where faces meet without tangency or curvature continuity",
+    "draft" => "Green: positive draft · yellow: less than the angle · red: undercut",
+    "accessibility" => "Green: reachable along the direction · red: hidden from it",
+    _ => "Blue: flat · green → yellow → red: curving more tightly",
+  };
+  ui.label("");
+  ui.label(RichText::new(legend).small().color(theme::MUTED));
+  ui.end_row();
+  app.analysis = on.then_some(a);
 }
 
 fn axis_label(a: &str) -> String {

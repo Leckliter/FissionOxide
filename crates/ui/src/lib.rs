@@ -92,6 +92,10 @@ pub struct App {
   pub(crate) last_click: Option<egui::Pos2>,
   /// The Measure dialog's result line: closest points and the label.
   pub(crate) measure: Option<(clf_engine::kernel::glam::DVec3, clf_engine::kernel::glam::DVec3, String)>,
+  /// Section analysis: `{plane, offset, flip}` (see [`clf_engine::scene::view_options`]).
+  pub section: Option<Value>,
+  /// Surface analysis: `{analysis, pull?, angle?}`.
+  pub analysis: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,6 +118,8 @@ struct RenderKey {
   show_grid: bool,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<clf_engine::model::FeatureId>,
+  /// Section and analysis settings.
+  view: Value,
 }
 
 impl App {
@@ -172,6 +178,8 @@ impl App {
       other: None,
       last_click: None,
       measure: None,
+      section: None,
+      analysis: None,
     }
   }
 

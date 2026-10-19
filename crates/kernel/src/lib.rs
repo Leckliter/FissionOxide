@@ -366,6 +366,12 @@ impl Shape {
     if r.solid_count() == 0 { Err(KernelError::Empty) } else { Ok(r) }
   }
 
+  /// The part of `tool` (a face or shell) inside this solid: a section through it. Unlike
+  /// [`Shape::boolean`] the result has no solids.
+  pub fn section_inside(&self, tool: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::boolean_op(self.get()?, tool.get()?, 2, FUZZY)?)
+  }
+
   /// Rounds the given edges (1-based edge-map indices).
   pub fn fillet(&self, edges: &[u32], radius: f64) -> Result<Shape> {
     if !(radius > 1e-9 && radius.is_finite()) {

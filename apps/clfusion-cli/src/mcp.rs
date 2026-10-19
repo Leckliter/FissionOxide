@@ -30,7 +30,7 @@ fn tools() -> Vec<Value> {
     .collect();
   out.push(json!({
     "name": "view_render",
-    "description": "Render the model to a PNG image. Parameters: {view?: home|front|back|top|bottom|left|right, width?, height?}",
+    "description": "Render the model to a PNG image. Parameters: {view?: home|front|back|top|bottom|left|right, width?, height?, section?: {plane, offset?, flip?}, analysis?: zebra|draft|accessibility|curvature, pull?: x|y|z|[x,y,z], angle?: deg}",
     "inputSchema": {"type": "object", "properties": {
       "view": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}
     }},
@@ -50,7 +50,8 @@ fn render_png(s: &Session, p: &Value) -> Result<Vec<u8>, String> {
     .bounds()
     .unwrap_or((clf_engine::kernel::glam::DVec3::splat(-50.0), clf_engine::kernel::glam::DVec3::splat(50.0)));
   cam.fit(lo, hi, w as f64 / h as f64);
-  let (scene, _) = SceneBuilder::default().build(s, &ViewOptions::default());
+  let opts: ViewOptions = clf_engine::scene::view_options(s, p)?;
+  let (scene, _) = SceneBuilder::default().build(s, &opts);
   render::render(&scene, &cam, w, h).to_png()
 }
 

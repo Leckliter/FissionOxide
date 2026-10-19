@@ -308,15 +308,24 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_grid: app.show_grid,
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
+    view: view_params(app),
   };
   if app.render_key.as_ref() == Some(&key) && app.tex.is_some() {
     return;
   }
+  let analysis = match clf_engine::scene::view_options(&app.s, &key.view) {
+    Ok(o) => o,
+    Err(e) => {
+      app.status = Some((e, true));
+      ViewOptions::default()
+    }
+  };
   let opts = ViewOptions {
     hover: app.hover,
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
   let frame = render::render(&scene, &app.cam, view.w, view.h);
@@ -328,6 +337,15 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   app.frame = Some(frame);
   app.picks = picks;
   app.render_key = Some(key);
+}
+
+/// The section and analysis settings as render parameters.
+fn view_params(app: &App) -> serde_json::Value {
+  let mut v = app.analysis.clone().unwrap_or(json!({}));
+  if let Some(sec) = &app.section {
+    v["section"] = sec.clone();
+  }
+  v
 }
 
 // ---------------------------------------------------------------- clicks & tools
