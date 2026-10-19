@@ -234,6 +234,8 @@ pub(crate) enum Cmd {
   FinishSketch,
   /// Remove the selected bodies (a timeline feature, unlike Delete).
   RemoveBodies,
+  /// EXPORT > 3D Print: the design as an STL mesh.
+  Print3d,
   Undo,
   Redo,
   Delete,
@@ -293,6 +295,7 @@ impl Cmd {
       Cmd::Redo => (Icon::Redo, "Redo", "Redo (Ctrl+Y)"),
       Cmd::Delete => (Icon::Remove, "Delete", "Delete the selection (Del)"),
       Cmd::RemoveBodies => (Icon::RemoveBody, "Remove", "Remove the selected bodies (kept in the timeline)"),
+      Cmd::Print3d => (Icon::Print3d, "3D Print", "Export the design as an STL mesh for printing"),
       Cmd::LookAt => (Icon::LookAt, "Look At", "Look at the sketch plane or a selected planar face"),
       Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
       Cmd::Home => (Icon::Views, "Home View", "Go to the home view (Home)"),
@@ -351,6 +354,7 @@ impl Cmd {
         }
       }
       Cmd::Delete => app.delete_selection(),
+      Cmd::Print3d => app.export("stl"),
       Cmd::RemoveBodies => {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();

@@ -1,4 +1,5 @@
-//! The toolbar's tool groups and their drop-down menus for the SOLID, SURFACE and MESH tabs,
+//! The toolbar's tool groups and their drop-down menus for the SOLID, SURFACE, MESH, SHEET
+//! METAL and PLASTIC tabs,
 //! laid out entry for entry like Fusion's: same order, separators, shortcuts, submenus and
 //! greyed-out items. Entries CLFusion can run carry a [`Cmd`]; the rest are listed so the
 //! toolbar reads like Fusion and say so in the status line when clicked.
@@ -355,6 +356,56 @@ const MESH_PREPARE: &[E] = &[
   x("Combine Face Groups", Icon::CombineFaceGroups),
 ];
 
+const EXPORT: &[E] = &[c("3D Print", Icon::Print3d, Cmd::Print3d)];
+
+const SHEET_CREATE: &[E] = &[
+  c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
+  x("Flange (Base/Edge/Contour)", Icon::Flange),
+  x("Hem", Icon::Hem),
+  x("Lofted Flange", Icon::LoftedFlange),
+  x("Fold", Icon::Fold),
+  x("Convert to Sheet Metal", Icon::ConvertSheet).k("Ctrl+Alt+S"),
+  x("Derive", Icon::Derive),
+  E::Sep,
+  c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
+  E::Sep,
+  x("Hole", Icon::Hole).k("H"),
+  x("Thread", Icon::Thread),
+  E::Sep,
+  E::Sub("Pattern", PATTERN),
+  c("Mirror", Icon::Mirror, D(Kind::Mirror)),
+  E::Sep,
+  x("Create Flat Pattern", Icon::FlatPattern),
+  x("Joint Origin", Icon::JointOrigin),
+];
+
+const SHEET_MODIFY: &[E] = &[
+  x("Unfold", Icon::Unfold),
+  x("Sheet Metal Rules", Icon::SmRules),
+  x("Corner Closure", Icon::CornerClosure),
+  x("Join by bend", Icon::Configure),
+  x("Rip", Icon::Rip),
+  E::Sep,
+  x("Sheet Metal Fillet", Icon::Configure),
+  x("Sheet Metal Chamfer", Icon::Configure),
+  c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
+  c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
+  E::Sep,
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
+  x("Align", Icon::Align),
+  c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
+  c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
+  E::Sep,
+  x("Physical Material", Icon::PhysMaterial),
+  x("Appearance", Icon::Appearance).k("A"),
+  x("Manage Materials", Icon::ManageMaterials),
+  E::Sep,
+  c("Change Parameters", Icon::Params, Cmd::Params),
+  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  E::Sep,
+  x("Bill of Materials", Icon::Bom),
+];
+
 const MESH_MODIFY: &[E] = &[
   x("Direct Edit", Icon::DirectEdit).g(),
   x("Remesh", Icon::Remesh).g(),
@@ -397,11 +448,12 @@ macro_rules! shared_groups {
       Group { label: "INSERT", quick: &["Insert Derive", "Canvas", "Insert Mesh"], menu: INSERT },
       Group { label: "ASSEMBLE", quick: &["Add To Assembly"], menu: ASSEMBLE },
       Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+      Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT },
     ]
   };
 }
 
-const SHARED: [Group; 6] = shared_groups!();
+const SHARED: [Group; 7] = shared_groups!();
 
 const SOLID: [Group; 2] = [
   Group {
@@ -426,6 +478,29 @@ const SURFACE: [Group; 2] = [
     label: "MODIFY",
     quick: &["Stitch", "Unstitch", "Trim", "Extend", "Bill of Materials"],
     menu: SURFACE_MODIFY,
+  },
+];
+
+const SHEET_METAL: [Group; 2] = [
+  Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
+  Group {
+    label: "MODIFY",
+    quick: &["Sheet Metal Rules", "Join by bend", "Sheet Metal Fillet", "Fillet", "Chamfer", "Bill of Materials"],
+    menu: SHEET_MODIFY,
+  },
+];
+
+// PLASTIC shows the SOLID menus with its own quick icons (Web and Rib up front)
+const PLASTIC: [Group; 2] = [
+  Group {
+    label: "CREATE",
+    quick: &["Create Sketch", "Extrude", "Revolve", "Hole", "Web", "Rib", "Rectangular Pattern", "Create Form"],
+    menu: SOLID_CREATE,
+  },
+  Group {
+    label: "MODIFY",
+    quick: &["Press Pull", "Fillet", "Shell", "Combine", "Split Body", "Move/Copy", "Bill of Materials"],
+    menu: SOLID_MODIFY,
   },
 ];
 
@@ -463,6 +538,8 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Solid => &SOLID,
     Tab::Surface => &SURFACE,
     Tab::Mesh => &MESH,
+    Tab::SheetMetal => &SHEET_METAL,
+    Tab::Plastic => &PLASTIC,
     _ => return false,
   };
   let mut pick: Option<Item> = None;

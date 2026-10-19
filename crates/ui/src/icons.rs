@@ -180,6 +180,17 @@ pub enum Icon {
   Separate,
   ScaleMesh,
   ConvertMesh,
+  Flange,
+  Hem,
+  LoftedFlange,
+  Fold,
+  ConvertSheet,
+  FlatPattern,
+  Unfold,
+  SmRules,
+  CornerClosure,
+  Rip,
+  Print3d,
 }
 
 #[derive(Clone, Copy)]
@@ -1258,6 +1269,59 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::Separate => {
       k.block(0.02, 0.48, 0.38, 0.92, 0.14, BlueLight, Blue, BlueDark);
       k.block(0.5, 0.3, 0.84, 0.72, 0.14, BlueLight, Blue, BlueDark);
+    }
+    Icon::Flange | Icon::LoftedFlange => {
+      let pts = [(0.22, 0.94), (0.22, 0.42), (0.3, 0.24), (0.46, 0.16), (0.92, 0.16)];
+      k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 5.0, k.col(Blue))));
+      k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 1.6, k.col(BlueLight))));
+      if icon == Icon::LoftedFlange {
+        k.ellipse((0.7, 0.72), 0.22, 0.12, Some(BlueLight), Blue);
+      }
+    }
+    Icon::Hem => {
+      k.thick((0.06, 0.82), (0.82, 0.34), Blue, 4.0);
+      k.thick((0.82, 0.34), (0.5, 0.18), BlueDark, 4.0);
+    }
+    Icon::Fold | Icon::Unfold => {
+      k.solid(&[(0.06, 0.56), (0.5, 0.56), (0.5, 0.9), (0.06, 0.9)], Blue);
+      if icon == Icon::Fold {
+        k.solid(&[(0.5, 0.56), (0.9, 0.16), (0.9, 0.5), (0.5, 0.9)], BlueLight);
+        k.arc((0.5, 0.56), 0.3, 0.2, 1.4, Ink);
+      } else {
+        k.solid(&[(0.5, 0.56), (0.94, 0.56), (0.94, 0.9), (0.5, 0.9)], BlueLight);
+        k.dashed((0.5, 0.56), (0.9, 0.16), Ink);
+      }
+    }
+    Icon::ConvertSheet => {
+      k.block(0.06, 0.4, 0.5, 0.92, 0.2, Light, Fill, Dark);
+      k.thick((0.62, 0.9), (0.62, 0.3), Blue, 3.0);
+      k.thick((0.62, 0.3), (0.94, 0.3), Blue, 3.0);
+    }
+    Icon::FlatPattern => {
+      k.solid(&[(0.06, 0.06), (0.8, 0.06), (0.8, 0.8), (0.06, 0.8)], White);
+      k.line((0.06, 0.32), (0.8, 0.32), Ink);
+      k.line((0.32, 0.06), (0.32, 0.8), Ink);
+      k.circle((0.82, 0.84), 0.14, Some(Blue), None);
+    }
+    Icon::SmRules => {
+      k.solid(&[(0.04, 0.06), (0.74, 0.06), (0.74, 0.84), (0.04, 0.84)], White);
+      for y in [0.3, 0.52] {
+        k.line((0.04, y), (0.74, y), Ink);
+      }
+      k.block(0.5, 0.62, 0.86, 0.96, 0.12, Light, Fill, Dark);
+    }
+    Icon::CornerClosure => {
+      k.solid(&[(0.06, 0.2), (0.46, 0.5), (0.46, 0.94), (0.06, 0.64)], Blue);
+      k.solid(&[(0.94, 0.2), (0.54, 0.5), (0.54, 0.94), (0.94, 0.64)], BlueLight);
+    }
+    Icon::Rip => {
+      k.solid(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], Blue);
+      k.path(&[(0.5, 0.06), (0.4, 0.24), (0.6, 0.42), (0.4, 0.6), (0.6, 0.78), (0.5, 0.94)], White);
+    }
+    Icon::Print3d => {
+      k.solid(&[(0.06, 0.12), (0.94, 0.12), (0.94, 0.9), (0.06, 0.9)], Dark);
+      k.solid(&[(0.2, 0.34), (0.8, 0.34), (0.8, 0.78), (0.2, 0.78)], White);
+      k.fill(&[(0.3, 0.78), (0.5, 0.48), (0.7, 0.78)], Orange);
     }
     Icon::ConvertMesh => {
       k.ellipse((0.34, 0.78), 0.22, 0.08, Some(Fill), Ink);
