@@ -14,7 +14,7 @@ use super::{Entry, MAX_PASSES, Operation, Path};
 
 /// One step of the clearing plan, in XY.
 #[derive(Debug, Clone)]
-enum Step {
+pub(super) enum Step {
   /// Enter here: a helix of this radius, or a plunge when it is 0.
   Seed { c: DVec2, rho: f64 },
   /// A cutting pass; `closed` loops end where they start.
@@ -36,43 +36,71 @@ enum Link {
 /// `top`.
 pub(super) fn clear(p: &mut Path, region: &Region, op: &Operation, levels: &[f64], top: f64) -> Result<(), String> {
   let plan = plan(region, op)?;
-  let slope = op.ramp_angle.clamp(0.5, 90.0).to_radians().tan();
   let mut above = top;
   for &z in levels {
-    p.top = above;
-    let at3 = |q: DVec2| DVec3::new(q.x, q.y, z);
-    for step in &plan {
-      match step {
-        Step::Seed { c, rho } => {
-          p.leave();
-          if *rho > 0.0 {
-            p.helix(at3(*c), *rho, above, z, slope);
-          } else {
-            p.enter(at3(*c));
-          }
-        }
-        Step::Cut { pts, closed, link } => {
-          match link {
-            Link::Direct => {}
-            Link::Through(q) => p.cut(at3(*q)),
-            Link::Retract(q) => {
-              p.leave();
-              p.enter(at3(*q));
-            }
-          }
-          for q in pts {
-            p.cut(at3(*q));
-          }
-          if *closed {
-            p.cut(at3(pts[0]));
-          }
-        }
-      }
-    }
-    p.leave();
+    replay(p, &plan, op, z, above);
     above = z;
   }
   Ok(())
+}
+
+/// Cuts a plan at depth `z`, the material starting at `above`.
+pub(super) fn replay(p: &mut Path, plan: &[Step], op: &Operation, z: f64, above: f64) {
+  let slope = op.ramp_angle.clamp(0.5, 90.0).to_radians().tan();
+  p.top = above;
+  let at3 = |q: DVec2| DVec3::new(q.x, q.y, z);
+  for step in plan {
+    match step {
+      Step::Seed { c, rho } => {
+        p.leave();
+        if *rho > 0.0 {
+          p.helix(at3(*c), *rho, above, z, slope);
+        } else {
+          p.enter(at3(*c));
+        }
+      }
+      Step::Cut { pts, closed, link } => {
+        match link {
+          Link::Direct => {}
+          Link::Through(q) => p.cut(at3(*q)),
+          Link::Retract(q) => {
+            p.leave();
+            p.enter(at3(*q));
+          }
+        }
+        for q in pts {
+          p.cut(at3(*q));
+        }
+        if *closed {
+          p.cut(at3(pts[0]));
+        }
+      }
+    }
+  }
+  p.leave();
+}
+
+/// What keeps the tool's centre in: a signed distance (positive where it may go), clamped to
+/// ±`max`.
+pub(super) trait Walls {
+  fn sdf(&self, p: DVec2, max: f64) -> f64;
+}
+
+impl Walls for Region {
+  fn sdf(&self, p: DVec2, max: f64) -> f64 {
+    Region::sdf(self, p, max)
+  }
+}
+
+/// The helix radius an operation asks for (0 = plunge).
+pub(super) fn helix_radius(op: &Operation) -> f64 {
+  if op.entry == Entry::Plunge {
+    0.0
+  } else if op.helix_diameter > 0.0 {
+    op.helix_diameter / 2.0
+  } else {
+    op.tool.radius()
+  }
 }
 
 fn plan(region: &Region, op: &Operation) -> Result<Vec<Step>, String> {
@@ -82,15 +110,28 @@ fn plan(region: &Region, op: &Operation) -> Result<Vec<Step>, String> {
   let extent = (region.hi - region.lo).max_element();
   let h = (s / 3.0).min(r / 4.0).max(extent / 1500.0).max(0.01);
   let mut grid = Grid::new(region.lo, region.hi, h, 2, 0.0);
-  let helix = if op.entry == Entry::Plunge {
-    0.0
-  } else if op.helix_diameter > 0.0 {
-    op.helix_diameter / 2.0
-  } else {
-    r
-  };
-  let cap = wall + helix.max(s) + 4.0 * h;
+  let cap = wall + helix_radius(op).max(s) + 4.0 * h;
   region.sdf_grid(&mut grid, cap);
+  let n = grid.v.len();
+  plan_on(grid, region, wall, cap, op, vec![false; n])
+}
+
+/// The clearing plan on a grid of tool centres holding the walls' signed distances (clamped
+/// to `cap`): the tool's centre keeps `wall` in from them. `cleared` marks nodes with nothing
+/// to cut (open air); growth starts from them before any helix seed.
+pub(super) fn plan_on(
+  mut grid: Grid,
+  walls: &dyn Walls,
+  wall: f64,
+  cap: f64,
+  op: &Operation,
+  mut cleared: Vec<bool>,
+) -> Result<Vec<Step>, String> {
+  let r = op.tool.radius();
+  let s = op.tool.diameter * op.stepover;
+  let h = grid.h;
+  let helix = helix_radius(op);
+  let region = walls;
   let sdf = grid.v.clone();
   let margin = 1e-3;
   let allowed: Vec<bool> = sdf.iter().map(|v| *v >= wall + margin).collect();
@@ -103,28 +144,38 @@ fn plan(region: &Region, op: &Operation) -> Result<Vec<Step>, String> {
   let depth = grid.distance_to(&outside);
   let n = grid.v.len();
   let (nx, ny) = (grid.nx, grid.ny);
-  let mut cleared = vec![false; n];
+  for (c, a) in cleared.iter_mut().zip(&allowed) {
+    *c &= *a;
+  }
+  // growing in from open air first: the first pass enters from the air nearest it
+  let mut open = cleared.iter().any(|c| *c);
   let mut steps = Vec::new();
-  let mut at: DVec2;
+  let mut at = DVec2::ZERO;
   let mut passes = 0;
   // a seed at the widest point of what's left, until nothing is
-  while let Some(seed) = (0..n).filter(|&i| allowed[i] && !cleared[i]).max_by(|a, b| depth[*a].total_cmp(&depth[*b])) {
-    let c = grid.node(seed);
-    let rho = if helix > 0.0 {
-      let room = region.sdf(c, cap) - wall - 0.01;
-      let rho = helix.min(room);
-      if rho >= 0.1 * r { rho } else { 0.0 }
-    } else {
-      0.0
-    };
-    steps.push(Step::Seed { c, rho });
-    at = c + DVec2::new(rho, 0.0);
-    for (i, cl) in cleared.iter_mut().enumerate() {
-      if allowed[i] && (grid.node(i) - c).length() <= rho + 1e-9 {
-        *cl = true;
+  loop {
+    if !open {
+      let Some(seed) = (0..n).filter(|&i| allowed[i] && !cleared[i]).max_by(|a, b| depth[*a].total_cmp(&depth[*b]))
+      else {
+        break;
+      };
+      let c = grid.node(seed);
+      let rho = if helix > 0.0 {
+        let room = region.sdf(c, cap) - wall - 0.01;
+        let rho = helix.min(room);
+        if rho >= 0.1 * r { rho } else { 0.0 }
+      } else {
+        0.0
+      };
+      steps.push(Step::Seed { c, rho });
+      at = c + DVec2::new(rho, 0.0);
+      for (i, cl) in cleared.iter_mut().enumerate() {
+        if allowed[i] && (grid.node(i) - c).length() <= rho + 1e-9 {
+          *cl = true;
+        }
       }
+      cleared[seed] = true;
     }
-    cleared[seed] = true;
     loop {
       passes += 1;
       if passes > MAX_PASSES {
@@ -172,6 +223,16 @@ fn plan(region: &Region, op: &Operation) -> Result<Vec<Step>, String> {
       for l in grid.contours() {
         pieces.extend(new_parts(&l, &fgrid, s));
       }
+      if open && let Some(first) = pieces.first().map(|p| p.0[0]) {
+        // down in the air next to the first pass
+        let k = (0..n)
+          .filter(|&i| cleared[i])
+          .min_by(|x, y| (grid.node(*x) - first).length().total_cmp(&(grid.node(*y) - first).length()))
+          .unwrap_or(0);
+        at = grid.node(k);
+        steps.push(Step::Seed { c: at, rho: 0.0 });
+        open = false;
+      }
       while !pieces.is_empty() {
         let (k, flip) = nearest_piece(&pieces, at);
         let (mut pts, closed) = pieces.swap_remove(k);
@@ -197,6 +258,7 @@ fn plan(region: &Region, op: &Operation) -> Result<Vec<Step>, String> {
       }
       cleared = grow;
     }
+    open = false;
   }
   Ok(steps)
 }
@@ -276,7 +338,7 @@ fn link(grid: &Grid, cleared: &[bool], allowed: &[bool], a: DVec2, b: DVec2) -> 
 
 /// Moves points that came out closer than `wall` to the region's boundary back out to it,
 /// adding midpoints where a segment would still cut too close.
-fn keep_off_walls(region: &Region, pts: Vec<DVec2>, wall: f64, closed: bool) -> Vec<DVec2> {
+fn keep_off_walls(region: &dyn Walls, pts: Vec<DVec2>, wall: f64, closed: bool) -> Vec<DVec2> {
   let cap = wall + 1.0;
   let fix = |mut q: DVec2| {
     for _ in 0..6 {

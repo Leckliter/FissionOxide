@@ -184,6 +184,8 @@ pub enum WarningKind {
   RapidCollision,
   /// Material stood above the flutes: the shank or holder rubs.
   Shank,
+  /// The tool holder ran into the stock or the part.
+  Holder,
 }
 
 impl WarningKind {
@@ -192,6 +194,7 @@ impl WarningKind {
       WarningKind::Gouge => "gouge",
       WarningKind::RapidCollision => "rapid_collision",
       WarningKind::Shank => "shank",
+      WarningKind::Holder => "holder",
     }
   }
 }
@@ -213,6 +216,7 @@ impl Warning {
       WarningKind::Gouge => "cuts into the part",
       WarningKind::RapidCollision => "rapids into the stock",
       WarningKind::Shank => "cuts deeper than the flutes",
+      WarningKind::Holder => "runs the tool holder into the material",
     };
     format!(
       "{} {what} ({} move(s), up to {:.3} mm, first at X{:.3} Y{:.3} Z{:.3})",
@@ -375,7 +379,7 @@ pub fn cut_only(stock: &mut Heightfield, tp: &Toolpath, at: &mut DVec3) {
 fn run(sim: &mut Simulation, tp: &Toolpath, at: &mut DVec3) -> f64 {
   let tool = &tp.tool;
   let mut warn: Vec<Warning> = Vec::new();
-  let mut note = |kind: WarningKind, p: DVec3, depth: f64, counted: &mut [bool; 3]| {
+  let mut note = |kind: WarningKind, p: DVec3, depth: f64, counted: &mut [bool; 4]| {
     let slot = kind as usize;
     match warn.iter_mut().find(|w| w.kind == kind) {
       Some(w) => {
@@ -391,8 +395,21 @@ fn run(sim: &mut Simulation, tp: &Toolpath, at: &mut DVec3) -> f64 {
   let mut removed = 0.0;
   let area = sim.stock.h * sim.stock.h;
   let r = tool.radius();
+  let mut holder = (tool.holder_diameter > 0.0 && tool.stickout > 0.0).then(|| Blocks::new(&sim.stock, tool));
   for m in &tp.moves {
-    let mut counted = [false; 3];
+    let mut counted = [false; 4];
+    if let Some(b) = holder.as_mut() {
+      // the holder's face, `stickout` above the tip, over the material along the move
+      let len = (m.to - *at).length();
+      let n = (len / b.size).ceil().max(1.0) as usize;
+      for s in 0..=n {
+        let p = at.lerp(m.to, s as f64 / n as f64);
+        let over = b.highest(&sim.stock, p.truncate(), tool.holder_diameter / 2.0) - (p.z + tool.stickout);
+        if over > GOUGE_TOLERANCE {
+          note(WarningKind::Holder, p, over, &mut counted);
+        }
+      }
+    }
     if m.rapid {
       // a rapid must clear the stock everywhere under the tool
       let len = (m.to - *at).length();
@@ -411,7 +428,11 @@ fn run(sim: &mut Simulation, tp: &Toolpath, at: &mut DVec3) -> f64 {
       }
     } else {
       let (stock, part, gouged, base) = (&mut sim.stock, &sim.part, &mut sim.gouged, sim.base);
+      let (blocks, nx) = (&mut holder, stock.nx);
       sweep(stock, tool, *at, m.to, |k, old, new, (p, d)| {
+        if let Some(b) = blocks.as_mut() {
+          b.lowered(k, nx);
+        }
         removed += (old - new.max(base)).max(0.0) * area;
         if part.z[k].is_finite() && new < part.z[k] - GOUGE_TOLERANCE && d < r - SIDE_TOLERANCE {
           gouged[k] = true;
@@ -426,6 +447,80 @@ fn run(sim: &mut Simulation, tp: &Toolpath, at: &mut DVec3) -> f64 {
   }
   sim.warnings.extend(warn);
   removed
+}
+
+/// The highest column of each square block of cells, kept up to date lazily as cuts lower
+/// them: quick answers to "how high is the material under the tool holder".
+struct Blocks {
+  /// Cells a block side.
+  b: usize,
+  bx: usize,
+  by: usize,
+  top: Vec<f64>,
+  stale: Vec<bool>,
+  /// Sampling step along moves (mm).
+  size: f64,
+}
+
+impl Blocks {
+  fn new(hf: &Heightfield, tool: &Tool) -> Blocks {
+    let b = ((tool.holder_diameter / 12.0 / hf.h).floor() as usize).clamp(1, 64);
+    let (bx, by) = (hf.nx.div_ceil(b), hf.ny.div_ceil(b));
+    let mut out = Blocks { b, bx, by, top: vec![f64::NEG_INFINITY; bx * by], stale: vec![true; bx * by], size: 0.0 };
+    out.size = (b as f64 * hf.h).max(hf.h);
+    out
+  }
+
+  fn lowered(&mut self, cell: usize, nx: usize) {
+    let (i, j) = (cell % nx, cell / nx);
+    self.stale[(j / self.b) * self.bx + i / self.b] = true;
+  }
+
+  /// The highest column whose centre is within `radius` of a point.
+  fn highest(&mut self, hf: &Heightfield, c: DVec2, radius: f64) -> f64 {
+    let bs = self.b as f64 * hf.h;
+    let (fx, fy) = ((c.x - hf.x0) / bs, (c.y - hf.y0) / bs);
+    let reach = radius / bs + 1.0;
+    let (i0, i1) = ((fx - reach).floor().max(0.0) as usize, ((fx + reach).floor().max(0.0) as usize).min(self.bx - 1));
+    let (j0, j1) = ((fy - reach).floor().max(0.0) as usize, ((fy + reach).floor().max(0.0) as usize).min(self.by - 1));
+    if fx + reach < 0.0 || fy + reach < 0.0 {
+      return f64::NEG_INFINITY;
+    }
+    let mut best = f64::NEG_INFINITY;
+    for bj in j0..=j1 {
+      for bi in i0..=i1 {
+        // the block's nearest point to the centre
+        let lo = DVec2::new(hf.x0 + bi as f64 * bs, hf.y0 + bj as f64 * bs);
+        let q = c.clamp(lo, lo + DVec2::splat(bs));
+        if (q - c).length() > radius + hf.h {
+          continue;
+        }
+        let k = bj * self.bx + bi;
+        if self.stale[k] {
+          let mut t = f64::NEG_INFINITY;
+          for j in bj * self.b..((bj + 1) * self.b).min(hf.ny) {
+            for i in bi * self.b..((bi + 1) * self.b).min(hf.nx) {
+              t = t.max(hf.z[j * hf.nx + i]);
+            }
+          }
+          self.top[k] = t;
+          self.stale[k] = false;
+        }
+        if self.top[k] <= best {
+          continue;
+        }
+        // look at the block's columns only when it could raise the answer
+        for j in bj * self.b..((bj + 1) * self.b).min(hf.ny) {
+          for i in bi * self.b..((bi + 1) * self.b).min(hf.nx) {
+            if (hf.centre(i, j) - c).length() <= radius {
+              best = best.max(hf.z[j * hf.nx + i]);
+            }
+          }
+        }
+      }
+    }
+    best
+  }
 }
 
 /// Lowers the columns under the tool moving from `a` to `b`; `cut(cell, old, new, (tip, d))`

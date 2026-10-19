@@ -786,6 +786,10 @@ const CAM_2D: &[E] = &[
 const CAM_3D: &[E] = &[
   c("Parallel", Icon::Zebra, D(Kind::Form(&forms::CAM_PARALLEL))),
   c("Scallop", Icon::Isocurve, D(Kind::Form(&forms::CAM_SCALLOP))),
+  c("Adaptive Clearing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE3D))),
+  c("Steep and Shallow", Icon::Zebra, D(Kind::Form(&forms::CAM_STEEP_SHALLOW))),
+  c("Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR3D))),
+  c("Pencil", Icon::Line, D(Kind::Form(&forms::CAM_PENCIL))),
 ];
 
 const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
