@@ -625,3 +625,23 @@ fn hub_versions_milestones_and_history() {
   assert_eq!(run(&mut other, "hub.projects", json!({})).as_array().unwrap().len(), 2);
   let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn component_copies_follow_the_original() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let b = s.model.bodies[0].id.0;
+  let c = run(&mut s, "component.create", json!({"name": "Block", "bodies": [b]}))["component"].clone();
+  let r = run(&mut s, "component.copy", json!({"component": c, "translate": [50, 0, 0]}));
+  assert!(r["error"].is_null(), "{r}");
+  assert_eq!(s.model.bodies.len(), 2);
+  let info = run(&mut s, "info", json!({}));
+  assert_eq!(info["components"][1]["name"], "Block:2", "{info}");
+  // edit the original: the copy follows
+  let bx = s.design.features[0].id.0;
+  run(&mut s, "feature.edit", json!({"feature": bx, "set": {"shape": {"type": "box", "width": "30", "depth": "10", "height": "5"}}}));
+  let v: Vec<f64> = s.model.bodies.iter().map(|b| b.shape.mass().unwrap().volume).collect();
+  assert!((v[0] - 1500.0).abs() < 1e-6 && (v[1] - 1500.0).abs() < 1e-6, "{v:?}");
+  let m = s.model.bodies[1].shape.mass().unwrap();
+  assert!((m.bbox_min.x - 35.0).abs() < 1e-6, "{m:?}");
+}

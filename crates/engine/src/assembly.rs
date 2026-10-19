@@ -70,6 +70,30 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       })?;
       Ok(json!({}))
     })(),
+    "component.copy" => (|| {
+      let source = component_id(s, p, "component")?;
+      let t = match p.get("translate").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => [expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?],
+        Some(_) => return Err(CmdError::new("translate needs [x, y, z]")),
+        None => ["0".into(), "0".into(), "0".into()],
+      };
+      let name = opt_str(p, "name").map(str::to_string);
+      let (fid, cid) = s.edit(|d| {
+        let fid = d.add_feature(FeatureKind::CopyComponent { source, translate: t })?;
+        // the copies' body ids are fixed by the feature (see `new_body`)
+        let n = d.component(source).map(|c| c.bodies.len()).unwrap_or(0) as u32;
+        let bodies = (0..n).map(|k| BodyId(fid.0 * 1000 + k)).collect();
+        let base = d.component(source).map(|c| c.name.clone()).unwrap_or_default();
+        let count = d.features.iter().filter(|f| matches!(&f.kind, FeatureKind::CopyComponent { source: s, .. } if *s == source)).count();
+        let cid = d.add_component(&name.unwrap_or_else(|| format!("{base}:{}", count + 1)), bodies)?;
+        if let (Some(src), Some(c)) = (d.component(source).map(|c| c.material.clone()), d.component_mut(cid)) {
+          c.material = src;
+        }
+        Ok((fid, cid))
+      })?;
+      let st = s.model.status(fid);
+      Ok(json!({"feature": fid.0, "component": cid.0, "error": st.and_then(|x| x.error.clone())}))
+    })(),
     "joint" => joint(s, p),
     "joint.drive" => (|| {
       let id = FeatureId(req_u32(p, "joint")?);

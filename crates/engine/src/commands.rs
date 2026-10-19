@@ -130,6 +130,7 @@ cmds! {
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "select" => "Set the selection", "{items: [Sel]}";
   "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
+  "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
   "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
   "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
   "component.rename" => "Rename a component", "{component, name}";

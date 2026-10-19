@@ -653,6 +653,14 @@ pub enum FeatureKind {
     #[serde(default)]
     limits: JointLimits,
   },
+  /// Another instance of a component: copies of its bodies, rebuilt from the source on every
+  /// change (edit the original and every copy follows), placed by `translate`. Joints can then
+  /// position the copy's component like any other.
+  CopyComponent {
+    source: ComponentId,
+    #[serde(default = "zeros")]
+    translate: [String; 3],
+  },
   /// Flattens a sheet metal body onto its stationary face.
   Unfold {
     body: BodyId,
@@ -738,6 +746,7 @@ impl FeatureKind {
       FeatureKind::Unfold { .. } => "Unfold",
       FeatureKind::Rip { .. } => "Rip",
       FeatureKind::Joint { .. } => "Joint",
+      FeatureKind::CopyComponent { .. } => "Copy",
       FeatureKind::Refold { .. } => "Refold",
     }
   }
@@ -1261,6 +1270,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       for (lo, hi) in [&mut limits.rotation, &mut limits.slide].into_iter().flatten() {
         f(lo);
         f(hi);
+      }
+    }
+    FeatureKind::CopyComponent { translate, .. } => {
+      for t in translate.iter_mut() {
+        f(t);
       }
     }
     FeatureKind::Rip { gap, .. } => {
