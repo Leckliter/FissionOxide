@@ -214,21 +214,21 @@ cmds! {
   "assembly.bom" => "Bill of materials: components, materials, volumes and masses; indented by sub-assembly level, top level only, or parts only", "{view?: indented|top|parts}";
   "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
   "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?, standard?: asme|iso, auto_balloons?}";
-  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
+  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?, sheet?}";
   "drawing.remove_view" => "Remove a view", "{drawing?, view}";
-  "drawing.move_view" => "Place a view (sheet mm; null = automatic)", "{drawing?, view, at}";
+  "drawing.move_view" => "Place a view (sheet mm; null = automatic), or move it to another sheet", "{drawing?, view, at, sheet?}";
   "drawing.dimension" => "Dimension two model points in a view", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?}";
-  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text}";
+  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text, sheet?}";
   "drawing.title" => "Fill in the title block", "{drawing?, title?, author?, part_number?, material?, revision?, company?}";
   "drawing.info" => "A drawing's views, scale and text", "{drawing?}";
   "drawing.list" => "List drawings", "{}";
   "drawing.delete" => "Delete a drawing", "{drawing?}";
-  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf", "{drawing?, path}";
+  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf: every sheet (PDF pages, DXF side by side, name-N.svg files) or one", "{drawing?, path, sheet?}";
   "drawing.break" => "Broken view: leave a stretch of a view out (model mm along the view's horizontal or vertical); dimensions keep the true length", "{drawing?, view, from, to, direction?: horizontal|vertical, gap?: sheet mm}";
   "drawing.remove_breaks" => "Remove a view's breaks", "{drawing?, view}";
   "drawing.ordinate" => "Ordinate dimensions: distances of points from an origin along the view's horizontal or vertical", "{drawing?, view?, origin: [x,y,z], points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?}";
   "drawing.angle" => "Angular dimension at a vertex between the edges to two points", "{drawing?, view?, vertex: [x,y,z], a: [x,y,z], b: [x,y,z], radius?: sheet mm}";
-  "drawing.feature_control" => "GD&T feature control frame on a model point (per the drawing's standard)", "{drawing?, view?, point: [x,y,z], offset?: [x,y] sheet mm, characteristic: straightness|flatness|circularity|cylindricity|profile_of_line|profile_of_surface|angularity|perpendicularity|parallelism|position|concentricity|symmetry|circular_runout|total_runout, tolerance, diameter?, modifier?: none|mmc|lmc, datums?: [\"A\", ...]}";
+  "drawing.feature_control" => "GD&T feature control frame on a model point (per the drawing's standard)", "{drawing?, view?, point: [x,y,z], offset?: [x,y] sheet mm, characteristic: straightness|flatness|circularity|cylindricity|profile_of_line|profile_of_surface|angularity|perpendicularity|parallelism|position|concentricity|symmetry|circular_runout|total_runout, tolerance, diameter?, modifier?: none|mmc|lmc, datums?: [\"A\", ...], lower?: {tolerance, diameter?, modifier?, datums?} (composite frame)}";
   "drawing.datum" => "Datum feature identifier on a model point (next free letter by default)", "{drawing?, view?, point: [x,y,z], offset?: [x,y], label?}";
   "drawing.surface_finish" => "Surface texture symbol (Ra, µm) on a model point", "{drawing?, view?, point: [x,y,z], offset?: [x,y], roughness, process?: any|removal|no_removal}";
   "drawing.balloon" => "Balloon with a component's parts list item number (follows the parts list)", "{drawing?, view?, component: id|name, point?: [x,y,z], offset?: [x,y]}";
@@ -299,6 +299,15 @@ cmds! {
   "component.sub_joints" => "The joints inside an inserted sub-assembly, with their motions", "{component}";
   "component.drive" => "Drive a joint inside a flexible inserted sub-assembly", "{component, joint: name, rotation?, slide?, slide2?, pitch?}";
   "component.parent" => "Move a component into another one (a sub-assembly), or back to the top level", "{component, parent?: component | null}";
+  "drawing.add_sheet" => "Add a sheet to a drawing (its own size and scale, or the drawing's)", "{drawing?, name?, size?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto}";
+  "drawing.set_sheet" => "Rename a sheet or change its size or scale", "{drawing?, sheet, name?, size?, scale?}";
+  "drawing.remove_sheet" => "Delete a sheet with its views and notes (a drawing keeps one)", "{drawing?, sheet}";
+  "drawing.baseline" => "Baseline dimensions: points measured from one origin along the view's horizontal or vertical, stacked", "{drawing?, view?, origin: [x,y,z], points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?, spacing?: sheet mm}";
+  "drawing.chain" => "Chain dimensions: consecutive distances between points on one line", "{drawing?, view?, points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?}";
+  "drawing.weld" => "Welding symbol on a joint (AWS A2.4 or ISO 2553 per the drawing's standard)", "{drawing?, view?, point: [x,y,z], kind: fillet|square|v|bevel|u|j|plug|spot|seam, side?: arrow|other|both, size?, length?: \"50\"|\"50-150\", all_around?, field?, tail?, offset?: [x,y]}";
+  "drawing.datum_target" => "Datum target (A1, B2, ...) on a model point; area > 0 for an area target", "{drawing?, view?, point: [x,y,z], label, area?: model mm, offset?: [x,y]}";
+  "drawing.revision" => "Add a row to the revision table (next letter by default)", "{drawing?, rev?, description?, date?, by?}";
+  "drawing.remove_revision" => "Remove a revision table row", "{drawing?, index}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
