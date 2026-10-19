@@ -83,7 +83,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         }
         ui.add_space(10.0);
         // the document tab fills the middle of the bar, its title centred, as in Fusion
-        let right_w = 160.0;
+        let right_w = 250.0;
         let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
         document_tab(app, ui, tab_w);
         ui.add_space(4.0);
@@ -102,8 +102,19 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           avatar(ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
           egui::Popup::menu(&help).show(help_menu);
-          let _ = bar_icon(ui, Icon::Bell, "Notifications", true);
-          let _ = bar_icon(ui, Icon::JobStatus, "Job Status: all changes are local", true);
+          let bell = bar_icon(ui, Icon::Bell, "Notifications", true);
+          // the unread dot
+          ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
+          let _ = bar_icon(ui, Icon::Clock, "Recent activity", true);
+          let _ = bar_icon(ui, Icon::Gauge, "Job Status: all changes are local", true);
+          // the Autodesk Assistant button, shown pressed as in Fusion
+          let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
+          ui.painter().rect(r, 3.0, theme::CONTEXT_TAB, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
+          icons::draw_color(ui.painter(), r.shrink(5.0), Icon::Assistant);
+          if resp.on_hover_text("Autodesk Assistant").clicked() {
+            app.status = Some(("The Autodesk Assistant isn't part of CLFusion".into(), false));
+          }
+          let _ = icons::icon_button(ui, Icon::Configure, 28.0, "Extensions", false, None);
         });
       });
     });
@@ -181,7 +192,7 @@ fn help_menu(ui: &mut egui::Ui) {
 
 fn avatar(ui: &mut egui::Ui) {
   let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
-  ui.painter().circle_filled(rect.center(), 12.0, Color32::from_rgb(0, 112, 192));
+  ui.painter().circle_filled(rect.center(), 12.0, Color32::from_rgb(92, 84, 196));
   ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "CL", egui::FontId::proportional(11.0), Color32::WHITE);
   resp.on_hover_text("Local user");
 }
@@ -1137,7 +1148,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
   let canvas = app.canvas;
   egui::Area::new(egui::Id::new("sketch-palette"))
-    .fixed_pos(canvas.right_top() + vec2(-8.0, 170.0))
+    .fixed_pos(canvas.right_top() + vec2(-34.0, 190.0))
     .pivot(egui::Align2::RIGHT_TOP)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
@@ -1259,6 +1270,36 @@ pub fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
       .stroke(Stroke::new(1.0, Color32::from_gray(176)))
       .min_size(vec2(72.0, 24.0)),
   )
+}
+
+/// The collapsed AUTODESK ASSISTANT tab on the right edge of the canvas, under the ViewCube.
+pub fn assistant_tab(app: &mut App, ctx: &egui::Context) {
+  let canvas = app.canvas;
+  egui::Area::new(egui::Id::new("assistant-tab"))
+    .fixed_pos(canvas.right_top() + vec2(-2.0, 210.0))
+    .pivot(egui::Align2::RIGHT_TOP)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 260.0), egui::Sense::click());
+      let p = ui.painter();
+      p.rect_filled(rect, 2.0, if resp.hovered() { theme::HOVER } else { theme::FLOAT_HEADER });
+      let ink = Color32::from_gray(80);
+      for dy in [-3.0, 3.0] {
+        let t = rect.center_top() + vec2(dy, 14.0);
+        p.add(egui::Shape::convex_polygon(
+          vec![t + vec2(-3.0, 0.0), t + vec2(2.0, -4.0), t + vec2(2.0, 4.0)],
+          ink,
+          Stroke::NONE,
+        ));
+      }
+      let galley = p.layout_no_wrap("AUTODESK ASSISTANT".into(), egui::FontId::proportional(12.0), ink);
+      let w = galley.size().x;
+      let pos = pos2(rect.center().x - galley.size().y / 2.0, rect.top() + 36.0 + w);
+      p.add(egui::epaint::TextShape::new(pos, galley, ink).with_angle(-std::f32::consts::FRAC_PI_2));
+      if resp.clicked() {
+        app.status = Some(("The Autodesk Assistant isn't part of CLFusion".into(), false));
+      }
+    });
 }
 
 /// Fusion's "Unsaved: Changes may be lost — Save" notice at the top of the canvas, shown for a

@@ -1,5 +1,4 @@
-//! The toolbar's tool groups and their drop-down menus for the SOLID, SURFACE, MESH, SHEET
-//! METAL and PLASTIC tabs,
+//! The toolbar's tool groups and their drop-down menus for every tab of the Design workspace,
 //! laid out entry for entry like Fusion's: same order, separators, shortcuts, submenus and
 //! greyed-out items. Entries CLFusion can run carry a [`Cmd`]; the rest are listed so the
 //! toolbar reads like Fusion and say so in the status line when clicked.
@@ -481,6 +480,63 @@ const SURFACE: [Group; 2] = [
   },
 ];
 
+const MANAGE: [Group; 1] =
+  [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[x("Bill of Materials", Icon::Bom)] }];
+
+const ADD_INS: &[E] =
+  &[x("Scripts and Add-Ins...", Icon::Scripts).k("Shift+S"), x("Design and Make Marketplace", Icon::Marketplace)];
+
+const UTILITY: &[E] = &[
+  x("Manage Materials", Icon::ManageMaterials),
+  x("Manage Threads Library", Icon::Configure),
+  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+];
+
+// UTILITIES' INSPECT has no Environment Map Analysis
+const UTIL_INSPECT: &[E] = &[
+  c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
+  x("Interference", Icon::Interference),
+  x("Section Analysis", Icon::Section),
+  E::Sep,
+  x("Curvature Comb Analysis", Icon::CurvComb),
+  x("Curvature Map Analysis", Icon::CurvMap),
+  x("Draft Analysis", Icon::DraftAnalysis),
+  x("Isocurve Analysis", Icon::Isocurve),
+  x("Zebra Analysis", Icon::Zebra),
+  E::Sep,
+  x("Accessibility Analysis", Icon::Accessibility),
+  x("Center of Mass", Icon::CenterOfMass),
+  x("Minimum Radius Analysis", Icon::MinRadius),
+  E::Sep,
+  x("Navigator", Icon::Navigator),
+  E::Sep,
+  x("Display Component Colors", Icon::ComponentColors).k("Shift+N"),
+  x("Display Mesh Face Groups", Icon::FaceGroups).k("Shift+F"),
+  E::Sep,
+  x("History", Icon::History),
+  x("Sustainability Insights", Icon::Sustainability),
+];
+
+const UTILITIES: [Group; 5] = [
+  Group { label: "MAKE", quick: &["3D Print"], menu: EXPORT },
+  Group { label: "ADD-INS", quick: &["Scripts and Add-Ins...", "Design and Make Marketplace"], menu: ADD_INS },
+  Group { label: "UTILITY", quick: &["Compute All", "Manage Materials"], menu: UTILITY },
+  Group {
+    label: "INSPECT",
+    quick: &[
+      "Measure",
+      "Interference",
+      "Draft Analysis",
+      "Accessibility Analysis",
+      "Section Analysis",
+      "Display Component Colors",
+      "Sustainability Insights",
+    ],
+    menu: UTIL_INSPECT,
+  },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+];
+
 const SHEET_METAL: [Group; 2] = [
   Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
   Group {
@@ -534,16 +590,19 @@ fn find(menu: &[E], label: &str) -> Option<Item> {
 
 /// Draws the tool groups of `tab`. Returns false for tabs without a layout yet.
 pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
-  let own: &[Group] = match tab {
-    Tab::Solid => &SOLID,
-    Tab::Surface => &SURFACE,
-    Tab::Mesh => &MESH,
-    Tab::SheetMetal => &SHEET_METAL,
-    Tab::Plastic => &PLASTIC,
-    _ => return false,
+  // MANAGE and UTILITIES stand alone; the modelling tabs end with the shared groups
+  let (own, shared): (&[Group], &[Group]) = match tab {
+    Tab::Solid => (&SOLID, &SHARED),
+    Tab::Surface => (&SURFACE, &SHARED),
+    Tab::Mesh => (&MESH, &SHARED),
+    Tab::SheetMetal => (&SHEET_METAL, &SHARED),
+    Tab::Plastic => (&PLASTIC, &SHARED),
+    Tab::Manage => (&MANAGE, &[]),
+    Tab::Utilities => (&UTILITIES, &[]),
+    Tab::Sketch => return false,
   };
   let mut pick: Option<Item> = None;
-  for g in own.iter().chain(SHARED.iter()) {
+  for g in own.iter().chain(shared.iter()) {
     show_group(app, ui, tab, g, &mut pick);
   }
   if let Some(it) = pick {

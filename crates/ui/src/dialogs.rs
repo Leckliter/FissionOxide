@@ -616,7 +616,7 @@ impl Dialog {
       if self.editing.is_some() { format!("EDIT {}", self.kind.title()) } else { self.kind.title().to_string() };
     let width = 300.0;
     egui::Area::new(egui::Id::new("feature-dialog"))
-      .default_pos(app.canvas.right_top() + egui::vec2(-8.0, 150.0))
+      .default_pos(app.canvas.right_top() + egui::vec2(-34.0, 190.0))
       .pivot(egui::Align2::RIGHT_TOP)
       .constrain(true)
       .order(egui::Order::Foreground)

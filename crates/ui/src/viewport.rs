@@ -831,8 +831,8 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
 
 /// A clickable orientation cube in the top-right corner. Returns true when it took the click.
 fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
-  let size = 44.0f32;
-  let center = view.rect.right_top() + Vec2::new(-70.0, 70.0);
+  let size = 50.0f32;
+  let center = view.rect.right_top() + Vec2::new(-92.0, 80.0);
   let (right, up, back) = app.cam.basis();
   let proj = |v: DVec3| center + Vec2::new(v.dot(right) as f32, -v.dot(up) as f32) * size * 0.62;
   let faces: [(DVec3, &str, StandardView); 6] = [
@@ -869,35 +869,86 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
       hit = Some(*v);
     }
   }
+  // lettered axis stubs leave the cube from its silhouette, as on Fusion's ViewCube; the ones
+  // pointing away from the viewer go behind the cube
+  let sgn = |bit: usize| if bit != 0 { 1.0 } else { -1.0 };
+  let axes = [
+    (DVec3::X, "X", Color32::from_rgb(222, 40, 36)),
+    (DVec3::Y, "Y", Color32::from_rgb(40, 170, 50)),
+    (DVec3::Z, "Z", Color32::from_rgb(30, 70, 220)),
+  ];
+  let stub = |painter: &egui::Painter, axis: DVec3, label: &str, col: Color32| {
+    // the silhouette corner furthest along the axis's on-screen direction
+    let d = proj(axis) - proj(DVec3::ZERO);
+    let base = (0..8)
+      .map(|i| DVec3::new(sgn(i & 1), sgn(i & 2), sgn(i & 4)))
+      .max_by(|a, b| {
+        ((proj(*a) - center).dot(d) + a.dot(axis) as f32).total_cmp(&((proj(*b) - center).dot(d) + b.dot(axis) as f32))
+      })
+      .unwrap_or(DVec3::ZERO);
+    painter.line_segment([proj(base), proj(base + axis * 0.55)], Stroke::new(2.5, col));
+    painter.text(proj(base + axis * 0.85), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), col);
+  };
+  for (axis, label, col) in axes {
+    if axis.dot(back) < 0.0 {
+      stub(painter, axis, label, col);
+    }
+  }
+  // soft shadow under the cube
+  painter.add(egui::Shape::ellipse_filled(
+    center + Vec2::new(4.0, size * 0.95),
+    Vec2::new(size * 0.8, size * 0.16),
+    Color32::from_black_alpha(28),
+  ));
   for (facing, pts, label, v) in &visible {
-    let shade = (226.0 + 26.0 * *facing as f32).min(252.0) as u8;
-    let fill = if hit == Some(*v) { Color32::from_rgb(160, 205, 240) } else { Color32::from_gray(shade) };
-    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(150))));
-    if *facing > 0.3 {
+    // grey, lit from above-left like Fusion's cube
+    let n = match v {
+      StandardView::Top => DVec3::Z,
+      StandardView::Bottom => -DVec3::Z,
+      StandardView::Front => -DVec3::Y,
+      StandardView::Back => DVec3::Y,
+      StandardView::Right => DVec3::X,
+      _ => -DVec3::X,
+    };
+    let light = (n.dot(up) * 0.6 - n.dot(right) * 0.25 + 0.55).clamp(0.0, 1.0) as f32;
+    let shade = (196.0 + 48.0 * light) as u8;
+    let fill = if hit == Some(*v) { Color32::from_rgb(170, 208, 240) } else { Color32::from_gray(shade) };
+    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(140))));
+    if *facing > 0.25 {
+      // the label lies in the face: rotate it along the face's horizontal
+      let h = match v {
+        StandardView::Top | StandardView::Bottom | StandardView::Front => DVec3::X,
+        StandardView::Back => -DVec3::X,
+        StandardView::Right => DVec3::Y,
+        _ => -DVec3::Y,
+      };
+      let dir = proj(n + h) - proj(n);
+      let angle = dir.y.atan2(dir.x);
       let c = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2()) / 4.0;
-      painter.text(
-        c.to_pos2(),
-        egui::Align2::CENTER_CENTER,
-        *label,
-        egui::FontId::proportional(9.5),
-        Color32::from_gray(70).gamma_multiply((*facing as f32 * 1.6).min(1.0)),
-      );
+      let color = Color32::from_gray(60).gamma_multiply((*facing as f32 * 1.5).min(1.0));
+      let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(10.5), color);
+      let half = galley.size() / 2.0;
+      let rot = egui::emath::Rot2::from_angle(angle);
+      let pos = c.to_pos2() - rot * half;
+      painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(angle));
     }
   }
-  // axis triad along the cube edges from the origin corner, as on Fusion's ViewCube
-  let corner = DVec3::splat(-1.0);
-  let faces_toward = |n: DVec3| n.dot(back) > 0.02;
-  for (axis, col, sides) in [
-    (DVec3::X, Color32::from_rgb(220, 50, 47), [-DVec3::Y, -DVec3::Z]),
-    (DVec3::Y, Color32::from_rgb(60, 170, 60), [-DVec3::X, -DVec3::Z]),
-    (DVec3::Z, Color32::from_rgb(40, 110, 220), [-DVec3::X, -DVec3::Y]),
-  ] {
-    if sides.iter().any(|n| faces_toward(*n)) {
-      painter.line_segment([proj(corner), proj(corner + axis * 2.35)], Stroke::new(2.0, col));
+  for (axis, label, col) in axes {
+    if axis.dot(back) >= 0.0 {
+      stub(painter, axis, label, col);
     }
   }
+  // the ViewCube menu button under the cube
+  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
+  let menu_hover = pointer.is_some_and(|p| menu.contains(p));
+  crate::icons::draw(
+    painter,
+    menu,
+    crate::icons::Icon::Component,
+    if menu_hover { crate::theme::ACCENT } else { Color32::from_gray(70) },
+  );
   // home button
-  let home = Rect::from_center_size(center + Vec2::new(-48.0, -48.0), Vec2::splat(18.0));
+  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
   let home_hover = pointer.is_some_and(|p| home.contains(p));
   let hc = if home_hover { crate::theme::ACCENT } else { Color32::from_gray(90) };
   let hs = Stroke::new(1.5, hc);
@@ -915,6 +966,11 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     hs,
   ));
   if clicked {
+    if menu_hover {
+      app.cam.ortho = !app.cam.ortho;
+      app.status = Some((format!("Camera: {}", if app.cam.ortho { "Orthographic" } else { "Perspective" }), false));
+      return true;
+    }
     if home_hover {
       app.cam.set_view(StandardView::Home);
       app.fit_view();
@@ -926,7 +982,7 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     }
   }
   let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
-  pointer.is_some_and(|p| cube_area.contains(p) || home.contains(p)) && clicked
+  pointer.is_some_and(|p| cube_area.contains(p) || home.contains(p) || menu.contains(p)) && clicked
 }
 
 fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {

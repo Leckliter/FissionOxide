@@ -509,6 +509,7 @@ impl App {
     if self.show_navbar {
       panels::nav_bar(self, &ctx);
     }
+    panels::assistant_tab(self, &ctx);
     panels::sketch_palette(self, &ctx);
     marking::show(self, &ctx);
     panels::canvas_status(self, &ctx);

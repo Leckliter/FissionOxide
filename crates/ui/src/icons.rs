@@ -61,7 +61,6 @@ pub enum Icon {
   Redo,
   Plus,
   Close,
-  JobStatus,
   Bell,
   Help,
   // browser
@@ -191,6 +190,11 @@ pub enum Icon {
   CornerClosure,
   Rip,
   Print3d,
+  Scripts,
+  Marketplace,
+  Assistant,
+  Gauge,
+  Clock,
 }
 
 #[derive(Clone, Copy)]
@@ -705,10 +709,6 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::Close => {
       k.line((0.25, 0.25), (0.75, 0.75), Ink);
       k.line((0.75, 0.25), (0.25, 0.75), Ink);
-    }
-    Icon::JobStatus => {
-      k.circle((0.5, 0.5), 0.4, None, Some(Ink));
-      k.path(&[(0.3, 0.52), (0.45, 0.66), (0.72, 0.36)], Ink);
     }
     Icon::Bell => {
       k.p.add(Shape::line(k.arc_pts((0.5, 0.45), 0.26, 0.26, 0.0, PI), Stroke::new(w, k.col(Ink))));
@@ -1317,6 +1317,34 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::Rip => {
       k.solid(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], Blue);
       k.path(&[(0.5, 0.06), (0.4, 0.24), (0.6, 0.42), (0.4, 0.6), (0.6, 0.78), (0.5, 0.94)], White);
+    }
+    Icon::Scripts => {
+      k.solid(&[(0.04, 0.08), (0.8, 0.08), (0.8, 0.7), (0.04, 0.7)], White);
+      k.fill(&[(0.04, 0.08), (0.8, 0.08), (0.8, 0.2), (0.04, 0.2)], Ink);
+      k.path(&[(0.14, 0.32), (0.26, 0.42), (0.14, 0.52)], Ink);
+      k.circle((0.76, 0.76), 0.16, Some(Fill), Some(Ink));
+      k.circle((0.76, 0.76), 0.06, Some(White), None);
+    }
+    Icon::Marketplace => {
+      k.solid(&[(0.24, 0.42), (0.7, 0.42), (0.7, 0.94), (0.24, 0.94)], Ink);
+      k.solid(&[(0.36, 0.16), (0.58, 0.16), (0.58, 0.42), (0.36, 0.42)], Ink);
+      k.thick((0.6, 0.18), (0.86, 0.04), Orange, 2.4);
+    }
+    Icon::Assistant => {
+      for i in 0..8 {
+        let a = i as f32 * TAU / 8.0;
+        let (c, s) = (a.cos(), a.sin());
+        k.thick((0.5 + c * 0.14, 0.5 + s * 0.14), (0.5 + c * 0.42, 0.5 + s * 0.42), Ink, 1.4);
+      }
+    }
+    Icon::Gauge => {
+      k.circle((0.5, 0.5), 0.42, None, Some(Ink));
+      k.thick((0.5, 0.5), (0.74, 0.3), Ink, 1.4);
+      k.dot((0.5, 0.5), Ink);
+    }
+    Icon::Clock => {
+      k.circle((0.5, 0.5), 0.42, None, Some(Ink));
+      k.path(&[(0.5, 0.22), (0.5, 0.5), (0.7, 0.62)], Ink);
     }
     Icon::Print3d => {
       k.solid(&[(0.06, 0.12), (0.94, 0.12), (0.94, 0.9), (0.06, 0.9)], Dark);
