@@ -427,6 +427,16 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Combine { .. } => Icon::Combine,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
+    FeatureKind::Flange { .. }
+    | FeatureKind::ContourFlange { .. }
+    | FeatureKind::EdgeFlange { .. }
+    | FeatureKind::Hem { .. }
+    | FeatureKind::Bend { .. } => Icon::Extrude,
+    FeatureKind::ConvertToSheetMetal { .. } | FeatureKind::Unfold { .. } => Icon::Shell,
+    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => Icon::Extrude,
+    FeatureKind::Hole { .. } => Icon::Cylinder,
+    FeatureKind::SplitBody { .. } => Icon::Combine,
+    FeatureKind::Draft { .. } => Icon::Chamfer,
   }
 }
 

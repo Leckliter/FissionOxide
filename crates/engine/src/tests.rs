@@ -177,3 +177,117 @@ fn scene_builds_and_picks() {
     frame.save_png(&std::path::Path::new(&dir).join("plate.png")).unwrap();
   }
 }
+
+#[test]
+fn sheet_metal_with_commands() {
+  let mut s = Session::default();
+  run(&mut s, "sheet.rule", json!({"name": "Alu", "thickness": 1.5, "bend_radius": 2, "k_factor": 0.4}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
+  let r = run(&mut s, "sheet.flange", json!({}));
+  assert!(r["error"].is_null(), "{r}");
+  let r = run(
+    &mut s,
+    "sheet.edge_flange",
+    json!({"edges": [{"point": [40, 40, 1.5]}, {"point": [40, 0, 1.5]}], "height": 15}),
+  );
+  assert!(r["error"].is_null(), "{r}");
+  let info = run(&mut s, "info", json!({}));
+  assert_eq!(info["bodies"][0]["sheet_metal"]["thickness"], 1.5, "{info}");
+  let dxf = std::env::temp_dir().join(format!("clf-flat-{}.dxf", std::process::id()));
+  let flat = run(&mut s, "sheet.flat_pattern", json!({"path": dxf}));
+  assert_eq!(flat["bends"].as_array().unwrap().len(), 2, "{flat}");
+  let ba = std::f64::consts::PI / 2.0 * (2.0 + 0.4 * 1.5);
+  let width = 40.0 + 2.0 * (ba + 15.0 - 3.5);
+  let size = flat["size"].as_array().unwrap();
+  let (a, b) = (size[0].as_f64().unwrap(), size[1].as_f64().unwrap());
+  assert!((a - 80.0).abs() < 1e-3 && (b - width).abs() < 1e-3, "{flat} {width}");
+  let text = std::fs::read_to_string(&dxf).unwrap();
+  let _ = std::fs::remove_file(&dxf);
+  assert!(text.contains("BEND_") && text.contains("OUTLINE"));
+  // unfold in the timeline; the rule still drives the folded part underneath
+  let r = run(&mut s, "sheet.unfold", json!({}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!(s.model.bodies[0].sheet.as_ref().unwrap().flat);
+  run(&mut s, "sheet.rule", json!({"name": "Alu", "thickness": 2}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert!(s.execute("sheet.rule_remove", &json!({"name": "Alu"})).is_err(), "rule in use");
+}
+
+#[test]
+fn loft_sweep_hole_split_draft() {
+  use std::f64::consts::PI;
+  let mut s = Session::default();
+  // loft: 40 mm square at z = 0 to a 20 mm circle at z = 30
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"center": [0, 0], "corner": [20, 20]}));
+  let a = s.edit_sketch.unwrap().0;
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}));
+  let plane = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": plane}}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  let b = s.edit_sketch.unwrap().0;
+  let r = run(&mut s, "loft", json!({"sections": [a, b]}));
+  assert!(r["error"].is_null(), "{r}");
+  let v = total_volume(&s);
+  assert!(v > PI * 100.0 * 30.0 && v < 1600.0 * 30.0, "{v}");
+  // split it at z = 10
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 10}));
+  let mid = s.design.features.last().unwrap().id.0;
+  let r = run(&mut s, "split", json!({"plane": {"feature": mid}}));
+  assert!(r["error"].is_null() && s.model.bodies.len() == 2, "{r}");
+  assert!((total_volume(&s) - v).abs() < 1e-3);
+
+  // sweep a circle along an L path, then drill a counterbored hole in a plate
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+  run(&mut s, "sketch.arc", json!({"center": [10, 30], "start": [10, 40], "end": [0, 30]}));
+  run(&mut s, "sketch.line", json!({"points": [[10, 40], [30, 40]]}));
+  let path = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 3}));
+  let r = run(&mut s, "sweep", json!({"path": path}));
+  assert!(r["error"].is_null(), "{r}");
+  let v = total_volume(&s);
+  let len = 30.0 + PI / 2.0 * 10.0 + 20.0;
+  assert!((v - PI * 9.0 * len).abs() / v < 1e-3, "{v}");
+
+  let mut s = Session::default();
+  plate(&mut s);
+  let before = total_volume(&s);
+  let b = s.model.bodies[0].id.0;
+  let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  run(&mut s, "sketch.create", json!({"plane": {"body": b, "face": top}}));
+  run(&mut s, "sketch.point", json!({"at": [15, 15]}));
+  run(&mut s, "sketch.point", json!({"at": [65, 15]}));
+  let r = run(
+    &mut s,
+    "hole",
+    json!({"diameter": 6, "through_all": true, "kind": "counterbore", "head_diameter": 10, "head_depth": 2}),
+  );
+  assert!(r["error"].is_null(), "{r}");
+  let removed = 2.0 * (PI * 9.0 * 6.0 + PI * (25.0 - 9.0) * 2.0);
+  assert!((before - total_volume(&s) - removed).abs() < 1e-2, "{} vs {removed}", before - total_volume(&s));
+
+  // draft the four sides of a box by 5° about its base
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 20}));
+  let b = &s.model.bodies[0];
+  let sides: Vec<_> =
+    b.faces().iter().filter(|f| f.normal.z.abs() < 0.1).map(|f| json!({"body": b.id.0, "face": f.id})).collect();
+  let r = run(&mut s, "draft", json!({"faces": sides, "plane": "xy", "angle": "5 deg"}));
+  assert!(r["error"].is_null(), "{r}");
+  let v = total_volume(&s);
+  assert!((v - 40.0 * 40.0 * 20.0).abs() > 100.0, "{v}");
+}
+
+#[test]
+fn every_listed_command_is_handled() {
+  for c in COMMANDS {
+    let mut s = Session::default();
+    if let Err(e) = s.execute(c.id, &json!({})) {
+      assert!(!e.0.starts_with("unknown command"), "{}: {e}", c.id);
+    }
+  }
+}

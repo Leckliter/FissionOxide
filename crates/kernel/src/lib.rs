@@ -201,6 +201,17 @@ pub struct MassProps {
   pub bbox_max: DVec3,
 }
 
+/// A bend in a flat pattern: its centre line (in the flat), angle, and whether the bend's inside
+/// is on the stationary face's side of the sheet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bend {
+  pub start: DVec3,
+  pub end: DVec3,
+  /// Radians.
+  pub angle: f64,
+  pub inner: bool,
+}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
 
@@ -357,6 +368,82 @@ impl Shape {
   /// Merges coplanar faces / collinear edges left over from modeling operations.
   pub fn unified(&self) -> Result<Shape> {
     Shape::wrap(sys::unify(self.get()?)?)
+  }
+
+  /// Flattens a sheet metal solid into the plane of `face` (1-based, planar), which stays put.
+  /// Bends are rolled out to the length of their neutral layer, `inner radius + k_factor ×
+  /// thickness` from the axis.
+  pub fn unfold(&self, face: u32, thickness: f64, k_factor: f64) -> Result<(Shape, Vec<Bend>)> {
+    if !(thickness > 1e-9 && thickness.is_finite()) {
+      return Err(KernelError::Input("sheet thickness must be positive".into()));
+    }
+    if !(0.0..=1.0).contains(&k_factor) {
+      return Err(KernelError::Input("the K-factor must be between 0 and 1".into()));
+    }
+    let mut raw = Vec::new();
+    let flat = Shape::wrap(sys::unfold(self.get()?, face, thickness, k_factor, &mut raw)?)?;
+    let bends = raw
+      .chunks_exact(8)
+      .map(|c| Bend {
+        start: DVec3::new(c[0], c[1], c[2]),
+        end: DVec3::new(c[3], c[4], c[5]),
+        angle: c[6],
+        inner: c[7] > 0.5,
+      })
+      .collect();
+    Ok((flat, bends))
+  }
+
+  /// An open chain of sketch segments on `plane` as a wire (sweep paths).
+  pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
+    let mut data = Vec::new();
+    for s in segs {
+      push_seg(&mut data, plane, s);
+    }
+    if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
+      return Err(KernelError::Input("the path is empty or not finite".into()));
+    }
+    Shape::wrap(sys::make_wire(&data)?)
+  }
+
+  /// Sweeps this face along a path wire.
+  pub fn sweep(&self, path: &Shape) -> Result<Shape> {
+    let r = Shape::wrap(sys::make_pipe(self.get()?, path.get()?)?)?;
+    if r.solid_count() == 0 { Err(KernelError::Kernel("the sweep made no solid".into())) } else { Ok(r) }
+  }
+
+  /// A solid through the outer boundaries of the given faces, in order.
+  pub fn loft(sections: &[Shape], ruled: bool, closed: bool) -> Result<Shape> {
+    if sections.len() < 2 {
+      return Err(KernelError::Input("a loft needs at least two profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    let r = Shape::wrap(sys::make_loft(c.get()?, ruled, closed)?)?;
+    if r.solid_count() == 0 { Err(KernelError::Kernel("the loft made no solid".into())) } else { Ok(r) }
+  }
+
+  /// The solids on either side of a plane (one or more pieces).
+  pub fn split(&self, origin: DVec3, normal: DVec3) -> Result<Vec<Shape>> {
+    let n = normal.try_normalize().ok_or(KernelError::Input("zero normal".into()))?;
+    let m = self.mass()?;
+    let size =
+      4.0 * ((m.bbox_max - m.bbox_min).length() + (m.bbox_max + m.bbox_min).length() / 2.0 + origin.length()) + 10.0;
+    let r = Shape::wrap(sys::split_by_plane(self.get()?, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], size)?)?;
+    r.solids()
+  }
+
+  /// Tapers faces (1-based) by `angle` radians about a neutral plane, pulling along its normal.
+  pub fn draft(&self, faces: &[u32], origin: DVec3, pull: DVec3, angle: f64) -> Result<Shape> {
+    let n = pull.try_normalize().ok_or(KernelError::Input("zero pull direction".into()))?;
+    if !(angle.is_finite() && angle.abs() < std::f64::consts::FRAC_PI_2) {
+      return Err(KernelError::Input("the draft angle must be under 90°".into()));
+    }
+    Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
+  }
+
+  /// One face (1-based face-map index) as a shape of its own.
+  pub fn face_shape(&self, face: u32) -> Result<Shape> {
+    Shape::wrap(sys::face_at_index(self.get()?, face)?)
   }
 
   pub fn solid_count(&self) -> usize {

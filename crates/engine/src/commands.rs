@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clf_kernel::glam::DVec3;
 use clf_model::{
-  AxisRef, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId, FeatureKind, Operation,
-  OriginPlane, ParamKind, PlaneRef, Primitive,
+  AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId, FeatureKind,
+  HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, SheetMetalRule,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -60,6 +60,11 @@ cmds! {
   "sketch.info" => "Sketch geometry, constraints, profiles and degrees of freedom", "{sketch?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all, distance2?, flip?, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
+  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], operation?}";
+  "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
+  "split" => "Split bodies along a plane", "{plane, bodies?}";
+  "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it)", "{edges: [{body, edge} | {point}], radius}";
   "chamfer" => "Bevel edges", "{edges: [{body, edge}], distance}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?})", "{faces: [{body, face} | {point}], thickness}";
@@ -83,6 +88,17 @@ cmds! {
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "select" => "Set the selection", "{items: [Sel]}";
+  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?}";
+  "sheet.rules" => "List the sheet metal rules", "{}";
+  "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
+  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join}";
+  "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?}";
+  "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
+  "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
+  "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body)", "{body, face?: {body, face} | {point}, rule?}";
+  "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
+  "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -256,6 +272,77 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into());
       add_feature(s, FeatureKind::Revolve { sketch: sk, profiles, axis, angle, operation: operation(p)? })
     }
+    "loft" => {
+      let list = p.get("sections").and_then(Value::as_array).ok_or(CmdError::new("missing 'sections'"))?;
+      let mut sections = Vec::new();
+      for v in list {
+        let (sketch, profile) = match v.as_u64() {
+          Some(id) => (id, None),
+          None => (
+            v.get("sketch")
+              .and_then(Value::as_u64)
+              .ok_or(CmdError::new("a section is a sketch id or {sketch, profile?}"))?,
+            opt_pt(v, "profile")?,
+          ),
+        };
+        let sketch = FeatureId(u32::try_from(sketch).map_err(|_| CmdError::new("bad sketch id"))?);
+        s.design.sketch(sketch)?;
+        sections.push(LoftSection { sketch, profile });
+      }
+      s.edit_sketch = None;
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Loft { sections, ruled: flag("ruled"), closed: flag("closed"), operation: operation(p)? },
+      )
+    }
+    "sweep" => {
+      let path_sketch = FeatureId(req_u32(p, "path")?);
+      s.design.sketch(path_sketch)?;
+      let sk = sketch_for_feature(s, p)?;
+      let profiles = profile_points(s, sk, p)?;
+      let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
+      add_feature(s, FeatureKind::Sweep { sketch: sk, profiles, path_sketch, path_curves, operation: operation(p)? })
+    }
+    "hole" => {
+      let sk = sketch_for_feature(s, p)?;
+      let kind = match opt_str(p, "kind").unwrap_or("simple") {
+        "simple" => HoleKind::Simple,
+        "counterbore" => HoleKind::Counterbore,
+        "countersink" => HoleKind::Countersink,
+        o => return Err(CmdError::new(format!("unknown hole kind '{o}' (simple, counterbore, countersink)"))),
+      };
+      let through_all = p.get("through_all").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Hole {
+          sketch: sk,
+          points: ids(p, "points").into_iter().map(PointId).collect(),
+          kind,
+          diameter: req_expr(p, "diameter")?,
+          depth: if through_all { "0".into() } else { req_expr(p, "depth")? },
+          through_all,
+          tip_angle: opt_expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()),
+          head_diameter: opt_expr(p, "head_diameter").unwrap_or_else(|| "0".into()),
+          head_depth: opt_expr(p, "head_depth").unwrap_or_else(|| "0".into()),
+          head_angle: opt_expr(p, "head_angle").unwrap_or_else(|| "90 deg".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        },
+      )
+    }
+    "split" => {
+      let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
+      add_feature(s, FeatureKind::SplitBody { bodies: body_sel(p), plane })
+    }
+    "draft" => {
+      let mut faces = Vec::new();
+      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+        faces.push(face_ref(s, f)?);
+      }
+      let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
+      let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip })
+    }
     "fillet" => {
       let edges = edge_refs(s, p)?;
       add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")? })
@@ -425,6 +512,141 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.selection = items;
       Ok(json!({}))
     }
+    "sheet.rule" => {
+      let name = opt_str(p, "name").unwrap_or("Default").to_string();
+      let mut rule = s
+        .design
+        .sheet_metal_rules
+        .iter()
+        .find(|r| r.name == name)
+        .cloned()
+        .unwrap_or_else(|| SheetMetalRule { name: name.clone(), ..s.design.sheet_rule("").unwrap_or_default() });
+      for (k, slot) in
+        [("thickness", &mut rule.thickness), ("bend_radius", &mut rule.bend_radius), ("k_factor", &mut rule.k_factor)]
+      {
+        if let Some(e) = opt_expr(p, k) {
+          *slot = e;
+        }
+      }
+      let info = clf_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
+      s.edit(|d| Ok(d.set_sheet_rule(rule)?))?;
+      Ok(json!({"name": name, "thickness": info.thickness, "bend_radius": info.bend_radius, "k_factor": info.k_factor}))
+    }
+    "sheet.rules" => {
+      let scope = params_scope(s);
+      let mut rules = s.design.sheet_metal_rules.clone();
+      if rules.is_empty() {
+        rules.push(SheetMetalRule::default());
+      }
+      Ok(json!(
+        rules
+          .iter()
+          .map(|r| {
+            let v = clf_model::sheet::eval_rule(r, &scope);
+            json!({
+              "name": r.name, "thickness": r.thickness, "bend_radius": r.bend_radius, "k_factor": r.k_factor,
+              "values": v.as_ref().ok().map(|i| [i.thickness, i.bend_radius, i.k_factor]),
+              "error": v.err(),
+            })
+          })
+          .collect::<Vec<_>>()
+      ))
+    }
+    "sheet.rule_remove" => {
+      let name = req_str(p, "name")?.to_string();
+      s.edit(|d| Ok(d.remove_sheet_rule(&name)?))?;
+      Ok(json!({}))
+    }
+    "sheet.flange" => {
+      let sk = sketch_for_feature(s, p)?;
+      let profiles = profile_points(s, sk, p)?;
+      let operation = operation(p)?;
+      if !matches!(operation, Operation::NewBody | Operation::Join) {
+        return Err(CmdError::new("a flange makes a new body or joins one"));
+      }
+      let rule = rule_name(s, p)?;
+      let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation })
+    }
+    "sheet.contour_flange" => {
+      let sk = sketch_for_feature(s, p)?;
+      let curves = ids(p, "curves").into_iter().map(CurveId).collect();
+      let rule = rule_name(s, p)?;
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::ContourFlange {
+          sketch: sk,
+          curves,
+          distance: req_expr(p, "distance")?,
+          symmetric: flag("symmetric"),
+          flip: flag("flip"),
+          flip_direction: flag("flip_direction"),
+          rule,
+        },
+      )
+    }
+    "sheet.edge_flange" => {
+      let edges = edge_refs(s, p)?;
+      let position = match opt_str(p, "position").unwrap_or("adjacent") {
+        "adjacent" => BendPosition::Adjacent,
+        "inside" => BendPosition::Inside,
+        "outside" => BendPosition::Outside,
+        o => return Err(CmdError::new(format!("unknown bend position '{o}' (adjacent, inside, outside)"))),
+      };
+      add_feature(
+        s,
+        FeatureKind::EdgeFlange {
+          edges,
+          height: req_expr(p, "height")?,
+          angle: opt_expr(p, "angle").unwrap_or_else(|| "90 deg".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+          position,
+          offset_start: opt_expr(p, "offset_start").unwrap_or_else(|| "0".into()),
+          offset_end: opt_expr(p, "offset_end").unwrap_or_else(|| "0".into()),
+        },
+      )
+    }
+    "sheet.hem" => {
+      let edges = edge_refs(s, p)?;
+      add_feature(
+        s,
+        FeatureKind::Hem {
+          edges,
+          length: req_expr(p, "length")?,
+          gap: opt_expr(p, "gap").unwrap_or_else(|| "0.5 mm".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        },
+      )
+    }
+    "sheet.bend" => {
+      let sk = sketch_for_feature(s, p)?;
+      let line = CurveId(req_u32(p, "line")?);
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Bend {
+          sketch: sk,
+          line,
+          angle: req_expr(p, "angle")?,
+          flip: flag("flip"),
+          flip_side: flag("flip_side"),
+        },
+      )
+    }
+    "sheet.convert" => {
+      let body = BodyId(req_u32(p, "body")?);
+      let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
+      let rule = rule_name(s, p)?;
+      add_feature(s, FeatureKind::ConvertToSheetMetal { body, face, rule })
+    }
+    "sheet.unfold" => {
+      let body = sheet_body(s, p)?;
+      let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
+      let keep_folded = p.get("keep_folded").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Unfold { body, face, keep_folded })
+    }
+    "sheet.flat_pattern" => flat_pattern(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -555,6 +777,79 @@ fn feature_status(s: &Session, id: FeatureId) -> Value {
     "warning": st.and_then(|x| x.warning.clone()),
     "bodies": s.model.bodies.len(),
   })
+}
+
+/// `rule`: a rule name that must exist (empty / absent = the default rule).
+fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
+  let name = opt_str(p, "rule").unwrap_or("").to_string();
+  if s.design.sheet_rule(&name).is_none() {
+    return Err(CmdError::new(format!("there is no sheet metal rule '{name}'")));
+  }
+  Ok(name)
+}
+
+/// `body`, or the only sheet metal body.
+fn sheet_body(s: &Session, p: &Value) -> Result<BodyId, CmdError> {
+  if p.get("body").is_some() {
+    return Ok(BodyId(req_u32(p, "body")?));
+  }
+  let mut sheets = s.model.bodies.iter().filter(|b| b.sheet.as_ref().is_some_and(|i| !i.flat));
+  match (sheets.next(), sheets.next()) {
+    (Some(b), None) => Ok(b.id),
+    (None, _) => Err(CmdError::new("there is no sheet metal body")),
+    _ => Err(CmdError::new("there are several sheet metal bodies; pass 'body'")),
+  }
+}
+
+fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
+  let id = sheet_body(s, p)?;
+  let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
+  let face = match p.get("face") {
+    Some(f) => {
+      let r = face_ref(s, f)?;
+      if r.body != id {
+        return Err(CmdError::new("the stationary face must be on the body"));
+      }
+      Some(r.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or(CmdError::new("no such face"))?)
+    }
+    None => None,
+  };
+  let flat = body.flat_pattern(face).map_err(CmdError::new)?;
+  let m = flat.shape.mass()?;
+  // size in the stationary plane
+  let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+  for e in flat.shape.edge_lines(0.05)? {
+    for q in e.points {
+      let l = flat.plane.to_local(q);
+      for k in 0..2 {
+        lo[k] = lo[k].min(l[k]);
+        hi[k] = hi[k].max(l[k]);
+      }
+    }
+  }
+  if let Some(path) = opt_str(p, "path") {
+    let path = PathBuf::from(path);
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+      "dxf" => std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
+      "step" | "stp" => clf_kernel::write_step([&flat.shape], &path)?,
+      "stl" => clf_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
+      o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),
+    }
+  }
+  Ok(json!({
+    "body": id.0,
+    "size": [hi[0] - lo[0], hi[1] - lo[1]],
+    "area_mm2": m.volume / body.sheet.as_ref().map(|i| i.thickness).unwrap_or(1.0),
+    "volume_mm3": m.volume,
+    "bends": flat.bends.iter().map(|b| json!({
+      "angle_deg": b.angle.to_degrees(),
+      "length": (b.end - b.start).length(),
+      "direction": if b.inner { "up" } else { "down" },
+      "start": flat.plane.to_local(b.start),
+      "end": flat.plane.to_local(b.end),
+    })).collect::<Vec<_>>(),
+  }))
 }
 
 // ---------------------------------------------------------------- references
@@ -1083,6 +1378,9 @@ fn info(s: &Session) -> Value {
         "bbox": m.map(|m| [m.bbox_min.to_array(), m.bbox_max.to_array()]),
         "faces": b.faces().len(),
         "edges": b.edges().len(),
+        "sheet_metal": b.sheet.as_ref().map(|i| json!({
+          "rule": i.rule, "thickness": i.thickness, "bend_radius": i.bend_radius, "k_factor": i.k_factor, "flat": i.flat,
+        })),
       })
     })
     .collect();
@@ -1142,7 +1440,14 @@ fn export(s: &Session, p: &Value) -> CmdResult {
         bodies.iter().filter_map(|b| b.shape.tessellate(fine_tol(b)).ok().map(|m| (s.body_name(b.id), m))).collect();
       clf_kernel::write_obj(&meshes, &path)?
     }
-    o => return Err(CmdError::new(format!("unknown export format '.{o}' (step, stl, obj)"))),
+    "dxf" => {
+      let [b] = bodies.as_slice() else {
+        return Err(CmdError::new("DXF exports one sheet metal body's flat pattern; pass 'bodies': [id]"));
+      };
+      let flat = b.flat_pattern(None).map_err(CmdError::new)?;
+      std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?
+    }
+    o => return Err(CmdError::new(format!("unknown export format '.{o}' (step, stl, obj, dxf)"))),
   }
   Ok(json!({"path": path, "bodies": bodies.len()}))
 }

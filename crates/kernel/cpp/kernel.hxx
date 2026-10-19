@@ -41,6 +41,15 @@ std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, 
 std::unique_ptr<Shape> transform(const Shape &s, rust::Slice<const double> m);
 std::unique_ptr<Shape> mirror(const Shape &s, rust::Slice<const double> plane);
 std::unique_ptr<Shape> unify(const Shape &s);
+std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
+                              rust::Vec<double> &bends);
+std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face);
+std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs);
+std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine);
+std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed);
+std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> plane, double size);
+std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, rust::Slice<const double> plane,
+                             double angle);
 
 uint32_t solid_count(const Shape &s);
 std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i);

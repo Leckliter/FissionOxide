@@ -24,6 +24,15 @@ change a parameter and watch the whole history rebuild.
 - **Solid features.** Extrude (one side, symmetric, two sides, through all; new body, join,
   cut, intersect), revolve, fillet, chamfer, shell, box/cylinder/sphere/torus, offset
   construction planes, mirror, rectangular and circular patterns, move/rotate, combine.
+- **More solid features.** Loft (smooth or ruled, open or closed), sweep along a path of lines
+  and arcs, holes at sketch points (simple, counterbore, countersink, drill point, through all),
+  split body by a plane, draft.
+- **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
+  Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
+  Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
+  line, Convert to Sheet Metal for thin solids, Unfold in the timeline, and a flat pattern with
+  bend lines exported as DXF (also STEP/STL). The unfolder works on the B-rep, so holes and cuts
+  anywhere — even across bends — come out in the flat pattern.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Exchange.** STEP import/export, STL and OBJ export. Designs save as readable JSON
@@ -60,6 +69,19 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Edit a feature         | Double-click it in the timeline                             |
 | Undo / Redo / Save     | Ctrl+Z / Ctrl+Y / Ctrl+S                                    |
 | Fit view               | F6                                                          |
+
+## Sheet metal
+
+```sh
+clfusion-cli run examples/sheet_bracket.jsonl --save bracket.clf
+clfusion-cli exec bracket.clf '{"cmd": "sheet.flat_pattern", "path": "bracket-flat.dxf"}'
+```
+
+Sheet metal bodies are ordinary solids that carry their rule, so every other feature (holes,
+cuts, fillets, patterns) works on them. Bends are true cylinders: the flat length of a bend is
+`angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
+sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
+`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`.
 
 ## Headless CLI and scripting
 

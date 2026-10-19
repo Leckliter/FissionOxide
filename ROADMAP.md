@@ -12,9 +12,10 @@ roughly in the order it would pay off.
 | Sketch    | Trim/extend, sketch fillet/chamfer, offset, mirror and pattern in sketches   |
 | Sketch    | Project/include edges from bodies; intersect curves that cross mid-span      |
 | Sketch    | Splines, ellipses, text                                                      |
-| Features  | Sweep and loft; hole feature (counterbore/countersink, threads as cosmetic)  |
+| Features  | Sweep with guide rails / twist; loft rails; threads (cosmetic and modeled)   |
 | Features  | Extrude "to object" / "to face", taper angle, thin extrude                   |
-| Features  | Press-pull and face offset; draft; split body / split face                   |
+| Features  | Press-pull and face offset; split face; split body by a face                 |
+| Sheet     | Bend and corner reliefs; miter flange; rip; refold; flat pattern as a sketch |
 | Features  | Variable-radius and setback fillets; chamfer with two distances / angle      |
 | Selection | Window/box select, selection filters, select-other (cycle overlapping picks) |
 | UI        | Drag manipulators (arrows) for extrude distance and other values             |
@@ -25,7 +26,7 @@ roughly in the order it would pay off.
 
 - Components and assemblies with joints and motion
 - Drawings (2D views with dimensions; DXF/PDF output)
-- Sheet metal, T-spline/form modeling, surface workspace
+- T-spline/form modeling, surface workspace
 - Appearances/materials and a render workspace
 - MCP server so AI agents can drive the command set directly
 - Background regeneration so long timelines don't block the UI

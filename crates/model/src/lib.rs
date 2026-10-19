@@ -6,9 +6,12 @@
 //! per-feature status, the way Fusion's timeline turns red on a failing feature without stopping
 //! the features after it.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
+// `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod refs;
 pub mod regen;
+pub mod sheet;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +20,7 @@ pub use clf_kernel as kernel;
 pub use clf_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
 
-use clf_sketch::{CurveId, Sketch};
+use clf_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
 pub const FORMAT_VERSION: u32 = 1;
@@ -47,6 +50,10 @@ pub struct Design {
   /// Per-body display settings (visibility, colour), by body id.
   #[serde(default)]
   pub bodies: Vec<BodySettings>,
+  /// Sheet metal rules (material thickness, bend radius, K-factor). Sheet metal features name
+  /// one; the first is the default.
+  #[serde(default)]
+  pub sheet_metal_rules: Vec<SheetMetalRule>,
   #[serde(default)]
   next_id: u32,
 }
@@ -63,6 +70,28 @@ pub struct Parameter {
   pub kind: ParamKind,
   #[serde(default)]
   pub comment: String,
+}
+
+/// A sheet metal rule, as in Fusion: the material settings sheet metal features share.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SheetMetalRule {
+  pub name: String,
+  pub thickness: String,
+  /// Inside bend radius.
+  pub bend_radius: String,
+  /// Where the neutral layer sits, as a fraction of the thickness from the inside of a bend.
+  pub k_factor: String,
+}
+
+impl Default for SheetMetalRule {
+  fn default() -> Self {
+    SheetMetalRule {
+      name: "Default".into(),
+      thickness: "1 mm".into(),
+      bend_radius: "1 mm".into(),
+      k_factor: "0.44".into(),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -187,6 +216,37 @@ impl Extent {
   pub fn distance(d: impl Into<String>) -> Self {
     Extent { kind: ExtentKind::OneSide, distance: d.into(), distance2: zero(), flip: false }
   }
+}
+
+/// One loft section: a profile of a sketch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoftSection {
+  pub sketch: FeatureId,
+  /// A point inside the profile; `None` = the sketch's largest profile.
+  #[serde(default)]
+  pub profile: Option<[f64; 2]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HoleKind {
+  #[default]
+  Simple,
+  Counterbore,
+  Countersink,
+}
+
+/// Where an edge flange's bend sits relative to the picked edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BendPosition {
+  /// The bend starts at the edge; the sheet gets longer.
+  #[default]
+  Adjacent,
+  /// The flange's outside face lands on the edge (the sheet is trimmed back).
+  Inside,
+  /// The flange's inside face lands on the edge.
+  Outside,
 }
 
 /// Which bodies a body-level feature acts on.
@@ -323,6 +383,179 @@ pub enum FeatureKind {
   RemoveBodies {
     bodies: Vec<BodyId>,
   },
+  /// Solid through profiles of several sketches, in order.
+  Loft {
+    sections: Vec<LoftSection>,
+    /// Straight (ruled) faces between sections instead of smooth ones.
+    #[serde(default)]
+    ruled: bool,
+    /// Loop back to the first section.
+    #[serde(default)]
+    closed: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Sweeps profiles along a path (an open chain of lines and arcs in another sketch).
+  Sweep {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    path_sketch: FeatureId,
+    /// The path's curves; empty = every non-construction line and arc of the path sketch.
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Drilled holes at sketch points, into the material (against the sketch normal).
+  Hole {
+    sketch: FeatureId,
+    /// Hole centres; empty = every sketch point that isn't part of a curve.
+    #[serde(default)]
+    points: Vec<PointId>,
+    #[serde(default)]
+    kind: HoleKind,
+    diameter: String,
+    /// Depth of the full-diameter part; ignored when `through_all`.
+    #[serde(default = "zero")]
+    depth: String,
+    #[serde(default)]
+    through_all: bool,
+    /// Drill point angle (0 = flat bottom).
+    #[serde(default = "drill_point")]
+    tip_angle: String,
+    #[serde(default = "zero")]
+    head_diameter: String,
+    /// Counterbore depth.
+    #[serde(default = "zero")]
+    head_depth: String,
+    /// Countersink included angle.
+    #[serde(default = "countersink")]
+    head_angle: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Splits bodies in two along a plane.
+  SplitBody {
+    #[serde(default)]
+    bodies: BodySel,
+    plane: PlaneRef,
+  },
+  /// Tapers faces by an angle about a neutral plane (pulling along its normal).
+  Draft {
+    faces: Vec<FaceRef>,
+    plane: PlaneRef,
+    angle: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Sheet metal flange from closed sketch profiles: a flat sheet of the rule's thickness.
+  Flange {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    /// Sheet metal rule name; empty = the design's default rule.
+    #[serde(default)]
+    rule: String,
+    /// Thicken against the sketch normal instead of along it.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Sheet metal contour flange: an open sketch path (lines and arcs) becomes one face of a bent
+  /// sheet; sharp corners get the rule's bend radius. The section is extruded `distance` along
+  /// the sketch normal.
+  ContourFlange {
+    sketch: FeatureId,
+    /// The path's curves; empty = every non-construction line and arc in the sketch.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    distance: String,
+    #[serde(default)]
+    symmetric: bool,
+    /// Put the material on the right of the path (default left).
+    #[serde(default)]
+    flip: bool,
+    /// Extrude against the sketch normal.
+    #[serde(default)]
+    flip_direction: bool,
+    #[serde(default)]
+    rule: String,
+  },
+  /// Sheet metal edge flange: a wall bent up from straight edges of a sheet.
+  EdgeFlange {
+    edges: Vec<EdgeRef>,
+    /// Flange height, measured from the outside of the sheet to the tip.
+    height: String,
+    #[serde(default = "right_angle")]
+    angle: String,
+    /// Bend towards the far side of the sheet instead of the side the edge is on.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    position: BendPosition,
+    /// Shorten the flange from the edge's start / end.
+    #[serde(default = "zero")]
+    offset_start: String,
+    #[serde(default = "zero")]
+    offset_end: String,
+  },
+  /// Sheet metal hem: the edge folded back 180° onto the sheet.
+  Hem {
+    edges: Vec<EdgeRef>,
+    /// From the outside of the fold to the end of the hem.
+    length: String,
+    /// Space between the sheet and the folded-back part.
+    gap: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Sheet metal bend along a sketch line drawn on a flat face of the sheet. The bend is
+  /// centred on the line; the side the line's left normal points to swings up (towards the
+  /// sketch's side of the sheet) unless flipped.
+  Bend {
+    sketch: FeatureId,
+    line: CurveId,
+    angle: String,
+    /// Bend away from the sketch side.
+    #[serde(default)]
+    flip: bool,
+    /// Swing the other side of the line.
+    #[serde(default)]
+    flip_side: bool,
+  },
+  /// Turns a thin solid into sheet metal (thickness is measured from the body).
+  ConvertToSheetMetal {
+    body: BodyId,
+    /// The face that defines the sheet's side; default the largest planar face.
+    #[serde(default)]
+    face: Option<FaceRef>,
+    #[serde(default)]
+    rule: String,
+  },
+  /// Flattens a sheet metal body onto its stationary face.
+  Unfold {
+    body: BodyId,
+    /// Stationary face; default the largest planar face.
+    #[serde(default)]
+    face: Option<FaceRef>,
+    /// Keep the folded body and add the flat pattern as a new body.
+    #[serde(default)]
+    keep_folded: bool,
+  },
+}
+
+fn drill_point() -> String {
+  "118 deg".to_string()
+}
+
+fn countersink() -> String {
+  "90 deg".to_string()
+}
+
+fn right_angle() -> String {
+  "90 deg".to_string()
 }
 
 fn one() -> String {
@@ -359,6 +592,28 @@ impl FeatureKind {
       FeatureKind::Combine { .. } => "Combine",
       FeatureKind::Import { .. } => "Import",
       FeatureKind::RemoveBodies { .. } => "Remove",
+      FeatureKind::Loft { .. } => "Loft",
+      FeatureKind::Sweep { .. } => "Sweep",
+      FeatureKind::Hole { .. } => "Hole",
+      FeatureKind::SplitBody { .. } => "Split",
+      FeatureKind::Draft { .. } => "Draft",
+      FeatureKind::Flange { .. } => "Flange",
+      FeatureKind::ContourFlange { .. } => "ContourFlange",
+      FeatureKind::EdgeFlange { .. } => "EdgeFlange",
+      FeatureKind::Hem { .. } => "Hem",
+      FeatureKind::Bend { .. } => "Bend",
+      FeatureKind::ConvertToSheetMetal { .. } => "ConvertToSheetMetal",
+      FeatureKind::Unfold { .. } => "Unfold",
+    }
+  }
+
+  /// The sheet metal rule a feature names, if it is a sheet metal feature with one.
+  pub fn sheet_rule(&self) -> Option<&str> {
+    match self {
+      FeatureKind::Flange { rule, .. }
+      | FeatureKind::ContourFlange { rule, .. }
+      | FeatureKind::ConvertToSheetMetal { rule, .. } => Some(rule.as_str()),
+      _ => None,
     }
   }
 
@@ -370,7 +625,15 @@ impl FeatureKind {
     };
     match self {
       FeatureKind::Sketch { plane, .. } => plane_dep(plane),
-      FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
+      FeatureKind::Extrude { sketch, .. }
+      | FeatureKind::Revolve { sketch, .. }
+      | FeatureKind::Flange { sketch, .. }
+      | FeatureKind::ContourFlange { sketch, .. }
+      | FeatureKind::Hole { sketch, .. }
+      | FeatureKind::Bend { sketch, .. } => vec![*sketch],
+      FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.sketch).collect(),
+      FeatureKind::Sweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
       _ => vec![],
@@ -415,6 +678,7 @@ impl Design {
       features: Vec::new(),
       marker: None,
       bodies: Vec::new(),
+      sheet_metal_rules: Vec::new(),
       next_id: 1,
     }
   }
@@ -581,6 +845,12 @@ impl Design {
         return Err(DesignError::InUse(name.to_string(), f.name.clone()));
       }
     }
+    for r in &self.sheet_metal_rules {
+      if [&r.thickness, &r.bend_radius, &r.k_factor].iter().any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
+      {
+        return Err(DesignError::InUse(name.to_string(), format!("sheet metal rule {}", r.name)));
+      }
+    }
     self.parameters.retain(|p| p.name != name);
     Ok(())
   }
@@ -601,6 +871,55 @@ impl Design {
     for f in &mut self.features {
       for_each_expr(&mut f.kind, &mut |e| *e = rename_ident(e, old, new));
     }
+    for r in &mut self.sheet_metal_rules {
+      for e in [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor] {
+        *e = rename_ident(e, old, new);
+      }
+    }
+    Ok(())
+  }
+
+  // ---- sheet metal rules ----
+
+  fn clone_rules(&self) -> Rules {
+    Rules { list: self.sheet_metal_rules.clone() }
+  }
+
+  /// The rule a sheet metal feature uses: by name, or the default (the first rule, else the
+  /// built-in one) for an empty name.
+  pub fn sheet_rule(&self, name: &str) -> Option<SheetMetalRule> {
+    self.clone_rules().get(name).ok()
+  }
+
+  /// Adds a rule or replaces the one with the same name.
+  pub fn set_sheet_rule(&mut self, rule: SheetMetalRule) -> Result<(), DesignError> {
+    if rule.name.trim().is_empty() {
+      return Err(DesignError::BadParameterName(rule.name));
+    }
+    match self.sheet_metal_rules.iter_mut().find(|r| r.name == rule.name) {
+      Some(r) => *r = rule,
+      None => {
+        if self.sheet_metal_rules.len() >= MAX_PARAMETERS {
+          return Err(DesignError::TooMany);
+        }
+        self.sheet_metal_rules.push(rule)
+      }
+    }
+    Ok(())
+  }
+
+  /// Removes a rule unless a feature names it.
+  pub fn remove_sheet_rule(&mut self, name: &str) -> Result<(), DesignError> {
+    if !self.sheet_metal_rules.iter().any(|r| r.name == name) {
+      return Err(DesignError::NoParameter(name.to_string()));
+    }
+    let is_default = self.sheet_metal_rules.first().is_some_and(|r| r.name == name);
+    for f in &self.features {
+      if f.kind.sheet_rule().is_some_and(|r| r == name || (r.is_empty() && is_default)) {
+        return Err(DesignError::InUse(name.to_string(), f.name.clone()));
+      }
+    }
+    self.sheet_metal_rules.retain(|r| r.name != name);
     Ok(())
   }
 
@@ -648,6 +967,24 @@ impl Design {
     }
     let s = std::fs::read_to_string(path).map_err(|e| DesignError::File(e.to_string()))?;
     Design::from_json(&s)
+  }
+}
+
+/// The rules a regeneration resolves sheet metal features against.
+pub(crate) struct Rules {
+  list: Vec<SheetMetalRule>,
+}
+
+impl Rules {
+  pub(crate) fn get(&self, name: &str) -> Result<SheetMetalRule, String> {
+    if name.is_empty() {
+      return Ok(self.list.first().cloned().unwrap_or_default());
+    }
+    match self.list.iter().find(|r| r.name == name) {
+      Some(r) => Ok(r.clone()),
+      None if name == "Default" && self.list.is_empty() => Ok(SheetMetalRule::default()),
+      None => Err(format!("there is no sheet metal rule '{name}'")),
+    }
   }
 }
 
@@ -702,10 +1039,31 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
       f(angle);
     }
+    FeatureKind::ContourFlange { distance, .. } => f(distance),
+    FeatureKind::EdgeFlange { height, angle, offset_start, offset_end, .. } => {
+      f(height);
+      f(angle);
+      f(offset_start);
+      f(offset_end);
+    }
+    FeatureKind::Hole { diameter, depth, tip_angle, head_diameter, head_depth, head_angle, .. } => {
+      for e in [diameter, depth, tip_angle, head_diameter, head_depth, head_angle] {
+        f(e);
+      }
+    }
+    FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
+    FeatureKind::Hem { length, gap, .. } => {
+      f(length);
+      f(gap);
+    }
+    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } | FeatureKind::SplitBody { .. } => {}
     FeatureKind::Mirror { .. }
     | FeatureKind::Combine { .. }
     | FeatureKind::Import { .. }
-    | FeatureKind::RemoveBodies { .. } => {}
+    | FeatureKind::RemoveBodies { .. }
+    | FeatureKind::Flange { .. }
+    | FeatureKind::ConvertToSheetMetal { .. }
+    | FeatureKind::Unfold { .. } => {}
   }
 }
 

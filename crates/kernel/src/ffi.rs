@@ -78,6 +78,13 @@ pub(crate) mod ffi {
     fn transform(s: &Shape, m: &[f64]) -> Result<UniquePtr<Shape>>;
     fn mirror(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn unfold(s: &Shape, face: u32, thickness: f64, k_factor: f64, bends: &mut Vec<f64>) -> Result<UniquePtr<Shape>>;
+    fn face_at_index(s: &Shape, face: u32) -> Result<UniquePtr<Shape>>;
+    fn make_wire(segs: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn make_pipe(face: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
+    fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
+    fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
+    fn draft(s: &Shape, faces: &[u32], plane: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
 
     fn solid_count(s: &Shape) -> u32;
     fn solid_at(s: &Shape, i: u32) -> Result<UniquePtr<Shape>>;

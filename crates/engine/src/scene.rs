@@ -178,7 +178,13 @@ impl SceneBuilder {
       let Some(r) = s.model.sketches.get(&f.id) else { continue };
       let is_edit = s.edit_sketch == Some(f.id);
       let consumed = s.design.features.iter().take(active).any(|g| match &g.kind {
-        FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => *sketch == f.id,
+        FeatureKind::Extrude { sketch, .. }
+        | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::Flange { sketch, .. }
+        | FeatureKind::ContourFlange { sketch, .. }
+        | FeatureKind::Hole { sketch, .. } => *sketch == f.id,
+        FeatureKind::Sweep { sketch, path_sketch, .. } => *sketch == f.id || *path_sketch == f.id,
+        FeatureKind::Loft { sections, .. } => sections.iter().any(|s| s.sketch == f.id),
         _ => false,
       });
       let show = !f.suppressed && (is_edit || !consumed || opts.show_profiles_of.contains(&f.id));
