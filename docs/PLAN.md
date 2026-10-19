@@ -103,7 +103,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
 | 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows |
-| 0 | Robustness fuzzing | not started |
+| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds |
 
 ### Reference part failures to fix
 
