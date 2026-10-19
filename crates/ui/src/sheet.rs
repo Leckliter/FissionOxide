@@ -19,13 +19,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     return;
   };
   let sheets = d.sheet_list();
-  let sheet = match app.s.drawing_sheet {
+  let on = match app.s.drawing_sheet {
     Some((dr, sh)) if dr == id && d.has_sheet(sh) => sh,
     _ => sheets[0].id,
   };
-  let key = (app.s.revision, id, sheet);
+  let key = (app.s.revision, id, on);
   if app.sheet_cache.as_ref().map(|c| c.0) != Some(key) {
-    let plot = fox_engine::model::drawing::render_sheet(d, &app.s.design, &app.s.model, sheet);
+    let plot = fox_engine::model::drawing::render_sheet(d, &app.s.design, &app.s.model, on);
     app.sheet_cache = Some((key, plot));
   }
   let (w, h) = match app.sheet_cache.as_ref().map(|c| &c.1) {
@@ -82,7 +82,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     None => {}
   }
 
-  tabs(app, ui, rect, id, &sheets, sheet);
+  tabs(app, ui, rect, id, &sheets, on);
 }
 
 /// The sheet tabs under the drawing, as Fusion's: click one to show it, right-click to delete

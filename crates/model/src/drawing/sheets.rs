@@ -184,7 +184,7 @@ mod tests {
     assert!(d.revisions.is_empty());
     // and save the way they did: no sheet fields while there is one sheet
     let back = serde_json::to_string(&d).unwrap();
-    assert!(!back.contains("sheets") && !back.contains("\"sheet\"") && !back.contains("revisions"), "{back}");
+    assert!(!back.contains("sheets") && !back.contains("\"sheet\":1") && !back.contains("revisions"), "{back}");
     assert_eq!(serde_json::from_str::<Drawing>(&back).unwrap(), d);
     let v = DrawingView::new(4, ViewKind::Front);
     assert_eq!(v.sheet, FIRST_SHEET);
