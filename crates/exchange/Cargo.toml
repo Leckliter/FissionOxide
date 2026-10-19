@@ -1,6 +1,6 @@
 [package]
-name = "clf-exchange"
-description = "File formats: STL, OBJ, PLY, 3MF, glTF, USDZ meshes, DXF and SVG sketches, .clfz archives, Fusion archive inspection"
+name = "fox-exchange"
+description = "File formats: STL, OBJ, PLY, 3MF, glTF, USDZ meshes, DXF and SVG sketches, .foxz archives, Fusion archive inspection"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

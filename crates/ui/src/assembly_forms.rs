@@ -73,7 +73,7 @@ pub static CONTACT_SET: Form = Form {
 
 #[cfg(test)]
 mod tests {
-  use clf_engine::Session;
+  use fox_engine::Session;
   use serde_json::{Value, json};
 
   use super::*;
@@ -108,7 +108,7 @@ mod tests {
     run_form(&mut s, &CONTACT_SET, &[("bodies", json!([bodies[1], bodies[2]]))]);
     assert_eq!(s.design.contact_sets.len(), 1);
     for (b, z) in [(bodies[1], [0, 0, 1]), (bodies[2], [1, 0, 0])] {
-      let c = s.design.component_of(clf_engine::model::BodyId(b)).unwrap().id.0;
+      let c = s.design.component_of(fox_engine::model::BodyId(b)).unwrap().id.0;
       let j = json!({"moving": c, "moving_origin": {"at": [0, 0, 0]}, "fixed_origin": {"at": [0, 0, 0], "z": z}, "kind": "slider", "as_built": true});
       s.execute("joint", &j).unwrap();
     }

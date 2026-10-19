@@ -351,145 +351,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
-name = "clf-engine"
-version = "0.1.0"
-dependencies = [
- "clf-exchange",
- "clf-expr",
- "clf-kernel",
- "clf-model",
- "clf-render",
- "clf-sketch",
- "clf-store",
- "clf-trace",
- "image",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "zip",
-]
-
-[[package]]
-name = "clf-exchange"
-version = "0.1.0"
-dependencies = [
- "quick-xml 0.42.0",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "zip",
-]
-
-[[package]]
-name = "clf-expr"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "clf-kernel"
-version = "0.1.0"
-dependencies = [
- "clf-sketch",
- "cxx",
- "cxx-build",
- "glam",
- "log",
- "occt-sys",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "clf-model"
-version = "0.1.0"
-dependencies = [
- "clf-expr",
- "clf-kernel",
- "clf-sketch",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "clf-render"
-version = "0.1.0"
-dependencies = [
- "glam",
- "image",
- "serde",
-]
-
-[[package]]
-name = "clf-sketch"
-version = "0.1.0"
-dependencies = [
- "clf-expr",
- "epaint_default_fonts",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "ttf-parser",
-]
-
-[[package]]
-name = "clf-store"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "clf-trace"
-version = "0.1.0"
-dependencies = [
- "image",
- "quick-xml 0.42.0",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "clf-ui"
-version = "0.1.0"
-dependencies = [
- "clf-engine",
- "eframe",
- "egui",
- "image",
- "log",
- "rfd",
- "serde_json",
-]
-
-[[package]]
-name = "clfusion"
-version = "0.1.0"
-dependencies = [
- "clf-ui",
- "eframe",
- "env_logger",
- "log",
-]
-
-[[package]]
-name = "clfusion-cli"
-version = "0.1.0"
-dependencies = [
- "clf-engine",
- "env_logger",
- "log",
- "serde_json",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1006,6 +867,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
+name = "fissionoxide"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "env_logger",
+ "fox-ui",
+ "log",
+]
+
+[[package]]
+name = "fissionoxide-cli"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "fox-engine",
+ "log",
+ "serde_json",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1057,6 +938,125 @@ name = "foreign-types-shared"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
+
+[[package]]
+name = "fox-engine"
+version = "0.1.0"
+dependencies = [
+ "fox-exchange",
+ "fox-expr",
+ "fox-kernel",
+ "fox-model",
+ "fox-render",
+ "fox-sketch",
+ "fox-store",
+ "fox-trace",
+ "image",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zip",
+]
+
+[[package]]
+name = "fox-exchange"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.42.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zip",
+]
+
+[[package]]
+name = "fox-expr"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-kernel"
+version = "0.1.0"
+dependencies = [
+ "cxx",
+ "cxx-build",
+ "fox-sketch",
+ "glam",
+ "log",
+ "occt-sys",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-model"
+version = "0.1.0"
+dependencies = [
+ "fox-expr",
+ "fox-kernel",
+ "fox-sketch",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-render"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "image",
+ "serde",
+]
+
+[[package]]
+name = "fox-sketch"
+version = "0.1.0"
+dependencies = [
+ "epaint_default_fonts",
+ "fox-expr",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ttf-parser",
+]
+
+[[package]]
+name = "fox-store"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-trace"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "quick-xml 0.42.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-ui"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "fox-engine",
+ "image",
+ "log",
+ "rfd",
+ "serde_json",
+]
 
 [[package]]
 name = "futures-core"

@@ -17,7 +17,7 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_TOOLCHAIN: 1.97.0
   # Crates that build without OpenCASCADE: they give feedback in a couple of minutes.
-  PURE_CRATES: -p clf-expr -p clf-sketch -p clf-exchange -p clf-store -p clf-render -p clf-trace
+  PURE_CRATES: -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-trace
 
 jobs:
   fast:
@@ -76,7 +76,7 @@ jobs:
       - name: Build OCCT
         if: steps.occt-cache.outputs.cache-hit != 'true'
         run: |
-          cargo build -p clf-kernel
+          cargo build -p fox-kernel
           mkdir -p "${{ steps.occt.outputs.dir }}"
           cp -r target/OCCT/include target/OCCT/lib "${{ steps.occt.outputs.dir }}/"
           rm -rf target/OCCT
@@ -87,6 +87,6 @@ jobs:
           path: ${{ steps.occt.outputs.dir }}
           key: ${{ steps.occt.outputs.key }}
       # From here on the kernel links against the cached install and never builds OCCT.
-      - run: echo "CLF_OCCT_DIR=${{ steps.occt.outputs.dir }}" >> "$GITHUB_ENV"
+      - run: echo "FOX_OCCT_DIR=${{ steps.occt.outputs.dir }}" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

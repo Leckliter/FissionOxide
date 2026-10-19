@@ -1,10 +1,10 @@
 //! Commands for the second batch of solid features: emboss/deboss, boundary fill and replace
 //! face, and the path references (guide rails, loft rails and centre lines) sweep and loft take.
 
-use clf_kernel::Shape;
-use clf_kernel::glam::DVec3;
-use clf_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
-use clf_sketch::CurveId;
+use fox_kernel::Shape;
+use fox_kernel::glam::DVec3;
+use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
+use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
 use crate::commands::{add_feature, face_ref, ids, operation, plane_ref, profile_points, req_expr, sketch_for_feature};
@@ -127,7 +127,7 @@ fn fill_tools(s: &Session, p: &Value) -> Result<(Vec<BodyId>, Vec<PlaneRef>), Cm
 
 /// The cells the tools bound, each with a point inside it (to pass as `cells`) and its volume.
 fn cells(s: &Session, tools: &[BodyId], planes: &[PlaneRef]) -> CmdResult {
-  let all = clf_model::regen::boundary_cells(&s.model, tools, planes).map_err(CmdError::new)?;
+  let all = fox_model::regen::boundary_cells(&s.model, tools, planes).map_err(CmdError::new)?;
   let mut out = Vec::new();
   for (i, c) in all.iter().enumerate() {
     let mp = c.mass().map_err(|e| CmdError::new(e.to_string()))?;
@@ -139,7 +139,7 @@ fn cells(s: &Session, tools: &[BodyId], planes: &[PlaneRef]) -> CmdResult {
 
 /// A point inside a solid: its centre of mass, or a probe of its bounding box when that lies outside.
 fn inner_point(s: &Shape, com: DVec3, lo: DVec3, hi: DVec3) -> DVec3 {
-  let inside = |p: DVec3| s.classify(p).is_ok_and(|w| w == clf_kernel::Inside::In);
+  let inside = |p: DVec3| s.classify(p).is_ok_and(|w| w == fox_kernel::Inside::In);
   if inside(com) {
     return com;
   }

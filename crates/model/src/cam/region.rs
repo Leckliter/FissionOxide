@@ -1,7 +1,7 @@
 //! 2D helpers for toolpaths: polygon regions with exact distances to their boundary, scalar
 //! grids, a Euclidean distance transform and iso-contours (marching squares).
 
-use clf_kernel::glam::{DVec2, DVec3};
+use fox_kernel::glam::{DVec2, DVec3};
 
 /// A planar region in XY bounded by closed loops (an outer loop and holes; inside = even-odd).
 #[derive(Debug, Clone)]

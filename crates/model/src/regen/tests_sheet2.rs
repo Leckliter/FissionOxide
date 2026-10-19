@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::*;
-use clf_kernel::glam::DVec3;
-use clf_sketch::{PtSpec, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_sketch::{PtSpec, Sketch};
 use std::f64::consts::PI;
 
 const XY: PlaneRef = PlaneRef::Origin { plane: OriginPlane::Xy };

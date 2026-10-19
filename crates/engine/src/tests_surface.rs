@@ -127,7 +127,7 @@ fn trim_with_bodies() {
   // keep points pick pieces instead
   run(&mut s, "feature.edit", json!({"feature": f, "set": {"flip": false, "keep": [[8, 0, 5]]}}));
   assert!(close(area(&s, w), 300.0, 1e-6), "{}", area(&s, w));
-  assert!(s.model.body(clf_model::BodyId(tool)).is_some(), "the tool stays");
+  assert!(s.model.body(fox_model::BodyId(tool)).is_some(), "the tool stays");
   // the tool can't trim itself
   assert!(s.execute("surface.trim", &json!({"bodies": [tool], "tool": {"body": tool}})).is_err());
 
@@ -213,7 +213,7 @@ fn variable_offset() {
   // the per-face distance is an expression like any other: it follows a parameter
   run(&mut s, "param.add", json!({"name": "gap", "expr": "4 mm"}));
   let f = s.design.features.last().unwrap().id.0;
-  let mut kind = serde_json::to_value(&s.design.feature(clf_model::FeatureId(f)).unwrap().kind).unwrap();
+  let mut kind = serde_json::to_value(&s.design.feature(fox_model::FeatureId(f)).unwrap().kind).unwrap();
   kind["face_distances"][0]["distance"] = json!("gap");
   run(&mut s, "feature.edit", json!({"feature": f, "set": {"face_distances": kind["face_distances"]}}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());

@@ -3,7 +3,7 @@
 //! heightfield ([`super::sim`]) and each pass of the pocket is kept only where material still
 //! stands under the tool.
 
-use clf_kernel::glam::DVec3;
+use fox_kernel::glam::DVec3;
 
 use super::sim::{self, Heightfield};
 use super::{Entry, Operation, Path, Setup, Tool, Toolpath, oriented};

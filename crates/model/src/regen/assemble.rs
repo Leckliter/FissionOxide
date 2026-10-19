@@ -8,8 +8,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use clf_kernel::Shape;
-use clf_kernel::glam::{DMat4, DVec3};
+use fox_kernel::Shape;
+use fox_kernel::glam::{DMat4, DVec3};
 
 use super::{Ctx, FResult, ke};
 use crate::assembly::{self, MotionAxis};
@@ -84,8 +84,8 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
     })
   };
   let eval = |e: &str, angle: bool| {
-    let kind = if angle { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
-    clf_expr::eval(e, kind, params).map_err(|err| format!("'{e}': {err}"))
+    let kind = if angle { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
+    fox_expr::eval(e, kind, params).map_err(|err| format!("'{e}': {err}"))
   };
   // follower (joint, motion) → link
   let mut links: BTreeMap<(FeatureId, MotionAxis), Link> = BTreeMap::new();

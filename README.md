@@ -1,10 +1,15 @@
-# CLFusion
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
+    <img src="assets/brand/wordmark-light.svg" alt="FissionOxide" height="72">
+  </picture>
+</h1>
 
 A parametric 3D CAD app in the spirit of Autodesk Fusion 360, written in Rust on the
 OpenCASCADE kernel. Sketch, constrain, dimension, extrude and fillet your way to a part, then
 change a parameter and watch the whole history rebuild.
 
-![CLFusion with a parametric L-bracket open](docs/images/clfusion-bracket.png)
+![FissionOxide with a parametric L-bracket open](docs/images/fissionoxide-bracket.png)
 
 ## What works today
 
@@ -108,8 +113,8 @@ change a parameter and watch the whole history rebuild.
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
   export glTF (`.glb`) and USDZ too. Opening a STEP or mesh makes a new design from it; meshes
-  become faceted bodies you can cut and fillet. Designs are readable JSON (`.clf`) or a packed
-  archive with thumbnail and version history (`.clfz`, CLFusion's `.f3d`/`.f3z`). See
+  become faceted bodies you can cut and fillet. Designs are readable JSON (`.fox`) or a packed
+  archive with thumbnail and version history (`.foxz`, FissionOxide's `.f3d`/`.f3z`). See
   [File formats](#file-formats).
 - **Data panel with version history.** Every save is a new version in a project, never an
   overwrite: open or compare any old version, promote it back to latest, mark milestones,
@@ -121,7 +126,7 @@ change a parameter and watch the whole history rebuild.
   closed by construction — every shape is a profile, ready to extrude, flange or cut. Colour
   mode traces each of N colours on its own. See [Image tracing](#image-tracing).
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
-  scripts all drive the same engine — and `clfusion-cli mcp` serves every command as a Model
+  scripts all drive the same engine — and `fissionoxide-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
 
 ## Build and run
@@ -130,11 +135,11 @@ You need Rust (stable), CMake and a C++17 compiler. The first build compiles Ope
 from source into `target/OCCT` (about 20 minutes on 4 cores); later builds reuse it.
 
 ```sh
-cargo run --release -p clfusion                         # the app
-cargo run --release -p clfusion -- examples/bracket.clf # open a design
+cargo run --release -p fissionoxide                         # the app
+cargo run --release -p fissionoxide -- examples/bracket.fox # open a design
 ```
 
-Set `CLF_OCCT_DIR` to an existing OCCT 7.8 install (`include/` and `lib/`, static libraries)
+Set `FOX_OCCT_DIR` to an existing OCCT 7.8 install (`include/` and `lib/`, static libraries)
 to skip the source build.
 
 On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa/OpenGL).
@@ -179,7 +184,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 ## Sketch text and blends
 
 ```sh
-clfusion-cli run examples/name_plate.jsonl --save plate.clf --png plate.png
+fissionoxide-cli run examples/name_plate.jsonl --save plate.fox --png plate.png
 ```
 
 A plate outlined by two lines joined with G2 blend curves, with raised text that is edited
@@ -191,8 +196,8 @@ exploded text open unchanged.
 ## Sheet metal
 
 ```sh
-clfusion-cli run examples/sheet_bracket.jsonl --save bracket.clf
-clfusion-cli exec bracket.clf '{"cmd": "sheet.flat_pattern", "path": "bracket-flat.dxf"}'
+fissionoxide-cli run examples/sheet_bracket.jsonl --save bracket.fox
+fissionoxide-cli exec bracket.fox '{"cmd": "sheet.flat_pattern", "path": "bracket-flat.dxf"}'
 ```
 
 Sheet metal bodies are ordinary solids that carry their rule, so every other feature (holes,
@@ -204,7 +209,7 @@ outline (and the bend lines, as construction lines) into a sketch on the station
 XY at the origin, to dimension, extrude or export.
 
 ```sh
-clfusion-cli run examples/sheet_hopper.jsonl --save hopper.clf
+fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
 ```
 
 - **Lofted flange** (`sheet.lofted_flange`): a sheet between two sketch profiles, both closed or
@@ -226,9 +231,9 @@ clfusion-cli run examples/sheet_hopper.jsonl --save hopper.clf
 ## Assemblies and drawings
 
 ```sh
-clfusion-cli run examples/arm_assembly.jsonl --save arm.clf
-clfusion-cli exec arm.clf '{"cmd": "param.set", "name": "swing", "expr": "-45 deg"}' --save arm.clf
-clfusion-cli exec arm.clf '{"cmd": "drawing.export", "path": "arm.pdf"}'
+fissionoxide-cli run examples/arm_assembly.jsonl --save arm.fox
+fissionoxide-cli exec arm.fox '{"cmd": "param.set", "name": "swing", "expr": "-45 deg"}' --save arm.fox
+fissionoxide-cli exec arm.fox '{"cmd": "drawing.export", "path": "arm.pdf"}'
 ```
 
 Group bodies into components, then joint them: a joint origin is a face (its centre and normal),
@@ -257,9 +262,9 @@ Drawings annotate model points in a view, so annotations move with their view an
 parameter changes:
 
 ```sh
-clfusion-cli run examples/link_bar_drawing.jsonl --save link_bar.clf
-clfusion-cli exec link_bar.clf '{"cmd": "param.set", "name": "len", "expr": "600"}' --save link_bar.clf
-clfusion-cli exec link_bar.clf '{"cmd": "drawing.export", "path": "link_bar.dxf"}'
+fissionoxide-cli run examples/link_bar_drawing.jsonl --save link_bar.fox
+fissionoxide-cli exec link_bar.fox '{"cmd": "param.set", "name": "len", "expr": "600"}' --save link_bar.fox
+fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.dxf"}'
 ```
 
 - **Broken views** (`drawing.break`) leave a stretch of a view out, between two break lines a
@@ -278,8 +283,8 @@ clfusion-cli exec link_bar.clf '{"cmd": "drawing.export", "path": "link_bar.dxf"
 
 | Format                          | Open / insert | Export | Notes                                                           |
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
-| CLFusion design `.clf`          | ✓             | ✓      | The parametric design as JSON                                   |
-| CLFusion archive `.clfz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
+| FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
+| FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
 | STEP `.step` `.stp`             | ✓             | ✓      | AP214 solids; surface-only files are sewn into shells/solids    |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
@@ -296,17 +301,17 @@ box STL turns into a six-faced box again.
 
 **About Fusion's `.f3d`/`.f3z`.** They are zip archives, but the geometry inside is Autodesk
 ShapeManager B-rep in an undocumented binary encoding that no open-source tool can read, and no
-other program can write a file Fusion would accept. CLFusion therefore does not pretend to:
+other program can write a file Fusion would accept. FissionOxide therefore does not pretend to:
 uploading an `.f3d` to the data panel keeps the file (with versions) and shows its preview
 image; `inspect` lists what's inside; standard-format files packed inside it are imported. For
-the geometry, export STEP from Fusion (File → Export) and open that. CLFusion's own `.clfz`
+the geometry, export STEP from Fusion (File → Export) and open that. FissionOxide's own `.foxz`
 plays the `.f3d`/`.f3z` role: one file with the full parametric design and its history.
 
 ## Data panel: projects and versions
 
-The data panel (📂) is CLFusion's version of Fusion's: designs live in **projects** and
-**folders** in a local hub (`~/.local/share/clfusion` on Linux, `%APPDATA%\CLFusion` on
-Windows, `~/Library/Application Support/CLFusion` on macOS; set `CLF_DATA_DIR` to move it).
+The data panel (📂) is FissionOxide's version of Fusion's: designs live in **projects** and
+**folders** in a local hub (`~/.local/share/fissionoxide` on Linux, `%APPDATA%\FissionOxide` on
+Windows, `~/Library/Application Support/FissionOxide` on macOS; set `FOX_DATA_DIR` to move it).
 
 - **Save** (Ctrl+S) adds a version with an optional description and milestone name; the first
   save asks for a name and a project. Earlier versions are never overwritten.
@@ -319,7 +324,7 @@ Windows, `~/Library/Application Support/CLFusion` on macOS; set `CLF_DATA_DIR` t
   files (`.f3d`) are stored as they are.
 - **Recent**, **search** (names, version descriptions, milestones), the per-project
   **activity** feed, and a **trash** you can restore from.
-- **Download** any version in any export format, or as a `.clfz` with its history.
+- **Download** any version in any export format, or as a `.foxz` with its history.
 
 The hub is plain files: `hub.json` (the index, replaced atomically) and one immutable file per
 version, so the app and the CLI can use the same hub at the same time.
@@ -363,11 +368,11 @@ G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`
 or Mach3/4 (`.tap`), in mm or inches.
 
 ```sh
-clfusion-cli exec part.clf '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1, "post": "haas"}' --save part.clf
-clfusion-cli exec part.clf '{"cmd": "cam.adaptive", "floors": [{"point": [35, 25, 12]}], "tool_number": 3}' --save part.clf
-clfusion-cli exec part.clf '{"cmd": "cam.simulate"}'
-clfusion-cli exec part.clf '{"cmd": "cam.post", "path": "part.nc", "units": "inch"}'
-clfusion-cli run examples/milling.jsonl --save milled.clf   # a whole job, start to finish
+fissionoxide-cli exec part.fox '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1, "post": "haas"}' --save part.fox
+fissionoxide-cli exec part.fox '{"cmd": "cam.adaptive", "floors": [{"point": [35, 25, 12]}], "tool_number": 3}' --save part.fox
+fissionoxide-cli exec part.fox '{"cmd": "cam.simulate"}'
+fissionoxide-cli exec part.fox '{"cmd": "cam.post", "path": "part.nc", "units": "inch"}'
+fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, start to finish
 ```
 
 The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
@@ -377,34 +382,34 @@ before running it.
 ## Headless CLI and scripting
 
 ```sh
-clfusion-cli run examples/bracket.jsonl --save bracket.clf --export bracket.step --png bracket.png
-clfusion-cli info bracket.clf
-clfusion-cli exec bracket.clf '{"cmd": "param.set", "name": "width", "expr": "80"}' --save bracket.clf
-clfusion-cli export bracket.clf bracket.stl
-clfusion-cli render bracket.clf top.png --view top
-clfusion-cli commands        # every command with its parameters
-clfusion-cli formats         # every file format and what CLFusion can do with it
-clfusion-cli convert part.step part.3mf
-clfusion-cli inspect part.f3d
+fissionoxide-cli run examples/bracket.jsonl --save bracket.fox --export bracket.step --png bracket.png
+fissionoxide-cli info bracket.fox
+fissionoxide-cli exec bracket.fox '{"cmd": "param.set", "name": "width", "expr": "80"}' --save bracket.fox
+fissionoxide-cli export bracket.fox bracket.stl
+fissionoxide-cli render bracket.fox top.png --view top
+fissionoxide-cli commands        # every command with its parameters
+fissionoxide-cli formats         # every file format and what FissionOxide can do with it
+fissionoxide-cli convert part.step part.3mf
+fissionoxide-cli inspect part.f3d
 
 # the data hub (add --hub DIR to use another hub)
-clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
-clfusion-cli hub list
-clfusion-cli hub versions '{"item": "i3"}'
-clfusion-cli hub compare '{"item": "i3", "a": 1}'
-clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
+fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
+fissionoxide-cli hub list
+fissionoxide-cli hub versions '{"item": "i3"}'
+fissionoxide-cli hub compare '{"item": "i3", "a": 1}'
+fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
 ```
 
 ### AI agents (MCP)
 
-`clfusion-cli mcp [design.clf]` is a Model Context Protocol server on stdio. Each command is a
+`fissionoxide-cli mcp [design.fox]` is a Model Context Protocol server on stdio. Each command is a
 tool (dots become underscores: `sheet.edge_flange` → `sheet_edge_flange`); `view_render`
 without a `path` returns a PNG of the model, optionally sectioned (`section: {plane, offset, flip}`)
 or with an analysis (`analysis: zebra | draft | accessibility | curvature`). To use it from Claude
 Code:
 
 ```sh
-claude mcp add clfusion -- /path/to/clfusion-cli mcp
+claude mcp add fissionoxide -- /path/to/fissionoxide-cli mcp
 ```
 
 A script is one JSON command per line. Faces and edges can be named by a point on them, so
@@ -432,7 +437,7 @@ These exist so code driving the engine can inspect and tag what it builds (see
   perimeter and bounding curves, and the curves outside every profile; `samples` and `loops`
   add points along curves and profile boundaries.
 - `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
-  DXF, an SVG or a `.clf`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
+  DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
 - Anywhere a plane is taken, `{"origin": [x,y,z], "normal": [x,y,z]}` is a free plane.
 
@@ -441,7 +446,7 @@ These exist so code driving the engine can inspect and tag what it builds (see
 ![Trace Image previewing a traced badge over its picture](docs/images/trace-image.png)
 
 Trace Image works on the sketch being edited (opening or dropping a picture starts a sketch on
-the XY plane for it). The tracer (`clf-trace`) thresholds the picture (automatically, or at a
+the XY plane for it). The tracer (`fox-trace`) thresholds the picture (automatically, or at a
 level you set; or reduces it to N colours), drops specks and fills pinholes, follows the pixel
 outlines so that no two outlines ever touch, then fits lines, arcs, circles and cubic splines
 within the *Detail* tolerance while keeping sharp corners sharp. Each outline is checked for
@@ -464,18 +469,18 @@ pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 
 | Crate               | Role                                                                   |
 |---------------------|------------------------------------------------------------------------|
-| `clf-expr`          | Unit-aware expressions and parameter evaluation                        |
-| `clf-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
-| `clf-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
-| `clf-model`         | The design document, feature timeline, regeneration and references     |
-| `clf-exchange`      | Mesh formats, DXF, SVG, `.clfz` archives, Fusion archive inspection    |
-| `clf-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
-| `clf-store`         | The data hub: projects, folders, items, versions, activity, trash      |
-| `clf-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
-| `clf-engine`        | Session, undo/redo, the JSON command set, scene building               |
-| `clf-ui`            | The egui desktop UI                                                    |
-| `apps/clfusion`     | Desktop app                                                            |
-| `apps/clfusion-cli` | Headless runner, exporter and renderer                                 |
+| `fox-expr`          | Unit-aware expressions and parameter evaluation                        |
+| `fox-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
+| `fox-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
+| `fox-model`         | The design document, feature timeline, regeneration and references     |
+| `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
+| `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
+| `fox-store`         | The data hub: projects, folders, items, versions, activity, trash      |
+| `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
+| `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
+| `fox-ui`            | The egui desktop UI                                                    |
+| `apps/fissionoxide`     | Desktop app                                                            |
+| `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).
@@ -483,9 +488,23 @@ OCCT handles them, plus fillets, shells and STEP. The bridge (`crates/kernel/cpp
 every OCCT exception, so a failed fillet shows as a red timeline feature and never crashes
 the app. The stock `opencascade` crate aborts the process when a fillet fails.
 
+## Brand
+
+FissionOxide was called CLFusion; `fox` is its short name in code (crates `fox-*`, the C++
+namespace, `FOX_*` environment variables). Designs saved as `.clf`/`.clfz` before the rename still
+open, and a data hub in the old `CLFusion` data directory moves to the new one on first start.
+
+The logo is in [`assets/brand`](assets/brand): the fox alone (`fox.svg`), the app icon on a dark or
+light tile (`icon.svg`, `icon-light.svg`, PNGs from 32 to 1024 px) and the wordmark, which follows
+the system theme (`wordmark.svg`) or is fixed for light or dark backgrounds. The fox's colours are
+the app's icon families: blue for solid modelling, orange for surfaces, amber for construction,
+green for inspecting, plus the purple and red accents. Every file, and the facets the app paints
+in its title bar (`crates/ui/src/logo.rs`), comes from `assets/brand/make_brand.py`; the wordmark
+is Inter Display Bold converted to outlines.
+
 ## Licence
 
-CLFusion's own code is MIT OR Apache-2.0. It links OpenCASCADE, which is LGPL-2.1 with the
+FissionOxide's own code is MIT OR Apache-2.0. It links OpenCASCADE, which is LGPL-2.1 with the
 OCCT exception; keep that in mind if you distribute binaries.
 
 See [ROADMAP.md](ROADMAP.md) for what's next.

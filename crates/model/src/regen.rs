@@ -8,9 +8,9 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 
-use clf_kernel::glam::{DMat4, DVec3};
-use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
-use clf_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
+use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
+use fox_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::ThinSide;
 use crate::assembly;
@@ -119,7 +119,7 @@ impl Body {
 pub struct SketchResult {
   pub plane: Plane,
   /// The solved sketch.
-  pub sketch: clf_sketch::Sketch,
+  pub sketch: fox_sketch::Sketch,
   pub profiles: Vec<Profile>,
   pub report: SolveReport,
   /// Dimensions whose expressions failed to evaluate.
@@ -349,7 +349,7 @@ fn eval_params(design: &Design) -> (HashMap<String, f64>, HashMap<String, String
     design.parameters.iter().map(|p| (p.name.clone(), p.expr.clone(), p.kind)).collect();
   let mut ok = HashMap::new();
   let mut err = HashMap::new();
-  for (k, v) in clf_expr::eval_parameters(&list) {
+  for (k, v) in fox_expr::eval_parameters(&list) {
     match v {
       Ok(v) => {
         ok.insert(k, v);
@@ -376,15 +376,15 @@ type FResult = Result<Option<String>, String>;
 
 impl Ctx<'_> {
   fn len(&self, e: &str) -> Result<f64, String> {
-    clf_expr::eval(e, clf_expr::Kind::Length, self.params).map_err(|err| format!("'{e}': {err}"))
+    fox_expr::eval(e, fox_expr::Kind::Length, self.params).map_err(|err| format!("'{e}': {err}"))
   }
 
   fn angle(&self, e: &str) -> Result<f64, String> {
-    clf_expr::eval(e, clf_expr::Kind::Angle, self.params).map_err(|err| format!("'{e}': {err}"))
+    fox_expr::eval(e, fox_expr::Kind::Angle, self.params).map_err(|err| format!("'{e}': {err}"))
   }
 
   fn count(&self, e: &str) -> Result<usize, String> {
-    let v = clf_expr::eval(e, clf_expr::Kind::Unitless, self.params).map_err(|err| format!("'{e}': {err}"))?;
+    let v = fox_expr::eval(e, fox_expr::Kind::Unitless, self.params).map_err(|err| format!("'{e}': {err}"))?;
     let n = v.round();
     if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
       return Err(format!("count must be between 1 and {MAX_INSTANCES}"));
@@ -438,7 +438,7 @@ impl Ctx<'_> {
               fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the target face could not be found")?;
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
-            if info.kind != clf_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
+            if info.kind != fox_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
               // a curved or tilted face: extrude through and trim to it
               let offset = self.len(&extent.distance)?;
               if (info.center - sk.plane.origin).dot(n) < 0.0 {
@@ -579,7 +579,7 @@ impl Ctx<'_> {
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
             let face = body.shape.face_shape(fid).map_err(ke)?;
             // flat faces move along their normal; curved ones are offset (a hole grows or shrinks)
-            let tool = if info.kind == clf_kernel::SurfaceKind::Plane {
+            let tool = if info.kind == fox_kernel::SurfaceKind::Plane {
               face.extrude(info.normal * dist).map_err(ke)?
             } else {
               face.thicken(dist).map_err(ke)?
@@ -853,12 +853,12 @@ impl Ctx<'_> {
         };
         let section = sheet::hole_section(r, deep, tip, head)?;
         let centres: Vec<[f64; 2]> = if points.is_empty() {
-          let used: Vec<clf_sketch::PointId> =
+          let used: Vec<fox_sketch::PointId> =
             sk.sketch.curves.iter().flat_map(|c| sk.sketch.curve_points(c.id)).collect();
           sk.sketch
             .points
             .iter()
-            .filter(|p| p.id != clf_sketch::ORIGIN && !used.contains(&p.id))
+            .filter(|p| p.id != fox_sketch::ORIGIN && !used.contains(&p.id))
             .map(|p| [p.x, p.y])
             .collect()
         } else {
@@ -1032,7 +1032,7 @@ impl Ctx<'_> {
             let b = &self.state.bodies[i];
             b.sheet.as_ref().is_some_and(|s| !s.flat)
               && b.faces().iter().any(|f| {
-                f.kind == clf_kernel::SurfaceKind::Plane
+                f.kind == fox_kernel::SurfaceKind::Plane
                   && f.normal.dot(n).abs() > 0.9999
                   && (f.origin - p0).dot(n).abs() < 1e-6
               })
@@ -1043,7 +1043,7 @@ impl Ctx<'_> {
         let (t, r) = (info.thickness, info.bend_radius);
         // is the material behind the sketch plane (−n) or in front of it?
         let behind = body.faces().iter().any(|f| {
-          f.kind == clf_kernel::SurfaceKind::Plane && f.normal.dot(n) > 0.9999 && (f.origin - p0).dot(n).abs() < 1e-6
+          f.kind == fox_kernel::SurfaceKind::Plane && f.normal.dot(n) > 0.9999 && (f.origin - p0).dot(n).abs() < 1e-6
         });
         let into = if behind { -n } else { n };
         let up = if *flip { into } else { -into };
@@ -1072,7 +1072,7 @@ impl Ctx<'_> {
         // revolve the cut faces at the start of the bend
         for f in fixed.iter() {
           for fi in f.faces().map_err(ke)? {
-            if fi.kind == clf_kernel::SurfaceKind::Plane
+            if fi.kind == fox_kernel::SurfaceKind::Plane
               && fi.normal.dot(side) > 0.9999
               && (fi.origin - start).dot(side).abs() < 1e-6
             {
@@ -1213,11 +1213,11 @@ impl Ctx<'_> {
             let eid = er.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("an edge could not be found")?;
             let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
             *er = EdgeRef::from_edge(bid, &e, body.faces());
-            let face = |id: u32| body.faces().iter().find(|f| f.id == id && f.kind == clf_kernel::SurfaceKind::Plane);
+            let face = |id: u32| body.faces().iter().find(|f| f.id == id && f.kind == fox_kernel::SurfaceKind::Plane);
             let (Some(f1), Some(f2)) = (face(e.faces[0]), face(e.faces[1])) else {
               return Err("rip along a straight edge between two flat faces".into());
             };
-            if e.kind != clf_kernel::CurveKind::Line {
+            if e.kind != fox_kernel::CurveKind::Line {
               return Err("rip along a straight edge between two flat faces".into());
             }
             let t = match &body.sheet {
@@ -1333,7 +1333,7 @@ impl Ctx<'_> {
       None => sheet::default_face(body.faces()).ok_or("the body has no planar face")?,
     };
     match body.faces().iter().find(|f| f.id == fid) {
-      Some(f) if f.kind == clf_kernel::SurfaceKind::Plane => Ok(fid),
+      Some(f) if f.kind == fox_kernel::SurfaceKind::Plane => Ok(fid),
       _ => Err("the face must be planar".into()),
     }
   }
@@ -1351,7 +1351,7 @@ impl Ctx<'_> {
     flip: bool,
     (o1, o2): (f64, f64),
     corners: CornerMode,
-    section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64, f64), String>,
+    section: impl Fn(&SheetInfo) -> Result<(fox_sketch::Profile, f64, f64), String>,
   ) -> FResult {
     struct Flange {
       start: DVec3,
@@ -1393,7 +1393,7 @@ impl Ctx<'_> {
         };
         let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
         *er = EdgeRef::from_edge(bid, &e, body.faces());
-        if e.kind != clf_kernel::CurveKind::Line {
+        if e.kind != fox_kernel::CurveKind::Line {
           return Err("flanges need straight edges".into());
         }
         let (panel, wall) = sheet::edge_faces(body.faces(), e.faces, e.length, t)
@@ -1562,7 +1562,7 @@ impl Ctx<'_> {
 
   /// Moves projected sketch curves onto their edges' current positions. Returns how many edges
   /// were not found.
-  fn refresh_links(&self, plane: &Plane, sketch: &mut clf_sketch::Sketch, links: &mut [crate::SketchLink]) -> usize {
+  fn refresh_links(&self, plane: &Plane, sketch: &mut fox_sketch::Sketch, links: &mut [crate::SketchLink]) -> usize {
     let mut lost = 0;
     for link in links.iter_mut() {
       let Ok(bi) = self.body_index(link.edge.body) else {
@@ -1578,7 +1578,7 @@ impl Ctx<'_> {
       link.edge = EdgeRef::from_edge(link.edge.body, &e, body.faces());
       let l = |v: DVec3| plane.to_local(v);
       let Some(kind) = sketch.curve(link.curve).map(|c| c.kind.clone()) else { continue };
-      let put = |sketch: &mut clf_sketch::Sketch, p: clf_sketch::PointId, at: [f64; 2]| {
+      let put = |sketch: &mut fox_sketch::Sketch, p: fox_sketch::PointId, at: [f64; 2]| {
         if let Some(q) = sketch.point_mut(p) {
           q.x = at[0];
           q.y = at[1];
@@ -1601,16 +1601,16 @@ impl Ctx<'_> {
             *radius = e.radius;
           }
           for c in &mut sketch.constraints {
-            if let clf_sketch::ConstraintKind::Radius { curve, value } = &mut c.kind
+            if let fox_sketch::ConstraintKind::Radius { curve, value } = &mut c.kind
               && *curve == link.curve
             {
-              *value = clf_sketch::Dim::new(e.radius);
+              *value = fox_sketch::Dim::new(e.radius);
             }
           }
         }
         CurveKind::Arc { center, start, end } => {
           let (s, m, t) = (l(e.start), l(e.mid), l(e.end));
-          let Some(c) = clf_sketch::circumcenter(s, m, t) else { continue };
+          let Some(c) = fox_sketch::circumcenter(s, m, t) else { continue };
           // the sketch arc runs counter-clockwise from start to end
           let ccw = (s[0] - c[0]) * (m[1] - c[1]) - (s[1] - c[1]) * (m[0] - c[0]) > 0.0;
           let (ps, pe) = if ccw { (s, t) } else { (t, s) };
@@ -1669,7 +1669,7 @@ impl Ctx<'_> {
         let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
         let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("the face could not be found")?;
         refresh_face(face, body, fid);
-        if info.kind != clf_kernel::SurfaceKind::Plane {
+        if info.kind != fox_kernel::SurfaceKind::Plane {
           return Err("the face is not planar".into());
         }
         sketch_plane_on(info.normal, info.origin)
@@ -1711,8 +1711,8 @@ impl Ctx<'_> {
         let e = body.edges().iter().find(|e| e.id == eid).copied().ok_or("the axis edge could not be found")?;
         *edge = EdgeRef::from_edge(edge.body, &e, body.faces());
         match e.kind {
-          clf_kernel::CurveKind::Line => Ok((e.start, (e.end - e.start).normalize_or_zero())),
-          clf_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
+          fox_kernel::CurveKind::Line => Ok((e.start, (e.end - e.start).normalize_or_zero())),
+          fox_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
           _ => Err("the axis edge is not straight or circular".into()),
         }
       }
@@ -1877,7 +1877,7 @@ impl Ctx<'_> {
     &mut self,
     feature: FeatureId,
     edges: &mut [EdgeRef],
-    op: impl Fn(&Shape, &[u32]) -> clf_kernel::Result<Shape>,
+    op: impl Fn(&Shape, &[u32]) -> fox_kernel::Result<Shape>,
   ) -> FResult {
     let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
     for (i, e) in edges.iter().enumerate() {
@@ -1919,7 +1919,7 @@ impl Ctx<'_> {
 fn refresh_face(fr: &mut FaceRef, body: &Body, fid: u32) {
   if let Some(info) = body.faces().iter().find(|f| f.id == fid) {
     let p = DVec3::from(fr.point);
-    let q = if info.kind == clf_kernel::SurfaceKind::Plane {
+    let q = if info.kind == fox_kernel::SurfaceKind::Plane {
       p - info.normal * (p - info.origin).dot(info.normal)
     } else {
       p

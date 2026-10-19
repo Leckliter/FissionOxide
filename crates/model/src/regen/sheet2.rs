@@ -1,6 +1,6 @@
 //! Regeneration of lofted and miter flanges (see [`crate::sheet2`]).
 
-use clf_kernel::glam::DVec3;
+use fox_kernel::glam::DVec3;
 
 use super::{Ctx, FResult};
 use crate::sheet::{self, SheetInfo};

@@ -1,27 +1,27 @@
-//! Headless CLFusion.
+//! Headless FissionOxide.
 //!
 //! ```text
-//! clfusion-cli run SCRIPT.jsonl [--open IN.clf] [--save OUT.clf] [--export OUT.step|stl|obj]...
+//! fissionoxide-cli run SCRIPT.jsonl [--open IN.fox] [--save OUT.fox] [--export OUT.step|stl|obj]...
 //!                               [--png OUT.png] [--view home|top|front|...] [--size 1200x800]
-//! clfusion-cli exec IN.clf '{"cmd": "info"}'
-//! clfusion-cli info IN.clf
-//! clfusion-cli export IN.clf OUT.step|stl|obj
-//! clfusion-cli render IN.clf OUT.png [--view V] [--size WxH]
-//! clfusion-cli commands
-//! clfusion-cli formats
-//! clfusion-cli inspect FILE
-//! clfusion-cli convert IN OUT                 (any readable format to any writable one)
-//! clfusion-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
-//! clfusion-cli mcp [IN.clf]                   (Model Context Protocol server on stdio)
+//! fissionoxide-cli exec IN.fox '{"cmd": "info"}'
+//! fissionoxide-cli info IN.fox
+//! fissionoxide-cli export IN.fox OUT.step|stl|obj
+//! fissionoxide-cli render IN.fox OUT.png [--view V] [--size WxH]
+//! fissionoxide-cli commands
+//! fissionoxide-cli formats
+//! fissionoxide-cli inspect FILE
+//! fissionoxide-cli convert IN OUT                 (any readable format to any writable one)
+//! fissionoxide-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
+//! fissionoxide-cli mcp [IN.fox]                   (Model Context Protocol server on stdio)
 //! ```
 //!
-//! `--hub DIR` (or `CLF_DATA_DIR`) picks the data hub directory for every subcommand.
+//! `--hub DIR` (or `FOX_DATA_DIR`) picks the data hub directory for every subcommand.
 //!
 //! ```text
-//! clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
-//! clfusion-cli hub list '{"project": "Default Project"}'
-//! clfusion-cli hub versions '{"item": "i3"}'
-//! clfusion-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
+//! fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
+//! fissionoxide-cli hub list '{"project": "Default Project"}'
+//! fissionoxide-cli hub versions '{"item": "i3"}'
+//! fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
 //! ```
 //!
 //! A script is one JSON command per line: `{"cmd": "extrude", "distance": 10}` (the remaining
@@ -33,9 +33,9 @@ mod mcp;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clf_engine::render::{self, Camera, StandardView};
-use clf_engine::scene::{SceneBuilder, ViewOptions};
-use clf_engine::{COMMANDS, Session};
+use fox_engine::render::{self, Camera, StandardView};
+use fox_engine::scene::{SceneBuilder, ViewOptions};
+use fox_engine::{COMMANDS, Session};
 use serde_json::{Value, json};
 
 fn main() -> ExitCode {
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
 
 fn writeln_err(e: &str) -> std::io::Result<()> {
   use std::io::Write;
-  writeln!(std::io::stderr(), "clfusion-cli: {e}")
+  writeln!(std::io::stderr(), "fissionoxide-cli: {e}")
 }
 
 fn out(v: &Value) {
@@ -76,7 +76,7 @@ fn run(args: &[String]) -> Result<(), String> {
       mcp::serve(s)
     }
     "formats" => {
-      for f in clf_engine::exchange::FORMATS {
+      for f in fox_engine::exchange::FORMATS {
         out(&json!(f));
       }
       Ok(())
@@ -189,7 +189,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | mcp [F.clf] | formats | commands  (all take --hub DIR)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands  (all take --hub DIR)".into()
 }
 
 thread_local! {
@@ -243,7 +243,7 @@ fn png(s: &Session, path: &Path, view: Option<&str>, size: Option<&str>) -> Resu
   let (lo, hi) = s
     .model
     .bounds()
-    .unwrap_or((clf_engine::kernel::glam::DVec3::splat(-50.0), clf_engine::kernel::glam::DVec3::splat(50.0)));
+    .unwrap_or((fox_engine::kernel::glam::DVec3::splat(-50.0), fox_engine::kernel::glam::DVec3::splat(50.0)));
   cam.fit(lo, hi, w as f64 / h.max(1) as f64);
   let (scene, _) = SceneBuilder::default().build(s, &ViewOptions::default());
   let frame = render::render(&scene, &cam, w, h);

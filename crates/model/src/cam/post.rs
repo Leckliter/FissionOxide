@@ -6,7 +6,7 @@
 
 use std::fmt::Write;
 
-use clf_kernel::glam::DVec3;
+use fox_kernel::glam::DVec3;
 
 use super::{CLEARANCE, RETRACT, Toolpath};
 
@@ -229,7 +229,11 @@ pub fn write(post: &Post, units: Units, title: &str, paths: &[Toolpath], origin:
   } else {
     o.line(&format!("({})", comment(title)));
   }
-  o.line(&format!("(CLFUSION - {} POST, {})", comment(post.name), if units == Units::Metric { "MM" } else { "INCH" }));
+  o.line(&format!(
+    "(FISSIONOXIDE - {} POST, {})",
+    comment(post.name),
+    if units == Units::Metric { "MM" } else { "INCH" }
+  ));
   o.line("(WORK ORIGIN: STOCK TOP, MIN X/Y CORNER - G54)");
   o.line(&format!("{} {}", post.safe_start, if units == Units::Metric { "G21" } else { "G20" }));
   for l in post.preamble {

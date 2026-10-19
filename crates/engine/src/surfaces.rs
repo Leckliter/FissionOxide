@@ -1,9 +1,9 @@
 //! Commands for the Surface workspace's extend, untrim, trim with a body or sketch, and
 //! offsets with a distance per face.
 
-use clf_model::surface::{ExtendMode, FaceDistance, TrimTool, UntrimLoops};
-use clf_model::{BodyId, FeatureId, FeatureKind};
-use clf_sketch::CurveId;
+use fox_model::surface::{ExtendMode, FaceDistance, TrimTool, UntrimLoops};
+use fox_model::{BodyId, FeatureId, FeatureKind};
+use fox_sketch::CurveId;
 use serde_json::Value;
 
 use crate::commands::{add_feature, edge_ref_of, expr_of, face_ref, ids, opt_str, req_expr, req_u32};

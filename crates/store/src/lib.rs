@@ -1,17 +1,17 @@
-//! The CLFusion data hub: a local counterpart of Fusion's data panel.
+//! The FissionOxide data hub: a local counterpart of Fusion's data panel.
 //!
 //! Designs live in **projects**, optionally inside **folders**. Every save makes a new
 //! **version** of an item instead of overwriting it, so the whole history stays available: open
 //! any old version, promote it to be the latest again, mark versions as **milestones**, and see an
 //! activity feed per project. Deleted items go to a trash first and can be restored. Files that
-//! aren't CLFusion designs (STEP, STL, a Fusion `.f3d` ...) can be uploaded and kept with the same
+//! aren't FissionOxide designs (STEP, STL, a Fusion `.f3d` ...) can be uploaded and kept with the same
 //! versioning.
 //!
 //! On disk the hub is a directory:
 //!
 //! ```text
 //! <root>/hub.json                   index: projects, folders, items, versions, activity
-//! <root>/items/<item>/v3.clf        version 3 of a design (or v3.<ext> for other files)
+//! <root>/items/<item>/v3.fox        version 3 of a design (or v3.<ext> for other files)
 //! <root>/items/<item>/v3.png        its thumbnail
 //! <root>/items/<item>/v3.orig.step  the file a version was uploaded from, if it was translated
 //! ```
@@ -111,7 +111,7 @@ pub struct Folder {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
-  /// A CLFusion design (`.clf`), openable and versioned by saves.
+  /// A FissionOxide design (`.fox`), openable and versioned by saves.
   Design,
   /// Any other uploaded file, kept as-is.
   File,
@@ -168,7 +168,7 @@ pub struct Item {
   pub folder: Option<String>,
   pub name: String,
   pub kind: ItemKind,
-  /// File extension of the versions (`clf` for designs).
+  /// File extension of the versions (`fox` for designs).
   pub ext: String,
   pub created: Timestamp,
   pub modified: Timestamp,
@@ -272,26 +272,20 @@ pub struct Store {
 }
 
 impl Store {
-  /// The default hub location: `$CLF_DATA_DIR`, else the platform data directory
-  /// (`$XDG_DATA_HOME/clfusion`, `~/.local/share/clfusion`, `%APPDATA%\CLFusion`,
-  /// `~/Library/Application Support/CLFusion`).
+  /// The default hub location: `$FOX_DATA_DIR`, else the platform data directory
+  /// (`$XDG_DATA_HOME/fissionoxide`, `~/.local/share/fissionoxide`, `%APPDATA%\FissionOxide`,
+  /// `~/Library/Application Support/FissionOxide`). A hub left in the directory of the app's
+  /// old name (CLFusion) is moved there the first time.
   pub fn default_root() -> PathBuf {
-    if let Some(d) = std::env::var_os("CLF_DATA_DIR") {
+    if let Some(d) = std::env::var_os("FOX_DATA_DIR") {
       return PathBuf::from(d);
     }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
-    if cfg!(windows) {
-      if let Some(a) = std::env::var_os("APPDATA") {
-        return PathBuf::from(a).join("CLFusion");
-      }
-    } else if cfg!(target_os = "macos") {
-      if let Some(h) = &home {
-        return h.join("Library/Application Support/CLFusion");
-      }
-    } else if let Some(x) = std::env::var_os("XDG_DATA_HOME") {
-      return PathBuf::from(x).join("clfusion");
+    let root = platform_dir("FissionOxide", "fissionoxide");
+    let legacy = platform_dir("CLFusion", "clfusion");
+    if !root.exists() && legacy.is_dir() && std::fs::rename(&legacy, &root).is_err() {
+      return legacy;
     }
-    home.map(|h| h.join(".local/share/clfusion")).unwrap_or_else(|| PathBuf::from("clfusion-data"))
+    root
   }
 
   /// Opens (or creates) a hub at `root`.
@@ -303,7 +297,7 @@ impl Store {
         let idx: Index = serde_json::from_str(&s)?;
         if idx.format_version > HUB_FORMAT_VERSION {
           return Err(invalid(format!(
-            "the hub at {} was written by a newer CLFusion (format {})",
+            "the hub at {} was written by a newer FissionOxide (format {})",
             root.display(),
             idx.format_version
           )));
@@ -952,7 +946,24 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
   Ok(())
 }
 
-/// Compares two designs (their `.clf` JSON): features added, removed, renamed, edited, reordered;
+/// The platform data directory for an app called `name` (`unix` on Linux and other Unixes).
+fn platform_dir(name: &str, unix: &str) -> PathBuf {
+  let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+  if cfg!(windows) {
+    if let Some(a) = std::env::var_os("APPDATA") {
+      return PathBuf::from(a).join(name);
+    }
+  } else if cfg!(target_os = "macos") {
+    if let Some(h) = &home {
+      return h.join("Library/Application Support").join(name);
+    }
+  } else if let Some(x) = std::env::var_os("XDG_DATA_HOME") {
+    return PathBuf::from(x).join(unix);
+  }
+  home.map(|h| h.join(".local/share").join(unix)).unwrap_or_else(|| PathBuf::from(format!("{unix}-data")))
+}
+
+/// Compares two designs (their `.fox` JSON): features added, removed, renamed, edited, reordered;
 /// parameters added, removed or changed.
 pub fn compare_designs(a: &serde_json::Value, b: &serde_json::Value) -> Vec<Change> {
   use serde_json::Value;

@@ -2,11 +2,11 @@
 
 use std::path::PathBuf;
 
-use clf_model::drawing::{
+use fox_model::drawing::{
   Axis, BreakDirection, Characteristic, DEFAULT_GAP, Datums, DimOrientation, Drawing, DrawingDim, FinishProcess,
   MaterialCondition, ProjectionAngle, SheetSize, Standard, ViewBreak, ViewKind, render, scale_text,
 };
-use clf_model::{BodyId, ComponentId};
+use fox_model::{BodyId, ComponentId};
 use serde_json::{Value, json};
 
 use crate::commands::{expr_of, ids, opt_str, req_str, req_u32, req_vec3};
@@ -365,7 +365,7 @@ fn opt_num(s: &Session, p: &Value, k: &str) -> Result<Option<f64>, CmdError> {
   match p.get(k) {
     None | Some(Value::Null) => Ok(None),
     Some(Value::String(t)) if t.trim().is_empty() => Ok(None),
-    Some(v) => Ok(Some(clf_expr::eval(&expr_of(v)?, clf_expr::Kind::Length, &s.model.params)?)),
+    Some(v) => Ok(Some(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &s.model.params)?)),
   }
 }
 

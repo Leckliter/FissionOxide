@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{Archive, ArchivedVersion, inspect_fusion, read_clfz, write_clfz};
+use crate::archive::{Archive, ArchivedVersion, inspect_fusion, read_foxz, write_foxz};
 use crate::dxf::{Drawing, Entity, bulge_arc, read_dxf, write_dxf};
 use crate::svg::{read_svg, write_svg};
 use std::io::Write as _;
@@ -239,7 +239,7 @@ fn negative_bulge_runs_clockwise() {
 }
 
 #[test]
-fn clfz_round_trip_with_history() {
+fn foxz_round_trip_with_history() {
   let a = Archive {
     name: "Bracket".into(),
     design: "{\"name\": \"Bracket\"}".into(),
@@ -253,9 +253,24 @@ fn clfz_round_trip_with_history() {
       ArchivedVersion { info: serde_json::json!({"number": 2}), design: "{\"v\": 2}".into(), thumbnail: Some(vec![9]) },
     ],
   };
-  let bytes = write_clfz(&a).unwrap();
-  assert_eq!(read_clfz(&bytes).unwrap(), a);
-  assert!(read_clfz(&write_3mf(&[cube(1.0)], None).unwrap()).is_err());
+  let bytes = write_foxz(&a).unwrap();
+  assert_eq!(read_foxz(&bytes).unwrap(), a);
+  assert!(read_foxz(&write_3mf(&[cube(1.0)], None).unwrap()).is_err());
+}
+
+/// Designs saved before the rename to FissionOxide (`.clf`, `.clfz`) still open.
+#[test]
+fn legacy_clf_files_still_read() {
+  assert_eq!(format_for_ext("clf").unwrap().id, "fox");
+  assert_eq!(format_for_ext("CLFZ").unwrap().id, "foxz");
+  let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+  let opts = zip::write::SimpleFileOptions::default();
+  w.start_file("design.clf", opts).unwrap();
+  w.write_all(b"{}").unwrap();
+  w.start_file("manifest.json", opts).unwrap();
+  w.write_all(br#"{"format": "clfz", "format_version": 1, "name": "Old", "design": "design.clf"}"#).unwrap();
+  let a = read_foxz(&w.finish().unwrap().into_inner()).unwrap();
+  assert_eq!((a.name.as_str(), a.design.as_str()), ("Old", "{}"));
 }
 
 #[test]

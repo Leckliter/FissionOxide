@@ -2,13 +2,13 @@
 
 use std::path::PathBuf;
 
-use clf_kernel::glam::DVec3;
-use clf_model::{
+use fox_kernel::glam::DVec3;
+use fox_model::{
   AttrTarget, AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
   FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
   SheetMetalRule, ThinSide,
 };
-use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
+use fox_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
 
 use crate::{CmdError, CmdResult, Sel, Session};
@@ -32,10 +32,10 @@ cmds! {
   "help" => "List commands", "{}";
   "info" => "Design summary: parameters, timeline with status, bodies with mass properties", "{}";
   "new" => "Start a new design", "{name?}";
-  "open" => "Open a design (.clf, .clfz) or any importable file as a new design", "{path}";
-  "save" => "Save the design to a file (.clf JSON, or .clfz archive)", "{path?}";
-  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .clf .clfz", "{path, bodies?: [id], sketch?, ascii?: bool}";
-  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .clf/.clfz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
+  "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
+  "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
   "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
@@ -67,7 +67,7 @@ cmds! {
   "hub.search" => "Find items by name, version description or milestone", "{query}";
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
-  "hub.download" => "Write an item version to a file; the extension picks the format (.clfz includes history)", "{item?, version?, path, ...export options}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.foxz includes history)", "{item?, version?, path, ...export options}";
   "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
@@ -95,7 +95,7 @@ cmds! {
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
-  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .clf/.clfz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
+  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
   "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
@@ -334,7 +334,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let path = PathBuf::from(req_str(p, "path")?);
       crate::files::import(s, &path, p)
     }
-    "formats" => Ok(json!(clf_exchange::FORMATS)),
+    "formats" => Ok(json!(fox_exchange::FORMATS)),
     "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
     n if n.starts_with("hub.") => crate::hub::run(s, n, p),
     "compute_all" => {
@@ -354,7 +354,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let (name, expr) = (req_str(p, "name")?.to_string(), req_expr(p, "expr")?);
       let kind = param_kind(opt_str(p, "kind"))?;
       let comment = opt_str(p, "comment").unwrap_or("").to_string();
-      clf_expr::eval(&expr, kind, &params_scope(s))?;
+      fox_expr::eval(&expr, kind, &params_scope(s))?;
       s.edit(|d| Ok(d.add_parameter(&name, &expr, kind, &comment)?))?;
       Ok(json!({"value": s.model.params.get(&name)}))
     }
@@ -413,8 +413,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let c = ConstraintId(req_u32(p, "constraint")?);
       let expr = req_expr(p, "value")?;
       let angle = s.design.sketch(sk)?.constraint(c).ok_or(CmdError::new("no such constraint"))?.kind.is_angle();
-      let kind = if angle { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
-      let v = clf_expr::eval(&expr, kind, &params_scope(s))?;
+      let kind = if angle { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
+      let v = fox_expr::eval(&expr, kind, &params_scope(s))?;
       s.edit(|d| {
         let sketch = d.sketch_mut(sk)?;
         sketch.set_dim(c, Dim::expr(expr, v))?;
@@ -502,11 +502,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let sk = sketch_id(s, p)?;
       let at = opt_pt(p, "at")?.unwrap_or([0.0, 0.0]);
       let angle = opt_expr(p, "angle")
-        .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &params_scope(s)))
+        .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &params_scope(s)))
         .transpose()?
         .unwrap_or(0.0);
       let (src, mut out, placed) = crate::trace::sketch(p, at, angle, &params_scope(s))?;
-      let t = clf_sketch::Xform2 { angle, center: at, ..Default::default() };
+      let t = fox_sketch::Xform2 { angle, center: at, ..Default::default() };
       let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &[], &t)?))?;
       out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
       let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.as_slice()).unwrap_or_default();
@@ -954,14 +954,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       if let Some(r) = opt_str(p, "corner_relief") {
         rule.corner_relief = match r {
-          "none" => clf_model::CornerRelief::None,
-          "round" => clf_model::CornerRelief::Round,
-          "square" => clf_model::CornerRelief::Square,
-          "tear" => clf_model::CornerRelief::Tear,
+          "none" => fox_model::CornerRelief::None,
+          "round" => fox_model::CornerRelief::Round,
+          "square" => fox_model::CornerRelief::Square,
+          "tear" => fox_model::CornerRelief::Tear,
           o => return Err(CmdError::new(format!("unknown corner relief '{o}' (none, round, square, tear)"))),
         };
       }
-      let info = clf_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
+      let info = fox_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
       s.edit(|d| Ok(d.set_sheet_rule(rule)?))?;
       Ok(json!({"name": name, "thickness": info.thickness, "bend_radius": info.bend_radius, "k_factor": info.k_factor}))
     }
@@ -975,7 +975,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         rules
           .iter()
           .map(|r| {
-            let v = clf_model::sheet::eval_rule(r, &scope);
+            let v = fox_model::sheet::eval_rule(r, &scope);
             json!({
               "name": r.name, "thickness": r.thickness, "bend_radius": r.bend_radius, "k_factor": r.k_factor,
               "values": v.as_ref().ok().map(|i| [i.thickness, i.bend_radius, i.k_factor]),
@@ -1132,7 +1132,7 @@ pub(crate) fn expr_of(v: &Value) -> Result<String, CmdError> {
   match v {
     Value::String(s) if !s.trim().is_empty() => Ok(s.clone()),
     Value::Number(n) => {
-      n.as_f64().filter(|f| f.is_finite()).map(clf_expr::trim_number).ok_or(CmdError::new("bad number"))
+      n.as_f64().filter(|f| f.is_finite()).map(fox_expr::trim_number).ok_or(CmdError::new("bad number"))
     }
     _ => Err(CmdError::new("expected a number or an expression string")),
   }
@@ -1219,7 +1219,7 @@ pub(crate) fn operation(p: &Value) -> Result<Operation, CmdError> {
 
 pub(crate) fn body_sel(p: &Value) -> BodySel {
   if let Some(c) = p.get("component").and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok()) {
-    return BodySel::Component { id: clf_model::ComponentId(c) };
+    return BodySel::Component { id: fox_model::ComponentId(c) };
   }
   let v = ids(p, "bodies");
   if v.is_empty() { BodySel::All } else { BodySel::Bodies { ids: v.into_iter().map(BodyId).collect() } }
@@ -1278,7 +1278,7 @@ fn attr_target(s: &Session, v: Option<&Value>) -> Result<AttrTarget, CmdError> {
   } else if let Some(b) = id("body") {
     AttrTarget::Body { body: BodyId(b) }
   } else if let Some(c) = id("component") {
-    AttrTarget::Component { component: clf_model::ComponentId(c) }
+    AttrTarget::Component { component: fox_model::ComponentId(c) }
   } else if let Some(f) = id("feature") {
     AttrTarget::Feature { feature: FeatureId(f) }
   } else {
@@ -1313,14 +1313,14 @@ fn attr_target_json(t: &AttrTarget) -> Value {
 }
 
 /// `translate`, `angle`, `scale` and `center` of a sketch transform.
-fn xform(s: &Session, p: &Value) -> Result<clf_sketch::Xform2, CmdError> {
+fn xform(s: &Session, p: &Value) -> Result<fox_sketch::Xform2, CmdError> {
   let scope = params_scope(s);
   let num = |k: &str, kind| -> Result<Option<f64>, CmdError> {
-    opt_expr(p, k).map(|e| clf_expr::eval(&e, kind, &scope)).transpose().map_err(CmdError::from)
+    opt_expr(p, k).map(|e| fox_expr::eval(&e, kind, &scope)).transpose().map_err(CmdError::from)
   };
-  Ok(clf_sketch::Xform2 {
-    scale: num("scale", clf_expr::Kind::Unitless)?.unwrap_or(1.0),
-    angle: num("angle", clf_expr::Kind::Angle)?.unwrap_or(0.0),
+  Ok(fox_sketch::Xform2 {
+    scale: num("scale", fox_expr::Kind::Unitless)?.unwrap_or(1.0),
+    angle: num("angle", fox_expr::Kind::Angle)?.unwrap_or(0.0),
     center: opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
     translate: opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
   })
@@ -1338,8 +1338,8 @@ fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), 
   if ext == "dxf" || ext == "svg" {
     return crate::files::dxf_sketch(&path);
   }
-  if ext != "clf" && ext != "clfz" {
-    return Err(CmdError::new("insert from a .dxf, .svg, .clf or .clfz file"));
+  if !matches!(ext.as_str(), "fox" | "foxz" | "clf" | "clfz") {
+    return Err(CmdError::new("insert from a .dxf, .svg, .fox or .foxz file"));
   }
   let other = Session::open(&path)?;
   let want = from.get("sketch");
@@ -1478,9 +1478,9 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(path);
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
-      "dxf" => std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
-      "step" | "stp" => clf_kernel::write_step([&flat.shape], &path)?,
-      "stl" => clf_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
+      "dxf" => std::fs::write(&path, fox_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
+      "step" | "stp" => fox_kernel::write_step([&flat.shape], &path)?,
+      "stl" => fox_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
       o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),
     }
   }
@@ -1564,10 +1564,10 @@ pub fn face_at(s: &Session, p: DVec3, normal: Option<[f64; 3]>) -> Result<(BodyI
       {
         continue;
       }
-      let d = if f.kind == clf_kernel::SurfaceKind::Plane {
+      let d = if f.kind == fox_kernel::SurfaceKind::Plane {
         let off = (p - f.origin).dot(f.normal).abs();
         let q = p - f.normal * (p - f.origin).dot(f.normal);
-        if off > 1e-3 || !clf_model::refs::point_in_face(mesh, f.id, q) {
+        if off > 1e-3 || !fox_model::refs::point_in_face(mesh, f.id, q) {
           continue;
         }
         off
@@ -1584,8 +1584,8 @@ pub fn face_at(s: &Session, p: DVec3, normal: Option<[f64; 3]>) -> Result<(BodyI
           (v - f.normal * v.dot(f.normal)).length()
         };
         match f.kind {
-          clf_kernel::SurfaceKind::Cylinder => (radial(f.origin) - f.radius).abs(),
-          clf_kernel::SurfaceKind::Sphere => ((p - f.origin).length() - f.radius).abs(),
+          fox_kernel::SurfaceKind::Cylinder => (radial(f.origin) - f.radius).abs(),
+          fox_kernel::SurfaceKind::Sphere => ((p - f.origin).length() - f.radius).abs(),
           _ => dt.min(nearest_vertex_dist(mesh, f.id, p)) * 0.5,
         }
       };
@@ -1598,7 +1598,7 @@ pub fn face_at(s: &Session, p: DVec3, normal: Option<[f64; 3]>) -> Result<(BodyI
 }
 
 /// Distance from a point to the nearest triangle of a face's tessellation.
-fn nearest_triangle_dist(m: &clf_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
+fn nearest_triangle_dist(m: &fox_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
   let v = |i: u32| m.positions.get(i as usize).map(|q| DVec3::new(q[0] as f64, q[1] as f64, q[2] as f64));
   let mut best = f64::INFINITY;
   for (t, tri) in m.indices.chunks_exact(3).enumerate() {
@@ -1626,7 +1626,7 @@ fn point_triangle_dist(p: DVec3, a: DVec3, b: DVec3, c: DVec3) -> f64 {
   seg_dist3(a, b, p).min(seg_dist3(b, c, p)).min(seg_dist3(c, a, p))
 }
 
-fn nearest_vertex_dist(m: &clf_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
+fn nearest_vertex_dist(m: &fox_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
   let mut best = f64::INFINITY;
   for (t, tri) in m.indices.chunks_exact(3).enumerate() {
     if m.tri_face.get(t) != Some(&face) {
@@ -1775,7 +1775,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   let scope = params_scope(s);
   let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
   let num =
-    |k: &str, kind: clf_expr::Kind| -> Result<f64, CmdError> { Ok(clf_expr::eval(&req_expr(p, k)?, kind, &scope)?) };
+    |k: &str, kind: fox_expr::Kind| -> Result<f64, CmdError> { Ok(fox_expr::eval(&req_expr(p, k)?, kind, &scope)?) };
   let count = |k: &str| -> Result<usize, CmdError> {
     p.get(k).and_then(Value::as_u64).map(|v| v as usize).ok_or(CmdError::new(format!("missing '{k}'")))
   };
@@ -1791,29 +1791,29 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
   let op = match name {
-    "sketch.fillet" => Op::Fillet(num("radius", clf_expr::Kind::Length)?),
+    "sketch.fillet" => Op::Fillet(num("radius", fox_expr::Kind::Length)?),
     "sketch.chamfer" => {
-      let d = num("distance", clf_expr::Kind::Length)?;
-      let d2 = opt_expr(p, "distance2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?;
+      let d = num("distance", fox_expr::Kind::Length)?;
+      let d2 = opt_expr(p, "distance2").map(|e| fox_expr::eval(&e, fox_expr::Kind::Length, &scope)).transpose()?;
       Op::Chamfer(d, d2.unwrap_or(d))
     }
-    "sketch.offset" => Op::Offset(num("distance", clf_expr::Kind::Length)?),
+    "sketch.offset" => Op::Offset(num("distance", fox_expr::Kind::Length)?),
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
     "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
     "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
     "sketch.pattern_rect" => Op::Rect(
       opt_pt(p, "direction")?.unwrap_or([1.0, 0.0]),
       count("count")?,
-      num("spacing", clf_expr::Kind::Length)?,
+      num("spacing", fox_expr::Kind::Length)?,
       opt_pt(p, "direction2")?.unwrap_or([0.0, 1.0]),
       p.get("count2").and_then(Value::as_u64).unwrap_or(1) as usize,
-      opt_expr(p, "spacing2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
+      opt_expr(p, "spacing2").map(|e| fox_expr::eval(&e, fox_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
     ),
     _ => Op::Circ(
       opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
       count("count")?,
       opt_expr(p, "angle")
-        .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &scope))
+        .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &scope))
         .transpose()?
         .unwrap_or(std::f64::consts::TAU),
     ),
@@ -1875,18 +1875,18 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
   }
   let mut todo: Vec<(E, Option<EdgeRef>)> = Vec::new();
   for e in body.edges().iter().filter(|e| face.is_none_or(|f| e.faces.contains(&f))) {
-    let l = |v: clf_kernel::glam::DVec3| plane.to_local(v);
+    let l = |v: fox_kernel::glam::DVec3| plane.to_local(v);
     let link = associative.then(|| EdgeRef::from_edge(body.id, e, body.faces()));
     match e.kind {
-      clf_kernel::CurveKind::Line => todo.push((E::Line(l(e.start), l(e.end)), link)),
-      clf_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
+      fox_kernel::CurveKind::Line => todo.push((E::Line(l(e.start), l(e.end)), link)),
+      fox_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
         if (e.start - e.end).length() < 1e-6 {
           todo.push((E::Circle(l(e.center), e.radius), link));
         } else {
           todo.push((E::Arc(l(e.start), l(e.mid), l(e.end)), link));
         }
       }
-      clf_kernel::CurveKind::Degenerate => {}
+      fox_kernel::CurveKind::Degenerate => {}
       _ => {
         if let Some(pl) = lines.iter().find(|x| x.id == e.id) {
           for w in pl.points.windows(2) {
@@ -1927,7 +1927,7 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
       };
       made.push(id);
       if let Some(edge) = link {
-        new_links.push(clf_model::SketchLink { curve: id, edge: edge.clone() });
+        new_links.push(fox_model::SketchLink { curve: id, edge: edge.clone() });
       }
     }
     for pt in sketch.points.iter_mut().filter(|p| !before.contains(&p.id)) {
@@ -2044,7 +2044,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let (c, r) = match pts.as_slice() {
           [a, b] => ([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0], (a[0] - b[0]).hypot(a[1] - b[1]) / 2.0),
           [a, b, c] => {
-            let o = clf_sketch::circumcenter(*a, *b, *c).ok_or(CmdError::new("the three points are in a line"))?;
+            let o = fox_sketch::circumcenter(*a, *b, *c).ok_or(CmdError::new("the three points are in a line"))?;
             (o, (a[0] - o[0]).hypot(a[1] - o[1]))
           }
           _ => return Err(CmdError::new("'through' needs 2 or 3 points")),
@@ -2067,7 +2067,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           _ => return Err(CmdError::new("missing 'radius' or 'diameter'")),
         };
         let (value, dim) = match &raw {
-          Value::String(e) => (clf_expr::eval(e, clf_expr::Kind::Length, &scope)?, Some(e.clone())),
+          Value::String(e) => (fox_expr::eval(e, fox_expr::Kind::Length, &scope)?, Some(e.clone())),
           v => (v.as_f64().ok_or(CmdError::new("radius/diameter must be a number or expression"))?, None),
         };
         let r = if key == "radius" { value } else { value / 2.0 };
@@ -2198,7 +2198,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           Some(c) => (c, true),
           None => {
             let m = req_pt(&p, "mid")?;
-            let c = clf_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
+            let c = fox_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
             // counter-clockwise from start to end when the middle point is on the left of the chord
             let cross = (en[0] - st[0]) * (m[1] - st[1]) - (en[1] - st[1]) * (m[0] - st[0]);
             (c, cross > 0.0)
@@ -2414,8 +2414,8 @@ fn dimension(s: &mut Session, p: &Value) -> CmdResult {
   let expr = req_expr(p, "value")?;
   let pts: Vec<PointId> = ids(p, "points").into_iter().map(PointId).collect();
   let cs: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
-  let kind = if t == "angle" { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
-  let value = clf_expr::eval(&expr, kind, &params_scope(s))?;
+  let kind = if t == "angle" { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
+  let value = fox_expr::eval(&expr, kind, &params_scope(s))?;
   let dim = Dim::expr(expr, value);
   let id = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
@@ -2504,10 +2504,10 @@ fn sketch_info(s: &Session, p: &Value) -> CmdResult {
     })
     .collect();
   // which curves bound each profile: match every loop segment to the curve it lies on
-  let curves_of = |l: &clf_sketch::Loop| {
+  let curves_of = |l: &fox_sketch::Loop| {
     let mut ids: Vec<u32> = Vec::new();
     for seg in &l.segs {
-      let tol = if matches!(seg, clf_sketch::Seg::Bezier { .. }) { 0.05 } else { 1e-5 };
+      let tol = if matches!(seg, fox_sketch::Seg::Bezier { .. }) { 0.05 } else { 1e-5 };
       let at = seg.mid();
       let best = solved
         .curves
@@ -2581,7 +2581,7 @@ fn bbox2(pts: impl Iterator<Item = [f64; 2]>) -> Value {
   b.map_or(Value::Null, |(lo, hi)| json!([lo, hi]))
 }
 
-fn loop_length(l: &clf_sketch::Loop) -> f64 {
+fn loop_length(l: &fox_sketch::Loop) -> f64 {
   let mut pts = l.polygon();
   pts.extend(pts.first().copied());
   pts.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum()

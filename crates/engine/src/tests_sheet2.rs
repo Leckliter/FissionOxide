@@ -1,6 +1,6 @@
 //! Tests for lofted and miter flanges, corner closures and flat pattern sketches.
 
-use clf_model::FeatureKind;
+use fox_model::FeatureKind;
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -30,7 +30,7 @@ fn flat_pattern_sketch_from_commands() {
   run(&mut s, "sheet.edge_flange", json!({"edges": [{"point": [50, 50, 2]}], "height": 20}));
   let r = run(&mut s, "sheet.flat_sketch", json!({}));
   assert_eq!(r["bends"], 1, "{r}");
-  let sk = clf_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
+  let sk = fox_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
   let res = s.model.sketches.get(&sk).unwrap();
   // the outline is one closed profile: 100 × (50 + bend allowance + 15)
   let len = 50.0 + std::f64::consts::PI / 2.0 * 4.0 + 15.0;
@@ -44,7 +44,7 @@ fn flat_pattern_sketch_from_commands() {
   // or on XY with the lower-left corner at the origin
   let body = s.model.bodies[0].id.0;
   let r = run(&mut s, "sheet.flat_sketch", json!({"body": [body], "on": "xy"}));
-  let sk = clf_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
+  let sk = fox_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
   let (lo, hi) = s.model.sketches[&sk].sketch.bounds().unwrap();
   assert!(lo[0].abs() < 1e-9 && lo[1].abs() < 1e-9, "{lo:?}");
   let mut size = [hi[0] - lo[0], hi[1] - lo[1]];
@@ -69,8 +69,8 @@ fn miter_flange_and_corner_closure_from_commands() {
   let r = run(&mut s, "sheet.corner_closure", json!({"corners": "closed", "relief": "round"}));
   assert!(r["error"].is_null(), "{r}");
   let FeatureKind::MiterFlange { corners, .. } = &s.design.features.last().unwrap().kind else { panic!() };
-  assert_eq!(*corners, clf_model::CornerMode::Closed);
-  assert_eq!(s.design.sheet_rule("").unwrap().corner_relief, clf_model::CornerRelief::Round);
+  assert_eq!(*corners, fox_model::CornerMode::Closed);
+  assert_eq!(s.design.sheet_rule("").unwrap().corner_relief, fox_model::CornerRelief::Round);
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   run(&mut s, "sheet.flat_pattern", json!({}));
 }
@@ -97,7 +97,7 @@ fn lofted_flange_from_commands() {
     assert!((v - folded).abs() < tol * folded, "{method}: {v} {folded}");
     // the sketch's outline is one region of the flat's area (t = 1)
     let r = run(&mut s, "sheet.flat_sketch", json!({"body": body}));
-    let sk = clf_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
+    let sk = fox_model::FeatureId(r["feature"].as_u64().unwrap() as u32);
     let res = &s.model.sketches[&sk];
     assert_eq!(res.profiles.len(), 1, "{method}");
     assert!((res.profiles[0].area() - v).abs() < 1e-3 * v, "{method}: {} {v}", res.profiles[0].area());

@@ -2,8 +2,8 @@
 //! lofts along rails or a centre line, setback fillet corners, extrudes up to a curved face or a
 //! body, emboss/deboss, boundary fill and replace face.
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
 use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef, sheet};
@@ -86,7 +86,7 @@ fn cells_of(mut shapes: Vec<Shape>, planes: &[Plane]) -> Result<Vec<Shape>, Stri
 
 /// Re-blends the corners of a fillet where three or more of the filleted edges (`ids` of `orig`)
 /// meet, `d` back from the vertex.
-pub(super) fn setback(orig: &Shape, filleted: &Shape, ids: &[u32], d: f64) -> clf_kernel::Result<Shape> {
+pub(super) fn setback(orig: &Shape, filleted: &Shape, ids: &[u32], d: f64) -> fox_kernel::Result<Shape> {
   let mut ends: Vec<(DVec3, usize)> = Vec::new();
   for e in orig.edges()?.iter().filter(|e| ids.contains(&e.id) && (e.start - e.end).length() > 1e-9) {
     for p in [e.start, e.end] {

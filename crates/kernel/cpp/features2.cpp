@@ -1,8 +1,8 @@
 // C++ side of the second batch of solid features: guided and twisted sweeps, lofts along a centre
 // line or rails, emboss, boundary fill, surfaces extended for replace face / extrude to object,
 // and setback fillet corners. See kernel.hxx; every entry point catches all exceptions.
-#include "clf-kernel/cpp/kernel.hxx"
-#include "clf-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/kernel.hxx"
+#include "fox-kernel/src/ffi.rs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -77,7 +77,7 @@
 #include <gp_Ax3.hxx>
 #include <gp_Pln.hxx>
 
-namespace clf {
+namespace fox {
 
 namespace {
 
@@ -96,8 +96,8 @@ namespace {
   }
 }
 
-#define CLF2_TRY try {
-#define CLF2_CATCH(what)                                                                                               \
+#define FOX2_TRY try {
+#define FOX2_CATCH(what)                                                                                               \
   }                                                                                                                    \
   catch (...) { rethrow2(what); }
 
@@ -282,7 +282,7 @@ bool surface_normal(const TopoDS_Face &f, const gp_Pnt &p, gp_Pnt &at, gp_Vec &n
 
 // Sweeps a profile along a path, oriented and scaled so that it keeps touching a guide rail.
 std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail) {
-  CLF2_TRY
+  FOX2_TRY
   const TopoDS_Wire &path = as_wire(spine, "the sweep path");
   const TopoDS_Wire &guide = as_wire(rail, "the guide rail");
   bool holes = false;
@@ -294,12 +294,12 @@ std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, cons
     ps.SetMode(guide, Standard_True, BRepFill_ContactOnBorder);
   });
   return out(valid(s, "guided sweep"));
-  CLF2_CATCH("guided sweep")
+  FOX2_CATCH("guided sweep")
 }
 
 // Sweeps a profile along a path, turning it by `twist` radians about the path from start to end.
 std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist) {
-  CLF2_TRY
+  FOX2_TRY
   const TopoDS_Wire &path = as_wire(spine, "the sweep path");
   std::vector<gp_Pnt> pts;
   std::vector<gp_Vec> tans;
@@ -336,12 +336,12 @@ std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, dou
     ps.SetMode(auxw, Standard_True, BRepFill_NoContact);
   });
   return out(valid(out_s, "twisted sweep"));
-  CLF2_CATCH("twisted sweep")
+  FOX2_CATCH("twisted sweep")
 }
 
 // Lofts through sections (faces or wires of a compound, in order) placed along a centre line.
 std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine) {
-  CLF2_TRY
+  FOX2_TRY
   const TopoDS_Wire &path = as_wire(spine, "the centre line");
   BRepOffsetAPI_MakePipeShell ps(path);
   ps.SetMode(Standard_False);
@@ -359,7 +359,7 @@ std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine)
   TopoDS_Shape s = ps.Shape();
   if (volume(s) < 0) s.Reverse();
   return out(valid(s, "loft"));
-  CLF2_CATCH("loft")
+  FOX2_CATCH("loft")
 }
 
 namespace {
@@ -447,7 +447,7 @@ double smooth(double t) { return t * t * (3.0 - 2.0 * t); }
 // Lofts through sections guided by rails: between the sections, every point is pulled along with
 // the rails (smoothly between them around the loop), so the loft's sides follow the rails.
 std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
-  CLF2_TRY
+  FOX2_TRY
   std::vector<TopoDS_Wire> ws;
   for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
     bool holes = false;
@@ -619,7 +619,7 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
   TopoDS_Shape s = mk.Shape();
   if (volume(s) < 0) s.Reverse();
   return out(valid(s, "loft"));
-  CLF2_CATCH("loft")
+  FOX2_CATCH("loft")
 }
 
 // The material an emboss adds (or a deboss removes): profile faces projected along `dir` onto
@@ -627,7 +627,7 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
 // wrapped around the cylinder instead, keeping their lengths.
 std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,
                                    rust::Slice<const double> dir, double depth, bool deboss, bool wrap) {
-  CLF2_TRY
+  FOX2_TRY
   need3(dir, 3, "emboss direction");
   if (!(depth > 0)) throw std::runtime_error("the depth must be positive");
   TopoDS_Face target = face_of(body, face);
@@ -740,12 +740,12 @@ std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape
   }
   if (nf == 0) throw std::runtime_error("no profiles");
   return out(tools);
-  CLF2_CATCH("emboss")
+  FOX2_CATCH("emboss")
 }
 
 // The closed cells a set of bodies and surfaces bound (boundary fill), as a compound of solids.
 std::unique_ptr<Shape> boundary_cells(const Shape &tools) {
-  CLF2_TRY
+  FOX2_TRY
   BOPAlgo_MakerVolume mv;
   TopTools_ListOfShape args;
   for (TopoDS_Iterator it(tools.s); it.More(); it.Next()) args.Append(it.Value());
@@ -756,30 +756,30 @@ std::unique_ptr<Shape> boundary_cells(const Shape &tools) {
   mv.Perform();
   if (mv.HasErrors()) throw std::runtime_error("the tools don't bound any cells");
   return out(mv.Shape());
-  CLF2_CATCH("boundary fill")
+  FOX2_CATCH("boundary fill")
 }
 
 // 0 inside, 1 outside, 2 on the boundary of a solid.
 int32_t classify(const Shape &s, double x, double y, double z) {
-  CLF2_TRY
+  FOX2_TRY
   BRepClass3d_SolidClassifier c(s.s, gp_Pnt(x, y, z), 1e-7);
   switch (c.State()) {
   case TopAbs_IN: return 0;
   case TopAbs_ON: return 2;
   default: return 1;
   }
-  CLF2_CATCH("classify")
+  FOX2_CATCH("classify")
 }
 
 // A square planar face of half-size `size` centred at origin(3) with normal(3).
 std::unique_ptr<Shape> plane_face(rust::Slice<const double> plane, double size) {
-  CLF2_TRY
+  FOX2_TRY
   need3(plane, 6, "plane");
   gp_Pln pln(gp_Pnt(plane[0], plane[1], plane[2]), gp_Dir(plane[3], plane[4], plane[5]));
   BRepBuilderAPI_MakeFace mf(pln, -size, size, -size, size);
   if (!mf.IsDone()) throw std::runtime_error("could not make the plane");
   return out(mf.Face());
-  CLF2_CATCH("plane")
+  FOX2_CATCH("plane")
 }
 
 // A face's surface extended by `size` on every side (whole for closed surfaces), optionally
@@ -787,7 +787,7 @@ std::unique_ptr<Shape> plane_face(rust::Slice<const double> plane, double size) 
 // face's orientation.
 std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offset, rust::Slice<const double> at,
                                      rust::Slice<const double> toward) {
-  CLF2_TRY
+  FOX2_TRY
   need3(toward, 3, "direction");
   need3(at, 3, "point");
   if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("extend needs a face");
@@ -841,25 +841,25 @@ std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offs
   TopoDS_Face e = mf.Face();
   if (f.Orientation() == TopAbs_REVERSED) e.Reverse();
   return out(e);
-  CLF2_CATCH("extend surface")
+  FOX2_CATCH("extend surface")
 }
 
 // Signed distance of a point from a face's surface, positive on the side its normal points to.
 double side_of(const Shape &face, double x, double y, double z) {
-  CLF2_TRY
+  FOX2_TRY
   if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("side needs a face");
   gp_Pnt p(x, y, z), at;
   gp_Vec n;
   if (!surface_normal(TopoDS::Face(face.s), p, at, n)) throw std::runtime_error("the point could not be projected");
   return gp_Vec(at, p).Dot(n);
-  CLF2_CATCH("side")
+  FOX2_CATCH("side")
 }
 
 // Re-blends filleted corners: around each corner point (3 doubles each) everything within
 // `radius` is cut away and the hole filled with a smooth patch tangent to the faces around it
 // (Fusion's setback fillet corners).
 std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double> points, double radius) {
-  CLF2_TRY
+  FOX2_TRY
   if (!(radius > 0)) throw std::runtime_error("the setback must be positive");
   TopoDS_Shape cur = s.s;
   for (size_t i = 0; i + 2 < points.size(); i += 3) {
@@ -915,7 +915,7 @@ std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double>
     cur = valid(solid, "setback");
   }
   return out(cur);
-  CLF2_CATCH("setback fillet")
+  FOX2_CATCH("setback fillet")
 }
 
-} // namespace clf
+} // namespace fox

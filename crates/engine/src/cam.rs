@@ -1,8 +1,8 @@
 //! Manufacture commands: setups, milling operations, the tool library, toolpaths, the stock
 //! simulation and G-code.
 
-use clf_model::BodyId;
-use clf_model::cam::{self, Entry, Library, OpKind, Operation, Setup, Tabs, Tool, ToolKind};
+use fox_model::BodyId;
+use fox_model::cam::{self, Entry, Library, OpKind, Operation, Setup, Tabs, Tool, ToolKind};
 use serde_json::{Value, json};
 
 use crate::commands::{face_ref, opt_str, req_str};
@@ -49,8 +49,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
 /// A number, or an expression string ("6 mm", "0.4").
 fn num(p: &Value, k: &str, default: f64) -> f64 {
   match p.get(k) {
-    Some(Value::String(e)) => clf_expr::eval(e, clf_expr::Kind::Length, &std::collections::HashMap::new())
-      .or_else(|_| clf_expr::eval(e, clf_expr::Kind::Unitless, &std::collections::HashMap::new()))
+    Some(Value::String(e)) => fox_expr::eval(e, fox_expr::Kind::Length, &std::collections::HashMap::new())
+      .or_else(|_| fox_expr::eval(e, fox_expr::Kind::Unitless, &std::collections::HashMap::new()))
       .unwrap_or(default),
     Some(v) => v.as_f64().unwrap_or(default),
     None => default,
@@ -124,7 +124,7 @@ fn setup(s: &mut Session, p: &Value) -> CmdResult {
   Ok(json!({"setup": id, "stock": [lo.to_array(), hi.to_array()]}))
 }
 
-fn faces_of(s: &Session, p: &Value, k: &str) -> Result<Vec<clf_model::FaceRef>, CmdError> {
+fn faces_of(s: &Session, p: &Value, k: &str) -> Result<Vec<fox_model::FaceRef>, CmdError> {
   let mut out = Vec::new();
   for f in p.get(k).and_then(Value::as_array).into_iter().flatten() {
     out.push(face_ref(s, f)?);

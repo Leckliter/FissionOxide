@@ -1,9 +1,9 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use clf_model::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
-use clf_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
-use clf_sketch::CurveId;
+use fox_model::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
+use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
 use crate::commands::{
@@ -221,7 +221,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   })
 }
 
-/// Fusion's common appearances (library names) and the colour CLFusion renders them in.
+/// Fusion's common appearances (library names) and the colour FissionOxide renders them in.
 pub const APPEARANCES: [(&str, [u8; 3]); 16] = [
   ("Steel - Satin", [186, 190, 196]),
   ("Aluminum - Anodized Black", [52, 54, 58]),

@@ -1,8 +1,8 @@
 //! Inspect commands: measuring between entities, selecting everything, and centre of mass.
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{CurveKind as EdgeKind, Shape, SurfaceKind};
-use clf_model::BodyId;
+use fox_kernel::glam::DVec3;
+use fox_kernel::{CurveKind as EdgeKind, Shape, SurfaceKind};
+use fox_model::BodyId;
 use serde_json::{Value, json};
 
 use crate::commands::{edge_at, face_at, req_u32, req_vec3};

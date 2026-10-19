@@ -1,7 +1,7 @@
 // Surface workspace additions to the bridge: extending surface edges, untrimming faces, telling
 // which side of a trimming tool a point is on, and offsetting with a distance per face.
-#include "clf-kernel/cpp/surface2.hxx"
-#include "clf-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/surface2.hxx"
+#include "fox-kernel/src/ffi.rs.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -48,7 +48,7 @@
 #include <TopoDS_Wire.hxx>
 #include <Precision.hxx>
 
-namespace clf {
+namespace fox {
 
 namespace {
 
@@ -449,4 +449,4 @@ std::unique_ptr<Shape> offset_variable(const Shape &s, double d, rust::Slice<con
   }
 }
 
-} // namespace clf
+} // namespace fox

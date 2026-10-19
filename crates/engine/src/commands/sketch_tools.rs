@@ -1,6 +1,6 @@
 //! Sketch commands for editable text, Break, tangent circles and blend curves.
 
-use clf_sketch::{CurveId, Dim, PointId, PtSpec, Sketch, TextId};
+use fox_sketch::{CurveId, Dim, PointId, PtSpec, Sketch, TextId};
 use serde_json::{Value, json};
 
 use super::{ids, opt_expr, opt_str, params_scope, pt_of, req_expr, req_pt, req_str, sketch_id};
@@ -47,7 +47,7 @@ fn finish(s: &Session, p: &Value, mut out: Value, made: &[CurveId]) -> CmdResult
 /// A length parameter (number or expression).
 fn length(s: &Session, p: &Value, k: &str) -> Result<Option<f64>, CmdError> {
   match opt_expr(p, k) {
-    Some(e) => Ok(Some(clf_expr::eval(&e, clf_expr::Kind::Length, &params_scope(s))?)),
+    Some(e) => Ok(Some(fox_expr::eval(&e, fox_expr::Kind::Length, &params_scope(s))?)),
     None => Ok(None),
   }
 }
@@ -59,7 +59,7 @@ fn angle(s: &Session, p: &Value, k: &str) -> Result<Option<f64>, CmdError> {
     Some(Value::Number(n)) => Ok(n.as_f64().map(f64::to_radians)),
     Some(_) => {
       let e = req_expr(p, k)?;
-      Ok(Some(clf_expr::eval(&e, clf_expr::Kind::Angle, &params_scope(s))?))
+      Ok(Some(fox_expr::eval(&e, fox_expr::Kind::Angle, &params_scope(s))?))
     }
   }
 }
@@ -153,7 +153,7 @@ fn tangent_circle(s: &mut Session, p: &Value) -> CmdResult {
   let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
   let radius = match opt_expr(p, "radius") {
     Some(e) => {
-      let v = clf_expr::eval(&e, clf_expr::Kind::Length, &params_scope(s))?;
+      let v = fox_expr::eval(&e, fox_expr::Kind::Length, &params_scope(s))?;
       Some(Dim::expr(e, v))
     }
     None => None,

@@ -1,16 +1,16 @@
 [package]
-name = "clf-kernel"
+name = "fox-kernel"
 description = "B-rep solid modeling on OpenCASCADE: profiles, extrude, revolve, booleans, fillets, meshing, STEP"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-links = "clf-kernel"
+links = "fox-kernel"
 
 [dependencies]
 cxx.workspace = true
 glam.workspace = true
 thiserror.workspace = true
-clf-sketch.workspace = true
+fox-sketch.workspace = true
 log.workspace = true
 
 [build-dependencies]

@@ -9,9 +9,9 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{Bend, FaceInfo, Plane, Shape, SurfaceKind};
-use clf_sketch::{CurveId, CurveKind, Loop, Profile, Seg, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{Bend, FaceInfo, Plane, Shape, SurfaceKind};
+use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg, Sketch};
 
 use crate::{CornerRelief, ReliefShape, SheetMetalRule};
 
@@ -73,10 +73,10 @@ impl SheetInfo {
 
 /// Evaluates a rule's expressions.
 pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result<SheetInfo, String> {
-  let len = |e: &str| clf_expr::eval(e, clf_expr::Kind::Length, params).map_err(|err| format!("'{e}': {err}"));
+  let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, params).map_err(|err| format!("'{e}': {err}"));
   let thickness = len(&rule.thickness)?;
   let bend_radius = len(&rule.bend_radius)?;
-  let k_factor = clf_expr::eval(&rule.k_factor, clf_expr::Kind::Unitless, params)
+  let k_factor = fox_expr::eval(&rule.k_factor, fox_expr::Kind::Unitless, params)
     .map_err(|err| format!("'{}': {err}", rule.k_factor))?;
   if !(thickness > 1e-6 && thickness.is_finite()) {
     return Err(format!("rule {}: the thickness must be positive", rule.name));
@@ -493,7 +493,7 @@ pub fn measure_thickness(faces: &[FaceInfo], face: u32) -> Option<f64> {
 
 /// Sharp straight corners between two faces of a sheet `t` thick, with the fillet radius that
 /// turns each into a bend of inside radius `r`: outside corners get r + t, inside corners r.
-pub fn sharp_corners(faces: &[FaceInfo], edges: &[clf_kernel::EdgeInfo], t: f64, r: f64) -> Vec<(u32, f64)> {
+pub fn sharp_corners(faces: &[FaceInfo], edges: &[fox_kernel::EdgeInfo], t: f64, r: f64) -> Vec<(u32, f64)> {
   let skin = |id: u32| {
     faces
       .iter()
@@ -503,7 +503,7 @@ pub fn sharp_corners(faces: &[FaceInfo], edges: &[clf_kernel::EdgeInfo], t: f64,
   };
   let mut out = Vec::new();
   for e in edges {
-    if e.kind != clf_kernel::CurveKind::Line || e.faces[1] == 0 {
+    if e.kind != fox_kernel::CurveKind::Line || e.faces[1] == 0 {
       continue;
     }
     let (Some(f1), Some(f2)) = (skin(e.faces[0]), skin(e.faces[1])) else { continue };
@@ -521,12 +521,12 @@ pub fn sharp_corners(faces: &[FaceInfo], edges: &[clf_kernel::EdgeInfo], t: f64,
 /// the third direction.
 pub fn corner_reliefs(
   faces: &[FaceInfo],
-  edges: &[clf_kernel::EdgeInfo],
+  edges: &[fox_kernel::EdgeInfo],
   sheet: &SheetInfo,
   diagonal: f64,
 ) -> Result<Vec<Shape>, String> {
   let (t, r) = (sheet.thickness, sheet.bend_radius);
-  let convex: Vec<&clf_kernel::EdgeInfo> = sharp_corners(faces, edges, t, r)
+  let convex: Vec<&fox_kernel::EdgeInfo> = sharp_corners(faces, edges, t, r)
     .iter()
     .filter(|(_, rad)| *rad > r + t * 0.5)
     .filter_map(|(id, _)| edges.iter().find(|e| e.id == *id))
@@ -609,16 +609,16 @@ pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {
   let lines = flat.shape.edge_lines(0.01).map_err(|e| e.to_string())?;
   let mut ents: Vec<Ent> = Vec::new();
   for e in &edges {
-    if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == clf_kernel::CurveKind::Degenerate {
+    if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == fox_kernel::CurveKind::Degenerate {
       continue;
     }
     let p = |v: DVec3| pl.to_local(v);
     match e.kind {
-      clf_kernel::CurveKind::Line => ents.push(Ent::Line(p(e.start), p(e.end), "OUTLINE")),
-      clf_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
+      fox_kernel::CurveKind::Line => ents.push(Ent::Line(p(e.start), p(e.end), "OUTLINE")),
+      fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
         ents.push(Ent::Circle(p(e.center), e.radius))
       }
-      clf_kernel::CurveKind::Circle => {
+      fox_kernel::CurveKind::Circle => {
         let (a, b) = if e.axis.dot(n) > 0.0 { (e.start, e.end) } else { (e.end, e.start) };
         let c = p(e.center);
         let ang = |v: DVec3| {
@@ -716,12 +716,12 @@ mod tests {
   #[test]
   fn open_path_orders_segments() {
     let mut s = Sketch::new();
-    s.add_line(clf_sketch::PtSpec::At(50.0, 0.0), clf_sketch::PtSpec::At(50.0, 30.0)).unwrap();
-    s.add_line(clf_sketch::PtSpec::At(0.0, 0.0), clf_sketch::PtSpec::At(50.0, 0.0)).unwrap();
+    s.add_line(fox_sketch::PtSpec::At(50.0, 0.0), fox_sketch::PtSpec::At(50.0, 30.0)).unwrap();
+    s.add_line(fox_sketch::PtSpec::At(0.0, 0.0), fox_sketch::PtSpec::At(50.0, 0.0)).unwrap();
     let p = open_path(&s, &[]).unwrap();
     assert_eq!(p.len(), 2);
     assert!(len2(sub(p[0].end(), p[1].start())) < 1e-9);
-    s.add_line(clf_sketch::PtSpec::At(0.0, 0.0), clf_sketch::PtSpec::At(50.0, 30.0)).unwrap();
+    s.add_line(fox_sketch::PtSpec::At(0.0, 0.0), fox_sketch::PtSpec::At(50.0, 30.0)).unwrap();
     assert!(open_path(&s, &[]).is_err(), "closed triangle");
   }
 }

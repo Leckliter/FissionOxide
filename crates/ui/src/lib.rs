@@ -1,4 +1,4 @@
-//! The CLFusion desktop app: a Fusion 360-style modeling workspace on egui.
+//! The FissionOxide desktop app: a Fusion 360-style modeling workspace on egui.
 //!
 //! Layout, as in Fusion: the application bar (document tabs) and toolbar (workspace switcher,
 //! tabs, tool groups) at the top; the canvas with the browser, comments, navigation bar,
@@ -11,6 +11,7 @@ mod data_panel;
 mod dialogs;
 mod forms;
 mod icons;
+mod logo;
 mod marking;
 mod menus;
 mod panels;
@@ -22,10 +23,10 @@ mod viewport;
 
 use std::path::PathBuf;
 
-use clf_engine::render::Camera;
-use clf_engine::scene::{Pick, PickTable, SceneBuilder};
-use clf_engine::{Sel, Session};
 use egui::TextureHandle;
+use fox_engine::render::Camera;
+use fox_engine::scene::{Pick, PickTable, SceneBuilder};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 pub use dialogs::Dialog;
@@ -36,7 +37,7 @@ pub struct App {
   pub cam: Camera,
   scene: SceneBuilder,
   picks: PickTable,
-  frame: Option<clf_engine::render::Frame>,
+  frame: Option<fox_engine::render::Frame>,
   tex: Option<TextureHandle>,
   render_key: Option<RenderKey>,
   pub hover: Option<Pick>,
@@ -76,13 +77,13 @@ pub struct App {
   drag: Option<viewport::Drag>,
   tstate: viewport::ToolState,
   fitted_once: bool,
-  last_sketch: Option<clf_engine::model::FeatureId>,
+  last_sketch: Option<fox_engine::model::FeatureId>,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
   pub drawing: Option<u32>,
   /// The open drawing's rendered sheet, keyed by (design revision, drawing).
-  sheet_cache: Option<((u64, u32), Result<clf_engine::model::plot::Plot, String>)>,
+  sheet_cache: Option<((u64, u32), Result<fox_engine::model::plot::Plot, String>)>,
   /// Sheet zoom and pan in the Drawing workspace.
   sheet_view: (f32, egui::Vec2),
   /// What clicks and window selection pick: faces (default), edges, bodies or components.
@@ -94,14 +95,14 @@ pub struct App {
   /// Where the last viewport click was (Select Other from the menu opens there).
   pub(crate) last_click: Option<egui::Pos2>,
   /// The Measure dialog's result line: closest points and the label.
-  pub(crate) measure: Option<(clf_engine::kernel::glam::DVec3, clf_engine::kernel::glam::DVec3, String)>,
-  /// Section analysis: `{plane, offset, flip}` (see [`clf_engine::scene::view_options`]).
+  pub(crate) measure: Option<(fox_engine::kernel::glam::DVec3, fox_engine::kernel::glam::DVec3, String)>,
+  /// Section analysis: `{plane, offset, flip}` (see [`fox_engine::scene::view_options`]).
   pub section: Option<Value>,
   /// Surface analysis: `{analysis, pull?, angle?}`.
   pub analysis: Option<Value>,
   /// A regeneration running in the background, and when it started. While it runs the UI shows
   /// the last image and takes no input (nothing may call the kernel; see `Session::begin`).
-  pub(crate) rebuild: Option<(clf_engine::Rebuild, f64)>,
+  pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
   /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
   pub manufacture: bool,
   /// The tool library window, while open.
@@ -123,11 +124,11 @@ struct RenderKey {
   size: [u32; 2],
   hover: Option<Pick>,
   selection: Vec<Sel>,
-  edit_sketch: Option<clf_engine::model::FeatureId>,
+  edit_sketch: Option<fox_engine::model::FeatureId>,
   show_edges: bool,
   show_grid: bool,
   visible: Vec<(u32, bool)>,
-  profiles_of: Vec<clf_engine::model::FeatureId>,
+  profiles_of: Vec<fox_engine::model::FeatureId>,
   /// Section and analysis settings.
   view: Value,
 }
@@ -299,7 +300,7 @@ impl App {
       .s
       .model
       .bounds()
-      .unwrap_or((clf_engine::kernel::glam::DVec3::splat(-50.0), clf_engine::kernel::glam::DVec3::splat(50.0)));
+      .unwrap_or((fox_engine::kernel::glam::DVec3::splat(-50.0), fox_engine::kernel::glam::DVec3::splat(50.0)));
     let aspect = self.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
     self.cam.fit(lo, hi, aspect);
   }
@@ -312,7 +313,7 @@ impl App {
       }
       (None, None) => self.s.design.name.clone(),
     };
-    format!("{}{} — CLFusion", name, if self.s.dirty { " •" } else { "" })
+    format!("{}{} — FissionOxide", name, if self.s.dirty { " •" } else { "" })
   }
 
   // ---- file actions ----
@@ -353,14 +354,14 @@ impl App {
     self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, ..Default::default() });
   }
 
-  /// Save to a file on this computer (.clf, or .clfz archive).
+  /// Save to a file on this computer (.fox, or .foxz archive).
   pub fn save_file(&mut self, save_as: bool) {
     let path = match (&self.s.path, save_as) {
       (Some(p), false) => Some(p.clone()),
       _ => rfd::FileDialog::new()
-        .add_filter("CLFusion design", &["clf"])
-        .add_filter("CLFusion archive (design + thumbnail)", &["clfz"])
-        .set_file_name(format!("{}.clf", self.s.design.name))
+        .add_filter("FissionOxide design", &["fox"])
+        .add_filter("FissionOxide archive (design + thumbnail)", &["foxz"])
+        .set_file_name(format!("{}.fox", self.s.design.name))
         .save_file(),
     };
     if let Some(p) = path
@@ -370,9 +371,9 @@ impl App {
     }
   }
 
-  /// Export in any writable format (by its id in [`clf_engine::exchange::FORMATS`]).
+  /// Export in any writable format (by its id in [`fox_engine::exchange::FORMATS`]).
   pub fn export(&mut self, id: &str) {
-    let Some(f) = clf_engine::exchange::FORMATS.iter().find(|f| f.id == id) else { return };
+    let Some(f) = fox_engine::exchange::FORMATS.iter().find(|f| f.id == id) else { return };
     let ext = f.extensions.first().copied().unwrap_or(id);
     if let Some(p) = rfd::FileDialog::new()
       .add_filter(f.name, f.extensions)
@@ -422,7 +423,7 @@ impl App {
       return;
     }
     let st = self.s.design.cam.last().map(|st| st.post.clone()).unwrap_or_default();
-    let ext = clf_engine::model::cam::post::find(&st).map(|p| p.extension).unwrap_or("nc");
+    let ext = fox_engine::model::cam::post::find(&st).map(|p| p.extension).unwrap_or("nc");
     if let Some(p) = rfd::FileDialog::new()
       .add_filter("G-code", &["nc", "tap", "gcode", "ngc"])
       .set_file_name(format!("{}.{ext}", self.s.design.name))
@@ -540,7 +541,7 @@ impl App {
       self.fit_view();
     }
     if pressed(Key::Home, Modifiers::NONE) {
-      self.cam.set_view(clf_engine::render::StandardView::Home);
+      self.cam.set_view(fox_engine::render::StandardView::Home);
       self.fit_view();
     }
     let sketching = self.s.edit_sketch.is_some();
@@ -676,7 +677,7 @@ impl App {
         .s
         .model
         .body(body)
-        .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == clf_engine::kernel::SurfaceKind::Plane))
+        .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == fox_engine::kernel::SurfaceKind::Plane))
         .unwrap_or(false);
       if planar {
         self.create_sketch(json!({"body": body.0, "face": face}));
@@ -696,7 +697,7 @@ impl App {
     }
   }
 
-  pub fn edit_sketch(&mut self, id: clf_engine::model::FeatureId) {
+  pub fn edit_sketch(&mut self, id: fox_engine::model::FeatureId) {
     self.cancel_dialog();
     if self.run("sketch.edit", json!({"sketch": id.0})).is_some() {
       self.look_at_sketch();
@@ -735,7 +736,7 @@ impl App {
     let normal = face.and_then(|(body, face)| {
       let b = self.s.model.body(body)?;
       let f = b.faces().iter().find(|f| f.id == face)?;
-      (f.kind == clf_engine::kernel::SurfaceKind::Plane).then_some(f.normal)
+      (f.kind == fox_engine::kernel::SurfaceKind::Plane).then_some(f.normal)
     });
     match normal {
       Some(n) => self.look_along(n),
@@ -744,7 +745,7 @@ impl App {
   }
 
   /// Turns the camera to look straight at a plane with normal `n`.
-  fn look_along(&mut self, n: clf_engine::kernel::glam::DVec3) {
+  fn look_along(&mut self, n: fox_engine::kernel::glam::DVec3) {
     self.cam.pitch =
       n.z.clamp(-1.0, 1.0).asin().clamp(-std::f64::consts::FRAC_PI_2 + 1e-6, std::f64::consts::FRAC_PI_2 - 1e-6);
     if n.z.abs() < 0.999 {

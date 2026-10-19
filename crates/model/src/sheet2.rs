@@ -10,9 +10,9 @@
 
 use std::f64::consts::PI;
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{Bend, Plane, Shape};
-use clf_sketch::{Loop, Profile, PtSpec, Seg, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{Bend, Plane, Shape};
+use fox_sketch::{Loop, Profile, PtSpec, Seg, Sketch};
 
 use crate::sheet::{self, FlatPattern, SheetInfo};
 use crate::{CornerRelief, LoftMethod};
@@ -54,7 +54,7 @@ fn seg_len(s: &Seg) -> f64 {
     Seg::Circle { radius, .. } => 2.0 * PI * radius,
     Seg::Bezier { p } => {
       let pts: Vec<P2> =
-        (0..=BEZIER_STEPS).map(|i| clf_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
+        (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
     }
   }
@@ -68,7 +68,7 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
     Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { 2.0 * PI * f } else { -2.0 * PI * f }),
     Seg::Bezier { p } => {
       let pts: Vec<P2> =
-        (0..=BEZIER_STEPS).map(|i| clf_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
+        (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       let cum: Vec<f64> = std::iter::once(0.0)
         .chain(pts.windows(2).scan(0.0, |acc, w| {
           *acc += len2(sub(w[1], w[0]));
@@ -309,7 +309,7 @@ fn tangent_elements(segs: &[Seg]) -> Option<Vec<El>> {
         items.push(El::Curve { phi0: PI / 2.0, phi1: PI / 2.0 + 2.0 * PI, c: center, r: radius })
       }
       Seg::Bezier { p } => {
-        let pts: Vec<P2> = (0..=16).map(|i| clf_sketch::bezier_at(&p, i as f64 / 16.0)).collect();
+        let pts: Vec<P2> = (0..=16).map(|i| fox_sketch::bezier_at(&p, i as f64 / 16.0)).collect();
         for w in pts.windows(2) {
           if len2(sub(w[1], w[0])) > 1e-9 {
             items.push(El::Straight { phi: (w[1][1] - w[0][1]).atan2(w[1][0] - w[0][0]), p0: w[0], p1: w[1] });
@@ -753,7 +753,7 @@ impl Strip {
   /// at the same parameters, so they share edges), sewn into a solid.
   fn smooth_solid(&self, t: f64) -> Result<Shape, String> {
     let m = self.a.len();
-    let ke = |e: clf_kernel::KernelError| e.to_string();
+    let ke = |e: fox_kernel::KernelError| e.to_string();
     let a2: Vec<DVec3> = (0..m).map(|i| self.a[i] + self.va[i] * t).collect();
     let b2: Vec<DVec3> = (0..m).map(|i| self.b[i] + self.vb[i] * t).collect();
     // chord-length parameters, averaged over both profiles
@@ -983,7 +983,7 @@ pub fn corner_relief(
 /// parallel to it): the outline's lines, arcs and circles (other curves as polylines) and the
 /// bend centre lines as construction lines. `shift` moves everything in the sketch.
 pub fn flat_sketch(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Sketch, String> {
-  use clf_sketch::{CurveKind, PointId};
+  use fox_sketch::{CurveKind, PointId};
   let pl = &flat.plane;
   let n = pl.normal();
   let on_plane = |p: DVec3| (p - pl.origin).dot(n).abs() < 1e-4;
@@ -1006,17 +1006,17 @@ pub fn flat_sketch(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Sketc
   };
   let mut kinds = Vec::new();
   for e in &edges {
-    if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == clf_kernel::CurveKind::Degenerate {
+    if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == fox_kernel::CurveKind::Degenerate {
       continue;
     }
     match e.kind {
-      clf_kernel::CurveKind::Line => {
+      fox_kernel::CurveKind::Line => {
         kinds.push(CurveKind::Line { a: pt(&mut sk, loc(e.start)), b: pt(&mut sk, loc(e.end)) })
       }
-      clf_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
+      fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
         kinds.push(CurveKind::Circle { center: pt(&mut sk, loc(e.center)), radius: e.radius })
       }
-      clf_kernel::CurveKind::Circle => {
+      fox_kernel::CurveKind::Circle => {
         // sketch arcs run counter-clockwise (seen along the sketch normal) from start to end
         let (a, b) = if e.axis.dot(plane.normal()) > 0.0 { (e.start, e.end) } else { (e.end, e.start) };
         kinds.push(CurveKind::Arc {
@@ -1039,7 +1039,7 @@ pub fn flat_sketch(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Sketc
   if kinds.is_empty() {
     return Err("the flat pattern has no outline".into());
   }
-  let err = |e: clf_sketch::SketchError| e.to_string();
+  let err = |e: fox_sketch::SketchError| e.to_string();
   for k in kinds {
     sk.add_curve(k).map_err(err)?;
   }

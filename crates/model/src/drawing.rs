@@ -6,8 +6,8 @@
 //! [`crate::plot`] writes as SVG, PDF or DXF. Views are exact hidden-line projections from the
 //! kernel, so they always match the model.
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{BoolOp, LineKind, Projection, Shape, SurfaceKind};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{BoolOp, LineKind, Projection, Shape, SurfaceKind};
 use serde::{Deserialize, Serialize};
 
 use crate::plot::{Anchor, Item, Pen, Plot};
@@ -441,7 +441,7 @@ impl Projected {
   }
 
   /// Is a circle clear of the broken-out stretches?
-  fn shows_circle(&self, c: &clf_kernel::ProjCircle) -> bool {
+  fn shows_circle(&self, c: &fox_kernel::ProjCircle) -> bool {
     (0..2).all(|i| {
       self.cuts[i].iter().all(|k| c.center[i] + c.radius <= k.from + 1e-9 || c.center[i] - c.radius >= k.to - 1e-9)
     })
@@ -659,7 +659,7 @@ fn detail(v: &DrawingView, mut base: Projected, center: DVec3, radius: f64, fact
   let mut lines = Vec::new();
   for l in &base.proj.lines {
     for piece in clip_circle(&l.points, c, radius) {
-      lines.push(clf_kernel::ProjLine { kind: l.kind, points: piece });
+      lines.push(fox_kernel::ProjLine { kind: l.kind, points: piece });
     }
   }
   base.proj.circles.retain(|k| inside(k.center) && k.radius < radius);
@@ -671,7 +671,7 @@ fn detail(v: &DrawingView, mut base: Projected, center: DVec3, radius: f64, fact
       [c[0] + radius * t.cos(), c[1] + radius * t.sin()]
     })
     .collect();
-  base.proj.lines.push(clf_kernel::ProjLine { kind: LineKind::Tangent, points: ring });
+  base.proj.lines.push(fox_kernel::ProjLine { kind: LineKind::Tangent, points: ring });
   base.lo = [c[0] - radius, c[1] - radius];
   base.hi = [c[0] + radius, c[1] + radius];
   base.hatch.clear();

@@ -1,7 +1,7 @@
 use super::*;
 use crate::*;
-use clf_kernel::glam::DVec3;
-use clf_sketch::{ConstraintKind, Dim, ORIGIN, PtSpec, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_sketch::{ConstraintKind, Dim, ORIGIN, PtSpec, Sketch};
 use std::f64::consts::PI;
 
 const XY: PlaneRef = PlaneRef::Origin { plane: OriginPlane::Xy };
@@ -633,7 +633,7 @@ fn shelled_box_rips_converts_and_unfolds() {
   let m = regenerate(&mut d);
   ok(&m);
   assert_eq!(m.bodies.len(), 1);
-  let cyl = m.bodies[0].faces().iter().filter(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).count();
+  let cyl = m.bodies[0].faces().iter().filter(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).count();
   assert_eq!(cyl, 8, "four bends, inside and outside");
   let flat = m.bodies[0].flat_pattern(None).unwrap();
   assert_eq!(flat.bends.len(), 4);
@@ -720,7 +720,7 @@ fn flanges_from_separate_features_leave_an_open_corner() {
   let e = m.bodies[0]
     .edges()
     .iter()
-    .filter(|e| e.kind == clf_kernel::CurveKind::Line && (e.mid.x - 100.0).abs() < 1e-6 && (e.mid.z - 2.0).abs() < 1e-6)
+    .filter(|e| e.kind == fox_kernel::CurveKind::Line && (e.mid.x - 100.0).abs() < 1e-6 && (e.mid.z - 2.0).abs() < 1e-6)
     .map(|e| EdgeRef::from_edge(m.bodies[0].id, e, m.bodies[0].faces()))
     .next()
     .unwrap();

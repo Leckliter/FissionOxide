@@ -74,7 +74,7 @@ pub fn read_obj(bytes: &[u8]) -> Result<Vec<Mesh>> {
 /// Writes meshes as one OBJ, an `o` per mesh, with normals when the meshes have them.
 pub fn write_obj(meshes: &[Mesh]) -> String {
   use std::fmt::Write as _;
-  let mut s = String::from("# CLFusion OBJ export (mm)\n");
+  let mut s = String::from("# FissionOxide OBJ export (mm)\n");
   let mut base = 1usize;
   for m in meshes {
     let _ = writeln!(s, "o {}", m.name.replace(char::is_whitespace, "_"));

@@ -1,9 +1,9 @@
 //! Regeneration of the surface tools added with the Surface workspace's second pass: extend,
 //! untrim, trim with a body or sketch, and offsets with a distance per face.
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{Plane, Shape};
-use clf_sketch::{Profile, Seg};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{Plane, Shape};
+use fox_sketch::{Profile, Seg};
 
 use super::{Ctx, FResult, ke};
 use crate::surface::{FaceDistance, TrimTool};
@@ -330,8 +330,8 @@ mod tests {
   use super::super::regenerate;
   use crate::surface::{ExtendMode, TrimTool, UntrimLoops};
   use crate::*;
-  use clf_kernel::glam::DVec3;
-  use clf_sketch::Sketch;
+  use fox_kernel::glam::DVec3;
+  use fox_sketch::Sketch;
 
   const XY: PlaneRef = PlaneRef::Origin { plane: OriginPlane::Xy };
 
@@ -365,7 +365,7 @@ mod tests {
 
     // a circle trimmed out of it, then untrimmed
     let mut c = Sketch::new();
-    c.add_circle(clf_sketch::PtSpec::At(5.0, 5.0), 2.0).unwrap();
+    c.add_circle(fox_sketch::PtSpec::At(5.0, 5.0), 2.0).unwrap();
     let cs = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: c, links: Vec::new() }).unwrap();
     let body = m.bodies[0].id;
     let tw = d

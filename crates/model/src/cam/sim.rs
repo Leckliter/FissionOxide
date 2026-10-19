@@ -3,7 +3,7 @@
 //! checked against the part's own heightfield for gouges, rapids into the stock and material
 //! above the flutes.
 
-use clf_kernel::glam::{DVec2, DVec3};
+use fox_kernel::glam::{DVec2, DVec3};
 
 use super::{Setup, Tool, Toolpath};
 use crate::regen::Model;
@@ -84,7 +84,7 @@ impl Heightfield {
 
   /// The highest the given meshes reach over each cell's square (an upper bound; −∞ where they
   /// don't reach), for keeping a tool off them.
-  pub fn rasterize_over(&mut self, meshes: &[&clf_kernel::TriMesh]) {
+  pub fn rasterize_over(&mut self, meshes: &[&fox_kernel::TriMesh]) {
     self.z.fill(f64::NEG_INFINITY);
     for m in meshes {
       for tri in m.indices.chunks_exact(3) {
@@ -136,7 +136,7 @@ impl Heightfield {
   }
 
   /// The top surface of the given meshes, sampled at the cell centres (−∞ where there is none).
-  pub fn rasterize(&mut self, meshes: &[&clf_kernel::TriMesh]) {
+  pub fn rasterize(&mut self, meshes: &[&fox_kernel::TriMesh]) {
     self.z.fill(f64::NEG_INFINITY);
     for m in meshes {
       for tri in m.indices.chunks_exact(3) {
@@ -341,7 +341,7 @@ pub fn start(setup: &Setup, model: &Model, h: f64) -> Result<(Heightfield, Heigh
   let (lo, hi) = super::stock(setup, model)?;
   let stock = Heightfield::new(lo.truncate(), hi.truncate(), h, hi.z);
   let mut part = stock.clone();
-  let meshes: Vec<&clf_kernel::TriMesh> = super::bodies(setup, model).into_iter().filter_map(|b| b.mesh()).collect();
+  let meshes: Vec<&fox_kernel::TriMesh> = super::bodies(setup, model).into_iter().filter_map(|b| b.mesh()).collect();
   part.rasterize(&meshes);
   Ok((stock, part, lo.z))
 }

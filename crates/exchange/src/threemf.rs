@@ -202,7 +202,7 @@ fn xml_escape(s: &str) -> String {
 pub fn write_3mf(meshes: &[Mesh], thumbnail_png: Option<&[u8]>) -> Result<Vec<u8>> {
   use std::fmt::Write as _;
   let mut model = String::from(
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<model unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n <metadata name=\"Application\">CLFusion</metadata>\n <resources>\n",
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<model unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n <metadata name=\"Application\">FissionOxide</metadata>\n <resources>\n",
   );
   for (k, m) in meshes.iter().enumerate() {
     let _ = writeln!(

@@ -2,8 +2,8 @@
 //! PDF / DXF / SVG exports are written from. Wheel zooms, right- or middle-drag pans,
 //! double-click fits the sheet.
 
-use clf_engine::model::plot::{Anchor, Item, Pen};
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
+use fox_engine::model::plot::{Anchor, Item, Pen};
 
 use crate::{App, theme};
 
@@ -17,7 +17,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   };
   let key = (app.s.revision, id);
   if app.sheet_cache.as_ref().map(|c| c.0) != Some(key) {
-    let plot = clf_engine::model::drawing::render(d, &app.s.design, &app.s.model);
+    let plot = fox_engine::model::drawing::render(d, &app.s.design, &app.s.model);
     app.sheet_cache = Some((key, plot));
   }
   let (w, h) = d.sheet.size();

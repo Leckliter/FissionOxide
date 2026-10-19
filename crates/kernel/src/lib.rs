@@ -1,4 +1,4 @@
-//! Solid modeling kernel for CLFusion, built on OpenCASCADE (OCCT 7.8) through a small C++ bridge.
+//! Solid modeling kernel for FissionOxide, built on OpenCASCADE (OCCT 7.8) through a small C++ bridge.
 //!
 //! The rest of the app talks to OCCT only through this crate's types, so the kernel can be
 //! swapped. Every kernel call that can fail returns [`KernelError`]; OCCT exceptions are caught on
@@ -11,8 +11,8 @@ mod ffi;
 
 use std::path::Path;
 
-use clf_sketch::{Profile, Seg};
 use cxx::UniquePtr;
+use fox_sketch::{Profile, Seg};
 use glam::{DMat4, DVec3};
 
 use ffi::ffi as sys;
@@ -891,7 +891,7 @@ pub fn write_stl(meshes: &[TriMesh], path: &Path) -> std::io::Result<()> {
   let tris: usize = meshes.iter().map(|m| m.indices.len() / 3).sum();
   let mut out = Vec::with_capacity(84 + tris * 50);
   let mut header = [0u8; 80];
-  let tag = b"CLFusion binary STL";
+  let tag = b"FissionOxide binary STL";
   header[..tag.len()].copy_from_slice(tag);
   out.extend_from_slice(&header);
   out.extend_from_slice(&(u32::try_from(tris).unwrap_or(u32::MAX)).to_le_bytes());
@@ -914,7 +914,7 @@ pub fn write_stl(meshes: &[TriMesh], path: &Path) -> std::io::Result<()> {
 /// Writes meshes as a Wavefront OBJ (one object per mesh).
 pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<()> {
   use std::fmt::Write as _;
-  let mut s = String::from("# CLFusion OBJ export (mm)\n");
+  let mut s = String::from("# FissionOxide OBJ export (mm)\n");
   let mut base = 1usize;
   for (name, m) in meshes {
     let _ = writeln!(s, "o {}", name.replace(char::is_whitespace, "_"));

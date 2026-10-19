@@ -63,7 +63,7 @@ fn sweep_rail_twist_and_loft_rails_by_command() {
   let m = s.model.bodies[0].shape.mass().unwrap();
   assert!((m.bbox_max.x - 15.0).abs() < 0.3 && (m.bbox_max.y - 10.0).abs() < 0.3, "{m:?}");
   let loft = s.design.features.last().unwrap().id;
-  assert!(s.design.feature(loft).unwrap().kind.depends_on().contains(&clf_model::FeatureId(r2)));
+  assert!(s.design.feature(loft).unwrap().kind.depends_on().contains(&fox_model::FeatureId(r2)));
   let err = s.execute("loft", &json!({"sections": [a, b], "rails": [r1], "centerline": r2})).unwrap();
   assert!(err["error"].is_string(), "{err}");
 }

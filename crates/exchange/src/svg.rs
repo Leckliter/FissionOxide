@@ -9,7 +9,7 @@
 //! circular after the transform, cubics otherwise. `<text>`, `<image>`, `<use>` and hidden
 //! elements are counted in [`Drawing::skipped`]; `<defs>`, `<clipPath>`, `<mask>`, `<symbol>`
 //! and other non-drawing content is ignored. Elements in a group whose id, class or label
-//! mentions "construction" are construction geometry (how CLFusion writes it).
+//! mentions "construction" are construction geometry (how FissionOxide writes it).
 //!
 //! Writing produces a standalone SVG in millimetres, stroke only, with connected entities joined
 //! into one `<path>` each.
@@ -967,7 +967,7 @@ pub fn write_svg(entities: &[(Entity, bool)]) -> String {
   // mirror y about the middle of the viewBox (what reading undoes)
   let flip = lo[1] + hi[1];
   let mut s = String::new();
-  s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- CLFusion SVG export (mm) -->\n");
+  s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- FissionOxide SVG export (mm) -->\n");
   let _ = writeln!(
     s,
     "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{}mm\" height=\"{}mm\" viewBox=\"{} {} {} {}\">",

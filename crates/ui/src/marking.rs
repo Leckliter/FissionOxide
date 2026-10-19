@@ -2,10 +2,10 @@
 //! one by clicking it, or by clicking anywhere in its direction) and an overflow list of
 //! commands for the current selection underneath.
 
-use clf_engine::Sel;
-use clf_engine::kernel::SurfaceKind;
-use clf_engine::model::FeatureId;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use fox_engine::Sel;
+use fox_engine::kernel::SurfaceKind;
+use fox_engine::model::FeatureId;
 
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};

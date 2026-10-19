@@ -145,7 +145,7 @@ pub struct Dim {
 
 impl Dim {
   pub fn new(value: f64) -> Self {
-    Dim { expr: clf_expr::trim_number(value), value }
+    Dim { expr: fox_expr::trim_number(value), value }
   }
 
   pub fn expr(expr: impl Into<String>, value: f64) -> Self {
@@ -710,13 +710,13 @@ impl Sketch {
 
   /// Evaluates every dimension expression with `scope`, storing values. Returns the ids and
   /// errors of dimensions that failed to evaluate (they keep their previous value).
-  pub fn evaluate_dims(&mut self, scope: &dyn clf_expr::Scope) -> Vec<(ConstraintId, clf_expr::ExprError)> {
+  pub fn evaluate_dims(&mut self, scope: &dyn fox_expr::Scope) -> Vec<(ConstraintId, fox_expr::ExprError)> {
     let mut errors = Vec::new();
     for c in &mut self.constraints {
-      let kind = if c.kind.is_angle() { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
+      let kind = if c.kind.is_angle() { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
       let id = c.id;
       if let Some(d) = c.kind.dim_mut() {
-        match clf_expr::eval(&d.expr, kind, scope) {
+        match fox_expr::eval(&d.expr, kind, scope) {
           Ok(v) => d.value = v,
           Err(e) => errors.push((id, e)),
         }
