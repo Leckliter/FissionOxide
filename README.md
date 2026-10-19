@@ -204,8 +204,8 @@ clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step
 ### AI agents (MCP)
 
 `clfusion-cli mcp [design.clf]` is a Model Context Protocol server on stdio. Each command is a
-tool (dots become underscores: `sheet.edge_flange` → `sheet_edge_flange`) and `view_render`
-returns a PNG of the model. To use it from Claude Code:
+tool (dots become underscores: `sheet.edge_flange` → `sheet_edge_flange`); `view_render`
+without a `path` returns a PNG of the model. To use it from Claude Code:
 
 ```sh
 claude mcp add clfusion -- /path/to/clfusion-cli mcp
@@ -220,6 +220,25 @@ scripts don't depend on internal numbering:
 {"cmd": "extrude", "extent": "through_all", "flip": true, "operation": "cut"}
 {"cmd": "fillet", "edges": [{"point": [6, 0, 6]}], "radius": 4}
 ```
+
+### Commands for scripts and plugins
+
+These exist so code driving the engine can inspect and tag what it builds (see
+[docs/PLUGINS.md](docs/PLUGINS.md)):
+
+- `transaction.begin` / `commit` / `rollback`: many commands as one undo step, or none.
+- `body.topology`: every face and edge with its geometry and which faces meet at each edge.
+- Feature results list `result_bodies`, the bodies the feature created or changed; `targets`
+  on extrude, revolve, loft, sweep, primitives and flanges limits join/cut to those bodies.
+- `attribute.set` / `get` / `find` / `delete`: named values on the design, bodies, components,
+  features and sketch curves or points; saved with the design.
+- `sketch.info` gives the sketch plane, curve lengths and boxes, each profile's box,
+  perimeter and bounding curves, and the curves outside every profile; `samples` and `loops`
+  add points along curves and profile boundaries.
+- `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
+  DXF or a `.clf`); `sketch.visible`; `body.color`; `selection`.
+- `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
+- Anywhere a plane is taken, `{"origin": [x,y,z], "normal": [x,y,z]}` is a free plane.
 
 ## Architecture
 

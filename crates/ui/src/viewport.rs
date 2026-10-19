@@ -267,6 +267,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    ..ViewOptions::default()
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
   let frame = render::render(&scene, &app.cam, view.w, view.h);

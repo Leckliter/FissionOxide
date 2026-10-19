@@ -216,21 +216,24 @@ Every tool was checked against the current command set. Host gaps (dialog inputs
 file output, resources, storage) are the plugin system itself, above. These are the **engine
 and query gaps**, in the order they unblock tools:
 
-| # | Gap | Kind | Tools blocked | New / changed command |
-|---|-----|------|---------------|------------------------|
-| 1 | Undo grouping: many commands as one undo step, with rollback | engine | all | `transaction.begin/commit/rollback` |
-| 2 | List a body's faces and edges with geometry and adjacency (kind, area, centre, normal, edge endpoints, length, faces per edge) | query | 7 | `body.topology` |
-| 3 | Which bodies a feature created or changed | query | 4 | `bodies` in feature results |
-| 4 | Join/cut only chosen bodies (today it hits every overlapping body) | engine | 4 | `targets` on extrude/revolve/sweep/loft/primitives |
-| 5 | Custom attributes on bodies, components, features and sketch curves | engine | 5 | `attribute.set/get/find/delete` |
-| 6 | Sketch frame (origin, axes) and curve lengths/samples, profile bounding boxes and their curves | query | 6 | richer `sketch.info` |
-| 7 | Read the current selection | query | 2 | `selection` |
-| 8 | Sketch visibility | engine | 4 | `sketch.visible`, shown in `info` |
-| 9 | Body colour | query | 3 | `body.color`, colour in `info` |
-| 10 | Move/rotate/scale sketch geometry | engine | 3 | `sketch.transform` |
-| 11 | Put DXF or another sketch's curves into an existing sketch | engine | 3 | `sketch.insert` |
-| 12 | Render to a PNG file with camera control and sketches hidden | query | 4 | `view.render` |
-| 13 | Construction plane through a point with a normal | engine | 1 | `plane.point_normal` |
+| # | Gap | Kind | Tools blocked | Command | Status |
+|---|-----|------|---------------|---------|--------|
+| 1 | Undo grouping: many commands as one undo step, with rollback | engine | all | `transaction.begin/commit/rollback` | done |
+| 2 | List a body's faces and edges with geometry and adjacency (kind, area, centre, normal, edge endpoints, length, faces per edge) | query | 7 | `body.topology` | done |
+| 3 | Which bodies a feature created or changed | query | 4 | `result_bodies` in feature results | done |
+| 4 | Join/cut only chosen bodies (today it hits every overlapping body) | engine | 4 | `targets` on extrude/revolve/loft/sweep/primitives/flange | done |
+| 5 | Custom attributes on bodies, components, features and sketch curves/points | engine | 5 | `attribute.set/get/find/delete` | done |
+| 6 | Sketch frame (origin, axes) and curve lengths/samples, profile bounding boxes and their curves, curves outside every profile | query | 6 | richer `sketch.info` | done |
+| 7 | Read the current selection | query | 2 | `selection` | done |
+| 8 | Sketch visibility | engine | 4 | `sketch.visible`, shown in `info` | done |
+| 9 | Body colour | query | 3 | `body.color`, colour in `info` | done |
+| 10 | Move/rotate/scale sketch geometry | engine | 3 | `sketch.transform` | done |
+| 11 | Put DXF, `.clf` or another sketch's curves into an existing sketch | engine | 3 | `sketch.insert` | done |
+| 12 | Render to a PNG file with camera control and sketches hidden | query | 4 | `view.render` | done |
+| 13 | Construction plane through a point with a normal | engine | 1 | `{origin, normal, x?}` wherever a plane is taken | done |
+
+Attributes can't be put on individual faces or edges yet: their indices change when the model
+changes. Tag the feature or body instead, and find faces again with `body.topology`.
 
 Later, needed by one tool each and not blocking the port: appearances with names and emissive
 light (LED brightness), temporary exploded positions without timeline features, a combined
@@ -238,7 +241,7 @@ multi-body DXF cut file, ellipse curves, curve/surface evaluation on freeform ge
 
 ## Milestones
 
-1. **Engine readiness** — the gap table above, each with tests and CLI/MCP exposure.
+1. **Engine readiness** — the gap table above, each with tests and CLI/MCP exposure (done).
 2. **Plugin host** — `clf-plugin` crate: package reader and validator, installed-plugin
    registry, Wasmtime runtime with the WIT host interface, transactions, permissions.
 3. **UI** — Plugins panel, install dialog and drag-and-drop, manifest-driven toolbar panels and
