@@ -15,7 +15,7 @@ use crate::viewport::NavMode;
 use crate::{App, RenameTarget, Tool};
 
 /// Toolbar tabs of the Design workspace; `Sketch` is the contextual tab shown while sketching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
   Solid,
   Surface,
@@ -29,7 +29,7 @@ pub enum Tab {
 
 impl Tab {
   const MAIN: [Tab; 7] =
-    [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Utilities, Tab::Manage];
+    [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Manage, Tab::Utilities];
 
   fn label(self) -> &'static str {
     match self {
@@ -232,6 +232,8 @@ pub(crate) enum Cmd {
   Construction,
   Constraint(&'static str),
   FinishSketch,
+  /// Remove the selected bodies (a timeline feature, unlike Delete).
+  RemoveBodies,
   Undo,
   Redo,
   Delete,
@@ -290,6 +292,7 @@ impl Cmd {
       Cmd::Undo => (Icon::Undo, "Undo", "Undo (Ctrl+Z)"),
       Cmd::Redo => (Icon::Redo, "Redo", "Redo (Ctrl+Y)"),
       Cmd::Delete => (Icon::Remove, "Delete", "Delete the selection (Del)"),
+      Cmd::RemoveBodies => (Icon::RemoveBody, "Remove", "Remove the selected bodies (kept in the timeline)"),
       Cmd::LookAt => (Icon::LookAt, "Look At", "Look at the sketch plane or a selected planar face"),
       Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
       Cmd::Home => (Icon::Views, "Home View", "Go to the home view (Home)"),
@@ -297,7 +300,7 @@ impl Cmd {
     }
   }
 
-  fn active(self, app: &App) -> bool {
+  pub(crate) fn active(self, app: &App) -> bool {
     match self {
       Cmd::SketchTool(t) => app.tool == t,
       Cmd::Select => false,
@@ -348,6 +351,16 @@ impl Cmd {
         }
       }
       Cmd::Delete => app.delete_selection(),
+      Cmd::RemoveBodies => {
+        let bodies: Vec<u32> =
+          app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();
+        if bodies.is_empty() {
+          app.status = Some(("Remove: select bodies first".into(), false));
+        } else {
+          app.run("body.remove", json!({"bodies": bodies}));
+          app.s.selection.clear();
+        }
+      }
       Cmd::LookAt => app.look_at_selection(),
       Cmd::Fit => app.fit_view(),
       Cmd::Home => {
@@ -403,6 +416,8 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
 /// `menu` lists every command of the group (`None` entries are separators).
 fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[Option<Cmd>]) -> Rect {
   let mut run = None;
+  let popup_id = egui::Id::new(("sketch-menu", label));
+  let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
@@ -416,10 +431,10 @@ fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[O
     });
     ui.add_space(3.0);
     let w = ui.min_rect().width();
-    group_label(ui, label, w)
+    group_label(ui, label, w, open)
   });
   let label_resp = inner.inner;
-  egui::Popup::menu(&label_resp).show(|ui| {
+  egui::Popup::menu(&label_resp).id(popup_id).show(|ui| {
     for item in menu {
       match item {
         Some(c) => {
@@ -442,12 +457,14 @@ fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[O
   inner.response.rect
 }
 
-/// The group name with its drop-down chevron (clickable).
-fn group_label(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
+/// The group name with its drop-down chevron (clickable); light blue while its menu is open.
+pub(crate) fn group_label(ui: &mut egui::Ui, label: &str, width: f32, open: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), theme::GROUP_LABEL).size().x;
   let (rect, resp) = ui.allocate_exact_size(vec2(width.max(tw + 22.0), 18.0), egui::Sense::click());
-  if resp.hovered() {
+  if open {
+    ui.painter().rect_filled(rect, 0.0, theme::CONTEXT_TAB);
+  } else if resp.hovered() {
     ui.painter().rect_filled(rect, 2.0, theme::HOVER);
   }
   let x0 = rect.center().x - (tw + 12.0) / 2.0;
@@ -456,7 +473,7 @@ fn group_label(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
   resp
 }
 
-fn separator(ui: &mut egui::Ui) {
+pub(crate) fn separator(ui: &mut egui::Ui) {
   let (r, _) = ui.allocate_exact_size(vec2(9.0, 58.0), egui::Sense::hover());
   ui.painter().line_segment([r.center_top() + vec2(0.0, 4.0), r.center_bottom()], Stroke::new(1.0, theme::SEPARATOR));
 }
@@ -484,9 +501,10 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
             .show(ui, |ui| {
               ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                match app.tab {
-                  Tab::Solid => solid_toolbar(app, ui),
+                let tab = app.tab;
+                match tab {
                   Tab::Sketch => sketch_toolbar(app, ui),
+                  other if crate::menus::tab_toolbar(app, ui, other) => {}
                   other => {
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
@@ -568,52 +586,6 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
   });
 }
 
-fn solid_toolbar(app: &mut App, ui: &mut egui::Ui) {
-  use Cmd::*;
-  use Kind as K;
-  let _ = group(
-    app,
-    ui,
-    "CREATE",
-    &[NewSketch, Dialog(K::Extrude), Dialog(K::Revolve), Dialog(K::Box), Dialog(K::RectPattern), Dialog(K::Mirror)],
-    &[
-      Some(NewSketch),
-      None,
-      Some(Dialog(K::Extrude)),
-      Some(Dialog(K::Revolve)),
-      None,
-      Some(Dialog(K::Box)),
-      Some(Dialog(K::Cylinder)),
-      Some(Dialog(K::Sphere)),
-      Some(Dialog(K::Torus)),
-      None,
-      Some(Dialog(K::RectPattern)),
-      Some(Dialog(K::CircPattern)),
-      Some(Dialog(K::Mirror)),
-    ],
-  );
-  let _ = group(
-    app,
-    ui,
-    "MODIFY",
-    &[Dialog(K::Fillet), Dialog(K::Chamfer), Dialog(K::Shell), Dialog(K::Combine), Dialog(K::Move), Params],
-    &[
-      Some(Dialog(K::Fillet)),
-      Some(Dialog(K::Chamfer)),
-      Some(Dialog(K::Shell)),
-      None,
-      Some(Dialog(K::Combine)),
-      Some(Dialog(K::Move)),
-      None,
-      Some(Params),
-    ],
-  );
-  let _ = group(app, ui, "CONSTRUCT", &[Dialog(K::OffsetPlane)], &[Some(Dialog(K::OffsetPlane))]);
-  let _ = group(app, ui, "INSPECT", &[Dialog(K::Inspect)], &[Some(Dialog(K::Inspect))]);
-  let _ = group(app, ui, "INSERT", &[InsertStep], &[Some(InsertStep)]);
-  let _ = group(app, ui, "SELECT", &[Select], &[Some(Select)]);
-}
-
 fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
   use Cmd::*;
   let t = SketchTool;
@@ -664,9 +636,9 @@ fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.add_space(3.0);
     let w = ui.min_rect().width();
-    group_label(ui, "CONSTRAINTS", w)
+    group_label(ui, "CONSTRAINTS", w, egui::Popup::is_id_open(ui.ctx(), egui::Id::new("constraints-menu")))
   });
-  egui::Popup::menu(&inner.inner).show(|ui| {
+  egui::Popup::menu(&inner.inner).id(egui::Id::new("constraints-menu")).show(|ui| {
     for kind in CONSTRAINTS {
       let (icon, name) = constraint_info(kind);
       if icons::menu_item(ui, icon, name).clicked() {

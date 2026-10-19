@@ -8,6 +8,7 @@
 mod dialogs;
 mod icons;
 mod marking;
+mod menus;
 mod panels;
 mod theme;
 mod viewport;
@@ -321,6 +322,12 @@ impl App {
       }
       if pressed(Key::F, Modifiers::NONE) {
         self.start(dialogs::Kind::Fillet);
+      }
+      if pressed(Key::M, Modifiers::NONE) {
+        self.start(dialogs::Kind::Move);
+      }
+      if pressed(Key::I, Modifiers::NONE) {
+        self.start(dialogs::Kind::Inspect);
       }
     }
   }

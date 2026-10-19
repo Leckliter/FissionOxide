@@ -89,6 +89,97 @@ pub enum Icon {
   Play,
   StepForward,
   ToEnd,
+  // full toolbar menus
+  PressPull,
+  Draft,
+  Scale,
+  OffsetFace,
+  ReplaceFace,
+  SplitFace,
+  SplitBody,
+  SilhouetteSplit,
+  Align,
+  RemoveBody,
+  PhysMaterial,
+  Appearance,
+  ManageMaterials,
+  ComputeAll,
+  Bom,
+  CreateForm,
+  Derive,
+  Sweep,
+  Loft,
+  Rib,
+  Web,
+  Emboss,
+  Hole,
+  Thread,
+  Coil,
+  Pipe,
+  Thicken,
+  BoundaryFill,
+  BaseFeature,
+  JointOrigin,
+  Configure,
+  ConfigTable,
+  ConfigRules,
+  Ucs,
+  PlaneAlt,
+  Axis,
+  CPoint,
+  Interference,
+  Section,
+  CurvComb,
+  CurvMap,
+  DraftAnalysis,
+  EnvMap,
+  Isocurve,
+  Zebra,
+  Accessibility,
+  CenterOfMass,
+  MinRadius,
+  Navigator,
+  ComponentColors,
+  FaceGroups,
+  History,
+  Sustainability,
+  Decal,
+  Canvas,
+  InsertSvg,
+  InsertDxf,
+  InsertMesh,
+  InsertComponent,
+  Fastener,
+  DuplicateJoints,
+  McMaster,
+  Manufacturer,
+  AddToAssembly,
+  WindowSel,
+  FreeformSel,
+  PaintSel,
+  Patch,
+  Ruled,
+  SurfOffset,
+  Trim,
+  Untrim,
+  Extend,
+  Stitch,
+  Unstitch,
+  ReverseNormal,
+  Tessellate,
+  MeshSection,
+  BaseMesh,
+  Repair,
+  GenFaceGroups,
+  CombineFaceGroups,
+  DirectEdit,
+  Remesh,
+  Reduce,
+  PlaneCut,
+  Smooth,
+  Separate,
+  ScaleMesh,
+  ConvertMesh,
 }
 
 #[derive(Clone, Copy)]
@@ -104,12 +195,24 @@ enum Tone {
   Green,
   Red,
   White,
+  Purple,
+  PurpleLight,
+}
+
+/// Colour family of an icon's solids: blue for solid modelling, orange for surfaces and gold
+/// for meshes, as in Fusion's toolbars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tint {
+  Blue,
+  Orange,
+  Gold,
 }
 
 struct Pen<'a> {
   p: &'a Painter,
   r: Rect,
   mono: Option<Color32>,
+  tint: Tint,
   w: f32,
 }
 
@@ -125,6 +228,8 @@ impl Pen<'_> {
         Tone::BlueLight => c.gamma_multiply(0.2),
         Tone::Light => c.gamma_multiply(0.15),
         Tone::White => Color32::from_white_alpha(200),
+        Tone::Purple => c.gamma_multiply(0.35),
+        Tone::PurpleLight => c.gamma_multiply(0.2),
         Tone::Ink | Tone::Red => c,
       },
       None => match t {
@@ -132,13 +237,27 @@ impl Pen<'_> {
         Tone::Fill => theme::ICON_FILL,
         Tone::Light => theme::ICON_FILL_LIGHT,
         Tone::Dark => Color32::from_rgb(150, 154, 160),
-        Tone::Blue => theme::ICON_BLUE,
-        Tone::BlueLight => theme::ICON_BLUE_LIGHT,
-        Tone::BlueDark => theme::ICON_BLUE_DARK,
+        Tone::Blue => match self.tint {
+          Tint::Blue => theme::ICON_BLUE,
+          Tint::Orange => Color32::from_rgb(240, 138, 48),
+          Tint::Gold => Color32::from_rgb(222, 178, 64),
+        },
+        Tone::BlueLight => match self.tint {
+          Tint::Blue => theme::ICON_BLUE_LIGHT,
+          Tint::Orange => Color32::from_rgb(250, 192, 128),
+          Tint::Gold => Color32::from_rgb(242, 216, 136),
+        },
+        Tone::BlueDark => match self.tint {
+          Tint::Blue => theme::ICON_BLUE_DARK,
+          Tint::Orange => Color32::from_rgb(196, 98, 24),
+          Tint::Gold => Color32::from_rgb(168, 126, 36),
+        },
         Tone::Orange => theme::ICON_ORANGE,
         Tone::Green => theme::ICON_GREEN,
         Tone::Red => theme::ICON_RED,
         Tone::White => Color32::WHITE,
+        Tone::Purple => Color32::from_rgb(150, 96, 214),
+        Tone::PurpleLight => Color32::from_rgb(204, 172, 240),
       },
     }
   }
@@ -147,7 +266,11 @@ impl Pen<'_> {
   fn edge(&self, t: Tone) -> Color32 {
     match (self.mono, t) {
       (Some(c), _) => c,
-      (None, Tone::Blue | Tone::BlueLight | Tone::BlueDark) => Color32::from_rgb(16, 84, 160),
+      (None, Tone::Blue | Tone::BlueLight | Tone::BlueDark) => match self.tint {
+        Tint::Blue => Color32::from_rgb(16, 84, 160),
+        Tint::Orange => Color32::from_rgb(170, 84, 20),
+        Tint::Gold => Color32::from_rgb(140, 104, 30),
+      },
       (None, Tone::Orange) => Color32::from_rgb(190, 105, 20),
       (None, Tone::Green) => Color32::from_rgb(40, 125, 40),
       _ => theme::ICON_INK,
@@ -267,19 +390,24 @@ impl Pen<'_> {
 
 /// Draws `icon` into `r` in one flat colour.
 pub fn draw(p: &Painter, r: Rect, icon: Icon, c: Color32) {
-  paint(p, r, icon, Some(c));
+  paint(p, r, icon, Some(c), Tint::Blue);
+}
+
+/// Draws `icon` in colour with its solids in the `tint` family.
+pub fn draw_tinted(p: &Painter, r: Rect, icon: Icon, tint: Tint) {
+  paint(p, r, icon, None, tint);
 }
 
 /// Draws `icon` into `r` in Fusion's colour style.
 pub fn draw_color(p: &Painter, r: Rect, icon: Icon) {
-  paint(p, r, icon, None);
+  paint(p, r, icon, None, Tint::Blue);
 }
 
-fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
+fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use Tone::*;
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
   let w = (r.width() / 16.0).clamp(1.0, 1.8);
-  let k = Pen { p, r, mono, w };
+  let k = Pen { p, r, mono, tint, w };
   match icon {
     Icon::Sketch => {
       k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
@@ -686,11 +814,474 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
       k.fill(&[(0.22, 0.2), (0.22, 0.8), (0.7, 0.5)], Ink);
       k.thick((0.78, 0.2), (0.78, 0.8), Ink, 1.4);
     }
+    Icon::PressPull => {
+      k.block(0.08, 0.36, 0.5, 0.92, 0.22, BlueLight, Blue, BlueDark);
+      k.thick((0.62, 0.62), (0.88, 0.62), Ink, 1.2);
+      k.arrow_head((0.98, 0.62), (1.0, 0.0), 0.16, Ink);
+    }
+    Icon::Draft => {
+      k.solid(&[(0.24, 0.1), (0.76, 0.1), (0.92, 0.9), (0.08, 0.9)], Fill);
+      k.solid(&[(0.24, 0.1), (0.4, 0.1), (0.3, 0.9), (0.08, 0.9)], Blue);
+    }
+    Icon::Scale => {
+      k.solid(&[(0.06, 0.06), (0.94, 0.06), (0.94, 0.94), (0.06, 0.94)], White);
+      k.solid(&[(0.06, 0.06), (0.52, 0.06), (0.52, 0.52), (0.06, 0.52)], Blue);
+    }
+    Icon::OffsetFace => {
+      k.solid(&[(0.06, 0.06), (0.94, 0.06), (0.94, 0.94), (0.06, 0.94)], White);
+      k.solid(&[(0.24, 0.24), (0.76, 0.24), (0.76, 0.76), (0.24, 0.76)], BlueLight);
+    }
+    Icon::ReplaceFace => {
+      k.block(0.1, 0.42, 0.66, 0.92, 0.24, Blue, White, Light);
+      k.thick((0.42, 0.62), (0.42, 0.22), Ink, 1.2);
+      k.arrow_head((0.42, 0.12), (0.0, -1.0), 0.16, Ink);
+    }
+    Icon::SplitFace => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.44), (0.08, 0.44)], Blue);
+      k.solid(&[(0.08, 0.54), (0.92, 0.54), (0.92, 0.9), (0.08, 0.9)], White);
+    }
+    Icon::SplitBody => {
+      k.block(0.08, 0.62, 0.74, 0.92, 0.2, Light, Fill, Dark);
+      k.block(0.08, 0.26, 0.74, 0.5, 0.2, BlueLight, Blue, BlueDark);
+    }
+    Icon::SilhouetteSplit => {
+      k.circle((0.5, 0.5), 0.42, Some(Blue), None);
+      k.p.add(Shape::convex_polygon(k.arc_pts((0.5, 0.5), 0.42, 0.42, PI, TAU), k.col(Light), Stroke::NONE));
+      k.ellipse((0.5, 0.5), 0.42, 0.12, None, Ink);
+    }
+    Icon::Align => {
+      k.thick((0.1, 0.06), (0.1, 0.94), Ink, 1.2);
+      k.solid(&[(0.14, 0.18), (0.6, 0.18), (0.6, 0.42), (0.14, 0.42)], Blue);
+      k.solid(&[(0.14, 0.56), (0.9, 0.56), (0.9, 0.8), (0.14, 0.8)], BlueLight);
+    }
+    Icon::RemoveBody => {
+      k.circle((0.76, 0.5), 0.17, Some(Blue), None);
+      k.thick((0.6, 0.5), (0.2, 0.5), Blue, 2.4);
+      k.arrow_head((0.04, 0.5), (-1.0, 0.0), 0.2, Blue);
+    }
+    Icon::PhysMaterial => {
+      k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
+      for (x, y) in [(0.32, 0.32), (0.68, 0.32), (0.5, 0.5), (0.32, 0.68), (0.68, 0.68)] {
+        k.fill(&[(x - 0.09, y - 0.09), (x + 0.09, y - 0.09), (x + 0.09, y + 0.09), (x - 0.09, y + 0.09)], Ink);
+      }
+    }
+    Icon::Appearance => {
+      let cols = [(230, 60, 50), (245, 160, 40), (240, 220, 60), (80, 180, 70), (50, 130, 220), (150, 90, 200)];
+      for (i, c) in cols.iter().enumerate() {
+        let a0 = TAU * i as f32 / 6.0;
+        let mut v = vec![k.u(0.5, 0.5)];
+        v.extend(k.arc_pts((0.5, 0.5), 0.44, 0.44, a0, a0 + TAU / 6.0));
+        let col = match mono {
+          Some(m) => m.gamma_multiply(0.3 + 0.1 * i as f32),
+          None => Color32::from_rgb(c.0, c.1, c.2),
+        };
+        k.p.add(Shape::convex_polygon(v, col, Stroke::NONE));
+      }
+    }
+    Icon::ManageMaterials | Icon::Bom | Icon::ConfigTable => {
+      k.solid(&[(0.08, 0.12), (0.92, 0.12), (0.92, 0.9), (0.08, 0.9)], White);
+      for y in [0.32, 0.51, 0.7] {
+        k.line((0.08, y), (0.92, y), Ink);
+      }
+      k.line((0.36, 0.12), (0.36, 0.9), Ink);
+      if icon == Icon::Bom {
+        k.fill(&[(0.0, 0.0), (0.22, 0.0), (0.22, 0.2), (0.0, 0.2)], Blue);
+      }
+      if icon == Icon::ConfigTable {
+        k.circle((0.76, 0.24), 0.2, Some(Blue), None);
+        k.path(&[(0.8, 0.1), (0.72, 0.26), (0.8, 0.26), (0.72, 0.4)], White);
+      }
+    }
+    Icon::ComputeAll => {
+      k.solid(&[(0.3, 0.04), (0.7, 0.04), (0.7, 0.96), (0.3, 0.96)], Ink);
+      k.circle((0.5, 0.22), 0.1, Some(Red), None);
+      k.circle((0.5, 0.5), 0.1, Some(Orange), None);
+      k.circle((0.5, 0.78), 0.1, Some(Green), None);
+    }
+    Icon::CreateForm => {
+      k.block(0.06, 0.36, 0.6, 0.9, 0.24, PurpleLight, Purple, Purple);
+      k.thick((0.78, 0.56), (0.78, 0.98), Green, 2.2);
+      k.thick((0.57, 0.77), (0.99, 0.77), Green, 2.2);
+    }
+    Icon::Derive => {
+      k.block(0.22, 0.36, 0.78, 0.92, 0.18, White, Light, Fill);
+      k.thick((0.02, 0.64), (0.4, 0.64), Ink, 1.4);
+      k.arrow_head((0.52, 0.64), (1.0, 0.0), 0.16, Ink);
+    }
+    Icon::Sweep => {
+      k.p.add(Shape::line(k.arc_pts((0.12, 0.9), 0.7, 0.7, 0.0, FRAC_PI_2 * 0.9), Stroke::new(w * 5.0, k.col(Blue))));
+      k.solid(&[(0.04, 0.08), (0.3, 0.08), (0.3, 0.34), (0.04, 0.34)], White);
+    }
+    Icon::Loft => {
+      k.solid(&[(0.3, 0.2), (0.7, 0.2), (0.92, 0.86), (0.08, 0.86)], Blue);
+      k.ellipse((0.5, 0.2), 0.2, 0.08, Some(BlueLight), Blue);
+      k.circle((0.24, 0.8), 0.12, Some(White), Some(Ink));
+    }
+    Icon::Rib => {
+      k.path(&[(0.1, 0.06), (0.1, 0.9), (0.94, 0.9)], Ink);
+      k.solid(&[(0.14, 0.2), (0.14, 0.86), (0.8, 0.86)], Blue);
+    }
+    Icon::Web => {
+      k.solid(&[(0.06, 0.06), (0.94, 0.06), (0.94, 0.94), (0.06, 0.94)], White);
+      k.thick((0.5, 0.1), (0.5, 0.9), Blue, 1.8);
+      k.thick((0.1, 0.5), (0.9, 0.5), Blue, 1.8);
+    }
+    Icon::Emboss => {
+      k.solid(&[(0.04, 0.3), (0.96, 0.3), (0.96, 0.92), (0.04, 0.92)], Light);
+      k.text((0.5, 0.56), "A", 0.62, Blue);
+    }
+    Icon::Hole => {
+      k.block(0.1, 0.4, 0.66, 0.92, 0.24, Light, Fill, Dark);
+      k.ellipse((0.47, 0.31), 0.13, 0.06, Some(White), Ink);
+      k.circle((0.38, 0.66), 0.13, Some(BlueLight), Some(Blue));
+    }
+    Icon::Thread => {
+      k.solid(&[(0.24, 0.08), (0.76, 0.08), (0.76, 0.92), (0.24, 0.92)], Light);
+      for i in 0..5 {
+        let y = 0.16 + i as f32 * 0.16;
+        k.thick((0.2, y + 0.08), (0.8, y), Blue, 1.2);
+      }
+    }
+    Icon::Coil => {
+      let mut pts = Vec::new();
+      for i in 0..=8 {
+        let y = 0.08 + i as f32 * 0.105;
+        pts.push((if i % 2 == 0 { 0.2 } else { 0.8 }, y));
+      }
+      k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 2.0, k.col(Blue))));
+    }
+    Icon::Pipe => {
+      k.thick((0.12, 0.88), (0.88, 0.12), Blue, 5.0);
+      k.thick((0.18, 0.82), (0.82, 0.18), BlueLight, 1.6);
+    }
+    Icon::Thicken => {
+      k.solid(&[(0.04, 0.6), (0.4, 0.2), (0.96, 0.2), (0.6, 0.6)], BlueLight);
+      k.solid(&[(0.04, 0.6), (0.6, 0.6), (0.6, 0.8), (0.04, 0.8)], Blue);
+      k.solid(&[(0.6, 0.6), (0.96, 0.2), (0.96, 0.4), (0.6, 0.8)], BlueDark);
+    }
+    Icon::BoundaryFill => {
+      k.solid(&[(0.06, 0.3), (0.6, 0.3), (0.6, 0.94), (0.06, 0.94)], Orange);
+      k.solid(&[(0.4, 0.06), (0.94, 0.06), (0.94, 0.6), (0.4, 0.6)], Blue);
+    }
+    Icon::BaseFeature => {
+      k.block(0.06, 0.36, 0.6, 0.9, 0.24, White, Light, Fill);
+      k.thick((0.78, 0.56), (0.78, 0.98), Green, 2.2);
+      k.thick((0.57, 0.77), (0.99, 0.77), Green, 2.2);
+    }
+    Icon::JointOrigin => {
+      k.circle((0.5, 0.5), 0.36, Some(Light), Some(Ink));
+      k.circle((0.5, 0.5), 0.12, Some(Blue), None);
+      k.p.add(Shape::line(k.arc_pts((0.5, 0.5), 0.46, 0.46, 0.3, 1.5), Stroke::new(w * 1.2, k.col(Ink))));
+    }
+    Icon::Configure | Icon::ConfigRules => {
+      if icon == Icon::ConfigRules {
+        k.solid(&[(0.04, 0.3), (0.84, 0.3), (0.84, 0.92), (0.04, 0.92)], BlueLight);
+      }
+      let (c, rad) = if icon == Icon::Configure { ((0.5, 0.5), 0.44) } else { ((0.74, 0.26), 0.24) };
+      k.circle(c, rad, Some(Blue), None);
+      let s = rad / 0.44;
+      k.p.add(Shape::line(
+        k.pts(&[
+          (c.0 + 0.08 * s, c.1 - 0.3 * s),
+          (c.0 - 0.1 * s, c.1 + 0.04 * s),
+          (c.0 + 0.1 * s, c.1 + 0.0),
+          (c.0 - 0.06 * s, c.1 + 0.3 * s),
+        ]),
+        Stroke::new(w * 1.6, k.col(White)),
+      ));
+    }
+    Icon::Ucs => {
+      k.thick((0.2, 0.8), (0.95, 0.8), Red, 1.2);
+      k.thick((0.2, 0.8), (0.2, 0.05), Blue, 1.2);
+      k.thick((0.2, 0.8), (0.55, 0.45), Green, 1.2);
+    }
+    Icon::PlaneAlt => {
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Orange);
+      k.thick((0.18, 0.92), (0.88, 0.1), Ink, 0.9);
+    }
+    Icon::Axis => {
+      k.solid(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.9), (0.3, 0.9)], Light);
+      k.thick((0.08, 0.96), (0.92, 0.04), Orange, 1.8);
+    }
+    Icon::CPoint => {
+      k.line((0.5, 0.06), (0.5, 0.94), Ink);
+      k.line((0.06, 0.5), (0.94, 0.5), Ink);
+      k.circle((0.5, 0.5), 0.2, Some(Orange), Some(Orange));
+    }
+    Icon::Interference => {
+      k.solid(&[(0.06, 0.06), (0.62, 0.06), (0.62, 0.62), (0.06, 0.62)], White);
+      k.solid(&[(0.38, 0.38), (0.94, 0.38), (0.94, 0.94), (0.38, 0.94)], White);
+      k.fill(&[(0.38, 0.38), (0.62, 0.38), (0.62, 0.62), (0.38, 0.62)], Red);
+    }
+    Icon::Section => {
+      k.solid(&[(0.06, 0.06), (0.94, 0.06), (0.94, 0.94), (0.06, 0.94)], White);
+      k.fill(&[(0.06, 0.06), (0.5, 0.06), (0.5, 0.94), (0.06, 0.94)], BlueLight);
+      k.thick((0.5, 0.02), (0.5, 0.98), Blue, 1.4);
+    }
+    Icon::CurvComb => {
+      k.arc((0.5, 0.95), 0.42, 0.3, PI - 0.3, Ink);
+      for i in 0..7 {
+        let a = 0.4 + i as f32 * 0.39;
+        let (c, sn) = (a.cos(), a.sin());
+        k.line((0.5 + c * 0.42, 0.95 - sn * 0.42), (0.5 + c * 0.62, 0.95 - sn * 0.62), Blue);
+      }
+    }
+    Icon::CurvMap | Icon::DraftAnalysis | Icon::FaceGroups | Icon::GenFaceGroups | Icon::CombineFaceGroups => {
+      let bands = [Red, Orange, Green, Blue];
+      if icon == Icon::CurvMap {
+        for (i, t) in bands.iter().enumerate() {
+          let y = 0.08 + i as f32 * 0.21;
+          k.fill(&[(0.08, y), (0.92, y), (0.92, y + 0.21), (0.08, y + 0.21)], *t);
+        }
+      } else if icon == Icon::DraftAnalysis {
+        for (i, t) in bands.iter().enumerate() {
+          let y = 0.1 + i as f32 * 0.2;
+          let half = (0.42f32.powi(2) - (y + 0.1 - 0.5).powi(2)).max(0.02).sqrt();
+          k.fill(&[(0.5 - half, y), (0.5 + half, y), (0.5 + half, y + 0.2), (0.5 - half, y + 0.2)], *t);
+        }
+      } else {
+        k.block(0.08, 0.38, 0.62, 0.92, 0.26, Green, Red, Blue);
+        if icon == Icon::CombineFaceGroups {
+          k.fill(&[(0.08, 0.38), (0.62, 0.38), (0.62, 0.92), (0.08, 0.92)], Blue);
+        }
+      }
+    }
+    Icon::EnvMap => {
+      k.circle((0.5, 0.5), 0.42, Some(Blue), None);
+      k.circle((0.38, 0.36), 0.14, Some(BlueLight), None);
+    }
+    Icon::Isocurve => {
+      k.solid(&[(0.06, 0.06), (0.94, 0.06), (0.94, 0.94), (0.06, 0.94)], White);
+      for i in 1..4 {
+        let t = i as f32 * 0.22 + 0.06;
+        k.line((t, 0.06), (t + 0.06, 0.94), Ink);
+        k.line((0.06, t), (0.94, t + 0.04), Ink);
+      }
+    }
+    Icon::Zebra => {
+      for i in 0..3 {
+        k.p.add(Shape::line(
+          k.arc_pts((0.0, 0.5), 0.3 + i as f32 * 0.24, 0.42, -1.2, 1.2),
+          Stroke::new(w * 2.2, k.col(Ink)),
+        ));
+      }
+    }
+    Icon::Accessibility => {
+      k.circle((0.4, 0.62), 0.32, Some(Green), None);
+      k.circle((0.74, 0.28), 0.16, Some(Red), None);
+    }
+    Icon::CenterOfMass => {
+      k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
+      let mut v = vec![k.u(0.5, 0.5)];
+      v.extend(k.arc_pts((0.5, 0.5), 0.42, 0.42, 0.0, FRAC_PI_2));
+      k.p.add(Shape::convex_polygon(v, k.col(Ink), Stroke::NONE));
+      let mut v = vec![k.u(0.5, 0.5)];
+      v.extend(k.arc_pts((0.5, 0.5), 0.42, 0.42, PI, PI + FRAC_PI_2));
+      k.p.add(Shape::convex_polygon(v, k.col(Ink), Stroke::NONE));
+    }
+    Icon::MinRadius => {
+      k.solid(&[(0.08, 0.08), (0.92, 0.08), (0.92, 0.92), (0.08, 0.92)], Light);
+      k.arc((0.92, 0.08), 0.44, PI, PI + FRAC_PI_2, Red);
+    }
+    Icon::Navigator => {
+      for (x, y) in [(0.08, 0.08), (0.6, 0.08), (0.08, 0.6), (0.6, 0.6)] {
+        k.closed(&[(x, y), (x + 0.3, y), (x + 0.3, y + 0.3), (x, y + 0.3)], Ink);
+      }
+      k.line((0.38, 0.23), (0.6, 0.23), Ink);
+      k.line((0.23, 0.38), (0.23, 0.6), Ink);
+    }
+    Icon::ComponentColors => {
+      k.circle((0.34, 0.34), 0.22, Some(Purple), None);
+      k.circle((0.68, 0.4), 0.2, Some(Blue), None);
+      k.circle((0.44, 0.7), 0.22, Some(Orange), None);
+    }
+    Icon::History => {
+      k.solid(&[(0.14, 0.06), (0.74, 0.06), (0.74, 0.94), (0.14, 0.94)], White);
+      k.circle((0.66, 0.7), 0.24, Some(White), Some(Blue));
+      k.path(&[(0.66, 0.56), (0.66, 0.7), (0.76, 0.76)], Blue);
+    }
+    Icon::Sustainability => {
+      k.circle((0.5, 0.5), 0.42, Some(White), Some(Ink));
+      k.text((0.5, 0.5), "CO2", 0.3, Ink);
+    }
+    Icon::Decal | Icon::Canvas => {
+      if icon == Icon::Decal {
+        k.solid(&[(0.04, 0.04), (0.64, 0.04), (0.64, 0.64), (0.04, 0.64)], Blue);
+        k.solid(&[(0.36, 0.5), (0.96, 0.5), (0.96, 0.96), (0.36, 0.96)], White);
+      } else {
+        k.solid(&[(0.04, 0.12), (0.96, 0.12), (0.96, 0.88), (0.04, 0.88)], BlueLight);
+        k.fill(&[(0.04, 0.88), (0.38, 0.42), (0.7, 0.88)], White);
+        k.fill(&[(0.42, 0.88), (0.66, 0.56), (0.96, 0.88)], White);
+        k.circle((0.74, 0.32), 0.08, Some(White), None);
+      }
+    }
+    Icon::InsertSvg | Icon::InsertDxf => {
+      k.solid(&[(0.16, 0.04), (0.84, 0.04), (0.84, 0.96), (0.16, 0.96)], White);
+      k.fill(&[(0.16, 0.62), (0.84, 0.62), (0.84, 0.96), (0.16, 0.96)], Ink);
+      k.text((0.5, 0.79), if icon == Icon::InsertSvg { "SVG" } else { "DXF" }, 0.26, White);
+      k.thick((0.0, 0.3), (0.42, 0.3), Blue, 1.4);
+      k.arrow_head((0.54, 0.3), (1.0, 0.0), 0.16, Blue);
+    }
+    Icon::InsertMesh
+    | Icon::Tessellate
+    | Icon::BaseMesh
+    | Icon::DirectEdit
+    | Icon::Repair
+    | Icon::Remesh
+    | Icon::Reduce
+    | Icon::PlaneCut
+    | Icon::Smooth
+    | Icon::ScaleMesh
+    | Icon::MeshSection => {
+      k.block(0.08, 0.38, 0.62, 0.92, 0.28, BlueLight, Blue, BlueDark);
+      k.line((0.08, 0.38), (0.62, 0.92), BlueDark);
+      k.line((0.62, 0.38), (0.08, 0.92), BlueDark);
+      match icon {
+        Icon::InsertMesh => {
+          k.thick((0.0, 0.12), (0.34, 0.12), Ink, 1.4);
+          k.arrow_head((0.46, 0.12), (1.0, 0.0), 0.16, Ink);
+        }
+        Icon::Tessellate | Icon::ScaleMesh => k.solid(&[(0.66, 0.04), (0.96, 0.04), (0.96, 0.34), (0.66, 0.34)], Light),
+        Icon::BaseMesh | Icon::DirectEdit => {
+          for i in 0..4 {
+            let a = i as f32 * FRAC_PI_2 * 0.5;
+            k.thick(
+              (0.8 - a.cos() * 0.16, 0.2 - a.sin() * 0.16),
+              (0.8 + a.cos() * 0.16, 0.2 + a.sin() * 0.16),
+              Orange,
+              1.4,
+            );
+          }
+        }
+        Icon::Repair => k.solid(&[(0.04, 0.72), (0.66, 0.72), (0.66, 0.86), (0.04, 0.86)], White),
+        Icon::Remesh | Icon::Reduce => k.line((0.35, 0.38), (0.35, 0.92), BlueDark),
+        Icon::PlaneCut => k.solid(&[(0.0, 0.7), (0.3, 0.2), (0.98, 0.2), (0.68, 0.7)], Orange),
+        Icon::Smooth => k.circle((0.74, 0.24), 0.18, Some(BlueLight), Some(Blue)),
+        _ => k.ellipse((0.36, 0.65), 0.3, 0.1, None, Blue),
+      }
+    }
+    Icon::InsertComponent | Icon::Manufacturer | Icon::McMaster => {
+      k.block(0.18, 0.36, 0.72, 0.92, 0.24, Light, Fill, Dark);
+      if icon == Icon::McMaster {
+        k.text((0.45, 0.65), "M", 0.4, Ink);
+      }
+    }
+    Icon::Fastener => {
+      k.solid(&[(0.1, 0.1), (0.9, 0.1), (0.9, 0.32), (0.1, 0.32)], Fill);
+      k.solid(&[(0.38, 0.32), (0.62, 0.32), (0.62, 0.94), (0.38, 0.94)], Fill);
+    }
+    Icon::DuplicateJoints => {
+      for x in [0.08, 0.38, 0.68] {
+        k.solid(&[(x, 0.2), (x + 0.22, 0.2), (x + 0.22, 0.86), (x, 0.86)], Fill);
+      }
+    }
+    Icon::AddToAssembly => {
+      k.block(0.06, 0.2, 0.36, 0.46, 0.12, White, Light, Fill);
+      k.block(0.44, 0.56, 0.84, 0.94, 0.12, Light, Fill, Dark);
+      k.thick((0.5, 0.14), (0.62, 0.36), Ink, 1.0);
+      k.arrow_head((0.66, 0.44), (0.4, 1.0), 0.14, Ink);
+    }
+    Icon::WindowSel | Icon::FreeformSel | Icon::PaintSel => {
+      match icon {
+        Icon::WindowSel => {
+          for (a, b) in [
+            ((0.06, 0.06), (0.78, 0.06)),
+            ((0.06, 0.06), (0.06, 0.7)),
+            ((0.78, 0.06), (0.78, 0.4)),
+            ((0.06, 0.7), (0.4, 0.7)),
+          ] {
+            k.dashed(a, b, Ink);
+          }
+        }
+        Icon::FreeformSel => {
+          k.p.add(Shape::line(k.arc_pts((0.42, 0.4), 0.36, 0.32, 0.4, TAU - 0.6), Stroke::new(w, k.col(Green))));
+        }
+        _ => {
+          k.block(0.06, 0.4, 0.5, 0.8, 0.16, Green, White, Light);
+          k.thick((0.6, 0.62), (0.94, 0.2), Orange, 2.0);
+        }
+      }
+      if icon != Icon::PaintSel {
+        k.solid(&[(0.46, 0.34), (0.46, 0.98), (0.62, 0.84), (0.82, 0.84)], White);
+      }
+    }
+    Icon::Patch => {
+      k.solid(&[(0.08, 0.2), (0.56, 0.2), (0.56, 0.56), (0.08, 0.56)], Blue);
+      k.solid(&[(0.56, 0.2), (0.92, 0.5), (0.92, 0.9), (0.56, 0.56)], BlueDark);
+    }
+    Icon::Ruled => {
+      k.solid(&[(0.06, 0.66), (0.46, 0.2), (0.94, 0.2), (0.54, 0.66)], BlueLight);
+      k.solid(&[(0.06, 0.66), (0.54, 0.66), (0.54, 0.86), (0.06, 0.86)], Blue);
+    }
+    Icon::SurfOffset => {
+      k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.5, 0.5, 0.5, PI - 0.5), Stroke::new(w * 3.0, k.col(BlueLight))));
+      k.p.add(Shape::line(k.arc_pts((0.5, 1.1), 0.8, 0.8, 0.6, PI - 0.6), Stroke::new(w * 3.0, k.col(Blue))));
+    }
+    Icon::Trim => {
+      k.circle((0.24, 0.78), 0.14, None, Some(Ink));
+      k.circle((0.76, 0.78), 0.14, None, Some(Ink));
+      k.thick((0.32, 0.66), (0.78, 0.06), Ink, 1.3);
+      k.thick((0.68, 0.66), (0.22, 0.06), Ink, 1.3);
+    }
+    Icon::Untrim | Icon::Unstitch => {
+      if icon == Icon::Untrim {
+        k.solid(&[(0.08, 0.2), (0.7, 0.2), (0.7, 0.9), (0.08, 0.9)], Blue);
+      } else {
+        k.solid(&[(0.14, 0.1), (0.62, 0.1), (0.62, 0.9), (0.14, 0.9)], Blue);
+        for i in 0..5 {
+          let y = 0.2 + i as f32 * 0.15;
+          k.line((0.3, y), (0.46, y), White);
+        }
+      }
+      k.thick((0.62, 0.62), (0.96, 0.96), Red, 1.6);
+      k.thick((0.96, 0.62), (0.62, 0.96), Red, 1.6);
+    }
+    Icon::Extend => {
+      k.solid(&[(0.08, 0.5), (0.92, 0.5), (0.92, 0.94), (0.08, 0.94)], Blue);
+      k.thick((0.5, 0.46), (0.5, 0.16), Ink, 1.4);
+      k.arrow_head((0.5, 0.04), (0.0, -1.0), 0.16, Ink);
+    }
+    Icon::Stitch => {
+      k.solid(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], Blue);
+      k.line((0.5, 0.06), (0.5, 0.94), Ink);
+      for i in 0..5 {
+        let y = 0.16 + i as f32 * 0.17;
+        k.line((0.36, y), (0.64, y), Ink);
+      }
+    }
+    Icon::ReverseNormal => {
+      k.solid(&[(0.06, 0.4), (0.94, 0.4), (0.94, 0.94), (0.06, 0.94)], Blue);
+      k.thick((0.5, 0.36), (0.5, 0.12), Ink, 1.2);
+      k.arrow_head((0.5, 0.02), (0.0, -1.0), 0.14, Ink);
+      k.text((0.5, 0.7), "↔", 0.4, White);
+    }
+    Icon::Separate => {
+      k.block(0.02, 0.48, 0.38, 0.92, 0.14, BlueLight, Blue, BlueDark);
+      k.block(0.5, 0.3, 0.84, 0.72, 0.14, BlueLight, Blue, BlueDark);
+    }
+    Icon::ConvertMesh => {
+      k.ellipse((0.34, 0.78), 0.22, 0.08, Some(Fill), Ink);
+      k.fill(&[(0.12, 0.3), (0.56, 0.3), (0.56, 0.78), (0.12, 0.78)], Fill);
+      k.ellipse((0.34, 0.3), 0.22, 0.08, Some(Light), Ink);
+      k.block(0.6, 0.62, 0.86, 0.94, 0.1, BlueLight, Blue, BlueDark);
+    }
   }
 }
 
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip).
 pub fn tool_button(ui: &mut egui::Ui, icon: Icon, label: &str, hint: &str, active: bool) -> egui::Response {
+  tool_button_tinted(ui, icon, Tint::Blue, label, hint, active)
+}
+
+/// [`tool_button`] with the icon's solids in the `tint` family.
+pub fn tool_button_tinted(
+  ui: &mut egui::Ui,
+  icon: Icon,
+  tint: Tint,
+  label: &str,
+  hint: &str,
+  active: bool,
+) -> egui::Response {
   let size = vec2(38.0, 38.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
   let ic = Rect::from_center_size(rect.center(), Vec2::splat(28.0));
@@ -702,11 +1293,13 @@ pub fn tool_button(ui: &mut egui::Ui, icon: Icon, label: &str, hint: &str, activ
     if resp.hovered() {
       ui.painter().rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
     }
-    draw_color(ui.painter(), ic, icon);
+    draw_tinted(ui.painter(), ic, icon, tint);
   }
   resp.on_hover_ui(|ui| {
     ui.label(egui::RichText::new(label).strong());
-    ui.label(egui::RichText::new(hint).color(theme::MUTED));
+    if !hint.is_empty() {
+      ui.label(egui::RichText::new(hint).color(theme::MUTED));
+    }
   })
 }
 
