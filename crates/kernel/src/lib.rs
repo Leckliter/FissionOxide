@@ -953,5 +953,8 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
   }
 }
 
+mod surface;
+pub use surface::{Extension, Untrim};
+
 #[cfg(test)]
 mod tests;

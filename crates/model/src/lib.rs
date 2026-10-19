@@ -18,6 +18,7 @@ pub mod plot;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
+pub mod surface;
 
 use serde::{Deserialize, Serialize};
 
@@ -887,6 +888,9 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: Vec<BodyId>,
     distance: String,
+    /// Faces offset by distances of their own (variable offset).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    face_distances: Vec<surface::FaceDistance>,
   },
   /// Trims surface bodies with a plane, keeping the side behind it (or in front, flipped).
   Trim {
@@ -915,6 +919,33 @@ pub enum FeatureKind {
     /// Keep the folded body and add the flat pattern as a new body.
     #[serde(default)]
     keep_folded: bool,
+  },
+  /// Extends open edges of surface bodies outward by a distance.
+  SurfaceExtend {
+    edges: Vec<EdgeRef>,
+    distance: String,
+    #[serde(default)]
+    mode: surface::ExtendMode,
+  },
+  /// Removes holes from faces and/or restores their untrimmed outer boundary.
+  Untrim {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    bodies: Vec<BodyId>,
+    #[serde(default)]
+    loops: surface::UntrimLoops,
+  },
+  /// Trims surface bodies with another body or with sketch curves projected onto them.
+  TrimWith {
+    bodies: Vec<BodyId>,
+    tool: surface::TrimTool,
+    /// Keep the other side.
+    #[serde(default)]
+    flip: bool,
+    /// Points picking the pieces to keep (instead of a side).
+    #[serde(default)]
+    keep: Vec<[f64; 3]>,
   },
 }
 
@@ -1023,6 +1054,9 @@ impl FeatureKind {
       FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
       FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
       FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
+      FeatureKind::SurfaceExtend { .. } => "Extend",
+      FeatureKind::Untrim { .. } => "Untrim",
+      FeatureKind::TrimWith { .. } => "Trim",
     }
   }
 
@@ -1077,6 +1111,7 @@ impl FeatureKind {
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
       FeatureKind::CircularPattern { axis, .. } => axis_dep(axis),
       FeatureKind::Move { axis: Some(axis), .. } => axis_dep(axis),
+      FeatureKind::TrimWith { tool: surface::TrimTool::Sketch { sketch, .. }, .. } => vec![*sketch],
       _ => vec![],
     }
   }
@@ -1642,7 +1677,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Thicken { thickness, .. } => f(thickness),
-    FeatureKind::SurfaceOffset { distance, .. } => f(distance),
+    FeatureKind::SurfaceOffset { distance, face_distances, .. } => {
+      f(distance);
+      for fd in face_distances {
+        f(&mut fd.distance);
+      }
+    }
     FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
     FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
     FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
@@ -1663,6 +1703,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. } => {}
+    FeatureKind::SurfaceExtend { distance, .. } => f(distance),
+    FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
   }
 }
 

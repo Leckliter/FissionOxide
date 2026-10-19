@@ -894,6 +894,37 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
         json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle")}),
       )
     }
+    "surface.trim.body" => {
+      // the tool is the body of the picked face; it doesn't trim itself
+      let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
+      let bodies: Vec<Value> =
+        p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter(|b| **b != tool).cloned().collect();
+      (
+        "surface.trim",
+        json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
+      )
+    }
+    "surface.trim.sketch" => {
+      let tool = json!({"sketch": p.get("sketch").cloned().unwrap_or(Value::Null), "curves": p.get("curves").cloned().unwrap_or(json!([]))});
+      (
+        "surface.trim",
+        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "tool": tool, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
+      )
+    }
+    "surface.offset.variable" => {
+      let d2 = p.get("distance2").cloned().unwrap_or(json!("0"));
+      let fds: Vec<Value> = p
+        .get("faces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|f| json!({"face": f, "distance": d2}))
+        .collect();
+      (
+        "surface.offset",
+        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "distance": p.get("distance").cloned().unwrap_or(json!("0")), "face_distances": fds}),
+      )
+    }
     _ => (form.cmd, p),
   }
 }
@@ -1021,4 +1052,88 @@ pub static CAM_DRILL: Form = Form {
     Input::Expr { key: "plunge", label: "Feed (mm/min)", default: "200" },
   ],
   picks_model: false,
+};
+
+pub static EXTEND: Form = Form {
+  title: "EXTEND",
+  name: "Extend",
+  hint: "Extend open surface edges by a distance",
+  icon: Icon::Extend,
+  cmd: "surface.extend",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Expr { key: "distance", label: "Distance", default: "5 mm" },
+    Input::Choice {
+      key: "mode",
+      label: "Extend type",
+      options: &[("natural", "Natural"), ("tangent", "Tangent"), ("perpendicular", "Perpendicular")],
+    },
+  ],
+  picks_model: true,
+};
+
+pub static UNTRIM: Form = Form {
+  title: "UNTRIM",
+  name: "Untrim",
+  hint: "Remove holes from faces or restore their untrimmed boundary",
+  icon: Icon::Untrim,
+  cmd: "surface.untrim",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Faces" },
+    Input::Choice {
+      key: "loops",
+      label: "Loop type",
+      options: &[("all", "All loops"), ("inner", "Internal loops"), ("outer", "External loops")],
+    },
+  ],
+  picks_model: true,
+};
+
+pub static TRIM_BODY: Form = Form {
+  title: "TRIM",
+  name: "Trim with Body",
+  hint: "Trim surface bodies with a solid or another surface",
+  icon: Icon::Trim,
+  cmd: "surface.trim.body",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Face { key: "tool", label: "Trimming tool (one of its faces)", near: None },
+    Input::Check { key: "flip", label: "Keep the other side" },
+  ],
+  picks_model: true,
+};
+
+pub static TRIM_SKETCH: Form = Form {
+  title: "TRIM",
+  name: "Trim with Sketch",
+  hint: "Trim surface bodies with sketch curves projected onto them",
+  icon: Icon::Trim,
+  cmd: "surface.trim.sketch",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Curves { key: "curves", label: "Curves (default the profiles)" },
+    Input::Check { key: "flip", label: "Keep the other side" },
+  ],
+  picks_model: true,
+};
+
+pub static VARIABLE_OFFSET: Form = Form {
+  title: "OFFSET",
+  name: "Variable Offset",
+  hint: "Offset surface bodies, with picked faces at a distance of their own",
+  icon: Icon::SurfOffset,
+  cmd: "surface.offset.variable",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Expr { key: "distance", label: "Distance", default: "2 mm" },
+    Input::FacesOpt { key: "faces", label: "Faces at their own distance" },
+    Input::Expr { key: "distance2", label: "Their distance", default: "4 mm" },
+  ],
+  picks_model: true,
 };

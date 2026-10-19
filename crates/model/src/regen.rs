@@ -1894,6 +1894,7 @@ fn ke(e: KernelError) -> String {
 
 mod extra;
 pub use extra::iso_pitch;
+mod surface;
 
 #[cfg(test)]
 mod tests;

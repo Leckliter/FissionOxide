@@ -32,6 +32,7 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/kernel.cpp");
   println!("cargo:rerun-if-changed=cpp/kernel.hxx");
   println!("cargo:rerun-if-changed=src/ffi.rs");
+  println!("cargo:rerun-if-changed=cpp/surface2.cpp");
   let root = match std::env::var_os("CLF_OCCT_DIR") {
     Some(d) => std::path::PathBuf::from(d),
     None => {
@@ -54,6 +55,7 @@ fn main() {
   }
   cxx_build::bridge("src/ffi.rs")
     .file("cpp/kernel.cpp")
+    .file("cpp/surface2.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

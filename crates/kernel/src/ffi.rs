@@ -151,6 +151,13 @@ pub(crate) mod ffi {
     fn write_iges(s: &Shape, path: &str) -> Result<()>;
     fn read_iges(path: &str) -> Result<UniquePtr<Shape>>;
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
+
+    // surface workspace (cpp/surface2.cpp)
+    include!("clf-kernel/cpp/surface2.hxx");
+    fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
+    fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
+    fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
+    fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

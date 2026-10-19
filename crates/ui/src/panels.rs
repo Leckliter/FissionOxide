@@ -1971,6 +1971,9 @@ fn feature_icon(k: &FeatureKind) -> Icon {
       clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
       clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
     },
+    FeatureKind::SurfaceExtend { .. } => Icon::Extend,
+    FeatureKind::Untrim { .. } => Icon::Untrim,
+    FeatureKind::TrimWith { .. } => Icon::Trim,
   }
 }
 
