@@ -21,7 +21,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Selection | Freeform and paint selection; vertex picking                                 |
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
 | View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |
-| Manufacture | Adaptive clearing, rest machining, 3D toolpaths, stock simulation, tool library, post-processor library, ramp/helical entries, tabs |
+| Manufacture | 3D adaptive roughing; pencil, steep-and-shallow and contour finishing; holder and fixture collision checks; arcs (G2/G3) in G-code; turning and 4/5-axis |
 | Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 
 ## Files and data

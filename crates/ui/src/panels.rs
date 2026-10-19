@@ -318,6 +318,9 @@ pub(crate) enum Cmd {
   CamDelete,
   /// Insert a design from the data hub as a component (opens the data panel).
   InsertComponent,
+  /// Manufacture: run the stock simulation; open the tool library.
+  CamSimulate,
+  CamTools,
 }
 
 impl Cmd {
@@ -407,11 +410,15 @@ impl Cmd {
       Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
       Cmd::ComputeAll => (Icon::ComputeAll, "Compute All", "Recompute the whole timeline (Ctrl+B)"),
       Cmd::CamGenerate => (Icon::Play, "Generate", "Compute the setup's toolpaths and machining time"),
-      Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code (.nc)"),
+      Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code with its post-processor"),
       Cmd::CamDelete => (Icon::Remove, "Delete Setup", "Delete the last setup and its operations"),
       Cmd::InsertComponent => {
         (Icon::InsertComponent, "Insert Component", "Insert a design from the data panel as a linked component")
       }
+      Cmd::CamSimulate => {
+        (Icon::MotionStudy, "Simulate", "Cut the stock with the toolpaths and check for gouges and collisions")
+      }
+      Cmd::CamTools => (Icon::Configure, "Tool Library", "The hub's cutting tools with their feeds and speeds"),
       Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
       Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
       Cmd::SelectOther => {
@@ -528,6 +535,8 @@ impl Cmd {
         app.status =
           Some(("Right-click a design in the Data Panel and choose Insert into Current Design".into(), false));
       }
+      Cmd::CamSimulate => app.cam_simulate(),
+      Cmd::CamTools => app.open_tool_library(),
       Cmd::SelectAll => {
         app.run("select.all", json!({}));
       }

@@ -1,0 +1,22 @@
+# A pocketed block machined end to end: tools from the hub's library, facing, adaptive clearing
+# with a helix entry, a rest pass for the corners, a ramped contour with holding tabs and
+# pecked drilling; then the stock simulation and LinuxCNC G-code (check it before running it).
+{"cmd": "new", "name": "Milled block"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [80, 50]}
+{"cmd": "extrude", "distance": 20}
+{"cmd": "sketch.create", "plane": {"point": [40, 25, 20], "normal": [0, 0, 1]}}
+{"cmd": "sketch.rect", "corner1": [12, 10], "corner2": [52, 40]}
+{"cmd": "extrude", "distance": 8, "flip": true, "operation": "cut"}
+{"cmd": "sketch.create", "plane": {"point": [66, 25, 20], "normal": [0, 0, 1]}}
+{"cmd": "sketch.circle", "center": [66, 25], "diameter": 6}
+{"cmd": "extrude", "extent": "through_all", "flip": true, "operation": "cut"}
+{"cmd": "cam.setup", "name": "Op 10", "stock_side": 3, "stock_top": 1, "post": "linuxcnc", "units": "mm"}
+{"cmd": "cam.face", "tool_number": 1, "stepover": 0.6, "stepdown": 1}
+{"cmd": "cam.adaptive", "floors": [{"point": [30, 25, 12]}], "tool_number": 2, "stepover": 0.12, "stepdown": 8}
+{"cmd": "cam.pocket", "floors": [{"point": [30, 25, 12]}], "tool_number": 4, "rest": true, "entry": "ramp", "stepdown": 4}
+{"cmd": "cam.contour", "tool_number": 3, "stepdown": 5, "entry": "ramp", "tabs": {"count": 4, "width": 6, "height": 2}}
+{"cmd": "cam.drill", "tool_number": 7, "peck": 3}
+{"cmd": "cam.generate"}
+{"cmd": "cam.simulate"}
+{"cmd": "cam.post"}

@@ -12,12 +12,22 @@ use serde::{Deserialize, Serialize};
 use crate::regen::{Body, Model};
 use crate::{BodyId, FaceRef};
 
+pub mod adaptive;
+pub mod post;
+pub mod region;
+pub mod rest;
+pub mod sim;
+pub mod surface;
+pub mod tools;
+
+pub use tools::{Library, ToolKind};
+
 /// Clearance above the stock for rapid moves between operations (mm).
-const CLEARANCE: f64 = 10.0;
+pub(crate) const CLEARANCE: f64 = 10.0;
 /// Retract height above the stock between passes (mm).
-const RETRACT: f64 = 3.0;
+pub(crate) const RETRACT: f64 = 3.0;
 /// Most passes one operation may make (guards against tiny step-overs).
-const MAX_PASSES: usize = 2000;
+pub(crate) const MAX_PASSES: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Setup {
@@ -33,6 +43,12 @@ pub struct Setup {
   pub stock_top: f64,
   #[serde(default)]
   pub operations: Vec<Operation>,
+  /// Post-processor for its G-code (see [`post`]; "" = Fanuc).
+  #[serde(default)]
+  pub post: String,
+  /// G-code in inches.
+  #[serde(default)]
+  pub imperial: bool,
 }
 
 fn one() -> f64 {
@@ -43,7 +59,7 @@ fn two() -> f64 {
   2.0
 }
 
-/// A flat end mill (drills use the same record: the diameter is the drill's).
+/// A cutting tool (see [`tools`] for the shapes and the library).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tool {
   /// Tool number in the machine's changer.
@@ -58,6 +74,29 @@ pub struct Tool {
   /// Plunge feed (mm/min).
   #[serde(default = "plunge")]
   pub plunge: f64,
+  #[serde(default)]
+  pub kind: ToolKind,
+  /// Name in the tool library ("" = described by its shape).
+  #[serde(default)]
+  pub name: String,
+  /// Bull-nose corner radius (mm).
+  #[serde(default)]
+  pub corner_radius: f64,
+  /// Drill point or chamfer mill included angle (degrees).
+  #[serde(default = "tip_angle")]
+  pub angle: f64,
+  /// Chamfer mill: diameter of the flat at its tip (mm).
+  #[serde(default)]
+  pub tip_diameter: f64,
+  /// Length of the cutting flutes (mm; 0 = unknown): deeper cuts rub the shank.
+  #[serde(default)]
+  pub flute_length: f64,
+  #[serde(default)]
+  pub flutes: u32,
+}
+
+fn tip_angle() -> f64 {
+  118.0
 }
 
 fn rpm() -> f64 {
@@ -86,6 +125,65 @@ pub struct Operation {
   /// Material left on walls for a finishing pass (mm).
   #[serde(default)]
   pub stock_to_leave: f64,
+  /// How the tool gets down to each cutting level.
+  #[serde(default)]
+  pub entry: Entry,
+  /// Ramp and helix angle (degrees from horizontal).
+  #[serde(default = "ramp_angle")]
+  pub ramp_angle: f64,
+  /// Helix diameter (mm; 0 = the tool's diameter), less where the pocket is narrower.
+  #[serde(default)]
+  pub helix_diameter: f64,
+}
+
+fn ramp_angle() -> f64 {
+  5.0
+}
+
+/// How an operation's tool enters the material at each level.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Entry {
+  /// Straight down at the plunge feed.
+  #[default]
+  Plunge,
+  /// Down along the cut at the ramp angle.
+  Ramp,
+  /// Down a helix at the ramp angle (pockets; contours ramp instead).
+  Helix,
+}
+
+impl Entry {
+  pub fn parse(s: &str) -> Option<Entry> {
+    match s.trim().to_ascii_lowercase().as_str() {
+      "plunge" => Some(Entry::Plunge),
+      "ramp" => Some(Entry::Ramp),
+      "helix" | "helical" => Some(Entry::Helix),
+      _ => None,
+    }
+  }
+}
+
+/// Holding tabs on a 2D contour: bridges of material left at the bottom so the part stays
+/// attached to the stock.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Tabs {
+  /// Tabs per loop, evenly spaced along it.
+  pub count: u32,
+  /// Tab width along the outline (mm).
+  #[serde(default = "tab_width")]
+  pub width: f64,
+  /// Tab height above the bottom of the cut part (mm).
+  #[serde(default = "tab_height")]
+  pub height: f64,
+}
+
+fn tab_width() -> f64 {
+  5.0
+}
+
+fn tab_height() -> f64 {
+  2.0
 }
 
 fn stepover() -> f64 {
@@ -102,8 +200,12 @@ pub enum OpKind {
   /// Faces the stock down to the top of the part.
   Face,
   /// Clears pockets down to flat floor faces (their outline is the pocket wall, holes in them
-  /// are islands left standing).
-  Pocket { floors: Vec<FaceRef> },
+  /// are islands left standing). `rest` only cuts what the setup's earlier operations left.
+  Pocket {
+    floors: Vec<FaceRef>,
+    #[serde(default)]
+    rest: bool,
+  },
   /// Follows the outline of faces (default the part's bottom face) outside it (or inside), down
   /// through the part.
   Contour {
@@ -111,6 +213,8 @@ pub enum OpKind {
     faces: Vec<FaceRef>,
     #[serde(default)]
     inside: bool,
+    #[serde(default)]
+    tabs: Option<Tabs>,
   },
   /// Drills holes (cylindrical faces with a vertical axis); `peck` > 0 pecks.
   Drill {
@@ -118,6 +222,23 @@ pub enum OpKind {
     holes: Vec<FaceRef>,
     #[serde(default)]
     peck: f64,
+  },
+  /// Adaptive clearing of pockets down to flat floors: the cleared area grows out from a helix
+  /// by the step-over each pass, so the tool's engagement stays about constant.
+  Adaptive { floors: Vec<FaceRef> },
+  /// 3D finishing in parallel rows across the part (faces, default all of it), the tool
+  /// dropped onto its surface; `angle` turns the rows from the X axis (degrees).
+  Parallel {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    angle: f64,
+  },
+  /// 3D finishing in rings a constant distance apart over the surface (constant scallop),
+  /// from the outline of the faces (default the whole part) inwards.
+  Scallop {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
   },
 }
 
@@ -173,7 +294,7 @@ pub fn origin(setup: &Setup, model: &Model) -> Result<DVec3, String> {
   Ok(DVec3::new(lo.x, lo.y, hi.z))
 }
 
-fn bodies<'a>(setup: &Setup, model: &'a Model) -> Vec<&'a Body> {
+pub(crate) fn bodies<'a>(setup: &Setup, model: &'a Model) -> Vec<&'a Body> {
   model.bodies.iter().filter(|b| setup.body.is_none_or(|id| id == b.id)).collect()
 }
 
@@ -200,10 +321,26 @@ fn resolve<'a>(model: &'a Model, f: &FaceRef) -> Result<(&'a Body, u32), String>
 
 /// Toolpaths of every operation of a setup.
 pub fn toolpaths(setup: &Setup, model: &Model) -> Result<Vec<Toolpath>, String> {
-  setup.operations.iter().map(|op| toolpath(setup, op, model).map_err(|e| format!("{}: {e}", op.name))).collect()
+  let mut out = Vec::new();
+  for op in &setup.operations {
+    let tp = toolpath(setup, op, model, &out).map_err(|e| format!("{}: {e}", op.name))?;
+    out.push(tp);
+  }
+  Ok(out)
 }
 
-fn toolpath(setup: &Setup, op: &Operation, model: &Model) -> Result<Toolpath, String> {
+/// A pocket floor: its face and height, checked to be flat and facing up.
+fn floor_face(model: &Model, f: &FaceRef) -> Result<(Shape, f64), String> {
+  let (b, id) = resolve(model, f)?;
+  let info = b.faces().iter().find(|x| x.id == id).ok_or("a floor face can't be found")?;
+  if info.kind != SurfaceKind::Plane || info.normal.z < 0.999 {
+    return Err("pocket floors must be flat faces facing up".into());
+  }
+  Ok((b.shape.face_shape(id).map_err(|e| e.to_string())?, info.origin.z))
+}
+
+/// `previous`: the toolpaths of the setup's earlier operations (for rest machining).
+fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath]) -> Result<Toolpath, String> {
   let d = op.tool.diameter;
   if d.is_nan() || d <= 0.0 {
     return Err("the tool diameter must be positive".into());
@@ -211,11 +348,21 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model) -> Result<Toolpath, St
   if op.stepdown.is_nan() || op.stepdown <= 0.0 || op.stepover.is_nan() || op.stepover <= 0.0 || op.stepover > 1.0 {
     return Err("step-down must be positive and step-over between 0 and 1".into());
   }
+  op.tool.check()?;
+  let drilling = matches!(op.kind, OpKind::Drill { .. });
+  let chamfering = matches!(op.kind, OpKind::Contour { .. }) && op.tool.kind == ToolKind::Chamfer;
+  if !drilling && !chamfering && !op.tool.kind.mills() {
+    return Err(format!("a {} can't mill sideways: use an end mill", op.tool.kind.id().replace('_', "-")));
+  }
+  if op.entry != Entry::Plunge && !(op.ramp_angle > 0.0 && op.ramp_angle <= 90.0) {
+    return Err("the ramp angle must be between 0 and 90 degrees".into());
+  }
   let (slo, shi) = stock(setup, model)?;
   let (plo, phi) = part_box(setup, model)?;
   let safe = shi.z + CLEARANCE;
-  let mut p = Path { moves: Vec::new(), feed: op.tool.feed, plunge: op.tool.plunge, safe };
+  let mut p = Path { moves: Vec::new(), feed: op.tool.feed, plunge: op.tool.plunge, safe, top: shi.z };
   let r = d / 2.0;
+  let slope = op.ramp_angle.to_radians().tan();
   let mut drill = None;
   match &op.kind {
     OpKind::Face => {
@@ -243,41 +390,77 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model) -> Result<Toolpath, St
           }
         }
         p.leave();
+        p.top = z;
       }
     }
-    OpKind::Pocket { floors } => {
+    OpKind::Pocket { floors, rest } => {
       if floors.is_empty() {
         return Err("pick the pocket floors".into());
       }
+      // what the earlier operations left, for rest machining
+      let left = if *rest { Some(rest::remaining(setup, model, previous, &op.tool)?) } else { None };
       for f in floors {
-        let (b, id) = resolve(model, f)?;
-        let info = b.faces().iter().find(|x| x.id == id).ok_or("a floor face can't be found")?;
-        if info.kind != SurfaceKind::Plane || info.normal.z < 0.999 {
-          return Err("pocket floors must be flat faces facing up".into());
-        }
-        let face = b.shape.face_shape(id).map_err(|e| e.to_string())?;
+        let (face, floor) = floor_face(model, f)?;
         // rings from the wall inwards; the centre is cut first, working out to the wall
         let rings = rings(&face, r + op.stock_to_leave, d * op.stepover)?;
         if rings.is_empty() {
           return Err("the tool doesn't fit in the pocket".into());
         }
-        let floor = info.origin.z;
+        let region = region::Region::new(&face.face_loops(0.01).map_err(|e| e.to_string())?);
+        let wall = r + op.stock_to_leave;
+        // the stock above the part may not be faced yet
+        let mut top = shi.z;
         for z in levels(phi.z, floor, op.stepdown) {
+          p.top = top;
+          if let Some(left) = &left {
+            rest::cut_rings(&mut p, left, &rings, z, top, op);
+            top = z;
+            continue;
+          }
+          let mut first = true;
           for ring in rings.iter().rev() {
             for lp in ring {
-              let lp = oriented(lp, true);
-              p.enter(at_z(lp[0], z));
-              for q in &lp[1..] {
-                p.cut(at_z(*q, z));
+              let lp: Vec<DVec3> = oriented(lp, true).into_iter().map(|q| at_z(q, z)).collect();
+              if op.entry == Entry::Plunge {
+                p.cut_loop(&lp, top, Entry::Plunge, slope);
+                p.leave();
+                continue;
               }
-              p.cut(at_z(lp[0], z));
+              // stay down between rings when the way there keeps clear of the walls
+              let at = p.moves.last().map(|m| m.to);
+              let link = at.filter(|a| (a.z - z).abs() < 1e-9).and_then(|a| {
+                let k = nearest(&lp, a);
+                region.as_ref().filter(|rg| clear_of_walls(rg, a, lp[k], wall)).map(|_| k)
+              });
+              if let Some(k) = link {
+                let lp = rotated(&lp, k);
+                p.cut(lp[0]);
+                p.follow(&lp);
+                continue;
+              }
               p.leave();
+              // a helix down at the pocket's widest point for its first ring, else a ramp
+              let helix = (first && op.entry == Entry::Helix)
+                .then(|| region.as_ref().and_then(|rg| helix_at(rg, op, wall, &lp)))
+                .flatten();
+              match helix {
+                Some((c, rho, k)) => {
+                  p.helix(c, rho, top, z, slope);
+                  let lp = rotated(&lp, k);
+                  p.cut(lp[0]);
+                  p.follow(&lp);
+                }
+                None => p.cut_loop(&lp, top, Entry::Ramp, slope),
+              }
+              first = false;
             }
           }
+          p.leave();
+          top = z;
         }
       }
     }
-    OpKind::Contour { faces, inside } => {
+    OpKind::Contour { faces, inside, tabs } => {
       let outlines: Vec<Shape> = if faces.is_empty() {
         // the part's lowest face pointing down
         let mut best: Option<(f64, Shape)> = None;
@@ -311,20 +494,44 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model) -> Result<Toolpath, St
       if loops.is_empty() {
         return Err("the contour can't be offset by the tool radius".into());
       }
+      let tabs = tabs.filter(|t| t.count > 0);
+      if let Some(t) = tabs
+        && !(t.width > 0.0 && t.height > 0.0)
+      {
+        return Err("tabs need a positive width and height".into());
+      }
       // cut through the part, a little below its bottom
+      let mut top = shi.z;
       for z in levels(shi.z, plo.z - 0.5, op.stepdown) {
+        p.top = top;
         for lp in &loops {
           // climb milling: clockwise outside a part, counter-clockwise inside
           let lp = oriented(lp, *inside);
-          p.enter(at_z(lp[0], z));
-          for q in &lp[1..] {
-            p.cut(at_z(*q, z));
-          }
-          p.cut(at_z(lp[0], z));
+          let lp: Vec<DVec3> = match tabs {
+            // bridges up to the tab height where this level cuts below it
+            Some(t) if z < plo.z + t.height - 1e-9 => tabbed(&lp, z, plo.z + t.height, t, r)?,
+            _ => lp.iter().map(|q| at_z(*q, z)).collect(),
+          };
+          let entry = if op.entry == Entry::Plunge { Entry::Plunge } else { Entry::Ramp };
+          p.cut_loop(&lp, top, entry, slope);
           p.leave();
         }
+        top = z;
       }
     }
+    OpKind::Adaptive { floors } => {
+      if floors.is_empty() {
+        return Err("pick the pocket floors".into());
+      }
+      for f in floors {
+        let (face, floor) = floor_face(model, f)?;
+        let region = region::Region::new(&face.face_loops(0.01).map_err(|e| e.to_string())?)
+          .ok_or("the pocket floor has no outline")?;
+        adaptive::clear(&mut p, &region, op, &levels(phi.z, floor, op.stepdown), shi.z)?;
+      }
+    }
+    OpKind::Parallel { faces, angle } => surface::parallel(&mut p, setup, model, op, faces, *angle)?,
+    OpKind::Scallop { faces } => surface::scallop(&mut p, setup, model, op, faces)?,
     OpKind::Drill { holes, peck } => {
       let mut found = Vec::new();
       let faces: Vec<(&Body, u32)> = if holes.is_empty() {
@@ -369,22 +576,26 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model) -> Result<Toolpath, St
         at = h.0;
         ordered.push(h);
       }
+      // as the canned cycles run them (G98): over the hole at the clearance height, down to
+      // the retract plane, pecks from there, and back up
       for (top, depth) in &ordered {
-        p.rapid(DVec3::new(top.x, top.y, top.z + RETRACT));
+        let r = top.z + RETRACT;
+        p.rapid(DVec3::new(top.x, top.y, safe));
+        p.rapid(DVec3::new(top.x, top.y, r));
         let bottom = top.z - depth;
         if *peck > 0.0 {
-          let mut z = top.z;
+          let mut z = r;
           while z > bottom + 1e-9 {
             z = (z - peck).max(bottom);
             p.moves.push(Move { rapid: false, to: DVec3::new(top.x, top.y, z), feed: op.tool.plunge });
-            p.rapid(DVec3::new(top.x, top.y, top.z + RETRACT));
+            p.rapid(DVec3::new(top.x, top.y, r));
           }
         } else {
           p.moves.push(Move { rapid: false, to: DVec3::new(top.x, top.y, bottom), feed: op.tool.plunge });
-          p.rapid(DVec3::new(top.x, top.y, top.z + RETRACT));
+          p.rapid(DVec3::new(top.x, top.y, r));
         }
+        p.rapid(DVec3::new(top.x, top.y, safe));
       }
-      p.rapid_up();
       drill = Some((ordered, *peck));
     }
   }
@@ -396,6 +607,8 @@ struct Path {
   feed: f64,
   plunge: f64,
   safe: f64,
+  /// Top of the material at the level being cut: entries rapid down to a retract above it.
+  top: f64,
 }
 
 impl Path {
@@ -412,7 +625,7 @@ impl Path {
   /// Over the start at the clearance height, then plunge.
   fn enter(&mut self, at: DVec3) {
     self.rapid(DVec3::new(at.x, at.y, self.safe));
-    self.rapid(DVec3::new(at.x, at.y, at.z + RETRACT.min(self.safe - at.z)));
+    self.rapid(DVec3::new(at.x, at.y, (self.top.max(at.z) + RETRACT).min(self.safe)));
     self.moves.push(Move { rapid: false, to: at, feed: self.plunge });
   }
 
@@ -421,8 +634,173 @@ impl Path {
   }
 
   fn leave(&mut self) {
-    self.rapid_up();
+    if self.moves.last().is_some_and(|m| m.to.z < self.safe - 1e-9) {
+      self.rapid_up();
+    }
   }
+
+  /// Around a closed loop from its first point (where the tool is) back to it.
+  fn follow(&mut self, lp: &[DVec3]) {
+    for q in &lp[1..] {
+      self.cut(*q);
+    }
+    self.cut(lp[0]);
+  }
+
+  /// A closed loop (each point at its own depth), entering from `top`, the top of the material
+  /// there: straight down, or ramping down along the loop at `slope` (dz per unit length) and
+  /// then going once more round at full depth.
+  fn cut_loop(&mut self, lp: &[DVec3], top: f64, entry: Entry, slope: f64) {
+    let n = lp.len();
+    let length: f64 = (0..n).map(|i| (lp[(i + 1) % n] - lp[i]).truncate().length()).sum();
+    let low = lp.iter().map(|q| q.z).fold(f64::INFINITY, f64::min);
+    let ramp = (top - low) / slope;
+    if entry == Entry::Plunge
+      || n < 2
+      || length < 1e-6
+      || slope <= 0.0
+      || top <= low + 1e-9
+      || ramp / length > MAX_PASSES as f64
+    {
+      self.enter(lp[0]);
+      self.follow(lp);
+      return;
+    }
+    // the ramp line z = top - s·slope, never below the loop's own depth
+    let line = |s: f64| top - s * slope;
+    self.enter(DVec3::new(lp[0].x, lp[0].y, top.max(lp[0].z)));
+    let total = ramp + length;
+    let mut s = 0.0;
+    let mut i = 0;
+    while s < total - 1e-9 {
+      let (a, b) = (lp[i % n], lp[(i + 1) % n]);
+      let seg = (b - a).truncate().length();
+      let end = (s + seg).min(total);
+      let tend = if seg > 1e-12 { ((end - s) / seg).min(1.0) } else { 1.0 };
+      let za = |t: f64| a.z + (b.z - a.z) * t;
+      // where the ramp line meets the loop's depth inside this segment
+      if seg > 1e-12 {
+        let f = |t: f64| line(s + t * seg) - za(t);
+        let (f0, f1) = (f(0.0), f(tend));
+        if f0 > 1e-9 && f1 < -1e-9 {
+          let t = f0 / (f0 - f1) * tend;
+          let q = a.lerp(b, t);
+          self.cut(DVec3::new(q.x, q.y, za(t)));
+        }
+      }
+      let q = a.lerp(b, tend);
+      self.cut(DVec3::new(q.x, q.y, za(tend).max(line(end))));
+      s = end;
+      i += 1;
+    }
+  }
+
+  /// A helix down from `top` to `z` around `c` (counter-clockwise), then once round at `z`;
+  /// ends at `c` + (`rho`, 0).
+  fn helix(&mut self, c: DVec3, rho: f64, top: f64, z: f64, slope: f64) {
+    let start = DVec3::new(c.x + rho, c.y, top.max(z));
+    self.enter(start);
+    // the slope along the chords actually cut
+    let per_turn = 72.0 * rho * (std::f64::consts::PI / 36.0).sin() * slope;
+    let turns = ((top - z).max(0.0) / per_turn.max(1e-9)).min(MAX_PASSES as f64 / 36.0);
+    let steps = ((turns * 36.0).ceil() as usize).max(1);
+    let total = turns * std::f64::consts::TAU;
+    for k in 1..=steps {
+      let t = k as f64 / steps as f64;
+      let a = total * t;
+      self.cut(DVec3::new(c.x + rho * a.cos(), c.y + rho * a.sin(), top + (z - top) * t));
+    }
+    for k in 1..=36 {
+      let a = total + std::f64::consts::TAU * k as f64 / 36.0;
+      self.cut(DVec3::new(c.x + rho * a.cos(), c.y + rho * a.sin(), z));
+    }
+    self.cut(DVec3::new(c.x + rho, c.y, z));
+  }
+}
+
+/// The index of a loop's point nearest to `p` (in XY).
+fn nearest(lp: &[DVec3], p: DVec3) -> usize {
+  lp.iter()
+    .enumerate()
+    .min_by(|a, b| (a.1.truncate() - p.truncate()).length().total_cmp(&(b.1.truncate() - p.truncate()).length()))
+    .map(|(i, _)| i)
+    .unwrap_or(0)
+}
+
+/// A closed loop starting at its `k`th point.
+fn rotated(lp: &[DVec3], k: usize) -> Vec<DVec3> {
+  lp[k..].iter().chain(&lp[..k]).copied().collect()
+}
+
+/// Whether a straight move keeps the tool centre `wall` or more inside a region.
+fn clear_of_walls(region: &region::Region, a: DVec3, b: DVec3, wall: f64) -> bool {
+  let len = (b - a).truncate().length();
+  let n = ((len / 0.05).ceil() as usize).clamp(1, 2000);
+  (0..=n).all(|k| region.sdf(a.lerp(b, k as f64 / n as f64).truncate(), wall + 1.0) >= wall - 1e-6)
+}
+
+/// A helix entry for a pocket's first ring: the centre (the pocket's widest point), radius and
+/// the ring point to go to from its end, if the helix fits and the way there is clear.
+fn helix_at(region: &region::Region, op: &Operation, wall: f64, lp: &[DVec3]) -> Option<(DVec3, f64, usize)> {
+  let want = if op.helix_diameter > 0.0 { op.helix_diameter / 2.0 } else { op.tool.radius() };
+  let h = ((region.hi - region.lo).max_element() / 200.0).max(0.02);
+  let (c, depth) = region.deepest(h, wall + want + 0.1)?;
+  let rho = want.min(depth - wall - 0.01);
+  if rho < 0.1 * op.tool.radius() {
+    return None;
+  }
+  let c = DVec3::new(c.x, c.y, lp[0].z);
+  let end = c + DVec3::new(rho, 0.0, 0.0);
+  let k = nearest(lp, end);
+  clear_of_walls(region, end, lp[k], wall).then_some((c, rho, k))
+}
+
+/// A closed loop at depth `z` with bridges up to `ztab` for holding tabs, evenly spaced along
+/// it; each bridge spans the tab's width plus the tool's diameter (the tool's centre path).
+fn tabbed(lp: &[DVec3], z: f64, ztab: f64, tabs: Tabs, r: f64) -> Result<Vec<DVec3>, String> {
+  let n = lp.len();
+  let mut at = vec![0.0];
+  for i in 0..n {
+    at.push(at[i] + (lp[(i + 1) % n] - lp[i]).truncate().length());
+  }
+  let length = at[n];
+  let half = tabs.width / 2.0 + r;
+  let count = tabs.count as f64;
+  if 2.0 * half * count >= length {
+    return Err("the tabs don't fit along the contour".into());
+  }
+  let spans: Vec<(f64, f64)> =
+    (0..tabs.count).map(|k| (k as f64 + 0.5) * length / count).map(|c| (c - half, c + half)).collect();
+  let point = |s: f64| -> DVec3 {
+    let i = at.partition_point(|v| *v <= s).saturating_sub(1).min(n - 1);
+    let seg = at[i + 1] - at[i];
+    let t = if seg > 1e-12 { (s - at[i]) / seg } else { 0.0 };
+    lp[i].lerp(lp[(i + 1) % n], t)
+  };
+  let inside = |s: f64| spans.iter().any(|(a, b)| s > *a && s < *b);
+  // vertices and tab ends in order along the loop
+  let mut events: Vec<(f64, u8)> = at[..n].iter().map(|s| (*s, 0)).collect();
+  for (a, b) in &spans {
+    events.push((*a, 1));
+    events.push((*b, 2));
+  }
+  events.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+  let mut out = Vec::new();
+  for (s, kind) in events {
+    let q = point(s);
+    match kind {
+      1 => {
+        out.push(at_z(q, z));
+        out.push(at_z(q, ztab));
+      }
+      2 => {
+        out.push(at_z(q, ztab));
+        out.push(at_z(q, z));
+      }
+      _ => out.push(at_z(q, if inside(s) { ztab } else { z })),
+    }
+  }
+  Ok(out)
 }
 
 /// Depths from `top` down to `bottom`, `step` apart, ending exactly at `bottom`.
@@ -505,75 +883,10 @@ fn cylinder_span(b: &Body, face: u32) -> Option<(f64, f64, bool)> {
   lo.is_finite().then_some((lo, hi, votes < 0.0))
 }
 
-/// G-code (Fanuc/Haas style, metric) for a setup's toolpaths, relative to its work origin.
+/// G-code for a setup's toolpaths with its post-processor (Fanuc unless set) and units,
+/// relative to its work origin.
 pub fn gcode(setup: &Setup, paths: &[Toolpath], origin: DVec3) -> String {
-  use std::fmt::Write;
-  let f = |v: f64| {
-    let s = format!("{:.3}", v);
-    let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
-    if s == "-0" { "0".to_string() } else { s }
-  };
-  let mut g = String::new();
-  let _ = writeln!(g, "%");
-  let _ = writeln!(g, "(CLFUSION - {})", setup.name.to_uppercase());
-  let _ = writeln!(g, "(WORK ORIGIN: STOCK TOP, MIN X/Y CORNER - G54)");
-  let _ = writeln!(g, "G90 G94 G17 G21");
-  let _ = writeln!(g, "G54");
-  let mut tool = None;
-  for tp in paths {
-    let _ = writeln!(g, "({} - D{} MM)", tp.name.to_uppercase(), f(tp.tool.diameter));
-    if tool != Some(tp.tool.number) {
-      let _ = writeln!(g, "M5");
-      let _ = writeln!(g, "G28 G91 Z0");
-      let _ = writeln!(g, "G90");
-      let _ = writeln!(g, "T{} M6", tp.tool.number);
-      let _ = writeln!(g, "S{} M3", tp.tool.rpm.round() as i64);
-      let _ = writeln!(g, "G43 H{}", tp.tool.number);
-      tool = Some(tp.tool.number);
-    }
-    let local = |p: DVec3| p - origin;
-    if let Some((holes, peck)) = &tp.drill {
-      let r = RETRACT;
-      let mut first = true;
-      for (top, depth) in holes {
-        let t = local(*top);
-        if first {
-          let _ = writeln!(g, "G0 X{} Y{} Z{}", f(t.x), f(t.y), f(t.z + CLEARANCE));
-          let cycle = if *peck > 0.0 { format!("G83 Q{}", f(*peck)) } else { "G81".to_string() };
-          let _ = writeln!(
-            g,
-            "G98 {cycle} X{} Y{} Z{} R{} F{}",
-            f(t.x),
-            f(t.y),
-            f(t.z - depth),
-            f(t.z + r),
-            f(tp.tool.plunge)
-          );
-          first = false;
-        } else {
-          let _ = writeln!(g, "X{} Y{} Z{} R{}", f(t.x), f(t.y), f(t.z - depth), f(t.z + r));
-        }
-      }
-      let _ = writeln!(g, "G80");
-      continue;
-    }
-    let mut last_feed = -1.0;
-    for m in &tp.moves {
-      let p = local(m.to);
-      if m.rapid {
-        let _ = writeln!(g, "G0 X{} Y{} Z{}", f(p.x), f(p.y), f(p.z));
-      } else if (m.feed - last_feed).abs() > 1e-9 {
-        let _ = writeln!(g, "G1 X{} Y{} Z{} F{}", f(p.x), f(p.y), f(p.z), f(m.feed));
-        last_feed = m.feed;
-      } else {
-        let _ = writeln!(g, "G1 X{} Y{} Z{}", f(p.x), f(p.y), f(p.z));
-      }
-    }
-  }
-  let _ = writeln!(g, "M5");
-  let _ = writeln!(g, "G28 G91 Z0");
-  let _ = writeln!(g, "G90");
-  let _ = writeln!(g, "M30");
-  let _ = writeln!(g, "%");
-  g
+  let post = post::find(&setup.post).unwrap_or(&post::POSTS[0]);
+  let units = if setup.imperial { post::Units::Imperial } else { post::Units::Metric };
+  post::write(post, units, &setup.name, paths, origin)
 }

@@ -4248,4 +4248,37 @@ mod tests {
     let m = s.model.bodies.iter().find(|b| b.id.0 == arm).unwrap().shape.mass().unwrap();
     assert!((m.bbox_min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox_min);
   }
+
+  #[test]
+  fn manufacture_forms_tools_entries_and_posts() {
+    use crate::forms::*;
+    use clf_engine::model::cam::{Entry, OpKind, ToolKind};
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let floor = vec![Sel::Face { body: b, face: top }];
+    let mut d = form(&mut s, &CAM_SETUP, vec![], &[("post", json!("grbl")), ("units", json!("inch"))]);
+    apply(&mut s, &mut d);
+    assert_eq!((s.design.cam[0].post.as_str(), s.design.cam[0].imperial), ("grbl", true));
+    let mut d = form(&mut s, &CAM_ADAPTIVE, floor.clone(), &[("tool_diameter", json!("8 mm"))]);
+    apply(&mut s, &mut d);
+    let mut d = form(&mut s, &CAM_POCKET, floor, &[("rest", json!(true)), ("entry", json!("ramp"))]);
+    apply(&mut s, &mut d);
+    let mut d = form(&mut s, &CAM_CONTOUR, vec![], &[("tabs", json!("2"))]);
+    apply(&mut s, &mut d);
+    let mut d = form(&mut s, &CAM_PARALLEL, vec![], &[("stepover", json!("0.3"))]);
+    apply(&mut s, &mut d);
+    let ops = &s.design.cam[0].operations;
+    assert_eq!(ops.len(), 4);
+    assert!(matches!(ops[0].kind, OpKind::Adaptive { .. }) && ops[0].entry == Entry::Helix && ops[0].stepover == 0.1);
+    assert!(matches!(ops[1].kind, OpKind::Pocket { rest: true, .. }) && ops[1].entry == Entry::Ramp);
+    assert!(matches!(ops[2].kind, OpKind::Contour { tabs: Some(t), .. } if t.count == 2 && t.width == 5.0));
+    assert!(matches!(ops[3].kind, OpKind::Parallel { .. }) && ops[3].tool.kind == ToolKind::Ball);
+    let g = run(&mut s, "cam.post", json!({}));
+    assert!(g["gcode"].as_str().unwrap().contains("G20") && g["post"] == "grbl");
+    let r = run(&mut s, "cam.simulate", json!({}));
+    assert!(r["removed"].as_array().unwrap().len() == 4);
+    assert!(s.simulation.is_some());
+  }
 }
