@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod cam_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
@@ -102,6 +103,8 @@ pub struct App {
   pub(crate) rebuild: Option<(clf_engine::Rebuild, f64)>,
   /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
   pub manufacture: bool,
+  /// The tool library window, while open.
+  pub tool_library: Option<cam_ui::ToolLibrary>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,6 +191,7 @@ impl App {
       analysis: None,
       rebuild: None,
       manufacture: false,
+      tool_library: None,
     }
   }
 
@@ -416,9 +420,11 @@ impl App {
       self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
       return;
     }
+    let st = self.s.design.cam.last().map(|st| st.post.clone()).unwrap_or_default();
+    let ext = clf_engine::model::cam::post::find(&st).map(|p| p.extension).unwrap_or("nc");
     if let Some(p) = rfd::FileDialog::new()
       .add_filter("G-code", &["nc", "tap", "gcode", "ngc"])
-      .set_file_name(format!("{}.nc", self.s.design.name))
+      .set_file_name(format!("{}.{ext}", self.s.design.name))
       .save_file()
       && let Some(r) = self.run("cam.post", json!({"path": p}))
     {
@@ -850,6 +856,7 @@ impl App {
       panels::parameters_window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
+    cam_ui::tool_library_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

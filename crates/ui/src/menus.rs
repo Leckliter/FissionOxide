@@ -718,14 +718,18 @@ const DRAWING: [Group; 7] = [
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];
 
-const CAM_SETUP: &[E] = &[c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP)))];
+const CAM_SETUP: &[E] = &[
+  c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP))),
+  E::Sep,
+  c("Tool Library", Icon::Configure, Cmd::CamTools),
+];
 
 const CAM_2D: &[E] = &[
   c("Face", Icon::Extrude, D(Kind::Form(&forms::CAM_FACE))),
   c("2D Pocket", Icon::Shell, D(Kind::Form(&forms::CAM_POCKET))),
   c("2D Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR))),
+  c("2D Adaptive Clearing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE))),
   E::Sep,
-  x("2D Adaptive Clearing", Icon::Shell),
   x("Slot", Icon::Slot),
   x("Trace", Icon::Line),
   x("Thread", Icon::Thread),
@@ -733,20 +737,27 @@ const CAM_2D: &[E] = &[
   x("Engrave", Icon::SkText),
 ];
 
+const CAM_3D: &[E] = &[
+  c("Parallel", Icon::Zebra, D(Kind::Form(&forms::CAM_PARALLEL))),
+  c("Scallop", Icon::Isocurve, D(Kind::Form(&forms::CAM_SCALLOP))),
+];
+
 const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
 
 const CAM_ACTIONS: &[E] = &[
   c("Generate", Icon::Play, Cmd::CamGenerate).k("Ctrl+G"),
+  c("Simulate", Icon::MotionStudy, Cmd::CamSimulate),
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
   c("Delete Setup", Icon::Remove, Cmd::CamDelete),
 ];
 
 /// The Manufacture workspace's MILLING tab.
-const MILLING: [Group; 4] = [
-  Group { label: "SETUP", quick: &["New Setup"], menu: CAM_SETUP },
-  Group { label: "2D", quick: &["Face", "2D Pocket", "2D Contour"], menu: CAM_2D },
+const MILLING: [Group; 5] = [
+  Group { label: "SETUP", quick: &["New Setup", "Tool Library"], menu: CAM_SETUP },
+  Group { label: "2D", quick: &["2D Adaptive Clearing", "2D Pocket", "Face", "2D Contour"], menu: CAM_2D },
+  Group { label: "3D", quick: &["Parallel", "Scallop"], menu: CAM_3D },
   Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
-  Group { label: "ACTIONS", quick: &["Generate", "Post Process"], menu: CAM_ACTIONS },
+  Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS },
 ];
 
 const MANAGE: [Group; 1] =

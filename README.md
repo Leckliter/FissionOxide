@@ -73,10 +73,12 @@ change a parameter and watch the whole history rebuild.
 - **Drag arrows.** Drag the arrow of an extrude or offset plane to change its distance.
 - **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
   rubber, wood and glass, on bodies or components (A).
-- **Manufacture.** A milling workspace: setups with stock and a work origin, facing, 2D pockets
-  (islands stay standing), 2D contours and drilling (G81/G83), toolpaths drawn in the view and
-  kept in step with the design, machining time, and metric G-code for Fanuc/Haas-style
-  controls (`.nc`). See [Manufacture](#manufacture-cam).
+- **Manufacture.** A milling workspace: setups with stock and a work origin, a tool library in
+  the hub (flat, ball, bull-nose, drill and chamfer tools with feeds and speeds), facing, 2D
+  pockets (islands stay standing, rest machining), adaptive clearing, 2D contours with holding
+  tabs, ramp and helix entries, drilling (G81/G83), 3D parallel and scallop finishing, a stock
+  removal simulation with gouge and collision warnings, and G-code for Fanuc, Haas, GRBL,
+  LinuxCNC and Mach3/4 in mm or inches. See [Manufacture](#manufacture-cam).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, mirror (symmetry-constrained),
@@ -230,27 +232,51 @@ version, so the app and the CLI can use the same hub at the same time.
 
 Switch the workspace to **Manufacture**. **New Setup** puts stock around the part (side and top
 offsets) with the work origin (G54) at the top of the stock, minimum X/Y corner; Z is negative
-into the stock. Then add operations:
+into the stock. The setup also picks the post-processor and the G-code units. Then add
+operations:
 
 - **Face** takes the stock top down to the part's top in zigzag rows.
 - **2D Pocket** clears down to the flat floor faces you pick, in rings from the centre out; holes
   in a floor stay as islands. Step-over, step-down and stock to leave are per operation.
+  **Rest machining** cuts only what the setup's earlier operations left (the corners a larger
+  tool couldn't reach): their toolpaths are run through the stock first.
+- **2D Adaptive Clearing** clears the same pockets with a light, constant engagement: the cut
+  starts as a helix at the pocket's widest point and grows by the step-over (the optimal load,
+  10% of the tool by default) each pass, at full depth, linking through cleared space.
 - **2D Contour** follows the part's outline (or picked faces) a tool radius outside — or inside —
-  climb milled, in step-downs through the part.
+  climb milled, in step-downs through the part. **Holding tabs** leave bridges of a given width
+  and height at the bottom so the part stays in the stock.
 - **Drill** drills every vertical hole (or the ones you pick), pecking if asked.
+- **Parallel** and **Scallop** finish 3D surfaces on the triangulated part: rows, or rings a
+  constant distance apart over the surface, with the tool (ball, bull-nose or flat) dropped onto
+  it so it never cuts in.
+
+Pockets and contours enter by plunging, **ramping** along the cut, or down a **helix**, at the
+ramp angle.
+
+The **Tool Library** (SETUP ▸ Tool Library) is `tools.json` in the data hub; a hub without one
+starts with a standard set. Operations take a tool by number (`tool_number`) or by diameter,
+and keep a copy of it, so a design machines the same on another computer.
 
 Toolpaths (cutting moves blue, rapids dashed orange) are drawn with the stock and follow design
-changes; **Generate** reports the machining time and **Post Process** writes the G-code.
+changes; **Generate** reports the machining time. **Simulate** cuts the stock with the
+toolpaths on a heightfield, shows what's left in the view (gouges in red) and warns about
+gouges, rapids into the stock and cuts deeper than the flutes. **Post Process** writes the
+G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`.nc`), GRBL
+(`.gcode`, no tool changer: it stops for each tool, drilling written out), LinuxCNC (`.ngc`)
+or Mach3/4 (`.tap`), in mm or inches.
 
 ```sh
-clfusion-cli exec part.clf '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1}' --save part.clf
-clfusion-cli exec part.clf '{"cmd": "cam.pocket", "floors": [{"point": [35, 25, 12]}], "tool_diameter": 6}' --save part.clf
-clfusion-cli exec part.clf '{"cmd": "cam.post", "path": "part.nc"}'
+clfusion-cli exec part.clf '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1, "post": "haas"}' --save part.clf
+clfusion-cli exec part.clf '{"cmd": "cam.adaptive", "floors": [{"point": [35, 25, 12]}], "tool_number": 3}' --save part.clf
+clfusion-cli exec part.clf '{"cmd": "cam.simulate"}'
+clfusion-cli exec part.clf '{"cmd": "cam.post", "path": "part.nc", "units": "inch"}'
+clfusion-cli run examples/milling.jsonl --save milled.clf   # a whole job, start to finish
 ```
 
-The toolpaths are 2.5-axis: there is no adaptive clearing, rest machining, 3D surfacing,
-simulation of the stock removal or a post-processor library yet; check the G-code against your
-machine before running it.
+The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
+are no 3D roughing, 4/5-axis or turning toolpaths yet: check the G-code against your machine
+before running it.
 
 ## Headless CLI and scripting
 
