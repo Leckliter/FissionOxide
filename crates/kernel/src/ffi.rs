@@ -193,6 +193,10 @@ pub(crate) mod ffi {
     fn step_doc_component(d: &StepDoc, i: usize) -> String;
     fn step_doc_color(d: &StepDoc, i: usize) -> Vec<f64>;
     fn step_doc_shape(d: &StepDoc, i: usize) -> Result<UniquePtr<Shape>>;
+
+    // fillets with a radius law (cpp/fillet3.cpp)
+    include!("fox-kernel/cpp/fillet3.hxx");
+    fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

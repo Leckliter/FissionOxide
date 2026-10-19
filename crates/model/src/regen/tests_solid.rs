@@ -159,7 +159,7 @@ fn setback_fillet_at_a_box_corner() {
     .collect();
   assert_eq!(edges.len(), 3);
   let f = d
-    .add_feature(FeatureKind::Fillet { edges, radius: "3".into(), radius2: None, setback: None, chord: false })
+    .add_feature(FeatureKind::Fillet { edges, radius: "3".into(), radius2: None, setback: None, chord: false, radii: vec![] })
     .unwrap();
   let plain = vol(&regenerate(&mut d).bodies[0]);
   if let Some(FeatureKind::Fillet { setback, .. }) = d.feature_mut(f).map(|f| &mut f.kind) {

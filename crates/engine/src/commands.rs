@@ -706,6 +706,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           radius2: opt_expr(p, "radius2"),
           setback: opt_expr(p, "setback"),
           chord: p.get("chord").and_then(Value::as_bool).unwrap_or(false),
+          radii: crate::fillet::radius_points(p)?,
         },
       )
     }

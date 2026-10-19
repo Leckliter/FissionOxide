@@ -986,3 +986,7 @@ mod tests;
 mod tests_features2;
 
 mod sheet2;
+
+mod fillet3;
+#[cfg(test)]
+mod tests_fillet3;

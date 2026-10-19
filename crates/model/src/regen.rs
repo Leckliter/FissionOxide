@@ -530,7 +530,7 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2, setback, chord } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback, chord, radii } => {
         let r = self.len(radius)?;
         let sb = match setback.as_deref().map(str::trim) {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
@@ -540,6 +540,15 @@ impl Ctx<'_> {
           Some(sb) => solid::setback(s, &f, ids, sb),
           None => Ok(f),
         };
+        let r2 = radius2.as_deref().map(|e| self.len(e)).transpose()?;
+        if !radii.is_empty() || r2.is_some_and(|r2| r2 <= 1e-9) || (r2.is_some() && r <= 1e-9) {
+          let mut law = vec![(0.0, r)];
+          for p in radii {
+            law.push((p.at, self.len(&p.radius)?));
+          }
+          law.push((1.0, r2.unwrap_or(r)));
+          return self.edge_op(id, edges, |s, ids| round(s, s.fillet_law(ids, &law)?, ids));
+        }
         match radius2 {
           Some(r2) => {
             let r2 = self.len(r2)?;

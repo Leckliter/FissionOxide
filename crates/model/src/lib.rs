@@ -22,6 +22,7 @@ pub mod regen;
 pub mod sheet;
 pub mod sheet2;
 pub mod surface;
+pub mod fillet;
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +31,7 @@ pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
+pub use fillet::RadiusPoint;
 
 use fox_sketch::{CurveId, PointId, Sketch};
 
@@ -529,6 +531,11 @@ pub enum FeatureKind {
     /// `radius` is the chord length: the width of the round across the edge.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     chord: bool,
+    /// Variable radius with radii at points along each edge (Fusion's variable-radius fillet):
+    /// the radius runs smoothly from `radius` at the start, through these, to `radius2` (or
+    /// `radius`) at the end. Radii may be zero.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    radii: Vec<RadiusPoint>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -1910,10 +1917,13 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, setback, .. } => {
+    FeatureKind::Fillet { radius, radius2, setback, radii, .. } => {
       f(radius);
       for r in [radius2, setback].into_iter().flatten() {
         f(r);
+      }
+      for p in radii {
+        f(&mut p.radius);
       }
     }
     FeatureKind::Chamfer { distance, distance2, angle, .. } => {

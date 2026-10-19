@@ -175,6 +175,23 @@ def crossings(p, polys):
   return inside
 
 
+RADIUS_SAMPLES = 32  # points a B-spline radius law is sampled at along the edge
+
+
+def bspline(ctrl, knots, u):
+  """A clamped 1-D B-spline (degree len(knots) - len(ctrl) - 1) at u, by de Boor."""
+  p = len(knots) - len(ctrl) - 1
+  k = p
+  while k + 1 < len(ctrl) and knots[k + 1] <= u:
+    k += 1
+  d = [ctrl[j + k - p] for j in range(p + 1)]
+  for r in range(1, p + 1):
+    for j in range(p, r - 1, -1):
+      a = (u - knots[j + k - p]) / (knots[j + 1 + k - r] - knots[j + k - p])
+      d[j] = (1 - a) * d[j - 1] + a * d[j]
+  return d[p]
+
+
 def edge_point(e):
   """A point on a recipe edge. A full circle's given point is its start, which is also on the seam
   of the face it bounds; take the point a quarter turn on instead."""
@@ -818,6 +835,19 @@ class Converter:
       self.cmd("fillet", True, edges=self.edges(f, T), radius=r1, radius2=r2)
     elif t == "chord_length":
       self.cmd("fillet", True, edges=self.edges(f, T), radius=f["radius"], chord=True)
+    elif t == "spline_radius":
+      if len(f["edges"]) != 1:
+        raise Unsupported("spline-radius fillet on several edges")
+      e = f["edges"][0]
+      law = [f["radius"]] + f["radii"]
+      flip = f.get("start") is not None and norm(sub(f["start"], e["start"])) > 1e-6
+      self.comment(f"B-spline radius law {law} on knots {f['knots']}, sampled at {RADIUS_SAMPLES} points")
+      pts = []
+      for i in range(RADIUS_SAMPLES + 1):
+        u = i / RADIUS_SAMPLES
+        pts.append([1 - u if flip else u, clean(bspline(law, f["knots"], u), 9)])
+      pts.sort()
+      self.cmd("fillet", True, edges=self.edges(f, T), radius=pts[0][1], radius2=pts[-1][1], radii=pts[1:-1])
     else:
       raise Unsupported(f"fillet type '{t}'")
 
