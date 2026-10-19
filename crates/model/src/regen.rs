@@ -1918,16 +1918,19 @@ impl Ctx<'_> {
       let mut ids = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
-        match er.resolve(body.edges(), body.faces(), scale) {
-          Some(eid) => {
-            if let Some(info) = body.edges().iter().find(|e| e.id == eid) {
-              *er = EdgeRef::from_edge(bid, info, body.faces());
-            }
-            if !ids.contains(&eid) {
-              ids.push(eid);
-            }
+        let found = er.resolve_all(body.edges(), body.faces(), scale);
+        if found.is_empty() {
+          missing = true;
+          continue;
+        }
+        let pieces: Vec<&EdgeInfo> = body.edges().iter().filter(|e| found.contains(&e.id)).collect();
+        if let Some(r) = EdgeRef::from_pieces(bid, &pieces, body.faces()) {
+          *er = r;
+        }
+        for eid in found {
+          if !ids.contains(&eid) {
+            ids.push(eid);
           }
-          None => missing = true,
         }
       }
       if ids.is_empty() {
