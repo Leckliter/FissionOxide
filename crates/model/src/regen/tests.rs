@@ -210,8 +210,12 @@ fn patterns_mirror_primitives_and_shell() {
   let m = regenerate(&mut d);
   let b = &m.bodies[0];
   let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap();
-  d.add_feature(FeatureKind::Shell { faces: vec![FaceRef::from_face(b.id, top, top.center)], thickness: "1".into() })
-    .unwrap();
+  d.add_feature(FeatureKind::Shell {
+    faces: vec![FaceRef::from_face(b.id, top, top.center)],
+    thickness: "1".into(),
+    round: false,
+  })
+  .unwrap();
   d.add_feature(FeatureKind::RectangularPattern {
     bodies: BodySel::All,
     direction: [1.0, 0.0, 0.0],
@@ -620,8 +624,12 @@ fn shelled_box_rips_converts_and_unfolds() {
   let m = regenerate(&mut d);
   let b = &m.bodies[0];
   let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap();
-  d.add_feature(FeatureKind::Shell { faces: vec![FaceRef::from_face(b.id, top, top.center)], thickness: "2".into() })
-    .unwrap();
+  d.add_feature(FeatureKind::Shell {
+    faces: vec![FaceRef::from_face(b.id, top, top.center)],
+    thickness: "2".into(),
+    round: false,
+  })
+  .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   let corners = [[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [0.0, 40.0]];

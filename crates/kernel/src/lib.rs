@@ -388,13 +388,14 @@ impl Shape {
   }
 
   /// Hollows the solid to `thickness`, opening the given faces (1-based face-map indices).
-  /// The outside surface is kept (walls grow inward).
-  pub fn shell(&self, faces: &[u32], thickness: f64) -> Result<Shape> {
+  /// The outside surface is kept (walls grow inward). Walls meet in sharp corners, as in Fusion,
+  /// or rounded ones when `round` is set.
+  pub fn shell(&self, faces: &[u32], thickness: f64, round: bool) -> Result<Shape> {
     if !(thickness > 1e-9 && thickness.is_finite()) {
       return Err(KernelError::Input("shell thickness must be positive".into()));
     }
     let before = self.mass()?.volume;
-    let r = Shape::wrap(sys::shell(self.get()?, faces, -thickness)?)?;
+    let r = Shape::wrap(sys::shell(self.get()?, faces, -thickness, round)?)?;
     // OCCT can "succeed" with nonsense when the walls swallow the part.
     let after = r.mass()?.volume;
     if !(after > 1e-9 && after < before) || r.solid_count() == 0 {

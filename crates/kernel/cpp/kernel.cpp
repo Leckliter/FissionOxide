@@ -396,7 +396,8 @@ std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges
 }
 
 // Hollows a solid, removing `faces` (1-based); negative thickness keeps the outside surface.
-std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, double thickness) {
+// Walls meet in sharp corners, or in rounded ones when `round` is set.
+std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, double thickness, bool round) {
   CLF_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
@@ -405,7 +406,8 @@ std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, 
     if (i >= 1 && static_cast<int>(i) <= map.Extent()) remove.Append(map(static_cast<int>(i)));
   }
   BRepOffsetAPI_MakeThickSolid mk;
-  mk.MakeThickSolidByJoin(s.s, remove, thickness, 1e-3, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Arc);
+  mk.MakeThickSolidByJoin(s.s, remove, thickness, 1e-3, BRepOffset_Skin, Standard_False, Standard_False,
+                          round ? GeomAbs_Arc : GeomAbs_Intersection);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("shell failed (thickness too large for the geometry?)");
   return wrap(checked(mk.Shape(), "shell"));

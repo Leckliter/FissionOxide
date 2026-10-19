@@ -125,7 +125,7 @@ cmds! {
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
-  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?})", "{faces: [{body, face} | {point}], thickness}";
+  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}); walls meet in sharp corners unless corners is round", "{faces: [{body, face} | {point}], thickness, corners?: \"sharp\"|\"round\"}";
   "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -639,7 +639,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
         faces.push(face_ref(s, f)?);
       }
-      add_feature(s, FeatureKind::Shell { faces, thickness: req_expr(p, "thickness")? })
+      let round = match p.get("corners").and_then(Value::as_str) {
+        None | Some("sharp") => false,
+        Some("round") => true,
+        Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
+      };
+      add_feature(s, FeatureKind::Shell { faces, thickness: req_expr(p, "thickness")?, round })
     }
     "box" | "cylinder" | "sphere" | "torus" => {
       let shape = match name {

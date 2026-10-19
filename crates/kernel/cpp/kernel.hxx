@@ -38,7 +38,7 @@ std::unique_ptr<Shape> make_torus(rust::Slice<const double> axis, double major, 
 std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, int32_t op, double fuzzy);
 std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges, double radius);
 std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges, double dist);
-std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, double thickness);
+std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, double thickness, bool round);
 std::unique_ptr<Shape> transform(const Shape &s, rust::Slice<const double> m);
 std::unique_ptr<Shape> mirror(const Shape &s, rust::Slice<const double> plane);
 std::unique_ptr<Shape> unify(const Shape &s);

@@ -101,7 +101,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **70 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **72 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
@@ -120,6 +120,5 @@ Wrong results:
 Missing options:
 
 - **37** Fillet at the apex of a loft-to-point (no edge found where expected).
-- **44, 45** Shell with sharp (intersection) joins; only rounded joins exist.
 - **78–81** Variable fillets: radius down to zero, chord length, taper to fit, several radii
   along the edge.

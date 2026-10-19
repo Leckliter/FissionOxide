@@ -872,9 +872,10 @@ impl Dialog {
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Shell { thickness, faces } => {
+      FeatureKind::Shell { thickness, faces, round } => {
         let mut d = Dialog::blank(Kind::Shell);
         d.radius = thickness.clone();
+        d.flag = *round;
         d.faces = vec![Value::Null; faces.len()];
         d
       }
@@ -1193,7 +1194,10 @@ impl Dialog {
       }
       Kind::Fillet => ("fillet", json!({"edges": self.edges, "radius": self.radius})),
       Kind::Chamfer => ("chamfer", json!({"edges": self.edges, "distance": self.radius})),
-      Kind::Shell => ("shell", json!({"faces": self.faces, "thickness": self.radius})),
+      Kind::Shell => (
+        "shell",
+        json!({"faces": self.faces, "thickness": self.radius, "corners": if self.flag { "round" } else { "sharp" }}),
+      ),
       Kind::Box => (
         "box",
         json!({"plane": self.plane, "at": self.at_pt()?, "width": self.a, "depth": self.b, "height": self.c, "operation": op}),
@@ -1248,7 +1252,7 @@ impl Dialog {
       Kind::Revolve => json!({"angle": self.angle, "operation": self.op}),
       Kind::Fillet => json!({"radius": self.radius}),
       Kind::Chamfer => json!({"distance": self.radius}),
-      Kind::Shell => json!({"thickness": self.radius}),
+      Kind::Shell => json!({"thickness": self.radius, "round": self.flag}),
       Kind::Box => {
         json!({"shape": {"type": "box", "width": self.a, "depth": self.b, "height": self.c}, "at": self.at_pt()?, "operation": self.op})
       }
@@ -1875,6 +1879,13 @@ impl Dialog {
           self.dirty = true;
         }
         ui.end_row();
+        if self.kind == Kind::Shell {
+          ui.label("");
+          if ui.checkbox(&mut self.flag, "Round corners").changed() && (!creating || self.applied) {
+            self.dirty = true;
+          }
+          ui.end_row();
+        }
       }
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
         ui.label("Plane");

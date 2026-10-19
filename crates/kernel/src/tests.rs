@@ -89,7 +89,7 @@ fn fillet_chamfer_shell() {
   let c = a.chamfer(&edges, 1.0).unwrap();
   assert!(volume(&c) < 8000.0);
   let top = a.faces().unwrap().iter().find(|f| f.normal.z > 0.9).unwrap().id;
-  let sh = a.shell(&[top], 1.0).unwrap();
+  let sh = a.shell(&[top], 1.0, false).unwrap();
   let inner = 38.0 * 18.0 * 9.0;
   assert!((volume(&sh) - (8000.0 - inner)).abs() < 1e-2, "{}", volume(&sh));
 }
@@ -152,7 +152,7 @@ fn hostile_inputs_are_errors() {
   assert!(Shape::make_box(DVec3::ZERO, DVec3::ZERO).is_err());
   assert!(Shape::sphere(DVec3::ZERO, -1.0).is_err());
   assert!(block().fillet(&[999], 1.0).is_err());
-  assert!(block().shell(&[1], 100.0).is_err());
+  assert!(block().shell(&[1], 100.0, false).is_err());
 }
 
 #[test]

@@ -564,7 +564,7 @@ impl Ctx<'_> {
         }
         Ok((!split_any).then(|| "the tool doesn't cross the bodies".to_string()))
       }
-      FeatureKind::Shell { faces, thickness } => {
+      FeatureKind::Shell { faces, thickness, round } => {
         let t = self.len(thickness)?;
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
@@ -589,7 +589,7 @@ impl Ctx<'_> {
               None => missing = true,
             }
           }
-          let shape = body.shape.shell(&ids, t).map_err(ke)?;
+          let shape = body.shape.shell(&ids, t, *round).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))
