@@ -252,7 +252,7 @@ fn sketch_edges(s: &Session, id: u32) -> Result<Vec<Edge>, CmdError> {
         SkSeg::Line { a, b } => Edge::Line { a, b },
         SkSeg::Arc { center, radius, start_angle, sweep } => Edge::Arc { center, radius, start_angle, sweep },
         SkSeg::Circle { center, radius, .. } => Edge::Circle { center, radius },
-        SkSeg::Bezier { .. } => {
+        SkSeg::Bezier { .. } | SkSeg::EllipseArc { .. } => {
           let mut pts = Vec::new();
           seg.flatten(&mut pts);
           pts.push(seg.end());
