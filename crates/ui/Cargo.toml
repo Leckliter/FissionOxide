@@ -13,6 +13,10 @@ rfd.workspace = true
 image.workspace = true
 serde_json.workspace = true
 log.workspace = true
+fox-render-gl.workspace = true
+
+[dev-dependencies]
+fox-render-gl = { workspace = true, features = ["headless"] }
 
 [lints]
 workspace = true

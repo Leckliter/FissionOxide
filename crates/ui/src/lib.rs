@@ -10,6 +10,7 @@ mod cam_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
+mod gpu;
 mod icons;
 mod logo;
 mod marking;
@@ -107,6 +108,8 @@ pub struct App {
   pub manufacture: bool,
   /// The tool library window, while open.
   pub tool_library: Option<cam_ui::ToolLibrary>,
+  /// The GPU viewport renderer and its setting.
+  pub(crate) gpu: gpu::Gpu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,6 +140,7 @@ impl App {
   pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> App {
     theme::apply(&cc.egui_ctx);
     let mut app = App::with_session(Session::default());
+    app.gpu = gpu::Gpu::new(cc.gl.clone());
     match open {
       Some(p) => app.open_path(&p),
       // like Fusion, start with the data panel showing
@@ -194,6 +198,7 @@ impl App {
       rebuild: None,
       manufacture: false,
       tool_library: None,
+      gpu: gpu::Gpu::new(None),
     }
   }
 
@@ -880,6 +885,7 @@ impl App {
     egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
       let rect = ui.available_rect_before_wrap();
       let painter = ui.painter_at(rect);
+      gpu::paint_last(self, &painter, rect, egui::Color32::from_gray(200));
       if let Some(tex) = &self.tex {
         painter.image(
           tex.id(),

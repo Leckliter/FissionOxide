@@ -1014,6 +1014,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fox-render-gl"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "fox-render",
+ "fox-render-gl",
+ "glam",
+ "glow",
+ "glutin",
+]
+
+[[package]]
 name = "fox-sketch"
 version = "0.1.0"
 dependencies = [
@@ -1052,6 +1064,7 @@ dependencies = [
  "eframe",
  "egui",
  "fox-engine",
+ "fox-render-gl",
  "image",
  "log",
  "rfd",

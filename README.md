@@ -465,6 +465,20 @@ It returns the counts, each colour layer, and `ink`: a point inside each traced 
 [`examples/trace_logo.jsonl`](examples/trace_logo.jsonl) traces and extrudes a badge. The
 pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 
+## Viewport renderer
+
+The desktop viewport draws on the GPU (OpenGL 3.3 or ES 3.0, through egui's glow painter): the
+scene is uploaded once and orbiting, panning and zooming only redraw it, so large models stay
+smooth. It draws the same scene as the CPU rasterizer (`fox-render`) with the same lighting,
+analysis shading, edges, sketch overlays, toolpaths, stock and transparency. Picking stays
+exact: each pixel's pick id is drawn into a second buffer and read back when the view settles.
+
+Display Settings (navigation bar) → GPU Renderer switches to the CPU rasterizer, which also
+takes over by itself when OpenGL can't start; `FOX_RENDERER=cpu` starts with it. The CLI and the
+MCP server always render on the CPU. Benchmarks: `cargo run --release -p fox-ui --example
+viewport_bench` (a patterned real part) and `cargo run --release -p fox-render-gl --features
+headless --example bench` (a synthetic part of several million triangles).
+
 ## Architecture
 
 | Crate               | Role                                                                   |
@@ -481,6 +495,7 @@ pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 | `fox-ui`            | The egui desktop UI                                                    |
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
+| `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).
