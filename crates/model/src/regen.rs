@@ -558,14 +558,18 @@ impl Ctx<'_> {
         self.split_multi(id, *target);
         Ok(None)
       }
-      FeatureKind::Import { breps, .. } => {
+      FeatureKind::Import { breps, meshes, .. } => {
         let mut shapes = Vec::new();
         for b in breps.iter() {
           shapes.push(Shape::from_brep(b).map_err(ke)?);
         }
+        for m in meshes.iter() {
+          let pos: Vec<[f32; 3]> = m.positions.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+          shapes.push(Shape::from_mesh(&pos, &m.indices, m.merge_coplanar).map_err(ke)?);
+        }
         for s in shapes {
-          for solid in s.solids().map_err(ke)? {
-            self.new_body(id, solid);
+          for body in s.bodies().map_err(ke)? {
+            self.new_body(id, body);
           }
         }
         Ok(None)

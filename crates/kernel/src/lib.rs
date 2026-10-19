@@ -552,6 +552,36 @@ impl Shape {
     (0..sys::solid_count(s)).map(|i| Shape::wrap(sys::solid_at(s, i)?)).collect()
   }
 
+  /// The bodies in this shape: its solids, or the shape itself when it has none (an open
+  /// shell or loose surfaces from a mesh or IGES file).
+  pub fn bodies(&self) -> Result<Vec<Shape>> {
+    let solids = self.solids()?;
+    if solids.is_empty() { Ok(vec![self.clone()]) } else { Ok(solids) }
+  }
+
+  /// Sews loose faces and shells together and closes watertight shells into solids.
+  pub fn sewn(&self, tolerance: f64) -> Result<Shape> {
+    Shape::wrap(sys::solidify(self.get()?, tolerance.clamp(1e-7, 1.0))?)
+  }
+
+  /// A faceted body from a triangle mesh (positions in mm, three indices per triangle). A
+  /// watertight mesh becomes a solid, anything else an open shell. With `merge_coplanar`,
+  /// coplanar triangles are merged into single faces (meshes exported from CAD get their flat
+  /// faces back); this is skipped for very large meshes.
+  pub fn from_mesh(positions: &[[f32; 3]], indices: &[u32], merge_coplanar: bool) -> Result<Shape> {
+    if indices.len() < 3 || !indices.len().is_multiple_of(3) {
+      return Err(KernelError::Input("the mesh has no triangles".into()));
+    }
+    if indices.iter().any(|&i| i as usize >= positions.len()) {
+      return Err(KernelError::Input("mesh vertex index out of range".into()));
+    }
+    let pos: Vec<f64> = positions.iter().flat_map(|p| p.iter().map(|&c| c as f64)).collect();
+    if pos.iter().any(|v| !v.is_finite()) {
+      return Err(KernelError::Input("non-finite mesh coordinates".into()));
+    }
+    Shape::wrap(sys::mesh_to_shape(&pos, indices, merge_coplanar)?)
+  }
+
   pub fn compound<'a>(shapes: impl IntoIterator<Item = &'a Shape>) -> Result<Shape> {
     let mut c = sys::compound_new();
     for s in shapes {
@@ -669,12 +699,42 @@ pub fn write_step<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) 
   Ok(sys::write_step(c.get()?, p)?)
 }
 
-/// Reads every solid from a STEP file.
+/// Reads the bodies of a STEP file: every solid, or, for a file of surfaces, the sewn shells.
 pub fn read_step(path: &Path) -> Result<Vec<Shape>> {
   let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
-  let s = Shape::wrap(sys::read_step(p)?)?;
-  let solids = s.solids()?;
-  if solids.is_empty() { Err(KernelError::Empty) } else { Ok(solids) }
+  imported_bodies(Shape::wrap(sys::read_step(p)?)?)
+}
+
+/// Writes shapes to an IGES file (millimetres, B-rep entities).
+pub fn write_iges<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) -> Result<()> {
+  let c = Shape::compound(shapes)?;
+  let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
+  Ok(sys::write_iges(c.get()?, p)?)
+}
+
+/// Reads the bodies of an IGES file. IGES usually carries trimmed surfaces rather than solids,
+/// so faces are sewn and closed shells become solids.
+pub fn read_iges(path: &Path) -> Result<Vec<Shape>> {
+  let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
+  imported_bodies(Shape::wrap(sys::read_iges(p)?)?)
+}
+
+/// Writes shapes as an OCCT `.brep` file.
+pub fn write_brep_file<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) -> Result<()> {
+  let c = Shape::compound(shapes)?;
+  std::fs::write(path, c.to_brep()?).map_err(|e| KernelError::Input(format!("{}: {e}", path.display())))
+}
+
+pub fn read_brep_file(path: &Path) -> Result<Vec<Shape>> {
+  let text = std::fs::read_to_string(path).map_err(|e| KernelError::Input(format!("{}: {e}", path.display())))?;
+  imported_bodies(Shape::from_brep(&text)?)
+}
+
+/// Solids if there are any; otherwise the faces sewn into shells (and solids where closed).
+fn imported_bodies(s: Shape) -> Result<Vec<Shape>> {
+  let s = if s.solid_count() == 0 { s.sewn(1e-3)? } else { s };
+  let bodies = s.bodies()?;
+  if bodies.is_empty() { Err(KernelError::Empty) } else { Ok(bodies) }
 }
 
 /// Writes meshes as one binary STL.

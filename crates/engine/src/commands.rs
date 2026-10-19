@@ -32,10 +32,42 @@ cmds! {
   "help" => "List commands", "{}";
   "info" => "Design summary: parameters, timeline with status, bodies with mass properties", "{}";
   "new" => "Start a new design", "{name?}";
-  "open" => "Open a .clf design", "{path}";
-  "save" => "Save the design (.clf JSON)", "{path?}";
-  "export" => "Export bodies: .step/.stp, .stl, .obj (format from the extension)", "{path, bodies?: [id]}";
-  "import" => "Import solids from a STEP file as a new feature", "{path}";
+  "open" => "Open a design (.clf, .clfz) or any importable file as a new design", "{path}";
+  "save" => "Save the design to a file (.clf JSON, or .clfz archive)", "{path?}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf (sketch), .clf .clfz", "{path, bodies?: [id], sketch?, ascii?: bool}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF (new sketch), .clf/.clfz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
+  "formats" => "Every file format with import/export support", "{}";
+  "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
+  "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
+  "hub.projects" => "List projects", "{}";
+  "hub.project.create" => "New project", "{name}";
+  "hub.project.rename" => "Rename a project", "{project, name}";
+  "hub.project.delete" => "Move a project to the trash", "{project}";
+  "hub.project.restore" => "Restore a trashed project", "{project}";
+  "hub.folder.create" => "New folder", "{project?, parent?, name}";
+  "hub.folder.rename" => "Rename a folder", "{folder, name}";
+  "hub.folder.delete" => "Delete an empty folder", "{folder}";
+  "hub.list" => "Folders and items in a project folder", "{project?, folder?}";
+  "hub.save" => "Save the design to the hub: a new version of its item, or a new item", "{project?, folder?, name?, description?, milestone?, new?: bool}";
+  "hub.open" => "Open a hub item (latest or a given version)", "{item, version?}";
+  "hub.versions" => "Version history of an item", "{item?}";
+  "hub.promote" => "Make an old version the latest (copies it as a new version)", "{item?, version}";
+  "hub.milestone" => "Mark a version as a milestone (no name clears it)", "{item?, version, name?}";
+  "hub.describe" => "Set a version's description", "{item?, version, description}";
+  "hub.version.delete" => "Delete an old, non-milestone version", "{item?, version}";
+  "hub.compare" => "What changed between two versions of a design", "{item?, a, b?}";
+  "hub.item.rename" => "Rename an item", "{item?, name}";
+  "hub.item.move" => "Move an item to another project/folder", "{item?, project?, folder?}";
+  "hub.item.copy" => "Copy an item version to a new item", "{item?, version?, project?, folder?, name?}";
+  "hub.item.delete" => "Move an item to the trash", "{item?}";
+  "hub.item.restore" => "Restore an item from the trash", "{item}";
+  "hub.item.purge" => "Permanently delete a trashed item", "{item}";
+  "hub.trash" => "Trashed items and projects", "{project?}";
+  "hub.recent" => "Recently opened or saved items", "{limit?}";
+  "hub.search" => "Find items by name, version description or milestone", "{query}";
+  "hub.activity" => "Activity feed", "{project?, item?, limit?}";
+  "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.clfz includes history)", "{item?, version?, path, ...export options}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
   "param.add" => "Add a user parameter", "{name, expr, kind?: length|angle|unitless, comment?}";
@@ -148,13 +180,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "info" => Ok(info(s)),
     "new" => {
+      let root = s.store_root.take();
       *s = Session::new(Design::new(opt_str(p, "name").unwrap_or("Untitled")));
+      s.store_root = root;
       Ok(json!({}))
     }
     "open" => {
       let path = PathBuf::from(req_str(p, "path")?);
-      *s = Session::open(&path)?;
-      Ok(json!({"features": s.design.features.len()}))
+      let root = s.store_root.take();
+      let opened = Session::open(&path);
+      s.store_root = root.clone();
+      *s = opened?;
+      s.store_root = root;
+      Ok(json!({"features": s.design.features.len(), "bodies": s.model.bodies.len()}))
     }
     "save" => {
       let path = match opt_str(p, "path") {
@@ -164,17 +202,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.save_to(&path)?;
       Ok(json!({"path": path}))
     }
-    "export" => export(s, p),
+    "export" => crate::files::export(s, p),
     "import" => {
       let path = PathBuf::from(req_str(p, "path")?);
-      let shapes = clf_kernel::read_step(&path)?;
-      let breps: Result<Vec<String>, _> = shapes.iter().map(|sh| sh.to_brep()).collect();
-      let breps = breps?;
-      let file_name = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-      let n = breps.len();
-      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Import { file_name, breps })?))?;
-      Ok(json!({"feature": id.0, "solids": n}))
+      crate::files::import(s, &path, p)
     }
+    "formats" => Ok(json!(clf_exchange::FORMATS)),
+    "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
+    n if n.starts_with("hub.") => crate::hub::run(s, n, p),
     "undo" => Ok(json!({"done": s.undo()})),
     "redo" => Ok(json!({"done": s.redo()})),
     "param.add" => {
@@ -1663,47 +1698,6 @@ fn info(s: &Session) -> Value {
       "grounded": c.grounded, "material": c.material,
     })).collect::<Vec<_>>(),
   })
-}
-
-fn export(s: &Session, p: &Value) -> CmdResult {
-  let path = PathBuf::from(req_str(p, "path")?);
-  let wanted: Vec<u32> = ids(p, "bodies");
-  let bodies: Vec<&clf_model::regen::Body> = s
-    .model
-    .bodies
-    .iter()
-    .filter(|b| if wanted.is_empty() { s.body_visible(b.id) } else { wanted.contains(&b.id.0) })
-    .collect();
-  if bodies.is_empty() {
-    return Err(CmdError::new("there are no bodies to export"));
-  }
-  let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-  match ext.as_str() {
-    "step" | "stp" => clf_kernel::write_step(bodies.iter().map(|b| &b.shape), &path)?,
-    "stl" => {
-      let meshes: Vec<_> = bodies.iter().filter_map(|b| b.shape.tessellate(fine_tol(b)).ok()).collect();
-      clf_kernel::write_stl(&meshes, &path)?
-    }
-    "obj" => {
-      let meshes: Vec<_> =
-        bodies.iter().filter_map(|b| b.shape.tessellate(fine_tol(b)).ok().map(|m| (s.body_name(b.id), m))).collect();
-      clf_kernel::write_obj(&meshes, &path)?
-    }
-    "dxf" => {
-      let [b] = bodies.as_slice() else {
-        return Err(CmdError::new("DXF exports one sheet metal body's flat pattern; pass 'bodies': [id]"));
-      };
-      let flat = b.flat_pattern(None).map_err(CmdError::new)?;
-      std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?
-    }
-    o => return Err(CmdError::new(format!("unknown export format '.{o}' (step, stl, obj, dxf)"))),
-  }
-  Ok(json!({"path": path, "bodies": bodies.len()}))
-}
-
-/// Export tessellation: finer than display.
-fn fine_tol(b: &clf_model::regen::Body) -> f64 {
-  (b.diagonal() * 0.0005).clamp(0.002, 0.1)
 }
 
 /// Selection helpers shared with the UI.

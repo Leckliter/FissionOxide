@@ -73,5 +73,9 @@ void write_step(const Shape &s, rust::Str path);
 std::unique_ptr<Shape> read_step(rust::Str path);
 rust::String write_brep(const Shape &s);
 std::unique_ptr<Shape> read_brep(rust::Str data);
+std::unique_ptr<Shape> solidify(const Shape &s, double tol);
+void write_iges(const Shape &s, rust::Str path);
+std::unique_ptr<Shape> read_iges(rust::Str path);
+std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
 } // namespace clf

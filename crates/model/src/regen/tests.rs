@@ -293,7 +293,7 @@ fn import_round_trip() {
   let m = regenerate(&mut d);
   let brep = m.bodies[0].shape.to_brep().unwrap();
   let mut d2 = Design::new("imported");
-  d2.add_feature(FeatureKind::Import { file_name: "block.step".into(), breps: vec![brep] }).unwrap();
+  d2.add_feature(FeatureKind::Import { file_name: "block.step".into(), breps: vec![brep], meshes: vec![] }).unwrap();
   let m2 = regenerate(&mut d2);
   ok(&m2);
   assert!((volume(&m2) - 8000.0).abs() < 1e-6);
@@ -673,4 +673,27 @@ fn refold_carries_cuts_made_in_the_flat() {
   assert!((mm.bbox_max.z - 20.0).abs() < 1e-3, "folded again: {mm:?}");
   // K = 0.5: the folded cut has the flat cut's volume
   assert!(((folded - mm.volume) - cut).abs() / cut < 0.01, "{} vs {cut}", folded - mm.volume);
+}
+
+#[test]
+fn imported_mesh_becomes_a_body() {
+  // a 10 mm cube as 12 triangles
+  #[rustfmt::skip]
+  let positions = vec![
+    0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 10.0, 0.0,
+    0.0, 0.0, 10.0, 10.0, 0.0, 10.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0,
+  ];
+  #[rustfmt::skip]
+  let indices = vec![0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
+  let mut d = Design::new("mesh");
+  let mesh = crate::MeshData { name: "Cube".into(), positions, indices, merge_coplanar: true };
+  d.add_feature(FeatureKind::Import { file_name: "cube.stl".into(), breps: vec![], meshes: vec![mesh] }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 1);
+  assert!((volume(&m) - 1000.0).abs() < 1e-6);
+  assert_eq!(m.bodies[0].faces().len(), 6);
+  // survives a save/load
+  let d2 = Design::from_json(&d.to_json()).unwrap();
+  assert_eq!(d2, d);
 }

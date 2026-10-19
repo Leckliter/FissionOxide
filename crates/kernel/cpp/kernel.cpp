@@ -62,7 +62,14 @@
 #include <TColgp_HArray1OfPnt.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepLib.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <IGESControl_Controller.hxx>
+#include <IGESControl_Reader.hxx>
+#include <IGESControl_Writer.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
 #include <Message_PrinterOStream.hxx>
@@ -72,6 +79,7 @@
 #include <STEPControl_Writer.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <ShapeFix_Solid.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -82,6 +90,9 @@
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
@@ -1305,6 +1316,136 @@ HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double defle
   add(h.OutLineHCompound(), 4);
   return out;
   CLF_CATCH("projection")
+}
+
+namespace {
+
+// Turns a closed shell into an outward-oriented solid; leaves open shells alone.
+TopoDS_Shape shell_to_solid(const TopoDS_Shell &sh) {
+  if (!BRep_Tool::IsClosed(sh)) return sh;
+  BRepBuilderAPI_MakeSolid ms(sh);
+  if (!ms.IsDone()) return sh;
+  TopoDS_Solid solid = ms.Solid();
+  BRepLib::OrientClosedSolid(solid);
+  ShapeFix_Solid fix(solid);
+  fix.Perform();
+  return fix.Solid().IsNull() ? TopoDS_Shape(solid) : fix.Solid();
+}
+
+// Sews loose faces/shells (IGES, surface STEP) into shells and closes what can be closed.
+TopoDS_Shape sew_to_solids(const TopoDS_Shape &s, double tol) {
+  BRepBuilderAPI_Sewing sew(tol);
+  sew.Add(s);
+  sew.Perform();
+  TopoDS_Shape sewn = sew.SewedShape();
+  if (sewn.IsNull()) return s;
+  TopoDS_Compound out;
+  BRep_Builder b;
+  b.MakeCompound(out);
+  int n = 0;
+  for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next(), ++n) {
+    b.Add(out, shell_to_solid(TopoDS::Shell(ex.Current())));
+  }
+  // faces that didn't join any shell
+  for (TopExp_Explorer ex(sewn, TopAbs_FACE, TopAbs_SHELL); ex.More(); ex.Next(), ++n) {
+    b.Add(out, ex.Current());
+  }
+  return n == 0 ? sewn : TopoDS_Shape(out);
+}
+
+} // namespace
+
+std::unique_ptr<Shape> solidify(const Shape &s, double tol) {
+  CLF_TRY
+  if (s.s.IsNull()) throw std::runtime_error("empty shape");
+  return wrap(sew_to_solids(s.s, tol));
+  CLF_CATCH("sewing")
+}
+
+void write_iges(const Shape &s, rust::Str path) {
+  CLF_TRY
+  quiet();
+  IGESControl_Controller::Init();
+  // mode 1: B-rep entities (manifold solids), which modern CAD reads as solids
+  IGESControl_Writer w("MM", 1);
+  if (!w.AddShape(s.s)) throw std::runtime_error("IGES transfer failed");
+  w.ComputeModel();
+  std::string p(path.data(), path.size());
+  if (!w.Write(p.c_str())) throw std::runtime_error("could not write " + p);
+  CLF_CATCH("IGES export")
+}
+
+std::unique_ptr<Shape> read_iges(rust::Str path) {
+  CLF_TRY
+  quiet();
+  IGESControl_Controller::Init();
+  IGESControl_Reader r;
+  std::string p(path.data(), path.size());
+  if (r.ReadFile(p.c_str()) != IFSelect_RetDone) throw std::runtime_error("could not read " + p);
+  r.TransferRoots();
+  return wrap(r.OneShape());
+  CLF_CATCH("IGES import")
+}
+
+std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge) {
+  CLF_TRY
+  const size_t nv = pos.size() / 3;
+  if (tris.size() % 3 != 0 || tris.empty()) throw std::runtime_error("no triangles");
+  std::vector<TopoDS_Vertex> verts(nv);
+  auto vertex = [&](uint32_t i) -> const TopoDS_Vertex & {
+    if (i >= nv) throw std::runtime_error("vertex index out of range");
+    if (verts[i].IsNull()) verts[i] = BRepBuilderAPI_MakeVertex(pnt(pos, size_t(i) * 3)).Vertex();
+    return verts[i];
+  };
+  // one edge per undirected vertex pair, shared by the triangles on either side
+  std::map<std::pair<uint32_t, uint32_t>, std::pair<TopoDS_Edge, int>> edges;
+  BRep_Builder b;
+  TopoDS_Shell shell;
+  b.MakeShell(shell);
+  size_t faces = 0;
+  for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+    uint32_t v[3] = {tris[t], tris[t + 1], tris[t + 2]};
+    if (v[0] == v[1] || v[1] == v[2] || v[0] == v[2]) continue;
+    gp_Pnt a = pnt(pos, size_t(v[0]) * 3), p1 = pnt(pos, size_t(v[1]) * 3), p2 = pnt(pos, size_t(v[2]) * 3);
+    gp_Vec n = gp_Vec(a, p1).Crossed(gp_Vec(a, p2));
+    if (n.Magnitude() < 1e-14) continue; // sliver
+    TopoDS_Wire w;
+    b.MakeWire(w);
+    for (int k = 0; k < 3; ++k) {
+      uint32_t i = v[k], j = v[(k + 1) % 3];
+      auto key = std::make_pair(std::min(i, j), std::max(i, j));
+      auto it = edges.find(key);
+      if (it == edges.end()) {
+        TopoDS_Edge e = BRepBuilderAPI_MakeEdge(vertex(key.first), vertex(key.second)).Edge();
+        it = edges.emplace(key, std::make_pair(e, 0)).first;
+      }
+      it->second.second++;
+      TopoDS_Edge e = it->second.first;
+      b.Add(w, i < j ? e : TopoDS::Edge(e.Reversed()));
+    }
+    w.Closed(true);
+    BRepBuilderAPI_MakeFace mf(gp_Pln(a, gp_Dir(n)), w, true);
+    if (!mf.IsDone()) continue;
+    b.Add(shell, mf.Face());
+    ++faces;
+  }
+  if (faces == 0) throw std::runtime_error("the mesh has no usable triangles");
+  bool closed = true;
+  for (auto &e : edges) closed = closed && e.second.second == 2;
+  shell.Closed(closed);
+  TopoDS_Shape result = closed ? shell_to_solid(shell) : TopoDS_Shape(shell);
+  if (!closed && faces <= 50000) {
+    // small gaps or duplicated seams: sewing may still close it
+    result = sew_to_solids(shell, 1e-4);
+  }
+  if (merge && faces <= 20000) {
+    // CAD-made meshes: merge the coplanar triangles back into proper planar faces
+    ShapeUpgrade_UnifySameDomain u(result, true, true, false);
+    u.Build();
+    if (!u.Shape().IsNull()) result = u.Shape();
+  }
+  return wrap(result);
+  CLF_CATCH("mesh conversion")
 }
 
 } // namespace clf
