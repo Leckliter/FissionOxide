@@ -304,7 +304,8 @@ impl Sketch {
     };
     let (a1, b1) = ends(self, l1)?;
     let (a2, b2) = ends(self, l2)?;
-    let near = |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
+    let near =
+      |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
     let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
       .into_iter()
       .find(|(p, _, q, _)| near(self, *p, *q))

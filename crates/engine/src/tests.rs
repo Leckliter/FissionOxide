@@ -370,7 +370,8 @@ fn drawings_with_views_dimensions_and_export() {
     assert!(text.iter().any(|t| t == want), "missing {want}: {text:?}");
   }
   run(&mut s, "drawing.add_view", json!({"kind": {"section": "y", "offset": 25}}));
-  let det = run(&mut s, "drawing.add_view", json!({"kind": {"detail": 2, "center": [40, 25, 6], "radius": 10, "factor": 3}}));
+  let det =
+    run(&mut s, "drawing.add_view", json!({"kind": {"detail": 2, "center": [40, 25, 6], "radius": 10, "factor": 3}}));
   assert!(det["view"].as_u64().is_some(), "{det}");
   run(&mut s, "drawing.dimension", json!({"view": 1, "a": [0, 0, 0], "b": [40, 0, 6], "orientation": "horizontal"}));
   run(&mut s, "drawing.title", json!({"part_number": "CLF-001", "material": "Aluminum"}));
@@ -430,7 +431,11 @@ fn sketch_modify_tools_and_project() {
   assert!((total_volume(&s) - 30.0 * 20.0 * 15.0).abs() < 1e-6);
   // the projection follows the box: make it wider and the extrusion above follows
   let bx = s.design.features[0].id.0;
-  run(&mut s, "feature.edit", json!({"feature": bx, "set": {"shape": {"type": "box", "width": "50", "depth": "20", "height": "10"}}}));
+  run(
+    &mut s,
+    "feature.edit",
+    json!({"feature": bx, "set": {"shape": {"type": "box", "width": "50", "depth": "20", "height": "10"}}}),
+  );
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   assert!((total_volume(&s) - 50.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
 }
@@ -646,7 +651,11 @@ fn component_copies_follow_the_original() {
   assert_eq!(info["components"][1]["name"], "Block:2", "{info}");
   // edit the original: the copy follows
   let bx = s.design.features[0].id.0;
-  run(&mut s, "feature.edit", json!({"feature": bx, "set": {"shape": {"type": "box", "width": "30", "depth": "10", "height": "5"}}}));
+  run(
+    &mut s,
+    "feature.edit",
+    json!({"feature": bx, "set": {"shape": {"type": "box", "width": "30", "depth": "10", "height": "5"}}}),
+  );
   let v: Vec<f64> = s.model.bodies.iter().map(|b| b.shape.mass().unwrap().volume).collect();
   assert!((v[0] - 1500.0).abs() < 1e-6 && (v[1] - 1500.0).abs() < 1e-6, "{v:?}");
   let m = s.model.bodies[1].shape.mass().unwrap();
@@ -734,7 +743,10 @@ fn splines_and_sketch_chamfers_make_profiles() {
   assert!(s.model.bodies[0].faces().iter().any(|f| f.kind == clf_kernel::SurfaceKind::Other), "a smooth spline face");
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
-  let c: Vec<u64> = serde_json::from_value(run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}))["curves"].clone()).unwrap();
+  let c: Vec<u64> = serde_json::from_value(
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}))["curves"].clone(),
+  )
+  .unwrap();
   run(&mut s, "sketch.chamfer", json!({"curves": [c[0], c[1]], "distance": 2, "distance2": 3}));
   run(&mut s, "extrude", json!({"distance": 1}));
   assert!((total_volume(&s) - (200.0 - 3.0)).abs() < 1e-6, "{}", total_volume(&s));

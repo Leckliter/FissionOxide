@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clf_kernel::glam::DVec3;
 use clf_model::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
-  FeatureKind, HoleKind, LoftSection, ThinSide, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
-  SheetMetalRule,
+  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  SheetMetalRule, ThinSide,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -247,7 +247,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.create" => {
       let plane = plane_ref(s, p.get("plane").unwrap_or(&json!("xy")))?;
-      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new(), links: Vec::new() })?))?;
+      let id =
+        s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new(), links: Vec::new() })?))?;
       s.edit_sketch = Some(id);
       Ok(json!({"sketch": id.0}))
     }

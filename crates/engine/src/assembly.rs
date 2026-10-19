@@ -84,7 +84,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         let n = d.component(source).map(|c| c.bodies.len()).unwrap_or(0) as u32;
         let bodies = (0..n).map(|k| BodyId(fid.0 * 1000 + k)).collect();
         let base = d.component(source).map(|c| c.name.clone()).unwrap_or_default();
-        let count = d.features.iter().filter(|f| matches!(&f.kind, FeatureKind::CopyComponent { source: s, .. } if *s == source)).count();
+        let count = d
+          .features
+          .iter()
+          .filter(|f| matches!(&f.kind, FeatureKind::CopyComponent { source: s, .. } if *s == source))
+          .count();
         let cid = d.add_component(&name.unwrap_or_else(|| format!("{base}:{}", count + 1)), bodies)?;
         if let (Some(src), Some(c)) = (d.component(source).map(|c| c.material.clone()), d.component_mut(cid)) {
           c.material = src;

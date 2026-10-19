@@ -12,8 +12,8 @@ use clf_kernel::glam::{DMat4, DVec3};
 use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
 use clf_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
-use crate::assembly;
 use crate::ThinSide;
+use crate::assembly;
 use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
@@ -352,7 +352,8 @@ impl Ctx<'_> {
         let report = sketch.solve();
         let profiles = find_profiles(sketch);
         let r = SketchResult { plane: pl, sketch: sketch.clone(), profiles, report, dim_errors };
-        let w = sketch_warning(&r).or_else(|| (lost > 0).then(|| format!("{lost} projected edge(s) could not be found")));
+        let w =
+          sketch_warning(&r).or_else(|| (lost > 0).then(|| format!("{lost} projected edge(s) could not be found")));
         self.state.sketches.insert(id, r);
         Ok(w)
       }
@@ -382,7 +383,8 @@ impl Ctx<'_> {
             let fr = extent.to.as_mut().ok_or("pick the face to extrude to")?;
             let bi = self.body_index(fr.body)?;
             let body = &self.state.bodies[bi];
-            let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the target face could not be found")?;
+            let fid =
+              fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the target face could not be found")?;
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
             if info.kind != clf_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
@@ -420,7 +422,9 @@ impl Ctx<'_> {
             let (outer, inner) = match extent.thin_side {
               ThinSide::Inside => (face.clone(), face.offset_face(-thin).map_err(ke)?),
               ThinSide::Outside => (face.offset_face(thin).map_err(ke)?, face.clone()),
-              ThinSide::Center => (face.offset_face(thin / 2.0).map_err(ke)?, face.offset_face(-thin / 2.0).map_err(ke)?),
+              ThinSide::Center => {
+                (face.offset_face(thin / 2.0).map_err(ke)?, face.offset_face(-thin / 2.0).map_err(ke)?)
+              }
             };
             let wall = solid(&outer)?.boolean(&solid(&inner)?, BoolOp::Subtract).map_err(ke)?;
             tools.push(wall);

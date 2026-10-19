@@ -373,7 +373,12 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
         .collect();
       plot.items.push(Item::Line { pen: Pen::Thin, points: ring });
       let letter = char::from(b'A' + (n % 26) as u8).to_string();
-      plot.items.push(Item::Text { at: [c[0] + r * 0.8, c[1] + r * 0.8], size: TEXT, text: letter, anchor: Anchor::Start });
+      plot.items.push(Item::Text {
+        at: [c[0] + r * 0.8, c[1] + r * 0.8],
+        size: TEXT,
+        text: letter,
+        anchor: Anchor::Start,
+      });
     }
   }
   if d.auto_dimensions {
@@ -516,7 +521,8 @@ fn clip_circle(pts: &[[f64; 2]], c: [f64; 2], r: f64) -> Vec<Vec<[f64; 2]>> {
     // where the segment crosses the circle (t in 0..1)
     let d = [b[0] - a[0], b[1] - a[1]];
     let f = [a[0] - c[0], a[1] - c[1]];
-    let (qa, qb, qc) = (d[0] * d[0] + d[1] * d[1], 2.0 * (f[0] * d[0] + f[1] * d[1]), f[0] * f[0] + f[1] * f[1] - r * r);
+    let (qa, qb, qc) =
+      (d[0] * d[0] + d[1] * d[1], 2.0 * (f[0] * d[0] + f[1] * d[1]), f[0] * f[0] + f[1] * f[1] - r * r);
     let mut ts = vec![0.0];
     let disc = qb * qb - 4.0 * qa * qc;
     if qa > 1e-18 && disc > 0.0 {
@@ -850,13 +856,20 @@ fn parts_list(plot: &mut Plot, design: &Design) {
   let n = rows.len() + 1;
   for i in 0..=n {
     let y = y0 + i as f64 * row_h;
-    plot.items.push(Item::Line { pen: if i == 0 || i == n { Pen::Border } else { Pen::Thin }, points: vec![[x0, y], [x1, y]] });
+    plot
+      .items
+      .push(Item::Line { pen: if i == 0 || i == n { Pen::Border } else { Pen::Thin }, points: vec![[x0, y], [x1, y]] });
   }
   for x in cols {
     plot.items.push(Item::Line { pen: Pen::Thin, points: vec![[x, y0], [x, y0 + n as f64 * row_h]] });
   }
   let cell = |plot: &mut Plot, col: usize, row: usize, text: String| {
-    plot.items.push(Item::Text { at: [cols[col] + 1.5, y0 + row as f64 * row_h + 1.8], size: 2.5, text, anchor: Anchor::Start });
+    plot.items.push(Item::Text {
+      at: [cols[col] + 1.5, y0 + row as f64 * row_h + 1.8],
+      size: 2.5,
+      text,
+      anchor: Anchor::Start,
+    });
   };
   // the header sits on top; item 1 just under it
   let top = n - 1;

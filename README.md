@@ -14,19 +14,22 @@ change a parameter and watch the whole history rebuild.
 - **User parameters and expressions.** Any value field takes `40 mm`, `width / 2 + 3`,
   `1.5 in`, `30 deg` or `sqrt(a^2 + b^2)`.
 - **Constrained sketches.** Line/polyline, two-point and centre rectangles, circles, 3-point
-  and centre arcs, polygons, slots and points; 20 constraint types (coincident, horizontal,
+  and centre arcs, splines, polygons, slots and points; 20 constraint types (coincident, horizontal,
   vertical, parallel, perpendicular, tangent, equal, concentric, midpoint, collinear,
   symmetric, fix, point-on-curve); driving dimensions (distance, horizontal/vertical,
   radius, diameter, angle, point-to-line). The solver reports degrees of freedom, colours
   free geometry blue, and you can drag points.
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
-  rectangle with a circle in it gives you the ring and the disc.
-- **Solid features.** Extrude (one side, symmetric, two sides, through all; new body, join,
-  cut, intersect), revolve, fillet, chamfer, shell, box/cylinder/sphere/torus, offset
+  rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
+  split each other, so two overlapping rectangles give three regions without trimming.
+- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face; taper
+  angle; thin walls inside/outside/centred; new body, join, cut, intersect), revolve, fillet
+  (constant or variable radius), chamfer (equal, two distances, or distance and angle),
+  press-pull of flat faces, shell, box/cylinder/sphere/torus, offset
   construction planes, mirror, rectangular and circular patterns, move/rotate, combine.
 - **More solid features.** Loft (smooth or ruled, open or closed), sweep along a path of lines
   and arcs, holes at sketch points (simple, counterbore, countersink, drill point, through all),
-  split body by a plane, draft.
+  split body by a plane or by another body, draft.
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
@@ -38,14 +41,16 @@ change a parameter and watch the whole history rebuild.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
   parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
-  bill of materials with masses.
+  bill of materials with masses. Component copies are linked: edit the original and every
+  copy follows.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
-  section views with hatching and sheet metal flat-pattern views with bend notes, all exact
+  section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
   hidden-line projections; automatic overall dimensions, hole callouts and centre marks; manual
-  dimensions, notes and a title block; export to PDF, SVG and DXF. Drawings live in the design
+  dimensions, notes, a title block and an assembly parts list; export to PDF, SVG and DXF. Drawings live in the design
   and follow parameter changes.
-- **Sketch tools.** Fillet, offset, trim, extend, mirror (symmetry-constrained), rectangular and
-  circular patterns, and project body edges into a sketch.
+- **Sketch tools.** Fillet, chamfer, offset, trim, extend, mirror (symmetry-constrained),
+  rectangular and circular patterns, and project body edges into a sketch (the projection
+  follows the body when it changes).
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
@@ -57,8 +62,9 @@ change a parameter and watch the whole history rebuild.
   overwrite: open or compare any old version, promote it back to latest, mark milestones,
   browse recent designs, search, see the activity feed, restore from the trash. See
   [Data panel](#data-panel-projects-and-versions).
-- **Scriptable.** Everything is a JSON command, so the GUI, the CLI and scripts (or an AI
-  agent) all drive the same engine.
+- **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
+  scripts all drive the same engine — and `clfusion-cli mcp` serves every command as a Model
+  Context Protocol tool, so an AI agent such as Claude can model with it directly.
 
 ## Build and run
 
@@ -186,6 +192,16 @@ clfusion-cli hub list
 clfusion-cli hub versions '{"item": "i3"}'
 clfusion-cli hub compare '{"item": "i3", "a": 1}'
 clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
+```
+
+### AI agents (MCP)
+
+`clfusion-cli mcp [design.clf]` is a Model Context Protocol server on stdio. Each command is a
+tool (dots become underscores: `sheet.edge_flange` → `sheet_edge_flange`) and `view_render`
+returns a PNG of the model. To use it from Claude Code:
+
+```sh
+claude mcp add clfusion -- /path/to/clfusion-cli mcp
 ```
 
 A script is one JSON command per line. Faces and edges can be named by a point on them, so

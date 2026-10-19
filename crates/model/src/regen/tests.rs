@@ -68,7 +68,8 @@ fn hole_on_top_face_follows_height_changes() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(20.0, 10.0), 3.0).unwrap();
-  let hs = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole, links: Vec::new() }).unwrap();
+  let hs =
+    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
     profiles: vec![],
@@ -153,8 +154,13 @@ fn revolve_around_sketch_line() {
   s.add_rectangle([10.0, 0.0], [20.0, 30.0]).unwrap();
   let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(0.0, 50.0)).unwrap();
   s.set_construction(axis, true).unwrap();
-  let sk =
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: s, links: Vec::new() }).unwrap();
+  let sk = d
+    .add_feature(FeatureKind::Sketch {
+      plane: PlaneRef::Origin { plane: OriginPlane::Xz },
+      sketch: s,
+      links: Vec::new(),
+    })
+    .unwrap();
   d.add_feature(FeatureKind::Revolve {
     sketch: sk,
     profiles: vec![],
@@ -329,7 +335,8 @@ fn edge_near(m: &Model, p: [f64; 3]) -> EdgeRef {
 }
 
 fn plate_flange(d: &mut Design) {
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("100", "50"), links: Vec::new() }).unwrap();
+  let s =
+    d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("100", "50"), links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Flange {
     sketch: s,
     profiles: vec![],

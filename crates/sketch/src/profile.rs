@@ -493,7 +493,13 @@ fn departure_angle(s: &Seg) -> f64 {
     }
     Seg::Circle { .. } => 0.0,
     Seg::Bezier { p } => {
-      let q = if dist(p[0], p[1]) > 1e-12 { p[1] } else if dist(p[0], p[2]) > 1e-12 { p[2] } else { p[3] };
+      let q = if dist(p[0], p[1]) > 1e-12 {
+        p[1]
+      } else if dist(p[0], p[2]) > 1e-12 {
+        p[2]
+      } else {
+        p[3]
+      };
       angle_of(p[0], q)
     }
   }

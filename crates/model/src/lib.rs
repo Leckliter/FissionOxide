@@ -1410,7 +1410,11 @@ mod tests {
   fn add_remove_features_with_dependents() {
     let mut d = Design::new("t");
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new(), links: Vec::new() })
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
       .unwrap();
     let e = d
       .add_feature(FeatureKind::Extrude {
@@ -1449,7 +1453,11 @@ mod tests {
     assert!(d.add_parameter("width", "1", ParamKind::Length, "").is_err());
     assert!(d.add_parameter("mm", "1", ParamKind::Length, "").is_err());
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new(), links: Vec::new() })
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
       .unwrap();
     d.add_feature(FeatureKind::Extrude {
       sketch: s,
@@ -1470,8 +1478,12 @@ mod tests {
   fn json_round_trip_and_hostile_files() {
     let mut d = Design::new("Bracket");
     d.add_parameter("t", "3", ParamKind::Length, "thickness").unwrap();
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: Sketch::new(), links: Vec::new() })
-      .unwrap();
+    d.add_feature(FeatureKind::Sketch {
+      plane: PlaneRef::Origin { plane: OriginPlane::Xz },
+      sketch: Sketch::new(),
+      links: Vec::new(),
+    })
+    .unwrap();
     let back = Design::from_json(&d.to_json()).unwrap();
     assert_eq!(back, d);
     assert!(Design::from_json("{").is_err());

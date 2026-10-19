@@ -10,16 +10,13 @@ roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Sketch    | Sketch chamfer; associative projection (follows body changes); break          |
-| Sketch    | Profiles from curves that cross mid-span (without trimming first)            |
-| Sketch    | Splines, ellipses, text                                                      |
+| Sketch    | Ellipses, text, break; splines in trim/offset; spline tangency constraints   |
 | Features  | Sweep with guide rails / twist; loft rails; threads (cosmetic and modeled)   |
-| Features  | Extrude "to object" / "to face", taper angle, thin extrude                   |
-| Features  | Press-pull and face offset; split face; split body by a face                 |
+| Features  | Press-pull of curved faces; split face; setback fillets; extrude to a curved face |
 | Sheet     | Miter flange from a profile; corner relief shapes; flat pattern as a sketch  |
-| Assembly  | Component instances (copies sharing a design); contact sets; motion links    |
-| Drawing   | Detail and broken views; ordinate/angle dimensions; GD&T; parts lists        |
-| Features  | Variable-radius and setback fillets; chamfer with two distances / angle      |
+| Assembly  | Contact sets; motion links between joints; rigid groups                      |
+| Drawing   | Broken views; ordinate/angle dimensions; GD&T; balloons                      |
+| UI        | Toolbar buttons and dialogs for sheet metal, assemblies, drawings and the newer features (engine/CLI/MCP only today) |
 | Selection | Window/box select, selection filters, select-other (cycle overlapping picks) |
 | UI        | Drag manipulators (arrows) for extrude distance and other values             |
 | UI        | Transparent preview bodies, section analysis, measure between two entities   |

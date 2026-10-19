@@ -210,7 +210,9 @@ fn view_kind(v: &Value) -> Result<ViewKind, CmdError> {
   if let Some(b) = v.get("flat").and_then(Value::as_u64) {
     return Ok(ViewKind::Flat { body: BodyId(u32::try_from(b).map_err(|_| CmdError::new("bad body"))?) });
   }
-  Err(CmdError::new("a view is a name, {\"section\": axis, \"offset\"}, {\"flat\": body} or {\"detail\": view, \"center\": [x,y,z], \"radius\", \"factor\"?}"))
+  Err(CmdError::new(
+    "a view is a name, {\"section\": axis, \"offset\"}, {\"flat\": body} or {\"detail\": view, \"center\": [x,y,z], \"radius\", \"factor\"?}",
+  ))
 }
 
 fn settings(d: &mut Drawing, p: &Value) -> Result<(), CmdError> {

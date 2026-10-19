@@ -12,6 +12,7 @@
 //! clfusion-cli inspect FILE
 //! clfusion-cli convert IN OUT                 (any readable format to any writable one)
 //! clfusion-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
+//! clfusion-cli mcp [IN.clf]                   (Model Context Protocol server on stdio)
 //! ```
 //!
 //! `--hub DIR` (or `CLF_DATA_DIR`) picks the data hub directory for every subcommand.
@@ -26,6 +27,8 @@
 //! A script is one JSON command per line: `{"cmd": "extrude", "distance": 10}` (the remaining
 //! keys are the parameters) or `{"command": "...", "params": {...}}`. Blank lines and lines
 //! starting with `#` are ignored. Each result is printed as one JSON line.
+
+mod mcp;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -65,6 +68,13 @@ fn run(args: &[String]) -> Result<(), String> {
   let Some(sub) = args.first() else { return Err(usage()) };
   let rest = &args[1..];
   match sub.as_str() {
+    "mcp" => {
+      let s = match rest.first() {
+        Some(p) => open(p)?,
+        None => session(Session::default()),
+      };
+      mcp::serve(s)
+    }
     "formats" => {
       for f in clf_engine::exchange::FORMATS {
         out(&json!(f));
@@ -179,7 +189,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | formats | commands  (all take --hub DIR)".into()
+  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | mcp [F.clf] | formats | commands  (all take --hub DIR)".into()
 }
 
 thread_local! {
