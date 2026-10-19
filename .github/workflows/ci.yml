@@ -17,7 +17,7 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_TOOLCHAIN: 1.97.0
   # Crates that build without OpenCASCADE: they give feedback in a couple of minutes.
-  PURE_CRATES: -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-trace
+  PURE_CRATES: -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-trace -p fox-brand
 
 jobs:
   fast:

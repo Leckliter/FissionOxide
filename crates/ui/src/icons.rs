@@ -282,9 +282,10 @@ enum Tone {
   Amber,
 }
 
-/// An icon's accent family. Every icon is a dark slate line drawing with one accent colour:
-/// blue for solid modelling (the default), orange for surfaces, gold for meshes, amber for
-/// construction geometry, green for inspecting and selecting, teal for sketching.
+/// An icon's accent family, one of the brand colour families (`fox-brand`). Every icon is a
+/// dark slate line drawing with one accent colour: blue for solid modelling (the default),
+/// orange for surfaces, gold for meshes, amber for construction geometry, green for inspecting
+/// and selecting, teal for sketching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tint {
   Blue,
@@ -299,11 +300,11 @@ impl Tint {
   fn accent(self) -> Color32 {
     match self {
       Tint::Blue => theme::ICON_BLUE,
-      Tint::Orange => Color32::from_rgb(240, 138, 48),
-      Tint::Gold => Color32::from_rgb(214, 168, 52),
-      Tint::Amber => Color32::from_rgb(236, 164, 44),
-      Tint::Green => Color32::from_rgb(52, 168, 83),
-      Tint::Teal => Color32::from_rgb(0, 150, 160),
+      Tint::Orange => theme::ICON_ORANGE,
+      Tint::Gold => theme::color(fox_brand::GOLD.base),
+      Tint::Amber => theme::color(fox_brand::AMBER.base),
+      Tint::Green => theme::ICON_GREEN,
+      Tint::Teal => theme::color(fox_brand::TEAL.base),
     }
   }
 }
@@ -343,7 +344,7 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
   Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
 }
 
-const SLATE: Color32 = Color32::from_rgb(52, 64, 82);
+const SLATE: Color32 = theme::ICON_INK;
 
 struct Pen<'a> {
   p: &'a Painter,
@@ -387,12 +388,12 @@ impl Pen<'_> {
           Tone::BlueDark => mix(accent, Color32::WHITE, 0.72),
           Tone::Orange => lit(theme::ICON_ORANGE),
           Tone::Green => lit(theme::ICON_GREEN),
-          Tone::Purple => lit(Color32::from_rgb(150, 96, 214)),
-          Tone::Amber => lit(Color32::from_rgb(236, 164, 44)),
+          Tone::Purple => lit(theme::color(fox_brand::PURPLE.base)),
+          Tone::Amber => lit(theme::color(fox_brand::AMBER.base)),
           Tone::Red => theme::ICON_RED,
-          Tone::Teal => Color32::from_rgb(0, 150, 160),
-          Tone::Coral => Color32::from_rgb(236, 98, 72),
-          Tone::Violet => Color32::from_rgb(120, 70, 188),
+          Tone::Teal => theme::color(fox_brand::TEAL.base),
+          Tone::Coral => theme::color(fox_brand::CORAL.base),
+          Tone::Violet => theme::color(fox_brand::PURPLE.dark),
         }
       }
     }

@@ -11,7 +11,7 @@ fn main() -> eframe::Result<()> {
       .with_min_inner_size([900.0, 600.0])
       .with_title("FissionOxide")
       .with_icon(
-        eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/brand/icon-256.png")).unwrap_or_default(),
+        eframe::icon_data::from_png_bytes(include_bytes!("../../../brand/logo/png/icon-256.png")).unwrap_or_default(),
       ),
     ..Default::default()
   };

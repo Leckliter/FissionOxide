@@ -51,7 +51,7 @@ cargo test --workspace
 The crates that don't link OpenCASCADE build and test in seconds, so iterate on them alone:
 
 ```sh
-cargo test -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render
+cargo test -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-brand
 ```
 
 CI (`.github/workflows/ci.yml`) uses a pinned Rust (`RUST_TOOLCHAIN`, currently 1.97.0) so a new
@@ -90,6 +90,13 @@ existing code, and put sizeable new logic in a new file or module (as `engine/sr
 - `crates/kernel/src/ffi.rs`
 - `crates/ui/src/dialogs.rs`, `crates/ui/src/menus.rs`, `crates/ui/src/icons.rs`
 - `README.md`, `ROADMAP.md`
+
+## Colours and the logo
+
+Colours come from the brand kit, not literals: `crates/ui/src/theme.rs` and the icon accents
+read `fox-brand`, which `brand/build.py` generates from `brand/tokens.json`. To change a colour,
+edit `tokens.json`, run `python3 brand/build.py` and commit what it writes (see
+[`brand/README.md`](brand/README.md)).
 
 ## Adding a feature end to end: chamfer as the example
 
