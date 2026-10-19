@@ -83,7 +83,7 @@ pub(crate) mod ffi {
     fn boolean_op(a: &Shape, b: &Shape, op: i32, fuzzy: f64) -> Result<UniquePtr<Shape>>;
     fn fillet(s: &Shape, edges: &[u32], radius: f64) -> Result<UniquePtr<Shape>>;
     fn chamfer(s: &Shape, edges: &[u32], dist: f64) -> Result<UniquePtr<Shape>>;
-    fn shell(s: &Shape, faces: &[u32], thickness: f64) -> Result<UniquePtr<Shape>>;
+    fn shell(s: &Shape, faces: &[u32], thickness: f64, round: bool) -> Result<UniquePtr<Shape>>;
     fn transform(s: &Shape, m: &[f64]) -> Result<UniquePtr<Shape>>;
     fn mirror(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify(s: &Shape) -> Result<UniquePtr<Shape>>;

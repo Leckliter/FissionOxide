@@ -546,6 +546,9 @@ pub enum FeatureKind {
     /// Faces to open; the rest of each body becomes a wall of `thickness`.
     faces: Vec<FaceRef>,
     thickness: String,
+    /// Round the corners where walls meet (default: sharp).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    round: bool,
   },
   /// Box / cylinder / sphere / torus placed on a plane at a point (plane coordinates).
   Primitive {
