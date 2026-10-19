@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
-    <img src="assets/brand/wordmark-light.svg" alt="FissionOxide" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/wordmark-dark.svg">
+    <img src="brand/logo/wordmark-light.svg" alt="FissionOxide" height="72">
   </picture>
 </h1>
 
@@ -543,6 +543,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
 | `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
 | `fox-ui`            | The egui desktop UI                                                    |
+| `fox-brand`         | Brand colours, fonts and the fox logo (generated from `brand/`)        |
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
@@ -559,13 +560,12 @@ FissionOxide was called CLFusion; `fox` is its short name in code (crates `fox-*
 namespace, `FOX_*` environment variables). Designs saved as `.fox`/`.foxz` before the rename still
 open, and a data hub in the old `CLFusion` data directory moves to the new one on first start.
 
-The logo is in [`assets/brand`](assets/brand): the fox alone (`fox.svg`), the app icon on a dark or
-light tile (`icon.svg`, `icon-light.svg`, PNGs from 32 to 1024 px) and the wordmark, which follows
-the system theme (`wordmark.svg`) or is fixed for light or dark backgrounds. The fox's colours are
-the app's icon families: blue for solid modelling, orange for surfaces, amber for construction,
-green for inspecting, plus the purple and red accents. Every file, and the facets the app paints
-in its title bar (`crates/ui/src/logo.rs`), comes from `assets/brand/make_brand.py`; the wordmark
-is Inter Display Bold converted to outlines.
+The brand kit is in [`brand/`](brand): the logo in every form (full colour, one colour, app icons,
+wordmarks), the colour, type and spacing tokens, ready-made files for websites (CSS variables,
+a Tailwind preset, favicons, a social card) and the `fox-brand` crate the app reads its colours
+and logo from. The fox's colours are the app's icon families. Open
+[`brand/index.html`](brand/index.html) for the guide and [`brand/README.md`](brand/README.md) for
+how to use it.
 
 ## Licence
 

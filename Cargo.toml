@@ -20,6 +20,7 @@ fox-exchange = { path = "crates/exchange" }
 fox-store = { path = "crates/store" }
 fox-trace = { path = "crates/trace" }
 fox-render-gl = { path = "crates/render-gl" }
+fox-brand = { path = "crates/brand" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
