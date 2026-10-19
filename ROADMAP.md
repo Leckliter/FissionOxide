@@ -20,7 +20,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
 | Selection | Freeform and paint selection; vertex picking                                 |
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
-| View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |
+| View      | Silhouette edges and hidden-line (dashed) display styles; GPU frustum culling and level of detail for huge assemblies |
 | Manufacture | 3D adaptive roughing; pencil, steep-and-shallow and contour finishing; holder and fixture collision checks; arcs (G2/G3) in G-code; turning and 4/5-axis |
 | Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Tracing   | Canvas (an image kept on a plane, calibrated); centre-line tracing for engraving; constraints on traced geometry; see [docs/TRACING.md](docs/TRACING.md) |

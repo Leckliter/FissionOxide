@@ -19,6 +19,7 @@ clf-ui = { path = "crates/ui" }
 clf-exchange = { path = "crates/exchange" }
 clf-store = { path = "crates/store" }
 clf-trace = { path = "crates/trace" }
+clf-render-gl = { path = "crates/render-gl" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

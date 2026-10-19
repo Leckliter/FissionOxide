@@ -425,6 +425,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "clf-render-gl"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "clf-render",
+ "clf-render-gl",
+ "glam",
+ "glow",
+ "glutin",
+]
+
+[[package]]
 name = "clf-sketch"
 version = "0.1.0"
 dependencies = [
@@ -461,6 +473,7 @@ name = "clf-ui"
 version = "0.1.0"
 dependencies = [
  "clf-engine",
+ "clf-render-gl",
  "eframe",
  "egui",
  "image",

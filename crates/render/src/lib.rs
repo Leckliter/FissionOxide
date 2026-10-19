@@ -229,6 +229,14 @@ pub struct Mesh {
   pub analyze: bool,
 }
 
+impl Mesh {
+  /// Drawn see-through (colour alpha below 255): after the opaque geometry, blended, without
+  /// writing depth.
+  pub fn transparent(&self) -> bool {
+    self.color[3] < 255
+  }
+}
+
 /// A surface analysis drawn on the meshes that ask for it, as in Fusion's INSPECT menu.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Analysis {
@@ -361,7 +369,7 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let key = (back * 0.8 + up * 0.5 - right * 0.3).normalize().as_vec3();
   let head = back.as_vec3();
   let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
-  for m in &scene.meshes {
+  for m in scene.meshes.iter().filter(|m| !m.transparent()) {
     draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
   }
   for l in scene.lines.iter().filter(|l| !l.on_top) {
@@ -369,6 +377,10 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   }
   for mk in scene.markers.iter().filter(|m| !m.on_top) {
     draw_marker(&mut f, mk, &vp);
+  }
+  // transparent meshes blend over everything behind them, edges included, and hide nothing
+  for m in scene.meshes.iter().filter(|m| m.transparent()) {
+    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
   }
   for l in scene.lines.iter().filter(|l| l.on_top) {
     draw_polyline(&mut f, l, &vp);
@@ -428,6 +440,7 @@ fn draw_mesh(
     }
     let id = m.tri_ids.get(t).copied().unwrap_or(m.id);
     let color = if m.highlight == Some(id) { m.highlight_color } else { m.color };
+    let color = if m.transparent() { color } else { [color[0], color[1], color[2], 255] };
     // near-plane clipping (z > -w in GL clip space)
     let poly = clip_near(&v);
     if poly.len() < 3 {
@@ -539,7 +552,9 @@ fn raster_tri(
       if zf >= *d {
         continue;
       }
-      *d = zf;
+      if color[3] == 255 {
+        *d = zf;
+      }
       // perspective-correct normal interpolation
       let (b0, b1, b2) = if persp {
         let a0 = w0 * inv_w[0];
@@ -588,9 +603,10 @@ fn raster_tri(
         }
       };
       if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
-        p[0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
-        p[1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
-        p[2] = (c.z * 255.0).clamp(0.0, 255.0) as u8;
+        let a = color[3] as f32 / 255.0;
+        for (k, v) in [c.x, c.y, c.z].into_iter().enumerate() {
+          p[k] = ((v * 255.0).clamp(0.0, 255.0) * a + p[k] as f32 * (1.0 - a)) as u8;
+        }
         p[3] = 255;
       }
       if let Some(slot) = f.ids.get_mut(i) {
@@ -728,6 +744,34 @@ mod tests {
     cam.set_view(StandardView::Bottom);
     let f = render(&scene, &cam, 200, 100);
     assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 1);
+  }
+
+  #[test]
+  fn transparent_meshes_blend_and_hide_nothing() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    // the see-through quad comes first but still draws after (and over) the opaque one
+    let scene = Scene {
+      meshes: vec![quad(5.0, [0, 0, 255, 128], 2), quad(0.0, [255, 0, 0, 255], 1)],
+      lines: vec![Polyline {
+        points: vec![[-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+        color: [0, 255, 0, 255],
+        width: 1.0,
+        id: 3,
+        on_top: false,
+        dashed: false,
+        behind: false,
+      }],
+      ..Default::default()
+    };
+    let f = render(&scene, &cam, 200, 100);
+    assert_eq!(f.pick(100.0, 40.0, 0, |_| true), 2, "it picks");
+    let px = &f.rgba[(40 * 200 + 100) * 4..(40 * 200 + 100) * 4 + 3];
+    assert!(px[0] > 90 && px[2] > 90 && px[1] < 40, "blended red and blue: {px:?}");
+    // the edge under it shows through, tinted
+    let row = (0..100).find(|&y| f.rgba[(y * 200 + 100) * 4 + 1] > 60).expect("the line shows");
+    assert!(f.rgba[(row * 200 + 100) * 4 + 2] > 60);
   }
 
   #[test]

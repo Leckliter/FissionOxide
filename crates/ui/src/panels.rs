@@ -1361,6 +1361,8 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
           }
           ui.separator();
           ui.checkbox(&mut app.show_viewcube, "ViewCube");
+          ui.separator();
+          crate::gpu::settings(app, ui);
         });
         let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
         nav_caret(ui);

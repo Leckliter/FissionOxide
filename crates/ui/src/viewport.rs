@@ -168,7 +168,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   render_if_needed(app, &view, &ctx);
 
   let painter = ui.painter_at(rect);
-  if let Some(tex) = &app.tex {
+  let gpu_drawn = crate::gpu::paint(app, &painter, rect, [view.w, view.h], &ctx);
+  if !gpu_drawn && let Some(tex) = &app.tex {
     painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
   }
 
@@ -327,6 +328,9 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     profiles_of: profiles_of.clone(),
     view: view_params(app),
   };
+  if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
+    return;
+  }
   if app.render_key.as_ref() == Some(&key) && app.tex.is_some() {
     return;
   }
@@ -345,6 +349,10 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
+  if crate::gpu::active(app) {
+    crate::gpu::set_scene(app, scene, picks, key);
+    return;
+  }
   let frame = render::render(&scene, &app.cam, view.w, view.h);
   let img = egui::ColorImage::from_rgba_unmultiplied([frame.width as usize, frame.height as usize], &frame.rgba);
   match &mut app.tex {
