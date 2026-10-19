@@ -1,0 +1,85 @@
+# Found by crates/engine/tests/fuzz_features.rs (seed 1004). The last shell segfaults inside OpenCASCADE
+# (BRepOffset_MakeOffset::IntersectEdges -> RefEdgeInter -> BRep_Tool::CurveOnSurface). Run: fissionoxide-cli run tests/fuzz/shell-offset-segfault.jsonl
+# base block
+{"cmd":"param.add","expr":"29.31 mm","name":"height"}
+{"cmd":"param.add","expr":"67.08 mm","name":"width"}
+{"cmd":"sketch.create","plane":"xy"}
+{"cmd":"sketch.line","points":[[0,0],[67.08,0]]}
+{"cmd":"sketch.line","points":[[67.08,0],[67.08,34.19]]}
+{"cmd":"sketch.line","points":[[67.08,34.19],[0,34.19]]}
+{"cmd":"sketch.line","points":[[0,34.19],[0,0]]}
+{"cmd":"sketch.dimension","points":[0,1],"type":"horizontal","value":"width"}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":"height","operation":"new_body","sketch":1}
+# boss r 2.5 h 12.48
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,29.31],"x":[1.0,0.0,0.0]}}
+{"center":[44.37,26.97],"cmd":"sketch.circle","radius":2.5}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":12.48,"operation":"join","sketch":3}
+# sketch.circle cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,41.79],"x":[1.0,0.0,0.0]}}
+{"center":[41.78,30.35],"cmd":"sketch.circle","radius":8.31}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":0.85,"flip":true,"operation":"cut","sketch":5}
+# boss r 5.06 h 4.84
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[28.51,21.61],"cmd":"sketch.circle","radius":5.06}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":4.84,"operation":"join","sketch":7}
+# sketch.rect cut through all
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,45.78],"x":[1.0,0.0,0.0]}}
+{"center":[28.68,19.27],"cmd":"sketch.rect","corner":[30.16,20.306]}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","extent":"through_all","flip":true,"operation":"cut","sketch":9}
+# sketch.circle cut through all
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[59.21,18.88],"cmd":"sketch.circle","radius":3.65}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","extent":"through_all","flip":true,"operation":"cut","sketch":11}
+# sketch.circle cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[44.94,11.78],"cmd":"sketch.circle","radius":8.2}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":10.98,"flip":true,"operation":"cut","sketch":13}
+# edit parameter width = 74.5
+{"cmd":"param.set","expr":"74.5 mm","name":"width"}
+# sketch.circle cut through all
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[52.07,15.07],"cmd":"sketch.circle","radius":8.49}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","extent":"through_all","flip":true,"operation":"cut","sketch":15}
+# fillet r 1.01
+{"cmd":"fillet","edges":[{"body":8000,"edge":21},{"body":8000,"edge":7}],"radius":1.01}
+# fillet r 1.39
+{"cmd":"fillet","edges":[{"body":8000,"edge":19},{"body":8000,"edge":8}],"radius":1.39}
+# chamfer 0.84
+{"cmd":"chamfer","distance":0.84,"edges":[{"body":2000,"edge":15},{"body":2000,"edge":14}]}
+# boss r 2.21 h 8.08
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[22.33,17.17],"cmd":"sketch.circle","radius":2.21}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":8.08,"operation":"join","sketch":20}
+# boss r 1.62 h 14
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,45.78],"x":[1.0,0.0,0.0]}}
+{"center":[27.69,21.81],"cmd":"sketch.circle","radius":1.62}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":14.0,"operation":"join","sketch":22}
+# boss r 2.52 h 8.37
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,59.78],"x":[1.0,0.0,0.0]}}
+{"center":[29.07,24.08],"cmd":"sketch.circle","radius":2.52}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":8.37,"operation":"join","sketch":24}
+# sketch.circle cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,68.15],"x":[1.0,0.0,0.0]}}
+{"center":[27.43,24.64],"cmd":"sketch.circle","radius":1.57}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":19.99,"flip":true,"operation":"cut","sketch":26}
+# boss r 1.76 h 4.35
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,40.94],"x":[1.0,0.0,0.0]}}
+{"center":[3.56,17.48],"cmd":"sketch.circle","radius":1.76}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":4.35,"operation":"join","sketch":28}
+# shell 1.47
+{"cmd":"shell","faces":[{"body":21000,"face":3}],"thickness":1.47}
+# shell 1.64
+{"cmd":"shell","faces":[{"body":21001,"face":13}],"thickness":1.64}

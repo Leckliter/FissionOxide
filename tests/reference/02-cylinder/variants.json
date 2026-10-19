@@ -1,0 +1,88 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "height-80",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "80"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "extrude distance 50 -> 80: cylinder r 15 h 80, V = pi r^2 h, A = 2 pi r^2 + 2 pi r h",
+        "body_count": 1,
+        "volume_mm3": 56548.66776461627,
+        "area_mm2": 8953.53906273091,
+        "center_of_mass": [
+          0.0,
+          0.0,
+          40.0
+        ],
+        "bbox": {
+          "min": [
+            -15.0,
+            -15.0,
+            0.0
+          ],
+          "max": [
+            15.0,
+            15.0,
+            80.0
+          ]
+        },
+        "faces": 3
+      }
+    },
+    {
+      "name": "radius-20",
+      "edits": [
+        {
+          "cmd": "sketch.edit",
+          "sketch": 1
+        },
+        {
+          "cmd": "sketch.dimension",
+          "type": "radius",
+          "curves": [
+            1
+          ],
+          "value": "20 mm"
+        },
+        {
+          "cmd": "sketch.finish"
+        }
+      ],
+      "expected": {
+        "method": "a radius dimension of 20 added to the circle: cylinder r 20 h 50",
+        "body_count": 1,
+        "volume_mm3": 62831.853071795864,
+        "area_mm2": 8796.45943005142,
+        "center_of_mass": [
+          0.0,
+          0.0,
+          25.0
+        ],
+        "bbox": {
+          "min": [
+            -20.0,
+            -20.0,
+            0.0
+          ],
+          "max": [
+            20.0,
+            20.0,
+            50.0
+          ]
+        },
+        "faces": 3
+      }
+    }
+  ]
+}

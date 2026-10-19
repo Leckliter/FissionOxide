@@ -120,6 +120,7 @@
 #include <gp_Trsf.hxx>
 #include <Geom_Ellipse.hxx>
 #include <gp_Elips.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 
 namespace fox {
 
@@ -184,7 +185,9 @@ TopoDS_Shape checked(const TopoDS_Shape &s, const char *what) {
   if (an.IsValid()) {
     return s;
   }
-  ShapeFix_Shape fix(s);
+  // ShapeFix can change sub-shapes in place, and `s` shares untouched ones with the operation's
+  // input, which the regeneration cache still holds: fix a copy.
+  ShapeFix_Shape fix(BRepBuilderAPI_Copy(s).Shape());
   fix.Perform();
   TopoDS_Shape f = fix.Shape();
   BRepCheck_Analyzer an2(f);
@@ -363,8 +366,11 @@ namespace {
 template <typename Op> TopoDS_Shape run_boolean(const TopoDS_Shape &a, const TopoDS_Shape &b, double fuzzy) {
   Op op;
   TopTools_ListOfShape args, tools;
-  args.Append(a);
-  tools.Append(b);
+  // Even non-destructive, the result shares sub-shapes with the arguments and the simplification
+  // below can change those in place, corrupting the arguments (bodies the regeneration cache and
+  // undo still hold). Work on copies of the topology; the geometry is shared and stays untouched.
+  args.Append(BRepBuilderAPI_Copy(a, Standard_False).Shape());
+  tools.Append(BRepBuilderAPI_Copy(b, Standard_False).Shape());
   op.SetArguments(args);
   op.SetTools(tools);
   if (fuzzy > 0.0) op.SetFuzzyValue(fuzzy);

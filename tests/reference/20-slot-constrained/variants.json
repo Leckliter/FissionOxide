@@ -1,0 +1,40 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "length-50",
+      "edits": [
+        {
+          "cmd": "sketch.set_dimension",
+          "sketch": 1,
+          "constraint": 20,
+          "value": "50"
+        }
+      ],
+      "expected": {
+        "method": "slot centre distance 40 -> 50: A2 = 2rL + pi r^2, V = A2 h, A = 2 A2 + (2L + 2 pi r) h",
+        "body_count": 1,
+        "volume_mm3": 3565.4866776461627,
+        "area_mm2": 2114.6902302738526,
+        "center_of_mass": [
+          25.0,
+          0.0,
+          2.5
+        ],
+        "bbox": {
+          "min": [
+            -6.0,
+            -6.0,
+            0.0
+          ],
+          "max": [
+            56.0,
+            6.0,
+            5.0
+          ]
+        },
+        "faces": 6
+      }
+    }
+  ]
+}

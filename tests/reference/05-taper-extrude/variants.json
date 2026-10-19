@@ -1,0 +1,85 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "taper-5",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "30",
+              "taper": "-5 deg"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "taper -10 deg -> -5 deg: square frustum, base 40, top 40 + 2*30*tan 5, V = h/3 (A0 + A1 + sqrt(A0 A1))",
+        "body_count": 1,
+        "volume_mm3": 54574.73735870641,
+        "area_mm2": 8781.998445243411,
+        "center_of_mass": [
+          0.0,
+          0.0,
+          15.614983642
+        ],
+        "bbox": {
+          "min": [
+            -22.62465990577772,
+            -22.62465990577772,
+            0.0
+          ],
+          "max": [
+            22.62465990577772,
+            22.62465990577772,
+            30.0
+          ]
+        },
+        "faces": 6
+      }
+    },
+    {
+      "name": "height-20",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "20",
+              "taper": "-10 deg"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "extrude distance 30 -> 20 at taper -10 deg: square frustum, base 40, top 40 + 2*20*tan 10",
+        "body_count": 1,
+        "volume_mm3": 37974.10289334569,
+        "area_mm2": 7349.832796670436,
+        "center_of_mass": [
+          0.0,
+          0.0,
+          10.538957007
+        ],
+        "bbox": {
+          "min": [
+            -23.526539614169298,
+            -23.526539614169298,
+            0.0
+          ],
+          "max": [
+            23.526539614169298,
+            23.526539614169298,
+            20.0
+          ]
+        },
+        "faces": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# Found by crates/engine/tests/fuzz_features.rs (seed 2). The last cut segfaults inside OpenCASCADE
+# (BRepAlgoAPI_BuilderAlgo::SimplifyResult -> ShapeUpgrade_UnifySameDomain::IntUnifyFaces -> FindCoordBounds).
+# Run: fissionoxide-cli run tests/fuzz/unify-same-domain-segfault.jsonl
+# base block
+{"cmd":"param.add","expr":"19.89 mm","name":"height"}
+{"cmd":"param.add","expr":"55.47 mm","name":"width"}
+{"cmd":"sketch.create","plane":"xy"}
+{"cmd":"sketch.line","points":[[0,0],[55.47,0]]}
+{"cmd":"sketch.line","points":[[55.47,0],[55.47,64.95]]}
+{"cmd":"sketch.line","points":[[55.47,64.95],[0,64.95]]}
+{"cmd":"sketch.line","points":[[0,64.95],[0,0]]}
+{"cmd":"sketch.dimension","points":[0,1],"type":"horizontal","value":"width"}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":"height","operation":"new_body","sketch":1}
+# sketch.rect cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,19.89],"x":[1.0,0.0,0.0]}}
+{"center":[20.93,44.67],"cmd":"sketch.rect","corner":[31.9,52.349000000000004]}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":7.12,"flip":true,"operation":"cut","sketch":3}
+# pattern x2
+{"bodies":[2000],"cmd":"pattern.rectangular","count":2,"direction":[0,1,0],"spacing":75.0}
+# shell 1.23
+{"cmd":"shell","faces":[{"body":2000,"face":9}],"thickness":1.23}
+# fillet r 1.85
+{"cmd":"fillet","edges":[{"body":5000,"edge":10},{"body":5000,"edge":15}],"radius":1.85}
+# boss r 12.39 h 9.45
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,19.89],"x":[1.0,0.0,0.0]}}
+{"center":[6.06,21.75],"cmd":"sketch.circle","radius":12.39}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":9.45,"operation":"join","sketch":8}
+# edit parameter width = 40.93
+{"cmd":"param.set","expr":"40.93 mm","name":"width"}
+# chamfer 0.21
+{"cmd":"chamfer","distance":0.21,"edges":[{"body":5000,"edge":31},{"body":5000,"edge":11}]}
+# pattern x3
+{"bodies":[2000],"cmd":"pattern.rectangular","count":3,"direction":[0,1,0],"spacing":149.0}
+# sketch.rect cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,19.89],"x":[1.0,0.0,0.0]}}
+{"center":[28.7,97.13],"cmd":"sketch.rect","corner":[35.61,101.967]}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":12.12,"flip":true,"operation":"cut","sketch":12}
+# sketch.circle cut
+{"cmd":"sketch.create","plane":{"normal":[0.0,0.0,1.0],"origin":[0.0,0.0,29.34],"x":[1.0,0.0,0.0]}}
+{"center":[12.25,353.19],"cmd":"sketch.circle","radius":5.43}
+{"cmd":"sketch.finish"}
+{"cmd":"extrude","distance":12.15,"flip":true,"operation":"cut","sketch":14}

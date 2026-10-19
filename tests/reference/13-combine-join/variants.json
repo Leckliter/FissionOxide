@@ -1,0 +1,44 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "cylinder-30",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 4,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "30"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "tool cylinder 40 -> 30 tall before the join: box + outer half cylinder z 0..20 + full cylinder z 20..30",
+        "body_count": 1,
+        "volume_mm3": 41047.78684233861,
+        "area_mm2": 7880.3538158400315,
+        "center_of_mass": [
+          24.969713413,
+          20.0,
+          11.653156151
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            52.0,
+            40.0,
+            30.0
+          ]
+        },
+        "faces": 9
+      }
+    }
+  ]
+}

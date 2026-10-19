@@ -19,20 +19,20 @@ rebuilds correctly (see the README for how that is checked).
 | 07-fillet-all-edges | pass | ok | 23340.8 | 4726.3 | 0.3 s |  |
 | 08-chamfer | pass | ok | 23730.7 | 5029.4 | 0.1 s |  |
 | 09-shell | pass | ok | 13632.0 | 13992.0 | 0.1 s |  |
-| 10-rect-pattern-holes | pass | ok | 29803.5 | 14652.4 | 0.7 s |  |
-| 11-circular-pattern-flange | pass | ok | 66758.8 | 19320.8 | 0.3 s |  |
-| 12-mirror-feature | pass | ok | 21392.9 | 6531.0 | 0.1 s |  |
-| 13-combine-join | pass | ok | 45571.7 | 8634.3 | 0.1 s |  |
+| 10-rect-pattern-holes | pass | ok | 29803.5 | 14652.4 | 0.4 s |  |
+| 11-circular-pattern-flange | pass | ok | 66758.8 | 19320.8 | 0.2 s |  |
+| 12-mirror-feature | pass | ok | 21392.9 | 6531.0 | 0.0 s |  |
+| 13-combine-join | pass | ok | 45571.7 | 8634.3 | 0.0 s |  |
 | 14-combine-cut | pass | ok | 42931.4 | 9706.9 | 0.0 s |  |
-| 15-combine-intersect | pass | ok | 54454.3 | 7382.7 | 0.2 s |  |
-| 16-sweep | pass |  | 2584.7 | 1779.7 | 0.1 s |  |
+| 15-combine-intersect | pass | ok | 54454.3 | 7382.7 | 0.1 s |  |
+| 16-sweep | pass |  | 2584.7 | 1779.7 | 0.0 s |  |
 | 17-loft | pass |  | 35125.5 | 6495.0 | 0.0 s |  |
 | 18-hole-features | pass | ok | 33890.7 | 8568.7 | 0.1 s |  |
 | 19-l-bracket-constrained | pass |  | 14720.0 | 5472.0 | 0.0 s |  |
 | 20-slot-constrained | pass |  | 2965.5 | 1774.7 | 0.0 s |  |
 | 21-draft | pass | ok | 54574.7 | 8782.0 | 0.0 s |  |
 | 22-split-body | pass | ok | 75398.2 | 12955.2 | 0.0 s |  |
-| 23-bracket-multifeature | pass | ok | 59331.1 | 18290.7 | 0.4 s |  |
+| 23-bracket-multifeature | pass | ok | 59331.1 | 18290.7 | 0.3 s |  |
 | 24-user-parameters | pass |  | 34821.9 | 8114.2 | 0.0 s |  |
 | 25-sketch-triangle | pass |  | 4032.2 | 2274.1 | 0.0 s |  |
 | 26-sketch-belt | pass |  | 11326.2 | 5637.4 | 0.1 s |  |
@@ -68,7 +68,7 @@ rebuilds correctly (see the README for how that is checked).
 | 56-holes-on-curved-face | pass | ok | 77943.1 | 10593.1 | 0.3 s |  |
 | 57-hole-pattern-sketch-points | pass | ok | 36766.7 | 11818.2 | 0.2 s |  |
 | 58-phone-stand | pass | ok | 74559.2 | 29148.8 | 0.2 s |  |
-| 59-enclosure-base | pass | ok | 34309.5 | 33795.6 | 0.6 s |  |
+| 59-enclosure-base | pass | ok | 34309.5 | 33795.6 | 0.5 s |  |
 | 60-pipe-flange | pass |  | 323661.0 | 56984.6 | 0.2 s |  |
 | 61-shaft-keyway | pass |  | 47526.2 | 9677.1 | 0.1 s |  |
 | 62-heat-sink | pass | ok | 43125.0 | 45725.0 | 1.8 s |  |
@@ -93,3 +93,5 @@ rebuilds correctly (see the README for how that is checked).
 | 81-fillet-spline-radius | pass | ok | 23933.6 | 5150.5 | 0.4 s |  |
 | 82-thin-extrude-frame | pass | ok | 6080.0 | 4256.0 | 0.1 s |  |
 | 83-boundary-loop-thicken | pass |  | 278.5 | 370.0 | 0.0 s |  |
+
+Edit checks on these parts: [reference-variants.md](reference-variants.md).
