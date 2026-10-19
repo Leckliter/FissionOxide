@@ -45,6 +45,10 @@ pub enum Seg {
     radius: f64,
     ccw: bool,
   },
+  /// A cubic Bézier piece of a spline (control points, start to end).
+  Bezier {
+    p: [[f64; 2]; 4],
+  },
 }
 
 impl Seg {
@@ -53,6 +57,7 @@ impl Seg {
       Seg::Line { a, .. } => a,
       Seg::Arc { center, radius, start_angle, .. } => polar(center, radius, start_angle),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
+      Seg::Bezier { p } => p[0],
     }
   }
 
@@ -61,6 +66,7 @@ impl Seg {
       Seg::Line { b, .. } => b,
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
+      Seg::Bezier { p } => p[3],
     }
   }
 
@@ -70,6 +76,7 @@ impl Seg {
       Seg::Line { a, b } => [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep / 2.0),
       Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { TAU / 2.0 } else { -TAU / 2.0 }),
+      Seg::Bezier { p } => crate::bezier_at(&p, 0.5),
     }
   }
 
@@ -80,6 +87,7 @@ impl Seg {
         Seg::Arc { center, radius, start_angle: start_angle + sweep, sweep: -sweep }
       }
       Seg::Circle { center, radius, ccw } => Seg::Circle { center, radius, ccw: !ccw },
+      Seg::Bezier { p } => Seg::Bezier { p: [p[3], p[2], p[1], p[0]] },
     }
   }
 
@@ -98,6 +106,11 @@ impl Seg {
         let s = if ccw { 1.0 } else { -1.0 };
         for i in 0..n {
           out.push(polar(center, radius, s * TAU * i as f64 / n as f64));
+        }
+      }
+      Seg::Bezier { p } => {
+        for i in 0..16 {
+          out.push(crate::bezier_at(&p, i as f64 / 16.0));
         }
       }
     }
@@ -287,6 +300,14 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         }
         edges.push((u, v, seg));
       }
+      CurveKind::Spline { .. } => {
+        let fit: Vec<[f64; 2]> = sketch.curve_points(c.id).iter().filter_map(|p| sketch.pos(*p)).collect();
+        for b in crate::spline_beziers(&fit) {
+          if dist(b[0], b[3]) > MERGE_TOL {
+            edges.push((0, 0, Seg::Bezier { p: b }));
+          }
+        }
+      }
     }
   }
   // Curves that cross mid-span split each other there, as in Fusion (no trimming needed).
@@ -396,11 +417,13 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
 /// or more points become arcs; the rest stay circles.
 fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg>, Vec<([f64; 2], f64)>) {
   use crate::edit::{Geo, meet};
+  // spline pieces don't split (yet); they join the graph as they are
+  let (curved, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::Bezier { .. }));
   let n_segs = segs.len();
-  let mut geos: Vec<Geo> = segs.iter().map(Geo::of_seg).collect();
+  let mut geos: Vec<Geo> = segs.iter().filter_map(Geo::of_seg).collect();
   geos.extend(circles.iter().map(|(c, r)| Geo::Arc { c: *c, r: *r, a0: 0.0, sweep: TAU }));
   if geos.len() > 2000 {
-    return (segs, circles);
+    return (segs.into_iter().chain(curved).collect(), circles);
   }
   let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); geos.len()];
   for i in 0..geos.len() {
@@ -455,6 +478,7 @@ fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg
       out.push(segs[i]);
     }
   }
+  out.extend(curved);
   (out, left)
 }
 
@@ -468,6 +492,10 @@ fn departure_angle(s: &Seg) -> f64 {
       angle_of(p0, p1)
     }
     Seg::Circle { .. } => 0.0,
+    Seg::Bezier { p } => {
+      let q = if dist(p[0], p[1]) > 1e-12 { p[1] } else if dist(p[0], p[2]) > 1e-12 { p[2] } else { p[3] };
+      angle_of(p[0], q)
+    }
   }
 }
 

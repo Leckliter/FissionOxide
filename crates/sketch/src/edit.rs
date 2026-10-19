@@ -59,8 +59,8 @@ pub(crate) enum Geo {
 
 impl Geo {
   /// A profile segment's geometry (circles start at angle 0).
-  pub(crate) fn of_seg(s: &crate::Seg) -> Geo {
-    match *s {
+  pub(crate) fn of_seg(s: &crate::Seg) -> Option<Geo> {
+    Some(match *s {
       crate::Seg::Line { a, b } => Geo::Line { a, b },
       crate::Seg::Arc { center, radius, start_angle, sweep } => {
         if sweep >= 0.0 {
@@ -70,7 +70,8 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-    }
+      crate::Seg::Bezier { .. } => return None,
+    })
   }
 
   /// Parameter of a point on the (extended) curve: line 0..1, arc 0..sweep.
@@ -171,6 +172,7 @@ impl Sketch {
         let a0 = angle_of(c, s);
         Geo::Arc { c, r: dist(c, s), a0, sweep: ccw_sweep(a0, angle_of(c, e)) }
       }
+      CurveKind::Spline { .. } => return None,
     })
   }
 
@@ -211,6 +213,13 @@ impl Sketch {
         }
         CurveKind::Arc { start, end, .. } => {
           for q in [start, end] {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::Spline { points } => {
+          for q in points {
             if *q == old {
               *q = new;
             }
@@ -281,6 +290,41 @@ impl Sketch {
     self.add_constraint(ConstraintKind::Tangent { a: l2, b: arc })?;
     self.add_constraint(ConstraintKind::Radius { curve: arc, value: Dim::new(radius) })?;
     Ok(arc)
+  }
+
+  /// Bevels the corner where two lines meet: the lines are cut back `d1` and `d2` from the corner
+  /// and joined by a new line.
+  pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
+    if !(d1 > EPS && d2 > EPS && d1.is_finite() && d2.is_finite()) {
+      return Err(SketchError::InvalidValue("chamfer distances must be positive".into()));
+    }
+    let ends = |s: &Sketch, id: CurveId| match s.curve(id).map(|c| &c.kind) {
+      Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
+      _ => Err(SketchError::WrongGeometry("a sketch chamfer", "two lines")),
+    };
+    let (a1, b1) = ends(self, l1)?;
+    let (a2, b2) = ends(self, l2)?;
+    let near = |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
+    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
+      .into_iter()
+      .find(|(p, _, q, _)| near(self, *p, *q))
+      .ok_or(SketchError::WrongGeometry("a sketch chamfer", "two lines that meet at an end"))?;
+    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
+    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
+    let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
+      return Err(SketchError::InvalidValue("zero-length line".into()));
+    };
+    if d1 >= dist(p, q1) - 1e-9 || d2 >= dist(p, q2) - 1e-9 {
+      return Err(SketchError::InvalidValue("the chamfer doesn't fit on these lines".into()));
+    }
+    let (t1, t2) = (add(p, mul(u, d1)), add(p, mul(v, d2)));
+    let (n1, n2) = (self.add_point(t1[0], t1[1]), self.add_point(t2[0], t2[1]));
+    self.swap_point(l1, c1, n1);
+    self.swap_point(l2, c2, n2);
+    let line = self.add_curve(CurveKind::Line { a: n1, b: n2 })?;
+    self.drop_if_unused(c1);
+    self.drop_if_unused(c2);
+    Ok(line)
   }
 
   // ---------------------------------------------------------------- trim / extend
@@ -453,6 +497,9 @@ impl Sketch {
         CurveKind::Arc { center, start, end } => {
           let (center, s, e) = (get(self, center)?, get(self, start)?, get(self, end)?);
           if flip { CurveKind::Arc { center, start: e, end: s } } else { CurveKind::Arc { center, start: s, end: e } }
+        }
+        CurveKind::Spline { points } => {
+          CurveKind::Spline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
         }
       };
       let nid = self.add_curve(kind)?;

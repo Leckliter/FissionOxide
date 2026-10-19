@@ -92,6 +92,8 @@ cmds! {
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.info" => "Sketch geometry, constraints, profiles and degrees of freedom", "{sketch?}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
+  "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
+  "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -260,7 +262,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({}))
     }
     "sketch.line" | "sketch.rect" | "sketch.circle" | "sketch.arc" | "sketch.polygon" | "sketch.slot"
-    | "sketch.point" => draw(s, name, p),
+    | "sketch.point" | "sketch.spline" => draw(s, name, p),
     "sketch.constrain" => constrain(s, p),
     "sketch.dimension" => dimension(s, p),
     "sketch.set_dimension" => {
@@ -324,6 +326,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.info" => sketch_info(s, p),
     "sketch.fillet"
+    | "sketch.chamfer"
     | "sketch.offset"
     | "sketch.trim"
     | "sketch.extend"
@@ -1240,6 +1243,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   };
   enum Op {
     Fillet(f64),
+    Chamfer(f64, f64),
     Offset(f64),
     Trim(Option<CurveId>, [f64; 2]),
     Extend(Option<CurveId>, [f64; 2]),
@@ -1250,6 +1254,11 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
   let op = match name {
     "sketch.fillet" => Op::Fillet(num("radius", clf_expr::Kind::Length)?),
+    "sketch.chamfer" => {
+      let d = num("distance", clf_expr::Kind::Length)?;
+      let d2 = opt_expr(p, "distance2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?;
+      Op::Chamfer(d, d2.unwrap_or(d))
+    }
     "sketch.offset" => Op::Offset(num("distance", clf_expr::Kind::Length)?),
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
     "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
@@ -1283,6 +1292,10 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Op::Fillet(r) => {
         let [a, b] = curves.as_slice() else { return Err(CmdError::new("a fillet needs two lines")) };
         vec![sketch.fillet(*a, *b, r)?]
+      }
+      Op::Chamfer(d1, d2) => {
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a chamfer needs two lines")) };
+        vec![sketch.chamfer(*a, *b, d1, d2)?]
       }
       Op::Offset(dist) => sketch.offset(&curves, dist)?,
       Op::Trim(c, at) => {
@@ -1498,6 +1511,24 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let c = req_pt(&p, "center")?;
         let cs = snap(sketch, c);
         sketch.add_polygon(cs, req_pt(&p, "vertex")?, sides)?;
+      }
+      "sketch.spline" => {
+        let pts: Vec<[f64; 2]> = p
+          .get("points")
+          .and_then(Value::as_array)
+          .ok_or(CmdError::new("missing 'points'"))?
+          .iter()
+          .map(|v| pt_of(v).ok_or(CmdError::new("points must be [x, y]")))
+          .collect::<Result<_, _>>()?;
+        if pts.len() < 2 {
+          return Err(CmdError::new("a spline needs 2 or more points"));
+        }
+        let mut ids = Vec::new();
+        for q in pts {
+          let spec = snap(sketch, q);
+          ids.push(sketch.resolve(spec)?);
+        }
+        sketch.add_curve(CurveKind::Spline { points: ids })?;
       }
       "sketch.slot" => {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;

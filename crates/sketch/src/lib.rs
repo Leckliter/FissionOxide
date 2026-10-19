@@ -75,6 +75,10 @@ pub enum CurveKind {
     start: PointId,
     end: PointId,
   },
+  /// A smooth curve through fit points (Catmull-Rom tangents, cubic pieces).
+  Spline {
+    points: Vec<PointId>,
+  },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -378,6 +382,11 @@ impl Sketch {
         return Err(SketchError::NoPoint(p));
       }
     }
+    if let CurveKind::Spline { points } = &kind
+      && (points.len() < 2 || points.len() > 1000)
+    {
+      return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
+    }
     if let CurveKind::Circle { radius, .. } = kind
       && !(radius.is_finite() && radius > 0.0)
     {
@@ -458,8 +467,24 @@ impl Sketch {
         let s = self.pos(*start)?;
         Some(dist(c, s))
       }
-      CurveKind::Line { .. } => None,
+      CurveKind::Line { .. } | CurveKind::Spline { .. } => None,
     }
+  }
+
+  /// A spline flattened to a polyline (empty for other curves).
+  pub fn spline_points(&self, id: CurveId) -> Vec<[f64; 2]> {
+    let Some(CurveKind::Spline { points }) = self.curve(id).map(|c| &c.kind) else { return Vec::new() };
+    let fit: Vec<[f64; 2]> = points.iter().filter_map(|p| self.pos(*p)).collect();
+    let mut out = Vec::new();
+    for b in spline_beziers(&fit) {
+      for k in 0..16 {
+        out.push(bezier_at(&b, k as f64 / 16.0));
+      }
+    }
+    if let Some(l) = fit.last() {
+      out.push(*l);
+    }
+    out
   }
 
   /// Ids of the points defining a curve.
@@ -498,6 +523,13 @@ impl Sketch {
           if let (Some(p), Some(r)) = (self.pos(*center), self.radius(c.id)) {
             add([p[0] - r, p[1] - r]);
             add([p[0] + r, p[1] + r]);
+          }
+        }
+        CurveKind::Spline { points } => {
+          for p in points {
+            if let Some(p) = self.pos(*p) {
+              add(p);
+            }
           }
         }
       }
@@ -541,6 +573,10 @@ impl Sketch {
         let sweep = ccw_sweep(a0, angle_of(cp, ep));
         let a = angle_of(cp, at);
         if ccw_sweep(a0, a) <= sweep { (dist(cp, at) - r).abs() } else { dist(at, sp).min(dist(at, ep)) }
+      }
+      CurveKind::Spline { .. } => {
+        let pts = self.spline_points(id);
+        pts.windows(2).map(|w| seg_dist(w[0], w[1], at)).fold(f64::INFINITY, f64::min)
       }
     })
   }
@@ -591,7 +627,15 @@ impl Sketch {
         None => Err(SketchError::NoCurve(id)),
       }
     };
-    let any = |id: CurveId| -> Result<(), SketchError> { self.curve(id).map(|_| ()).ok_or(SketchError::NoCurve(id)) };
+    let any = |id: CurveId| -> Result<(), SketchError> {
+      match self.curve(id).map(|c| &c.kind) {
+        Some(CurveKind::Spline { .. }) => {
+          Err(SketchError::WrongGeometry("this constraint", "lines, circles or arcs (constrain a spline's points)"))
+        }
+        Some(_) => Ok(()),
+        None => Err(SketchError::NoCurve(id)),
+      }
+    };
     match kind {
       ConstraintKind::Horizontal { line: l } => line(*l, "Horizontal"),
       ConstraintKind::Vertical { line: l } => line(*l, "Vertical"),
@@ -653,7 +697,45 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Line { a, b } => vec![*a, *b],
     CurveKind::Circle { center, .. } => vec![*center],
     CurveKind::Arc { center, start, end } => vec![*center, *start, *end],
+    CurveKind::Spline { points } => points.clone(),
   }
+}
+
+/// Cubic Bézier pieces (control points) of a spline through `pts`: Catmull-Rom tangents inside,
+/// natural (half-chord) tangents at the ends.
+pub fn spline_beziers(pts: &[[f64; 2]]) -> Vec<[[f64; 2]; 4]> {
+  let n = pts.len();
+  if n < 2 {
+    return Vec::new();
+  }
+  let tangent = |i: usize| -> [f64; 2] {
+    let (a, b) = if i == 0 {
+      (pts[0], pts[1])
+    } else if i == n - 1 {
+      (pts[n - 2], pts[n - 1])
+    } else {
+      (pts[i - 1], pts[i + 1])
+    };
+    let k = if i == 0 || i == n - 1 { 1.0 } else { 0.5 };
+    [(b[0] - a[0]) * k, (b[1] - a[1]) * k]
+  };
+  (0..n - 1)
+    .map(|i| {
+      let (p0, p3) = (pts[i], pts[i + 1]);
+      let (t0, t1) = (tangent(i), tangent(i + 1));
+      [p0, [p0[0] + t0[0] / 3.0, p0[1] + t0[1] / 3.0], [p3[0] - t1[0] / 3.0, p3[1] - t1[1] / 3.0], p3]
+    })
+    .collect()
+}
+
+/// A point on a cubic Bézier.
+pub fn bezier_at(b: &[[f64; 2]; 4], t: f64) -> [f64; 2] {
+  let u = 1.0 - t;
+  let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+  [
+    w[0] * b[0][0] + w[1] * b[1][0] + w[2] * b[2][0] + w[3] * b[3][0],
+    w[0] * b[0][1] + w[1] * b[1][1] + w[2] * b[2][1] + w[3] * b[3][1],
+  ]
 }
 
 pub(crate) fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {

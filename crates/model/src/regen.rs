@@ -1507,6 +1507,7 @@ impl Ctx<'_> {
           put(sketch, start, ps);
           put(sketch, end, pe);
         }
+        CurveKind::Spline { .. } => {}
       }
     }
     lost

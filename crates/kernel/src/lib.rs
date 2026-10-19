@@ -824,19 +824,22 @@ pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<(
 }
 
 fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
-  let mut put = |kind: f64, p: [DVec3; 3]| {
+  let mut put = |kind: f64, p: [DVec3; 4]| {
     out.push(kind);
     for v in p {
       out.extend_from_slice(&[v.x, v.y, v.z]);
     }
   };
   match *s {
-    Seg::Line { a, b } => put(0.0, [plane.to_world(a), plane.to_world(b), DVec3::ZERO]),
-    Seg::Arc { .. } => put(1.0, [plane.to_world(s.start()), plane.to_world(s.mid()), plane.to_world(s.end())]),
+    Seg::Line { a, b } => put(0.0, [plane.to_world(a), plane.to_world(b), DVec3::ZERO, DVec3::ZERO]),
+    Seg::Arc { .. } => {
+      put(1.0, [plane.to_world(s.start()), plane.to_world(s.mid()), plane.to_world(s.end()), DVec3::ZERO])
+    }
     Seg::Circle { center, radius, ccw } => {
       let n = if ccw { plane.normal() } else { -plane.normal() };
-      put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0)])
+      put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0), DVec3::ZERO])
     }
+    Seg::Bezier { p } => put(3.0, p.map(|q| plane.to_world(q))),
   }
 }
 

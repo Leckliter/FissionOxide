@@ -711,3 +711,24 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
   assert_eq!(s.model.bodies.len(), 2, "the block becomes the disc and the rest");
   assert!((total_volume(&s) - 8000.0).abs() < 1e-6);
 }
+
+#[test]
+fn splines_and_sketch_chamfers_make_profiles() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, 8], [20, 3], [30, 10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[30, 10], [30, -10], [0, -10], [0, 0]]}));
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["profiles"].as_array().unwrap().len(), 1, "{info}");
+  let r = run(&mut s, "extrude", json!({"distance": 5}));
+  assert!(r["error"].is_null(), "{r}");
+  let v = total_volume(&s);
+  assert!(v > 30.0 * 10.0 * 5.0 && v < 30.0 * 20.0 * 5.0, "{v}");
+  assert!(s.model.bodies[0].faces().iter().any(|f| f.kind == clf_kernel::SurfaceKind::Other), "a smooth spline face");
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c: Vec<u64> = serde_json::from_value(run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}))["curves"].clone()).unwrap();
+  run(&mut s, "sketch.chamfer", json!({"curves": [c[0], c[1]], "distance": 2, "distance2": 3}));
+  run(&mut s, "extrude", json!({"distance": 1}));
+  assert!((total_volume(&s) - (200.0 - 3.0)).abs() < 1e-6, "{}", total_volume(&s));
+}

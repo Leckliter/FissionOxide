@@ -55,7 +55,9 @@
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
@@ -193,10 +195,10 @@ bool shape_is_null(const Shape &s) { return s.s.IsNull(); }
 int32_t shape_type(const Shape &s) { return s.s.IsNull() ? -1 : static_cast<int32_t>(s.s.ShapeType()); }
 
 namespace {
-// Edge `seg` of a segment list (10 doubles each, see make_face).
+// Edge `seg` of a segment list (13 doubles each, see make_face).
 TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
-  size_t o = seg * 10;
-  need(segs, o + 10, "segments");
+  size_t o = seg * 13;
+  need(segs, o + 13, "segments");
   int kind = static_cast<int>(segs[o]);
   if (kind == 0) {
     BRepBuilderAPI_MakeEdge me(pnt(segs, o + 1), pnt(segs, o + 4));
@@ -210,6 +212,14 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     if (!me.IsDone()) throw std::runtime_error("degenerate arc in profile");
     return me.Edge();
   }
+  if (kind == 3) {
+    TColgp_Array1OfPnt poles(1, 4);
+    for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
+    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles);
+    BRepBuilderAPI_MakeEdge me(bz);
+    if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
+    return me.Edge();
+  }
   gp_Circ c(gp_Ax2(pnt(segs, o + 1), dir(segs, o + 4)), segs[o + 7]);
   BRepBuilderAPI_MakeEdge me(c);
   if (!me.IsDone()) throw std::runtime_error("degenerate circle in profile");
@@ -218,7 +228,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
 } // namespace
 
 // plane: origin(3) normal(3) xdir(3)
-// segs: 10 doubles each: kind (0 line, 1 arc through 3 points, 2 circle), p0, p1, p2
+// segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
@@ -717,7 +727,7 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
   CLF_TRY
   BRepBuilderAPI_MakeWire mw;
-  for (size_t i = 0; i * 10 < segs.size(); ++i) {
+  for (size_t i = 0; i * 13 < segs.size(); ++i) {
     mw.Add(seg_edge(segs, i));
     if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
   }
