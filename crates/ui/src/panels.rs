@@ -395,23 +395,9 @@ impl Cmd {
   }
 }
 
-const CONSTRAINTS: [&str; 12] = [
-  "horizontal",
-  "vertical",
-  "coincident",
-  "tangent",
-  "equal",
-  "parallel",
-  "perpendicular",
-  "fix",
-  "midpoint",
-  "concentric",
-  "collinear",
-  "symmetric",
-];
-
 fn constraint_info(kind: &str) -> (Icon, &'static str) {
   match kind {
+    "hv" => (Icon::HorizVert, "Horizontal/Vertical"),
     "horizontal" => (Icon::Horizontal, "Horizontal"),
     "vertical" => (Icon::Vertical, "Vertical"),
     "coincident" => (Icon::Coincident, "Coincident"),
@@ -425,51 +411,6 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
     "collinear" => (Icon::Collinear, "Collinear"),
     _ => (Icon::Symmetric, "Symmetry"),
   }
-}
-
-/// A tool group: the icon row with its label and drop-down underneath, then a separator.
-/// `menu` lists every command of the group (`None` entries are separators).
-fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[Option<Cmd>]) -> Rect {
-  let mut run = None;
-  let popup_id = egui::Id::new(("sketch-menu", label));
-  let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
-  let inner = ui.vertical(|ui| {
-    ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
-      for c in quick {
-        let (icon, name, hint) = c.info();
-        if icons::tool_button(ui, icon, name, hint, c.active(app)).clicked() {
-          run = Some(*c);
-        }
-      }
-    });
-    ui.add_space(3.0);
-    let w = ui.min_rect().width();
-    group_label(ui, label, w, open)
-  });
-  let label_resp = inner.inner;
-  egui::Popup::menu(&label_resp).id(popup_id).show(|ui| {
-    for item in menu {
-      match item {
-        Some(c) => {
-          let (icon, name, _) = c.info();
-          if icons::menu_item(ui, icon, name).clicked() {
-            run = Some(*c);
-            ui.close();
-          }
-        }
-        None => {
-          ui.separator();
-        }
-      }
-    }
-  });
-  separator(ui);
-  if let Some(c) = run {
-    c.run(app);
-  }
-  inner.response.rect
 }
 
 /// The group name with its drop-down chevron (clickable); light blue while its menu is open.
@@ -489,7 +430,7 @@ pub(crate) fn group_label(ui: &mut egui::Ui, label: &str, width: f32, open: bool
 }
 
 pub(crate) fn separator(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(9.0, 58.0), egui::Sense::hover());
+  let (r, _) = ui.allocate_exact_size(vec2(7.0, 58.0), egui::Sense::hover());
   ui.painter().line_segment([r.center_top() + vec2(0.0, 4.0), r.center_bottom()], Stroke::new(1.0, theme::SEPARATOR));
 }
 
@@ -518,7 +459,6 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let tab = app.tab;
                 match tab {
-                  Tab::Sketch => sketch_toolbar(app, ui),
                   other if crate::menus::tab_toolbar(app, ui, other) => {}
                   other => {
                     ui.add_space(12.0);
@@ -540,7 +480,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
 fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   ui.vertical(|ui| {
     ui.add_space(9.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(104.0, 76.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(92.0, 76.0), egui::Sense::click());
     let fill = if resp.hovered() { theme::HOVER } else { Color32::from_rgb(248, 248, 248) };
     ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
     ui.painter().text(
@@ -599,79 +539,6 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       }
     }
   });
-}
-
-fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
-  use Cmd::*;
-  let t = SketchTool;
-  let _ = group(
-    app,
-    ui,
-    "CREATE",
-    &[
-      t(Tool::Line),
-      t(Tool::Rect),
-      t(Tool::Circle),
-      t(Tool::Arc3),
-      t(Tool::Polygon),
-      t(Tool::Slot),
-      t(Tool::Dimension),
-    ],
-    &[
-      Some(t(Tool::Line)),
-      None,
-      Some(t(Tool::Rect)),
-      Some(t(Tool::CenterRect)),
-      Some(t(Tool::Circle)),
-      Some(t(Tool::Arc3)),
-      Some(t(Tool::CenterArc)),
-      Some(t(Tool::Polygon)),
-      Some(t(Tool::Slot)),
-      Some(t(Tool::Point)),
-      None,
-      Some(t(Tool::Dimension)),
-    ],
-  );
-  let _ = group(app, ui, "MODIFY", &[Construction], &[Some(Construction)]);
-  // constraints: a compact two-row grid, as in Fusion's CONSTRAINTS group
-  let mut run = None;
-  let inner = ui.vertical(|ui| {
-    ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
-    ui.spacing_mut().interact_size.y = 18.0;
-    ui.add_space(2.0);
-    for row in CONSTRAINTS.chunks(6) {
-      ui.horizontal(|ui| {
-        for kind in row {
-          let (icon, name) = constraint_info(kind);
-          if icons::icon_button(ui, icon, 18.0, name, false, None).clicked() {
-            run = Some(Constraint(kind));
-          }
-        }
-      });
-    }
-    ui.add_space(3.0);
-    let w = ui.min_rect().width();
-    group_label(ui, "CONSTRAINTS", w, egui::Popup::is_id_open(ui.ctx(), egui::Id::new("constraints-menu")))
-  });
-  egui::Popup::menu(&inner.inner).id(egui::Id::new("constraints-menu")).show(|ui| {
-    for kind in CONSTRAINTS {
-      let (icon, name) = constraint_info(kind);
-      if icons::menu_item(ui, icon, name).clicked() {
-        run = Some(Constraint(kind));
-        ui.close();
-      }
-    }
-  });
-  separator(ui);
-  if let Some(c) = run {
-    c.run(app);
-  }
-  let _ = group(app, ui, "INSPECT", &[Dialog(Kind::Inspect)], &[Some(Dialog(Kind::Inspect))]);
-  let _ = group(app, ui, "SELECT", &[t(Tool::Select)], &[Some(t(Tool::Select))]);
-  // the FINISH SKETCH group sits on light blue, like the contextual SKETCH tab
-  let bg = ui.painter().add(egui::Shape::Noop);
-  let r = group(app, ui, "FINISH SKETCH", &[FinishSketch], &[Some(FinishSketch)]);
-  ui.painter().set(bg, egui::Shape::rect_filled(r.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
 }
 
 // ---------------------------------------------------------------- canvas overlays
@@ -1176,7 +1043,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui));
             });
           };
-          row(ui, "Construction", &mut |ui| {
+          row(ui, "Linetype", &mut |ui| {
             if icons::icon_button(ui, Icon::Construction, 22.0, "Normal/Construction (X)", false, None).clicked() {
               app.toggle_construction();
             }
@@ -1192,12 +1059,25 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "Snap", &mut |ui| {
             ui.checkbox(&mut app.snap, "");
           });
-          row(ui, "Show Dimensions", &mut |ui| {
+          // options CLFusion doesn't have yet are listed, greyed, as in Fusion's palette
+          for (label, on) in [("Slice", false), ("Profile", true), ("Points", true)] {
+            row(ui, label, &mut |ui| {
+              let mut v = on;
+              ui.add_enabled(false, egui::Checkbox::without_text(&mut v)).on_disabled_hover_text("Not in CLFusion yet");
+            });
+          }
+          row(ui, "Dimensions", &mut |ui| {
             ui.checkbox(&mut app.show_dims, "");
           });
-          row(ui, "Show Constraints", &mut |ui| {
+          row(ui, "Constraints", &mut |ui| {
             ui.checkbox(&mut app.show_constraints, "");
           });
+          for (label, on) in [("Projected Geometries", true), ("Construction Geometries", true), ("3D Sketch", false)] {
+            row(ui, label, &mut |ui| {
+              let mut v = on;
+              ui.add_enabled(false, egui::Checkbox::without_text(&mut v)).on_disabled_hover_text("Not in CLFusion yet");
+            });
+          }
           if let Some(r) = app.s.model.sketches.get(&sk) {
             ui.add_space(4.0);
             let (txt, col) = if !r.report.ok() {
@@ -1603,6 +1483,42 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
       Sel::SketchCurve { curve, .. } => curves.push(curve.0),
       _ => {}
     }
+  }
+  // Horizontal/Vertical picks per line (or point pair) whichever is closer
+  if kind == "hv" {
+    let Ok(sketch) = app.s.design.sketch(sk) else { return };
+    let mut jobs: Vec<(&'static str, serde_json::Value)> = Vec::new();
+    if points.len() == 2 && curves.is_empty() {
+      if let (Some(a), Some(b)) =
+        (sketch.pos(clf_engine::sketch::PointId(points[0])), sketch.pos(clf_engine::sketch::PointId(points[1])))
+      {
+        let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
+        jobs.push((kind, json!({"sketch": sk.0, "type": kind, "points": points})));
+      }
+    }
+    for c in &curves {
+      let ends = sketch.curve_points(clf_engine::sketch::CurveId(*c));
+      if let Some(curve) = sketch.curve(clf_engine::sketch::CurveId(*c))
+        && matches!(curve.kind, clf_engine::sketch::CurveKind::Line { .. })
+        && let (Some(a), Some(b)) =
+          (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p)))
+      {
+        let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
+        jobs.push((kind, json!({"sketch": sk.0, "type": kind, "curves": [c]})));
+      }
+    }
+    if jobs.is_empty() {
+      app.status = Some(("Horizontal/Vertical: select lines or two points".into(), false));
+      return;
+    }
+    let mut any = false;
+    for (_, params) in jobs {
+      any |= app.run("sketch.constrain", params).is_some();
+    }
+    if any {
+      app.s.selection.clear();
+    }
+    return;
   }
   // H/V on several lines: one constraint each
   if matches!(kind, "horizontal" | "vertical" | "fix") && points.len() != 2 {

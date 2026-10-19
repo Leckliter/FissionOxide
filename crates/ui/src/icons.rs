@@ -195,6 +195,44 @@ pub enum Icon {
   Assistant,
   Gauge,
   Clock,
+  // sketch family
+  MidpointLine,
+  Rect3,
+  Circle2P,
+  Circle3P,
+  Circle2T,
+  Circle3T,
+  TangentArc,
+  PolygonCirc,
+  PolygonEdge,
+  Ellipse,
+  OverallSlot,
+  CenterPointSlot,
+  ArcSlot3,
+  ArcSlotCenter,
+  SplineFit,
+  SplineCtrl,
+  Conic,
+  SkText,
+  SkMirror,
+  SkCircPattern,
+  SkRectPattern,
+  Project,
+  Intersect,
+  Include3D,
+  ProjectSurface,
+  SkFillet,
+  SkChamfer,
+  BlendCurve,
+  SkOffset,
+  SkTrim,
+  SkExtend,
+  SkBreak,
+  SkScale,
+  HorizVert,
+  Curvature,
+  PolygonCon,
+  FinishAuto,
 }
 
 #[derive(Clone, Copy)]
@@ -212,6 +250,14 @@ enum Tone {
   White,
   Purple,
   PurpleLight,
+  // CLFusion's own families: sketch (slate + teal vertices, coral edits), constraints (violet
+  // tiles) and construction geometry (amber)
+  Slate,
+  Teal,
+  Coral,
+  Violet,
+  VioletLight,
+  Amber,
 }
 
 /// Colour family of an icon's solids: blue for solid modelling, orange for surfaces and gold
@@ -244,7 +290,9 @@ impl Pen<'_> {
         Tone::Light => c.gamma_multiply(0.15),
         Tone::White => Color32::from_white_alpha(200),
         Tone::Purple => c.gamma_multiply(0.35),
-        Tone::PurpleLight => c.gamma_multiply(0.2),
+        Tone::PurpleLight | Tone::VioletLight => c.gamma_multiply(0.15),
+        Tone::Slate | Tone::Teal | Tone::Coral | Tone::Violet => c,
+        Tone::Amber => c.gamma_multiply(0.4),
         Tone::Ink | Tone::Red => c,
       },
       None => match t {
@@ -273,6 +321,12 @@ impl Pen<'_> {
         Tone::White => Color32::WHITE,
         Tone::Purple => Color32::from_rgb(150, 96, 214),
         Tone::PurpleLight => Color32::from_rgb(204, 172, 240),
+        Tone::Slate => Color32::from_rgb(52, 64, 82),
+        Tone::Teal => Color32::from_rgb(0, 150, 160),
+        Tone::Coral => Color32::from_rgb(236, 98, 72),
+        Tone::Violet => Color32::from_rgb(120, 70, 188),
+        Tone::VioletLight => Color32::from_rgb(237, 229, 250),
+        Tone::Amber => Color32::from_rgb(236, 164, 44),
       },
     }
   }
@@ -345,6 +399,34 @@ impl Pen<'_> {
     }
   }
 
+  /// Sketch family: a geometry stroke.
+  fn sk(&self, pts: &[(f32, f32)], t: Tone) {
+    self.p.add(Shape::line(self.pts(pts), Stroke::new(self.w * 1.15, self.col(t))));
+  }
+
+  /// Sketch family: a closed geometry stroke.
+  fn skc(&self, pts: &[(f32, f32)], t: Tone) {
+    self.p.add(Shape::closed_line(self.pts(pts), Stroke::new(self.w * 1.15, self.col(t))));
+  }
+
+  /// Sketch family: an arc stroke.
+  fn ska(&self, c: (f32, f32), rad: f32, a0: f32, a1: f32, t: Tone) {
+    self.p.add(Shape::line(self.arc_pts(c, rad, rad, a0, a1), Stroke::new(self.w * 1.15, self.col(t))));
+  }
+
+  /// Sketch family: a vertex, a hollow teal square (Fusion uses filled dots).
+  fn vtx(&self, c: (f32, f32)) {
+    let h = (self.r.width() * 0.075).max(2.2);
+    let rect = Rect::from_center_size(self.u(c.0, c.1), Vec2::splat(h * 2.0));
+    self.p.rect(
+      rect,
+      0.5,
+      self.col(Tone::White),
+      Stroke::new(self.w * 0.9, self.col(Tone::Teal)),
+      egui::StrokeKind::Inside,
+    );
+  }
+
   fn dot(&self, c: (f32, f32), t: Tone) {
     let rad = (self.r.width() * 0.07).max(1.6);
     self.p.circle_filled(self.u(c.0, c.1), rad, self.col(t));
@@ -403,6 +485,27 @@ impl Pen<'_> {
   }
 }
 
+fn is_constraint(icon: Icon) -> bool {
+  matches!(
+    icon,
+    Icon::Coincident
+      | Icon::Horizontal
+      | Icon::Vertical
+      | Icon::HorizVert
+      | Icon::Parallel
+      | Icon::Perpendicular
+      | Icon::Tangent
+      | Icon::Equal
+      | Icon::Concentric
+      | Icon::Midpoint
+      | Icon::Collinear
+      | Icon::Symmetric
+      | Icon::Fix
+      | Icon::Curvature
+      | Icon::PolygonCon
+  )
+}
+
 /// Draws `icon` into `r` in one flat colour.
 pub fn draw(p: &Painter, r: Rect, icon: Icon, c: Color32) {
   paint(p, r, icon, Some(c), Tint::Blue);
@@ -423,12 +526,23 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
   let w = (r.width() / 16.0).clamp(1.0, 1.8);
   let k = Pen { p, r, mono, tint, w };
+  if mono.is_none() && is_constraint(icon) {
+    // constraints sit on a soft violet tile
+    p.rect(
+      r.expand(r.width() * 0.08),
+      r.width() * 0.2,
+      k.col(VioletLight),
+      Stroke::new(1.0, Color32::from_rgb(206, 190, 236)),
+      egui::StrokeKind::Inside,
+    );
+  }
   match icon {
     Icon::Sketch => {
       k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
-      for (x, y) in [(0.08, 0.14), (0.78, 0.14), (0.08, 0.78)] {
-        k.fill(&[(x - 0.07, y - 0.07), (x + 0.07, y - 0.07), (x + 0.07, y + 0.07), (x - 0.07, y + 0.07)], Ink);
-      }
+      k.skc(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], Slate);
+      k.vtx((0.08, 0.14));
+      k.vtx((0.78, 0.14));
+      k.vtx((0.08, 0.78));
       k.thick((0.78, 0.58), (0.78, 0.98), Green, 2.2);
       k.thick((0.58, 0.78), (0.98, 0.78), Green, 2.2);
     }
@@ -504,8 +618,10 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       }
     }
     Icon::Plane => {
-      k.solid(&[(0.06, 0.82), (0.06, 0.28), (0.4, 0.08), (0.4, 0.62)], Green);
-      k.solid(&[(0.5, 0.92), (0.5, 0.38), (0.86, 0.18), (0.86, 0.72)], Orange);
+      k.skc(&[(0.04, 0.9), (0.28, 0.6), (0.96, 0.6), (0.72, 0.9)], Slate);
+      k.solid(&[(0.04, 0.42), (0.28, 0.1), (0.96, 0.1), (0.72, 0.42)], Amber);
+      k.thick((0.5, 0.78), (0.5, 0.36), Slate, 1.0);
+      k.arrow_head((0.5, 0.3), (0.0, -1.0), 0.12, Slate);
     }
     Icon::Measure => {
       k.solid(&[(0.04, 0.44), (0.96, 0.44), (0.96, 0.72), (0.04, 0.72)], Orange);
@@ -542,35 +658,40 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.46, 0.34), (0.46, 0.98), (0.62, 0.84), (0.82, 0.84)], White);
     }
     Icon::Line => {
-      k.line((0.15, 0.85), (0.85, 0.15), Ink);
-      k.dot((0.15, 0.85), Blue);
-      k.dot((0.85, 0.15), Blue);
+      k.sk(&[(0.14, 0.86), (0.86, 0.14)], Slate);
+      k.vtx((0.14, 0.86));
+      k.vtx((0.86, 0.14));
     }
     Icon::Rect => {
-      k.closed(&[(0.1, 0.25), (0.9, 0.25), (0.9, 0.8), (0.1, 0.8)], Ink);
-      k.dot((0.1, 0.8), Blue);
-      k.dot((0.9, 0.25), Blue);
+      k.skc(&[(0.1, 0.22), (0.9, 0.22), (0.9, 0.78), (0.1, 0.78)], Slate);
+      k.vtx((0.1, 0.78));
+      k.vtx((0.9, 0.22));
     }
     Icon::CenterRect => {
-      k.closed(&[(0.1, 0.25), (0.9, 0.25), (0.9, 0.8), (0.1, 0.8)], Ink);
-      k.dot((0.5, 0.525), Blue);
-      k.dot((0.9, 0.25), Blue);
+      k.skc(&[(0.1, 0.22), (0.9, 0.22), (0.9, 0.78), (0.1, 0.78)], Slate);
+      k.dashed((0.5, 0.5), (0.9, 0.22), Slate);
+      k.vtx((0.5, 0.5));
+      k.vtx((0.9, 0.22));
     }
     Icon::Circle => {
-      k.circle((0.5, 0.5), 0.38, None, Some(Ink));
-      k.line((0.5, 0.5), (0.77, 0.23), Ink);
-      k.dot((0.5, 0.5), Blue);
+      k.ska((0.5, 0.5), 0.38, 0.0, TAU, Slate);
+      k.dashed((0.5, 0.5), (0.77, 0.23), Slate);
+      k.vtx((0.5, 0.5));
+      k.vtx((0.77, 0.23));
     }
     Icon::Arc3 => {
-      k.arc((0.5, 0.78), 0.4, 0.0, PI, Ink);
-      k.dot((0.1, 0.78), Blue);
-      k.dot((0.9, 0.78), Blue);
-      k.dot((0.5, 0.38), Blue);
+      k.ska((0.5, 0.78), 0.4, 0.0, PI, Slate);
+      k.vtx((0.1, 0.78));
+      k.vtx((0.9, 0.78));
+      k.vtx((0.5, 0.38));
     }
     Icon::CenterArc => {
-      k.arc((0.25, 0.75), 0.6, 0.0, FRAC_PI_2, Ink);
-      k.dashed((0.25, 0.75), (0.85, 0.75), Ink);
-      k.dot((0.25, 0.75), Blue);
+      k.ska((0.22, 0.78), 0.6, 0.0, FRAC_PI_2, Slate);
+      k.dashed((0.22, 0.78), (0.82, 0.78), Slate);
+      k.dashed((0.22, 0.78), (0.22, 0.18), Slate);
+      k.vtx((0.22, 0.78));
+      k.vtx((0.82, 0.78));
+      k.vtx((0.22, 0.18));
     }
     Icon::Polygon => {
       let pts: Vec<(f32, f32)> = (0..6)
@@ -579,95 +700,92 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
           (0.5 + t.cos() * 0.4, 0.5 + t.sin() * 0.4)
         })
         .collect();
-      k.closed(&pts, Ink);
-      k.dot((0.5, 0.5), Blue);
+      k.skc(&pts, Slate);
+      k.dashed((0.5, 0.5), (0.9, 0.5), Slate);
+      k.vtx((0.5, 0.5));
+      k.vtx((0.9, 0.5));
     }
     Icon::Slot => {
-      k.arc((0.3, 0.5), 0.22, FRAC_PI_2, 1.5 * PI, Ink);
-      k.arc((0.7, 0.5), 0.22, -FRAC_PI_2, FRAC_PI_2, Ink);
-      k.line((0.3, 0.28), (0.7, 0.28), Ink);
-      k.line((0.3, 0.72), (0.7, 0.72), Ink);
-      k.dot((0.3, 0.5), Blue);
-      k.dot((0.7, 0.5), Blue);
+      k.ska((0.3, 0.5), 0.22, FRAC_PI_2, 1.5 * PI, Slate);
+      k.ska((0.7, 0.5), 0.22, -FRAC_PI_2, FRAC_PI_2, Slate);
+      k.sk(&[(0.3, 0.28), (0.7, 0.28)], Slate);
+      k.sk(&[(0.3, 0.72), (0.7, 0.72)], Slate);
+      k.dashed((0.3, 0.5), (0.7, 0.5), Slate);
+      k.vtx((0.3, 0.5));
+      k.vtx((0.7, 0.5));
     }
     Icon::Point => {
-      k.circle((0.5, 0.5), 0.14, Some(Blue), Some(Blue));
-      k.line((0.5, 0.15), (0.5, 0.3), Ink);
-      k.line((0.5, 0.7), (0.5, 0.85), Ink);
-      k.line((0.15, 0.5), (0.3, 0.5), Ink);
-      k.line((0.7, 0.5), (0.85, 0.5), Ink);
+      k.sk(&[(0.5, 0.1), (0.5, 0.3)], Slate);
+      k.sk(&[(0.5, 0.7), (0.5, 0.9)], Slate);
+      k.sk(&[(0.1, 0.5), (0.3, 0.5)], Slate);
+      k.sk(&[(0.7, 0.5), (0.9, 0.5)], Slate);
+      k.vtx((0.5, 0.5));
     }
     Icon::Dimension => {
-      k.line((0.1, 0.55), (0.1, 0.92), Ink);
-      k.line((0.9, 0.55), (0.9, 0.92), Ink);
-      k.line((0.14, 0.75), (0.86, 0.75), Ink);
-      k.arrow_head((0.11, 0.75), (-1.0, 0.0), 0.14, Ink);
-      k.arrow_head((0.89, 0.75), (1.0, 0.0), 0.14, Ink);
-      k.text((0.5, 0.36), "10", 0.42, Blue);
+      k.sk(&[(0.1, 0.5), (0.1, 0.94)], Slate);
+      k.sk(&[(0.9, 0.5), (0.9, 0.94)], Slate);
+      k.sk(&[(0.16, 0.72), (0.84, 0.72)], Teal);
+      k.arrow_head((0.11, 0.72), (-1.0, 0.0), 0.14, Teal);
+      k.arrow_head((0.89, 0.72), (1.0, 0.0), 0.14, Teal);
+      k.text((0.5, 0.32), "10", 0.42, Slate);
     }
     Icon::Construction => {
-      k.dashed((0.1, 0.85), (0.9, 0.15), Orange);
-      k.dot((0.1, 0.85), Ink);
-      k.dot((0.9, 0.15), Ink);
+      k.dashed((0.12, 0.88), (0.88, 0.12), Orange);
+      k.vtx((0.12, 0.88));
+      k.vtx((0.88, 0.12));
     }
     Icon::Coincident => {
-      k.line((0.08, 0.82), (0.5, 0.5), Ink);
-      k.line((0.5, 0.5), (0.92, 0.78), Ink);
-      k.circle((0.5, 0.5), 0.12, Some(Red), Some(Red));
+      k.sk(&[(0.1, 0.78), (0.5, 0.5)], Violet);
+      k.sk(&[(0.5, 0.5), (0.92, 0.72)], Violet);
+      k.circle((0.5, 0.5), 0.12, Some(Violet), None);
     }
     Icon::Horizontal => {
-      k.line((0.1, 0.62), (0.9, 0.62), Ink);
-      k.dot((0.1, 0.62), Red);
-      k.dot((0.9, 0.62), Red);
-      k.text((0.5, 0.28), "H", 0.4, Red);
+      k.thick((0.1, 0.62), (0.9, 0.62), Violet, 1.4);
+      k.text((0.5, 0.3), "H", 0.4, Violet);
     }
     Icon::Vertical => {
-      k.line((0.62, 0.1), (0.62, 0.9), Ink);
-      k.dot((0.62, 0.1), Red);
-      k.dot((0.62, 0.9), Red);
-      k.text((0.28, 0.5), "V", 0.4, Red);
+      k.thick((0.64, 0.1), (0.64, 0.9), Violet, 1.4);
+      k.text((0.3, 0.5), "V", 0.4, Violet);
     }
     Icon::Parallel => {
-      k.line((0.12, 0.8), (0.52, 0.12), Ink);
-      k.line((0.48, 0.88), (0.88, 0.2), Red);
+      k.thick((0.14, 0.82), (0.52, 0.14), Violet, 1.4);
+      k.thick((0.48, 0.86), (0.86, 0.18), Violet, 1.4);
     }
     Icon::Perpendicular => {
-      k.line((0.1, 0.85), (0.9, 0.85), Ink);
-      k.line((0.5, 0.85), (0.5, 0.12), Red);
-      k.closed(&[(0.5, 0.85), (0.5, 0.68), (0.67, 0.68), (0.67, 0.85)], Ink);
+      k.thick((0.1, 0.86), (0.9, 0.86), Violet, 1.4);
+      k.thick((0.3, 0.86), (0.3, 0.12), Violet, 1.4);
+      k.sk(&[(0.3, 0.68), (0.48, 0.68), (0.48, 0.86)], Violet);
     }
     Icon::Tangent => {
-      k.circle((0.5, 0.62), 0.28, None, Some(Ink));
-      k.line((0.04, 0.34), (0.96, 0.34), Red);
+      k.ska((0.5, 0.62), 0.26, 0.0, TAU, Violet);
+      k.thick((0.06, 0.36), (0.94, 0.36), Violet, 1.4);
     }
     Icon::Equal => {
-      k.thick((0.15, 0.38), (0.85, 0.38), Red, 1.4);
-      k.thick((0.15, 0.62), (0.85, 0.62), Red, 1.4);
+      k.thick((0.16, 0.38), (0.84, 0.38), Violet, 1.8);
+      k.thick((0.16, 0.62), (0.84, 0.62), Violet, 1.8);
     }
     Icon::Concentric => {
-      k.circle((0.5, 0.5), 0.4, None, Some(Ink));
-      k.circle((0.5, 0.5), 0.2, None, Some(Red));
-      k.dot((0.5, 0.5), Ink);
+      k.ska((0.5, 0.5), 0.4, 0.0, TAU, Violet);
+      k.ska((0.5, 0.5), 0.2, 0.0, TAU, Violet);
     }
     Icon::Midpoint => {
-      k.line((0.08, 0.72), (0.92, 0.28), Ink);
-      k.fill(&[(0.5, 0.33), (0.62, 0.57), (0.38, 0.57)], Red);
+      k.sk(&[(0.08, 0.72), (0.92, 0.28)], Violet);
+      k.fill(&[(0.5, 0.3), (0.64, 0.58), (0.36, 0.58)], Violet);
     }
     Icon::Collinear => {
-      k.line((0.05, 0.78), (0.4, 0.57), Ink);
-      k.line((0.6, 0.45), (0.95, 0.24), Red);
-      k.dashed((0.4, 0.57), (0.6, 0.45), Ink);
+      k.thick((0.06, 0.78), (0.38, 0.58), Violet, 1.4);
+      k.thick((0.62, 0.42), (0.94, 0.22), Violet, 1.4);
+      k.dashed((0.38, 0.58), (0.62, 0.42), Violet);
     }
     Icon::Symmetric => {
-      k.dashed((0.5, 0.04), (0.5, 0.96), Ink);
-      k.dot((0.18, 0.5), Red);
-      k.dot((0.82, 0.5), Red);
-      k.line((0.24, 0.5), (0.38, 0.5), Ink);
-      k.line((0.62, 0.5), (0.76, 0.5), Ink);
+      k.dashed((0.5, 0.06), (0.5, 0.94), Violet);
+      k.circle((0.2, 0.5), 0.09, Some(Violet), None);
+      k.circle((0.8, 0.5), 0.09, Some(Violet), None);
     }
     Icon::Fix => {
-      k.arc((0.5, 0.45), 0.2, 0.0, PI, Ink);
-      k.solid(&[(0.2, 0.45), (0.8, 0.45), (0.8, 0.9), (0.2, 0.9)], Orange);
+      k.ska((0.5, 0.44), 0.2, 0.0, PI, Violet);
+      k.fill(&[(0.22, 0.44), (0.78, 0.44), (0.78, 0.88), (0.22, 0.88)], Violet);
+      k.circle((0.5, 0.64), 0.06, Some(VioletLight), None);
     }
     Icon::Finish => {
       k.circle((0.5, 0.5), 0.46, Some(Green), None);
@@ -1007,17 +1125,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.2, 0.8), (0.55, 0.45), Green, 1.2);
     }
     Icon::PlaneAlt => {
-      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Orange);
-      k.thick((0.18, 0.92), (0.88, 0.1), Ink, 0.9);
+      k.solid(&[(0.04, 0.78), (0.3, 0.26), (0.96, 0.26), (0.7, 0.78)], Amber);
+      k.ska((0.18, 0.86), 0.3, 0.2, 1.2, Slate);
     }
     Icon::Axis => {
-      k.solid(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.9), (0.3, 0.9)], Light);
-      k.thick((0.08, 0.96), (0.92, 0.04), Orange, 1.8);
+      k.ellipse((0.4, 0.62), 0.2, 0.08, Some(Light), Slate);
+      k.thick((0.08, 0.96), (0.92, 0.04), Amber, 2.0);
     }
     Icon::CPoint => {
-      k.line((0.5, 0.06), (0.5, 0.94), Ink);
-      k.line((0.06, 0.5), (0.94, 0.5), Ink);
-      k.circle((0.5, 0.5), 0.2, Some(Orange), Some(Orange));
+      k.sk(&[(0.5, 0.06), (0.5, 0.94)], Slate);
+      k.sk(&[(0.06, 0.5), (0.94, 0.5)], Slate);
+      k.circle((0.5, 0.5), 0.2, Some(Amber), Some(Amber));
     }
     Icon::Interference => {
       k.solid(&[(0.06, 0.06), (0.62, 0.06), (0.62, 0.62), (0.06, 0.62)], White);
@@ -1270,6 +1388,251 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.block(0.02, 0.48, 0.38, 0.92, 0.14, BlueLight, Blue, BlueDark);
       k.block(0.5, 0.3, 0.84, 0.72, 0.14, BlueLight, Blue, BlueDark);
     }
+    Icon::MidpointLine => {
+      k.sk(&[(0.1, 0.9), (0.9, 0.1)], Slate);
+      k.vtx((0.5, 0.5));
+      k.vtx((0.9, 0.1));
+    }
+    Icon::Rect3 => {
+      k.skc(&[(0.06, 0.56), (0.44, 0.14), (0.94, 0.48), (0.56, 0.9)], Slate);
+      k.vtx((0.06, 0.56));
+      k.vtx((0.44, 0.14));
+      k.vtx((0.94, 0.48));
+    }
+    Icon::Circle2P | Icon::Circle3P => {
+      k.ska((0.5, 0.5), 0.38, 0.0, TAU, Slate);
+      if icon == Icon::Circle2P {
+        k.dashed((0.12, 0.5), (0.88, 0.5), Slate);
+        k.vtx((0.12, 0.5));
+        k.vtx((0.88, 0.5));
+      } else {
+        k.vtx((0.12, 0.5));
+        k.vtx((0.69, 0.17));
+        k.vtx((0.69, 0.83));
+      }
+    }
+    Icon::Circle2T | Icon::Circle3T => {
+      if icon == Icon::Circle2T {
+        k.sk(&[(0.04, 0.24), (0.96, 0.24)], Slate);
+        k.sk(&[(0.2, 0.04), (0.2, 0.96)], Slate);
+        k.ska((0.5, 0.54), 0.3, 0.0, TAU, Teal);
+        k.vtx((0.5, 0.24));
+        k.vtx((0.2, 0.54));
+      } else {
+        k.skc(&[(0.5, 0.04), (0.96, 0.86), (0.04, 0.86)], Slate);
+        k.ska((0.5, 0.58), 0.26, 0.0, TAU, Teal);
+      }
+    }
+    Icon::TangentArc => {
+      k.sk(&[(0.04, 0.82), (0.44, 0.82)], Slate);
+      k.ska((0.44, 0.5), 0.32, -FRAC_PI_2, FRAC_PI_2, Teal);
+      k.vtx((0.44, 0.82));
+      k.vtx((0.44, 0.18));
+    }
+    Icon::PolygonCirc | Icon::PolygonEdge => {
+      let pts: Vec<(f32, f32)> = (0..6)
+        .map(|i| {
+          let t = TAU * i as f32 / 6.0;
+          (0.5 + t.cos() * 0.42, 0.5 + t.sin() * 0.42)
+        })
+        .collect();
+      k.skc(&pts, Slate);
+      if icon == Icon::PolygonCirc {
+        k.ska((0.5, 0.5), 0.36, 0.0, TAU, Teal);
+        k.vtx((0.5, 0.5));
+      } else {
+        k.sk(&[pts[1], pts[2]], Teal);
+        k.vtx(pts[1]);
+        k.vtx(pts[2]);
+      }
+    }
+    Icon::Ellipse => {
+      k.p.add(Shape::closed_line(k.arc_pts((0.5, 0.5), 0.42, 0.26, 0.0, TAU), Stroke::new(w * 1.15, k.col(Slate))));
+      k.dashed((0.08, 0.5), (0.92, 0.5), Slate);
+      k.vtx((0.5, 0.5));
+      k.vtx((0.92, 0.5));
+    }
+    Icon::OverallSlot | Icon::CenterPointSlot => {
+      k.ska((0.3, 0.5), 0.22, FRAC_PI_2, 1.5 * PI, Slate);
+      k.ska((0.7, 0.5), 0.22, -FRAC_PI_2, FRAC_PI_2, Slate);
+      k.sk(&[(0.3, 0.28), (0.7, 0.28)], Slate);
+      k.sk(&[(0.3, 0.72), (0.7, 0.72)], Slate);
+      if icon == Icon::OverallSlot {
+        k.vtx((0.08, 0.5));
+        k.vtx((0.92, 0.5));
+      } else {
+        k.vtx((0.5, 0.5));
+        k.vtx((0.7, 0.5));
+      }
+    }
+    Icon::ArcSlot3 | Icon::ArcSlotCenter => {
+      k.ska((0.5, 1.0), 0.72, 0.6, PI - 0.6, Slate);
+      k.ska((0.5, 1.0), 0.38, 0.6, PI - 0.6, Slate);
+      k.ska((0.5, 1.0), 0.55, 0.6, PI - 0.6, Teal);
+      k.vtx((0.5 + 0.55 * 0.825, 1.0 - 0.55 * 0.565));
+      k.vtx((0.5 - 0.55 * 0.825, 1.0 - 0.55 * 0.565));
+      if icon == Icon::ArcSlot3 {
+        k.vtx((0.5, 0.45));
+      } else {
+        k.vtx((0.5, 0.94));
+      }
+    }
+    Icon::SplineFit | Icon::SplineCtrl => {
+      let curve: Vec<(f32, f32)> = (0..=20)
+        .map(|i| {
+          let t = i as f32 / 20.0;
+          (0.08 + 0.84 * t, 0.5 - 0.32 * (t * TAU * 0.9).sin())
+        })
+        .collect();
+      k.sk(&curve, Slate);
+      if icon == Icon::SplineFit {
+        k.vtx(curve[0]);
+        k.vtx(curve[7]);
+        k.vtx(curve[20]);
+      } else {
+        let ctrl = [(0.08, 0.5), (0.3, 0.06), (0.62, 0.94), (0.92, 0.5)];
+        for i in 0..3 {
+          k.dashed(ctrl[i], ctrl[i + 1], Teal);
+        }
+        for c in ctrl {
+          k.vtx(c);
+        }
+      }
+    }
+    Icon::Conic => {
+      k.dashed((0.08, 0.9), (0.5, 0.12), Slate);
+      k.dashed((0.5, 0.12), (0.92, 0.9), Slate);
+      let curve: Vec<(f32, f32)> = (0..=16)
+        .map(|i| {
+          let t = i as f32 / 16.0;
+          let x = 0.08 + 0.84 * t;
+          (x, 0.9 - 2.6 * (t * (1.0 - t)) * 0.5)
+        })
+        .collect();
+      k.sk(&curve, Teal);
+      k.vtx((0.08, 0.9));
+      k.vtx((0.92, 0.9));
+      k.vtx((0.5, 0.12));
+    }
+    Icon::SkText => {
+      k.text((0.42, 0.46), "A", 0.78, Slate);
+      k.sk(&[(0.06, 0.92), (0.94, 0.92)], Teal);
+    }
+    Icon::SkMirror => {
+      k.dashed((0.5, 0.04), (0.5, 0.96), Slate);
+      k.skc(&[(0.08, 0.84), (0.4, 0.84), (0.4, 0.2)], Slate);
+      k.skc(&[(0.92, 0.84), (0.6, 0.84), (0.6, 0.2)], Teal);
+    }
+    Icon::SkCircPattern => {
+      for i in 0..6 {
+        let t = TAU * i as f32 / 6.0 - FRAC_PI_2;
+        k.ska((0.5 + t.cos() * 0.34, 0.5 + t.sin() * 0.34), 0.1, 0.0, TAU, if i == 0 { Slate } else { Teal });
+      }
+      k.vtx((0.5, 0.5));
+    }
+    Icon::SkRectPattern => {
+      for (i, (x, y)) in [(0.08, 0.08), (0.56, 0.08), (0.08, 0.56), (0.56, 0.56)].into_iter().enumerate() {
+        k.skc(&[(x, y), (x + 0.36, y), (x + 0.36, y + 0.36), (x, y + 0.36)], if i == 0 { Slate } else { Teal });
+      }
+    }
+    Icon::Project | Icon::Intersect | Icon::Include3D | Icon::ProjectSurface => match icon {
+      Icon::Project => {
+        k.block(0.2, 0.18, 0.62, 0.48, 0.16, Light, Fill, Dark);
+        k.skc(&[(0.08, 0.7), (0.62, 0.7), (0.92, 0.94), (0.38, 0.94)], Teal);
+        k.dashed((0.42, 0.5), (0.5, 0.8), Slate);
+      }
+      Icon::Intersect => {
+        k.block(0.14, 0.36, 0.62, 0.92, 0.24, Light, Fill, Dark);
+        k.sk(&[(0.02, 0.62), (0.98, 0.42)], Teal);
+      }
+      Icon::Include3D => {
+        k.skc(&[(0.1, 0.36), (0.6, 0.36), (0.6, 0.9), (0.1, 0.9)], Slate);
+        k.sk(&[(0.1, 0.36), (0.36, 0.1), (0.88, 0.1), (0.6, 0.36)], Slate);
+        k.sk(&[(0.88, 0.1), (0.88, 0.64), (0.6, 0.9)], Teal);
+      }
+      _ => {
+        k.p.add(Shape::convex_polygon(k.arc_pts((0.5, 1.2), 0.7, 0.6, 0.6, PI - 0.6), k.col(Light), Stroke::NONE));
+        k.ska((0.5, 1.2), 0.62, 0.8, PI - 0.8, Teal);
+        k.dashed((0.5, 0.04), (0.5, 0.5), Slate);
+      }
+    },
+    Icon::SkFillet | Icon::SkChamfer => {
+      k.sk(&[(0.12, 0.92), (0.12, 0.5)], Slate);
+      k.sk(&[(0.5, 0.12), (0.92, 0.12)], Slate);
+      k.dashed((0.12, 0.5), (0.12, 0.12), Slate);
+      k.dashed((0.12, 0.12), (0.5, 0.12), Slate);
+      if icon == Icon::SkFillet {
+        k.ska((0.5, 0.5), 0.38, FRAC_PI_2, PI, Coral);
+      } else {
+        k.sk(&[(0.12, 0.5), (0.5, 0.12)], Coral);
+      }
+    }
+    Icon::BlendCurve => {
+      k.ska((0.0, 0.8), 0.28, 0.0, FRAC_PI_2, Slate);
+      k.ska((1.0, 0.2), 0.28, PI, 1.5 * PI, Slate);
+      let s: Vec<(f32, f32)> = (0..=12)
+        .map(|i| {
+          let t = i as f32 / 12.0;
+          (0.28 + 0.44 * t, 0.8 - 0.6 * (t * t * (3.0 - 2.0 * t)))
+        })
+        .collect();
+      k.sk(&s, Coral);
+    }
+    Icon::SkOffset => {
+      k.ska((0.5, 0.95), 0.36, 0.3, PI - 0.3, Slate);
+      k.ska((0.5, 0.95), 0.62, 0.3, PI - 0.3, Coral);
+    }
+    Icon::SkTrim => {
+      k.sk(&[(0.06, 0.6), (0.5, 0.6)], Slate);
+      k.dashed((0.5, 0.6), (0.94, 0.6), Coral);
+      k.sk(&[(0.5, 0.08), (0.5, 0.92)], Slate);
+      k.thick((0.66, 0.4), (0.86, 0.8), Coral, 1.2);
+      k.thick((0.86, 0.4), (0.66, 0.8), Coral, 1.2);
+    }
+    Icon::SkExtend => {
+      k.sk(&[(0.06, 0.6), (0.5, 0.6)], Slate);
+      k.dashed((0.5, 0.6), (0.86, 0.6), Coral);
+      k.sk(&[(0.88, 0.08), (0.88, 0.92)], Slate);
+      k.arrow_head((0.84, 0.6), (1.0, 0.0), 0.14, Coral);
+    }
+    Icon::SkBreak => {
+      k.sk(&[(0.06, 0.5), (0.42, 0.5)], Slate);
+      k.sk(&[(0.58, 0.5), (0.94, 0.5)], Slate);
+      k.sk(&[(0.42, 0.3), (0.42, 0.7)], Coral);
+      k.sk(&[(0.58, 0.3), (0.58, 0.7)], Coral);
+    }
+    Icon::SkScale => {
+      k.skc(&[(0.06, 0.5), (0.5, 0.5), (0.5, 0.94), (0.06, 0.94)], Slate);
+      k.dashed((0.06, 0.06), (0.94, 0.06), Coral);
+      k.dashed((0.94, 0.06), (0.94, 0.94), Coral);
+      k.dashed((0.94, 0.94), (0.06, 0.94), Coral);
+      k.dashed((0.06, 0.94), (0.06, 0.06), Coral);
+      k.vtx((0.06, 0.94));
+    }
+    Icon::HorizVert => {
+      k.thick((0.1, 0.86), (0.9, 0.86), Violet, 1.4);
+      k.thick((0.5, 0.86), (0.5, 0.1), Violet, 1.4);
+      k.sk(&[(0.3, 0.86), (0.3, 0.76)], Violet);
+      k.sk(&[(0.7, 0.86), (0.7, 0.76)], Violet);
+    }
+    Icon::Curvature => {
+      k.ska((0.1, 0.1), 0.42, -FRAC_PI_2, 0.0, Violet);
+      k.ska((0.9, 0.9), 0.42, FRAC_PI_2, PI, Violet);
+      k.circle((0.5, 0.5), 0.08, Some(Violet), None);
+    }
+    Icon::PolygonCon => {
+      let pts: Vec<(f32, f32)> = (0..5)
+        .map(|i| {
+          let t = TAU * i as f32 / 5.0 - FRAC_PI_2;
+          (0.5 + t.cos() * 0.42, 0.54 + t.sin() * 0.42)
+        })
+        .collect();
+      k.skc(&pts, Violet);
+    }
+    Icon::FinishAuto => {
+      k.circle((0.5, 0.5), 0.46, Some(Teal), None);
+      k.p.add(Shape::line(k.pts(&[(0.27, 0.52), (0.44, 0.68), (0.74, 0.34)]), Stroke::new(w * 2.2, k.col(White))));
+    }
     Icon::Flange | Icon::LoftedFlange => {
       let pts = [(0.22, 0.94), (0.22, 0.42), (0.3, 0.24), (0.46, 0.16), (0.92, 0.16)];
       k.p.add(Shape::line(k.pts(&pts), Stroke::new(w * 5.0, k.col(Blue))));
@@ -1360,12 +1723,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   }
 }
 
-/// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip).
-pub fn tool_button(ui: &mut egui::Ui, icon: Icon, label: &str, hint: &str, active: bool) -> egui::Response {
-  tool_button_tinted(ui, icon, Tint::Blue, label, hint, active)
-}
-
-/// [`tool_button`] with the icon's solids in the `tint` family.
+/// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip),
+/// its solids in the `tint` family.
 pub fn tool_button_tinted(
   ui: &mut egui::Ui,
   icon: Icon,
@@ -1373,10 +1732,12 @@ pub fn tool_button_tinted(
   label: &str,
   hint: &str,
   active: bool,
+  compact: bool,
 ) -> egui::Response {
-  let size = vec2(38.0, 38.0);
+  // compact: narrower buttons for wide groups (sketch constraints), same height
+  let size = if compact { vec2(31.0, 38.0) } else { vec2(35.0, 38.0) };
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-  let ic = Rect::from_center_size(rect.center(), Vec2::splat(28.0));
+  let ic = Rect::from_center_size(rect.center(), Vec2::splat(if compact { 23.0 } else { 27.0 }));
   if active {
     // Fusion shows the running tool as a white icon on solid blue
     ui.painter().rect_filled(rect, 2.0, theme::ACCENT);
@@ -1416,24 +1777,6 @@ pub fn icon_button(
     None => draw_color(ui.painter(), ir, icon),
   }
   if hint.is_empty() { resp } else { resp.on_hover_text(hint) }
-}
-
-/// A row in a drop-down menu: small icon then the command name.
-pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
-  let w = ui.available_width().max(190.0);
-  let (rect, resp) = ui.allocate_exact_size(vec2(w, 26.0), egui::Sense::click());
-  if resp.hovered() {
-    ui.painter().rect_filled(rect, 0.0, theme::HOVER);
-  }
-  draw_color(ui.painter(), Rect::from_min_size(rect.min + vec2(6.0, 4.0), Vec2::splat(18.0)), icon);
-  ui.painter().text(
-    rect.left_center() + vec2(32.0, 0.0),
-    egui::Align2::LEFT_CENTER,
-    label,
-    egui::FontId::proportional(12.5),
-    theme::TEXT,
-  );
-  resp
 }
 
 /// A small downward chevron.

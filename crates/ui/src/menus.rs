@@ -11,7 +11,7 @@ use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
-use crate::{App, theme};
+use crate::{App, Tool, theme};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Item {
@@ -480,6 +480,167 @@ const SURFACE: [Group; 2] = [
   },
 ];
 
+use Cmd::SketchTool as T;
+
+const SK_RECT: &[E] = &[
+  c("2-Point Rectangle", Icon::Rect, T(Tool::Rect)).k("R"),
+  x("3-Point Rectangle", Icon::Rect3),
+  c("Center Rectangle", Icon::CenterRect, T(Tool::CenterRect)),
+];
+
+const SK_CIRCLE: &[E] = &[
+  c("Center Diameter Circle", Icon::Circle, T(Tool::Circle)).k("C"),
+  x("2-Point Circle", Icon::Circle2P),
+  x("3-Point Circle", Icon::Circle3P),
+  x("2-Tangent Circle", Icon::Circle2T),
+  x("3-Tangent Circle", Icon::Circle3T),
+];
+
+const SK_ARC: &[E] = &[
+  c("3-Point Arc", Icon::Arc3, T(Tool::Arc3)).k("A"),
+  c("Center Point Arc", Icon::CenterArc, T(Tool::CenterArc)),
+  x("Tangent Arc", Icon::TangentArc),
+];
+
+const SK_POLYGON: &[E] = &[
+  x("Circumscribed Polygon", Icon::PolygonCirc),
+  c("Inscribed Polygon", Icon::Polygon, T(Tool::Polygon)),
+  x("Edge Polygon", Icon::PolygonEdge),
+];
+
+const SK_SLOT: &[E] = &[
+  c("Center to Center Slot", Icon::Slot, T(Tool::Slot)),
+  x("Overall Slot", Icon::OverallSlot),
+  x("Center Point Slot", Icon::CenterPointSlot),
+  x("Three Point Arc Slot", Icon::ArcSlot3),
+  x("Center Point Arc Slot", Icon::ArcSlotCenter),
+];
+
+const SK_SPLINE: &[E] = &[x("Fit Point Spline", Icon::SplineFit), x("Control Point Spline", Icon::SplineCtrl)];
+
+const SK_PROJECT: &[E] = &[
+  x("Project", Icon::Project).k("P"),
+  x("Intersect", Icon::Intersect),
+  x("Include 3D Geometry", Icon::Include3D),
+  x("Project To Surface", Icon::ProjectSurface),
+];
+
+const SKETCH_CREATE: &[E] = &[
+  c("Line", Icon::Line, T(Tool::Line)).k("L"),
+  x("Midpoint Line", Icon::MidpointLine),
+  E::Sub("Rectangle", SK_RECT),
+  E::Sub("Circle", SK_CIRCLE),
+  E::Sub("Arc", SK_ARC),
+  E::Sub("Polygon", SK_POLYGON),
+  x("Ellipse", Icon::Ellipse),
+  E::Sub("Slot", SK_SLOT),
+  E::Sub("Spline", SK_SPLINE),
+  x("Conic Curve", Icon::Conic),
+  c("Point", Icon::Point, T(Tool::Point)),
+  x("Text", Icon::SkText),
+  E::Sep,
+  x("Mirror", Icon::SkMirror),
+  x("Circular Pattern", Icon::SkCircPattern),
+  x("Rectangular Pattern", Icon::SkRectPattern),
+  E::Sep,
+  E::Sub("Project / Include", SK_PROJECT),
+  E::Sep,
+  c("Sketch Dimension", Icon::Dimension, T(Tool::Dimension)).k("D"),
+];
+
+const SK_CHAMFER: &[E] = &[
+  x("Equal Distance Chamfer", Icon::SkChamfer),
+  x("Distance-Distance Chamfer", Icon::SkChamfer),
+  x("Distance-Angle Chamfer", Icon::SkChamfer),
+];
+
+const SKETCH_MODIFY: &[E] = &[
+  x("Fillet", Icon::SkFillet),
+  E::Sub("Chamfer", SK_CHAMFER),
+  x("Blend Curve", Icon::BlendCurve),
+  x("Offset", Icon::SkOffset).k("O"),
+  E::Sep,
+  x("Trim", Icon::SkTrim).k("T"),
+  x("Extend", Icon::SkExtend),
+  x("Break", Icon::SkBreak),
+  x("Sketch Scale", Icon::SkScale),
+  x("Move/Copy", Icon::Move).k("M"),
+  E::Sep,
+  c("Change Parameters", Icon::Params, Cmd::Params),
+];
+
+const SKETCH_CONSTRAINTS: &[E] = &[
+  c("Horizontal/Vertical", Icon::HorizVert, Cmd::Constraint("hv")),
+  c("Coincident", Icon::Coincident, Cmd::Constraint("coincident")),
+  c("Tangent", Icon::Tangent, Cmd::Constraint("tangent")),
+  c("Equal", Icon::Equal, Cmd::Constraint("equal")),
+  c("Parallel", Icon::Parallel, Cmd::Constraint("parallel")),
+  c("Perpendicular", Icon::Perpendicular, Cmd::Constraint("perpendicular")),
+  c("Fix/UnFix", Icon::Fix, Cmd::Constraint("fix")),
+  c("MidPoint", Icon::Midpoint, Cmd::Constraint("midpoint")),
+  c("Concentric", Icon::Concentric, Cmd::Constraint("concentric")),
+  c("Collinear", Icon::Collinear, Cmd::Constraint("collinear")),
+  c("Symmetry", Icon::Symmetric, Cmd::Constraint("symmetric")),
+  x("Curvature", Icon::Curvature),
+  x("Polygon", Icon::PolygonCon),
+];
+
+// the sketch tab's INSERT has no Insert Component
+const SKETCH_INSERT: &[E] = &[
+  x("Decal", Icon::Decal),
+  x("Canvas", Icon::Canvas),
+  x("Insert SVG", Icon::InsertSvg),
+  x("Insert DXF", Icon::InsertDxf),
+  x("Insert Mesh", Icon::InsertMesh).g(),
+  x("Insert Fastener", Icon::Fastener).off(),
+  x("Duplicate With Joints", Icon::DuplicateJoints).off(),
+  x("Insert Derive", Icon::Derive),
+  x("Insert McMaster-Carr Component", Icon::McMaster).off(),
+  x("Insert a manufacturer part", Icon::Manufacturer).off(),
+  x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
+];
+
+const FINISH: &[E] =
+  &[c("Finish Sketch", Icon::Finish, Cmd::FinishSketch), x("Finish with AutoConstrain", Icon::FinishAuto)];
+
+/// The contextual SKETCH tab, shown only while a sketch is open.
+const SKETCH: [Group; 9] = [
+  Group {
+    label: "CREATE",
+    quick: &["Line", "2-Point Rectangle", "Center Diameter Circle", "Fit Point Spline", "Mirror", "Sketch Dimension"],
+    menu: SKETCH_CREATE,
+  },
+  Group { label: "MODIFY", quick: &["Fillet", "Trim", "Offset", "Blend Curve"], menu: SKETCH_MODIFY },
+  Group {
+    label: "CONSTRAINTS",
+    quick: &[
+      "Horizontal/Vertical",
+      "Coincident",
+      "Tangent",
+      "Equal",
+      "Parallel",
+      "Perpendicular",
+      "Fix/UnFix",
+      "MidPoint",
+      "Concentric",
+      "Collinear",
+      "Symmetry",
+      "Curvature",
+    ],
+    menu: SKETCH_CONSTRAINTS,
+  },
+  Group {
+    label: "CONFIGURE",
+    quick: &["Configure", "Display Configuration Table", "Create Configuration Rules"],
+    menu: CONFIGURE,
+  },
+  Group { label: "INSPECT", quick: &["Measure", "Section Analysis"], menu: INSPECT },
+  Group { label: "INSERT", quick: &["Insert Derive", "Canvas", "Insert Mesh"], menu: SKETCH_INSERT },
+  Group { label: "ASSEMBLE", quick: &["Add To Assembly"], menu: ASSEMBLE },
+  Group { label: "SELECT", quick: &["Select"], menu: SELECT },
+  Group { label: "FINISH SKETCH", quick: &["Finish Sketch"], menu: FINISH },
+];
+
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[x("Bill of Materials", Icon::Bom)] }];
 
@@ -599,7 +760,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Plastic => (&PLASTIC, &SHARED),
     Tab::Manage => (&MANAGE, &[]),
     Tab::Utilities => (&UTILITIES, &[]),
-    Tab::Sketch => return false,
+    Tab::Sketch => (&SKETCH, &[]),
   };
   let mut pick: Option<Item> = None;
   for g in own.iter().chain(shared.iter()) {
@@ -617,6 +778,8 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
 fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Option<Item>) {
   let popup_id = egui::Id::new(("toolbar-menu", tab, g.label));
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+  // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
+  let bg = ui.painter().add(egui::Shape::Noop);
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
@@ -629,7 +792,8 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
           (true, false) => format!("Shortcut: {}", it.key),
         };
         let active = it.cmd.is_some_and(|c| c.active(app));
-        if icons::tool_button_tinted(ui, it.icon, it.tint, it.label, &hint, active).clicked() {
+        let compact = g.quick.len() > 8;
+        if icons::tool_button_tinted(ui, it.icon, it.tint, it.label, &hint, active, compact).clicked() {
           *pick = Some(it);
         }
       }
@@ -639,6 +803,10 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     panels::group_label(ui, g.label, w, open)
   });
   egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick));
+  if g.label == "FINISH SKETCH" {
+    ui.painter()
+      .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
+  }
   panels::separator(ui);
 }
 
