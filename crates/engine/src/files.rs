@@ -249,6 +249,25 @@ fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   Ok(out)
 }
 
+/// The curves of a DXF file as a free-standing sketch (endpoints joined), and a warning about
+/// skipped entities.
+pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdError> {
+  let drawing = read_dxf(&std::fs::read(path)?).map_err(ex)?;
+  let mut sk = Sketch::new();
+  for (e, construction) in &drawing.entities {
+    if let Some(c) = add_entity(&mut sk, *e)?
+      && *construction
+    {
+      sk.set_construction(c, true)?;
+    }
+  }
+  let warning = (!drawing.skipped.is_empty()).then(|| {
+    let list: Vec<String> = drawing.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    format!("skipped unsupported DXF entities: {}", list.join(", "))
+  });
+  Ok((sk, warning))
+}
+
 fn snap(sk: &Sketch, at: [f64; 2]) -> PtSpec {
   match sk.nearest_point(at, DXF_SNAP, &[]) {
     Some(id) => PtSpec::Point(id),

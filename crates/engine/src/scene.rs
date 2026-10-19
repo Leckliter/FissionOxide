@@ -87,6 +87,10 @@ pub struct ViewOptions {
   pub hover: Option<Pick>,
   pub hide_edges: bool,
   pub hide_grid: bool,
+  /// Draw no sketches (renders of the finished part).
+  pub hide_sketches: bool,
+  /// Draw only these bodies (`None` = every visible body).
+  pub only_bodies: Option<Vec<BodyId>>,
   /// Profiles are shown (and pickable) for these sketches even if consumed.
   pub show_profiles_of: Vec<FeatureId>,
   /// Section analysis: bodies are cut away on the side the plane's normal points to, and the
@@ -129,7 +133,11 @@ impl SceneBuilder {
 
     // bodies
     for body in &s.model.bodies {
-      if !s.body_visible(body.id) {
+      let shown = match &opts.only_bodies {
+        Some(only) => only.contains(&body.id),
+        None => s.body_visible(body.id),
+      };
+      if !shown {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
@@ -237,7 +245,8 @@ impl SceneBuilder {
         FeatureKind::Loft { sections, .. } => sections.iter().any(|s| s.sketch == f.id),
         _ => false,
       });
-      let show = !f.suppressed && (is_edit || !consumed || opts.show_profiles_of.contains(&f.id));
+      let auto = !consumed || opts.show_profiles_of.contains(&f.id);
+      let show = !f.suppressed && !opts.hide_sketches && (is_edit || f.visible.unwrap_or(auto));
       if !show {
         continue;
       }
@@ -718,6 +727,83 @@ fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
 /// Projects a world point into a sketch plane (for clicking in the viewport).
 pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
   plane.to_local(p)
+}
+
+/// Renders the design to a PNG for `view.render`: `{width?, height?, view?, yaw?, pitch?,
+/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, background?}` plus the
+/// section and analysis options of [`view_options`]. Without
+/// `distance` the camera fits the bodies shown.
+pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::CmdError> {
+  use crate::CmdError;
+  use clf_render::{Camera, StandardView};
+  use serde_json::Value;
+  let size = |k: &str, d: u64| p.get(k).and_then(Value::as_u64).unwrap_or(d).clamp(16, 8192) as u32;
+  let (w, h) = (size("width", 1000), size("height", 700));
+  let flag = |k: &str, d: bool| p.get(k).and_then(Value::as_bool).unwrap_or(d);
+  let scope = s.model.params.clone();
+  let angle = |k: &str| -> Result<Option<f64>, CmdError> {
+    crate::commands::opt_expr(p, k)
+      .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &scope))
+      .transpose()
+      .map_err(CmdError::from)
+  };
+  let mut cam = Camera::default();
+  if let Some(v) = p.get("view").and_then(Value::as_str) {
+    cam.set_view(StandardView::parse(v).ok_or_else(|| {
+      CmdError::new(format!("unknown view '{v}' (home, iso, top, bottom, front, back, left, right)"))
+    })?);
+  }
+  if let Some(y) = angle("yaw")? {
+    cam.yaw = y;
+  }
+  if let Some(pt) = angle("pitch")? {
+    cam.pitch = pt.clamp(-89.9f64.to_radians(), 89.9f64.to_radians());
+  }
+  if let Some(f) = angle("fov")? {
+    cam.fov = f.clamp(1f64.to_radians(), 120f64.to_radians());
+  }
+  cam.ortho = flag("ortho", cam.ortho);
+  let only: Option<Vec<BodyId>> =
+    p.get("bodies").map(|_| crate::commands::ids(p, "bodies").into_iter().map(BodyId).collect());
+  if let Some(only) = &only
+    && let Some(b) = only.iter().find(|b| s.model.body(**b).is_none())
+  {
+    return Err(CmdError::new(format!("no body {}", b.0)));
+  }
+  let shown = |id: BodyId| match &only {
+    Some(o) => o.contains(&id),
+    None => s.body_visible(id),
+  };
+  let mut bounds: Option<(DVec3, DVec3)> = None;
+  for b in s.model.bodies.iter().filter(|b| shown(b.id)) {
+    if let Ok(m) = b.shape.mass() {
+      let (lo, hi) = bounds.get_or_insert((m.bbox_min, m.bbox_max));
+      *lo = lo.min(m.bbox_min);
+      *hi = hi.max(m.bbox_max);
+    }
+  }
+  let (lo, hi) = bounds.or_else(|| s.model.bounds()).unwrap_or((DVec3::splat(-50.0), DVec3::splat(50.0)));
+  cam.fit(lo, hi, w as f64 / h as f64);
+  if p.get("target").is_some() {
+    cam.target = crate::commands::req_vec3(p, "target")?;
+  }
+  if let Some(d) = crate::commands::opt_expr(p, "distance") {
+    cam.distance = clf_expr::eval(&d, clf_expr::Kind::Length, &scope)?.max(1e-3);
+  }
+  let opts = ViewOptions {
+    hide_sketches: !flag("sketches", false),
+    hide_grid: !flag("grid", false),
+    hide_edges: !flag("edges", true),
+    only_bodies: only,
+    ..view_options(s, p).map_err(CmdError::new)?
+  };
+  let (mut scene, _) = SceneBuilder::default().build(s, &opts);
+  if let Some(bg) = p.get("background") {
+    let c = crate::commands::parse_color(bg)?;
+    scene.background_top = [c[0], c[1], c[2], 255];
+    scene.background_bottom = scene.background_top;
+  }
+  clf_render::render(&scene, &cam, w, h).to_png().map_err(CmdError::new)
 }
 
 /// Every body face a ray passes through, nearest first (one hit per face): for "Select Other",

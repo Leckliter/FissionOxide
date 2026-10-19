@@ -52,6 +52,10 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
         }
         super::sketch_plane_on(info.normal, info.origin)?
       }
+      // only where the plane is and which way it faces matter here
+      PlaneRef::Free { origin, normal, .. } => {
+        Plane::from_normal(DVec3::from(*origin), DVec3::from(*normal), DVec3::X).map_err(ke)?
+      }
     });
   }
   cells_of(shapes, &pls)

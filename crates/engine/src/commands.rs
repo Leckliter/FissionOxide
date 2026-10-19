@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clf_kernel::glam::DVec3;
 use clf_model::{
-  AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
-  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  AttrTarget, AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef,
+  FeatureId, FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
   SheetMetalRule, ThinSide,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
@@ -71,11 +71,14 @@ cmds! {
   "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
+  "transaction.begin" => "Group the following commands into one undo step (for scripts and plugins)", "{}";
+  "transaction.commit" => "End the transaction, keeping its changes as one undo step", "{}";
+  "transaction.rollback" => "End the transaction, undoing everything done since it began", "{}";
   "param.add" => "Add a user parameter", "{name, expr, kind?: length|angle|unitless, comment?}";
   "param.set" => "Change a parameter's expression", "{name, expr}";
   "param.rename" => "Rename a parameter (rewrites expressions using it)", "{name, to}";
   "param.remove" => "Delete an unused parameter", "{name}";
-  "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?}}";
+  "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
   "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
@@ -91,7 +94,10 @@ cmds! {
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
-  "sketch.info" => "Sketch geometry, constraints, profiles and degrees of freedom", "{sketch?}";
+  "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
+  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF file or a sketch in a .clf/.clfz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
+  "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
+  "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
   "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
@@ -106,10 +112,10 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face|to_body, to?: face (flat or curved) | {body}, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect}";
-  "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
-  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?}";
-  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face|to_body, to?: face (flat or curved) | {body}, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
+  "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
+  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
@@ -118,11 +124,11 @@ cmds! {
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?})", "{faces: [{body, face} | {point}], thickness}";
-  "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?}";
-  "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?}";
-  "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?}";
-  "torus" => "Torus primitive", "{plane?, at?, major, minor, operation?}";
-  "plane.offset" => "Construction plane offset from a plane or planar face", "{plane, offset}";
+  "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?, targets?: [body] (bodies join/cut may change)}";
+  "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?, targets?: [body] (bodies join/cut may change)}";
+  "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?, targets?: [body] (bodies join/cut may change)}";
+  "torus" => "Torus primitive", "{plane?, at?, major, minor, operation?, targets?: [body] (bodies join/cut may change)}";
+  "plane.offset" => "Construction plane offset from a plane or planar face; a plane can also be {origin: [x,y,z], normal, x?} anywhere a plane is taken", "{plane, offset?}";
   "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
   "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
@@ -147,7 +153,7 @@ cmds! {
   "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
   "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
-  "body.appearance" => "Set the appearance of bodies (a library name or [r,g,b]; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
+  "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
   "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner", "{name?, body?, stock_side?, stock_top?}";
   "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool: {diameter, number?, rpm?, feed?, plunge?} | tool_diameter, stepover?: fraction, stepdown?}";
@@ -166,13 +172,20 @@ cmds! {
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
+  "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature)", "{feature, set: {...}}";
   "feature.delete" => "Delete a feature and the features that depend on it", "{feature}";
   "feature.suppress" => "Suppress or unsuppress a feature", "{feature, suppressed?: bool}";
   "feature.rename" => "Rename a feature", "{feature, name}";
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
+  "attribute.set" => "Attach a named value to the design, a body, component, feature or sketch curve/point", "{target?: \"design\" | {body} | {component} | {feature} | {sketch} | {sketch, curve} | {sketch, point}, group, name, value}";
+  "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
+  "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
+  "attribute.delete" => "Remove attributes from a target (no name = the whole group)", "{target?, group, name?}";
+  "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, background?: \"#rrggbb\"}";
   "select" => "Set the selection", "{items: [Sel]}";
+  "selection" => "The current selection", "{}";
   "select.all" => "Select every body (or every face, edge, or curve of the edited sketch)", "{kind?: bodies|faces|edges|sketch}";
   "select.invert" => "Select what isn't selected (of the selected kind)", "{}";
   "measure" => "Measure one entity (properties) or the distance and angle between two; an entity is {body}, {body, face}, {body, edge} or {point, snap?: face|edge}; default the selection", "{a?, b?}";
@@ -204,7 +217,7 @@ cmds! {
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
-  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join}";
+  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
   "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
@@ -283,6 +296,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "undo" => Ok(json!({"done": s.undo()})),
     "redo" => Ok(json!({"done": s.redo()})),
+    "transaction.begin" => {
+      s.begin_transaction()?;
+      Ok(json!({}))
+    }
+    "transaction.commit" => Ok(json!({"changed": s.commit_transaction()?})),
+    "transaction.rollback" => Ok(json!({"changed": s.rollback_transaction()?})),
     "param.add" => {
       let (name, expr) = (req_str(p, "name")?.to_string(), req_expr(p, "expr")?);
       let kind = param_kind(opt_str(p, "kind"))?;
@@ -402,6 +421,36 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({"dof": r.dof}))
     }
     "sketch.info" => sketch_info(s, p),
+    "sketch.transform" => {
+      let sk = sketch_id(s, p)?;
+      let t = xform(s, p)?;
+      let mut curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
+      if curves.is_empty() {
+        curves = s.design.sketch(sk)?.curves.iter().map(|c| c.id).collect();
+      }
+      let r = s.edit(|d| {
+        let sketch = d.sketch_mut(sk)?;
+        let r = sketch.transform(&curves, &t)?;
+        if sketch.solve().ok() {
+          Ok(r)
+        } else {
+          Err(CmdError::new("the moved geometry conflicts with its constraints"))
+        }
+      })?;
+      Ok(json!({
+        "removed_constraints": r.removed.iter().map(|c| c.0).collect::<Vec<_>>(),
+        "unlinked_dimensions": r.unlinked.iter().map(|c| c.0).collect::<Vec<_>>(),
+      }))
+    }
+    "sketch.insert" => {
+      let sk = sketch_id(s, p)?;
+      let t = xform(s, p)?;
+      let from = p.get("from").ok_or(CmdError::new("missing 'from'"))?;
+      let (src, warning) = insert_source(s, from)?;
+      let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
+      let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &curves, &t)?))?;
+      Ok(json!({"curves": added.iter().map(|c| c.0).collect::<Vec<_>>(), "warning": warning}))
+    }
     "sketch.fillet"
     | "sketch.chamfer"
     | "sketch.offset"
@@ -452,14 +501,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         to,
       };
       let operation = operation(p)?;
-      add_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation })
+      add_op_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation }, p)
     }
     "revolve" => {
       let sk = sketch_for_feature(s, p)?;
       let profiles = profile_points(s, sk, p)?;
       let axis = axis_ref(s, p.get("axis").ok_or(CmdError::new("missing 'axis'"))?)?;
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into());
-      add_feature(s, FeatureKind::Revolve { sketch: sk, profiles, axis, angle, operation: operation(p)? })
+      add_op_feature(s, FeatureKind::Revolve { sketch: sk, profiles, axis, angle, operation: operation(p)? }, p)
     }
     "loft" => {
       let list = p.get("sections").and_then(Value::as_array).ok_or(CmdError::new("missing 'sections'"))?;
@@ -485,7 +534,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         rails.push(crate::solid::path_ref(s, v)?);
       }
       let centerline = p.get("centerline").map(|v| crate::solid::path_ref(s, v)).transpose()?;
-      add_feature(
+      add_op_feature(
         s,
         FeatureKind::Loft {
           sections,
@@ -495,6 +544,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           rails,
           centerline,
         },
+        p,
       )
     }
     "sweep" => {
@@ -504,7 +554,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let profiles = profile_points(s, sk, p)?;
       let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
       let rail = p.get("rail").map(|v| crate::solid::path_ref(s, v)).transpose()?;
-      add_feature(
+      add_op_feature(
         s,
         FeatureKind::Sweep {
           sketch: sk,
@@ -515,6 +565,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           rail,
           twist: opt_expr(p, "twist").unwrap_or_default(),
         },
+        p,
       )
     }
     "hole" => {
@@ -610,11 +661,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       };
       let plane = plane_ref(s, p.get("plane").unwrap_or(&json!("xy")))?;
       let at = opt_pt(p, "at")?.unwrap_or([0.0, 0.0]);
-      add_feature(s, FeatureKind::Primitive { shape, plane, at, operation: operation(p)? })
+      add_op_feature(s, FeatureKind::Primitive { shape, plane, at, operation: operation(p)? }, p)
     }
     "plane.offset" => {
       let base = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
-      add_feature(s, FeatureKind::ConstructionPlane { base, offset: req_expr(p, "offset")? })
+      let offset = if p.get("offset").is_some() { req_expr(p, "offset")? } else { "0".into() };
+      add_feature(s, FeatureKind::ConstructionPlane { base, offset })
     }
     "mirror" => {
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
@@ -688,6 +740,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.dirty = true;
       Ok(json!({}))
     }
+    "body.topology" => body_topology(s, p),
+    "sketch.visible" => {
+      let sk = FeatureId(req_u32(p, "sketch")?);
+      s.design.sketch(sk)?;
+      let v = p.get("visible").and_then(Value::as_bool);
+      s.edit(|d| {
+        d.feature_mut(sk).ok_or(CmdError::new("no such sketch"))?.visible = v;
+        Ok(())
+      })?;
+      Ok(json!({}))
+    }
     "feature.edit" => {
       let id = FeatureId(req_u32(p, "feature")?);
       let set = p.get("set").and_then(Value::as_object).ok_or(CmdError::new("missing 'set' object"))?.clone();
@@ -752,6 +815,44 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let items: Vec<Sel> = serde_json::from_value(p.get("items").cloned().unwrap_or(json!([])))?;
       s.selection = items;
       Ok(json!({}))
+    }
+    "selection" => Ok(json!(s.selection)),
+    "view.render" => {
+      let path = PathBuf::from(req_str(p, "path")?);
+      let png = crate::scene::render_png(s, p)?;
+      std::fs::write(&path, &png)?;
+      Ok(json!({"path": path, "bytes": png.len()}))
+    }
+    "attribute.set" => {
+      let target = attr_target(s, p.get("target"))?;
+      let (group, name) = (req_str(p, "group")?.to_string(), req_str(p, "name")?.to_string());
+      let value = p.get("value").cloned().ok_or(CmdError::new("missing 'value'"))?;
+      s.edit(|d| {
+        d.set_attribute(target, &group, &name, value);
+        Ok(())
+      })?;
+      Ok(json!({}))
+    }
+    "attribute.get" | "attribute.find" => {
+      let target = if name == "attribute.get" { Some(attr_target(s, p.get("target"))?) } else { None };
+      let (group, aname, value) = (opt_str(p, "group"), opt_str(p, "name"), p.get("value"));
+      let found: Vec<Value> = s
+        .design
+        .attributes
+        .iter()
+        .filter(|a| target.is_none_or(|t| a.target == t) && attr_target_exists(s, &a.target))
+        .filter(|a| group.is_none_or(|g| a.group == g) && aname.is_none_or(|n| a.name == n))
+        .filter(|a| value.is_none_or(|v| &a.value == v))
+        .map(|a| json!({"target": attr_target_json(&a.target), "group": a.group, "name": a.name, "value": a.value}))
+        .collect();
+      Ok(json!(found))
+    }
+    "attribute.delete" => {
+      let target = attr_target(s, p.get("target"))?;
+      let group = req_str(p, "group")?.to_string();
+      let aname = opt_str(p, "name").map(str::to_string);
+      let n = s.edit(|d| Ok(d.remove_attributes(target, &group, aname.as_deref())))?;
+      Ok(json!({"removed": n}))
     }
     "sheet.rule" => {
       let name = opt_str(p, "name").unwrap_or("Default").to_string();
@@ -820,7 +921,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       let rule = rule_name(s, p)?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-      add_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation })
+      add_op_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation }, p)
     }
     "sheet.contour_flange" => {
       let sk = sketch_for_feature(s, p)?;
@@ -1049,6 +1150,22 @@ pub(crate) fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
   Ok(feature_status(s, id))
 }
 
+/// Adds a join/cut/intersect feature, limited to the bodies in `targets` when given.
+fn add_op_feature(s: &mut Session, kind: FeatureKind, p: &Value) -> CmdResult {
+  let targets: Vec<BodyId> = ids(p, "targets").into_iter().map(BodyId).collect();
+  if let Some(b) = targets.iter().find(|b| s.model.body(**b).is_none()) {
+    return Err(CmdError::new(format!("no body {}", b.0)));
+  }
+  let id = s.edit(|d| {
+    let id = d.add_feature(kind)?;
+    if let Some(f) = d.feature_mut(id) {
+      f.targets = targets;
+    }
+    Ok(id)
+  })?;
+  Ok(feature_status(s, id))
+}
+
 fn feature_status(s: &Session, id: FeatureId) -> Value {
   let st = s.model.status(id);
   json!({
@@ -1057,7 +1174,176 @@ fn feature_status(s: &Session, id: FeatureId) -> Value {
     "error": st.and_then(|x| x.error.clone()),
     "warning": st.and_then(|x| x.warning.clone()),
     "bodies": s.model.bodies.len(),
+    // bodies this feature created or changed
+    "result_bodies": s.model.bodies.iter().filter(|b| b.feature == id).map(|b| b.id.0).collect::<Vec<_>>(),
   })
+}
+
+/// An attribute target: absent or `"design"`, `{body}`, `{component}`, `{feature}`, `{sketch}`
+/// (the sketch feature), `{sketch, curve}` or `{sketch, point}`.
+fn attr_target(s: &Session, v: Option<&Value>) -> Result<AttrTarget, CmdError> {
+  let v = match v {
+    None | Some(Value::Null) => return Ok(AttrTarget::Design),
+    Some(Value::String(d)) if d == "design" => return Ok(AttrTarget::Design),
+    Some(v) => v,
+  };
+  let id = |k: &str| v.get(k).and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok());
+  let t = if let Some(sk) = id("sketch") {
+    let sketch = FeatureId(sk);
+    match (id("curve"), id("point")) {
+      (Some(c), _) => AttrTarget::SketchCurve { sketch, curve: CurveId(c) },
+      (None, Some(pt)) => AttrTarget::SketchPoint { sketch, point: PointId(pt) },
+      (None, None) => AttrTarget::Feature { feature: sketch },
+    }
+  } else if let Some(b) = id("body") {
+    AttrTarget::Body { body: BodyId(b) }
+  } else if let Some(c) = id("component") {
+    AttrTarget::Component { component: clf_model::ComponentId(c) }
+  } else if let Some(f) = id("feature") {
+    AttrTarget::Feature { feature: FeatureId(f) }
+  } else {
+    return Err(CmdError::new(format!("not an attribute target: {v}")));
+  };
+  if !attr_target_exists(s, &t) {
+    return Err(CmdError::new(format!("{v} does not exist")));
+  }
+  Ok(t)
+}
+
+fn attr_target_exists(s: &Session, t: &AttrTarget) -> bool {
+  match *t {
+    AttrTarget::Design => true,
+    AttrTarget::Body { body } => s.model.body(body).is_some(),
+    AttrTarget::Component { component } => s.design.components.iter().any(|c| c.id == component),
+    AttrTarget::Feature { feature } => s.design.feature(feature).is_some(),
+    AttrTarget::SketchCurve { sketch, curve } => s.design.sketch(sketch).is_ok_and(|k| k.curve(curve).is_some()),
+    AttrTarget::SketchPoint { sketch, point } => s.design.sketch(sketch).is_ok_and(|k| k.point(point).is_some()),
+  }
+}
+
+fn attr_target_json(t: &AttrTarget) -> Value {
+  match *t {
+    AttrTarget::Design => json!("design"),
+    AttrTarget::Body { body } => json!({"body": body.0}),
+    AttrTarget::Component { component } => json!({"component": component.0}),
+    AttrTarget::Feature { feature } => json!({"feature": feature.0}),
+    AttrTarget::SketchCurve { sketch, curve } => json!({"sketch": sketch.0, "curve": curve.0}),
+    AttrTarget::SketchPoint { sketch, point } => json!({"sketch": sketch.0, "point": point.0}),
+  }
+}
+
+/// `translate`, `angle`, `scale` and `center` of a sketch transform.
+fn xform(s: &Session, p: &Value) -> Result<clf_sketch::Xform2, CmdError> {
+  let scope = params_scope(s);
+  let num = |k: &str, kind| -> Result<Option<f64>, CmdError> {
+    opt_expr(p, k).map(|e| clf_expr::eval(&e, kind, &scope)).transpose().map_err(CmdError::from)
+  };
+  Ok(clf_sketch::Xform2 {
+    scale: num("scale", clf_expr::Kind::Unitless)?.unwrap_or(1.0),
+    angle: num("angle", clf_expr::Kind::Angle)?.unwrap_or(0.0),
+    center: opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
+    translate: opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
+  })
+}
+
+/// The sketch `sketch.insert` copies from.
+fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), CmdError> {
+  let Some(path) = opt_str(from, "path") else {
+    let id = FeatureId(req_u32(from, "sketch")?);
+    let sk = s.model.sketches.get(&id).map(|r| r.sketch.clone());
+    return Ok((sk.map_or_else(|| s.design.sketch(id).cloned(), Ok)?, None));
+  };
+  let path = PathBuf::from(path);
+  let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+  if ext == "dxf" {
+    return crate::files::dxf_sketch(&path);
+  }
+  if ext != "clf" && ext != "clfz" {
+    return Err(CmdError::new("insert from a .dxf, .clf or .clfz file"));
+  }
+  let other = Session::open(&path)?;
+  let want = from.get("sketch");
+  let found = other.design.features.iter().find(|f| {
+    matches!(f.kind, FeatureKind::Sketch { .. })
+      && match want {
+        None => true,
+        Some(Value::String(n)) => &f.name == n,
+        Some(v) => v.as_u64() == Some(u64::from(f.id.0)),
+      }
+  });
+  let f = found.ok_or_else(|| CmdError::new(format!("{} has no such sketch", path.display())))?;
+  let sk = other.model.sketches.get(&f.id).map(|r| r.sketch.clone());
+  Ok((sk.map_or_else(|| other.design.sketch(f.id).cloned(), Ok)?, None))
+}
+
+/// `"#rrggbb"` or `[r, g, b]` (0–255).
+pub(crate) fn parse_color(v: &Value) -> Result<[u8; 3], CmdError> {
+  let bad = || CmdError::new(format!("a colour is \"#rrggbb\" or [r, g, b], not {v}"));
+  if let Some(hex) = v.as_str() {
+    let h = hex.strip_prefix('#').unwrap_or(hex);
+    if h.len() != 6 || !h.is_ascii() {
+      return Err(bad());
+    }
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).map_err(|_| bad());
+    return Ok([byte(0)?, byte(2)?, byte(4)?]);
+  }
+  let a = v.as_array().filter(|a| a.len() == 3).ok_or_else(bad)?;
+  let mut c = [0u8; 3];
+  for (slot, x) in c.iter_mut().zip(a) {
+    *slot = x.as_u64().and_then(|x| u8::try_from(x).ok()).ok_or_else(bad)?;
+  }
+  Ok(c)
+}
+
+fn body_topology(s: &Session, p: &Value) -> CmdResult {
+  let id = BodyId(req_u32(p, "body")?);
+  let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
+  let want = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
+  let v3 = |v: DVec3| json!([v.x, v.y, v.z]);
+  let mut out = serde_json::Map::new();
+  if want("faces") {
+    let faces: Vec<Value> = body
+      .faces()
+      .iter()
+      .map(|f| {
+        let edges: Vec<u32> = body.edges().iter().filter(|e| e.faces.contains(&f.id)).map(|e| e.id).collect();
+        json!({
+          "id": f.id,
+          "kind": format!("{:?}", f.kind).to_ascii_lowercase(),
+          "area": f.area,
+          "origin": v3(f.origin),
+          "normal": v3(f.normal),
+          "xdir": v3(f.xdir),
+          "center": v3(f.center),
+          "radius": f.radius,
+          "edges": edges,
+        })
+      })
+      .collect();
+    out.insert("faces".into(), json!(faces));
+  }
+  if want("edges") {
+    let edges: Vec<Value> = body
+      .edges()
+      .iter()
+      .map(|e| {
+        json!({
+          "id": e.id,
+          "kind": format!("{:?}", e.kind).to_ascii_lowercase(),
+          "start": v3(e.start),
+          "end": v3(e.end),
+          "mid": v3(e.mid),
+          "center": v3(e.center),
+          "axis": v3(e.axis),
+          "radius": e.radius,
+          "length": e.length,
+          "faces": e.faces.iter().copied().filter(|f| *f != 0).collect::<Vec<_>>(),
+        })
+      })
+      .collect();
+    out.insert("edges".into(), json!(edges));
+  }
+  Ok(Value::Object(out))
 }
 
 /// `rule`: a rule name that must exist (empty / absent = the default rule).
@@ -1154,6 +1440,14 @@ pub(crate) fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
       }
       _ => Err(CmdError::new("that feature is not a construction plane")),
     };
+  }
+  if v.get("origin").is_some() {
+    let normal = req_vec3(v, "normal")?;
+    if DVec3::from(normal).length() < 1e-12 {
+      return Err(CmdError::new("the plane's normal is zero"));
+    }
+    let x = v.get("x").map(|_| req_vec3(v, "x")).transpose()?;
+    return Ok(PlaneRef::Free { origin: req_vec3(v, "origin")?, normal, x });
   }
   let face = face_ref(s, v)?;
   if !face.planar {
@@ -2112,18 +2406,104 @@ fn sketch_info(s: &Session, p: &Value) -> CmdResult {
   };
   let sketch = s.design.sketch(sk)?;
   let r = s.model.sketches.get(&sk);
+  let solved = r.map(|r| &r.sketch).unwrap_or(sketch);
+  let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+  let (samples, loops) = (flag("samples"), flag("loops"));
+  let v3 = |v: DVec3| json!([v.x, v.y, v.z]);
+  let geometry: Vec<Value> = solved
+    .curves
+    .iter()
+    .map(|c| {
+      let poly = crate::scene::curve_polyline(solved, &c.kind);
+      let length = match &c.kind {
+        CurveKind::Circle { radius, .. } => std::f64::consts::TAU * radius,
+        _ => poly.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum(),
+      };
+      let mut g = json!({"curve": c.id.0, "length": length, "bbox": bbox2(poly.iter().copied())});
+      if samples {
+        g["samples"] = json!(poly);
+      }
+      g
+    })
+    .collect();
+  // which curves bound each profile: match every loop segment to the curve it lies on
+  let curves_of = |l: &clf_sketch::Loop| {
+    let mut ids: Vec<u32> = Vec::new();
+    for seg in &l.segs {
+      let tol = if matches!(seg, clf_sketch::Seg::Bezier { .. }) { 0.05 } else { 1e-5 };
+      let at = seg.mid();
+      let best = solved
+        .curves
+        .iter()
+        .filter(|c| !c.construction)
+        .filter_map(|c| solved.distance_to_curve(c.id, at).map(|d| (c.id.0, d)))
+        .filter(|(_, d)| *d <= tol)
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+      if let Some((id, _)) = best
+        && !ids.contains(&id)
+      {
+        ids.push(id);
+      }
+    }
+    ids
+  };
+  let mut used: Vec<u32> = Vec::new();
+  let profiles = r.map(|r| {
+    r.profiles
+      .iter()
+      .enumerate()
+      .map(|(i, pr)| {
+        let outer = curves_of(&pr.outer);
+        let holes: Vec<Vec<u32>> = pr.holes.iter().map(&curves_of).collect();
+        used.extend(outer.iter().chain(holes.iter().flatten()));
+        let perimeter: f64 = std::iter::once(&pr.outer).chain(&pr.holes).map(loop_length).sum();
+        let mut v = json!({
+          "index": i, "area": pr.area(), "inside": pr.interior_point(), "holes": pr.holes.len(),
+          "bbox": bbox2(pr.outer.polygon().into_iter()), "perimeter": perimeter,
+          "curves": outer, "hole_curves": holes,
+        });
+        if loops {
+          v["outer"] = json!(pr.outer.segs);
+          v["hole_loops"] = json!(pr.holes.iter().map(|h| &h.segs).collect::<Vec<_>>());
+        }
+        v
+      })
+      .collect::<Vec<_>>()
+  });
+  let unused: Vec<u32> =
+    solved.curves.iter().filter(|c| !c.construction && !used.contains(&c.id.0)).map(|c| c.id.0).collect();
   Ok(json!({
     "sketch": sk.0,
+    "plane": r.map(|r| json!({"origin": v3(r.plane.origin), "x": v3(r.plane.x), "y": v3(r.plane.y), "normal": v3(r.plane.normal())})),
     "points": sketch.points.iter().map(|p| json!({"id": p.id.0, "at": [p.x, p.y], "fixed": p.fixed})).collect::<Vec<_>>(),
     "curves": sketch.curves,
+    "geometry": geometry,
     "constraints": sketch.constraints,
-    "profiles": r.map(|r| r.profiles.iter().enumerate().map(|(i, pr)| json!({
-      "index": i, "area": pr.area(), "inside": pr.interior_point(), "holes": pr.holes.len()
-    })).collect::<Vec<_>>()),
+    "profiles": profiles,
+    "open_curves": unused,
     "dof": r.map(|r| r.report.dof),
     "solved": r.map(|r| r.report.ok()),
     "free_points": r.map(|r| r.report.free_points.iter().map(|p| p.0).collect::<Vec<_>>()),
   }))
+}
+
+/// `[[min x, min y], [max x, max y]]`, or null for no points.
+fn bbox2(pts: impl Iterator<Item = [f64; 2]>) -> Value {
+  let mut b: Option<([f64; 2], [f64; 2])> = None;
+  for q in pts {
+    let (lo, hi) = b.get_or_insert((q, q));
+    for k in 0..2 {
+      lo[k] = lo[k].min(q[k]);
+      hi[k] = hi[k].max(q[k]);
+    }
+  }
+  b.map_or(Value::Null, |(lo, hi)| json!([lo, hi]))
+}
+
+fn loop_length(l: &clf_sketch::Loop) -> f64 {
+  let mut pts = l.polygon();
+  pts.extend(pts.first().copied());
+  pts.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum()
 }
 
 // ---------------------------------------------------------------- info / export
@@ -2139,6 +2519,7 @@ fn info(s: &Session) -> Value {
         "id": b.id.0,
         "name": s.body_name(b.id),
         "visible": s.body_visible(b.id),
+        "color": s.design.body_settings(b.id).and_then(|x| x.color).map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])),
         "volume_mm3": m.map(|m| m.volume),
         "area_mm2": m.map(|m| m.area),
         "bbox": m.map(|m| [m.bbox_min.to_array(), m.bbox_max.to_array()]),
@@ -2161,6 +2542,7 @@ fn info(s: &Session) -> Value {
         "name": f.name,
         "type": f.kind.base_name(),
         "suppressed": f.suppressed,
+        "visible": f.visible,
         "rolled_back": st.rolled_back,
         "error": st.error,
         "warning": st.warning,
