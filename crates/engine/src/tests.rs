@@ -347,6 +347,11 @@ fn assembly_with_a_revolute_joint() {
   run(&mut s, "feature.edit", json!({"feature": j, "set": {"offset": "-3"}}));
   let clash = run(&mut s, "assembly.interference", json!({}));
   assert_eq!(clash.as_array().unwrap().len(), 1, "{clash}");
+  let dwg = run(&mut s, "drawing.create", json!({"views": ["front", "top"]}));
+  let text: Vec<String> = serde_json::from_value(dwg["text"].clone()).unwrap();
+  for want in ["ITEM", "QTY", "Base", "Arm", "Aluminum"] {
+    assert!(text.iter().any(|t| t == want), "parts list missing {want}: {text:?}");
+  }
   let bom = run(&mut s, "assembly.bom", json!({}));
   let arm_row = bom.as_array().unwrap().iter().find(|r| r["name"] == "Arm").unwrap();
   let v = 80.0 * 20.0 * 5.0 - std::f64::consts::PI * 25.0 * 5.0;
@@ -365,6 +370,8 @@ fn drawings_with_views_dimensions_and_export() {
     assert!(text.iter().any(|t| t == want), "missing {want}: {text:?}");
   }
   run(&mut s, "drawing.add_view", json!({"kind": {"section": "y", "offset": 25}}));
+  let det = run(&mut s, "drawing.add_view", json!({"kind": {"detail": 2, "center": [40, 25, 6], "radius": 10, "factor": 3}}));
+  assert!(det["view"].as_u64().is_some(), "{det}");
   run(&mut s, "drawing.dimension", json!({"view": 1, "a": [0, 0, 0], "b": [40, 0, 6], "orientation": "horizontal"}));
   run(&mut s, "drawing.title", json!({"part_number": "CLF-001", "material": "Aluminum"}));
   run(&mut s, "drawing.set", json!({"scale": "1:1", "projection": "first_angle"}));

@@ -36,6 +36,9 @@ pub struct Drawing {
   pub auto_dimensions: bool,
   #[serde(default)]
   pub title: TitleBlock,
+  /// A parts list table (when the design has components).
+  #[serde(default = "yes")]
+  pub parts_list: bool,
 }
 
 fn yes() -> bool {
@@ -135,6 +138,20 @@ pub enum ViewKind {
   Flat {
     body: BodyId,
   },
+  /// An enlarged circle of another view around a model point.
+  Detail {
+    parent: u32,
+    center: [f64; 3],
+    /// Model mm.
+    radius: f64,
+    /// Enlargement over the drawing's scale.
+    #[serde(default = "two")]
+    factor: f64,
+  },
+}
+
+fn two() -> f64 {
+  2.0
 }
 
 impl ViewKind {
@@ -161,7 +178,7 @@ impl ViewKind {
       ViewKind::Bottom => (-DVec3::Z, DVec3::X),
       ViewKind::Right => (DVec3::X, DVec3::Y),
       ViewKind::Left => (-DVec3::X, -DVec3::Y),
-      ViewKind::Iso | ViewKind::Flat { .. } => iso,
+      ViewKind::Iso | ViewKind::Flat { .. } | ViewKind::Detail { .. } => iso,
       ViewKind::Section { axis, flip, .. } => {
         let (z, x) = match axis {
           Axis::X => (DVec3::X, DVec3::Y),
@@ -180,6 +197,10 @@ impl ViewKind {
         format!("SECTION {c}-{c}")
       }
       ViewKind::Flat { .. } => "FLAT PATTERN".into(),
+      ViewKind::Detail { factor, .. } => {
+        let c = char::from(b'A' + (n % 26) as u8);
+        format!("DETAIL {c} ({})", scale_text(*factor))
+      }
       ViewKind::Iso => "ISOMETRIC".into(),
       k => format!("{k:?}").to_uppercase(),
     }
@@ -246,6 +267,7 @@ impl Drawing {
       dimensions: Vec::new(),
       auto_dimensions: true,
       title: TitleBlock::default(),
+      parts_list: true,
     }
   }
 
@@ -284,11 +306,14 @@ struct Projected {
   hatch: Vec<Vec<[[f64; 2]; 2]>>,
   /// Bend lines of a flat pattern, with their notes.
   bends: Vec<([[f64; 2]; 2], String)>,
+  /// Enlargement over the drawing scale (detail views).
+  mul: f64,
 }
 
 impl Projected {
+  /// Size at the drawing scale's units (model mm, times any enlargement).
   fn size(&self) -> [f64; 2] {
-    [self.hi[0] - self.lo[0], self.hi[1] - self.lo[1]]
+    [(self.hi[0] - self.lo[0]) * self.mul, (self.hi[1] - self.lo[1]) * self.mul]
   }
 
   fn to_view(&self, p: DVec3) -> [f64; 2] {
@@ -314,7 +339,14 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
 
   let mut views = Vec::new();
   for v in &d.views {
-    views.push(project_view(v, &part, model, defl)?);
+    if let ViewKind::Detail { parent, center, radius, factor } = &v.kind {
+      let pv = d.views.iter().find(|x| x.id == *parent && !matches!(x.kind, ViewKind::Detail { .. }));
+      let pv = pv.ok_or(format!("detail view {}: its parent view is gone", v.id))?;
+      let base = project_view(pv, &part, model, defl)?;
+      views.push(detail(v, base, DVec3::from(*center), *radius, *factor)?);
+    } else {
+      views.push(project_view(v, &part, model, defl)?);
+    }
   }
   let (w, h) = d.sheet.size();
   let scale = match d.scale {
@@ -327,8 +359,28 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
   for (n, pv) in views.iter().enumerate() {
     draw_view(&mut plot, pv, scale, n);
   }
+  for (n, v) in views.iter().enumerate() {
+    if let ViewKind::Detail { parent, center, radius, .. } = &v.view.kind
+      && let Some(pv) = views.iter().find(|x| x.view.id == *parent)
+    {
+      let c = sheet_pt(pv, scale, pv.to_view(DVec3::from(*center)));
+      let r = radius * scale * pv.mul;
+      let ring: Vec<[f64; 2]> = (0..=72)
+        .map(|i| {
+          let t = std::f64::consts::TAU * i as f64 / 72.0;
+          [c[0] + r * t.cos(), c[1] + r * t.sin()]
+        })
+        .collect();
+      plot.items.push(Item::Line { pen: Pen::Thin, points: ring });
+      let letter = char::from(b'A' + (n % 26) as u8).to_string();
+      plot.items.push(Item::Text { at: [c[0] + r * 0.8, c[1] + r * 0.8], size: TEXT, text: letter, anchor: Anchor::Start });
+    }
+  }
   if d.auto_dimensions {
     auto_dims(&mut plot, &views, scale);
+  }
+  if d.parts_list && !design.components.is_empty() {
+    parts_list(&mut plot, design);
   }
   for dim in &d.dimensions {
     match dim {
@@ -419,7 +471,84 @@ fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Resu
   }
   let proj = shape.project(z, right, defl).map_err(|e| e.to_string())?;
   let (lo, hi) = proj.bounds().ok_or("the view is empty")?;
-  Ok(Projected { view: v.clone(), proj, lo, hi, right, up, hatch, bends })
+  Ok(Projected { view: v.clone(), proj, lo, hi, right, up, hatch, bends, mul: 1.0 })
+}
+
+/// A detail view: the parent's projection clipped to a circle around `center` and enlarged.
+fn detail(v: &DrawingView, mut base: Projected, center: DVec3, radius: f64, factor: f64) -> Result<Projected, String> {
+  if !(radius > 0.0 && factor > 0.0) {
+    return Err("a detail view needs a positive radius and enlargement".into());
+  }
+  let c = base.to_view(center);
+  let inside = |p: [f64; 2]| (p[0] - c[0]).hypot(p[1] - c[1]) <= radius;
+  let mut lines = Vec::new();
+  for l in &base.proj.lines {
+    for piece in clip_circle(&l.points, c, radius) {
+      lines.push(clf_kernel::ProjLine { kind: l.kind, points: piece });
+    }
+  }
+  base.proj.circles.retain(|k| inside(k.center) && k.radius < radius);
+  base.proj.lines = lines;
+  // the boundary circle
+  let ring: Vec<[f64; 2]> = (0..=96)
+    .map(|i| {
+      let t = std::f64::consts::TAU * i as f64 / 96.0;
+      [c[0] + radius * t.cos(), c[1] + radius * t.sin()]
+    })
+    .collect();
+  base.proj.lines.push(clf_kernel::ProjLine { kind: LineKind::Tangent, points: ring });
+  base.lo = [c[0] - radius, c[1] - radius];
+  base.hi = [c[0] + radius, c[1] + radius];
+  base.hatch.clear();
+  base.bends.clear();
+  base.view = v.clone();
+  base.mul = factor;
+  Ok(base)
+}
+
+/// The parts of a polyline inside a circle.
+fn clip_circle(pts: &[[f64; 2]], c: [f64; 2], r: f64) -> Vec<Vec<[f64; 2]>> {
+  let inside = |p: [f64; 2]| (p[0] - c[0]).hypot(p[1] - c[1]) <= r;
+  let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+  let mut cur: Vec<[f64; 2]> = Vec::new();
+  for w in pts.windows(2) {
+    let (a, b) = (w[0], w[1]);
+    // where the segment crosses the circle (t in 0..1)
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let f = [a[0] - c[0], a[1] - c[1]];
+    let (qa, qb, qc) = (d[0] * d[0] + d[1] * d[1], 2.0 * (f[0] * d[0] + f[1] * d[1]), f[0] * f[0] + f[1] * f[1] - r * r);
+    let mut ts = vec![0.0];
+    let disc = qb * qb - 4.0 * qa * qc;
+    if qa > 1e-18 && disc > 0.0 {
+      for t in [(-qb - disc.sqrt()) / (2.0 * qa), (-qb + disc.sqrt()) / (2.0 * qa)] {
+        if t > 0.0 && t < 1.0 {
+          ts.push(t);
+        }
+      }
+    }
+    ts.push(1.0);
+    for k in 0..ts.len() - 1 {
+      let p = |t: f64| [a[0] + d[0] * t, a[1] + d[1] * t];
+      let (p0, p1) = (p(ts[k]), p(ts[k + 1]));
+      if inside(p((ts[k] + ts[k + 1]) / 2.0)) {
+        if cur.last().is_none_or(|q| (q[0] - p0[0]).hypot(q[1] - p0[1]) > 1e-9) {
+          if cur.len() > 1 {
+            out.push(std::mem::take(&mut cur));
+          }
+          cur = vec![p0];
+        }
+        cur.push(p1);
+      } else if cur.len() > 1 {
+        out.push(std::mem::take(&mut cur));
+      } else {
+        cur.clear();
+      }
+    }
+  }
+  if cur.len() > 1 {
+    out.push(cur);
+  }
+  out
 }
 
 /// Grid cell of a standard view: (column, row) around the front view at (0, 0).
@@ -503,7 +632,8 @@ fn place(views: &mut [Projected], angle: ProjectionAngle, scale: f64, w: f64, h:
 fn sheet_pt(v: &Projected, scale: f64, p: [f64; 2]) -> [f64; 2] {
   let at = v.view.at.unwrap_or([0.0, 0.0]);
   let c = [(v.lo[0] + v.hi[0]) / 2.0, (v.lo[1] + v.hi[1]) / 2.0];
-  [at[0] + (p[0] - c[0]) * scale, at[1] + (p[1] - c[1]) * scale]
+  let k = scale * v.mul;
+  [at[0] + (p[0] - c[0]) * k, at[1] + (p[1] - c[1]) * k]
 }
 
 fn draw_view(plot: &mut Plot, v: &Projected, scale: f64, n: usize) {
@@ -699,6 +829,46 @@ fn auto_dims(plot: &mut Plot, views: &[Projected], scale: f64) {
       let text = if n > 1 { format!("{n}× Ø{}", fmt_len(d)) } else { format!("Ø{}", fmt_len(d)) };
       plot.items.push(Item::Text { at: [end[0] + 1.0, end[1] - 1.2], size: TEXT, text, anchor: Anchor::Start });
     }
+  }
+}
+
+/// A parts list above the title block: one row per component (copies counted together).
+fn parts_list(plot: &mut Plot, design: &Design) {
+  let mut rows: Vec<(String, usize, String)> = Vec::new();
+  for c in &design.components {
+    let base = c.name.split(':').next().unwrap_or(&c.name).to_string();
+    let material = if c.material.is_empty() { "Steel".to_string() } else { c.material.clone() };
+    match rows.iter_mut().find(|r| r.0 == base) {
+      Some(r) => r.1 += 1,
+      None => rows.push((base, 1, material)),
+    }
+  }
+  let (x1, row_h) = (plot.width - MARGIN, 6.0);
+  let x0 = x1 - TITLE_W;
+  let y0 = MARGIN + TITLE_H;
+  let cols = [x0, x0 + 15.0, x0 + 30.0, x0 + 120.0, x1];
+  let n = rows.len() + 1;
+  for i in 0..=n {
+    let y = y0 + i as f64 * row_h;
+    plot.items.push(Item::Line { pen: if i == 0 || i == n { Pen::Border } else { Pen::Thin }, points: vec![[x0, y], [x1, y]] });
+  }
+  for x in cols {
+    plot.items.push(Item::Line { pen: Pen::Thin, points: vec![[x, y0], [x, y0 + n as f64 * row_h]] });
+  }
+  let cell = |plot: &mut Plot, col: usize, row: usize, text: String| {
+    plot.items.push(Item::Text { at: [cols[col] + 1.5, y0 + row as f64 * row_h + 1.8], size: 2.5, text, anchor: Anchor::Start });
+  };
+  // the header sits on top; item 1 just under it
+  let top = n - 1;
+  for (k, h) in ["ITEM", "QTY", "PART", "MATERIAL"].iter().enumerate() {
+    cell(plot, k, top, h.to_string());
+  }
+  for (i, (name, qty, material)) in rows.into_iter().enumerate() {
+    let row = top - 1 - i;
+    cell(plot, 0, row, (i + 1).to_string());
+    cell(plot, 1, row, qty.to_string());
+    cell(plot, 2, row, name);
+    cell(plot, 3, row, material);
   }
 }
 

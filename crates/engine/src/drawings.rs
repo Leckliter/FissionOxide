@@ -199,10 +199,18 @@ fn view_kind(v: &Value) -> Result<ViewKind, CmdError> {
     let flip = v.get("flip").and_then(Value::as_bool).unwrap_or(false);
     return Ok(ViewKind::Section { axis, offset, flip });
   }
+  if let Some(parent) = v.get("detail").and_then(Value::as_u64) {
+    return Ok(ViewKind::Detail {
+      parent: u32::try_from(parent).map_err(|_| CmdError::new("bad view id"))?,
+      center: req_vec3(v, "center")?,
+      radius: v.get("radius").and_then(Value::as_f64).ok_or(CmdError::new("a detail view needs 'radius'"))?,
+      factor: v.get("factor").and_then(Value::as_f64).unwrap_or(2.0),
+    });
+  }
   if let Some(b) = v.get("flat").and_then(Value::as_u64) {
     return Ok(ViewKind::Flat { body: BodyId(u32::try_from(b).map_err(|_| CmdError::new("bad body"))?) });
   }
-  Err(CmdError::new("a view is a name, {\"section\": axis, \"offset\"} or {\"flat\": body}"))
+  Err(CmdError::new("a view is a name, {\"section\": axis, \"offset\"}, {\"flat\": body} or {\"detail\": view, \"center\": [x,y,z], \"radius\", \"factor\"?}"))
 }
 
 fn settings(d: &mut Drawing, p: &Value) -> Result<(), CmdError> {
@@ -225,6 +233,9 @@ fn settings(d: &mut Drawing, p: &Value) -> Result<(), CmdError> {
   }
   if let Some(b) = p.get("auto_dimensions").and_then(Value::as_bool) {
     d.auto_dimensions = b;
+  }
+  if let Some(b) = p.get("parts_list").and_then(Value::as_bool) {
+    d.parts_list = b;
   }
   if let Some(n) = opt_str(p, "rename") {
     d.name = n.to_string();
