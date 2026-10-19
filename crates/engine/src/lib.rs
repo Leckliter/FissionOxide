@@ -17,6 +17,7 @@ mod inspect;
 pub mod scene;
 mod solid;
 mod surfaces;
+mod sheet2;
 mod text;
 
 use std::path::PathBuf;
@@ -444,3 +445,4 @@ mod tests_more;
 #[cfg(test)]
 mod tests_solid;
 mod tests_surface;
+mod tests_sheet2;

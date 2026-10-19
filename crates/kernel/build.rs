@@ -34,6 +34,7 @@ fn main() {
   println!("cargo:rerun-if-changed=src/ffi.rs");
   println!("cargo:rerun-if-changed=cpp/features2.cpp");
   println!("cargo:rerun-if-changed=cpp/surface2.cpp");
+  println!("cargo:rerun-if-changed=cpp/sheet2.cpp");
   let root = match std::env::var_os("CLF_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
@@ -65,6 +66,7 @@ fn main() {
     .file("cpp/kernel.cpp")
     .file("cpp/features2.cpp")
     .file("cpp/surface2.cpp")
+    .file("cpp/sheet2.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

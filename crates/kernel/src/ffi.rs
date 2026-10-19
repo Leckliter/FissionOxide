@@ -178,6 +178,8 @@ pub(crate) mod ffi {
     fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
     fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
+    // sheet2.cpp
+    fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

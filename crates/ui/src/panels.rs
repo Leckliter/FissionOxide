@@ -1977,6 +1977,8 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::SurfaceExtend { .. } => Icon::Extend,
     FeatureKind::Untrim { .. } => Icon::Untrim,
     FeatureKind::TrimWith { .. } => Icon::Trim,
+    FeatureKind::LoftedFlange { .. } => Icon::LoftedFlange,
+    FeatureKind::MiterFlange { .. } => Icon::Flange,
   }
 }
 

@@ -113,5 +113,8 @@ std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offs
                                      rust::Slice<const double> toward);
 double side_of(const Shape &face, double x, double y, double z);
 std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double> points, double radius);
+// sheet2.cpp
+std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<const double> b,
+                                     rust::Slice<const double> u);
 
 } // namespace clf

@@ -13,7 +13,7 @@ use clf_kernel::glam::DVec3;
 use clf_kernel::{Bend, FaceInfo, Plane, Shape, SurfaceKind};
 use clf_sketch::{CurveId, CurveKind, Loop, Profile, Seg, Sketch};
 
-use crate::{ReliefShape, SheetMetalRule};
+use crate::{CornerRelief, ReliefShape, SheetMetalRule};
 
 /// Points closer than this join a path.
 const JOIN_TOL: f64 = 1e-6;
@@ -35,6 +35,11 @@ pub struct SheetInfo {
   pub gap: f64,
   /// The body is a flat pattern (after Unfold).
   pub flat: bool,
+  pub corner_relief: CornerRelief,
+  /// mm; `None` = the default for the shape.
+  pub corner_relief_size: Option<f64>,
+  /// Set on lofted flanges, which the B-rep unfolder can't flatten (see [`crate::sheet2`]).
+  pub developed: Option<std::sync::Arc<crate::sheet2::Development>>,
 }
 
 /// What Refold needs to fold a flat pattern back up.
@@ -52,6 +57,17 @@ impl SheetInfo {
   /// Length of the neutral layer through a bend of `angle` radians (the bend allowance).
   pub fn bend_allowance(&self, angle: f64) -> f64 {
     angle.abs() * (self.bend_radius + self.k_factor * self.thickness)
+  }
+
+  /// Corner relief size: a square's side, a round or tear relief's diameter. By default a
+  /// square or round relief clears both bends where they meet, a tear is a thickness wide.
+  pub fn corner_relief_size(&self) -> f64 {
+    let (r, t) = (self.bend_radius, self.thickness);
+    self.corner_relief_size.unwrap_or(match self.corner_relief {
+      CornerRelief::Round => 2.0 * std::f64::consts::SQRT_2 * (r + t),
+      CornerRelief::Tear => t,
+      CornerRelief::Square | CornerRelief::None => 2.0 * (r + t),
+    })
   }
 }
 
@@ -78,6 +94,15 @@ pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result
   if !(relief_width > 0.0 && relief_depth >= 0.0 && gap > 0.0) {
     return Err(format!("rule {}: relief sizes and the gap must be positive", rule.name));
   }
+  let corner_relief_size = if rule.corner_relief_size.trim().is_empty() {
+    None
+  } else {
+    let v = len(&rule.corner_relief_size)?;
+    if !(v > 1e-6 && v.is_finite()) {
+      return Err(format!("rule {}: the corner relief size must be positive", rule.name));
+    }
+    Some(v)
+  };
   Ok(SheetInfo {
     rule: rule.name.clone(),
     thickness,
@@ -88,6 +113,9 @@ pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result
     relief_depth,
     gap,
     flat: false,
+    corner_relief: rule.corner_relief,
+    corner_relief_size,
+    developed: None,
   })
 }
 

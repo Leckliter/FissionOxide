@@ -19,6 +19,7 @@ pub mod refs;
 pub mod regen;
 pub mod sheet;
 pub mod surface;
+pub mod sheet2;
 
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +114,13 @@ pub struct SheetMetalRule {
   /// Gap left at mitered corners and rips; empty = half the thickness.
   #[serde(default)]
   pub gap: String,
+  /// Notch cut where two flanges' bends meet at a corner.
+  #[serde(default)]
+  pub corner_relief: CornerRelief,
+  /// Corner relief size (square side / round diameter / tear width); empty = default, see
+  /// [`sheet::SheetInfo::corner_relief_size`].
+  #[serde(default)]
+  pub corner_relief_size: String,
 }
 
 impl Default for SheetMetalRule {
@@ -126,6 +134,8 @@ impl Default for SheetMetalRule {
       relief_width: String::new(),
       relief_depth: String::new(),
       gap: String::new(),
+      corner_relief: CornerRelief::None,
+      corner_relief_size: String::new(),
     }
   }
 }
@@ -148,6 +158,42 @@ pub enum CornerMode {
   Miter,
   /// Leave the flanges as they are (an open corner).
   Open,
+  /// Run both flanges into the corner and join them along the bisector (a closed, welded seam).
+  Closed,
+  /// The first flange runs over the end of the second, which stops the rule's gap short of it.
+  Overlap,
+}
+
+/// The notch cut where two flanges' bends meet at a corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerRelief {
+  #[default]
+  None,
+  Round,
+  Square,
+  Tear,
+}
+
+/// One profile of a lofted flange: a sketch's largest closed profile, or an open chain of its
+/// curves.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LoftProfile {
+  pub sketch: FeatureId,
+  /// The chain's curves; empty = the sketch's largest closed profile, else all its curves.
+  #[serde(default)]
+  pub curves: Vec<CurveId>,
+}
+
+/// How a lofted flange is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LoftMethod {
+  /// One smooth surface (formed in a die).
+  #[default]
+  DieFormed,
+  /// Flat facets joined by straight bends (formed on a press brake).
+  PressBrake,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1061,6 +1107,37 @@ pub enum FeatureKind {
     #[serde(default)]
     keep: Vec<[f64; 3]>,
   },
+  /// Sheet metal lofted flange: a sheet between two profiles (closed profiles are opened by the
+  /// rule's gap so the flange unfolds). The profiles are one face of the sheet.
+  LoftedFlange {
+    from: LoftProfile,
+    to: LoftProfile,
+    #[serde(default)]
+    method: LoftMethod,
+    /// Press brake: how many bends (facet boundaries) to aim for.
+    #[serde(default = "lofted_bends")]
+    bends: String,
+    /// Put the material on the other side of the profiles.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    rule: String,
+  },
+  /// Sheet metal miter flange: an open sketch profile (drawn across the first edge, starting on
+  /// it) swept along a chain of sheet edges, with mitred corners.
+  MiterFlange {
+    sketch: FeatureId,
+    /// The profile's curves; empty = every non-construction line and arc in the sketch.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    edges: Vec<EdgeRef>,
+    #[serde(default)]
+    corners: CornerMode,
+  },
+}
+
+fn lofted_bends() -> String {
+  "8".to_string()
 }
 
 fn stitch_tolerance() -> String {
@@ -1175,6 +1252,8 @@ impl FeatureKind {
       FeatureKind::SurfaceExtend { .. } => "Extend",
       FeatureKind::Untrim { .. } => "Untrim",
       FeatureKind::TrimWith { .. } => "Trim",
+      FeatureKind::LoftedFlange { .. } => "LoftedFlange",
+      FeatureKind::MiterFlange { .. } => "MiterFlange",
     }
   }
 
@@ -1184,6 +1263,7 @@ impl FeatureKind {
       FeatureKind::Flange { rule, .. }
       | FeatureKind::ContourFlange { rule, .. }
       | FeatureKind::ConvertToSheetMetal { rule, .. } => Some(rule.as_str()),
+      FeatureKind::LoftedFlange { rule, .. } => Some(rule.as_str()),
       _ => None,
     }
   }
@@ -1237,6 +1317,8 @@ impl FeatureKind {
       FeatureKind::BoundaryFill { planes, .. } => planes.iter().flat_map(plane_dep).collect(),
       FeatureKind::ReplaceFace { plane: Some(plane), .. } => plane_dep(plane),
       FeatureKind::TrimWith { tool: surface::TrimTool::Sketch { sketch, .. }, .. } => vec![*sketch],
+      FeatureKind::LoftedFlange { from, to, .. } => vec![from.sketch, to.sketch],
+      FeatureKind::MiterFlange { sketch, .. } => vec![*sketch],
       _ => vec![],
     }
   }
@@ -1467,7 +1549,7 @@ impl Design {
       }
     }
     for r in &self.sheet_metal_rules {
-      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap]
+      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap, &r.corner_relief_size]
         .iter()
         .any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
       {
@@ -1495,9 +1577,15 @@ impl Design {
       for_each_expr(&mut f.kind, &mut |e| *e = rename_ident(e, old, new));
     }
     for r in &mut self.sheet_metal_rules {
-      for e in
-        [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor, &mut r.relief_width, &mut r.relief_depth, &mut r.gap]
-      {
+      for e in [
+        &mut r.thickness,
+        &mut r.bend_radius,
+        &mut r.k_factor,
+        &mut r.relief_width,
+        &mut r.relief_depth,
+        &mut r.gap,
+        &mut r.corner_relief_size,
+      ] {
         *e = rename_ident(e, old, new);
       }
     }
@@ -1854,6 +1942,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. } => {}
     FeatureKind::SurfaceExtend { distance, .. } => f(distance),
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
+    FeatureKind::LoftedFlange { bends, .. } => f(bends),
+    FeatureKind::MiterFlange { .. } => {}
   }
 }
 

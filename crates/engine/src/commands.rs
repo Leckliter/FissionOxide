@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clf_kernel::glam::DVec3;
 use clf_model::{
-  AttrTarget, AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef,
-  FeatureId, FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  AttrTarget, AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
+  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
   SheetMetalRule, ThinSide,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
@@ -223,12 +223,12 @@ cmds! {
   "drawing.surface_finish" => "Surface texture symbol (Ra, µm) on a model point", "{drawing?, view?, point: [x,y,z], offset?: [x,y], roughness, process?: any|removal|no_removal}";
   "drawing.balloon" => "Balloon with a component's parts list item number (follows the parts list)", "{drawing?, view?, component: id|name, point?: [x,y,z], offset?: [x,y]}";
   "drawing.remove_dimension" => "Remove a dimension, note or annotation by index", "{drawing?, index}";
-  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
+  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?, corner_relief?: none|round|square|tear, corner_relief_size?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
   "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
-  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
   "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
   "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body); sharp corners become bends", "{body, face?: {body, face} | {point}, rule?, bends?}";
@@ -243,6 +243,10 @@ cmds! {
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
   "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular", "{edges, distance, mode?: natural|tangent|perpendicular}";
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
+  "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?}";
+  "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap}";
+  "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
+  "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap, relief?: none|round|square|tear, relief_size?, rule?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -266,6 +270,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::solid::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::sheet2::run(s, name, p) {
     return r;
   }
   match name {
@@ -885,6 +892,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         ("relief_width", &mut rule.relief_width),
         ("relief_depth", &mut rule.relief_depth),
         ("gap", &mut rule.gap),
+        ("corner_relief_size", &mut rule.corner_relief_size),
       ] {
         if let Some(e) = opt_expr(p, k) {
           *slot = e;
@@ -896,6 +904,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           "round" => ReliefShape::Round,
           "none" => ReliefShape::None,
           o => return Err(CmdError::new(format!("unknown relief '{o}' (rectangular, round, none)"))),
+        };
+      }
+      if let Some(r) = opt_str(p, "corner_relief") {
+        rule.corner_relief = match r {
+          "none" => clf_model::CornerRelief::None,
+          "round" => clf_model::CornerRelief::Round,
+          "square" => clf_model::CornerRelief::Square,
+          "tear" => clf_model::CornerRelief::Tear,
+          o => return Err(CmdError::new(format!("unknown corner relief '{o}' (none, round, square, tear)"))),
         };
       }
       let info = clf_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
@@ -974,11 +991,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           position,
           offset_start: opt_expr(p, "offset_start").unwrap_or_else(|| "0".into()),
           offset_end: opt_expr(p, "offset_end").unwrap_or_else(|| "0".into()),
-          corners: match opt_str(p, "corners").unwrap_or("miter") {
-            "miter" => CornerMode::Miter,
-            "open" => CornerMode::Open,
-            o => return Err(CmdError::new(format!("unknown corner mode '{o}' (miter, open)"))),
-          },
+          corners: crate::sheet2::corner_mode(p)?,
         },
       )
     }
@@ -1362,7 +1375,7 @@ fn body_topology(s: &Session, p: &Value) -> CmdResult {
 }
 
 /// `rule`: a rule name that must exist (empty / absent = the default rule).
-fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
+pub(crate) fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
   let name = opt_str(p, "rule").unwrap_or("").to_string();
   if s.design.sheet_rule(&name).is_none() {
     return Err(CmdError::new(format!("there is no sheet metal rule '{name}'")));
@@ -1371,7 +1384,7 @@ fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
 }
 
 /// `body`, or the only sheet metal body.
-fn sheet_body(s: &Session, p: &Value) -> Result<BodyId, CmdError> {
+pub(crate) fn sheet_body(s: &Session, p: &Value) -> Result<BodyId, CmdError> {
   if p.get("body").is_some() {
     return Ok(BodyId(req_u32(p, "body")?));
   }
@@ -1616,7 +1629,7 @@ pub(crate) fn edge_ref_of(s: &Session, e: &Value) -> Result<EdgeRef, CmdError> {
   Ok(EdgeRef::from_edge(body, info, b.faces()))
 }
 
-fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
+pub(crate) fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
   let list = p.get("edges").and_then(Value::as_array).ok_or(CmdError::new("missing 'edges'"))?;
   let mut out = Vec::new();
   for e in list {

@@ -75,6 +75,13 @@ impl Body {
   /// face).
   pub fn flat_pattern(&self, face: Option<u32>) -> Result<FlatPattern, String> {
     let sheet = self.sheet.as_ref().ok_or("the body is not sheet metal")?;
+    // a lofted flange brings its own flat pattern (while the body is as it was built)
+    if let Some(dev) = &sheet.developed {
+      let volume = self.shape.mass().map(|m| m.volume).unwrap_or(0.0);
+      if (volume - dev.volume).abs() <= 1e-6 * dev.volume.abs().max(1.0) {
+        return dev.flat_pattern(sheet.thickness);
+      }
+    }
     let face = face.or_else(|| sheet::default_face(self.faces())).ok_or("the body has no planar face")?;
     sheet::flat_pattern(&self.shape, self.faces(), face, sheet)
   }
@@ -964,7 +971,7 @@ impl Ctx<'_> {
             BendPosition::Inside => -(r + t) * half,
             BendPosition::Outside => -r * half,
           };
-          Ok((sheet::flange_section(r, t, a, straight.max(0.0)), shift))
+          Ok((sheet::flange_section(r, t, a, straight.max(0.0)), shift, crate::sheet2::bend_top(r, t, a)))
         })
       }
       FeatureKind::Hem { edges, length, gap, flip } => {
@@ -978,7 +985,8 @@ impl Ctx<'_> {
           if straight < -1e-9 {
             return Err(format!("the hem must be at least {:.3} mm long", r + t));
           }
-          Ok((sheet::flange_section(r, t, std::f64::consts::PI, straight.max(0.0)), 0.0))
+          let top = crate::sheet2::bend_top(r, t, std::f64::consts::PI);
+          Ok((sheet::flange_section(r, t, std::f64::consts::PI, straight.max(0.0)), 0.0, top))
         })
       }
       FeatureKind::Bend { sketch, line, angle, flip, flip_side } => {
@@ -1319,7 +1327,9 @@ impl Ctx<'_> {
   /// Edge flanges and hems: for each straight sheet edge, `section` gives the bend's section (in
   /// the plane across the edge, see [`sheet::flange_section`]) and how far back from the edge
   /// the bend starts; the sheet is trimmed back that far and the bends are joined on. Flanges
-  /// that stop short of an edge's end get bend reliefs; flanges meeting at a corner are mitered.
+  /// that stop short of an edge's end get bend reliefs; flanges meeting at a corner are closed
+  /// as `corners` says, with the rule's corner relief. `section` also gives the height of the
+  /// bend (what a corner relief clears).
   fn edge_flanges(
     &mut self,
     feature: FeatureId,
@@ -1327,7 +1337,7 @@ impl Ctx<'_> {
     flip: bool,
     (o1, o2): (f64, f64),
     corners: CornerMode,
-    section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64), String>,
+    section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64, f64), String>,
   ) -> FResult {
     struct Flange {
       start: DVec3,
@@ -1359,7 +1369,7 @@ impl Ctx<'_> {
         return Err("the body is unfolded".into());
       }
       let t = info.thickness;
-      let (profile, shift) = section(&info)?;
+      let (profile, shift, bend_top) = section(&info)?;
       let mut list: Vec<Flange> = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
@@ -1395,7 +1405,9 @@ impl Ctx<'_> {
         return Err("the selected edges could not be found".into());
       }
       // corners shared by two flanges bending the same way
-      if corners == CornerMode::Miter {
+      let (xout, xin) = crate::sheet2::section_extents(&profile, bend_top);
+      let mut relief_at: Vec<(DVec3, DVec3, DVec3, DVec3)> = Vec::new();
+      {
         for i in 0..list.len() {
           for j in i + 1..list.len() {
             if list[i].b.dot(list[j].b) < 0.9999 {
@@ -1409,15 +1421,27 @@ impl Ctx<'_> {
                 }
                 let (wi, wj) = (list[i].w, list[j].w);
                 let corner = pi + (wi + wj) * shift;
+                relief_at.push((list[i].base + (pi - list[i].start) + (wi + wj) * shift, wi, wj, list[i].b));
                 let diag = wi + wj;
                 let Some(n) = diag.cross(list[i].b).try_normalize() else { continue };
                 // flange i lies on the side its edge runs to from the corner
                 let into_i = if ei == 0 { list[i].dir } else { -list[i].dir };
                 let n = if (into_i + wi).dot(n) > 0.0 { n } else { -n };
+                match corners {
+                  CornerMode::Open => continue,
+                  CornerMode::Miter | CornerMode::Closed => {
+                    let gap = if corners == CornerMode::Closed { 0.0 } else { info.gap };
+                    list[i].cuts.push((corner + n * (gap / 2.0), n));
+                    list[j].cuts.push((corner - n * (gap / 2.0), -n));
+                  }
+                  // i runs out to j's outside; j stops the gap short of i's wall
+                  CornerMode::Overlap => {
+                    list[i].cuts.push((pi + wj * (shift + xout), -wj));
+                    list[j].cuts.push((pi + wi * (shift + xin - info.gap), -wi));
+                  }
+                }
                 list[i].ext[ei] = true;
                 list[j].ext[ej] = true;
-                list[i].cuts.push((corner + n * (info.gap / 2.0), n));
-                list[j].cuts.push((corner - n * (info.gap / 2.0), -n));
               }
             }
           }
@@ -1503,6 +1527,16 @@ impl Ctx<'_> {
       }
       for f in &tools {
         shape = shape.boolean(f, BoolOp::Union).map_err(ke)?;
+      }
+      // corner reliefs (overlapping bends need one: square unless the rule says otherwise)
+      let relief = match (info.corner_relief, corners) {
+        (crate::CornerRelief::None, CornerMode::Overlap) => crate::CornerRelief::Square,
+        (r, _) => r,
+      };
+      for (at, wi, wj, up) in &relief_at {
+        if let Some(cut) = crate::sheet2::corner_relief(*at, *wi, *wj, *up, bend_top, &info, relief)? {
+          shape = shape.boolean(&cut, BoolOp::Subtract).map_err(ke)?;
+        }
       }
       let shape = shape.unified().map_err(ke)?;
       self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, feature);
@@ -1943,6 +1977,9 @@ pub use solid::boundary_cells;
 #[cfg(test)]
 mod tests_solid;
 mod surface;
+mod sheet2;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_sheet2;

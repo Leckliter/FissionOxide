@@ -447,6 +447,7 @@ impl Ctx<'_> {
       FeatureKind::SurfaceExtend { .. } | FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {
         self.apply_surface(id, kind)
       }
+      FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
