@@ -45,7 +45,7 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/sheet2.cpp");
   println!("cargo:rerun-if-changed=cpp/xcaf.cpp");
   println!("cargo:rerun-if-changed=cpp/xcaf.hxx");
-  let root = match std::env::var_os("CLF_OCCT_DIR") {
+  let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
       // A prebuilt (e.g. cached) install: never fall back to building OCCT behind the user's back.

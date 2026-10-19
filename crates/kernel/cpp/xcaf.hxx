@@ -2,9 +2,9 @@
 // as kernel.hxx: every entry point catches all kernel exceptions.
 #pragma once
 
-#include "clf-kernel/cpp/kernel.hxx"
+#include "fox-kernel/cpp/kernel.hxx"
 
-namespace clf {
+namespace fox {
 
 // An XCAF document being written, or a STEP file's parts after reading.
 struct StepDoc {
@@ -24,4 +24,4 @@ rust::String step_doc_component(const StepDoc &d, size_t i);
 rust::Vec<double> step_doc_color(const StepDoc &d, size_t i);
 std::unique_ptr<Shape> step_doc_shape(const StepDoc &d, size_t i);
 
-} // namespace clf
+} // namespace fox

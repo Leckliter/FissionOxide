@@ -38,7 +38,7 @@ pub enum Pick {
   },
   SketchCurve {
     sketch: FeatureId,
-    curve: clf_sketch::CurveId,
+    curve: fox_sketch::CurveId,
   },
   Profile {
     sketch: FeatureId,
@@ -1049,7 +1049,7 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
 // ---------------------------------------------------------------- vertices, joint glyphs
 
 /// A body's vertices: one `(edge, end, position)` per distinct edge end point, in edge order.
-pub fn body_vertices(body: &clf_model::regen::Body) -> Vec<(u32, bool, DVec3)> {
+pub fn body_vertices(body: &fox_model::regen::Body) -> Vec<(u32, bool, DVec3)> {
   let tol = (body.diagonal() * 1e-7).max(1e-9);
   let mut out: Vec<(u32, bool, DVec3)> = Vec::new();
   for e in body.edges() {
@@ -1103,7 +1103,7 @@ pub struct JointMark {
   /// A joint (placed at its fixed side's origin) rather than a saved joint origin.
   pub joint: bool,
   /// X, Y, Z axes and origin (world).
-  pub frame: clf_kernel::glam::DMat4,
+  pub frame: fox_kernel::glam::DMat4,
 }
 
 /// The saved joint origins and joints of the active timeline, where they are now.
@@ -1119,11 +1119,11 @@ pub fn joint_marks(s: &Session) -> Vec<JointMark> {
       }
       FeatureKind::Joint { fixed_origin, angle, offset, .. } => {
         let Some(base) = geometry_frame(s, fixed_origin) else { continue };
-        let len = |e: &str| clf_expr::eval(e, clf_expr::Kind::Length, &s.model.params).unwrap_or(0.0);
-        let ang = clf_expr::eval(angle, clf_expr::Kind::Angle, &s.model.params).unwrap_or(0.0);
+        let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &s.model.params).unwrap_or(0.0);
+        let ang = fox_expr::eval(angle, fox_expr::Kind::Angle, &s.model.params).unwrap_or(0.0);
         let m = base
-          * clf_kernel::glam::DMat4::from_translation(DVec3::new(0.0, 0.0, len(offset)))
-          * clf_kernel::glam::DMat4::from_rotation_z(ang);
+          * fox_kernel::glam::DMat4::from_translation(DVec3::new(0.0, 0.0, len(offset)))
+          * fox_kernel::glam::DMat4::from_rotation_z(ang);
         out.push(JointMark { feature: f.id, joint: true, frame: m });
       }
       _ => {}
@@ -1133,8 +1133,8 @@ pub fn joint_marks(s: &Session) -> Vec<JointMark> {
 }
 
 /// The frame a joint geometry names, on the bodies as they are now.
-pub fn geometry_frame(s: &Session, g: &clf_model::assembly::JointGeometry) -> Option<clf_kernel::glam::DMat4> {
-  use clf_model::assembly::{self, JointGeometry};
+pub fn geometry_frame(s: &Session, g: &fox_model::assembly::JointGeometry) -> Option<fox_kernel::glam::DMat4> {
+  use fox_model::assembly::{self, JointGeometry};
   match g {
     JointGeometry::Origin { origin } => s.model.joint_origins.get(origin).map(|(_, m)| *m),
     JointGeometry::Point { point, z, x } => assembly::frame(DVec3::from(*point), DVec3::from(*z), DVec3::from(*x)).ok(),

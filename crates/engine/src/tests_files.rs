@@ -13,7 +13,7 @@ fn run(s: &mut Session, cmd: &str, p: serde_json::Value) -> serde_json::Value {
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
-  let d = std::env::temp_dir().join(format!("clf-engine-files-{name}-{}", std::process::id()));
+  let d = std::env::temp_dir().join(format!("fox-engine-files-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);
   std::fs::create_dir_all(&d).unwrap();
   d
@@ -55,10 +55,10 @@ fn dxf_keeps_splines_and_ellipses_as_curves() {
   }
   // the spline's ends are joined to the line, as before
   let sk = &t.model.sketches[&t.design.features[0].id].sketch;
-  let line = sk.curves.iter().find(|c| matches!(c.kind, clf_sketch::CurveKind::Line { .. })).unwrap();
-  let clf_sketch::CurveKind::Line { a: la, .. } = line.kind else { panic!("not a line") };
+  let line = sk.curves.iter().find(|c| matches!(c.kind, fox_sketch::CurveKind::Line { .. })).unwrap();
+  let fox_sketch::CurveKind::Line { a: la, .. } = line.kind else { panic!("not a line") };
   let fit = sk.curves.iter().find_map(|c| match &c.kind {
-    clf_sketch::CurveKind::Spline { points, .. } => Some(points.clone()),
+    fox_sketch::CurveKind::Spline { points, .. } => Some(points.clone()),
     _ => None,
   });
   assert_eq!(fit.unwrap().last(), Some(&la), "shared end point");

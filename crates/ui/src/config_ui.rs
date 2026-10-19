@@ -154,7 +154,7 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
         .color(theme::MUTED),
     );
     ui.add_space(4.0);
-    let t = clf_engine::config::table(&app.s.design);
+    let t = fox_engine::config::table(&app.s.design);
     let cols = t["columns"].as_array().cloned().unwrap_or_default();
     let rows = t["rows"].as_array().cloned().unwrap_or_default();
     egui::ScrollArea::horizontal().show(ui, |ui| {
@@ -268,9 +268,9 @@ fn add_column(app: &mut App, ui: &mut egui::Ui, first: Option<String>) {
   }
   for f in &d.features {
     choices.push((format!("Suppress {}", f.name), json!({"feature": f.id.0, "suppressed": f.suppressed})));
-    if let clf_engine::model::FeatureKind::Joint { kind, rotation, slide, slide2, pitch, .. } = &f.kind {
+    if let fox_engine::model::FeatureKind::Joint { kind, rotation, slide, slide2, pitch, .. } = &f.kind {
       for (m, v) in [("rotation", rotation), ("slide", slide), ("slide2", slide2), ("pitch", pitch)] {
-        let axis = clf_engine::model::assembly::MotionAxis::parse(m);
+        let axis = fox_engine::model::assembly::MotionAxis::parse(m);
         if axis.is_some_and(|a| a.allowed(*kind)) {
           choices.push((format!("{} {m}", f.name), json!({"joint": f.id.0, "motion": m, "value": v})));
         }
@@ -326,7 +326,7 @@ mod tests {
 
   #[test]
   fn table_cells_drive_the_engine() {
-    let mut s = clf_engine::Session::default();
+    let mut s = fox_engine::Session::default();
     s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
     s.execute("config.create", &json!({"name": "A"})).unwrap();
     let b = s.model.bodies[0].id.0;

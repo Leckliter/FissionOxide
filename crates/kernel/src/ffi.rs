@@ -182,7 +182,7 @@ pub(crate) mod ffi {
     fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
 
     // STEP assemblies with names and colours (cpp/xcaf.cpp)
-    include!("clf-kernel/cpp/xcaf.hxx");
+    include!("fox-kernel/cpp/xcaf.hxx");
     type StepDoc;
     fn step_doc_new(name: &str) -> Result<UniquePtr<StepDoc>>;
     fn step_doc_add(d: Pin<&mut StepDoc>, component: &str, name: &str, s: &Shape, color: &[f64]) -> Result<()>;

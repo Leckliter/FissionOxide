@@ -153,7 +153,7 @@ pub struct Session {
   /// The setup and design revision they were generated for.
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
-  pub simulation: Option<(u32, u64, clf_model::cam::sim::Simulation)>,
+  pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
   pub diff: Option<diff::DiffView>,
 }

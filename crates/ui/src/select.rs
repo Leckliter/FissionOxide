@@ -550,18 +550,18 @@ pub(crate) fn joint_glyphs(
   app: &mut App,
   resp: &egui::Response,
   painter: &egui::Painter,
-  project: &dyn Fn(clf_engine::kernel::glam::DVec3) -> Option<Pos2>,
+  project: &dyn Fn(fox_engine::kernel::glam::DVec3) -> Option<Pos2>,
 ) -> bool {
   if app.s.edit_sketch.is_some() {
     return false;
   }
-  let marks = clf_engine::scene::joint_marks(&app.s);
+  let marks = fox_engine::scene::joint_marks(&app.s);
   if marks.is_empty() {
     return false;
   }
   let hover = resp.hover_pos();
-  let mut hot: Option<(f32, clf_engine::scene::JointMark)> = None;
-  let mut drawn: Vec<(Pos2, clf_engine::scene::JointMark)> = Vec::new();
+  let mut hot: Option<(f32, fox_engine::scene::JointMark)> = None;
+  let mut drawn: Vec<(Pos2, fox_engine::scene::JointMark)> = Vec::new();
   for m in &marks {
     let o = m.frame.w_axis.truncate();
     let Some(c) = project(o) else { continue };
@@ -573,7 +573,7 @@ pub(crate) fn joint_glyphs(
     }
     drawn.push((c, *m));
   }
-  let selected = |m: &clf_engine::scene::JointMark| app.s.selection.contains(&Sel::Feature { feature: m.feature });
+  let selected = |m: &fox_engine::scene::JointMark| app.s.selection.contains(&Sel::Feature { feature: m.feature });
   for (c, m) in &drawn {
     let is_hot = hot.is_some_and(|(_, h)| h.feature == m.feature);
     let ring = if is_hot {
@@ -633,12 +633,12 @@ pub(crate) fn joint_glyphs(
 
 /// World length of a joint glyph's axis stubs: about 22 points on screen.
 fn joint_axis_len(
-  project: &dyn Fn(clf_engine::kernel::glam::DVec3) -> Option<Pos2>,
-  o: clf_engine::kernel::glam::DVec3,
+  project: &dyn Fn(fox_engine::kernel::glam::DVec3) -> Option<Pos2>,
+  o: fox_engine::kernel::glam::DVec3,
 ) -> f64 {
   let Some(c) = project(o) else { return 1.0 };
   // probe along each world axis: the longest projection tells the scale even edge-on
-  let px = [clf_engine::kernel::glam::DVec3::X, clf_engine::kernel::glam::DVec3::Y, clf_engine::kernel::glam::DVec3::Z]
+  let px = [fox_engine::kernel::glam::DVec3::X, fox_engine::kernel::glam::DVec3::Y, fox_engine::kernel::glam::DVec3::Z]
     .iter()
     .filter_map(|a| project(o + *a).map(|p| (p - c).length()))
     .fold(0.0f32, f32::max);

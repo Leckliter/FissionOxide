@@ -8,9 +8,9 @@
 //! Everything is drawn with the egui painter over the rendered image, so it works with any
 //! renderer.
 
-use clf_engine::kernel::glam::DVec3;
-use clf_engine::render::ray_plane;
 use egui::{Color32, Pos2, Stroke, Vec2};
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::render::ray_plane;
 
 use crate::App;
 use crate::viewport::Drag;
@@ -372,7 +372,7 @@ fn readout(
   project: &dyn Fn(DVec3) -> Option<Pos2>,
 ) {
   let moved = t.origin - start.origin;
-  let mm = |v: f64| format!("{} mm", clf_engine::sketch::Dim::new(v).expr);
+  let mm = |v: f64| format!("{} mm", fox_engine::sketch::Dim::new(v).expr);
   let (at, text) = match h {
     Handle::Ring(_) => (project(t.origin), format!("{:.1}°", t.angle.to_degrees())),
     Handle::Arrow(i) => (l.arrows[i].map(|a| a.1), mm(moved.dot(t.axes[i]))),

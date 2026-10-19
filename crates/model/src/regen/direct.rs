@@ -1,7 +1,7 @@
 //! Regeneration of base features: frozen bodies, then direct edits in order.
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{Shape, SurfaceKind};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{Shape, SurfaceKind};
 
 use super::{Body, Ctx, FResult, ke};
 use crate::direct::DirectEdit;

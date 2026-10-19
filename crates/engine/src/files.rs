@@ -7,12 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
-use clf_exchange::archive::{Archive, read_clfz, write_clfz};
-use clf_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
-use clf_exchange::svg::{read_svg, write_svg};
-use clf_exchange::{FormatKind, Mesh, format_for_path};
-use clf_model::{Design, FeatureId, FeatureKind, MeshData};
-use clf_sketch::{CurveKind, PtSpec, Sketch};
+use fox_exchange::archive::{Archive, read_foxz, write_foxz};
+use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
+use fox_exchange::svg::{read_svg, write_svg};
+use fox_exchange::{FormatKind, Mesh, format_for_path};
+use fox_model::{Design, FeatureId, FeatureKind, MeshData};
+use fox_sketch::{CurveKind, PtSpec, Sketch};
 use serde_json::{Value, json};
 
 use crate::{CmdError, CmdResult, Session};
@@ -102,8 +102,8 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
     "step" => import_step(s, path, name),
     "iges" | "brep" => {
       let shapes = match fmt.id {
-        "iges" => clf_kernel::read_iges(path)?,
-        _ => clf_kernel::read_brep_file(path)?,
+        "iges" => fox_kernel::read_iges(path)?,
+        _ => fox_kernel::read_brep_file(path)?,
       };
       let breps = shapes.iter().map(|sh| sh.to_brep()).collect::<Result<Vec<_>, _>>()?;
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
@@ -150,25 +150,25 @@ fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Valu
 /// A STEP file's bodies with their names and colours; its sub-assemblies become components.
 /// Files whose structure can't be read come in as plain bodies.
 fn import_step(s: &mut Session, path: &Path, file_name: String) -> CmdResult {
-  let parts = match clf_kernel::read_step_assembly(path) {
+  let parts = match fox_kernel::read_step_assembly(path) {
     Ok(p) => p,
-    Err(_) => clf_kernel::read_step(path)?
+    Err(_) => fox_kernel::read_step(path)?
       .into_iter()
-      .map(|shape| clf_kernel::StepBody { name: String::new(), component: String::new(), color: None, shape })
+      .map(|shape| fox_kernel::StepBody { name: String::new(), component: String::new(), color: None, shape })
       .collect(),
   };
   let breps = parts.iter().map(|p| p.shape.to_brep()).collect::<Result<Vec<_>, _>>()?;
   let mut out = add_import(s, FeatureKind::Import { file_name, breps, meshes: Vec::new() })?;
-  let bodies: Vec<clf_model::BodyId> = out["bodies"]
+  let bodies: Vec<fox_model::BodyId> = out["bodies"]
     .as_array()
-    .map(|a| a.iter().filter_map(Value::as_u64).map(|v| clf_model::BodyId(v as u32)).collect())
+    .map(|a| a.iter().filter_map(Value::as_u64).map(|v| fox_model::BodyId(v as u32)).collect())
     .unwrap_or_default();
   let named = parts.iter().any(|p| !p.name.is_empty() || p.color.is_some() || !p.component.is_empty());
   if bodies.len() != parts.len() || !named {
     return Ok(out);
   }
   let components = s.edit(|d| {
-    let mut groups: Vec<(String, Vec<clf_model::BodyId>)> = Vec::new();
+    let mut groups: Vec<(String, Vec<fox_model::BodyId>)> = Vec::new();
     for (b, part) in bodies.iter().zip(&parts) {
       let set = d.body_settings_mut(*b);
       if !part.name.trim().is_empty() {
@@ -198,7 +198,7 @@ fn import_step(s: &mut Session, path: &Path, file_name: String) -> CmdResult {
 
 /// Writes bodies as a STEP assembly: components as sub-assemblies, bodies as named, coloured
 /// parts.
-fn write_step(s: &Session, bodies: &[&clf_model::regen::Body], path: &Path) -> Result<(), CmdError> {
+fn write_step(s: &Session, bodies: &[&fox_model::regen::Body], path: &Path) -> Result<(), CmdError> {
   let info: Vec<(String, String, Option<[u8; 3]>)> = bodies
     .iter()
     .map(|b| {
@@ -206,12 +206,12 @@ fn write_step(s: &Session, bodies: &[&clf_model::regen::Body], path: &Path) -> R
       (s.body_name(b.id), component, s.design.body_settings(b.id).and_then(|x| x.color))
     })
     .collect();
-  let parts: Vec<clf_kernel::StepPart> = bodies
+  let parts: Vec<fox_kernel::StepPart> = bodies
     .iter()
     .zip(&info)
-    .map(|(b, (name, component, color))| clf_kernel::StepPart { name, component, color: *color, shape: &b.shape })
+    .map(|(b, (name, component, color))| fox_kernel::StepPart { name, component, color: *color, shape: &b.shape })
     .collect();
-  Ok(clf_kernel::write_step_assembly(&s.design.name, &parts, path)?)
+  Ok(fox_kernel::write_step_assembly(&s.design.name, &parts, path)?)
 }
 
 /// Adds an import feature; if it fails to build, nothing is added.
@@ -425,7 +425,7 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<fox_sketch::CurveId>,
 /// A DXF spline as the sketch curve that draws it exactly: a fit-point spline when the file's
 /// fit points give the same curve (or are all it has), a control-point spline for a clamped
 /// uniform B-spline, otherwise a Bézier chain.
-fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<clf_sketch::CurveId>, CmdError> {
+fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId>, CmdError> {
   let pieces = sp.beziers();
   let finite = |v: &[[f64; 2]]| v.iter().flatten().all(|x| x.is_finite());
   if !finite(&sp.control) || !finite(&sp.fit) {
@@ -435,7 +435,7 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<clf_sketch::CurveId
   let same = |a: &[[[f64; 2]; 4]], b: &[[[f64; 2]; 4]]| {
     a.len() == b.len() && a.iter().flatten().zip(b.iter().flatten()).all(|(p, q)| dist(*p, *q) < 1e-7 * size)
   };
-  let ends = |sk: &mut Sketch, pts: &[[f64; 2]]| -> Result<Vec<clf_sketch::PointId>, CmdError> {
+  let ends = |sk: &mut Sketch, pts: &[[f64; 2]]| -> Result<Vec<fox_sketch::PointId>, CmdError> {
     let n = pts.len();
     let mut ids = Vec::with_capacity(n);
     for (i, p) in pts.iter().enumerate() {
@@ -449,7 +449,7 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<clf_sketch::CurveId
     }
     Ok(ids)
   };
-  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&clf_sketch::spline_beziers(&sp.fit), &pieces)) {
+  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::spline_beziers(&sp.fit), &pieces)) {
     if sp.fit.iter().all(|p| dist(*p, sp.fit[0]) < DXF_SNAP) {
       return Ok(None);
     }
@@ -475,7 +475,7 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<clf_sketch::CurveId
 }
 
 /// Cubic Bézier pieces as one Bézier chain curve.
-fn add_chain(sk: &mut Sketch, pieces: &[[[f64; 2]; 4]]) -> Result<Option<clf_sketch::CurveId>, CmdError> {
+fn add_chain(sk: &mut Sketch, pieces: &[[[f64; 2]; 4]]) -> Result<Option<fox_sketch::CurveId>, CmdError> {
   if pieces.is_empty() || pieces.len() > 1000 || !pieces.iter().flatten().flatten().all(|x| x.is_finite()) {
     return Ok(None);
   }
@@ -521,7 +521,7 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
         continue;
       }
       // DXF gets real SPLINE and ELLIPSE entities that read back as the same kind of curve
-      let pts = |ids: &[clf_sketch::PointId]| ids.iter().map(|p| pos(*p)).collect::<Vec<_>>();
+      let pts = |ids: &[fox_sketch::PointId]| ids.iter().map(|p| pos(*p)).collect::<Vec<_>>();
       let e = match &c.kind {
         CurveKind::Ellipse { center, major, minor } => {
           let (c0, m) = (pos(*center), pos(*major));
@@ -638,8 +638,8 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
       let shapes = bodies.iter().map(|b| &b.shape);
       match fmt.id {
         "step" => write_step(s, &bodies, &path)?,
-        "iges" => clf_kernel::write_iges(shapes, &path)?,
-        _ => clf_kernel::write_brep_file(shapes, &path)?,
+        "iges" => fox_kernel::write_iges(shapes, &path)?,
+        _ => fox_kernel::write_brep_file(shapes, &path)?,
       }
       out["bodies"] = json!(bodies.len());
     }

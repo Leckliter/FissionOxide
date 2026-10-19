@@ -35,7 +35,7 @@ A design keeps a table of named configurations in `Design::configurations`
 - The table's columns are the distinct override targets across all rows (`Column`); a cell is
   the row's override for that column or empty (the default).
 - `active: null` (or no `configurations` key at all) means "no configuration": the design as
-  modelled. Every field has a serde default and is skipped when empty, so existing `.clf` files
+  modelled. Every field has a serde default and is skipped when empty, so existing `.fox` files
   load and save unchanged.
 
 ### Regeneration

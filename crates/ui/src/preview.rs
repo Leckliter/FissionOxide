@@ -3,11 +3,11 @@
 //!
 //! The ghosts are painted with egui over the rendered image, so they work with any renderer.
 
-use clf_engine::Session;
-use clf_engine::kernel::TriMesh;
-use clf_engine::kernel::glam::DVec3;
-use clf_engine::model::BodyId;
 use egui::{Color32, Pos2};
+use fox_engine::Session;
+use fox_engine::kernel::TriMesh;
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::model::BodyId;
 
 use crate::App;
 

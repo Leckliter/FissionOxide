@@ -151,8 +151,8 @@ impl ConfigTable {
       c.overrides
         .iter()
         .any(|o| match o {
-          Override::Parameter { name: n, expr } => n != name && clf_expr::identifiers(expr).iter().any(|i| i == name),
-          Override::Joint { value, .. } => clf_expr::identifiers(value).iter().any(|i| i == name),
+          Override::Parameter { name: n, expr } => n != name && fox_expr::identifiers(expr).iter().any(|i| i == name),
+          Override::Joint { value, .. } => fox_expr::identifiers(value).iter().any(|i| i == name),
           _ => false,
         })
         .then(|| c.name.clone())

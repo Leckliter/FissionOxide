@@ -6,8 +6,8 @@
 //! old ∩ new. Bodies the booleans can't handle (open surfaces, failing operations) are compared
 //! whole: a body identical in both versions is unchanged, others are added or removed.
 
-use clf_kernel::{BoolOp, EdgeLine, Shape, TriMesh};
-use clf_render::{Mesh, NO_ID, Polyline, Scene};
+use fox_kernel::{BoolOp, EdgeLine, Shape, TriMesh};
+use fox_render::{Mesh, NO_ID, Polyline, Scene};
 use serde_json::{Value, json};
 
 use crate::{CmdError, CmdResult, Session};
@@ -168,7 +168,7 @@ fn darker(c: [u8; 4]) -> [u8; 4] {
 
 /// `hub.diff`: compare version `a` of a design with `b` (default the latest) and show it in the
 /// viewport; `{clear: true}` goes back to the design.
-pub(crate) fn run(s: &mut Session, st: &clf_store::Store, p: &Value) -> CmdResult {
+pub(crate) fn run(s: &mut Session, st: &fox_store::Store, p: &Value) -> CmdResult {
   if p.get("clear").and_then(Value::as_bool).unwrap_or(false) {
     s.diff = None;
     return Ok(json!({}));

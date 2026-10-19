@@ -3,10 +3,10 @@
 //! offset arrow and angle ring of Joint (see [`crate::manipulators`]); and picking joints and
 //! saved joint origins in the viewport.
 
-use clf_engine::Session;
-use clf_engine::kernel::glam::{DMat4, DQuat, DVec3};
-use clf_engine::model::BodyId;
-use clf_engine::scene::JointMark;
+use fox_engine::Session;
+use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
+use fox_engine::model::BodyId;
+use fox_engine::scene::JointMark;
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
@@ -25,11 +25,11 @@ pub(super) struct Cache {
 const AXES: [&str; 3] = ["x", "y", "z"];
 
 fn mm(v: f64) -> String {
-  format!("{} mm", clf_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
+  format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
 }
 
 fn deg(a: f64) -> String {
-  format!("{} deg", clf_engine::sketch::Dim::new((a.to_degrees() * 1e4).round() / 1e4).expr)
+  format!("{} deg", fox_engine::sketch::Dim::new((a.to_degrees() * 1e4).round() / 1e4).expr)
 }
 
 /// Rotation about world axis `i` (0 = X) by `a` radians.
@@ -44,14 +44,14 @@ impl Dialog {
   }
 
   fn len(&self, s: &Session, e: &str) -> Option<f64> {
-    clf_engine::expr::eval(e, clf_engine::expr::Kind::Length, &s.model.params).ok()
+    fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &s.model.params).ok()
   }
 
   fn ang(&self, s: &Session, e: &str) -> Option<f64> {
     if e.trim().is_empty() {
       return Some(0.0);
     }
-    clf_engine::expr::eval(e, clf_engine::expr::Kind::Angle, &s.model.params).ok()
+    fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok()
   }
 
   /// The pick an arrow hangs on: the first edge (Fillet, Chamfer) or face (Press Pull).
@@ -262,7 +262,7 @@ fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
     let n: DVec3 = body
       .faces()
       .iter()
-      .filter(|f| e.faces.contains(&f.id) && f.kind == clf_engine::kernel::SurfaceKind::Plane)
+      .filter(|f| e.faces.contains(&f.id) && f.kind == fox_engine::kernel::SurfaceKind::Plane)
       .map(|f| f.normal)
       .sum();
     let dir = n.try_normalize().or_else(|| {
@@ -274,7 +274,7 @@ fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
   }
   let face = get("face")?;
   let f = body.faces().iter().find(|f| f.id == face)?;
-  if f.kind == clf_engine::kernel::SurfaceKind::Plane {
+  if f.kind == fox_engine::kernel::SurfaceKind::Plane {
     return Some((f.center, f.normal.try_normalize()?));
   }
   let m = body.mesh()?;
@@ -288,7 +288,7 @@ fn anchor(s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
 
 /// The joint origin frame of a picked face, edge or point (as the joint command reads them).
 fn pick_frame(s: &Session, body: BodyId, o: &Value) -> Option<DMat4> {
-  use clf_engine::model::assembly;
+  use fox_engine::model::assembly;
   let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
   let b = s.model.body(body)?;
   if let Some(f) = o.get("face") {
@@ -306,7 +306,7 @@ fn pick_frame(s: &Session, body: BodyId, o: &Value) -> Option<DMat4> {
 
 #[cfg(test)]
 mod tests {
-  use clf_engine::Sel;
+  use fox_engine::Sel;
 
   use super::*;
 
@@ -374,7 +374,7 @@ mod tests {
     let bb = s.model.bodies[0].shape.mass().unwrap();
     assert!((bb.bbox_max.z - 25.0).abs() < 1e-6, "{bb:?}");
     // no arrow when editing an existing feature (its picks name the body before it)
-    d.editing = Some(clf_engine::model::FeatureId(1));
+    d.editing = Some(fox_engine::model::FeatureId(1));
     assert!(d.manipulator(&s).is_none());
   }
 
@@ -462,7 +462,7 @@ mod tests {
     // glyphs: saved origins fill the Joint dialog's sides in turn; a joint goes to Drive Joints
     let base_c = comp(&s, base);
     run(&mut s, "joint_origin", json!({"component": base_c, "at": [10, 10, 10], "name": "Corner"}));
-    let marks = clf_engine::scene::joint_marks(&s);
+    let marks = fox_engine::scene::joint_marks(&s);
     let origin = *marks.iter().find(|m| !m.joint).unwrap();
     let jm = *marks.iter().find(|m| m.joint && m.feature == joint).unwrap();
     let mut j = Dialog::blank(Kind::Joint);
@@ -477,7 +477,7 @@ mod tests {
     assert!(!Dialog::blank(Kind::Fillet).pick_joint_mark(&mut s, &jm, "Joint1"));
 
     // a picked vertex is a joint origin at that point
-    let v = clf_engine::scene::body_vertices(&s.model.bodies[0])[0];
+    let v = fox_engine::scene::body_vertices(&s.model.bodies[0])[0];
     s.selection = vec![Sel::Vertex { body: BodyId(base), edge: v.0, end: v.1 }];
     let o = super::super::sel_origins(&s);
     assert_eq!(o, vec![(base, json!({"at": v.2.to_array()}))]);

@@ -5,8 +5,8 @@ use crate::assembly::{JointGeometry, JointKind, MotionAxis};
 use crate::config::{Column, Configuration, Override};
 use crate::direct::{BaseBody, DirectEdit};
 use crate::*;
-use clf_kernel::glam::DVec3;
-use clf_sketch::{ConstraintKind, Dim, ORIGIN, PtSpec, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_sketch::{ConstraintKind, Dim, ORIGIN, PtSpec, Sketch};
 
 const XY: PlaneRef = PlaneRef::Origin { plane: OriginPlane::Xy };
 
@@ -280,7 +280,7 @@ fn delete_face_and_base_feature_in_a_parametric_timeline() {
   assert!(volume(&m) < 8000.0 - 1.0);
   assert!(d.open_base_feature().is_none());
   let body = &m.bodies[0];
-  let cyl = body.faces().iter().find(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).unwrap();
+  let cyl = body.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
   let face = FaceRef::from_face(body.id, cyl, cyl.center + DVec3::new(3.0, 0.0, 0.0));
   let base = d.add_direct_edit(DirectEdit::DeleteFaces { faces: vec![face] }).unwrap();
   assert_eq!(d.open_base_feature(), Some(base));

@@ -299,8 +299,8 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 
 | Format                          | Open / insert | Export | Notes                                                           |
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
-| CLFusion design `.clf`          | ✓             | ✓      | The parametric design as JSON                                   |
-| CLFusion archive `.clfz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
+| FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
+| FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
 | STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies: components, body names and colours both ways; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
@@ -347,7 +347,7 @@ Windows, `~/Library/Application Support/FissionOxide` on macOS; set `FOX_DATA_DI
 The hub is plain files: `hub.json` (the index, replaced atomically) and one immutable file per
 version, so the app and the CLI can use the same hub at the same time.
 
-**Sharing a hub between machines.** Point `CLF_DATA_DIR` (or `--hub`) at a folder that
+**Sharing a hub between machines.** Point `FOX_DATA_DIR` (or `--hub`) at a folder that
 Dropbox, OneDrive, Syncthing, Nextcloud or a network drive keeps in sync. Nothing is lost when
 two people save at once: version files and ids carry a tag of the process that made them, so
 they never collide; every write of `hub.json` happens under a `hub.lock` and merges with what
@@ -421,13 +421,13 @@ fissionoxide-cli convert part.step part.3mf
 fissionoxide-cli inspect part.f3d
 
 # the data hub (add --hub DIR to use another hub)
-clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
-clfusion-cli hub list
-clfusion-cli hub versions '{"item": "i3"}'
-clfusion-cli hub compare '{"item": "i3", "a": 1}'
-clfusion-cli hub comment '{"item": "i3", "version": 2, "text": "wall too thin at the boss"}'
-clfusion-cli hub comments '{"item": "i3"}'
-clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
+fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
+fissionoxide-cli hub list
+fissionoxide-cli hub versions '{"item": "i3"}'
+fissionoxide-cli hub compare '{"item": "i3", "a": 1}'
+fissionoxide-cli hub comment '{"item": "i3", "version": 2, "text": "wall too thin at the boss"}'
+fissionoxide-cli hub comments '{"item": "i3"}'
+fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
 ```
 
 ### AI agents (MCP)
@@ -518,9 +518,9 @@ and Solid → Configure → Display Configuration Table edits every cell. Export
 configuration without switching to it:
 
 ```sh
-clfusion-cli run examples/configurations.jsonl --save plate.clf
-clfusion-cli export plate.clf plate-large.step --configuration Large
-clfusion-cli render plate.clf plain.png --configuration Plain
+fissionoxide-cli run examples/configurations.jsonl --save plate.fox
+fissionoxide-cli export plate.fox plate-large.step --configuration Large
+fissionoxide-cli render plate.fox plain.png --configuration Plain
 ```
 
 Direct edits (Solid → Modify → Direct Edit, or `direct.move_face`, `direct.press_pull`,
@@ -533,18 +533,18 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 
 | Crate               | Role                                                                   |
 |---------------------|------------------------------------------------------------------------|
-| `clf-expr`          | Unit-aware expressions and parameter evaluation                        |
-| `clf-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
-| `clf-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
-| `clf-model`         | The design document, feature timeline, regeneration and references     |
-| `clf-exchange`      | Mesh formats, DXF, SVG, `.clfz` archives, Fusion archive inspection    |
-| `clf-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
-| `clf-store`         | The data hub: projects, folders, items, versions, comments, activity, trash; safe sharing through sync folders |
-| `clf-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
-| `clf-engine`        | Session, undo/redo, the JSON command set, scene building               |
-| `clf-ui`            | The egui desktop UI                                                    |
-| `apps/clfusion`     | Desktop app                                                            |
-| `apps/clfusion-cli` | Headless runner, exporter and renderer                                 |
+| `fox-expr`          | Unit-aware expressions and parameter evaluation                        |
+| `fox-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
+| `fox-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
+| `fox-model`         | The design document, feature timeline, regeneration and references     |
+| `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
+| `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
+| `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash; safe sharing through sync folders |
+| `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
+| `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
+| `fox-ui`            | The egui desktop UI                                                    |
+| `apps/fissionoxide`     | Desktop app                                                            |
+| `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
@@ -556,7 +556,7 @@ the app. The stock `opencascade` crate aborts the process when a fillet fails.
 ## Brand
 
 FissionOxide was called CLFusion; `fox` is its short name in code (crates `fox-*`, the C++
-namespace, `FOX_*` environment variables). Designs saved as `.clf`/`.clfz` before the rename still
+namespace, `FOX_*` environment variables). Designs saved as `.fox`/`.foxz` before the rename still
 open, and a data hub in the old `CLFusion` data directory moves to the new one on first start.
 
 The logo is in [`assets/brand`](assets/brand): the fox alone (`fox.svg`), the app icon on a dark or

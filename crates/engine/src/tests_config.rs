@@ -64,7 +64,7 @@ fn configuration_table_switch_and_export() {
   s.redo();
 
   // export one configuration without switching
-  let dir = std::env::temp_dir().join(format!("clf-config-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-config-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let step = dir.join("tall.step");
   let r = run(&mut s, "export", json!({"path": step, "configuration": "Tall"}));
@@ -75,7 +75,7 @@ fn configuration_table_switch_and_export() {
   assert!(s.execute("export", &json!({"path": step, "configuration": "Nope"})).is_err());
 
   // the table survives save/load; clearing a cell and renaming and deleting rows
-  let clf = dir.join("configs.clf");
+  let clf = dir.join("configs.fox");
   run(&mut s, "config.activate", json!({"name": "Tall"}));
   run(&mut s, "save", json!({"path": clf}));
   let mut back = Session::open(&clf).unwrap();
@@ -126,7 +126,7 @@ fn history_off_and_direct_edits() {
   assert!((volume(&s) - 16000.0).abs() < 1e-6);
 
   // saved and reopened, the base feature replays
-  let path = std::env::temp_dir().join(format!("clf-base-{}.clf", std::process::id()));
+  let path = std::env::temp_dir().join(format!("fox-base-{}.fox", std::process::id()));
   run(&mut s, "save", json!({"path": path}));
   let back = Session::open(&path).unwrap();
   std::fs::remove_file(&path).ok();

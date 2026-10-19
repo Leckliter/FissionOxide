@@ -1,6 +1,6 @@
 //! Tests for the viewport scene: vertex picks and joint glyphs.
 
-use clf_kernel::glam::DVec3;
+use fox_kernel::glam::DVec3;
 use serde_json::{Value, json};
 
 use crate::scene::{self, Pick, SceneBuilder, ViewOptions};

@@ -2,10 +2,10 @@
 //! history on/off and the direct edits that go into a base feature. See
 //! `docs/CONFIGURATIONS.md`.
 
-use clf_model::assembly::MotionAxis;
-use clf_model::config::{Column, Configuration, MAX_CONFIGURATIONS, Override};
-use clf_model::direct::{BaseBody, DirectEdit};
-use clf_model::{BodyId, Design, FaceRef, FeatureId, FeatureKind};
+use fox_model::assembly::MotionAxis;
+use fox_model::config::{Column, Configuration, MAX_CONFIGURATIONS, Override};
+use fox_model::direct::{BaseBody, DirectEdit};
+use fox_model::{BodyId, Design, FaceRef, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
 use crate::commands::{expr_of, face_ref, opt_str, parse_color, req_str, req_u32, req_vec3};
@@ -141,7 +141,7 @@ pub fn default_text(d: &Design, c: &Column) -> String {
     },
     Column::Joint { joint, motion } => {
       let mut k = d.feature(*joint).map(|f| f.kind.clone());
-      k.as_mut().and_then(|k| clf_model::config::joint_field(k, *motion).cloned()).unwrap_or("(missing)".into())
+      k.as_mut().and_then(|k| fox_model::config::joint_field(k, *motion).cloned()).unwrap_or("(missing)".into())
     }
   }
 }
@@ -324,7 +324,7 @@ fn faces(s: &Session, p: &Value) -> Result<Vec<FaceRef>, CmdError> {
 /// A length now: a number (mm) or an expression evaluated with the current parameters.
 fn length(s: &Session, p: &Value, k: &str) -> Result<f64, CmdError> {
   let e = expr_of(p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))?)?;
-  Ok(clf_expr::eval(&e, clf_expr::Kind::Length, &s.model.params)?)
+  Ok(fox_expr::eval(&e, fox_expr::Kind::Length, &s.model.params)?)
 }
 
 /// Adds a direct edit to the open base feature (or a new one) and reports its status.

@@ -262,7 +262,7 @@ fn open_mesh_is_a_shell() {
 
 #[test]
 fn step_assembly_round_trip_with_names_and_colours() {
-  let dir = std::env::temp_dir().join(format!("clf-kernel-xcaf-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-kernel-xcaf-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let path = dir.join("asm.step");
   let base = Shape::make_box(DVec3::ZERO, DVec3::new(20.0, 20.0, 5.0)).unwrap();

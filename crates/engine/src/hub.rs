@@ -85,8 +85,8 @@ pub fn version_json(v: &Version) -> Value {
   })
 }
 
-fn comment_json(version: u32, c: &clf_store::Comment) -> Value {
-  json!({"id": c.id, "version": version, "author": c.author, "time": c.time, "time_text": clf_store::format_time(c.time), "text": c.text})
+fn comment_json(version: u32, c: &fox_store::Comment) -> Value {
+  json!({"id": c.id, "version": version, "author": c.author, "time": c.time, "time_text": fox_store::format_time(c.time), "text": c.text})
 }
 
 pub fn item_json(st: &Store, it: &Item) -> Value {

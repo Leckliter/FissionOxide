@@ -1501,7 +1501,7 @@ impl Dialog {
         self.flip = v < 0.0;
         self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v.abs()).expr);
       }
-      Kind::OffsetPlane => self.distance = format!("{} mm", clf_engine::sketch::Dim::new(v).expr),
+      Kind::OffsetPlane => self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v).expr),
       _ => {
         if !self.set_more_manipulator(v, step) {
           return;
@@ -3672,7 +3672,7 @@ fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
       Sel::Face { body, face } => Some((body.0, json!({"face": {"body": body.0, "face": face}}))),
       Sel::Edge { body, edge } => Some((body.0, json!({"edge": {"body": body.0, "edge": edge}}))),
       Sel::Vertex { body, edge, end } => {
-        clf_engine::scene::vertex_pos(s, *body, *edge, *end).map(|p| (body.0, json!({"at": p.to_array()})))
+        fox_engine::scene::vertex_pos(s, *body, *edge, *end).map(|p| (body.0, json!({"at": p.to_array()})))
       }
       _ => None,
     })

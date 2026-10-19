@@ -249,6 +249,7 @@ mod tests {
       visible: Vec::new(),
       profiles_of: Vec::new(),
       view: serde_json::json!({}),
+      vertices: false,
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

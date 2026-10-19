@@ -1,8 +1,8 @@
 // STEP assemblies: components as sub-assemblies, bodies as named parts with surface colours, read
 // and written through an XCAF document (STEPCAFControl). The document is a bare TDocStd_Document
 // with the XCAF tools attached, so no application framework or visualisation is linked in.
-#include "clf-kernel/cpp/xcaf.hxx"
-#include "clf-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/xcaf.hxx"
+#include "fox-kernel/src/ffi.rs.h"
 
 #include <stdexcept>
 #include <string>
@@ -30,7 +30,7 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
-namespace clf {
+namespace fox {
 
 namespace {
 
@@ -302,4 +302,4 @@ std::unique_ptr<Shape> step_doc_shape(const StepDoc &d, size_t i) {
   }
 }
 
-} // namespace clf
+} // namespace fox

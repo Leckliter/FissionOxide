@@ -688,7 +688,7 @@ fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
   o.pairs(&[(0, "ENDSEC"), (0, "EOF")]);
 
   let mut head = Out { s: String::new(), next: 0 };
-  head.pair(999, "CLFusion DXF export (mm)");
+  head.pair(999, "FissionOxide DXF export (mm)");
   head.pairs(&[(0, "SECTION"), (2, "HEADER"), (9, "$ACADVER"), (1, "AC1015"), (9, "$HANDSEED")]);
   head.pair(5, &format!("{:X}", o.next));
   head.pairs(&[(9, "$INSUNITS"), (70, "4"), (9, "$MEASUREMENT"), (70, "1"), (0, "ENDSEC")]);

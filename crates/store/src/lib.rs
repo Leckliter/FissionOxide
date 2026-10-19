@@ -17,7 +17,7 @@
 //! <root>/hub.lock                   held while hub.json is rewritten
 //! ```
 //!
-//! (Newer version files carry a tag of the process that wrote them: `v3-k2x9.clf`.)
+//! (Newer version files carry a tag of the process that wrote them: `v3-k2x9.fox`.)
 //!
 //! Version files are written once and never modified; `hub.json` is replaced atomically, so a
 //! crash mid-save never corrupts earlier versions. The index is re-read on [`Store::open`] and
@@ -335,7 +335,7 @@ impl Store {
     let idx: Index = serde_json::from_str(s)?;
     if idx.format_version > HUB_FORMAT_VERSION {
       return Err(invalid(format!(
-        "the hub at {} was written by a newer CLFusion (format {})",
+        "the hub at {} was written by a newer FissionOxide (format {})",
         root.display(),
         idx.format_version
       )));
