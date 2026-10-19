@@ -40,8 +40,11 @@ fn screw_joints_turn_and_advance() {
   let z0 = bbox(&s, body).0.z;
   let at = json!({"at": [0, 0, 0]});
   assert!(
-    s.execute("joint", &json!({"moving": nut, "moving_origin": at, "fixed_origin": at, "kind": "screw", "as_built": true}))
-      .is_err(),
+    s.execute(
+      "joint",
+      &json!({"moving": nut, "moving_origin": at, "fixed_origin": at, "kind": "screw", "as_built": true})
+    )
+    .is_err(),
     "a screw needs its lead"
   );
   let j = run(
@@ -66,12 +69,14 @@ fn screw_joints_turn_and_advance() {
   )["feature"]
     .as_u64()
     .unwrap();
-  let bad = s
-    .execute("motion_link", &json!({"leader": crank, "follower": j, "follower_motion": "slide"}))
-    .unwrap();
+  let bad = s.execute("motion_link", &json!({"leader": crank, "follower": j, "follower_motion": "slide"})).unwrap();
   assert!(bad["error"].as_str().unwrap().contains("no slide motion"), "{bad}");
   run(&mut s, "undo", json!({}));
-  run(&mut s, "motion_link", json!({"leader": crank, "follower": j, "leader_value": "90 deg", "follower_value": "360 deg"}));
+  run(
+    &mut s,
+    "motion_link",
+    json!({"leader": crank, "follower": j, "leader_value": "90 deg", "follower_value": "360 deg"}),
+  );
   // the crank's 90° turns the screw a whole turn: one lead (1 mm)
   assert!((bbox(&s, body).0.z - z0 - 1.0).abs() < 1e-6, "{:?}", bbox(&s, body));
 }
@@ -101,7 +106,8 @@ fn cam_followers_keep_contact_while_the_cam_turns() {
   )["feature"]
     .as_u64()
     .unwrap();
-  let r = run(&mut s, "cam_follower", json!({"bodies": [disc], "follower": slide, "clearance": "1 mm", "name": "Lift"}));
+  let r =
+    run(&mut s, "cam_follower", json!({"bodies": [disc], "follower": slide, "clearance": "1 mm", "name": "Lift"}));
   assert_eq!(r["name"], "Lift");
   for deg in [0.0_f64, 45.0, 120.0, 200.0] {
     run(&mut s, "joint.drive", json!({"joint": rev, "rotation": format!("{deg} deg")}));
@@ -155,11 +161,12 @@ fn inserted_assemblies_keep_their_components_and_joints() {
   run(&mut src, "joint.drive", json!({"joint": hinge, "rotation": "0 deg"}));
   let src_at_0 = bbox(&src, src_arm);
   run(&mut src, "joint.drive", json!({"joint": hinge, "rotation": "90 deg"}));
-  assert!(!near(src_at_0.0, src_at_90.0, 1.0));
+  assert!(!near(src_at_0.1, src_at_90.1, 1.0), "{src_at_0:?} {src_at_90:?}");
 
   let mut s = Session { store_root: Some(dir.clone()), ..Session::default() };
   let lift = DVec3::new(0.0, 0.0, 100.0);
-  let top = run(&mut s, "component.insert", json!({"item": item, "translate": [0, 0, 100]}))["component"].as_u64().unwrap();
+  let top =
+    run(&mut s, "component.insert", json!({"item": item, "translate": [0, 0, 100]}))["component"].as_u64().unwrap();
   // the hierarchy: Linkage > Base, Arm; the parts keep their materials
   let (base, arm) = (comp_named(&s, "Base"), comp_named(&s, "Arm"));
   assert_eq!(base.parent.map(|p| p.0 as u64), Some(top));

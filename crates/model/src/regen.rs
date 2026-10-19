@@ -2060,8 +2060,8 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 }
 
 mod direct;
+mod subasm;
 #[cfg(test)]
 mod tests_config;
-mod subasm;
 #[cfg(test)]
 mod tests_subasm;

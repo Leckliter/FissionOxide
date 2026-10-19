@@ -15,15 +15,15 @@ pub mod config;
 pub mod construct;
 pub mod direct;
 pub mod drawing;
+pub mod mechanism;
 pub mod meshops;
 pub mod plot;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
 pub mod sheet2;
-pub mod surface;
-pub mod mechanism;
 pub mod subassembly;
+pub mod surface;
 
 use serde::{Deserialize, Serialize};
 

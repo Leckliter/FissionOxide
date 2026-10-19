@@ -97,7 +97,7 @@ fn screw_joint_advances_by_its_lead_per_turn() {
 fn cam_design(flat: bool) -> (Design, FeatureId, BodyId, FeatureId) {
   let mut d = Design::new("cam");
   let disc = add(&mut d, cylinder("10", "5"), [5.0, 0.0]);
-  let follower = add(&mut d, cube("2"), [40.0, 0.0]);
+  let follower = add(&mut d, cube("4"), [40.0, 0.0]);
   let cam = d.add_component("Cam", vec![disc]).unwrap();
   let slider = d.add_component("Follower", vec![follower]).unwrap();
   let m = regenerate(&mut d);
@@ -128,7 +128,7 @@ fn cam_follower_rides_the_cam_as_it_turns() {
     turn(&mut d, rev, deg);
     let m = regenerate(&mut d);
     ok(&m);
-    let t = (deg as f64).to_radians();
+    let t = f64::to_radians(deg);
     // where the line y = 0 leaves the disc on the +X side
     let x = 5.0 * t.cos() + (100.0 - 25.0 * t.sin().powi(2)).sqrt();
     let got = bbox(&m, follower).0.x;
@@ -145,12 +145,15 @@ fn cam_follower_rides_the_cam_as_it_turns() {
 #[test]
 fn cam_followers_report_bad_setups() {
   let (mut d, rev, _, j) = cam_design(false);
-  // the cam's own joint can't follow it
-  let cam = d.components[0].id;
-  let bad = d.add_feature(FeatureKind::CamFollower { cam, follower: rev, flat: false, clearance: "0".into() }).unwrap();
-  let m = regenerate(&mut d);
-  assert!(m.status(bad).unwrap().error.as_deref().unwrap().contains("follow itself"), "{:?}", m.status(bad));
-  d.features.retain(|f| f.id != bad);
+  let (cam, slider) = (d.components[0].id, d.components[1].id);
+  // the cam's own (revolute) joint doesn't slide, and a follower can't be its own cam
+  for (c, f, why) in [(cam, rev, "doesn't slide"), (slider, j, "follow itself")] {
+    let bad =
+      d.add_feature(FeatureKind::CamFollower { cam: c, follower: f, flat: false, clearance: "0".into() }).unwrap();
+    let m = regenerate(&mut d);
+    assert!(m.status(bad).unwrap().error.as_deref().unwrap().contains(why), "{:?}", m.status(bad));
+    d.features.retain(|f| f.id != bad);
+  }
   // two cams on one joint
   let twice = d.add_feature(FeatureKind::CamFollower { cam, follower: j, flat: true, clearance: "0".into() }).unwrap();
   let m = regenerate(&mut d);

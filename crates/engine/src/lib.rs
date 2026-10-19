@@ -20,9 +20,9 @@ mod mates;
 pub mod scene;
 mod sheet2;
 mod solid;
+mod subassembly;
 mod surfaces;
 mod trace;
-mod subassembly;
 
 use std::path::PathBuf;
 
@@ -478,8 +478,8 @@ mod tests_sketch;
 #[cfg(test)]
 mod tests_solid;
 #[cfg(test)]
+mod tests_subassembly;
+#[cfg(test)]
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
-#[cfg(test)]
-mod tests_subassembly;

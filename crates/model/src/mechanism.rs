@@ -22,7 +22,8 @@ pub fn cam_contact(tris: &[[DVec3; 3]], tip: DVec3, dir: DVec3, flat: bool, clea
     return Err("the cam has no bodies".into());
   }
   // which side of the cam the follower is on: compare with the cam's middle along the slide
-  let (lo, hi) = tris.iter().flatten().map(|p| (*p - tip).dot(d)).fold((f64::MAX, f64::MIN), |(a, b), t| (a.min(t), b.max(t)));
+  let (lo, hi) =
+    tris.iter().flatten().map(|p| (*p - tip).dot(d)).fold((f64::MAX, f64::MIN), |(a, b), t| (a.min(t), b.max(t)));
   let above = lo + hi < 0.0;
   let t = if flat {
     if above { hi } else { lo }

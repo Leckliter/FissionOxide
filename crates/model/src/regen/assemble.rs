@@ -206,7 +206,8 @@ fn cams(
   for f in active.iter().filter(|f| !f.suppressed) {
     let FeatureKind::CamFollower { cam, follower, flat, clearance } = &f.kind else { continue };
     let r = (|| {
-      let joint = active.iter().find(|j| j.id == *follower && !j.suppressed).ok_or("the follower's joint no longer exists")?;
+      let joint =
+        active.iter().find(|j| j.id == *follower && !j.suppressed).ok_or("the follower's joint no longer exists")?;
       let FeatureKind::Joint { kind, moving, .. } = &joint.kind else {
         return Err("the follower must be a joint".to_string());
       };
@@ -284,7 +285,7 @@ impl Ctx<'_> {
         Some(e) => Err(e.clone()),
         None => Ok(None),
       },
-      FeatureKind::InsertDesign { name, breps, translate, sub: Some(sub) } if sub.flexible && sub.has_joints() => {
+      FeatureKind::InsertDesign { name, breps, translate, sub: Some(sub), .. } if sub.flexible && sub.has_joints() => {
         self.insert_flexible(id, name, breps, translate, sub)
       }
       FeatureKind::InsertDesign { name, breps, translate, .. } => {

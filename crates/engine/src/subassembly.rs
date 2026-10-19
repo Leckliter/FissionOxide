@@ -20,7 +20,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let (fid, _) = insert_for(s, p)?;
       let on = p.get("flexible").and_then(Value::as_bool).unwrap_or(true);
       s.edit(|d| {
-        let Some(FeatureKind::InsertDesign { sub: Some(sub), name, .. }) = d.feature_mut(fid).map(|f| &mut f.kind) else {
+        let Some(FeatureKind::InsertDesign { sub: Some(sub), name, .. }) = d.feature_mut(fid).map(|f| &mut f.kind)
+        else {
           return Err(CmdError::new("that component has no sub-assembly"));
         };
         if on && !sub.has_joints() {
@@ -230,7 +231,8 @@ impl Source {
         } => {
           let mut ok = remap(moving, comps) && fixed.as_mut().is_none_or(|c| remap(c, comps));
           ok &= regeo(moving_origin, host_body, &origins) && regeo(fixed_origin, host_body, &origins);
-          for (e, a) in [(angle, true), (offset, false), (rotation, true), (slide, false), (slide2, false), (pitch, true)]
+          for (e, a) in
+            [(angle, true), (offset, false), (rotation, true), (slide, false), (slide2, false), (pitch, true)]
           {
             ok &= self.freeze(e, a);
           }
@@ -443,7 +445,8 @@ pub(crate) fn tree(d: &Design) -> Vec<(ComponentId, usize)> {
 pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
   let view = opt_str(p, "view").unwrap_or("indented");
   let body_volume = |b: &BodyId| s.model.body(*b).and_then(|b| b.shape.mass().ok()).map(|m| m.volume).unwrap_or(0.0);
-  let material = |c: &fox_model::Component| if c.material.is_empty() { "Steel".to_string() } else { c.material.clone() };
+  let material =
+    |c: &fox_model::Component| if c.material.is_empty() { "Steel".to_string() } else { c.material.clone() };
   let tree = tree(&s.design);
   let below = |c: ComponentId| -> Vec<ComponentId> {
     let at = tree.iter().position(|(x, _)| *x == c).unwrap_or(0);
@@ -482,9 +485,7 @@ pub(crate) fn bom(s: &Session, p: &Value) -> CmdResult {
     r
   };
   let mut rows: Vec<Value> = match view {
-    "indented" => {
-      tree.iter().filter_map(|(c, level)| s.design.component(*c).map(|c| row(c, *level))).collect()
-    }
+    "indented" => tree.iter().filter_map(|(c, level)| s.design.component(*c).map(|c| row(c, *level))).collect(),
     "top" => tree
       .iter()
       .filter(|(_, l)| *l == 0)

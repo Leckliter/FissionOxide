@@ -136,7 +136,12 @@ fn contact_set_id(s: &Session, p: &Value) -> Result<u32, CmdError> {
 }
 
 /// A feature of the given kind by id or name.
-pub(crate) fn feature_by(s: &Session, v: Option<&Value>, what: &str, ok: fn(&FeatureKind) -> bool) -> Result<FeatureId, CmdError> {
+pub(crate) fn feature_by(
+  s: &Session,
+  v: Option<&Value>,
+  what: &str,
+  ok: fn(&FeatureKind) -> bool,
+) -> Result<FeatureId, CmdError> {
   let v = v.ok_or(CmdError::new(format!("missing '{what}'")))?;
   let f = match v {
     Value::String(n) => s.design.features.iter().find(|f| f.name == *n),
@@ -362,7 +367,8 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let n = breps.len();
   let source = linked.then(|| HubSource { item: item.id.clone(), version });
   let (fid, cid) = s.edit(|d| {
-    let fid = d.add_feature(FeatureKind::InsertDesign { name: name.clone(), source, breps, translate: t, sub: None })?;
+    let fid =
+      d.add_feature(FeatureKind::InsertDesign { name: name.clone(), source, breps, translate: t, sub: None })?;
     let cid = d.add_component(&name, insert_bodies(fid, n))?;
     if let Some(c) = d.component_mut(cid) {
       c.material = material;
