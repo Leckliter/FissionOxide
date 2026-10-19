@@ -174,3 +174,20 @@ fn mesh_normals_agree_with_triangles() {
   }
   assert_eq!(bad, 0, "{bad} bad normals of {}", m.indices.len());
 }
+
+#[test]
+fn hidden_line_projection() {
+  // a 40 × 20 × 10 block with a vertical hole, seen from the front and from the top
+  let b = Shape::make_box(DVec3::ZERO, DVec3::new(40.0, 20.0, 10.0)).unwrap();
+  let c = Shape::cylinder(DVec3::new(20.0, 10.0, -1.0), DVec3::Z, 4.0, 12.0).unwrap();
+  let part = b.boolean(&c, BoolOp::Subtract).unwrap();
+  let front = part.project(-DVec3::Y, DVec3::X, 0.01).unwrap();
+  let (lo, hi) = front.bounds().unwrap();
+  assert!((hi[0] - lo[0] - 40.0).abs() < 1e-6 && (hi[1] - lo[1] - 10.0).abs() < 1e-6, "{lo:?} {hi:?}");
+  assert!((lo[1] - 0.0).abs() < 1e-6, "front view y is world Z");
+  assert!(front.lines.iter().any(|l| l.kind.hidden()), "the hole is hidden from the front");
+  let top = part.project(DVec3::Z, DVec3::X, 0.01).unwrap();
+  let (lo, hi) = top.bounds().unwrap();
+  assert!((hi[1] - lo[1] - 20.0).abs() < 1e-6 && (lo[1] - 0.0).abs() < 1e-6, "top view y is world Y: {lo:?}");
+  assert!(top.circles.iter().any(|c| (c.radius - 4.0).abs() < 1e-9 && !c.kind.hidden()));
+}

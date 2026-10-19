@@ -10,6 +10,8 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod assembly;
+pub mod drawing;
+pub mod plot;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
@@ -59,6 +61,9 @@ pub struct Design {
   /// Components: named groups of bodies that joints move together.
   #[serde(default)]
   pub components: Vec<Component>,
+  /// 2D drawings of the design.
+  #[serde(default)]
+  pub drawings: Vec<drawing::Drawing>,
   #[serde(default)]
   next_id: u32,
 }
@@ -783,6 +788,7 @@ impl Design {
       bodies: Vec::new(),
       sheet_metal_rules: Vec::new(),
       components: Vec::new(),
+      drawings: Vec::new(),
       next_id: 1,
     }
   }
@@ -985,6 +991,24 @@ impl Design {
       }
     }
     Ok(())
+  }
+
+  // ---- drawings ----
+
+  pub fn drawing(&self, id: u32) -> Option<&drawing::Drawing> {
+    self.drawings.iter().find(|d| d.id == id)
+  }
+
+  pub fn drawing_mut(&mut self, id: u32) -> Option<&mut drawing::Drawing> {
+    self.drawings.iter_mut().find(|d| d.id == id)
+  }
+
+  /// A new drawing with the given views; returns its id.
+  pub fn add_drawing(&mut self, name: &str, views: Vec<drawing::ViewKind>) -> u32 {
+    let id = self.drawings.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+    let name = if name.trim().is_empty() { format!("Drawing{id}") } else { name.to_string() };
+    self.drawings.push(drawing::Drawing::new(id, name, views));
+    id
   }
 
   // ---- components ----

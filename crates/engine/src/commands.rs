@@ -100,6 +100,18 @@ cmds! {
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
   "assembly.interference" => "Overlapping bodies of different components", "{}";
   "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
+  "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
+  "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, rename?}";
+  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
+  "drawing.remove_view" => "Remove a view", "{drawing?, view}";
+  "drawing.move_view" => "Place a view (sheet mm; null = automatic)", "{drawing?, view, at}";
+  "drawing.dimension" => "Dimension two model points in a view", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?}";
+  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text}";
+  "drawing.title" => "Fill in the title block", "{drawing?, title?, author?, part_number?, material?, revision?, company?}";
+  "drawing.info" => "A drawing's views, scale and text", "{drawing?}";
+  "drawing.list" => "List drawings", "{}";
+  "drawing.delete" => "Delete a drawing", "{drawing?}";
+  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf", "{drawing?, path}";
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
@@ -117,6 +129,9 @@ cmds! {
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   if let Some(r) = crate::assembly::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::drawings::run(s, name, p) {
     return r;
   }
   match name {

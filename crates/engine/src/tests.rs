@@ -350,3 +350,40 @@ fn assembly_with_a_revolute_joint() {
   assert!((arm_row["mass_g"].as_f64().unwrap() - v * 2.7 / 1000.0).abs() < 1e-3, "{bom}");
   assert_eq!(arm_row["material"], "Aluminum");
 }
+
+#[test]
+fn drawings_with_views_dimensions_and_export() {
+  let mut s = Session::default();
+  plate(&mut s);
+  let r = run(&mut s, "drawing.create", json!({"name": "Plate", "sheet": "a3"}));
+  assert!(r["error"].is_null(), "{r}");
+  let text: Vec<String> = serde_json::from_value(r["text"].clone()).unwrap();
+  for want in ["80", "50", "6", "Ø12", "FRONT", "TOP", "RIGHT", "ISOMETRIC", "Plate"] {
+    assert!(text.iter().any(|t| t == want), "missing {want}: {text:?}");
+  }
+  run(&mut s, "drawing.add_view", json!({"kind": {"section": "y", "offset": 25}}));
+  run(&mut s, "drawing.dimension", json!({"view": 1, "a": [0, 0, 0], "b": [40, 0, 6], "orientation": "horizontal"}));
+  run(&mut s, "drawing.title", json!({"part_number": "CLF-001", "material": "Aluminum"}));
+  run(&mut s, "drawing.set", json!({"scale": "1:1", "projection": "first_angle"}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert!(info["error"].is_null(), "{info}");
+  let text: Vec<String> = serde_json::from_value(info["text"].clone()).unwrap();
+  assert!(
+    text.iter().any(|t| t == "SECTION E-E") && text.iter().any(|t| t == "1:1") && text.iter().any(|t| t == "40"),
+    "{text:?}"
+  );
+  let dir = std::env::temp_dir().join(format!("clf-drawing-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  for ext in ["svg", "pdf", "dxf"] {
+    let path = dir.join(format!("plate.{ext}"));
+    run(&mut s, "drawing.export", json!({"path": path}));
+    assert!(std::fs::metadata(&path).unwrap().len() > 1000, "{ext}");
+  }
+  let _ = std::fs::remove_dir_all(&dir);
+  // drawings save with the design and follow parameter changes
+  run(&mut s, "param.set", json!({"name": "thick", "expr": "9"}));
+  let text: Vec<String> = serde_json::from_value(run(&mut s, "drawing.info", json!({}))["text"].clone()).unwrap();
+  assert!(text.iter().any(|t| t == "9"), "{text:?}");
+  let back = clf_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.drawings, s.design.drawings);
+}

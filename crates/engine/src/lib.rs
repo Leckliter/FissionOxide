@@ -8,6 +8,7 @@
 
 mod assembly;
 mod commands;
+mod drawings;
 pub mod scene;
 
 use std::path::PathBuf;
