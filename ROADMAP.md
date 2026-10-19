@@ -1,8 +1,8 @@
 # CLFusion roadmap
 
 CLFusion covers Fusion's core solid-modeling loop: sketch, constrain, dimension, extrude,
-revolve, fillet, chamfer, shell, pattern, mirror, parameters, timeline editing, and
-STEP/STL export. The list below is what's missing compared with Fusion's Design workspace,
+revolve, fillet, chamfer, shell, pattern, mirror, parameters, timeline editing, the common
+exchange formats and a versioned data panel. The list below is what's missing compared with Fusion's Design workspace,
 roughly in the order it would pay off.
 
 ## Next
@@ -20,6 +20,16 @@ roughly in the order it would pay off.
 | UI        | Drag manipulators (arrows) for extrude distance and other values             |
 | UI        | Transparent preview bodies, section analysis, measure between two entities   |
 | View      | GPU renderer (wgpu) for big models; the CPU one stays for the CLI            |
+
+## Files and data
+
+| Area     | Item                                                                           |
+|----------|--------------------------------------------------------------------------------|
+| Formats  | ACIS SAT/SMT, Parasolid (x_t), DWG, FBX: need closed-source or licensed SDKs   |
+| Formats  | DXF splines and ellipses; SVG sketch import/export                             |
+| Formats  | STEP with colours, names and assembly structure (needs OCCT's XCAF toolkit)    |
+| Data     | Sharing a hub between machines (sync folder or server), comments on versions   |
+| Data     | Visual diff between two versions in the viewport                              |
 
 ## Later
 

@@ -95,5 +95,9 @@ pub(crate) mod ffi {
     fn read_step(path: &str) -> Result<UniquePtr<Shape>>;
     fn write_brep(s: &Shape) -> Result<String>;
     fn read_brep(data: &str) -> Result<UniquePtr<Shape>>;
+    fn solidify(s: &Shape, tol: f64) -> Result<UniquePtr<Shape>>;
+    fn write_iges(s: &Shape, path: &str) -> Result<()>;
+    fn read_iges(path: &str) -> Result<UniquePtr<Shape>>;
+    fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
   }
 }

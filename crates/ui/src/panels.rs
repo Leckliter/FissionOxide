@@ -18,36 +18,82 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.visuals_mut().override_text_color = Some(theme::APP_BAR_TEXT);
+        let grid = egui::Button::new(RichText::new("📂").size(16.0).color(Color32::WHITE)).frame(false);
+        if ui.add(grid).on_hover_text("Show / hide the data panel").clicked() {
+          app.data.toggle();
+        }
         ui.label(RichText::new("CLFusion").strong().color(Color32::WHITE));
         ui.add_space(8.0);
         egui::MenuBar::new().ui(ui, |ui| {
           ui.menu_button("File", |ui| {
-            if ui.button("New design").clicked() {
+            if ui.button("New design  (Ctrl+N)").clicked() {
               app.new_design();
               ui.close();
             }
-            if ui.button("Open…  (Ctrl+O)").clicked() {
+            if ui
+              .button("Open…  (Ctrl+O)")
+              .on_hover_text("Designs, or STEP, IGES, STL, OBJ, 3MF, PLY, DXF … as a new design")
+              .clicked()
+            {
               ui.close();
               app.open_dialog();
             }
-            if ui.button("Save  (Ctrl+S)").clicked() {
+            ui.menu_button("Open recent", |ui| {
+              let recent = app
+                .s
+                .execute("hub.recent", &json!({"limit": 12}))
+                .ok()
+                .and_then(|v| v.as_array().cloned())
+                .unwrap_or_default();
+              if recent.is_empty() {
+                ui.label(RichText::new("Nothing saved yet").color(theme::MUTED));
+              }
+              for it in recent {
+                let id = it["id"].as_str().unwrap_or_default().to_string();
+                let label = format!(
+                  "{}  v{}",
+                  it["name"].as_str().unwrap_or_default(),
+                  it["latest"]["number"].as_u64().unwrap_or(0)
+                );
+                if ui.button(label).clicked() {
+                  ui.close();
+                  app.open_hub_item(&id, None);
+                }
+              }
+            });
+            if ui.button(if app.data.open { "Hide data panel" } else { "Show data panel" }).clicked() {
+              app.data.toggle();
+              ui.close();
+            }
+            ui.separator();
+            if ui.button("Save  (Ctrl+S)").on_hover_text("Save a new version to the data panel").clicked() {
               ui.close();
               app.save(false);
             }
-            if ui.button("Save as…").clicked() {
+            if ui.button("Save as…  (Ctrl+Shift+S)").on_hover_text("Save as a new design in the data panel").clicked()
+            {
               ui.close();
               app.save(true);
             }
+            if ui.button("Save to file…").on_hover_text("Write a .clf or .clfz file on this computer").clicked() {
+              ui.close();
+              app.save_file(true);
+            }
             ui.separator();
-            if ui.button("Import STEP…").clicked() {
+            if ui
+              .button("Insert into design…")
+              .on_hover_text("Add the bodies (or DXF sketch) from a file to this design")
+              .clicked()
+            {
               ui.close();
               app.import();
             }
             ui.menu_button("Export", |ui| {
-              for (label, ext) in [("STEP (.step)", "step"), ("STL mesh (.stl)", "stl"), ("OBJ mesh (.obj)", "obj")] {
-                if ui.button(label).clicked() {
+              for f in clf_engine::exchange::FORMATS.iter().filter(|f| f.export) {
+                let label = format!("{} (.{})", f.name, f.extensions.join(", ."));
+                if ui.button(label).on_hover_text(f.note).clicked() {
                   ui.close();
-                  app.export(ext);
+                  app.export(f.id);
                 }
               }
             });
@@ -239,7 +285,15 @@ fn solid_toolbar(app: &mut App, ui: &mut egui::Ui) {
     }
   });
   group(ui, "INSERT", |ui| {
-    if icons::tool_button(ui, Icon::Import, "STEP", "Import a STEP file", false).clicked() {
+    if icons::tool_button(
+      ui,
+      Icon::Import,
+      "Insert",
+      "Insert a file: STEP, IGES, STL, OBJ, 3MF, PLY, DXF, CLFusion designs",
+      false,
+    )
+    .clicked()
+    {
       app.import();
     }
   });

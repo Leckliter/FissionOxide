@@ -1,0 +1,14 @@
+[package]
+name = "clf-store"
+description = "Local data hub: projects, folders, designs and their version history (Fusion's data panel)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

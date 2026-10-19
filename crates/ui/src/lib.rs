@@ -5,6 +5,7 @@
 //! bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod data_panel;
 mod dialogs;
 mod icons;
 mod panels;
@@ -45,6 +46,8 @@ pub struct App {
   tstate: viewport::ToolState,
   fitted_once: bool,
   last_sketch: Option<clf_engine::model::FeatureId>,
+  /// The data panel (projects, designs, versions).
+  pub data: data_panel::DataPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,8 +74,10 @@ impl App {
   pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> App {
     theme::apply(&cc.egui_ctx);
     let mut app = App::with_session(Session::default());
-    if let Some(p) = open {
-      app.open_path(&p);
+    match open {
+      Some(p) => app.open_path(&p),
+      // like Fusion, start with the data panel showing
+      None => app.data.toggle(),
     }
     app
   }
@@ -98,6 +103,7 @@ impl App {
       tstate: viewport::ToolState::default(),
       fitted_once: false,
       last_sketch: None,
+      data: data_panel::DataPanel::default(),
     }
   }
 
@@ -122,13 +128,39 @@ impl App {
   pub fn open_path(&mut self, p: &std::path::Path) {
     match Session::open(p) {
       Ok(s) => {
-        self.s = s;
-        self.dialog = None;
-        self.tool = Tool::Select;
-        self.fit_view();
-        self.status = Some((format!("Opened {}", p.display()), false));
+        self.replace_session(s);
+        let msg = match self.s.path {
+          Some(_) => format!("Opened {}", p.display()),
+          None => format!("Opened {} as a new design (Save to keep it)", p.display()),
+        };
+        self.status = Some((msg, false));
       }
       Err(e) => self.status = Some((format!("Couldn't open {}: {e}", p.display()), true)),
+    }
+  }
+
+  /// Switches to another session, keeping the hub location.
+  fn replace_session(&mut self, mut s: Session) {
+    s.store_root = self.s.store_root.clone();
+    self.s = s;
+    self.dialog = None;
+    self.tool = Tool::Select;
+    self.fit_view();
+    self.data.invalidate();
+  }
+
+  /// Opens a design (latest or a given version) from the data panel.
+  pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
+    self.cancel_dialog();
+    if let Some(r) = self.run("hub.open", json!({"item": item, "version": version})) {
+      self.dialog = None;
+      self.tool = Tool::Select;
+      self.fit_view();
+      self.data.invalidate();
+      if r.get("warning").is_none() {
+        let v = r.get("version").and_then(Value::as_u64).unwrap_or(0);
+        self.status = Some((format!("Opened {} v{v}", self.s.design.name), false));
+      }
     }
   }
 
@@ -143,37 +175,59 @@ impl App {
   }
 
   fn title(&self) -> String {
-    let name = self
-      .s
-      .path
-      .as_ref()
-      .and_then(|p| p.file_stem())
-      .map(|n| n.to_string_lossy().to_string())
-      .unwrap_or_else(|| self.s.design.name.clone());
+    let name = match (&self.s.hub, &self.s.path) {
+      (Some(h), _) => format!("{} v{}", self.s.design.name, h.version),
+      (None, Some(p)) => {
+        p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| self.s.design.name.clone())
+      }
+      (None, None) => self.s.design.name.clone(),
+    };
     format!("{}{} — CLFusion", name, if self.s.dirty { " •" } else { "" })
   }
 
   // ---- file actions ----
 
   pub fn new_design(&mut self) {
+    let root = self.s.store_root.clone();
     self.s = Session::default();
+    self.s.store_root = root;
     self.dialog = None;
     self.tool = Tool::Select;
     self.cam = Camera::default();
     self.fitted_once = false;
   }
 
+  /// Open from this computer: designs, or any importable file as a new design.
   pub fn open_dialog(&mut self) {
-    if let Some(p) = rfd::FileDialog::new().add_filter("CLFusion design", &["clf", "json"]).pick_file() {
+    if let Some(p) = data_panel::pick_importable("Open", false).into_iter().next() {
       self.open_path(&p);
     }
   }
 
+  /// Save (Ctrl+S): a new version in the data panel. The first save, or Save As, asks for a
+  /// name and location.
   pub fn save(&mut self, save_as: bool) {
+    self.save_to_hub(save_as);
+  }
+
+  pub fn save_to_hub(&mut self, as_new: bool) {
+    let (project, folder) = self.data.location();
+    self.data.invalidate();
+    let name = if as_new && self.s.hub.is_some() {
+      format!("{} (copy)", self.s.design.name)
+    } else {
+      self.s.design.name.clone()
+    };
+    self.data.save = Some(data_panel::SaveForm { name, as_new, project, folder, ..Default::default() });
+  }
+
+  /// Save to a file on this computer (.clf, or .clfz archive).
+  pub fn save_file(&mut self, save_as: bool) {
     let path = match (&self.s.path, save_as) {
       (Some(p), false) => Some(p.clone()),
       _ => rfd::FileDialog::new()
         .add_filter("CLFusion design", &["clf"])
+        .add_filter("CLFusion archive (design + thumbnail)", &["clfz"])
         .set_file_name(format!("{}.clf", self.s.design.name))
         .save_file(),
     };
@@ -184,27 +238,60 @@ impl App {
     }
   }
 
-  pub fn export(&mut self, ext: &str) {
-    let filter = match ext {
-      "step" => ("STEP", vec!["step", "stp"]),
-      "stl" => ("STL mesh", vec!["stl"]),
-      _ => ("OBJ mesh", vec!["obj"]),
-    };
+  /// Export in any writable format (by its id in [`clf_engine::exchange::FORMATS`]).
+  pub fn export(&mut self, id: &str) {
+    let Some(f) = clf_engine::exchange::FORMATS.iter().find(|f| f.id == id) else { return };
+    let ext = f.extensions.first().copied().unwrap_or(id);
     if let Some(p) = rfd::FileDialog::new()
-      .add_filter(filter.0, &filter.1)
+      .add_filter(f.name, f.extensions)
       .set_file_name(format!("{}.{ext}", self.s.design.name))
       .save_file()
-      && self.run("export", json!({"path": p})).is_some()
     {
-      self.status = Some((format!("Exported {}", p.display()), false));
+      let mut params = json!({"path": p});
+      if id == "dxf" {
+        params["sketch"] = json!(self.s.edit_sketch.or(self.last_sketch).map(|s| s.0));
+      }
+      if self.run("export", params).is_some() {
+        self.status = Some((format!("Exported {}", p.display()), false));
+      }
     }
   }
 
+  /// Insert a file into the current design.
   pub fn import(&mut self) {
-    if let Some(p) = rfd::FileDialog::new().add_filter("STEP", &["step", "stp"]).pick_file()
-      && self.run("import", json!({"path": p})).is_some()
-    {
+    for p in data_panel::pick_importable("Insert into the design", true) {
+      self.import_path(&p);
+    }
+  }
+
+  pub fn import_path(&mut self, p: &std::path::Path) {
+    if let Some(r) = self.run("import", json!({"path": p})) {
+      if r.get("warning").is_none() {
+        self.status = Some((format!("Inserted {}", p.display()), false));
+      }
       self.fit_view();
+    }
+  }
+
+  /// Files dropped on the window: uploaded when the data panel is open, otherwise opened (into
+  /// an empty design) or inserted.
+  fn dropped_files(&mut self, ctx: &egui::Context) {
+    let files: Vec<PathBuf> =
+      ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| p.is_absolute()).collect());
+    for p in files {
+      if self.data.open {
+        let (project, folder) = self.data.location();
+        if let Some(r) = self.run("hub.upload", json!({"path": p, "project": project, "folder": folder}))
+          && r.get("warning").is_none()
+        {
+          self.status = Some((format!("Uploaded {}", p.display()), false));
+        }
+        self.data.invalidate();
+      } else if self.s.design.features.is_empty() && !self.s.dirty {
+        self.open_path(&p);
+      } else {
+        self.import_path(&p);
+      }
     }
   }
 
@@ -220,6 +307,9 @@ impl App {
     }
     if pressed(Key::Y, Modifiers::COMMAND) || pressed(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT) {
       self.s.redo();
+    }
+    if pressed(Key::S, Modifiers::COMMAND | Modifiers::SHIFT) {
+      self.save(true);
     }
     if pressed(Key::S, Modifiers::COMMAND) {
       self.save(false);
@@ -416,11 +506,15 @@ impl App {
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
-    self.shortcuts(&ctx);
+    if self.data.save.is_none() {
+      self.shortcuts(&ctx);
+    }
+    self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
     panels::status_bar(self, ui);
     panels::timeline(self, ui);
+    data_panel::show(self, ui);
     panels::browser(self, ui);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
@@ -431,6 +525,7 @@ impl App {
     if self.show_params {
       panels::parameters_window(self, &ctx);
     }
+    data_panel::save_window(self, &ctx);
     egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
       viewport::show(self, ui);
     });
