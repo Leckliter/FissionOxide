@@ -1,27 +1,96 @@
-//! Colours and style: light panels and a dark application bar, like Fusion.
+//! Colours and style, modelled on Autodesk Fusion's light theme: a light-grey application bar
+//! with document tabs, a white toolbar with workspace tabs, panels floating over a
+//! blue-grey gradient canvas, and Fusion blue for selection and the primary button.
 
-use egui::Color32;
+use egui::{Color32, CornerRadius, Stroke};
 
-pub const APP_BAR: Color32 = Color32::from_rgb(38, 42, 50);
-pub const APP_BAR_TEXT: Color32 = Color32::from_rgb(225, 228, 235);
-pub const TOOLBAR: Color32 = Color32::from_rgb(244, 245, 247);
-pub const PANEL: Color32 = Color32::from_rgb(250, 250, 251);
-pub const BORDER: Color32 = Color32::from_rgb(214, 217, 222);
-pub const ACCENT: Color32 = Color32::from_rgb(0, 120, 212);
-pub const SKETCH_ACCENT: Color32 = Color32::from_rgb(40, 150, 70);
-pub const ERROR: Color32 = Color32::from_rgb(200, 40, 40);
-pub const WARNING: Color32 = Color32::from_rgb(200, 140, 0);
-pub const MUTED: Color32 = Color32::from_rgb(120, 125, 135);
-pub const GROUP_LABEL: Color32 = Color32::from_rgb(90, 96, 108);
+/// Application bar (data panel, file, save, undo/redo, document tabs).
+pub const APP_BAR: Color32 = Color32::from_rgb(232, 232, 232);
+/// Toolbar (workspace switcher, tabs and tool groups).
+pub const TOOLBAR: Color32 = Color32::from_rgb(250, 250, 250);
+pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255);
+/// Floating panels over the canvas (browser, comments, navigation bar).
+pub const FLOAT: Color32 = Color32::from_rgba_premultiplied(250, 250, 250, 245);
+pub const FLOAT_HEADER: Color32 = Color32::from_rgb(242, 242, 242);
+pub const BORDER: Color32 = Color32::from_rgb(208, 208, 208);
+pub const SEPARATOR: Color32 = Color32::from_rgb(220, 220, 220);
+/// Fusion blue: selection, active tab underline, OK button.
+pub const ACCENT: Color32 = Color32::from_rgb(6, 150, 215);
+pub const ACCENT_DARK: Color32 = Color32::from_rgb(0, 119, 178);
+/// Light blue behind hovered / selected rows and buttons.
+pub const HOVER: Color32 = Color32::from_rgb(229, 241, 251);
+pub const SELECTED: Color32 = Color32::from_rgb(204, 228, 247);
+pub const SKETCH_ACCENT: Color32 = Color32::from_rgb(58, 160, 60);
+pub const ERROR: Color32 = Color32::from_rgb(214, 48, 39);
+pub const WARNING: Color32 = Color32::from_rgb(232, 155, 0);
+pub const TEXT: Color32 = Color32::from_rgb(40, 40, 40);
+pub const MUTED: Color32 = Color32::from_rgb(120, 120, 120);
+pub const GROUP_LABEL: Color32 = Color32::from_rgb(80, 80, 80);
+/// Command dialog title bar.
+pub const DIALOG_HEADER: Color32 = Color32::from_rgb(74, 74, 74);
+/// Timeline strip.
+pub const TIMELINE: Color32 = Color32::from_rgb(244, 244, 244);
+
+/// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
+pub const ICON_INK: Color32 = Color32::from_rgb(85, 85, 85);
+pub const ICON_FILL: Color32 = Color32::from_rgb(196, 199, 204);
+pub const ICON_FILL_LIGHT: Color32 = Color32::from_rgb(226, 228, 231);
+pub const ICON_BLUE: Color32 = Color32::from_rgb(40, 140, 220);
+pub const ICON_ORANGE: Color32 = Color32::from_rgb(240, 145, 40);
+pub const ICON_GREEN: Color32 = Color32::from_rgb(70, 165, 60);
 
 pub fn apply(ctx: &egui::Context) {
   ctx.set_visuals(egui::Visuals::light());
   ctx.all_styles_mut(|style| {
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
-    style.spacing.button_padding = egui::vec2(6.0, 3.0);
-    style.visuals.selection.bg_fill = ACCENT;
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
-    style.visuals.window_corner_radius = 6.0.into();
-    style.visuals.panel_fill = PANEL;
+    style.spacing.button_padding = egui::vec2(8.0, 3.0);
+    style.spacing.interact_size.y = 22.0;
+    style.spacing.menu_margin = egui::Margin::same(4);
+    use egui::{FontFamily, FontId, TextStyle};
+    style.text_styles = [
+      (TextStyle::Small, FontId::new(10.0, FontFamily::Proportional)),
+      (TextStyle::Body, FontId::new(12.5, FontFamily::Proportional)),
+      (TextStyle::Button, FontId::new(12.5, FontFamily::Proportional)),
+      (TextStyle::Heading, FontId::new(15.0, FontFamily::Proportional)),
+      (TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace)),
+    ]
+    .into();
+    let v = &mut style.visuals;
+    v.override_text_color = None;
+    v.panel_fill = PANEL;
+    v.window_fill = PANEL;
+    v.window_stroke = Stroke::new(1.0, BORDER);
+    v.window_corner_radius = CornerRadius::same(3);
+    v.menu_corner_radius = CornerRadius::same(2);
+    v.window_shadow = egui::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(45) };
+    v.popup_shadow = egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) };
+    v.selection.bg_fill = ACCENT;
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.hyperlink_color = ACCENT;
+    v.extreme_bg_color = Color32::WHITE;
+    v.faint_bg_color = Color32::from_rgb(246, 246, 246);
+    v.text_edit_bg_color = Some(Color32::WHITE);
+    let w = &mut v.widgets;
+    let r = CornerRadius::same(2);
+    w.noninteractive.bg_stroke = Stroke::new(1.0, SEPARATOR);
+    w.noninteractive.fg_stroke = Stroke::new(1.0, TEXT);
+    w.inactive.bg_fill = Color32::from_rgb(245, 245, 245);
+    w.inactive.weak_bg_fill = Color32::from_rgb(245, 245, 245);
+    w.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(196, 196, 196));
+    w.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+    w.hovered.bg_fill = HOVER;
+    w.hovered.weak_bg_fill = HOVER;
+    w.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
+    w.hovered.fg_stroke = Stroke::new(1.0, Color32::BLACK);
+    w.active.bg_fill = SELECTED;
+    w.active.weak_bg_fill = SELECTED;
+    w.active.bg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    w.active.fg_stroke = Stroke::new(1.0, Color32::BLACK);
+    w.open.bg_fill = SELECTED;
+    w.open.weak_bg_fill = SELECTED;
+    for s in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+      s.corner_radius = r;
+      s.expansion = 0.0;
+    }
   });
 }

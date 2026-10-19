@@ -11,6 +11,7 @@ use clf_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use serde_json::json;
 
+use crate::icons::{self, Icon};
 use crate::{App, RenderKey};
 
 /// Screen-space snap radius for sketch points (points, logical pixels).
@@ -19,6 +20,14 @@ const SNAP_PX: f32 = 9.0;
 const HV_SNAP_DEG: f64 = 2.5;
 /// Max rendered pixels (keeps software rendering interactive on HiDPI screens).
 const MAX_PIXELS: f32 = 3_000_000.0;
+
+/// Navigation bar mode: while set, a left-drag orbits, pans or zooms instead of selecting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavMode {
+  Orbit,
+  Pan,
+  Zoom,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -39,6 +48,7 @@ pub enum Tool {
 pub enum Drag {
   Orbit,
   Pan,
+  Zoom,
   /// Dragging a sketch point; the design before the drag is restored and replaced by one command.
   SketchPoint {
     sketch: FeatureId,
@@ -98,6 +108,7 @@ impl View {
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let rect = ui.available_rect_before_wrap();
+  app.canvas = rect;
   let resp = ui.allocate_rect(rect, Sense::click_and_drag());
   let ctx = ui.ctx().clone();
   let mut ppp = ctx.pixels_per_point();
@@ -126,12 +137,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
-  consumed |= viewcube(app, ui, &painter, &view);
+  if app.show_viewcube {
+    consumed |= viewcube(app, ui, &painter, &view);
+  }
   dim_editor(app, &ctx);
   tool_preview(app, &painter, &resp, &view);
   hud(app, &painter, &resp, &view);
 
-  if !consumed {
+  if !consumed && app.nav_mode.is_none() {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
@@ -163,10 +176,20 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
   if resp.drag_started_by(egui::PointerButton::Middle) {
     app.drag = Some(if shift { Drag::Orbit } else { Drag::Pan });
   }
+  if let Some(mode) = app.nav_mode
+    && resp.drag_started_by(egui::PointerButton::Primary)
+  {
+    app.drag = Some(match mode {
+      NavMode::Orbit => Drag::Orbit,
+      NavMode::Pan => Drag::Pan,
+      NavMode::Zoom => Drag::Zoom,
+    });
+  }
   let d = resp.drag_delta();
   match app.drag {
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
+    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006).exp(), None),
     _ => {}
   }
   if resp.drag_stopped()
@@ -221,14 +244,19 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     selection: app.s.selection.clone(),
     edit_sketch: app.s.edit_sketch,
     show_edges: app.show_edges,
+    show_grid: app.show_grid,
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
   };
   if app.render_key.as_ref() == Some(&key) && app.tex.is_some() {
     return;
   }
-  let opts =
-    ViewOptions { hover: app.hover, hide_edges: !app.show_edges, hide_grid: false, show_profiles_of: profiles_of };
+  let opts = ViewOptions {
+    hover: app.hover,
+    hide_edges: !app.show_edges,
+    hide_grid: !app.show_grid,
+    show_profiles_of: profiles_of,
+  };
   let (scene, picks) = app.scene.build(&app.s, &opts);
   let frame = render::render(&scene, &app.cam, view.w, view.h);
   let img = egui::ColorImage::from_rgba_unmultiplied([frame.width as usize, frame.height as usize], &frame.rgba);
@@ -541,6 +569,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   let font = egui::FontId::proportional(12.0);
   let mut glyph_count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
   for c in &sketch.constraints {
+    if c.kind.dim().is_some() && !app.show_dims || c.kind.dim().is_none() && !app.show_constraints {
+      continue;
+    }
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
       let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim) else { continue };
@@ -563,14 +594,16 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       let r = Rect::from_center_size(at, galley.size() + Vec2::new(8.0, 4.0));
       let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click());
       let bg = if selected {
-        Color32::from_rgb(190, 215, 250)
+        crate::theme::SELECTED
       } else if resp.hovered() {
-        Color32::from_rgb(230, 238, 250)
+        crate::theme::HOVER
       } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 225)
+        Color32::from_rgba_unmultiplied(255, 255, 255, 170)
       };
-      painter.rect_filled(r, 3.0, bg);
-      painter.rect_stroke(r, 3.0, Stroke::new(1.0, Color32::from_gray(150)), egui::StrokeKind::Inside);
+      painter.rect_filled(r, 1.0, bg);
+      if selected || resp.hovered() {
+        painter.rect_stroke(r, 1.0, Stroke::new(1.0, crate::theme::ACCENT), egui::StrokeKind::Inside);
+      }
       painter.galley(r.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
         app.dim_edit = Some((c.id.0, dim.expr.clone(), at));
@@ -588,23 +621,17 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     let Some(at) = to_screen(anchor) else { continue };
     let at = at + Vec2::new(10.0 + 14.0 * *k as f32, -12.0);
     *k += 1;
-    let r = Rect::from_center_size(at, Vec2::splat(14.0));
+    let r = Rect::from_center_size(at, Vec2::splat(15.0));
     let resp = ui.interact(r, ui.id().with(("glyph", c.id.0)), Sense::click());
-    let bg = if selected {
-      Color32::from_rgb(120, 170, 240)
+    let (bg, edge) = if selected {
+      (crate::theme::SELECTED, crate::theme::ACCENT)
     } else if resp.hovered() {
-      Color32::from_rgb(220, 230, 245)
+      (crate::theme::HOVER, crate::theme::ACCENT)
     } else {
-      Color32::from_rgba_unmultiplied(245, 245, 245, 210)
+      (Color32::from_rgba_unmultiplied(255, 255, 255, 230), Color32::from_gray(170))
     };
-    painter.rect_filled(r, 2.0, bg);
-    painter.text(
-      r.center(),
-      egui::Align2::CENTER_CENTER,
-      glyph(&c.kind),
-      egui::FontId::proportional(10.0),
-      Color32::from_rgb(60, 60, 70),
-    );
+    painter.rect(r, 1.0, bg, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    icons::draw_color(painter, r.shrink(2.0), glyph(&c.kind));
     if resp.clicked() {
       let add = ui.input(|i| i.modifiers.shift);
       crate::panels::toggle_sel(&mut app.s, Sel::SketchConstraint { sketch: sk, constraint: c.id }, add);
@@ -667,22 +694,21 @@ fn sketch_center(s: &Sketch) -> Option<[f64; 2]> {
   Some([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0])
 }
 
-fn glyph(k: &ConstraintKind) -> &'static str {
+fn glyph(k: &ConstraintKind) -> Icon {
   match k {
-    ConstraintKind::Coincident { .. } => "•",
-    ConstraintKind::Fix { .. } => "F",
-    ConstraintKind::Horizontal { .. } | ConstraintKind::HorizontalPoints { .. } => "H",
-    ConstraintKind::Vertical { .. } | ConstraintKind::VerticalPoints { .. } => "V",
-    ConstraintKind::Parallel { .. } => "∥",
-    ConstraintKind::Perpendicular { .. } => "⊥",
-    ConstraintKind::Collinear { .. } => "C",
-    ConstraintKind::Equal { .. } => "=",
-    ConstraintKind::Tangent { .. } => "T",
-    ConstraintKind::Concentric { .. } => "◎",
-    ConstraintKind::PointOnCurve { .. } => "o",
-    ConstraintKind::Midpoint { .. } => "M",
-    ConstraintKind::Symmetric { .. } => "S",
-    _ => "?",
+    ConstraintKind::Coincident { .. } | ConstraintKind::PointOnCurve { .. } => Icon::Coincident,
+    ConstraintKind::Fix { .. } => Icon::Fix,
+    ConstraintKind::Horizontal { .. } | ConstraintKind::HorizontalPoints { .. } => Icon::Horizontal,
+    ConstraintKind::Vertical { .. } | ConstraintKind::VerticalPoints { .. } => Icon::Vertical,
+    ConstraintKind::Parallel { .. } => Icon::Parallel,
+    ConstraintKind::Perpendicular { .. } => Icon::Perpendicular,
+    ConstraintKind::Collinear { .. } => Icon::Collinear,
+    ConstraintKind::Equal { .. } => Icon::Equal,
+    ConstraintKind::Tangent { .. } => Icon::Tangent,
+    ConstraintKind::Concentric { .. } => Icon::Concentric,
+    ConstraintKind::Midpoint { .. } => Icon::Midpoint,
+    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    _ => Icon::Fix,
   }
 }
 
@@ -784,10 +810,13 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Point) => "Point: click to place",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
     (true, Tool::Select) => "Select / drag points · Del deletes · constraints apply to the selection",
-    (false, _) => "Right-drag orbit · middle-drag pan · wheel zoom · click faces, edges, profiles",
+    (false, _) => return,
   };
+  if app.status.is_some() {
+    return;
+  }
   painter.text(
-    view.rect.left_bottom() + Vec2::new(10.0, -10.0),
+    view.rect.left_bottom() + Vec2::new(12.0, -48.0),
     egui::Align2::LEFT_BOTTOM,
     hint,
     egui::FontId::proportional(12.0),
@@ -836,18 +865,30 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     }
   }
   for (facing, pts, label, v) in &visible {
-    let shade = (200.0 + 50.0 * *facing as f32) as u8;
-    let fill = if hit == Some(*v) { Color32::from_rgb(150, 190, 240) } else { Color32::from_gray(shade) };
-    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(120))));
-    if *facing > 0.35 {
+    let shade = (226.0 + 26.0 * *facing as f32).min(252.0) as u8;
+    let fill = if hit == Some(*v) { Color32::from_rgb(160, 205, 240) } else { Color32::from_gray(shade) };
+    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(150))));
+    if *facing > 0.3 {
       let c = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2()) / 4.0;
       painter.text(
         c.to_pos2(),
         egui::Align2::CENTER_CENTER,
         *label,
-        egui::FontId::proportional(9.0),
-        Color32::from_gray(50),
+        egui::FontId::proportional(9.5),
+        Color32::from_gray(70).gamma_multiply((*facing as f32 * 1.6).min(1.0)),
       );
+    }
+  }
+  // axis triad along the cube edges from the origin corner, as on Fusion's ViewCube
+  let corner = DVec3::splat(-1.0);
+  let faces_toward = |n: DVec3| n.dot(back) > 0.02;
+  for (axis, col, sides) in [
+    (DVec3::X, Color32::from_rgb(220, 50, 47), [-DVec3::Y, -DVec3::Z]),
+    (DVec3::Y, Color32::from_rgb(60, 170, 60), [-DVec3::X, -DVec3::Z]),
+    (DVec3::Z, Color32::from_rgb(40, 110, 220), [-DVec3::X, -DVec3::Y]),
+  ] {
+    if sides.iter().any(|n| faces_toward(*n)) {
+      painter.line_segment([proj(corner), proj(corner + axis * 2.35)], Stroke::new(2.0, col));
     }
   }
   // home button

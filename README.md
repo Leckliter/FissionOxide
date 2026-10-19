@@ -50,14 +50,15 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 
 | Action                 | How                                                         |
 |------------------------|-------------------------------------------------------------|
-| Orbit / pan / zoom     | Right-drag / middle-drag (or Shift+right-drag) / wheel      |
+| Orbit / pan / zoom     | Right-drag / middle-drag (or Shift+right-drag) / wheel, or the navigation bar's Orbit, Pan and Zoom modes |
 | Standard views         | Click the ViewCube faces; ⌂ or Home for the home view       |
-| New sketch             | Select a planar face, then Sketch, or pick XY/XZ/YZ         |
+| New sketch             | Select a planar face, then Create Sketch, or pick XY/XZ/YZ; double-click an origin plane in the browser |
 | Sketch tools           | L line, R rectangle, C circle, A arc, P point, D dimension  |
 | Angle dimension        | Dimension tool: Shift-click a line, then click another line |
 | Construction geometry  | Select curves, press X                                      |
 | Extrude / Fillet       | E / F (select profiles or edges first)                      |
 | Edit a feature         | Double-click it in the timeline                             |
+| All commands of a group | Click the group name under the toolbar icons (CREATE ▾, MODIFY ▾, …) |
 | Undo / Redo / Save     | Ctrl+Z / Ctrl+Y / Ctrl+S                                    |
 | Fit view               | F6                                                          |
 

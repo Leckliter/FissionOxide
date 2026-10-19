@@ -11,9 +11,9 @@ use clf_sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
-pub const BODY_COLOR: [u8; 4] = [178, 184, 192, 255];
-pub const HOVER_COLOR: [u8; 4] = [125, 178, 235, 255];
-pub const SELECT_COLOR: [u8; 4] = [70, 140, 230, 255];
+pub const BODY_COLOR: [u8; 4] = [186, 190, 196, 255];
+pub const HOVER_COLOR: [u8; 4] = [128, 190, 238, 255];
+pub const SELECT_COLOR: [u8; 4] = [36, 142, 220, 255];
 pub const EDGE_COLOR: [u8; 4] = [35, 38, 44, 255];
 pub const PROFILE_COLOR: [u8; 4] = [246, 214, 160, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
@@ -108,7 +108,7 @@ impl SceneBuilder {
     }
     let mut picks = PickTable::default();
     let mut scene =
-      Scene { background_top: [208, 216, 228, 255], background_bottom: [246, 247, 250, 255], ..Default::default() };
+      Scene { background_top: [198, 208, 220, 255], background_bottom: [250, 251, 252, 255], ..Default::default() };
     let selected: Vec<Pick> = s.selection.iter().filter_map(Pick::from_sel).collect();
     let selected_bodies: Vec<BodyId> =
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
