@@ -1,0 +1,29 @@
+{
+  "$description": "The fox mark's geometry on a 600 x 680 grid (centre line x = 300). `left` facets are mirrored to make the right half; each names its colour family on the left and on the right, and a shade (0 light, 1 base, 2 dark, 3 deep) for the left. The right half, in shadow, takes one shade darker. `centre` facets straddle the centre line and are drawn last.",
+  "width": 600,
+  "height": 680,
+  "shades": ["light", "base", "dark", "deep"],
+  "left": [
+    {"part": "ear", "left": "purple", "right": "red", "shade": 0, "points": [[50, 20], [240, 170], [150, 178]]},
+    {"part": "ear", "left": "purple", "right": "red", "shade": 1, "points": [[50, 20], [150, 178], [62, 368]]},
+    {"part": "ear", "left": "purple", "right": "red", "shade": 3, "points": [[150, 178], [240, 170], [62, 368]]},
+    {"part": "face", "left": "amber", "right": "orange", "shade": 0, "points": [[240, 170], [15, 412], [175, 322]]},
+    {"part": "face", "left": "amber", "right": "orange", "shade": 1, "points": [[240, 170], [175, 322], [300, 460]]},
+    {"part": "face", "left": "amber", "right": "orange", "shade": 2, "points": [[15, 412], [175, 322], [118, 384]]},
+    {"part": "face", "left": "amber", "right": "orange", "shade": 3, "points": [[118, 384], [175, 322], [300, 460]]},
+    {"part": "eye", "left": "blue", "right": "blue", "shade": 1, "points": [[118, 384], [300, 460], [205, 485]]},
+    {"part": "eye", "left": "blue", "right": "blue", "shade": 2, "points": [[205, 485], [300, 460], [256, 605]]},
+    {"part": "muzzle", "left": "amber", "right": "orange", "shade": 1, "points": [[262, 425], [300, 460], [300, 605], [256, 605]]},
+    {"part": "jaw", "left": "green", "right": "red", "shade": 0, "points": [[15, 412], [118, 384], [205, 485]]},
+    {"part": "jaw", "left": "green", "right": "red", "shade": 1, "points": [[15, 412], [205, 485], [226, 552]]},
+    {"part": "jaw", "left": "green", "right": "red", "shade": 2, "points": [[15, 412], [226, 552], [252, 662]]},
+    {"part": "jaw", "left": "green", "right": "red", "shade": 3, "points": [[205, 485], [256, 605], [252, 662], [226, 552]]},
+    {"part": "chin", "left": "blue", "right": "blue", "shade": 3, "points": [[256, 605], [300, 638], [252, 662]]},
+    {"part": "chin", "left": "blue", "right": "blue", "shade": 2, "points": [[252, 662], [300, 638], [300, 662]]},
+    {"part": "forehead", "left": "blue", "right": "blue", "shade": 1, "points": [[240, 170], [300, 236], [300, 460]]}
+  ],
+  "centre": [
+    {"part": "forehead", "family": "blue", "shade": 0, "points": [[240, 170], [360, 170], [300, 236]]},
+    {"part": "chin", "family": "blue", "shade": 0, "points": [[256, 605], [344, 605], [300, 638]]}
+  ]
+}

@@ -625,7 +625,8 @@ fn hub_versions_milestones_and_history() {
   let up = run(&mut s, "hub.upload", json!({"path": step, "project": "Fixtures"}));
   assert_eq!(up["kind"], "design");
   let vs = run(&mut s, "hub.versions", json!({"item": up["item"]}));
-  assert_eq!(vs["versions"][0]["original"], "v1.orig.step");
+  let orig = vs["versions"][0]["original"].as_str().unwrap();
+  assert!(orig.starts_with("v1-") && orig.ends_with(".orig.step"), "{orig}");
   // trash and restore
   run(&mut s, "hub.item.delete", json!({}));
   assert!(s.hub.is_none());

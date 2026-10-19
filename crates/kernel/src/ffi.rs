@@ -180,6 +180,19 @@ pub(crate) mod ffi {
     fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
     // sheet2.cpp
     fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
+
+    // STEP assemblies with names and colours (cpp/xcaf.cpp)
+    include!("fox-kernel/cpp/xcaf.hxx");
+    type StepDoc;
+    fn step_doc_new(name: &str) -> Result<UniquePtr<StepDoc>>;
+    fn step_doc_add(d: Pin<&mut StepDoc>, component: &str, name: &str, s: &Shape, color: &[f64]) -> Result<()>;
+    fn step_doc_write(d: Pin<&mut StepDoc>, path: &str) -> Result<()>;
+    fn step_doc_read(path: &str) -> Result<UniquePtr<StepDoc>>;
+    fn step_doc_len(d: &StepDoc) -> usize;
+    fn step_doc_name(d: &StepDoc, i: usize) -> String;
+    fn step_doc_component(d: &StepDoc, i: usize) -> String;
+    fn step_doc_color(d: &StepDoc, i: usize) -> Vec<f64>;
+    fn step_doc_shape(d: &StepDoc, i: usize) -> Result<UniquePtr<Shape>>;
   }
 }
 

@@ -279,3 +279,33 @@ fn tapered_extrude_keeps_sharp_corners_both_ways() {
     assert!((s.mass().unwrap().bbox_min.z + h).abs() < 1e-9);
   }
 }
+
+#[test]
+fn step_assembly_round_trip_with_names_and_colours() {
+  let dir = std::env::temp_dir().join(format!("fox-kernel-xcaf-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let path = dir.join("asm.step");
+  let base = Shape::make_box(DVec3::ZERO, DVec3::new(20.0, 20.0, 5.0)).unwrap();
+  let hub = Shape::cylinder(DVec3::new(40.0, 0.0, 0.0), DVec3::Z, 5.0, 10.0).unwrap();
+  let pin = Shape::make_box(DVec3::new(0.0, 40.0, 0.0), DVec3::new(4.0, 44.0, 12.0)).unwrap();
+  let parts = [
+    StepPart { name: "Base", component: "", color: None, shape: &base },
+    StepPart { name: "Hub ü", component: "Wheel", color: Some([200, 30, 40]), shape: &hub },
+    StepPart { name: "Pin", component: "Wheel", color: Some([32, 80, 192]), shape: &pin },
+  ];
+  write_step_assembly("Cart", &parts, &path).unwrap();
+  let back = read_step_assembly(&path).unwrap();
+  assert_eq!(back.len(), 3);
+  let find = |n: &str| back.iter().find(|b| b.name == n).unwrap_or_else(|| panic!("{n} in {back:?}"));
+  assert_eq!(find("Base").component, "");
+  assert_eq!(find("Base").color, None);
+  assert_eq!(find("Hub ü").component, "Wheel", "non-ASCII names survive");
+  assert_eq!(find("Hub ü").color, Some([200, 30, 40]));
+  assert_eq!(find("Pin").color, Some([32, 80, 192]));
+  // placed where they were
+  let m = find("Pin").shape.mass().unwrap();
+  assert!((m.volume - 4.0 * 4.0 * 12.0).abs() < 1e-6 && (m.center_of_mass.y - 42.0).abs() < 1e-6, "{m:?}");
+  // the plain reader still sees the solids
+  assert_eq!(read_step(&path).unwrap().len(), 3);
+  let _ = std::fs::remove_dir_all(&dir);
+}

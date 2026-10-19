@@ -829,7 +829,7 @@ fn ends(e: &Entity) -> Option<(P, P)> {
       (sweep > 1e-12 && sweep < TAU - 1e-12)
         .then(|| (Entity::arc_point(center, radius, start), Entity::arc_point(center, radius, end)))
     }
-    Entity::Circle { .. } | Entity::Point { .. } => None,
+    Entity::Circle { .. } | Entity::Point { .. } | Entity::Spline(_) | Entity::Ellipse { .. } => None,
   }
 }
 
@@ -853,12 +853,13 @@ fn extent(e: &Entity) -> Vec<P> {
       v
     }
     Entity::Point { .. } => Vec::new(),
+    Entity::Spline(_) | Entity::Ellipse { .. } => e.beziers().into_iter().flatten().collect(),
   }
 }
 
 /// One `<path>` for a chain of connected entities, each with "reversed".
 fn write_chain(s: &mut String, indent: &str, chain: &[(Entity, bool)]) {
-  let Some(&(e0, r0)) = chain.first() else { return };
+  let Some((e0, r0)) = chain.first().cloned() else { return };
   let Some((a, b)) = ends(&e0) else { return };
   let start = if r0 { b } else { a };
   let end_of = |e: &Entity, rev: bool| ends(e).map(|(a, b)| if rev { a } else { b }).unwrap_or(start);
@@ -885,7 +886,7 @@ fn write_chain(s: &mut String, indent: &str, chain: &[(Entity, bool)]) {
         let r = num(radius);
         let _ = write!(d, " A {r} {r} 0 {} {} {}", u8::from(large), u8::from(sweep), pt(to));
       }
-      Entity::Circle { .. } | Entity::Point { .. } => {}
+      Entity::Circle { .. } | Entity::Point { .. } | Entity::Spline(_) | Entity::Ellipse { .. } => {}
     }
   }
   if closed {
@@ -916,15 +917,15 @@ fn write_group(s: &mut String, indent: &str, entities: &[Entity]) {
       continue;
     }
     let Some((a, b)) = ends(e) else { continue };
-    if let Some(&(last, rev)) = chain.last() {
+    if let Some((last, rev)) = chain.last().cloned() {
       let end = ends(&last).map(|(p, q)| if rev { p } else { q });
       if let Some(end) = end {
         if dist(end, a) < JOIN {
-          chain.push((*e, false));
+          chain.push((e.clone(), false));
           continue;
         }
         if dist(end, b) < JOIN {
-          chain.push((*e, true));
+          chain.push((e.clone(), true));
           continue;
         }
       }
@@ -934,13 +935,13 @@ fn write_group(s: &mut String, indent: &str, entities: &[Entity]) {
         && (dist(s0, a) < JOIN || dist(s0, b) < JOIN)
       {
         chain[0].1 = true;
-        chain.push((*e, dist(s0, a) >= JOIN));
+        chain.push((e.clone(), dist(s0, a) >= JOIN));
         continue;
       }
     }
     write_chain(s, indent, &chain);
     chain.clear();
-    chain.push((*e, false));
+    chain.push((e.clone(), false));
   }
   write_chain(s, indent, &chain);
 }
@@ -949,6 +950,16 @@ fn write_group(s: &mut String, indent: &str, entities: &[Entity]) {
 /// entities go in a dashed group with id "construction". Points have no SVG form and are left
 /// out.
 pub fn write_svg(entities: &[(Entity, bool)]) -> String {
+  // splines and ellipses become their Bézier pieces
+  let entities: Vec<(Entity, bool)> = entities
+    .iter()
+    .flat_map(|(e, c)| match e {
+      Entity::Spline(_) | Entity::Ellipse { .. } => {
+        e.beziers().into_iter().map(|p| (Entity::Bezier { p }, *c)).collect()
+      }
+      _ => vec![(e.clone(), *c)],
+    })
+    .collect();
   let pts: Vec<P> =
     entities.iter().flat_map(|(e, _)| extent(e)).filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
   let (mut lo, mut hi) = ([0.0f64; 2], [0.0f64; 2]);
@@ -984,8 +995,8 @@ pub fn write_svg(entities: &[(Entity, bool)]) -> String {
      stroke-linecap=\"round\" stroke-linejoin=\"round\">",
     num(flip)
   );
-  let normal: Vec<Entity> = entities.iter().filter(|(_, c)| !c).map(|(e, _)| *e).collect();
-  let cons: Vec<Entity> = entities.iter().filter(|(_, c)| *c).map(|(e, _)| *e).collect();
+  let normal: Vec<Entity> = entities.iter().filter(|(_, c)| !c).map(|(e, _)| e.clone()).collect();
+  let cons: Vec<Entity> = entities.iter().filter(|(_, c)| *c).map(|(e, _)| e.clone()).collect();
   write_group(&mut s, "    ", &normal);
   if !cons.is_empty() {
     s.push_str("    <g id=\"construction\" stroke=\"#808080\" stroke-dasharray=\"1 0.5\">\n");

@@ -7,14 +7,18 @@
 
 mod assembly_forms;
 mod cam_ui;
+mod config_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
+mod gpu;
 mod icons;
 mod logo;
+mod manipulators;
 mod marking;
 mod menus;
 mod panels;
+mod preview;
 mod select;
 mod sheet;
 mod theme;
@@ -107,6 +111,16 @@ pub struct App {
   pub manufacture: bool,
   /// The tool library window, while open.
   pub tool_library: Option<cam_ui::ToolLibrary>,
+  /// The GPU viewport renderer and its setting.
+  pub(crate) gpu: gpu::Gpu,
+  /// What a left-drag with the select tool does: window, freeform or paint selection.
+  pub sel_mode: select::Mode,
+  /// The freeform loop or paint stroke being dragged.
+  pub(crate) region: select::Region,
+  /// The move/rotate triad drag in progress.
+  pub(crate) manip: manipulators::State,
+  /// The bodies as the open dialog found them, drawn as ghosts behind its preview.
+  pub(crate) ghost: preview::Ghost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -131,12 +145,15 @@ struct RenderKey {
   profiles_of: Vec<fox_engine::model::FeatureId>,
   /// Section and analysis settings.
   view: Value,
+  /// Body vertices drawn (the Vertices selection filter).
+  vertices: bool,
 }
 
 impl App {
   pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> App {
     theme::apply(&cc.egui_ctx);
     let mut app = App::with_session(Session::default());
+    app.gpu = gpu::Gpu::new(cc.gl.clone());
     match open {
       Some(p) => app.open_path(&p),
       // like Fusion, start with the data panel showing
@@ -194,6 +211,11 @@ impl App {
       rebuild: None,
       manufacture: false,
       tool_library: None,
+      gpu: gpu::Gpu::new(None),
+      sel_mode: select::Mode::default(),
+      region: select::Region::default(),
+      manip: manipulators::State::default(),
+      ghost: preview::Ghost::default(),
     }
   }
 
@@ -586,6 +608,14 @@ impl App {
           self.start(d);
         }
       }
+      // window, freeform and paint selection
+      for (k, m) in
+        [(Key::Num1, select::Mode::Window), (Key::Num2, select::Mode::Freeform), (Key::Num3, select::Mode::Paint)]
+      {
+        if pressed(k, Modifiers::NONE) {
+          self.sel_mode = m;
+        }
+      }
     }
   }
 
@@ -636,8 +666,11 @@ impl App {
   pub fn start(&mut self, kind: dialogs::Kind) {
     self.cancel_dialog();
     self.tool = Tool::Select;
+    self.ghost.capture(&self.s);
     self.dialog = Some(Dialog::open(self, kind));
     if let Some(d) = self.dialog.as_mut() {
+      // manipulators hang on the picks as they are before the preview changes them
+      d.refresh_manip(&self.s);
       d.preview(&mut self.s);
     }
   }
@@ -859,6 +892,7 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
+    config_ui::table_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {
@@ -880,6 +914,7 @@ impl App {
     egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
       let rect = ui.available_rect_before_wrap();
       let painter = ui.painter_at(rect);
+      gpu::paint_last(self, &painter, rect, egui::Color32::from_gray(200));
       if let Some(tex) = &self.tex {
         painter.image(
           tex.id(),

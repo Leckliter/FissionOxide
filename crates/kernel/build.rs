@@ -6,6 +6,14 @@
 const OCCT_LIBS: &[&str] = &[
   "TKDEIGES",
   "TKDESTEP",
+  // XCAF documents for STEP with names, colours and assemblies (cpp/xcaf.cpp)
+  "TKXCAF",
+  "TKVCAF",
+  "TKV3d",
+  "TKService",
+  "TKCAF",
+  "TKLCAF",
+  "TKCDF",
   "TKDE",
   "TKXSBase",
   "TKHLR",
@@ -35,6 +43,8 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/features2.cpp");
   println!("cargo:rerun-if-changed=cpp/surface2.cpp");
   println!("cargo:rerun-if-changed=cpp/sheet2.cpp");
+  println!("cargo:rerun-if-changed=cpp/xcaf.cpp");
+  println!("cargo:rerun-if-changed=cpp/xcaf.hxx");
   let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
@@ -67,6 +77,7 @@ fn main() {
     .file("cpp/features2.cpp")
     .file("cpp/surface2.cpp")
     .file("cpp/sheet2.cpp")
+    .file("cpp/xcaf.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

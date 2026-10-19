@@ -9,6 +9,8 @@
 mod assembly;
 mod cam;
 mod commands;
+pub mod config;
+pub mod diff;
 mod drawings;
 mod features;
 pub mod files;
@@ -105,6 +107,14 @@ pub enum Sel {
   Feature {
     feature: FeatureId,
   },
+  /// A body vertex, named by an edge ending there (`end` = its end rather than its start), as
+  /// point references are (`{"vertex": edge, "end"}`).
+  Vertex {
+    body: BodyId,
+    edge: u32,
+    #[serde(default)]
+    end: bool,
+  },
 }
 
 /// A regeneration running on another thread (see [`Session::begin`]).
@@ -144,6 +154,8 @@ pub struct Session {
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
   pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
+  /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
+  pub diff: Option<diff::DiffView>,
 }
 
 impl Default for Session {
@@ -171,6 +183,7 @@ impl Session {
       toolpaths: Vec::new(),
       toolpaths_of: None,
       simulation: None,
+      diff: None,
     };
     s.rebuild();
     s
@@ -415,6 +428,7 @@ impl Session {
     self.selection.retain(|s| match s {
       Sel::Body { body } => model.body(*body).is_some(),
       Sel::Face { body, .. } | Sel::Edge { body, .. } => same(body),
+      Sel::Vertex { body, .. } => same(body),
       _ => true,
     });
   }
@@ -449,7 +463,13 @@ mod tests_assembly;
 #[cfg(test)]
 mod tests_cam;
 #[cfg(test)]
+mod tests_config;
+#[cfg(test)]
+mod tests_files;
+#[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_scene;
 #[cfg(test)]
 mod tests_sheet2;
 #[cfg(test)]

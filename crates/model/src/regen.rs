@@ -222,6 +222,12 @@ impl Regenerator {
   /// Replays the design. Sketch positions are written back after solving, and face/edge
   /// references are refreshed to the faces/edges they resolved to.
   pub fn regenerate(&mut self, design: &mut Design) -> Model {
+    // an active configuration regenerates a copy with its overrides (see config.rs)
+    if let Some(mut eff) = crate::config::effective(design) {
+      let model = self.regenerate(&mut eff);
+      crate::config::write_back(design, &eff);
+      return model;
+    }
     let (params, param_errors) = eval_params(design);
     let mates = assemble::mates(design, &params);
     let mut key = {
@@ -2042,3 +2048,7 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
     _ => None,
   }
 }
+
+mod direct;
+#[cfg(test)]
+mod tests_config;

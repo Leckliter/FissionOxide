@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
-    <img src="assets/brand/wordmark-light.svg" alt="FissionOxide" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/wordmark-dark.svg">
+    <img src="brand/logo/wordmark-light.svg" alt="FissionOxide" height="72">
   </picture>
 </h1>
 
@@ -89,12 +89,18 @@ change a parameter and watch the whole history rebuild.
   (or are placed automatically); export to PDF, SVG and DXF. Drawings live in the design and follow parameter
   changes.
 - **Selecting and inspecting, as in Fusion.** Window selection (left to right picks what is
-  inside, right to left what the box touches), Select Other (Alt+click or hold) for what's behind
-  the front face, selection priority (face, edge, body, component) and filters, Select All and
-  Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
+  inside, right to left what the box touches), freeform (lasso) selection by the same rule and
+  paint selection (everything the brush passes over), Select Other (Alt+click or hold) for what's
+  behind the front face, selection priority (face, edge, body, component) and filters, vertex
+  picking (the Vertices filter shows body vertices as dots), joints and saved joint origins
+  picked in the viewport by their glyphs, Select All and Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
   drawn in the view); centre of mass; section analysis capped with the exact cut face; zebra,
   draft, accessibility and curvature-map analyses.
-- **Drag arrows.** Drag the arrow of an extrude or offset plane to change its distance.
+- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset
+  and the fillet and chamfer size; a move/rotate triad (three arrows, three rings, three planar
+  handles) for Move, and an offset arrow and angle ring for Joint. A drag writes its dialog's
+  fields, which still take typed values. While a command previews its result, the bodies as they
+  were show through it as transparent ghosts.
 - **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
   rubber, wood and glass, on bodies or components (A).
 - **Manufacture.** A milling workspace: setups with stock and a work origin, a tool library in
@@ -117,8 +123,9 @@ change a parameter and watch the whole history rebuild.
   archive with thumbnail and version history (`.foxz`, FissionOxide's `.f3d`/`.f3z`). See
   [File formats](#file-formats).
 - **Data panel with version history.** Every save is a new version in a project, never an
-  overwrite: open or compare any old version, promote it back to latest, mark milestones,
-  browse recent designs, search, see the activity feed, restore from the trash. See
+  overwrite: open or compare any old version (also as a coloured diff in the viewport),
+  promote it back to latest, mark milestones, comment on versions, browse recent designs,
+  search, see the activity feed, restore from the trash, share the hub through a sync folder. See
   [Data panel](#data-panel-projects-and-versions).
 - **Trace images.** Turn a photo, logo or scan into clean sketch geometry: Trace Image (sketch
   Create or Insert menu, or drop/open a picture) previews the outlines over the image as you
@@ -128,6 +135,12 @@ change a parameter and watch the whole history rebuild.
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
   scripts all drive the same engine — and `fissionoxide-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
+- **Configurations and base features.** A configuration table of named variants that override
+  parameters, feature suppression, appearances and joint values; switch the active one from the
+  browser, edit them in a table, export any of them. Turn design history off (the timeline
+  becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
+  face — that collect in a Base Feature in the timeline. See
+  [Configurations](#configurations-and-base-features).
 
 ## Build and run
 
@@ -164,9 +177,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Picking in a command   | With a command dialog open, clicks add to (or remove from) its selection |
 | Edit a feature         | Double-click it in the timeline                             |
 | Window selection       | Left-drag with the select tool: left to right = fully inside, right to left = touching |
+| Freeform / paint selection | 2 / 3 (1 for window again), or SELECT ▾; a lasso that sets off to the right takes what's inside, to the left what it touches |
 | Select Other           | Alt+click, or hold the mouse button still; SELECT ▾ also sets selection priority and filters |
 | Measure                | Select one or two bodies, faces or edges, then I            |
-| Drag arrow             | In Extrude or Offset Plane, drag the arrow head             |
+| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer or Offset Plane, drag the arrow head |
+| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square |
+| Joints in the viewport | Click a joint origin's glyph to use it in Joint, a joint's to drive it (or select it) |
 | Appearance             | A                                                           |
 | Compute All            | Ctrl+B (in the background)                                  |
 | Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |
@@ -285,13 +301,13 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
 | FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
 | FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
-| STEP `.step` `.stp`             | ✓             | ✓      | AP214 solids; surface-only files are sewn into shells/solids    |
+| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies: components, body names and colours both ways; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
 | STL `.stl` (binary / ASCII)     | ✓             | ✓      | Imported meshes become faceted bodies (≤ 250k triangles)        |
 | OBJ `.obj`, PLY `.ply`, 3MF     | ✓             | ✓      | 3MF honours units, components and build transforms              |
 | glTF binary `.glb`, USDZ        |               | ✓      | Metres / Y-up for web and AR viewers                            |
-| DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges ↔ a sketch          |
+| DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges, splines and ellipses ↔ a sketch (R12, or R2000 when there are splines/ellipses) |
 | SVG `.svg`                      | ✓             | ✓      | Paths, shapes, transforms ↔ a sketch; curves stay exact         |
 | PNG, JPEG, BMP, WebP            | trace         |        | Traced into sketch curves (see [Image tracing](#image-tracing)) |
 | Autodesk Fusion `.f3d` `.f3z`   | stored        |        | See below                                                       |
@@ -317,17 +333,29 @@ Windows, `~/Library/Application Support/FissionOxide` on macOS; set `FOX_DATA_DI
   save asks for a name and a project. Earlier versions are never overwritten.
 - Select a design to see its **version history** with thumbnails, authors and times. Open any
   version, **promote** an old one to be the latest again, **compare** it with the latest
-  (features and parameters added, removed or changed), mark or clear **milestones**
-  (milestones can't be deleted).
+  (features and parameters added, removed or changed, and in the viewport: added geometry
+  green, removed red, unchanged as a grey ghost, until the comparison window closes), mark or
+  clear **milestones** (milestones can't be deleted), and **comment** on versions (💬; comments
+  show under each version, are searchable and appear in the activity feed).
 - **Upload** files (or drop them on the panel): designs and archives keep their history, STEP /
   IGES / mesh / DXF files are translated into designs that keep the original file, and other
   files (`.f3d`) are stored as they are.
-- **Recent**, **search** (names, version descriptions, milestones), the per-project
+- **Recent**, **search** (names, version descriptions, milestones, comments), the per-project
   **activity** feed, and a **trash** you can restore from.
 - **Download** any version in any export format, or as a `.foxz` with its history.
 
 The hub is plain files: `hub.json` (the index, replaced atomically) and one immutable file per
 version, so the app and the CLI can use the same hub at the same time.
+
+**Sharing a hub between machines.** Point `FOX_DATA_DIR` (or `--hub`) at a folder that
+Dropbox, OneDrive, Syncthing, Nextcloud or a network drive keeps in sync. Nothing is lost when
+two people save at once: version files and ids carry a tag of the process that made them, so
+they never collide; every write of `hub.json` happens under a `hub.lock` and merges with what
+is on disk (both saves are kept; if both made "v3", the later one becomes v4); and when the lock
+is held by another machine the change goes to a `hub.conflict-….json` copy instead. Those, and
+the conflict copies sync tools make (`hub (conflicted copy).json`, `hub.sync-conflict-….json`
+…), are merged into `hub.json` the next time the hub is opened. A version whose index entry
+arrived before its file says it is still syncing.
 
 ## Manufacture (CAM)
 
@@ -397,6 +425,8 @@ fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
 fissionoxide-cli hub list
 fissionoxide-cli hub versions '{"item": "i3"}'
 fissionoxide-cli hub compare '{"item": "i3", "a": 1}'
+fissionoxide-cli hub comment '{"item": "i3", "version": 2, "text": "wall too thin at the boss"}'
+fissionoxide-cli hub comments '{"item": "i3"}'
 fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
 ```
 
@@ -465,6 +495,40 @@ It returns the counts, each colour layer, and `ink`: a point inside each traced 
 [`examples/trace_logo.jsonl`](examples/trace_logo.jsonl) traces and extrudes a badge. The
 pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 
+## Viewport renderer
+
+The desktop viewport draws on the GPU (OpenGL 3.3 or ES 3.0, through egui's glow painter): the
+scene is uploaded once and orbiting, panning and zooming only redraw it, so large models stay
+smooth. It draws the same scene as the CPU rasterizer (`fox-render`) with the same lighting,
+analysis shading, edges, sketch overlays, toolpaths, stock and transparency. Picking stays
+exact: each pixel's pick id is drawn into a second buffer and read back when the view settles.
+
+Display Settings (navigation bar) → GPU Renderer switches to the CPU rasterizer, which also
+takes over by itself when OpenGL can't start; `FOX_RENDERER=cpu` starts with it. The CLI and the
+MCP server always render on the CPU. Benchmarks: `cargo run --release -p fox-ui --example
+viewport_bench` (a patterned real part) and `cargo run --release -p fox-render-gl --features
+headless --example bench` (a synthetic part of several million triangles).
+
+## Configurations and base features
+
+A configuration is a named row of overrides: parameter expressions, suppressed or unsuppressed
+features, body appearances and joint motion values; anything it doesn't override keeps the
+design's own value. The browser's Configurations folder switches between them (click a row),
+and Solid → Configure → Display Configuration Table edits every cell. Exports can pick a
+configuration without switching to it:
+
+```sh
+fissionoxide-cli run examples/configurations.jsonl --save plate.fox
+fissionoxide-cli export plate.fox plate-large.step --configuration Large
+fissionoxide-cli render plate.fox plain.png --configuration Plain
+```
+
+Direct edits (Solid → Modify → Direct Edit, or `direct.move_face`, `direct.press_pull`,
+`direct.delete_face`) don't record parameters: they go into a Base Feature in the timeline,
+replayed on whatever the features before it build. Capture Design History off collapses the
+timeline into one base feature holding the bodies as they are (Undo brings the history back);
+on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](docs/CONFIGURATIONS.md).
+
 ## Architecture
 
 | Crate               | Role                                                                   |
@@ -475,12 +539,14 @@ pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 | `fox-model`         | The design document, feature timeline, regeneration and references     |
 | `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
 | `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
-| `fox-store`         | The data hub: projects, folders, items, versions, activity, trash      |
+| `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash; safe sharing through sync folders |
 | `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
 | `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
 | `fox-ui`            | The egui desktop UI                                                    |
+| `fox-brand`         | Brand colours, fonts and the fox logo (generated from `brand/`)        |
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
+| `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).
@@ -491,16 +557,15 @@ the app. The stock `opencascade` crate aborts the process when a fillet fails.
 ## Brand
 
 FissionOxide was called CLFusion; `fox` is its short name in code (crates `fox-*`, the C++
-namespace, `FOX_*` environment variables). Designs saved as `.clf`/`.clfz` before the rename still
+namespace, `FOX_*` environment variables). Designs saved as `.fox`/`.foxz` before the rename still
 open, and a data hub in the old `CLFusion` data directory moves to the new one on first start.
 
-The logo is in [`assets/brand`](assets/brand): the fox alone (`fox.svg`), the app icon on a dark or
-light tile (`icon.svg`, `icon-light.svg`, PNGs from 32 to 1024 px) and the wordmark, which follows
-the system theme (`wordmark.svg`) or is fixed for light or dark backgrounds. The fox's colours are
-the app's icon families: blue for solid modelling, orange for surfaces, amber for construction,
-green for inspecting, plus the purple and red accents. Every file, and the facets the app paints
-in its title bar (`crates/ui/src/logo.rs`), comes from `assets/brand/make_brand.py`; the wordmark
-is Inter Display Bold converted to outlines.
+The brand kit is in [`brand/`](brand): the logo in every form (full colour, one colour, app icons,
+wordmarks), the colour, type and spacing tokens, ready-made files for websites (CSS variables,
+a Tailwind preset, favicons, a social card) and the `fox-brand` crate the app reads its colours
+and logo from. The fox's colours are the app's icon families. Open
+[`brand/index.html`](brand/index.html) for the guide and [`brand/README.md`](brand/README.md) for
+how to use it.
 
 ## Licence
 

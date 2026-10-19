@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="FissionOxide">
+  <title>FissionOxide</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9EDF2"/>
+    </linearGradient>
+  </defs>
+  <rect x="0.5" y="0.5" width="1023" height="1023" rx="230.4" fill="url(#tile)" stroke="#D3D9E1"/>
+  <g transform="translate(177.694 133.120) scale(1.11435)">
+    <path d="M50 20 L240 170 L150 178 Z" fill="#B07FEA" stroke="#B07FEA" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M550 20 L360 170 L450 178 Z" fill="#DE3832" stroke="#DE3832" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M50 20 L150 178 L62 368 Z" fill="#9660D6" stroke="#9660D6" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M550 20 L450 178 L538 368 Z" fill="#BC2A27" stroke="#BC2A27" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M150 178 L240 170 L62 368 Z" fill="#55289A" stroke="#55289A" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M450 178 L360 170 L538 368 Z" fill="#93201F" stroke="#93201F" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M240 170 L15 412 L175 322 Z" fill="#FFCD4A" stroke="#FFCD4A" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M360 170 L585 412 L425 322 Z" fill="#F5961E" stroke="#F5961E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M240 170 L175 322 L300 460 Z" fill="#F7B92E" stroke="#F7B92E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M360 170 L425 322 L300 460 Z" fill="#E37A12" stroke="#E37A12" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M15 412 L175 322 L118 384 Z" fill="#E8A21E" stroke="#E8A21E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M585 412 L425 322 L482 384 Z" fill="#C2600C" stroke="#C2600C" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M118 384 L175 322 L300 460 Z" fill="#CC8812" stroke="#CC8812" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M482 384 L425 322 L300 460 Z" fill="#C2600C" stroke="#C2600C" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M118 384 L300 460 L205 485 Z" fill="#1E88E5" stroke="#1E88E5" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M482 384 L300 460 L395 485 Z" fill="#1268BE" stroke="#1268BE" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M205 485 L300 460 L256 605 Z" fill="#1268BE" stroke="#1268BE" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M395 485 L300 460 L344 605 Z" fill="#0F4F9E" stroke="#0F4F9E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M262 425 L300 460 L300 605 L256 605 Z" fill="#F7B92E" stroke="#F7B92E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M338 425 L300 460 L300 605 L344 605 Z" fill="#E37A12" stroke="#E37A12" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M15 412 L118 384 L205 485 Z" fill="#8ED04F" stroke="#8ED04F" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M585 412 L482 384 L395 485 Z" fill="#DE3832" stroke="#DE3832" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M15 412 L205 485 L226 552 Z" fill="#38AC46" stroke="#38AC46" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M585 412 L395 485 L374 552 Z" fill="#BC2A27" stroke="#BC2A27" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M15 412 L226 552 L252 662 Z" fill="#2E9A3E" stroke="#2E9A3E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M585 412 L374 552 L348 662 Z" fill="#93201F" stroke="#93201F" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M205 485 L256 605 L252 662 L226 552 Z" fill="#25863A" stroke="#25863A" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M395 485 L344 605 L348 662 L374 552 Z" fill="#93201F" stroke="#93201F" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M256 605 L300 638 L252 662 Z" fill="#0F4F9E" stroke="#0F4F9E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M344 605 L300 638 L348 662 Z" fill="#0F4F9E" stroke="#0F4F9E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M252 662 L300 638 L300 662 Z" fill="#1268BE" stroke="#1268BE" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M348 662 L300 638 L300 662 Z" fill="#0F4F9E" stroke="#0F4F9E" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M240 170 L300 236 L300 460 Z" fill="#1E88E5" stroke="#1E88E5" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M360 170 L300 236 L300 460 Z" fill="#1268BE" stroke="#1268BE" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M240 170 L360 170 L300 236 Z" fill="#4BA6F2" stroke="#4BA6F2" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M256 605 L344 605 L300 638 Z" fill="#4BA6F2" stroke="#4BA6F2" stroke-width="0.8" stroke-linejoin="round"/>
+  </g>
+</svg>

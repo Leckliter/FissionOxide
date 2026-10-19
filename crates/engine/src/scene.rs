@@ -24,11 +24,32 @@ pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
 /// What a pick id refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Pick {
-  Face { body: BodyId, face: u32 },
-  Edge { body: BodyId, edge: u32 },
-  SketchPoint { sketch: FeatureId, point: PointId },
-  SketchCurve { sketch: FeatureId, curve: fox_sketch::CurveId },
-  Profile { sketch: FeatureId, index: usize },
+  Face {
+    body: BodyId,
+    face: u32,
+  },
+  Edge {
+    body: BodyId,
+    edge: u32,
+  },
+  SketchPoint {
+    sketch: FeatureId,
+    point: PointId,
+  },
+  SketchCurve {
+    sketch: FeatureId,
+    curve: fox_sketch::CurveId,
+  },
+  Profile {
+    sketch: FeatureId,
+    index: usize,
+  },
+  /// A body vertex (shown while the vertex selection filter is on), named by an edge ending there.
+  Vertex {
+    body: BodyId,
+    edge: u32,
+    end: bool,
+  },
 }
 
 impl Pick {
@@ -39,6 +60,7 @@ impl Pick {
       Pick::SketchPoint { sketch, point } => Sel::SketchPoint { sketch, point },
       Pick::SketchCurve { sketch, curve } => Sel::SketchCurve { sketch, curve },
       Pick::Profile { sketch, index } => Sel::Profile { sketch, index },
+      Pick::Vertex { body, edge, end } => Sel::Vertex { body, edge, end },
     }
   }
 
@@ -49,6 +71,7 @@ impl Pick {
       Sel::SketchPoint { sketch, point } => Pick::SketchPoint { sketch, point },
       Sel::SketchCurve { sketch, curve } => Pick::SketchCurve { sketch, curve },
       Sel::Profile { sketch, index } => Pick::Profile { sketch, index },
+      Sel::Vertex { body, edge, end } => Pick::Vertex { body, edge, end },
       _ => return None,
     })
   }
@@ -101,6 +124,8 @@ pub struct ViewOptions {
   pub curvature: bool,
   /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
   pub toolpaths: bool,
+  /// Draw body vertices as pickable dots (the Vertices selection filter).
+  pub show_vertices: bool,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -131,8 +156,16 @@ impl SceneBuilder {
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
     let editing = s.edit_sketch.is_some();
 
+    // a version comparison replaces the bodies
+    if let Some(d) = &s.diff {
+      crate::diff::draw(d, &mut scene);
+    }
+
     // bodies
     for body in &s.model.bodies {
+      if s.diff.is_some() {
+        continue;
+      }
       let shown = match &opts.only_bodies {
         Some(only) => only.contains(&body.id),
         None => s.body_visible(body.id),
@@ -141,8 +174,7 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
-      let base =
-        s.design.body_settings(body.id).and_then(|b| b.color).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
+      let base = s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
       let base = if selected_bodies.contains(&body.id) { mix(base, SELECT_COLOR, 0.45) } else { base };
       let base = if editing { mix(base, [255, 255, 255, 255], 0.35) } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
@@ -227,6 +259,10 @@ impl SceneBuilder {
           });
         }
       }
+    }
+
+    if opts.show_vertices {
+      vertex_markers(&mut scene, &mut picks, s, opts, &selected);
     }
 
     // sketches
@@ -1008,4 +1044,109 @@ fn simulated_stock(scene: &mut Scene, s: &Session) {
     colors: m.colors,
     analyze: false,
   });
+}
+
+// ---------------------------------------------------------------- vertices, joint glyphs
+
+/// A body's vertices: one `(edge, end, position)` per distinct edge end point, in edge order.
+pub fn body_vertices(body: &fox_model::regen::Body) -> Vec<(u32, bool, DVec3)> {
+  let tol = (body.diagonal() * 1e-7).max(1e-9);
+  let mut out: Vec<(u32, bool, DVec3)> = Vec::new();
+  for e in body.edges() {
+    for (end, p) in [(false, e.start), (true, e.end)] {
+      if !out.iter().any(|v| v.2.distance(p) <= tol) {
+        out.push((e.id, end, p));
+      }
+    }
+  }
+  out
+}
+
+/// Where a vertex pick lies.
+pub fn vertex_pos(s: &Session, body: BodyId, edge: u32, end: bool) -> Option<DVec3> {
+  let e = s.model.body(body)?.edges().iter().find(|e| e.id == edge)?;
+  Some(if end { e.end } else { e.start })
+}
+
+const VERTEX_COLOR: [u8; 4] = [40, 44, 52, 255];
+
+fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &ViewOptions, selected: &[Pick]) {
+  for body in &s.model.bodies {
+    let shown = match &opts.only_bodies {
+      Some(only) => only.contains(&body.id),
+      None => s.body_visible(body.id),
+    };
+    if !shown {
+      continue;
+    }
+    for (edge, end, p) in body_vertices(body) {
+      if opts.section.is_some_and(|pl| (p - pl.origin).dot(pl.normal()) > 1e-9) {
+        continue;
+      }
+      let pick = Pick::Vertex { body: body.id, edge, end };
+      let (color, size) = if selected.contains(&pick) {
+        (SELECT_COLOR, 4.5)
+      } else if opts.hover == Some(pick) {
+        (HOVER_COLOR, 4.5)
+      } else {
+        (VERTEX_COLOR, 3.0)
+      };
+      scene.markers.push(Marker { at: p.as_vec3().to_array(), color, size, id: picks.id(pick), on_top: false });
+    }
+  }
+}
+
+/// A saved joint origin or a joint, drawn as a glyph the viewport can pick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JointMark {
+  pub feature: FeatureId,
+  /// A joint (placed at its fixed side's origin) rather than a saved joint origin.
+  pub joint: bool,
+  /// X, Y, Z axes and origin (world).
+  pub frame: fox_kernel::glam::DMat4,
+}
+
+/// The saved joint origins and joints of the active timeline, where they are now.
+pub fn joint_marks(s: &Session) -> Vec<JointMark> {
+  let active = s.design.active_len();
+  let mut out = Vec::new();
+  for f in s.design.features.iter().take(active).filter(|f| !f.suppressed) {
+    match &f.kind {
+      FeatureKind::JointOrigin { .. } => {
+        if let Some((_, m)) = s.model.joint_origins.get(&f.id) {
+          out.push(JointMark { feature: f.id, joint: false, frame: *m });
+        }
+      }
+      FeatureKind::Joint { fixed_origin, angle, offset, .. } => {
+        let Some(base) = geometry_frame(s, fixed_origin) else { continue };
+        let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &s.model.params).unwrap_or(0.0);
+        let ang = fox_expr::eval(angle, fox_expr::Kind::Angle, &s.model.params).unwrap_or(0.0);
+        let m = base
+          * fox_kernel::glam::DMat4::from_translation(DVec3::new(0.0, 0.0, len(offset)))
+          * fox_kernel::glam::DMat4::from_rotation_z(ang);
+        out.push(JointMark { feature: f.id, joint: true, frame: m });
+      }
+      _ => {}
+    }
+  }
+  out
+}
+
+/// The frame a joint geometry names, on the bodies as they are now.
+pub fn geometry_frame(s: &Session, g: &fox_model::assembly::JointGeometry) -> Option<fox_kernel::glam::DMat4> {
+  use fox_model::assembly::{self, JointGeometry};
+  match g {
+    JointGeometry::Origin { origin } => s.model.joint_origins.get(origin).map(|(_, m)| *m),
+    JointGeometry::Point { point, z, x } => assembly::frame(DVec3::from(*point), DVec3::from(*z), DVec3::from(*x)).ok(),
+    JointGeometry::Face { face } => {
+      let b = s.model.body(face.body)?;
+      let id = face.resolve(b.faces(), b.mesh(), b.diagonal())?;
+      assembly::face_frame(b.faces().iter().find(|f| f.id == id)?).ok()
+    }
+    JointGeometry::Edge { edge } => {
+      let b = s.model.body(edge.body)?;
+      let id = edge.resolve(b.edges(), b.faces(), b.diagonal())?;
+      assembly::edge_frame(b.edges().iter().find(|e| e.id == id)?, b.faces()).ok()
+    }
+  }
 }

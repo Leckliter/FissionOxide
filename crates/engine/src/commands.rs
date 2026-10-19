@@ -273,6 +273,24 @@ cmds! {
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
   "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
   "sketch.blend" => "Blend curve: a spline joining the ends of two curves, tangent (g1) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
+  "config.list" => "Configurations (named variants), the active one and whether design history is captured", "{}";
+  "config.create" => "Add a configuration, empty or copying another's overrides", "{name, copy?, activate?: bool}";
+  "config.delete" => "Delete a configuration", "{name}";
+  "config.rename" => "Rename a configuration", "{name, new_name}";
+  "config.activate" => "Make a configuration active (no name: the design as modelled)", "{name?}";
+  "config.set" => "Set one cell of a configuration; a null value clears it back to the design's own", "{configuration, parameter, expr} | {configuration, feature, suppressed} | {configuration, body, appearance? | color?} | {configuration, joint, motion?: rotation|slide|slide2|pitch, value}";
+  "config.table" => "The configuration table: a row per configuration, a column per overridden parameter, feature, appearance or joint", "{}";
+  "design.history" => "Capture design history on or off; turning it off collapses the timeline into a base feature", "{capture: bool}";
+  "base.start" => "Add an empty base feature at the marker: direct edits go into it", "{}";
+  "base.edit" => "Edit a base feature: roll the marker back to just after it", "{feature}";
+  "base.finish" => "Finish editing a base feature: move the marker back to the end", "{}";
+  "direct.move_face" => "Move flat faces by a vector (direct edit in a base feature, not parametric)", "{faces: [{body, face} | {point}], translate: [x,y,z]}";
+  "direct.press_pull" => "Push (−) or pull (+) faces by a fixed distance (direct edit in a base feature)", "{faces: [{body, face} | {point}], distance}";
+  "direct.delete_face" => "Delete faces and heal the body (direct edit in a base feature)", "{faces: [{body, face} | {point}]}";
+  "hub.comment" => "Comment on a version (default: the open one, else the latest)", "{item?, version?, text}";
+  "hub.comments" => "Comments on an item's versions", "{item?, version?}";
+  "hub.comment.delete" => "Delete a comment", "{item?, comment}";
+  "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -299,6 +317,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::sheet2::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::config::run(s, name, p) {
     return r;
   }
   match name {
@@ -2606,7 +2627,7 @@ fn info(s: &Session) -> Value {
         "id": b.id.0,
         "name": s.body_name(b.id),
         "visible": s.body_visible(b.id),
-        "color": s.design.body_settings(b.id).and_then(|x| x.color).map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])),
+        "color": s.design.body_color(b.id).map(|c| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])),
         "volume_mm3": m.map(|m| m.volume),
         "area_mm2": m.map(|m| m.area),
         "bbox": m.map(|m| [m.bbox_min.to_array(), m.bbox_max.to_array()]),

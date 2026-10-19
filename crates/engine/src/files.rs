@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use fox_exchange::archive::{Archive, read_foxz, write_foxz};
-use fox_exchange::dxf::{Drawing, Entity, read_dxf, write_dxf};
+use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
 use fox_exchange::svg::{read_svg, write_svg};
 use fox_exchange::{FormatKind, Mesh, format_for_path};
 use fox_model::{Design, FeatureId, FeatureKind, MeshData};
@@ -99,9 +99,9 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   }
   let name = file_name(path);
   match fmt.id {
-    "step" | "iges" | "brep" => {
+    "step" => import_step(s, path, name),
+    "iges" | "brep" => {
       let shapes = match fmt.id {
-        "step" => fox_kernel::read_step(path)?,
         "iges" => fox_kernel::read_iges(path)?,
         _ => fox_kernel::read_brep_file(path)?,
       };
@@ -145,6 +145,73 @@ fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Valu
     })
     .collect();
   add_import(s, FeatureKind::Import { file_name, breps: Vec::new(), meshes })
+}
+
+/// A STEP file's bodies with their names and colours; its sub-assemblies become components.
+/// Files whose structure can't be read come in as plain bodies.
+fn import_step(s: &mut Session, path: &Path, file_name: String) -> CmdResult {
+  let parts = match fox_kernel::read_step_assembly(path) {
+    Ok(p) => p,
+    Err(_) => fox_kernel::read_step(path)?
+      .into_iter()
+      .map(|shape| fox_kernel::StepBody { name: String::new(), component: String::new(), color: None, shape })
+      .collect(),
+  };
+  let breps = parts.iter().map(|p| p.shape.to_brep()).collect::<Result<Vec<_>, _>>()?;
+  let mut out = add_import(s, FeatureKind::Import { file_name, breps, meshes: Vec::new() })?;
+  let bodies: Vec<fox_model::BodyId> = out["bodies"]
+    .as_array()
+    .map(|a| a.iter().filter_map(Value::as_u64).map(|v| fox_model::BodyId(v as u32)).collect())
+    .unwrap_or_default();
+  let named = parts.iter().any(|p| !p.name.is_empty() || p.color.is_some() || !p.component.is_empty());
+  if bodies.len() != parts.len() || !named {
+    return Ok(out);
+  }
+  let components = s.edit(|d| {
+    let mut groups: Vec<(String, Vec<fox_model::BodyId>)> = Vec::new();
+    for (b, part) in bodies.iter().zip(&parts) {
+      let set = d.body_settings_mut(*b);
+      if !part.name.trim().is_empty() {
+        set.name = Some(part.name.trim().to_string());
+      }
+      set.color = part.color;
+      if !part.component.is_empty() {
+        match groups.iter_mut().find(|g| g.0 == part.component) {
+          Some(g) => g.1.push(*b),
+          None => groups.push((part.component.clone(), vec![*b])),
+        }
+      }
+    }
+    let mut ids = Vec::new();
+    for (name, members) in groups {
+      ids.push(d.add_component(&name, members)?.0);
+    }
+    Ok(ids)
+  });
+  // one undo step with the import
+  if let Ok(ids) = components {
+    s.undo.pop();
+    out["components"] = json!(ids);
+  }
+  Ok(out)
+}
+
+/// Writes bodies as a STEP assembly: components as sub-assemblies, bodies as named, coloured
+/// parts.
+fn write_step(s: &Session, bodies: &[&fox_model::regen::Body], path: &Path) -> Result<(), CmdError> {
+  let info: Vec<(String, String, Option<[u8; 3]>)> = bodies
+    .iter()
+    .map(|b| {
+      let component = s.design.component_of(b.id).map(|c| c.name.clone()).unwrap_or_default();
+      (s.body_name(b.id), component, s.design.body_settings(b.id).and_then(|x| x.color))
+    })
+    .collect();
+  let parts: Vec<fox_kernel::StepPart> = bodies
+    .iter()
+    .zip(&info)
+    .map(|(b, (name, component, color))| fox_kernel::StepPart { name, component, color: *color, shape: &b.shape })
+    .collect();
+  Ok(fox_kernel::write_step_assembly(&s.design.name, &parts, path)?)
 }
 
 /// Adds an import feature; if it fails to build, nothing is added.
@@ -236,7 +303,7 @@ fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
     let sk = d.sketch_mut(id)?;
     let mut n = 0usize;
     for (e, construction) in &ents {
-      if let Some(c) = add_entity(sk, *e)? {
+      if let Some(c) = add_entity(sk, e.clone())? {
         if *construction {
           sk.set_construction(c, true)?;
         }
@@ -271,7 +338,7 @@ pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdErr
   let drawing = read_drawing(path)?;
   let mut sk = Sketch::new();
   for (e, construction) in &drawing.entities {
-    if let Some(c) = add_entity(&mut sk, *e)?
+    if let Some(c) = add_entity(&mut sk, e.clone())?
       && *construction
     {
       sk.set_construction(c, true)?;
@@ -340,11 +407,104 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<fox_sketch::CurveId>,
       }
       None
     }
+    Entity::Ellipse { center, major, ratio, .. } if e.is_full_ellipse() => {
+      let minor = major[0].hypot(major[1]) * ratio;
+      if !finite(&[center[0], center[1], major[0], major[1], minor]) || minor < DXF_SNAP {
+        return Ok(None);
+      }
+      let c = snap(sk, center);
+      let c = sk.resolve(c)?;
+      let m = sk.add_point(center[0] + major[0], center[1] + major[1]);
+      Some(sk.add_curve(CurveKind::Ellipse { center: c, major: m, minor })?)
+    }
+    Entity::Spline(sp) => add_spline(sk, &sp)?,
+    Entity::Ellipse { .. } => add_chain(sk, &e.beziers())?,
   })
 }
 
-/// Sketch geometry as DXF entities (sketch coordinates); `exact` keeps splines as Béziers
-/// (SVG) instead of short lines (DXF R12).
+/// A DXF spline as the sketch curve that draws it exactly: a fit-point spline when the file's
+/// fit points give the same curve (or are all it has), a control-point spline for a clamped
+/// uniform B-spline, otherwise a Bézier chain.
+fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId>, CmdError> {
+  let pieces = sp.beziers();
+  let finite = |v: &[[f64; 2]]| v.iter().flatten().all(|x| x.is_finite());
+  if !finite(&sp.control) || !finite(&sp.fit) {
+    return Ok(None);
+  }
+  let size = pieces.iter().flatten().chain(&sp.fit).fold(0.0f64, |m, p| m.max(p[0].abs()).max(p[1].abs())).max(1.0);
+  let same = |a: &[[[f64; 2]; 4]], b: &[[[f64; 2]; 4]]| {
+    a.len() == b.len() && a.iter().flatten().zip(b.iter().flatten()).all(|(p, q)| dist(*p, *q) < 1e-7 * size)
+  };
+  let ends = |sk: &mut Sketch, pts: &[[f64; 2]]| -> Result<Vec<fox_sketch::PointId>, CmdError> {
+    let n = pts.len();
+    let mut ids = Vec::with_capacity(n);
+    for (i, p) in pts.iter().enumerate() {
+      // end points join neighbours; inner points never snap
+      if i == 0 || i + 1 == n {
+        let s = snap(sk, *p);
+        ids.push(sk.resolve(s)?);
+      } else {
+        ids.push(sk.add_point(p[0], p[1]));
+      }
+    }
+    Ok(ids)
+  };
+  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::spline_beziers(&sp.fit), &pieces)) {
+    if sp.fit.iter().all(|p| dist(*p, sp.fit[0]) < DXF_SNAP) {
+      return Ok(None);
+    }
+    if sp.fit.len() > 1000 {
+      return add_chain(sk, &pieces);
+    }
+    let pts = ends(sk, &sp.fit)?;
+    return Ok(Some(sk.add_curve(CurveKind::spline(pts))?));
+  }
+  let control_spline = !sp.is_rational()
+    && sp.is_uniform()
+    && sp.control.len() <= 1000
+    && match sp.degree {
+      3 => sp.control.len() >= 4,
+      // the sketch's two- and three-point control splines are a line and a quadratic
+      d => sp.control.len() == d + 1 && d <= 2,
+    };
+  if control_spline {
+    let pts = ends(sk, &sp.control)?;
+    return Ok(Some(sk.add_curve(CurveKind::ControlSpline { points: pts })?));
+  }
+  add_chain(sk, &pieces)
+}
+
+/// Cubic Bézier pieces as one Bézier chain curve.
+fn add_chain(sk: &mut Sketch, pieces: &[[[f64; 2]; 4]]) -> Result<Option<fox_sketch::CurveId>, CmdError> {
+  if pieces.is_empty() || pieces.len() > 1000 || !pieces.iter().flatten().flatten().all(|x| x.is_finite()) {
+    return Ok(None);
+  }
+  let first = pieces[0][0];
+  if pieces.iter().flatten().all(|q| dist(*q, first) < DXF_SNAP) {
+    return Ok(None);
+  }
+  let mut ids = Vec::with_capacity(pieces.len() * 3 + 1);
+  let a = snap(sk, first);
+  ids.push(sk.resolve(a)?);
+  for (i, p) in pieces.iter().enumerate() {
+    ids.push(sk.add_point(p[1][0], p[1][1]));
+    ids.push(sk.add_point(p[2][0], p[2][1]));
+    if i + 1 == pieces.len() {
+      let b = snap(sk, p[3]);
+      ids.push(sk.resolve(b)?);
+    } else {
+      ids.push(sk.add_point(p[3][0], p[3][1]));
+    }
+  }
+  Ok(Some(sk.add_curve(CurveKind::Bezier { points: ids })?))
+}
+
+fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
+  (a[0] - b[0]).hypot(a[1] - b[1])
+}
+
+/// Sketch geometry as DXF entities (sketch coordinates); `exact` gives splines and ellipses as
+/// Bézier pieces (SVG) instead of SPLINE and ELLIPSE entities (DXF).
 fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
   let pos = |id| sk.pos(id).unwrap_or([0.0, 0.0]);
   let mut out = Vec::new();
@@ -360,10 +520,23 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
         }
         continue;
       }
-      // DXF gets the spline as short lines
-      for w in sk.spline_points(c.id).windows(2) {
-        out.push((Entity::Line { a: w[0], b: w[1] }, c.construction));
-      }
+      // DXF gets real SPLINE and ELLIPSE entities that read back as the same kind of curve
+      let pts = |ids: &[fox_sketch::PointId]| ids.iter().map(|p| pos(*p)).collect::<Vec<_>>();
+      let e = match &c.kind {
+        CurveKind::Ellipse { center, major, minor } => {
+          let (c0, m) = (pos(*center), pos(*major));
+          Entity::ellipse(c0, [m[0] - c0[0], m[1] - c0[1]], *minor)
+        }
+        CurveKind::ControlSpline { points } => {
+          let degree = points.len().clamp(2, 4) - 1;
+          Entity::Spline(Spline::clamped_uniform(degree, pts(points)))
+        }
+        CurveKind::Spline { points, .. } => {
+          Entity::Spline(Spline { fit: pts(points), ..Spline::from_beziers(&sk.beziers(c.id)) })
+        }
+        _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
+      };
+      out.push((e, c.construction));
       continue;
     }
     let e = match c.kind {
@@ -464,7 +637,7 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
       let bodies = export_bodies(s, p)?;
       let shapes = bodies.iter().map(|b| &b.shape);
       match fmt.id {
-        "step" => fox_kernel::write_step(shapes, &path)?,
+        "step" => write_step(s, &bodies, &path)?,
         "iges" => fox_kernel::write_iges(shapes, &path)?,
         _ => fox_kernel::write_brep_file(shapes, &path)?,
       }

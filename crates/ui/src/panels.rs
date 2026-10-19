@@ -330,6 +330,12 @@ pub(crate) enum Cmd {
   /// Manufacture: run the stock simulation; open the tool library.
   CamSimulate,
   CamTools,
+  /// Show or hide the configuration table.
+  ConfigTable,
+  /// Turn "capture design history" off (collapsing the timeline into a base feature) or on.
+  CaptureHistory,
+  /// Freeform or paint selection (window selection is [`Cmd::WindowSelect`]).
+  SelectMode(crate::select::Mode),
 }
 
 impl Cmd {
@@ -455,8 +461,27 @@ impl Cmd {
         "faces" => (Icon::SplitFace, "Faces", "Allow selecting faces"),
         "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
         "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
+        "vertices" => (Icon::Point, "Vertices", "Show body vertices and allow selecting them"),
         _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
       },
+      Cmd::ConfigTable => (
+        Icon::ConfigTable,
+        "Configuration Table",
+        "Named variants overriding parameters, suppression, appearances and joints",
+      ),
+      Cmd::CaptureHistory => (
+        Icon::Box,
+        "Capture Design History",
+        "On: a parametric timeline. Off: the timeline becomes a base feature for direct edits",
+      ),
+      Cmd::SelectMode(crate::select::Mode::Paint) => {
+        (Icon::PaintSel, "Paint Selection", "Drag over faces, edges or bodies to select everything the brush touches")
+      }
+      Cmd::SelectMode(_) => (
+        Icon::FreeformSel,
+        "Freeform Selection",
+        "Drag a loop: setting off to the right selects what's inside, to the left what it touches",
+      ),
     }
   }
 
@@ -468,6 +493,8 @@ impl Cmd {
       Cmd::Dialog(k) => app.dialog.as_ref().is_some_and(|d| d.kind == k),
       Cmd::Priority(p) => app.sel_priority == p,
       Cmd::Filter(f) => app.sel_filter.get(f),
+      Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
+      Cmd::SelectMode(m) => app.sel_mode == m,
       _ => false,
     }
   }
@@ -559,6 +586,7 @@ impl Cmd {
       Cmd::SelectOther => crate::viewport::select_other_at_last_click(app),
       Cmd::WindowSelect => {
         app.nav_mode = None;
+        app.sel_mode = crate::select::Mode::Window;
         app.set_tool(Tool::Select);
         app.status =
           Some(("Drag a box: left to right selects what's inside, right to left what it touches".into(), false));
@@ -578,6 +606,14 @@ impl Cmd {
           app.run("body.visible", json!({"body": b.0, "visible": !visible}));
         }
         app.s.selection.clear();
+      }
+      Cmd::ConfigTable => crate::config_ui::toggle_table(),
+      Cmd::CaptureHistory => crate::config_ui::toggle_history(app),
+      Cmd::SelectMode(m) => {
+        app.nav_mode = None;
+        app.sel_mode = m;
+        app.set_tool(Tool::Select);
+        app.status = Some((Cmd::SelectMode(m).info().2.into(), false));
       }
     }
   }
@@ -1017,6 +1053,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   joints_section(app, ui);
   browser_assembly::sections(app, ui);
   drawings_section(app, ui);
+  browser_config::section(app, ui);
 }
 
 /// Components with their bodies; right-click to rename, ground, duplicate or delete.
@@ -1371,6 +1408,8 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
           }
           ui.separator();
           ui.checkbox(&mut app.show_viewcube, "ViewCube");
+          ui.separator();
+          crate::gpu::settings(app, ui);
         });
         let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
         nav_caret(ui);
@@ -1636,6 +1675,7 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
       Sel::SketchCurve { .. } => "Sketch Curve",
       Sel::SketchPoint { .. } => "Sketch Point",
       Sel::SketchConstraint { .. } => "Constraint",
+      Sel::Vertex { .. } => "Vertex",
     }
   };
   let text = match app.s.selection.as_slice() {
@@ -2022,6 +2062,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::RigidGroup { .. } => Icon::Component,
     FeatureKind::MotionLink { .. } => Icon::DriveJoint,
     FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
+    FeatureKind::BaseFeature { .. } => Icon::Box,
   }
 }
 
@@ -2165,3 +2206,4 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
 }
 
 mod browser_assembly;
+mod browser_config;
