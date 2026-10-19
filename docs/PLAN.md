@@ -103,7 +103,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
 | 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks | done: **31 of 31** variants of 23 reference parts pass (edit, regenerate, compare with closed-form answers, a from-scratch rebuild and undo), see [reference-variants.md](reference-variants.md) |
-| 0 | Robustness fuzzing | done: `crates/engine/tests/fuzz_features.rs`, seeded random sequences of sketch, extrude, cut, fillet, chamfer, shell, pattern and earlier-feature edits; short run in `cargo test`, long run `-- --ignored` |
+| 0 | Robustness fuzzing | done: `crates/engine/tests/fuzz_features.rs`, seeded random sequences of sketch, extrude, cut, fillet, chamfer, shell, pattern and earlier-feature edits; short run in `cargo test`, long run `-- --ignored`. Found and fixed: booleans and shape repair corrupting cached bodies (bad undo/rollback), inside-out solids accepted; open: three segfaults inside OpenCASCADE (shell, boolean simplification, fillet corners), see [tests/fuzz](../tests/fuzz/README.md) |
 
 ### Reference part failures to fix
 
