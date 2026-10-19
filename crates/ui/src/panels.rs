@@ -62,27 +62,39 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
     .frame(egui::Frame::NONE.fill(theme::APP_BAR).inner_margin(egui::Margin { left: 6, right: 8, top: 0, bottom: 0 }))
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
         if bar_icon(ui, Icon::DataPanel, "Show Data Panel", true).clicked() {
           app.status = Some(("The Data Panel (cloud projects) isn't part of CLFusion yet".into(), false));
         }
-        ui.add_space(4.0);
-        let file = file_button(ui);
+        ui.add_space(6.0);
+        let file = caret_button(ui, Icon::File, "File", true);
         egui::Popup::menu(&file).show(|ui| file_menu(app, ui));
+        ui.add_space(2.0);
         if bar_icon(ui, Icon::Save, "Save (Ctrl+S)", true).clicked() {
           app.save(false);
         }
         ui.add_space(6.0);
-        if bar_icon(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo()).clicked() && app.s.can_undo() {
+        if caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo()).clicked() && app.s.can_undo() {
           app.cancel_dialog();
           app.s.undo();
         }
-        if bar_icon(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo()).clicked() && app.s.can_redo() {
+        if caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo()).clicked() && app.s.can_redo() {
           app.s.redo();
         }
-        ui.add_space(24.0);
-        document_tab(app, ui);
-        if bar_icon(ui, Icon::Plus, "New Design (Ctrl+N)", true).clicked() {
+        ui.add_space(10.0);
+        // the document tab fills the middle of the bar, its title centred, as in Fusion
+        let right_w = 160.0;
+        let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
+        document_tab(app, ui, tab_w);
+        ui.add_space(4.0);
+        let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::click());
+        ui.painter().rect_filled(
+          r,
+          2.0,
+          if resp.hovered() { Color32::from_gray(192) } else { Color32::from_gray(205) },
+        );
+        icons::draw(ui.painter(), r.shrink(8.0), Icon::Plus, Color32::from_gray(70));
+        if resp.on_hover_text("New Design (Ctrl+N)").clicked() {
           app.new_design();
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -92,24 +104,26 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           egui::Popup::menu(&help).show(help_menu);
           let _ = bar_icon(ui, Icon::Bell, "Notifications", true);
           let _ = bar_icon(ui, Icon::JobStatus, "Job Status: all changes are local", true);
-          let _ = bar_icon(ui, Icon::Extensions, "Extensions", true);
         });
       });
     });
 }
 
-fn file_button(ui: &mut egui::Ui) -> egui::Response {
-  let (rect, resp) = ui.allocate_exact_size(vec2(38.0, 28.0), egui::Sense::click());
-  if resp.hovered() {
+/// An application bar icon with a drop-down caret (File, Undo, Redo).
+fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egui::Response {
+  let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 28.0), egui::Sense::click());
+  if resp.hovered() && enabled {
     ui.painter().rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
   }
-  icons::draw_color(
-    ui.painter(),
-    Rect::from_center_size(rect.center() - vec2(5.0, 0.0), Vec2::splat(19.0)),
-    Icon::File,
-  );
-  icons::chevron(ui.painter(), rect.right_center() - vec2(7.0, 0.0), theme::ICON_INK);
-  resp.on_hover_text("File")
+  let ink = if enabled { theme::ICON_INK } else { Color32::from_gray(175) };
+  let ir = Rect::from_center_size(rect.center() - vec2(5.0, 0.0), Vec2::splat(19.0));
+  if enabled && icon == Icon::File {
+    icons::draw_color(ui.painter(), ir, icon);
+  } else {
+    icons::draw(ui.painter(), ir, icon, ink);
+  }
+  icons::chevron(ui.painter(), rect.right_center() - vec2(7.0, 0.0), ink);
+  resp.on_hover_text(hint)
 }
 
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
@@ -172,7 +186,7 @@ fn avatar(ui: &mut egui::Ui) {
   resp.on_hover_text("Local user");
 }
 
-fn document_tab(app: &mut App, ui: &mut egui::Ui) {
+fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
   let name = app
     .s
     .path
@@ -180,36 +194,22 @@ fn document_tab(app: &mut App, ui: &mut egui::Ui) {
     .and_then(|p| p.file_stem())
     .map(|n| n.to_string_lossy().to_string())
     .unwrap_or_else(|| app.s.design.name.clone());
-  let label = if app.s.dirty { format!("{name}*") } else { name };
-  let font = egui::FontId::proportional(12.5);
-  let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), theme::TEXT).size().x;
-  let w = (tw + 70.0).clamp(150.0, 320.0);
+  let label = if app.s.dirty { format!("{name} v1*") } else { format!("{name} v1") };
+  let font = egui::FontId::proportional(13.5);
   let full = ui.max_rect();
   let (slot, _) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::hover());
   // the tab runs to the bottom edge of the bar and merges into the toolbar
-  let rect = Rect::from_min_max(pos2(slot.min.x, full.bottom() - 31.0), pos2(slot.max.x, full.bottom() + 1.0));
+  let rect = Rect::from_min_max(pos2(slot.min.x, full.bottom() - 33.0), pos2(slot.max.x, full.bottom() + 1.0));
   let p = ui.painter();
-  p.rect(
-    rect,
-    egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 },
-    theme::TOOLBAR,
-    Stroke::new(1.0, theme::BORDER),
-    egui::StrokeKind::Inside,
-  );
-  p.line_segment(
-    [rect.left_bottom() + vec2(1.0, -0.5), rect.right_bottom() + vec2(-1.0, -0.5)],
-    Stroke::new(2.0, theme::TOOLBAR),
-  );
-  icons::draw_color(
-    p,
-    Rect::from_center_size(rect.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)),
-    Icon::Component,
-  );
-  p.text(rect.left_center() + vec2(30.0, 0.0), egui::Align2::LEFT_CENTER, label, font, theme::TEXT);
-  let close = Rect::from_center_size(rect.right_center() - vec2(14.0, 0.0), Vec2::splat(16.0));
+  p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::TOOLBAR);
+  let galley = p.layout_no_wrap(label, font, theme::TEXT);
+  let tx = rect.center().x - galley.size().x / 2.0 + 11.0;
+  icons::draw_color(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), Icon::Component);
+  p.galley(pos2(tx, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+  let close = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), Vec2::splat(18.0));
   let cr = ui.interact(close, ui.id().with("doc-close"), egui::Sense::click());
   if cr.hovered() {
-    ui.painter().rect_filled(close, 2.0, Color32::from_gray(220));
+    ui.painter().rect_filled(close, 2.0, Color32::from_gray(222));
   }
   icons::draw(ui.painter(), close, Icon::Close, theme::ICON_INK);
   if cr.on_hover_text("Close (opens a new empty design)").clicked() {
@@ -401,7 +401,7 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
 
 /// A tool group: the icon row with its label and drop-down underneath, then a separator.
 /// `menu` lists every command of the group (`None` entries are separators).
-fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[Option<Cmd>]) {
+fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[Option<Cmd>]) -> Rect {
   let mut run = None;
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
@@ -439,11 +439,12 @@ fn group(app: &mut App, ui: &mut egui::Ui, label: &str, quick: &[Cmd], menu: &[O
   if let Some(c) = run {
     c.run(app);
   }
+  inner.response.rect
 }
 
 /// The group name with its drop-down chevron (clickable).
 fn group_label(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
-  let font = egui::FontId::proportional(11.0);
+  let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), theme::GROUP_LABEL).size().x;
   let (rect, resp) = ui.allocate_exact_size(vec2(width.max(tw + 22.0), 18.0), egui::Sense::click());
   if resp.hovered() {
@@ -466,7 +467,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
     app.tab = Tab::Solid;
   }
   egui::Panel::top("toolbar")
-    .exact_size(92.0)
+    .exact_size(96.0)
     .frame(egui::Frame::NONE.fill(theme::TOOLBAR).inner_margin(egui::Margin { left: 6, right: 6, top: 0, bottom: 0 }))
     .show(ui, |ui| {
       let full = ui.max_rect();
@@ -505,23 +506,18 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
 
 fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   ui.vertical(|ui| {
-    ui.add_space(10.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(96.0, 68.0), egui::Sense::click());
-    let fill = if resp.hovered() { theme::HOVER } else { Color32::WHITE };
-    ui.painter().rect(rect, 2.0, fill, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-    icons::draw_color(
-      ui.painter(),
-      Rect::from_center_size(rect.center() - vec2(0.0, 12.0), Vec2::splat(24.0)),
-      Icon::Extrude,
-    );
+    ui.add_space(9.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(104.0, 76.0), egui::Sense::click());
+    let fill = if resp.hovered() { theme::HOVER } else { Color32::from_rgb(248, 248, 248) };
+    ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
     ui.painter().text(
-      rect.center() + vec2(-6.0, 16.0),
+      rect.center() - vec2(6.0, 0.0),
       egui::Align2::CENTER_CENTER,
       "DESIGN",
-      egui::FontId::proportional(12.5),
-      theme::TEXT,
+      egui::FontId::proportional(13.5),
+      Color32::from_gray(30),
     );
-    icons::chevron(ui.painter(), rect.center() + vec2(28.0, 16.0), theme::TEXT);
+    icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
     egui::Popup::menu(&resp).show(|ui| {
       ui.set_min_width(180.0);
       for (i, w) in WORKSPACES.iter().enumerate() {
@@ -537,26 +533,32 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
 
 fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
   ui.horizontal(|ui| {
-    ui.spacing_mut().item_spacing.x = 2.0;
+    ui.spacing_mut().item_spacing.x = 4.0;
     let mut tabs: Vec<Tab> = Tab::MAIN.to_vec();
     if sketching {
       tabs.push(Tab::Sketch);
     }
     for t in tabs {
-      let font = egui::FontId::proportional(12.0);
+      let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
-      let color = if active { Color32::BLACK } else { Color32::from_gray(95) };
+      let color = if active { theme::ACCENT } else { Color32::from_gray(45) };
       let tw = ui.painter().layout_no_wrap(t.label().into(), font.clone(), color).size().x;
-      let (rect, resp) = ui.allocate_exact_size(vec2(tw + 22.0, 28.0), egui::Sense::click());
-      if resp.hovered() && !active {
-        ui.painter().rect_filled(rect.shrink2(vec2(0.0, 3.0)), 2.0, theme::HOVER);
+      let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
+      let pill = rect.shrink2(vec2(0.0, 3.0));
+      if t == Tab::Sketch {
+        // the contextual tab keeps its light blue background
+        ui.painter().rect_filled(pill, 2.0, theme::CONTEXT_TAB);
+      } else if resp.hovered() && !active {
+        ui.painter().rect_filled(pill, 2.0, theme::HOVER);
       }
       ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, t.label(), font, color);
-      if active {
-        let c = if t == Tab::Sketch { theme::SKETCH_ACCENT } else { theme::ACCENT };
+      if active && t != Tab::Sketch {
         ui.painter().line_segment(
-          [rect.left_bottom() + vec2(6.0, -2.0), rect.right_bottom() + vec2(-6.0, -2.0)],
-          Stroke::new(2.5, c),
+          [
+            pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
+            pos2(rect.center().x + tw / 2.0 + 4.0, rect.bottom() - 2.0),
+          ],
+          Stroke::new(3.0, theme::ACCENT),
         );
       }
       if resp.clicked() {
@@ -569,7 +571,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
 fn solid_toolbar(app: &mut App, ui: &mut egui::Ui) {
   use Cmd::*;
   use Kind as K;
-  group(
+  let _ = group(
     app,
     ui,
     "CREATE",
@@ -590,7 +592,7 @@ fn solid_toolbar(app: &mut App, ui: &mut egui::Ui) {
       Some(Dialog(K::Mirror)),
     ],
   );
-  group(
+  let _ = group(
     app,
     ui,
     "MODIFY",
@@ -606,16 +608,16 @@ fn solid_toolbar(app: &mut App, ui: &mut egui::Ui) {
       Some(Params),
     ],
   );
-  group(app, ui, "CONSTRUCT", &[Dialog(K::OffsetPlane)], &[Some(Dialog(K::OffsetPlane))]);
-  group(app, ui, "INSPECT", &[Dialog(K::Inspect)], &[Some(Dialog(K::Inspect))]);
-  group(app, ui, "INSERT", &[InsertStep], &[Some(InsertStep)]);
-  group(app, ui, "SELECT", &[Select], &[Some(Select)]);
+  let _ = group(app, ui, "CONSTRUCT", &[Dialog(K::OffsetPlane)], &[Some(Dialog(K::OffsetPlane))]);
+  let _ = group(app, ui, "INSPECT", &[Dialog(K::Inspect)], &[Some(Dialog(K::Inspect))]);
+  let _ = group(app, ui, "INSERT", &[InsertStep], &[Some(InsertStep)]);
+  let _ = group(app, ui, "SELECT", &[Select], &[Some(Select)]);
 }
 
 fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
   use Cmd::*;
   let t = SketchTool;
-  group(
+  let _ = group(
     app,
     ui,
     "CREATE",
@@ -643,7 +645,7 @@ fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
       Some(t(Tool::Dimension)),
     ],
   );
-  group(app, ui, "MODIFY", &[Construction], &[Some(Construction)]);
+  let _ = group(app, ui, "MODIFY", &[Construction], &[Some(Construction)]);
   // constraints: a compact two-row grid, as in Fusion's CONSTRAINTS group
   let mut run = None;
   let inner = ui.vertical(|ui| {
@@ -677,34 +679,41 @@ fn sketch_toolbar(app: &mut App, ui: &mut egui::Ui) {
   if let Some(c) = run {
     c.run(app);
   }
-  group(app, ui, "INSPECT", &[Dialog(Kind::Inspect)], &[Some(Dialog(Kind::Inspect))]);
-  group(app, ui, "SELECT", &[t(Tool::Select)], &[Some(t(Tool::Select))]);
-  group(app, ui, "FINISH SKETCH", &[FinishSketch], &[Some(FinishSketch)]);
+  let _ = group(app, ui, "INSPECT", &[Dialog(Kind::Inspect)], &[Some(Dialog(Kind::Inspect))]);
+  let _ = group(app, ui, "SELECT", &[t(Tool::Select)], &[Some(t(Tool::Select))]);
+  // the FINISH SKETCH group sits on light blue, like the contextual SKETCH tab
+  let bg = ui.painter().add(egui::Shape::Noop);
+  let r = group(app, ui, "FINISH SKETCH", &[FinishSketch], &[Some(FinishSketch)]);
+  ui.painter().set(bg, egui::Shape::rect_filled(r.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
 }
 
 // ---------------------------------------------------------------- canvas overlays
 
-fn float_frame() -> egui::Frame {
-  egui::Frame::new().fill(theme::FLOAT).stroke(Stroke::new(1.0, theme::BORDER)).corner_radius(2).shadow(egui::Shadow {
-    offset: [0, 1],
-    blur: 6,
-    spread: 0,
-    color: Color32::from_black_alpha(30),
-  })
-}
-
 /// A floating panel's header: collapse arrow and title.
+/// The header bar of the browser and comments panels: ◂◂ collapse arrows, title, and the
+/// options dot and pin bar on the right.
 fn float_header(ui: &mut egui::Ui, title: &str, open: &mut bool, width: f32) {
-  let (rect, resp) = ui.allocate_exact_size(vec2(width, 24.0), egui::Sense::click());
-  ui.painter().rect_filled(rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, theme::FLOAT_HEADER);
-  let tri = rect.left_center() + vec2(12.0, 0.0);
-  triangle(ui.painter(), tri, *open, theme::GROUP_LABEL);
-  ui.painter().text(
-    rect.left_center() + vec2(24.0, 0.0),
-    egui::Align2::LEFT_CENTER,
-    title,
-    egui::FontId::proportional(11.0),
-    theme::GROUP_LABEL,
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, 26.0), egui::Sense::click());
+  let p = ui.painter();
+  p.rect(rect, 2.0, theme::FLOAT_HEADER, Stroke::new(1.0, Color32::from_gray(212)), egui::StrokeKind::Inside);
+  let c = rect.left_center() + vec2(12.0, 0.0);
+  let ink = Color32::from_gray(70);
+  for dx in [-3.0, 3.0] {
+    let t = c + vec2(dx, 0.0);
+    let pts = if *open {
+      vec![t + vec2(-3.0, 0.0), t + vec2(2.0, -4.0), t + vec2(2.0, 4.0)]
+    } else {
+      vec![t + vec2(3.0, 0.0), t + vec2(-2.0, -4.0), t + vec2(-2.0, 4.0)]
+    };
+    p.add(egui::Shape::convex_polygon(pts, ink, Stroke::NONE));
+  }
+  p.text(rect.left_center() + vec2(28.0, 0.0), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(12.0), ink);
+  let dot = rect.right_center() - vec2(24.0, 0.0);
+  p.circle_filled(dot, 5.0, ink);
+  p.circle_filled(dot, 1.5, Color32::WHITE);
+  p.line_segment(
+    [rect.right_center() + vec2(-9.0, -6.0), rect.right_center() + vec2(-9.0, 6.0)],
+    Stroke::new(1.0, ink),
   );
   if resp.clicked() {
     *open = !*open;
@@ -721,6 +730,23 @@ fn triangle(p: &egui::Painter, c: Pos2, open: bool, color: Color32) {
   p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
 }
 
+/// Browser expander: a hollow ▷ when closed, a hollow ▽ when open, and the filled ◢ of the
+/// root component.
+fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, root: bool, color: Color32) {
+  let s = Stroke::new(1.0, color);
+  if root {
+    p.add(egui::Shape::convex_polygon(
+      vec![c + vec2(4.0, -4.0), c + vec2(4.0, 4.0), c + vec2(-4.0, 4.0)],
+      color,
+      Stroke::NONE,
+    ));
+  } else if open {
+    p.add(egui::Shape::closed_line(vec![c + vec2(-5.0, -3.0), c + vec2(5.0, -3.0), c + vec2(0.0, 4.0)], s));
+  } else {
+    p.add(egui::Shape::closed_line(vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)], s));
+  }
+}
+
 /// What happened to a browser row.
 #[derive(Default)]
 struct RowEvents {
@@ -731,6 +757,8 @@ struct RowEvents {
 }
 
 /// One browser row: expander, visibility eye, icon and name.
+/// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
+/// and the name on a grey pill (a dark pill with an activation radio for the root component).
 fn tree_row(
   ui: &mut egui::Ui,
   id: egui::Id,
@@ -744,37 +772,53 @@ fn tree_row(
   label_color: Color32,
 ) -> RowEvents {
   let width = ui.available_width();
-  let (rect, resp) = ui.allocate_exact_size(vec2(width, 22.0), egui::Sense::click());
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, 25.0), egui::Sense::click());
   let open_id = id.with("open");
   let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).or(expand).unwrap_or(false);
   let p = ui.painter().clone();
-  if selected {
-    p.rect_filled(rect, 0.0, theme::SELECTED);
-  } else if resp.hovered() {
-    p.rect_filled(rect, 0.0, theme::HOVER);
-  }
-  let x = rect.min.x + 6.0 + depth as f32 * 14.0;
+  let root = depth == 0;
+  let x = rect.min.x + 8.0 + depth as f32 * 16.0;
   let cy = rect.center().y;
   let mut ev = RowEvents::default();
   if expand.is_some() {
-    let tr = Rect::from_center_size(pos2(x + 5.0, cy), Vec2::splat(14.0));
+    let tr = Rect::from_center_size(pos2(x + 4.0, cy), Vec2::splat(14.0));
     let r = ui.interact(tr, id.with("tri"), egui::Sense::click());
-    triangle(&p, tr.center(), open, if r.hovered() { theme::ACCENT } else { Color32::from_gray(90) });
+    tree_triangle(&p, tr.center(), open, root, if r.hovered() { theme::ACCENT } else { Color32::from_gray(70) });
     if r.clicked() {
       open = !open;
       ui.data_mut(|d| d.insert_temp(open_id, open));
     }
   }
   if let Some(visible) = eye {
-    let er = Rect::from_center_size(pos2(x + 22.0, cy), vec2(16.0, 14.0));
+    let er = Rect::from_center_size(pos2(x + 24.0, cy), vec2(18.0, 14.0));
     let r = ui.interact(er, id.with("eye"), egui::Sense::click());
     icons::draw_color(&p, er, if visible { Icon::Eye } else { Icon::EyeOff });
     if r.on_hover_text(if visible { "Hide" } else { "Show" }).clicked() {
       ev.eye = true;
     }
   }
-  icons::draw_color(&p, Rect::from_center_size(pos2(x + 41.0, cy), Vec2::splat(16.0)), icon);
-  p.text(pos2(x + 54.0, cy), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.5), label_color);
+  let font = egui::FontId::proportional(13.0);
+  let text_color = if root { Color32::WHITE } else { label_color };
+  let galley = p.layout_no_wrap(label.to_string(), font, text_color);
+  let icon_x = x + 44.0;
+  let pill = Rect::from_min_size(pos2(icon_x - 11.0, cy - 10.5), vec2(galley.size().x + 36.0, 21.0));
+  let (fill, stroke) = if selected {
+    (theme::SELECTED, Stroke::new(1.0, theme::ACCENT))
+  } else if resp.hovered() {
+    (if root { Color32::from_gray(80) } else { theme::HOVER }, Stroke::new(1.0, theme::SELECTED))
+  } else {
+    (if root { theme::PILL_ROOT } else { theme::PILL }, Stroke::NONE)
+  };
+  p.rect(pill, 2.0, fill, stroke, egui::StrokeKind::Inside);
+  icons::draw_color(&p, Rect::from_center_size(pos2(icon_x, cy), Vec2::splat(16.0)), icon);
+  let text_color = if selected && root { theme::TEXT } else { text_color };
+  p.galley_with_override_text_color(pos2(icon_x + 13.0, cy - galley.size().y / 2.0), galley, text_color);
+  if root {
+    // the activation radio of the root component
+    let c = pos2(pill.right() + 12.0, cy);
+    p.circle(c, 7.0, Color32::WHITE, Stroke::new(1.0, Color32::from_gray(90)));
+    p.circle_filled(c, 3.5, Color32::from_gray(60));
+  }
   if resp.double_clicked() {
     ev.double_clicked = true;
   } else if resp.clicked() {
@@ -790,23 +834,22 @@ fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
 
 pub fn browser(app: &mut App, ctx: &egui::Context) {
   let canvas = app.canvas;
-  egui::Area::new(egui::Id::new("browser")).fixed_pos(canvas.min + vec2(8.0, 8.0)).order(egui::Order::Middle).show(
+  egui::Area::new(egui::Id::new("browser")).fixed_pos(canvas.min + vec2(6.0, 6.0)).order(egui::Order::Middle).show(
     ctx,
     |ui| {
-      float_frame().show(ui, |ui| {
-        let width = 250.0;
-        ui.set_width(width);
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        float_header(ui, "BROWSER", &mut app.browser_open, width);
-        if !app.browser_open {
-          return;
-        }
-        let max_h = (canvas.height() - 90.0).max(120.0);
-        egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
-          ui.add_space(3.0);
-          browser_tree(app, ui);
-          ui.add_space(4.0);
-        });
+      let width = 270.0;
+      ui.set_width(width);
+      ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+      float_header(ui, "BROWSER", &mut app.browser_open, width);
+      if !app.browser_open {
+        return;
+      }
+      // the rows sit directly on the canvas, without a panel behind them
+      let max_h = (canvas.height() - 90.0).max(120.0);
+      egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+        ui.add_space(4.0);
+        browser_tree(app, ui);
+        ui.add_space(4.0);
       });
     },
   );
@@ -1014,26 +1057,13 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
 pub fn comments(app: &mut App, ctx: &egui::Context) {
   let canvas = app.canvas;
   egui::Area::new(egui::Id::new("comments"))
-    .fixed_pos(canvas.left_bottom() + vec2(8.0, -8.0))
+    .fixed_pos(canvas.left_bottom() + vec2(6.0, -6.0))
     .pivot(egui::Align2::LEFT_BOTTOM)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
-      float_frame().show(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let open = false;
-        let (rect, _) = ui.allocate_exact_size(vec2(250.0, 24.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 2.0, theme::FLOAT_HEADER);
-        triangle(ui.painter(), rect.left_center() + vec2(12.0, 0.0), open, theme::GROUP_LABEL);
-        ui.painter().text(
-          rect.left_center() + vec2(24.0, 0.0),
-          egui::Align2::LEFT_CENTER,
-          "COMMENTS",
-          egui::FontId::proportional(11.0),
-          theme::GROUP_LABEL,
-        );
-        let plus = Rect::from_center_size(rect.right_center() - vec2(14.0, 0.0), Vec2::splat(14.0));
-        icons::draw(ui.painter(), plus, Icon::Plus, theme::GROUP_LABEL);
-      });
+      ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+      let mut open = false;
+      float_header(ui, "COMMENTS", &mut open, 270.0);
     });
 }
 
@@ -1045,67 +1075,77 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
     .pivot(egui::Align2::CENTER_BOTTOM)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
-      float_frame().inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-          ui.spacing_mut().item_spacing.x = 1.0;
-          let mode_btn = |ui: &mut egui::Ui, app: &mut App, icon, hint, mode| {
-            if icons::icon_button(ui, icon, 26.0, hint, app.nav_mode == Some(mode), None).clicked() {
-              app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
-            }
-          };
-          mode_btn(ui, app, Icon::Orbit, "Orbit: left-drag to orbit (Esc to stop)", NavMode::Orbit);
-          if icons::icon_button(
-            ui,
-            Icon::LookAt,
-            26.0,
-            "Look At: the sketch plane or a selected planar face",
-            false,
-            None,
-          )
-          .clicked()
-          {
-            app.look_at_selection();
+      // Fusion draws the navigation bar as bare icons on the canvas
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let mode_btn = |ui: &mut egui::Ui, app: &mut App, icon, hint, mode| {
+          if icons::icon_button(ui, icon, 28.0, hint, app.nav_mode == Some(mode), None).clicked() {
+            app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
           }
-          nav_sep(ui);
-          mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
-          mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
-          if icons::icon_button(ui, Icon::Fit, 26.0, "Fit (F6)", false, None).clicked() {
-            app.fit_view();
+        };
+        mode_btn(ui, app, Icon::Orbit, "Orbit: left-drag to orbit (Esc to stop)", NavMode::Orbit);
+        nav_caret(ui);
+        if icons::icon_button(
+          ui,
+          Icon::LookAt,
+          28.0,
+          "Look At: the sketch plane or a selected planar face",
+          false,
+          None,
+        )
+        .clicked()
+        {
+          app.look_at_selection();
+        }
+        mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
+        mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
+        if icons::icon_button(ui, Icon::Fit, 28.0, "Fit (F6)", false, None).clicked() {
+          app.fit_view();
+        }
+        nav_caret(ui);
+        nav_sep(ui);
+        let d = icons::icon_button(ui, Icon::Display, 28.0, "Display Settings", false, None);
+        nav_caret(ui);
+        egui::Popup::menu(&d).show(|ui| {
+          ui.set_min_width(220.0);
+          ui.label(RichText::new("Visual Style").strong());
+          if ui.radio(app.show_edges, "Shaded with Visible Edges Only").clicked() {
+            app.show_edges = true;
           }
-          nav_sep(ui);
-          let d = icons::icon_button(ui, Icon::Display, 26.0, "Display Settings", false, None);
-          egui::Popup::menu(&d).show(|ui| {
-            ui.set_min_width(220.0);
-            ui.label(RichText::new("Visual Style").strong());
-            if ui.radio(app.show_edges, "Shaded with Visible Edges Only").clicked() {
-              app.show_edges = true;
-            }
-            if ui.radio(!app.show_edges, "Shaded").clicked() {
-              app.show_edges = false;
-            }
-            ui.separator();
-            ui.label(RichText::new("Camera").strong());
-            if ui.radio(app.cam.ortho, "Orthographic").clicked() {
-              app.cam.ortho = true;
-            }
-            if ui.radio(!app.cam.ortho, "Perspective").clicked() {
-              app.cam.ortho = false;
-            }
-            ui.separator();
-            ui.checkbox(&mut app.show_viewcube, "ViewCube");
-          });
-          let g = icons::icon_button(ui, Icon::Grid, 26.0, "Grid and Snaps", false, None);
-          egui::Popup::menu(&g).show(|ui| {
-            ui.set_min_width(160.0);
-            ui.checkbox(&mut app.show_grid, "Layout Grid");
-          });
-          let v = icons::icon_button(ui, Icon::Viewports, 26.0, "Viewports", false, None);
-          egui::Popup::menu(&v).show(|ui| {
-            let _ = ui.selectable_label(true, "Single View");
-          });
+          if ui.radio(!app.show_edges, "Shaded").clicked() {
+            app.show_edges = false;
+          }
+          ui.separator();
+          ui.label(RichText::new("Camera").strong());
+          if ui.radio(app.cam.ortho, "Orthographic").clicked() {
+            app.cam.ortho = true;
+          }
+          if ui.radio(!app.cam.ortho, "Perspective").clicked() {
+            app.cam.ortho = false;
+          }
+          ui.separator();
+          ui.checkbox(&mut app.show_viewcube, "ViewCube");
+        });
+        let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
+        nav_caret(ui);
+        egui::Popup::menu(&g).show(|ui| {
+          ui.set_min_width(160.0);
+          ui.checkbox(&mut app.show_grid, "Layout Grid");
+          ui.checkbox(&mut app.snap, "Snap to Grid");
+        });
+        let v = icons::icon_button(ui, Icon::Viewports, 28.0, "Viewports", false, None);
+        nav_caret(ui);
+        egui::Popup::menu(&v).show(|ui| {
+          let _ = ui.selectable_label(true, "Single View");
         });
       });
     });
+}
+
+/// The small drop-down caret after a navigation bar icon.
+fn nav_caret(ui: &mut egui::Ui) {
+  let (r, _) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::hover());
+  icons::chevron(ui.painter(), r.center(), Color32::from_gray(80));
 }
 
 fn nav_sep(ui: &mut egui::Ui) {
@@ -1121,49 +1161,58 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
   let canvas = app.canvas;
   egui::Area::new(egui::Id::new("sketch-palette"))
-    .fixed_pos(canvas.right_top() + vec2(-8.0, 150.0))
+    .fixed_pos(canvas.right_top() + vec2(-8.0, 170.0))
     .pivot(egui::Align2::RIGHT_TOP)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
       dialog_frame().show(ui, |ui| {
-        let width = 250.0;
+        let width = 270.0;
         ui.set_width(width);
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        dialog_header(ui, Icon::Sketch, "SKETCH PALETTE", width);
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
-          ui.spacing_mut().item_spacing = vec2(6.0, 5.0);
-          let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), egui::Sense::hover());
-          triangle(ui.painter(), r.left_center() + vec2(4.0, 0.0), true, theme::GROUP_LABEL);
+        dialog_header(ui, "SKETCH PALETTE", width);
+        egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 14, top: 6, bottom: 8 }).show(ui, |ui| {
+          ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
+          let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
+          triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
           ui.painter().text(
-            r.left_center() + vec2(14.0, 0.0),
+            r.left_center() + vec2(16.0, 0.0),
             egui::Align2::LEFT_CENTER,
             "Options",
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(13.0),
             theme::TEXT,
           );
-          egui::Grid::new("palette").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
-            ui.label("Linetype");
-            if icons::icon_button(ui, Icon::Construction, 22.0, "Construction (X)", false, None).clicked() {
+          let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
+            ui.horizontal(|ui| {
+              ui.set_height(27.0);
+              ui.add_space(14.0);
+              ui.label(label);
+              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui));
+            });
+          };
+          row(ui, "Construction", &mut |ui| {
+            if icons::icon_button(ui, Icon::Construction, 22.0, "Normal/Construction (X)", false, None).clicked() {
               app.toggle_construction();
             }
-            ui.end_row();
-            ui.label("Look At");
+          });
+          row(ui, "Look At", &mut |ui| {
             if icons::icon_button(ui, Icon::LookAt, 22.0, "Look at the sketch plane", false, None).clicked() {
               app.look_at_selection();
             }
-            ui.end_row();
-            ui.label("Sketch Grid");
+          });
+          row(ui, "Sketch Grid", &mut |ui| {
             ui.checkbox(&mut app.show_grid, "");
-            ui.end_row();
-            ui.label("Show Dimensions");
+          });
+          row(ui, "Snap", &mut |ui| {
+            ui.checkbox(&mut app.snap, "");
+          });
+          row(ui, "Show Dimensions", &mut |ui| {
             ui.checkbox(&mut app.show_dims, "");
-            ui.end_row();
-            ui.label("Show Constraints");
+          });
+          row(ui, "Show Constraints", &mut |ui| {
             ui.checkbox(&mut app.show_constraints, "");
-            ui.end_row();
           });
           if let Some(r) = app.s.model.sketches.get(&sk) {
-            ui.add_space(2.0);
+            ui.add_space(4.0);
             let (txt, col) = if !r.report.ok() {
               ("Over-constrained / conflicting".to_string(), theme::ERROR)
             } else if r.report.dof == 0 {
@@ -1171,15 +1220,18 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
             } else {
               (format!("{} degrees of freedom", r.report.dof), theme::ACCENT)
             };
-            ui.label(RichText::new(txt).color(col).small());
-            ui.label(RichText::new(format!("{} profiles", r.profiles.len())).color(theme::MUTED).small());
+            ui.horizontal(|ui| {
+              ui.add_space(14.0);
+              ui.label(RichText::new(txt).color(col).small());
+              ui.label(RichText::new(format!("· {} profiles", r.profiles.len())).color(theme::MUTED).small());
+            });
           }
         });
         let sep = ui.allocate_exact_size(vec2(width, 1.0), egui::Sense::hover()).0;
-        ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
+        ui.painter().rect_filled(sep, 0.0, Color32::from_gray(215));
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if primary_button(ui, "Finish Sketch").clicked() {
+            if secondary_button(ui, "Finish Sketch").clicked() {
               app.finish_sketch();
             }
           });
@@ -1191,60 +1243,124 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
 /// Frame of a command dialog (and the sketch palette).
 pub fn dialog_frame() -> egui::Frame {
   egui::Frame::new()
-    .fill(theme::PANEL)
-    .stroke(Stroke::new(1.0, Color32::from_gray(150)))
+    .fill(theme::DIALOG_BODY)
+    .stroke(Stroke::new(1.0, Color32::from_gray(190)))
     .corner_radius(2)
-    .shadow(egui::Shadow { offset: [0, 3], blur: 12, spread: 0, color: Color32::from_black_alpha(55) })
+    .shadow(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(35) })
 }
 
-/// The dark title bar of a command dialog: command icon, title and the » collapse mark.
-pub fn dialog_header(ui: &mut egui::Ui, icon: Icon, title: &str, width: f32) {
+/// The light title bar of a command dialog: the ⊖ collapse button, the title and ▸▸.
+pub fn dialog_header(ui: &mut egui::Ui, title: &str, width: f32) {
   let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), egui::Sense::hover());
-  ui.painter().rect_filled(rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, theme::DIALOG_HEADER);
-  icons::draw_color(
-    ui.painter(),
-    Rect::from_center_size(rect.left_center() + vec2(15.0, 0.0), Vec2::splat(17.0)),
-    icon,
-  );
-  ui.painter().text(
-    rect.left_center() + vec2(30.0, 0.0),
-    egui::Align2::LEFT_CENTER,
-    title,
-    egui::FontId::proportional(12.5),
-    Color32::WHITE,
-  );
-  ui.painter().text(
-    rect.right_center() - vec2(12.0, 1.0),
-    egui::Align2::CENTER_CENTER,
-    "»",
-    egui::FontId::proportional(15.0),
-    Color32::from_gray(200),
-  );
-}
-
-/// Fusion's blue OK-style button.
-pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-  let fill = theme::ACCENT;
-  let r = ui.add(
-    egui::Button::new(RichText::new(label).color(Color32::WHITE))
-      .fill(fill)
-      .stroke(Stroke::new(1.0, theme::ACCENT_DARK))
-      .min_size(vec2(72.0, 24.0)),
-  );
-  if r.hovered() {
-    ui.painter().rect_filled(r.rect, 2.0, Color32::from_white_alpha(25));
+  let p = ui.painter();
+  p.rect_filled(rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, theme::DIALOG_HEADER);
+  p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, Color32::from_gray(212)));
+  let ink = Color32::from_gray(55);
+  let c = rect.left_center() + vec2(14.0, 0.0);
+  p.circle_filled(c, 6.0, ink);
+  p.line_segment([c - vec2(3.0, 0.0), c + vec2(3.0, 0.0)], Stroke::new(1.5, Color32::WHITE));
+  p.text(rect.left_center() + vec2(27.0, 0.0), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(12.5), ink);
+  for dx in [-14.0, -8.0] {
+    let t = rect.right_center() + vec2(dx, 0.0);
+    p.add(egui::Shape::convex_polygon(
+      vec![t + vec2(-2.0, -4.0), t + vec2(3.0, 0.0), t + vec2(-2.0, 4.0)],
+      ink,
+      Stroke::NONE,
+    ));
   }
-  r
 }
 
-/// White secondary button (Cancel).
+/// The OK button. Fusion draws OK and Cancel alike, in light grey.
+pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+  secondary_button(ui, label)
+}
+
+/// Light grey dialog button (OK, Cancel, Finish Sketch).
 pub fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
   ui.add(
     egui::Button::new(label)
-      .fill(Color32::WHITE)
-      .stroke(Stroke::new(1.0, Color32::from_gray(170)))
+      .fill(Color32::from_gray(236))
+      .stroke(Stroke::new(1.0, Color32::from_gray(176)))
       .min_size(vec2(72.0, 24.0)),
   )
+}
+
+/// Fusion's "Unsaved: Changes may be lost — Save" notice at the top of the canvas, shown for a
+/// changed design that has never been saved.
+pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
+  if app.s.path.is_some() || !app.s.dirty {
+    return;
+  }
+  let canvas = app.canvas;
+  egui::Area::new(egui::Id::new("unsaved"))
+    .fixed_pos(canvas.center_top() + vec2(0.0, 8.0))
+    .pivot(egui::Align2::CENTER_TOP)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+        let p = ui.painter();
+        p.add(egui::Shape::convex_polygon(
+          vec![r.center_top(), r.right_bottom(), r.left_bottom()],
+          theme::ICON_ORANGE,
+          Stroke::NONE,
+        ));
+        p.text(
+          r.center() + vec2(0.0, 2.0),
+          egui::Align2::CENTER_CENTER,
+          "!",
+          egui::FontId::proportional(11.0),
+          Color32::WHITE,
+        );
+        ui.label(RichText::new("Unsaved:").strong().color(theme::TEXT));
+        ui.label(RichText::new("Changes may be lost").color(theme::TEXT));
+        ui.add_space(6.0);
+        if ui.link("Save").clicked() {
+          app.save(false);
+        }
+      });
+    });
+}
+
+/// What is selected (or hovered), at the canvas's bottom-right corner, as Fusion shows it.
+pub fn selection_info(app: &mut App, ctx: &egui::Context) {
+  let name = |s: &Sel| -> &'static str {
+    match s {
+      Sel::Face { .. } => "Face",
+      Sel::Edge { .. } => "Edge",
+      Sel::Body { .. } => "Body",
+      Sel::Profile { .. } => "Profile",
+      Sel::Feature { .. } => "Feature",
+      Sel::SketchCurve { .. } => "Sketch Curve",
+      Sel::SketchPoint { .. } => "Sketch Point",
+      Sel::SketchConstraint { .. } => "Constraint",
+    }
+  };
+  let text = match app.s.selection.as_slice() {
+    [] => match app.hover {
+      Some(h) => name(&h.to_sel()).to_string(),
+      None => return,
+    },
+    [one] => name(one).to_string(),
+    many => {
+      let first = name(&many[0]);
+      if many.iter().all(|s| name(s) == first) {
+        format!("{} {first}s", many.len())
+      } else {
+        format!("{} objects", many.len())
+      }
+    }
+  };
+  let canvas = app.canvas;
+  let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
+  painter.text(
+    canvas.right_bottom() - vec2(14.0, 12.0),
+    egui::Align2::RIGHT_BOTTOM,
+    text,
+    egui::FontId::proportional(12.5),
+    Color32::from_gray(50),
+  );
 }
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
@@ -1441,11 +1557,22 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
 
 /// The history marker: a dark bar with a grab handle, as in Fusion's timeline.
 fn marker(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(10.0, 30.0), egui::Sense::hover());
+  let (r, _) = ui.allocate_exact_size(vec2(12.0, 32.0), egui::Sense::hover());
   let x = r.center().x;
-  let c = Color32::from_gray(60);
-  ui.painter().line_segment([pos2(x, r.top() + 2.0), pos2(x, r.bottom() - 2.0)], Stroke::new(2.0, c));
-  ui.painter().rect_filled(Rect::from_center_size(pos2(x, r.bottom() - 6.0), vec2(8.0, 8.0)), 1.0, c);
+  let c = Color32::from_gray(55);
+  ui.painter().line_segment([pos2(x, r.top() + 4.0), pos2(x, r.bottom())], Stroke::new(2.0, c));
+  // the grab handle sits on top, as in Fusion
+  ui.painter().add(egui::Shape::convex_polygon(
+    vec![
+      pos2(x - 5.0, r.top()),
+      pos2(x + 5.0, r.top()),
+      pos2(x + 5.0, r.top() + 7.0),
+      pos2(x, r.top() + 11.0),
+      pos2(x - 5.0, r.top() + 7.0),
+    ],
+    c,
+    Stroke::NONE,
+  ));
 }
 
 /// Applies a constraint to the current sketch selection.

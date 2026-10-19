@@ -304,8 +304,8 @@ fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<
       p[0] = prev[0];
     }
   }
-  // tidy coordinates: round to a precision that matches the zoom
-  let step = grid_step(app, view) / 100.0;
+  // tidy coordinates: round to a precision that matches the zoom (a quarter grid cell with Snap)
+  let step = grid_step(app, view) / if app.snap { 4.0 } else { 100.0 };
   p = [round_to(p[0], step), round_to(p[1], step)];
   Some((p, None))
 }

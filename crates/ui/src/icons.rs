@@ -61,7 +61,6 @@ pub enum Icon {
   Redo,
   Plus,
   Close,
-  Extensions,
   JobStatus,
   Bell,
   Help,
@@ -99,6 +98,8 @@ enum Tone {
   Light,
   Dark,
   Blue,
+  BlueLight,
+  BlueDark,
   Orange,
   Green,
   Red,
@@ -120,7 +121,8 @@ impl Pen<'_> {
   fn col(&self, t: Tone) -> Color32 {
     match self.mono {
       Some(c) => match t {
-        Tone::Fill | Tone::Dark | Tone::Blue | Tone::Orange | Tone::Green => c.gamma_multiply(0.35),
+        Tone::Fill | Tone::Dark | Tone::Blue | Tone::BlueDark | Tone::Orange | Tone::Green => c.gamma_multiply(0.35),
+        Tone::BlueLight => c.gamma_multiply(0.2),
         Tone::Light => c.gamma_multiply(0.15),
         Tone::White => Color32::from_white_alpha(200),
         Tone::Ink | Tone::Red => c,
@@ -131,9 +133,11 @@ impl Pen<'_> {
         Tone::Light => theme::ICON_FILL_LIGHT,
         Tone::Dark => Color32::from_rgb(150, 154, 160),
         Tone::Blue => theme::ICON_BLUE,
+        Tone::BlueLight => theme::ICON_BLUE_LIGHT,
+        Tone::BlueDark => theme::ICON_BLUE_DARK,
         Tone::Orange => theme::ICON_ORANGE,
         Tone::Green => theme::ICON_GREEN,
-        Tone::Red => theme::ERROR,
+        Tone::Red => theme::ICON_RED,
         Tone::White => Color32::WHITE,
       },
     }
@@ -143,7 +147,7 @@ impl Pen<'_> {
   fn edge(&self, t: Tone) -> Color32 {
     match (self.mono, t) {
       (Some(c), _) => c,
-      (None, Tone::Blue) => Color32::from_rgb(20, 100, 175),
+      (None, Tone::Blue | Tone::BlueLight | Tone::BlueDark) => Color32::from_rgb(16, 84, 160),
       (None, Tone::Orange) => Color32::from_rgb(190, 105, 20),
       (None, Tone::Green) => Color32::from_rgb(40, 125, 40),
       _ => theme::ICON_INK,
@@ -278,45 +282,42 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
   let k = Pen { p, r, mono, w };
   match icon {
     Icon::Sketch => {
-      k.solid(&[(0.08, 0.3), (0.72, 0.3), (0.72, 0.92), (0.08, 0.92)], Light);
-      k.path(&[(0.2, 0.8), (0.2, 0.48), (0.52, 0.48)], Ink);
-      // pencil
-      k.p.line_segment([k.u(0.42, 0.7), k.u(0.9, 0.1)], Stroke::new(w * 3.2, k.col(Orange)));
-      k.p.line_segment([k.u(0.84, 0.17), k.u(0.9, 0.1)], Stroke::new(w * 3.2, k.col(Ink)));
-      k.line((0.42, 0.7), (0.37, 0.78), Ink);
+      k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
+      for (x, y) in [(0.08, 0.14), (0.78, 0.14), (0.08, 0.78)] {
+        k.fill(&[(x - 0.07, y - 0.07), (x + 0.07, y - 0.07), (x + 0.07, y + 0.07), (x - 0.07, y + 0.07)], Ink);
+      }
+      k.thick((0.78, 0.58), (0.78, 0.98), Green, 2.2);
+      k.thick((0.58, 0.78), (0.98, 0.78), Green, 2.2);
     }
     Icon::Extrude => {
-      k.block(0.1, 0.55, 0.68, 0.9, 0.22, Blue, Fill, Dark);
-      k.line((0.49, 0.45), (0.49, 0.12), Ink);
-      k.arrow_head((0.49, 0.04), (0.0, -1.0), 0.16, Ink);
+      k.block(0.12, 0.34, 0.62, 0.94, 0.26, BlueLight, Blue, BlueDark);
+      k.thick((0.37, 0.3), (0.37, 0.04), Ink, 1.0);
+      k.arrow_head((0.37, 0.0), (0.0, -1.0), 0.13, Ink);
     }
     Icon::Revolve => {
+      k.p.add(Shape::line(k.arc_pts((0.5, 0.56), 0.36, 0.3, -2.9, 0.1), Stroke::new(w * 5.0, k.col(Blue))));
+      k.p.add(Shape::line(k.arc_pts((0.5, 0.44), 0.36, 0.3, -2.9, 0.1), Stroke::new(w * 3.0, k.col(BlueLight))));
       k.dashed((0.5, 0.02), (0.5, 0.98), Ink);
-      k.solid(&[(0.55, 0.3), (0.75, 0.3), (0.75, 0.7), (0.55, 0.7)], Fill);
-      k.p.add(Shape::line(k.arc_pts((0.5, 0.5), 0.42, 0.16, -2.6, 0.2), Stroke::new(w * 1.4, k.col(Blue))));
-      k.arrow_head((0.92, 0.47), (0.2, -1.0), 0.14, Blue);
     }
-    Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
+    Icon::Box => k.block(0.1, 0.38, 0.66, 0.9, 0.26, BlueLight, Blue, BlueDark),
     Icon::Cylinder => {
-      k.fill(&[(0.18, 0.25), (0.82, 0.25), (0.82, 0.78), (0.18, 0.78)], Fill);
-      k.ellipse((0.5, 0.78), 0.32, 0.12, Some(Fill), Ink);
-      k.fill(&[(0.18, 0.25), (0.82, 0.25), (0.82, 0.78), (0.18, 0.78)], Fill);
-      k.line((0.18, 0.25), (0.18, 0.78), Ink);
-      k.line((0.82, 0.25), (0.82, 0.78), Ink);
-      k.ellipse((0.5, 0.25), 0.32, 0.12, Some(Light), Ink);
+      k.ellipse((0.5, 0.78), 0.32, 0.12, Some(Blue), Blue);
+      k.fill(&[(0.18, 0.25), (0.82, 0.25), (0.82, 0.78), (0.18, 0.78)], Blue);
+      k.line((0.18, 0.25), (0.18, 0.78), BlueDark);
+      k.line((0.82, 0.25), (0.82, 0.78), BlueDark);
+      k.ellipse((0.5, 0.25), 0.32, 0.12, Some(BlueLight), Blue);
     }
     Icon::Sphere => {
-      k.circle((0.5, 0.5), 0.4, Some(Fill), Some(Ink));
-      k.circle((0.38, 0.38), 0.12, Some(Light), None);
-      k.p.add(Shape::line(k.arc_pts((0.5, 0.5), 0.4, 0.12, PI, TAU), Stroke::new(w * 0.7, k.col(Ink))));
+      k.circle((0.5, 0.5), 0.4, Some(Blue), Some(Blue));
+      k.circle((0.38, 0.38), 0.13, Some(BlueLight), None);
     }
     Icon::Torus => {
-      k.ellipse((0.5, 0.5), 0.44, 0.28, Some(Fill), Ink);
-      k.ellipse((0.5, 0.47), 0.18, 0.08, Some(White), Ink);
+      k.ellipse((0.5, 0.5), 0.44, 0.28, Some(Blue), Blue);
+      k.ellipse((0.5, 0.47), 0.18, 0.08, Some(White), Blue);
     }
     Icon::Pattern => {
       for (i, (x, y)) in [(0.06, 0.08), (0.56, 0.08), (0.06, 0.58), (0.56, 0.58)].into_iter().enumerate() {
-        k.solid(&[(x, y), (x + 0.36, y), (x + 0.36, y + 0.34), (x, y + 0.34)], if i == 0 { Blue } else { Fill });
+        k.solid(&[(x, y), (x + 0.36, y), (x + 0.36, y + 0.34), (x, y + 0.34)], if i == 0 { BlueDark } else { Blue });
       }
     }
     Icon::CircPattern => {
@@ -324,11 +325,11 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
       for i in 0..6 {
         let t = TAU * i as f32 / 6.0 - FRAC_PI_2;
         let c = (0.5 + t.cos() * 0.32, 0.5 + t.sin() * 0.32);
-        k.circle(c, 0.11, Some(if i == 0 { Blue } else { Fill }), Some(Ink));
+        k.circle(c, 0.11, Some(if i == 0 { BlueDark } else { Blue }), Some(Blue));
       }
     }
     Icon::Mirror => {
-      k.solid(&[(0.06, 0.85), (0.42, 0.85), (0.42, 0.2)], Fill);
+      k.solid(&[(0.06, 0.85), (0.42, 0.85), (0.42, 0.2)], BlueLight);
       k.solid(&[(0.94, 0.85), (0.58, 0.85), (0.58, 0.2)], Blue);
       k.dashed((0.5, 0.04), (0.5, 0.96), Ink);
     }
@@ -348,31 +349,30 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
       k.solid(&[(0.18, 0.36), (0.28, 0.27), (0.76, 0.27), (0.66, 0.36)], Blue);
     }
     Icon::Combine => {
-      k.circle((0.36, 0.5), 0.3, Some(Fill), Some(Ink));
-      k.circle((0.64, 0.5), 0.3, Some(Blue), Some(Blue));
-      k.p.add(Shape::line(k.arc_pts((0.36, 0.5), 0.3, 0.3, -1.1, 1.1), Stroke::new(w * 0.8, k.col(Ink))));
+      k.block(0.06, 0.4, 0.5, 0.88, 0.2, BlueLight, Blue, BlueDark);
+      k.block(0.36, 0.22, 0.78, 0.66, 0.2, BlueLight, Blue, BlueDark);
     }
     Icon::Move => {
-      k.solid(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)], Fill);
       for (tip, dir) in
         [((0.5, 0.02), (0.0, -1.0)), ((0.5, 0.98), (0.0, 1.0)), ((0.02, 0.5), (-1.0, 0.0)), ((0.98, 0.5), (1.0, 0.0))]
       {
-        k.line((0.5, 0.5), (tip.0 - dir.0 * 0.1, tip.1 - dir.1 * 0.1), Blue);
-        k.arrow_head(tip, dir, 0.16, Blue);
+        k.thick((0.5, 0.5), (tip.0 - dir.0 * 0.12, tip.1 - dir.1 * 0.12), Ink, 1.6);
+        k.arrow_head(tip, dir, 0.2, Ink);
       }
     }
     Icon::Plane => {
-      k.solid(&[(0.04, 0.78), (0.3, 0.28), (0.96, 0.28), (0.7, 0.78)], Orange);
-      k.line((0.5, 0.53), (0.5, 0.05), Ink);
-      k.arrow_head((0.5, 0.02), (0.0, -1.0), 0.12, Ink);
+      k.solid(&[(0.06, 0.82), (0.06, 0.28), (0.4, 0.08), (0.4, 0.62)], Green);
+      k.solid(&[(0.5, 0.92), (0.5, 0.38), (0.86, 0.18), (0.86, 0.72)], Orange);
     }
     Icon::Measure => {
-      k.solid(&[(0.04, 0.62), (0.62, 0.04), (0.96, 0.38), (0.38, 0.96)], Light);
-      for i in 1..6 {
-        let t = i as f32 * 0.1;
-        let l = if i % 2 == 0 { 0.16 } else { 0.1 };
-        k.line((0.04 + t, 0.62 - t), (0.04 + t + l, 0.62 - t + l), Ink);
+      k.solid(&[(0.04, 0.44), (0.96, 0.44), (0.96, 0.72), (0.04, 0.72)], Orange);
+      for i in 1..8 {
+        let x = 0.04 + i as f32 * 0.115;
+        k.line((x, 0.44), (x, if i % 2 == 0 { 0.6 } else { 0.54 }), Ink);
       }
+      k.line((0.04, 0.24), (0.96, 0.24), Blue);
+      k.line((0.04, 0.14), (0.04, 0.34), Blue);
+      k.line((0.96, 0.14), (0.96, 0.34), Blue);
     }
     Icon::Import => {
       k.solid(&[(0.08, 0.6), (0.92, 0.6), (0.92, 0.92), (0.08, 0.92)], Fill);
@@ -388,9 +388,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
       k.text((0.5, 0.5), "ƒx", 0.55, Blue);
     }
     Icon::Select => {
-      k.solid(&[(0.22, 0.06), (0.22, 0.8), (0.4, 0.64), (0.62, 0.64)], White);
-      k.thick((0.36, 0.62), (0.52, 0.94), Ink, 1.6);
-      k.closed(&[(0.22, 0.06), (0.22, 0.8), (0.4, 0.64), (0.62, 0.64)], Ink);
+      for (a, b) in [
+        ((0.06, 0.06), (0.78, 0.06)),
+        ((0.06, 0.06), (0.06, 0.7)),
+        ((0.78, 0.06), (0.78, 0.4)),
+        ((0.06, 0.7), (0.4, 0.7)),
+      ] {
+        k.dashed(a, b, Green);
+      }
+      k.solid(&[(0.46, 0.34), (0.46, 0.98), (0.62, 0.84), (0.82, 0.84)], White);
     }
     Icon::Line => {
       k.line((0.15, 0.85), (0.85, 0.15), Ink);
@@ -464,55 +470,55 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
     Icon::Coincident => {
       k.line((0.08, 0.82), (0.5, 0.5), Ink);
       k.line((0.5, 0.5), (0.92, 0.78), Ink);
-      k.circle((0.5, 0.5), 0.12, Some(Blue), Some(Blue));
+      k.circle((0.5, 0.5), 0.12, Some(Red), Some(Red));
     }
     Icon::Horizontal => {
       k.line((0.1, 0.62), (0.9, 0.62), Ink);
-      k.dot((0.1, 0.62), Blue);
-      k.dot((0.9, 0.62), Blue);
-      k.text((0.5, 0.28), "H", 0.4, Blue);
+      k.dot((0.1, 0.62), Red);
+      k.dot((0.9, 0.62), Red);
+      k.text((0.5, 0.28), "H", 0.4, Red);
     }
     Icon::Vertical => {
       k.line((0.62, 0.1), (0.62, 0.9), Ink);
-      k.dot((0.62, 0.1), Blue);
-      k.dot((0.62, 0.9), Blue);
-      k.text((0.28, 0.5), "V", 0.4, Blue);
+      k.dot((0.62, 0.1), Red);
+      k.dot((0.62, 0.9), Red);
+      k.text((0.28, 0.5), "V", 0.4, Red);
     }
     Icon::Parallel => {
       k.line((0.12, 0.8), (0.52, 0.12), Ink);
-      k.line((0.48, 0.88), (0.88, 0.2), Blue);
+      k.line((0.48, 0.88), (0.88, 0.2), Red);
     }
     Icon::Perpendicular => {
       k.line((0.1, 0.85), (0.9, 0.85), Ink);
-      k.line((0.5, 0.85), (0.5, 0.12), Blue);
+      k.line((0.5, 0.85), (0.5, 0.12), Red);
       k.closed(&[(0.5, 0.85), (0.5, 0.68), (0.67, 0.68), (0.67, 0.85)], Ink);
     }
     Icon::Tangent => {
       k.circle((0.5, 0.62), 0.28, None, Some(Ink));
-      k.line((0.04, 0.34), (0.96, 0.34), Blue);
+      k.line((0.04, 0.34), (0.96, 0.34), Red);
     }
     Icon::Equal => {
-      k.thick((0.15, 0.38), (0.85, 0.38), Blue, 1.4);
-      k.thick((0.15, 0.62), (0.85, 0.62), Blue, 1.4);
+      k.thick((0.15, 0.38), (0.85, 0.38), Red, 1.4);
+      k.thick((0.15, 0.62), (0.85, 0.62), Red, 1.4);
     }
     Icon::Concentric => {
       k.circle((0.5, 0.5), 0.4, None, Some(Ink));
-      k.circle((0.5, 0.5), 0.2, None, Some(Blue));
+      k.circle((0.5, 0.5), 0.2, None, Some(Red));
       k.dot((0.5, 0.5), Ink);
     }
     Icon::Midpoint => {
       k.line((0.08, 0.72), (0.92, 0.28), Ink);
-      k.fill(&[(0.5, 0.33), (0.62, 0.57), (0.38, 0.57)], Blue);
+      k.fill(&[(0.5, 0.33), (0.62, 0.57), (0.38, 0.57)], Red);
     }
     Icon::Collinear => {
       k.line((0.05, 0.78), (0.4, 0.57), Ink);
-      k.line((0.6, 0.45), (0.95, 0.24), Blue);
+      k.line((0.6, 0.45), (0.95, 0.24), Red);
       k.dashed((0.4, 0.57), (0.6, 0.45), Ink);
     }
     Icon::Symmetric => {
       k.dashed((0.5, 0.04), (0.5, 0.96), Ink);
-      k.dot((0.18, 0.5), Blue);
-      k.dot((0.82, 0.5), Blue);
+      k.dot((0.18, 0.5), Red);
+      k.dot((0.82, 0.5), Red);
       k.line((0.24, 0.5), (0.38, 0.5), Ink);
       k.line((0.62, 0.5), (0.76, 0.5), Ink);
     }
@@ -521,7 +527,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
       k.solid(&[(0.2, 0.45), (0.8, 0.45), (0.8, 0.9), (0.2, 0.9)], Orange);
     }
     Icon::Finish => {
-      k.p.add(Shape::line(k.pts(&[(0.1, 0.52), (0.38, 0.8), (0.92, 0.2)]), Stroke::new(w * 2.4, k.col(Green))));
+      k.circle((0.5, 0.5), 0.46, Some(Green), None);
+      k.p.add(Shape::line(k.pts(&[(0.27, 0.52), (0.44, 0.68), (0.74, 0.34)]), Stroke::new(w * 2.2, k.col(White))));
     }
     Icon::DataPanel => {
       for i in 0..3 {
@@ -559,13 +566,6 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
     Icon::Close => {
       k.line((0.25, 0.25), (0.75, 0.75), Ink);
       k.line((0.75, 0.25), (0.25, 0.75), Ink);
-    }
-    Icon::Extensions => {
-      k.solid(&[(0.12, 0.3), (0.72, 0.3), (0.72, 0.9), (0.12, 0.9)], White);
-      k.circle((0.42, 0.24), 0.11, Some(White), Some(Ink));
-      k.circle((0.8, 0.6), 0.11, Some(White), Some(Ink));
-      k.fill(&[(0.32, 0.31), (0.52, 0.31), (0.52, 0.36), (0.32, 0.36)], White);
-      k.fill(&[(0.66, 0.5), (0.71, 0.5), (0.71, 0.7), (0.66, 0.7)], White);
     }
     Icon::JobStatus => {
       k.circle((0.5, 0.5), 0.4, None, Some(Ink));
@@ -691,14 +691,19 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>) {
 
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip).
 pub fn tool_button(ui: &mut egui::Ui, icon: Icon, label: &str, hint: &str, active: bool) -> egui::Response {
-  let size = vec2(36.0, 36.0);
+  let size = vec2(38.0, 38.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-  if active || resp.hovered() {
-    let (fill, stroke) = if active { (theme::SELECTED, theme::ACCENT) } else { (theme::HOVER, theme::SELECTED) };
-    ui.painter().rect(rect, 2.0, fill, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+  let ic = Rect::from_center_size(rect.center(), Vec2::splat(28.0));
+  if active {
+    // Fusion shows the running tool as a white icon on solid blue
+    ui.painter().rect_filled(rect, 2.0, theme::ACCENT);
+    draw(ui.painter(), ic, icon, Color32::WHITE);
+  } else {
+    if resp.hovered() {
+      ui.painter().rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
+    }
+    draw_color(ui.painter(), ic, icon);
   }
-  let ic = Rect::from_center_size(rect.center(), Vec2::splat(26.0));
-  draw_color(ui.painter(), ic, icon);
   resp.on_hover_ui(|ui| {
     ui.label(egui::RichText::new(label).strong());
     ui.label(egui::RichText::new(hint).color(theme::MUTED));

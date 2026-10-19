@@ -108,7 +108,7 @@ impl SceneBuilder {
     }
     let mut picks = PickTable::default();
     let mut scene =
-      Scene { background_top: [198, 208, 220, 255], background_bottom: [250, 251, 252, 255], ..Default::default() };
+      Scene { background_top: [250, 250, 251, 255], background_bottom: [234, 236, 239, 255], ..Default::default() };
     let selected: Vec<Pick> = s.selection.iter().filter_map(Pick::from_sel).collect();
     let selected_bodies: Vec<BodyId> =
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
@@ -268,7 +268,7 @@ fn grid(scene: &mut Scene, s: &Session) {
   for i in -n..=n {
     let t = i as f64 * step;
     let major = i % 5 == 0;
-    let col = if major { [170, 176, 188, 255] } else { [200, 205, 214, 255] };
+    let col = if major { [190, 193, 198, 255] } else { [218, 220, 224, 255] };
     for (a, b) in [([t, -ext], [t, ext]), ([-ext, t], [ext, t])] {
       scene.lines.push(Polyline {
         points: vec![plane.to_world(a).as_vec3().to_array(), plane.to_world(b).as_vec3().to_array()],
@@ -281,15 +281,18 @@ fn grid(scene: &mut Scene, s: &Session) {
       });
     }
   }
-  // origin axes
-  let l = (ext * 0.25) as f32;
-  for (d, col) in
-    [([l, 0.0, 0.0], [220, 50, 50, 255]), ([0.0, l, 0.0], [40, 170, 60, 255]), ([0.0, 0.0, l], [50, 90, 230, 255])]
-  {
+  // origin axes: X and Y run across the whole grid, as in Fusion; Z is a short stub
+  let l = ext as f32;
+  let z = (ext * 0.25) as f32;
+  for (a, b, col) in [
+    ([-l, 0.0, 0.0], [l, 0.0, 0.0], [232, 96, 92, 255]),
+    ([0.0, -l, 0.0], [0.0, l, 0.0], [96, 190, 96, 255]),
+    ([0.0, 0.0, 0.0], [0.0, 0.0, z], [70, 110, 230, 255]),
+  ] {
     scene.lines.push(Polyline {
-      points: vec![[0.0; 3], d],
+      points: vec![a, b],
       color: col,
-      width: 2.0,
+      width: 1.5,
       id: 0,
       on_top: false,
       dashed: false,

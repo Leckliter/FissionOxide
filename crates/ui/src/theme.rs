@@ -1,17 +1,23 @@
-//! Colours and style, modelled on Autodesk Fusion's light theme: a light-grey application bar
-//! with document tabs, a white toolbar with workspace tabs, panels floating over a
-//! blue-grey gradient canvas, and Fusion blue for selection and the primary button.
+//! Colours and style, modelled on Autodesk Fusion's light theme: a grey application bar with a
+//! wide document tab, a light-grey toolbar with workspace tabs and bold blue icons, a
+//! near-white canvas with the browser rows floating directly on it, and light-grey command
+//! dialogs.
 
 use egui::{Color32, CornerRadius, Stroke};
 
 /// Application bar (data panel, file, save, undo/redo, document tabs).
-pub const APP_BAR: Color32 = Color32::from_rgb(232, 232, 232);
+pub const APP_BAR: Color32 = Color32::from_rgb(222, 222, 222);
 /// Toolbar (workspace switcher, tabs and tool groups).
-pub const TOOLBAR: Color32 = Color32::from_rgb(250, 250, 250);
+pub const TOOLBAR: Color32 = Color32::from_rgb(243, 243, 243);
+/// Background of the contextual SKETCH tab and the FINISH SKETCH group.
+pub const CONTEXT_TAB: Color32 = Color32::from_rgb(214, 233, 250);
 pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255);
-/// Floating panels over the canvas (browser, comments, navigation bar).
-pub const FLOAT: Color32 = Color32::from_rgba_premultiplied(250, 250, 250, 245);
-pub const FLOAT_HEADER: Color32 = Color32::from_rgb(242, 242, 242);
+/// Header bars of the floating BROWSER and COMMENTS panels.
+pub const FLOAT_HEADER: Color32 = Color32::from_rgb(236, 236, 236);
+/// Grey pills behind browser row labels.
+pub const PILL: Color32 = Color32::from_rgba_premultiplied(226, 226, 226, 225);
+/// The dark pill of the browser's root component.
+pub const PILL_ROOT: Color32 = Color32::from_rgb(96, 96, 96);
 pub const BORDER: Color32 = Color32::from_rgb(208, 208, 208);
 pub const SEPARATOR: Color32 = Color32::from_rgb(220, 220, 220);
 /// Fusion blue: selection, active tab underline, OK button.
@@ -20,24 +26,27 @@ pub const ACCENT_DARK: Color32 = Color32::from_rgb(0, 119, 178);
 /// Light blue behind hovered / selected rows and buttons.
 pub const HOVER: Color32 = Color32::from_rgb(229, 241, 251);
 pub const SELECTED: Color32 = Color32::from_rgb(204, 228, 247);
-pub const SKETCH_ACCENT: Color32 = Color32::from_rgb(58, 160, 60);
 pub const ERROR: Color32 = Color32::from_rgb(214, 48, 39);
 pub const WARNING: Color32 = Color32::from_rgb(232, 155, 0);
 pub const TEXT: Color32 = Color32::from_rgb(40, 40, 40);
 pub const MUTED: Color32 = Color32::from_rgb(120, 120, 120);
-pub const GROUP_LABEL: Color32 = Color32::from_rgb(80, 80, 80);
-/// Command dialog title bar.
-pub const DIALOG_HEADER: Color32 = Color32::from_rgb(74, 74, 74);
+pub const GROUP_LABEL: Color32 = Color32::from_rgb(45, 45, 45);
+/// Command dialog title bar and body.
+pub const DIALOG_HEADER: Color32 = Color32::from_rgb(232, 232, 232);
+pub const DIALOG_BODY: Color32 = Color32::from_rgb(247, 247, 247);
 /// Timeline strip.
-pub const TIMELINE: Color32 = Color32::from_rgb(244, 244, 244);
+pub const TIMELINE: Color32 = Color32::from_rgb(238, 238, 238);
 
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
-pub const ICON_INK: Color32 = Color32::from_rgb(85, 85, 85);
-pub const ICON_FILL: Color32 = Color32::from_rgb(196, 199, 204);
-pub const ICON_FILL_LIGHT: Color32 = Color32::from_rgb(226, 228, 231);
-pub const ICON_BLUE: Color32 = Color32::from_rgb(40, 140, 220);
-pub const ICON_ORANGE: Color32 = Color32::from_rgb(240, 145, 40);
-pub const ICON_GREEN: Color32 = Color32::from_rgb(70, 165, 60);
+pub const ICON_INK: Color32 = Color32::from_rgb(70, 70, 70);
+pub const ICON_FILL: Color32 = Color32::from_rgb(200, 203, 207);
+pub const ICON_FILL_LIGHT: Color32 = Color32::from_rgb(230, 231, 233);
+pub const ICON_BLUE: Color32 = Color32::from_rgb(30, 136, 229);
+pub const ICON_BLUE_LIGHT: Color32 = Color32::from_rgb(132, 192, 245);
+pub const ICON_BLUE_DARK: Color32 = Color32::from_rgb(18, 92, 178);
+pub const ICON_ORANGE: Color32 = Color32::from_rgb(245, 150, 30);
+pub const ICON_GREEN: Color32 = Color32::from_rgb(56, 172, 70);
+pub const ICON_RED: Color32 = Color32::from_rgb(222, 56, 50);
 
 pub fn apply(ctx: &egui::Context) {
   ctx.set_visuals(egui::Visuals::light());

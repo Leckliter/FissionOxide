@@ -57,28 +57,6 @@ impl Kind {
     }
   }
 
-  fn icon(self) -> Icon {
-    match self {
-      Kind::PickPlane => Icon::Sketch,
-      Kind::Extrude => Icon::Extrude,
-      Kind::Revolve => Icon::Revolve,
-      Kind::Fillet => Icon::Fillet,
-      Kind::Chamfer => Icon::Chamfer,
-      Kind::Shell => Icon::Shell,
-      Kind::Box => Icon::Box,
-      Kind::Cylinder => Icon::Cylinder,
-      Kind::Sphere => Icon::Sphere,
-      Kind::Torus => Icon::Torus,
-      Kind::RectPattern => Icon::Pattern,
-      Kind::CircPattern => Icon::CircPattern,
-      Kind::Mirror => Icon::Mirror,
-      Kind::Combine => Icon::Combine,
-      Kind::Move => Icon::Move,
-      Kind::OffsetPlane => Icon::Plane,
-      Kind::Inspect => Icon::Measure,
-    }
-  }
-
   /// Dialogs whose input is picked edges/faces/bodies of the model: they preview on demand,
   /// because a preview changes the very geometry being picked.
   fn picks_model(self) -> bool {
@@ -646,7 +624,7 @@ impl Dialog {
         panels::dialog_frame().show(ui, |ui| {
           ui.set_width(width);
           ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-          panels::dialog_header(ui, self.kind.icon(), &title, width);
+          panels::dialog_header(ui, &title, width);
           egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
             egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
@@ -659,7 +637,7 @@ impl Dialog {
           });
           let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
           ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
-          egui::Frame::new().fill(theme::FLOAT_HEADER).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+          egui::Frame::new().fill(theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
             ui.horizontal(|ui| {
               ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
               let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 24.0), egui::Sense::hover());
@@ -1181,34 +1159,27 @@ fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
     .map(|f| f.id)
 }
 
-/// Fusion's selection input: a grey "Select" button until something is picked, then a blue
-/// chip with the count.
+/// Fusion's selection input: a "Select" chip until something is picked, then a blue chip with
+/// the count and a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, text: &str, has: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
-  let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 34.0, 22.0), egui::Sense::hover());
+  let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());
+  let chip = egui::Rect::from_min_size(rect.min, egui::vec2(tw + 32.0, 22.0));
   let p = ui.painter();
+  let ir = egui::Rect::from_center_size(chip.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(15.0));
   if has {
-    p.rect(rect, 2.0, theme::ACCENT, egui::Stroke::new(1.0, theme::ACCENT_DARK), egui::StrokeKind::Inside);
-    let x = rect.left_center() + egui::vec2(12.0, 0.0);
-    let s = egui::Stroke::new(1.4, egui::Color32::WHITE);
+    p.rect_filled(chip, 2.0, theme::ACCENT);
+    crate::icons::draw(p, ir, Icon::Select, egui::Color32::WHITE);
+    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, egui::Color32::WHITE);
+    let x = egui::pos2(chip.right() + 10.0, chip.center().y);
+    let s = egui::Stroke::new(1.4, egui::Color32::from_gray(70));
     p.line_segment([x + egui::vec2(-4.0, -4.0), x + egui::vec2(4.0, 4.0)], s);
     p.line_segment([x + egui::vec2(4.0, -4.0), x + egui::vec2(-4.0, 4.0)], s);
-    p.text(rect.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, egui::Color32::WHITE);
   } else {
-    p.rect(
-      rect,
-      2.0,
-      egui::Color32::WHITE,
-      egui::Stroke::new(1.0, egui::Color32::from_gray(170)),
-      egui::StrokeKind::Inside,
-    );
-    crate::icons::draw_color(
-      p,
-      egui::Rect::from_center_size(rect.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(14.0)),
-      Icon::Select,
-    );
-    p.text(rect.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
+    p.rect(chip, 2.0, egui::Color32::WHITE, egui::Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
+    crate::icons::draw(p, ir, Icon::Select, theme::ICON_INK);
+    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
   }
   resp
 }

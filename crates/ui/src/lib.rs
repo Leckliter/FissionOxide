@@ -41,6 +41,8 @@ pub struct App {
   pub show_grid: bool,
   /// Sketch palette options.
   pub show_dims: bool,
+  /// Snap sketch clicks to the grid.
+  pub snap: bool,
   pub show_constraints: bool,
   /// Floating panels.
   pub browser_open: bool,
@@ -117,6 +119,7 @@ impl App {
       show_edges: true,
       show_grid: true,
       show_dims: true,
+      snap: false,
       show_constraints: true,
       browser_open: true,
       show_comments: true,
@@ -502,6 +505,8 @@ impl App {
     panels::sketch_palette(self, &ctx);
     marking::show(self, &ctx);
     panels::canvas_status(self, &ctx);
+    panels::unsaved_banner(self, &ctx);
+    panels::selection_info(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
