@@ -115,6 +115,11 @@ change a parameter and watch the whole history rebuild.
   overwrite: open or compare any old version, promote it back to latest, mark milestones,
   browse recent designs, search, see the activity feed, restore from the trash. See
   [Data panel](#data-panel-projects-and-versions).
+- **Trace images.** Turn a photo, logo or scan into clean sketch geometry: Trace Image (sketch
+  Create or Insert menu, or drop/open a picture) previews the outlines over the image as you
+  adjust threshold, detail and corners, and writes lines, arcs, circles and splines that are
+  closed by construction — every shape is a profile, ready to extrude, flange or cut. Colour
+  mode traces each of N colours on its own. See [Image tracing](#image-tracing).
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
   scripts all drive the same engine — and `clfusion-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
@@ -282,6 +287,8 @@ clfusion-cli exec link_bar.clf '{"cmd": "drawing.export", "path": "link_bar.dxf"
 | OBJ `.obj`, PLY `.ply`, 3MF     | ✓             | ✓      | 3MF honours units, components and build transforms              |
 | glTF binary `.glb`, USDZ        |               | ✓      | Metres / Y-up for web and AR viewers                            |
 | DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges ↔ a sketch          |
+| SVG `.svg`                      | ✓             | ✓      | Paths, shapes, transforms ↔ a sketch; curves stay exact         |
+| PNG, JPEG, BMP, WebP            | trace         |        | Traced into sketch curves (see [Image tracing](#image-tracing)) |
 | Autodesk Fusion `.f3d` `.f3z`   | stored        |        | See below                                                       |
 
 When a mesh comes from CAD, coplanar triangles are merged back into flat faces on import, so a
@@ -425,9 +432,33 @@ These exist so code driving the engine can inspect and tag what it builds (see
   perimeter and bounding curves, and the curves outside every profile; `samples` and `loops`
   add points along curves and profile boundaries.
 - `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
-  DXF or a `.clf`); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
+  DXF, an SVG or a `.clf`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
 - Anywhere a plane is taken, `{"origin": [x,y,z], "normal": [x,y,z]}` is a free plane.
+
+## Image tracing
+
+![Trace Image previewing a traced badge over its picture](docs/images/trace-image.png)
+
+Trace Image works on the sketch being edited (opening or dropping a picture starts a sketch on
+the XY plane for it). The tracer (`clf-trace`) thresholds the picture (automatically, or at a
+level you set; or reduces it to N colours), drops specks and fills pinholes, follows the pixel
+outlines so that no two outlines ever touch, then fits lines, arcs, circles and cubic splines
+within the *Detail* tolerance while keeping sharp corners sharp. Each outline is checked for
+closure and self-intersection before it reaches the sketch, so the sketch's profile finder sees
+every shape as a region: a ring is a ring, an `O` keeps its counter.
+
+After OK the traced shapes (not their holes) are selected, so Extrude straight away gives the
+part. The same thing is a command:
+
+```json
+{"cmd": "sketch.trace", "image": "logo.png", "width": "120 mm", "fit": "curves"}
+```
+
+It returns the counts, each colour layer, and `ink`: a point inside each traced shape to pass to
+`extrude`'s `profiles`. `trace.info` reports the same without changing the design, and
+[`examples/trace_logo.jsonl`](examples/trace_logo.jsonl) traces and extrudes a badge. The
+pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
 
 ## Architecture
 
@@ -437,7 +468,8 @@ These exist so code driving the engine can inspect and tag what it builds (see
 | `clf-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
 | `clf-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
 | `clf-model`         | The design document, feature timeline, regeneration and references     |
-| `clf-exchange`      | Mesh formats, DXF, `.clfz` archives, Fusion archive inspection         |
+| `clf-exchange`      | Mesh formats, DXF, SVG, `.clfz` archives, Fusion archive inspection    |
+| `clf-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
 | `clf-store`         | The data hub: projects, folders, items, versions, activity, trash      |
 | `clf-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
 | `clf-engine`        | Session, undo/redo, the JSON command set, scene building               |

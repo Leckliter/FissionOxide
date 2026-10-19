@@ -245,7 +245,7 @@ const INSPECT: &[E] = &[
 const INSERT: &[E] = &[
   x("Decal", Icon::Decal),
   x("Canvas", Icon::Canvas),
-  x("Insert SVG", Icon::InsertSvg),
+  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
@@ -571,6 +571,7 @@ const SKETCH_CREATE: &[E] = &[
   c("Conic Curve", Icon::Conic, T(Tool::Conic)),
   c("Point", Icon::Point, T(Tool::Point)),
   c("Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT))),
+  c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
   E::Sep,
   c("Mirror", Icon::SkMirror, D(Kind::SkMirror)),
   c("Circular Pattern", Icon::SkCircPattern, D(Kind::SkCircPattern)),
@@ -623,9 +624,10 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 
 // the sketch tab's INSERT has no Insert Component
 const SKETCH_INSERT: &[E] = &[
+  c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
   x("Decal", Icon::Decal),
   x("Canvas", Icon::Canvas),
-  x("Insert SVG", Icon::InsertSvg),
+  c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
   x("Insert Fastener", Icon::Fastener).off(),

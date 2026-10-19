@@ -19,6 +19,7 @@ pub mod scene;
 mod sheet2;
 mod solid;
 mod surfaces;
+mod trace;
 
 use std::path::PathBuf;
 
@@ -457,3 +458,5 @@ mod tests_sketch;
 mod tests_solid;
 #[cfg(test)]
 mod tests_surface;
+#[cfg(test)]
+mod tests_trace;

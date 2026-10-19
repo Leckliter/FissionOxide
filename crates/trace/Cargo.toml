@@ -1,0 +1,18 @@
+[package]
+name = "clf-trace"
+description = "Image tracing: bitmaps to closed contours of lines, arcs, circles and cubic Béziers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+quick-xml.workspace = true
+
+[lints]
+workspace = true

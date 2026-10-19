@@ -17,6 +17,7 @@ mod panels;
 mod select;
 mod sheet;
 mod theme;
+mod trace;
 mod viewport;
 
 use std::path::PathBuf;
@@ -248,6 +249,12 @@ impl App {
   }
 
   pub fn open_path(&mut self, p: &std::path::Path) {
+    if trace::is_image(p) {
+      // a picture opens as a new design with a sketch to trace it into
+      self.replace_session(Session::default());
+      self.trace_image(p.to_path_buf());
+      return;
+    }
     match Session::open(p) {
       Ok(s) => {
         self.replace_session(s);
@@ -373,7 +380,7 @@ impl App {
       .save_file()
     {
       let mut params = json!({"path": p});
-      if id == "dxf" {
+      if id == "dxf" || id == "svg" {
         params["sketch"] = json!(self.s.edit_sketch.or(self.last_sketch).map(|s| s.0));
       }
       if self.run("export", params).is_some() {
@@ -456,6 +463,8 @@ impl App {
           self.status = Some((format!("Uploaded {}", p.display()), false));
         }
         self.data.invalidate();
+      } else if trace::is_image(&p) {
+        self.trace_image(p);
       } else if self.s.design.features.is_empty() && !self.s.dirty {
         self.open_path(&p);
       } else {
@@ -630,6 +639,23 @@ impl App {
     if let Some(d) = self.dialog.as_mut() {
       d.preview(&mut self.s);
     }
+  }
+
+  /// Opens Trace Image on `path` (an opened or dropped image) in the sketch being edited, or in
+  /// a new sketch on the XY plane.
+  pub fn trace_image(&mut self, path: PathBuf) {
+    if self.s.edit_sketch.is_none() {
+      self.create_sketch(json!("xy"));
+      if self.s.edit_sketch.is_none() {
+        return;
+      }
+    }
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::TraceImage);
+    d.trace = Some(Box::new(trace::TraceState::with_image(path)));
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
   }
 
   pub fn cancel_dialog(&mut self) {

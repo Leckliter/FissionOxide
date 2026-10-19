@@ -1,5 +1,5 @@
 //! File formats for CLFusion that don't need the B-rep kernel: triangle meshes (STL, OBJ, PLY,
-//! 3MF, glTF, USDZ), 2D sketch geometry (DXF), CLFusion design archives (`.clfz`) and inspection
+//! 3MF, glTF, USDZ), 2D sketch geometry (DXF, SVG), CLFusion design archives (`.clfz`) and inspection
 //! of Autodesk Fusion archives (`.f3d`/`.f3z`).
 //!
 //! B-rep formats (STEP, IGES, BRep) go through `clf-kernel`; [`FORMATS`] lists every format the
@@ -14,6 +14,7 @@ mod glb;
 mod obj;
 mod ply;
 mod stl;
+pub mod svg;
 mod threemf;
 mod usdz;
 
@@ -97,6 +98,7 @@ formats! {
   "glb", "glTF binary", ["glb"], Mesh, false, true, "Metres, Y-up, for web and AR viewers";
   "usdz", "USDZ", ["usdz"], Mesh, false, true, "Universal Scene Description package (ASCII layer)";
   "dxf", "DXF", ["dxf"], Sketch, true, true, "2D: imports into a new sketch; exports the active or last sketch";
+  "svg", "SVG", ["svg"], Sketch, true, true, "2D: imports into a new sketch (paths, shapes, transforms); exports the active or last sketch with exact curves";
 }
 
 /// Looks up a format by file extension (case-insensitive, without the dot).

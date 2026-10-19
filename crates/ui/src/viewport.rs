@@ -172,6 +172,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
   }
 
+  let cam = app.cam;
+  crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+
   // overlays that take clicks come first
   let mut consumed = false;
   if app.s.edit_sketch.is_some() {
