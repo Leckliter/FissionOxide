@@ -30,10 +30,8 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Area     | Item                                                                           |
 |----------|--------------------------------------------------------------------------------|
 | Formats  | ACIS SAT/SMT, Parasolid (x_t), DWG, FBX: need closed-source or licensed SDKs   |
-| Formats  | DXF splines and ellipses as entities (exported as lines today)               |
-| Formats  | STEP with colours, names and assembly structure (needs OCCT's XCAF toolkit)    |
-| Data     | Sharing a hub between machines (sync folder or server), comments on versions   |
-| Data     | Visual diff between two versions in the viewport                              |
+| Formats  | STEP: nested sub-assemblies and instanced parts kept as such (flattened into components today); colours per face |
+| Data     | A hub server (sharing works through sync folders today); real-time presence and locking of designs being edited |
 
 ## Later
 

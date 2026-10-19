@@ -117,8 +117,9 @@ change a parameter and watch the whole history rebuild.
   archive with thumbnail and version history (`.foxz`, FissionOxide's `.f3d`/`.f3z`). See
   [File formats](#file-formats).
 - **Data panel with version history.** Every save is a new version in a project, never an
-  overwrite: open or compare any old version, promote it back to latest, mark milestones,
-  browse recent designs, search, see the activity feed, restore from the trash. See
+  overwrite: open or compare any old version (also as a coloured diff in the viewport),
+  promote it back to latest, mark milestones, comment on versions, browse recent designs,
+  search, see the activity feed, restore from the trash, share the hub through a sync folder. See
   [Data panel](#data-panel-projects-and-versions).
 - **Trace images.** Turn a photo, logo or scan into clean sketch geometry: Trace Image (sketch
   Create or Insert menu, or drop/open a picture) previews the outlines over the image as you
@@ -289,15 +290,15 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 
 | Format                          | Open / insert | Export | Notes                                                           |
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
-| FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
-| FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
-| STEP `.step` `.stp`             | ✓             | ✓      | AP214 solids; surface-only files are sewn into shells/solids    |
+| CLFusion design `.clf`          | ✓             | ✓      | The parametric design as JSON                                   |
+| CLFusion archive `.clfz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
+| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies: components, body names and colours both ways; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
 | STL `.stl` (binary / ASCII)     | ✓             | ✓      | Imported meshes become faceted bodies (≤ 250k triangles)        |
 | OBJ `.obj`, PLY `.ply`, 3MF     | ✓             | ✓      | 3MF honours units, components and build transforms              |
 | glTF binary `.glb`, USDZ        |               | ✓      | Metres / Y-up for web and AR viewers                            |
-| DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges ↔ a sketch          |
+| DXF `.dxf`                      | ✓             | ✓      | Lines, arcs, circles, polylines with bulges, splines and ellipses ↔ a sketch (R12, or R2000 when there are splines/ellipses) |
 | SVG `.svg`                      | ✓             | ✓      | Paths, shapes, transforms ↔ a sketch; curves stay exact         |
 | PNG, JPEG, BMP, WebP            | trace         |        | Traced into sketch curves (see [Image tracing](#image-tracing)) |
 | Autodesk Fusion `.f3d` `.f3z`   | stored        |        | See below                                                       |
@@ -323,17 +324,29 @@ Windows, `~/Library/Application Support/FissionOxide` on macOS; set `FOX_DATA_DI
   save asks for a name and a project. Earlier versions are never overwritten.
 - Select a design to see its **version history** with thumbnails, authors and times. Open any
   version, **promote** an old one to be the latest again, **compare** it with the latest
-  (features and parameters added, removed or changed), mark or clear **milestones**
-  (milestones can't be deleted).
+  (features and parameters added, removed or changed, and in the viewport: added geometry
+  green, removed red, unchanged as a grey ghost, until the comparison window closes), mark or
+  clear **milestones** (milestones can't be deleted), and **comment** on versions (💬; comments
+  show under each version, are searchable and appear in the activity feed).
 - **Upload** files (or drop them on the panel): designs and archives keep their history, STEP /
   IGES / mesh / DXF files are translated into designs that keep the original file, and other
   files (`.f3d`) are stored as they are.
-- **Recent**, **search** (names, version descriptions, milestones), the per-project
+- **Recent**, **search** (names, version descriptions, milestones, comments), the per-project
   **activity** feed, and a **trash** you can restore from.
 - **Download** any version in any export format, or as a `.foxz` with its history.
 
 The hub is plain files: `hub.json` (the index, replaced atomically) and one immutable file per
 version, so the app and the CLI can use the same hub at the same time.
+
+**Sharing a hub between machines.** Point `CLF_DATA_DIR` (or `--hub`) at a folder that
+Dropbox, OneDrive, Syncthing, Nextcloud or a network drive keeps in sync. Nothing is lost when
+two people save at once: version files and ids carry a tag of the process that made them, so
+they never collide; every write of `hub.json` happens under a `hub.lock` and merges with what
+is on disk (both saves are kept; if both made "v3", the later one becomes v4); and when the lock
+is held by another machine the change goes to a `hub.conflict-….json` copy instead. Those, and
+the conflict copies sync tools make (`hub (conflicted copy).json`, `hub.sync-conflict-….json`
+…), are merged into `hub.json` the next time the hub is opened. A version whose index entry
+arrived before its file says it is still syncing.
 
 ## Manufacture (CAM)
 
@@ -399,11 +412,13 @@ fissionoxide-cli convert part.step part.3mf
 fissionoxide-cli inspect part.f3d
 
 # the data hub (add --hub DIR to use another hub)
-fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
-fissionoxide-cli hub list
-fissionoxide-cli hub versions '{"item": "i3"}'
-fissionoxide-cli hub compare '{"item": "i3", "a": 1}'
-fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
+clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
+clfusion-cli hub list
+clfusion-cli hub versions '{"item": "i3"}'
+clfusion-cli hub compare '{"item": "i3", "a": 1}'
+clfusion-cli hub comment '{"item": "i3", "version": 2, "text": "wall too thin at the boss"}'
+clfusion-cli hub comments '{"item": "i3"}'
+clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
 ```
 
 ### AI agents (MCP)
@@ -509,18 +524,18 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 
 | Crate               | Role                                                                   |
 |---------------------|------------------------------------------------------------------------|
-| `fox-expr`          | Unit-aware expressions and parameter evaluation                        |
-| `fox-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
-| `fox-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
-| `fox-model`         | The design document, feature timeline, regeneration and references     |
-| `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
-| `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
-| `fox-store`         | The data hub: projects, folders, items, versions, activity, trash      |
-| `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
-| `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
-| `fox-ui`            | The egui desktop UI                                                    |
-| `apps/fissionoxide`     | Desktop app                                                            |
-| `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
+| `clf-expr`          | Unit-aware expressions and parameter evaluation                        |
+| `clf-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
+| `clf-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
+| `clf-model`         | The design document, feature timeline, regeneration and references     |
+| `clf-exchange`      | Mesh formats, DXF, SVG, `.clfz` archives, Fusion archive inspection    |
+| `clf-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
+| `clf-store`         | The data hub: projects, folders, items, versions, comments, activity, trash; safe sharing through sync folders |
+| `clf-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
+| `clf-engine`        | Session, undo/redo, the JSON command set, scene building               |
+| `clf-ui`            | The egui desktop UI                                                    |
+| `apps/clfusion`     | Desktop app                                                            |
+| `apps/clfusion-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans

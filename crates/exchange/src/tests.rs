@@ -190,8 +190,8 @@ fn dxf_round_trip() {
   let d = read_dxf(text.as_bytes()).unwrap();
   assert_eq!(d.entities.len(), 4);
   assert!(d.skipped.is_empty());
-  match d.entities[2] {
-    (Entity::Arc { radius, start, end, .. }, true) => {
+  match &d.entities[2] {
+    &(Entity::Arc { radius, start, end, .. }, true) => {
       assert!((radius - 10.0).abs() < 1e-9 && start.abs() < 1e-9 && (end - std::f64::consts::FRAC_PI_2).abs() < 1e-9)
     }
     e => panic!("{e:?}"),
@@ -312,7 +312,7 @@ fn near(a: [f64; 2], b: [f64; 2], tol: f64) -> bool {
 }
 
 fn ents(d: &Drawing) -> Vec<Entity> {
-  d.entities.iter().map(|e| e.0).collect()
+  d.entities.iter().map(|e| e.0.clone()).collect()
 }
 
 fn lines(d: &Drawing) -> Vec<([f64; 2], [f64; 2])> {
@@ -347,6 +347,10 @@ fn ends_of(e: &Entity) -> ([f64; 2], [f64; 2]) {
       (Entity::arc_point(center, radius, start), Entity::arc_point(center, radius, end))
     }
     Entity::Circle { center, .. } | Entity::Point { at: center } => (center, center),
+    Entity::Spline(_) | Entity::Ellipse { .. } => {
+      let bz = e.beziers();
+      (bz.first().map_or([0.0; 2], |b| b[0]), bz.last().map_or([0.0; 2], |b| b[3]))
+    }
   }
 }
 
@@ -790,7 +794,7 @@ fn svg_round_trip() {
   assert_eq!(back.len(), want.len(), "{back:?}");
   let tol = 1e-6;
   let same = |x: &Entity, y: &Entity| -> bool {
-    match (*x, *y) {
+    match (x.clone(), y.clone()) {
       (Entity::Circle { center: c0, radius: r0 }, Entity::Circle { center: c1, radius: r1 }) => {
         near(c0, c1, tol) && (r0 - r1).abs() < tol
       }
@@ -833,4 +837,124 @@ fn svg_rejects_other_files() {
   assert!(read_svg(b"<svg xmlns='http://www.w3.org/2000/svg'><g><line x2='1'/></svg>").is_err());
   // an empty but valid SVG is fine
   assert!(read_svg(b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap().entities.is_empty());
+}
+
+#[test]
+fn dxf_splines_and_ellipses_round_trip_as_entities() {
+  use crate::dxf::Spline;
+  use std::f64::consts::{FRAC_PI_2, PI};
+  let control = Spline::clamped_uniform(3, vec![[0.0, 0.0], [10.0, 5.0], [20.0, -5.0], [30.0, 0.0], [40.0, 8.0]]);
+  let fitted = Spline { degree: 3, fit: vec![[0.0, 0.0], [5.0, 5.0], [10.0, 0.0]], ..Spline::default() };
+  let ents = vec![
+    (Entity::Line { a: [0.0, 0.0], b: [10.0, 0.0] }, false),
+    (Entity::Spline(control.clone()), false),
+    (Entity::Spline(fitted), true),
+    (Entity::ellipse([5.0, 5.0], [0.0, 2.0], 6.0), false),
+    (Entity::Ellipse { center: [1.0, 2.0], major: [4.0, 0.0], ratio: 0.5, start: FRAC_PI_2, end: PI }, false),
+    (Entity::Bezier { p: [[0.0, 0.0], [1.0, 2.0], [3.0, 2.0], [4.0, 0.0]] }, false),
+  ];
+  let text = write_dxf(&ents);
+  assert!(text.contains("AC1015") && text.contains("SPLINE") && text.contains("ELLIPSE"), "R2000 with real entities");
+  assert!(text.contains("AcDbSpline") && text.contains("*Model_Space"));
+  let d = read_dxf(text.as_bytes()).unwrap();
+  assert!(d.skipped.is_empty(), "{:?}", d.skipped);
+  assert_eq!(d.entities.len(), ents.len());
+  // the control spline comes back with the same knots and control points
+  match &d.entities[1].0 {
+    Entity::Spline(sp) => {
+      assert_eq!((sp.degree, sp.control.len()), (3, 5));
+      assert!(sp.is_uniform() && !sp.is_rational() && sp.fit.is_empty());
+      for (a, b) in sp.control.iter().zip(&control.control) {
+        assert!((a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9);
+      }
+      // and draws the same curve
+      for (p, q) in sp.beziers().iter().flatten().zip(control.beziers().iter().flatten()) {
+        assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9);
+      }
+    }
+    e => panic!("{e:?}"),
+  }
+  // fit points survive, on the construction layer
+  match &d.entities[2] {
+    (Entity::Spline(sp), true) => assert_eq!(sp.fit.len(), 3),
+    e => panic!("{e:?}"),
+  }
+  // a taller-than-wide ellipse is written with the axes swapped (ratio at most 1)
+  match d.entities[3].0 {
+    Entity::Ellipse { center, major, ratio, .. } => {
+      assert!((center[0] - 5.0).abs() < 1e-9 && (major[0].hypot(major[1]) - 6.0).abs() < 1e-9);
+      assert!((ratio - 2.0 / 6.0).abs() < 1e-9);
+      assert!(d.entities[3].0.is_full_ellipse());
+    }
+    ref e => panic!("{e:?}"),
+  }
+  match d.entities[4].0 {
+    Entity::Ellipse { start, end, .. } => {
+      assert!((start - FRAC_PI_2).abs() < 1e-9 && (end - PI).abs() < 1e-9);
+      assert!(!d.entities[4].0.is_full_ellipse());
+      // the elliptical arc's pieces end where the arc does: (1, 2) + 0.5 * 4 * (0, 1) rotated to π → (-3, 2)
+      let bz = d.entities[4].0.beziers();
+      let last = bz.last().unwrap()[3];
+      assert!((last[0] + 3.0).abs() < 1e-9 && (last[1] - 2.0).abs() < 1e-9, "{last:?}");
+    }
+    ref e => panic!("{e:?}"),
+  }
+  // a lone Bézier is a one-piece SPLINE
+  match &d.entities[5].0 {
+    Entity::Spline(sp) => assert_eq!(sp.beziers(), vec![[[0.0, 0.0], [1.0, 2.0], [3.0, 2.0], [4.0, 0.0]]]),
+    e => panic!("{e:?}"),
+  }
+  // without splines or ellipses the file stays R12
+  assert!(write_dxf(&ents[..1]).contains("AC1009"));
+}
+
+#[test]
+fn dxf_reads_foreign_splines_and_mirrored_ellipses() {
+  use std::f64::consts::FRAC_PI_2;
+  // a quadratic spline with a non-uniform knot vector, a rational one (a quarter circle), a
+  // fit-point-only one, and an ellipse arc on a flipped extrusion
+  let text = "0\nSECTION\n2\nENTITIES\n\
+0\nSPLINE\n8\n0\n70\n8\n71\n2\n72\n7\n73\n4\n40\n0\n40\n0\n40\n0\n40\n1\n40\n3\n40\n3\n40\n3\n\
+10\n0\n20\n0\n30\n0\n10\n1\n20\n2\n30\n0\n10\n3\n20\n2\n30\n0\n10\n4\n20\n0\n30\n0\n\
+0\nSPLINE\n8\n0\n70\n12\n71\n2\n72\n6\n73\n3\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n\
+41\n1\n41\n0.7071067811865476\n41\n1\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n\
+0\nSPLINE\n8\n0\n70\n8\n71\n3\n74\n3\n11\n0\n21\n0\n11\n1\n21\n1\n11\n2\n21\n0\n\
+0\nELLIPSE\n8\n0\n10\n5\n20\n0\n11\n2\n21\n0\n40\n0.5\n41\n0\n42\n1.5707963267948966\n230\n-1\n\
+0\nENDSEC\n0\nEOF\n";
+  let d = read_dxf(text.as_bytes()).unwrap();
+  assert!(d.skipped.is_empty(), "{:?}", d.skipped);
+  assert_eq!(d.entities.len(), 4);
+  let Entity::Spline(quad) = &d.entities[0].0 else { panic!() };
+  let pieces = quad.beziers();
+  assert_eq!(pieces.len(), 2, "two knot spans");
+  assert_eq!(pieces[0][0], [0.0, 0.0]);
+  assert_eq!(pieces[1][3], [4.0, 0.0]);
+  // exact: the pieces lie on the B-spline
+  for (i, p) in pieces.iter().enumerate() {
+    let (u0, u1) = if i == 0 { (0.0, 1.0) } else { (1.0, 3.0) };
+    for t in [0.25, 0.5, 0.75] {
+      let a = Entity::bezier_point(p, t);
+      // compare against the curve at the matching parameter: quadratic pieces are uniform in t
+      let b = quad.point(u0 + (u1 - u0) * t);
+      assert!((a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{a:?} {b:?}");
+    }
+  }
+  // the rational quarter circle is fitted closely
+  let Entity::Spline(circle) = &d.entities[1].0 else { panic!() };
+  assert!(circle.is_rational());
+  for p in circle.beziers() {
+    for t in [0.0, 0.3, 0.5, 0.8, 1.0] {
+      let q = Entity::bezier_point(&p, t);
+      assert!((q[0].hypot(q[1]) - 10.0).abs() < 1e-4, "{q:?}");
+    }
+  }
+  let Entity::Spline(fit) = &d.entities[2].0 else { panic!() };
+  assert!(fit.control.is_empty() && fit.fit.len() == 3);
+  assert_eq!(fit.beziers().len(), 2);
+  // the flipped ellipse: world coordinates kept, direction reversed (−π/2 .. 0)
+  let Entity::Ellipse { center, start, end, .. } = d.entities[3].0 else { panic!() };
+  assert_eq!(center, [5.0, 0.0]);
+  assert!((start + FRAC_PI_2).abs() < 1e-12 && end.abs() < 1e-12);
+  let bz = d.entities[3].0.beziers();
+  assert!((bz[0][0][1] + 1.0).abs() < 1e-9, "starts at the bottom of the minor axis: {:?}", bz[0][0]);
 }

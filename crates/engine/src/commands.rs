@@ -287,6 +287,10 @@ cmds! {
   "direct.move_face" => "Move flat faces by a vector (direct edit in a base feature, not parametric)", "{faces: [{body, face} | {point}], translate: [x,y,z]}";
   "direct.press_pull" => "Push (−) or pull (+) faces by a fixed distance (direct edit in a base feature)", "{faces: [{body, face} | {point}], distance}";
   "direct.delete_face" => "Delete faces and heal the body (direct edit in a base feature)", "{faces: [{body, face} | {point}]}";
+  "hub.comment" => "Comment on a version (default: the open one, else the latest)", "{item?, version?, text}";
+  "hub.comments" => "Comments on an item's versions", "{item?, version?}";
+  "hub.comment.delete" => "Delete a comment", "{item?, comment}";
+  "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

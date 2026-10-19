@@ -20,10 +20,11 @@
 //! `info` and the `--export`/`--png` outputs of `run`.
 //!
 //! ```text
-//! fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
-//! fissionoxide-cli hub list '{"project": "Default Project"}'
-//! fissionoxide-cli hub versions '{"item": "i3"}'
-//! fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
+//! clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
+//! clfusion-cli hub list '{"project": "Default Project"}'
+//! clfusion-cli hub versions '{"item": "i3"}'
+//! clfusion-cli hub comment '{"item": "i3", "version": 2, "text": "check the fillet"}'
+//! clfusion-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
 //! ```
 //!
 //! A script is one JSON command per line: `{"cmd": "extrude", "distance": 10}` (the remaining
