@@ -1225,15 +1225,19 @@ impl Ctx<'_> {
       let reach = (body.diagonal() + 10.0 * t) * 2.0;
       let mut tools = Vec::new();
       let mut cuts = Vec::new();
-      for f in &list {
-        let s0 = if f.ext[0] { -reach } else { o1 };
-        let s1 = if f.ext[1] { f.len + reach } else { f.len - o2 };
+      let build = |f: &Flange, s0: f64, s1: f64| -> Result<Shape, String> {
         let plane = Plane { origin: f.base + f.w * shift + f.dir * s0, x: f.w, y: f.b };
         let mut tool = Shape::face(&plane, &profile).map_err(ke)?.extrude(f.dir * (s1 - s0)).map_err(ke)?;
         for (o, n) in &f.cuts {
           tool = tool.boolean(&sheet::half_space(*o, *n, 4.0 * reach)?, BoolOp::Intersect).map_err(ke)?;
         }
-        tools.push(tool);
+        Ok(tool)
+      };
+      let mut spans = Vec::new();
+      for f in &list {
+        let s0 = if f.ext[0] { -reach } else { o1 };
+        let s1 = if f.ext[1] { f.len + reach } else { f.len - o2 };
+        spans.push((s0, s1));
         if shift < -1e-9 {
           let (c0, c1) = (o1.max(0.0), f.len - o2.max(0.0));
           let plane = Plane { origin: f.base + f.w * shift + f.dir * c0, x: f.w, y: f.b };
@@ -1263,6 +1267,38 @@ impl Ctx<'_> {
       let mut shape = body.shape.clone();
       for c in &cuts {
         shape = shape.boolean(c, BoolOp::Subtract).map_err(ke)?;
+      }
+      // a flange that runs into material already there (a flange from an earlier feature) is
+      // pulled back from it by the rule's gap, leaving an open corner
+      for (f, (s0, s1)) in list.iter().zip(spans.iter_mut()) {
+        let mut tool = build(f, *s0, *s1)?;
+        if let Ok(clash) = tool.boolean(&shape, BoolOp::Intersect)
+          && let Ok(m) = clash.mass()
+          && m.volume > 1e-6
+        {
+          let (lo, hi) = (m.bbox_min, m.bbox_max);
+          let along: Vec<f64> = (0..8)
+            .map(|k| {
+              let c = DVec3::new(
+                if k & 1 == 0 { lo.x } else { hi.x },
+                if k & 2 == 0 { lo.y } else { hi.y },
+                if k & 4 == 0 { lo.z } else { hi.z },
+              );
+              (c - f.base).dot(f.dir)
+            })
+            .collect();
+          let (cmin, cmax) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(*v), b.max(*v)));
+          if (cmin + cmax) / 2.0 < (*s0 + *s1) / 2.0 {
+            *s0 = s0.max(cmax + info.gap);
+          } else {
+            *s1 = s1.min(cmin - info.gap);
+          }
+          if *s1 - *s0 < 1e-3 {
+            return Err("the flange would overlap another flange along its whole length".into());
+          }
+          tool = build(f, *s0, *s1)?;
+        }
+        tools.push(tool);
       }
       for f in &tools {
         shape = shape.boolean(f, BoolOp::Union).map_err(ke)?;

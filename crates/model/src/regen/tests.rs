@@ -697,3 +697,31 @@ fn imported_mesh_becomes_a_body() {
   let d2 = Design::from_json(&d.to_json()).unwrap();
   assert_eq!(d2, d);
 }
+
+#[test]
+fn flanges_from_separate_features_leave_an_open_corner() {
+  let mut d = sheet_design();
+  plate_flange(&mut d);
+  let m = regenerate(&mut d);
+  let first = flange_on(&mut d, vec![edge_near(&m, [50.0, 50.0, 2.0])], ("0", "0"));
+  let FeatureKind::EdgeFlange { position, .. } = &mut d.feature_mut(first).unwrap().kind else { panic!() };
+  *position = BendPosition::Inside;
+  let m = regenerate(&mut d);
+  ok(&m);
+  // the second flange's edge now ends where the first flange's bend begins
+  let e = m.bodies[0]
+    .edges()
+    .iter()
+    .filter(|e| e.kind == clf_kernel::CurveKind::Line && (e.mid.x - 100.0).abs() < 1e-6 && (e.mid.z - 2.0).abs() < 1e-6)
+    .map(|e| EdgeRef::from_edge(m.bodies[0].id, e, m.bodies[0].faces()))
+    .next()
+    .unwrap();
+  let second = flange_on(&mut d, vec![e], ("0", "0"));
+  let FeatureKind::EdgeFlange { position, .. } = &mut d.feature_mut(second).unwrap().kind else { panic!() };
+  *position = BendPosition::Inside;
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 1);
+  let flat = m.bodies[0].flat_pattern(None).unwrap();
+  assert_eq!(flat.bends.len(), 2);
+}
