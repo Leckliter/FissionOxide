@@ -1,0 +1,73 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "thickness-3",
+      "edits": [
+        {
+          "cmd": "param.set",
+          "name": "sm_thickness",
+          "expr": "3 mm"
+        }
+      ],
+      "expected": {
+        "method": "rule thickness 2.5 -> 3 (bend radius = thickness): base, R3..6 bend, flange to z 20",
+        "body_count": 1,
+        "volume_mm3": 22520.575041173113,
+        "area_mm2": 16064.12819493887,
+        "center_of_mass": [
+          50.0,
+          24.30326265,
+          3.788688792
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            100.0,
+            60.0,
+            20.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "height-30",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 3,
+          "set": {
+            "height": "30"
+          }
+        }
+      ],
+      "expected": {
+        "method": "flange height 20 -> 30 (outer face reaches z 30)",
+        "body_count": 1,
+        "volume_mm3": 21472.621556370217,
+        "area_mm2": 18107.549676223574,
+        "center_of_mass": [
+          50.0,
+          21.348337614,
+          6.067250527
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            100.0,
+            60.0,
+            30.0
+          ]
+        }
+      }
+    }
+  ]
+}

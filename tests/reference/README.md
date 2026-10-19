@@ -30,6 +30,36 @@ new case passes, add it to the list (the test prints the line to add).
 | `compare` | Optional: compare only these keys. |
 | `tolerance` | Optional overrides: `rel` (volume, area; default 1e-3) and `abs_mm` (centre of mass and bbox; default 1e-3 × the bbox diagonal). |
 
+## variants.json (edit checks)
+
+Optional. Each variant edits the finished part and says what the edited part must measure, so
+editing an early feature is tested as well as building:
+
+```json
+{"variants": [
+  {"name": "height-35",
+   "edits": [{"cmd": "feature.edit", "feature": 2, "set": {"extent": {"kind": "one_side", "distance": "35"}}}],
+   "expected": {"method": "...", "volume_mm3": 42000.0, "faces": 6}}
+]}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | Short name; the variant is reported as `case/name`. |
+| `edits` | Commands in the `part.jsonl` form, run on the built part (`param.set`, `feature.edit`, `sketch.set_dimension`, `sketch.drag`, `sketch.transform`, ...). |
+| `expected` | As `expected.json`, for the edited part. |
+| `note` | Optional: what the variant exercises. |
+
+`cargo test -p fox-engine --test reference_parts reference_variants` builds each case once, then
+for each variant applies the edits in a transaction (the model regenerates incrementally, as in the
+app) and checks that the edited part is a valid solid matching `expected`, that regenerating the
+edited design from scratch gives the same volume, area and face count, and that rolling the edits
+back gives the original part again. `variant-baseline.txt` ratchets like `baseline.txt`, with
+`case/name` lines. `FOX_REFERENCE_REPORT=1` also writes `docs/reference-variants.md`.
+
+The variants and their answers are written by `tools/reference-variants/variants.py` (closed-form
+geometry, independent of FissionOxide); edit the script and rerun it rather than the JSON.
+
 ## Origin
 
 Cases 01–83 (`recipe.json` and `expected.json`) come from the SolidCraft oracle,
