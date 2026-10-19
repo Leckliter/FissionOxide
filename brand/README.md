@@ -65,6 +65,21 @@ that doesn't work (some email clients, image tags in GitHub), use `wordmark-ligh
 backgrounds and `wordmark-dark.svg` on dark ones, or a `<picture>` with both. The fox itself
 works on either.
 
+**Animate it.** `logo/motion/` holds animated SVGs built from the same facets and wordmark:
+
+| File                 | What it does                                                                    |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `splash.svg`         | Start-up, plays once (~3 s): shards burst from a nucleus into the fox, "FOX" pops up from the name's own F, O and x, then opens out to FissionOxide. Ends on `wordmark.svg` exactly. |
+| `loader-explode.svg` | Loading loop (2.4 s): the facets drift apart like an exploded assembly and snap back. |
+| `loader-ripple.svg`  | Loading loop (1.6 s): a glow pulses from the nose and a wave runs out to the ear tips. |
+
+They animate with CSS inside the SVG, so they play in a browser or webview (`<img>`, `<object>`
+or inline) with no script. The splash's name follows the light or dark theme like `wordmark.svg`.
+With reduced motion turned on, the splash shows the finished logo and the loaders slow down.
+Native renderers such as resvg draw only a still frame; to animate the fox in the desktop app,
+tween `logo::FACETS` the same way (each facet is one translate, rotate and scale from the
+nucleus at (300, 400)).
+
 **A Rust app.** Depend on `fox-brand` (no dependencies of its own):
 
 ```rust
