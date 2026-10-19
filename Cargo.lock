@@ -361,12 +361,10 @@ dependencies = [
  "clf-render",
  "clf-sketch",
  "clf-store",
- "epaint_default_fonts",
  "log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "ttf-parser",
  "zip",
 ]
 

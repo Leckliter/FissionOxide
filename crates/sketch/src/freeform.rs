@@ -211,9 +211,21 @@ pub(crate) fn path_param(path: &[Bz], p: P) -> f64 {
   let n = path.len();
   let closed = path_closed(path);
   let neighbour = if local <= 1e-12 {
-    if i > 0 { Some((i - 1, 1.0)) } else if closed { Some((n - 1, 1.0)) } else { None }
+    if i > 0 {
+      Some((i - 1, 1.0))
+    } else if closed {
+      Some((n - 1, 1.0))
+    } else {
+      None
+    }
   } else if local >= 1.0 - 1e-12 {
-    if i + 1 < n { Some((i + 1, 0.0)) } else if closed { Some((0, 0.0)) } else { None }
+    if i + 1 < n {
+      Some((i + 1, 0.0))
+    } else if closed {
+      Some((0, 0.0))
+    } else {
+      None
+    }
   } else {
     None
   };
@@ -563,9 +575,10 @@ impl Sketch {
     let mut splits: Vec<(f64, Option<CurveId>)> = Vec::new();
     if at_point {
       let p = shape.at(tp);
-      let snapped = cuts.iter().filter(|(t, _)| dist(shape.at(*t), p) <= snap.max(0.0)).min_by(|a, b| {
-        dist(shape.at(a.0), p).total_cmp(&dist(shape.at(b.0), p))
-      });
+      let snapped = cuts
+        .iter()
+        .filter(|(t, _)| dist(shape.at(*t), p) <= snap.max(0.0))
+        .min_by(|a, b| dist(shape.at(a.0), p).total_cmp(&dist(shape.at(b.0), p)));
       splits.push(match snapped {
         Some((t, o)) => (*t, Some(*o)),
         None => (tp, None),
@@ -600,7 +613,12 @@ impl Sketch {
   }
 
   /// Splits `curve` at sorted parameters; split points crossing another curve stay on it.
-  fn split_at(&mut self, curve: CurveId, shape: &Shape, splits: &[(f64, Option<CurveId>)]) -> Result<Vec<CurveId>, SketchError> {
+  fn split_at(
+    &mut self,
+    curve: CurveId,
+    shape: &Shape,
+    splits: &[(f64, Option<CurveId>)],
+  ) -> Result<Vec<CurveId>, SketchError> {
     let c = self.curve(curve).ok_or(SketchError::NoCurve(curve))?.clone();
     let closed = shape.closed();
     let new_pts: Vec<PointId> = splits

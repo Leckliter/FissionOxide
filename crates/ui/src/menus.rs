@@ -511,8 +511,8 @@ const SK_CIRCLE: &[E] = &[
   c("Center Diameter Circle", Icon::Circle, T(Tool::Circle)).k("C"),
   c("2-Point Circle", Icon::Circle2P, T(Tool::Circle2P)),
   c("3-Point Circle", Icon::Circle3P, T(Tool::Circle3P)),
-  x("2-Tangent Circle", Icon::Circle2T),
-  x("3-Tangent Circle", Icon::Circle3T),
+  c("2-Tangent Circle", Icon::Circle2T, T(Tool::Circle2T)),
+  c("3-Tangent Circle", Icon::Circle3T, T(Tool::Circle3T)),
 ];
 
 const SK_ARC: &[E] = &[
@@ -579,16 +579,19 @@ const SK_CHAMFER: &[E] = &[
 const SKETCH_MODIFY: &[E] = &[
   c("Fillet", Icon::SkFillet, D(Kind::SkFillet)),
   E::Sub("Chamfer", SK_CHAMFER),
-  x("Blend Curve", Icon::BlendCurve),
+  c("Blend Curve", Icon::BlendCurve, T(Tool::Blend)),
   c("Offset", Icon::SkOffset, D(Kind::SkOffset)).k("O"),
   E::Sep,
   c("Trim", Icon::SkTrim, T(Tool::Trim)).k("T"),
   c("Extend", Icon::SkExtend, T(Tool::Extend)),
-  x("Break", Icon::SkBreak),
+  c("Break", Icon::SkBreak, T(Tool::Break)),
   x("Sketch Scale", Icon::SkScale),
   x("Move/Copy", Icon::Move).k("M"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
+  E::Sep,
+  c("Edit Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EDIT))),
+  c("Explode Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EXPLODE))),
 ];
 
 const SKETCH_CONSTRAINTS: &[E] = &[
@@ -603,7 +606,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
   c("Concentric", Icon::Concentric, Cmd::Constraint("concentric")),
   c("Collinear", Icon::Collinear, Cmd::Constraint("collinear")),
   c("Symmetry", Icon::Symmetric, Cmd::Constraint("symmetric")),
-  x("Curvature", Icon::Curvature),
+  c("Curvature", Icon::Curvature, Cmd::Constraint("curvature")),
   x("Polygon", Icon::PolygonCon),
 ];
 

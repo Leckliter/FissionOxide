@@ -355,7 +355,9 @@ impl<'a> System<'a> {
     let joint = self.joint.get(k).copied().unwrap_or_default();
     match eq {
       Eqn::User(ci) => match self.sketch.constraints.get(*ci).map(|c| &c.kind) {
-        Some(ConstraintKind::Tangent { a, b }) if self.is_free(*a) || self.is_free(*b) => self.smooth(x, *a, *b, joint, false),
+        Some(ConstraintKind::Tangent { a, b }) if self.is_free(*a) || self.is_free(*b) => {
+          self.smooth(x, *a, *b, joint, false)
+        }
         Some(ConstraintKind::Curvature { a, b }) => self.smooth(x, *a, *b, joint, true),
         Some(ConstraintKind::PointOnCurve { p, curve }) if self.is_free(*curve) => {
           let path = self.free_path(x, *curve);
@@ -443,7 +445,13 @@ impl<'a> System<'a> {
 
   /// (position, outward direction, curvature) of a curve at the joint end, or for a circle at the
   /// point nearest `toward`.
-  fn frame(&self, x: &[f64], id: CurveId, at_end: bool, toward: Option<([f64; 2], [f64; 2])>) -> Option<([f64; 2], [f64; 2], f64)> {
+  fn frame(
+    &self,
+    x: &[f64],
+    id: CurveId,
+    at_end: bool,
+    toward: Option<([f64; 2], [f64; 2])>,
+  ) -> Option<([f64; 2], [f64; 2], f64)> {
     let (_, kind) = self.curve(id)?;
     if let CurveKind::Circle { .. } = kind {
       let (q, tq) = toward?;

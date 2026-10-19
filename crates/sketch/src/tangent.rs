@@ -71,7 +71,8 @@ fn newton(f: &dyn Fn(&[f64]) -> Vec<f64>, mut x: Vec<f64>) -> Option<Vec<f64>> {
       let mut a = vec![0.0; n * (n + 1)];
       for p in 0..n {
         for q in 0..n {
-          a[p * (n + 1) + q] = (0..m).map(|i| j[i * n + p] * j[i * n + q]).sum::<f64>() + if p == q { lambda } else { 0.0 };
+          a[p * (n + 1) + q] =
+            (0..m).map(|i| j[i * n + p] * j[i * n + q]).sum::<f64>() + if p == q { lambda } else { 0.0 };
         }
         a[p * (n + 1) + n] = -(0..m).map(|i| j[i * n + p] * r[i]).sum::<f64>();
       }
@@ -143,7 +144,12 @@ impl Sketch {
   /// Curves are lines, circles or arcs (lines count as infinite, arcs as whole circles); of the
   /// possible circles, the one whose centre is nearest `near` is drawn. Two curves also get a
   /// radius dimension.
-  pub fn add_tangent_circle(&mut self, curves: &[CurveId], radius: Option<Dim>, near: P) -> Result<CurveId, SketchError> {
+  pub fn add_tangent_circle(
+    &mut self,
+    curves: &[CurveId],
+    radius: Option<Dim>,
+    near: P,
+  ) -> Result<CurveId, SketchError> {
     let targets: Vec<Target> = curves.iter().map(|c| self.tangent_target(*c)).collect::<Result<_, _>>()?;
     let n = targets.len();
     match (n, &radius) {
@@ -163,7 +169,8 @@ impl Sketch {
     });
     let mut combos: Vec<Vec<i8>> = vec![vec![]];
     for t in &targets {
-      combos = combos.into_iter().flat_map(|c| t.branches().iter().map(move |b| [c.clone(), vec![*b]].concat())).collect();
+      combos =
+        combos.into_iter().flat_map(|c| t.branches().iter().map(move |b| [c.clone(), vec![*b]].concat())).collect();
     }
     let mut best: Option<(f64, P, f64)> = None;
     for combo in &combos {

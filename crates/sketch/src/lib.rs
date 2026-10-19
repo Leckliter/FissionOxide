@@ -693,7 +693,10 @@ impl Sketch {
         let a = angle_of(cp, at);
         if ccw_sweep(a0, a) <= sweep { (dist(cp, at) - r).abs() } else { dist(at, sp).min(dist(at, ep)) }
       }
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } | CurveKind::Bezier { .. } => {
+      CurveKind::Spline { .. }
+      | CurveKind::ControlSpline { .. }
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;

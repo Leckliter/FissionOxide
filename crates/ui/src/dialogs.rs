@@ -796,6 +796,7 @@ impl Dialog {
     }
     if let Kind::Form(f) = kind {
       d.form.sync(f, &app.s, app.last_sketch.or_else(|| last_unconsumed_sketch(&app.s)));
+      crate::forms::prefill(f, &mut d.form, &app.s);
     }
     if kind == Kind::Section && app.section.is_none() {
       // a picked planar face, else the front plane through the middle of the model

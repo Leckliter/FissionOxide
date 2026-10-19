@@ -1533,7 +1533,10 @@ impl Ctx<'_> {
           put(sketch, start, ps);
           put(sketch, end, pe);
         }
-        CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => {}
+        CurveKind::Spline { .. }
+        | CurveKind::ControlSpline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::Bezier { .. } => {}
       }
     }
     lost

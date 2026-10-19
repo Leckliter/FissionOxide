@@ -309,7 +309,7 @@ fn sketch_entities(sk: &Sketch) -> Vec<(Entity, bool)> {
     for p in clf_sketch::curve_points(&c.kind) {
       on_curve.insert(p);
     }
-    if matches!(c.kind, CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) {
+    if c.kind.is_freeform() {
       // DXF gets the spline as short lines
       for w in sk.spline_points(c.id).windows(2) {
         out.push((Entity::Line { a: w[0], b: w[1] }, c.construction));
@@ -317,7 +317,12 @@ fn sketch_entities(sk: &Sketch) -> Vec<(Entity, bool)> {
       continue;
     }
     let e = match c.kind {
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => continue,
+      CurveKind::Spline { .. }
+      | CurveKind::ControlSpline { .. }
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => {
+        continue;
+      }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },
       CurveKind::Circle { center, radius } => Entity::Circle { center: pos(center), radius },
       CurveKind::Arc { center, start, end } => {

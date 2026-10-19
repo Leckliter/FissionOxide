@@ -172,7 +172,10 @@ impl Sketch {
         let a0 = angle_of(c, s);
         Geo::Arc { c, r: dist(c, s), a0, sweep: ccw_sweep(a0, angle_of(c, e)) }
       }
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } | CurveKind::Bezier { .. } => {
+      CurveKind::Spline { .. }
+      | CurveKind::ControlSpline { .. }
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => {
         return None;
       }
     })
