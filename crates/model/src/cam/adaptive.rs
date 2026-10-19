@@ -23,7 +23,7 @@ pub(super) enum Step {
 
 /// How the tool gets to the start of a pass from the end of the last one.
 #[derive(Debug, Clone, Copy)]
-enum Link {
+pub(super) enum Link {
   /// Straight there through cleared space.
   Direct,
   /// Through a cleared point next to the start, staying down, then into the cut sideways.

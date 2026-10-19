@@ -27,7 +27,7 @@ struct Relief {
   raw: Vec<f64>,
   /// Slope of the part under the tool (degrees from horizontal).
   slope: Vec<f64>,
-  /// Nodes over the faces to machine.
+  /// Nodes where the tool touches the faces to machine (or a node beside them does).
   covered: Vec<bool>,
 }
 
@@ -53,8 +53,16 @@ impl Relief {
         slope[j * nx + i] = DVec2::new(dx, dy).length().atan().to_degrees();
       }
     }
-    let covered = (0..n).map(|i| s.covers(g.node(i))).collect();
+    let off = [DVec2::ZERO, DVec2::X * h, -DVec2::X * h, DVec2::Y * h, -DVec2::Y * h];
+    let covered = (0..n).map(|i| off.iter().any(|d| s.covers(g.node(i) + *d))).collect();
     Relief { g, raw, slope, covered }
+  }
+
+  /// Whether the tool at `p` (or a node's width beside it) touches the faces to machine: the
+  /// tool running round the part's outside sits right on the edge of that area.
+  fn reaches(&self, s: &Surface, p: DVec2) -> bool {
+    let h = self.g.h;
+    [DVec2::ZERO, DVec2::X * h, -DVec2::X * h, DVec2::Y * h, -DVec2::Y * h].iter().any(|d| s.covers(p + *d))
   }
 
   fn slope_at(&self, p: DVec2) -> f64 {
@@ -86,7 +94,6 @@ fn waterlines(s: &Surface, rel: &Relief, step: f64, keep: &dyn Fn(DVec2) -> bool
     let w = Grid { v: g.v.iter().map(|v| v - z).collect(), ..g.clone() };
     let mut level: Vec<(Vec<DVec3>, bool)> = Vec::new();
     for l in w.contours() {
-      let l = simplify(&l, (g.h * 0.05).min(0.005), true);
       // each point at the level, or on the safe side of it where the iso-line cut a step
       let pts: Vec<(DVec3, bool)> = l.iter().map(|q| (lift(s, &w, *q, z), keep(*q))).collect();
       if pts.iter().all(|p| p.1) {
@@ -144,24 +151,39 @@ fn waterlines(s: &Surface, rel: &Relief, step: f64, keep: &dyn Fn(DVec2) -> bool
   Ok(out)
 }
 
-/// A waterline point at height `z`, unless the tool would cut into the part there: then the
-/// nearest corner of its grid cell that is clear at `z`, or as high as the tool must be.
+/// A waterline point at height `z`: the iso-line's crossing of a grid edge, moved along that
+/// edge to where the tool just touches the part (linear interpolation puts it anywhere across
+/// a step), on the clear side.
 fn lift(s: &Surface, w: &Grid, q: DVec2, z: f64) -> DVec3 {
-  let tip = s.drop(q).z;
-  if tip <= z + 0.002 {
-    return DVec3::new(q.x, q.y, z.max(tip));
+  let tol = 0.002;
+  let (fx, fy) = ((q.x - w.x0) / w.h, (q.y - w.y0) / w.h);
+  let max = |n: usize| (n.saturating_sub(2)) as f64;
+  // the edge's two nodes: on a row (y on a grid line) or a column
+  let (a, b) = if (fy - fy.round()).abs() < 1e-6 {
+    let (i, j) = (fx.floor().clamp(0.0, max(w.nx)) as usize, fy.round().clamp(0.0, max(w.ny) + 1.0) as usize);
+    (j * w.nx + i, j * w.nx + i + 1)
+  } else {
+    let (i, j) = (fx.round().clamp(0.0, max(w.nx) + 1.0) as usize, fy.floor().clamp(0.0, max(w.ny)) as usize);
+    (j * w.nx + i, (j + 1) * w.nx + i)
+  };
+  let (good, bad) = match (w.v[a] <= 0.0, w.v[b] <= 0.0) {
+    (true, false) => (w.node(a), w.node(b)),
+    (false, true) => (w.node(b), w.node(a)),
+    _ => {
+      let tip = s.drop(q).z;
+      return DVec3::new(q.x, q.y, z.max(tip));
+    }
+  };
+  let (mut good, mut bad) = (good, bad);
+  for _ in 0..12 {
+    let m = (good + bad) / 2.0;
+    if s.drop(m).z <= z + tol {
+      good = m;
+    } else {
+      bad = m;
+    }
   }
-  let fx = ((q.x - w.x0) / w.h).floor().clamp(0.0, (w.nx - 2) as f64) as usize;
-  let fy = ((q.y - w.y0) / w.h).floor().clamp(0.0, (w.ny - 2) as f64) as usize;
-  let corners = [(fx, fy), (fx + 1, fy), (fx, fy + 1), (fx + 1, fy + 1)];
-  corners
-    .iter()
-    .map(|&(i, j)| j * w.nx + i)
-    .filter(|&k| w.v[k] <= 0.0)
-    .map(|k| w.node(k))
-    .min_by(|a, b| (*a - q).length().total_cmp(&(*b - q).length()))
-    .map(|c| DVec3::new(c.x, c.y, z.max(s.drop(c).z)))
-    .unwrap_or(DVec3::new(q.x, q.y, tip))
+  DVec3::new(good.x, good.y, z.max(s.drop(good).z))
 }
 
 /// Cuts 3D passes (already at their heights) in order, staying down between them when the
@@ -213,7 +235,7 @@ pub(super) fn contour(
   let s = Surface::new(setup, model, op, faces)?;
   let rel = Relief::new(&s);
   let min = min_slope.max(1.0);
-  let passes = waterlines(&s, &rel, op.stepdown, &|q| s.covers(q) && rel.slope_at(q) >= min)?;
+  let passes = waterlines(&s, &rel, op.stepdown, &|q| rel.reaches(&s, q) && rel.slope_at(q) >= min)?;
   if passes.is_empty() {
     return Err("there are no steep areas to contour".into());
   }
@@ -237,7 +259,7 @@ pub(super) fn steep_shallow(
   let s = Surface::new(setup, model, op, faces)?;
   let rel = Relief::new(&s);
   let overlap = 2.0;
-  let steep = waterlines(&s, &rel, op.stepdown, &|q| s.covers(q) && rel.slope_at(q) >= threshold - overlap)?;
+  let steep = waterlines(&s, &rel, op.stepdown, &|q| rel.reaches(&s, q) && rel.slope_at(q) >= threshold - overlap)?;
   let step = op.tool.diameter * op.stepover;
   let shallow = rows(&s, step, 0.0, &|q| s.covers(q) && rel.slope_at(q) <= threshold + overlap)?;
   if steep.is_empty() && shallow.is_empty() {
@@ -300,7 +322,7 @@ fn creases(rel: &Relief) -> Vec<bool> {
     Some(((b - m) / len).atan() - ((m - a) / len).atan())
   };
   let mut out = vec![false; n];
-  for k in 0..n {
+  for (k, o) in out.iter_mut().enumerate() {
     if !rel.covered[k] {
       continue;
     }
@@ -315,7 +337,7 @@ fn creases(rel: &Relief) -> Vec<bool> {
       // the most along the direction (the first of two equal ones), and enough with the
       // larger neighbour when the crease falls between nodes
       if b > before && b >= after && b + before.max(after).max(0.0) >= limit {
-        out[k] = true;
+        *o = true;
         break;
       }
     }

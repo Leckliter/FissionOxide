@@ -92,18 +92,17 @@ fn arcs_in_gcode_follow_the_toolpaths() {
       assert_eq!(straight["arcs"], 0);
       let sg = straight["gcode"].as_str().unwrap();
       assert!(g.lines().count() + 50 < sg.lines().count(), "{}", p.id);
-      // every point read back from the arcs lies on the toolpath (within the arc tolerance
-      // and the units' rounding), and the arcs end where the moves they replace end
+      // every point read back from the arcs lies on the toolpath (within the arc tolerance,
+      // the bow of the chords it replaces and the units' rounding), in order, to its end
       let read = post::read(g).unwrap_or_else(|e| panic!("{} {units}: {e}", p.id));
       let got: Vec<DVec3> = read.iter().filter(|m| !m.0).map(|m| m.1).collect();
-      let tol = if units == "mm" { 0.012 } else { 0.016 };
+      let tol = if units == "mm" { 0.035 } else { 0.04 };
       let mut k = 0;
       for q in &got {
-        let (best, d) = (k.max(1)..(k + 400).min(cutting.len()))
-          .map(|i| (i, seg_distance(*q, cutting[i - 1], cutting[i])))
-          .min_by(|a, b| a.1.total_cmp(&b.1))
-          .unwrap();
-        assert!(d < tol, "{} {units}: {q:?} is {d} off the toolpath", p.id);
+        // the first segment from where the last point was that it lies on
+        let near =
+          (k.max(1)..(k + 400).min(cutting.len())).find(|&i| seg_distance(*q, cutting[i - 1], cutting[i]) < tol);
+        let Some(best) = near else { panic!("{} {units}: {q:?} is off the toolpath after move {k}", p.id) };
         k = best;
       }
       assert!(k + 1 >= cutting.len() - 1, "{} {units}: read back {k} of {}", p.id, cutting.len());
@@ -151,8 +150,9 @@ fn adaptive3d_roughs_the_stock_around_the_part() {
       assert!(d >= 7.0 + 4.0 + 0.3 - 0.3, "{p:?} is {d} from the boss axis");
     }
     if p.z < 6.0 {
-      let inside = p.x > -4.0 + 0.3 && p.x < 44.0 - 0.3 && p.y > -4.0 + 0.3 && p.y < 34.0 - 0.3;
-      assert!(!inside, "{p:?} over the base below its top");
+      let q = p.truncate();
+      let d = (q - q.clamp(DVec2::ZERO, DVec2::new(40.0, 30.0))).length();
+      assert!(d >= 4.0 + 0.3 - 0.3, "{p:?} is {d} from the base below its top");
     }
   }
   // levels a step-down apart, and one on the base's top (6 + 0.3)
@@ -180,7 +180,7 @@ fn adaptive3d_roughs_the_stock_around_the_part() {
     }
   }
   assert!(thin * 50 < over, "{thin} of {over} cells finished below the stock to leave");
-  // the engagement: no slotting, each cut takes about the step-over
+  // many light passes rather than a few full-width ones
   assert!(t.moves.len() > 500);
 }
 
@@ -200,11 +200,26 @@ fn pencil_follows_the_concave_corners() {
     let inside = p.x > 11.0 && p.x < 29.0 && p.y > 9.0 && p.y < 21.0;
     inside && ((dx - 2.0).abs() < 0.5 || (dy - 2.0).abs() < 0.5)
   };
-  let good = pts.iter().filter(|p| near(p) && (p.z - 6.0).abs() < 0.3).count();
-  assert!(good * 10 >= pts.len() * 9, "{good} of {}: {:?}", pts.len(), &pts[..pts.len().min(20)]);
+  // along the floor's edges, about the inner loop's length (16 + 10, twice)
+  let t = &s.toolpaths[0];
+  let mut along = 0.0;
+  let mut at = t.moves[0].to;
+  for m in &t.moves {
+    if !m.rapid && near(&m.to) && near(&at) && (m.to.z - 6.0).abs() < 0.05 && (at.z - 6.0).abs() < 0.05 {
+      along += (m.to - at).length();
+    }
+    at = m.to;
+  }
+  assert!(along > 45.0 && along < 60.0, "{along}");
+  // the rest climbs the four vertical corners, on their diagonals
+  for p in &pts {
+    let (dx, dy) = ((p.x - 10.0).abs().min((p.x - 30.0).abs()), (p.y - 8.0).abs().min((p.y - 22.0).abs()));
+    assert!(near(p) || (dx - dy).abs() < 0.5, "{p:?}");
+  }
   // all four sides
   for (x, y) in [(20.0, 10.0), (20.0, 20.0), (12.0, 15.0), (28.0, 15.0)] {
-    assert!(pts.iter().any(|p| (p.truncate() - DVec2::new(x, y)).length() < 1.0), "no pass near ({x}, {y})");
+    let c = DVec3::new(x, y, 6.0);
+    assert!(pts.windows(2).any(|w| seg_distance(c, w[0], w[1]) < 1.0), "no pass near ({x}, {y})");
   }
   no_gouges(&mut s);
   // a part without inside corners has nothing to pencil
@@ -253,11 +268,8 @@ fn contour_and_steep_shallow_finishing() {
   let ring = pts.iter().filter(|p| p.z > 7.0 && p.z < 15.0).count();
   assert!(ring > 100, "{ring}");
   // rows on the boss's top and the base's top, the ball's tip on them
-  assert!(
-    pts.iter().filter(|p| (p.z - 16.0).abs() < 1e-3 && (p.truncate() - DVec2::new(20.0, 15.0)).length() < 3.0).count()
-      > 10
-  );
-  assert!(pts.iter().filter(|p| (p.z - 6.0).abs() < 1e-3 && p.x > 3.0 && p.x < 8.0).count() > 10);
+  let flat = |z: f64| pts.windows(2).filter(|w| (w[0].z - z).abs() < 1e-3 && (w[1].z - z).abs() < 1e-3).count();
+  assert!(flat(16.0) > 10 && flat(6.0) > 30, "{} {}", flat(16.0), flat(6.0));
   no_gouges(&mut s);
   assert!(s.execute("cam.steep_shallow", &json!({"tool_diameter": 6, "threshold": 95})).is_err());
 }

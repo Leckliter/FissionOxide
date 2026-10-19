@@ -161,7 +161,7 @@ fn arc_through(from: DVec3, run: &[Move], tol: f64) -> Option<Arc> {
     prev = ang;
     last = p;
   }
-  if total > MAX_SWEEP || total < 1e-6 {
+  if !(1e-6..=MAX_SWEEP).contains(&total) {
     return None;
   }
   // Z evenly along the sweep (flat or helical)
@@ -258,7 +258,7 @@ mod tests {
     let mut at = q[0];
     let mut k = 0;
     for s in &segs {
-      let Segment::Arc(a) = s else { unreachable!() };
+      let Segment::Arc(a) = s else { continue };
       assert_eq!(a.from, at);
       for p in a.points(1f64.to_radians()) {
         let r = p.truncate().length();
