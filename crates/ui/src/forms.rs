@@ -938,10 +938,15 @@ pub static TRIM: Form = Form {
   picks_model: true,
 };
 
+const CAM_POSTS: &[(&str, &str)] =
+  &[("fanuc", "Fanuc"), ("haas", "Haas"), ("grbl", "GRBL"), ("linuxcnc", "LinuxCNC"), ("mach3", "Mach3 / Mach4")];
+
+const CAM_TOOL: Input = Input::Expr { key: "tool_number", label: "Library tool (0 = by diameter)", default: "0" };
+
 pub static CAM_SETUP: Form = Form {
   title: "SETUP",
   name: "New Setup",
-  hint: "A milling setup: the stock around the part and its work origin",
+  hint: "A milling setup: the stock around the part, its work origin and post-processor",
   icon: Icon::Box,
   cmd: "cam.setup",
   fixed: &[],
@@ -949,6 +954,8 @@ pub static CAM_SETUP: Form = Form {
     Input::Text { key: "name", label: "Name", default: "" },
     Input::Expr { key: "stock_side", label: "Stock side offset", default: "2" },
     Input::Expr { key: "stock_top", label: "Stock top offset", default: "1" },
+    Input::Choice { key: "post", label: "Post-processor", options: CAM_POSTS },
+    Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
   ],
   picks_model: false,
 };
@@ -961,6 +968,7 @@ pub static CAM_FACE: Form = Form {
   cmd: "cam.face",
   fixed: &[],
   inputs: &[
+    CAM_TOOL,
     Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "20 mm" },
     Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.7" },
     Input::Expr { key: "stepdown", label: "Maximum step-down", default: "1 mm" },
@@ -978,10 +986,18 @@ pub static CAM_POCKET: Form = Form {
   fixed: &[],
   inputs: &[
     Input::Faces { key: "floors", label: "Pocket floors" },
+    CAM_TOOL,
     Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
     Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.4" },
     Input::Expr { key: "stepdown", label: "Maximum step-down", default: "2 mm" },
     Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Check { key: "rest", label: "Rest machining (only what earlier operations left)" },
+    Input::Choice {
+      key: "entry",
+      label: "Entry",
+      options: &[("plunge", "Plunge"), ("ramp", "Ramp"), ("helix", "Helix")],
+    },
+    Input::Expr { key: "ramp_angle", label: "Ramp angle (°)", default: "5" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
   ],
@@ -998,9 +1014,15 @@ pub static CAM_CONTOUR: Form = Form {
   inputs: &[
     Input::FacesOpt { key: "faces", label: "Outline faces (default bottom)" },
     Input::Check { key: "inside", label: "Inside the outline" },
+    CAM_TOOL,
     Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
     Input::Expr { key: "stepdown", label: "Maximum step-down", default: "2 mm" },
     Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Choice { key: "entry", label: "Entry", options: &[("plunge", "Plunge"), ("ramp", "Ramp")] },
+    Input::Expr { key: "ramp_angle", label: "Ramp angle (°)", default: "5" },
+    Input::Expr { key: "tabs", label: "Holding tabs per loop", default: "0" },
+    Input::Expr { key: "tab_width", label: "Tab width", default: "5 mm" },
+    Input::Expr { key: "tab_height", label: "Tab height", default: "2 mm" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
   ],
@@ -1016,9 +1038,71 @@ pub static CAM_DRILL: Form = Form {
   fixed: &[],
   inputs: &[
     Input::FacesOpt { key: "holes", label: "Holes (default all)" },
+    CAM_TOOL,
     Input::Expr { key: "tool_diameter", label: "Drill diameter", default: "6 mm" },
     Input::Expr { key: "peck", label: "Peck depth (0 = none)", default: "0" },
     Input::Expr { key: "plunge", label: "Feed (mm/min)", default: "200" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_ADAPTIVE: Form = Form {
+  title: "2D ADAPTIVE CLEARING",
+  name: "2D Adaptive Clearing",
+  hint: "Clear pockets with a light, constant engagement, spiralling out from a helix",
+  icon: Icon::Shell,
+  cmd: "cam.adaptive",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "floors", label: "Pocket floors" },
+    CAM_TOOL,
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepover", label: "Optimal load (of the tool)", default: "0.1" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "10 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Choice { key: "entry", label: "Entry", options: &[("helix", "Helix"), ("plunge", "Plunge")] },
+    Input::Expr { key: "ramp_angle", label: "Helix angle (°)", default: "5" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+  ],
+  picks_model: false,
+};
+
+const CAM_3D_TOOLS: &[(&str, &str)] = &[("ball", "Ball end mill"), ("flat", "Flat end mill")];
+
+pub static CAM_PARALLEL: Form = Form {
+  title: "PARALLEL",
+  name: "Parallel",
+  hint: "3D finishing in parallel rows over the part's surface",
+  icon: Icon::Zebra,
+  cmd: "cam.parallel",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Faces (default all)" },
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
+    Input::Expr { key: "angle", label: "Pass angle (°)", default: "0" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_SCALLOP: Form = Form {
+  title: "SCALLOP",
+  name: "Scallop",
+  hint: "3D finishing in rings a constant distance apart over the surface",
+  icon: Icon::Isocurve,
+  cmd: "cam.scallop",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Faces (default all)" },
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
   ],
   picks_model: false,
 };

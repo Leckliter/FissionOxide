@@ -136,6 +136,8 @@ pub struct Session {
   pub toolpaths: Vec<clf_model::cam::Toolpath>,
   /// The setup and design revision they were generated for.
   pub toolpaths_of: Option<(u32, u64)>,
+  /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
+  pub simulation: Option<(u32, u64, clf_model::cam::sim::Simulation)>,
 }
 
 impl Default for Session {
@@ -161,6 +163,7 @@ impl Session {
       hub: None,
       toolpaths: Vec::new(),
       toolpaths_of: None,
+      simulation: None,
     };
     s.rebuild();
     s
@@ -391,5 +394,7 @@ impl Session {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cam;
 #[cfg(test)]
 mod tests_more;

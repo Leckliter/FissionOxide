@@ -346,6 +346,7 @@ impl SceneBuilder {
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
+      simulated_stock(&mut scene, s);
     }
     scene.analysis = opts.analysis;
     (scene, picks)
@@ -870,4 +871,27 @@ fn toolpath_lines(scene: &mut Scene, s: &Session) {
       line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
     }
   }
+}
+
+/// The simulated stock (`cam.simulate`) while it matches the design: gouges in red.
+fn simulated_stock(scene: &mut Scene, s: &Session) {
+  let Some((_, rev, sim)) = &s.simulation else { return };
+  if *rev != s.revision {
+    return;
+  }
+  let m = sim.mesh(220);
+  // a hair above the part, so machined faces show the stock's colour instead of flickering
+  let positions = m.positions.iter().map(|p| [p[0], p[1], p[2] + 0.005]).collect();
+  scene.meshes.push(Mesh {
+    positions,
+    normals: m.normals,
+    indices: m.indices,
+    tri_ids: Vec::new(),
+    id: 0,
+    color: [196, 170, 120, 255],
+    highlight: None,
+    highlight_color: [0, 0, 0, 0],
+    colors: m.colors,
+    analyze: false,
+  });
 }
