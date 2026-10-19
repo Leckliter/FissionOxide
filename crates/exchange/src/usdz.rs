@@ -8,7 +8,7 @@ use crate::{Mesh, Result};
 pub fn usda(meshes: &[Mesh]) -> String {
   use std::fmt::Write as _;
   let mut s = String::from(
-    "#usda 1.0\n(\n    defaultPrim = \"CLFusion\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n    doc = \"Exported by CLFusion\"\n)\n\ndef Xform \"CLFusion\"\n{\n",
+    "#usda 1.0\n(\n    defaultPrim = \"FissionOxide\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n    doc = \"Exported by FissionOxide\"\n)\n\ndef Xform \"FissionOxide\"\n{\n",
   );
   let mut used = std::collections::HashSet::new();
   for (k, m) in meshes.iter().enumerate() {

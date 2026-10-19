@@ -1,6 +1,6 @@
 //! The toolbar's tool groups and their drop-down menus for every tab of the Design workspace,
 //! laid out entry for entry like Fusion's: same order, separators, shortcuts, submenus and
-//! greyed-out items. Entries CLFusion can run carry a [`Cmd`]; the rest are listed so the
+//! greyed-out items. Entries FissionOxide can run carry a [`Cmd`]; the rest are listed so the
 //! toolbar reads like Fusion and say so in the status line when clicked.
 //!
 //! To wire up a new command, give its entry a `Cmd` (and add the command itself in
@@ -11,7 +11,7 @@ use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
-use crate::{App, Tool, theme};
+use crate::{App, Tool, assembly_forms, theme};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Item {
@@ -20,7 +20,7 @@ pub(crate) struct Item {
   tint: Tint,
   /// Keyboard shortcut shown in the menu.
   key: &'static str,
-  /// What it runs; None when CLFusion doesn't have the command yet.
+  /// What it runs; None when FissionOxide doesn't have the command yet.
   cmd: Option<Cmd>,
   /// Greyed out, as Fusion shows commands unavailable in the current context.
   disabled: bool,
@@ -34,12 +34,12 @@ pub(crate) enum E {
   Sub(&'static str, &'static [E]),
 }
 
-/// A command CLFusion runs.
+/// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
   E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false })
 }
 
-/// A Fusion command CLFusion doesn't have yet.
+/// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
   E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false })
 }
@@ -129,7 +129,7 @@ const SOLID_CREATE: &[E] = &[
   c("Loft", Icon::Loft, D(Kind::Loft)),
   c("Rib", Icon::Rib, D(Kind::Form(&forms::RIB))),
   c("Web", Icon::Web, D(Kind::Form(&forms::WEB))),
-  x("Emboss", Icon::Emboss),
+  c("Emboss", Icon::Emboss, D(Kind::Form(&forms::EMBOSS))),
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
@@ -145,11 +145,11 @@ const SOLID_CREATE: &[E] = &[
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
-  x("Boundary Fill", Icon::BoundaryFill),
+  c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
   E::Sep,
   x("Create Base Feature", Icon::BaseFeature),
   E::Sub("Create PCB", CREATE_PCB),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SOLID_MODIFY: &[E] = &[
@@ -163,7 +163,7 @@ const SOLID_MODIFY: &[E] = &[
   c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
   c("Combine", Icon::Combine, D(Kind::Combine)),
   c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
-  x("Replace Face", Icon::ReplaceFace),
+  c("Replace Face", Icon::ReplaceFace, D(Kind::Form(&forms::REPLACE_FACE))),
   c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   x("Silhouette Split", Icon::SilhouetteSplit),
@@ -248,7 +248,7 @@ const INSERT: &[E] = &[
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
-  x("Insert Component", Icon::InsertComponent).off(),
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
   x("Insert Derive", Icon::Derive),
@@ -256,19 +256,25 @@ const INSERT: &[E] = &[
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
   E::Sep,
-  // not in Fusion's menu: CLFusion's STEP import
+  // not in Fusion's menu: FissionOxide's STEP import
   c("Insert STEP", Icon::Import, Cmd::InsertStep),
 ];
 
 const ASSEMBLE: &[E] = &[
   x("Add To Assembly", Icon::AddToAssembly),
   E::Sep,
-  // not in Fusion's menu: CLFusion's component and joint commands
+  // not in Fusion's menu: FissionOxide's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
+  E::Sep,
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
+  c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
+  c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
 ];
 
 const SELECTION_TOOLS: &[E] = &[
@@ -320,13 +326,14 @@ const SURFACE_CREATE: &[E] = &[
   c("Patch from Sketch", Icon::Patch, D(Kind::Form(&forms::PATCH_SKETCH))).o(),
   c("Ruled", Icon::Ruled, D(Kind::Form(&forms::RULED))).o(),
   c("Offset", Icon::SurfOffset, D(Kind::Form(&forms::SURFACE_OFFSET))).o(),
+  c("Variable Offset", Icon::SurfOffset, D(Kind::Form(&forms::VARIABLE_OFFSET))).o(),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
-  x("Boundary Fill", Icon::BoundaryFill),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SURFACE_MODIFY: &[E] = &[
@@ -335,8 +342,10 @@ const SURFACE_MODIFY: &[E] = &[
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
   c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))),
-  x("Untrim", Icon::Untrim).o(),
-  x("Extend", Icon::Extend).o(),
+  c("Trim with Body", Icon::Trim, D(Kind::Form(&forms::TRIM_BODY))),
+  c("Trim with Sketch", Icon::Trim, D(Kind::Form(&forms::TRIM_SKETCH))),
+  c("Untrim", Icon::Untrim, D(Kind::Form(&forms::UNTRIM))).o(),
+  c("Extend", Icon::Extend, D(Kind::Form(&forms::EXTEND))).o(),
   c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
   c("Unstitch", Icon::Unstitch, D(Kind::Form(&forms::UNSTITCH))).o(),
   c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).o(),
@@ -379,7 +388,8 @@ const SHEET_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
   c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
   c("Hem", Icon::Hem, D(Kind::Hem)),
-  x("Lofted Flange", Icon::LoftedFlange),
+  c("Lofted Flange", Icon::LoftedFlange, D(Kind::Form(&forms::LOFTED_FLANGE))),
+  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
   c("Fold", Icon::Fold, D(Kind::Fold)),
   c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
@@ -393,14 +403,15 @@ const SHEET_CREATE: &[E] = &[
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
   c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
-  x("Corner Closure", Icon::CornerClosure),
+  c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
   x("Join by bend", Icon::Configure),
   c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,
@@ -511,8 +522,8 @@ const SK_CIRCLE: &[E] = &[
   c("Center Diameter Circle", Icon::Circle, T(Tool::Circle)).k("C"),
   c("2-Point Circle", Icon::Circle2P, T(Tool::Circle2P)),
   c("3-Point Circle", Icon::Circle3P, T(Tool::Circle3P)),
-  x("2-Tangent Circle", Icon::Circle2T),
-  x("3-Tangent Circle", Icon::Circle3T),
+  c("2-Tangent Circle", Icon::Circle2T, T(Tool::Circle2T)),
+  c("3-Tangent Circle", Icon::Circle3T, T(Tool::Circle3T)),
 ];
 
 const SK_ARC: &[E] = &[
@@ -580,16 +591,19 @@ const SK_CHAMFER: &[E] = &[
 const SKETCH_MODIFY: &[E] = &[
   c("Fillet", Icon::SkFillet, D(Kind::SkFillet)),
   E::Sub("Chamfer", SK_CHAMFER),
-  x("Blend Curve", Icon::BlendCurve),
+  c("Blend Curve", Icon::BlendCurve, T(Tool::Blend)),
   c("Offset", Icon::SkOffset, D(Kind::SkOffset)).k("O"),
   E::Sep,
   c("Trim", Icon::SkTrim, T(Tool::Trim)).k("T"),
   c("Extend", Icon::SkExtend, T(Tool::Extend)),
-  x("Break", Icon::SkBreak),
+  c("Break", Icon::SkBreak, T(Tool::Break)),
   x("Sketch Scale", Icon::SkScale),
   x("Move/Copy", Icon::Move).k("M"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
+  E::Sep,
+  c("Edit Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EDIT))),
+  c("Explode Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EXPLODE))),
 ];
 
 const SKETCH_CONSTRAINTS: &[E] = &[
@@ -604,7 +618,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
   c("Concentric", Icon::Concentric, Cmd::Constraint("concentric")),
   c("Collinear", Icon::Collinear, Cmd::Constraint("collinear")),
   c("Symmetry", Icon::Symmetric, Cmd::Constraint("symmetric")),
-  x("Curvature", Icon::Curvature),
+  c("Curvature", Icon::Curvature, Cmd::Constraint("curvature")),
   x("Polygon", Icon::PolygonCon),
 ];
 
@@ -677,6 +691,8 @@ const DRAWING_CREATE: &[E] = &[
   c("Flat Pattern View", Icon::FlatPattern, V("flat")),
   E::Sep,
   c("Create Drawing", Icon::NewDrawing, D(Kind::NewDrawing)),
+  E::Sep,
+  c("Break View", Icon::BreakView, D(Kind::Form(&forms::DRAWING_BREAK))),
 ];
 
 const DRAWING_MODIFY: &[E] = &[
@@ -686,13 +702,26 @@ const DRAWING_MODIFY: &[E] = &[
   c("Sheet Settings", Icon::SheetSettings, D(Kind::DrawingSettings)),
 ];
 
-const DRAWING_DIMENSIONS: &[E] = &[c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D")];
+const DRAWING_DIMENSIONS: &[E] = &[
+  c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D"),
+  c("Ordinate Dimension", Icon::OrdinateDim, D(Kind::Form(&forms::DRAWING_ORDINATE))),
+  c("Angular Dimension", Icon::AngleDim, D(Kind::Form(&forms::DRAWING_ANGLE))),
+];
 
 const DRAWING_TEXT: &[E] = &[c("Text", Icon::SkText, D(Kind::DrawingNote)).k("T")];
 
 const DRAWING_TABLES: &[E] = &[
   c("Parts List", Icon::PartsList, D(Kind::DrawingSettings)),
   c("Title Block", Icon::TitleBlock, D(Kind::DrawingTitle)),
+  E::Sep,
+  c("Balloon", Icon::Balloon, D(Kind::Form(&forms::DRAWING_BALLOON))),
+  c("Auto Balloon", Icon::Balloon, D(Kind::DrawingSettings)),
+];
+
+const DRAWING_SYMBOLS: &[E] = &[
+  c("Feature Control Frame", Icon::FeatureControl, D(Kind::Form(&forms::DRAWING_FCF))),
+  c("Datum Identifier", Icon::DatumId, D(Kind::Form(&forms::DRAWING_DATUM))),
+  c("Surface Texture", Icon::SurfaceTexture, D(Kind::Form(&forms::DRAWING_FINISH))),
 ];
 
 const DRAWING_EXPORT: &[E] = &[
@@ -704,7 +733,7 @@ const DRAWING_EXPORT: &[E] = &[
 const FINISH_DRAWING: &[E] = &[c("Finish Drawing", Icon::Finish, Cmd::FinishDrawing)];
 
 /// The Drawing workspace's toolbar.
-const DRAWING: [Group; 7] = [
+const DRAWING: [Group; 8] = [
   Group {
     label: "CREATE",
     quick: &["Base View", "Projected View", "Section View", "Detail View"],
@@ -713,7 +742,12 @@ const DRAWING: [Group; 7] = [
   Group { label: "MODIFY", quick: &["Move", "Sheet Settings"], menu: DRAWING_MODIFY },
   Group { label: "DIMENSIONS", quick: &["Dimension"], menu: DRAWING_DIMENSIONS },
   Group { label: "TEXT", quick: &["Text"], menu: DRAWING_TEXT },
-  Group { label: "TABLES", quick: &["Parts List", "Title Block"], menu: DRAWING_TABLES },
+  Group {
+    label: "SYMBOLS",
+    quick: &["Feature Control Frame", "Datum Identifier", "Surface Texture"],
+    menu: DRAWING_SYMBOLS,
+  },
+  Group { label: "TABLES", quick: &["Parts List", "Title Block", "Balloon"], menu: DRAWING_TABLES },
   Group { label: "EXPORT", quick: &["PDF Export", "DXF Export", "SVG Export"], menu: DRAWING_EXPORT },
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];
@@ -890,7 +924,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
   if let Some(it) = pick {
     match it.cmd {
       Some(c) => c.run(app),
-      None => app.status = Some((format!("{} isn't in CLFusion yet", it.label), false)),
+      None => app.status = Some((format!("{} isn't in FissionOxide yet", it.label), false)),
     }
   }
   true
@@ -909,7 +943,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
       for label in g.quick.iter().take(MAX_QUICK) {
         let Some(it) = find(g.menu, label) else { continue };
         let hint = match (it.cmd.is_some(), it.key.is_empty()) {
-          (false, _) => "Not in CLFusion yet".to_string(),
+          (false, _) => "Not in FissionOxide yet".to_string(),
           (true, true) => String::new(),
           (true, false) => format!("Shortcut: {}", it.key),
         };

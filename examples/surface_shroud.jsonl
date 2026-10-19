@@ -1,0 +1,13 @@
+# A curved shroud built in the Surface workspace: an arc extruded into a wall, its straight
+# edges extended naturally (the curve carries on round), a window trimmed through it with a
+# sketch circle projected onto it, and the result thickened into a 2 mm solid.
+{"cmd": "new", "name": "Shroud"}
+{"cmd": "param.add", "name": "wrap", "expr": "15 mm", "comment": "how far each edge carries on round"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [40, 0], "end": [0, 40]}
+{"cmd": "surface.extrude", "distance": "30 mm"}
+{"cmd": "surface.extend", "edges": [{"point": [40, 0, 15]}, {"point": [0, 40, 15]}], "distance": "wrap", "mode": "natural"}
+{"cmd": "sketch.create", "plane": "yz"}
+{"cmd": "sketch.circle", "center": [12, 15], "radius": 8}
+{"cmd": "surface.trim", "bodies": [2000], "tool": {"sketch": 4}}
+{"cmd": "thicken", "bodies": [2000], "thickness": "2 mm"}

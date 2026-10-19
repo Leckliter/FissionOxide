@@ -1,12 +1,13 @@
-//! Assembly commands: components, joints, motion, interference and the bill of materials.
+//! Assembly commands: components, joints, motion, interference and the bill of materials (joint
+//! origins, rigid groups, motion links, contact sets and inserted designs are in [`crate::mates`]).
 
-use clf_kernel::BoolOp;
-use clf_model::assembly::{self, JointGeometry, JointKind, JointLimits};
-use clf_model::{BodyId, ComponentId, FeatureId, FeatureKind};
+use fox_kernel::BoolOp;
+use fox_model::assembly::{self, JointGeometry, JointKind, JointLimits};
+use fox_model::{BodyId, ComponentId, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
 use crate::commands::{edge_ref_of, expr_of, face_ref, ids, opt_expr, opt_str, req_str, req_u32, req_vec3};
-use crate::{CmdError, CmdResult, Session};
+use crate::{CmdError, CmdResult, Session, mates};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
   Some(match name {
@@ -110,12 +111,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       if !matches!(s.design.feature(id).map(|f| &f.kind), Some(FeatureKind::Joint { .. })) {
         return Err(CmdError::new("that feature is not a joint"));
       }
+      if mates::has_contacts(&s.design) && !set.is_empty() {
+        return drive_to_contact(s, id, set);
+      }
       s.execute("feature.edit", &json!({"feature": id.0, "set": set}))
     })(),
     "motion.study" => motion_study(s, p),
     "assembly.interference" => Ok(json!(interference(&s.model.bodies, s))),
     "assembly.bom" => Ok(bom(s)),
-    _ => return None,
+    _ => return mates::run(s, name, p),
   })
 }
 
@@ -125,8 +129,11 @@ fn component_id(s: &Session, p: &Value, k: &str) -> Result<ComponentId, CmdError
   Ok(id)
 }
 
-/// {"face": face} | {"edge": edge} | {"at": [x,y,z], "z"?, "x"?}
-fn geometry(s: &Session, v: &Value) -> Result<JointGeometry, CmdError> {
+/// {"face": face} | {"edge": edge} | {"at": [x,y,z], "z"?, "x"?} | {"origin": joint origin id or name}
+pub(crate) fn geometry(s: &Session, v: &Value) -> Result<JointGeometry, CmdError> {
+  if let Some(o) = v.get("origin") {
+    return Ok(JointGeometry::Origin { origin: mates::origin_id(s, o)? });
+  }
   if let Some(f) = v.get("face") {
     return Ok(JointGeometry::Face { face: face_ref(s, f)? });
   }
@@ -141,7 +148,9 @@ fn geometry(s: &Session, v: &Value) -> Result<JointGeometry, CmdError> {
       x: opt("x", [1.0, 0.0, 0.0])?,
     });
   }
-  Err(CmdError::new("a joint origin is {\"face\": ...}, {\"edge\": ...} or {\"at\": [x, y, z], \"z\"?, \"x\"?}"))
+  Err(CmdError::new(
+    "a joint origin is {\"face\": ...}, {\"edge\": ...}, {\"at\": [x, y, z], \"z\"?, \"x\"?} or {\"origin\": saved origin}",
+  ))
 }
 
 fn limit(p: &Value, k: &str) -> Result<Option<(String, String)>, CmdError> {
@@ -153,13 +162,19 @@ fn limit(p: &Value, k: &str) -> Result<Option<(String, String)>, CmdError> {
 }
 
 fn joint(s: &mut Session, p: &Value) -> CmdResult {
-  let moving = component_id(s, p, "moving")?;
-  let fixed = match p.get("fixed") {
-    Some(Value::Null) | None => None,
-    Some(_) => Some(component_id(s, p, "fixed")?),
-  };
   let moving_origin = geometry(s, p.get("moving_origin").ok_or(CmdError::new("missing 'moving_origin'"))?)?;
   let fixed_origin = geometry(s, p.get("fixed_origin").ok_or(CmdError::new("missing 'fixed_origin'"))?)?;
+  // saved joint origins know their component
+  let on = |g: &JointGeometry| g.origin().and_then(|o| mates::origin_component(s, o));
+  let moving = match (p.get("moving"), on(&moving_origin)) {
+    (None, Some(c)) => c,
+    _ => component_id(s, p, "moving")?,
+  };
+  let fixed = match (p.get("fixed"), on(&fixed_origin)) {
+    (None, Some(c)) => Some(c),
+    (Some(Value::Null) | None, _) => None,
+    (Some(_), _) => Some(component_id(s, p, "fixed")?),
+  };
   let kind = match opt_str(p, "kind").unwrap_or("rigid") {
     "rigid" => JointKind::Rigid,
     "revolute" => JointKind::Revolute,
@@ -206,53 +221,101 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 /// Steps a joint's motion and reports interference at each step (the design is left as it was).
+/// With contact sets, the study stops where their bodies first touch.
 fn motion_study(s: &Session, p: &Value) -> CmdResult {
   let id = FeatureId(req_u32(p, "joint")?);
   let field = opt_str(p, "motion").unwrap_or("rotation");
   if !["rotation", "slide", "slide2", "pitch"].contains(&field) {
     return Err(CmdError::new("motion is rotation, slide, slide2 or pitch"));
   }
-  let kind = if matches!(field, "rotation" | "pitch") { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
+  if !matches!(s.design.feature(id).map(|f| &f.kind), Some(FeatureKind::Joint { .. })) {
+    return Err(CmdError::new("that feature is not a joint"));
+  }
+  let kind = if matches!(field, "rotation" | "pitch") { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
   let scope = s.model.params.clone();
-  let from = clf_expr::eval(&expr_of(p.get("from").ok_or(CmdError::new("missing 'from'"))?)?, kind, &scope)?;
-  let to = clf_expr::eval(&expr_of(p.get("to").ok_or(CmdError::new("missing 'to'"))?)?, kind, &scope)?;
+  let from = fox_expr::eval(&expr_of(p.get("from").ok_or(CmdError::new("missing 'from'"))?)?, kind, &scope)?;
+  let to = fox_expr::eval(&expr_of(p.get("to").ok_or(CmdError::new("missing 'to'"))?)?, kind, &scope)?;
   let steps = p.get("steps").and_then(Value::as_u64).unwrap_or(8).clamp(1, 360) as usize;
+  let shown = |v: f64| if kind == fox_expr::Kind::Angle { v.to_degrees() } else { v };
+  let contact = mates::has_contacts(&s.design);
+  let mut trial = mates::Trial::new(s, id);
   let mut out = Vec::new();
+  let mut prev = from;
   for i in 0..=steps {
     let v = from + (to - from) * i as f64 / steps as f64;
-    let mut d = s.design.clone();
-    let f = d.feature_mut(id).ok_or(CmdError::new("no such joint"))?;
-    let FeatureKind::Joint { rotation, slide, slide2, pitch, .. } = &mut f.kind else {
-      return Err(CmdError::new("that feature is not a joint"));
-    };
-    let slot = match field {
-      "rotation" => rotation,
-      "slide" => slide,
-      "slide2" => slide2,
-      _ => pitch,
-    };
-    *slot = if kind == clf_expr::Kind::Angle { format!("{} deg", v.to_degrees()) } else { format!("{v} mm") };
-    let m = clf_model::regen::regenerate(&mut d);
+    let at = mates::between(&[(field.to_string(), v)], &[(field.to_string(), v)], 0.0);
+    if contact && !trial.clash(&at).is_empty() {
+      // back up to where the contact set's bodies touch, and stop there
+      let (a, b) = ([(field.to_string(), prev)], [(field.to_string(), v)]);
+      let t = mates::last_clear(&mut trial, &a, &b);
+      let stop = prev + (v - prev) * t;
+      out.push(json!({"value": shown(stop), "error": null, "interference": [], "contact": true}));
+      break;
+    }
+    let (d, m) = trial.model(&at);
     let err = m.status(id).and_then(|st| st.error.clone());
-    let clashes = if err.is_none() { interference(&m.bodies, s) } else { Vec::new() };
-    out.push(json!({
-      "value": if kind == clf_expr::Kind::Angle { v.to_degrees() } else { v },
-      "error": err,
-      "interference": clashes,
-    }));
+    let clashes = if err.is_none() { interference_in(&d, &m.bodies) } else { Vec::new() };
+    out.push(json!({"value": shown(v), "error": err, "interference": clashes}));
+    prev = v;
   }
   Ok(json!(out))
 }
 
+/// Drives a joint toward new motion values, stopping where contact set bodies first touch.
+fn drive_to_contact(s: &mut Session, id: FeatureId, set: serde_json::Map<String, Value>) -> CmdResult {
+  let scope = s.model.params.clone();
+  let Some(FeatureKind::Joint { rotation, slide, slide2, pitch, .. }) = s.design.feature(id).map(|f| &f.kind) else {
+    return Err(CmdError::new("that feature is not a joint"));
+  };
+  let now = |k: &str| match k {
+    "rotation" => rotation.clone(),
+    "slide" => slide.clone(),
+    "slide2" => slide2.clone(),
+    _ => pitch.clone(),
+  };
+  let kind = |k: &str| if matches!(k, "rotation" | "pitch") { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
+  let mut from = Vec::new();
+  let mut to = Vec::new();
+  for (k, v) in &set {
+    from.push((k.clone(), fox_expr::eval(&now(k), kind(k), &scope)?));
+    to.push((k.clone(), fox_expr::eval(v.as_str().unwrap_or_default(), kind(k), &scope)?));
+  }
+  let mut trial = mates::Trial::new(s, id);
+  let clash = trial.clash(&set);
+  if clash.is_empty() {
+    return s.execute("feature.edit", &json!({"feature": id.0, "set": set}));
+  }
+  let t = mates::last_clear(&mut trial, &from, &to);
+  let stop = mates::between(&from, &to, t);
+  let mut out = s.execute("feature.edit", &json!({"feature": id.0, "set": stop}))?;
+  out["contact"] = json!(true);
+  out["bodies"] = json!(clash.first().map(|(a, b)| [a.0, b.0]));
+  out["stopped_at"] = json!(stop);
+  Ok(out)
+}
+
 /// Pairs of bodies (in different components) that overlap, with the overlap volume.
-fn interference(bodies: &[clf_model::regen::Body], s: &Session) -> Vec<Value> {
-  let comp = |b: BodyId| s.design.component_of(b).map(|c| c.id);
+fn interference(bodies: &[fox_model::regen::Body], s: &Session) -> Vec<Value> {
+  interference_in(&s.design, bodies)
+}
+
+fn interference_in(d: &fox_model::Design, bodies: &[fox_model::regen::Body]) -> Vec<Value> {
+  let comp = |b: BodyId| d.component_of(b).map(|c| c.id);
+  let apart = |a: BodyId, b: BodyId| comp(a).is_none() || comp(a) != comp(b);
+  overlaps(bodies, &apart).into_iter().map(|(a, b, v)| json!({"bodies": [a.0, b.0], "volume_mm3": v})).collect()
+}
+
+/// Pairs of bodies that `check` accepts and that overlap, with the overlap volume.
+pub(crate) fn overlaps(
+  bodies: &[fox_model::regen::Body],
+  check: &dyn Fn(BodyId, BodyId) -> bool,
+) -> Vec<(BodyId, BodyId, f64)> {
   let boxes: Vec<_> = bodies.iter().map(|b| b.shape.mass().ok().map(|m| (m.bbox_min, m.bbox_max))).collect();
   let mut out = Vec::new();
   for i in 0..bodies.len() {
     for j in i + 1..bodies.len() {
       let (a, b) = (&bodies[i], &bodies[j]);
-      if comp(a.id).is_some() && comp(a.id) == comp(b.id) {
+      if !check(a.id, b.id) {
         continue;
       }
       let (Some(ba), Some(bb)) = (boxes[i], boxes[j]) else { continue };
@@ -263,7 +326,7 @@ fn interference(bodies: &[clf_model::regen::Body], s: &Session) -> Vec<Value> {
         && let Ok(m) = c.mass()
         && m.volume > 1e-6
       {
-        out.push(json!({"bodies": [a.id.0, b.id.0], "volume_mm3": m.volume}));
+        out.push((a.id, b.id, m.volume));
       }
     }
   }

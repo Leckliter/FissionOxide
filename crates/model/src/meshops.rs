@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use clf_kernel::TriMesh;
-use clf_kernel::glam::DVec3;
+use fox_kernel::TriMesh;
+use fox_kernel::glam::DVec3;
 
 /// Shared vertices (a tessellation repeats them per face) and triangles indexing them.
 pub fn weld(m: &TriMesh) -> (Vec<DVec3>, Vec<u32>) {

@@ -5,8 +5,8 @@
 //! it. Coordinates in G-code are relative to the setup's work origin: the top of the stock at
 //! its minimum X/Y corner (Z is negative into the stock).
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{Shape, SurfaceKind};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{Shape, SurfaceKind};
 use serde::{Deserialize, Serialize};
 
 use crate::regen::{Body, Model};

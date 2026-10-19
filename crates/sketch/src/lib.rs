@@ -9,8 +9,11 @@
 
 mod build;
 mod edit;
+mod freeform;
 mod profile;
 mod solve;
+mod tangent;
+mod text;
 mod transform;
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,7 @@ use std::collections::HashMap;
 pub use build::{PtSpec, circumcenter};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
+pub use text::{SketchText, TextId, text_fonts};
 pub use transform::{TransformReport, Xform2};
 
 /// The sketch origin: always present, always fixed at (0, 0).
@@ -39,6 +43,10 @@ pub struct Sketch {
   pub curves: Vec<Curve>,
   pub constraints: Vec<Constraint>,
   next_id: u32,
+  /// Editable text: each keeps its string, font and placement and owns the glyph curves it
+  /// generates (sketches from before text was editable have none, only exploded curves).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub texts: Vec<SketchText>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -80,6 +88,13 @@ pub enum CurveKind {
   /// A smooth curve through fit points (Catmull-Rom tangents, cubic pieces).
   Spline {
     points: Vec<PointId>,
+    /// Tangent handle at the start: the first piece's inner control point. Added when a tangency
+    /// or curvature constraint uses that end, so the fit points stay free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_handle: Option<PointId>,
+    /// Tangent handle at the end: the last piece's inner control point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_handle: Option<PointId>,
   },
   /// A cubic B-spline shaped by control points (it passes through the first and last).
   ControlSpline {
@@ -91,6 +106,27 @@ pub enum CurveKind {
     major: PointId,
     minor: f64,
   },
+  /// A chain of cubic Bézier pieces: points 0, 3, 6, … lie on the curve, the two between each
+  /// pair are its handles. What trimming, breaking, extending or offsetting a spline or an
+  /// ellipse leaves.
+  Bezier {
+    points: Vec<PointId>,
+  },
+}
+
+impl CurveKind {
+  /// A fit-point spline without tangent handles.
+  pub fn spline(points: Vec<PointId>) -> CurveKind {
+    CurveKind::Spline { points, start_handle: None, end_handle: None }
+  }
+
+  /// Splines, ellipses and Bézier chains: curves drawn as Bézier pieces.
+  pub fn is_freeform(&self) -> bool {
+    matches!(
+      self,
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } | CurveKind::Bezier { .. }
+    )
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -109,7 +145,7 @@ pub struct Dim {
 
 impl Dim {
   pub fn new(value: f64) -> Self {
-    Dim { expr: clf_expr::trim_number(value), value }
+    Dim { expr: fox_expr::trim_number(value), value }
   }
 
   pub fn expr(expr: impl Into<String>, value: f64) -> Self {
@@ -219,6 +255,12 @@ pub enum ConstraintKind {
     b: CurveId,
     value: Dim,
   },
+  /// Curvature continuity (G2) where two curves meet, one of them a spline: tangent there, with
+  /// equal curvature.
+  Curvature {
+    a: CurveId,
+    b: CurveId,
+  },
 }
 
 impl ConstraintKind {
@@ -277,6 +319,7 @@ impl ConstraintKind {
       ConstraintKind::Radius { .. } => "Radius",
       ConstraintKind::Diameter { .. } => "Diameter",
       ConstraintKind::Angle { .. } => "Angle",
+      ConstraintKind::Curvature { .. } => "Curvature",
     }
   }
 
@@ -308,6 +351,7 @@ impl ConstraintKind {
       | ConstraintKind::Equal { a, b }
       | ConstraintKind::Tangent { a, b }
       | ConstraintKind::Concentric { a, b }
+      | ConstraintKind::Curvature { a, b }
       | ConstraintKind::Angle { a, b, .. } => vec![*a, *b],
       ConstraintKind::PointOnCurve { curve, .. }
       | ConstraintKind::Radius { curve, .. }
@@ -349,10 +393,11 @@ impl Sketch {
       curves: Vec::new(),
       constraints: Vec::new(),
       next_id: 1,
+      texts: Vec::new(),
     }
   }
 
-  fn alloc(&mut self) -> u32 {
+  pub(crate) fn alloc(&mut self) -> u32 {
     let id = self.next_id;
     self.next_id = self.next_id.saturating_add(1);
     id
@@ -394,10 +439,15 @@ impl Sketch {
         return Err(SketchError::NoPoint(p));
       }
     }
-    if let CurveKind::Spline { points } | CurveKind::ControlSpline { points } = &kind
+    if let CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } = &kind
       && (points.len() < 2 || points.len() > 1000)
     {
       return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
+    }
+    if let CurveKind::Bezier { points } = &kind
+      && (points.len() < 4 || points.len() > 3001 || points.len() % 3 != 1)
+    {
+      return Err(SketchError::InvalidValue("a Bézier chain needs 3n + 1 points (n = 1..1000)".into()));
     }
     if let CurveKind::Ellipse { center, major, minor } = kind {
       let (c, m) = (self.pos(center), self.pos(major));
@@ -419,6 +469,10 @@ impl Sketch {
   /// Adds a constraint after checking it refers to geometry of the right type.
   pub fn add_constraint(&mut self, kind: ConstraintKind) -> Result<ConstraintId, SketchError> {
     self.validate(&kind)?;
+    if let ConstraintKind::Tangent { a, b } | ConstraintKind::Curvature { a, b } = kind {
+      self.add_spline_handle(a, b);
+      self.add_spline_handle(b, a);
+    }
     let id = ConstraintId(self.alloc());
     self.constraints.push(Constraint { id, kind });
     Ok(id)
@@ -431,7 +485,11 @@ impl Sketch {
   }
 
   /// Deletes a curve, its points that nothing else uses, and constraints that referred to them.
+  /// A text's glyph curve deletes the whole text.
   pub fn remove_curve(&mut self, id: CurveId) -> Result<(), SketchError> {
+    if let Some(t) = self.text_of(id) {
+      return self.remove_text(t);
+    }
     let curve = self.curve(id).ok_or(SketchError::NoCurve(id))?.clone();
     self.curves.retain(|c| c.id != id);
     let still_used: Vec<PointId> = self.curves.iter().flat_map(|c| curve_points(&c.kind)).collect();
@@ -449,6 +507,9 @@ impl Sketch {
     }
     if self.point(id).is_none() {
       return Err(SketchError::NoPoint(id));
+    }
+    if let Some(t) = self.texts.iter().find(|t| t.anchor == id || t.points.contains(&id)).map(|t| t.id) {
+      return self.remove_text(t);
     }
     let users: Vec<CurveId> =
       self.curves.iter().filter(|c| curve_points(&c.kind).contains(&id)).map(|c| c.id).collect();
@@ -489,23 +550,19 @@ impl Sketch {
       CurveKind::Line { .. }
       | CurveKind::Spline { .. }
       | CurveKind::ControlSpline { .. }
-      | CurveKind::Ellipse { .. } => None,
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => None,
     }
   }
 
   /// A spline or ellipse as cubic Bézier pieces (empty for lines, circles and arcs).
   pub fn beziers(&self, id: CurveId) -> Vec<[[f64; 2]; 4]> {
-    let Some(c) = self.curve(id) else { return Vec::new() };
-    let pts = |ids: &[PointId]| -> Vec<[f64; 2]> { ids.iter().filter_map(|p| self.pos(*p)).collect() };
-    match &c.kind {
-      CurveKind::Spline { points } => spline_beziers(&pts(points)),
-      CurveKind::ControlSpline { points } => bspline_beziers(&pts(points)),
-      CurveKind::Ellipse { center, major, minor } => match (self.pos(*center), self.pos(*major)) {
-        (Some(c), Some(m)) => ellipse_beziers(c, m, *minor),
-        _ => Vec::new(),
-      },
-      _ => Vec::new(),
-    }
+    self.curve(id).map(|c| self.kind_beziers(&c.kind)).unwrap_or_default()
+  }
+
+  /// [`Sketch::beziers`] of a curve kind at the current point positions.
+  pub fn kind_beziers(&self, kind: &CurveKind) -> Vec<[[f64; 2]; 4]> {
+    kind_beziers(kind, &|p| self.pos(p))
   }
 
   /// A spline or ellipse flattened to a polyline (empty for other curves).
@@ -584,9 +641,9 @@ impl Sketch {
             add([p[0] + r, p[1] + r]);
           }
         }
-        CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
-          for p in points {
-            if let Some(p) = self.pos(*p) {
+        CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+          for p in curve_points(&c.kind) {
+            if let Some(p) = self.pos(p) {
               add(p);
             }
           }
@@ -638,22 +695,28 @@ impl Sketch {
         let a = angle_of(cp, at);
         if ccw_sweep(a0, a) <= sweep { (dist(cp, at) - r).abs() } else { dist(at, sp).min(dist(at, ep)) }
       }
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => {
-        let pts = self.spline_points(id);
-        pts.windows(2).map(|w| seg_dist(w[0], w[1], at)).fold(f64::INFINITY, f64::min)
+      CurveKind::Spline { .. }
+      | CurveKind::ControlSpline { .. }
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => {
+        let path = self.beziers(id);
+        if path.is_empty() {
+          return None;
+        }
+        dist(freeform::path_at(&path, freeform::path_param(&path, at)), at)
       }
     })
   }
 
   /// Evaluates every dimension expression with `scope`, storing values. Returns the ids and
   /// errors of dimensions that failed to evaluate (they keep their previous value).
-  pub fn evaluate_dims(&mut self, scope: &dyn clf_expr::Scope) -> Vec<(ConstraintId, clf_expr::ExprError)> {
+  pub fn evaluate_dims(&mut self, scope: &dyn fox_expr::Scope) -> Vec<(ConstraintId, fox_expr::ExprError)> {
     let mut errors = Vec::new();
     for c in &mut self.constraints {
-      let kind = if c.kind.is_angle() { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
+      let kind = if c.kind.is_angle() { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
       let id = c.id;
       if let Some(d) = c.kind.dim_mut() {
-        match clf_expr::eval(&d.expr, kind, scope) {
+        match fox_expr::eval(&d.expr, kind, scope) {
           Ok(v) => d.value = v,
           Err(e) => errors.push((id, e)),
         }
@@ -693,13 +756,16 @@ impl Sketch {
     };
     let any = |id: CurveId| -> Result<(), SketchError> {
       match self.curve(id).map(|c| &c.kind) {
-        Some(CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) => {
+        Some(k) if k.is_freeform() => {
           Err(SketchError::WrongGeometry("this constraint", "lines, circles or arcs (constrain a spline's points)"))
         }
         Some(_) => Ok(()),
         None => Err(SketchError::NoCurve(id)),
       }
     };
+    let exists = |id: CurveId| self.curve(id).map(|_| ()).ok_or(SketchError::NoCurve(id));
+    let free = |id: CurveId| self.curve(id).is_some_and(|c| c.kind.is_freeform());
+    let ellipse = |id: CurveId| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Ellipse { .. }));
     match kind {
       ConstraintKind::Horizontal { line: l } => line(*l, "Horizontal"),
       ConstraintKind::Vertical { line: l } => line(*l, "Vertical"),
@@ -723,6 +789,16 @@ impl Sketch {
           Err(SketchError::WrongGeometry("Equal", "two lines or two circles/arcs"))
         }
       }
+      ConstraintKind::Tangent { a, b } | ConstraintKind::Curvature { a, b } if free(*a) || free(*b) => {
+        exists(*a)?;
+        exists(*b)?;
+        if a == b || ellipse(*a) || ellipse(*b) {
+          Err(SketchError::WrongGeometry(kind.name(), "a spline and a curve that meets one of its ends"))
+        } else {
+          Ok(())
+        }
+      }
+      ConstraintKind::Curvature { .. } => Err(SketchError::WrongGeometry("Curvature", "a spline")),
       ConstraintKind::Tangent { a, b } => {
         any(*a)?;
         any(*b)?;
@@ -733,7 +809,7 @@ impl Sketch {
           Ok(())
         }
       }
-      ConstraintKind::PointOnCurve { curve, .. } => any(*curve),
+      ConstraintKind::PointOnCurve { curve, .. } => exists(*curve),
       _ => {
         if let Some(d) = kind.dim()
           && !d.value.is_finite()
@@ -761,8 +837,41 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Line { a, b } => vec![*a, *b],
     CurveKind::Circle { center, .. } => vec![*center],
     CurveKind::Arc { center, start, end } => vec![*center, *start, *end],
-    CurveKind::Spline { points } | CurveKind::ControlSpline { points } => points.clone(),
+    CurveKind::Spline { points, start_handle, end_handle } => {
+      points.iter().copied().chain(*start_handle).chain(*end_handle).collect()
+    }
+    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
+  }
+}
+
+/// A curve's Bézier pieces with point positions from `pos` (empty for lines, circles and arcs).
+pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> Vec<[[f64; 2]; 4]> {
+  let pts = |ids: &[PointId]| -> Vec<[f64; 2]> { ids.iter().filter_map(|p| pos(*p)).collect() };
+  match kind {
+    CurveKind::Spline { points, start_handle, end_handle } => {
+      let mut bz = spline_beziers(&pts(points));
+      if let (Some(h), Some(first)) = (start_handle.and_then(pos), bz.first_mut()) {
+        first[1] = h;
+      }
+      if let (Some(h), Some(last)) = (end_handle.and_then(pos), bz.last_mut()) {
+        last[2] = h;
+      }
+      bz
+    }
+    CurveKind::ControlSpline { points } => bspline_beziers(&pts(points)),
+    CurveKind::Bezier { points } => {
+      let p = pts(points);
+      if p.len() < 4 || p.len() % 3 != 1 {
+        return Vec::new();
+      }
+      p.windows(4).step_by(3).map(|w| [w[0], w[1], w[2], w[3]]).collect()
+    }
+    CurveKind::Ellipse { center, major, minor } => match (pos(*center), pos(*major)) {
+      (Some(c), Some(m)) => ellipse_beziers(c, m, *minor),
+      _ => Vec::new(),
+    },
+    _ => Vec::new(),
   }
 }
 

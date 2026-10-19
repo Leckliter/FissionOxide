@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Turn the neutral reference recipes (tests/reference/NN-name/recipe.json) into CLFusion
+"""Turn the neutral reference recipes (tests/reference/NN-name/recipe.json) into FissionOxide
 command scripts (part.jsonl next to each recipe).
 
     python3 tools/reference-import/import.py            # every case
     python3 tools/reference-import/import.py 03 box     # cases whose name contains a filter
 
-A part.jsonl containing a line "# hand-edited" is left alone. Recipe operations CLFusion cannot
+A part.jsonl containing a line "# hand-edited" is left alone. Recipe operations FissionOxide cannot
 express are written as "# UNSUPPORTED: ..." comment lines (the case then fails, which is the point).
 
 Conventions (see a recipe's "conventions"): sketches are in sketch-local 2D coordinates on a frame
 (origin, x_dir, y_dir, normal); faces and edges are picked by a world point. Every sketch is placed
 on a free plane {origin, normal, x}, which reproduces the recipe frame exactly (y = normal x x).
 Feature patterns and feature mirrors are replayed by repeating the feature on a moved copy of its
-sketch (CLFusion patterns and mirrors work on bodies).
+sketch (FissionOxide patterns and mirrors work on bodies).
 
 Python 3 standard library only.
 """
@@ -26,7 +26,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 REF = os.path.join(ROOT, "tests", "reference")
 
 SNAP = 1e-6
-BODIES_PER_FEATURE = 1000  # CLFusion body ids: feature id * 1000 + k
+BODIES_PER_FEATURE = 1000  # FissionOxide body ids: feature id * 1000 + k
 
 
 # ---------------------------------------------------------------- vectors
@@ -186,19 +186,19 @@ class Unsupported(Exception):
 
 
 class Sketch:
-  """A recipe sketch as emitted into CLFusion: feature id, entity -> curve/point ids, geometry."""
+  """A recipe sketch as emitted into FissionOxide: feature id, entity -> curve/point ids, geometry."""
 
   def __init__(self, fid, constrained):
     self.fid = fid
     self.constrained = constrained
     self.points = [(0, 0.0, 0.0)]  # (id, x, y); id 0 is the sketch origin
     self.next_id = 1
-    self.curve = {}  # recipe entity id -> CLFusion curve id
+    self.curve = {}  # recipe entity id -> FissionOxide curve id
     self.pt = {"origin": 0}  # "<entity>.<start|end|center>" or point entity id -> point id
     self.pos = {"origin": [0.0, 0.0]}
     self.geom = {}  # recipe entity id -> polyline (local, as drawn)
     self.kind = {}  # recipe entity id -> type
-    self.hv = set()  # curve ids CLFusion constrained horizontal/vertical on its own
+    self.hv = set()  # curve ids FissionOxide constrained horizontal/vertical on its own
     self.construction = set()
 
   def alloc(self):
@@ -231,10 +231,10 @@ class Converter:
   def __init__(self, recipe):
     self.r = recipe
     self.out = []
-    self.fid = 0  # last CLFusion feature id
+    self.fid = 0  # last FissionOxide feature id
     self.sketch_defs = {}  # recipe sketch name -> recipe feature
     self.sketches = {}  # recipe sketch name -> Sketch (emitted at identity)
-    self.bodies = {}  # recipe body name -> CLFusion body id
+    self.bodies = {}  # recipe body name -> FissionOxide body id
     self.planes = {}  # construction plane name -> (origin, normal)
     self.features = {}  # recipe feature name -> recipe feature
     self.feature_bodies = {}
@@ -436,7 +436,7 @@ class Converter:
     elif t in ("radius", "diameter"):
       self.cmd("sketch.dimension", type=t, curves=[sk.curve[refs[0]]], value=v)
     elif t == "angle":
-      # the recipe's angle is unsigned; CLFusion's runs counter-clockwise from the first line to the
+      # the recipe's angle is unsigned; FissionOxide's runs counter-clockwise from the first line to the
       # second (modulo 180 deg), so take the sign the drawn lines have
       if not isinstance(v, str):
         ga, gb = sk.geom[refs[0]], sk.geom[refs[1]]
@@ -556,7 +556,7 @@ class Converter:
         self.unsupported_op(f"{op} {f.get('name', '')}: {e}")
       except AttributeError as e:
         if f"op_{op}" in str(e):
-          self.unsupported_op(f"operation '{op}' has no CLFusion mapping in the importer")
+          self.unsupported_op(f"operation '{op}' has no FissionOxide mapping in the importer")
         else:
           raise
     return self.out
@@ -572,7 +572,7 @@ class Converter:
       if th.get("curves") and set(th["curves"]) != set(e for e in sk.curve if e not in sk.construction):
         raise Unsupported("thin extrude of some of a sketch's curves")
       if side == "two_sides" and t2 and t1 != t2:
-        # two walls, inside and outside the closed curves, joined: CLFusion's thin extrude has one
+        # two walls, inside and outside the closed curves, joined: FissionOxide's thin extrude has one
         # thickness on one side (or centred)
         self.comment(f"thin wall {t1} inside and {t2} outside the curves: two thin extrudes, joined")
         thin = [{"thin": t1, "thin_side": "inside"}, {"thin": t2, "thin_side": "outside"}]
@@ -613,7 +613,7 @@ class Converter:
     else:
       raise Unsupported(f"extent {et}")
     if ext.get("taper_deg"):
-      # recipe: positive grows outward; CLFusion: positive tapers inward
+      # recipe: positive grows outward; FissionOxide: positive tapers inward
       params["taper"] = f"{-ext['taper_deg']} deg"
     params["operation"] = op
     if op != "new_body":
@@ -702,7 +702,7 @@ class Converter:
     self.new_bodies(fid, f.get("result_bodies"))
 
   def helix_sweep(self, f, pts):
-    """A circle swept along a fitted helix through the Z axis: CLFusion's coil."""
+    """A circle swept along a fitted helix through the Z axis: FissionOxide's coil."""
     rs = [math.hypot(p[0], p[1]) for p in pts]
     R = sum(rs) / len(rs)
     if max(rs) - min(rs) > 1e-6 * R:
@@ -936,7 +936,7 @@ class Converter:
       self.cmd("sheet.edge_flange", True, edges=self.edges(f, T), height=f["height"], angle=f"{f['angle']} deg",
                **params)
     elif t == "contour":
-      self.comment("the recipe puts the material right of the sketch path's travel; CLFusion's default is left: flip")
+      self.comment("the recipe puts the material right of the sketch path's travel; FissionOxide's default is left: flip")
       sk = self.sketch(f["profile_sketch"], T)
       self.cmd("sheet.contour_flange", True, sketch=sk.fid, curves=[sk.curve[c] for c in f["profile_curves"]],
                distance=f["distance"], rule=rule, flip=True)
@@ -962,7 +962,7 @@ class Converter:
   def op_sm_hem(self, f, T):
     if f.get("type") != "flat":
       raise Unsupported(f"hem type {f.get('type')}")
-    # the recipe's hem folds over the flange's inner face; CLFusion's default folds it outward
+    # the recipe's hem folds over the flange's inner face; FissionOxide's default folds it outward
     params = {} if f.get("flipped") else {"flip": True}
     self.comment("hem gap 0.01 mm: the source's rule hem gap; folded over the flange's inner face")
     self.cmd("sheet.hem", True, edges=[{"point": f["edge"]["point"]}], length=f["length"], gap=0.01, **params)

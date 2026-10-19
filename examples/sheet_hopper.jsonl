@@ -1,0 +1,21 @@
+# Sheet metal hopper and tray: a press-brake lofted flange from a rectangle to a circle, a tray
+# with a miter flange (a hat profile swept along three edges, closed corners with round reliefs),
+# and both flat patterns as editable sketches. Change "bends" or the rule and everything follows.
+{"cmd": "new", "name": "Sheet hopper"}
+{"cmd": "param.add", "name": "bends", "expr": "16", "comment": "press brake bends in the hopper"}
+{"cmd": "sheet.rule", "name": "Steel 1", "thickness": "1 mm", "bend_radius": "1 mm", "k_factor": 0.44, "corner_relief": "round"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [-60, -40], "corner2": [60, 40]}
+{"cmd": "plane.offset", "plane": "xy", "offset": 70}
+{"cmd": "sketch.create", "plane": {"feature": 2}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 20}
+{"cmd": "sheet.lofted_flange", "from": 1, "to": 3, "method": "press_brake", "bends": "bends"}
+{"cmd": "sheet.flat_sketch", "body": 4000, "on": "xy"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [200, 0], "corner2": [300, 60]}
+{"cmd": "sheet.flange"}
+{"cmd": "sketch.create", "plane": "yz"}
+{"cmd": "sketch.line", "points": [[60, 1], [60, 16], [68, 16]]}
+{"cmd": "sheet.miter_flange", "edges": [{"point": [250, 60, 1]}, {"point": [300, 30, 1]}, {"point": [250, 0, 1]}], "corners": "closed"}
+{"cmd": "sheet.flat_pattern", "body": 7000}
+{"cmd": "sheet.flat_sketch", "body": 7000}

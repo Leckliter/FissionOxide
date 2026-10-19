@@ -1,4 +1,4 @@
-# Contributing to CLFusion
+# Contributing to FissionOxide
 
 ## Build
 
@@ -14,20 +14,20 @@ The first build compiles OpenCASCADE 7.8 from source into `target/OCCT` (about 2
 4 cores). Every profile shares that directory, so `cargo build`, `cargo test`, `cargo clippy`
 and `--release` all reuse it, and only `cargo clean` throws it away.
 
-To skip the OCCT build altogether, point `CLF_OCCT_DIR` at an existing install (`include/` and
+To skip the OCCT build altogether, point `FOX_OCCT_DIR` at an existing install (`include/` and
 `lib/` with static libraries), for example one you kept from an earlier build:
 
 ```sh
 mkdir -p ~/occt && cp -r target/OCCT/include target/OCCT/lib ~/occt/
-export CLF_OCCT_DIR=~/occt
+export FOX_OCCT_DIR=~/occt
 ```
 
-CI does exactly this with a cached install. A `CLF_OCCT_DIR` without `include/` and `lib/` is
+CI does exactly this with a cached install. A `FOX_OCCT_DIR` without `include/` and `lib/` is
 an error rather than a silent rebuild.
 
 ```sh
-cargo run --release -p clfusion        # the app
-cargo run --release -p clfusion-cli -- commands   # every JSON command
+cargo run --release -p fissionoxide        # the app
+cargo run --release -p fissionoxide-cli -- commands   # every JSON command
 ```
 
 ### Claude Code cloud sessions
@@ -51,7 +51,7 @@ cargo test --workspace
 The crates that don't link OpenCASCADE build and test in seconds, so iterate on them alone:
 
 ```sh
-cargo test -p clf-expr -p clf-sketch -p clf-exchange -p clf-store -p clf-render
+cargo test -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render
 ```
 
 CI (`.github/workflows/ci.yml`) uses a pinned Rust (`RUST_TOOLCHAIN`, currently 1.97.0) so a new
@@ -72,8 +72,8 @@ Add tests for what you add: kernel operations in `crates/kernel/src/tests.rs`, r
 - `rustfmt.toml` sets 2-space indents and a 120-column limit; `cargo fmt` is the authority.
 - Match the comment density of the code around you: a doc comment on public items and on
   anything non-obvious, not a narration of each line.
-- `unsafe` is forbidden outside the cxx bridge in `clf-kernel`.
-- Every OCCT call in `crates/kernel/cpp/kernel.cpp` sits between `CLF_TRY` and `CLF_CATCH`,
+- `unsafe` is forbidden outside the cxx bridge in `fox-kernel`.
+- Every OCCT call in `crates/kernel/cpp/kernel.cpp` sits between `FOX_TRY` and `FOX_CATCH`,
   so a failing operation becomes an `Err` (a red timeline feature), never a crash.
 
 ## Shared files
@@ -105,7 +105,7 @@ UI dialog ──JSON command──▶ engine command ──FeatureKind──▶ 
 - **C++** (`crates/kernel/cpp/kernel.cpp`, declared in `kernel.hxx`): `chamfer(s, edges, dist)`
   and `chamfer2(s, edges, d1, d2, angle)` build a `BRepFilletAPI_MakeChamfer`, add the 1-based
   edges, throw `std::runtime_error` with a readable message when OCCT fails, and wrap the body in
-  `CLF_TRY` … `CLF_CATCH("chamfer")`.
+  `FOX_TRY` … `FOX_CATCH("chamfer")`.
 - **Bridge** (`crates/kernel/src/ffi.rs`): the matching `fn chamfer(...) -> Result<UniquePtr<Shape>>;`
   lines in the `unsafe extern "C++"` block.
 - **Safe API** (`crates/kernel/src/lib.rs`): `Shape::chamfer` and `Shape::chamfer_two` check
@@ -117,7 +117,7 @@ UI dialog ──JSON command──▶ engine command ──FeatureKind──▶ 
 
 - **`FeatureKind::Chamfer`** (`crates/model/src/lib.rs`): the persistent description. Store
   references (`EdgeRef`), not kernel ids, and values as expression strings (`distance: String`)
-  so parameters drive them. New optional fields get `#[serde(default)]` so older `.clf` files
+  so parameters drive them. New optional fields get `#[serde(default)]` so older `.fox` files
   still load.
 - **`FeatureKind::base_name`**: `"Chamfer"`, the stem of new feature names (`Chamfer3`).
 - **`for_each_expr`**: visit every expression field, so parameter renames and dependency
@@ -134,7 +134,7 @@ UI dialog ──JSON command──▶ engine command ──FeatureKind──▶ 
 
 - **Listing** (`cmds!` at the top of `crates/engine/src/commands.rs`):
   `"chamfer" => "help text", "{edges: [{body, edge}], distance, distance2? | angle?}";`. This
-  list drives `clfusion-cli`, the MCP server's tool list and the `every_listed_command_is_handled`
+  list drives `fissionoxide-cli`, the MCP server's tool list and the `every_listed_command_is_handled`
   test.
 - **Handler**: the `"chamfer"` arm parses the parameters with the helpers there (`edge_refs`,
   `req_expr`, `opt_expr`) and calls `add_feature(s, FeatureKind::Chamfer { .. })`, which records

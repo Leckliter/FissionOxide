@@ -1,5 +1,5 @@
 [package]
-name = "clf-store"
+name = "fox-store"
 description = "Local data hub: projects, folders, designs and their version history (Fusion's data panel)"
 version.workspace = true
 edition.workspace = true

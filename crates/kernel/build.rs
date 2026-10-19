@@ -1,6 +1,6 @@
 //! Builds OpenCASCADE (once, via occt-sys, into `target/OCCT`) and the C++ side of the bridge.
 //!
-//! Set `CLF_OCCT_DIR` to an existing OCCT install (with `include/` and `lib/`) to skip the
+//! Set `FOX_OCCT_DIR` to an existing OCCT install (with `include/` and `lib/`) to skip the
 //! from-source build (CI restores a cached one this way); an empty value counts as unset.
 
 const OCCT_LIBS: &[&str] = &[
@@ -28,16 +28,19 @@ const OCCT_LIBS: &[&str] = &[
 ];
 
 fn main() {
-  println!("cargo:rerun-if-env-changed=CLF_OCCT_DIR");
+  println!("cargo:rerun-if-env-changed=FOX_OCCT_DIR");
   println!("cargo:rerun-if-changed=cpp/kernel.cpp");
   println!("cargo:rerun-if-changed=cpp/kernel.hxx");
   println!("cargo:rerun-if-changed=src/ffi.rs");
-  let root = match std::env::var_os("CLF_OCCT_DIR") {
+  println!("cargo:rerun-if-changed=cpp/features2.cpp");
+  println!("cargo:rerun-if-changed=cpp/surface2.cpp");
+  println!("cargo:rerun-if-changed=cpp/sheet2.cpp");
+  let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
       // A prebuilt (e.g. cached) install: never fall back to building OCCT behind the user's back.
       if !root.join("lib").is_dir() || !root.join("include").is_dir() {
-        panic!("CLF_OCCT_DIR={} has no include/ and lib/ (an OCCT 7.8 install with static libraries)", root.display());
+        panic!("FOX_OCCT_DIR={} has no include/ and lib/ (an OCCT 7.8 install with static libraries)", root.display());
       }
       root
     }
@@ -61,10 +64,13 @@ fn main() {
   }
   cxx_build::bridge("src/ffi.rs")
     .file("cpp/kernel.cpp")
+    .file("cpp/features2.cpp")
+    .file("cpp/surface2.cpp")
+    .file("cpp/sheet2.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)
     .flag_if_supported("-Wno-deprecated-declarations")
     .flag_if_supported("-Wno-unused-parameter")
-    .compile("clf-kernel-cpp");
+    .compile("fox-kernel-cpp");
 }

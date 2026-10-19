@@ -1,6 +1,6 @@
 # Plan: Fusion parity, then a fabrication suite
 
-CLFusion's goal is a parametric CAD app close enough to Fusion 360 that people can switch, which
+FissionOxide's goal is a parametric CAD app close enough to Fusion 360 that people can switch, which
 then grows into a suite for hobby and small-shop fabrication: lasers, plasma tables, waterjets,
 press brakes and CNC routers, supported by default rather than through paid extensions.
 
@@ -9,7 +9,7 @@ this file says what comes first and how we know a phase is done.
 
 ## Where we stand (October 2026)
 
-CLFusion covers most of Fusion's design workspace in breadth (sketching, solids, surfaces, sheet
+FissionOxide covers most of Fusion's design workspace in breadth (sketching, solids, surfaces, sheet
 metal, assemblies, drawings, milling CAM, MCP), but each area is shallow: about 50k lines and one
 scenario test per feature. The closest open-source project, SolidCraft (Rust, MIT/Apache, about
 400k lines), is the opposite: deeper and much better tested, but on the young `truck` kernel, so
@@ -39,7 +39,7 @@ Before deepening anything, measure it.
 4. **Robustness fuzzing.** Seeded random feature sequences, checked for valid solids and
    consistent volumes after every step.
 
-*Done when* every reference part has a CLFusion script, the pass rate is published in
+*Done when* every reference part has a FissionOxide script, the pass rate is published in
 `docs/reference-parts.md`, and CI runs the suite.
 
 ## Phase 1: the core modelling loop at Fusion quality

@@ -1,10 +1,10 @@
 //! Selection behaviour, as in Fusion: selection priority (faces, edges, bodies or components),
 //! selection filters, and Select Other (everything under the cursor, front to back).
 
-use clf_engine::model::BodyId;
-use clf_engine::scene::Pick;
-use clf_engine::{Sel, Session};
 use egui::{Pos2, RichText};
+use fox_engine::model::BodyId;
+use fox_engine::scene::Pick;
+use fox_engine::{Sel, Session};
 
 use crate::{App, theme};
 

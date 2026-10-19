@@ -2,8 +2,8 @@
 //! asks for. They run through the same preview machinery as the hand-built dialogs in
 //! [`crate::dialogs`] (a preview is the command applied; OK keeps it, Cancel withdraws it).
 
-use clf_engine::model::{BodyId, FeatureId, FeatureKind};
-use clf_engine::{Sel, Session};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind};
+use fox_engine::{Sel, Session};
 use serde_json::{Map, Value, json};
 
 use crate::icons::Icon;
@@ -102,6 +102,39 @@ pub enum Input {
     label: &'static str,
     default: [&'static str; 3],
   },
+  /// A view of the open drawing (drawing commands get the drawing too).
+  DrawingView {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// A component of the design.
+  Component {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// Selected sketch profiles, as points inside them (left out when none: every profile).
+  Profiles {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// The last selected face on another body than the first selected face (a replacement
+  /// surface); a form with one keeps its `Faces` to the first face's body.
+  FaceOther {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// An optional construction or origin plane from a drop-down (never from picks).
+  PlaneOpt {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// Boundary fill cells of the bodies in the `tools` input, ticked to keep: points inside them
+  /// (left out when none are ticked: every cell).
+  Cells {
+    key: &'static str,
+    label: &'static str,
+    tools: &'static str,
+  },
 }
 
 impl Input {
@@ -121,7 +154,13 @@ impl Input {
       | Input::Text { key, .. }
       | Input::Check { key, .. }
       | Input::Choice { key, .. }
-      | Input::Vec3 { key, .. } => key,
+      | Input::Vec3 { key, .. }
+      | Input::DrawingView { key, .. }
+      | Input::Component { key, .. }
+      | Input::Profiles { key, .. }
+      | Input::FaceOther { key, .. }
+      | Input::PlaneOpt { key, .. }
+      | Input::Cells { key, .. } => key,
     }
   }
 }
@@ -134,6 +173,12 @@ pub struct State {
   pub chosen: Vec<Option<Value>>,
   /// Centres of picked faces, for inputs that want one.
   near: Vec<Option<[f64; 3]>>,
+  /// The open drawing, for drawing commands.
+  pub drawing: Option<u32>,
+  /// Boundary fill cells found for the current tools: a point inside each and its volume.
+  pub cells: Vec<([f64; 3], f64)>,
+  /// The tools those cells were found for.
+  pub cells_for: Value,
 }
 
 impl State {
@@ -150,7 +195,9 @@ impl State {
         | Input::FacesOpt { .. }
         | Input::Edges { .. }
         | Input::Bodies { .. }
-        | Input::Curves { .. } => {
+        | Input::Curves { .. }
+        | Input::Profiles { .. }
+        | Input::Cells { .. } => {
           json!([])
         }
         Input::Plane { .. } => json!("xy"),
@@ -158,7 +205,14 @@ impl State {
         _ => Value::Null,
       })
       .collect();
-    State { values, chosen: vec![None; form.inputs.len()], near: vec![None; form.inputs.len()] }
+    State {
+      values,
+      chosen: vec![None; form.inputs.len()],
+      near: vec![None; form.inputs.len()],
+      drawing: None,
+      cells: Vec::new(),
+      cells_for: Value::Null,
+    }
   }
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
@@ -206,9 +260,45 @@ impl State {
         _ => {}
       }
     }
+    // a replacement surface is a face on another body; the faces to replace stay on the first
+    let mut faces = faces;
+    let mut other = Value::Null;
+    if form.inputs.iter().any(|i| matches!(i, Input::FaceOther { .. })) && !faces.is_empty() {
+      let first = faces[0]["body"].clone();
+      other = faces.iter().rev().find(|f| f["body"] != first).cloned().unwrap_or(Value::Null);
+      faces.retain(|f| f["body"] == first);
+    }
+    let profiles: Vec<[f64; 2]> = s
+      .selection
+      .iter()
+      .filter_map(|x| match x {
+        Sel::Profile { sketch, index } => {
+          s.model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.interior_point())
+        }
+        _ => None,
+      })
+      .collect();
+    // sketches of the picked curves, then of picked profiles (the n-th sketch input takes the n-th)
+    let mut sketches: Vec<FeatureId> = curves.iter().map(|c| c.0).collect();
+    sketches.extend(
+      s.selection.iter().filter_map(|x| if let Sel::Profile { sketch, .. } = x { Some(*sketch) } else { None }),
+    );
+    sketches.dedup();
+    let mut seen = Vec::new();
+    sketches.retain(|f| {
+      if seen.contains(f) {
+        false
+      } else {
+        seen.push(*f);
+        true
+      }
+    });
+    let mut ns = 0;
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
+        Input::Profiles { .. } => json!(profiles),
+        Input::FaceOther { .. } => other.clone(),
         Input::Faces { .. } | Input::FacesOpt { .. } => json!(faces),
         Input::Face { .. } => {
           nf += 1;
@@ -225,7 +315,12 @@ impl State {
         Input::Curves { .. } => json!(curves.iter().map(|c| c.1).collect::<Vec<_>>()),
         Input::Sketch { .. } => {
           let chosen = self.chosen[i].as_ref().and_then(Value::as_u64).map(|f| FeatureId(f as u32));
-          let sk = curves.first().map(|c| c.0).or(profile_sketch).or(chosen).or(s.edit_sketch).or(last_sketch);
+          ns += 1;
+          let sk = if ns == 1 {
+            curves.first().map(|c| c.0).or(profile_sketch).or(chosen).or(s.edit_sketch).or(last_sketch)
+          } else {
+            sketches.get(ns - 1).copied().or(chosen)
+          };
           sk.map(|f| json!(f.0)).unwrap_or(Value::Null)
         }
         Input::Plane { .. } => {
@@ -257,6 +352,7 @@ impl State {
           return Some(label);
         }
         Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
+        Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
         _ => {}
       }
     }
@@ -269,10 +365,19 @@ impl State {
     for (k, v) in form.fixed {
       p.insert(k.to_string(), json!(v));
     }
+    if let Some(d) = self.drawing
+      && form.cmd.starts_with("drawing.")
+    {
+      p.insert("drawing".into(), json!(d));
+    }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
       match input {
-        Input::Curves { .. } | Input::FacesOpt { .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
+        Input::Curves { .. } | Input::FacesOpt { .. } | Input::Profiles { .. } | Input::Cells { .. }
+          if v.as_array().is_some_and(Vec::is_empty) =>
+        {
+          continue;
+        }
         Input::Bodies { required: false, .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
         Input::Expr { .. } | Input::Text { .. } if v.as_str().is_some_and(|t| t.trim().is_empty()) => continue,
         Input::Face { near: Some(n), .. } => {
@@ -296,12 +401,32 @@ impl State {
     }
     Value::Object(p)
   }
+
+  /// Points drawing commands at the open drawing; views and components default to the first.
+  pub fn set_drawing(&mut self, form: &Form, s: &Session, drawing: Option<u32>) {
+    self.drawing = drawing;
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      match input {
+        Input::DrawingView { .. } if v.is_null() => {
+          if let Some(view) = drawing.and_then(|d| s.design.drawing(d)).and_then(|d| d.views.first()) {
+            *v = json!(view.id);
+          }
+        }
+        Input::Component { .. } if v.is_null() => {
+          if let Some(c) = s.design.components.first() {
+            *v = json!(c.id.0);
+          }
+        }
+        _ => {}
+      }
+    }
+  }
 }
 
 fn planar(s: &Session, body: BodyId, face: u32) -> bool {
   s.model
     .body(body)
-    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == clf_engine::kernel::SurfaceKind::Plane))
+    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == fox_engine::kernel::SurfaceKind::Plane))
     .unwrap_or(false)
 }
 
@@ -862,16 +987,17 @@ pub static APPEARANCE: Form = Form {
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Text as sketch outlines you can extrude",
+  hint: "Editable text whose outlines you can extrude",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
   inputs: &[
-    Input::Text { key: "text", label: "Text", default: "CLFusion" },
+    Input::Text { key: "text", label: "Text", default: "FissionOxide" },
     Input::Expr { key: "height", label: "Height", default: "5" },
     Input::Expr { key: "x", label: "X", default: "0" },
     Input::Expr { key: "y", label: "Y", default: "0" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
+    Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
   ],
   picks_model: false,
 };
@@ -891,8 +1017,58 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
       (
         "sketch.text",
-        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle")}),
+        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle"), "font": p.get("font").cloned().unwrap_or(json!("sans"))}),
       )
+    }
+    // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
+    c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {
+      let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
+      let mut q = p.clone();
+      if let Some(m) = q.as_object_mut() {
+        m.remove("offset_x");
+        m.remove("offset_y");
+        m.insert("offset".into(), json!([num("offset_x"), num("offset_y")]));
+      }
+      (form.cmd, q)
+    }
+    "surface.trim.body" => {
+      // the tool is the body of the picked face; it doesn't trim itself
+      let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
+      let bodies: Vec<Value> =
+        p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter(|b| **b != tool).cloned().collect();
+      (
+        "surface.trim",
+        json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
+      )
+    }
+    "surface.trim.sketch" => {
+      let tool = json!({"sketch": p.get("sketch").cloned().unwrap_or(Value::Null), "curves": p.get("curves").cloned().unwrap_or(json!([]))});
+      (
+        "surface.trim",
+        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "tool": tool, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
+      )
+    }
+    "surface.offset.variable" => {
+      let d2 = p.get("distance2").cloned().unwrap_or(json!("0"));
+      let fds: Vec<Value> = p
+        .get("faces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|f| json!({"face": f, "distance": d2}))
+        .collect();
+      (
+        "surface.offset",
+        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "distance": p.get("distance").cloned().unwrap_or(json!("0")), "face_distances": fds}),
+      )
+    }
+    "sketch.text_edit.form" => {
+      let mut q = p.clone();
+      // the angle box is in degrees: a plain number is what the command takes
+      if let Some(a) = p.get("angle").and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()) {
+        q["angle"] = json!(a);
+      }
+      ("sketch.text_edit", q)
     }
     _ => (form.cmd, p),
   }
@@ -1046,6 +1222,48 @@ pub static CAM_DRILL: Form = Form {
   picks_model: false,
 };
 
+// ---------------------------------------------------------------- drawing annotations
+
+pub static DRAWING_BREAK: Form = Form {
+  title: "BREAK VIEW",
+  name: "Break View",
+  hint: "Leave a stretch of a long view out; dimensions keep the true length",
+  icon: Icon::BreakView,
+  cmd: "drawing.break",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Choice {
+      key: "direction",
+      label: "Direction",
+      options: &[("horizontal", "Horizontal"), ("vertical", "Vertical")],
+    },
+    Input::Expr { key: "from", label: "From (model mm)", default: "20" },
+    Input::Expr { key: "to", label: "To (model mm)", default: "60" },
+    Input::Expr { key: "gap", label: "Gap (sheet mm)", default: "6" },
+  ],
+  picks_model: false,
+};
+
+const TEXT_FONTS: &[(&str, &str)] = &[("sans", "Sans (Ubuntu Light)"), ("mono", "Mono (Hack)")];
+
+pub static SK_TEXT_EDIT: Form = Form {
+  title: "EDIT TEXT",
+  name: "Edit Text",
+  hint: "Change a sketch text (select one of its letters); its outlines regenerate",
+  icon: Icon::SkText,
+  cmd: "sketch.text_edit.form",
+  fixed: &[],
+  inputs: &[
+    Input::Curves { key: "curves", label: "Letter of the text" },
+    Input::Text { key: "text", label: "Text", default: "" },
+    Input::Expr { key: "height", label: "Height", default: "" },
+    Input::Expr { key: "angle", label: "Angle (deg)", default: "" },
+    Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
+  ],
+  picks_model: false,
+};
+
 pub static CAM_ADAPTIVE: Form = Form {
   title: "2D ADAPTIVE CLEARING",
   name: "2D Adaptive Clearing",
@@ -1064,6 +1282,27 @@ pub static CAM_ADAPTIVE: Form = Form {
     Input::Expr { key: "ramp_angle", label: "Helix angle (°)", default: "5" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+  ],
+  picks_model: false,
+};
+
+pub static LOFTED_FLANGE: Form = Form {
+  title: "LOFTED FLANGE",
+  name: "Lofted Flange",
+  hint: "Sheet metal between two profiles (pick a profile in each sketch); closed profiles get a seam",
+  icon: Icon::LoftedFlange,
+  cmd: "sheet.lofted_flange",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "from", label: "First profile" },
+    Input::Sketch { key: "to", label: "Second profile" },
+    Input::Choice {
+      key: "method",
+      label: "Method",
+      options: &[("die_formed", "Die formed"), ("press_brake", "Press brake")],
+    },
+    Input::Expr { key: "bends", label: "Bends (press brake)", default: "8" },
+    Input::Check { key: "flip", label: "Flip side" },
   ],
   picks_model: false,
 };
@@ -1089,6 +1328,330 @@ pub static CAM_PARALLEL: Form = Form {
   picks_model: false,
 };
 
+pub static DRAWING_ORDINATE: Form = Form {
+  title: "ORDINATE DIMENSION",
+  name: "Ordinate Dimension",
+  hint: "Distances of points from an origin along the view's horizontal or vertical",
+  icon: Icon::OrdinateDim,
+  cmd: "drawing.ordinate",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "origin", label: "Origin (model)", default: ["0", "0", "0"] },
+    Input::Text { key: "points", label: "Points (x y z; …)", default: "" },
+    Input::Choice {
+      key: "orientation",
+      label: "Direction",
+      options: &[("horizontal", "Horizontal"), ("vertical", "Vertical")],
+    },
+    Input::Expr { key: "offset", label: "Offset (sheet mm)", default: "10" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_ANGLE: Form = Form {
+  title: "ANGULAR DIMENSION",
+  name: "Angular Dimension",
+  hint: "The angle at a vertex between the edges to two points",
+  icon: Icon::AngleDim,
+  cmd: "drawing.angle",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "vertex", label: "Vertex (model)", default: ["0", "0", "0"] },
+    Input::Vec3 { key: "a", label: "Point on edge 1", default: ["10", "0", "0"] },
+    Input::Vec3 { key: "b", label: "Point on edge 2", default: ["0", "0", "10"] },
+    Input::Expr { key: "radius", label: "Arc radius (sheet mm)", default: "15" },
+  ],
+  picks_model: false,
+};
+
+const CHARACTERISTICS: &[(&str, &str)] = &[
+  ("position", "Position"),
+  ("flatness", "Flatness"),
+  ("straightness", "Straightness"),
+  ("circularity", "Circularity"),
+  ("cylindricity", "Cylindricity"),
+  ("profile_of_line", "Profile of a line"),
+  ("profile_of_surface", "Profile of a surface"),
+  ("angularity", "Angularity"),
+  ("perpendicularity", "Perpendicularity"),
+  ("parallelism", "Parallelism"),
+  ("concentricity", "Concentricity (ISO)"),
+  ("symmetry", "Symmetry (ISO)"),
+  ("circular_runout", "Circular runout"),
+  ("total_runout", "Total runout"),
+];
+
+pub static DRAWING_FCF: Form = Form {
+  title: "FEATURE CONTROL FRAME",
+  name: "Feature Control Frame",
+  hint: "A GD&T tolerance on a feature, per the drawing's standard (ASME or ISO)",
+  icon: Icon::FeatureControl,
+  cmd: "drawing.feature_control",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Feature point (model)", default: ["0", "0", "0"] },
+    Input::Choice { key: "characteristic", label: "Characteristic", options: CHARACTERISTICS },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.1" },
+    Input::Check { key: "diameter", label: "Diameter zone (Ø)" },
+    Input::Choice {
+      key: "modifier",
+      label: "Material condition",
+      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+    },
+    Input::Text { key: "datums", label: "Datums", default: "A" },
+    Input::Expr { key: "offset_x", label: "Frame offset X (sheet mm)", default: "12" },
+    Input::Expr { key: "offset_y", label: "Frame offset Y (sheet mm)", default: "12" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_DATUM: Form = Form {
+  title: "DATUM IDENTIFIER",
+  name: "Datum Identifier",
+  hint: "Mark a feature as a datum (the next free letter when left empty)",
+  icon: Icon::DatumId,
+  cmd: "drawing.datum",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Feature point (model)", default: ["0", "0", "0"] },
+    Input::Text { key: "label", label: "Letter", default: "" },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "0" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_FINISH: Form = Form {
+  title: "SURFACE TEXTURE",
+  name: "Surface Texture",
+  hint: "A surface finish symbol (Ra in µm), per the drawing's standard",
+  icon: Icon::SurfaceTexture,
+  cmd: "drawing.surface_finish",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Surface point (model)", default: ["0", "0", "0"] },
+    Input::Expr { key: "roughness", label: "Roughness Ra (µm)", default: "1.6" },
+    Input::Choice {
+      key: "process",
+      label: "Process",
+      options: &[("any", "Any"), ("removal", "Material removal required"), ("no_removal", "No material removal")],
+    },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "0" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "0" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_BALLOON: Form = Form {
+  title: "BALLOON",
+  name: "Balloon",
+  hint: "A parts list item number on a component; it follows the parts list",
+  icon: Icon::Balloon,
+  cmd: "drawing.balloon",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Component { key: "component", label: "Component" },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "12" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
+  ],
+  picks_model: false,
+};
+
+pub static EMBOSS: Form = Form {
+  title: "EMBOSS",
+  name: "Emboss",
+  hint: "Raise or sink sketch profiles or text on a face, flat or curved",
+  icon: Icon::Emboss,
+  cmd: "emboss",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Profiles { key: "profiles", label: "Profiles" },
+    Input::Face { key: "face", label: "Face", near: None },
+    Input::Expr { key: "depth", label: "Depth", default: "1 mm" },
+    Input::Check { key: "deboss", label: "Deboss (sink into the face)" },
+    Input::Check { key: "wrap", label: "Wrap around a cylinder" },
+  ],
+  picks_model: true,
+};
+
+pub static EXTEND: Form = Form {
+  title: "EXTEND",
+  name: "Extend",
+  hint: "Extend open surface edges by a distance",
+  icon: Icon::Extend,
+  cmd: "surface.extend",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Expr { key: "distance", label: "Distance", default: "5 mm" },
+    Input::Choice {
+      key: "mode",
+      label: "Extend type",
+      options: &[("natural", "Natural"), ("tangent", "Tangent"), ("perpendicular", "Perpendicular")],
+    },
+  ],
+  picks_model: true,
+};
+
+pub static UNTRIM: Form = Form {
+  title: "UNTRIM",
+  name: "Untrim",
+  hint: "Remove holes from faces or restore their untrimmed boundary",
+  icon: Icon::Untrim,
+  cmd: "surface.untrim",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Faces" },
+    Input::Choice {
+      key: "loops",
+      label: "Loop type",
+      options: &[("all", "All loops"), ("inner", "Internal loops"), ("outer", "External loops")],
+    },
+  ],
+  picks_model: true,
+};
+
+pub static TRIM_BODY: Form = Form {
+  title: "TRIM",
+  name: "Trim with Body",
+  hint: "Trim surface bodies with a solid or another surface",
+  icon: Icon::Trim,
+  cmd: "surface.trim.body",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Face { key: "tool", label: "Trimming tool (one of its faces)", near: None },
+    Input::Check { key: "flip", label: "Keep the other side" },
+  ],
+  picks_model: true,
+};
+
+pub static TRIM_SKETCH: Form = Form {
+  title: "TRIM",
+  name: "Trim with Sketch",
+  hint: "Trim surface bodies with sketch curves projected onto them",
+  icon: Icon::Trim,
+  cmd: "surface.trim.sketch",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Curves { key: "curves", label: "Curves (default the profiles)" },
+    Input::Check { key: "flip", label: "Keep the other side" },
+  ],
+  picks_model: true,
+};
+
+pub static BOUNDARY_FILL: Form = Form {
+  title: "BOUNDARY FILL",
+  name: "Boundary Fill",
+  hint: "Solids from the closed cells that bodies and a plane bound",
+  icon: Icon::BoundaryFill,
+  cmd: "boundary_fill",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "tools", label: "Tools", required: true },
+    Input::PlaneOpt { key: "planes", label: "Plane" },
+    Input::Cells { key: "cells", label: "Cells", tools: "tools" },
+    Input::Choice { key: "operation", label: "Operation", options: OPS },
+    Input::Check { key: "remove_tools", label: "Remove tools" },
+  ],
+  picks_model: true,
+};
+
+pub static REPLACE_FACE: Form = Form {
+  title: "REPLACE FACE",
+  name: "Replace Face",
+  hint: "Replace flat faces with a face of another body (or a plane); neighbours extend or trim",
+  icon: Icon::ReplaceFace,
+  cmd: "replace_face",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Source faces" },
+    Input::FaceOther { key: "target", label: "Target face" },
+    Input::PlaneOpt { key: "plane", label: "Or a plane" },
+  ],
+  picks_model: true,
+};
+
+pub static VARIABLE_OFFSET: Form = Form {
+  title: "OFFSET",
+  name: "Variable Offset",
+  hint: "Offset surface bodies, with picked faces at a distance of their own",
+  icon: Icon::SurfOffset,
+  cmd: "surface.offset.variable",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Expr { key: "distance", label: "Distance", default: "2 mm" },
+    Input::FacesOpt { key: "faces", label: "Faces at their own distance" },
+    Input::Expr { key: "distance2", label: "Their distance", default: "4 mm" },
+  ],
+  picks_model: true,
+};
+
+pub static MITER_FLANGE: Form = Form {
+  title: "MITER FLANGE",
+  name: "Miter Flange",
+  hint: "Sweep an open profile, drawn across the first edge and starting on it, along sheet edges",
+  icon: Icon::Flange,
+  cmd: "sheet.miter_flange",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Sketch { key: "sketch", label: "Profile sketch" },
+    Input::Curves { key: "curves", label: "Profile curves (default all)" },
+    Input::Choice { key: "corners", label: "Corners", options: CORNERS },
+  ],
+  picks_model: true,
+};
+
+pub static CORNER_CLOSURE: Form = Form {
+  title: "CORNER CLOSURE",
+  name: "Corner Closure",
+  hint: "How the last edge or miter flange closes its corners, and the rule's corner relief",
+  icon: Icon::CornerClosure,
+  cmd: "sheet.corner_closure",
+  fixed: &[],
+  inputs: &[
+    Input::Choice { key: "corners", label: "Corners", options: CORNERS },
+    Input::Choice {
+      key: "relief",
+      label: "Corner relief",
+      options: &[("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")],
+    },
+    Input::Expr { key: "relief_size", label: "Relief size (empty = default)", default: "" },
+  ],
+  picks_model: false,
+};
+
+pub static FLAT_SKETCH: Form = Form {
+  title: "FLAT PATTERN SKETCH",
+  name: "Flat Pattern Sketch",
+  hint: "The flat pattern as an editable sketch: outline and bend lines",
+  icon: Icon::FlatPattern,
+  cmd: "sheet.flat_sketch",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "body", label: "Body (default the sheet metal body)", required: false },
+    Input::Choice {
+      key: "on",
+      label: "Place on",
+      options: &[("face", "Stationary face"), ("xy", "XY plane at the origin")],
+    },
+  ],
+  picks_model: false,
+};
+
+const CORNERS: &[(&str, &str)] = &[("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+
 pub static CAM_SCALLOP: Form = Form {
   title: "SCALLOP",
   name: "Scallop",
@@ -1106,3 +1669,40 @@ pub static CAM_SCALLOP: Form = Form {
   ],
   picks_model: false,
 };
+
+pub static SK_TEXT_EXPLODE: Form = Form {
+  title: "EXPLODE TEXT",
+  name: "Explode Text",
+  hint: "Turn a sketch text into plain lines and splines",
+  icon: Icon::SkText,
+  cmd: "sketch.text_explode",
+  fixed: &[],
+  inputs: &[Input::Curves { key: "curves", label: "Letter of the text" }],
+  picks_model: false,
+};
+
+/// Fills a form from what it edits when it opens (Edit Text: the selected text's values).
+pub fn prefill(form: &Form, state: &mut State, s: &Session) {
+  if !std::ptr::eq(form, &SK_TEXT_EDIT) {
+    return;
+  }
+  let Some(sk) = s.edit_sketch else { return };
+  let Ok(sketch) = s.design.sketch(sk) else { return };
+  let picked = s.selection.iter().find_map(|x| match x {
+    Sel::SketchCurve { curve, .. } => sketch.text_of(*curve),
+    _ => None,
+  });
+  let Some(t) = picked.or(sketch.texts.first().map(|t| t.id)).and_then(|id| sketch.text(id)) else { return };
+  for (i, input) in form.inputs.iter().enumerate() {
+    let v = match input.key() {
+      "text" => json!(t.text),
+      "height" => json!(fox_engine::sketch::Dim::new(t.height).expr),
+      "angle" => json!(fox_engine::sketch::Dim::new(t.angle.to_degrees()).expr),
+      "font" => json!(t.font),
+      _ => continue,
+    };
+    if let Some(slot) = state.values.get_mut(i) {
+      *slot = v;
+    }
+  }
+}

@@ -6,12 +6,12 @@
 //! within the degrees of freedom of the joint type. Motion values are expressions, so parameters
 //! drive mechanisms and limits are checked on every rebuild.
 
-use clf_kernel::glam::{DMat4, DVec3};
-use clf_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
+use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
 use serde::{Deserialize, Serialize};
 
-use crate::BodyId;
 use crate::refs::{EdgeRef, FaceRef};
+use crate::{BodyId, FeatureId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ComponentId(pub u32);
@@ -110,6 +110,8 @@ pub enum JointGeometry {
     #[serde(default = "x_axis")]
     x: [f64; 3],
   },
+  /// A saved joint origin (a `JointOrigin` feature): it moves with its component.
+  Origin { origin: FeatureId },
 }
 
 fn z_axis() -> [f64; 3] {
@@ -126,8 +128,13 @@ impl JointGeometry {
     match self {
       JointGeometry::Face { face } => Some(face.body),
       JointGeometry::Edge { edge } => Some(edge.body),
-      JointGeometry::Point { .. } => None,
+      JointGeometry::Point { .. } | JointGeometry::Origin { .. } => None,
     }
+  }
+
+  /// The saved joint origin this uses, if any.
+  pub fn origin(&self) -> Option<FeatureId> {
+    if let JointGeometry::Origin { origin } = self { Some(*origin) } else { None }
   }
 }
 
@@ -226,6 +233,97 @@ pub fn joint_transform(
     * m
     * mate
     * moving.inverse()
+}
+
+/// One of a joint's motions, as motion links read and drive them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionAxis {
+  #[default]
+  Rotation,
+  Slide,
+  Slide2,
+  Pitch,
+}
+
+impl MotionAxis {
+  pub const ALL: [MotionAxis; 4] = [MotionAxis::Rotation, MotionAxis::Slide, MotionAxis::Slide2, MotionAxis::Pitch];
+
+  pub fn name(self) -> &'static str {
+    match self {
+      MotionAxis::Rotation => "rotation",
+      MotionAxis::Slide => "slide",
+      MotionAxis::Slide2 => "slide2",
+      MotionAxis::Pitch => "pitch",
+    }
+  }
+
+  pub fn parse(s: &str) -> Option<MotionAxis> {
+    MotionAxis::ALL.into_iter().find(|a| a.name() == s)
+  }
+
+  /// Angles (rotation, pitch) or lengths (slides).
+  pub fn is_angle(self) -> bool {
+    matches!(self, MotionAxis::Rotation | MotionAxis::Pitch)
+  }
+
+  /// Does a joint of this kind have this motion?
+  pub fn allowed(self, kind: JointKind) -> bool {
+    let (rot, sl, sl2, pitch) = kind.freedoms();
+    match self {
+      MotionAxis::Rotation => rot,
+      MotionAxis::Slide => sl,
+      MotionAxis::Slide2 => sl2,
+      MotionAxis::Pitch => pitch,
+    }
+  }
+
+  /// The first motion a joint of this kind has.
+  pub fn first(kind: JointKind) -> Option<MotionAxis> {
+    MotionAxis::ALL.into_iter().find(|a| a.allowed(kind))
+  }
+
+  pub fn get(self, m: &Motion) -> f64 {
+    match self {
+      MotionAxis::Rotation => m.rotation,
+      MotionAxis::Slide => m.slide,
+      MotionAxis::Slide2 => m.slide2,
+      MotionAxis::Pitch => m.pitch,
+    }
+  }
+
+  pub fn set(self, m: &mut Motion, v: f64) {
+    match self {
+      MotionAxis::Rotation => m.rotation = v,
+      MotionAxis::Slide => m.slide = v,
+      MotionAxis::Slide2 => m.slide2 = v,
+      MotionAxis::Pitch => m.pitch = v,
+    }
+  }
+}
+
+/// The data hub design (and version) an inserted component was made from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HubSource {
+  /// Hub item id.
+  pub item: String,
+  pub version: u32,
+}
+
+/// Components whose bodies can't pass through each other while joints are driven: driving
+/// stops where they first touch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContactSet {
+  pub id: u32,
+  pub name: String,
+  #[serde(default)]
+  pub components: Vec<ComponentId>,
+  #[serde(default = "yes")]
+  pub enabled: bool,
+}
+
+fn yes() -> bool {
+  true
 }
 
 #[cfg(test)]

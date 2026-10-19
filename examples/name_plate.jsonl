@@ -1,0 +1,17 @@
+# A name plate: two lines joined at the ends by curvature-continuous blend curves, extruded,
+# with editable text on top. Changing the text afterwards regenerates the raised letters.
+{"cmd": "new", "name": "Name plate"}
+{"cmd": "param.add", "name": "label_height", "expr": "10 mm"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.line", "points": [[0, 0], [80, 0]]}
+{"cmd": "sketch.line", "points": [[80, 30], [0, 30]]}
+{"cmd": "sketch.blend", "curves": [2, 6], "near": [[80, 0], [80, 30]], "continuity": "g2"}
+{"cmd": "sketch.blend", "curves": [6, 2], "near": [[0, 30], [0, 0]], "continuity": "g2"}
+{"cmd": "extrude", "distance": 3}
+{"cmd": "sketch.create", "plane": {"point": [40, 15, 3], "normal": [0, 0, 1]}}
+{"cmd": "sketch.text", "at": [6, 9], "text": "FOX", "height": "label_height"}
+{"cmd": "extrude", "distance": 1, "operation": "join"}
+{"cmd": "sketch.edit", "sketch": 3}
+{"cmd": "sketch.text_edit", "text": "FissionOxide"}
+{"cmd": "sketch.finish"}
+{"cmd": "info"}

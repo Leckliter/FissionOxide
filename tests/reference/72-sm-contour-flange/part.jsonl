@@ -4,7 +4,7 @@
 {"cmd": "param.add", "name": "sm_thickness", "expr": "2.5 mm"}
 {"cmd": "param.add", "name": "sm_bend_radius", "expr": "sm_thickness"}
 {"cmd": "sheet.rule", "name": "Steel (mm)", "thickness": "sm_thickness", "bend_radius": "sm_bend_radius", "k_factor": 0.44}
-# the recipe puts the material right of the sketch path's travel; CLFusion's default is left: flip
+# the recipe puts the material right of the sketch path's travel; FissionOxide's default is left: flip
 # sketch Contour: XZ
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}

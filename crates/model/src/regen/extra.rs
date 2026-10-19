@@ -1,9 +1,9 @@
 //! Regeneration of construction geometry (planes, axes, points by method), threads, coils,
 //! pipes, ribs and webs, scale, split/remove faces, thicken, surfaces and mesh tools.
 
-use clf_kernel::glam::{DMat3, DQuat, DVec3};
-use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
-use clf_sketch::{CurveKind, Loop, Profile, Seg};
+use fox_kernel::glam::{DMat3, DQuat, DVec3};
+use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
+use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
@@ -387,27 +387,7 @@ impl Ctx<'_> {
         self.new_body(id, face);
         Ok(None)
       }
-      FeatureKind::SurfaceOffset { faces, bodies, distance } => {
-        let d = self.len(distance)?;
-        let mut skins = Vec::new();
-        for (bi, fids) in self.faces_by_body(faces)? {
-          for f in fids {
-            skins.push(self.state.bodies[bi].shape.face_shape(f).map_err(ke)?);
-          }
-        }
-        for b in bodies.iter() {
-          let bi = self.body_index(*b)?;
-          skins.push(self.state.bodies[bi].shape.clone());
-        }
-        if skins.is_empty() {
-          return Err("select faces or bodies to offset".into());
-        }
-        for skin in skins {
-          let off = skin.offset_surface(d).map_err(ke)?;
-          self.new_body(id, off);
-        }
-        Ok(None)
-      }
+      FeatureKind::SurfaceOffset { .. } => self.apply_surface(id, kind),
       FeatureKind::Trim { bodies, tool, flip } => {
         let pl = self.resolve_plane(tool)?;
         let n = pl.normal() * if *flip { -1.0 } else { 1.0 };
@@ -448,7 +428,7 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::Mesh { bodies, op, amount } => {
-        let amount = clf_expr::eval(amount, clf_expr::Kind::Unitless, self.params).map_err(|e| e.to_string())?;
+        let amount = fox_expr::eval(amount, fox_expr::Kind::Unitless, self.params).map_err(|e| e.to_string())?;
         for b in bodies.iter() {
           let bi = self.body_index(*b)?;
           let mesh = self.state.bodies[bi].mesh().cloned().ok_or("the body has no mesh")?;
@@ -464,12 +444,20 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::SurfaceExtend { .. } | FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {
+        self.apply_surface(id, kind)
+      }
+      FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
+      FeatureKind::JointOrigin { .. }
+      | FeatureKind::RigidGroup { .. }
+      | FeatureKind::MotionLink { .. }
+      | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
 
   fn factor(&self, e: &str) -> Result<f64, String> {
-    clf_expr::eval(e, clf_expr::Kind::Unitless, self.params).map_err(|err| format!("'{e}': {err}"))
+    fox_expr::eval(e, fox_expr::Kind::Unitless, self.params).map_err(|err| format!("'{e}': {err}"))
   }
 
   /// New surface bodies: the faces sewn into one shell.
@@ -557,7 +545,7 @@ impl Ctx<'_> {
       }
       PointRef::Center { edge } => {
         let (_, info) = self.edge_info(edge)?;
-        if info.kind != clf_kernel::CurveKind::Circle {
+        if info.kind != fox_kernel::CurveKind::Circle {
           return Err("the edge is not circular".into());
         }
         Ok(info.center)
@@ -679,7 +667,7 @@ impl Ctx<'_> {
       PlaneDef::TwoEdges { a, b } => {
         let (_, ea) = self.edge_info(a)?;
         let (_, eb) = self.edge_info(b)?;
-        if ea.kind != clf_kernel::CurveKind::Line || eb.kind != clf_kernel::CurveKind::Line {
+        if ea.kind != fox_kernel::CurveKind::Line || eb.kind != fox_kernel::CurveKind::Line {
           return Err("pick two straight edges".into());
         }
         let da = ea.end - ea.start;
@@ -727,8 +715,8 @@ impl Ctx<'_> {
       AxisDef::Edge { edge } => {
         let (_, e) = self.edge_info(edge)?;
         match e.kind {
-          clf_kernel::CurveKind::Line => Ok((e.start, e.end - e.start)),
-          clf_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
+          fox_kernel::CurveKind::Line => Ok((e.start, e.end - e.start)),
+          fox_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
           _ => Err("pick a straight or circular edge".into()),
         }
       }
@@ -771,7 +759,7 @@ impl Ctx<'_> {
         let n = pl.normal();
         let (_, info) = self.edge_info(edge)?;
         let dist = |p: DVec3| (p - pl.origin).dot(n);
-        if info.kind == clf_kernel::CurveKind::Line {
+        if info.kind == fox_kernel::CurveKind::Line {
           let d = info.end - info.start;
           let den = d.dot(n);
           if den.abs() < 1e-12 {
@@ -812,7 +800,7 @@ fn perpendicular(d: DVec3) -> DVec3 {
 }
 
 fn trim(v: f64) -> String {
-  clf_expr::trim_number((v * 1000.0).round() / 1000.0)
+  fox_expr::trim_number((v * 1000.0).round() / 1000.0)
 }
 
 /// Start point and direction (sketch coordinates) of a path segment.
@@ -830,10 +818,10 @@ fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
 }
 
 /// One wire per chosen sketch curve (default every non-construction curve).
-fn sketch_wires(
+pub(super) fn sketch_wires(
   plane: &Plane,
-  sketch: &clf_sketch::Sketch,
-  curves: &[clf_sketch::CurveId],
+  sketch: &fox_sketch::Sketch,
+  curves: &[fox_sketch::CurveId],
 ) -> Result<Vec<Shape>, String> {
   let mut out = Vec::new();
   for c in &sketch.curves {
@@ -858,7 +846,7 @@ fn thread_groove(
   length: f64,
   external: bool,
   left: bool,
-) -> clf_kernel::Result<Shape> {
+) -> fox_kernel::Result<Shape> {
   let h = if external { 0.6134 * pitch } else { 0.5413 * pitch };
   // a little past the surface on the open side so the cut is clean
   let base = 0.25 * h;

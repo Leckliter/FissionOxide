@@ -80,7 +80,7 @@ pub fn write_stl(meshes: &[Mesh]) -> Vec<u8> {
   let tris: usize = meshes.iter().map(Mesh::triangle_count).sum();
   let mut out = Vec::with_capacity(84 + tris * 50);
   let mut header = [0u8; 80];
-  let tag = b"CLFusion binary STL (mm)";
+  let tag = b"FissionOxide binary STL (mm)";
   header[..tag.len()].copy_from_slice(tag);
   out.extend_from_slice(&header);
   out.extend_from_slice(&(u32::try_from(tris).unwrap_or(u32::MAX)).to_le_bytes());

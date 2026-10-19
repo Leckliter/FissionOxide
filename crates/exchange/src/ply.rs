@@ -201,7 +201,7 @@ pub fn write_ply(meshes: &[Mesh]) -> Vec<u8> {
   let nv: usize = meshes.iter().map(|m| m.positions.len()).sum();
   let nf: usize = meshes.iter().map(Mesh::triangle_count).sum();
   let header = format!(
-    "ply\nformat binary_little_endian 1.0\ncomment CLFusion export (mm)\nelement vertex {nv}\nproperty float x\nproperty float y\nproperty float z\nelement face {nf}\nproperty list uchar uint vertex_indices\nend_header\n"
+    "ply\nformat binary_little_endian 1.0\ncomment FissionOxide export (mm)\nelement vertex {nv}\nproperty float x\nproperty float y\nproperty float z\nelement face {nf}\nproperty list uchar uint vertex_indices\nend_header\n"
   );
   let mut out = header.into_bytes();
   for m in meshes {

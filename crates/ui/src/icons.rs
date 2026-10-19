@@ -248,6 +248,14 @@ pub enum Icon {
   Curvature,
   PolygonCon,
   FinishAuto,
+  // drawing annotations
+  BreakView,
+  OrdinateDim,
+  AngleDim,
+  FeatureControl,
+  DatumId,
+  SurfaceTexture,
+  Balloon,
 }
 
 #[derive(Clone, Copy)]
@@ -265,7 +273,7 @@ enum Tone {
   White,
   Purple,
   PurpleLight,
-  // CLFusion's own families, each dark slate with one accent: sketch (teal vertices), sketch
+  // FissionOxide's own families, each dark slate with one accent: sketch (teal vertices), sketch
   // edits (coral), constraints (violet) and construction geometry (amber)
   Slate,
   Teal,
@@ -1863,6 +1871,58 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.fill(&[(0.12, 0.3), (0.56, 0.3), (0.56, 0.78), (0.12, 0.78)], Fill);
       k.ellipse((0.34, 0.3), 0.22, 0.08, Some(Light), Ink);
       k.block(0.6, 0.62, 0.86, 0.94, 0.1, BlueLight, Blue, BlueDark);
+    }
+    Icon::BreakView => {
+      // a long bar with its middle broken out
+      k.solid(&[(0.06, 0.36), (0.38, 0.36), (0.38, 0.64), (0.06, 0.64)], BlueLight);
+      k.solid(&[(0.62, 0.36), (0.94, 0.36), (0.94, 0.64), (0.62, 0.64)], BlueLight);
+      for x in [0.44, 0.56] {
+        k.path(&[(x, 0.2), (x, 0.42), (x + 0.04, 0.47), (x - 0.04, 0.53), (x, 0.58), (x, 0.8)], Ink);
+      }
+    }
+    Icon::OrdinateDim => {
+      k.line((0.1, 0.92), (0.9, 0.92), Ink);
+      for (x, t) in [(0.16, "0"), (0.5, "2"), (0.84, "5")] {
+        k.line((x, 0.86), (x, 0.42), Blue);
+        k.text((x, 0.26), t, 0.3, Ink);
+      }
+    }
+    Icon::AngleDim => {
+      k.thick((0.12, 0.88), (0.92, 0.88), Ink, 1.2);
+      k.thick((0.12, 0.88), (0.7, 0.2), Ink, 1.2);
+      k.arc((0.12, 0.88), 0.56, 0.0, 0.86, Blue);
+      k.arrow_head((0.68, 0.88), (0.0, 1.0), 0.12, Blue);
+      k.text((0.66, 0.6), "°", 0.36, Blue);
+    }
+    Icon::FeatureControl => {
+      k.solid(&[(0.04, 0.3), (0.96, 0.3), (0.96, 0.7), (0.04, 0.7)], White);
+      for x in [0.34, 0.74] {
+        k.line((x, 0.3), (x, 0.7), Ink);
+      }
+      k.circle((0.19, 0.5), 0.08, None, Some(Blue));
+      k.line((0.07, 0.5), (0.31, 0.5), Blue);
+      k.line((0.19, 0.36), (0.19, 0.64), Blue);
+      k.text((0.54, 0.5), ".1", 0.3, Ink);
+      k.text((0.85, 0.5), "A", 0.3, Ink);
+    }
+    Icon::DatumId => {
+      k.solid(&[(0.26, 0.06), (0.74, 0.06), (0.74, 0.5), (0.26, 0.5)], White);
+      k.text((0.5, 0.28), "A", 0.36, Ink);
+      k.line((0.5, 0.5), (0.5, 0.72), Ink);
+      k.fill(&[(0.32, 0.9), (0.68, 0.9), (0.5, 0.72)], Blue);
+      k.thick((0.1, 0.92), (0.9, 0.92), Ink, 1.2);
+    }
+    Icon::SurfaceTexture => {
+      k.thick((0.06, 0.9), (0.94, 0.9), Ink, 1.2);
+      k.path(&[(0.26, 0.5), (0.44, 0.88), (0.72, 0.18), (0.94, 0.18)], Blue);
+      k.line((0.26, 0.5), (0.6, 0.5), Blue);
+      k.text((0.18, 0.24), "Ra", 0.24, Ink);
+    }
+    Icon::Balloon => {
+      k.circle((0.62, 0.36), 0.26, Some(White), Some(Ink));
+      k.text((0.62, 0.36), "1", 0.3, Ink);
+      k.line((0.44, 0.55), (0.16, 0.84), Blue);
+      k.dot((0.16, 0.84), Blue);
     }
   }
 }

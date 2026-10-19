@@ -52,7 +52,7 @@ impl Entity {
 }
 
 /// A DXF drawing's geometry. `construction` marks entities on a layer named like
-/// "construction" (how CLFusion writes construction geometry).
+/// "construction" (how FissionOxide writes construction geometry).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Drawing {
   pub entities: Vec<(Entity, bool)>,
@@ -264,7 +264,7 @@ pub fn write_dxf(entities: &[(Entity, bool)]) -> String {
   let mut pair = |c: i32, v: &str| {
     let _ = write!(s, "{c:>3}\n{v}\n");
   };
-  pair(999, "CLFusion DXF export (mm)");
+  pair(999, "FissionOxide DXF export (mm)");
   pair(0, "SECTION");
   pair(2, "HEADER");
   pair(9, "$ACADVER");

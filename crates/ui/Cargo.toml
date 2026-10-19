@@ -1,12 +1,12 @@
 [package]
-name = "clf-ui"
-description = "The CLFusion desktop UI (egui)"
+name = "fox-ui"
+description = "The FissionOxide desktop UI (egui)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clf-engine.workspace = true
+fox-engine.workspace = true
 egui.workspace = true
 eframe.workspace = true
 rfd.workspace = true

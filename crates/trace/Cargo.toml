@@ -1,5 +1,5 @@
 [package]
-name = "clf-trace"
+name = "fox-trace"
 description = "Image tracing: bitmaps to closed contours of lines, arcs, circles and cubic Béziers"
 version.workspace = true
 edition.workspace = true

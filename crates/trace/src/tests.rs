@@ -489,7 +489,7 @@ fn arcs_run_counter_clockwise_when_flagged() {
   }
 }
 
-/// Run with `cargo test --release -p clf-trace -- --ignored --nocapture`.
+/// Run with `cargo test --release -p fox-trace -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn timing_1000px_logo() {
@@ -575,7 +575,7 @@ fn load_and_decode_files() {
     .unwrap();
   assert_eq!(decode(&png).unwrap(), img);
   // the format is sniffed from the content, whatever the extension
-  let path = std::env::temp_dir().join(format!("clf-trace-test-{}.jpg", std::process::id()));
+  let path = std::env::temp_dir().join(format!("fox-trace-test-{}.jpg", std::process::id()));
   std::fs::write(&path, &png).unwrap();
   let loaded = load(&path);
   std::fs::remove_file(&path).ok();

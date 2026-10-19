@@ -1,6 +1,6 @@
-// C++ side of the CLFusion kernel bridge. See kernel.hxx.
-#include "clf-kernel/cpp/kernel.hxx"
-#include "clf-kernel/src/ffi.rs.h"
+// C++ side of the FissionOxide kernel bridge. See kernel.hxx.
+#include "fox-kernel/cpp/kernel.hxx"
+#include "fox-kernel/src/ffi.rs.h"
 
 #include <cmath>
 #include <deque>
@@ -119,7 +119,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
 
-namespace clf {
+namespace fox {
 
 namespace {
 
@@ -138,8 +138,8 @@ namespace {
   }
 }
 
-#define CLF_TRY try {
-#define CLF_CATCH(what)                                                                                                \
+#define FOX_TRY try {
+#define FOX_CATCH(what)                                                                                                \
   }                                                                                                                    \
   catch (...) { rethrow(what); }
 
@@ -246,7 +246,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
                                  rust::Slice<const uint32_t> loop_lens) {
-  CLF_TRY
+  FOX_TRY
   need(plane, 9, "make_face plane");
   gp_Pln pln(gp_Ax3(pnt(plane, 0), dir(plane, 3), dir(plane, 6)));
   size_t seg = 0;
@@ -271,57 +271,57 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
   fix.FixOrientation();
   fix.Perform();
   return wrap(fix.Face());
-  CLF_CATCH("profile")
+  FOX_CATCH("profile")
 }
 
 std::unique_ptr<Shape> make_prism(const Shape &face, double dx, double dy, double dz) {
-  CLF_TRY
+  FOX_TRY
   BRepPrimAPI_MakePrism mk(face.s, gp_Vec(dx, dy, dz), Standard_True);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("extrusion failed");
   return wrap(checked(mk.Shape(), "extrusion"));
-  CLF_CATCH("extrude")
+  FOX_CATCH("extrude")
 }
 
 // axis: origin(3) dir(3)
 std::unique_ptr<Shape> make_revol(const Shape &face, rust::Slice<const double> axis, double angle) {
-  CLF_TRY
+  FOX_TRY
   need(axis, 6, "revolve axis");
   BRepPrimAPI_MakeRevol mk(face.s, gp_Ax1(pnt(axis, 0), dir(axis, 3)), angle, Standard_True);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("revolve failed");
   return wrap(checked(mk.Shape(), "revolve"));
-  CLF_CATCH("revolve")
+  FOX_CATCH("revolve")
 }
 
 std::unique_ptr<Shape> make_box(double x0, double y0, double z0, double x1, double y1, double z1) {
-  CLF_TRY
+  FOX_TRY
   BRepPrimAPI_MakeBox mk(gp_Pnt(x0, y0, z0), gp_Pnt(x1, y1, z1));
   return wrap(mk.Shape());
-  CLF_CATCH("box")
+  FOX_CATCH("box")
 }
 
 std::unique_ptr<Shape> make_cylinder(rust::Slice<const double> axis, double radius, double height) {
-  CLF_TRY
+  FOX_TRY
   need(axis, 6, "cylinder axis");
   BRepPrimAPI_MakeCylinder mk(gp_Ax2(pnt(axis, 0), dir(axis, 3)), radius, height);
   return wrap(mk.Shape());
-  CLF_CATCH("cylinder")
+  FOX_CATCH("cylinder")
 }
 
 std::unique_ptr<Shape> make_sphere(double cx, double cy, double cz, double radius) {
-  CLF_TRY
+  FOX_TRY
   BRepPrimAPI_MakeSphere mk(gp_Pnt(cx, cy, cz), radius);
   return wrap(mk.Shape());
-  CLF_CATCH("sphere")
+  FOX_CATCH("sphere")
 }
 
 std::unique_ptr<Shape> make_torus(rust::Slice<const double> axis, double major, double minor) {
-  CLF_TRY
+  FOX_TRY
   need(axis, 6, "torus axis");
   BRepPrimAPI_MakeTorus mk(gp_Ax2(pnt(axis, 0), dir(axis, 3)), major, minor);
   return wrap(mk.Shape());
-  CLF_CATCH("torus")
+  FOX_CATCH("torus")
 }
 
 namespace {
@@ -343,7 +343,7 @@ template <typename Op> TopoDS_Shape run_boolean(const TopoDS_Shape &a, const Top
 
 // op: 0 = union, 1 = subtract (a − b), 2 = intersect
 std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, int32_t op, double fuzzy) {
-  CLF_TRY
+  FOX_TRY
   TopoDS_Shape r;
   switch (op) {
   case 0: r = run_boolean<BRepAlgoAPI_Fuse>(a.s, b.s, fuzzy); break;
@@ -354,11 +354,11 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, int32_t op, do
   auto out = std::make_unique<Shape>();
   out->s = r.IsNull() ? r : checked(r, "boolean");
   return out;
-  CLF_CATCH("boolean")
+  FOX_CATCH("boolean")
 }
 
 std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges, double radius) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   BRepFilletAPI_MakeFillet mk(s.s);
@@ -373,11 +373,11 @@ std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges,
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
   return wrap(checked(mk.Shape(), "fillet"));
-  CLF_CATCH("fillet")
+  FOX_CATCH("fillet")
 }
 
 std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges, double dist) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   BRepFilletAPI_MakeChamfer mk(s.s);
@@ -392,13 +392,13 @@ std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (distance too large?)");
   return wrap(checked(mk.Shape(), "chamfer"));
-  CLF_CATCH("chamfer")
+  FOX_CATCH("chamfer")
 }
 
 // Hollows a solid, removing `faces` (1-based); negative thickness keeps the outside surface.
 // Walls meet in sharp corners, or in rounded ones when `round` is set.
 std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, double thickness, bool round) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
   TopTools_ListOfShape remove;
@@ -411,39 +411,39 @@ std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, 
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("shell failed (thickness too large for the geometry?)");
   return wrap(checked(mk.Shape(), "shell"));
-  CLF_CATCH("shell")
+  FOX_CATCH("shell")
 }
 
 // m: 3x4 row-major affine matrix
 std::unique_ptr<Shape> transform(const Shape &s, rust::Slice<const double> m) {
-  CLF_TRY
+  FOX_TRY
   need(m, 12, "transform matrix");
   gp_Trsf t;
   t.SetValues(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11]);
   BRepBuilderAPI_Transform mk(s.s, t, Standard_True);
   if (!mk.IsDone()) throw std::runtime_error("transform failed");
   return wrap(mk.Shape());
-  CLF_CATCH("transform")
+  FOX_CATCH("transform")
 }
 
 // plane: origin(3) normal(3)
 std::unique_ptr<Shape> mirror(const Shape &s, rust::Slice<const double> plane) {
-  CLF_TRY
+  FOX_TRY
   need(plane, 6, "mirror plane");
   gp_Trsf t;
   t.SetMirror(gp_Ax2(pnt(plane, 0), dir(plane, 3)));
   BRepBuilderAPI_Transform mk(s.s, t, Standard_True);
   if (!mk.IsDone()) throw std::runtime_error("mirror failed");
   return wrap(mk.Shape());
-  CLF_CATCH("mirror")
+  FOX_CATCH("mirror")
 }
 
 std::unique_ptr<Shape> unify(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   ShapeUpgrade_UnifySameDomain u(s.s, Standard_True, Standard_True, Standard_False);
   u.Build();
   return wrap(u.Shape());
-  CLF_CATCH("unify")
+  FOX_CATCH("unify")
 }
 
 uint32_t solid_count(const Shape &s) {
@@ -454,13 +454,13 @@ uint32_t solid_count(const Shape &s) {
 }
 
 std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i) {
-  CLF_TRY
+  FOX_TRY
   uint32_t n = 0;
   for (TopExp_Explorer ex(s.s, TopAbs_SOLID); ex.More(); ex.Next(), ++n) {
     if (n == i) return wrap(ex.Current());
   }
   throw std::runtime_error("no such solid");
-  CLF_CATCH("solid")
+  FOX_CATCH("solid")
 }
 
 std::unique_ptr<Shape> compound_new() {
@@ -473,15 +473,15 @@ std::unique_ptr<Shape> compound_new() {
 }
 
 void compound_add(Shape &c, const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   if (s.s.IsNull()) return;
   BRep_Builder b;
   b.Add(c.s, s.s);
-  CLF_CATCH("compound")
+  FOX_CATCH("compound")
 }
 
 MeshData mesh_shape(const Shape &s, double linear, double angular) {
-  CLF_TRY
+  FOX_TRY
   MeshData out;
   BRepMesh_IncrementalMesh mesher(s.s, linear, Standard_False, angular, Standard_True);
   TopTools_IndexedMapOfShape faces;
@@ -518,11 +518,11 @@ MeshData mesh_shape(const Shape &s, double linear, double angular) {
     }
   }
   return out;
-  CLF_CATCH("mesh")
+  FOX_CATCH("mesh")
 }
 
 EdgeData edge_polylines(const Shape &s, double deflection) {
-  CLF_TRY
+  FOX_TRY
   EdgeData out;
   TopTools_IndexedMapOfShape edges;
   index_map(s.s, TopAbs_EDGE, edges);
@@ -546,11 +546,11 @@ EdgeData edge_polylines(const Shape &s, double deflection) {
     out.edge_ids.push_back(static_cast<uint32_t>(ei));
   }
   return out;
-  CLF_CATCH("edges")
+  FOX_CATCH("edges")
 }
 
 rust::Vec<FaceInfo> face_infos(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   rust::Vec<FaceInfo> out;
   TopTools_IndexedMapOfShape faces;
   index_map(s.s, TopAbs_FACE, faces);
@@ -596,11 +596,11 @@ rust::Vec<FaceInfo> face_infos(const Shape &s) {
     out.push_back(info);
   }
   return out;
-  CLF_CATCH("faces")
+  FOX_CATCH("faces")
 }
 
 rust::Vec<EdgeInfo> edge_infos(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   rust::Vec<EdgeInfo> out;
   TopTools_IndexedMapOfShape edges, faces;
   index_map(s.s, TopAbs_EDGE, edges);
@@ -653,11 +653,11 @@ rust::Vec<EdgeInfo> edge_infos(const Shape &s) {
     out.push_back(info);
   }
   return out;
-  CLF_CATCH("edge info")
+  FOX_CATCH("edge info")
 }
 
 MassProps mass_props(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   MassProps out{};
   GProp_GProps vol;
   BRepGProp::VolumeProperties(s.s, vol);
@@ -676,7 +676,7 @@ MassProps mass_props(const Shape &s) {
     out.bbox_max = {x1, y1, z1};
   }
   return out;
-  CLF_CATCH("mass properties")
+  FOX_CATCH("mass properties")
 }
 
 bool is_valid(const Shape &s) {
@@ -690,7 +690,7 @@ bool is_valid(const Shape &s) {
 }
 
 void write_step(const Shape &s, rust::Str path) {
-  CLF_TRY
+  FOX_TRY
   quiet();
   STEPControl_Writer w;
   Interface_Static::SetCVal("write.step.unit", "MM");
@@ -698,50 +698,50 @@ void write_step(const Shape &s, rust::Str path) {
   if (w.Transfer(s.s, STEPControl_AsIs) != IFSelect_RetDone) throw std::runtime_error("STEP transfer failed");
   std::string p(path.data(), path.size());
   if (w.Write(p.c_str()) != IFSelect_RetDone) throw std::runtime_error("could not write " + p);
-  CLF_CATCH("STEP export")
+  FOX_CATCH("STEP export")
 }
 
 std::unique_ptr<Shape> read_step(rust::Str path) {
-  CLF_TRY
+  FOX_TRY
   quiet();
   STEPControl_Reader r;
   std::string p(path.data(), path.size());
   if (r.ReadFile(p.c_str()) != IFSelect_RetDone) throw std::runtime_error("could not read " + p);
   r.TransferRoots();
   return wrap(r.OneShape());
-  CLF_CATCH("STEP import")
+  FOX_CATCH("STEP import")
 }
 
 rust::String write_brep(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   std::ostringstream os;
   BRepTools::Write(s.s, os);
   return rust::String(os.str());
-  CLF_CATCH("BRep write")
+  FOX_CATCH("BRep write")
 }
 
 std::unique_ptr<Shape> read_brep(rust::Str data) {
-  CLF_TRY
+  FOX_TRY
   std::istringstream is(std::string(data.data(), data.size()));
   TopoDS_Shape shape;
   BRep_Builder b;
   BRepTools::Read(shape, is, b);
   return wrap(shape);
-  CLF_CATCH("BRep read")
+  FOX_CATCH("BRep read")
 }
 
 std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
   if (face < 1 || static_cast<int>(face) > map.Extent()) throw std::runtime_error("no such face");
   return wrap(map(static_cast<int>(face)));
-  CLF_CATCH("face")
+  FOX_CATCH("face")
 }
 
 // An open or closed chain of segments (see make_face) as a wire.
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
-  CLF_TRY
+  FOX_TRY
   BRepBuilderAPI_MakeWire mw;
   for (size_t i = 0; i * 13 < segs.size(); ++i) {
     mw.Add(seg_edge(segs, i));
@@ -749,7 +749,7 @@ std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
   }
   if (!mw.IsDone()) throw std::runtime_error("empty path");
   return wrap(mw.Wire());
-  CLF_CATCH("path")
+  FOX_CATCH("path")
 }
 
 // Sweeps a planar face along a wire (corrected Frenet frame, as Fusion's default orientation).
@@ -792,7 +792,7 @@ TopoDS_Shape corner_sweep(const TopoDS_Wire &spine, const TopoDS_Wire &profile) 
 } // namespace
 
 std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine) {
-  CLF_TRY
+  FOX_TRY
   if (spine.s.ShapeType() != TopAbs_WIRE) throw std::runtime_error("the sweep path must be a wire");
   const TopoDS_Wire &path = TopoDS::Wire(spine.s);
   if (face.s.ShapeType() == TopAbs_FACE && has_corners(path)) {
@@ -813,12 +813,12 @@ std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine) {
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the sweep failed");
   return wrap(checked(mk.Shape(), "sweep"));
-  CLF_CATCH("sweep")
+  FOX_CATCH("sweep")
 }
 
 // Lofts through the outer wires of the faces (or the wires) of a compound, in order.
 std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed) {
-  CLF_TRY
+  FOX_TRY
   BRepOffsetAPI_ThruSections mk(Standard_True, ruled ? Standard_True : Standard_False, 1e-6);
   int n = 0;
   TopoDS_Wire first;
@@ -841,12 +841,12 @@ std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed)
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the loft failed (are the profiles compatible?)");
   return wrap(checked(mk.Shape(), "loft"));
-  CLF_CATCH("loft")
+  FOX_CATCH("loft")
 }
 
 // Splits a solid with an infinite plane (origin(3) normal(3)); the result holds every piece.
 std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> plane, double size) {
-  CLF_TRY
+  FOX_TRY
   need(plane, 6, "split plane");
   gp_Pln pln(pnt(plane, 0), dir(plane, 3));
   BRepBuilderAPI_MakeFace mf(pln, -size, size, -size, size);
@@ -861,14 +861,14 @@ std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> 
   sp.Build();
   if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
   return wrap(sp.Shape());
-  CLF_CATCH("split")
+  FOX_CATCH("split")
 }
 
 // Tapers faces (1-based) by `angle` (rad) about the neutral plane (origin(3) normal(3)), pulling
 // along the plane normal.
 std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, rust::Slice<const double> plane,
                              double angle) {
-  CLF_TRY
+  FOX_TRY
   need(plane, 6, "draft plane");
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
@@ -886,7 +886,7 @@ std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, 
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the draft failed");
   return wrap(checked(mk.Shape(), "draft"));
-  CLF_CATCH("draft")
+  FOX_CATCH("draft")
 }
 
 // ---------------------------------------------------------------- sheet metal unfolding
@@ -950,6 +950,27 @@ gp_Pnt bend_map(const Place &p, const gp_Pnt &X) {
   double s = gp_Vec(p.O, X).Dot(p.a);
   double phi = bend_angle(p, X);
   return p.P0.Translated(p.A * s + p.V * (phi * p.Rn));
+}
+
+// Whether a cylinder is the bend `p` (another face of it).
+bool same_bend(const Place &p, const gp_Cylinder &cy) {
+  return std::abs(cy.Radius() - p.R) < 1e-6 && cy.Axis().Direction().IsParallel(gp_Dir(p.a), 1e-6) &&
+         gp_Lin(cy.Axis()).Distance(p.O) < 1e-6;
+}
+
+// The rigid 3D → flat map of the plane tangent to bend `p` along its line through X (where a face
+// beyond the bend continues).
+gp_Trsf bend_line_frame(const Place &p, const gp_Pnt &X) {
+  double phi = bend_angle(p, X);
+  gp_Vec r = p.r0 * std::cos(phi) + p.b * std::sin(phi);
+  gp_Vec w = p.r0 * -std::sin(phi) + p.b * std::cos(phi);
+  gp_Pnt o3 = p.O.Translated(r * p.R);
+  gp_Pnt o2 = p.P0.Translated(p.V * (phi * p.Rn));
+  gp_Ax3 from(o3, gp_Dir(p.a.Crossed(w)), gp_Dir(p.a));
+  gp_Ax3 to(o2, gp_Dir(p.A.Crossed(p.V)), gp_Dir(p.A));
+  gp_Trsf T;
+  T.SetDisplacement(from, to);
+  return T;
 }
 
 TopoDS_Edge flat_edge(const TopoDS_Edge &e, const Place &p) {
@@ -1085,10 +1106,13 @@ Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, do
         Place pg;
         if (gt == GeomAbs_Plane && !pf.cyl) {
           pg.T = pf.T; // coplanar neighbour
-        } else if (gt == GeomAbs_Cylinder && !pf.cyl) {
+        } else if (gt == GeomAbs_Cylinder && (!pf.cyl || !same_bend(pf, gs.Cylinder()))) {
           gp_Cylinder cy = gs.Cylinder();
           BRepAdaptor_Curve ec(E);
           if (ec.GetType() != GeomAbs_Line || !ec.Line().Direction().IsParallel(cy.Axis().Direction(), 1e-6)) continue;
+          // a bend running straight into another bend: unroll the first up to their shared line
+          gp_Trsf T = pf.T;
+          if (pf.cyl) T = bend_line_frame(pf, M);
           pg.cyl = true;
           pg.a = gp_Vec(cy.Axis().Direction());
           pg.O = cy.Location();
@@ -1106,26 +1130,14 @@ Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, do
           double r_in = pg.inner ? pg.R : pg.R - thickness;
           if (r_in < -1e-9) throw std::runtime_error("unfold: a bend is tighter than the sheet thickness");
           pg.Rn = std::max(r_in, 0.0) + k_factor * thickness;
-          pg.P0 = pg.O.Translated(pg.r0 * pg.R).Transformed(pf.T);
-          pg.A = pg.a.Transformed(pf.T);
-          pg.V = pg.b.Transformed(pf.T);
+          pg.P0 = pg.O.Translated(pg.r0 * pg.R).Transformed(T);
+          pg.A = pg.a.Transformed(T);
+          pg.V = pg.b.Transformed(T);
         } else if (gt == GeomAbs_Plane && pf.cyl) {
           BRepAdaptor_Curve ec(E);
           if (ec.GetType() != GeomAbs_Line) continue;
-          double phi = bend_angle(pf, M);
-          gp_Vec r = pf.r0 * std::cos(phi) + pf.b * std::sin(phi);
-          gp_Vec w = pf.r0 * -std::sin(phi) + pf.b * std::cos(phi);
-          gp_Pnt o3 = pf.O.Translated(r * pf.R);
-          gp_Pnt o2 = pf.P0.Translated(pf.V * (phi * pf.Rn));
-          gp_Ax3 from(o3, gp_Dir(pf.a.Crossed(w)), gp_Dir(pf.a));
-          gp_Ax3 to(o2, gp_Dir(pf.A.Crossed(pf.V)), gp_Dir(pf.A));
-          pg.T.SetDisplacement(from, to);
+          pg.T = bend_line_frame(pf, M);
         } else if (gt == GeomAbs_Cylinder && pf.cyl) {
-          gp_Cylinder cy = gs.Cylinder();
-          if (std::abs(cy.Radius() - pf.R) > 1e-6 || !cy.Axis().Direction().IsParallel(gp_Dir(pf.a), 1e-6) ||
-              gp_Lin(cy.Axis()).Distance(pf.O) > 1e-6) {
-            throw std::runtime_error("unfold: bends that run straight into other bends are not supported");
-          }
           pg = pf; // the same bend split into several faces
           pg.repeat = true;
         } else {
@@ -1146,7 +1158,7 @@ Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, do
 // end(3) in the flat, the bend angle (rad) and 1 if the bend's inside is on the stationary skin.
 std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
                               rust::Vec<double> &bends) {
-  CLF_TRY
+  FOX_TRY
   Unfolding u = plan_unfold(s.s, face, thickness, k_factor);
   const TopTools_IndexedMapOfShape &faces = u.faces;
   const std::map<int, Place> &placed = u.placed;
@@ -1188,7 +1200,7 @@ std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, d
     solids.push_back(mk.Shape());
   }
   return wrap(checked(fuse_all(solids, 1e-5), "flat pattern"));
-  CLF_CATCH("unfold")
+  FOX_CATCH("unfold")
 }
 
 namespace {
@@ -1290,7 +1302,7 @@ TopoDS_Shape refold_piece(const TopoDS_Face &piece, const Place &pl, double t, c
 // holds the solids cut out of the flat (through the thickness).
 std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double thickness, double k_factor,
                                    const Shape &removed) {
-  CLF_TRY
+  FOX_TRY
   Unfolding u = plan_unfold(folded.s, face, thickness, k_factor);
   std::vector<std::pair<TopoDS_Shape, const Place *>> regions;
   for (const auto &[fi, pl] : u.placed) {
@@ -1327,13 +1339,13 @@ std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double th
   }
   if (n == 0) throw std::runtime_error("refold: no cuts reach the flat pattern's face");
   return wrap(out);
-  CLF_CATCH("refold")
+  FOX_CATCH("refold")
 }
 
 // Like fillet, with a radius per edge.
 std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> edges,
                                     rust::Slice<const double> radii) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   BRepFilletAPI_MakeFillet mk(s.s);
@@ -1349,12 +1361,12 @@ std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> 
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
   return wrap(checked(mk.Shape(), "fillet"));
-  CLF_CATCH("fillet")
+  FOX_CATCH("fillet")
 }
 
 // Hidden-line projection. view: direction towards the viewer(3), screen right(3).
 HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection) {
-  CLF_TRY
+  FOX_TRY
   need(view, 6, "view");
   HlrData out;
   Handle(HLRBRep_Algo) algo = new HLRBRep_Algo();
@@ -1396,7 +1408,7 @@ HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double defle
   add(h.HCompound(), 3);
   add(h.OutLineHCompound(), 4);
   return out;
-  CLF_CATCH("projection")
+  FOX_CATCH("projection")
 }
 
 namespace {
@@ -1437,14 +1449,14 @@ TopoDS_Shape sew_to_solids(const TopoDS_Shape &s, double tol) {
 } // namespace
 
 std::unique_ptr<Shape> solidify(const Shape &s, double tol) {
-  CLF_TRY
+  FOX_TRY
   if (s.s.IsNull()) throw std::runtime_error("empty shape");
   return wrap(sew_to_solids(s.s, tol));
-  CLF_CATCH("sewing")
+  FOX_CATCH("sewing")
 }
 
 void write_iges(const Shape &s, rust::Str path) {
-  CLF_TRY
+  FOX_TRY
   quiet();
   IGESControl_Controller::Init();
   // mode 1: B-rep entities (manifold solids), which modern CAD reads as solids
@@ -1453,11 +1465,11 @@ void write_iges(const Shape &s, rust::Str path) {
   w.ComputeModel();
   std::string p(path.data(), path.size());
   if (!w.Write(p.c_str())) throw std::runtime_error("could not write " + p);
-  CLF_CATCH("IGES export")
+  FOX_CATCH("IGES export")
 }
 
 std::unique_ptr<Shape> read_iges(rust::Str path) {
-  CLF_TRY
+  FOX_TRY
   quiet();
   IGESControl_Controller::Init();
   IGESControl_Reader r;
@@ -1465,11 +1477,11 @@ std::unique_ptr<Shape> read_iges(rust::Str path) {
   if (r.ReadFile(p.c_str()) != IFSelect_RetDone) throw std::runtime_error("could not read " + p);
   r.TransferRoots();
   return wrap(r.OneShape());
-  CLF_CATCH("IGES import")
+  FOX_CATCH("IGES import")
 }
 
 std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge) {
-  CLF_TRY
+  FOX_TRY
   const size_t nv = pos.size() / 3;
   if (tris.size() % 3 != 0 || tris.empty()) throw std::runtime_error("no triangles");
   std::vector<TopoDS_Vertex> verts(nv);
@@ -1526,24 +1538,24 @@ std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<
     if (!u.Shape().IsNull()) result = u.Shape();
   }
   return wrap(result);
-  CLF_CATCH("mesh conversion")
+  FOX_CATCH("mesh conversion")
 }
 
 // A planar face extruded `height` along its normal with its sides drafted by `angle` (rad;
 // positive tapers inward).
 std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angle) {
-  CLF_TRY
+  FOX_TRY
   if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("taper needs a face");
   LocOpe_DPrism dp(TopoDS::Face(face.s), height, angle);
   TopoDS_Shape r = dp.Shape();
   if (r.IsNull()) throw std::runtime_error("the tapered extrusion failed (taper too steep for the height?)");
   return wrap(checked(r, "tapered extrusion"));
-  CLF_CATCH("tapered extrude")
+  FOX_CATCH("tapered extrude")
 }
 
 // A planar face grown (d > 0) or shrunk (d < 0) by `d` all round, holes included.
 std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
-  CLF_TRY
+  FOX_TRY
   if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("offset needs a face");
   const TopoDS_Face &f = TopoDS::Face(face.s);
   BRepOffsetAPI_MakeOffset mk(f, GeomAbs_Intersection);
@@ -1575,12 +1587,12 @@ std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
   fix.FixOrientation();
   fix.Perform();
   return wrap(fix.Face());
-  CLF_CATCH("offset profile")
+  FOX_CATCH("offset profile")
 }
 
 // Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad).
 std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   TopTools_IndexedDataMapOfShapeListOfShape ef;
@@ -1600,12 +1612,12 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (too large?)");
   return wrap(checked(mk.Shape(), "chamfer"));
-  CLF_CATCH("chamfer")
+  FOX_CATCH("chamfer")
 }
 
 // Fillets edges with a radius running from r1 at each edge's start to r2 at its end.
 std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   BRepFilletAPI_MakeFillet mk(s.s);
@@ -1620,12 +1632,12 @@ std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> ed
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
   return wrap(checked(mk.Shape(), "fillet"));
-  CLF_CATCH("fillet")
+  FOX_CATCH("fillet")
 }
 
 // Splits a solid with another shape; the result holds every piece.
 std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool) {
-  CLF_TRY
+  FOX_TRY
   BRepAlgoAPI_Splitter sp;
   TopTools_ListOfShape args, tools;
   args.Append(s.s);
@@ -1636,22 +1648,22 @@ std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool) {
   sp.Build();
   if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
   return wrap(sp.Shape());
-  CLF_CATCH("split")
+  FOX_CATCH("split")
 }
 
 
 std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
   return wrap(map(static_cast<int>(edge)));
-  CLF_CATCH("edge")
+  FOX_CATCH("edge")
 }
 
 // Minimum distance between two shapes: [distance, point on a (3), point on b (3)].
 rust::Vec<double> min_distance(const Shape &a, const Shape &b) {
-  CLF_TRY
+  FOX_TRY
   BRepExtrema_DistShapeShape d(a.s, b.s);
   d.Perform();
   if (!d.IsDone() || d.NbSolution() < 1) throw std::runtime_error("the distance could not be computed");
@@ -1660,14 +1672,14 @@ rust::Vec<double> min_distance(const Shape &a, const Shape &b) {
   gp_Pnt p1 = d.PointOnShape1(1), p2 = d.PointOnShape2(1);
   for (double v : {p1.X(), p1.Y(), p1.Z(), p2.X(), p2.Y(), p2.Z()}) out.push_back(v);
   return out;
-  CLF_CATCH("measure")
+  FOX_CATCH("measure")
 }
 
 // Sweeps a profile (a face or wire in the plane through the axis and xdir, at the helix start
 // origin + radius·xdir) along a helix. axis: origin(3) dir(3) xdir(3).
 std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
                                    double height, bool left) {
-  CLF_TRY
+  FOX_TRY
   need(axis, 9, "helix axis");
   if (radius <= 0 || pitch <= 0 || height <= 0) throw std::runtime_error("radius, pitch and height must be positive");
   if (height / pitch > 400) throw std::runtime_error("too many turns (at most 400)");
@@ -1696,12 +1708,12 @@ std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const doubl
   if (!ps.IsDone()) throw std::runtime_error("the helical sweep failed");
   ps.MakeSolid();
   return wrap(checked(ps.Shape(), "helical sweep"));
-  CLF_CATCH("helix")
+  FOX_CATCH("helix")
 }
 
 // A face or shell thickened into a solid (d > 0 along the face normals).
 std::unique_ptr<Shape> thicken(const Shape &s, double d) {
-  CLF_TRY
+  FOX_TRY
   if (std::abs(d) < 1e-9) throw std::runtime_error("the thickness must not be zero");
   try {
     BRepOffsetAPI_MakeThickSolid mk;
@@ -1715,12 +1727,12 @@ std::unique_ptr<Shape> thicken(const Shape &s, double d) {
   mo.MakeOffsetShape();
   if (!mo.IsDone()) throw std::runtime_error("the faces could not be thickened");
   return wrap(checked(mo.Shape(), "thicken"));
-  CLF_CATCH("thicken")
+  FOX_CATCH("thicken")
 }
 
 // Scales about a centre: uniformly (exact) or per axis.
 std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, double sx, double sy, double sz) {
-  CLF_TRY
+  FOX_TRY
   if (sx <= 0 || sy <= 0 || sz <= 0) throw std::runtime_error("scale factors must be positive");
   if (std::abs(sx - sy) < 1e-12 && std::abs(sx - sz) < 1e-12) {
     gp_Trsf t;
@@ -1736,12 +1748,12 @@ std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, do
   BRepBuilderAPI_GTransform tr(s.s, g, Standard_True);
   if (!tr.IsDone()) throw std::runtime_error("non-uniform scale failed");
   return wrap(checked(tr.Shape(), "scale"));
-  CLF_CATCH("scale")
+  FOX_CATCH("scale")
 }
 
 // Removes faces (1-based) and heals the gap from the neighbours (defeaturing).
 std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> faces) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
   BRepAlgoAPI_Defeaturing df;
@@ -1758,12 +1770,12 @@ std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> 
   df.Build();
   if (!df.IsDone() || df.HasErrors()) throw std::runtime_error("the faces could not be removed");
   return wrap(checked(df.Shape(), "remove faces"));
-  CLF_CATCH("remove faces")
+  FOX_CATCH("remove faces")
 }
 
 // Splits faces (1-based) where a tool shape crosses them; the body stays one solid.
 std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> faces, const Shape &tool) {
-  CLF_TRY
+  FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_FACE, map);
   BRepFeat_SplitShape ss(s.s);
@@ -1785,12 +1797,12 @@ std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> f
   ss.Build();
   if (!ss.IsDone()) throw std::runtime_error("the faces could not be split");
   return wrap(ss.Shape());
-  CLF_CATCH("split face")
+  FOX_CATCH("split face")
 }
 
 // A surface patch filling a closed boundary (a wire or edges): planar when it can be.
 std::unique_ptr<Shape> patch(const Shape &boundary) {
-  CLF_TRY
+  FOX_TRY
   BRepBuilderAPI_MakeWire mw;
   for (TopExp_Explorer ex(boundary.s, TopAbs_EDGE); ex.More(); ex.Next()) mw.Add(TopoDS::Edge(ex.Current()));
   if (mw.IsDone() && mw.Wire().Closed()) {
@@ -1806,12 +1818,12 @@ std::unique_ptr<Shape> patch(const Shape &boundary) {
   fill.Build();
   if (!fill.IsDone()) throw std::runtime_error("the patch could not be computed");
   return wrap(fill.Face());
-  CLF_CATCH("patch")
+  FOX_CATCH("patch")
 }
 
 // The boundary loops of a face as ordered polylines (outer loop first).
 EdgeData face_loops(const Shape &s, double deflection) {
-  CLF_TRY
+  FOX_TRY
   EdgeData out;
   TopoDS_Face face;
   for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More(); ex.Next()) {
@@ -1849,13 +1861,13 @@ EdgeData face_loops(const Shape &s, double deflection) {
   }
   out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
   return out;
-  CLF_CATCH("face loops")
+  FOX_CATCH("face loops")
 }
 
 // Every loop of a planar face offset by d (d < 0 inwards), as ordered polylines; empty when the
 // offset vanishes. Toolpaths use these: an offset can split a region into several.
 EdgeData offset_polylines(const Shape &face, double d, double deflection) {
-  CLF_TRY
+  FOX_TRY
   EdgeData out;
   if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("offset needs a face");
   BRepOffsetAPI_MakeOffset mk(TopoDS::Face(face.s), GeomAbs_Arc);
@@ -1888,12 +1900,12 @@ EdgeData offset_polylines(const Shape &face, double d, double deflection) {
   }
   out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
   return out;
-  CLF_CATCH("offset loops")
+  FOX_CATCH("offset loops")
 }
 
 // A ruled surface between two edges.
 std::unique_ptr<Shape> ruled(const Shape &a, const Shape &b) {
-  CLF_TRY
+  FOX_TRY
   if (a.s.ShapeType() != TopAbs_EDGE || b.s.ShapeType() != TopAbs_EDGE) throw std::runtime_error("pick two edges");
   TopoDS_Edge ea = TopoDS::Edge(a.s), eb = TopoDS::Edge(b.s);
   // run both edges the same way, or the surface twists
@@ -1908,29 +1920,29 @@ std::unique_ptr<Shape> ruled(const Shape &a, const Shape &b) {
   if (a0.Distance(b0) + a1.Distance(b1) > a0.Distance(b1) + a1.Distance(b0)) eb = TopoDS::Edge(eb.Reversed());
   TopoDS_Face f = BRepFill::Face(ea, eb);
   return wrap(f);
-  CLF_CATCH("ruled surface")
+  FOX_CATCH("ruled surface")
 }
 
 // Surfaces (or a solid's skin) offset by d along their normals.
 std::unique_ptr<Shape> offset_shape(const Shape &s, double d) {
-  CLF_TRY
+  FOX_TRY
   BRepOffsetAPI_MakeOffsetShape mk;
   mk.PerformBySimple(s.s, d);
   if (!mk.IsDone()) throw std::runtime_error("the surface can't be offset that far");
   return wrap(mk.Shape());
-  CLF_CATCH("offset surface")
+  FOX_CATCH("offset surface")
 }
 
 std::unique_ptr<Shape> make_vertex(double x, double y, double z) {
-  CLF_TRY
+  FOX_TRY
   return wrap(BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex());
-  CLF_CATCH("vertex")
+  FOX_CATCH("vertex")
 }
 
 std::unique_ptr<Shape> reversed(const Shape &s) {
-  CLF_TRY
+  FOX_TRY
   return wrap(s.s.Reversed());
-  CLF_CATCH("reverse")
+  FOX_CATCH("reverse")
 }
 
-} // namespace clf
+} // namespace fox

@@ -1,4 +1,4 @@
-//! The CLFusion engine: an editing session over a design, with undo/redo, regeneration and a
+//! The FissionOxide engine: an editing session over a design, with undo/redo, regeneration and a
 //! JSON command interface.
 //!
 //! Everything the app can do is a command (`session.execute("extrude", json!({...}))`): the UI,
@@ -14,24 +14,27 @@ mod features;
 pub mod files;
 pub mod hub;
 mod inspect;
+mod mates;
 pub mod scene;
-mod text;
+mod sheet2;
+mod solid;
+mod surfaces;
 mod trace;
 
 use std::path::PathBuf;
 
-use clf_model::regen::{Model, Regenerator};
-use clf_model::{BodyId, Design, FeatureId};
+use fox_model::regen::{Model, Regenerator};
+use fox_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
-pub use clf_exchange as exchange;
-pub use clf_expr as expr;
-pub use clf_kernel as kernel;
-pub use clf_model as model;
-pub use clf_render as render;
-pub use clf_sketch as sketch;
-pub use clf_store as store;
 pub use commands::{COMMANDS, CommandSpec};
+pub use fox_exchange as exchange;
+pub use fox_expr as expr;
+pub use fox_kernel as kernel;
+pub use fox_model as model;
+pub use fox_render as render;
+pub use fox_sketch as sketch;
+pub use fox_store as store;
 pub use hub::HubLink;
 
 /// Undo history depth.
@@ -57,10 +60,10 @@ macro_rules! impl_from_err {
   )*};
 }
 impl_from_err!(
-  clf_model::DesignError,
-  clf_sketch::SketchError,
-  clf_kernel::KernelError,
-  clf_expr::ExprError,
+  fox_model::DesignError,
+  fox_sketch::SketchError,
+  fox_kernel::KernelError,
+  fox_expr::ExprError,
   std::io::Error,
   serde_json::Error
 );
@@ -89,15 +92,15 @@ pub enum Sel {
   },
   SketchPoint {
     sketch: FeatureId,
-    point: clf_sketch::PointId,
+    point: fox_sketch::PointId,
   },
   SketchCurve {
     sketch: FeatureId,
-    curve: clf_sketch::CurveId,
+    curve: fox_sketch::CurveId,
   },
   SketchConstraint {
     sketch: FeatureId,
-    constraint: clf_sketch::ConstraintId,
+    constraint: fox_sketch::ConstraintId,
   },
   Feature {
     feature: FeatureId,
@@ -136,11 +139,11 @@ pub struct Session {
   /// The hub item and version the design was opened from or last saved to.
   pub hub: Option<HubLink>,
   /// Toolpaths last generated (`cam.generate`), drawn in the Manufacture workspace.
-  pub toolpaths: Vec<clf_model::cam::Toolpath>,
+  pub toolpaths: Vec<fox_model::cam::Toolpath>,
   /// The setup and design revision they were generated for.
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
-  pub simulation: Option<(u32, u64, clf_model::cam::sim::Simulation)>,
+  pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
 }
 
 impl Default for Session {
@@ -173,7 +176,7 @@ impl Session {
     s
   }
 
-  /// Opens any readable file: a `.clf`/`.clfz` design, or a STEP, IGES, mesh, DXF ... file as a
+  /// Opens any readable file: a `.fox`/`.foxz` design, or a STEP, IGES, mesh, DXF ... file as a
   /// new design (see [`files`]).
   pub fn open(path: &std::path::Path) -> Result<Session, CmdError> {
     files::open(path)
@@ -329,7 +332,7 @@ impl Session {
         let pname = commands::req_str(params, "name")?.to_string();
         let expr = commands::expr_of(params.get("expr").ok_or(CmdError::new("missing 'expr'"))?)?;
         // check the new value before committing to a rebuild
-        let list: Vec<(String, String, clf_model::ParamKind)> = self
+        let list: Vec<(String, String, fox_model::ParamKind)> = self
           .design
           .parameters
           .iter()
@@ -338,7 +341,7 @@ impl Session {
         if !list.iter().any(|(n, ..)| *n == pname) {
           return Err(CmdError::new(format!("no parameter '{pname}'")));
         }
-        for (n, v) in clf_expr::eval_parameters(&list) {
+        for (n, v) in fox_expr::eval_parameters(&list) {
           if let Err(e) = v {
             return Err(CmdError::new(format!("{n}: {e}")));
           }
@@ -430,7 +433,7 @@ impl Session {
     self.design.body_settings(id).map(|s| s.visible).unwrap_or(true)
   }
 
-  /// Saves to a file (`.clfz` writes an archive, anything else `.clf` JSON).
+  /// Saves to a file (`.foxz` writes an archive, anything else `.fox` JSON).
   pub fn save_to(&mut self, path: &std::path::Path) -> Result<(), CmdError> {
     files::save_design(self, path)?;
     self.path = Some(path.to_path_buf());
@@ -442,8 +445,18 @@ impl Session {
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_assembly;
+#[cfg(test)]
 mod tests_cam;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_sheet2;
+#[cfg(test)]
+mod tests_sketch;
+#[cfg(test)]
+mod tests_solid;
+#[cfg(test)]
+mod tests_surface;
 #[cfg(test)]
 mod tests_trace;

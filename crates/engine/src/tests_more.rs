@@ -221,7 +221,7 @@ fn surfaces_patch_stitch_thicken() {
 fn mesh_tools_and_appearance() {
   let mut s = Session::default();
   run(&mut s, "sphere", json!({"radius": 10}));
-  let dir = std::env::temp_dir().join(format!("clf-mesh-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-mesh-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let stl = dir.join("ball.stl");
   run(&mut s, "export", json!({"path": stl}));
@@ -235,10 +235,10 @@ fn mesh_tools_and_appearance() {
   run(&mut s, "mesh.smooth", json!({"bodies": [b], "passes": 2}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   run(&mut s, "body.appearance", json!({"body": b, "appearance": "ABS (Red)"}));
-  assert_eq!(s.design.body_settings(clf_model::BodyId(b)).unwrap().color, Some([208, 50, 46]));
+  assert_eq!(s.design.body_settings(fox_model::BodyId(b)).unwrap().color, Some([208, 50, 46]));
   assert!(s.execute("body.appearance", &json!({"body": b, "appearance": "Unobtainium"})).is_err());
   run(&mut s, "body.appearance", json!({"body": b}));
-  assert_eq!(s.design.body_settings(clf_model::BodyId(b)).unwrap().color, None);
+  assert_eq!(s.design.body_settings(fox_model::BodyId(b)).unwrap().color, None);
 }
 
 #[test]

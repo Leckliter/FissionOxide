@@ -1,15 +1,15 @@
 # Plugin system plan
 
-CLFusion needs plugins so that tool suites built for other CAD apps — starting with the LumenArt
+FissionOxide needs plugins so that tool suites built for other CAD apps — starting with the LumenArt
 Tool Suite, a Fusion 360 add-in of about 22 sheet-metal and sign-making commands — can live on in
-CLFusion, and so that anyone can extend the app without rebuilding it.
+FissionOxide, and so that anyone can extend the app without rebuilding it.
 
 This document is the plan: what a plugin is, how it is installed, how it runs, and what the
 engine has to grow before the first real plugin can be ported.
 
 ## Goals
 
-- **One file to install.** A plugin is a single `.clfplugin` file. The user installs it from
+- **One file to install.** A plugin is a single `.foxplugin` file. The user installs it from
   File → Plugins → Install… or by dropping it on the window; they never touch a folder.
 - **Same API as everything else.** Plugins drive the engine through the same JSON commands as
   the GUI, the CLI and the MCP server (`Session::execute`). There is no second API to keep in
@@ -23,7 +23,7 @@ engine has to grow before the first real plugin can be ported.
 
 ## The package
 
-A `.clfplugin` is a zip:
+A `.foxplugin` is a zip:
 
 ```
 plugin.toml          manifest (below)
@@ -42,7 +42,7 @@ version = "1.0.0"                  # semver; installing a newer version updates 
 author = "LumenArt"
 description = "Sheet metal tabs, slots and cut-file checks"
 homepage = "https://lumenart.shop"
-clfusion = ">=0.2"                 # app versions it works with
+fissionoxide = ">=0.2"                 # app versions it works with
 api = 1                            # plugin API version
 
 # What the plugin may do beyond running design commands. Shown to the user at install.
@@ -106,8 +106,8 @@ shipped with the app.
 
 ## Installing ("upload")
 
-1. The user picks File → Plugins → Install… or drags a `.clfplugin` onto the window.
-2. The app checks the package: manifest parses, ids are unique, `api` and `clfusion` versions
+1. The user picks File → Plugins → Install… or drags a `.foxplugin` onto the window.
+2. The app checks the package: manifest parses, ids are unique, `api` and `fissionoxide` versions
    are supported, the wasm module compiles, every icon and command input is valid.
 3. The install dialog shows name, version, author, what it adds (commands and panels) and the
    permissions it asks for. Same id with a newer version shows as an update; older asks first.
@@ -131,7 +131,7 @@ The same package and install path will work for a future download page or a shar
 - **Can't crash the app.** Traps, panics and infinite loops (fuel/epoch limits) end the plugin
   run with an error; the design is restored as it was before the run.
 - **One file for every platform.** No per-OS builds, no ABI break when the app is rebuilt
-  (CLFusion forbids `unsafe`, which rules out loading native libraries anyway).
+  (FissionOxide forbids `unsafe`, which rules out loading native libraries anyway).
 - **Any language.** Plugins can be written in Rust, or in **Python via `componentize-py`**,
   which keeps porting the existing Python add-in close to the original code. JavaScript, Go and
   C also compile to components.
@@ -143,7 +143,7 @@ dylibs (unsafe, unsandboxed, ABI-fragile).
 ### Host interface (WIT)
 
 ```wit
-package clfusion:plugin@1.0.0;
+package fissionoxide:plugin@1.0.0;
 
 interface host {
   /// Run any engine command; returns its JSON result or an error message.
@@ -201,8 +201,8 @@ The suite splits into two plugins, replacing its current folder-detecting loader
   Assembly.
 - **LumenArt Pro** (the private commands), installed only on LumenArt machines.
 
-Its DXF library ships in `resources/`. Its `.f3d` library parts can't be read by CLFusion and
-need converting to `.dxf` or `.clf` once. Signing and license keys for selling the public plugin
+Its DXF library ships in `resources/`. Its `.f3d` library parts can't be read by FissionOxide and
+need converting to `.dxf` or `.fox` once. Signing and license keys for selling the public plugin
 can come later without changing the format.
 
 Port order (each step proves more of the API): Clean Duplicate Lines (selection + choice inputs,
@@ -228,7 +228,7 @@ and query gaps**, in the order they unblock tools:
 | 8 | Sketch visibility | engine | 4 | `sketch.visible`, shown in `info` | done |
 | 9 | Body colour | query | 3 | `body.appearance` takes `"#rrggbb"`; colour in `info` | done |
 | 10 | Move/rotate/scale sketch geometry | engine | 3 | `sketch.transform` | done |
-| 11 | Put DXF, `.clf` or another sketch's curves into an existing sketch | engine | 3 | `sketch.insert` | done |
+| 11 | Put DXF, `.fox` or another sketch's curves into an existing sketch | engine | 3 | `sketch.insert` | done |
 | 12 | Render to a PNG file with camera control and sketches hidden | query | 4 | `view.render` | done |
 | 13 | Construction plane through a point with a normal | engine | 1 | `{origin, normal, x?}` wherever a plane is taken | done |
 
@@ -242,10 +242,10 @@ multi-body DXF cut file, ellipse curves, curve/surface evaluation on freeform ge
 ## Milestones
 
 1. **Engine readiness** — the gap table above, each with tests and CLI/MCP exposure (done).
-2. **Plugin host** — `clf-plugin` crate: package reader and validator, installed-plugin
+2. **Plugin host** — `fox-plugin` crate: package reader and validator, installed-plugin
    registry, Wasmtime runtime with the WIT host interface, transactions, permissions.
 3. **UI** — Plugins panel, install dialog and drag-and-drop, manifest-driven toolbar panels and
    dialogs, progress and result messages, plugin log.
-4. **SDK** — WIT file, a Rust and a Python template, `clfusion-cli plugin pack|check|run` for
+4. **SDK** — WIT file, a Rust and a Python template, `fissionoxide-cli plugin pack|check|run` for
    development (run a plugin headless against a design).
 5. **First ports** — Clean Duplicate Lines, then the rest of LumenArt Tools in the order above.

@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use clf_engine::kernel::glam::DVec3;
 use egui::{Color32, Pos2, RichText};
+use fox_engine::kernel::glam::DVec3;
 use serde_json::{Value, json};
 
 use crate::{App, theme};

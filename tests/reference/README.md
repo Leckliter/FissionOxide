@@ -1,18 +1,18 @@
 # Reference parts
 
-Parts whose measurements are known independently of CLFusion. Each directory is one case:
+Parts whose measurements are known independently of FissionOxide. Each directory is one case:
 
 - `expected.json`: what the finished part must measure, and where the numbers come from.
 - `recipe.json`: the part described in a neutral, CAD-independent format (sketches in
   sketch-local coordinates, features with their parameters, faces and edges picked by a
   world-space point).
-- `part.jsonl`: the same part as a CLFusion command script (one JSON command per line, as
-  `clfusion-cli run` reads it). Generated from `recipe.json` by `tools/reference-import`, then
+- `part.jsonl`: the same part as a FissionOxide command script (one JSON command per line, as
+  `fissionoxide-cli run` reads it). Generated from `recipe.json` by `tools/reference-import`, then
   edited by hand where needed.
 
-`cargo test -p clf-engine --test reference_parts` builds every part that has a `part.jsonl` and
+`cargo test -p fox-engine --test reference_parts` builds every part that has a `part.jsonl` and
 compares it with `expected.json`. Each built part must also be a valid solid that survives a STEP
-round trip. Set `CLF_REFERENCE_REPORT=1` to rewrite `docs/reference-parts.md`.
+round trip. Set `FOX_REFERENCE_REPORT=1` to rewrite `docs/reference-parts.md`.
 
 `baseline.txt` lists the cases that pass. The test fails when a listed case stops passing; when a
 new case passes, add it to the list (the test prints the line to add).

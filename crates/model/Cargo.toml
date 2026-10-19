@@ -1,14 +1,14 @@
 [package]
-name = "clf-model"
+name = "fox-model"
 description = "Parametric design: parameters, feature timeline, regeneration"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clf-expr.workspace = true
-clf-sketch.workspace = true
-clf-kernel.workspace = true
+fox-expr.workspace = true
+fox-sketch.workspace = true
+fox-kernel.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
