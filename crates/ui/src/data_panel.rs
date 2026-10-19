@@ -513,7 +513,7 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
             }
             ui.label(t);
             if is_latest {
-              ui.label(RichText::new("latest").small().color(theme::SKETCH_ACCENT));
+              ui.label(RichText::new("latest").small().color(theme::ICON_GREEN));
             }
             if let Some(m) = v.get("milestone").and_then(Value::as_str) {
               ui.label(RichText::new(format!("⭐ {m}")).small().color(theme::WARNING));
@@ -699,7 +699,7 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
     }
     for ch in changes {
       let (sym, col) = match s(&ch, "kind").as_str() {
-        "added" => ("+", theme::SKETCH_ACCENT),
+        "added" => ("+", theme::ICON_GREEN),
         "removed" => ("-", theme::ERROR),
         _ => ("~", theme::ACCENT),
       };

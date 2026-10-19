@@ -9,8 +9,9 @@ use clf_engine::{Sel, Session};
 use egui::RichText;
 use serde_json::{Value, json};
 
-use crate::App;
+use crate::icons::Icon;
 use crate::theme;
+use crate::{App, panels};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -614,51 +615,72 @@ impl Dialog {
     let mut cancel = false;
     let title =
       if self.editing.is_some() { format!("EDIT {}", self.kind.title()) } else { self.kind.title().to_string() };
-    egui::Window::new(RichText::new(title).strong())
-      .id(egui::Id::new("feature-dialog"))
-      .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 250.0))
-      .collapsible(false)
-      .resizable(false)
-      .default_width(270.0)
+    let width = 300.0;
+    egui::Area::new(egui::Id::new("feature-dialog"))
+      .default_pos(app.canvas.right_top() + egui::vec2(-8.0, 150.0))
+      .pivot(egui::Align2::RIGHT_TOP)
+      .constrain(true)
+      .order(egui::Order::Foreground)
       .show(ctx, |ui| {
-        egui::Grid::new("dlg").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-          self.fields(app, ui);
-        });
-        if let Some(e) = &self.error {
-          ui.add_space(4.0);
-          ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
-        }
-        if !matches!(self.kind, Kind::PickPlane | Kind::Inspect) {
-          ui.add_space(6.0);
-          ui.separator();
-          ui.horizontal(|ui| {
-            if self.kind.picks_model() && self.editing.is_none() {
-              let label = if self.applied { "Hide preview" } else { "Preview" };
-              if ui.button(label).clicked() {
-                if self.applied {
-                  self.withdraw(&mut app.s);
-                } else {
-                  self.preview(&mut app.s);
-                }
-              }
+        panels::dialog_frame().show(ui, |ui| {
+          ui.set_width(width);
+          ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+          panels::dialog_header(ui, &title, width);
+          egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+            egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
+              self.fields(app, ui);
+            });
+            if let Some(e) = &self.error {
+              ui.add_space(6.0);
+              ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-              if ui.button("Cancel").clicked() {
-                cancel = true;
-              }
-              if ui
-                .add(
-                  egui::Button::new(RichText::new("  OK  ").strong().color(egui::Color32::WHITE)).fill(theme::ACCENT),
-                )
-                .clicked()
-              {
-                ok = true;
+          });
+          let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
+          ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
+          egui::Frame::new().fill(theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+              ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+              let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 24.0), egui::Sense::hover());
+              ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme::ICON_INK));
+              ui.painter().text(
+                r.center(),
+                egui::Align2::CENTER_CENTER,
+                "i",
+                egui::FontId::proportional(11.0),
+                theme::ICON_INK,
+              );
+              if !matches!(self.kind, Kind::PickPlane | Kind::Inspect) {
+                if self.kind.picks_model() && self.editing.is_none() {
+                  let mut on = self.applied;
+                  if ui.checkbox(&mut on, "Preview").changed() {
+                    if self.applied {
+                      self.withdraw(&mut app.s);
+                    } else {
+                      self.preview(&mut app.s);
+                    }
+                  }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                  if panels::secondary_button(ui, "Cancel").clicked() {
+                    cancel = true;
+                  }
+                  if panels::primary_button(ui, "OK").clicked() {
+                    ok = true;
+                  }
+                });
+              } else {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                  if panels::secondary_button(ui, if self.kind == Kind::PickPlane { "Cancel" } else { "Close" })
+                    .clicked()
+                  {
+                    cancel = true;
+                  }
+                });
               }
             });
           });
-        } else if ui.button("Close").clicked() {
-          cancel = true;
-        }
+        });
       });
     if self.dirty {
       self.preview(&mut app.s);
@@ -714,13 +736,13 @@ impl Dialog {
       Kind::Extrude | Kind::Revolve => {
         ui.label("Profiles");
         let n = self.profiles.len();
-        ui.label(if self.editing.is_some() {
-          "(unchanged)".to_string()
+        if self.editing.is_some() {
+          ui.label("(unchanged)");
         } else if n == 0 {
-          "all regions — click to choose".to_string()
+          sel_chip(ui, "Select (all regions)", false);
         } else {
-          format!("{n} selected")
-        });
+          sel_chip(ui, &format!("{n} selected"), true);
+        }
         ui.end_row();
         if self.kind == Kind::Extrude {
           ui.label("Extent");
@@ -777,7 +799,11 @@ impl Dialog {
         let (what, n) =
           if self.kind == Kind::Shell { ("Faces", self.faces.len()) } else { ("Edges", self.edges.len()) };
         ui.label(what);
-        ui.label(if creating { format!("{n} selected") } else { format!("{n} (unchanged)") });
+        if creating {
+          sel_chip(ui, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+        } else {
+          ui.label(format!("{n} (unchanged)"));
+        }
         ui.end_row();
         ui.label(match self.kind {
           Kind::Fillet => "Radius",
@@ -840,7 +866,7 @@ impl Dialog {
           ui.end_row();
         } else {
           ui.label("Bodies");
-          ui.label(self.bodies_label());
+          sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
           ui.end_row();
           ui.label("");
           if ui.checkbox(&mut self.join, "Join to original").changed() {
@@ -851,7 +877,7 @@ impl Dialog {
       }
       Kind::RectPattern | Kind::CircPattern => {
         ui.label("Bodies");
-        ui.label(self.bodies_label());
+        sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
         if self.kind == Kind::RectPattern {
           ui.label("Direction");
@@ -910,7 +936,10 @@ impl Dialog {
       }
       Kind::Combine => {
         ui.label("Target");
-        ui.label(self.bodies.first().map(|b| app.s.body_name(BodyId(*b))).unwrap_or_else(|| "select bodies".into()));
+        match self.bodies.first() {
+          Some(b) => sel_chip(ui, &app.s.body_name(BodyId(*b)), true),
+          None => sel_chip(ui, "Select", false),
+        };
         ui.end_row();
         ui.label("Tools");
         ui.label(format!("{}", self.bodies.len().saturating_sub(1)));
@@ -924,7 +953,7 @@ impl Dialog {
       }
       Kind::Move => {
         ui.label("Bodies");
-        ui.label(self.bodies_label());
+        sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
         for (i, l) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
           ui.label(*l);
@@ -1129,4 +1158,29 @@ fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
         && !feats.iter().any(|g| matches!(&g.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if *sketch == f.id))
     })
     .map(|f| f.id)
+}
+
+/// Fusion's selection input: a "Select" chip until something is picked, then a blue chip with
+/// the count and a ✕ beside it.
+fn sel_chip(ui: &mut egui::Ui, text: &str, has: bool) -> egui::Response {
+  let font = egui::FontId::proportional(12.0);
+  let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
+  let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());
+  let chip = egui::Rect::from_min_size(rect.min, egui::vec2(tw + 32.0, 22.0));
+  let p = ui.painter();
+  let ir = egui::Rect::from_center_size(chip.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(15.0));
+  if has {
+    p.rect_filled(chip, 2.0, theme::ACCENT);
+    crate::icons::draw(p, ir, Icon::Select, egui::Color32::WHITE);
+    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, egui::Color32::WHITE);
+    let x = egui::pos2(chip.right() + 10.0, chip.center().y);
+    let s = egui::Stroke::new(1.4, egui::Color32::from_gray(70));
+    p.line_segment([x + egui::vec2(-4.0, -4.0), x + egui::vec2(4.0, 4.0)], s);
+    p.line_segment([x + egui::vec2(4.0, -4.0), x + egui::vec2(-4.0, 4.0)], s);
+  } else {
+    p.rect(chip, 2.0, egui::Color32::WHITE, egui::Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
+    crate::icons::draw(p, ir, Icon::Select, theme::ICON_INK);
+    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
+  }
+  resp
 }

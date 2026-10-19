@@ -1,13 +1,14 @@
 //! The CLFusion desktop app: a Fusion 360-style modeling workspace on egui.
 //!
-//! Layout: application bar and toolbar at the top, the browser tree on the left, the viewport
-//! with its ViewCube in the middle, feature dialogs floating on the right and the timeline at the
-//! bottom. The UI is thin: every action goes through [`Session::execute`] commands.
+//! Layout, as in Fusion: the application bar (document tabs) and toolbar (workspace switcher,
+//! tabs, tool groups) at the top; the canvas with the browser, comments, navigation bar,
+//! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 mod data_panel;
 mod dialogs;
 mod icons;
+mod marking;
 mod panels;
 mod theme;
 mod viewport;
@@ -21,7 +22,7 @@ use egui::TextureHandle;
 use serde_json::{Value, json};
 
 pub use dialogs::Dialog;
-pub use viewport::Tool;
+pub use viewport::{NavMode, Tool};
 
 pub struct App {
   pub s: Session,
@@ -38,6 +39,29 @@ pub struct App {
   pub status: Option<(String, bool)>,
   pub show_params: bool,
   pub show_edges: bool,
+  pub show_grid: bool,
+  /// Sketch palette options.
+  pub show_dims: bool,
+  /// Snap sketch clicks to the grid.
+  pub snap: bool,
+  pub show_constraints: bool,
+  /// Floating panels.
+  pub browser_open: bool,
+  pub show_comments: bool,
+  pub show_navbar: bool,
+  pub show_viewcube: bool,
+  /// Navigation bar mode (orbit / pan / zoom with the left button).
+  pub nav_mode: Option<NavMode>,
+  /// Toolbar tab; opening a sketch switches to the contextual SKETCH tab.
+  pub tab: panels::Tab,
+  /// Timeline playback: time of the next step.
+  playing: Option<f64>,
+  /// Last repeatable command, for the marking menu's Repeat.
+  last_cmd: Option<panels::Cmd>,
+  /// The open right-click marking menu.
+  marking: Option<marking::MarkingMenu>,
+  /// The canvas (viewport) rectangle, for panels floating over it.
+  pub(crate) canvas: egui::Rect,
   /// Inline dimension value editor: (constraint id, text, screen position).
   dim_edit: Option<(u32, String, egui::Pos2)>,
   /// Feature id being renamed in the timeline/browser.
@@ -66,6 +90,7 @@ struct RenderKey {
   selection: Vec<Sel>,
   edit_sketch: Option<clf_engine::model::FeatureId>,
   show_edges: bool,
+  show_grid: bool,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<clf_engine::model::FeatureId>,
 }
@@ -97,6 +122,20 @@ impl App {
       status: None,
       show_params: false,
       show_edges: true,
+      show_grid: true,
+      show_dims: true,
+      snap: false,
+      show_constraints: true,
+      browser_open: true,
+      show_comments: true,
+      show_navbar: true,
+      show_viewcube: true,
+      nav_mode: None,
+      tab: panels::Tab::Solid,
+      playing: None,
+      last_cmd: None,
+      marking: None,
+      canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
       dim_edit: None,
       rename: None,
       drag: None,
@@ -193,6 +232,7 @@ impl App {
     self.s.store_root = root;
     self.dialog = None;
     self.tool = Tool::Select;
+    self.nav_mode = None;
     self.cam = Camera::default();
     self.fitted_once = false;
   }
@@ -321,8 +361,12 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.dim_edit.is_some() {
+      if self.marking.is_some() {
+        self.marking = None;
+      } else if self.dim_edit.is_some() {
         self.dim_edit = None;
+      } else if self.nav_mode.is_some() {
+        self.nav_mode = None;
       } else if !self.tstate.is_empty() {
         viewport::reset_tool_state(self);
       } else if self.tool != Tool::Select {
@@ -418,6 +462,7 @@ impl App {
     if self.run("sketch.create", json!({"plane": plane})).is_some() {
       self.s.selection.clear();
       self.look_at_sketch();
+      self.tab = panels::Tab::Sketch;
       self.tool = Tool::Line;
       self.status = Some(("Sketching — draw with the Create tools; Finish Sketch when done".into(), false));
     }
@@ -427,6 +472,7 @@ impl App {
     self.cancel_dialog();
     if self.run("sketch.edit", json!({"sketch": id.0})).is_some() {
       self.look_at_sketch();
+      self.tab = panels::Tab::Sketch;
       self.tool = Tool::Select;
     }
   }
@@ -441,16 +487,42 @@ impl App {
   fn look_at_sketch(&mut self) {
     let Some(r) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)) else { return };
     let n = r.plane.normal();
+    let o = r.plane.origin;
+    self.look_along(n);
+    if self.s.model.bodies.is_empty() {
+      self.cam.target = o.to_array();
+    }
+  }
+
+  /// Navigation bar Look At: the open sketch's plane, else the selected planar face.
+  pub fn look_at_selection(&mut self) {
+    if self.s.edit_sketch.is_some() {
+      self.look_at_sketch();
+      return;
+    }
+    let face = self.s.selection.iter().find_map(|s| match s {
+      Sel::Face { body, face } => Some((*body, *face)),
+      _ => None,
+    });
+    let normal = face.and_then(|(body, face)| {
+      let b = self.s.model.body(body)?;
+      let f = b.faces().iter().find(|f| f.id == face)?;
+      (f.kind == clf_engine::kernel::SurfaceKind::Plane).then_some(f.normal)
+    });
+    match normal {
+      Some(n) => self.look_along(n),
+      None => self.status = Some(("Look At: select a planar face".into(), false)),
+    }
+  }
+
+  /// Turns the camera to look straight at a plane with normal `n`.
+  fn look_along(&mut self, n: clf_engine::kernel::glam::DVec3) {
     self.cam.pitch =
       n.z.clamp(-1.0, 1.0).asin().clamp(-std::f64::consts::FRAC_PI_2 + 1e-6, std::f64::consts::FRAC_PI_2 - 1e-6);
     if n.z.abs() < 0.999 {
       self.cam.yaw = n.x.atan2(-n.y);
     } else {
       self.cam.yaw = 0.0;
-    }
-    let o = r.plane.origin;
-    if self.s.model.bodies.is_empty() {
-      self.cam.target = o.to_array();
     }
   }
 
@@ -512,10 +584,23 @@ impl App {
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
-    panels::status_bar(self, ui);
     panels::timeline(self, ui);
     data_panel::show(self, ui);
-    panels::browser(self, ui);
+    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+      viewport::show(self, ui);
+    });
+    if self.show_comments {
+      panels::comments(self, &ctx);
+    }
+    panels::browser(self, &ctx);
+    if self.show_navbar {
+      panels::nav_bar(self, &ctx);
+    }
+    panels::sketch_palette(self, &ctx);
+    marking::show(self, &ctx);
+    panels::canvas_status(self, &ctx);
+    panels::unsaved_banner(self, &ctx);
+    panels::selection_info(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
@@ -526,9 +611,6 @@ impl App {
       panels::parameters_window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
-    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-      viewport::show(self, ui);
-    });
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {
