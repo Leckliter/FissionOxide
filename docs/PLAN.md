@@ -71,7 +71,7 @@ recorded Fusion tutorials can be followed step by step.
    a die-opening calculator, and bend tables exported as CSV.
 3. **Sheet metal features:** lofted flanges, corner closure, and the flat pattern as an
    editable sketch.
-4. **G2/G3 arcs** in CAM output (today it is straight moves only).
+4. **G2/G3 arcs** in CAM output. *Done:* the posts fit arcs to runs of short moves.
 
 *Done when* the sheet metal reference parts pass and their DXFs pass the validator.
 

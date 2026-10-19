@@ -2,12 +2,14 @@
 //!
 //! A post is a small table of what its control wants (program number, a decimal point on whole
 //! numbers, tool changes, tool length offsets, canned drilling cycles, how to send Z home) and
-//! one writer for all of them, in millimetres or inches.
+//! one writer for all of them, in millimetres or inches. Circles in the toolpaths go out as G2/G3
+//! arcs (see [`super::arcs`]).
 
 use std::fmt::Write;
 
 use fox_kernel::glam::DVec3;
 
+use super::arcs::{self, Seg};
 use super::{CLEARANCE, RETRACT, Toolpath};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,8 @@ pub struct Post {
   pub home: &'static [&'static str],
   /// Program end.
   pub end: &'static str,
+  /// Circles go out as G2/G3 arcs (I/J centre offsets) instead of runs of short lines.
+  pub arcs: bool,
 }
 
 pub static POSTS: [Post; 5] = [
@@ -78,6 +82,7 @@ pub static POSTS: [Post; 5] = [
     preamble: &[],
     home: &["G28 G91 Z0.", "G90"],
     end: "M30",
+    arcs: true,
   },
   Post {
     id: "haas",
@@ -94,6 +99,7 @@ pub static POSTS: [Post; 5] = [
     preamble: &[],
     home: &["G28 G91 Z0.", "G90"],
     end: "M30",
+    arcs: true,
   },
   Post {
     id: "grbl",
@@ -110,6 +116,7 @@ pub static POSTS: [Post; 5] = [
     preamble: &[],
     home: &[],
     end: "M30",
+    arcs: true,
   },
   Post {
     id: "linuxcnc",
@@ -126,6 +133,7 @@ pub static POSTS: [Post; 5] = [
     preamble: &["G64 P0.01"],
     home: &["G53 G0 Z0"],
     end: "M2",
+    arcs: true,
   },
   Post {
     id: "mach3",
@@ -142,6 +150,7 @@ pub static POSTS: [Post; 5] = [
     preamble: &[],
     home: &["G53 G0 Z0"],
     end: "M30",
+    arcs: true,
   },
 ];
 
@@ -278,17 +287,45 @@ pub fn write(post: &Post, units: Units, title: &str, paths: &[Toolpath], origin:
       continue;
     }
     let mut last_feed = -1.0;
-    for m in &tp.moves {
-      let p = local(m.to);
-      let (x, y, z) = (o.num(p.x), o.num(p.y), o.num(p.z));
-      if m.rapid {
-        o.line(&format!("{} X{x} Y{y} Z{z}", o.code('G', 0)));
-      } else if (m.feed - last_feed).abs() > 1e-9 {
-        o.line(&format!("{} X{x} Y{y} Z{z} F{}", o.code('G', 1), o.feed(m.feed)));
-        last_feed = m.feed;
-      } else {
-        o.line(&format!("{} X{x} Y{y} Z{z}", o.code('G', 1)));
+    let mut at: Option<DVec3> = None;
+    let moves = &tp.moves;
+    let mut k = 0;
+    while k < moves.len() {
+      if moves[k].rapid {
+        let p = local(moves[k].to);
+        o.line(&format!("{} X{} Y{} Z{}", o.code('G', 0), o.num(p.x), o.num(p.y), o.num(p.z)));
+        at = Some(p);
+        k += 1;
+        continue;
       }
+      // a run of cutting moves at one feed: circles in it go out as arcs
+      let feed = moves[k].feed;
+      let end =
+        (k..moves.len()).find(|&e| moves[e].rapid || (moves[e].feed - feed).abs() > 1e-9).unwrap_or(moves.len());
+      let points: Vec<DVec3> = moves[k..end].iter().map(|m| local(m.to)).collect();
+      let segs = match at {
+        Some(from) if post.arcs => arcs::fit(from, &points, arcs::FIT_TOL),
+        _ => points.iter().map(|p| Seg::Line(*p)).collect(),
+      };
+      let mut from = at.unwrap_or(points[0]);
+      for seg in segs {
+        let f = if (feed - last_feed).abs() > 1e-9 { format!(" F{}", o.feed(feed)) } else { String::new() };
+        last_feed = feed;
+        match seg {
+          Seg::Line(p) => {
+            o.line(&format!("{} X{} Y{} Z{}{f}", o.code('G', 1), o.num(p.x), o.num(p.y), o.num(p.z)));
+            from = p;
+          }
+          Seg::Arc { to, center, cw } => {
+            let (i, j) = (center.x - from.x, center.y - from.y);
+            let g = o.code('G', if cw { 2 } else { 3 });
+            o.line(&format!("{g} X{} Y{} I{} J{}{f}", o.num(to.x), o.num(to.y), o.num(i), o.num(j)));
+            from = to;
+          }
+        }
+      }
+      at = points.last().copied();
+      k = end;
     }
   }
   o.line(&o.code('M', 5));
@@ -356,6 +393,8 @@ pub fn read(g: &str) -> Result<Vec<(bool, DVec3, f64)>, String> {
       match g {
         0 => motion = 0,
         10 => motion = 1,
+        20 => motion = 2,
+        30 => motion = 3,
         200 => scale = 25.4,
         210 => scale = 1.0,
         900 => absolute = true,
@@ -415,7 +454,25 @@ pub fn read(g: &str) -> Result<Vec<(bool, DVec3, f64)>, String> {
       pos = DVec3::new(xy.x, xy.y, start);
       continue;
     }
-    pos = DVec3::new(x.map_or(pos.x, |v| v * scale), y.map_or(pos.y, |v| v * scale), z.map_or(pos.z, |v| v * scale));
+    let to = DVec3::new(x.map_or(pos.x, |v| v * scale), y.map_or(pos.y, |v| v * scale), z.map_or(pos.z, |v| v * scale));
+    if motion == 2 || motion == 3 {
+      // an arc in XY around the start plus (I, J), as points no more than 2 degrees apart
+      let c = DVec3::new(pos.x + get('I').unwrap_or(0.0) * scale, pos.y + get('J').unwrap_or(0.0) * scale, pos.z);
+      let (a0, a1) = ((pos.y - c.y).atan2(pos.x - c.x), (to.y - c.y).atan2(to.x - c.x));
+      let tau = std::f64::consts::TAU;
+      let mut sweep = if motion == 3 { (a1 - a0).rem_euclid(tau) } else { -(a0 - a1).rem_euclid(tau) };
+      if sweep.abs() < 1e-9 {
+        sweep = if motion == 3 { tau } else { -tau };
+      }
+      let r = (pos - c).truncate().length();
+      let n = (sweep.abs() / 2f64.to_radians()).ceil().max(1.0) as usize;
+      for s in 1..n {
+        let t = s as f64 / n as f64;
+        let a = a0 + sweep * t;
+        out.push((false, DVec3::new(c.x + r * a.cos(), c.y + r * a.sin(), pos.z + (to.z - pos.z) * t), feed));
+      }
+    }
+    pos = to;
     out.push((motion == 0, pos, feed));
   }
   Ok(out)
