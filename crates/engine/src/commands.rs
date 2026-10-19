@@ -59,6 +59,14 @@ cmds! {
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.info" => "Sketch geometry, constraints, profiles and degrees of freedom", "{sketch?}";
+  "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
+  "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
+  "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
+  "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
+  "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
+  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
+  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
+  "sketch.project" => "Project a body's edges (or one face's edges) into the sketch as fixed geometry", "{body, face?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all, distance2?, flip?, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
@@ -277,6 +285,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({"dof": r.dof}))
     }
     "sketch.info" => sketch_info(s, p),
+    "sketch.fillet"
+    | "sketch.offset"
+    | "sketch.trim"
+    | "sketch.extend"
+    | "sketch.mirror"
+    | "sketch.pattern_rect"
+    | "sketch.pattern_circ" => modify(s, name, p),
+    "sketch.project" => project(s, p),
     "extrude" => {
       let sk = sketch_for_feature(s, p)?;
       let profiles = profile_points(s, sk, p)?;
@@ -1131,6 +1147,158 @@ fn profile_points(s: &Session, sketch: FeatureId, p: &Value) -> Result<Vec<[f64;
     }
   }
   Ok(out)
+}
+
+// ---------------------------------------------------------------- sketch modify
+
+fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  let sk = sketch_id(s, p)?;
+  let scope = params_scope(s);
+  let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
+  let num =
+    |k: &str, kind: clf_expr::Kind| -> Result<f64, CmdError> { Ok(clf_expr::eval(&req_expr(p, k)?, kind, &scope)?) };
+  let count = |k: &str| -> Result<usize, CmdError> {
+    p.get(k).and_then(Value::as_u64).map(|v| v as usize).ok_or(CmdError::new(format!("missing '{k}'")))
+  };
+  enum Op {
+    Fillet(f64),
+    Offset(f64),
+    Trim(Option<CurveId>, [f64; 2]),
+    Extend(Option<CurveId>, [f64; 2]),
+    Mirror(CurveId),
+    Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
+    Circ([f64; 2], usize, f64),
+  }
+  let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
+  let op = match name {
+    "sketch.fillet" => Op::Fillet(num("radius", clf_expr::Kind::Length)?),
+    "sketch.offset" => Op::Offset(num("distance", clf_expr::Kind::Length)?),
+    "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
+    "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
+    "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
+    "sketch.pattern_rect" => Op::Rect(
+      opt_pt(p, "direction")?.unwrap_or([1.0, 0.0]),
+      count("count")?,
+      num("spacing", clf_expr::Kind::Length)?,
+      opt_pt(p, "direction2")?.unwrap_or([0.0, 1.0]),
+      p.get("count2").and_then(Value::as_u64).unwrap_or(1) as usize,
+      opt_expr(p, "spacing2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
+    ),
+    _ => Op::Circ(
+      opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
+      count("count")?,
+      opt_expr(p, "angle")
+        .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &scope))
+        .transpose()?
+        .unwrap_or(std::f64::consts::TAU),
+    ),
+  };
+  let made = s.edit(move |d| {
+    let sketch = d.sketch_mut(sk)?;
+    let pick = |sketch: &Sketch, c: Option<CurveId>, at: [f64; 2]| -> Result<CurveId, CmdError> {
+      match c {
+        Some(c) => Ok(c),
+        None => sketch.nearest_curve(at, 1.0).ok_or(CmdError::new("no curve there")),
+      }
+    };
+    let made = match op {
+      Op::Fillet(r) => {
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a fillet needs two lines")) };
+        vec![sketch.fillet(*a, *b, r)?]
+      }
+      Op::Offset(dist) => sketch.offset(&curves, dist)?,
+      Op::Trim(c, at) => {
+        let c = pick(sketch, c, at)?;
+        sketch.trim(c, at)?
+      }
+      Op::Extend(c, at) => {
+        let c = pick(sketch, c, at)?;
+        sketch.extend(c, at)?;
+        vec![c]
+      }
+      Op::Mirror(line) => sketch.mirror(&curves, line)?,
+      Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
+      Op::Circ(c, n, a) => sketch.pattern_circ(&curves, c, n, a)?,
+    };
+    if !sketch.solve().ok() {
+      return Err(CmdError::new("the result conflicts with the sketch's constraints"));
+    }
+    Ok(made)
+  })?;
+  let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
+  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+}
+
+/// Projects body edges onto the sketch plane as fixed geometry.
+fn project(s: &mut Session, p: &Value) -> CmdResult {
+  let sk = sketch_id(s, p)?;
+  let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
+  let body = s.model.body(BodyId(req_u32(p, "body")?)).ok_or(CmdError::new("no such body"))?;
+  let face = p.get("face").and_then(Value::as_u64).map(|f| f as u32);
+  let n = plane.normal();
+  let lines = body.shape.edge_lines((body.diagonal() * 0.001).clamp(0.005, 0.2))?;
+  enum E {
+    Line([f64; 2], [f64; 2]),
+    Circle([f64; 2], f64),
+    Arc([f64; 2], [f64; 2], [f64; 2]),
+  }
+  let mut todo = Vec::new();
+  for e in body.edges().iter().filter(|e| face.is_none_or(|f| e.faces.contains(&f))) {
+    let l = |v: clf_kernel::glam::DVec3| plane.to_local(v);
+    match e.kind {
+      clf_kernel::CurveKind::Line => todo.push(E::Line(l(e.start), l(e.end))),
+      clf_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
+        if (e.start - e.end).length() < 1e-6 {
+          todo.push(E::Circle(l(e.center), e.radius));
+        } else {
+          todo.push(E::Arc(l(e.start), l(e.mid), l(e.end)));
+        }
+      }
+      clf_kernel::CurveKind::Degenerate => {}
+      _ => {
+        if let Some(pl) = lines.iter().find(|x| x.id == e.id) {
+          for w in pl.points.windows(2) {
+            todo.push(E::Line(l(w[0]), l(w[1])));
+          }
+        }
+      }
+    }
+  }
+  let made = s.edit(move |d| {
+    let sketch = d.sketch_mut(sk)?;
+    let before: Vec<PointId> = sketch.points.iter().map(|p| p.id).collect();
+    let at = |sketch: &Sketch, q: [f64; 2]| match sketch.nearest_point(q, 1e-6, &[]) {
+      Some(id) if !before.contains(&id) => PtSpec::Point(id),
+      _ => PtSpec::At(q[0], q[1]),
+    };
+    let mut made = Vec::new();
+    for e in &todo {
+      match *e {
+        E::Line(a, b) => {
+          if (a[0] - b[0]).hypot(a[1] - b[1]) > 1e-6 {
+            let (sa, sb) = (at(sketch, a), at(sketch, b));
+            made.push(sketch.add_line(sa, sb)?.0);
+          }
+        }
+        E::Circle(c, r) => {
+          let sc = at(sketch, c);
+          let id = sketch.add_circle(sc, r)?;
+          sketch.add_constraint(ConstraintKind::Radius { curve: id, value: Dim::new(r) })?;
+          made.push(id);
+        }
+        E::Arc(a, m, b) => {
+          let (sa, sb) = (at(sketch, a), at(sketch, b));
+          made.push(sketch.add_arc_3pt(sa, m, sb)?);
+        }
+      }
+    }
+    for pt in sketch.points.iter_mut().filter(|p| !before.contains(&p.id)) {
+      pt.fixed = true;
+    }
+    Ok(made)
+  })?;
+  let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
+  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
 }
 
 // ---------------------------------------------------------------- sketch drawing

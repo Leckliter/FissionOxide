@@ -387,3 +387,35 @@ fn drawings_with_views_dimensions_and_export() {
   let back = clf_model::Design::from_json(&s.design.to_json()).unwrap();
   assert_eq!(back.drawings, s.design.drawings);
 }
+
+#[test]
+fn sketch_modify_tools_and_project() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let rect = run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}))["curves"].clone();
+  let c: Vec<u64> = serde_json::from_value(rect).unwrap();
+  run(&mut s, "sketch.fillet", json!({"curves": [c[0], c[1]], "radius": 4}));
+  let off = run(&mut s, "sketch.offset", json!({"curves": [c[2], c[3]], "distance": 3}));
+  assert_eq!(off["curves"].as_array().unwrap().len(), 2, "{off}");
+  let before = run(&mut s, "sketch.info", json!({}))["curves"].as_array().unwrap().len();
+  let first = off["curves"][0].clone();
+  run(&mut s, "sketch.trim", json!({"curve": first, "at": [20, 23]}));
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert!(info["curves"].as_array().unwrap().len() <= before, "{info}");
+  assert!(info["solved"].as_bool().unwrap(), "{info}");
+  run(&mut s, "sketch.finish", json!({}));
+  // project a box's top face into a sketch above it and extrude the outline
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 30, "depth": 20, "height": 10}));
+  let b = s.model.bodies[0].id.0;
+  let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 25}));
+  let pl = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
+  let r = run(&mut s, "sketch.project", json!({"body": b, "face": top}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 4, "{r}");
+  assert_eq!(r["profiles"], 1);
+  let r = run(&mut s, "extrude", json!({"distance": 5}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - 30.0 * 20.0 * 15.0).abs() < 1e-6);
+}

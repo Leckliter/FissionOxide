@@ -1,21 +1,23 @@
 # CLFusion roadmap
 
-CLFusion covers Fusion's core solid-modeling loop: sketch, constrain, dimension, extrude,
-revolve, fillet, chamfer, shell, pattern, mirror, parameters, timeline editing, and
-STEP/STL export. The list below is what's missing compared with Fusion's Design workspace,
+CLFusion covers Fusion's core solid-modeling loop (sketch, constrain, dimension, extrude,
+revolve, sweep, loft, holes, fillet, chamfer, shell, draft, pattern, mirror, parameters, timeline
+editing, STEP/STL export), sheet metal, assemblies with joints, and drawings. The list below is what's missing compared with Fusion's Design workspace,
 roughly in the order it would pay off.
 
 ## Next
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Sketch    | Trim/extend, sketch fillet/chamfer, offset, mirror and pattern in sketches   |
-| Sketch    | Project/include edges from bodies; intersect curves that cross mid-span      |
+| Sketch    | Sketch chamfer; associative projection (follows body changes); break          |
+| Sketch    | Profiles from curves that cross mid-span (without trimming first)            |
 | Sketch    | Splines, ellipses, text                                                      |
 | Features  | Sweep with guide rails / twist; loft rails; threads (cosmetic and modeled)   |
 | Features  | Extrude "to object" / "to face", taper angle, thin extrude                   |
 | Features  | Press-pull and face offset; split face; split body by a face                 |
-| Sheet     | Bend and corner reliefs; miter flange; rip; refold; flat pattern as a sketch |
+| Sheet     | Miter flange from a profile; corner relief shapes; flat pattern as a sketch  |
+| Assembly  | Component instances (copies sharing a design); contact sets; motion links    |
+| Drawing   | Detail and broken views; ordinate/angle dimensions; GD&T; parts lists        |
 | Features  | Variable-radius and setback fillets; chamfer with two distances / angle      |
 | Selection | Window/box select, selection filters, select-other (cycle overlapping picks) |
 | UI        | Drag manipulators (arrows) for extrude distance and other values             |
@@ -24,8 +26,6 @@ roughly in the order it would pay off.
 
 ## Later
 
-- Components and assemblies with joints and motion
-- Drawings (2D views with dimensions; DXF/PDF output)
 - T-spline/form modeling, surface workspace
 - Appearances/materials and a render workspace
 - MCP server so AI agents can drive the command set directly

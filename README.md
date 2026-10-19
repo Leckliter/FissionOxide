@@ -30,9 +30,22 @@ change a parameter and watch the whole history rebuild.
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
-  line, Convert to Sheet Metal for thin solids, Unfold in the timeline, and a flat pattern with
-  bend lines exported as DXF (also STEP/STL). The unfolder works on the B-rep, so holes and cuts
-  anywhere — even across bends — come out in the flat pattern.
+  line, Rip, Convert to Sheet Metal (sharp corners become bends, with corner reliefs), Unfold
+  and Refold in the timeline (cuts made while flat are carried back onto the bends), mitered
+  corners between flanges, rectangular or round bend reliefs, and a flat pattern with bend lines
+  exported as DXF (also STEP/STL). The unfolder works on the B-rep, so holes and cuts anywhere —
+  even across bends — come out in the flat pattern.
+- **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
+  slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
+  parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
+  bill of materials with masses.
+- **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
+  section views with hatching and sheet metal flat-pattern views with bend notes, all exact
+  hidden-line projections; automatic overall dimensions, hole callouts and centre marks; manual
+  dimensions, notes and a title block; export to PDF, SVG and DXF. Drawings live in the design
+  and follow parameter changes.
+- **Sketch tools.** Fillet, offset, trim, extend, mirror (symmetry-constrained), rectangular and
+  circular patterns, and project body edges into a sketch.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Exchange.** STEP import/export, STL and OBJ export. Designs save as readable JSON
@@ -82,6 +95,20 @@ cuts, fillets, patterns) works on them. Bends are true cylinders: the flat lengt
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
 sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
 `OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`.
+
+## Assemblies and drawings
+
+```sh
+clfusion-cli run examples/arm_assembly.jsonl --save arm.clf
+clfusion-cli exec arm.clf '{"cmd": "param.set", "name": "swing", "expr": "-45 deg"}' --save arm.clf
+clfusion-cli exec arm.clf '{"cmd": "drawing.export", "path": "arm.pdf"}'
+```
+
+Group bodies into components, then joint them: a joint origin is a face (its centre and normal),
+a circular edge (its centre and axis) or an explicit point. The moving component's origin is
+brought onto the fixed one with the Z axes facing each other (so faces mate); `flip` aligns them
+instead, `angle` and `offset` adjust the placement, and the joint's motion (`rotation`, `slide`,
+`slide2`, `pitch`, depending on the type) can be any expression.
 
 ## Headless CLI and scripting
 
