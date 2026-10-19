@@ -185,7 +185,7 @@ fn every_example_design_still_loads() {
   let mut n = 0;
   for entry in std::fs::read_dir(dir).unwrap() {
     let path = entry.unwrap().path();
-    if path.extension().is_some_and(|x| x == "clf") {
+    if path.extension().is_some_and(|x| x == "fox" || x == "clf") {
       let mut d = Design::load(&path).unwrap();
       assert!(d.configurations.is_empty() && !d.history_off);
       ok(&regenerate(&mut d));
