@@ -140,7 +140,10 @@ namespace {
   }
 }
 
-#define FOX_TRY try {
+#define FOX_TRY                                                                                                        \
+  try {                                                                                                                \
+    catch_signals();                                                                                                   \
+    OCC_CATCH_SIGNALS
 #define FOX_CATCH(what)                                                                                                \
   }                                                                                                                    \
   catch (...) { rethrow(what); }

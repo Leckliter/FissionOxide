@@ -2,14 +2,30 @@
 //
 // Every entry point catches *all* exceptions (OCCT's Standard_Failure does not derive from
 // std::exception) and rethrows std::runtime_error, which cxx turns into a Rust Err. Nothing that
-// goes wrong inside the kernel may abort the process.
+// goes wrong inside the kernel may abort the process. That includes crashes inside OCCT itself
+// (a null dereference in a fillet, say): with OCC_CONVERT_SIGNALS, OCC_CATCH_SIGNALS in each
+// entry point's try block turns the signal into a Standard_Failure (OCCT is built with it too).
 #pragma once
 
+#if !defined(_WIN32) && !defined(OCC_CONVERT_SIGNALS)
+#define OCC_CONVERT_SIGNALS
+#endif
+
 #include <memory>
+#include <mutex>
+#include <OSD.hxx>
+#include <Standard_ErrorHandler.hxx>
 #include <TopoDS_Shape.hxx>
 #include "rust/cxx.h"
 
 namespace fox {
+
+// Installs OCCT's signal handler once (without floating-point traps), so OCC_CATCH_SIGNALS can
+// turn a crash inside OCCT into an exception.
+inline void catch_signals() {
+  static std::once_flag once;
+  std::call_once(once, [] { OSD::SetSignal(Standard_False); });
+}
 
 struct Shape {
   TopoDS_Shape s;
