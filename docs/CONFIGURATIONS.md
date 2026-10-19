@@ -98,7 +98,8 @@ container for non-parametric geometry:
 - **Direct edits** (`direct.move_face`, `direct.press_pull`, `direct.delete_face`) go into the
   open base feature: the base feature just before the timeline marker. With none open, a new
   one is added at the marker, so consecutive direct edits collect in one container. With
-  history off that is always the base feature at the end of the timeline.
+  history off that is the base feature the timeline was collapsed into (parametric features
+  added meanwhile still go in the timeline after it).
 - `base.start` adds an empty base feature, `base.edit {feature}` rolls the marker back to just
   after an existing one (so direct edits go into it and later features are suspended), and
   `base.finish` moves the marker back to the end.
