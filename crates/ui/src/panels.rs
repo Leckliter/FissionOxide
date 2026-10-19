@@ -330,6 +330,10 @@ pub(crate) enum Cmd {
   /// Manufacture: run the stock simulation; open the tool library.
   CamSimulate,
   CamTools,
+  /// Show or hide the configuration table.
+  ConfigTable,
+  /// Turn "capture design history" off (collapsing the timeline into a base feature) or on.
+  CaptureHistory,
 }
 
 impl Cmd {
@@ -457,6 +461,16 @@ impl Cmd {
         "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
         _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
       },
+      Cmd::ConfigTable => (
+        Icon::ConfigTable,
+        "Configuration Table",
+        "Named variants overriding parameters, suppression, appearances and joints",
+      ),
+      Cmd::CaptureHistory => (
+        Icon::Box,
+        "Capture Design History",
+        "On: a parametric timeline. Off: the timeline becomes a base feature for direct edits",
+      ),
     }
   }
 
@@ -579,6 +593,8 @@ impl Cmd {
         }
         app.s.selection.clear();
       }
+      Cmd::ConfigTable => crate::config_ui::toggle_table(),
+      Cmd::CaptureHistory => crate::config_ui::toggle_history(app),
     }
   }
 }
@@ -1017,6 +1033,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   joints_section(app, ui);
   browser_assembly::sections(app, ui);
   drawings_section(app, ui);
+  browser_config::section(app, ui);
 }
 
 /// Components with their bodies; right-click to rename, ground, duplicate or delete.
@@ -2024,6 +2041,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::RigidGroup { .. } => Icon::Component,
     FeatureKind::MotionLink { .. } => Icon::DriveJoint,
     FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
+    FeatureKind::BaseFeature { .. } => Icon::Box,
   }
 }
 
@@ -2167,3 +2185,4 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
 }
 
 mod browser_assembly;
+mod browser_config;

@@ -7,6 +7,7 @@
 
 mod assembly_forms;
 mod cam_ui;
+mod config_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
@@ -864,6 +865,7 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
+    config_ui::table_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

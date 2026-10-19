@@ -1,0 +1,17 @@
+# A mounting plate in three configurations: Large overrides the size parameters and colours the
+# plate, Plain suppresses the hole. Export one with --configuration NAME.
+{"cmd": "new", "name": "Mounting plate"}
+{"cmd": "param.add", "name": "width", "expr": "60 mm"}
+{"cmd": "param.add", "name": "thickness", "expr": "5 mm"}
+{"cmd": "box", "width": "width", "depth": 40, "height": "thickness", "at": [0, 0]}
+{"cmd": "cylinder", "radius": 6, "height": 50, "at": [0, 0], "operation": "cut"}
+{"cmd": "config.create", "name": "Large"}
+{"cmd": "config.set", "configuration": "Large", "parameter": "width", "expr": "120 mm"}
+{"cmd": "config.set", "configuration": "Large", "parameter": "thickness", "expr": "8 mm"}
+{"cmd": "config.set", "configuration": "Large", "body": 1000, "appearance": "Aluminum - Anodized Blue"}
+{"cmd": "config.create", "name": "Plain"}
+{"cmd": "config.set", "configuration": "Plain", "feature": 2, "suppressed": true}
+{"cmd": "config.table"}
+{"cmd": "config.activate", "name": "Large"}
+{"cmd": "info"}
+{"cmd": "config.activate"}
