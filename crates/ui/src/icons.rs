@@ -250,13 +250,12 @@ enum Tone {
   White,
   Purple,
   PurpleLight,
-  // CLFusion's own families: sketch (slate + teal vertices, coral edits), constraints (violet
-  // tiles) and construction geometry (amber)
+  // CLFusion's own families, each dark slate with one accent: sketch (teal vertices), sketch
+  // edits (coral), constraints (violet) and construction geometry (amber)
   Slate,
   Teal,
   Coral,
   Violet,
-  VioletLight,
   Amber,
 }
 
@@ -290,7 +289,7 @@ impl Pen<'_> {
         Tone::Light => c.gamma_multiply(0.15),
         Tone::White => Color32::from_white_alpha(200),
         Tone::Purple => c.gamma_multiply(0.35),
-        Tone::PurpleLight | Tone::VioletLight => c.gamma_multiply(0.15),
+        Tone::PurpleLight => c.gamma_multiply(0.15),
         Tone::Slate | Tone::Teal | Tone::Coral | Tone::Violet => c,
         Tone::Amber => c.gamma_multiply(0.4),
         Tone::Ink | Tone::Red => c,
@@ -325,7 +324,6 @@ impl Pen<'_> {
         Tone::Teal => Color32::from_rgb(0, 150, 160),
         Tone::Coral => Color32::from_rgb(236, 98, 72),
         Tone::Violet => Color32::from_rgb(120, 70, 188),
-        Tone::VioletLight => Color32::from_rgb(237, 229, 250),
         Tone::Amber => Color32::from_rgb(236, 164, 44),
       },
     }
@@ -485,27 +483,6 @@ impl Pen<'_> {
   }
 }
 
-fn is_constraint(icon: Icon) -> bool {
-  matches!(
-    icon,
-    Icon::Coincident
-      | Icon::Horizontal
-      | Icon::Vertical
-      | Icon::HorizVert
-      | Icon::Parallel
-      | Icon::Perpendicular
-      | Icon::Tangent
-      | Icon::Equal
-      | Icon::Concentric
-      | Icon::Midpoint
-      | Icon::Collinear
-      | Icon::Symmetric
-      | Icon::Fix
-      | Icon::Curvature
-      | Icon::PolygonCon
-  )
-}
-
 /// Draws `icon` into `r` in one flat colour.
 pub fn draw(p: &Painter, r: Rect, icon: Icon, c: Color32) {
   paint(p, r, icon, Some(c), Tint::Blue);
@@ -526,16 +503,6 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
   let w = (r.width() / 16.0).clamp(1.0, 1.8);
   let k = Pen { p, r, mono, tint, w };
-  if mono.is_none() && is_constraint(icon) {
-    // constraints sit on a soft violet tile
-    p.rect(
-      r.expand(r.width() * 0.08),
-      r.width() * 0.2,
-      k.col(VioletLight),
-      Stroke::new(1.0, Color32::from_rgb(206, 190, 236)),
-      egui::StrokeKind::Inside,
-    );
-  }
   match icon {
     Icon::Sketch => {
       k.solid(&[(0.08, 0.14), (0.78, 0.14), (0.78, 0.78), (0.08, 0.78)], White);
@@ -735,57 +702,60 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.vtx((0.88, 0.12));
     }
     Icon::Coincident => {
-      k.sk(&[(0.1, 0.78), (0.5, 0.5)], Violet);
-      k.sk(&[(0.5, 0.5), (0.92, 0.72)], Violet);
-      k.circle((0.5, 0.5), 0.12, Some(Violet), None);
+      k.sk(&[(0.1, 0.78), (0.5, 0.5)], Slate);
+      k.sk(&[(0.5, 0.5), (0.92, 0.72)], Slate);
+      k.circle((0.5, 0.5), 0.13, Some(Violet), None);
     }
     Icon::Horizontal => {
-      k.thick((0.1, 0.62), (0.9, 0.62), Violet, 1.4);
+      k.thick((0.1, 0.62), (0.9, 0.62), Slate, 1.2);
       k.text((0.5, 0.3), "H", 0.4, Violet);
     }
     Icon::Vertical => {
-      k.thick((0.64, 0.1), (0.64, 0.9), Violet, 1.4);
+      k.thick((0.64, 0.1), (0.64, 0.9), Slate, 1.2);
       k.text((0.3, 0.5), "V", 0.4, Violet);
     }
     Icon::Parallel => {
-      k.thick((0.14, 0.82), (0.52, 0.14), Violet, 1.4);
-      k.thick((0.48, 0.86), (0.86, 0.18), Violet, 1.4);
+      k.thick((0.14, 0.82), (0.52, 0.14), Slate, 1.2);
+      k.thick((0.48, 0.86), (0.86, 0.18), Violet, 1.5);
     }
     Icon::Perpendicular => {
-      k.thick((0.1, 0.86), (0.9, 0.86), Violet, 1.4);
-      k.thick((0.3, 0.86), (0.3, 0.12), Violet, 1.4);
-      k.sk(&[(0.3, 0.68), (0.48, 0.68), (0.48, 0.86)], Violet);
+      k.thick((0.08, 0.86), (0.92, 0.86), Slate, 1.2);
+      k.thick((0.34, 0.86), (0.34, 0.1), Violet, 1.5);
+      k.sk(&[(0.34, 0.66), (0.54, 0.66), (0.54, 0.86)], Slate);
     }
     Icon::Tangent => {
-      k.ska((0.5, 0.62), 0.26, 0.0, TAU, Violet);
-      k.thick((0.06, 0.36), (0.94, 0.36), Violet, 1.4);
+      k.ska((0.5, 0.62), 0.27, 0.0, TAU, Slate);
+      k.thick((0.04, 0.35), (0.96, 0.35), Violet, 1.5);
     }
     Icon::Equal => {
-      k.thick((0.16, 0.38), (0.84, 0.38), Violet, 1.8);
-      k.thick((0.16, 0.62), (0.84, 0.62), Violet, 1.8);
+      k.thick((0.1, 0.34), (0.9, 0.34), Slate, 1.2);
+      k.thick((0.1, 0.7), (0.9, 0.7), Slate, 1.2);
+      k.thick((0.44, 0.22), (0.56, 0.46), Violet, 1.4);
+      k.thick((0.44, 0.58), (0.56, 0.82), Violet, 1.4);
     }
     Icon::Concentric => {
-      k.ska((0.5, 0.5), 0.4, 0.0, TAU, Violet);
+      k.ska((0.5, 0.5), 0.41, 0.0, TAU, Slate);
       k.ska((0.5, 0.5), 0.2, 0.0, TAU, Violet);
+      k.dot((0.5, 0.5), Violet);
     }
     Icon::Midpoint => {
-      k.sk(&[(0.08, 0.72), (0.92, 0.28)], Violet);
-      k.fill(&[(0.5, 0.3), (0.64, 0.58), (0.36, 0.58)], Violet);
+      k.sk(&[(0.08, 0.72), (0.92, 0.28)], Slate);
+      k.fill(&[(0.5, 0.28), (0.66, 0.6), (0.34, 0.6)], Violet);
     }
     Icon::Collinear => {
-      k.thick((0.06, 0.78), (0.38, 0.58), Violet, 1.4);
-      k.thick((0.62, 0.42), (0.94, 0.22), Violet, 1.4);
-      k.dashed((0.38, 0.58), (0.62, 0.42), Violet);
+      k.thick((0.06, 0.78), (0.38, 0.58), Slate, 1.2);
+      k.thick((0.62, 0.42), (0.94, 0.22), Violet, 1.5);
+      k.dashed((0.38, 0.58), (0.62, 0.42), Slate);
     }
     Icon::Symmetric => {
-      k.dashed((0.5, 0.06), (0.5, 0.94), Violet);
-      k.circle((0.2, 0.5), 0.09, Some(Violet), None);
-      k.circle((0.8, 0.5), 0.09, Some(Violet), None);
+      k.dashed((0.5, 0.04), (0.5, 0.96), Slate);
+      k.circle((0.18, 0.5), 0.1, Some(Violet), None);
+      k.circle((0.82, 0.5), 0.1, Some(Violet), None);
     }
     Icon::Fix => {
-      k.ska((0.5, 0.44), 0.2, 0.0, PI, Violet);
-      k.fill(&[(0.22, 0.44), (0.78, 0.44), (0.78, 0.88), (0.22, 0.88)], Violet);
-      k.circle((0.5, 0.64), 0.06, Some(VioletLight), None);
+      k.ska((0.5, 0.44), 0.2, 0.0, PI, Slate);
+      k.fill(&[(0.22, 0.44), (0.78, 0.44), (0.78, 0.9), (0.22, 0.9)], Violet);
+      k.circle((0.5, 0.64), 0.06, Some(White), None);
     }
     Icon::Finish => {
       k.circle((0.5, 0.5), 0.46, Some(Green), None);
@@ -1610,15 +1580,17 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.vtx((0.06, 0.94));
     }
     Icon::HorizVert => {
-      k.thick((0.1, 0.86), (0.9, 0.86), Violet, 1.4);
-      k.thick((0.5, 0.86), (0.5, 0.1), Violet, 1.4);
-      k.sk(&[(0.3, 0.86), (0.3, 0.76)], Violet);
-      k.sk(&[(0.7, 0.86), (0.7, 0.76)], Violet);
+      k.thick((0.08, 0.88), (0.92, 0.88), Slate, 1.2);
+      k.thick((0.5, 0.88), (0.5, 0.1), Slate, 1.2);
+      k.sk(&[(0.26, 0.88), (0.26, 0.74)], Violet);
+      k.sk(&[(0.74, 0.88), (0.74, 0.74)], Violet);
+      k.sk(&[(0.5, 0.34), (0.64, 0.34)], Violet);
+      k.sk(&[(0.5, 0.6), (0.64, 0.6)], Violet);
     }
     Icon::Curvature => {
-      k.ska((0.1, 0.1), 0.42, -FRAC_PI_2, 0.0, Violet);
+      k.ska((0.1, 0.1), 0.42, -FRAC_PI_2, 0.0, Slate);
       k.ska((0.9, 0.9), 0.42, FRAC_PI_2, PI, Violet);
-      k.circle((0.5, 0.5), 0.08, Some(Violet), None);
+      k.circle((0.5, 0.5), 0.09, Some(Violet), None);
     }
     Icon::PolygonCon => {
       let pts: Vec<(f32, f32)> = (0..5)
@@ -1627,7 +1599,10 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
           (0.5 + t.cos() * 0.42, 0.54 + t.sin() * 0.42)
         })
         .collect();
-      k.skc(&pts, Violet);
+      k.skc(&pts, Slate);
+      for p in &pts {
+        k.circle(*p, 0.07, Some(Violet), None);
+      }
     }
     Icon::FinishAuto => {
       k.circle((0.5, 0.5), 0.46, Some(Teal), None);
