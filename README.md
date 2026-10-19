@@ -13,8 +13,10 @@ change a parameter and watch the whole history rebuild.
   rest of the timeline, as in Fusion.
 - **User parameters and expressions.** Any value field takes `40 mm`, `width / 2 + 3`,
   `1.5 in`, `30 deg` or `sqrt(a^2 + b^2)`.
-- **Constrained sketches.** Line/polyline, two-point and centre rectangles, circles, 3-point
-  and centre arcs, splines, polygons, slots and points; 20 constraint types (coincident, horizontal,
+- **Constrained sketches.** Line/polyline and midpoint lines; two-point, centre and 3-point
+  rectangles; centre, 2-point and 3-point circles; 3-point, centre and tangent arcs; fit and
+  control point splines, ellipses and conics; inscribed, circumscribed and edge polygons; centre,
+  overall, centre-point and arc slots; points and text (glyph outlines you can extrude); 20 constraint types (coincident, horizontal,
   vertical, parallel, perpendicular, tangent, equal, concentric, midpoint, collinear,
   symmetric, fix, point-on-curve); driving dimensions (distance, horizontal/vertical,
   radius, diameter, angle, point-to-line). The solver reports degrees of freedom, colours
@@ -25,11 +27,25 @@ change a parameter and watch the whole history rebuild.
 - **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face; taper
   angle; thin walls inside/outside/centred; new body, join, cut, intersect), revolve, fillet
   (constant or variable radius), chamfer (equal, two distances, or distance and angle),
-  press-pull of flat faces, shell, box/cylinder/sphere/torus, offset
-  construction planes, mirror, rectangular and circular patterns, move/rotate, combine.
+  press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
+  rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
+- **Construction geometry.** Planes offset, at an angle, midway, through three points or two
+  edges, tangent to a round face, or along a path; axes through a round face, normal to a face,
+  where two planes meet, through two points or along an edge; points at vertices, circle
+  centres, edge/plane and three-plane intersections, or along a path. They follow the model and
+  can be sketch planes, revolve axes and inputs to each other.
+- **Threads, coils, pipes, ribs and webs.** Cosmetic or modeled (an ISO 60° helical groove)
+  threads with ISO metric coarse pitches by default, coils with round, square or triangular
+  wire, solid or hollow pipes along a path, ribs and webs that grow until they meet the body.
+- **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
 - **More solid features.** Loft (smooth or ruled, open or closed), sweep along a path of lines
   and arcs, holes at sketch points (simple, counterbore, countersink, drill point, through all),
   split body by a plane or by another body, draft.
+- **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
+  sketch, ruled surfaces between edges, offset surfaces, trim with a plane, stitch surfaces into
+  a solid, unstitch, reverse normals, and thicken faces or surfaces into solids.
+- **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
+  clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
@@ -48,6 +64,21 @@ change a parameter and watch the whole history rebuild.
   hidden-line projections; automatic overall dimensions, hole callouts and centre marks; manual
   dimensions, notes, a title block and an assembly parts list; export to PDF, SVG and DXF. Drawings live in the design
   and follow parameter changes.
+- **Selecting and inspecting, as in Fusion.** Window selection (left to right picks what is
+  inside, right to left what the box touches), Select Other (Alt+click or hold) for what's behind
+  the front face, selection priority (face, edge, body, component) and filters, Select All and
+  Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
+  drawn in the view); centre of mass; section analysis capped with the exact cut face; zebra,
+  draft, accessibility and curvature-map analyses.
+- **Drag arrows.** Drag the arrow of an extrude or offset plane to change its distance.
+- **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
+  rubber, wood and glass, on bodies or components (A).
+- **Manufacture.** A milling workspace: setups with stock and a work origin, facing, 2D pockets
+  (islands stay standing), 2D contours and drilling (G81/G83), toolpaths drawn in the view and
+  kept in step with the design, machining time, and metric G-code for Fanuc/Haas-style
+  controls (`.nc`). See [Manufacture](#manufacture-cam).
+- **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
+  thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
   follows the body when it changes).
@@ -98,6 +129,12 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Components and joints  | Right-click a component in the browser to rename, ground, duplicate or delete it; double-click a joint to drive it |
 | Picking in a command   | With a command dialog open, clicks add to (or remove from) its selection |
 | Edit a feature         | Double-click it in the timeline                             |
+| Window selection       | Left-drag with the select tool: left to right = fully inside, right to left = touching |
+| Select Other           | Alt+click, or hold the mouse button still; SELECT ▾ also sets selection priority and filters |
+| Measure                | Select one or two bodies, faces or edges, then I            |
+| Drag arrow             | In Extrude or Offset Plane, drag the arrow head             |
+| Appearance             | A                                                           |
+| Compute All            | Ctrl+B (in the background)                                  |
 | Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |
 | All commands of a group | Click the group name under the toolbar icons (CREATE ▾, MODIFY ▾, …) |
 | Undo / Redo            | Ctrl+Z / Ctrl+Y                                             |
@@ -180,6 +217,32 @@ Windows, `~/Library/Application Support/CLFusion` on macOS; set `CLF_DATA_DIR` t
 The hub is plain files: `hub.json` (the index, replaced atomically) and one immutable file per
 version, so the app and the CLI can use the same hub at the same time.
 
+## Manufacture (CAM)
+
+Switch the workspace to **Manufacture**. **New Setup** puts stock around the part (side and top
+offsets) with the work origin (G54) at the top of the stock, minimum X/Y corner; Z is negative
+into the stock. Then add operations:
+
+- **Face** takes the stock top down to the part's top in zigzag rows.
+- **2D Pocket** clears down to the flat floor faces you pick, in rings from the centre out; holes
+  in a floor stay as islands. Step-over, step-down and stock to leave are per operation.
+- **2D Contour** follows the part's outline (or picked faces) a tool radius outside — or inside —
+  climb milled, in step-downs through the part.
+- **Drill** drills every vertical hole (or the ones you pick), pecking if asked.
+
+Toolpaths (cutting moves blue, rapids dashed orange) are drawn with the stock and follow design
+changes; **Generate** reports the machining time and **Post Process** writes the G-code.
+
+```sh
+clfusion-cli exec part.clf '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1}' --save part.clf
+clfusion-cli exec part.clf '{"cmd": "cam.pocket", "floors": [{"point": [35, 25, 12]}], "tool_diameter": 6}' --save part.clf
+clfusion-cli exec part.clf '{"cmd": "cam.post", "path": "part.nc"}'
+```
+
+The toolpaths are 2.5-axis: there is no adaptive clearing, rest machining, 3D surfacing,
+simulation of the stock removal or a post-processor library yet; check the G-code against your
+machine before running it.
+
 ## Headless CLI and scripting
 
 ```sh
@@ -205,7 +268,8 @@ clfusion-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step
 
 `clfusion-cli mcp [design.clf]` is a Model Context Protocol server on stdio. Each command is a
 tool (dots become underscores: `sheet.edge_flange` → `sheet_edge_flange`) and `view_render`
-returns a PNG of the model. To use it from Claude Code:
+returns a PNG of the model, optionally sectioned (`section: {plane, offset, flip}`) or with an
+analysis (`analysis: zebra | draft | accessibility | curvature`). To use it from Claude Code:
 
 ```sh
 claude mcp add clfusion -- /path/to/clfusion-cli mcp
