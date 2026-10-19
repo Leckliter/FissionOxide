@@ -448,6 +448,10 @@ impl Ctx<'_> {
         self.apply_surface(id, kind)
       }
       FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
+      FeatureKind::JointOrigin { .. }
+      | FeatureKind::RigidGroup { .. }
+      | FeatureKind::MotionLink { .. }
+      | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

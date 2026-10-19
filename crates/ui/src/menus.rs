@@ -11,7 +11,7 @@ use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
-use crate::{App, Tool, theme};
+use crate::{App, Tool, assembly_forms, theme};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Item {
@@ -149,7 +149,7 @@ const SOLID_CREATE: &[E] = &[
   E::Sep,
   x("Create Base Feature", Icon::BaseFeature),
   E::Sub("Create PCB", CREATE_PCB),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SOLID_MODIFY: &[E] = &[
@@ -248,7 +248,7 @@ const INSERT: &[E] = &[
   x("Insert SVG", Icon::InsertSvg),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
-  x("Insert Component", Icon::InsertComponent).off(),
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
   x("Insert Derive", Icon::Derive),
@@ -269,6 +269,12 @@ const ASSEMBLE: &[E] = &[
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
+  E::Sep,
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("Rigid Group", Icon::Component, D(Kind::Form(&assembly_forms::RIGID_GROUP))),
+  c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
+  c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
+  c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
 ];
 
 const SELECTION_TOOLS: &[E] = &[
@@ -327,7 +333,7 @@ const SURFACE_CREATE: &[E] = &[
   E::Sep,
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SURFACE_MODIFY: &[E] = &[
@@ -398,7 +404,7 @@ const SHEET_CREATE: &[E] = &[
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
   c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
-  x("Joint Origin", Icon::JointOrigin),
+  c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
 
 const SHEET_MODIFY: &[E] = &[

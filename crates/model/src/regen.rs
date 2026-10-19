@@ -145,6 +145,12 @@ struct State {
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
   body_counter: u32,
+  /// Saved joint origins: component and frame (as the component is now).
+  joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
+  /// How far joints have moved each component.
+  placed: BTreeMap<crate::ComponentId, DMat4>,
+  /// Rigid groups so far.
+  groups: Vec<Vec<crate::ComponentId>>,
 }
 
 /// The regenerated design.
@@ -163,6 +169,10 @@ pub struct Model {
   /// Evaluated parameter values (mm / rad).
   pub params: HashMap<String, f64>,
   pub param_errors: HashMap<String, String>,
+  /// Saved joint origins: component and frame, where the component ended up.
+  pub joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
+  /// How far joints have moved each component (identity if they haven't).
+  pub placed: BTreeMap<crate::ComponentId, DMat4>,
 }
 
 impl Model {
@@ -213,11 +223,13 @@ impl Regenerator {
   /// references are refreshed to the faces/edges they resolved to.
   pub fn regenerate(&mut self, design: &mut Design) -> Model {
     let (params, param_errors) = eval_params(design);
+    let mates = assemble::mates(design, &params);
     let mut key = {
       let mut h = DefaultHasher::new();
       serde_json::to_string(&design.parameters).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.sheet_metal_rules).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.components).unwrap_or_default().hash(&mut h);
+      mates.key().hash(&mut h);
       h.finish()
     };
     let active = design.active_len();
@@ -250,8 +262,14 @@ impl Regenerator {
       st.suppressed = feature.suppressed;
       if !feature.suppressed {
         let targets = feature.targets.clone();
-        let mut ctx =
-          Ctx { params: &params, rules: &rules, components: &components, targets: &targets, state: &mut state };
+        let mut ctx = Ctx {
+          params: &params,
+          rules: &rules,
+          components: &components,
+          targets: &targets,
+          state: &mut state,
+          mates: &mates,
+        };
         let id = feature.id;
         let mut kind = feature.kind.clone();
         match ctx.apply(id, &mut kind) {
@@ -281,6 +299,8 @@ impl Regenerator {
       status,
       params,
       param_errors,
+      joint_origins: state.joint_origins,
+      placed: state.placed,
     }
   }
 }
@@ -349,6 +369,7 @@ struct Ctx<'a> {
   /// The current feature's join/cut targets (empty = any body it touches).
   targets: &'a [BodyId],
   state: &'a mut State,
+  mates: &'a assemble::Mates,
 }
 
 type FResult = Result<Option<String>, String>;
@@ -1122,12 +1143,13 @@ impl Ctx<'_> {
         {
           return Err("the fixed component no longer exists".into());
         }
-        let motion = assembly::Motion {
+        let mut motion = assembly::Motion {
           rotation: self.angle(rotation)?,
           slide: self.len(slide)?,
           slide2: self.len(slide2)?,
           pitch: self.angle(pitch)?,
         };
+        self.mates.drive(id, &mut motion);
         if let Some((lo, hi)) = &limits.rotation {
           let (lo, hi) = (self.angle(lo)?, self.angle(hi)?);
           if !(lo - 1e-9..=hi + 1e-9).contains(&motion.rotation) {
@@ -1157,15 +1179,7 @@ impl Ctx<'_> {
           *as_built,
           motion,
         );
-        let bodies: Vec<usize> = comp.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect();
-        if bodies.is_empty() {
-          return Err(format!("{} has no bodies", comp.name));
-        }
-        for bi in bodies {
-          let s = self.state.bodies[bi].shape.transformed(m).map_err(ke)?;
-          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
-        }
-        Ok(None)
+        self.move_component(id, *moving, *fixed, m)
       }
       FeatureKind::CopyComponent { source, translate } => {
         let comp = self.components.iter().find(|c| c.id == *source).ok_or("the source component no longer exists")?;
@@ -1634,6 +1648,7 @@ impl Ctx<'_> {
         *edge = EdgeRef::from_edge(edge.body, info, body.faces());
         assembly::edge_frame(info, body.faces())
       }
+      assembly::JointGeometry::Origin { origin } => self.origin_frame(*origin),
     }
   }
 
@@ -1978,6 +1993,8 @@ pub use solid::boundary_cells;
 mod tests_solid;
 mod surface;
 mod sheet2;
+
+mod assemble;
 
 #[cfg(test)]
 mod tests;

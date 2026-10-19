@@ -247,6 +247,17 @@ cmds! {
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap}";
   "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
   "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap, relief?: none|round|square|tear, relief_size?, rule?}";
+  "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, flip?, name?}";
+  "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
+  "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
+  "contact_set.create" => "Contact set: components that can't pass through each other; driving a joint stops at contact", "{components?: [id], bodies?: [id], name?}";
+  "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
+  "contact_set.delete" => "Delete a contact set", "{contact_set}";
+  "contact_set.list" => "List the contact sets", "{}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version", "{item, version?, name?, translate?: [x,y,z], link?: bool}";
+  "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
+  "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
+  "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

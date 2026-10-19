@@ -70,7 +70,9 @@ change a parameter and watch the whole history rebuild.
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
   parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
   bill of materials with masses. Component copies are linked: edit the original and every
-  copy follows.
+  copy follows. Saved joint origins, rigid groups, motion links (gears, rack and pinion), contact
+  sets that stop motion where bodies touch, and components inserted from other designs in the
+  data hub as linked references that update to the source's newest version.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
   section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
   hidden-line projections; broken views; automatic overall dimensions, hole callouts and centre marks; manual,
@@ -207,6 +209,22 @@ a circular edge (its centre and axis) or an explicit point. The moving component
 brought onto the fixed one with the Z axes facing each other (so faces mate); `flip` aligns them
 instead, `angle` and `offset` adjust the placement, and the joint's motion (`rotation`, `slide`,
 `slide2`, `pitch`, depending on the type) can be any expression.
+
+- **Joint origins** (`joint_origin`) save a frame on a component — a face, an edge or a point,
+  turned, offset or flipped — that joints use as `{"origin": "Name"}`. It moves with its
+  component, so whatever is jointed to it follows the component's own joints.
+- **Rigid groups** (`rigid_group`) make components move as one: joints after the group in the
+  timeline move every member, and members a joint before it didn't move (say, a part modeled
+  next to an already jointed one) keep their place relative to the others as those move.
+- **Motion links** (`motion_link`) drive one joint's motion from another's: when the leader
+  moves `leader_value`, the follower moves `follower_value` (`360 deg` ↔ `2 * pi * 5 mm` is a
+  rack and pinion with a 5 mm pitch radius). Links chain; loops are reported.
+- **Contact sets** (`contact_set.create`) list components that can't pass through each other:
+  Drive Joints and motion studies stop where their bodies first touch.
+- **Insert Component** (`component.insert`, or right-click a design in the data panel) brings a
+  hub design in as a component. Its bodies are stored in the design, so it opens without the
+  hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
+  gets it, and `component.break_link` keeps a local copy.
 
 Drawings annotate model points in a view, so annotations move with their view and follow
 parameter changes:

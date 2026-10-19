@@ -75,6 +75,9 @@ pub struct Design {
   /// Manufacture setups (CAM).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cam: Vec<cam::Setup>,
+  /// Assembly contact sets (see [`assembly::ContactSet`]).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub contact_sets: Vec<assembly::ContactSet>,
   #[serde(default)]
   next_id: u32,
 }
@@ -1134,10 +1137,80 @@ pub enum FeatureKind {
     #[serde(default)]
     corners: CornerMode,
   },
+  /// A saved joint origin on a component: a frame (from a face, an edge or a point, then
+  /// offset, turned and flipped) that joints can mate to and that moves with the component.
+  JointOrigin {
+    #[serde(default = "no_component")]
+    component: ComponentId,
+    #[serde(default = "origin_point")]
+    geometry: JointGeometry,
+    /// Rotation about the origin's Z axis.
+    #[serde(default = "zero")]
+    angle: String,
+    /// Offset along the origin's Z axis.
+    #[serde(default = "zero")]
+    offset: String,
+    /// Reverse the Z axis.
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Components that move as one: a joint moving any of them moves them all.
+  RigidGroup {
+    #[serde(default)]
+    components: Vec<ComponentId>,
+    /// Where joints had put each member when the group was made (column-major matrices, one per
+    /// component). Members that joints haven't moved since, e.g. bodies modeled after the joint,
+    /// are brought along by the others' movement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    poses: Vec<[f64; 16]>,
+  },
+  /// Drives one joint's motion from another's (gears, rack and pinion, leadscrews): when the
+  /// leader moves `leader_value`, the follower moves `follower_value`.
+  MotionLink {
+    #[serde(default = "no_feature")]
+    leader: FeatureId,
+    #[serde(default)]
+    leader_motion: assembly::MotionAxis,
+    #[serde(default = "no_feature")]
+    follower: FeatureId,
+    #[serde(default)]
+    follower_motion: assembly::MotionAxis,
+    #[serde(default = "full_turn")]
+    leader_value: String,
+    #[serde(default = "full_turn")]
+    follower_value: String,
+    #[serde(default)]
+    reverse: bool,
+  },
+  /// A component inserted from another design: the source's bodies, stored as BRep text. With a
+  /// `source`, it is a linked reference to a data hub design that can be updated to the source's
+  /// newest version (or unlinked to keep a local copy).
+  InsertDesign {
+    #[serde(default)]
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<assembly::HubSource>,
+    #[serde(default)]
+    breps: Vec<String>,
+    #[serde(default = "zeros")]
+    translate: [String; 3],
+  },
 }
 
 fn lofted_bends() -> String {
   "8".to_string()
+}
+
+fn no_component() -> ComponentId {
+  ComponentId(0)
+}
+
+fn no_feature() -> FeatureId {
+  FeatureId(0)
+}
+
+fn origin_point() -> JointGeometry {
+  JointGeometry::Point { point: [0.0; 3], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] }
 }
 
 fn stitch_tolerance() -> String {
@@ -1254,6 +1327,10 @@ impl FeatureKind {
       FeatureKind::TrimWith { .. } => "Trim",
       FeatureKind::LoftedFlange { .. } => "LoftedFlange",
       FeatureKind::MiterFlange { .. } => "MiterFlange",
+      FeatureKind::JointOrigin { .. } => "JointOrigin",
+      FeatureKind::RigidGroup { .. } => "RigidGroup",
+      FeatureKind::MotionLink { .. } => "MotionLink",
+      FeatureKind::InsertDesign { .. } => "Insert",
     }
   }
 
@@ -1319,6 +1396,11 @@ impl FeatureKind {
       FeatureKind::TrimWith { tool: surface::TrimTool::Sketch { sketch, .. }, .. } => vec![*sketch],
       FeatureKind::LoftedFlange { from, to, .. } => vec![from.sketch, to.sketch],
       FeatureKind::MiterFlange { sketch, .. } => vec![*sketch],
+      FeatureKind::Joint { moving_origin, fixed_origin, .. } => {
+        [moving_origin, fixed_origin].into_iter().filter_map(assembly::JointGeometry::origin).collect()
+      }
+      FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
+      FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       _ => vec![],
     }
   }
@@ -1366,6 +1448,7 @@ impl Design {
       drawings: Vec::new(),
       attributes: Vec::new(),
       cam: Vec::new(),
+      contact_sets: Vec::new(),
       next_id: 1,
     }
   }
@@ -1648,8 +1731,21 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+      if let FeatureKind::JointOrigin { component, .. } = &f.kind
+        && *component == id
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
+      if let FeatureKind::RigidGroup { components, .. } = &f.kind
+        && components.contains(&id)
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
     }
     self.components.retain(|c| c.id != id);
+    for cs in &mut self.contact_sets {
+      cs.components.retain(|c| *c != id);
+    }
     Ok(())
   }
 
@@ -1944,6 +2040,20 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
     FeatureKind::LoftedFlange { bends, .. } => f(bends),
     FeatureKind::MiterFlange { .. } => {}
+    FeatureKind::JointOrigin { angle, offset, .. } => {
+      f(angle);
+      f(offset);
+    }
+    FeatureKind::MotionLink { leader_value, follower_value, .. } => {
+      f(leader_value);
+      f(follower_value);
+    }
+    FeatureKind::InsertDesign { translate, .. } => {
+      for t in translate.iter_mut() {
+        f(t);
+      }
+    }
+    FeatureKind::RigidGroup { .. } => {}
   }
 }
 

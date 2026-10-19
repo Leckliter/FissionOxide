@@ -16,7 +16,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Features  | Configurations (table-driven variants); base features (direct editing without history) |
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
 | Sheet     | Rounded bends between press-brake lofted flange facets; later cuts in a lofted flange's flat pattern; a flat pattern sketch that follows the model |
-| Assembly  | Contact sets; motion links; rigid groups; joint origins; insert a component from another design |
+| Assembly  | Pick saved joint origins and joints in the viewport (dialogs name them today); screw and cam motion; contact sets during viewport drags; nested sub-assemblies from inserted designs |
 | Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
 | Selection | Freeform and paint selection; vertex picking                                 |
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |

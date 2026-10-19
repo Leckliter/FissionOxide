@@ -14,6 +14,7 @@ mod features;
 pub mod files;
 pub mod hub;
 mod inspect;
+mod mates;
 pub mod scene;
 mod solid;
 mod surfaces;
@@ -440,6 +441,8 @@ impl Session {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_assembly;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
