@@ -109,6 +109,28 @@ pub(crate) mod ffi {
     fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
     fn draft(s: &Shape, faces: &[u32], plane: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
 
+    fn edge_at_index(s: &Shape, edge: u32) -> Result<UniquePtr<Shape>>;
+    fn min_distance(a: &Shape, b: &Shape) -> Result<Vec<f64>>;
+    fn helix_sweep(
+      profile: &Shape,
+      axis: &[f64],
+      radius: f64,
+      pitch: f64,
+      height: f64,
+      left: bool,
+    ) -> Result<UniquePtr<Shape>>;
+    fn thicken(s: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
+    fn scale(s: &Shape, cx: f64, cy: f64, cz: f64, sx: f64, sy: f64, sz: f64) -> Result<UniquePtr<Shape>>;
+    fn remove_faces(s: &Shape, faces: &[u32]) -> Result<UniquePtr<Shape>>;
+    fn split_faces(s: &Shape, faces: &[u32], tool: &Shape) -> Result<UniquePtr<Shape>>;
+    fn patch(boundary: &Shape) -> Result<UniquePtr<Shape>>;
+    fn face_loops(s: &Shape, deflection: f64) -> Result<EdgeData>;
+    fn reversed(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn make_vertex(x: f64, y: f64, z: f64) -> Result<UniquePtr<Shape>>;
+    fn ruled(a: &Shape, b: &Shape) -> Result<UniquePtr<Shape>>;
+    fn offset_shape(s: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
+    fn offset_polylines(face: &Shape, d: f64, deflection: f64) -> Result<EdgeData>;
+
     fn solid_count(s: &Shape) -> u32;
     fn solid_at(s: &Shape, i: u32) -> Result<UniquePtr<Shape>>;
     fn compound_new() -> UniquePtr<Shape>;
@@ -131,3 +153,9 @@ pub(crate) mod ffi {
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
   }
 }
+
+// SAFETY: a Shape is a TopoDS_Shape, whose handles OCCT reference-counts atomically. The engine
+// moves a design's shapes to a worker thread for background regeneration and back; while that
+// runs the other thread makes no kernel calls (see `clf_engine::Rebuild`), so no shape is used
+// from two threads at once.
+unsafe impl Send for ffi::Shape {}

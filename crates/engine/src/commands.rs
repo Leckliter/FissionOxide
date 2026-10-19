@@ -68,6 +68,7 @@ cmds! {
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
   "hub.download" => "Write an item version to a file; the extension picks the format (.clfz includes history)", "{item?, version?, path, ...export options}";
+  "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
   "transaction.begin" => "Group the following commands into one undo step (for scripts and plugins)", "{}";
@@ -81,11 +82,11 @@ cmds! {
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
   "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
-  "sketch.rect" => "Two-point rectangle, or centre rectangle with {center, corner}", "{corner1, corner2} | {center, corner}";
-  "sketch.circle" => "Circle", "{center: [x,y], radius | diameter}";
-  "sketch.arc" => "Arc through three points or around a centre", "{start, mid, end} | {center, start, end}";
-  "sketch.polygon" => "Regular polygon inscribed in a circle", "{center, vertex, sides}";
-  "sketch.slot" => "Centre-to-centre slot", "{start, end, width}";
+  "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
+  "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
+  "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end} | {tangent: curve, start, end}";
+  "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
+  "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
   "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix, points?: [id], curves?: [id]}";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
@@ -100,6 +101,10 @@ cmds! {
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
   "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
+  "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
+  "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
+  "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
+  "sketch.text" => "Text as sketch curves (closed outlines you can extrude)", "{at: [x,y], text, height?, angle?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -124,6 +129,41 @@ cmds! {
   "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?, targets?: [body] (bodies join/cut may change)}";
   "torus" => "Torus primitive", "{plane?, at?, major, minor, operation?, targets?: [body] (bodies join/cut may change)}";
   "plane.offset" => "Construction plane offset from a plane or planar face; a plane can also be {origin: [x,y,z], normal, x?} anywhere a plane is taken", "{plane, offset?}";
+  "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
+  "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
+  "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
+  "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
+  "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
+  "pipe" => "Round tube along a path sketch (solid, or hollow with a wall)", "{path: sketch, path_curves?, diameter, wall?, operation?}";
+  "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
+  "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
+  "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
+  "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
+  "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
+  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?, flip?, operation?}";
+  "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
+  "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
+  "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
+  "surface.stitch" => "Sew surface bodies together (into a solid when they close)", "{bodies, tolerance?}";
+  "surface.unstitch" => "Break bodies into one surface body per face", "{bodies}";
+  "surface.reverse" => "Flip surface normals", "{bodies}";
+  "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
+  "surface.offset" => "New surfaces offset from faces or bodies", "{faces? | bodies?, distance}";
+  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it; flip for the other)", "{bodies, tool: plane, flip?}";
+  "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
+  "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
+  "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
+  "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
+  "appearances" => "The appearance library", "{}";
+  "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner", "{name?, body?, stock_side?, stock_top?}";
+  "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool: {diameter, number?, rpm?, feed?, plunge?} | tool_diameter, stepover?: fraction, stepdown?}";
+  "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands)", "{setup?, floors: [face], tool | tool_diameter, stepover?, stepdown?, stock_to_leave?}";
+  "cam.contour" => "2D contour around the outline of faces (default the part's bottom), down through the part", "{setup?, faces?, inside?, tool | tool_diameter, stepdown?, stock_to_leave?}";
+  "cam.drill" => "Drill vertical holes (default every hole); peck > 0 pecks", "{setup?, holes?: [face], tool | tool_diameter, peck?}";
+  "cam.generate" => "Compute a setup's toolpaths (shown in the viewport): moves, length and time", "{setup?}";
+  "cam.post" => "Write a setup's G-code (Fanuc/Haas, metric, G54); without a path, returns it", "{setup?, path?}";
+  "cam.list" => "Setups and their operations", "{}";
+  "cam.delete" => "Delete a setup, or one of its operations", "{setup?, operation?}";
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
@@ -132,7 +172,6 @@ cmds! {
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
   "body.visible" => "Show or hide a body", "{body, visible}";
-  "body.color" => "Set a body's display colour (null = default)", "{body, color: \"#rrggbb\" | [r, g, b] | null}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature)", "{feature, set: {...}}";
   "feature.delete" => "Delete a feature and the features that depend on it", "{feature}";
@@ -147,6 +186,10 @@ cmds! {
   "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, background?: \"#rrggbb\"}";
   "select" => "Set the selection", "{items: [Sel]}";
   "selection" => "The current selection", "{}";
+  "select.all" => "Select every body (or every face, edge, or curve of the edited sketch)", "{kind?: bodies|faces|edges|sketch}";
+  "select.invert" => "Select what isn't selected (of the selected kind)", "{}";
+  "measure" => "Measure one entity (properties) or the distance and angle between two; an entity is {body}, {body, face}, {body, edge} or {point, snap?: face|edge}; default the selection", "{a?, b?}";
+  "inspect.center_of_mass" => "Centre of mass, volume and mass of bodies (default all visible)", "{bodies?}";
   "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
   "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
   "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
@@ -193,6 +236,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   if let Some(r) = crate::drawings::run(s, name, p) {
     return r;
   }
+  if let Some(r) = crate::inspect::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::features::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::cam::run(s, name, p) {
+    return r;
+  }
   match name {
     "help" => {
       Ok(json!(COMMANDS.iter().map(|c| json!({"id": c.id, "help": c.help, "params": c.params})).collect::<Vec<_>>()))
@@ -229,14 +281,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "formats" => Ok(json!(clf_exchange::FORMATS)),
     "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
     n if n.starts_with("hub.") => crate::hub::run(s, n, p),
+    "compute_all" => {
+      s.regen.clear();
+      s.rebuild();
+      Ok(json!({"errors": s.model.errors()}))
+    }
     "undo" => Ok(json!({"done": s.undo()})),
     "redo" => Ok(json!({"done": s.redo()})),
     "transaction.begin" => {
-      s.begin()?;
+      s.begin_transaction()?;
       Ok(json!({}))
     }
-    "transaction.commit" => Ok(json!({"changed": s.commit()?})),
-    "transaction.rollback" => Ok(json!({"changed": s.rollback()?})),
+    "transaction.commit" => Ok(json!({"changed": s.commit_transaction()?})),
+    "transaction.rollback" => Ok(json!({"changed": s.rollback_transaction()?})),
     "param.add" => {
       let (name, expr) = (req_str(p, "name")?.to_string(), req_expr(p, "expr")?);
       let kind = param_kind(opt_str(p, "kind"))?;
@@ -282,8 +339,18 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.edit_sketch = None;
       Ok(json!({}))
     }
-    "sketch.line" | "sketch.rect" | "sketch.circle" | "sketch.arc" | "sketch.polygon" | "sketch.slot"
-    | "sketch.point" | "sketch.spline" => draw(s, name, p),
+    "sketch.line"
+    | "sketch.rect"
+    | "sketch.circle"
+    | "sketch.arc"
+    | "sketch.polygon"
+    | "sketch.slot"
+    | "sketch.point"
+    | "sketch.spline"
+    | "sketch.control_spline"
+    | "sketch.ellipse"
+    | "sketch.conic"
+    | "sketch.text" => draw(s, name, p),
     "sketch.constrain" => constrain(s, p),
     "sketch.dimension" => dimension(s, p),
     "sketch.set_dimension" => {
@@ -633,19 +700,6 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.dirty = true;
       Ok(json!({}))
     }
-    "body.color" => {
-      let b = BodyId(req_u32(p, "body")?);
-      s.model.body(b).ok_or(CmdError::new(format!("no body {}", b.0)))?;
-      let color = match p.get("color") {
-        None | Some(Value::Null) => None,
-        Some(c) => Some(parse_color(c)?),
-      };
-      s.edit(|d| {
-        d.body_settings_mut(b).color = color;
-        Ok(())
-      })?;
-      Ok(json!({}))
-    }
     "body.topology" => body_topology(s, p),
     "sketch.visible" => {
       let sk = FeatureId(req_u32(p, "sketch")?);
@@ -964,7 +1018,7 @@ pub(crate) fn expr_of(v: &Value) -> Result<String, CmdError> {
   }
 }
 
-fn req_expr(p: &Value, k: &str) -> Result<String, CmdError> {
+pub(crate) fn req_expr(p: &Value, k: &str) -> Result<String, CmdError> {
   expr_of(p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))?)
 }
 
@@ -1033,7 +1087,7 @@ fn params_scope(s: &Session) -> std::collections::HashMap<String, f64> {
   s.model.params.clone()
 }
 
-fn operation(p: &Value) -> Result<Operation, CmdError> {
+pub(crate) fn operation(p: &Value) -> Result<Operation, CmdError> {
   Ok(match opt_str(p, "operation").unwrap_or("new_body") {
     "new_body" | "new" => Operation::NewBody,
     "join" | "union" => Operation::Join,
@@ -1043,7 +1097,7 @@ fn operation(p: &Value) -> Result<Operation, CmdError> {
   })
 }
 
-fn body_sel(p: &Value) -> BodySel {
+pub(crate) fn body_sel(p: &Value) -> BodySel {
   if let Some(c) = p.get("component").and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok()) {
     return BodySel::Component { id: clf_model::ComponentId(c) };
   }
@@ -1051,7 +1105,7 @@ fn body_sel(p: &Value) -> BodySel {
   if v.is_empty() { BodySel::All } else { BodySel::Bodies { ids: v.into_iter().map(BodyId).collect() } }
 }
 
-fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
+pub(crate) fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
   let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   Ok(feature_status(s, id))
 }
@@ -1328,7 +1382,7 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
 // ---------------------------------------------------------------- references
 
 /// "xy" | "xz" | "yz" | {"feature": id} | {"body": id, "face": n}
-fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
+pub(crate) fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
   if let Some(name) = v.as_str() {
     let plane = match name.to_ascii_lowercase().as_str() {
       "xy" | "top" => OriginPlane::Xy,
@@ -1341,7 +1395,9 @@ fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
   if let Some(f) = v.get("feature").and_then(Value::as_u64) {
     let id = FeatureId(u32::try_from(f).map_err(|_| CmdError::new("bad feature"))?);
     return match s.design.feature(id).map(|f| &f.kind) {
-      Some(FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: id }),
+      Some(FeatureKind::ConstructionPlane { .. } | FeatureKind::PlaneBy { .. }) => {
+        Ok(PlaneRef::Construction { feature: id })
+      }
       _ => Err(CmdError::new("that feature is not a construction plane")),
     };
   }
@@ -1396,8 +1452,22 @@ pub fn face_at(s: &Session, p: DVec3, normal: Option<[f64; 3]>) -> Result<(BodyI
         }
         off
       } else {
-        // curved faces: distance to the nearest tessellation vertex of the face
-        nearest_vertex_dist(mesh, f.id, p)
+        // curved faces: near the face's triangles (they sag inside the true surface), then the
+        // exact distance where the surface is known
+        let sag = (b.diagonal() * 0.01).clamp(0.05, 2.0);
+        let dt = nearest_triangle_dist(mesh, f.id, p);
+        if dt > sag {
+          continue;
+        }
+        let radial = |o: DVec3| {
+          let v = p - o;
+          (v - f.normal * v.dot(f.normal)).length()
+        };
+        match f.kind {
+          clf_kernel::SurfaceKind::Cylinder => (radial(f.origin) - f.radius).abs(),
+          clf_kernel::SurfaceKind::Sphere => ((p - f.origin).length() - f.radius).abs(),
+          _ => dt.min(nearest_vertex_dist(mesh, f.id, p)) * 0.5,
+        }
       };
       if d < 0.05 && best.is_none_or(|(_, _, bd)| d < bd) {
         best = Some((b.id, f.id, d));
@@ -1405,6 +1475,35 @@ pub fn face_at(s: &Session, p: DVec3, normal: Option<[f64; 3]>) -> Result<(BodyI
     }
   }
   best.map(|(b, f, _)| (b, f)).ok_or_else(|| CmdError::new(format!("no face at {:?}", p.to_array())))
+}
+
+/// Distance from a point to the nearest triangle of a face's tessellation.
+fn nearest_triangle_dist(m: &clf_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
+  let v = |i: u32| m.positions.get(i as usize).map(|q| DVec3::new(q[0] as f64, q[1] as f64, q[2] as f64));
+  let mut best = f64::INFINITY;
+  for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+    if m.tri_face.get(t) != Some(&face) {
+      continue;
+    }
+    if let (Some(a), Some(b), Some(c)) = (v(tri[0]), v(tri[1]), v(tri[2])) {
+      best = best.min(point_triangle_dist(p, a, b, c));
+    }
+  }
+  best
+}
+
+fn point_triangle_dist(p: DVec3, a: DVec3, b: DVec3, c: DVec3) -> f64 {
+  let n = (b - a).cross(c - a);
+  let n2 = n.length_squared();
+  if n2 > 1e-24 {
+    // inside the triangle's prism: the distance to its plane
+    let q = p - n * ((p - a).dot(n) / n2);
+    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, w)| (*w - *u).cross(q - *u).dot(n) >= 0.0);
+    if inside {
+      return (p - q).length();
+    }
+  }
+  seg_dist3(a, b, p).min(seg_dist3(b, c, p)).min(seg_dist3(c, a, p))
 }
 
 fn nearest_vertex_dist(m: &clf_kernel::TriMesh, face: u32, p: DVec3) -> f64 {
@@ -1474,7 +1573,7 @@ fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
   Ok(out)
 }
 
-fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
+pub(crate) fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
   if let Some(n) = v.as_str() {
     return Ok(match n.to_ascii_lowercase().as_str() {
       "x" => AxisRef::X,
@@ -1485,6 +1584,13 @@ fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
   }
   if let Some(c) = v.get("line").and_then(Value::as_u64) {
     return Ok(AxisRef::SketchLine { curve: CurveId(u32::try_from(c).map_err(|_| CmdError::new("bad curve"))?) });
+  }
+  if let Some(f) = v.get("axis").and_then(Value::as_u64) {
+    let feature = FeatureId(u32::try_from(f).map_err(|_| CmdError::new("bad axis"))?);
+    if !s.model.axes.contains_key(&feature) {
+      return Err(CmdError::new("that feature is not a construction axis"));
+    }
+    return Ok(AxisRef::Construction { feature });
   }
   let body = BodyId(req_u32(v, "body")?);
   let edge = req_u32(v, "edge")?;
@@ -1504,7 +1610,7 @@ fn sketch_id(s: &Session, p: &Value) -> Result<FeatureId, CmdError> {
 }
 
 /// The sketch an extrude/revolve uses: `sketch` param, the edited sketch, or the last sketch.
-fn sketch_for_feature(s: &mut Session, p: &Value) -> Result<FeatureId, CmdError> {
+pub(crate) fn sketch_for_feature(s: &mut Session, p: &Value) -> Result<FeatureId, CmdError> {
   let id = match p.get("sketch").and_then(Value::as_u64) {
     Some(v) => FeatureId(u32::try_from(v).map_err(|_| CmdError::new("bad sketch id"))?),
     None => match s.edit_sketch {
@@ -1764,6 +1870,37 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           auto_hv(sketch, line);
         }
       }
+      "sketch.rect" if p.get("points").is_some() => {
+        let pts = pts_of(&p, "points")?;
+        let [a, b, c] = pts.as_slice() else { return Err(CmdError::new("a 3-point rectangle needs 3 points")) };
+        let (ux, uy) = (b[0] - a[0], b[1] - a[1]);
+        let l = ux.hypot(uy);
+        if l < 1e-9 {
+          return Err(CmdError::new("the first two points are the same"));
+        }
+        // the third point sets the height across the first side
+        let (nx, ny) = (-uy / l, ux / l);
+        let h = (c[0] - a[0]) * nx + (c[1] - a[1]) * ny;
+        if h.abs() < 1e-9 {
+          return Err(CmdError::new("the rectangle has no height"));
+        }
+        let corners = [*a, *b, [b[0] + nx * h, b[1] + ny * h], [a[0] + nx * h, a[1] + ny * h]];
+        let mut ids = Vec::new();
+        for q in corners {
+          let spec = snap(sketch, q);
+          ids.push(sketch.resolve(spec)?);
+        }
+        let mut lines = Vec::new();
+        for i in 0..4 {
+          lines.push(sketch.add_line(PtSpec::Point(ids[i]), PtSpec::Point(ids[(i + 1) % 4]))?.0);
+        }
+        for (x, y) in [(0, 1), (1, 2), (2, 3)] {
+          sketch.add_constraint(ConstraintKind::Perpendicular { a: lines[x], b: lines[y] })?;
+        }
+        if (uy / l).abs() < 1e-12 || (ux / l).abs() < 1e-12 {
+          auto_hv(sketch, lines[0]);
+        }
+      }
       "sketch.rect" => {
         if let Some(c) = opt_pt(&p, "center")? {
           let corner = req_pt(&p, "corner")?;
@@ -1779,6 +1916,25 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
             {
               sketch.add_constraint(ConstraintKind::Coincident { a: c, b: other })?;
             }
+          }
+        }
+      }
+      "sketch.circle" if p.get("through").is_some() => {
+        let pts = pts_of(&p, "through")?;
+        let (c, r) = match pts.as_slice() {
+          [a, b] => ([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0], (a[0] - b[0]).hypot(a[1] - b[1]) / 2.0),
+          [a, b, c] => {
+            let o = clf_sketch::circumcenter(*a, *b, *c).ok_or(CmdError::new("the three points are in a line"))?;
+            (o, (a[0] - o[0]).hypot(a[1] - o[1]))
+          }
+          _ => return Err(CmdError::new("'through' needs 2 or 3 points")),
+        };
+        let cs = snap(sketch, c);
+        let id = sketch.add_circle(cs, r)?;
+        // the circle passes through the clicked points that landed on existing ones
+        for q in pts {
+          if let Some(other) = sketch.nearest_point(q, SNAP, &[]) {
+            sketch.add_constraint(ConstraintKind::PointOnCurve { p: other, curve: id })?;
           }
         }
       }
@@ -1807,6 +1963,58 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           sketch.add_constraint(kind)?;
         }
       }
+      "sketch.arc" if p.get("tangent").is_some() => {
+        let curve = CurveId(req_u32(&p, "tangent")?);
+        let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
+        let dir = match sketch.curve(curve).map(|c| c.kind.clone()) {
+          Some(CurveKind::Line { a, b }) => {
+            let (pa, pb) = (sketch.pos(a).unwrap_or_default(), sketch.pos(b).unwrap_or_default());
+            // leave the line's end the arc starts at, carrying on its direction
+            let at_b = (pb[0] - st[0]).hypot(pb[1] - st[1]) <= (pa[0] - st[0]).hypot(pa[1] - st[1]);
+            if at_b { [pb[0] - pa[0], pb[1] - pa[1]] } else { [pa[0] - pb[0], pa[1] - pb[1]] }
+          }
+          Some(CurveKind::Arc { center, .. }) => {
+            let c = sketch.pos(center).unwrap_or_default();
+            // the arc's tangent at that end (counter-clockwise), pointing away from it
+            let r = [st[0] - c[0], st[1] - c[1]];
+            let ccw = [-r[1], r[0]];
+            let ends = sketch.curve_points(curve);
+            let at_end =
+              ends.get(2).and_then(|e| sketch.pos(*e)).is_some_and(|e| (e[0] - st[0]).hypot(e[1] - st[1]) < 1e-6);
+            if at_end { ccw } else { [-ccw[0], -ccw[1]] }
+          }
+          _ => return Err(CmdError::new("a tangent arc starts at the end of a line or arc")),
+        };
+        let l = dir[0].hypot(dir[1]);
+        if l < 1e-12 {
+          return Err(CmdError::new("the curve has no direction there"));
+        }
+        let n = [-dir[1] / l, dir[0] / l];
+        let chord = [en[0] - st[0], en[1] - st[1]];
+        let den = 2.0 * (chord[0] * n[0] + chord[1] * n[1]);
+        if den.abs() < 1e-12 {
+          return Err(CmdError::new("the end is straight ahead: draw a line instead"));
+        }
+        // centre on the start's normal, equidistant from both ends
+        let t = (chord[0] * chord[0] + chord[1] * chord[1]) / den;
+        let c = [st[0] + n[0] * t, st[1] + n[1] * t];
+        let ss = snap(sketch, st);
+        let ccw = t > 0.0;
+        let arc = if ccw {
+          sketch.add_arc_center(PtSpec::At(c[0], c[1]), ss, en)?
+        } else {
+          let es = snap(sketch, en);
+          let a = sketch.add_arc_center(PtSpec::At(c[0], c[1]), es, st)?;
+          // the start landed on a fresh point: tie it to the curve's end
+          if let Some(e) = sketch.curve_points(a).get(2).copied()
+            && let Some(other) = sketch.nearest_point(st, SNAP, &[e])
+          {
+            sketch.add_constraint(ConstraintKind::Coincident { a: e, b: other })?;
+          }
+          a
+        };
+        sketch.add_constraint(ConstraintKind::Tangent { a: curve, b: arc })?;
+      }
       "sketch.arc" => {
         if let Some(c) = opt_pt(&p, "center")? {
           let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
@@ -1820,9 +2028,30 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       "sketch.polygon" => {
         let sides = p.get("sides").and_then(Value::as_u64).unwrap_or(6) as usize;
-        let c = req_pt(&p, "center")?;
+        let n = sides.max(3) as f64;
+        let (c, vertex) = if p.get("edge").is_some() {
+          // from one edge: the centre is on its left at the apothem
+          let e = pts_of(&p, "edge")?;
+          let [a, b] = e.as_slice() else { return Err(CmdError::new("'edge' needs two points")) };
+          let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+          let side = dx.hypot(dy);
+          let apothem = side / (2.0 * (std::f64::consts::PI / n).tan());
+          let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+          ([m[0] - dy / side * apothem, m[1] + dx / side * apothem], *a)
+        } else {
+          let c = req_pt(&p, "center")?;
+          let v = req_pt(&p, "vertex")?;
+          if p.get("circumscribed").and_then(Value::as_bool).unwrap_or(false) {
+            // the clicked point is an edge midpoint: turn half a side and reach the corner
+            let half = std::f64::consts::PI / n;
+            let (dx, dy) = ((v[0] - c[0]) / half.cos(), (v[1] - c[1]) / half.cos());
+            (c, [c[0] + dx * half.cos() - dy * half.sin(), c[1] + dx * half.sin() + dy * half.cos()])
+          } else {
+            (c, v)
+          }
+        };
         let cs = snap(sketch, c);
-        sketch.add_polygon(cs, req_pt(&p, "vertex")?, sides)?;
+        sketch.add_polygon(cs, vertex, sides)?;
       }
       "sketch.spline" => {
         let pts: Vec<[f64; 2]> = p
@@ -1842,9 +2071,87 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         }
         sketch.add_curve(CurveKind::Spline { points: ids })?;
       }
+      "sketch.slot" if p.get("arc_center").is_some() || p.get("mid").is_some() => {
+        let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
+        let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
+        let (c, ccw) = match opt_pt(&p, "arc_center")? {
+          Some(c) => (c, true),
+          None => {
+            let m = req_pt(&p, "mid")?;
+            let c = clf_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
+            // counter-clockwise from start to end when the middle point is on the left of the chord
+            let cross = (en[0] - st[0]) * (m[1] - st[1]) - (en[1] - st[1]) * (m[0] - st[0]);
+            (c, cross > 0.0)
+          }
+        };
+        let (a0, a1) = (st, en);
+        let (from, to) = if ccw { (a0, a1) } else { (a1, a0) };
+        add_arc_slot(sketch, c, from, to, w)?;
+      }
       "sketch.slot" => {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
-        sketch.add_slot(req_pt(&p, "start")?, req_pt(&p, "end")?, w)?;
+        let (a, b) = match (opt_pt(&p, "center")?, opt_str(&p, "kind").unwrap_or("center_to_center")) {
+          (Some(c), _) => {
+            let e = req_pt(&p, "end")?;
+            ([2.0 * c[0] - e[0], 2.0 * c[1] - e[1]], e)
+          }
+          (None, "overall") => {
+            let (a, b) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
+            let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+            if l <= w {
+              return Err(CmdError::new("the slot is shorter than its width"));
+            }
+            let k = w / 2.0 / l;
+            let d = [(b[0] - a[0]) * k, (b[1] - a[1]) * k];
+            ([a[0] + d[0], a[1] + d[1]], [b[0] - d[0], b[1] - d[1]])
+          }
+          _ => (req_pt(&p, "start")?, req_pt(&p, "end")?),
+        };
+        sketch.add_slot(a, b, w)?;
+      }
+      "sketch.ellipse" => {
+        let c = req_pt(&p, "center")?;
+        let m = req_pt(&p, "major")?;
+        let minor = p.get("minor").and_then(Value::as_f64).ok_or(CmdError::new("missing 'minor'"))?;
+        let cs = snap(sketch, c);
+        let center = sketch.resolve(cs)?;
+        let major = sketch.add_point(m[0], m[1]);
+        sketch.add_curve(CurveKind::Ellipse { center, major, minor })?;
+      }
+      "sketch.control_spline" => {
+        let pts = pts_of(&p, "points")?;
+        if pts.len() < 2 {
+          return Err(CmdError::new("a control point spline needs 2 or more points"));
+        }
+        let mut ids = Vec::new();
+        for (i, q) in pts.iter().enumerate() {
+          // only the ends snap to existing points: the inner control points float off the curve
+          let spec = if i == 0 || i + 1 == pts.len() { snap(sketch, *q) } else { PtSpec::At(q[0], q[1]) };
+          ids.push(sketch.resolve(spec)?);
+        }
+        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+      }
+      "sketch.conic" => {
+        let (st, en, apex) = (req_pt(&p, "start")?, req_pt(&p, "end")?, req_pt(&p, "apex")?);
+        let rho = p.get("rho").and_then(Value::as_f64).unwrap_or(0.5);
+        if !(0.01..0.99).contains(&rho) {
+          return Err(CmdError::new("rho must be between 0.01 and 0.99"));
+        }
+        // a cubic through start and end pulled towards the apex (rho 0.5 is a parabola)
+        let k = 4.0 * rho / 3.0;
+        let c1 = [st[0] + (apex[0] - st[0]) * k, st[1] + (apex[1] - st[1]) * k];
+        let c2 = [en[0] + (apex[0] - en[0]) * k, en[1] + (apex[1] - en[1]) * k];
+        let (a, b) = (snap(sketch, st), snap(sketch, en));
+        let ids =
+          vec![sketch.resolve(a)?, sketch.add_point(c1[0], c1[1]), sketch.add_point(c2[0], c2[1]), sketch.resolve(b)?];
+        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+      }
+      "sketch.text" => {
+        let at = req_pt(&p, "at")?;
+        let text = req_str(&p, "text")?;
+        let height = p.get("height").and_then(Value::as_f64).unwrap_or(5.0);
+        let angle = p.get("angle").and_then(Value::as_f64).unwrap_or(0.0).to_radians();
+        crate::text::add_text(sketch, at, text, height, angle)?;
       }
       _ => {
         let at = req_pt(&p, "at")?;
@@ -1859,6 +2166,41 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   })?;
   let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
   Ok(json!({"curves": created.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+}
+
+fn pts_of(p: &Value, k: &str) -> Result<Vec<[f64; 2]>, CmdError> {
+  p.get(k)
+    .and_then(Value::as_array)
+    .ok_or_else(|| CmdError::new(format!("missing '{k}'")))?
+    .iter()
+    .map(|v| pt_of(v).ok_or(CmdError::new("points must be [x, y]")))
+    .collect()
+}
+
+/// A slot along an arc: centre `c`, counter-clockwise from `from` to `to` (both on the centre
+/// line), `w` wide: outer and inner arcs joined by round caps.
+fn add_arc_slot(sketch: &mut Sketch, c: [f64; 2], from: [f64; 2], to: [f64; 2], w: f64) -> Result<(), CmdError> {
+  let r = (from[0] - c[0]).hypot(from[1] - c[1]);
+  if w <= 0.0 || w / 2.0 >= r {
+    return Err(CmdError::new("the slot is wider than its arc's radius allows"));
+  }
+  let (a0, a1) = ((from[1] - c[1]).atan2(from[0] - c[0]), (to[1] - c[1]).atan2(to[0] - c[0]));
+  let at = |radius: f64, a: f64| [c[0] + radius * a.cos(), c[1] + radius * a.sin()];
+  let (ro, ri) = (r + w / 2.0, r - w / 2.0);
+  let pt = |s: &mut Sketch, q: [f64; 2]| s.add_point(q[0], q[1]);
+  let (os, oe, is, ie) =
+    (pt(sketch, at(ro, a0)), pt(sketch, at(ro, a1)), pt(sketch, at(ri, a0)), pt(sketch, at(ri, a1)));
+  let (cc, c0, c1) = (pt(sketch, c), pt(sketch, at(r, a0)), pt(sketch, at(r, a1)));
+  // outer arc forwards, the end cap round the far side, inner arc back (stored ccw), start cap
+  let outer = sketch.add_curve(CurveKind::Arc { center: cc, start: os, end: oe })?;
+  let cap1 = sketch.add_curve(CurveKind::Arc { center: c1, start: oe, end: ie })?;
+  let inner = sketch.add_curve(CurveKind::Arc { center: cc, start: is, end: ie })?;
+  let cap0 = sketch.add_curve(CurveKind::Arc { center: c0, start: is, end: os })?;
+  for (a, b) in [(outer, cap1), (cap1, inner), (inner, cap0), (cap0, outer)] {
+    sketch.add_constraint(ConstraintKind::Tangent { a, b })?;
+  }
+  sketch.add_constraint(ConstraintKind::Concentric { a: outer, b: inner })?;
+  Ok(())
 }
 
 /// Exactly horizontal/vertical new lines get the matching constraint (Fusion's auto-constraints).

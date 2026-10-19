@@ -813,14 +813,14 @@ fn colour_selection_and_sketch_visibility() {
   let mut s = Session::default();
   plate(&mut s);
   let b = s.model.bodies[0].id.0;
-  run(&mut s, "body.color", json!({"body": b, "color": "#ff8000"}));
+  run(&mut s, "body.appearance", json!({"body": b, "color": "#ff8000"}));
   assert_eq!(run(&mut s, "info", json!({}))["bodies"][0]["color"], "#ff8000");
-  run(&mut s, "body.color", json!({"body": b, "color": [0, 16, 255]}));
+  run(&mut s, "body.appearance", json!({"body": b, "color": [0, 16, 255]}));
   assert_eq!(s.design.body_settings(BodyId(b)).unwrap().color, Some([0, 16, 255]));
-  assert!(s.execute("body.color", &json!({"body": b, "color": "#12"})).is_err());
+  assert!(s.execute("body.appearance", &json!({"body": b, "color": "#12"})).is_err());
   assert!(s.undo());
   assert_eq!(s.design.body_settings(BodyId(b)).unwrap().color, Some([255, 128, 0]));
-  run(&mut s, "body.color", json!({"body": b, "color": null}));
+  run(&mut s, "body.appearance", json!({"body": b, "color": null}));
   assert!(run(&mut s, "info", json!({}))["bodies"][0]["color"].is_null());
 
   run(&mut s, "select", json!({"items": [{"type": "body", "body": b}]}));

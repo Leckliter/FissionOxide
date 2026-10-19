@@ -300,9 +300,8 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         }
         edges.push((u, v, seg));
       }
-      CurveKind::Spline { .. } => {
-        let fit: Vec<[f64; 2]> = sketch.curve_points(c.id).iter().filter_map(|p| sketch.pos(*p)).collect();
-        for b in crate::spline_beziers(&fit) {
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => {
+        for b in sketch.beziers(c.id) {
           if dist(b[0], b[3]) > MERGE_TOL {
             edges.push((0, 0, Seg::Bezier { p: b }));
           }

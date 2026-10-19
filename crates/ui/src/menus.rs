@@ -100,6 +100,8 @@ pub(crate) struct Group {
   menu: &'static [E],
 }
 
+use crate::forms;
+use crate::select::Priority;
 use Cmd::Dialog as D;
 
 const PATTERN: &[E] = &[
@@ -109,8 +111,8 @@ const PATTERN: &[E] = &[
 ];
 
 const SIMPLIFY: &[E] = &[
-  x("Remove Faces", Icon::RemoveBody),
-  x("Remove Features", Icon::RemoveBody),
+  c("Remove Faces", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
+  c("Remove Features", Icon::RemoveBody, D(Kind::Form(&forms::REMOVE_FACES))),
   x("Replace with Primitives", Icon::Box),
 ];
 
@@ -125,24 +127,24 @@ const SOLID_CREATE: &[E] = &[
   c("Revolve", Icon::Revolve, D(Kind::Revolve)),
   c("Sweep", Icon::Sweep, D(Kind::Sweep)),
   c("Loft", Icon::Loft, D(Kind::Loft)),
-  x("Rib", Icon::Rib),
-  x("Web", Icon::Web),
+  c("Rib", Icon::Rib, D(Kind::Form(&forms::RIB))),
+  c("Web", Icon::Web, D(Kind::Form(&forms::WEB))),
   x("Emboss", Icon::Emboss),
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
-  x("Thread", Icon::Thread),
+  c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
   E::Sep,
   c("Box", Icon::Box, D(Kind::Box)),
   c("Cylinder", Icon::Cylinder, D(Kind::Cylinder)),
   c("Sphere", Icon::Sphere, D(Kind::Sphere)),
   c("Torus", Icon::Torus, D(Kind::Torus)),
-  x("Coil", Icon::Coil),
-  x("Pipe", Icon::Pipe),
+  c("Coil", Icon::Coil, D(Kind::Form(&forms::COIL))),
+  c("Pipe", Icon::Pipe, D(Kind::Form(&forms::PIPE))),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
-  x("Thicken", Icon::Thicken),
+  c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   x("Boundary Fill", Icon::BoundaryFill),
   E::Sep,
   x("Create Base Feature", Icon::BaseFeature),
@@ -158,11 +160,11 @@ const SOLID_MODIFY: &[E] = &[
   E::Sep,
   c("Shell", Icon::Shell, D(Kind::Shell)),
   c("Draft", Icon::Draft, D(Kind::Draft)),
-  x("Scale", Icon::Scale),
+  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
   c("Combine", Icon::Combine, D(Kind::Combine)),
-  x("Offset Face", Icon::OffsetFace),
+  c("Offset Face", Icon::OffsetFace, D(Kind::Form(&forms::OFFSET_FACE))),
   x("Replace Face", Icon::ReplaceFace),
-  x("Split Face", Icon::SplitFace),
+  c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   x("Silhouette Split", Icon::SilhouetteSplit),
   E::Sep,
@@ -174,11 +176,11 @@ const SOLID_MODIFY: &[E] = &[
   E::Sub("Simplify", SIMPLIFY),
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  x("Appearance", Icon::Appearance).k("A"),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -193,42 +195,42 @@ const CONSTRUCT: &[E] = &[
   x("User Coordinate System (UCS)", Icon::Ucs),
   E::Sep,
   c("Offset Plane", Icon::Plane, D(Kind::OffsetPlane)),
-  x("Plane at Angle", Icon::PlaneAlt),
-  x("Tangent Plane", Icon::PlaneAlt),
-  x("Midplane", Icon::Plane),
-  x("Perpendicular Plane", Icon::PlaneAlt),
-  x("Plane Through Two Edges", Icon::PlaneAlt),
-  x("Plane Through Three Points", Icon::PlaneAlt),
-  x("Plane Along Path", Icon::PlaneAlt),
+  c("Plane at Angle", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ANGLE))),
+  c("Tangent Plane", Icon::PlaneAlt, D(Kind::Form(&forms::TANGENT_PLANE))),
+  c("Midplane", Icon::Plane, D(Kind::Form(&forms::MIDPLANE))),
+  c("Perpendicular Plane", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
+  c("Plane Through Two Edges", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_TWO_EDGES))),
+  c("Plane Through Three Points", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_THREE_POINTS))),
+  c("Plane Along Path", Icon::PlaneAlt, D(Kind::Form(&forms::PLANE_ALONG_PATH))),
   E::Sep,
-  x("Axis Through Cylinder/Cone/Torus", Icon::Axis),
-  x("Axis Perpendicular To Face", Icon::Axis),
-  x("Axis Through Two Planes", Icon::Axis),
-  x("Axis Through Two Points", Icon::Axis),
-  x("Axis Through Edge", Icon::Axis),
+  c("Axis Through Cylinder/Cone/Torus", Icon::Axis, D(Kind::Form(&forms::AXIS_FACE))),
+  c("Axis Perpendicular To Face", Icon::Axis, D(Kind::Form(&forms::AXIS_NORMAL))),
+  c("Axis Through Two Planes", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_PLANES))),
+  c("Axis Through Two Points", Icon::Axis, D(Kind::Form(&forms::AXIS_TWO_POINTS))),
+  c("Axis Through Edge", Icon::Axis, D(Kind::Form(&forms::AXIS_EDGE))),
   E::Sep,
-  x("Point At Vertex", Icon::CPoint),
-  x("Point Through Two Edges", Icon::CPoint),
-  x("Point Through Three Planes", Icon::CPoint),
-  x("Point At Center Of Circle/Sphere/Torus", Icon::CPoint),
-  x("Point At Edge And Plane", Icon::CPoint),
-  x("Point Along Path", Icon::CPoint),
+  c("Point At Vertex", Icon::CPoint, D(Kind::Form(&forms::POINT_VERTEX))),
+  c("Point Through Two Edges", Icon::CPoint, D(Kind::Form(&forms::POINT_TWO_EDGES))),
+  c("Point Through Three Planes", Icon::CPoint, D(Kind::Form(&forms::POINT_THREE_PLANES))),
+  c("Point At Center Of Circle/Sphere/Torus", Icon::CPoint, D(Kind::Form(&forms::POINT_CENTER))),
+  c("Point At Edge And Plane", Icon::CPoint, D(Kind::Form(&forms::POINT_EDGE_PLANE))),
+  c("Point Along Path", Icon::CPoint, D(Kind::Form(&forms::POINT_ALONG_PATH))),
 ];
 
 const INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
   c("Interference", Icon::Interference, D(Kind::Interference)),
-  x("Section Analysis", Icon::Section),
+  c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
   x("Curvature Comb Analysis", Icon::CurvComb),
-  x("Curvature Map Analysis", Icon::CurvMap),
-  x("Draft Analysis", Icon::DraftAnalysis),
+  c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
+  c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
   x("Environment Map Analysis", Icon::EnvMap),
   x("Isocurve Analysis", Icon::Isocurve),
-  x("Zebra Analysis", Icon::Zebra),
+  c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
-  x("Accessibility Analysis", Icon::Accessibility),
-  x("Center of Mass", Icon::CenterOfMass),
+  c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
+  c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
   x("Minimum Radius Analysis", Icon::MinRadius),
   E::Sep,
   x("Navigator", Icon::Navigator),
@@ -244,8 +246,8 @@ const INSERT: &[E] = &[
   x("Decal", Icon::Decal),
   x("Canvas", Icon::Canvas),
   x("Insert SVG", Icon::InsertSvg),
-  x("Insert DXF", Icon::InsertDxf),
-  x("Insert Mesh", Icon::InsertMesh).g(),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
   x("Insert Component", Icon::InsertComponent).off(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
@@ -269,30 +271,33 @@ const ASSEMBLE: &[E] = &[
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
 ];
 
-const SELECTION_TOOLS: &[E] =
-  &[x("Select All", Icon::Select).k("Ctrl+A"), x("Select Other", Icon::Select), x("Invert Selection", Icon::Select)];
+const SELECTION_TOOLS: &[E] = &[
+  c("Select All", Icon::Select, Cmd::SelectAll).k("Ctrl+A"),
+  c("Select Other", Icon::Select, Cmd::SelectOther).k("Alt+click"),
+  c("Invert Selection", Icon::Select, Cmd::SelectInvert),
+];
 
 const SELECTION_PRIORITY: &[E] = &[
-  x("Select Body Priority", Icon::Body),
-  x("Select Face Priority", Icon::SplitFace),
-  x("Select Edge Priority", Icon::Line),
-  x("Select Component Priority", Icon::Component),
+  c("Select Body Priority", Icon::Body, Cmd::Priority(Priority::Body)),
+  c("Select Face Priority", Icon::SplitFace, Cmd::Priority(Priority::Face)),
+  c("Select Edge Priority", Icon::Line, Cmd::Priority(Priority::Edge)),
+  c("Select Component Priority", Icon::Component, Cmd::Priority(Priority::Component)),
 ];
 
 const SELECTION_FILTERS: &[E] = &[
-  x("Bodies", Icon::Body),
-  x("Faces", Icon::SplitFace),
-  x("Edges", Icon::Line),
+  c("Bodies", Icon::Body, Cmd::Filter("bodies")),
+  c("Faces", Icon::SplitFace, Cmd::Filter("faces")),
+  c("Edges", Icon::Line, Cmd::Filter("edges")),
   x("Vertices", Icon::Point),
-  x("Sketches", Icon::SketchSmall),
-  x("Sketch Profiles", Icon::Rect),
+  c("Sketches", Icon::SketchSmall, Cmd::Filter("sketches")),
+  c("Sketch Profiles", Icon::Rect, Cmd::Filter("profiles")),
   x("Construction", Icon::Plane),
 ];
 
 const SELECT: &[E] = &[
   c("Select", Icon::Select, Cmd::Select),
   E::Sep,
-  x("Window Selection", Icon::WindowSel).k("1"),
+  c("Window Selection", Icon::WindowSel, Cmd::WindowSelect).k("1"),
   x("Freeform Selection", Icon::FreeformSel).k("2"),
   x("Paint Selection", Icon::PaintSel).k("3"),
   E::Sep,
@@ -307,18 +312,19 @@ const SURFACE_CREATE: &[E] = &[
   x("Create Form", Icon::CreateForm),
   x("Derive", Icon::Derive),
   E::Sep,
-  x("Extrude", Icon::Extrude).o(),
-  x("Revolve", Icon::Revolve).o(),
+  c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),
+  c("Revolve", Icon::Revolve, D(Kind::Form(&forms::SURFACE_REVOLVE))).o(),
   x("Sweep", Icon::Sweep).o(),
   x("Loft", Icon::Loft).o(),
-  x("Patch", Icon::Patch).o(),
-  x("Ruled", Icon::Ruled).o(),
-  x("Offset", Icon::SurfOffset).o(),
+  c("Patch", Icon::Patch, D(Kind::Form(&forms::PATCH))).o(),
+  c("Patch from Sketch", Icon::Patch, D(Kind::Form(&forms::PATCH_SKETCH))).o(),
+  c("Ruled", Icon::Ruled, D(Kind::Form(&forms::RULED))).o(),
+  c("Offset", Icon::SurfOffset, D(Kind::Form(&forms::SURFACE_OFFSET))).o(),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
-  x("Thicken", Icon::Thicken),
+  c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   x("Boundary Fill", Icon::BoundaryFill),
   x("Joint Origin", Icon::JointOrigin),
 ];
@@ -328,14 +334,14 @@ const SURFACE_MODIFY: &[E] = &[
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
-  x("Trim", Icon::Trim),
+  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))),
   x("Untrim", Icon::Untrim).o(),
   x("Extend", Icon::Extend).o(),
-  x("Stitch", Icon::Stitch).o(),
-  x("Unstitch", Icon::Unstitch).o(),
-  x("Reverse Normal", Icon::ReverseNormal).o(),
-  x("Scale", Icon::Scale),
-  x("Split Face", Icon::SplitFace),
+  c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
+  c("Unstitch", Icon::Unstitch, D(Kind::Form(&forms::UNSTITCH))).o(),
+  c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).o(),
+  c("Scale", Icon::Scale, D(Kind::Form(&forms::SCALE))),
+  c("Split Face", Icon::SplitFace, D(Kind::Form(&forms::SPLIT_FACE))),
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
@@ -344,17 +350,17 @@ const SURFACE_MODIFY: &[E] = &[
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  x("Appearance", Icon::Appearance).k("A"),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
 const MESH_CREATE: &[E] = &[
-  x("Insert Mesh", Icon::InsertMesh).g(),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
   x("Tessellate", Icon::Tessellate).g(),
   E::Sep,
   x("Create Mesh Section Sketch", Icon::MeshSection).g(),
@@ -381,7 +387,7 @@ const SHEET_CREATE: &[E] = &[
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
   E::Sep,
   c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
-  x("Thread", Icon::Thread),
+  c("Thread", Icon::Thread, D(Kind::Form(&forms::THREAD))),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
@@ -409,11 +415,11 @@ const SHEET_MODIFY: &[E] = &[
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  x("Appearance", Icon::Appearance).k("A"),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -421,12 +427,12 @@ const SHEET_MODIFY: &[E] = &[
 const MESH_MODIFY: &[E] = &[
   x("Direct Edit", Icon::DirectEdit).g(),
   x("Remesh", Icon::Remesh).g(),
-  x("Reduce", Icon::Reduce).g(),
-  x("Plane Cut", Icon::PlaneCut).g(),
+  c("Reduce", Icon::Reduce, D(Kind::Form(&forms::MESH_REDUCE))).g(),
+  c("Plane Cut", Icon::PlaneCut, D(Kind::SplitBody)).g(),
   x("Shell", Icon::Shell),
   x("Combine", Icon::Combine).g(),
-  x("Smooth", Icon::Smooth).g(),
-  x("Reverse Normal", Icon::ReverseNormal).g(),
+  c("Smooth", Icon::Smooth, D(Kind::Form(&forms::MESH_SMOOTH))).g(),
+  c("Reverse Normal", Icon::ReverseNormal, D(Kind::Form(&forms::REVERSE_NORMAL))).g(),
   E::Sep,
   x("Separate", Icon::Separate).g(),
   E::Sep,
@@ -435,13 +441,13 @@ const MESH_MODIFY: &[E] = &[
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
-  x("Convert Mesh", Icon::ConvertMesh).g(),
+  c("Convert Mesh", Icon::ConvertMesh, D(Kind::Form(&forms::MESH_CONVERT))).g(),
   E::Sep,
   c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
-  x("Appearance", Icon::Appearance).k("A"),
+  c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -497,14 +503,14 @@ use Cmd::SketchTool as T;
 
 const SK_RECT: &[E] = &[
   c("2-Point Rectangle", Icon::Rect, T(Tool::Rect)).k("R"),
-  x("3-Point Rectangle", Icon::Rect3),
+  c("3-Point Rectangle", Icon::Rect3, T(Tool::Rect3)),
   c("Center Rectangle", Icon::CenterRect, T(Tool::CenterRect)),
 ];
 
 const SK_CIRCLE: &[E] = &[
   c("Center Diameter Circle", Icon::Circle, T(Tool::Circle)).k("C"),
-  x("2-Point Circle", Icon::Circle2P),
-  x("3-Point Circle", Icon::Circle3P),
+  c("2-Point Circle", Icon::Circle2P, T(Tool::Circle2P)),
+  c("3-Point Circle", Icon::Circle3P, T(Tool::Circle3P)),
   x("2-Tangent Circle", Icon::Circle2T),
   x("3-Tangent Circle", Icon::Circle3T),
 ];
@@ -512,25 +518,27 @@ const SK_CIRCLE: &[E] = &[
 const SK_ARC: &[E] = &[
   c("3-Point Arc", Icon::Arc3, T(Tool::Arc3)).k("A"),
   c("Center Point Arc", Icon::CenterArc, T(Tool::CenterArc)),
-  x("Tangent Arc", Icon::TangentArc),
+  c("Tangent Arc", Icon::TangentArc, T(Tool::TangentArc)),
 ];
 
 const SK_POLYGON: &[E] = &[
-  x("Circumscribed Polygon", Icon::PolygonCirc),
+  c("Circumscribed Polygon", Icon::PolygonCirc, T(Tool::CircPolygon)),
   c("Inscribed Polygon", Icon::Polygon, T(Tool::Polygon)),
-  x("Edge Polygon", Icon::PolygonEdge),
+  c("Edge Polygon", Icon::PolygonEdge, T(Tool::EdgePolygon)),
 ];
 
 const SK_SLOT: &[E] = &[
   c("Center to Center Slot", Icon::Slot, T(Tool::Slot)),
-  x("Overall Slot", Icon::OverallSlot),
-  x("Center Point Slot", Icon::CenterPointSlot),
-  x("Three Point Arc Slot", Icon::ArcSlot3),
-  x("Center Point Arc Slot", Icon::ArcSlotCenter),
+  c("Overall Slot", Icon::OverallSlot, T(Tool::OverallSlot)),
+  c("Center Point Slot", Icon::CenterPointSlot, T(Tool::CenterSlot)),
+  c("Three Point Arc Slot", Icon::ArcSlot3, T(Tool::ArcSlot3)),
+  c("Center Point Arc Slot", Icon::ArcSlotCenter, T(Tool::ArcSlotCenter)),
 ];
 
-const SK_SPLINE: &[E] =
-  &[c("Fit Point Spline", Icon::SplineFit, T(Tool::Spline)), x("Control Point Spline", Icon::SplineCtrl)];
+const SK_SPLINE: &[E] = &[
+  c("Fit Point Spline", Icon::SplineFit, T(Tool::Spline)),
+  c("Control Point Spline", Icon::SplineCtrl, T(Tool::ControlSpline)),
+];
 
 const SK_PROJECT: &[E] = &[
   c("Project", Icon::Project, D(Kind::Project)).k("P"),
@@ -541,17 +549,17 @@ const SK_PROJECT: &[E] = &[
 
 const SKETCH_CREATE: &[E] = &[
   c("Line", Icon::Line, T(Tool::Line)).k("L"),
-  x("Midpoint Line", Icon::MidpointLine),
+  c("Midpoint Line", Icon::MidpointLine, T(Tool::MidpointLine)),
   E::Sub("Rectangle", SK_RECT),
   E::Sub("Circle", SK_CIRCLE),
   E::Sub("Arc", SK_ARC),
   E::Sub("Polygon", SK_POLYGON),
-  x("Ellipse", Icon::Ellipse),
+  c("Ellipse", Icon::Ellipse, T(Tool::Ellipse)),
   E::Sub("Slot", SK_SLOT),
   E::Sub("Spline", SK_SPLINE),
-  x("Conic Curve", Icon::Conic),
+  c("Conic Curve", Icon::Conic, T(Tool::Conic)),
   c("Point", Icon::Point, T(Tool::Point)),
-  x("Text", Icon::SkText),
+  c("Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT))),
   E::Sep,
   c("Mirror", Icon::SkMirror, D(Kind::SkMirror)),
   c("Circular Pattern", Icon::SkCircPattern, D(Kind::SkCircPattern)),
@@ -604,8 +612,8 @@ const SKETCH_INSERT: &[E] = &[
   x("Decal", Icon::Decal),
   x("Canvas", Icon::Canvas),
   x("Insert SVG", Icon::InsertSvg),
-  x("Insert DXF", Icon::InsertDxf),
-  x("Insert Mesh", Icon::InsertMesh).g(),
+  c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
+  c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
   x("Insert Fastener", Icon::Fastener).off(),
   x("Duplicate With Joints", Icon::DuplicateJoints).off(),
   x("Insert Derive", Icon::Derive),
@@ -708,6 +716,37 @@ const DRAWING: [Group; 7] = [
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];
 
+const CAM_SETUP: &[E] = &[c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP)))];
+
+const CAM_2D: &[E] = &[
+  c("Face", Icon::Extrude, D(Kind::Form(&forms::CAM_FACE))),
+  c("2D Pocket", Icon::Shell, D(Kind::Form(&forms::CAM_POCKET))),
+  c("2D Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR))),
+  E::Sep,
+  x("2D Adaptive Clearing", Icon::Shell),
+  x("Slot", Icon::Slot),
+  x("Trace", Icon::Line),
+  x("Thread", Icon::Thread),
+  x("Bore", Icon::Hole),
+  x("Engrave", Icon::SkText),
+];
+
+const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
+
+const CAM_ACTIONS: &[E] = &[
+  c("Generate", Icon::Play, Cmd::CamGenerate).k("Ctrl+G"),
+  c("Post Process", Icon::ExportDxf, Cmd::CamPost),
+  c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+];
+
+/// The Manufacture workspace's MILLING tab.
+const MILLING: [Group; 4] = [
+  Group { label: "SETUP", quick: &["New Setup"], menu: CAM_SETUP },
+  Group { label: "2D", quick: &["Face", "2D Pocket", "2D Contour"], menu: CAM_2D },
+  Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
+  Group { label: "ACTIONS", quick: &["Generate", "Post Process"], menu: CAM_ACTIONS },
+];
+
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
@@ -717,23 +756,23 @@ const ADD_INS: &[E] =
 const UTILITY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
   x("Manage Threads Library", Icon::Configure),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
 ];
 
 // UTILITIES' INSPECT has no Environment Map Analysis
 const UTIL_INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
   c("Interference", Icon::Interference, D(Kind::Interference)),
-  x("Section Analysis", Icon::Section),
+  c("Section Analysis", Icon::Section, D(Kind::Section)),
   E::Sep,
   x("Curvature Comb Analysis", Icon::CurvComb),
-  x("Curvature Map Analysis", Icon::CurvMap),
-  x("Draft Analysis", Icon::DraftAnalysis),
+  c("Curvature Map Analysis", Icon::CurvMap, D(Kind::Analysis("curvature"))),
+  c("Draft Analysis", Icon::DraftAnalysis, D(Kind::Analysis("draft"))),
   x("Isocurve Analysis", Icon::Isocurve),
-  x("Zebra Analysis", Icon::Zebra),
+  c("Zebra Analysis", Icon::Zebra, D(Kind::Analysis("zebra"))),
   E::Sep,
-  x("Accessibility Analysis", Icon::Accessibility),
-  x("Center of Mass", Icon::CenterOfMass),
+  c("Accessibility Analysis", Icon::Accessibility, D(Kind::Analysis("accessibility"))),
+  c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
   x("Minimum Radius Analysis", Icon::MinRadius),
   E::Sep,
   x("Navigator", Icon::Navigator),
@@ -829,6 +868,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Utilities => (&UTILITIES, &[]),
     Tab::Sketch => (&SKETCH, &[]),
     Tab::Drawing => (&DRAWING, &[]),
+    Tab::Milling => (&MILLING, &[]),
   };
   let mut pick: Option<Item> = None;
   for g in own.iter().chain(shared.iter()) {
@@ -870,7 +910,10 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     let w = ui.min_rect().width();
     panels::group_label(ui, g.label, w, open)
   });
-  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick));
+  // toggles (selection priority and filters) show a check mark while on
+  let on: Vec<&'static str> =
+    toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
+  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick, &on));
   if matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING") {
     ui.painter()
       .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
@@ -878,7 +921,20 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
   panels::separator(ui);
 }
 
-fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
+/// The toggle commands in a menu (and its submenus).
+fn toggles(menu: &'static [E]) -> Vec<Item> {
+  let mut out = Vec::new();
+  for e in menu {
+    match e {
+      E::I(i) if matches!(i.cmd, Some(Cmd::Priority(_) | Cmd::Filter(_))) => out.push(*i),
+      E::Sub(_, sub) => out.extend(toggles(sub)),
+      _ => {}
+    }
+  }
+  out
+}
+
+fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>, on: &[&'static str]) {
   ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
   let font = egui::FontId::proportional(12.5);
   let widest = menu
@@ -898,7 +954,17 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
   for e in menu {
     match e {
       E::I(it) => {
-        if row(ui, width, Some(it), it.label, false).clicked() && !it.disabled {
+        let r = row(ui, width, Some(it), it.label, false);
+        if on.contains(&it.label) {
+          ui.painter().text(
+            r.rect.right_center() - vec2(14.0, 0.0),
+            egui::Align2::CENTER_CENTER,
+            "✔",
+            egui::FontId::proportional(12.0),
+            theme::TEXT,
+          );
+        }
+        if r.clicked() && !it.disabled {
           *pick = Some(*it);
           ui.close();
         }
@@ -912,7 +978,7 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
       }
       E::Sub(label, sub) => {
         let resp = row(ui, width, None, label, true);
-        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, sub, pick));
+        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, sub, pick, on));
       }
     }
   }

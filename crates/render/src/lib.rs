@@ -223,6 +223,22 @@ pub struct Mesh {
   /// Highlighted triangles' id (drawn tinted), e.g. the hovered face.
   pub highlight: Option<u32>,
   pub highlight_color: [u8; 4],
+  /// Per-vertex colours (e.g. a curvature map); empty = `color`.
+  pub colors: Vec<[u8; 4]>,
+  /// Shown with the scene's surface analysis (bodies, not sketch profiles).
+  pub analyze: bool,
+}
+
+/// A surface analysis drawn on the meshes that ask for it, as in Fusion's INSPECT menu.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Analysis {
+  /// Reflected stripes: kinks and steps in the stripes show where surfaces don't join smoothly.
+  Zebra { stripes: f32 },
+  /// Green where faces lean along the pull direction by more than `angle` (radians), red where
+  /// they lean against it, yellow in between.
+  Draft { pull: [f32; 3], angle: f32 },
+  /// Green where a tool coming along `dir` reaches the face, red where it can't.
+  Accessibility { dir: [f32; 3] },
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +273,7 @@ pub struct Scene {
   pub markers: Vec<Marker>,
   pub background_top: [u8; 4],
   pub background_bottom: [u8; 4],
+  pub analysis: Option<Analysis>,
 }
 
 pub struct Frame {
@@ -345,7 +362,7 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let head = back.as_vec3();
   let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
   for m in &scene.meshes {
-    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill]);
+    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
   }
   for l in scene.lines.iter().filter(|l| !l.on_top) {
     draw_polyline(&mut f, l, &vp);
@@ -376,13 +393,25 @@ struct CV {
   c: DVec4,
   n: Vec3,
   wpos: Vec3,
+  /// Vertex colour (0–1), when the mesh has per-vertex colours.
+  col: Vec3,
 }
 
-fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, lights: [Vec3; 3]) {
+fn draw_mesh(
+  f: &mut Frame,
+  m: &Mesh,
+  vp: &DMat4,
+  cam: &Camera,
+  eye: DVec3,
+  lights: [Vec3; 3],
+  analysis: Option<Analysis>,
+) {
   let tris = m.indices.len() / 3;
+  let rgb = |c: [u8; 4]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
+  let per_vertex = !m.colors.is_empty();
   for t in 0..tris {
     let idx = [m.indices[t * 3], m.indices[t * 3 + 1], m.indices[t * 3 + 2]];
-    let mut v = [CV { c: DVec4::ZERO, n: Vec3::Z, wpos: Vec3::ZERO }; 3];
+    let mut v = [CV { c: DVec4::ZERO, n: Vec3::Z, wpos: Vec3::ZERO, col: Vec3::ZERO }; 3];
     let mut ok = true;
     for k in 0..3 {
       let Some(p) = m.positions.get(idx[k] as usize) else {
@@ -391,7 +420,8 @@ fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, ligh
       };
       let n = m.normals.get(idx[k] as usize).copied().unwrap_or([0.0, 0.0, 1.0]);
       let wp = DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
-      v[k] = CV { c: *vp * wp.extend(1.0), n: Vec3::from(n), wpos: Vec3::from(*p) };
+      let col = m.colors.get(idx[k] as usize).map(|c| rgb(*c)).unwrap_or_else(|| rgb(m.color));
+      v[k] = CV { c: *vp * wp.extend(1.0), n: Vec3::from(n), wpos: Vec3::from(*p), col };
     }
     if !ok {
       continue;
@@ -403,8 +433,10 @@ fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, ligh
     if poly.len() < 3 {
       continue;
     }
+    // a highlighted (hovered) triangle shows its highlight, not the vertex colours
+    let shade = Shade { vertex_colors: per_vertex && m.highlight != Some(id), analysis };
     for i in 1..poly.len() - 1 {
-      raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, lights);
+      raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, lights, shade);
     }
   }
 }
@@ -430,14 +462,31 @@ fn clip_near(v: &[CV; 3]) -> Vec<CV> {
         c: a.c + (b.c - a.c) * t,
         n: a.n + (b.n - a.n) * t as f32,
         wpos: a.wpos + (b.wpos - a.wpos) * t as f32,
+        col: a.col + (b.col - a.col) * t as f32,
       });
     }
   }
   out
 }
 
+/// How a triangle's pixels are coloured beyond plain lighting.
+#[derive(Clone, Copy)]
+struct Shade {
+  vertex_colors: bool,
+  analysis: Option<Analysis>,
+}
+
 #[allow(clippy::too_many_arguments)]
-fn raster_tri(f: &mut Frame, v: [CV; 3], id: u32, color: [u8; 4], cam: &Camera, eye: DVec3, lights: [Vec3; 3]) {
+fn raster_tri(
+  f: &mut Frame,
+  v: [CV; 3],
+  id: u32,
+  color: [u8; 4],
+  cam: &Camera,
+  eye: DVec3,
+  lights: [Vec3; 3],
+  shade: Shade,
+) {
   let [key, head, fill] = lights;
   let (w, h) = (f.width as f64, f.height as f64);
   let mut sx = [0.0f64; 3];
@@ -509,7 +558,35 @@ fn raster_tri(f: &mut Frame, v: [CV; 3], id: u32, color: [u8; 4], cam: &Camera, 
       let diff = 0.45 * n.dot(key).max(0.0) + 0.3 * n.dot(head).max(0.0) + 0.2 * n.dot(fill).max(0.0);
       let half = (key + view).normalize_or_zero();
       let spec = n.dot(half).max(0.0).powf(40.0) * 0.2;
-      let c = base * (0.38 + diff) + Vec3::splat(spec);
+      let base =
+        if shade.vertex_colors { v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32 } else { base };
+      let c = match shade.analysis {
+        None => base * (0.38 + diff) + Vec3::splat(spec),
+        Some(Analysis::Zebra { stripes }) => {
+          // stripes of a striped environment reflected in the surface
+          let r = n * (2.0 * n.dot(view)) - view;
+          let band = ((r.z * 0.5 + 0.5) * stripes).floor() as i64;
+          let tone = if band % 2 == 0 { 0.1 } else { 0.95 };
+          Vec3::splat(tone * (0.75 + 0.25 * diff))
+        }
+        Some(Analysis::Draft { pull, angle }) => {
+          let d = n.dot(Vec3::from(pull).normalize_or_zero());
+          let t = angle.sin();
+          let tone = if d > t {
+            Vec3::new(0.2, 0.75, 0.25)
+          } else if d < -t {
+            Vec3::new(0.85, 0.2, 0.2)
+          } else {
+            Vec3::new(0.95, 0.85, 0.2)
+          };
+          tone * (0.45 + diff)
+        }
+        Some(Analysis::Accessibility { dir }) => {
+          let d = n.dot(Vec3::from(dir).normalize_or_zero());
+          let tone = if d > 1e-3 { Vec3::new(0.2, 0.75, 0.25) } else { Vec3::new(0.85, 0.2, 0.2) };
+          tone * (0.45 + diff)
+        }
+      };
       if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
         p[0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
         p[1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
@@ -633,6 +710,8 @@ mod tests {
       color,
       highlight: None,
       highlight_color: [0; 4],
+      colors: vec![],
+      analyze: false,
     }
   }
 

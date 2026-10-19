@@ -93,6 +93,14 @@ pub struct ViewOptions {
   pub only_bodies: Option<Vec<BodyId>>,
   /// Profiles are shown (and pickable) for these sketches even if consumed.
   pub show_profiles_of: Vec<FeatureId>,
+  /// Section analysis: bodies are cut away on the side the plane's normal points to, and the
+  /// cut is capped.
+  pub section: Option<Plane>,
+  pub analysis: Option<clf_render::Analysis>,
+  /// Colour bodies by how sharply they curve.
+  pub curvature: bool,
+  /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
+  pub toolpaths: bool,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -101,6 +109,9 @@ pub struct SceneBuilder {
   revision: u64,
   edges: HashMap<BodyId, Vec<EdgeLine>>,
   profiles: HashMap<(FeatureId, usize), Option<TriMesh>>,
+  /// Section caps per body, for the plane they were cut with.
+  caps: HashMap<BodyId, (Plane, Option<TriMesh>)>,
+  curvature: HashMap<BodyId, Vec<[u8; 4]>>,
 }
 
 impl SceneBuilder {
@@ -108,6 +119,8 @@ impl SceneBuilder {
     if self.revision != s.revision {
       self.edges.clear();
       self.profiles.clear();
+      self.caps.clear();
+      self.curvature.clear();
       self.revision = s.revision;
     }
     let mut picks = PickTable::default();
@@ -144,13 +157,40 @@ impl SceneBuilder {
           if let Pick::Face { body: b, .. } = p { (*b == body.id).then(|| picks.id_of(p)).flatten() } else { None }
         })
         .collect();
+      let first = scene.meshes.len();
       if sel_faces.is_empty() {
-        scene.meshes.push(mesh_of(m, tri_ids, base, hover));
+        let mut mesh = mesh_of(m, tri_ids, base, hover);
+        if opts.curvature {
+          mesh.colors = self.curvature.entry(body.id).or_insert_with(|| curvature_colors(m)).clone();
+        }
+        scene.meshes.push(mesh);
       } else {
         // split selected faces into a second mesh so they draw in the selection colour
         let (a, b) = split_mesh(m, &tri_ids, &sel_faces);
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
+      }
+      for mesh in &mut scene.meshes[first..] {
+        mesh.analyze = true;
+        if let Some(pl) = &opts.section {
+          clip_mesh(mesh, pl);
+        }
+      }
+      if let Some(pl) = opts.section {
+        let cap = match self.caps.get(&body.id) {
+          Some((p, c)) if *p == pl => c.clone(),
+          _ => {
+            let c = section_cap(&body.shape, &pl, scene_size(s));
+            self.caps.insert(body.id, (pl, c.clone()));
+            c
+          }
+        };
+        if let Some(c) = cap {
+          let n = vec![(-pl.normal()).as_vec3().to_array(); c.positions.len()];
+          let mut mesh = mesh_of(&TriMesh { normals: n, ..c }, Vec::new(), mix(base, [120, 60, 50, 255], 0.35), None);
+          mesh.analyze = false;
+          scene.meshes.push(mesh);
+        }
       }
       if !opts.hide_edges {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
@@ -159,6 +199,16 @@ impl SceneBuilder {
         });
         for e in edges.iter() {
           let pick = Pick::Edge { body: body.id, edge: e.id };
+          let points: Vec<[f32; 3]> = match &opts.section {
+            Some(pl) => {
+              let kept: Vec<_> = e.points.iter().filter(|p| (**p - pl.origin).dot(pl.normal()) <= 1e-9).collect();
+              if kept.len() < 2 {
+                continue;
+              }
+              kept.iter().map(|p| p.as_vec3().to_array()).collect()
+            }
+            None => e.points.iter().map(|p| p.as_vec3().to_array()).collect(),
+          };
           let (color, width) = if selected.contains(&pick) {
             (SELECT_COLOR, 3.0)
           } else if opts.hover == Some(pick) {
@@ -167,7 +217,7 @@ impl SceneBuilder {
             (EDGE_COLOR, 1.0)
           };
           scene.lines.push(Polyline {
-            points: e.points.iter().map(|p| p.as_vec3().to_array()).collect(),
+            points,
             color,
             width,
             id: picks.id(pick),
@@ -260,9 +310,53 @@ impl SceneBuilder {
       });
     }
 
+    // construction axes (dashed, through the model), points and cosmetic threads
+    let reach = scene_size(s) * 0.4;
+    for (id, (o, d)) in &s.model.axes {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+        continue;
+      }
+      scene.lines.push(Polyline {
+        points: vec![(*o - *d * reach).as_vec3().to_array(), (*o + *d * reach).as_vec3().to_array()],
+        color: [200, 140, 40, 255],
+        width: 1.5,
+        id: 0,
+        on_top: false,
+        dashed: true,
+        behind: false,
+      });
+    }
+    for (id, p) in &s.model.points {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+        continue;
+      }
+      scene.markers.push(Marker {
+        at: p.as_vec3().to_array(),
+        color: [200, 140, 40, 255],
+        size: 5.0,
+        id: 0,
+        on_top: true,
+      });
+    }
+    for (_, helix) in &s.model.threads {
+      scene.lines.push(Polyline {
+        points: helix.iter().map(|p| p.as_vec3().to_array()).collect(),
+        color: [90, 96, 108, 255],
+        width: 1.0,
+        id: 0,
+        on_top: false,
+        dashed: false,
+        behind: false,
+      });
+    }
+
     if !opts.hide_grid {
       grid(&mut scene, s);
     }
+    if opts.toolpaths {
+      toolpath_lines(&mut scene, s);
+    }
+    scene.analysis = opts.analysis;
     (scene, picks)
   }
 }
@@ -414,17 +508,32 @@ fn fully_dimensioned_circle(sk: &Sketch, c: clf_sketch::CurveId, free: &[PointId
 /// Flattened curve in sketch coordinates.
 pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   match kind {
-    CurveKind::Spline { points } => {
-      let fit: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
+    CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
+      let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
+      let bz = if matches!(kind, CurveKind::Spline { .. }) {
+        clf_sketch::spline_beziers(&pts)
+      } else {
+        clf_sketch::bspline_beziers(&pts)
+      };
       let mut out = Vec::new();
-      for b in clf_sketch::spline_beziers(&fit) {
+      for b in &bz {
         for k in 0..24 {
-          out.push(clf_sketch::bezier_at(&b, k as f64 / 24.0));
+          out.push(clf_sketch::bezier_at(b, k as f64 / 24.0));
         }
       }
-      out.extend(fit.last());
+      out.extend(bz.last().map(|b| b[3]));
       out
     }
+    CurveKind::Ellipse { center, major, minor } => match (sk.pos(*center), sk.pos(*major)) {
+      (Some(c), Some(m)) => {
+        let bz = clf_sketch::ellipse_beziers(c, m, *minor);
+        let mut out: Vec<[f64; 2]> =
+          bz.iter().flat_map(|b| (0..16).map(move |k| clf_sketch::bezier_at(b, k as f64 / 16.0))).collect();
+        out.extend(bz.first().map(|b| b[0]));
+        out
+      }
+      _ => vec![],
+    },
     CurveKind::Line { a, b } => match (sk.pos(*a), sk.pos(*b)) {
       (Some(a), Some(b)) => vec![a, b],
       _ => vec![],
@@ -468,7 +577,128 @@ fn mesh_of(m: &TriMesh, tri_ids: Vec<u32>, color: [u8; 4], hover: Option<u32>) -
     color,
     highlight: hover,
     highlight_color: HOVER_COLOR,
+    colors: Vec::new(),
+    analyze: false,
   }
+}
+
+/// Cuts away the triangles (and parts of triangles) in front of a section plane (on its
+/// normal's side), keeping pick ids.
+fn clip_mesh(m: &mut Mesh, pl: &Plane) {
+  let n = pl.normal();
+  let side = |p: [f32; 3]| (DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) - pl.origin).dot(n);
+  let mut indices = Vec::with_capacity(m.indices.len());
+  let mut ids = Vec::with_capacity(m.tri_ids.len());
+  let per_tri = !m.tri_ids.is_empty();
+  let tris = m.indices.len() / 3;
+  for t in 0..tris {
+    let tri = [m.indices[t * 3], m.indices[t * 3 + 1], m.indices[t * 3 + 2]];
+    let Some(d) = tri.iter().map(|&i| m.positions.get(i as usize).map(|p| side(*p))).collect::<Option<Vec<f64>>>()
+    else {
+      continue;
+    };
+    let id = m.tri_ids.get(t).copied();
+    if d.iter().all(|x| *x <= 0.0) {
+      indices.extend_from_slice(&tri);
+      ids.extend(id);
+      continue;
+    }
+    if d.iter().all(|x| *x > 0.0) {
+      continue;
+    }
+    // split: walk the edges keeping the inside part (a triangle or a quad)
+    let mut poly: Vec<u32> = Vec::new();
+    for k in 0..3 {
+      let (a, b) = (tri[k], tri[(k + 1) % 3]);
+      let (da, db) = (d[k], d[(k + 1) % 3]);
+      if da <= 0.0 {
+        poly.push(a);
+      }
+      if (da <= 0.0) != (db <= 0.0) {
+        let s = (da / (da - db)) as f32;
+        let (pa, pb) = (m.positions[a as usize], m.positions[b as usize]);
+        let (na, nb) = (
+          m.normals.get(a as usize).copied().unwrap_or([0.0, 0.0, 1.0]),
+          m.normals.get(b as usize).copied().unwrap_or([0.0, 0.0, 1.0]),
+        );
+        let lerp =
+          |x: [f32; 3], y: [f32; 3]| [x[0] + (y[0] - x[0]) * s, x[1] + (y[1] - x[1]) * s, x[2] + (y[2] - x[2]) * s];
+        m.positions.push(lerp(pa, pb));
+        m.normals.push(lerp(na, nb));
+        if !m.colors.is_empty() {
+          let (ca, cb) = (m.colors[a as usize], m.colors[b as usize]);
+          m.colors.push(if s < 0.5 { ca } else { cb });
+        }
+        poly.push((m.positions.len() - 1) as u32);
+      }
+    }
+    for k in 1..poly.len().saturating_sub(1) {
+      indices.extend_from_slice(&[poly[0], poly[k], poly[k + 1]]);
+      ids.extend(id);
+    }
+  }
+  m.indices = indices;
+  if per_tri {
+    m.tri_ids = ids;
+  }
+}
+
+/// The cut face where a section plane passes through a body, tessellated.
+fn section_cap(shape: &Shape, pl: &Plane, size: f64) -> Option<TriMesh> {
+  use clf_sketch::{Loop, Profile, Seg};
+  let r = size * 4.0;
+  let sq = Loop {
+    segs: vec![
+      Seg::Line { a: [-r, -r], b: [r, -r] },
+      Seg::Line { a: [r, -r], b: [r, r] },
+      Seg::Line { a: [r, r], b: [-r, r] },
+      Seg::Line { a: [-r, r], b: [-r, -r] },
+    ],
+  };
+  let face = Shape::face(pl, &Profile { outer: sq, holes: vec![] }).ok()?;
+  let cut = shape.section_inside(&face).ok()?;
+  cut.tessellate((size * 0.001).clamp(0.01, 0.5)).ok()
+}
+
+/// Per-vertex colours from how sharply the surface curves there: blue flat, through green and
+/// yellow, to red tight.
+fn curvature_colors(m: &TriMesh) -> Vec<[u8; 4]> {
+  let pos: Vec<DVec3> = m.positions.iter().map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)).collect();
+  let nor: Vec<DVec3> = m.normals.iter().map(|n| DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64)).collect();
+  let mut sum = vec![0.0f64; pos.len()];
+  let mut cnt = vec![0.0f64; pos.len()];
+  for t in m.indices.chunks_exact(3) {
+    for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+      let (a, b) = (a as usize, b as usize);
+      let (Some(pa), Some(pb), Some(na), Some(nb)) = (pos.get(a), pos.get(b), nor.get(a), nor.get(b)) else {
+        continue;
+      };
+      let l = (*pb - *pa).length();
+      if l > 1e-9 {
+        // normal turn per unit length: about 1/radius
+        let k = (*nb - *na).length() / l;
+        for v in [a, b] {
+          sum[v] += k;
+          cnt[v] += 1.0;
+        }
+      }
+    }
+  }
+  let ks: Vec<f64> = sum.iter().zip(&cnt).map(|(s, c)| if *c > 0.0 { s / c } else { 0.0 }).collect();
+  let mut sorted: Vec<f64> = ks.iter().copied().filter(|k| *k > 1e-6).collect();
+  sorted.sort_by(f64::total_cmp);
+  let top = sorted.get(sorted.len() * 95 / 100).copied().unwrap_or(1.0).max(1e-6);
+  ks.iter()
+    .map(|k| {
+      let t = (k / top).clamp(0.0, 1.0) as f32;
+      let ramp = [[40.0, 80.0, 220.0], [40.0, 190.0, 90.0], [240.0, 210.0, 40.0], [225.0, 50.0, 40.0]];
+      let x = t * 3.0;
+      let i = (x.floor() as usize).min(2);
+      let f = x - i as f32;
+      let c: [f32; 3] = [0, 1, 2].map(|j| ramp[i][j] + (ramp[i + 1][j] - ramp[i][j]) * f);
+      [c[0] as u8, c[1] as u8, c[2] as u8, 255]
+    })
+    .collect()
 }
 
 /// Splits a mesh's triangles into (not in `ids`, in `ids`) keeping per-triangle pick ids.
@@ -500,7 +730,8 @@ pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
 }
 
 /// Renders the design to a PNG for `view.render`: `{width?, height?, view?, yaw?, pitch?,
-/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, background?}`. Without
+/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, background?}` plus the
+/// section and analysis options of [`view_options`]. Without
 /// `distance` the camera fits the bodies shown.
 pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::CmdError> {
   use crate::CmdError;
@@ -564,7 +795,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     hide_grid: !flag("grid", false),
     hide_edges: !flag("edges", true),
     only_bodies: only,
-    ..Default::default()
+    ..view_options(s, p).map_err(CmdError::new)?
   };
   let (mut scene, _) = SceneBuilder::default().build(s, &opts);
   if let Some(bg) = p.get("background") {
@@ -573,4 +804,156 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     scene.background_bottom = scene.background_top;
   }
   clf_render::render(&scene, &cam, w, h).to_png().map_err(CmdError::new)
+}
+
+/// Every body face a ray passes through, nearest first (one hit per face): for "Select Other",
+/// which lists what lies under the cursor behind the front-most face.
+pub fn ray_hits(s: &Session, origin: DVec3, dir: DVec3) -> Vec<(f64, Pick)> {
+  let mut out: Vec<(f64, Pick)> = Vec::new();
+  for body in s.model.bodies.iter().filter(|b| s.body_visible(b.id)) {
+    let Some(m) = body.mesh() else { continue };
+    let v = |i: u32| m.positions.get(i as usize).map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+    for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+      let (Some(a), Some(b), Some(c)) = (v(tri[0]), v(tri[1]), v(tri[2])) else { continue };
+      let Some(d) = ray_triangle(origin, dir, a, b, c) else { continue };
+      let Some(&face) = m.tri_face.get(t) else { continue };
+      let pick = Pick::Face { body: body.id, face };
+      match out.iter_mut().find(|(_, p)| *p == pick) {
+        Some(e) => e.0 = e.0.min(d),
+        None => out.push((d, pick)),
+      }
+    }
+  }
+  out.sort_by(|a, b| a.0.total_cmp(&b.0));
+  out
+}
+
+/// Möller–Trumbore: distance along the ray to the triangle, if it is hit in front.
+fn ray_triangle(o: DVec3, d: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
+  let (e1, e2) = (b - a, c - a);
+  let p = d.cross(e2);
+  let det = e1.dot(p);
+  if det.abs() < 1e-12 {
+    return None;
+  }
+  let inv = 1.0 / det;
+  let t0 = o - a;
+  let u = t0.dot(p) * inv;
+  if !(0.0..=1.0).contains(&u) {
+    return None;
+  }
+  let q = t0.cross(e1);
+  let v = d.dot(q) * inv;
+  if v < 0.0 || u + v > 1.0 {
+    return None;
+  }
+  let t = e2.dot(q) * inv;
+  (t > 0.0).then_some(t)
+}
+
+/// A world plane from a JSON plane value: "xy" | "xz" | "yz" | {"feature": construction plane}
+/// | {"body", "face"} (a planar face), moved `offset` along its normal and flipped if asked.
+pub fn view_plane(s: &Session, v: &serde_json::Value, offset: f64, flip: bool) -> Result<Plane, String> {
+  let base = if let Some(n) = v.as_str() {
+    match n.to_ascii_lowercase().as_str() {
+      "xy" | "top" => Plane::XY,
+      "xz" | "front" => Plane::XZ,
+      "yz" | "right" => Plane::YZ,
+      o => return Err(format!("unknown plane '{o}'")),
+    }
+  } else if let Some(f) = v.get("feature").and_then(serde_json::Value::as_u64) {
+    *s.model.planes.get(&FeatureId(f as u32)).ok_or("that feature is not a construction plane")?
+  } else {
+    let body =
+      BodyId(v.get("body").and_then(serde_json::Value::as_u64).ok_or("a plane needs 'body' and 'face'")? as u32);
+    let face = v.get("face").and_then(serde_json::Value::as_u64).ok_or("a plane needs 'face'")? as u32;
+    let f = s.model.body(body).and_then(|b| b.faces().iter().find(|f| f.id == face).copied()).ok_or("no such face")?;
+    f.plane().ok_or("the face is not planar")?
+  };
+  let pl = base.offset(offset);
+  Ok(if flip { Plane { origin: pl.origin, x: pl.x, y: -pl.y } } else { pl })
+}
+
+/// View options from render parameters: `section: {plane, offset?, flip?}` and
+/// `analysis: zebra | draft | accessibility | curvature` (with `pull`: "x" | "y" | "z" | [x,y,z]
+/// and `angle` in degrees for draft).
+pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, String> {
+  let mut o = ViewOptions::default();
+  if let Some(sec) = p.get("section") {
+    let plane = sec.get("plane").cloned().unwrap_or(serde_json::json!("xz"));
+    let offset = sec.get("offset").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    let flip = sec.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    o.section = Some(view_plane(s, &plane, offset, flip)?);
+  }
+  o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
+  let pull = match p.get("pull") {
+    Some(serde_json::Value::String(a)) => match a.as_str() {
+      "x" => [1.0, 0.0, 0.0],
+      "y" => [0.0, 1.0, 0.0],
+      _ => [0.0, 0.0, 1.0],
+    },
+    Some(serde_json::Value::Array(a)) if a.len() == 3 => [0, 1, 2].map(|i| a[i].as_f64().unwrap_or(0.0) as f32),
+    _ => [0.0, 0.0, 1.0],
+  };
+  match p.get("analysis").and_then(serde_json::Value::as_str) {
+    None => {}
+    Some("zebra") => o.analysis = Some(clf_render::Analysis::Zebra { stripes: 24.0 }),
+    Some("draft") => {
+      let a = p.get("angle").and_then(serde_json::Value::as_f64).unwrap_or(1.0).to_radians() as f32;
+      o.analysis = Some(clf_render::Analysis::Draft { pull, angle: a })
+    }
+    Some("accessibility") => o.analysis = Some(clf_render::Analysis::Accessibility { dir: pull }),
+    Some("curvature") => o.curvature = true,
+    Some(other) => return Err(format!("unknown analysis '{other}' (zebra, draft, accessibility, curvature)")),
+  }
+  Ok(o)
+}
+
+/// Toolpaths (cutting moves blue, rapids dashed orange) and the stock box of their setup.
+fn toolpath_lines(scene: &mut Scene, s: &Session) {
+  let line = |scene: &mut Scene, pts: Vec<[f32; 3]>, color: [u8; 4], dashed: bool, width: f32| {
+    scene.lines.push(Polyline { points: pts, color, width, id: 0, on_top: false, dashed, behind: false });
+  };
+  if let Some((id, _)) = s.toolpaths_of
+    && let Some(st) = s.design.cam.iter().find(|c| c.id == id)
+    && let Ok((lo, hi)) = clf_model::cam::stock(st, &s.model)
+  {
+    let c = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).as_vec3().to_array();
+    for z in [lo.z, hi.z] {
+      line(
+        scene,
+        vec![c(lo.x, lo.y, z), c(hi.x, lo.y, z), c(hi.x, hi.y, z), c(lo.x, hi.y, z), c(lo.x, lo.y, z)],
+        [120, 130, 150, 255],
+        true,
+        1.0,
+      );
+    }
+    for (x, y) in [(lo.x, lo.y), (hi.x, lo.y), (hi.x, hi.y), (lo.x, hi.y)] {
+      line(scene, vec![c(x, y, lo.z), c(x, y, hi.z)], [120, 130, 150, 255], true, 1.0);
+    }
+  }
+  for tp in &s.toolpaths {
+    let mut run: Vec<[f32; 3]> = Vec::new();
+    let mut rapid = false;
+    let mut at: Option<DVec3> = None;
+    for m in &tp.moves {
+      let p = m.to.as_vec3().to_array();
+      if m.rapid != rapid && !run.is_empty() {
+        let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
+        line(scene, std::mem::take(&mut run), color, rapid, if rapid { 1.0 } else { 1.5 });
+      }
+      if run.is_empty()
+        && let Some(a) = at
+      {
+        run.push(a.as_vec3().to_array());
+      }
+      rapid = m.rapid;
+      run.push(p);
+      at = Some(m.to);
+    }
+    if run.len() > 1 {
+      let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
+      line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
+    }
+  }
 }

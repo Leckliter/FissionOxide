@@ -10,6 +10,19 @@
 #include <stdexcept>
 #include <string>
 
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepFill.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepAlgoAPI_Defeaturing.hxx>
+#include <BRepAlgoAPI_Section.hxx>
+#include <BRepFeat_SplitShape.hxx>
+#include <BRepFill_Filling.hxx>
+#include <BRepOffset_MakeOffset.hxx>
+#include <Geom2d_Line.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Lin2d.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -651,8 +664,9 @@ MassProps mass_props(const Shape &s) {
   GProp_GProps surf;
   BRepGProp::SurfaceProperties(s.s, surf);
   out.area = surf.Mass();
+  // the tight box: the default one is loose around curved (fillet, B-spline) faces
   Bnd_Box box;
-  BRepBndLib::Add(s.s, box);
+  BRepBndLib::AddOptimal(s.s, box, Standard_False, Standard_False);
   if (!box.IsVoid()) {
     double x0, y0, z0, x1, y1, z1;
     box.Get(x0, y0, z0, x1, y1, z1);
@@ -737,10 +751,63 @@ std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
 }
 
 // Sweeps a planar face along a wire (corrected Frenet frame, as Fusion's default orientation).
+namespace {
+// Does a path turn sharply anywhere (a corner, not a tangent join)?
+bool has_corners(const TopoDS_Wire &w) {
+  gp_Vec prev;
+  bool first = true;
+  for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next()) {
+    BRepAdaptor_Curve c(ex.Current());
+    bool rev = ex.Current().Orientation() == TopAbs_REVERSED;
+    double t0 = rev ? c.LastParameter() : c.FirstParameter();
+    double t1 = rev ? c.FirstParameter() : c.LastParameter();
+    gp_Pnt p;
+    gp_Vec d0, d1;
+    c.D1(t0, p, d0);
+    c.D1(t1, p, d1);
+    if (rev) {
+      d0.Reverse();
+      d1.Reverse();
+    }
+    if (!first && d0.Magnitude() > 1e-12 && prev.Magnitude() > 1e-12 && d0.Angle(prev) > 1e-3) return true;
+    prev = d1;
+    first = false;
+  }
+  return false;
+}
+
+// Sweeps one closed profile wire along a path with sharp corners (mitred, as Fusion's pipes).
+TopoDS_Shape corner_sweep(const TopoDS_Wire &spine, const TopoDS_Wire &profile) {
+  BRepOffsetAPI_MakePipeShell ps(spine);
+  ps.SetMode(Standard_False);
+  ps.SetTransitionMode(BRepBuilderAPI_RightCorner);
+  ps.Add(profile);
+  ps.Build();
+  if (!ps.IsDone()) throw std::runtime_error("the sweep failed at a corner of the path");
+  ps.MakeSolid();
+  return ps.Shape();
+}
+} // namespace
+
 std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine) {
   CLF_TRY
   if (spine.s.ShapeType() != TopAbs_WIRE) throw std::runtime_error("the sweep path must be a wire");
-  BRepOffsetAPI_MakePipe mk(TopoDS::Wire(spine.s), face.s, GeomFill_IsCorrectedFrenet, Standard_False);
+  const TopoDS_Wire &path = TopoDS::Wire(spine.s);
+  if (face.s.ShapeType() == TopAbs_FACE && has_corners(path)) {
+    // a face sweep only follows smooth paths: sweep each loop with mitred corners and cut the
+    // holes out of the outer solid
+    const TopoDS_Face &f = TopoDS::Face(face.s);
+    TopoDS_Wire outer = BRepTools::OuterWire(f);
+    TopoDS_Shape out = corner_sweep(path, outer);
+    for (TopExp_Explorer ex(f, TopAbs_WIRE); ex.More(); ex.Next()) {
+      if (ex.Current().IsSame(outer)) continue;
+      BRepAlgoAPI_Cut cut(out, corner_sweep(path, TopoDS::Wire(ex.Current())));
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      out = cut.Shape();
+    }
+    return wrap(checked(out, "sweep"));
+  }
+  BRepOffsetAPI_MakePipe mk(path, face.s, GeomFill_IsCorrectedFrenet, Standard_False);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the sweep failed");
   return wrap(checked(mk.Shape(), "sweep"));
@@ -1568,6 +1635,300 @@ std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool) {
   if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
   return wrap(sp.Shape());
   CLF_CATCH("split")
+}
+
+
+std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_EDGE, map);
+  if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
+  return wrap(map(static_cast<int>(edge)));
+  CLF_CATCH("edge")
+}
+
+// Minimum distance between two shapes: [distance, point on a (3), point on b (3)].
+rust::Vec<double> min_distance(const Shape &a, const Shape &b) {
+  CLF_TRY
+  BRepExtrema_DistShapeShape d(a.s, b.s);
+  d.Perform();
+  if (!d.IsDone() || d.NbSolution() < 1) throw std::runtime_error("the distance could not be computed");
+  rust::Vec<double> out;
+  out.push_back(d.Value());
+  gp_Pnt p1 = d.PointOnShape1(1), p2 = d.PointOnShape2(1);
+  for (double v : {p1.X(), p1.Y(), p1.Z(), p2.X(), p2.Y(), p2.Z()}) out.push_back(v);
+  return out;
+  CLF_CATCH("measure")
+}
+
+// Sweeps a profile (a face or wire in the plane through the axis and xdir, at the helix start
+// origin + radius·xdir) along a helix. axis: origin(3) dir(3) xdir(3).
+std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
+                                   double height, bool left) {
+  CLF_TRY
+  need(axis, 9, "helix axis");
+  if (radius <= 0 || pitch <= 0 || height <= 0) throw std::runtime_error("radius, pitch and height must be positive");
+  if (height / pitch > 400) throw std::runtime_error("too many turns (at most 400)");
+  gp_Ax3 ax(pnt(axis, 0), dir(axis, 3), dir(axis, 6));
+  Handle(Geom_CylindricalSurface) cyl = new Geom_CylindricalSurface(ax, radius);
+  gp_Dir2d d2(left ? -2.0 * M_PI : 2.0 * M_PI, pitch);
+  gp_Lin2d line(gp_Pnt2d(0.0, 0.0), d2);
+  double turns = height / pitch;
+  double len = turns * std::sqrt(4.0 * M_PI * M_PI + pitch * pitch);
+  Handle(Geom2d_TrimmedCurve) seg = GCE2d_MakeSegment(line, 0.0, len);
+  TopoDS_Edge e = BRepBuilderAPI_MakeEdge(seg, cyl);
+  BRepLib::BuildCurves3d(e, 1e-6, GeomAbs_C1, 14, 400);
+  TopoDS_Wire spine = BRepBuilderAPI_MakeWire(e);
+  TopoDS_Wire w;
+  if (profile.s.ShapeType() == TopAbs_FACE) {
+    w = BRepTools::OuterWire(TopoDS::Face(profile.s));
+  } else if (profile.s.ShapeType() == TopAbs_WIRE) {
+    w = TopoDS::Wire(profile.s);
+  } else {
+    throw std::runtime_error("the helix profile must be a face or a wire");
+  }
+  BRepOffsetAPI_MakePipeShell ps(spine);
+  ps.SetMode(gp_Dir(axis[3], axis[4], axis[5]));
+  ps.Add(w);
+  ps.Build();
+  if (!ps.IsDone()) throw std::runtime_error("the helical sweep failed");
+  ps.MakeSolid();
+  return wrap(checked(ps.Shape(), "helical sweep"));
+  CLF_CATCH("helix")
+}
+
+// A face or shell thickened into a solid (d > 0 along the face normals).
+std::unique_ptr<Shape> thicken(const Shape &s, double d) {
+  CLF_TRY
+  if (std::abs(d) < 1e-9) throw std::runtime_error("the thickness must not be zero");
+  try {
+    BRepOffsetAPI_MakeThickSolid mk;
+    mk.MakeThickSolidBySimple(s.s, d);
+    mk.Build();
+    if (mk.IsDone()) return wrap(checked(mk.Shape(), "thicken"));
+  } catch (...) {
+  }
+  BRepOffset_MakeOffset mo;
+  mo.Initialize(s.s, d, 1e-6, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection, Standard_True);
+  mo.MakeOffsetShape();
+  if (!mo.IsDone()) throw std::runtime_error("the faces could not be thickened");
+  return wrap(checked(mo.Shape(), "thicken"));
+  CLF_CATCH("thicken")
+}
+
+// Scales about a centre: uniformly (exact) or per axis.
+std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, double sx, double sy, double sz) {
+  CLF_TRY
+  if (sx <= 0 || sy <= 0 || sz <= 0) throw std::runtime_error("scale factors must be positive");
+  if (std::abs(sx - sy) < 1e-12 && std::abs(sx - sz) < 1e-12) {
+    gp_Trsf t;
+    t.SetScale(gp_Pnt(cx, cy, cz), sx);
+    BRepBuilderAPI_Transform tr(s.s, t, Standard_True);
+    return wrap(tr.Shape());
+  }
+  gp_GTrsf g;
+  g.SetValue(1, 1, sx);
+  g.SetValue(2, 2, sy);
+  g.SetValue(3, 3, sz);
+  g.SetTranslationPart(gp_XYZ(cx * (1 - sx), cy * (1 - sy), cz * (1 - sz)));
+  BRepBuilderAPI_GTransform tr(s.s, g, Standard_True);
+  if (!tr.IsDone()) throw std::runtime_error("non-uniform scale failed");
+  return wrap(checked(tr.Shape(), "scale"));
+  CLF_CATCH("scale")
+}
+
+// Removes faces (1-based) and heals the gap from the neighbours (defeaturing).
+std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> faces) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_FACE, map);
+  BRepAlgoAPI_Defeaturing df;
+  df.SetShape(s.s);
+  int n = 0;
+  for (uint32_t i : faces) {
+    if (i >= 1 && static_cast<int>(i) <= map.Extent()) {
+      df.AddFaceToRemove(map(static_cast<int>(i)));
+      ++n;
+    }
+  }
+  if (n == 0) throw std::runtime_error("no faces to remove");
+  df.SetRunParallel(Standard_False);
+  df.Build();
+  if (!df.IsDone() || df.HasErrors()) throw std::runtime_error("the faces could not be removed");
+  return wrap(checked(df.Shape(), "remove faces"));
+  CLF_CATCH("remove faces")
+}
+
+// Splits faces (1-based) where a tool shape crosses them; the body stays one solid.
+std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> faces, const Shape &tool) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_FACE, map);
+  BRepFeat_SplitShape ss(s.s);
+  int n = 0;
+  for (uint32_t i : faces) {
+    if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
+    const TopoDS_Face &f = TopoDS::Face(map(static_cast<int>(i)));
+    BRepAlgoAPI_Section sec(f, tool.s, Standard_False);
+    sec.ComputePCurveOn1(Standard_True);
+    sec.Approximation(Standard_True);
+    sec.Build();
+    if (!sec.IsDone()) continue;
+    for (TopExp_Explorer ex(sec.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
+      ss.Add(TopoDS::Edge(ex.Current()), f);
+      ++n;
+    }
+  }
+  if (n == 0) throw std::runtime_error("the tool does not cross the faces");
+  ss.Build();
+  if (!ss.IsDone()) throw std::runtime_error("the faces could not be split");
+  return wrap(ss.Shape());
+  CLF_CATCH("split face")
+}
+
+// A surface patch filling a closed boundary (a wire or edges): planar when it can be.
+std::unique_ptr<Shape> patch(const Shape &boundary) {
+  CLF_TRY
+  BRepBuilderAPI_MakeWire mw;
+  for (TopExp_Explorer ex(boundary.s, TopAbs_EDGE); ex.More(); ex.Next()) mw.Add(TopoDS::Edge(ex.Current()));
+  if (mw.IsDone() && mw.Wire().Closed()) {
+    BRepBuilderAPI_MakeFace mf(mw.Wire(), Standard_True);
+    if (mf.IsDone()) return wrap(mf.Face());
+  }
+  BRepFill_Filling fill;
+  int n = 0;
+  for (TopExp_Explorer ex(boundary.s, TopAbs_EDGE); ex.More(); ex.Next(), ++n) {
+    fill.Add(TopoDS::Edge(ex.Current()), GeomAbs_C0, Standard_True);
+  }
+  if (n == 0) throw std::runtime_error("the boundary has no edges");
+  fill.Build();
+  if (!fill.IsDone()) throw std::runtime_error("the patch could not be computed");
+  return wrap(fill.Face());
+  CLF_CATCH("patch")
+}
+
+// The boundary loops of a face as ordered polylines (outer loop first).
+EdgeData face_loops(const Shape &s, double deflection) {
+  CLF_TRY
+  EdgeData out;
+  TopoDS_Face face;
+  for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More(); ex.Next()) {
+    face = TopoDS::Face(ex.Current());
+    break;
+  }
+  if (face.IsNull()) throw std::runtime_error("no face");
+  TopoDS_Wire outer = BRepTools::OuterWire(face);
+  std::vector<TopoDS_Wire> wires;
+  wires.push_back(outer);
+  for (TopExp_Explorer ex(face, TopAbs_WIRE); ex.More(); ex.Next()) {
+    if (!ex.Current().IsSame(outer)) wires.push_back(TopoDS::Wire(ex.Current()));
+  }
+  uint32_t k = 0;
+  for (const TopoDS_Wire &w : wires) {
+    out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+    out.edge_ids.push_back(++k);
+    bool first_edge = true;
+    for (BRepTools_WireExplorer we(w, face); we.More(); we.Next()) {
+      const TopoDS_Edge &e = we.Current();
+      if (BRep_Tool::Degenerated(e)) continue;
+      BRepAdaptor_Curve c(e);
+      GCPnts_TangentialDeflection td(c, 0.1, deflection);
+      int n = td.NbPoints();
+      bool rev = e.Orientation() == TopAbs_REVERSED;
+      // each edge after the first starts where the previous one ended
+      for (int j = first_edge ? 1 : 2; j <= n; ++j) {
+        gp_Pnt p = td.Value(rev ? n - j + 1 : j);
+        out.points.push_back(p.X());
+        out.points.push_back(p.Y());
+        out.points.push_back(p.Z());
+      }
+      first_edge = false;
+    }
+  }
+  out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+  return out;
+  CLF_CATCH("face loops")
+}
+
+// Every loop of a planar face offset by d (d < 0 inwards), as ordered polylines; empty when the
+// offset vanishes. Toolpaths use these: an offset can split a region into several.
+EdgeData offset_polylines(const Shape &face, double d, double deflection) {
+  CLF_TRY
+  EdgeData out;
+  if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("offset needs a face");
+  BRepOffsetAPI_MakeOffset mk(TopoDS::Face(face.s), GeomAbs_Arc);
+  try {
+    mk.Perform(d);
+  } catch (...) {
+    return out;
+  }
+  if (!mk.IsDone()) return out;
+  uint32_t k = 0;
+  for (TopExp_Explorer wx(mk.Shape(), TopAbs_WIRE); wx.More(); wx.Next()) {
+    out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+    out.edge_ids.push_back(++k);
+    bool first_edge = true;
+    for (BRepTools_WireExplorer we(TopoDS::Wire(wx.Current())); we.More(); we.Next()) {
+      const TopoDS_Edge &e = we.Current();
+      if (BRep_Tool::Degenerated(e)) continue;
+      BRepAdaptor_Curve c(e);
+      GCPnts_TangentialDeflection td(c, 0.1, deflection);
+      int n = td.NbPoints();
+      bool rev = e.Orientation() == TopAbs_REVERSED;
+      for (int j = first_edge ? 1 : 2; j <= n; ++j) {
+        gp_Pnt p = td.Value(rev ? n - j + 1 : j);
+        out.points.push_back(p.X());
+        out.points.push_back(p.Y());
+        out.points.push_back(p.Z());
+      }
+      first_edge = false;
+    }
+  }
+  out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+  return out;
+  CLF_CATCH("offset loops")
+}
+
+// A ruled surface between two edges.
+std::unique_ptr<Shape> ruled(const Shape &a, const Shape &b) {
+  CLF_TRY
+  if (a.s.ShapeType() != TopAbs_EDGE || b.s.ShapeType() != TopAbs_EDGE) throw std::runtime_error("pick two edges");
+  TopoDS_Edge ea = TopoDS::Edge(a.s), eb = TopoDS::Edge(b.s);
+  // run both edges the same way, or the surface twists
+  auto ends = [](const TopoDS_Edge &e) {
+    BRepAdaptor_Curve c(e);
+    gp_Pnt p0 = c.Value(c.FirstParameter()), p1 = c.Value(c.LastParameter());
+    if (e.Orientation() == TopAbs_REVERSED) std::swap(p0, p1);
+    return std::make_pair(p0, p1);
+  };
+  auto [a0, a1] = ends(ea);
+  auto [b0, b1] = ends(eb);
+  if (a0.Distance(b0) + a1.Distance(b1) > a0.Distance(b1) + a1.Distance(b0)) eb = TopoDS::Edge(eb.Reversed());
+  TopoDS_Face f = BRepFill::Face(ea, eb);
+  return wrap(f);
+  CLF_CATCH("ruled surface")
+}
+
+// Surfaces (or a solid's skin) offset by d along their normals.
+std::unique_ptr<Shape> offset_shape(const Shape &s, double d) {
+  CLF_TRY
+  BRepOffsetAPI_MakeOffsetShape mk;
+  mk.PerformBySimple(s.s, d);
+  if (!mk.IsDone()) throw std::runtime_error("the surface can't be offset that far");
+  return wrap(mk.Shape());
+  CLF_CATCH("offset surface")
+}
+
+std::unique_ptr<Shape> make_vertex(double x, double y, double z) {
+  CLF_TRY
+  return wrap(BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex());
+  CLF_CATCH("vertex")
+}
+
+std::unique_ptr<Shape> reversed(const Shape &s) {
+  CLF_TRY
+  return wrap(s.s.Reversed());
+  CLF_CATCH("reverse")
 }
 
 } // namespace clf

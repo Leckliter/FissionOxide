@@ -366,6 +366,12 @@ impl Shape {
     if r.solid_count() == 0 { Err(KernelError::Empty) } else { Ok(r) }
   }
 
+  /// The part of `tool` (a face or shell) inside this solid: a section through it. Unlike
+  /// [`Shape::boolean`] the result has no solids.
+  pub fn section_inside(&self, tool: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::boolean_op(self.get()?, tool.get()?, 2, FUZZY)?)
+  }
+
   /// Rounds the given edges (1-based edge-map indices).
   pub fn fillet(&self, edges: &[u32], radius: f64) -> Result<Shape> {
     if !(radius > 1e-9 && radius.is_finite()) {
@@ -576,9 +582,113 @@ impl Shape {
     Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)?.solids()
   }
 
+  /// This shape split where `tool` crosses it, as one shape (surfaces included).
+  pub fn split_raw(&self, tool: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)
+  }
+
   /// One face (1-based face-map index) as a shape of its own.
   pub fn face_shape(&self, face: u32) -> Result<Shape> {
     Shape::wrap(sys::face_at_index(self.get()?, face)?)
+  }
+
+  /// One edge (1-based index, as in [`Shape::edges`]) as a shape of its own.
+  pub fn edge_shape(&self, edge: u32) -> Result<Shape> {
+    Shape::wrap(sys::edge_at_index(self.get()?, edge)?)
+  }
+
+  /// Minimum distance to another shape and the closest points on each.
+  pub fn distance_to(&self, other: &Shape) -> Result<(f64, DVec3, DVec3)> {
+    let v = sys::min_distance(self.get()?, other.get()?)?;
+    match v.as_slice() {
+      [d, a @ ..] if a.len() == 6 => Ok((*d, DVec3::new(a[0], a[1], a[2]), DVec3::new(a[3], a[4], a[5]))),
+      _ => Err(KernelError::Kernel("measure returned no points".into())),
+    }
+  }
+
+  /// Sweeps this profile (a face or wire in the plane through the axis, at `origin + radius·xdir`)
+  /// along a helix of `radius` and `pitch` rising `height` along `dir`.
+  #[allow(clippy::too_many_arguments)]
+  pub fn helix_sweep(
+    &self,
+    origin: DVec3,
+    dir: DVec3,
+    xdir: DVec3,
+    radius: f64,
+    pitch: f64,
+    height: f64,
+    left: bool,
+  ) -> Result<Shape> {
+    let axis = [origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, xdir.x, xdir.y, xdir.z];
+    Shape::wrap(sys::helix_sweep(self.get()?, &axis, radius, pitch, height, left)?)
+  }
+
+  /// A face or shell thickened into a solid (positive = along the face normals).
+  pub fn thicken(&self, d: f64) -> Result<Shape> {
+    let s = Shape::wrap(sys::thicken(self.get()?, d)?)?;
+    // offsetting against a face's normal can leave the solid inside out
+    if s.mass().is_ok_and(|m| m.volume < 0.0) { s.reversed() } else { Ok(s) }
+  }
+
+  /// Scales about `center`, per axis (uniform factors keep the geometry exact).
+  pub fn scaled(&self, center: DVec3, s: DVec3) -> Result<Shape> {
+    Shape::wrap(sys::scale(self.get()?, center.x, center.y, center.z, s.x, s.y, s.z)?)
+  }
+
+  /// Removes faces and grows the neighbours to close the gap (fillets, holes, bosses...).
+  pub fn remove_faces(&self, faces: &[u32]) -> Result<Shape> {
+    Shape::wrap(sys::remove_faces(self.get()?, faces)?)
+  }
+
+  /// Splits faces where `tool` crosses them; the body stays in one piece.
+  pub fn split_faces(&self, faces: &[u32], tool: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::split_faces(self.get()?, faces, tool.get()?)?)
+  }
+
+  /// A surface filling a closed boundary of edges (planar when the boundary is flat).
+  pub fn patch(&self) -> Result<Shape> {
+    Shape::wrap(sys::patch(self.get()?)?)
+  }
+
+  /// The first face's boundary loops as ordered polylines, outer loop first.
+  pub fn face_loops(&self, deflection: f64) -> Result<Vec<Vec<DVec3>>> {
+    let d = sys::face_loops(self.get()?, deflection.clamp(1e-4, 100.0))?;
+    let pts: Vec<DVec3> = d.points.chunks_exact(3).map(|c| DVec3::new(c[0], c[1], c[2])).collect();
+    Ok(d.offsets.windows(2).filter_map(|w| pts.get(w[0] as usize..w[1] as usize).map(<[DVec3]>::to_vec)).collect())
+  }
+
+  /// A single point (for measuring to a point).
+  pub fn vertex(p: DVec3) -> Result<Shape> {
+    Shape::wrap(sys::make_vertex(p.x, p.y, p.z)?)
+  }
+
+  /// Every loop of this planar face offset by `d` (negative = inwards) as ordered polylines;
+  /// empty once the offset vanishes. An offset can split a region into several loops.
+  pub fn offset_loops(&self, d: f64, deflection: f64) -> Result<Vec<Vec<DVec3>>> {
+    let e = sys::offset_polylines(self.get()?, d, deflection.clamp(1e-4, 100.0))?;
+    let pts: Vec<DVec3> = e.points.chunks_exact(3).map(|c| DVec3::new(c[0], c[1], c[2])).collect();
+    Ok(
+      e.offsets
+        .windows(2)
+        .filter_map(|w| pts.get(w[0] as usize..w[1] as usize).map(<[DVec3]>::to_vec))
+        .filter(|l| l.len() > 2)
+        .collect(),
+    )
+  }
+
+  /// A ruled surface between this edge and another.
+  pub fn ruled_to(&self, other: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::ruled(self.get()?, other.get()?)?)
+  }
+
+  /// Surfaces offset by `d` along their normals (a new surface, the original is kept).
+  pub fn offset_surface(&self, d: f64) -> Result<Shape> {
+    Shape::wrap(sys::offset_shape(self.get()?, d)?)
+  }
+
+  /// The same shape with its orientation (face normals) reversed.
+  pub fn reversed(&self) -> Result<Shape> {
+    Shape::wrap(sys::reversed(self.get()?)?)
   }
 
   pub fn solid_count(&self) -> usize {

@@ -27,6 +27,8 @@ pub enum Tab {
   Sketch,
   /// The Drawing workspace's single tab.
   Drawing,
+  /// The Manufacture workspace's milling tab.
+  Milling,
 }
 
 impl Tab {
@@ -44,6 +46,7 @@ impl Tab {
       Tab::Manage => "MANAGE",
       Tab::Sketch => "SKETCH",
       Tab::Drawing => "DRAWING",
+      Tab::Milling => "MILLING",
     }
   }
 }
@@ -299,6 +302,20 @@ pub(crate) enum Cmd {
   DrawingExport(&'static str),
   /// Back to the Design workspace.
   FinishDrawing,
+  SelectAll,
+  SelectInvert,
+  SelectOther,
+  /// Window selection (a left-drag with the select tool; this just switches to it).
+  WindowSelect,
+  Priority(crate::select::Priority),
+  /// Toggle a selection filter: bodies, faces, edges, sketches or profiles.
+  Filter(&'static str),
+  /// Recompute the whole timeline (in the background).
+  ComputeAll,
+  /// Manufacture: compute the toolpaths, write G-code, delete the setup.
+  CamGenerate,
+  CamPost,
+  CamDelete,
 }
 
 impl Cmd {
@@ -342,6 +359,20 @@ impl Cmd {
         Tool::Spline => (Icon::SplineFit, "Fit Point Spline", "Smooth curve through clicked points"),
         Tool::Trim => (Icon::SkTrim, "Trim", "Remove the piece of a curve you click (T)"),
         Tool::Extend => (Icon::SkExtend, "Extend", "Extend a line to the next curve"),
+        Tool::Rect3 => (Icon::Rect3, "3-Point Rectangle", "Rectangle at any angle from one side and a height"),
+        Tool::Circle2P => (Icon::Circle2P, "2-Point Circle", "Circle from the ends of a diameter"),
+        Tool::Circle3P => (Icon::Circle3P, "3-Point Circle", "Circle through three points"),
+        Tool::TangentArc => (Icon::TangentArc, "Tangent Arc", "Arc continuing smoothly from a line or arc"),
+        Tool::CircPolygon => (Icon::PolygonCirc, "Circumscribed Polygon", "Hexagon from centre and a side's middle"),
+        Tool::EdgePolygon => (Icon::PolygonEdge, "Edge Polygon", "Hexagon from one side"),
+        Tool::OverallSlot => (Icon::OverallSlot, "Overall Slot", "Slot from its overall length and width"),
+        Tool::CenterSlot => (Icon::CenterPointSlot, "Center Point Slot", "Slot from its centre, an end and width"),
+        Tool::ArcSlot3 => (Icon::ArcSlot3, "Three Point Arc Slot", "Curved slot through three points"),
+        Tool::ArcSlotCenter => (Icon::ArcSlotCenter, "Center Point Arc Slot", "Curved slot around a centre"),
+        Tool::ControlSpline => (Icon::SplineCtrl, "Control Point Spline", "Spline shaped by control points"),
+        Tool::Ellipse => (Icon::Ellipse, "Ellipse", "Ellipse from centre, major axis and minor radius"),
+        Tool::Conic => (Icon::Conic, "Conic Curve", "Curve from start to end bent towards an apex"),
+        Tool::MidpointLine => (Icon::MidpointLine, "Midpoint Line", "Line from its midpoint"),
         Tool::Select => (Icon::Select, "Select", "Select sketch geometry"),
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
@@ -372,6 +403,35 @@ impl Cmd {
         _ => (Icon::ExportSvg, "SVG Export", "Write the drawing as an SVG"),
       },
       Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
+      Cmd::ComputeAll => (Icon::ComputeAll, "Compute All", "Recompute the whole timeline (Ctrl+B)"),
+      Cmd::CamGenerate => (Icon::Play, "Generate", "Compute the setup's toolpaths and machining time"),
+      Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code (.nc)"),
+      Cmd::CamDelete => (Icon::Remove, "Delete Setup", "Delete the last setup and its operations"),
+      Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
+      Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
+      Cmd::SelectOther => {
+        (Icon::Select, "Select Other", "Everything under the last click, front to back (or Alt+click, or hold)")
+      }
+      Cmd::WindowSelect => (
+        Icon::WindowSel,
+        "Window Selection",
+        "Drag a box: left to right selects what's inside, right to left what it touches",
+      ),
+      Cmd::Priority(p) => match p {
+        crate::select::Priority::Body => (Icon::Body, "Select Body Priority", "Clicks and boxes select whole bodies"),
+        crate::select::Priority::Face => (Icon::SplitFace, "Select Face Priority", "Clicks select faces (and edges)"),
+        crate::select::Priority::Edge => (Icon::Line, "Select Edge Priority", "Clicks and boxes select edges only"),
+        crate::select::Priority::Component => {
+          (Icon::Component, "Select Component Priority", "Clicks select every body of a component")
+        }
+      },
+      Cmd::Filter(f) => match f {
+        "bodies" => (Icon::Body, "Bodies", "Allow selecting bodies"),
+        "faces" => (Icon::SplitFace, "Faces", "Allow selecting faces"),
+        "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
+        "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
+        _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
+      },
     }
   }
 
@@ -381,6 +441,8 @@ impl Cmd {
       Cmd::Select => false,
       Cmd::Params => app.show_params,
       Cmd::Dialog(k) => app.dialog.as_ref().is_some_and(|d| d.kind == k),
+      Cmd::Priority(p) => app.sel_priority == p,
+      Cmd::Filter(f) => app.sel_filter.get(f),
       _ => false,
     }
   }
@@ -446,6 +508,29 @@ impl Cmd {
       }
       Cmd::DrawingExport(e) => app.export_drawing(e),
       Cmd::FinishDrawing => app.close_drawing(),
+      Cmd::ComputeAll => app.run_background("compute_all", json!({})),
+      Cmd::CamGenerate => app.cam_generate(true),
+      Cmd::CamPost => app.cam_post(),
+      Cmd::CamDelete => {
+        if app.run("cam.delete", json!({})).is_some() {
+          app.status = Some(("Setup deleted".into(), false));
+        }
+      }
+      Cmd::SelectAll => {
+        app.run("select.all", json!({}));
+      }
+      Cmd::SelectInvert => {
+        app.run("select.invert", json!({}));
+      }
+      Cmd::SelectOther => crate::viewport::select_other_at_last_click(app),
+      Cmd::WindowSelect => {
+        app.nav_mode = None;
+        app.set_tool(Tool::Select);
+        app.status =
+          Some(("Drag a box: left to right selects what's inside, right to left what it touches".into(), false));
+      }
+      Cmd::Priority(p) => app.sel_priority = p,
+      Cmd::Filter(f) => app.sel_filter.toggle(f),
       Cmd::Fit => app.fit_view(),
       Cmd::Home => {
         app.cam.set_view(StandardView::Home);
@@ -555,8 +640,20 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
     ui.painter().text(
       rect.center() - vec2(8.0, 0.0),
       egui::Align2::CENTER_CENTER,
-      if app.drawing.is_some() { "DRAWING" } else { "DESIGN" },
-      egui::FontId::proportional(if app.drawing.is_some() { 12.5 } else { 13.5 }),
+      if app.drawing.is_some() {
+        "DRAWING"
+      } else if app.manufacture {
+        "MANUFACTURE"
+      } else {
+        "DESIGN"
+      },
+      egui::FontId::proportional(if app.manufacture {
+        10.0
+      } else if app.drawing.is_some() {
+        12.5
+      } else {
+        13.5
+      }),
       Color32::from_gray(30),
     );
     icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
@@ -565,13 +662,36 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       let drawing = app.drawing.is_some();
       for (i, w) in WORKSPACES.iter().enumerate() {
         // Design and Drawing are CLFusion's workspaces
-        let current = if *w == "Drawing" { drawing } else { i == 0 && !drawing };
-        let r = ui.add_enabled(i == 0 || *w == "Drawing", egui::Button::selectable(current, *w));
+        let current = match *w {
+          "Drawing" => drawing,
+          "Manufacture" => app.manufacture && !drawing,
+          _ => i == 0 && !drawing && !app.manufacture,
+        };
+        let r =
+          ui.add_enabled(matches!(*w, "Design" | "Drawing" | "Manufacture"), egui::Button::selectable(current, *w));
         if r.clicked() {
           ui.close();
-          match (*w, drawing) {
-            ("Drawing", false) => app.open_drawing_workspace(),
-            ("Design", true) => app.close_drawing(),
+          match *w {
+            "Drawing" if !drawing => {
+              app.manufacture = false;
+              app.open_drawing_workspace();
+            }
+            "Design" => {
+              app.manufacture = false;
+              if drawing {
+                app.close_drawing();
+              }
+            }
+            "Manufacture" => {
+              if drawing {
+                app.close_drawing();
+              }
+              app.cancel_dialog();
+              if app.s.edit_sketch.is_some() {
+                app.finish_sketch();
+              }
+              app.manufacture = true;
+            }
             _ => {}
           }
         }
@@ -587,7 +707,10 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.drawing.is_some() {
       tabs = vec![Tab::Drawing];
       app.tab = Tab::Drawing;
-    } else if app.tab == Tab::Drawing {
+    } else if app.manufacture {
+      tabs = vec![Tab::Milling];
+      app.tab = Tab::Milling;
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling) {
       app.tab = Tab::Solid;
     }
     if sketching {
@@ -1822,6 +1945,32 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Hole { .. } => Icon::Cylinder,
     FeatureKind::SplitBody { .. } | FeatureKind::Joint { .. } | FeatureKind::CopyComponent { .. } => Icon::Combine,
     FeatureKind::Draft { .. } => Icon::Chamfer,
+    FeatureKind::PlaneBy { .. } => Icon::PlaneAlt,
+    FeatureKind::ConstructionAxis { .. } => Icon::Axis,
+    FeatureKind::ConstructionPoint { .. } => Icon::CPoint,
+    FeatureKind::Thread { .. } => Icon::Thread,
+    FeatureKind::Coil { .. } => Icon::Coil,
+    FeatureKind::Pipe { .. } => Icon::Pipe,
+    FeatureKind::Rib { web: true, .. } => Icon::Web,
+    FeatureKind::Rib { .. } => Icon::Rib,
+    FeatureKind::Scale { .. } => Icon::Scale,
+    FeatureKind::SplitFace { .. } => Icon::SplitFace,
+    FeatureKind::RemoveFaces { .. } => Icon::RemoveBody,
+    FeatureKind::Thicken { .. } => Icon::Thicken,
+    FeatureKind::SurfaceExtrude { .. } => Icon::Extrude,
+    FeatureKind::SurfaceRevolve { .. } => Icon::Revolve,
+    FeatureKind::Patch { .. } => Icon::Patch,
+    FeatureKind::Stitch { .. } => Icon::Stitch,
+    FeatureKind::Unstitch { .. } => Icon::Unstitch,
+    FeatureKind::ReverseNormal { .. } => Icon::ReverseNormal,
+    FeatureKind::Ruled { .. } => Icon::Ruled,
+    FeatureKind::SurfaceOffset { .. } => Icon::SurfOffset,
+    FeatureKind::Trim { .. } => Icon::Trim,
+    FeatureKind::Mesh { op, .. } => match op {
+      clf_engine::model::construct::MeshOp::Reduce => Icon::Reduce,
+      clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
+      clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
+    },
   }
 }
 
@@ -1915,7 +2064,7 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
         }
         if r.lost_focus() {
           if text != p.expr {
-            app.run("param.set", json!({"name": p.name, "expr": text}));
+            app.run_background("param.set", json!({"name": p.name, "expr": text}));
           }
           ui.data_mut(|d| d.remove::<String>(id));
         }

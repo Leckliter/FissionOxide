@@ -172,7 +172,7 @@ impl Sketch {
         let a0 = angle_of(c, s);
         Geo::Arc { c, r: dist(c, s), a0, sweep: ccw_sweep(a0, angle_of(c, e)) }
       }
-      CurveKind::Spline { .. } => return None,
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => return None,
     })
   }
 
@@ -218,8 +218,15 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Spline { points } => {
+        CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
           for q in points {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::Ellipse { center, major, .. } => {
+          for q in [center, major] {
             if *q == old {
               *q = new;
             }
@@ -501,6 +508,12 @@ impl Sketch {
         }
         CurveKind::Spline { points } => {
           CurveKind::Spline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
+        }
+        CurveKind::ControlSpline { points } => {
+          CurveKind::ControlSpline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
+        }
+        CurveKind::Ellipse { center, major, minor } => {
+          CurveKind::Ellipse { center: get(self, center)?, major: get(self, major)?, minor }
         }
       };
       let nid = self.add_curve(kind)?;

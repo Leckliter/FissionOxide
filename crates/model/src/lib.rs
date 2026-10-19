@@ -10,7 +10,10 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod assembly;
+pub mod cam;
+pub mod construct;
 pub mod drawing;
+pub mod meshops;
 pub mod plot;
 pub mod refs;
 pub mod regen;
@@ -67,6 +70,9 @@ pub struct Design {
   /// Data that scripts and plugins attach to the design and its parts (Fusion's attributes).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub attributes: Vec<Attribute>,
+  /// Manufacture setups (CAM).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub cam: Vec<cam::Setup>,
   #[serde(default)]
   next_id: u32,
 }
@@ -264,6 +270,10 @@ pub enum AxisRef {
   /// A straight edge of a body.
   Edge {
     edge: EdgeRef,
+  },
+  /// A construction axis feature.
+  Construction {
+    feature: FeatureId,
   },
 }
 
@@ -765,6 +775,186 @@ pub enum FeatureKind {
     #[serde(default = "zeros")]
     translate: [String; 3],
   },
+  /// Construction plane by another method (angle, midplane, three points, ...).
+  PlaneBy {
+    def: construct::PlaneDef,
+  },
+  ConstructionAxis {
+    def: construct::AxisDef,
+  },
+  ConstructionPoint {
+    def: construct::PointDef,
+  },
+  /// Threads on cylindrical faces: cosmetic (drawn on the face) or modeled (cut as a helical
+  /// groove). External on a boss, internal in a hole.
+  Thread {
+    faces: Vec<FaceRef>,
+    /// Pitch; empty = ISO metric coarse for the diameter.
+    #[serde(default)]
+    pitch: String,
+    /// Threaded length from the face's start; empty = the whole face.
+    #[serde(default)]
+    length: String,
+    #[serde(default = "zero")]
+    offset: String,
+    #[serde(default)]
+    modeled: bool,
+    /// Left-handed.
+    #[serde(default)]
+    left: bool,
+    /// Start from the face's other end.
+    #[serde(default)]
+    flip: bool,
+  },
+  /// A helical coil around an axis normal to a plane, centred at a plane point.
+  Coil {
+    plane: PlaneRef,
+    #[serde(default)]
+    at: [f64; 2],
+    diameter: String,
+    pitch: String,
+    height: String,
+    #[serde(default)]
+    section: construct::CoilSection,
+    /// Wire size (circle diameter, square or triangle side).
+    section_size: String,
+    #[serde(default)]
+    left: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// A round tube swept along a path of lines and arcs, solid or hollow.
+  Pipe {
+    path_sketch: FeatureId,
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    diameter: String,
+    /// Wall thickness; empty = a solid rod.
+    #[serde(default)]
+    wall: String,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// A rib (thickness across the sketch plane) or web (thickness in the sketch plane) grown from
+  /// open sketch lines until it meets the body, or to a depth.
+  Rib {
+    sketch: FeatureId,
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    thickness: String,
+    /// Depth; empty = to the next face of the body.
+    #[serde(default)]
+    depth: String,
+    /// Grow towards the other side.
+    #[serde(default)]
+    flip: bool,
+    /// A web (in-plane thickness, grows along the sketch normal) instead of a rib.
+    #[serde(default)]
+    web: bool,
+  },
+  /// Scales bodies about a point, uniformly or per axis.
+  Scale {
+    #[serde(default)]
+    bodies: BodySel,
+    #[serde(default)]
+    center: [f64; 3],
+    factor: String,
+    /// Non-uniform X/Y/Z factors (replace `factor`).
+    #[serde(default)]
+    factors: Option<[String; 3]>,
+  },
+  /// Splits faces along a plane; the body stays one piece.
+  SplitFace {
+    faces: Vec<FaceRef>,
+    tool: PlaneRef,
+  },
+  /// Removes faces and heals the body around them (Simplify > Remove Faces).
+  RemoveFaces {
+    faces: Vec<FaceRef>,
+  },
+  /// Thickens faces or surface bodies into solids.
+  Thicken {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    bodies: Vec<BodyId>,
+    thickness: String,
+    /// Half the thickness each side.
+    #[serde(default)]
+    symmetric: bool,
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// A surface extruded from open (or closed) sketch curves.
+  SurfaceExtrude {
+    sketch: FeatureId,
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    distance: String,
+    #[serde(default)]
+    symmetric: bool,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// A surface revolved from sketch curves.
+  SurfaceRevolve {
+    sketch: FeatureId,
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    axis: AxisRef,
+    #[serde(default = "full_turn")]
+    angle: String,
+  },
+  /// A surface filling a closed boundary: body edges or a sketch's curves.
+  Patch {
+    #[serde(default)]
+    edges: Vec<EdgeRef>,
+    #[serde(default)]
+    sketch: Option<FeatureId>,
+  },
+  /// Sews surface bodies into one (a solid when they close up).
+  Stitch {
+    bodies: Vec<BodyId>,
+    #[serde(default = "stitch_tolerance")]
+    tolerance: String,
+  },
+  /// Breaks bodies into one surface body per face.
+  Unstitch {
+    bodies: Vec<BodyId>,
+  },
+  /// A ruled surface between two edges.
+  Ruled {
+    a: EdgeRef,
+    b: EdgeRef,
+  },
+  /// New surface bodies offset from faces or bodies along their normals.
+  SurfaceOffset {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    bodies: Vec<BodyId>,
+    distance: String,
+  },
+  /// Trims surface bodies with a plane, keeping the side behind it (or in front, flipped).
+  Trim {
+    bodies: Vec<BodyId>,
+    tool: PlaneRef,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Flips the normals of surface bodies.
+  ReverseNormal {
+    bodies: Vec<BodyId>,
+  },
+  /// Mesh tools on faceted (imported mesh) bodies: reduce, smooth or convert.
+  Mesh {
+    bodies: Vec<BodyId>,
+    op: construct::MeshOp,
+    #[serde(default = "one")]
+    amount: String,
+  },
   /// Flattens a sheet metal body onto its stationary face.
   Unfold {
     body: BodyId,
@@ -775,6 +965,10 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_folded: bool,
   },
+}
+
+fn stitch_tolerance() -> String {
+  "0.01 mm".to_string()
 }
 
 fn drill_point() -> String {
@@ -854,6 +1048,30 @@ impl FeatureKind {
       FeatureKind::Joint { .. } => "Joint",
       FeatureKind::CopyComponent { .. } => "Copy",
       FeatureKind::Refold { .. } => "Refold",
+      FeatureKind::PlaneBy { .. } => "Plane",
+      FeatureKind::ConstructionAxis { .. } => "Axis",
+      FeatureKind::ConstructionPoint { .. } => "Point",
+      FeatureKind::Thread { .. } => "Thread",
+      FeatureKind::Coil { .. } => "Coil",
+      FeatureKind::Pipe { .. } => "Pipe",
+      FeatureKind::Rib { web: true, .. } => "Web",
+      FeatureKind::Rib { .. } => "Rib",
+      FeatureKind::Scale { .. } => "Scale",
+      FeatureKind::SplitFace { .. } => "SplitFace",
+      FeatureKind::RemoveFaces { .. } => "RemoveFaces",
+      FeatureKind::Thicken { .. } => "Thicken",
+      FeatureKind::SurfaceExtrude { .. } => "SurfaceExtrude",
+      FeatureKind::SurfaceRevolve { .. } => "SurfaceRevolve",
+      FeatureKind::Patch { .. } => "Patch",
+      FeatureKind::Stitch { .. } => "Stitch",
+      FeatureKind::Unstitch { .. } => "Unstitch",
+      FeatureKind::ReverseNormal { .. } => "ReverseNormal",
+      FeatureKind::Ruled { .. } => "Ruled",
+      FeatureKind::SurfaceOffset { .. } => "Offset",
+      FeatureKind::Trim { .. } => "Trim",
+      FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
+      FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
+      FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
     }
   }
 
@@ -873,10 +1091,14 @@ impl FeatureKind {
       PlaneRef::Construction { feature } => vec![*feature],
       _ => vec![],
     };
+    let axis_dep = |a: &AxisRef| match a {
+      AxisRef::Construction { feature } => vec![*feature],
+      _ => vec![],
+    };
     match self {
       FeatureKind::Sketch { plane, .. } => plane_dep(plane),
+      FeatureKind::Revolve { sketch, axis, .. } => std::iter::once(*sketch).chain(axis_dep(axis)).collect(),
       FeatureKind::Extrude { sketch, .. }
-      | FeatureKind::Revolve { sketch, .. }
       | FeatureKind::Flange { sketch, .. }
       | FeatureKind::ContourFlange { sketch, .. }
       | FeatureKind::Hole { sketch, .. }
@@ -886,6 +1108,24 @@ impl FeatureKind {
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
+      FeatureKind::PlaneBy { def } => def.depends_on(),
+      FeatureKind::ConstructionAxis { def } => def.depends_on(),
+      FeatureKind::ConstructionPoint { def } => def.depends_on(),
+      FeatureKind::Coil { plane, .. }
+      | FeatureKind::SplitFace { tool: plane, .. }
+      | FeatureKind::Trim { tool: plane, .. } => plane_dep(plane),
+      FeatureKind::Pipe { path_sketch, .. } => vec![*path_sketch],
+      FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
+      FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
+        let mut v = vec![*sketch];
+        if let AxisRef::Construction { feature } = axis {
+          v.push(*feature);
+        }
+        v
+      }
+      FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
+      FeatureKind::CircularPattern { axis, .. } => axis_dep(axis),
+      FeatureKind::Move { axis: Some(axis), .. } => axis_dep(axis),
       _ => vec![],
     }
   }
@@ -932,6 +1172,7 @@ impl Design {
       components: Vec::new(),
       drawings: Vec::new(),
       attributes: Vec::new(),
+      cam: Vec::new(),
       next_id: 1,
     }
   }
@@ -1426,6 +1667,59 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       f(length);
       f(gap);
     }
+    FeatureKind::PlaneBy { def } => {
+      for e in def.exprs() {
+        f(e);
+      }
+    }
+    FeatureKind::ConstructionPoint { def } => {
+      for e in def.exprs() {
+        f(e);
+      }
+    }
+    FeatureKind::Thread { pitch, length, offset, .. } => {
+      for e in [pitch, length, offset] {
+        if !e.is_empty() {
+          f(e);
+        }
+      }
+    }
+    FeatureKind::Coil { diameter, pitch, height, section_size, .. } => {
+      for e in [diameter, pitch, height, section_size] {
+        f(e);
+      }
+    }
+    FeatureKind::Pipe { diameter, wall, .. } => {
+      f(diameter);
+      if !wall.is_empty() {
+        f(wall);
+      }
+    }
+    FeatureKind::Rib { thickness, depth, .. } => {
+      f(thickness);
+      if !depth.is_empty() {
+        f(depth);
+      }
+    }
+    FeatureKind::Scale { factor, factors, .. } => {
+      f(factor);
+      for e in factors.iter_mut().flatten() {
+        f(e);
+      }
+    }
+    FeatureKind::Thicken { thickness, .. } => f(thickness),
+    FeatureKind::SurfaceOffset { distance, .. } => f(distance),
+    FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
+    FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
+    FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
+    FeatureKind::Stitch { tolerance, .. } => f(tolerance),
+    FeatureKind::Mesh { amount, .. } => f(amount),
+    FeatureKind::ConstructionAxis { .. }
+    | FeatureKind::SplitFace { .. }
+    | FeatureKind::RemoveFaces { .. }
+    | FeatureKind::Patch { .. }
+    | FeatureKind::Unstitch { .. }
+    | FeatureKind::ReverseNormal { .. } => {}
     FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } | FeatureKind::SplitBody { .. } => {}
     FeatureKind::Mirror { .. }
     | FeatureKind::Combine { .. }

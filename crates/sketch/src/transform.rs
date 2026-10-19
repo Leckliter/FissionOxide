@@ -52,7 +52,7 @@ pub struct TransformReport {
 }
 
 impl Sketch {
-  /// Moves the points of `curves` by `t`, scaling circle radii and the dimensions measured
+  /// Moves the points of `curves` by `t`, scaling circle and ellipse radii and the dimensions measured
   /// entirely within the moved geometry. Fixed points (the origin, projected geometry) stay.
   /// Constraints to geometry that didn't move are kept; solve afterwards.
   pub fn transform(&mut self, curves: &[CurveId], t: &Xform2) -> Result<TransformReport, SketchError> {
@@ -70,8 +70,10 @@ impl Sketch {
       [p.x, p.y] = t.apply([p.x, p.y]);
     }
     for c in self.curves.iter_mut().filter(|c| curves.contains(&c.id)) {
-      if let CurveKind::Circle { radius, .. } = &mut c.kind {
-        *radius *= t.scale;
+      match &mut c.kind {
+        CurveKind::Circle { radius, .. } => *radius *= t.scale,
+        CurveKind::Ellipse { minor, .. } => *minor *= t.scale,
+        _ => {}
       }
     }
     let line_moved =
@@ -155,6 +157,12 @@ impl Sketch {
         }
         CurveKind::Spline { points } => {
           CurveKind::Spline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
+        }
+        CurveKind::ControlSpline { points } => {
+          CurveKind::ControlSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
+        }
+        CurveKind::Ellipse { center, major, minor } => {
+          CurveKind::Ellipse { center: pt(self, *center)?, major: pt(self, *major)?, minor: minor * t.scale }
         }
       };
       let id = self.add_curve(kind)?;

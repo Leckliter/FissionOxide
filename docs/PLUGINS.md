@@ -226,7 +226,7 @@ and query gaps**, in the order they unblock tools:
 | 6 | Sketch frame (origin, axes) and curve lengths/samples, profile bounding boxes and their curves, curves outside every profile | query | 6 | richer `sketch.info` | done |
 | 7 | Read the current selection | query | 2 | `selection` | done |
 | 8 | Sketch visibility | engine | 4 | `sketch.visible`, shown in `info` | done |
-| 9 | Body colour | query | 3 | `body.color`, colour in `info` | done |
+| 9 | Body colour | query | 3 | `body.appearance` takes `"#rrggbb"`; colour in `info` | done |
 | 10 | Move/rotate/scale sketch geometry | engine | 3 | `sketch.transform` | done |
 | 11 | Put DXF, `.clf` or another sketch's curves into an existing sketch | engine | 3 | `sketch.insert` | done |
 | 12 | Render to a PNG file with camera control and sketches hidden | query | 4 | `view.render` | done |
