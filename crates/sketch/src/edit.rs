@@ -43,7 +43,7 @@ fn polar(c: P, r: f64, a: f64) -> P {
 
 /// A curve's current geometry.
 #[derive(Debug, Clone, Copy)]
-enum Geo {
+pub(crate) enum Geo {
   Line {
     a: P,
     b: P,
@@ -58,8 +58,23 @@ enum Geo {
 }
 
 impl Geo {
+  /// A profile segment's geometry (circles start at angle 0).
+  pub(crate) fn of_seg(s: &crate::Seg) -> Geo {
+    match *s {
+      crate::Seg::Line { a, b } => Geo::Line { a, b },
+      crate::Seg::Arc { center, radius, start_angle, sweep } => {
+        if sweep >= 0.0 {
+          Geo::Arc { c: center, r: radius, a0: start_angle, sweep }
+        } else {
+          Geo::Arc { c: center, r: radius, a0: start_angle + sweep, sweep: -sweep }
+        }
+      }
+      crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
+    }
+  }
+
   /// Parameter of a point on the (extended) curve: line 0..1, arc 0..sweep.
-  fn param(&self, p: P) -> f64 {
+  pub(crate) fn param(&self, p: P) -> f64 {
     match *self {
       Geo::Line { a, b } => {
         let d = sub(b, a);
@@ -69,26 +84,26 @@ impl Geo {
     }
   }
 
-  fn at(&self, t: f64) -> P {
+  pub(crate) fn at(&self, t: f64) -> P {
     match *self {
       Geo::Line { a, b } => add(a, mul(sub(b, a), t)),
       Geo::Arc { c, r, a0, .. } => polar(c, r, a0 + t),
     }
   }
 
-  fn end_param(&self) -> f64 {
+  pub(crate) fn end_param(&self) -> f64 {
     match *self {
       Geo::Line { .. } => 1.0,
       Geo::Arc { sweep, .. } => sweep,
     }
   }
 
-  fn full(&self) -> bool {
+  pub(crate) fn full(&self) -> bool {
     matches!(*self, Geo::Arc { sweep, .. } if sweep >= TAU - 1e-12)
   }
 
   /// Is a point of the (extended) curve within its extent?
-  fn contains(&self, p: P) -> bool {
+  pub(crate) fn contains(&self, p: P) -> bool {
     let t = self.param(p);
     match *self {
       Geo::Line { a, b } => {
@@ -101,7 +116,7 @@ impl Geo {
 }
 
 /// Points where the extended curves meet (lines as infinite lines, arcs as full circles).
-fn meet(g: &Geo, h: &Geo) -> Vec<P> {
+pub(crate) fn meet(g: &Geo, h: &Geo) -> Vec<P> {
   match (*g, *h) {
     (Geo::Line { a, b }, Geo::Line { a: c, b: d }) => {
       let (r, s) = (sub(b, a), sub(d, c));

@@ -250,7 +250,7 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
   };
   // Edges as segments oriented u→v
   let mut edges: Vec<(usize, usize, Seg)> = Vec::new();
-  let mut circles = Vec::new();
+  let mut circles: Vec<([f64; 2], f64)> = Vec::new();
   for c in sketch.curves.iter().filter(|c| !c.construction).take(MAX_EDGES) {
     match &c.kind {
       CurveKind::Line { a, b } => {
@@ -287,6 +287,17 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         }
         edges.push((u, v, seg));
       }
+    }
+  }
+  // Curves that cross mid-span split each other there, as in Fusion (no trimming needed).
+  let (split, rest) = split_at_crossings(edges.iter().map(|e| e.2).collect(), circles);
+  circles = rest;
+  verts.clear();
+  edges.clear();
+  for seg in split {
+    let (u, v) = (vid(seg.start(), &mut verts), vid(seg.end(), &mut verts));
+    if u != v {
+      edges.push((u, v, seg));
     }
   }
   // Prune dangling edges repeatedly.
@@ -379,6 +390,72 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
   let mut comps: Vec<(usize, Vec<Loop>)> = comp_loops.into_iter().collect();
   comps.sort_by_key(|(k, _)| *k);
   (comps.into_iter().map(|(_, v)| v).collect(), circles)
+}
+
+/// Splits segments (and circles) where they cross each other's interiors. Circles crossed at two
+/// or more points become arcs; the rest stay circles.
+fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg>, Vec<([f64; 2], f64)>) {
+  use crate::edit::{Geo, meet};
+  let n_segs = segs.len();
+  let mut geos: Vec<Geo> = segs.iter().map(Geo::of_seg).collect();
+  geos.extend(circles.iter().map(|(c, r)| Geo::Arc { c: *c, r: *r, a0: 0.0, sweep: TAU }));
+  if geos.len() > 2000 {
+    return (segs, circles);
+  }
+  let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); geos.len()];
+  for i in 0..geos.len() {
+    for j in i + 1..geos.len() {
+      for p in meet(&geos[i], &geos[j]) {
+        if geos[i].contains(p) && geos[j].contains(p) {
+          cuts[i].push(geos[i].param(p));
+          cuts[j].push(geos[j].param(p));
+        }
+      }
+    }
+  }
+  let to_seg = |g: &Geo, t0: f64, t1: f64| -> Seg {
+    match *g {
+      Geo::Line { .. } => Seg::Line { a: g.at(t0), b: g.at(t1) },
+      Geo::Arc { c, r, a0, .. } => Seg::Arc { center: c, radius: r, start_angle: a0 + t0, sweep: t1 - t0 },
+    }
+  };
+  let mut out = Vec::new();
+  let mut left = Vec::new();
+  for (i, g) in geos.iter().enumerate() {
+    let end = g.end_param();
+    let tol = match *g {
+      Geo::Line { a, b } => MERGE_TOL / dist(a, b).max(MERGE_TOL),
+      Geo::Arc { r, .. } => MERGE_TOL / r.max(MERGE_TOL),
+    };
+    let mut ts: Vec<f64> = cuts[i].iter().copied().filter(|t| g.full() || (*t > tol && *t < end - tol)).collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup_by(|a, b| (*a - *b).abs() <= tol);
+    if g.full() {
+      if ts.len() > 1 && (ts[0] + TAU - ts[ts.len() - 1]).abs() <= tol {
+        ts.pop();
+      }
+      if ts.len() < 2 {
+        left.push(circles[i - n_segs]);
+        continue;
+      }
+      for k in 0..ts.len() {
+        let (t0, t1) = (ts[k], if k + 1 < ts.len() { ts[k + 1] } else { ts[0] + TAU });
+        out.push(to_seg(g, t0, t1));
+      }
+      continue;
+    }
+    let mut prev = 0.0;
+    for t in ts.into_iter().chain([end]) {
+      if t - prev > tol {
+        out.push(to_seg(g, prev, t));
+      }
+      prev = t;
+    }
+    if i < n_segs && out.last().is_none() {
+      out.push(segs[i]);
+    }
+  }
+  (out, left)
 }
 
 /// Direction a segment leaves its start, nudged along the curve so tangent line/arc pairs sort.
@@ -508,5 +585,28 @@ mod tests {
     let island = p.iter().find(|r| r.contains([20.0, 20.0])).unwrap();
     assert_eq!(island.holes.len(), 1);
     assert!((frame.area() - (10000.0 - 6400.0)).abs() < 1e-6);
+  }
+}
+
+#[cfg(test)]
+mod crossing_tests {
+  use super::*;
+  use crate::PtSpec;
+
+  #[test]
+  fn overlapping_rectangles_and_a_circle_on_a_line_make_regions() {
+    let mut s = Sketch::new();
+    s.add_rectangle([0.0, 0.0], [20.0, 10.0]).unwrap();
+    s.add_rectangle([10.0, 5.0], [30.0, 15.0]).unwrap();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 3, "two L-shapes and their overlap");
+    let total: f64 = p.iter().map(|r| r.area()).sum();
+    assert!((total - (200.0 + 200.0 - 50.0)).abs() < 1e-6);
+    let mut s = Sketch::new();
+    s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
+    s.add_line(PtSpec::At(-20.0, 0.0), PtSpec::At(20.0, 0.0)).unwrap();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 2, "two half discs");
+    assert!(p.iter().all(|r| (r.area() - std::f64::consts::PI * 50.0).abs() < 0.5), "areas are of flattened arcs");
   }
 }
