@@ -52,9 +52,11 @@ fn flat_pattern_to_gcode() {
   // hole first: the first pierce is inside the hole
   let first = text.lines().find(|l| l.starts_with("G0 X")).unwrap();
   let xy: Vec<f64> = first.split_whitespace().skip(1).map(|w| w[1..].parse().unwrap()).collect();
-  let flat_len = 50.0 + std::f64::consts::PI / 2.0 * 4.0 + 15.0;
-  let centres = [[30.0, 25.0], [30.0, flat_len - 25.0], [70.0, 25.0], [70.0, flat_len - 25.0]];
-  let near = centres.iter().any(|c| (xy[0] - c[0]).hypot(xy[1] - c[1]) < 10.0);
+  let hole = cs.iter().find(|c| c["hole"] == true).unwrap();
+  let f = |v: &Value, k: usize| v[k].as_f64().unwrap();
+  let centre = [(f(&hole["min"], 0) + f(&hole["max"], 0)) / 2.0, (f(&hole["min"], 1) + f(&hole["max"], 1)) / 2.0];
+  assert!((f(&hole["max"], 0) - f(&hole["min"], 0) - 20.0).abs() < 1e-6, "{hole}");
+  let near = (xy[0] - centre[0]).hypot(xy[1] - centre[1]) < 10.0;
   assert!(near, "first pierce {xy:?} inside the hole");
 
   // to a file, plasma with micro-joints, inches
