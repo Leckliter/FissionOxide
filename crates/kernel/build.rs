@@ -1,7 +1,7 @@
 //! Builds OpenCASCADE (once, via occt-sys, into `target/OCCT`) and the C++ side of the bridge.
 //!
 //! Set `CLF_OCCT_DIR` to an existing OCCT install (with `include/` and `lib/`) to skip the
-//! from-source build.
+//! from-source build (CI restores a cached one this way); an empty value counts as unset.
 
 const OCCT_LIBS: &[&str] = &[
   "TKDEIGES",
@@ -33,8 +33,15 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/kernel.hxx");
   println!("cargo:rerun-if-changed=src/ffi.rs");
   let root = match std::env::var_os("CLF_OCCT_DIR") {
-    Some(d) => std::path::PathBuf::from(d),
-    None => {
+    Some(d) if !d.is_empty() => {
+      let root = std::path::PathBuf::from(d);
+      // A prebuilt (e.g. cached) install: never fall back to building OCCT behind the user's back.
+      if !root.join("lib").is_dir() || !root.join("include").is_dir() {
+        panic!("CLF_OCCT_DIR={} has no include/ and lib/ (an OCCT 7.8 install with static libraries)", root.display());
+      }
+      root
+    }
+    _ => {
       let root = occt_sys::occt_path();
       if !root.join("lib").exists() {
         occt_sys::build_occt();
