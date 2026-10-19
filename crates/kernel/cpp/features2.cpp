@@ -96,7 +96,10 @@ namespace {
   }
 }
 
-#define FOX2_TRY try {
+#define FOX2_TRY                                                                                                       \
+  try {                                                                                                                \
+    catch_signals();                                                                                                   \
+    OCC_CATCH_SIGNALS
 #define FOX2_CATCH(what)                                                                                               \
   }                                                                                                                    \
   catch (...) { rethrow2(what); }

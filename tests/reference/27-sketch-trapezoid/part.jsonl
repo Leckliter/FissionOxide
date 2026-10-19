@@ -25,4 +25,4 @@
 {"cmd": "sketch.dimension", "type": "point_line", "points": [12], "curves": [3], "value": 8}
 {"cmd": "sketch.dimension", "type": "horizontal", "points": [12, 14], "value": 36}
 {"cmd": "sketch.finish"}
-{"cmd": "extrude", "sketch": 1, "profiles": [[2.051655085, 1.498664985], [23.620708033, 10.523716851], [2.372028662, 24.008222133], [-19.127493984, 14.011396631]], "distance": 5, "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[0, 1], [21.642507074, 11.985504245], [0, 24], [-21.642507074, 11.985504245]], "distance": 5, "operation": "new_body"}

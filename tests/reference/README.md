@@ -14,6 +14,13 @@ Parts whose measurements are known independently of FissionOxide. Each directory
 compares it with `expected.json`. Each built part must also be a valid solid that survives a STEP
 round trip. Set `FOX_REFERENCE_REPORT=1` to rewrite `docs/reference-parts.md`.
 
+Every passing part is also edited: its first extrusion's distance grows by 15% in place and the
+timeline rebuilds. The result must match building the script with that distance from scratch or,
+where the script's later picks (points on faces and edges) no longer land on the bigger part, the
+edit must keep every face and editing it back must restore the part exactly. A failure means a
+later feature lost track of the face or edge it was on. `edit-baseline.txt` lists the parts that
+survive; one that stops surviving fails the test.
+
 `baseline.txt` lists the cases that pass. The test fails when a listed case stops passing; when a
 new case passes, add it to the list (the test prints the line to add).
 

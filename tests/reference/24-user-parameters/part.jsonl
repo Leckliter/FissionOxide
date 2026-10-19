@@ -22,4 +22,4 @@
 {"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 12], "value": "width / 2"}
 {"cmd": "sketch.dimension", "type": "vertical", "points": [0, 12], "value": "depth / 2"}
 {"cmd": "sketch.finish"}
-{"cmd": "extrude", "sketch": 1, "profiles": [[25, 1], [49, 15], [25, 29], [1, 15]], "distance": "height", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[30, 1], [59, 20], [30, 39], [1, 20]], "distance": "height", "operation": "new_body"}

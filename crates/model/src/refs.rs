@@ -38,6 +38,15 @@ pub struct EdgeRef {
   pub circular: bool,
   #[serde(default)]
   pub radius: f64,
+  /// The edge's ends when it was picked (both zero in files from before ends were kept).
+  #[serde(default, skip_serializing_if = "is_zero")]
+  pub start: [f64; 3],
+  #[serde(default, skip_serializing_if = "is_zero")]
+  pub end: [f64; 3],
+}
+
+fn is_zero(p: &[f64; 3]) -> bool {
+  *p == [0.0; 3]
 }
 
 impl FaceRef {
@@ -92,7 +101,59 @@ impl EdgeRef {
       n2: n2.to_array(),
       circular: e.kind == CurveKind::Circle,
       radius: e.radius,
+      start: e.start.to_array(),
+      end: e.end.to_array(),
     }
+  }
+
+  /// Like [`EdgeRef::from_edge`], over the pieces a straight edge was split into: the ends span
+  /// all of them, so the reference keeps finding every piece.
+  pub fn from_pieces(body: BodyId, pieces: &[&EdgeInfo], faces: &[FaceInfo]) -> Option<EdgeRef> {
+    let first = pieces.first()?;
+    let mut r = EdgeRef::from_edge(body, first, faces);
+    if pieces.len() > 1 {
+      let d = edge_dir(first);
+      let ends = pieces.iter().flat_map(|e| [e.start, e.end]);
+      let lo = ends.clone().min_by(|a, b| a.dot(d).total_cmp(&b.dot(d)))?;
+      let hi = ends.max_by(|a, b| a.dot(d).total_cmp(&b.dot(d)))?;
+      r.start = lo.to_array();
+      r.end = hi.to_array();
+      r.point = ((lo + hi) / 2.0).to_array();
+    }
+    Some(r)
+  }
+
+  /// Every edge this reference stands for (1-based ids). A straight edge that later features
+  /// split (a slot cut across it) is every piece still on its line within its old extent, between
+  /// the same faces; otherwise the best match, as [`EdgeRef::resolve`] finds it.
+  pub fn resolve_all(&self, edges: &[EdgeInfo], faces: &[FaceInfo], scale: f64) -> Vec<u32> {
+    let (s0, e0) = (DVec3::from(self.start), DVec3::from(self.end));
+    let len = (e0 - s0).length();
+    if !self.circular && len > 1e-9 {
+      let d0 = (e0 - s0) / len;
+      let tol = 1e-6 * scale.max(1.0);
+      let (a0, b0) = (DVec3::from(self.n1), DVec3::from(self.n2));
+      let on_line = |q: DVec3| (q - s0).cross(d0).length() <= tol;
+      let along = |q: DVec3| (q - s0).dot(d0);
+      let pieces: Vec<u32> = edges
+        .iter()
+        .filter(|e| e.kind == CurveKind::Line && 1.0 - edge_dir(e).dot(d0).abs() < 1e-9)
+        .filter(|e| on_line(e.start) && on_line(e.end))
+        .filter(|e| {
+          let (u, v) = (along(e.start).min(along(e.end)), along(e.start).max(along(e.end)));
+          v.min(len) - u.max(0.0) > tol
+        })
+        .filter(|e| {
+          let (a, b) = adjacent_normals(e, faces);
+          (normal_mismatch(a, a0) + normal_mismatch(b, b0)).min(normal_mismatch(a, b0) + normal_mismatch(b, a0)) < 1e-6
+        })
+        .map(|e| e.id)
+        .collect();
+      if !pieces.is_empty() {
+        return pieces;
+      }
+    }
+    self.resolve(edges, faces, scale).into_iter().collect()
   }
 
   /// Picks the best matching edge (1-based id).

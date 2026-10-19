@@ -900,10 +900,10 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges, setback, .. } => {
+      FeatureKind::Fillet { radius, edges, setback, chord, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
-        d.load_setback(setback);
+        d.load_setback(setback, *chord);
         d.edges = vec![Value::Null; edges.len()];
         d
       }

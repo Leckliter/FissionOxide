@@ -145,7 +145,7 @@ fn params(m: &Machine, p: &Value) -> Result<CutParams, CmdError> {
     None => None,
   };
   let mut c = m.process(process.as_deref()).map_err(CmdError::new)?;
-  let mut set = |k: &str, f: &mut f64| {
+  let set = |k: &str, f: &mut f64| {
     if let Some(v) = p.get(k).and_then(num) {
       *f = v;
     }

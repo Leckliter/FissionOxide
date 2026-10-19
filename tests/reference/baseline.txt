@@ -3,6 +3,7 @@
 02-cylinder
 03-box-through-hole
 04-revolve-vase
+05-taper-extrude
 06-symmetric-extrude
 07-fillet-all-edges
 08-chamfer
@@ -23,6 +24,7 @@
 23-bracket-multifeature
 24-user-parameters
 25-sketch-triangle
+26-sketch-belt
 27-sketch-trapezoid
 28-blind-pocket-fillets
 29-two-sided-and-partial-revolve
@@ -33,6 +35,7 @@
 34-chamfer-then-fillet
 35-fillet-curved-curved
 36-corner-blend-two-radii
+37-pyramid-apex-blend
 38-coincident-cylinders
 39-tee-pipe
 40-box-sphere-torus
@@ -70,4 +73,6 @@
 74-sm-unfold-refold
 76-sm-thickness-variant
 77-fillet-variable-linear
+79-fillet-chord-length
 82-thin-extrude-frame
+83-boundary-loop-thicken

@@ -138,7 +138,10 @@ namespace {
   }
 }
 
-#define FOX_TRY try {
+#define FOX_TRY                                                                                                        \
+  try {                                                                                                                \
+    catch_signals();                                                                                                   \
+    OCC_CATCH_SIGNALS
 #define FOX_CATCH(what)                                                                                                \
   }                                                                                                                    \
   catch (...) { rethrow(what); }
@@ -816,15 +819,22 @@ std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine) {
   FOX_CATCH("sweep")
 }
 
-// Lofts through the outer wires of the faces (or the wires) of a compound, in order.
+// Lofts through the outer wires of the faces (or the wires) of a compound, in order. The first
+// and last sections may be vertices (a loft to a point).
 std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed) {
   FOX_TRY
   BRepOffsetAPI_ThruSections mk(Standard_True, ruled ? Standard_True : Standard_False, 1e-6);
-  int n = 0;
+  int n = 0, count = 0;
+  for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) ++count;
   TopoDS_Wire first;
   for (TopoDS_Iterator it(sections.s); it.More(); it.Next(), ++n) {
     const TopoDS_Shape &sh = it.Value();
     TopoDS_Wire w;
+    if (sh.ShapeType() == TopAbs_VERTEX) {
+      if (closed || (n != 0 && n != count - 1)) throw std::runtime_error("only the first or last loft section can be a point");
+      mk.AddVertex(TopoDS::Vertex(sh));
+      continue;
+    }
     if (sh.ShapeType() == TopAbs_FACE) {
       w = BRepTools::OuterWire(TopoDS::Face(sh));
     } else if (sh.ShapeType() == TopAbs_WIRE) {

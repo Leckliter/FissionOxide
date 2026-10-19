@@ -14,16 +14,22 @@ on a free plane {origin, normal, x}, which reproduces the recipe frame exactly (
 Feature patterns and feature mirrors are replayed by repeating the feature on a moved copy of its
 sketch (FissionOxide patterns and mirrors work on bodies).
 
+Constrained sketches are solved by target/debug/fissionoxide-cli (build it first, or set FOX_CLI)
+so that profile points fall inside the solved regions.
+
 Python 3 standard library only.
 """
 
 import json
 import math
 import os
+import subprocess
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 REF = os.path.join(ROOT, "tests", "reference")
+# The command-line app, used to solve constrained sketches (FOX_CLI overrides).
+CLI = os.environ.get("FOX_CLI") or os.path.join(ROOT, "target", "debug", "fissionoxide-cli")
 
 SNAP = 1e-6
 BODIES_PER_FEATURE = 1000  # FissionOxide body ids: feature id * 1000 + k
@@ -375,8 +381,36 @@ class Converter:
       self.constraint(sk, c)
     for d in rs.get("dimensions") or []:
       self.dimension(sk, d)
+    if constrained:
+      self.use_solved_geometry(sk)
     self.cmd("sketch.finish")
     return sk
+
+  def use_solved_geometry(self, sk):
+    """Replaces the sketch's drawn geometry with where the solver puts it, so profile points land
+    inside the solved regions (recipes draw constrained sketches roughly on purpose)."""
+    if not os.path.exists(CLI):
+      raise Unsupported(f"constrained sketch needs {CLI} (cargo build -p fissionoxide-cli) to solve it")
+    script = "\n".join(self.out + [json.dumps({"cmd": "sketch.info", "sketch": sk.fid})]) + "\n"
+    run = subprocess.run([CLI, "run", "-"], input=script, capture_output=True, text=True)
+    lines = [json.loads(l) for l in run.stdout.splitlines() if l.startswith("{")]
+    info = lines[-1].get("ok") if lines else None
+    if run.returncode != 0 or not info or not info.get("curves"):
+      raise Unsupported(f"solving the sketch failed: {run.stderr.strip() or run.stdout[-300:]}")
+    pts = {p["id"]: p["at"] for p in info["points"]}
+    curves = {c["id"]: c["kind"] for c in info["curves"]}
+    for eid, cid in sk.curve.items():
+      k = curves.get(cid)
+      if k is None or sk.geom.get(eid) is None:
+        continue
+      if k["type"] == "line":
+        sk.geom[eid] = [pts[k["a"]], pts[k["b"]]]
+      elif k["type"] == "circle":
+        sk.geom[eid] = arc_polyline(pts[k["center"]], k["radius"], 0, 2 * math.pi)
+      elif k["type"] == "arc":
+        c, a, b = pts[k["center"]], pts[k["start"]], pts[k["end"]]
+        a0, a1 = math.atan2(a[1] - c[1], a[0] - c[0]), math.atan2(b[1] - c[1], b[0] - c[0])
+        sk.geom[eid] = arc_polyline(c, math.hypot(a[0] - c[0], a[1] - c[1]), a0, ccw_sweep(a0, a1))
 
   def point_id(self, sk, ref):
     if ref not in sk.pt:
@@ -782,6 +816,8 @@ class Converter:
       if f.get("start") is not None and norm(sub(f["start"], e["start"])) > 1e-6:
         r1, r2 = r2, r1
       self.cmd("fillet", True, edges=self.edges(f, T), radius=r1, radius2=r2)
+    elif t == "chord_length":
+      self.cmd("fillet", True, edges=self.edges(f, T), radius=f["radius"], chord=True)
     else:
       raise Unsupported(f"fillet type '{t}'")
 

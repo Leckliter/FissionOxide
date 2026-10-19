@@ -14,6 +14,8 @@ use crate::forms::{Form, Input};
 #[derive(Debug, Clone, Default)]
 pub(super) struct Extra {
   setback: String,
+  /// Fillet radius given as the chord length (the round's width).
+  chord: bool,
   rail: Option<FeatureId>,
   twist: String,
   rails: Vec<FeatureId>,
@@ -29,6 +31,16 @@ impl Dialog {
   // ---- fillet ----
 
   pub(super) fn setback_row(&mut self, ui: &mut egui::Ui, creating: bool) {
+    ui.label("Radius type");
+    let mut changed = false;
+    ui.horizontal(|ui| {
+      changed |= ui.radio_value(&mut self.solid.chord, false, "Constant").changed();
+      changed |= ui.radio_value(&mut self.solid.chord, true, "Chord length").changed();
+    });
+    if changed && (!creating || self.applied) {
+      self.dirty = true;
+    }
+    ui.end_row();
     ui.label("Setback (corners)");
     let r = ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("none").desired_width(140.0));
     if r.changed() && (!creating || self.applied) {
@@ -39,6 +51,9 @@ impl Dialog {
 
   /// Fillet parameters with the setback (left out when empty; `null` when editing clears it).
   pub(super) fn with_setback(&self, mut p: Value, editing: bool) -> Value {
+    if self.solid.chord || editing {
+      p["chord"] = json!(self.solid.chord);
+    }
     let sb = self.solid.setback.trim();
     if !sb.is_empty() {
       p["setback"] = json!(sb);
@@ -48,8 +63,9 @@ impl Dialog {
     p
   }
 
-  pub(super) fn load_setback(&mut self, setback: &Option<String>) {
+  pub(super) fn load_setback(&mut self, setback: &Option<String>, chord: bool) {
     self.solid.setback = setback.clone().unwrap_or_default();
+    self.solid.chord = chord;
   }
 
   // ---- sweep and loft ----

@@ -97,8 +97,7 @@ fn sketch_and_faces() {
 
 #[test]
 fn machines_in_the_hub() {
-  let mut s = Session::default();
-  s.store_root = Some(hub("machines"));
+  let mut s = Session { store_root: Some(hub("machines")), ..Default::default() };
   let builtin = run(&mut s, "cut.machines", json!({})).as_array().unwrap().len();
   assert!(builtin >= 6);
   run(

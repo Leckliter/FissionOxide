@@ -377,14 +377,14 @@ impl Shape {
     if !(radius > 1e-9 && radius.is_finite()) {
       return Err(KernelError::Input("fillet radius must be positive".into()));
     }
-    Shape::wrap(sys::fillet(self.get()?, edges, radius)?)
+    Shape::wrap(sys::fillet(self.get()?, edges, radius)?)?.outward()
   }
 
   pub fn chamfer(&self, edges: &[u32], distance: f64) -> Result<Shape> {
     if !(distance > 1e-9 && distance.is_finite()) {
       return Err(KernelError::Input("chamfer distance must be positive".into()));
     }
-    Shape::wrap(sys::chamfer(self.get()?, edges, distance)?)
+    Shape::wrap(sys::chamfer(self.get()?, edges, distance)?)?.outward()
   }
 
   /// Hollows the solid to `thickness`, opening the given faces (1-based face-map indices).
@@ -520,7 +520,7 @@ impl Shape {
       return Err(KernelError::Input("fillet radii must be positive".into()));
     }
     let (ids, radii): (Vec<u32>, Vec<f64>) = edges.iter().copied().unzip();
-    Shape::wrap(sys::fillet_radii(self.get()?, &ids, &radii)?)
+    Shape::wrap(sys::fillet_radii(self.get()?, &ids, &radii)?)?.outward()
   }
 
   /// Hidden-line projection seen from `toward_viewer` with `right` as the screen's x axis.
@@ -550,8 +550,27 @@ impl Shape {
     if !(height.is_finite() && height.abs() > 1e-9 && angle.is_finite() && angle.abs() < 1.5) {
       return Err(KernelError::Input("taper needs a height and an angle under 85°".into()));
     }
-    // OCCT measures the height along the drafted sides
-    Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+    // A straight prism with its sides drafted about the base plane keeps sharp corners, as in
+    // Fusion; OCCT's drafted prism rounds them when the taper goes outward.
+    self.drafted_prism(height, angle).or_else(|_| {
+      // OCCT measures the height along the drafted sides
+      Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+    })
+  }
+
+  fn drafted_prism(&self, height: f64, angle: f64) -> Result<Shape> {
+    let base = self.faces()?.into_iter().next().ok_or(KernelError::Input("taper needs a face".into()))?;
+    let n = base.normal;
+    let prism = self.extrude(n * height)?;
+    let caps = |f: &FaceInfo| f.kind == SurfaceKind::Plane && f.normal.dot(n).abs() > 1.0 - 1e-9;
+    let sides: Vec<u32> = prism.faces()?.iter().filter(|f| !caps(f)).map(|f| f.id).collect();
+    let r = prism.draft(&sides, base.origin, n * height.signum(), angle)?;
+    // the sides must have leaned the right way
+    let (v, v0) = (r.mass()?.volume, prism.mass()?.volume);
+    if r.solid_count() != 1 || (angle > 0.0) != (v < v0) {
+      return Err(KernelError::Kernel("drafted prism went the wrong way".into()));
+    }
+    Ok(r)
   }
 
   /// This planar face grown (d > 0) or shrunk (d < 0) all round.
@@ -567,7 +586,7 @@ impl Shape {
     if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
       return Err(KernelError::Input("chamfer sizes must be positive".into()));
     }
-    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)?.outward()
   }
 
   /// Fillets edges with the radius running from `r1` to `r2` along each edge.
@@ -575,7 +594,7 @@ impl Shape {
     if !(r1 > 1e-9 && r2 > 1e-9 && r1.is_finite() && r2.is_finite()) {
       return Err(KernelError::Input("fillet radii must be positive".into()));
     }
-    Shape::wrap(sys::fillet_var(self.get()?, edges, r1, r2)?)
+    Shape::wrap(sys::fillet_var(self.get()?, edges, r1, r2)?)?.outward()
   }
 
   /// The pieces of this solid cut by another shape.
@@ -685,6 +704,12 @@ impl Shape {
   /// Surfaces offset by `d` along their normals (a new surface, the original is kept).
   pub fn offset_surface(&self, d: f64) -> Result<Shape> {
     Shape::wrap(sys::offset_shape(self.get()?, d)?)
+  }
+
+  /// This solid turned right side out: OCCT's blends can come back inside out (correct
+  /// geometry, faces pointing in), which reads as a negative volume.
+  fn outward(self) -> Result<Shape> {
+    if self.solid_count() > 0 && self.mass()?.volume < 0.0 { self.reversed() } else { Ok(self) }
   }
 
   /// The same shape with its orientation (face normals) reversed.

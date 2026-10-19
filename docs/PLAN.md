@@ -101,25 +101,27 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **72 of 83 pass**, see [reference-parts.md](reference-parts.md) |
-| 0 | Edit checks, fuzzing | not started |
+| 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows |
+| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds |
+| 1 | Stable references | started: a filleted edge that an inserted feature splits keeps the fillet on every piece (it used to jump to a look-alike edge silently); `tests/edits.rs` covers dimension edits, inserted and deleted features. Next: OCCT modification history |
 | 3 | 2D cutting and machine posts (items 1, 2) | done: `fox-cut` crate, `cut.*` commands, `fissionoxide-cli cut`, 2D Cut window; posts not yet run on real machines |
 
 ### Reference part failures to fix
 
 Wrong results:
 
-- **05** An outward taper extrude rounds the corners (10 faces, should be 6).
-- **26** The profile finder doesn't split a circle where a tangent line ends on it, so a belt
-  shape never becomes a region. The solver also leaves tangent points about 4e-5 mm off.
-- **42** Hole walls are split into two faces where overlapping patterned holes meet; volume is
-  right. Needs face unification after booleans.
-- **83** A symmetric thicken leaves a cylindrical wall as two unrecognised faces.
-- **69, 75** Sheet metal corners: tray corners and the trimming of a second edge flange differ
-  from the reference convention.
+- **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
+  and each hole wall stays split in two there (the edge joins four faces, so faces can't be
+  merged across it). Volume is right; low priority.
+- **69, 75** Sheet metal corners. Not bugs: these expected values follow SolidCraft's own corner
+  convention (walls stretched until their inner corners are a gap apart, open relief), which their
+  notes say. What matters is Fusion's corner and relief behaviour, which needs references measured
+  against Fusion before these cases mean anything.
 
 Missing options:
 
-- **37** Fillet at the apex of a loft-to-point (no edge found where expected).
-- **78–81** Variable fillets: radius down to zero, chord length, taper to fit, several radii
-  along the edge.
+- **78** A variable fillet whose radius runs down to zero (OpenCASCADE needs a radius above zero).
+- **80, 81** Fillet radius that follows the room available, and a radius given as B-spline
+  control values: SolidCraft options that Fusion doesn't have. Fusion's own variable fillet
+  (radii at points along the edge) is the version worth adding.

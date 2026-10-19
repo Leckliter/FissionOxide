@@ -261,6 +261,26 @@ fn open_mesh_is_a_shell() {
 }
 
 #[test]
+fn tapered_extrude_keeps_sharp_corners_both_ways() {
+  let face = Shape::face(&Plane::XY, &rect_profile(20.0, 20.0)).unwrap();
+  let (h, a) = (10.0, 10f64.to_radians());
+  for (angle, top) in [(a, 20.0 - 2.0 * h * a.tan()), (-a, 20.0 + 2.0 * h * a.tan())] {
+    let s = face.extrude_tapered(h, angle).unwrap();
+    // a square frustum: V = h/3 (A1 + A2 + sqrt(A1 A2))
+    let (a1, a2) = (400.0, top * top);
+    let want = h / 3.0 * (a1 + a2 + (a1 * a2).sqrt());
+    assert!((volume(&s) - want).abs() < 1e-6 * want, "taper {angle}: {} vs {want}", volume(&s));
+    assert_eq!(s.faces().unwrap().len(), 6, "sharp corners: no rounded faces");
+    let m = s.mass().unwrap();
+    assert!((m.bbox_max.z - h).abs() < 1e-9);
+    // and downwards, mirrored
+    let s = face.extrude_tapered(-h, angle).unwrap();
+    assert!((volume(&s) - want).abs() < 1e-6 * want, "taper {angle} down: {} vs {want}", volume(&s));
+    assert!((s.mass().unwrap().bbox_min.z + h).abs() < 1e-9);
+  }
+}
+
+#[test]
 fn step_assembly_round_trip_with_names_and_colours() {
   let dir = std::env::temp_dir().join(format!("fox-kernel-xcaf-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();

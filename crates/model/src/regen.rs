@@ -530,7 +530,7 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2, setback } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback, chord } => {
         let r = self.len(radius)?;
         let sb = match setback.as_deref().map(str::trim) {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
@@ -545,6 +545,10 @@ impl Ctx<'_> {
             let r2 = self.len(r2)?;
             self.edge_op(id, edges, |s, ids| round(s, s.fillet_variable(ids, r, r2)?, ids))
           }
+          None if *chord => self.edge_op(id, edges, |s, ids| {
+            let radii = chord_radii(s, ids, r)?;
+            round(s, s.fillet_each(&radii)?, ids)
+          }),
           None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
@@ -800,9 +804,13 @@ impl Ctx<'_> {
           let prof = match sec.profile {
             Some(p) => pick_profiles(&sk.profiles, &[p]).0.into_iter().next(),
             None => sk.profiles.first().cloned(),
+          };
+          match (prof, lone_point(&sk.sketch)) {
+            (Some(prof), _) => faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?),
+            // a sketch holding just a point: the loft runs to (or from) that point
+            (None, Some(p)) => faces.push(Shape::vertex(sk.plane.to_world(p)).map_err(ke)?),
+            (None, None) => return Err(format!("section {} has no profile", i + 1)),
           }
-          .ok_or(format!("section {} has no profile", i + 1))?;
-          faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?);
         }
         let tool = self.loft_guided(&faces, *ruled, *closed, rails, centerline.as_ref())?;
         self.operate(id, tool, *operation)?;
@@ -1900,16 +1908,19 @@ impl Ctx<'_> {
       let mut ids = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
-        match er.resolve(body.edges(), body.faces(), scale) {
-          Some(eid) => {
-            if let Some(info) = body.edges().iter().find(|e| e.id == eid) {
-              *er = EdgeRef::from_edge(bid, info, body.faces());
-            }
-            if !ids.contains(&eid) {
-              ids.push(eid);
-            }
+        let found = er.resolve_all(body.edges(), body.faces(), scale);
+        if found.is_empty() {
+          missing = true;
+          continue;
+        }
+        let pieces: Vec<&EdgeInfo> = body.edges().iter().filter(|e| found.contains(&e.id)).collect();
+        if let Some(r) = EdgeRef::from_pieces(bid, &pieces, body.faces()) {
+          *er = r;
+        }
+        for eid in found {
+          if !ids.contains(&eid) {
+            ids.push(eid);
           }
-          None => missing = true,
         }
       }
       if ids.is_empty() {
@@ -2009,6 +2020,37 @@ mod assemble;
 mod tests;
 #[cfg(test)]
 mod tests_sheet2;
+
+/// The radius rounding each edge to a round `chord` wide. Across an edge whose faces' normals
+/// turn by α the round is 2 r sin(α/2) wide; edges next to a curved face are taken as square.
+fn chord_radii(s: &Shape, ids: &[u32], chord: f64) -> fox_kernel::Result<Vec<(u32, f64)>> {
+  let (faces, edges) = (s.faces()?, s.edges()?);
+  let normal = |id: u32| faces.iter().find(|f| f.id == id).and_then(|f| f.plane()).map(|p| p.normal());
+  Ok(
+    ids
+      .iter()
+      .map(|&id| {
+        let turn = edges
+          .iter()
+          .find(|e| e.id == id)
+          .and_then(|e| Some(normal(e.faces[0])?.angle_between(normal(e.faces[1])?)))
+          .filter(|a| *a > 1e-6)
+          .unwrap_or(std::f64::consts::FRAC_PI_2);
+        (id, chord / (2.0 * (turn / 2.0).sin()))
+      })
+      .collect(),
+  )
+}
+
+/// The sketch's only point that no curve uses (the origin aside), if it has exactly one.
+fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
+  let used: Vec<_> = sk.curves.iter().flat_map(|c| fox_sketch::curve_points(&c.kind)).collect();
+  let mut lone = sk.points.iter().filter(|p| p.id != fox_sketch::ORIGIN && !used.contains(&p.id));
+  match (lone.next(), lone.next()) {
+    (Some(p), None) => Some([p.x, p.y]),
+    _ => None,
+  }
+}
 
 mod direct;
 #[cfg(test)]
