@@ -1002,6 +1002,6 @@ mod sheet2;
 
 mod refparts;
 #[cfg(test)]
-mod tests_refparts;
-#[cfg(test)]
 mod tests_ellipse;
+#[cfg(test)]
+mod tests_refparts;
