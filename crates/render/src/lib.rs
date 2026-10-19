@@ -304,6 +304,21 @@ impl Frame {
     image::save_buffer(path, &self.rgba, self.width, self.height, image::ExtendedColorType::Rgba8)
       .map_err(|e| e.to_string())
   }
+
+  /// The frame encoded as PNG.
+  pub fn to_png(&self) -> Result<Vec<u8>, String> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::write_buffer_with_format(
+      &mut out,
+      &self.rgba,
+      self.width,
+      self.height,
+      image::ExtendedColorType::Rgba8,
+      image::ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+  }
 }
 
 /// Renders a scene from a camera into a new frame.

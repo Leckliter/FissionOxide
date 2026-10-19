@@ -4,6 +4,7 @@
 //! from-source build.
 
 const OCCT_LIBS: &[&str] = &[
+  "TKDEIGES",
   "TKDESTEP",
   "TKDE",
   "TKXSBase",

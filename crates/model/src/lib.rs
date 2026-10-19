@@ -315,14 +315,31 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_tools: bool,
   },
-  /// Bodies imported from a STEP file, stored losslessly as OCCT BRep text.
+  /// Bodies imported from a file: exact geometry (STEP, IGES, BRep) stored losslessly as OCCT
+  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that become faceted bodies.
   Import {
     file_name: String,
+    #[serde(default)]
     breps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    meshes: Vec<MeshData>,
   },
   RemoveBodies {
     bodies: Vec<BodyId>,
   },
+}
+
+/// An imported triangle mesh (millimetres).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeshData {
+  pub name: String,
+  /// x, y, z per vertex.
+  pub positions: Vec<f32>,
+  /// Three vertex indices per triangle.
+  pub indices: Vec<u32>,
+  /// Merge coplanar triangles into planar faces when building the body.
+  #[serde(default)]
+  pub merge_coplanar: bool,
 }
 
 fn one() -> String {

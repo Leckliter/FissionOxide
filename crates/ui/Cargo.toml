@@ -10,6 +10,7 @@ clf-engine.workspace = true
 egui.workspace = true
 eframe.workspace = true
 rfd.workspace = true
+image.workspace = true
 serde_json.workspace = true
 log.workspace = true
 

@@ -174,3 +174,71 @@ fn mesh_normals_agree_with_triangles() {
   }
   assert_eq!(bad, 0, "{bad} bad normals of {}", m.indices.len());
 }
+
+#[test]
+fn iges_and_brep_files() {
+  let a = block().fillet(&[1], 2.0).unwrap();
+  let dir = std::env::temp_dir().join(format!("clf-kernel-iges-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let iges = dir.join("part.igs");
+  write_iges([&a], &iges).unwrap();
+  let back = read_iges(&iges).unwrap();
+  assert_eq!(back.len(), 1);
+  assert_eq!(back[0].solid_count(), 1, "IGES faces are sewn back into a solid");
+  assert!((volume(&back[0]) - volume(&a)).abs() < 0.5, "{} vs {}", volume(&back[0]), volume(&a));
+  let brep = dir.join("part.brep");
+  write_brep_file([&a, &block().translated(DVec3::X * 100.0).unwrap()], &brep).unwrap();
+  assert_eq!(read_brep_file(&brep).unwrap().len(), 2);
+  assert!(read_iges(&dir.join("missing.igs")).is_err());
+  let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The block's triangulation, welded so triangles share vertices.
+fn welded_mesh(s: &Shape) -> (Vec<[f32; 3]>, Vec<u32>) {
+  let m = s.tessellate(0.05).unwrap();
+  let mut map = std::collections::HashMap::new();
+  let mut pos = Vec::new();
+  let remap: Vec<u32> = m
+    .positions
+    .iter()
+    .map(|p| {
+      *map.entry([p[0].to_bits(), p[1].to_bits(), p[2].to_bits()]).or_insert_with(|| {
+        pos.push(*p);
+        pos.len() as u32 - 1
+      })
+    })
+    .collect();
+  (pos, m.indices.iter().map(|&i| remap[i as usize]).collect())
+}
+
+#[test]
+fn closed_mesh_becomes_a_solid() {
+  let b = block();
+  let (pos, idx) = welded_mesh(&b);
+  let s = Shape::from_mesh(&pos, &idx, false).unwrap();
+  assert_eq!(s.solid_count(), 1);
+  assert!((volume(&s) - 8000.0).abs() < 1e-2, "{}", volume(&s));
+  assert_eq!(s.faces().unwrap().len(), idx.len() / 3);
+  // merged: back to six planar faces
+  let merged = Shape::from_mesh(&pos, &idx, true).unwrap();
+  assert_eq!(merged.faces().unwrap().len(), 6);
+  assert!((volume(&merged) - 8000.0).abs() < 1e-2);
+  // a faceted body takes part in booleans like any other
+  let hole = Shape::cylinder(DVec3::new(20.0, 10.0, -1.0), DVec3::Z, 3.0, 12.0).unwrap();
+  let cut = merged.boolean(&hole, BoolOp::Subtract).unwrap();
+  assert!(volume(&cut) < 8000.0 - 250.0);
+  // inside-out triangles still give a positive volume
+  let flipped: Vec<u32> = idx.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
+  assert!(volume(&Shape::from_mesh(&pos, &flipped, false).unwrap()) > 7999.0);
+}
+
+#[test]
+fn open_mesh_is_a_shell() {
+  let (pos, idx) = welded_mesh(&block());
+  // drop two triangles: a hole in the surface
+  let s = Shape::from_mesh(&pos, &idx[6..], false).unwrap();
+  assert_eq!(s.solid_count(), 0);
+  assert_eq!(s.bodies().unwrap().len(), 1);
+  assert!(Shape::from_mesh(&pos, &[0, 1], false).is_err());
+  assert!(Shape::from_mesh(&pos, &[0, 1, 999_999], false).is_err());
+}
