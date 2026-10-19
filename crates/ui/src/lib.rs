@@ -11,9 +11,11 @@ mod data_panel;
 mod dialogs;
 mod forms;
 mod icons;
+mod manipulators;
 mod marking;
 mod menus;
 mod panels;
+mod preview;
 mod select;
 mod sheet;
 mod theme;
@@ -106,6 +108,14 @@ pub struct App {
   pub manufacture: bool,
   /// The tool library window, while open.
   pub tool_library: Option<cam_ui::ToolLibrary>,
+  /// What a left-drag with the select tool does: window, freeform or paint selection.
+  pub sel_mode: select::Mode,
+  /// The freeform loop or paint stroke being dragged.
+  pub(crate) region: select::Region,
+  /// The move/rotate triad drag in progress.
+  pub(crate) manip: manipulators::State,
+  /// The bodies as the open dialog found them, drawn as ghosts behind its preview.
+  pub(crate) ghost: preview::Ghost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -130,6 +140,8 @@ struct RenderKey {
   profiles_of: Vec<clf_engine::model::FeatureId>,
   /// Section and analysis settings.
   view: Value,
+  /// Body vertices drawn (the Vertices selection filter).
+  vertices: bool,
 }
 
 impl App {
@@ -193,6 +205,10 @@ impl App {
       rebuild: None,
       manufacture: false,
       tool_library: None,
+      sel_mode: select::Mode::default(),
+      region: select::Region::default(),
+      manip: manipulators::State::default(),
+      ghost: preview::Ghost::default(),
     }
   }
 
@@ -585,6 +601,14 @@ impl App {
           self.start(d);
         }
       }
+      // window, freeform and paint selection
+      for (k, m) in
+        [(Key::Num1, select::Mode::Window), (Key::Num2, select::Mode::Freeform), (Key::Num3, select::Mode::Paint)]
+      {
+        if pressed(k, Modifiers::NONE) {
+          self.sel_mode = m;
+        }
+      }
     }
   }
 
@@ -635,8 +659,11 @@ impl App {
   pub fn start(&mut self, kind: dialogs::Kind) {
     self.cancel_dialog();
     self.tool = Tool::Select;
+    self.ghost.capture(&self.s);
     self.dialog = Some(Dialog::open(self, kind));
     if let Some(d) = self.dialog.as_mut() {
+      // manipulators hang on the picks as they are before the preview changes them
+      d.refresh_manip(&self.s);
       d.preview(&mut self.s);
     }
   }

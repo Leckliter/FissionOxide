@@ -38,6 +38,12 @@ fn entity(s: &Session, v: &Value) -> Result<Entity, CmdError> {
     }
     return match sel {
       "body" | "face" | "edge" => entity(s, &v),
+      "vertex" => {
+        let end = v.get("end").and_then(Value::as_bool).unwrap_or(false);
+        let at = crate::scene::vertex_pos(s, BodyId(req_u32(&v, "body")?), req_u32(&v, "edge")?, end)
+          .ok_or(CmdError::new("no such vertex"))?;
+        entity(s, &json!({"point": at.to_array()}))
+      }
       o => Err(CmdError::new(format!("can't measure a {o}"))),
     };
   }
