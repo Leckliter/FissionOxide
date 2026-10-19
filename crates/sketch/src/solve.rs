@@ -188,6 +188,7 @@ impl Sketch {
     drop(sys);
     if solved || keep_on_failure {
       vars.write_back(self, &x);
+      self.place_texts();
     }
     SolveReport {
       status: if solved { SolveStatus::Solved } else { SolveStatus::Failed },
@@ -255,7 +256,18 @@ struct System<'a> {
   deps: Vec<Vec<usize>>,
   /// Sign / branch chosen per equation at the start.
   sign: Vec<f64>,
+  /// Which ends meet, per spline tangency / curvature equation, chosen at the start.
+  joint: Vec<Joint>,
   n_rows: usize,
+}
+
+/// Where two curves meet for a spline tangency or curvature constraint.
+#[derive(Debug, Clone, Copy, Default)]
+struct Joint {
+  /// Use the end (not the start) of curve a / b.
+  ends: [bool; 2],
+  /// Length that makes the curvature residual comparable to the others.
+  scale: f64,
 }
 
 impl<'a> System<'a> {
@@ -303,6 +315,7 @@ impl<'a> System<'a> {
       rows_of: Vec::new(),
       deps: Vec::new(),
       sign: Vec::new(),
+      joint: Vec::new(),
       n_rows: 0,
     };
     let x0 = sys.x0.clone();
@@ -311,7 +324,9 @@ impl<'a> System<'a> {
       let eq = sys.eqns[k];
       let sign = sys.branch(eq, &x0);
       sys.sign.push(sign);
-      let n = sys.eval(eq, sign, &x0).len();
+      let joint = sys.joint_of(eq, &x0);
+      sys.joint.push(joint);
+      let n = sys.eval_at(k, &x0).len();
       sys.rows_of.push((rows, rows + n));
       rows += n;
       let d = sys.eq_deps(eq);
@@ -327,10 +342,29 @@ impl<'a> System<'a> {
 
   fn residuals(&self, x: &[f64]) -> Vec<f64> {
     let mut out = Vec::with_capacity(self.n_rows);
-    for (k, eq) in self.eqns.iter().enumerate() {
-      out.extend(self.eval(*eq, self.sign.get(k).copied().unwrap_or(1.0), x));
+    for k in 0..self.eqns.len() {
+      out.extend(self.eval_at(k, x));
     }
     out
+  }
+
+  /// Residuals of equation `k` with its frozen branch choices.
+  fn eval_at(&self, k: usize, x: &[f64]) -> Vec<f64> {
+    let Some(eq) = self.eqns.get(k) else { return vec![] };
+    let sign = self.sign.get(k).copied().unwrap_or(1.0);
+    let joint = self.joint.get(k).copied().unwrap_or_default();
+    match eq {
+      Eqn::User(ci) => match self.sketch.constraints.get(*ci).map(|c| &c.kind) {
+        Some(ConstraintKind::Tangent { a, b }) if self.is_free(*a) || self.is_free(*b) => self.smooth(x, *a, *b, joint, false),
+        Some(ConstraintKind::Curvature { a, b }) => self.smooth(x, *a, *b, joint, true),
+        Some(ConstraintKind::PointOnCurve { p, curve }) if self.is_free(*curve) => {
+          let path = self.free_path(x, *curve);
+          if path.is_empty() { vec![0.0] } else { vec![crate::freeform::path_distance(&path, self.p(x, *p))] }
+        }
+        _ => self.eval(*eq, sign, x),
+      },
+      Eqn::ArcRadius(_) => self.eval(*eq, sign, x),
+    }
   }
 
   /// Sparse central-difference Jacobian, dense row-major m×n.
@@ -338,16 +372,15 @@ impl<'a> System<'a> {
     let n = self.n_vars();
     let mut j = vec![0.0; self.n_rows * n];
     let mut xp = x.to_vec();
-    for (k, eq) in self.eqns.iter().enumerate() {
+    for k in 0..self.eqns.len() {
       let (r0, _) = self.rows_of[k];
-      let sign = self.sign[k];
       for &v in &self.deps[k] {
         let orig = xp[v];
         let h = 1e-7 * (1.0 + orig.abs());
         xp[v] = orig + h;
-        let rp = self.eval(*eq, sign, &xp);
+        let rp = self.eval_at(k, &xp);
         xp[v] = orig - h;
-        let rm = self.eval(*eq, sign, &xp);
+        let rm = self.eval_at(k, &xp);
         xp[v] = orig;
         for (i, (a, b)) in rp.iter().zip(&rm).enumerate() {
           j[(r0 + i) * n + v] = (a - b) / (2.0 * h);
@@ -394,6 +427,99 @@ impl<'a> System<'a> {
 
   fn is_line(&self, id: CurveId) -> bool {
     matches!(self.curve(id), Some((_, CurveKind::Line { .. })))
+  }
+
+  fn is_free(&self, id: CurveId) -> bool {
+    self.curve(id).is_some_and(|(_, k)| k.is_freeform())
+  }
+
+  /// A freeform curve's Bézier pieces at `x`.
+  fn free_path(&self, x: &[f64], id: CurveId) -> Vec<[[f64; 2]; 4]> {
+    match self.curve(id) {
+      Some((_, kind)) => crate::kind_beziers(kind, &|p| Some(self.p(x, p))),
+      None => Vec::new(),
+    }
+  }
+
+  /// (position, outward direction, curvature) of a curve at the joint end, or for a circle at the
+  /// point nearest `toward`.
+  fn frame(&self, x: &[f64], id: CurveId, at_end: bool, toward: Option<([f64; 2], [f64; 2])>) -> Option<([f64; 2], [f64; 2], f64)> {
+    let (_, kind) = self.curve(id)?;
+    if let CurveKind::Circle { .. } = kind {
+      let (q, tq) = toward?;
+      let (c, r) = self.round(x, id);
+      let u = unit(sub(q, c));
+      let ccw = [-u[1], u[0]];
+      let p = [c[0] + u[0] * r, c[1] + u[1] * r];
+      return Some(if dot(ccw, tq) <= 0.0 { (p, ccw, 1.0 / r) } else { (p, [-ccw[0], -ccw[1]], -1.0 / r) });
+    }
+    crate::freeform::end_frame(kind, at_end, &|p| Some(self.p(x, p)))
+  }
+
+  /// Tangency (and with `curvature`, equal curvature) where a spline meets another curve.
+  fn smooth(&self, x: &[f64], a: CurveId, b: CurveId, joint: Joint, curvature: bool) -> Vec<f64> {
+    let is_circle = |id| matches!(self.curve(id), Some((_, CurveKind::Circle { .. })));
+    // a circle has no ends: it is met where the other curve's end is
+    let (fa, fb) = if is_circle(a) {
+      let fb = self.frame(x, b, joint.ends[1], None);
+      (fb.and_then(|f| self.frame(x, a, false, Some((f.0, f.1)))), fb)
+    } else {
+      let fa = self.frame(x, a, joint.ends[0], None);
+      (fa, fa.and_then(|f| self.frame(x, b, joint.ends[1], Some((f.0, f.1)))))
+    };
+    let (Some((_, ta, ka)), Some((_, tb, kb))) = (fa, fb) else {
+      return if curvature { vec![0.0, 0.0] } else { vec![0.0] };
+    };
+    let mut r = vec![cross(ta, tb)];
+    if curvature {
+      // both curvatures are taken arriving at the joint, so a smooth joint has them opposite
+      r.push((ka + kb) * joint.scale);
+    }
+    r
+  }
+
+  /// Picks the ends that meet for spline tangency / curvature (the closest pair).
+  fn joint_of(&self, eq: Eqn, x: &[f64]) -> Joint {
+    let Eqn::User(ci) = eq else { return Joint::default() };
+    let (a, b) = match self.sketch.constraints.get(ci).map(|c| &c.kind) {
+      Some(ConstraintKind::Tangent { a, b }) if self.is_free(*a) || self.is_free(*b) => (*a, *b),
+      Some(ConstraintKind::Curvature { a, b }) => (*a, *b),
+      _ => return Joint::default(),
+    };
+    let ends = |id: CurveId| -> Vec<(bool, [f64; 2])> {
+      match self.curve(id) {
+        Some((_, CurveKind::Circle { .. })) | None => vec![],
+        Some((_, kind)) => [false, true]
+          .into_iter()
+          .filter_map(|e| crate::freeform::end_frame(kind, e, &|p| Some(self.p(x, p))).map(|f| (e, f.0)))
+          .collect(),
+      }
+    };
+    let (ea, eb) = (ends(a), ends(b));
+    let span = |v: &[(bool, [f64; 2])]| if v.len() == 2 { crate::dist(v[0].1, v[1].1) } else { 0.0 };
+    let scale = span(&ea).max(span(&eb)).max(1e-3);
+    let mut best = (f64::INFINITY, [true, true]);
+    if ea.is_empty() || eb.is_empty() {
+      // one is a circle: the other's end nearest it
+      let (circle, other, flip) = if ea.is_empty() { (a, &eb, true) } else { (b, &ea, false) };
+      let (c, r) = self.round(x, circle);
+      for (e, p) in other {
+        let d = (crate::dist(c, *p) - r).abs();
+        if d < best.0 {
+          best = (d, if flip { [false, *e] } else { [*e, false] });
+        }
+      }
+    } else {
+      for (e1, p1) in &ea {
+        for (e2, p2) in &eb {
+          let d = crate::dist(*p1, *p2);
+          if d < best.0 - 1e-12 {
+            best = (d, [*e1, *e2]);
+          }
+        }
+      }
+    }
+    Joint { ends: best.1, scale }
   }
 
   fn curve_vars(&self, id: CurveId, out: &mut Vec<usize>) {
@@ -576,6 +702,8 @@ impl<'a> System<'a> {
       }
       K::Radius { curve, value } => vec![self.round(x, *curve).1 - value.value],
       K::Diameter { curve, value } => vec![2.0 * self.round(x, *curve).1 - value.value],
+      // spline joints are evaluated in `eval_at`
+      K::Curvature { .. } => vec![0.0, 0.0],
       K::Angle { a, b, value } => {
         let (u, v) = (self.dir(x, *a), self.dir(x, *b));
         // sin(φ − θ) where φ is the angle from a to b

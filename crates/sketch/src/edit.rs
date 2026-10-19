@@ -163,7 +163,7 @@ pub(crate) fn meet(g: &Geo, h: &Geo) -> Vec<P> {
 }
 
 impl Sketch {
-  fn geo(&self, id: CurveId) -> Option<Geo> {
+  pub(crate) fn geo(&self, id: CurveId) -> Option<Geo> {
     Some(match self.curve(id)?.kind {
       CurveKind::Line { a, b } => Geo::Line { a: self.pos(a)?, b: self.pos(b)? },
       CurveKind::Circle { center, radius } => Geo::Arc { c: self.pos(center)?, r: radius, a0: 0.0, sweep: TAU },
@@ -172,36 +172,24 @@ impl Sketch {
         let a0 = angle_of(c, s);
         Geo::Arc { c, r: dist(c, s), a0, sweep: ccw_sweep(a0, angle_of(c, e)) }
       }
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => return None,
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } | CurveKind::Bezier { .. } => {
+        return None;
+      }
     })
   }
 
-  /// Where other curves cross curve `id`: (parameter along it, the other curve).
+  /// Where other curves (splines too) cross curve `id`: (parameter along it, the other curve).
   fn crossings(&self, id: CurveId) -> Result<Vec<(f64, CurveId)>, SketchError> {
-    let g = self.geo(id).ok_or(SketchError::NoCurve(id))?;
-    let mut out = Vec::new();
-    for c in &self.curves {
-      if c.id == id {
-        continue;
-      }
-      let Some(h) = self.geo(c.id) else { continue };
-      for p in meet(&g, &h) {
-        if g.contains(p) && h.contains(p) {
-          out.push((g.param(p), c.id));
-        }
-      }
-    }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    Ok(out)
+    self.crossings_any(id)
   }
 
   /// Uses of a point by curves.
-  fn point_users(&self, p: PointId) -> usize {
+  pub(crate) fn point_users(&self, p: PointId) -> usize {
     self.curves.iter().filter(|c| curve_points(&c.kind).contains(&p)).count()
   }
 
   /// Replaces point `old` by `new` in curve `id`.
-  fn swap_point(&mut self, id: CurveId, old: PointId, new: PointId) {
+  pub(crate) fn swap_point(&mut self, id: CurveId, old: PointId, new: PointId) {
     if let Some(c) = self.curve_mut(id) {
       match &mut c.kind {
         CurveKind::Line { a, b } => {
@@ -218,7 +206,14 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
+        CurveKind::Spline { points, start_handle, end_handle } => {
+          for q in points.iter_mut().chain(start_handle.iter_mut()).chain(end_handle.iter_mut()) {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
           for q in points {
             if *q == old {
               *q = new;
@@ -238,7 +233,7 @@ impl Sketch {
   }
 
   /// Deletes a point no curve uses any more, with its constraints.
-  fn drop_if_unused(&mut self, p: PointId) {
+  pub(crate) fn drop_if_unused(&mut self, p: PointId) {
     if p != crate::ORIGIN && self.point_users(p) == 0 {
       self.points.retain(|x| x.id != p);
       self.constraints.retain(|c| !c.kind.points().contains(&p));
@@ -250,6 +245,8 @@ impl Sketch {
   /// Rounds the corner where two lines meet with an arc of `radius`, tangent to both (the lines
   /// are trimmed back). The radius becomes a driving dimension.
   pub fn fillet(&mut self, l1: CurveId, l2: CurveId, radius: f64) -> Result<CurveId, SketchError> {
+    self.not_text(l1)?;
+    self.not_text(l2)?;
     if !(radius > EPS && radius.is_finite()) {
       return Err(SketchError::InvalidValue(format!("fillet radius {radius}")));
     }
@@ -302,6 +299,8 @@ impl Sketch {
   /// Bevels the corner where two lines meet: the lines are cut back `d1` and `d2` from the corner
   /// and joined by a new line.
   pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
+    self.not_text(l1)?;
+    self.not_text(l2)?;
     if !(d1 > EPS && d2 > EPS && d1.is_finite() && d2.is_finite()) {
       return Err(SketchError::InvalidValue("chamfer distances must be positive".into()));
     }
@@ -339,7 +338,12 @@ impl Sketch {
 
   /// Removes the piece of `curve` around `at` between its nearest crossings with other curves
   /// (the whole curve if nothing crosses it). New ends stay on the curves they were cut at.
+  /// Splines and ellipses keep what is left as Bézier chains.
   pub fn trim(&mut self, curve: CurveId, at: P) -> Result<Vec<CurveId>, SketchError> {
+    self.not_text(curve)?;
+    if self.curve(curve).is_some_and(|c| c.kind.is_freeform()) {
+      return self.trim_free(curve, at);
+    }
     let g = self.geo(curve).ok_or(SketchError::NoCurve(curve))?;
     let tp = g.param(at);
     let end = g.end_param();
@@ -423,56 +427,31 @@ impl Sketch {
     self.drop_if_unused(old);
   }
 
-  /// Lengthens a line from its end nearest `at` to the nearest curve it would reach.
+  /// Lengthens a line, arc or open spline from its end nearest `at` to the nearest curve it
+  /// would reach (lines straight on, arcs round their circle, splines along their end piece).
   pub fn extend(&mut self, line: CurveId, at: P) -> Result<(), SketchError> {
+    self.not_text(line)?;
+    match self.curve(line).map(|c| &c.kind) {
+      Some(CurveKind::Arc { .. }) => return self.extend_arc(line, at),
+      Some(k) if k.is_freeform() => return self.extend_free(line, at),
+      _ => {}
+    }
     let Some(CurveKind::Line { a, b }) = self.curve(line).map(|c| c.kind.clone()) else {
-      return Err(SketchError::WrongGeometry("extend", "a line"));
+      return Err(SketchError::WrongGeometry("extend", "a line, arc or spline"));
     };
     let g = self.geo(line).ok_or(SketchError::NoCurve(line))?;
     let (pa, pb) = (self.pos(a).ok_or(SketchError::NoPoint(a))?, self.pos(b).ok_or(SketchError::NoPoint(b))?);
     let from_b = dist(at, pb) <= dist(at, pa);
     let mut best: Option<(f64, P, CurveId)> = None;
-    for c in &self.curves {
-      if c.id == line {
-        continue;
-      }
-      let Some(h) = self.geo(c.id) else { continue };
-      for p in meet(&g, &h) {
-        if !h.contains(p) {
-          continue;
-        }
-        let t = g.param(p);
-        let gain = if from_b { t - 1.0 } else { -t };
-        if gain > 1e-9 && best.is_none_or(|(bg, _, _)| gain < bg) {
-          best = Some((gain, p, c.id));
-        }
+    for (p, other) in self.hits_extended(&g, line) {
+      let t = g.param(p);
+      let gain = if from_b { t - 1.0 } else { -t };
+      if gain > 1e-9 && best.is_none_or(|(bg, _, _)| gain < bg) {
+        best = Some((gain, p, other));
       }
     }
     let (_, p, other) = best.ok_or(SketchError::InvalidValue("nothing to extend the line to".into()))?;
-    let end = if from_b { b } else { a };
-    if self.point_users(end) > 1 || self.point(end).is_some_and(|x| x.fixed) {
-      let np = self.add_point(p[0], p[1]);
-      self.swap_point(line, end, np);
-      self.add_constraint(ConstraintKind::PointOnCurve { p: np, curve: other })?;
-    } else {
-      if let Some(q) = self.point_mut(end) {
-        q.x = p[0];
-        q.y = p[1];
-      }
-      // constraints that pinned the old end would fight the new position
-      self.constraints.retain(|c| {
-        !matches!(
-          c.kind,
-          ConstraintKind::Distance { .. }
-            | ConstraintKind::HorizontalDistance { .. }
-            | ConstraintKind::VerticalDistance { .. }
-            | ConstraintKind::Fix { .. }
-            | ConstraintKind::Coincident { .. }
-        ) || !c.kind.points().contains(&end)
-      });
-      self.add_constraint(ConstraintKind::PointOnCurve { p: end, curve: other })?;
-    }
-    Ok(())
+    self.move_end(line, if from_b { b } else { a }, p, other)
   }
 
   // ---------------------------------------------------------------- copies
@@ -506,11 +485,16 @@ impl Sketch {
           let (center, s, e) = (get(self, center)?, get(self, start)?, get(self, end)?);
           if flip { CurveKind::Arc { center, start: e, end: s } } else { CurveKind::Arc { center, start: s, end: e } }
         }
-        CurveKind::Spline { points } => {
-          CurveKind::Spline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
-        }
+        CurveKind::Spline { points, start_handle, end_handle } => CurveKind::Spline {
+          points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()?,
+          start_handle: start_handle.map(|p| get(self, p)).transpose()?,
+          end_handle: end_handle.map(|p| get(self, p)).transpose()?,
+        },
         CurveKind::ControlSpline { points } => {
           CurveKind::ControlSpline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
+        }
+        CurveKind::Bezier { points } => {
+          CurveKind::Bezier { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
         }
         CurveKind::Ellipse { center, major, minor } => {
           CurveKind::Ellipse { center: get(self, center)?, major: get(self, major)?, minor }
@@ -609,9 +593,9 @@ impl Sketch {
 
   // ---------------------------------------------------------------- offset
 
-  /// Offsets a chain of lines and arcs (or circles) by `distance`: positive is outward for a
-  /// closed chain, to the left for an open one. Corners are re-met sharply; arcs stay concentric
-  /// with the originals (sharing their centres) and lines parallel.
+  /// Offsets a chain of lines, arcs and splines (or circles and ellipses) by `distance`: positive
+  /// is outward for a closed chain, to the left for an open one. Corners are re-met sharply; arcs
+  /// stay concentric with the originals (sharing their centres) and lines parallel.
   pub fn offset(&mut self, curves: &[CurveId], distance: f64) -> Result<Vec<CurveId>, SketchError> {
     if !(distance.is_finite() && distance.abs() > EPS) {
       return Err(SketchError::InvalidValue("offset distance must not be zero".into()));
@@ -632,6 +616,10 @@ impl Sketch {
       }
     }
     if chain_ids.is_empty() {
+      return Ok(out);
+    }
+    if chain_ids.iter().any(|c| self.curve(*c).is_some_and(|c| c.kind.is_freeform())) {
+      out.extend(self.offset_free(&chain_ids, distance)?);
       return Ok(out);
     }
     // order the chain: (curve, reversed)
