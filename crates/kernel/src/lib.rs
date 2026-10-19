@@ -537,6 +537,45 @@ impl Shape {
     Ok(Projection { lines, circles })
   }
 
+  /// This planar face extruded `height` along its normal with sides drafted by `angle` radians
+  /// (positive tapers inward).
+  pub fn extrude_tapered(&self, height: f64, angle: f64) -> Result<Shape> {
+    if !(height.is_finite() && height.abs() > 1e-9 && angle.is_finite() && angle.abs() < 1.5) {
+      return Err(KernelError::Input("taper needs a height and an angle under 85°".into()));
+    }
+    // OCCT measures the height along the drafted sides
+    Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+  }
+
+  /// This planar face grown (d > 0) or shrunk (d < 0) all round.
+  pub fn offset_face(&self, d: f64) -> Result<Shape> {
+    if !d.is_finite() {
+      return Err(KernelError::Input("offset must be finite".into()));
+    }
+    Shape::wrap(sys::offset_face(self.get()?, d)?)
+  }
+
+  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians.
+  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<Shape> {
+    if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
+      return Err(KernelError::Input("chamfer sizes must be positive".into()));
+    }
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)
+  }
+
+  /// Fillets edges with the radius running from `r1` to `r2` along each edge.
+  pub fn fillet_variable(&self, edges: &[u32], r1: f64, r2: f64) -> Result<Shape> {
+    if !(r1 > 1e-9 && r2 > 1e-9 && r1.is_finite() && r2.is_finite()) {
+      return Err(KernelError::Input("fillet radii must be positive".into()));
+    }
+    Shape::wrap(sys::fillet_var(self.get()?, edges, r1, r2)?)
+  }
+
+  /// The pieces of this solid cut by another shape.
+  pub fn split_by(&self, tool: &Shape) -> Result<Vec<Shape>> {
+    Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)?.solids()
+  }
+
   /// One face (1-based face-map index) as a shape of its own.
   pub fn face_shape(&self, face: u32) -> Result<Shape> {
     Shape::wrap(sys::face_at_index(self.get()?, face)?)

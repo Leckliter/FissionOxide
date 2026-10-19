@@ -645,3 +645,69 @@ fn component_copies_follow_the_original() {
   let m = s.model.bodies[1].shape.mass().unwrap();
   assert!((m.bbox_min.x - 35.0).abs() < 1e-6, "{m:?}");
 }
+
+#[test]
+fn extrude_options_press_pull_chamfers_and_split_by_body() {
+  use std::f64::consts::PI;
+  let square = |s: &mut Session| {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+    run(s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 20]}));
+  };
+  // thin wall 2 mm inside a 20 × 20 square, 10 high
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(&mut s, "extrude", json!({"distance": 10, "thin": 2}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - (400.0 - 256.0) * 10.0).abs() < 1e-6, "{}", total_volume(&s));
+  // tapered: a frustum, narrower at the top
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(&mut s, "extrude", json!({"distance": 10, "taper": "10 deg"}));
+  assert!(r["error"].is_null(), "{r}");
+  let top = 20.0 - 2.0 * 10.0 * (10f64).to_radians().tan();
+  let frustum = 10.0 / 3.0 * (400.0 + top * top + 20.0 * top);
+  assert!((total_volume(&s) - frustum).abs() < 1e-3, "{} vs {frustum}", total_volume(&s));
+  // to a face: a box's top, 30 up
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 30, "at": [50, 50]}));
+  square(&mut s);
+  let r = run(&mut s, "extrude", json!({"extent": "to_face", "to": {"point": [50, 50, 30]}}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - (3000.0 + 400.0 * 30.0)).abs() < 1e-6);
+  // press-pull the top up 5 then the side in 2
+  let b = s.model.bodies[1].id.0;
+  run(&mut s, "press_pull", json!({"faces": [{"point": [10, 10, 30]}], "distance": 5}));
+  run(&mut s, "press_pull", json!({"faces": [{"point": [20, 10, 10]}], "distance": -2}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  let v = s.model.bodies.iter().find(|x| x.id.0 == b).unwrap().shape.mass().unwrap().volume;
+  assert!((v - 18.0 * 20.0 * 35.0).abs() < 1e-6, "{v}");
+  // chamfers and a variable fillet
+  for (params, ok) in [
+    (json!({"distance": 2, "distance2": 4}), 4.0),
+    (json!({"distance": 2, "angle": "30 deg"}), 2.0 * (30f64).to_radians().tan()),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+    let mut p = params.clone();
+    p["edges"] = json!([{"point": [10, 0, 20]}]);
+    let r = run(&mut s, "chamfer", p);
+    assert!(r["error"].is_null(), "{r}");
+    let cut = 8000.0 - total_volume(&s);
+    assert!((cut - 2.0 * ok / 2.0 * 20.0).abs() < 1e-6, "{cut}");
+  }
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  let r = run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 1, "radius2": 4}));
+  assert!(r["error"].is_null(), "{r}");
+  let removed = 8000.0 - total_volume(&s);
+  assert!(removed > (1.0 - PI / 4.0) * 20.0 && removed < (1.0 - PI / 4.0) * 16.0 * 20.0, "{removed}");
+  // split a block with a cylinder
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10, "at": [20, 10]}));
+  run(&mut s, "cylinder", json!({"radius": 5, "height": 30, "at": [20, 10], "plane": "xy"}));
+  let tool = s.model.bodies[1].id.0;
+  let r = run(&mut s, "split_by_body", json!({"tool": tool, "remove_tool": true}));
+  assert!(r["error"].is_null(), "{r}");
+  assert_eq!(s.model.bodies.len(), 2, "the block becomes the disc and the rest");
+  assert!((total_volume(&s) - 8000.0).abs() < 1e-6);
+}

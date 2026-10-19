@@ -49,6 +49,11 @@ std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double th
                                    const Shape &removed);
 std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> edges,
                                     rust::Slice<const double> radii);
+std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angle);
+std::unique_ptr<Shape> offset_face(const Shape &face, double d);
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle);
+std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2);
+std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool);
 HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection);
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs);
 std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine);

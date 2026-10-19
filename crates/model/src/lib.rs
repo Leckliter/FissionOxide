@@ -240,6 +240,19 @@ pub enum ExtentKind {
   TwoSides,
   /// Through every body, in the chosen direction.
   ThroughAll,
+  /// Up to a planar face (`to`), plus `distance` past it.
+  ToFace,
+}
+
+/// Which way a thin extrusion's wall grows from the profile's outline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinSide {
+  /// Into the profile.
+  #[default]
+  Inside,
+  Outside,
+  Center,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -252,6 +265,17 @@ pub struct Extent {
   pub distance2: String,
   #[serde(default)]
   pub flip: bool,
+  /// Side taper (angle; positive narrows). Empty = none.
+  #[serde(default)]
+  pub taper: String,
+  /// Wall thickness of a thin extrusion. Empty = solid.
+  #[serde(default)]
+  pub thin: String,
+  #[serde(default)]
+  pub thin_side: ThinSide,
+  /// The face a `to_face` extent stops at.
+  #[serde(default)]
+  pub to: Option<FaceRef>,
 }
 
 fn zero() -> String {
@@ -260,7 +284,16 @@ fn zero() -> String {
 
 impl Extent {
   pub fn distance(d: impl Into<String>) -> Self {
-    Extent { kind: ExtentKind::OneSide, distance: d.into(), distance2: zero(), flip: false }
+    Extent {
+      kind: ExtentKind::OneSide,
+      distance: d.into(),
+      distance2: zero(),
+      flip: false,
+      taper: String::new(),
+      thin: String::new(),
+      thin_side: ThinSide::Inside,
+      to: None,
+    }
   }
 }
 
@@ -358,10 +391,32 @@ pub enum FeatureKind {
   Fillet {
     edges: Vec<EdgeRef>,
     radius: String,
+    /// Variable radius: the radius at each edge's end (it runs from `radius` at the start).
+    #[serde(default)]
+    radius2: Option<String>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
     distance: String,
+    /// Two-distance chamfer: the distance on the other face.
+    #[serde(default)]
+    distance2: Option<String>,
+    /// Distance-and-angle chamfer.
+    #[serde(default)]
+    angle: Option<String>,
+  },
+  /// Press-pull: planar faces pushed out (join) or in (cut) along their normals.
+  OffsetFaces {
+    faces: Vec<FaceRef>,
+    distance: String,
+  },
+  /// Splits bodies with another body (kept unless `remove_tool`).
+  SplitByBody {
+    #[serde(default)]
+    bodies: BodySel,
+    tool: BodyId,
+    #[serde(default)]
+    remove_tool: bool,
   },
   Shell {
     /// Faces to open; the rest of each body becomes a wall of `thickness`.
@@ -718,6 +773,8 @@ impl FeatureKind {
       FeatureKind::Extrude { .. } => "Extrude",
       FeatureKind::Revolve { .. } => "Revolve",
       FeatureKind::Fillet { .. } => "Fillet",
+      FeatureKind::OffsetFaces { .. } => "PressPull",
+      FeatureKind::SplitByBody { .. } => "Split",
       FeatureKind::Chamfer { .. } => "Chamfer",
       FeatureKind::Shell { .. } => "Shell",
       FeatureKind::Primitive { shape: Primitive::Box { .. }, .. } => "Box",
@@ -1212,10 +1269,27 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Extrude { extent, .. } => {
       f(&mut extent.distance);
       f(&mut extent.distance2);
+      for e in [&mut extent.taper, &mut extent.thin] {
+        if !e.is_empty() {
+          f(e);
+        }
+      }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, .. } => f(radius),
-    FeatureKind::Chamfer { distance, .. } => f(distance),
+    FeatureKind::Fillet { radius, radius2, .. } => {
+      f(radius);
+      if let Some(r) = radius2 {
+        f(r);
+      }
+    }
+    FeatureKind::Chamfer { distance, distance2, angle, .. } => {
+      f(distance);
+      for e in [distance2, angle].into_iter().flatten() {
+        f(e);
+      }
+    }
+    FeatureKind::OffsetFaces { distance, .. } => f(distance),
+    FeatureKind::SplitByBody { .. } => {}
     FeatureKind::Shell { thickness, .. } => f(thickness),
     FeatureKind::Primitive { shape, .. } => match shape {
       Primitive::Box { width, depth, height } => {

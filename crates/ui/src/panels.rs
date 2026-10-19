@@ -467,6 +467,8 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Extrude { .. } => Icon::Extrude,
     FeatureKind::Revolve { .. } => Icon::Revolve,
     FeatureKind::Fillet { .. } => Icon::Fillet,
+    FeatureKind::OffsetFaces { .. } => Icon::Extrude,
+    FeatureKind::SplitByBody { .. } => Icon::Combine,
     FeatureKind::Chamfer { .. } => Icon::Chamfer,
     FeatureKind::Shell { .. } => Icon::Shell,
     FeatureKind::Primitive { shape: Primitive::Box { .. }, .. } => Icon::Box,

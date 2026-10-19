@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clf_kernel::glam::DVec3;
 use clf_model::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
-  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  FeatureKind, HoleKind, LoftSection, ThinSide, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
   SheetMetalRule,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
@@ -99,15 +99,17 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all, distance2?, flip?, operation?: new_body|join|cut|intersect}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face, to?: face, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], operation?}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
-  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it)", "{edges: [{body, edge} | {point}], radius}";
-  "chamfer" => "Bevel edges", "{edges: [{body, edge}], distance}";
+  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable", "{edges: [{body, edge} | {point}], radius, radius2?}";
+  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
+  "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
+  "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?})", "{faces: [{body, face} | {point}], thickness}";
   "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?}";
   "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?}";
@@ -337,14 +339,34 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "symmetric" => ExtentKind::Symmetric,
         "two_sides" => ExtentKind::TwoSides,
         "through_all" | "all" => ExtentKind::ThroughAll,
+        "to_face" | "to" => ExtentKind::ToFace,
         other => return Err(CmdError::new(format!("unknown extent '{other}'"))),
       };
-      let distance = if kind == ExtentKind::ThroughAll { "0".to_string() } else { req_expr(p, "distance")? };
+      let distance = match kind {
+        ExtentKind::ThroughAll => "0".to_string(),
+        ExtentKind::ToFace => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+        _ => req_expr(p, "distance")?,
+      };
+      let to = match (kind, p.get("to")) {
+        (ExtentKind::ToFace, Some(f)) => Some(face_ref(s, f)?),
+        (ExtentKind::ToFace, None) => return Err(CmdError::new("to_face needs 'to': a face")),
+        _ => None,
+      };
+      let thin_side = match opt_str(p, "thin_side").unwrap_or("inside") {
+        "inside" => ThinSide::Inside,
+        "outside" => ThinSide::Outside,
+        "center" => ThinSide::Center,
+        o => return Err(CmdError::new(format!("unknown thin side '{o}' (inside, outside, center)"))),
+      };
       let extent = Extent {
         kind,
         distance,
         distance2: opt_expr(p, "distance2").unwrap_or_else(|| "0".into()),
         flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        taper: opt_expr(p, "taper").unwrap_or_default(),
+        thin: opt_expr(p, "thin").unwrap_or_default(),
+        thin_side,
+        to,
       };
       let operation = operation(p)?;
       add_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation })
@@ -429,11 +451,31 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "fillet" => {
       let edges = edge_refs(s, p)?;
-      add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")? })
+      add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")?, radius2: opt_expr(p, "radius2") })
     }
     "chamfer" => {
       let edges = edge_refs(s, p)?;
-      add_feature(s, FeatureKind::Chamfer { edges, distance: req_expr(p, "distance")? })
+      add_feature(
+        s,
+        FeatureKind::Chamfer {
+          edges,
+          distance: req_expr(p, "distance")?,
+          distance2: opt_expr(p, "distance2"),
+          angle: opt_expr(p, "angle"),
+        },
+      )
+    }
+    "press_pull" => {
+      let mut faces = Vec::new();
+      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+        faces.push(face_ref(s, f)?);
+      }
+      add_feature(s, FeatureKind::OffsetFaces { faces, distance: req_expr(p, "distance")? })
+    }
+    "split_by_body" => {
+      let tool = BodyId(req_u32(p, "tool")?);
+      let remove_tool = p.get("remove_tool").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::SplitByBody { bodies: body_sel(p), tool, remove_tool })
     }
     "shell" => {
       let mut faces = Vec::new();

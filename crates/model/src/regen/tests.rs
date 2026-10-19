@@ -99,7 +99,7 @@ fn fillet_survives_parameter_change() {
     .map(|e| EdgeRef::from_edge(body.id, e, body.faces()))
     .collect();
   assert_eq!(edges.len(), 4);
-  d.add_feature(FeatureKind::Fillet { edges, radius: "2".into() }).unwrap();
+  d.add_feature(FeatureKind::Fillet { edges, radius: "2".into(), radius2: None }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   let v1 = volume(&m);
@@ -227,7 +227,7 @@ fn patterns_mirror_primitives_and_shell() {
 #[test]
 fn failing_feature_does_not_stop_the_timeline() {
   let (mut d, s, _) = block_design();
-  let bad = d.add_feature(FeatureKind::Fillet { edges: vec![], radius: "1".into() }).unwrap();
+  let bad = d.add_feature(FeatureKind::Fillet { edges: vec![], radius: "1".into(), radius2: None }).unwrap();
   let bad2 = d
     .add_feature(FeatureKind::Extrude {
       sketch: s,

@@ -247,6 +247,7 @@ impl Dialog {
           ExtentKind::Symmetric => "symmetric",
           ExtentKind::TwoSides => "two_sides",
           ExtentKind::ThroughAll => "through_all",
+          ExtentKind::ToFace => "to_face",
         };
         d.op = op_str(*operation);
         d
@@ -265,13 +266,13 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges } => {
+      FeatureKind::Fillet { radius, edges, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Chamfer { distance, edges } => {
+      FeatureKind::Chamfer { distance, edges, .. } => {
         let mut d = Dialog::blank(Kind::Chamfer);
         d.radius = distance.clone();
         d.edges = vec![Value::Null; edges.len()];

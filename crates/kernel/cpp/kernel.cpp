@@ -27,6 +27,8 @@
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <LocOpe_DPrism.hxx>
 #include <HLRAlgo_Projector.hxx>
 #include <HLRBRep_Algo.hxx>
 #include <HLRBRep_HLRToShape.hxx>
@@ -1446,6 +1448,116 @@ std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<
   }
   return wrap(result);
   CLF_CATCH("mesh conversion")
+}
+
+// A planar face extruded `height` along its normal with its sides drafted by `angle` (rad;
+// positive tapers inward).
+std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angle) {
+  CLF_TRY
+  if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("taper needs a face");
+  LocOpe_DPrism dp(TopoDS::Face(face.s), height, angle);
+  TopoDS_Shape r = dp.Shape();
+  if (r.IsNull()) throw std::runtime_error("the tapered extrusion failed (taper too steep for the height?)");
+  return wrap(checked(r, "tapered extrusion"));
+  CLF_CATCH("tapered extrude")
+}
+
+// A planar face grown (d > 0) or shrunk (d < 0) by `d` all round, holes included.
+std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
+  CLF_TRY
+  if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("offset needs a face");
+  const TopoDS_Face &f = TopoDS::Face(face.s);
+  BRepOffsetAPI_MakeOffset mk(f, GeomAbs_Intersection);
+  mk.Perform(d);
+  if (!mk.IsDone()) throw std::runtime_error("the profile can't be offset that far");
+  Handle(Geom_Surface) surf = BRep_Tool::Surface(f);
+  std::vector<TopoDS_Wire> wires;
+  for (TopExp_Explorer wx(mk.Shape(), TopAbs_WIRE); wx.More(); wx.Next()) wires.push_back(TopoDS::Wire(wx.Current()));
+  if (wires.empty()) throw std::runtime_error("the offset profile vanished");
+  // the outer wire is the one with the largest face
+  size_t outer = 0;
+  double best = -1;
+  for (size_t i = 0; i < wires.size(); ++i) {
+    BRepBuilderAPI_MakeFace t(surf, wires[i], Standard_True);
+    if (!t.IsDone()) continue;
+    GProp_GProps g;
+    BRepGProp::SurfaceProperties(t.Face(), g);
+    if (std::abs(g.Mass()) > best) {
+      best = std::abs(g.Mass());
+      outer = i;
+    }
+  }
+  BRepBuilderAPI_MakeFace mf(surf, wires[outer], Standard_True);
+  for (size_t i = 0; i < wires.size(); ++i) {
+    if (i != outer) mf.Add(wires[i]);
+  }
+  if (!mf.IsDone()) throw std::runtime_error("could not make the offset profile");
+  ShapeFix_Face fix(mf.Face());
+  fix.FixOrientation();
+  fix.Perform();
+  return wrap(fix.Face());
+  CLF_CATCH("offset profile")
+}
+
+// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad).
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_EDGE, map);
+  TopTools_IndexedDataMapOfShapeListOfShape ef;
+  TopExp::MapShapesAndAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
+  BRepFilletAPI_MakeChamfer mk(s.s);
+  int added = 0;
+  for (uint32_t i : edges) {
+    if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
+    const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
+    if (!ef.Contains(e) || ef.FindFromKey(e).IsEmpty()) continue;
+    const TopoDS_Face &f = TopoDS::Face(ef.FindFromKey(e).First());
+    if (angle) mk.AddDA(d1, d2, e, f);
+    else mk.Add(d1, d2, e, f);
+    ++added;
+  }
+  if (added == 0) throw std::runtime_error("no edges to chamfer");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (too large?)");
+  return wrap(checked(mk.Shape(), "chamfer"));
+  CLF_CATCH("chamfer")
+}
+
+// Fillets edges with a radius running from r1 at each edge's start to r2 at its end.
+std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_EDGE, map);
+  BRepFilletAPI_MakeFillet mk(s.s);
+  int added = 0;
+  for (uint32_t i : edges) {
+    if (i >= 1 && static_cast<int>(i) <= map.Extent()) {
+      mk.Add(r1, r2, TopoDS::Edge(map(static_cast<int>(i))));
+      ++added;
+    }
+  }
+  if (added == 0) throw std::runtime_error("no edges to fillet");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  return wrap(checked(mk.Shape(), "fillet"));
+  CLF_CATCH("fillet")
+}
+
+// Splits a solid with another shape; the result holds every piece.
+std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool) {
+  CLF_TRY
+  BRepAlgoAPI_Splitter sp;
+  TopTools_ListOfShape args, tools;
+  args.Append(s.s);
+  tools.Append(tool.s);
+  sp.SetArguments(args);
+  sp.SetTools(tools);
+  sp.SetFuzzyValue(1e-6);
+  sp.Build();
+  if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
+  return wrap(sp.Shape());
+  CLF_CATCH("split")
 }
 
 } // namespace clf

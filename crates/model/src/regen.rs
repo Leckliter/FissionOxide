@@ -13,6 +13,7 @@ use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh}
 use clf_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::assembly;
+use crate::ThinSide;
 use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
@@ -365,7 +366,7 @@ impl Ctx<'_> {
             "the selected profiles no longer exist".into()
           });
         }
-        let n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
+        let mut n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
         let (start, length) = match extent.kind {
           ExtentKind::OneSide => (0.0, self.len(&extent.distance)?),
           ExtentKind::Symmetric => {
@@ -377,12 +378,55 @@ impl Ctx<'_> {
             (-d2, d1 + d2)
           }
           ExtentKind::ThroughAll => (0.0, self.through_all(&sk.plane)),
+          ExtentKind::ToFace => {
+            let fr = extent.to.as_mut().ok_or("pick the face to extrude to")?;
+            let bi = self.body_index(fr.body)?;
+            let body = &self.state.bodies[bi];
+            let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the target face could not be found")?;
+            refresh_face(fr, body, fid);
+            let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
+            if info.kind != clf_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
+              return Err("extrude to a flat face parallel to the sketch".into());
+            }
+            let mut d = (info.origin - sk.plane.origin).dot(n);
+            if d < 0.0 {
+              n = -n;
+              d = -d;
+            }
+            (0.0, d + self.len(&extent.distance)?)
+          }
+        };
+        let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
+        let thin = if extent.thin.trim().is_empty() { 0.0 } else { self.len(&extent.thin)? };
+        if taper.abs() > 1e-12 && start.abs() > 0.0 {
+          return Err("taper works with one-side, through-all and to-face extents".into());
+        }
+        if thin < 0.0 {
+          return Err("the thin wall thickness must be positive".into());
+        }
+        let along = n.dot(sk.plane.normal()).signum();
+        let solid = |face: &Shape| -> Result<Shape, String> {
+          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face.clone() };
+          if taper.abs() > 1e-12 {
+            face.extrude_tapered(length * along, taper).map_err(ke)
+          } else {
+            face.extrude(n * length).map_err(ke)
+          }
         };
         let mut tools = Vec::new();
         for p in &chosen {
           let face = Shape::face(&sk.plane, p).map_err(ke)?;
-          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face };
-          tools.push(face.extrude(n * length).map_err(ke)?);
+          if thin > 0.0 {
+            let (outer, inner) = match extent.thin_side {
+              ThinSide::Inside => (face.clone(), face.offset_face(-thin).map_err(ke)?),
+              ThinSide::Outside => (face.offset_face(thin).map_err(ke)?, face.clone()),
+              ThinSide::Center => (face.offset_face(thin / 2.0).map_err(ke)?, face.offset_face(-thin / 2.0).map_err(ke)?),
+            };
+            let wall = solid(&outer)?.boolean(&solid(&inner)?, BoolOp::Subtract).map_err(ke)?;
+            tools.push(wall);
+          } else {
+            tools.push(solid(&face)?);
+          }
         }
         let tool = union_all(tools)?;
         self.operate(id, tool, *operation)?;
@@ -405,13 +449,91 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius } => {
+      FeatureKind::Fillet { edges, radius, radius2 } => {
         let r = self.len(radius)?;
-        self.edge_op(id, edges, |s, ids| s.fillet(ids, r))
+        match radius2 {
+          Some(r2) => {
+            let r2 = self.len(r2)?;
+            self.edge_op(id, edges, |s, ids| s.fillet_variable(ids, r, r2))
+          }
+          None => self.edge_op(id, edges, |s, ids| s.fillet(ids, r)),
+        }
       }
-      FeatureKind::Chamfer { edges, distance } => {
+      FeatureKind::Chamfer { edges, distance, distance2, angle } => {
         let d = self.len(distance)?;
-        self.edge_op(id, edges, |s, ids| s.chamfer(ids, d))
+        match (distance2, angle) {
+          (_, Some(a)) => {
+            let a = self.angle(a)?;
+            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, a, true))
+          }
+          (Some(d2), None) => {
+            let d2 = self.len(d2)?;
+            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, d2, false))
+          }
+          (None, None) => self.edge_op(id, edges, |s, ids| s.chamfer(ids, d)),
+        }
+      }
+      FeatureKind::OffsetFaces { faces, distance } => {
+        let dist = self.len(distance)?;
+        if dist.abs() < 1e-9 {
+          return Err("the distance must not be zero".into());
+        }
+        let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
+        for (i, f) in faces.iter().enumerate() {
+          by_body.entry(f.body).or_default().push(i);
+        }
+        if by_body.is_empty() {
+          return Err("select faces to push or pull".into());
+        }
+        for (bid, idxs) in by_body {
+          let bi = self.body_index(bid)?;
+          let body = &self.state.bodies[bi];
+          let mut shape = body.shape.clone();
+          for i in idxs {
+            let Some(fr) = faces.get_mut(i) else { continue };
+            let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a face could not be found")?;
+            refresh_face(fr, body, fid);
+            let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
+            if info.kind != clf_kernel::SurfaceKind::Plane {
+              return Err("press-pull works on flat faces".into());
+            }
+            let tool = body.shape.face_shape(fid).map_err(ke)?.extrude(info.normal * dist).map_err(ke)?;
+            let op = if dist > 0.0 { BoolOp::Union } else { BoolOp::Subtract };
+            shape = shape.boolean(&tool, op).map_err(ke)?;
+          }
+          let shape = shape.unified().map_err(ke)?;
+          self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+          self.split_multi(id, bid);
+        }
+        Ok(None)
+      }
+      FeatureKind::SplitByBody { bodies, tool, remove_tool } => {
+        let ti = self.body_index(*tool)?;
+        let tool_shape = self.state.bodies[ti].shape.clone();
+        let targets: Vec<BodyId> =
+          self.select(bodies)?.into_iter().map(|i| self.state.bodies[i].id).filter(|b| b != tool).collect();
+        let mut split_any = false;
+        for bid in targets {
+          let bi = self.body_index(bid)?;
+          let pieces = self.state.bodies[bi].shape.split_by(&tool_shape).map_err(ke)?;
+          if pieces.len() < 2 {
+            continue;
+          }
+          split_any = true;
+          let sheet = self.state.bodies[bi].sheet.clone();
+          let mut it = pieces.into_iter();
+          if let Some(first) = it.next() {
+            self.state.bodies[bi] = self.state.bodies[bi].with_shape(first, id);
+          }
+          for piece in it {
+            let nid = self.new_body(id, piece);
+            self.set_sheet(nid, sheet.clone());
+          }
+        }
+        if *remove_tool {
+          self.state.bodies.retain(|b| b.id != *tool);
+        }
+        Ok((!split_any).then(|| "the tool doesn't cross the bodies".to_string()))
       }
       FeatureKind::Shell { faces, thickness } => {
         let t = self.len(thickness)?;

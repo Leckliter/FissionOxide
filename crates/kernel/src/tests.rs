@@ -259,3 +259,4 @@ fn open_mesh_is_a_shell() {
   assert!(Shape::from_mesh(&pos, &[0, 1], false).is_err());
   assert!(Shape::from_mesh(&pos, &[0, 1, 999_999], false).is_err());
 }
+

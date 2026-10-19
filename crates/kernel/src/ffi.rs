@@ -97,6 +97,11 @@ pub(crate) mod ffi {
       removed: &Shape,
     ) -> Result<UniquePtr<Shape>>;
     fn fillet_radii(s: &Shape, edges: &[u32], radii: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn draft_prism(face: &Shape, height: f64, angle: f64) -> Result<UniquePtr<Shape>>;
+    fn offset_face(face: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
+    fn chamfer2(s: &Shape, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<UniquePtr<Shape>>;
+    fn fillet_var(s: &Shape, edges: &[u32], r1: f64, r2: f64) -> Result<UniquePtr<Shape>>;
+    fn split_by_shape(s: &Shape, tool: &Shape) -> Result<UniquePtr<Shape>>;
     fn hlr_project(s: &Shape, view: &[f64], deflection: f64) -> Result<HlrData>;
     fn make_wire(segs: &[f64]) -> Result<UniquePtr<Shape>>;
     fn make_pipe(face: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
