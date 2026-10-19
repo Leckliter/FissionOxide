@@ -89,12 +89,18 @@ change a parameter and watch the whole history rebuild.
   (or are placed automatically); export to PDF, SVG and DXF. Drawings live in the design and follow parameter
   changes.
 - **Selecting and inspecting, as in Fusion.** Window selection (left to right picks what is
-  inside, right to left what the box touches), Select Other (Alt+click or hold) for what's behind
-  the front face, selection priority (face, edge, body, component) and filters, Select All and
-  Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
+  inside, right to left what the box touches), freeform (lasso) selection by the same rule and
+  paint selection (everything the brush passes over), Select Other (Alt+click or hold) for what's
+  behind the front face, selection priority (face, edge, body, component) and filters, vertex
+  picking (the Vertices filter shows body vertices as dots), joints and saved joint origins
+  picked in the viewport by their glyphs, Select All and Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
   drawn in the view); centre of mass; section analysis capped with the exact cut face; zebra,
   draft, accessibility and curvature-map analyses.
-- **Drag arrows.** Drag the arrow of an extrude or offset plane to change its distance.
+- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset
+  and the fillet and chamfer size; a move/rotate triad (three arrows, three rings, three planar
+  handles) for Move, and an offset arrow and angle ring for Joint. A drag writes its dialog's
+  fields, which still take typed values. While a command previews its result, the bodies as they
+  were show through it as transparent ghosts.
 - **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
   rubber, wood and glass, on bodies or components (A).
 - **Manufacture.** A milling workspace: setups with stock and a work origin, a tool library in
@@ -171,9 +177,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Picking in a command   | With a command dialog open, clicks add to (or remove from) its selection |
 | Edit a feature         | Double-click it in the timeline                             |
 | Window selection       | Left-drag with the select tool: left to right = fully inside, right to left = touching |
+| Freeform / paint selection | 2 / 3 (1 for window again), or SELECT ▾; a lasso that sets off to the right takes what's inside, to the left what it touches |
 | Select Other           | Alt+click, or hold the mouse button still; SELECT ▾ also sets selection priority and filters |
 | Measure                | Select one or two bodies, faces or edges, then I            |
-| Drag arrow             | In Extrude or Offset Plane, drag the arrow head             |
+| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer or Offset Plane, drag the arrow head |
+| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square |
+| Joints in the viewport | Click a joint origin's glyph to use it in Joint, a joint's to drive it (or select it) |
 | Appearance             | A                                                           |
 | Compute All            | Ctrl+B (in the background)                                  |
 | Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |

@@ -91,6 +91,12 @@ pub enum Drag {
   },
   /// Dragging a command dialog's arrow (extrude distance, plane offset).
   Manip,
+  /// Freeform (lasso) selection; the loop is in `App::region`.
+  Lasso,
+  /// Paint selection: whatever the brush passes over is selected as it goes.
+  Paint,
+  /// Dragging a handle of the dialog's move/rotate triad (see [`crate::manipulators`]).
+  Triad,
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -175,6 +181,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   let cam = app.cam;
   crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
+  crate::preview::overlay(app, &painter, &|p| view.to_screen(&cam, p));
 
   // overlays that take clicks come first
   let mut consumed = false;
@@ -184,7 +191,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if app.show_viewcube {
     consumed |= viewcube(app, ui, &painter, &view);
   }
+  let step = grid_step(app, &view) / 10.0;
+  let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
+  consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
+  consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   dim_editor(app, &ctx);
   tool_preview(app, &painter, &resp, &view);
   measure_overlay(app, &painter, &view);
@@ -195,6 +206,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
     painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
+  crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
 
   // right-click without dragging opens the marking menu; while it's open it owns the clicks
@@ -264,6 +276,10 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
           finish_box(app, view, start, now, add);
         }
       }
+      Drag::Lasso => {
+        let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
+        crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
+      }
       _ => {}
     }
   }
@@ -295,7 +311,8 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
       .or_else(|| pick_kind(|p| matches!(p, Pick::SketchCurve { .. })))
       .or(exact)
   } else {
-    pick_kind(|p| matches!(p, Pick::Edge { .. })).or(exact)
+    // vertices (drawn only with their filter on) before edges before faces
+    pick_kind(|p| matches!(p, Pick::Vertex { .. })).or_else(|| pick_kind(|p| matches!(p, Pick::Edge { .. }))).or(exact)
   };
   // while a sketch tool draws, only points matter for snapping
   if sketching && app.tool.picks_curves() {
@@ -327,6 +344,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
     view: view_params(app),
+    vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -346,6 +364,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    show_vertices: key.vertices,
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
@@ -438,6 +457,10 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     && resp.dragged_by(egui::PointerButton::Primary)
   {
     drag_point_live(app, view, pos, sketch, point);
+    return;
+  }
+  // freeform and paint selection
+  if crate::select::drag_region(app, resp, ctx, pos, &|p| view.to_px(p).into()) {
     return;
   }
   // window selection with the select tool
@@ -1435,73 +1458,7 @@ fn finish_box(app: &mut App, view: &View, a: Pos2, b: Pos2, add: bool) {
       }
     }
   }
-  let mut total: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-  if window {
-    for id in &frame.ids {
-      if inside.contains_key(id) {
-        *total.entry(*id).or_default() += 1;
-      }
-    }
-  }
-  let sketching = app.s.edit_sketch.is_some();
-  let (filter, priority) = (app.sel_filter, app.sel_priority);
-  // per target: pixels inside and pixels anywhere
-  let mut hits: Vec<(Sel, usize, usize)> = Vec::new();
-  let mut whole: std::collections::HashMap<fox_engine::model::BodyId, usize> = std::collections::HashMap::new();
-  for (&id, &n) in &inside {
-    let Some(p) = app.picks.get(id) else { continue };
-    let keep = if sketching {
-      matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. })
-    } else {
-      filter.allows(&p, priority)
-        && !matches!(
-          (priority, p),
-          (crate::select::Priority::Face, Pick::Edge { .. }) | (crate::select::Priority::Edge, Pick::Face { .. })
-        )
-    };
-    if !keep {
-      continue;
-    }
-    let all = total.get(&id).copied().unwrap_or(n);
-    let targets = if sketching { vec![p.to_sel()] } else { crate::select::targets(&app.s, p, priority) };
-    for t in targets {
-      match hits.iter_mut().find(|h| h.0 == t) {
-        Some(h) => {
-          h.1 += n;
-          h.2 += all;
-        }
-        None => hits.push((t, n, all)),
-      }
-    }
-  }
-  if window {
-    // a body is inside only if all of its pixels are, edges included
-    for (&id, &all) in &total {
-      if let Some(Pick::Face { body, .. } | Pick::Edge { body, .. }) = app.picks.get(id) {
-        *whole.entry(body).or_default() += all;
-      }
-    }
-    let mut body_px: std::collections::HashMap<fox_engine::model::BodyId, usize> = std::collections::HashMap::new();
-    for id in &frame.ids {
-      if let Some(Pick::Face { body, .. } | Pick::Edge { body, .. }) = app.picks.get(*id)
-        && whole.contains_key(&body)
-      {
-        *body_px.entry(body).or_default() += 1;
-      }
-    }
-    hits.retain(|(t, n, all)| match t {
-      Sel::Body { body } => whole.get(body).copied().unwrap_or(0) >= body_px.get(body).copied().unwrap_or(usize::MAX),
-      _ => n >= all,
-    });
-  }
-  if !add {
-    app.s.selection.clear();
-  }
-  for (t, ..) in hits {
-    if !app.s.selection.contains(&t) {
-      app.s.selection.push(t);
-    }
-  }
+  crate::select::select_ids(app, &inside, window, add);
 }
 
 /// Opens the Select Other list for what lies under `pos`.

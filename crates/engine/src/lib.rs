@@ -107,6 +107,14 @@ pub enum Sel {
   Feature {
     feature: FeatureId,
   },
+  /// A body vertex, named by an edge ending there (`end` = its end rather than its start), as
+  /// point references are (`{"vertex": edge, "end"}`).
+  Vertex {
+    body: BodyId,
+    edge: u32,
+    #[serde(default)]
+    end: bool,
+  },
 }
 
 /// A regeneration running on another thread (see [`Session::begin`]).
@@ -420,6 +428,7 @@ impl Session {
     self.selection.retain(|s| match s {
       Sel::Body { body } => model.body(*body).is_some(),
       Sel::Face { body, .. } | Sel::Edge { body, .. } => same(body),
+      Sel::Vertex { body, .. } => same(body),
       _ => true,
     });
   }
@@ -459,6 +468,8 @@ mod tests_config;
 mod tests_files;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_scene;
 #[cfg(test)]
 mod tests_sheet2;
 #[cfg(test)]
