@@ -308,6 +308,10 @@ cmds! {
   "drawing.datum_target" => "Datum target (A1, B2, ...) on a model point; area > 0 for an area target", "{drawing?, view?, point: [x,y,z], label, area?: model mm, offset?: [x,y]}";
   "drawing.revision" => "Add a row to the revision table (next letter by default)", "{drawing?, rev?, description?, date?, by?}";
   "drawing.remove_revision" => "Remove a revision table row", "{drawing?, index}";
+  "cam.adaptive3d" => "3D adaptive roughing: clear the stock around the part level by level, growing in from the open side (or a helix) by the step-over so the engagement stays about constant; flat areas get a level of their own", "{setup?, tool_number? | tool | tool_diameter, stepover?: fraction (default 0.15), stepdown?, stock_to_leave? (default 0.3), entry?: helix|plunge, ramp_angle?, helix_diameter?}";
+  "cam.pencil" => "3D pencil finishing: a pass along each concave corner or fillet tighter than the tool", "{setup?, faces?, tool_number? | tool | tool_diameter, tool_kind?}";
+  "cam.steep_shallow" => "3D steep and shallow finishing: waterline passes a step-down apart on areas steeper than the threshold, parallel rows a step-over apart on the rest", "{setup?, faces?, threshold?: degrees (default 45), tool_number? | tool | tool_diameter, stepover?, stepdown?}";
+  "cam.contour3d" => "3D contour (waterline) finishing: passes at constant heights a step-down apart on areas at least min_slope steep", "{setup?, faces?, min_slope?: degrees, tool_number? | tool | tool_diameter, stepdown?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

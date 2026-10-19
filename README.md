@@ -152,6 +152,9 @@ change a parameter and watch the whole history rebuild.
   arcs. A fit-point spline stays a fit-point spline after Trim, Break and Extend (through the
   fit points it keeps, its new ends holding their direction). Sketch text takes fonts from
   disk: a font file's path or the name of one in the system's font folders (`sketch.fonts`).
+- **3D milling and arcs.** 3D adaptive roughing of the stock around the part, pencil,
+  steep-and-shallow and contour (waterline) finishing, and G2/G3 arcs (helical too) fitted to
+  the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
 
 ## Build and run
 
@@ -433,6 +436,14 @@ operations:
 - **Parallel** and **Scallop** finish 3D surfaces on the triangulated part: rows, or rings a
   constant distance apart over the surface, with the tool (ball, bull-nose or flat) dropped onto
   it so it never cuts in.
+- **Adaptive Clearing** (3D) roughs the stock around the whole part in levels a step-down apart,
+  plus a level on each flat area: at each level the cut grows in from the open air around the
+  stock (or from a helix in closed areas) by the optimal load, so the engagement stays about
+  constant, keeping the stock to leave (0.3 mm by default) off the part.
+- **Contour** (3D) finishes steep areas in waterline passes at constant heights a step-down
+  apart (only where the part is at least the minimum slope steep); **Steep and Shallow** adds
+  parallel rows on the areas below the threshold angle; **Pencil** runs one pass along each
+  concave corner or fillet tighter than the tool, where it touches the part on two sides.
 
 Pockets and contours enter by plunging, **ramping** along the cut, or down a **helix**, at the
 ramp angle.
@@ -449,6 +460,10 @@ G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`
 (`.gcode`, no tool changer: it stops for each tool, drilling written out), LinuxCNC (`.ngc`)
 or Mach3/4 (`.tap`), in mm or inches.
 
+Cutting moves that lie on a circle in the XY plane are written as **G2/G3 arcs** (centre by
+I/J, helical when Z falls evenly along them, G17), within the setup's arc tolerance (0.01 mm by
+default); `"arcs": false` on the setup or on `cam.post` keeps straight moves.
+
 ```sh
 fissionoxide-cli exec part.fox '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1, "post": "haas"}' --save part.fox
 fissionoxide-cli exec part.fox '{"cmd": "cam.adaptive", "floors": [{"point": [35, 25, 12]}], "tool_number": 3}' --save part.fox
@@ -458,8 +473,8 @@ fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, s
 ```
 
 The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
-are no 3D roughing, 4/5-axis or turning toolpaths yet: check the G-code against your machine
-before running it.
+are no 4/5-axis or turning toolpaths yet: check the G-code against your machine before running
+it.
 
 ## Headless CLI and scripting
 

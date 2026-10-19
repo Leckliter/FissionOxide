@@ -6,7 +6,7 @@
 
 use std::fmt::Write;
 
-use fox_kernel::glam::DVec3;
+use fox_kernel::glam::{DVec2, DVec3};
 
 use super::{CLEARANCE, RETRACT, Toolpath};
 
@@ -219,6 +219,19 @@ impl Out<'_> {
 /// The G-code of toolpaths, relative to the work origin; `safe` is the clearance height in
 /// work coordinates.
 pub fn write(post: &Post, units: Units, title: &str, paths: &[Toolpath], origin: DVec3) -> String {
+  write_with(post, units, title, paths, origin, None)
+}
+
+/// [`write`], with cutting moves on circles written as G2/G3 arcs (in the XY plane, G17) when
+/// `arcs` gives a tolerance (mm; see [`super::arcs`]).
+pub fn write_with(
+  post: &Post,
+  units: Units,
+  title: &str,
+  paths: &[Toolpath],
+  origin: DVec3,
+  arcs: Option<f64>,
+) -> String {
   let mut o = Out { post, units, g: String::new() };
   let safe = paths.iter().flat_map(|t| t.moves.iter()).map(|m| m.to.z - origin.z).fold(CLEARANCE, f64::max);
   if post.percent {
@@ -241,11 +254,14 @@ pub fn write(post: &Post, units: Units, title: &str, paths: &[Toolpath], origin:
   }
   o.line("G54");
   let mut tool = None;
+  // where the tool is, for the first arc of a toolpath
+  let mut at: Option<DVec3> = None;
   for tp in paths {
     o.line(&format!("({} - {})", comment(&tp.name), comment(&tp.tool.describe())));
     if tool != Some(tp.tool.number) {
       o.line(&o.code('M', 5));
       o.home(safe);
+      at = None;
       if post.tool_change {
         o.line(&format!("T{} {}", tp.tool.number, o.code('M', 6)));
       } else {
@@ -275,10 +291,37 @@ pub fn write(post: &Post, units: Units, title: &str, paths: &[Toolpath], origin:
         }
       }
       o.line(&o.code('G', 80));
+      at = None;
       continue;
     }
     let mut last_feed = -1.0;
-    for m in &tp.moves {
+    let segments = match arcs {
+      Some(tol) => super::arcs::fit(&tp.moves, at, tol),
+      None => tp.moves.iter().map(|m| super::arcs::Segment::Move(*m)).collect(),
+    };
+    at = tp.moves.last().map(|m| m.to).or(at);
+    for seg in segments {
+      let m = match seg {
+        super::arcs::Segment::Move(m) => m,
+        super::arcs::Segment::Arc(a) => {
+          let (p, c) = (local(a.to), a.centre - a.from.truncate());
+          let mut l = format!(
+            "{} X{} Y{} Z{} I{} J{}",
+            o.code('G', if a.ccw { 3 } else { 2 }),
+            o.num(p.x),
+            o.num(p.y),
+            o.num(p.z),
+            o.num(c.x),
+            o.num(c.y)
+          );
+          if (a.feed - last_feed).abs() > 1e-9 {
+            l += &format!(" F{}", o.feed(a.feed));
+            last_feed = a.feed;
+          }
+          o.line(&l);
+          continue;
+        }
+      };
       let p = local(m.to);
       let (x, y, z) = (o.num(p.x), o.num(p.y), o.num(p.z));
       if m.rapid {
@@ -356,6 +399,7 @@ pub fn read(g: &str) -> Result<Vec<(bool, DVec3, f64)>, String> {
       match g {
         0 => motion = 0,
         10 => motion = 1,
+        20 | 30 => motion = *g,
         200 => scale = 25.4,
         210 => scale = 1.0,
         900 => absolute = true,
@@ -415,7 +459,26 @@ pub fn read(g: &str) -> Result<Vec<(bool, DVec3, f64)>, String> {
       pos = DVec3::new(xy.x, xy.y, start);
       continue;
     }
-    pos = DVec3::new(x.map_or(pos.x, |v| v * scale), y.map_or(pos.y, |v| v * scale), z.map_or(pos.z, |v| v * scale));
+    let to = DVec3::new(x.map_or(pos.x, |v| v * scale), y.map_or(pos.y, |v| v * scale), z.map_or(pos.z, |v| v * scale));
+    if motion == 20 || motion == 30 {
+      // arcs in the XY plane, centre relative to the start (I, J); read as short moves
+      if get('R').is_some() {
+        return Err(format!("line {}: R arcs aren't read", n + 1));
+      }
+      let centre = pos.truncate() + DVec2::new(get('I').unwrap_or(0.0), get('J').unwrap_or(0.0)) * scale;
+      let r0 = (pos.truncate() - centre).length();
+      let r1 = (to.truncate() - centre).length();
+      if (r0 - r1).abs() > 0.006 + 1e-3 * r0 {
+        return Err(format!("line {}: the arc's end isn't on its circle ({r0} vs {r1})", n + 1));
+      }
+      let arc = super::arcs::Arc { from: pos, to, centre, ccw: motion == 30, feed, moves: 0 };
+      for q in arc.points(2f64.to_radians()) {
+        out.push((false, q, feed));
+      }
+      pos = to;
+      continue;
+    }
+    pos = to;
     out.push((motion == 0, pos, feed));
   }
   Ok(out)

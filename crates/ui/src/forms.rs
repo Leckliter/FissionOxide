@@ -1708,3 +1708,79 @@ pub fn prefill(form: &Form, state: &mut State, s: &Session) {
     }
   }
 }
+
+pub static CAM_ADAPTIVE3D: Form = Form {
+  title: "ADAPTIVE CLEARING",
+  name: "Adaptive Clearing",
+  hint: "3D roughing of the stock around the part, level by level, with a light, constant engagement",
+  icon: Icon::Shell,
+  cmd: "cam.adaptive3d",
+  fixed: &[],
+  inputs: &[
+    CAM_TOOL,
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "8 mm" },
+    Input::Expr { key: "stepover", label: "Optimal load (of the tool)", default: "0.15" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "3 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0.3 mm" },
+    Input::Choice { key: "entry", label: "Entry", options: &[("helix", "Helix"), ("plunge", "Plunge")] },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_PENCIL: Form = Form {
+  title: "PENCIL",
+  name: "Pencil",
+  hint: "3D finishing along concave corners and fillets tighter than the tool",
+  icon: Icon::Line,
+  cmd: "cam.pencil",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Faces (default all)" },
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "4 mm" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1200" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_STEEP_SHALLOW: Form = Form {
+  title: "STEEP AND SHALLOW",
+  name: "Steep and Shallow",
+  hint: "3D finishing: waterlines on steep areas, parallel rows on shallow ones",
+  icon: Icon::Zebra,
+  cmd: "cam.steep_shallow",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Faces (default all)" },
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "threshold", label: "Threshold angle (°)", default: "45" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
+    Input::Expr { key: "stepdown", label: "Step-down", default: "0.5 mm" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_CONTOUR3D: Form = Form {
+  title: "CONTOUR",
+  name: "Contour",
+  hint: "3D finishing in waterline passes at constant heights on steep areas",
+  icon: Icon::SkOffset,
+  cmd: "cam.contour3d",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Faces (default all)" },
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "min_slope", label: "Minimum slope (°)", default: "30" },
+    Input::Expr { key: "stepdown", label: "Step-down", default: "0.5 mm" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+  ],
+  picks_model: false,
+};

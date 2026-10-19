@@ -389,7 +389,7 @@ fn posts_write_the_toolpaths_moves() {
   assert_eq!(run(&mut s, "cam.posts", json!({})).as_array().unwrap().len(), 5);
   for p in &post::POSTS {
     for units in ["mm", "inch"] {
-      let r = run(&mut s, "cam.post", json!({"post": p.id, "units": units}));
+      let r = run(&mut s, "cam.post", json!({"post": p.id, "units": units, "arcs": false}));
       assert_eq!(r["post"], p.id);
       let g = r["gcode"].as_str().unwrap();
       let read = post::read(g).unwrap_or_else(|e| panic!("{} {units}: {e}", p.id));
