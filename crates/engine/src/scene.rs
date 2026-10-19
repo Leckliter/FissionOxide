@@ -405,17 +405,32 @@ fn fully_dimensioned_circle(sk: &Sketch, c: clf_sketch::CurveId, free: &[PointId
 /// Flattened curve in sketch coordinates.
 pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   match kind {
-    CurveKind::Spline { points } => {
-      let fit: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
+    CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
+      let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
+      let bz = if matches!(kind, CurveKind::Spline { .. }) {
+        clf_sketch::spline_beziers(&pts)
+      } else {
+        clf_sketch::bspline_beziers(&pts)
+      };
       let mut out = Vec::new();
-      for b in clf_sketch::spline_beziers(&fit) {
+      for b in &bz {
         for k in 0..24 {
-          out.push(clf_sketch::bezier_at(&b, k as f64 / 24.0));
+          out.push(clf_sketch::bezier_at(b, k as f64 / 24.0));
         }
       }
-      out.extend(fit.last());
+      out.extend(bz.last().map(|b| b[3]));
       out
     }
+    CurveKind::Ellipse { center, major, minor } => match (sk.pos(*center), sk.pos(*major)) {
+      (Some(c), Some(m)) => {
+        let bz = clf_sketch::ellipse_beziers(c, m, *minor);
+        let mut out: Vec<[f64; 2]> =
+          bz.iter().flat_map(|b| (0..16).map(move |k| clf_sketch::bezier_at(b, k as f64 / 16.0))).collect();
+        out.extend(bz.first().map(|b| b[0]));
+        out
+      }
+      _ => vec![],
+    },
     CurveKind::Line { a, b } => match (sk.pos(*a), sk.pos(*b)) {
       (Some(a), Some(b)) => vec![a, b],
       _ => vec![],
@@ -488,4 +503,49 @@ fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
 /// Projects a world point into a sketch plane (for clicking in the viewport).
 pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
   plane.to_local(p)
+}
+
+/// Every body face a ray passes through, nearest first (one hit per face): for "Select Other",
+/// which lists what lies under the cursor behind the front-most face.
+pub fn ray_hits(s: &Session, origin: DVec3, dir: DVec3) -> Vec<(f64, Pick)> {
+  let mut out: Vec<(f64, Pick)> = Vec::new();
+  for body in s.model.bodies.iter().filter(|b| s.body_visible(b.id)) {
+    let Some(m) = body.mesh() else { continue };
+    let v = |i: u32| m.positions.get(i as usize).map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+    for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+      let (Some(a), Some(b), Some(c)) = (v(tri[0]), v(tri[1]), v(tri[2])) else { continue };
+      let Some(d) = ray_triangle(origin, dir, a, b, c) else { continue };
+      let Some(&face) = m.tri_face.get(t) else { continue };
+      let pick = Pick::Face { body: body.id, face };
+      match out.iter_mut().find(|(_, p)| *p == pick) {
+        Some(e) => e.0 = e.0.min(d),
+        None => out.push((d, pick)),
+      }
+    }
+  }
+  out.sort_by(|a, b| a.0.total_cmp(&b.0));
+  out
+}
+
+/// Möller–Trumbore: distance along the ray to the triangle, if it is hit in front.
+fn ray_triangle(o: DVec3, d: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
+  let (e1, e2) = (b - a, c - a);
+  let p = d.cross(e2);
+  let det = e1.dot(p);
+  if det.abs() < 1e-12 {
+    return None;
+  }
+  let inv = 1.0 / det;
+  let t0 = o - a;
+  let u = t0.dot(p) * inv;
+  if !(0.0..=1.0).contains(&u) {
+    return None;
+  }
+  let q = t0.cross(e1);
+  let v = d.dot(q) * inv;
+  if v < 0.0 || u + v > 1.0 {
+    return None;
+  }
+  let t = e2.dot(q) * inv;
+  (t > 0.0).then_some(t)
 }

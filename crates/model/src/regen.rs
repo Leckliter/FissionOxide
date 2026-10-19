@@ -134,6 +134,9 @@ struct State {
   bodies: Vec<Body>,
   sketches: BTreeMap<FeatureId, SketchResult>,
   planes: BTreeMap<FeatureId, Plane>,
+  axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
+  points: BTreeMap<FeatureId, DVec3>,
+  threads: Vec<(FeatureId, Vec<DVec3>)>,
   body_counter: u32,
 }
 
@@ -143,6 +146,11 @@ pub struct Model {
   pub bodies: Vec<Body>,
   pub sketches: BTreeMap<FeatureId, SketchResult>,
   pub planes: BTreeMap<FeatureId, Plane>,
+  /// Construction axes: a point and a unit direction.
+  pub axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
+  pub points: BTreeMap<FeatureId, DVec3>,
+  /// Cosmetic threads, as helix polylines to draw on their faces.
+  pub threads: Vec<(FeatureId, Vec<DVec3>)>,
   /// Status per feature, in timeline order.
   pub status: Vec<FeatureStatus>,
   /// Evaluated parameter values (mm / rad).
@@ -254,7 +262,17 @@ impl Regenerator {
       status.push(st);
     }
     // cached statuses must carry their warnings/errors too
-    Model { bodies: state.bodies, sketches: state.sketches, planes: state.planes, status, params, param_errors }
+    Model {
+      bodies: state.bodies,
+      sketches: state.sketches,
+      planes: state.planes,
+      axes: state.axes,
+      points: state.points,
+      threads: state.threads,
+      status,
+      params,
+      param_errors,
+    }
   }
 }
 
@@ -498,10 +516,13 @@ impl Ctx<'_> {
             let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a face could not be found")?;
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
-            if info.kind != clf_kernel::SurfaceKind::Plane {
-              return Err("press-pull works on flat faces".into());
-            }
-            let tool = body.shape.face_shape(fid).map_err(ke)?.extrude(info.normal * dist).map_err(ke)?;
+            let face = body.shape.face_shape(fid).map_err(ke)?;
+            // flat faces move along their normal; curved ones are offset (a hole grows or shrinks)
+            let tool = if info.kind == clf_kernel::SurfaceKind::Plane {
+              face.extrude(info.normal * dist).map_err(ke)?
+            } else {
+              face.thicken(dist).map_err(ke)?
+            };
             let op = if dist > 0.0 { BoolOp::Union } else { BoolOp::Subtract };
             shape = shape.boolean(&tool, op).map_err(ke)?;
           }
@@ -1224,6 +1245,7 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      other => self.apply_extra(id, other),
     }
   }
 
@@ -1511,7 +1533,7 @@ impl Ctx<'_> {
           put(sketch, start, ps);
           put(sketch, end, pe);
         }
-        CurveKind::Spline { .. } => {}
+        CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => {}
       }
     }
     lost
@@ -1582,6 +1604,9 @@ impl Ctx<'_> {
         };
         let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
         Ok((pa, (pb - pa).try_normalize().ok_or("the axis line has no length")?))
+      }
+      AxisRef::Construction { feature } => {
+        self.state.axes.get(feature).copied().ok_or_else(|| "its construction axis failed".to_string())
       }
       AxisRef::Edge { edge } => {
         let bi = self.body_index(edge.body)?;
@@ -1866,6 +1891,9 @@ fn boxes_touch(a: (DVec3, DVec3), b: (DVec3, DVec3)) -> bool {
 fn ke(e: KernelError) -> String {
   e.to_string()
 }
+
+mod extra;
+pub use extra::iso_pitch;
 
 #[cfg(test)]
 mod tests;

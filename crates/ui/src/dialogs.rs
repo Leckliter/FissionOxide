@@ -53,6 +53,7 @@ pub enum Kind {
   Material,
   Interference,
   Bom,
+  CenterOfMass,
   // sketch modify (run on the sketch being edited)
   SkFillet,
   SkChamfer,
@@ -116,6 +117,7 @@ impl Kind {
       Kind::Material => "PHYSICAL MATERIAL",
       Kind::Interference => "INTERFERENCE",
       Kind::Bom => "BILL OF MATERIALS",
+      Kind::CenterOfMass => "CENTER OF MASS",
       Kind::SkFillet => "SKETCH FILLET",
       Kind::SkChamfer | Kind::SkChamfer2 => "SKETCH CHAMFER",
       Kind::SkOffset => "OFFSET",
@@ -175,6 +177,7 @@ impl Kind {
       Kind::Material => Icon::PhysMaterial,
       Kind::Interference => Icon::Interference,
       Kind::Bom => Icon::Bom,
+      Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
       Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
       Kind::SkOffset => Icon::SkOffset,
@@ -218,6 +221,7 @@ impl Kind {
       Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
       Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
+      Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
@@ -264,7 +268,10 @@ impl Kind {
 
   /// Dialogs that only show information (no OK, nothing applied).
   fn reports(self) -> bool {
-    matches!(self, Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::MotionStudy)
+    matches!(
+      self,
+      Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::MotionStudy | Kind::CenterOfMass
+    )
   }
 
   /// Dialogs of the Drawing workspace.
@@ -294,6 +301,33 @@ impl Kind {
         | Kind::Project
     )
   }
+}
+
+/// A drag arrow in the viewport (see [`Dialog::manipulator`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Manipulator {
+  pub origin: clf_engine::kernel::glam::DVec3,
+  pub dir: clf_engine::kernel::glam::DVec3,
+  pub value: f64,
+}
+
+/// The world plane a dialog's plane value ("xy", {"feature"}, {"body", "face"}) names.
+fn plane_of(s: &Session, v: &Value) -> Option<clf_engine::kernel::Plane> {
+  use clf_engine::kernel::Plane;
+  if let Some(n) = v.as_str() {
+    return Some(match n {
+      "xz" => Plane::XZ,
+      "yz" => Plane::YZ,
+      _ => Plane::XY,
+    });
+  }
+  if let Some(f) = v.get("feature").and_then(Value::as_u64) {
+    return s.model.planes.get(&FeatureId(f as u32)).copied();
+  }
+  let body = BodyId(v.get("body")?.as_u64()? as u32);
+  let face = v.get("face")?.as_u64()? as u32;
+  let f = s.model.body(body)?.faces().iter().find(|f| f.id == face).copied()?;
+  clf_engine::model::regen::sketch_plane_on(f.normal, f.origin).ok()
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
@@ -755,6 +789,7 @@ impl Dialog {
           AxisRef::Z => "z".into(),
           AxisRef::SketchLine { curve } => format!("line:{}", curve.0),
           AxisRef::Edge { .. } => "edge".into(),
+          AxisRef::Construction { feature } => format!("axis:{}", feature.0),
         };
         d
       }
@@ -832,7 +867,9 @@ impl Dialog {
     }
     let op = self.op;
     Some(match self.kind {
-      Kind::PickPlane | Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom => return None,
+      Kind::PickPlane | Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::CenterOfMass => {
+        return None;
+      }
       Kind::Loft => (
         "loft",
         json!({
@@ -1068,9 +1105,10 @@ impl Dialog {
         }),
       ),
       Kind::Revolve => {
-        let axis = match self.axis.strip_prefix("line:") {
-          Some(n) => json!({"line": n.parse::<u32>().ok()?}),
-          None => json!(self.axis),
+        let axis = match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
+          (Some(n), _) => json!({"line": n.parse::<u32>().ok()?}),
+          (_, Some(n)) => json!({"axis": n.parse::<u32>().ok()?}),
+          _ => json!(self.axis),
         };
         (
           "revolve",
@@ -1275,6 +1313,55 @@ impl Dialog {
 
   pub fn unpreview(&mut self, s: &mut Session) {
     self.withdraw(s);
+  }
+
+  /// The drag arrow this dialog shows in the viewport: where it starts, the direction a positive
+  /// value points (unit) and the current value along it (mm). Extrude distance and offset plane
+  /// offset, as in Fusion.
+  pub fn manipulator(&self, s: &Session) -> Option<Manipulator> {
+    let len = |e: &str| clf_engine::expr::eval(e, clf_engine::expr::Kind::Length, &s.model.params).ok();
+    match self.kind {
+      Kind::Extrude if matches!(self.extent, "one_side" | "symmetric" | "two_sides") => {
+        let r = s.model.sketches.get(&self.sketch?)?;
+        let at = match self.profiles.first() {
+          Some(p) => *p,
+          None => r.profiles.first()?.interior_point(),
+        };
+        let sign = if self.flip { -1.0 } else { 1.0 };
+        Some(Manipulator { origin: r.plane.to_world(at), dir: r.plane.normal(), value: sign * len(&self.distance)? })
+      }
+      Kind::OffsetPlane => {
+        let base = plane_of(s, &self.plane)?;
+        Some(Manipulator { origin: base.origin, dir: base.normal(), value: len(&self.distance)? })
+      }
+      _ => None,
+    }
+  }
+
+  /// Sets the value the drag arrow changed (rounded to `step`) and re-previews.
+  pub fn set_manipulator(&mut self, value: f64, step: f64) {
+    let v = if step > 0.0 { (value / step).round() * step } else { value };
+    match self.kind {
+      Kind::Extrude => {
+        self.flip = v < 0.0;
+        self.distance = format!("{} mm", clf_engine::sketch::Dim::new(v.abs()).expr);
+      }
+      Kind::OffsetPlane => self.distance = format!("{} mm", clf_engine::sketch::Dim::new(v).expr),
+      _ => return,
+    }
+    self.dirty = true;
+  }
+
+  /// The point a report dialog marks in the viewport (centre of mass).
+  pub fn marker(&self) -> Option<clf_engine::kernel::glam::DVec3> {
+    if self.kind != Kind::CenterOfMass {
+      return None;
+    }
+    let c: Vec<f64> = self.report.as_ref()?.get("center")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+    match c.as_slice() {
+      [x, y, z] => Some(clf_engine::kernel::glam::DVec3::new(*x, *y, *z)),
+      _ => None,
+    }
   }
 
   /// Sketch whose profiles should stay visible/pickable while this dialog is open.
@@ -1756,7 +1843,7 @@ impl Dialog {
         ui.end_row();
         if self.kind == Kind::RectPattern {
           ui.label("Direction");
-          self.axis_combo(ui, "dir1", true);
+          self.axis_combo(ui, "dir1", true, &[]);
           ui.end_row();
           ui.label("Count");
           if ui.add(egui::TextEdit::singleline(&mut self.count).desired_width(140.0)).changed() {
@@ -1775,7 +1862,7 @@ impl Dialog {
           ui.end_row();
           if self.use_dir2 {
             ui.label("Direction 2");
-            self.axis_combo(ui, "dir2", false);
+            self.axis_combo(ui, "dir2", false, &[]);
             ui.end_row();
             ui.label("Count 2");
             if ui.add(egui::TextEdit::singleline(&mut self.count2).desired_width(140.0)).changed() {
@@ -1790,7 +1877,7 @@ impl Dialog {
           }
         } else {
           ui.label("Axis");
-          self.axis_combo(ui, "axis", false);
+          self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
           ui.end_row();
           ui.label("Count");
           if ui.add(egui::TextEdit::singleline(&mut self.count).desired_width(140.0)).changed() {
@@ -1838,7 +1925,7 @@ impl Dialog {
           ui.end_row();
         }
         ui.label("Rotate about");
-        self.axis_combo(ui, "axis", false);
+        self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
         ui.end_row();
         ui.label("Angle");
         if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
@@ -2207,6 +2294,28 @@ impl Dialog {
         }
         ui.end_row();
       }
+      Kind::CenterOfMass => {
+        let r = self.report.clone().unwrap_or(Value::Null);
+        let c: Vec<f64> = r
+          .get("center")
+          .and_then(Value::as_array)
+          .map(|a| a.iter().filter_map(Value::as_f64).collect())
+          .unwrap_or_default();
+        ui.label("Bodies");
+        ui.label(format!("{}", r.get("bodies").and_then(Value::as_array).map(Vec::len).unwrap_or(0)));
+        ui.end_row();
+        if let [x, y, z] = c.as_slice() {
+          ui.label(RichText::new("Centre").strong());
+          ui.label(format!("{x:.3}, {y:.3}, {z:.3} mm"));
+          ui.end_row();
+        }
+        ui.label("Mass");
+        ui.label(format!("{:.2} g", r.get("mass_g").and_then(Value::as_f64).unwrap_or(0.0)));
+        ui.end_row();
+        ui.label("Volume");
+        ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
+        ui.end_row();
+      }
       Kind::Bom => {
         let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
         if rows.is_empty() {
@@ -2509,6 +2618,10 @@ impl Dialog {
       }
       Kind::Interference => s.execute("assembly.interference", &json!({})),
       Kind::Bom => s.execute("assembly.bom", &json!({})),
+      Kind::CenterOfMass => {
+        let bodies = sel_only_bodies(s);
+        s.execute("inspect.center_of_mass", &json!({"bodies": bodies}))
+      }
       Kind::MotionStudy => match self.target {
         Some(j) => s.execute(
           "motion.study",
@@ -2751,7 +2864,7 @@ impl Dialog {
     });
   }
 
-  fn axis_combo(&mut self, ui: &mut egui::Ui, id: &str, first: bool) {
+  fn axis_combo(&mut self, ui: &mut egui::Ui, id: &str, first: bool, axes: &[u32]) {
     let cur = if id == "dir1" {
       self.dir.clone()
     } else if id == "dir2" {
@@ -2760,13 +2873,16 @@ impl Dialog {
       self.axis.clone()
     };
     let _ = first;
+    // construction axes can be revolve axes (not pattern directions)
+    let extra: Vec<String> =
+      if id == "dir1" || id == "dir2" { Vec::new() } else { axes.iter().map(|a| format!("axis:{a}")).collect() };
     egui::ComboBox::from_id_salt(id).selected_text(axis_label(&cur)).width(140.0).show_ui(ui, |ui| {
-      for a in ["x", "y", "z"] {
-        if ui.selectable_label(cur == a, axis_label(a)).clicked() {
+      for a in ["x", "y", "z"].into_iter().map(str::to_string).chain(extra) {
+        if ui.selectable_label(cur == a, axis_label(&a)).clicked() {
           match id {
-            "dir1" => self.dir = a.into(),
-            "dir2" => self.dir2 = a.into(),
-            _ => self.axis = a.into(),
+            "dir1" => self.dir = a,
+            "dir2" => self.dir2 = a,
+            _ => self.axis = a,
           }
           self.dirty = true;
         }
@@ -2807,10 +2923,53 @@ impl Dialog {
 }
 
 fn inspect(app: &mut App, ui: &mut egui::Ui) {
+  app.measure = None;
   let s = &app.s;
   if s.selection.is_empty() {
-    ui.label("Select a body, face or edge");
+    ui.label("Select a body, face or edge — two to measure between them");
     ui.end_row();
+    return;
+  }
+  let measurable: Vec<Value> = s
+    .selection
+    .iter()
+    .filter(|x| matches!(x, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }))
+    .filter_map(|x| serde_json::to_value(x).ok())
+    .collect();
+  if measurable.len() == 2 {
+    match app.s.execute("measure", &json!({"a": measurable[0], "b": measurable[1]})) {
+      Ok(r) => {
+        let mm = |k: &str| r.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let d = mm("distance");
+        ui.label(RichText::new("Distance").strong());
+        ui.label(RichText::new(format!("{d:.3} mm")).strong());
+        ui.end_row();
+        let v3 = |k: &str| -> Option<[f64; 3]> {
+          let a = r.get(k)?.as_array()?;
+          Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+        };
+        if let Some(dl) = v3("delta") {
+          for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+            ui.label(*axis);
+            ui.label(format!("{:.3} mm", dl[i]));
+            ui.end_row();
+          }
+        }
+        if let Some(a) = r.get("angle_deg").and_then(Value::as_f64) {
+          ui.label("Angle");
+          ui.label(format!("{a:.3}°"));
+          ui.end_row();
+        }
+        if let (Some(f), Some(t)) = (v3("from"), v3("to")) {
+          use clf_engine::kernel::glam::DVec3;
+          app.measure = Some((DVec3::from(f), DVec3::from(t), format!("{d:.3} mm")));
+        }
+      }
+      Err(e) => {
+        ui.label(RichText::new(e.0).color(theme::ERROR));
+        ui.end_row();
+      }
+    }
     return;
   }
   for sel in s.selection.clone().iter().take(6) {
@@ -2875,7 +3034,7 @@ fn axis_label(a: &str) -> String {
     "x" => "X axis".into(),
     "y" => "Y axis".into(),
     "z" => "Z axis".into(),
-    other => other.replace("line:", "Sketch line "),
+    other => other.replace("line:", "Sketch line ").replace("axis:", "Axis "),
   }
 }
 

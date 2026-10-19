@@ -301,3 +301,15 @@ fn bom(s: &Session) -> Value {
   }
   json!(rows)
 }
+
+/// Density (g/mm³) of a body: its component's physical material, steel for root bodies.
+pub(crate) fn density_of(s: &Session, body: BodyId) -> f64 {
+  let material = s
+    .design
+    .components
+    .iter()
+    .find(|c| c.bodies.contains(&body) && !c.material.is_empty())
+    .map(|c| c.material.as_str())
+    .unwrap_or("Steel");
+  assembly::density(material) / 1000.0
+}

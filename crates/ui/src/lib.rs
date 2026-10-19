@@ -11,6 +11,7 @@ mod icons;
 mod marking;
 mod menus;
 mod panels;
+mod select;
 mod sheet;
 mod theme;
 mod viewport;
@@ -80,6 +81,16 @@ pub struct App {
   sheet_cache: Option<((u64, u32), Result<clf_engine::model::plot::Plot, String>)>,
   /// Sheet zoom and pan in the Drawing workspace.
   sheet_view: (f32, egui::Vec2),
+  /// What clicks and window selection pick: faces (default), edges, bodies or components.
+  pub sel_priority: select::Priority,
+  /// Which kinds of things can be picked.
+  pub sel_filter: select::Filters,
+  /// The open Select Other list.
+  pub(crate) other: Option<select::OtherMenu>,
+  /// Where the last viewport click was (Select Other from the menu opens there).
+  pub(crate) last_click: Option<egui::Pos2>,
+  /// The Measure dialog's result line: closest points and the label.
+  pub(crate) measure: Option<(clf_engine::kernel::glam::DVec3, clf_engine::kernel::glam::DVec3, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -155,6 +166,11 @@ impl App {
       fitted_once: false,
       last_sketch: None,
       data: data_panel::DataPanel::default(),
+      sel_priority: select::Priority::Face,
+      sel_filter: select::Filters::default(),
+      other: None,
+      last_click: None,
+      measure: None,
     }
   }
 
@@ -373,6 +389,9 @@ impl App {
     }
     if pressed(Key::N, Modifiers::COMMAND) {
       self.new_design();
+    }
+    if pressed(Key::A, Modifiers::COMMAND) && self.drawing.is_none() {
+      self.run("select.all", json!({}));
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       if self.marking.is_some() {

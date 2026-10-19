@@ -179,9 +179,13 @@ pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String
         }
         segs.push(Seg::Arc { center: c, radius: len2(sub(s, c)), start_angle: a0, sweep });
       }
-      CurveKind::Spline { .. } => {
-        let fit: Vec<P2> = sketch.curve_points(c.id).iter().filter_map(|p| sketch.pos(*p)).collect();
-        segs.extend(clf_sketch::spline_beziers(&fit).into_iter().map(|p| Seg::Bezier { p }));
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } => {
+        segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p }));
+      }
+      CurveKind::Ellipse { .. } => {
+        if !curves.is_empty() {
+          return Err("a path can't include a full ellipse".into());
+        }
       }
       CurveKind::Circle { .. } => {
         if !curves.is_empty() {

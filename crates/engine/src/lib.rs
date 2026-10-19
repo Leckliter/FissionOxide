@@ -9,9 +9,12 @@
 mod assembly;
 mod commands;
 mod drawings;
+mod features;
 pub mod files;
 pub mod hub;
+mod inspect;
 pub mod scene;
+mod text;
 
 use std::path::PathBuf;
 
@@ -20,6 +23,7 @@ use clf_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
 pub use clf_exchange as exchange;
+pub use clf_expr as expr;
 pub use clf_kernel as kernel;
 pub use clf_model as model;
 pub use clf_render as render;
@@ -280,3 +284,5 @@ impl Session {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_more;

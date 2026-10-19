@@ -57,6 +57,15 @@ pub enum Drag {
     sketch: FeatureId,
     point: PointId,
   },
+  /// Window selection from `start` to `now`: left to right selects what is fully inside, right to
+  /// left what the box touches. A press held without moving opens Select Other instead.
+  Box {
+    start: Pos2,
+    now: Pos2,
+    since: f64,
+  },
+  /// Dragging a command dialog's arrow (extrude distance, plane offset).
+  Manip,
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -143,9 +152,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if app.show_viewcube {
     consumed |= viewcube(app, ui, &painter, &view);
   }
+  consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   dim_editor(app, &ctx);
   tool_preview(app, &painter, &resp, &view);
+  measure_overlay(app, &painter, &view);
   hud(app, &painter, &resp, &view);
+  if let Some(Drag::Box { start, now, .. }) = app.drag {
+    let r = Rect::from_two_pos(start, now);
+    // left to right: window (blue, solid); right to left: crossing (green)
+    let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
+    painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
+  }
+  crate::select::show_other(app, &ctx);
 
   // right-click without dragging opens the marking menu; while it's open it owns the clicks
   if resp.secondary_clicked()
@@ -202,9 +220,20 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
   }
   if resp.drag_stopped()
     && let Some(drag) = app.drag.take()
-    && let Drag::SketchPoint { sketch, point } = drag
   {
-    finish_point_drag(app, sketch, point);
+    match drag {
+      Drag::SketchPoint { sketch, point } => finish_point_drag(app, sketch, point),
+      Drag::Box { start, now, since } => {
+        let held = ctx.input(|i| i.time) - since;
+        if (now - start).length() < 4.0 && held > 0.45 {
+          open_select_other(app, view, start);
+        } else {
+          let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
+          finish_box(app, view, start, now, add);
+        }
+      }
+      _ => {}
+    }
   }
 }
 
@@ -242,6 +271,13 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     app.hover = pick_kind(|p| matches!(p, Pick::SketchCurve { .. }));
   } else if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
+  } else if !sketching {
+    let (filter, priority) = (app.sel_filter, app.sel_priority);
+    let ok = |p: &Pick| filter.allows(p, priority);
+    if !app.hover.as_ref().is_some_and(ok) {
+      // the front-most pick is filtered out: the nearest allowed one around the cursor wins
+      app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
+    }
   }
 }
 
@@ -344,8 +380,23 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     drag_point_live(app, view, pos, sketch, point);
     return;
   }
+  // window selection with the select tool
+  if resp.drag_started_by(egui::PointerButton::Primary) && app.drag.is_none() && app.tool == Tool::Select {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or(pos);
+    let since = ctx.input(|i| i.pointer.press_start_time()).unwrap_or(0.0);
+    app.drag = Some(Drag::Box { start, now: pos, since });
+  }
+  if let Some(Drag::Box { now, .. }) = &mut app.drag {
+    *now = pos;
+    return;
+  }
 
   if !resp.clicked() {
+    return;
+  }
+  app.last_click = Some(pos);
+  if ctx.input(|i| i.modifiers.alt) && app.tool == Tool::Select {
+    open_select_other(app, view, pos);
     return;
   }
   if let Some(d) = app.dialog.as_mut()
@@ -457,7 +508,8 @@ fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 
 fn select_click(app: &mut App, add: bool) {
   match app.hover {
-    Some(p) => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
+    Some(p) if app.s.edit_sketch.is_some() => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
+    Some(p) => crate::select::pick(app, p, add),
     None if !add => app.s.selection.clear(),
     None => {}
   }
@@ -510,7 +562,7 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       }
       Some(CurveKind::Circle { radius, .. }) => (json!({"type": "diameter", "curves": [curve.0]}), Some(2.0 * radius)),
       Some(CurveKind::Arc { .. }) => (json!({"type": "radius", "curves": [curve.0]}), sketch.radius(curve)),
-      Some(CurveKind::Spline { .. }) | None => return,
+      Some(CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) | None => return,
     },
     (None, Some(Pick::SketchPoint { .. })) => {
       app.tstate.dim_first = hover;
@@ -1045,4 +1097,208 @@ fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {
     }
   }
   inside
+}
+
+// ---------------------------------------------------------------- window selection, Select Other
+
+/// Selects what a window from `a` to `b` covers. Left to right selects only what lies fully
+/// inside; right to left anything the window touches. Priority and filters decide what a covered
+/// pick selects (faces, edges, bodies or components; sketch geometry while sketching).
+fn finish_box(app: &mut App, view: &View, a: Pos2, b: Pos2, add: bool) {
+  let Some(frame) = &app.frame else { return };
+  let window = b.x >= a.x;
+  let ((x0, y0), (x1, y1)) = (view.to_px(a), view.to_px(b));
+  let (w, h) = (frame.width as i64, frame.height as i64);
+  let cl = |v: f64, m: i64| (v.round() as i64).clamp(0, m);
+  let (x0, x1) = (cl(x0.min(x1), w), cl(x0.max(x1), w));
+  let (y0, y1) = (cl(y0.min(y1), h), cl(y0.max(y1), h));
+  let mut inside: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+  for y in y0..y1 {
+    for x in x0..x1 {
+      if let Some(&id) = frame.ids.get((y * w + x) as usize)
+        && id != 0
+      {
+        *inside.entry(id).or_default() += 1;
+      }
+    }
+  }
+  let mut total: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+  if window {
+    for id in &frame.ids {
+      if inside.contains_key(id) {
+        *total.entry(*id).or_default() += 1;
+      }
+    }
+  }
+  let sketching = app.s.edit_sketch.is_some();
+  let (filter, priority) = (app.sel_filter, app.sel_priority);
+  // per target: pixels inside and pixels anywhere
+  let mut hits: Vec<(Sel, usize, usize)> = Vec::new();
+  let mut whole: std::collections::HashMap<clf_engine::model::BodyId, usize> = std::collections::HashMap::new();
+  for (&id, &n) in &inside {
+    let Some(p) = app.picks.get(id) else { continue };
+    let keep = if sketching {
+      matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. })
+    } else {
+      filter.allows(&p, priority)
+        && !matches!(
+          (priority, p),
+          (crate::select::Priority::Face, Pick::Edge { .. }) | (crate::select::Priority::Edge, Pick::Face { .. })
+        )
+    };
+    if !keep {
+      continue;
+    }
+    let all = total.get(&id).copied().unwrap_or(n);
+    let targets = if sketching { vec![p.to_sel()] } else { crate::select::targets(&app.s, p, priority) };
+    for t in targets {
+      match hits.iter_mut().find(|h| h.0 == t) {
+        Some(h) => {
+          h.1 += n;
+          h.2 += all;
+        }
+        None => hits.push((t, n, all)),
+      }
+    }
+  }
+  if window {
+    // a body is inside only if all of its pixels are, edges included
+    for (&id, &all) in &total {
+      if let Some(Pick::Face { body, .. } | Pick::Edge { body, .. }) = app.picks.get(id) {
+        *whole.entry(body).or_default() += all;
+      }
+    }
+    let mut body_px: std::collections::HashMap<clf_engine::model::BodyId, usize> = std::collections::HashMap::new();
+    for id in &frame.ids {
+      if let Some(Pick::Face { body, .. } | Pick::Edge { body, .. }) = app.picks.get(*id)
+        && whole.contains_key(&body)
+      {
+        *body_px.entry(body).or_default() += 1;
+      }
+    }
+    hits.retain(|(t, n, all)| match t {
+      Sel::Body { body } => whole.get(body).copied().unwrap_or(0) >= body_px.get(body).copied().unwrap_or(usize::MAX),
+      _ => n >= all,
+    });
+  }
+  if !add {
+    app.s.selection.clear();
+  }
+  for (t, ..) in hits {
+    if !app.s.selection.contains(&t) {
+      app.s.selection.push(t);
+    }
+  }
+}
+
+/// Opens the Select Other list for what lies under `pos`.
+fn open_select_other(app: &mut App, view: &View, pos: Pos2) {
+  let (o, d) = view.ray(&app.cam, pos);
+  let hits = clf_engine::scene::ray_hits(&app.s, o, d);
+  app.other = Some(crate::select::OtherMenu::new(&app.s, pos, app.hover, &hits));
+}
+
+/// Select Other from the menu: at the last click, or the middle of the viewport.
+pub(crate) fn select_other_at_last_click(app: &mut App) {
+  let pos = app.last_click.unwrap_or(app.canvas.center());
+  let ppp = app.frame.as_ref().map(|f| f.width as f32 / app.canvas.width().max(1.0)).unwrap_or(1.0);
+  let view = View {
+    rect: app.canvas,
+    ppp,
+    w: app.frame.as_ref().map(|f| f.width).unwrap_or(1),
+    h: app.frame.as_ref().map(|f| f.height).unwrap_or(1),
+  };
+  open_select_other(app, &view, pos);
+}
+
+// ---------------------------------------------------------------- manipulators, measure line
+
+/// The open dialog's drag arrow: drawn from its base along its direction to the current value;
+/// dragging the head changes the value (snapped to a tenth of the grid). Returns true while the
+/// arrow has the pointer.
+fn manipulator(
+  app: &mut App,
+  resp: &egui::Response,
+  painter: &egui::Painter,
+  view: &View,
+  ctx: &egui::Context,
+) -> bool {
+  let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else { return false };
+  let tip = m.origin + m.dir * m.value;
+  let (Some(a), Some(b)) = (view.to_screen(&app.cam, m.origin), view.to_screen(&app.cam, tip)) else { return false };
+  let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
+  let active = matches!(app.drag, Some(Drag::Manip));
+  let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
+  painter.line_segment([a, b], Stroke::new(2.0, col));
+  let dir2 = (b - a).normalized();
+  let dir2 = if dir2.is_finite() && (b - a).length() > 1.0 { dir2 } else { Vec2::new(0.0, -1.0) };
+  let side = Vec2::new(-dir2.y, dir2.x);
+  let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
+  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
+  painter.text(
+    b + side * 14.0 + dir2 * 4.0,
+    egui::Align2::LEFT_CENTER,
+    format!("{} mm", clf_engine::sketch::Dim::new(m.value).expr),
+    egui::FontId::proportional(12.0),
+    Color32::from_gray(40),
+  );
+  if hot && resp.drag_started_by(egui::PointerButton::Primary) {
+    app.drag = Some(Drag::Manip);
+  }
+  if matches!(app.drag, Some(Drag::Manip)) {
+    if let Some(p) = resp.interact_pointer_pos() {
+      let (o, d) = view.ray(&app.cam, p);
+      // closest point on the arrow's axis to the pointer ray
+      let w0 = m.origin - o;
+      let (aa, bb, cc) = (m.dir.dot(m.dir), m.dir.dot(d), d.dot(d));
+      let (dd, ee) = (m.dir.dot(w0), d.dot(w0));
+      let den = aa * cc - bb * bb;
+      if den.abs() > 1e-12 {
+        let t = (bb * ee - cc * dd) / den;
+        let step = grid_step(app, view) / 10.0;
+        if let Some(dlg) = app.dialog.as_mut() {
+          dlg.set_manipulator(t, step);
+        }
+      }
+    }
+    ctx.request_repaint();
+    return true;
+  }
+  hot
+}
+
+/// The Measure dialog's result: a line between the closest points with the distance.
+fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  if let Some(c) = app.dialog.as_ref().and_then(|d| d.marker())
+    && let Some(p) = view.to_screen(&app.cam, c)
+  {
+    // centre of mass: Fusion's quartered circle
+    let col = Color32::from_rgb(30, 30, 30);
+    painter.circle_filled(p, 8.0, Color32::WHITE);
+    painter.circle_stroke(p, 8.0, Stroke::new(1.5, col));
+    for (a0, a1) in [(0.0f32, 0.5f32), (1.0, 1.5)] {
+      let pts: Vec<Pos2> = std::iter::once(p)
+        .chain((0..=8).map(|i| {
+          let t = std::f32::consts::PI * (a0 + (a1 - a0) * i as f32 / 8.0);
+          p + Vec2::new(t.cos(), -t.sin()) * 8.0
+        }))
+        .collect();
+      painter.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+    }
+  }
+  let Some((a, b, label)) = &app.measure else { return };
+  if !app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::Inspect) {
+    return;
+  }
+  let (Some(pa), Some(pb)) = (view.to_screen(&app.cam, *a), view.to_screen(&app.cam, *b)) else { return };
+  let col = Color32::from_rgb(230, 90, 30);
+  painter.line_segment([pa, pb], Stroke::new(2.0, col));
+  for p in [pa, pb] {
+    painter.circle_filled(p, 3.5, col);
+  }
+  let mid = pa + (pb - pa) * 0.5;
+  let galley = painter.layout_no_wrap(label.clone(), egui::FontId::proportional(12.0), Color32::WHITE);
+  let r = Rect::from_center_size(mid + Vec2::new(0.0, -14.0), galley.size() + Vec2::new(10.0, 4.0));
+  painter.rect_filled(r, 3.0, col);
+  painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::WHITE);
 }

@@ -299,6 +299,14 @@ pub(crate) enum Cmd {
   DrawingExport(&'static str),
   /// Back to the Design workspace.
   FinishDrawing,
+  SelectAll,
+  SelectInvert,
+  SelectOther,
+  /// Window selection (a left-drag with the select tool; this just switches to it).
+  WindowSelect,
+  Priority(crate::select::Priority),
+  /// Toggle a selection filter: bodies, faces, edges, sketches or profiles.
+  Filter(&'static str),
 }
 
 impl Cmd {
@@ -372,6 +380,31 @@ impl Cmd {
         _ => (Icon::ExportSvg, "SVG Export", "Write the drawing as an SVG"),
       },
       Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
+      Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
+      Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
+      Cmd::SelectOther => {
+        (Icon::Select, "Select Other", "Everything under the last click, front to back (or Alt+click, or hold)")
+      }
+      Cmd::WindowSelect => (
+        Icon::WindowSel,
+        "Window Selection",
+        "Drag a box: left to right selects what's inside, right to left what it touches",
+      ),
+      Cmd::Priority(p) => match p {
+        crate::select::Priority::Body => (Icon::Body, "Select Body Priority", "Clicks and boxes select whole bodies"),
+        crate::select::Priority::Face => (Icon::SplitFace, "Select Face Priority", "Clicks select faces (and edges)"),
+        crate::select::Priority::Edge => (Icon::Line, "Select Edge Priority", "Clicks and boxes select edges only"),
+        crate::select::Priority::Component => {
+          (Icon::Component, "Select Component Priority", "Clicks select every body of a component")
+        }
+      },
+      Cmd::Filter(f) => match f {
+        "bodies" => (Icon::Body, "Bodies", "Allow selecting bodies"),
+        "faces" => (Icon::SplitFace, "Faces", "Allow selecting faces"),
+        "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
+        "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
+        _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
+      },
     }
   }
 
@@ -381,6 +414,8 @@ impl Cmd {
       Cmd::Select => false,
       Cmd::Params => app.show_params,
       Cmd::Dialog(k) => app.dialog.as_ref().is_some_and(|d| d.kind == k),
+      Cmd::Priority(p) => app.sel_priority == p,
+      Cmd::Filter(f) => app.sel_filter.get(f),
       _ => false,
     }
   }
@@ -446,6 +481,21 @@ impl Cmd {
       }
       Cmd::DrawingExport(e) => app.export_drawing(e),
       Cmd::FinishDrawing => app.close_drawing(),
+      Cmd::SelectAll => {
+        app.run("select.all", json!({}));
+      }
+      Cmd::SelectInvert => {
+        app.run("select.invert", json!({}));
+      }
+      Cmd::SelectOther => crate::viewport::select_other_at_last_click(app),
+      Cmd::WindowSelect => {
+        app.nav_mode = None;
+        app.set_tool(Tool::Select);
+        app.status =
+          Some(("Drag a box: left to right selects what's inside, right to left what it touches".into(), false));
+      }
+      Cmd::Priority(p) => app.sel_priority = p,
+      Cmd::Filter(f) => app.sel_filter.toggle(f),
       Cmd::Fit => app.fit_view(),
       Cmd::Home => {
         app.cam.set_view(StandardView::Home);
@@ -1822,6 +1872,29 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Hole { .. } => Icon::Cylinder,
     FeatureKind::SplitBody { .. } | FeatureKind::Joint { .. } | FeatureKind::CopyComponent { .. } => Icon::Combine,
     FeatureKind::Draft { .. } => Icon::Chamfer,
+    FeatureKind::PlaneBy { .. } => Icon::PlaneAlt,
+    FeatureKind::ConstructionAxis { .. } => Icon::Axis,
+    FeatureKind::ConstructionPoint { .. } => Icon::CPoint,
+    FeatureKind::Thread { .. } => Icon::Thread,
+    FeatureKind::Coil { .. } => Icon::Coil,
+    FeatureKind::Pipe { .. } => Icon::Pipe,
+    FeatureKind::Rib { web: true, .. } => Icon::Web,
+    FeatureKind::Rib { .. } => Icon::Rib,
+    FeatureKind::Scale { .. } => Icon::Scale,
+    FeatureKind::SplitFace { .. } => Icon::SplitFace,
+    FeatureKind::RemoveFaces { .. } => Icon::RemoveBody,
+    FeatureKind::Thicken { .. } => Icon::Thicken,
+    FeatureKind::SurfaceExtrude { .. } => Icon::Extrude,
+    FeatureKind::SurfaceRevolve { .. } => Icon::Revolve,
+    FeatureKind::Patch { .. } => Icon::Patch,
+    FeatureKind::Stitch { .. } => Icon::Stitch,
+    FeatureKind::Unstitch { .. } => Icon::Unstitch,
+    FeatureKind::ReverseNormal { .. } => Icon::ReverseNormal,
+    FeatureKind::Mesh { op, .. } => match op {
+      clf_engine::model::construct::MeshOp::Reduce => Icon::Reduce,
+      clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
+      clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
+    },
   }
 }
 

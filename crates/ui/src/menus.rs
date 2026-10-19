@@ -100,6 +100,7 @@ pub(crate) struct Group {
   menu: &'static [E],
 }
 
+use crate::select::Priority;
 use Cmd::Dialog as D;
 
 const PATTERN: &[E] = &[
@@ -228,7 +229,7 @@ const INSPECT: &[E] = &[
   x("Zebra Analysis", Icon::Zebra),
   E::Sep,
   x("Accessibility Analysis", Icon::Accessibility),
-  x("Center of Mass", Icon::CenterOfMass),
+  c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
   x("Minimum Radius Analysis", Icon::MinRadius),
   E::Sep,
   x("Navigator", Icon::Navigator),
@@ -269,30 +270,33 @@ const ASSEMBLE: &[E] = &[
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
 ];
 
-const SELECTION_TOOLS: &[E] =
-  &[x("Select All", Icon::Select).k("Ctrl+A"), x("Select Other", Icon::Select), x("Invert Selection", Icon::Select)];
+const SELECTION_TOOLS: &[E] = &[
+  c("Select All", Icon::Select, Cmd::SelectAll).k("Ctrl+A"),
+  c("Select Other", Icon::Select, Cmd::SelectOther).k("Alt+click"),
+  c("Invert Selection", Icon::Select, Cmd::SelectInvert),
+];
 
 const SELECTION_PRIORITY: &[E] = &[
-  x("Select Body Priority", Icon::Body),
-  x("Select Face Priority", Icon::SplitFace),
-  x("Select Edge Priority", Icon::Line),
-  x("Select Component Priority", Icon::Component),
+  c("Select Body Priority", Icon::Body, Cmd::Priority(Priority::Body)),
+  c("Select Face Priority", Icon::SplitFace, Cmd::Priority(Priority::Face)),
+  c("Select Edge Priority", Icon::Line, Cmd::Priority(Priority::Edge)),
+  c("Select Component Priority", Icon::Component, Cmd::Priority(Priority::Component)),
 ];
 
 const SELECTION_FILTERS: &[E] = &[
-  x("Bodies", Icon::Body),
-  x("Faces", Icon::SplitFace),
-  x("Edges", Icon::Line),
+  c("Bodies", Icon::Body, Cmd::Filter("bodies")),
+  c("Faces", Icon::SplitFace, Cmd::Filter("faces")),
+  c("Edges", Icon::Line, Cmd::Filter("edges")),
   x("Vertices", Icon::Point),
-  x("Sketches", Icon::SketchSmall),
-  x("Sketch Profiles", Icon::Rect),
+  c("Sketches", Icon::SketchSmall, Cmd::Filter("sketches")),
+  c("Sketch Profiles", Icon::Rect, Cmd::Filter("profiles")),
   x("Construction", Icon::Plane),
 ];
 
 const SELECT: &[E] = &[
   c("Select", Icon::Select, Cmd::Select),
   E::Sep,
-  x("Window Selection", Icon::WindowSel).k("1"),
+  c("Window Selection", Icon::WindowSel, Cmd::WindowSelect).k("1"),
   x("Freeform Selection", Icon::FreeformSel).k("2"),
   x("Paint Selection", Icon::PaintSel).k("3"),
   E::Sep,
@@ -733,7 +737,7 @@ const UTIL_INSPECT: &[E] = &[
   x("Zebra Analysis", Icon::Zebra),
   E::Sep,
   x("Accessibility Analysis", Icon::Accessibility),
-  x("Center of Mass", Icon::CenterOfMass),
+  c("Center of Mass", Icon::CenterOfMass, D(Kind::CenterOfMass)),
   x("Minimum Radius Analysis", Icon::MinRadius),
   E::Sep,
   x("Navigator", Icon::Navigator),
@@ -870,7 +874,10 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     let w = ui.min_rect().width();
     panels::group_label(ui, g.label, w, open)
   });
-  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick));
+  // toggles (selection priority and filters) show a check mark while on
+  let on: Vec<&'static str> =
+    toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
+  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick, &on));
   if matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING") {
     ui.painter()
       .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
@@ -878,7 +885,20 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
   panels::separator(ui);
 }
 
-fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
+/// The toggle commands in a menu (and its submenus).
+fn toggles(menu: &'static [E]) -> Vec<Item> {
+  let mut out = Vec::new();
+  for e in menu {
+    match e {
+      E::I(i) if matches!(i.cmd, Some(Cmd::Priority(_) | Cmd::Filter(_))) => out.push(*i),
+      E::Sub(_, sub) => out.extend(toggles(sub)),
+      _ => {}
+    }
+  }
+  out
+}
+
+fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>, on: &[&'static str]) {
   ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
   let font = egui::FontId::proportional(12.5);
   let widest = menu
@@ -898,7 +918,17 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
   for e in menu {
     match e {
       E::I(it) => {
-        if row(ui, width, Some(it), it.label, false).clicked() && !it.disabled {
+        let r = row(ui, width, Some(it), it.label, false);
+        if on.contains(&it.label) {
+          ui.painter().text(
+            r.rect.right_center() - vec2(14.0, 0.0),
+            egui::Align2::CENTER_CENTER,
+            "✔",
+            egui::FontId::proportional(12.0),
+            theme::TEXT,
+          );
+        }
+        if r.clicked() && !it.disabled {
           *pick = Some(*it);
           ui.close();
         }
@@ -912,7 +942,7 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>) {
       }
       E::Sub(label, sub) => {
         let resp = row(ui, width, None, label, true);
-        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, sub, pick));
+        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, sub, pick, on));
       }
     }
   }

@@ -62,6 +62,19 @@ std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> 
 std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, rust::Slice<const double> plane,
                              double angle);
 
+std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge);
+rust::Vec<double> min_distance(const Shape &a, const Shape &b);
+std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
+                                   double height, bool left);
+std::unique_ptr<Shape> thicken(const Shape &s, double d);
+std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, double sx, double sy, double sz);
+std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> faces);
+std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> faces, const Shape &tool);
+std::unique_ptr<Shape> patch(const Shape &boundary);
+EdgeData face_loops(const Shape &s, double deflection);
+std::unique_ptr<Shape> reversed(const Shape &s);
+std::unique_ptr<Shape> make_vertex(double x, double y, double z);
+
 uint32_t solid_count(const Shape &s);
 std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i);
 std::unique_ptr<Shape> compound_new();
