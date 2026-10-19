@@ -675,6 +675,8 @@ const DRAWING_CREATE: &[E] = &[
   c("Flat Pattern View", Icon::FlatPattern, V("flat")),
   E::Sep,
   c("Create Drawing", Icon::NewDrawing, D(Kind::NewDrawing)),
+  E::Sep,
+  c("Break View", Icon::BreakView, D(Kind::Form(&forms::DRAWING_BREAK))),
 ];
 
 const DRAWING_MODIFY: &[E] = &[
@@ -684,13 +686,26 @@ const DRAWING_MODIFY: &[E] = &[
   c("Sheet Settings", Icon::SheetSettings, D(Kind::DrawingSettings)),
 ];
 
-const DRAWING_DIMENSIONS: &[E] = &[c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D")];
+const DRAWING_DIMENSIONS: &[E] = &[
+  c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D"),
+  c("Ordinate Dimension", Icon::OrdinateDim, D(Kind::Form(&forms::DRAWING_ORDINATE))),
+  c("Angular Dimension", Icon::AngleDim, D(Kind::Form(&forms::DRAWING_ANGLE))),
+];
 
 const DRAWING_TEXT: &[E] = &[c("Text", Icon::SkText, D(Kind::DrawingNote)).k("T")];
 
 const DRAWING_TABLES: &[E] = &[
   c("Parts List", Icon::PartsList, D(Kind::DrawingSettings)),
   c("Title Block", Icon::TitleBlock, D(Kind::DrawingTitle)),
+  E::Sep,
+  c("Balloon", Icon::Balloon, D(Kind::Form(&forms::DRAWING_BALLOON))),
+  c("Auto Balloon", Icon::Balloon, D(Kind::DrawingSettings)),
+];
+
+const DRAWING_SYMBOLS: &[E] = &[
+  c("Feature Control Frame", Icon::FeatureControl, D(Kind::Form(&forms::DRAWING_FCF))),
+  c("Datum Identifier", Icon::DatumId, D(Kind::Form(&forms::DRAWING_DATUM))),
+  c("Surface Texture", Icon::SurfaceTexture, D(Kind::Form(&forms::DRAWING_FINISH))),
 ];
 
 const DRAWING_EXPORT: &[E] = &[
@@ -702,7 +717,7 @@ const DRAWING_EXPORT: &[E] = &[
 const FINISH_DRAWING: &[E] = &[c("Finish Drawing", Icon::Finish, Cmd::FinishDrawing)];
 
 /// The Drawing workspace's toolbar.
-const DRAWING: [Group; 7] = [
+const DRAWING: [Group; 8] = [
   Group {
     label: "CREATE",
     quick: &["Base View", "Projected View", "Section View", "Detail View"],
@@ -711,7 +726,12 @@ const DRAWING: [Group; 7] = [
   Group { label: "MODIFY", quick: &["Move", "Sheet Settings"], menu: DRAWING_MODIFY },
   Group { label: "DIMENSIONS", quick: &["Dimension"], menu: DRAWING_DIMENSIONS },
   Group { label: "TEXT", quick: &["Text"], menu: DRAWING_TEXT },
-  Group { label: "TABLES", quick: &["Parts List", "Title Block"], menu: DRAWING_TABLES },
+  Group {
+    label: "SYMBOLS",
+    quick: &["Feature Control Frame", "Datum Identifier", "Surface Texture"],
+    menu: DRAWING_SYMBOLS,
+  },
+  Group { label: "TABLES", quick: &["Parts List", "Title Block", "Balloon"], menu: DRAWING_TABLES },
   Group { label: "EXPORT", quick: &["PDF Export", "DXF Export", "SVG Export"], menu: DRAWING_EXPORT },
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];

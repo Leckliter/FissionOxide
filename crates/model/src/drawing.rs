@@ -12,7 +12,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::plot::{Anchor, Item, Pen, Plot};
 use crate::regen::Model;
-use crate::{BodyId, Design};
+use crate::{BodyId, ComponentId, Design};
+
+mod annotate;
+mod breaks;
+
+pub use annotate::{Characteristic, Datums, FinishProcess, MaterialCondition, Standard};
+pub use breaks::{BreakDirection, DEFAULT_GAP, ViewBreak};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Drawing {
@@ -39,6 +45,12 @@ pub struct Drawing {
   /// A parts list table (when the design has components).
   #[serde(default = "yes")]
   pub parts_list: bool,
+  /// Drafting standard of the annotations (GD&T, surface finish, decimal sign).
+  #[serde(default)]
+  pub standard: Standard,
+  /// A balloon for every parts list row that has none, kept in step with the parts list.
+  #[serde(default)]
+  pub auto_balloons: bool,
 }
 
 fn yes() -> bool {
@@ -107,6 +119,9 @@ pub struct DrawingView {
   pub at: Option<[f64; 2]>,
   #[serde(default = "yes")]
   pub hidden_lines: bool,
+  /// Stretches left out of the view (a broken view).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub breaks: Vec<ViewBreak>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,10 +247,104 @@ pub enum DrawingDim {
   },
   /// Free text on the sheet.
   Note { at: [f64; 2], text: String },
+  /// Ordinate dimensions: distances of points from `origin` along the view's horizontal or
+  /// vertical.
+  Ordinate {
+    view: u32,
+    origin: [f64; 3],
+    points: Vec<[f64; 3]>,
+    #[serde(default = "horizontal")]
+    orientation: DimOrientation,
+    /// Sheet mm past the farthest point to the values.
+    #[serde(default = "dim_offset")]
+    offset: f64,
+  },
+  /// The angle at `vertex` between the edges to `a` and `b`.
+  Angle {
+    view: u32,
+    vertex: [f64; 3],
+    a: [f64; 3],
+    b: [f64; 3],
+    /// Arc radius, sheet mm.
+    #[serde(default = "arc_radius")]
+    radius: f64,
+  },
+  /// A GD&T feature control frame on a leader to a model point; `offset` (sheet mm) places
+  /// the frame relative to the point.
+  FeatureControl {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default = "leader_offset")]
+    offset: [f64; 2],
+    characteristic: Characteristic,
+    tolerance: f64,
+    /// A cylindrical (Ø) tolerance zone.
+    #[serde(default)]
+    diameter: bool,
+    #[serde(default)]
+    modifier: Option<MaterialCondition>,
+    /// Primary, secondary and tertiary datum references.
+    #[serde(default)]
+    datums: Vec<String>,
+  },
+  /// A datum feature identifier on a model point.
+  Datum {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default = "leader_offset")]
+    offset: [f64; 2],
+    label: String,
+  },
+  /// A surface texture symbol (Ra in µm) on a model point.
+  SurfaceFinish {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default)]
+    offset: [f64; 2],
+    roughness: f64,
+    #[serde(default)]
+    process: FinishProcess,
+  },
+  /// A balloon with the parts list item number of a component.
+  Balloon {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default = "leader_offset")]
+    offset: [f64; 2],
+    component: ComponentId,
+  },
+}
+
+impl DrawingDim {
+  /// The view a dimension or annotation hangs off (notes hang off the sheet).
+  pub fn view(&self) -> Option<u32> {
+    match self {
+      DrawingDim::Note { .. } => None,
+      DrawingDim::Distance { view, .. }
+      | DrawingDim::Ordinate { view, .. }
+      | DrawingDim::Angle { view, .. }
+      | DrawingDim::FeatureControl { view, .. }
+      | DrawingDim::Datum { view, .. }
+      | DrawingDim::SurfaceFinish { view, .. }
+      | DrawingDim::Balloon { view, .. } => Some(*view),
+    }
+  }
 }
 
 fn dim_offset() -> f64 {
   10.0
+}
+
+fn horizontal() -> DimOrientation {
+  DimOrientation::Horizontal
+}
+
+fn arc_radius() -> f64 {
+  15.0
+}
+
+fn leader_offset() -> [f64; 2] {
+  [12.0, 12.0]
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -268,6 +377,8 @@ impl Drawing {
       auto_dimensions: true,
       title: TitleBlock::default(),
       parts_list: true,
+      standard: Standard::default(),
+      auto_balloons: false,
     }
   }
 
@@ -281,7 +392,7 @@ impl Drawing {
 impl DrawingView {
   pub fn new(id: u32, kind: ViewKind) -> DrawingView {
     let hidden_lines = !matches!(kind, ViewKind::Iso);
-    DrawingView { id, kind, at: None, hidden_lines }
+    DrawingView { id, kind, at: None, hidden_lines, breaks: Vec::new() }
   }
 }
 
@@ -308,12 +419,32 @@ struct Projected {
   bends: Vec<([[f64; 2]; 2], String)>,
   /// Enlargement over the drawing scale (detail views).
   mul: f64,
+  /// Broken-out stretches along the view's horizontal and vertical.
+  cuts: [Vec<breaks::Cut>; 2],
 }
 
 impl Projected {
-  /// Size at the drawing scale's units (model mm, times any enlargement).
+  /// Size at the drawing scale's units (model mm, times any enlargement), broken-out stretches
+  /// left out.
   fn size(&self) -> [f64; 2] {
-    [(self.hi[0] - self.lo[0]) * self.mul, (self.hi[1] - self.lo[1]) * self.mul]
+    [0, 1].map(|i| (self.hi[i] - self.lo[i] - breaks::removed(&self.cuts[i])) * self.mul)
+  }
+
+  /// The part's true size in the view (model mm), what dimensions read.
+  fn true_size(&self) -> [f64; 2] {
+    [self.hi[0] - self.lo[0], self.hi[1] - self.lo[1]]
+  }
+
+  /// Sheet mm the view takes at `scale`, break gaps included.
+  fn extent(&self, scale: f64) -> [f64; 2] {
+    [0, 1].map(|i| breaks::fold(&self.cuts[i], self.lo[i], self.hi[i], scale * self.mul))
+  }
+
+  /// Is a circle clear of the broken-out stretches?
+  fn shows_circle(&self, c: &clf_kernel::ProjCircle) -> bool {
+    (0..2).all(|i| {
+      self.cuts[i].iter().all(|k| c.center[i] + c.radius <= k.from + 1e-9 || c.center[i] - c.radius >= k.to - 1e-9)
+    })
   }
 
   fn to_view(&self, p: DVec3) -> [f64; 2] {
@@ -347,6 +478,9 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
     } else {
       views.push(project_view(v, &part, model, defl)?);
     }
+  }
+  for pv in &mut views {
+    pv.cuts = breaks::cuts(&pv.view.breaks, pv.lo, pv.hi);
   }
   let (w, h) = d.sheet.size();
   let scale = match d.scale {
@@ -382,30 +516,66 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
     }
   }
   if d.auto_dimensions {
-    auto_dims(&mut plot, &views, scale);
+    auto_dims(&mut plot, &views, scale, d.standard);
   }
+  let rows = bom_rows(design);
   if d.parts_list && !design.components.is_empty() {
-    parts_list(&mut plot, design);
+    parts_list(&mut plot, &rows);
   }
+  let std = d.standard;
   for dim in &d.dimensions {
+    let pv = dim.view().and_then(|id| views.iter().find(|v| v.view.id == id));
+    let anchor = |p: &[f64; 3]| pv.map(|pv| sheet_pt(pv, scale, pv.to_view(DVec3::from(*p)))).unwrap_or_default();
     match dim {
-      DrawingDim::Distance { view, a, b, orientation, offset } => {
-        let Some(pv) = views.iter().find(|v| v.view.id == *view) else { continue };
-        let (pa, pb) =
-          (sheet_pt(pv, scale, pv.to_view(DVec3::from(*a))), sheet_pt(pv, scale, pv.to_view(DVec3::from(*b))));
+      DrawingDim::Distance { a, b, orientation, offset, .. } => {
+        let Some(pv) = pv else { continue };
+        let (va, vb) = (pv.to_view(DVec3::from(*a)), pv.to_view(DVec3::from(*b)));
+        // true lengths, whatever breaks the view has
         let value = match orientation {
           DimOrientation::Aligned => (DVec3::from(*a) - DVec3::from(*b)).length(),
-          _ => ((pa[if *orientation == DimOrientation::Horizontal { 0 } else { 1 }]
-            - pb[if *orientation == DimOrientation::Horizontal { 0 } else { 1 }])
-            / scale)
-            .abs(),
+          DimOrientation::Horizontal => (va[0] - vb[0]).abs(),
+          DimOrientation::Vertical => (va[1] - vb[1]).abs(),
         };
-        linear_dim(&mut plot, pa, pb, *orientation, *offset, &fmt_len(value));
+        linear_dim(&mut plot, anchor(a), anchor(b), *orientation, *offset, &std.number(value));
       }
       DrawingDim::Note { at, text } => {
         plot.items.push(Item::Text { at: *at, size: TEXT, text: text.clone(), anchor: Anchor::Start })
       }
+      DrawingDim::Ordinate { origin, points, orientation, offset, .. } => {
+        let Some(pv) = pv else { continue };
+        annotate::ordinate(&mut plot, std, pv, scale, *origin, points, *orientation, *offset);
+      }
+      DrawingDim::Angle { vertex, a, b, radius, .. } => {
+        let Some(pv) = pv else { continue };
+        annotate::angle(&mut plot, std, pv, scale, *vertex, *a, *b, *radius);
+      }
+      DrawingDim::FeatureControl { point, offset, characteristic, tolerance, diameter, modifier, datums, .. } => {
+        if pv.is_some() {
+          let (ch, tol) = (*characteristic, *tolerance);
+          annotate::feature_control(&mut plot, std, anchor(point), *offset, ch, tol, *diameter, *modifier, datums);
+        }
+      }
+      DrawingDim::Datum { point, offset, label, .. } => {
+        if pv.is_some() {
+          annotate::datum(&mut plot, anchor(point), *offset, label);
+        }
+      }
+      DrawingDim::SurfaceFinish { point, offset, roughness, process, .. } => {
+        if pv.is_some() {
+          annotate::surface_finish(&mut plot, std, anchor(point), *offset, *roughness, *process);
+        }
+      }
+      DrawingDim::Balloon { point, offset, component, .. } => {
+        // the item number comes from the parts list as it is now
+        let item = rows.iter().position(|r| r.components.contains(component));
+        if let (Some(_), Some(n)) = (pv, item) {
+          annotate::balloon(&mut plot, anchor(point), *offset, &(n + 1).to_string());
+        }
+      }
     }
+  }
+  if d.auto_balloons {
+    auto_balloons(&mut plot, d, &views, scale, &rows, design, &bodies);
   }
   frame(&mut plot, d, design, scale);
   Ok(plot)
@@ -476,7 +646,7 @@ fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Resu
   }
   let proj = shape.project(z, right, defl).map_err(|e| e.to_string())?;
   let (lo, hi) = proj.bounds().ok_or("the view is empty")?;
-  Ok(Projected { view: v.clone(), proj, lo, hi, right, up, hatch, bends, mul: 1.0 })
+  Ok(Projected { view: v.clone(), proj, lo, hi, right, up, hatch, bends, mul: 1.0, cuts: [Vec::new(), Vec::new()] })
 }
 
 /// A detail view: the parent's projection clipped to a circle around `center` and enlarged.
@@ -572,12 +742,16 @@ fn cell(kind: &ViewKind, angle: ProjectionAngle) -> Option<(i32, i32)> {
   })
 }
 
-/// Column widths / row heights (model mm) of the standard-view grid, by index -2..=2.
-fn grid(views: &[Projected], angle: ProjectionAngle) -> ([f64; 5], [f64; 5]) {
+/// Column widths / row heights (model mm) of the standard-view grid, by index -2..=2; with a
+/// scale, break gaps count too.
+fn grid(views: &[Projected], angle: ProjectionAngle, scale: Option<f64>) -> ([f64; 5], [f64; 5]) {
   let (mut cols, mut rows) = ([0.0; 5], [0.0; 5]);
   for v in views {
     if let Some((c, r)) = cell(&v.view.kind, angle) {
-      let s = v.size();
+      let s = match scale {
+        Some(k) => v.extent(k).map(|e| e / k),
+        None => v.size(),
+      };
       cols[(c + 2) as usize] = f64::max(cols[(c + 2) as usize], s[0]);
       rows[(r + 2) as usize] = f64::max(rows[(r + 2) as usize], s[1]);
     }
@@ -586,7 +760,7 @@ fn grid(views: &[Projected], angle: ProjectionAngle) -> ([f64; 5], [f64; 5]) {
 }
 
 fn auto_scale(views: &[Projected], angle: ProjectionAngle, w: f64, h: f64) -> f64 {
-  let (cols, rows) = grid(views, angle);
+  let (cols, rows) = grid(views, angle, None);
   let extra: f64 =
     views.iter().filter(|v| cell(&v.view.kind, angle).is_none() && v.view.at.is_none()).map(|v| v.size()[0]).sum();
   let used = |a: &[f64; 5]| a.iter().filter(|x| **x > 0.0).count() as f64;
@@ -604,7 +778,7 @@ fn auto_scale(views: &[Projected], angle: ProjectionAngle, w: f64, h: f64) -> f6
 
 /// Puts each view's centre on the sheet.
 fn place(views: &mut [Projected], angle: ProjectionAngle, scale: f64, w: f64, h: f64) {
-  let (cols, rows) = grid(views, angle);
+  let (cols, rows) = grid(views, angle, Some(scale));
   let used_cols: Vec<usize> = (0..5).filter(|i| cols[*i] > 0.0).collect();
   let used_rows: Vec<usize> = (0..5).filter(|i| rows[*i] > 0.0).collect();
   let mut col_x = [0.0; 5];
@@ -627,9 +801,9 @@ fn place(views: &mut [Projected], angle: ProjectionAngle, scale: f64, w: f64, h:
     if let Some((c, r)) = cell(&v.view.kind, angle) {
       v.view.at = Some([col_x[(c + 2) as usize], row_y[(r + 2) as usize]]);
     } else {
-      let s = v.size();
-      v.view.at = Some([next_x + s[0] * scale / 2.0, (h - MARGIN - GAP - s[1] * scale / 2.0).max(MARGIN + TITLE_H)]);
-      next_x += s[0] * scale + GAP;
+      let e = v.extent(scale);
+      v.view.at = Some([next_x + e[0] / 2.0, (h - MARGIN - GAP - e[1] / 2.0).max(MARGIN + TITLE_H)]);
+      next_x += e[0] + GAP;
     }
   }
   let _ = w;
@@ -637,12 +811,17 @@ fn place(views: &mut [Projected], angle: ProjectionAngle, scale: f64, w: f64, h:
 
 fn sheet_pt(v: &Projected, scale: f64, p: [f64; 2]) -> [f64; 2] {
   let at = v.view.at.unwrap_or([0.0, 0.0]);
-  let c = [(v.lo[0] + v.hi[0]) / 2.0, (v.lo[1] + v.hi[1]) / 2.0];
-  let k = scale * v.mul;
-  [at[0] + (p[0] - c[0]) * k, at[1] + (p[1] - c[1]) * k]
+  let (k, e) = (scale * v.mul, v.extent(scale));
+  [0, 1].map(|i| at[i] - e[i] / 2.0 + breaks::fold(&v.cuts[i], v.lo[i], p[i], k))
+}
+
+/// The pieces of a view-coordinate polyline left after the view's breaks.
+fn unbroken(v: &Projected, pts: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+  breaks::clip(pts, 0, &v.cuts[0]).iter().flat_map(|p| breaks::clip(p, 1, &v.cuts[1])).collect()
 }
 
 fn draw_view(plot: &mut Plot, v: &Projected, scale: f64, n: usize) {
+  let broken = v.cuts.iter().any(|c| !c.is_empty());
   for l in &v.proj.lines {
     let pen = match l.kind {
       LineKind::Visible | LineKind::Outline => Pen::Visible,
@@ -654,23 +833,32 @@ fn draw_view(plot: &mut Plot, v: &Projected, scale: f64, n: usize) {
         Pen::Hidden
       }
     };
+    if broken {
+      for piece in unbroken(v, &l.points) {
+        plot.items.push(Item::Line { pen, points: piece.iter().map(|p| sheet_pt(v, scale, *p)).collect() });
+      }
+      continue;
+    }
     plot.items.push(Item::Line { pen, points: l.points.iter().map(|p| sheet_pt(v, scale, *p)).collect() });
   }
   // centre marks on holes seen end-on
-  for c in v.proj.circles.iter().filter(|c| !c.kind.hidden()) {
+  for c in v.proj.circles.iter().filter(|c| !c.kind.hidden() && v.shows_circle(c)) {
     let o = sheet_pt(v, scale, c.center);
     let r = c.radius * scale + 2.0;
     plot.items.push(Item::Line { pen: Pen::Center, points: vec![[o[0] - r, o[1]], [o[0] + r, o[1]]] });
     plot.items.push(Item::Line { pen: Pen::Center, points: vec![[o[0], o[1] - r], [o[0], o[1] + r]] });
   }
   for faces in &v.hatch {
-    let segs: Vec<[[f64; 2]; 2]> = faces.iter().map(|s| [sheet_pt(v, scale, s[0]), sheet_pt(v, scale, s[1])]).collect();
-    for h in hatch_lines(&segs, 2.5) {
-      plot.items.push(Item::Line { pen: Pen::Thin, points: h.to_vec() });
+    // hatched in view coordinates (2.5 mm apart on the sheet), then broken like the edges
+    for h in hatch_lines(faces, 2.5 / (scale * v.mul)) {
+      for piece in unbroken(v, &h) {
+        plot.items.push(Item::Line { pen: Pen::Thin, points: piece.iter().map(|p| sheet_pt(v, scale, *p)).collect() });
+      }
     }
   }
   for (seg, note) in &v.bends {
-    let (a, b) = (sheet_pt(v, scale, seg[0]), sheet_pt(v, scale, seg[1]));
+    let Some(piece) = unbroken(v, seg).into_iter().next() else { continue };
+    let (a, b) = (sheet_pt(v, scale, piece[0]), sheet_pt(v, scale, piece[piece.len() - 1]));
     plot.items.push(Item::Line { pen: Pen::Center, points: vec![a, b] });
     // the note runs along the bend line, just off it
     let d = [b[0] - a[0], b[1] - a[1]];
@@ -681,8 +869,20 @@ fn draw_view(plot: &mut Plot, v: &Projected, scale: f64, n: usize) {
     plot.items.push(Item::RotatedText { at: m, size: 2.5, text: note.clone(), angle });
   }
   let at = v.view.at.unwrap_or([0.0, 0.0]);
+  let e = v.extent(scale);
+  // break lines at both ends of each gap, across the whole view
+  for (i, cuts) in v.cuts.iter().enumerate() {
+    let j = 1 - i;
+    let (lo, hi) = (at[j] - e[j] / 2.0 - 2.0, at[j] + e[j] / 2.0 + 2.0);
+    for c in cuts {
+      let start = at[i] - e[i] / 2.0 + breaks::fold(cuts, v.lo[i], c.from, scale * v.mul);
+      for pos in [start, start + c.gap] {
+        plot.items.push(Item::Line { pen: Pen::Thin, points: breaks::break_line(i, pos, lo, hi) });
+      }
+    }
+  }
   // under the view, clear of the dimensions placed below it
-  let below = at[1] - v.size()[1] * scale / 2.0 - 19.0;
+  let below = at[1] - e[1] / 2.0 - 19.0;
   plot.items.push(Item::Text { at: [at[0], below], size: TEXT, text: v.view.kind.label(n), anchor: Anchor::Middle });
 }
 
@@ -783,7 +983,7 @@ fn arrow(tip: [f64; 2], dir: [f64; 2]) -> Item {
 
 /// Overall sizes of the front view (and depth from a top or side view), and a diameter callout
 /// for every distinct hole seen end-on.
-fn auto_dims(plot: &mut Plot, views: &[Projected], scale: f64) {
+fn auto_dims(plot: &mut Plot, views: &[Projected], scale: f64, std: Standard) {
   let front = views.iter().find(|v| v.view.kind == ViewKind::Front);
   let depth_view = views
     .iter()
@@ -793,31 +993,31 @@ fn auto_dims(plot: &mut Plot, views: &[Projected], scale: f64) {
   let corners = |v: &Projected| (sheet_pt(v, scale, v.lo), sheet_pt(v, scale, v.hi));
   if let Some(v) = front {
     let (lo, hi) = corners(v);
-    let s = v.size();
-    linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &fmt_len(s[0]));
-    linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &fmt_len(s[1]));
+    let s = v.true_size();
+    linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &std.number(s[0]));
+    linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &std.number(s[1]));
   }
   if let Some((v, vertical)) = depth_view {
     let (lo, hi) = corners(v);
-    let s = v.size();
+    let s = v.true_size();
     if vertical {
-      linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &fmt_len(s[1]));
+      linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &std.number(s[1]));
     } else {
-      linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &fmt_len(s[0]));
+      linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &std.number(s[0]));
     }
   }
   if front.is_none() && depth_view.is_none() {
     // single non-standard views (flat patterns, sections): their own extents
     for v in views {
       let (lo, hi) = corners(v);
-      let s = v.size();
-      linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &fmt_len(s[0]));
-      linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &fmt_len(s[1]));
+      let s = v.true_size();
+      linear_dim(plot, [lo[0], lo[1]], [hi[0], lo[1]], DimOrientation::Horizontal, -10.0, &std.number(s[0]));
+      linear_dim(plot, [lo[0], lo[1]], [lo[0], hi[1]], DimOrientation::Vertical, 10.0, &std.number(s[1]));
     }
   }
   let mut seen: Vec<f64> = Vec::new();
   for v in views.iter().filter(|v| !matches!(v.view.kind, ViewKind::Iso)) {
-    for c in v.proj.circles.iter().filter(|c| !c.kind.hidden()) {
+    for c in v.proj.circles.iter().filter(|c| !c.kind.hidden() && v.shows_circle(c)) {
       let d = 2.0 * c.radius;
       if seen.iter().any(|x| (x - d).abs() < 1e-6) {
         continue;
@@ -831,24 +1031,47 @@ fn auto_dims(plot: &mut Plot, views: &[Projected], scale: f64) {
       let end = [knee[0] + 4.0, knee[1]];
       plot.items.push(Item::Line { pen: Pen::Thin, points: vec![on, knee, end] });
       plot.items.push(arrow(on, [-k, -k]));
-      let n = v.proj.circles.iter().filter(|x| (2.0 * x.radius - d).abs() < 1e-6 && !x.kind.hidden()).count();
-      let text = if n > 1 { format!("{n}× Ø{}", fmt_len(d)) } else { format!("Ø{}", fmt_len(d)) };
+      let n = v
+        .proj
+        .circles
+        .iter()
+        .filter(|x| (2.0 * x.radius - d).abs() < 1e-6 && !x.kind.hidden() && v.shows_circle(x))
+        .count();
+      let text = if n > 1 { format!("{n}× Ø{}", std.number(d)) } else { format!("Ø{}", std.number(d)) };
       plot.items.push(Item::Text { at: [end[0] + 1.0, end[1] - 1.2], size: TEXT, text, anchor: Anchor::Start });
     }
   }
 }
 
-/// A parts list above the title block: one row per component (copies counted together).
-fn parts_list(plot: &mut Plot, design: &Design) {
-  let mut rows: Vec<(String, usize, String)> = Vec::new();
+/// A row of the parts list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BomRow {
+  pub name: String,
+  pub qty: usize,
+  pub material: String,
+  /// The components counted in the row (a component and its copies).
+  pub components: Vec<ComponentId>,
+}
+
+/// The parts list: one row per component, copies counted together; item n is row n - 1.
+pub fn bom_rows(design: &Design) -> Vec<BomRow> {
+  let mut rows: Vec<BomRow> = Vec::new();
   for c in &design.components {
     let base = c.name.split(':').next().unwrap_or(&c.name).to_string();
     let material = if c.material.is_empty() { "Steel".to_string() } else { c.material.clone() };
-    match rows.iter_mut().find(|r| r.0 == base) {
-      Some(r) => r.1 += 1,
-      None => rows.push((base, 1, material)),
+    match rows.iter_mut().find(|r| r.name == base) {
+      Some(r) => {
+        r.qty += 1;
+        r.components.push(c.id);
+      }
+      None => rows.push(BomRow { name: base, qty: 1, material, components: vec![c.id] }),
     }
   }
+  rows
+}
+
+/// A parts list above the title block.
+fn parts_list(plot: &mut Plot, rows: &[BomRow]) {
   let (x1, row_h) = (plot.width - MARGIN, 6.0);
   let x0 = x1 - TITLE_W;
   let y0 = MARGIN + TITLE_H;
@@ -876,12 +1099,47 @@ fn parts_list(plot: &mut Plot, design: &Design) {
   for (k, h) in ["ITEM", "QTY", "PART", "MATERIAL"].iter().enumerate() {
     cell(plot, k, top, h.to_string());
   }
-  for (i, (name, qty, material)) in rows.into_iter().enumerate() {
+  for (i, r) in rows.iter().enumerate() {
     let row = top - 1 - i;
     cell(plot, 0, row, (i + 1).to_string());
-    cell(plot, 1, row, qty.to_string());
-    cell(plot, 2, row, name);
-    cell(plot, 3, row, material);
+    cell(plot, 1, row, r.qty.to_string());
+    cell(plot, 2, row, r.name.clone());
+    cell(plot, 3, row, r.material.clone());
+  }
+}
+
+/// Balloons for the parts list rows that have none yet, in the isometric view (else the first),
+/// on the centre of mass of the row's first drawn component.
+fn auto_balloons(
+  plot: &mut Plot,
+  d: &Drawing,
+  views: &[Projected],
+  scale: f64,
+  rows: &[BomRow],
+  design: &Design,
+  bodies: &[&crate::regen::Body],
+) {
+  let Some(pv) = views.iter().find(|v| v.view.kind == ViewKind::Iso).or(views.first()) else { return };
+  let manual: Vec<ComponentId> = d
+    .dimensions
+    .iter()
+    .filter_map(|x| if let DrawingDim::Balloon { component, .. } = x { Some(*component) } else { None })
+    .collect();
+  let mut placed = Vec::new();
+  for (n, row) in rows.iter().enumerate() {
+    if row.components.iter().any(|c| manual.contains(c)) {
+      continue;
+    }
+    let drawn = |c: &ComponentId| {
+      let comp = design.component(*c)?;
+      let b = comp.bodies.iter().find_map(|id| bodies.iter().find(|b| b.id == *id))?;
+      b.shape.mass().ok().map(|m| m.center_of_mass)
+    };
+    let Some(p) = row.components.iter().find_map(drawn) else { continue };
+    let anchor = sheet_pt(pv, scale, pv.to_view(p));
+    let offset = annotate::auto_offset(pv, scale, anchor, &placed);
+    placed.push([anchor[0] + offset[0], anchor[1] + offset[1]]);
+    annotate::balloon(plot, anchor, offset, &(n + 1).to_string());
   }
 }
 
@@ -913,9 +1171,10 @@ fn frame(plot: &mut Plot, d: &Drawing, design: &Design, scale: f64) {
   label(plot, cols[1], rows[0], "MATERIAL", &t.material);
   label(plot, x0, y0, "SCALE", &scale_text(scale));
   let size = format!(
-    "{:?} · mm · {}",
+    "{:?} · mm · {} · {}",
     d.sheet,
-    if d.projection == ProjectionAngle::ThirdAngle { "3rd angle" } else { "1st angle" }
+    if d.projection == ProjectionAngle::ThirdAngle { "3rd angle" } else { "1st angle" },
+    d.standard.name()
   );
   label(plot, cols[0], y0, "SHEET", &size);
   let rev = if t.revision.is_empty() { "-".to_string() } else { t.revision.clone() };

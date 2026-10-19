@@ -61,9 +61,11 @@ change a parameter and watch the whole history rebuild.
   copy follows.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
   section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
-  hidden-line projections; automatic overall dimensions, hole callouts and centre marks; manual
-  dimensions, notes, a title block and an assembly parts list; export to PDF, SVG and DXF. Drawings live in the design
-  and follow parameter changes.
+  hidden-line projections; broken views; automatic overall dimensions, hole callouts and centre marks; manual,
+  ordinate and angular dimensions (true lengths across breaks); GD&T feature control frames, datum identifiers and
+  surface texture symbols per ASME or ISO; notes, a title block, an assembly parts list and balloons that follow it
+  (or are placed automatically); export to PDF, SVG and DXF. Drawings live in the design and follow parameter
+  changes.
 - **Selecting and inspecting, as in Fusion.** Window selection (left to right picks what is
   inside, right to left what the box touches), Select Other (Alt+click or hold) for what's behind
   the front face, selection priority (face, edge, body, component) and filters, Select All and
@@ -169,6 +171,28 @@ a circular edge (its centre and axis) or an explicit point. The moving component
 brought onto the fixed one with the Z axes facing each other (so faces mate); `flip` aligns them
 instead, `angle` and `offset` adjust the placement, and the joint's motion (`rotation`, `slide`,
 `slide2`, `pitch`, depending on the type) can be any expression.
+
+Drawings annotate model points in a view, so annotations move with their view and follow
+parameter changes:
+
+```sh
+clfusion-cli run examples/link_bar_drawing.jsonl --save link_bar.clf
+clfusion-cli exec link_bar.clf '{"cmd": "param.set", "name": "len", "expr": "600"}' --save link_bar.clf
+clfusion-cli exec link_bar.clf '{"cmd": "drawing.export", "path": "link_bar.dxf"}'
+```
+
+- **Broken views** (`drawing.break`) leave a stretch of a view out, between two break lines a
+  `gap` apart; dimensions, ordinates and hole callouts still read the true length.
+- **Ordinate** (`drawing.ordinate`) and **angular** (`drawing.angle`) dimensions.
+- **GD&T** (`drawing.feature_control`, `drawing.datum`, `drawing.surface_finish`): the 14
+  characteristics with Ø zones, MMC/LMC and up to three datums; the drawing's `standard` (ASME,
+  the default, or ISO) sets the decimal sign, the surface texture layout ("1.6" in the V, or
+  "Ra 1,6" on the extension line) and which characteristics exist (ASME Y14.5-2018 has no
+  concentricity or symmetry).
+- **Balloons** (`drawing.balloon`) carry a component's parts list item number, worked out each
+  time the drawing is drawn, so they renumber when the parts list changes; `auto_balloons`
+  balloons every row that has none.
+
 ## File formats
 
 | Format                          | Open / insert | Export | Notes                                                           |

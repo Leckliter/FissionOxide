@@ -17,7 +17,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Surface   | Extend, untrim; trim with a body or sketch; offset with variable distance     |
 | Sheet     | Lofted and miter flanges; corner closure; flat pattern as a sketch           |
 | Assembly  | Contact sets; motion links; rigid groups; joint origins; insert a component from another design |
-| Drawing   | Broken views; ordinate and angle dimensions; GD&T; balloons                  |
+| Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
 | Selection | Freeform and paint selection; vertex picking                                 |
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
 | View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |

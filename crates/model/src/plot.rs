@@ -289,7 +289,7 @@ impl Plot {
 }
 
 /// Approximate Helvetica text width (mm).
-fn text_width(text: &str, size: f64) -> f64 {
+pub fn text_width(text: &str, size: f64) -> f64 {
   text.chars().count() as f64 * size * 0.52
 }
 

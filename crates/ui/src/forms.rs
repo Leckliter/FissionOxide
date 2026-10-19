@@ -102,6 +102,16 @@ pub enum Input {
     label: &'static str,
     default: [&'static str; 3],
   },
+  /// A view of the open drawing (drawing commands get the drawing too).
+  DrawingView {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// A component of the design.
+  Component {
+    key: &'static str,
+    label: &'static str,
+  },
 }
 
 impl Input {
@@ -121,7 +131,9 @@ impl Input {
       | Input::Text { key, .. }
       | Input::Check { key, .. }
       | Input::Choice { key, .. }
-      | Input::Vec3 { key, .. } => key,
+      | Input::Vec3 { key, .. }
+      | Input::DrawingView { key, .. }
+      | Input::Component { key, .. } => key,
     }
   }
 }
@@ -134,6 +146,8 @@ pub struct State {
   pub chosen: Vec<Option<Value>>,
   /// Centres of picked faces, for inputs that want one.
   near: Vec<Option<[f64; 3]>>,
+  /// The open drawing, for drawing commands.
+  pub drawing: Option<u32>,
 }
 
 impl State {
@@ -158,7 +172,7 @@ impl State {
         _ => Value::Null,
       })
       .collect();
-    State { values, chosen: vec![None; form.inputs.len()], near: vec![None; form.inputs.len()] }
+    State { values, chosen: vec![None; form.inputs.len()], near: vec![None; form.inputs.len()], drawing: None }
   }
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
@@ -257,6 +271,7 @@ impl State {
           return Some(label);
         }
         Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
+        Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
         _ => {}
       }
     }
@@ -268,6 +283,11 @@ impl State {
     let mut p = Map::new();
     for (k, v) in form.fixed {
       p.insert(k.to_string(), json!(v));
+    }
+    if let Some(d) = self.drawing
+      && form.cmd.starts_with("drawing.")
+    {
+      p.insert("drawing".into(), json!(d));
     }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
@@ -295,6 +315,26 @@ impl State {
       }
     }
     Value::Object(p)
+  }
+
+  /// Points drawing commands at the open drawing; views and components default to the first.
+  pub fn set_drawing(&mut self, form: &Form, s: &Session, drawing: Option<u32>) {
+    self.drawing = drawing;
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      match input {
+        Input::DrawingView { .. } if v.is_null() => {
+          if let Some(view) = drawing.and_then(|d| s.design.drawing(d)).and_then(|d| d.views.first()) {
+            *v = json!(view.id);
+          }
+        }
+        Input::Component { .. } if v.is_null() => {
+          if let Some(c) = s.design.components.first() {
+            *v = json!(c.id.0);
+          }
+        }
+        _ => {}
+      }
+    }
   }
 }
 
@@ -894,6 +934,17 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
         json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle")}),
       )
     }
+    // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
+    c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {
+      let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
+      let mut q = p.clone();
+      if let Some(m) = q.as_object_mut() {
+        m.remove("offset_x");
+        m.remove("offset_y");
+        m.insert("offset".into(), json!([num("offset_x"), num("offset_y")]));
+      }
+      (form.cmd, q)
+    }
     _ => (form.cmd, p),
   }
 }
@@ -1019,6 +1070,164 @@ pub static CAM_DRILL: Form = Form {
     Input::Expr { key: "tool_diameter", label: "Drill diameter", default: "6 mm" },
     Input::Expr { key: "peck", label: "Peck depth (0 = none)", default: "0" },
     Input::Expr { key: "plunge", label: "Feed (mm/min)", default: "200" },
+  ],
+  picks_model: false,
+};
+
+// ---------------------------------------------------------------- drawing annotations
+
+pub static DRAWING_BREAK: Form = Form {
+  title: "BREAK VIEW",
+  name: "Break View",
+  hint: "Leave a stretch of a long view out; dimensions keep the true length",
+  icon: Icon::BreakView,
+  cmd: "drawing.break",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Choice {
+      key: "direction",
+      label: "Direction",
+      options: &[("horizontal", "Horizontal"), ("vertical", "Vertical")],
+    },
+    Input::Expr { key: "from", label: "From (model mm)", default: "20" },
+    Input::Expr { key: "to", label: "To (model mm)", default: "60" },
+    Input::Expr { key: "gap", label: "Gap (sheet mm)", default: "6" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_ORDINATE: Form = Form {
+  title: "ORDINATE DIMENSION",
+  name: "Ordinate Dimension",
+  hint: "Distances of points from an origin along the view's horizontal or vertical",
+  icon: Icon::OrdinateDim,
+  cmd: "drawing.ordinate",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "origin", label: "Origin (model)", default: ["0", "0", "0"] },
+    Input::Text { key: "points", label: "Points (x y z; …)", default: "" },
+    Input::Choice {
+      key: "orientation",
+      label: "Direction",
+      options: &[("horizontal", "Horizontal"), ("vertical", "Vertical")],
+    },
+    Input::Expr { key: "offset", label: "Offset (sheet mm)", default: "10" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_ANGLE: Form = Form {
+  title: "ANGULAR DIMENSION",
+  name: "Angular Dimension",
+  hint: "The angle at a vertex between the edges to two points",
+  icon: Icon::AngleDim,
+  cmd: "drawing.angle",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "vertex", label: "Vertex (model)", default: ["0", "0", "0"] },
+    Input::Vec3 { key: "a", label: "Point on edge 1", default: ["10", "0", "0"] },
+    Input::Vec3 { key: "b", label: "Point on edge 2", default: ["0", "0", "10"] },
+    Input::Expr { key: "radius", label: "Arc radius (sheet mm)", default: "15" },
+  ],
+  picks_model: false,
+};
+
+const CHARACTERISTICS: &[(&str, &str)] = &[
+  ("position", "Position"),
+  ("flatness", "Flatness"),
+  ("straightness", "Straightness"),
+  ("circularity", "Circularity"),
+  ("cylindricity", "Cylindricity"),
+  ("profile_of_line", "Profile of a line"),
+  ("profile_of_surface", "Profile of a surface"),
+  ("angularity", "Angularity"),
+  ("perpendicularity", "Perpendicularity"),
+  ("parallelism", "Parallelism"),
+  ("concentricity", "Concentricity (ISO)"),
+  ("symmetry", "Symmetry (ISO)"),
+  ("circular_runout", "Circular runout"),
+  ("total_runout", "Total runout"),
+];
+
+pub static DRAWING_FCF: Form = Form {
+  title: "FEATURE CONTROL FRAME",
+  name: "Feature Control Frame",
+  hint: "A GD&T tolerance on a feature, per the drawing's standard (ASME or ISO)",
+  icon: Icon::FeatureControl,
+  cmd: "drawing.feature_control",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Feature point (model)", default: ["0", "0", "0"] },
+    Input::Choice { key: "characteristic", label: "Characteristic", options: CHARACTERISTICS },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0.1" },
+    Input::Check { key: "diameter", label: "Diameter zone (Ø)" },
+    Input::Choice {
+      key: "modifier",
+      label: "Material condition",
+      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+    },
+    Input::Text { key: "datums", label: "Datums", default: "A" },
+    Input::Expr { key: "offset_x", label: "Frame offset X (sheet mm)", default: "12" },
+    Input::Expr { key: "offset_y", label: "Frame offset Y (sheet mm)", default: "12" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_DATUM: Form = Form {
+  title: "DATUM IDENTIFIER",
+  name: "Datum Identifier",
+  hint: "Mark a feature as a datum (the next free letter when left empty)",
+  icon: Icon::DatumId,
+  cmd: "drawing.datum",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Feature point (model)", default: ["0", "0", "0"] },
+    Input::Text { key: "label", label: "Letter", default: "" },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "0" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_FINISH: Form = Form {
+  title: "SURFACE TEXTURE",
+  name: "Surface Texture",
+  hint: "A surface finish symbol (Ra in µm), per the drawing's standard",
+  icon: Icon::SurfaceTexture,
+  cmd: "drawing.surface_finish",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Vec3 { key: "point", label: "Surface point (model)", default: ["0", "0", "0"] },
+    Input::Expr { key: "roughness", label: "Roughness Ra (µm)", default: "1.6" },
+    Input::Choice {
+      key: "process",
+      label: "Process",
+      options: &[("any", "Any"), ("removal", "Material removal required"), ("no_removal", "No material removal")],
+    },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "0" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "0" },
+  ],
+  picks_model: false,
+};
+
+pub static DRAWING_BALLOON: Form = Form {
+  title: "BALLOON",
+  name: "Balloon",
+  hint: "A parts list item number on a component; it follows the parts list",
+  icon: Icon::Balloon,
+  cmd: "drawing.balloon",
+  fixed: &[],
+  inputs: &[
+    Input::DrawingView { key: "view", label: "View" },
+    Input::Component { key: "component", label: "Component" },
+    Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "12" },
+    Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
   ],
   picks_model: false,
 };
