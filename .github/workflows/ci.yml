@@ -6,9 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# A new push waits for the running job instead of cancelling it: a cancelled run would throw away
+# a half-done OCCT build before it reaches the cache.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
