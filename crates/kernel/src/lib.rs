@@ -957,6 +957,8 @@ mod features2;
 pub use features2::Inside;
 mod surface;
 pub use surface::{Extension, Untrim};
+mod xcaf;
+pub use xcaf::{StepBody, StepPart, read_step_assembly, write_step_assembly};
 
 #[cfg(test)]
 mod tests;

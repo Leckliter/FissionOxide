@@ -35,7 +35,7 @@ fn req<'a>(p: &'a Value, k: &str) -> Result<&'a str, CmdError> {
   opt(p, k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))
 }
 
-fn version_of(p: &Value, k: &str) -> Result<Option<u32>, CmdError> {
+pub(crate) fn version_of(p: &Value, k: &str) -> Result<Option<u32>, CmdError> {
   match p.get(k) {
     None | Some(Value::Null) => Ok(None),
     Some(v) => v
@@ -46,12 +46,12 @@ fn version_of(p: &Value, k: &str) -> Result<Option<u32>, CmdError> {
   }
 }
 
-fn req_version(p: &Value, k: &str) -> Result<u32, CmdError> {
+pub(crate) fn req_version(p: &Value, k: &str) -> Result<u32, CmdError> {
   version_of(p, k)?.ok_or_else(|| CmdError::new(format!("missing '{k}'")))
 }
 
 /// `item` param, or the item the open design is linked to.
-fn item_of(s: &Session, p: &Value) -> Result<String, CmdError> {
+pub(crate) fn item_of(s: &Session, p: &Value) -> Result<String, CmdError> {
   match opt(p, "item") {
     Some(i) => Ok(i.to_string()),
     None => {
@@ -81,7 +81,12 @@ pub fn version_json(v: &Version) -> Value {
     "thumbnail": v.thumbnail.is_some(),
     "original": v.original,
     "stats": v.stats,
+    "comments": v.comments.iter().map(|c| comment_json(v.number, c)).collect::<Vec<_>>(),
   })
+}
+
+fn comment_json(version: u32, c: &clf_store::Comment) -> Value {
+  json!({"id": c.id, "version": version, "author": c.author, "time": c.time, "time_text": clf_store::format_time(c.time), "text": c.text})
 }
 
 pub fn item_json(st: &Store, it: &Item) -> Value {
@@ -126,7 +131,7 @@ fn meta(s: &Session, p: &Value) -> VersionMeta {
 }
 
 /// Loads a design version from the hub into a fresh session (no link set).
-fn session_for(st: &Store, item: &str, version: Option<u32>) -> Result<Session, CmdError> {
+pub(crate) fn session_for(st: &Store, item: &str, version: Option<u32>) -> Result<Session, CmdError> {
   let it = st.item(item)?;
   let path = st.version_path(item, version)?;
   match it.kind {
@@ -175,6 +180,7 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "versions": items.iter().map(|i| i.versions.len()).sum::<usize>(),
         "bytes": st.disk_usage(),
         "linked": s.hub,
+        "merged_conflicts": st.merged_conflicts(),
       }))
     }
     "hub.projects" => {
@@ -397,6 +403,28 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "hub.upload" => upload(s, &mut st, p),
     "hub.download" => download(&st, s, p),
+    "hub.comment" => {
+      let item = item_of(s, p)?;
+      // default: the version the open design came from, else the latest
+      let linked = s.hub.as_ref().filter(|h| h.item == item).map(|h| h.version);
+      let version = match version_of(p, "version")?.or(linked) {
+        Some(v) => v,
+        None => st.item(&item)?.latest().map(|v| v.number).ok_or(CmdError::new("the item has no versions"))?,
+      };
+      let id = st.add_comment(&item, version, req(p, "text")?)?;
+      Ok(json!({"item": item, "version": version, "comment": id}))
+    }
+    "hub.comments" => {
+      let item = item_of(s, p)?;
+      let list = st.comments(&item, version_of(p, "version")?)?;
+      Ok(json!({"item": item, "comments": list.iter().map(|(n, c)| comment_json(*n, c)).collect::<Vec<_>>()}))
+    }
+    "hub.comment.delete" => {
+      let item = item_of(s, p)?;
+      st.delete_comment(&item, req(p, "comment")?)?;
+      Ok(json!({}))
+    }
+    "hub.diff" => crate::diff::run(s, &st, p),
     other => Err(CmdError::new(format!("unknown command '{other}' (try 'help')"))),
   }
 }

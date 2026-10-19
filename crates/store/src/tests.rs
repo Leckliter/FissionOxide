@@ -107,12 +107,14 @@ fn uploads_copies_and_moves() {
     VersionMeta { original: Some(("bracket.step".into(), b"ISO-10303-21;".to_vec())), ..VersionMeta::default() };
   let (item, _) = s.create_item(at, b"{}", Origin::Uploaded { file: "bracket.step".into() }, meta).unwrap();
   let v = s.item(&item).unwrap().latest().unwrap().clone();
-  assert_eq!(v.original.as_deref(), Some("v1.orig.step"));
-  assert!(s.item_dir(&item).join("v1.orig.step").exists());
+  let orig = v.original.clone().unwrap();
+  assert!(orig.starts_with("v1-") && orig.ends_with(".orig.step"), "{orig}");
+  assert!(s.item_dir(&item).join(&orig).exists());
   let raw = NewItem { project: &p, folder: None, name: "Fusion part", kind: ItemKind::File, ext: "f3d" };
   let (f3d, _) =
     s.create_item(raw, b"PK", Origin::Uploaded { file: "part.f3d".into() }, VersionMeta::default()).unwrap();
-  assert!(s.version_path(&f3d, None).unwrap().ends_with("v1.f3d"));
+  let file = s.version_path(&f3d, None).unwrap();
+  assert!(file.extension().unwrap() == "f3d" && file.file_name().unwrap().to_string_lossy().starts_with("v1-"));
   let at = NewItem { project: &q, folder: None, name: "Bracket copy", ..design() };
   let (copy, _) = s.copy_item(&item, None, at).unwrap();
   assert_eq!(s.item(&copy).unwrap().project, q);
@@ -176,4 +178,169 @@ fn compare_two_designs() {
   assert!(has("added", "parameter", "h"));
   assert!(has("removed", "parameter", "old"));
   assert!(compare_designs(&a, &a).is_empty());
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+  std::fs::create_dir_all(to).unwrap();
+  for e in std::fs::read_dir(from).unwrap() {
+    let e = e.unwrap();
+    let t = to.join(e.file_name());
+    if e.file_type().unwrap().is_dir() {
+      copy_dir(&e.path(), &t)
+    } else {
+      std::fs::copy(e.path(), t).map(|_| ()).unwrap()
+    }
+  }
+}
+
+#[test]
+fn two_writers_merge_instead_of_overwriting() {
+  let root = temp_root("merge");
+  let mut a = Store::open(&root).unwrap();
+  let p = a.create_project("Shared").unwrap();
+  let (item, _) = a
+    .create_item(NewItem { project: &p, name: "Hinge", ..design() }, b"1", Origin::Saved, VersionMeta::default())
+    .unwrap();
+  // the CLI (or another machine) opens the hub now, before `a` changes it again
+  let mut b = Store::open(&root).unwrap();
+  a.create_folder(&p, None, "From A").unwrap();
+  let va = a.add_version(&item, b"2a", Origin::Saved, VersionMeta::default()).unwrap();
+  // b still has the old index in memory: its writes merge with a's instead of replacing them
+  b.create_folder(&p, None, "From B").unwrap();
+  let vb = b.add_version(&item, b"2b", Origin::Saved, VersionMeta::default()).unwrap();
+  b.rename_item(&item, "Hinge (B)").unwrap();
+  assert_eq!((va, vb), (2, 3), "b's save follows a's");
+  // two saves that really race (both wrote v2 before either index write) are renumbered
+  let mut c = Store::open(&root).unwrap();
+  c.write_version(&item, b"4c", Origin::Saved, VersionMeta::default()).unwrap();
+  let vd = b.add_version(&item, b"4d", Origin::Saved, VersionMeta::default()).unwrap();
+  c.persist().unwrap();
+  assert_eq!(vd, 4);
+
+  let s = Store::open(&root).unwrap();
+  let names: Vec<_> = s.list(&p, None).unwrap().folders.iter().map(|f| f.name.clone()).collect();
+  assert!(names.contains(&"From A".to_string()) && names.contains(&"From B".to_string()), "{names:?}");
+  let it = s.item(&item).unwrap();
+  assert_eq!(it.name, "Hinge (B)");
+  assert_eq!(it.versions.iter().map(|v| v.number).collect::<Vec<_>>(), [1, 2, 3, 4, 5], "the clash is renumbered");
+  let contents: Vec<Vec<u8>> = (1..=5).map(|n| s.read_version(&item, Some(n)).unwrap()).collect();
+  assert_eq!(contents, [&b"1"[..], b"2a", b"2b", b"4d", b"4c"], "no save lost; the later index write comes after");
+  // both activity feeds survive
+  assert!(s.activity(None, None, 100).iter().any(|a| a.text.contains("renamed Hinge")));
+  assert!(s.activity(None, None, 100).iter().filter(|a| a.text.starts_with("saved Hinge")).count() >= 2);
+
+  // a deletion on one side is kept when the other side didn't touch the record
+  let mut c = Store::open(&root).unwrap();
+  let mut d = Store::open(&root).unwrap();
+  let f = c.list(&p, None).unwrap().folders.iter().find(|f| f.name == "From A").unwrap().id.clone();
+  c.delete_folder(&f).unwrap();
+  d.create_project("Elsewhere").unwrap();
+  let s = Store::open(&root).unwrap();
+  assert!(s.folder(&f).is_err(), "the deleted folder stays deleted");
+  assert!(s.find_project("Elsewhere").is_ok());
+  let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_held_lock_writes_a_conflict_copy_merged_on_the_next_open() {
+  let root = temp_root("lock");
+  let mut s = Store::open(&root).unwrap();
+  let p = s.create_project("P").unwrap();
+  // another machine's lock arrives through the sync folder and stays
+  std::fs::write(root.join(sync::LOCK), "other-host pid 1").unwrap();
+  let before = std::fs::read_to_string(root.join("hub.json")).unwrap();
+  let q = s.create_project("Written while locked").unwrap();
+  assert_eq!(std::fs::read_to_string(root.join("hub.json")).unwrap(), before, "hub.json untouched");
+  assert_eq!(sync::conflict_copies(&root).len(), 1, "the change went to a conflict copy");
+  assert!(s.project(&q).is_ok(), "and is still visible to its writer");
+
+  // the lock goes away; the next open merges the copy and removes it
+  std::fs::remove_file(root.join(sync::LOCK)).unwrap();
+  let s2 = Store::open(&root).unwrap();
+  assert_eq!(s2.merged_conflicts(), 1);
+  assert!(s2.project(&p).is_ok() && s2.project(&q).is_ok());
+  assert!(sync::conflict_copies(&root).is_empty());
+  assert!(!root.join(sync::LOCK).exists(), "the lock is released after the merge");
+
+  // a stale lock (a crashed writer) is broken instead of waited on
+  let lock = root.join(sync::LOCK);
+  std::fs::write(&lock, "crashed").unwrap();
+  let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+  std::fs::File::options().write(true).open(&lock).unwrap().set_modified(old).unwrap();
+  let mut s3 = Store::open(&root).unwrap();
+  let t = std::time::Instant::now();
+  s3.create_project("After crash").unwrap();
+  assert!(t.elapsed() < std::time::Duration::from_secs(1));
+  assert!(sync::conflict_copies(&root).is_empty() && !lock.exists());
+  assert!(Store::open(&root).unwrap().find_project("After crash").is_ok());
+  let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn sync_tool_conflict_copies_are_merged() {
+  // two machines share a hub through a sync folder and both save while offline
+  let root = temp_root("synced");
+  let mut a = Store::open(&root).unwrap();
+  let p = a.create_project("Team").unwrap();
+  let (item, _) = a
+    .create_item(NewItem { project: &p, name: "Bracket", ..design() }, b"v1", Origin::Saved, VersionMeta::default())
+    .unwrap();
+  let other = temp_root("synced-other");
+  copy_dir(&root, &other);
+  let mut b = Store::open(&other).unwrap();
+  b.add_version(&item, b"bob", Origin::Saved, VersionMeta::default()).unwrap();
+  b.add_comment(&item, 1, "check the hole spacing").unwrap();
+  a.add_version(&item, b"alice", Origin::Saved, VersionMeta::default()).unwrap();
+  // the sync tool brings Bob's version file over and keeps his index as a conflicted copy
+  copy_dir(&other.join("items"), &root.join("items"));
+  std::fs::copy(other.join("hub.json"), root.join("hub (Bob's conflicted copy 2026-10-19).json")).unwrap();
+  std::fs::write(root.join("hub.sync-conflict-20261019-xyz.json"), "{ not json").unwrap();
+
+  let s = Store::open(&root).unwrap();
+  assert_eq!(s.merged_conflicts(), 1, "the unreadable copy is left for later");
+  let it = s.item(&item).unwrap();
+  assert_eq!(it.versions.iter().map(|v| v.number).collect::<Vec<_>>(), [1, 2, 3]);
+  let all: Vec<Vec<u8>> = it.versions.iter().map(|v| s.read_version(&item, Some(v.number)).unwrap()).collect();
+  assert!(all.contains(&b"bob".to_vec()) && all.contains(&b"alice".to_vec()));
+  assert_eq!(s.comments(&item, Some(1)).unwrap().len(), 1, "Bob's comment arrived");
+  assert_eq!(sync::conflict_copies(&root).len(), 1);
+  assert!(root.join("hub.sync-conflict-20261019-xyz.json").exists());
+  let _ = std::fs::remove_dir_all(&root);
+  let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn comments_on_versions() {
+  let root = temp_root("comments");
+  let mut s = Store::open(&root).unwrap();
+  let p = s.create_project("P").unwrap();
+  let (item, _) = s
+    .create_item(NewItem { project: &p, name: "Lid", ..design() }, b"1", Origin::Saved, VersionMeta::default())
+    .unwrap();
+  s.add_version(&item, b"2", Origin::Saved, VersionMeta::default()).unwrap();
+  let c1 = s.add_comment(&item, 1, "  Wall too thin here  ").unwrap();
+  let c2 = s.add_comment(&item, 2, "Fixed in v2, please check the snap fit").unwrap();
+  assert!(s.add_comment(&item, 2, "   ").is_err(), "empty comments are refused");
+  assert!(s.add_comment(&item, 9, "nope").is_err());
+  assert_ne!(c1, c2);
+
+  let s = Store::open(&root).unwrap();
+  let all = s.comments(&item, None).unwrap();
+  assert_eq!(
+    all.iter().map(|(n, c)| (*n, c.text.as_str())).collect::<Vec<_>>(),
+    [(1, "Wall too thin here"), (2, "Fixed in v2, please check the snap fit")]
+  );
+  assert_eq!(s.comments(&item, Some(2)).unwrap().len(), 1);
+  assert!(!all[0].1.author.is_empty());
+  assert_eq!(s.search("snap fit").len(), 1, "comments are searchable");
+  assert!(s.activity(None, Some(&item), 10).iter().any(|a| a.text.contains("commented on Lid v2")));
+
+  let mut s = s;
+  s.delete_comment(&item, &c1).unwrap();
+  assert!(s.delete_comment(&item, &c1).is_err());
+  assert_eq!(Store::open(&root).unwrap().comments(&item, None).unwrap().len(), 1);
+  // promoting a version doesn't copy its comments
+  let v3 = s.promote(&item, 2).unwrap();
+  assert!(s.comments(&item, Some(v3)).unwrap().is_empty());
+  let _ = std::fs::remove_dir_all(&root);
 }

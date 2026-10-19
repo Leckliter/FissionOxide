@@ -1,18 +1,19 @@
 //! DXF: 2D geometry in and out of sketches.
 //!
-//! Reading handles LINE, CIRCLE, ARC, LWPOLYLINE and POLYLINE (with bulge arcs) and POINT in the
-//! ENTITIES section, the `$INSUNITS` header unit, and entities drawn with a flipped extrusion
-//! direction (mirrored OCS, common from CAM tools). Other entities are counted in
-//! [`Drawing::skipped`]. Writing produces an R12 (AC1009) file, which every CAD/CAM/laser tool
-//! reads.
+//! Reading handles LINE, CIRCLE, ARC, LWPOLYLINE and POLYLINE (with bulge arcs), POINT, SPLINE
+//! and ELLIPSE in the ENTITIES section, the `$INSUNITS` header unit, and entities drawn with a
+//! flipped extrusion direction (mirrored OCS, common from CAM tools). Other entities are counted
+//! in [`Drawing::skipped`]. Writing produces an R12 (AC1009) file, which every CAD/CAM/laser tool
+//! reads, unless there are splines or ellipses: those need R2000 (AC1015).
 
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 
+pub use crate::nurbs::Spline;
 use crate::{ExchangeError, Result};
 
 /// One 2D entity in millimetres. Arcs run counter-clockwise from `start` to `end` (radians).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Entity {
   Line {
     a: [f64; 2],
@@ -36,6 +37,18 @@ pub enum Entity {
   Bezier {
     p: [[f64; 2]; 4],
   },
+  /// A NURBS curve (DXF SPLINE).
+  Spline(Spline),
+  /// An elliptical arc: `major` is the end of the major axis relative to the centre, `ratio` the
+  /// minor/major radius ratio (at most 1); it runs counter-clockwise from parameter `start` to
+  /// `end` (radians; 0 to 2π is the whole ellipse).
+  Ellipse {
+    center: [f64; 2],
+    major: [f64; 2],
+    ratio: f64,
+    start: f64,
+    end: f64,
+  },
 }
 
 impl Entity {
@@ -48,6 +61,39 @@ impl Entity {
     let u = 1.0 - t;
     let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
     [0, 1].map(|k| w[0] * p[0][k] + w[1] * p[1][k] + w[2] * p[2][k] + w[3] * p[3][k])
+  }
+
+  /// A whole ellipse (parameters 0 to 2π) with these radii; `major_end` is the end of the
+  /// `a`-radius axis relative to the centre. Swaps the axes when `b` is the larger radius, as DXF
+  /// wants a ratio of at most 1.
+  pub fn ellipse(center: [f64; 2], major_end: [f64; 2], b: f64) -> Entity {
+    let a = major_end[0].hypot(major_end[1]);
+    let (major, ratio) = if b <= a || a == 0.0 {
+      (major_end, if a > 0.0 { b / a } else { 1.0 })
+    } else {
+      ([-major_end[1] * b / a, major_end[0] * b / a], a / b)
+    };
+    Entity::Ellipse { center, major, ratio, start: 0.0, end: std::f64::consts::TAU }
+  }
+
+  /// Splines and ellipses as cubic Bézier pieces (a Bézier as itself; empty for other entities).
+  pub fn beziers(&self) -> Vec<[[f64; 2]; 4]> {
+    match self {
+      Entity::Bezier { p } => vec![*p],
+      Entity::Spline(sp) => sp.beziers(),
+      Entity::Ellipse { center, major, ratio, start, end } => {
+        crate::nurbs::ellipse_beziers(*center, *major, *ratio, *start, *end)
+      }
+      _ => Vec::new(),
+    }
+  }
+
+  /// A whole ellipse rather than an elliptical arc.
+  pub fn is_full_ellipse(&self) -> bool {
+    match *self {
+      Entity::Ellipse { start, end, .. } => !(1e-9..=TAU - 1e-9).contains(&(end - start).rem_euclid(TAU)),
+      _ => false,
+    }
   }
 }
 
@@ -212,11 +258,69 @@ pub fn read_dxf(bytes: &[u8]) -> Result<Drawing> {
         }
         polyline(&mut d, &verts, closed, cons);
       }
+      "SPLINE" => match spline(r, scale) {
+        Some(sp) => d.entities.push((Entity::Spline(sp), cons)),
+        None => *d.skipped.entry("SPLINE".into()).or_insert(0) += 1,
+      },
+      "ELLIPSE" => {
+        // ELLIPSE points are in world coordinates; a flipped extrusion only reverses the direction
+        if let (Some(cx), Some(cy), Some(mx), Some(my), Some(ratio)) = (r.f(10), r.f(20), r.f(11), r.f(21), r.f(40))
+          && ratio > 0.0
+          && ratio <= 1.0 + 1e-9
+          && mx.hypot(my) > 0.0
+        {
+          let (a0, a1) = (r.f(41).unwrap_or(0.0), r.f(42).unwrap_or(TAU));
+          let (start, end) = if fx < 0.0 { (-a1, -a0) } else { (a0, a1) };
+          let (center, major) = ([cx * scale, cy * scale], [mx * scale, my * scale]);
+          d.entities.push((Entity::Ellipse { center, major, ratio: ratio.min(1.0), start, end }, cons));
+        } else {
+          *d.skipped.entry("ELLIPSE".into()).or_insert(0) += 1;
+        }
+      }
       other => *d.skipped.entry(other.to_string()).or_insert(0) += 1,
     }
     k += 1;
   }
   Ok(d)
+}
+
+/// A SPLINE's degree, knots, weights, control and fit points (world coordinates), or `None` when
+/// they don't make a curve.
+fn spline(r: &Raw, scale: f64) -> Option<Spline> {
+  let mut sp = Spline { degree: r.f(71)? as usize, ..Spline::default() };
+  let (mut cx, mut fx) = (None, None);
+  for (c, v) in &r.pairs {
+    let Ok(v) = v.trim().parse::<f64>() else { continue };
+    match c {
+      40 => sp.knots.push(v),
+      41 => sp.weights.push(v),
+      10 => cx = Some(v),
+      20 => {
+        if let Some(x) = cx.take() {
+          sp.control.push([x * scale, v * scale]);
+        }
+      }
+      11 => fx = Some(v),
+      21 => {
+        if let Some(x) = fx.take() {
+          sp.fit.push([x * scale, v * scale]);
+        }
+      }
+      _ => {}
+    }
+  }
+  if sp.weights.len() != sp.control.len() {
+    sp.weights.clear();
+  }
+  if sp.control.is_empty() {
+    // fit points only: the curve is interpolated through them
+    sp.knots.clear();
+    return (sp.fit.len() >= 2).then_some(sp);
+  }
+  if sp.knots.is_empty() && sp.control.len() > sp.degree {
+    sp = Spline { fit: sp.fit, weights: sp.weights, ..Spline::clamped_uniform(sp.degree, sp.control) };
+  }
+  sp.is_valid().then_some(sp)
 }
 
 /// Splits a polyline with bulges into lines and arcs.
@@ -256,9 +360,13 @@ pub fn bulge_arc(a: [f64; 2], b: [f64; 2], bulge: f64) -> Option<Entity> {
   Some(Entity::Arc { center, radius, start, end })
 }
 
-/// Writes entities (millimetres) as an R12 DXF. Construction entities go on layer
-/// "CONSTRUCTION".
+/// Writes entities (millimetres) as a DXF: R12 when lines, circles, arcs and points do, R2000
+/// when there are splines or ellipses (written as SPLINE and ELLIPSE entities). Construction
+/// entities go on layer "CONSTRUCTION".
 pub fn write_dxf(entities: &[(Entity, bool)]) -> String {
+  if entities.iter().any(|(e, _)| matches!(e, Entity::Spline(_) | Entity::Ellipse { .. })) {
+    return write_dxf2000(entities);
+  }
   use std::fmt::Write as _;
   let mut s = String::new();
   let mut pair = |c: i32, v: &str| {
@@ -324,16 +432,18 @@ pub fn write_dxf(entities: &[(Entity, bool)]) -> String {
           pair(c, &num(v));
         }
       }
-      Entity::Bezier { p } => {
+      Entity::Bezier { .. } | Entity::Spline(_) | Entity::Ellipse { .. } => {
         // R12 has no splines: short lines
         const STEPS: usize = 16;
-        for i in 0..STEPS {
-          let a = Entity::bezier_point(&p, i as f64 / STEPS as f64);
-          let b = Entity::bezier_point(&p, (i + 1) as f64 / STEPS as f64);
-          pair(0, "LINE");
-          pair(8, layer);
-          for (c, v) in [(10, a[0]), (20, a[1]), (30, 0.0), (11, b[0]), (21, b[1]), (31, 0.0)] {
-            pair(c, &num(v));
+        for p in e.beziers() {
+          for i in 0..STEPS {
+            let a = Entity::bezier_point(&p, i as f64 / STEPS as f64);
+            let b = Entity::bezier_point(&p, (i + 1) as f64 / STEPS as f64);
+            pair(0, "LINE");
+            pair(8, layer);
+            for (c, v) in [(10, a[0]), (20, a[1]), (30, 0.0), (11, b[0]), (21, b[1]), (31, 0.0)] {
+              pair(c, &num(v));
+            }
           }
         }
       }
@@ -342,4 +452,245 @@ pub fn write_dxf(entities: &[(Entity, bool)]) -> String {
   pair(0, "ENDSEC");
   pair(0, "EOF");
   s
+}
+
+fn num(v: f64) -> String {
+  let v = if v.abs() < 1e-12 { 0.0 } else { v };
+  format!("{v:.12}").trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Group-code/value output with a handle counter, for R2000 files.
+struct Out {
+  s: String,
+  next: u32,
+}
+
+impl Out {
+  fn pair(&mut self, c: i32, v: &str) {
+    use std::fmt::Write as _;
+    let _ = write!(self.s, "{c:>3}\n{v}\n");
+  }
+
+  fn pairs(&mut self, list: &[(i32, &str)]) {
+    for (c, v) in list {
+      self.pair(*c, v);
+    }
+  }
+
+  fn handle(&mut self) -> String {
+    self.next += 1;
+    format!("{:X}", self.next - 1)
+  }
+
+  fn point(&mut self, c: i32, p: [f64; 2]) {
+    self.pair(c, &num(p[0]));
+    self.pair(c + 10, &num(p[1]));
+    self.pair(c + 20, "0");
+  }
+
+  fn table(&mut self, name: &str, h: &str, n: usize) {
+    self.pairs(&[(0, "TABLE"), (2, name), (5, h), (330, "0"), (100, "AcDbSymbolTable"), (70, &n.to_string())]);
+  }
+
+  /// A table record's common part: type, handle, owner (the table) and subclass markers.
+  fn record(&mut self, kind: &str, owner: &str, class: &str) {
+    let h = self.handle();
+    let code = if kind == "DIMSTYLE" { 105 } else { 5 };
+    self.pairs(&[(0, kind), (code, &h), (330, owner), (100, "AcDbSymbolTableRecord"), (100, class)]);
+  }
+
+  /// An entity's common part, owned by model space.
+  fn entity(&mut self, kind: &str, owner: &str, layer: &str, class: &str) {
+    let h = self.handle();
+    self.pairs(&[(0, kind), (5, &h), (330, owner), (100, "AcDbEntity"), (8, layer), (100, class)]);
+  }
+
+  fn spline(&mut self, sp: &Spline) {
+    self.pairs(&[(210, "0"), (220, "0"), (230, "1")]);
+    let rational = sp.is_rational();
+    self.pair(70, if rational { "12" } else { "8" });
+    self.pair(71, &sp.degree.to_string());
+    self.pair(72, &sp.knots.len().to_string());
+    self.pair(73, &sp.control.len().to_string());
+    self.pair(74, &sp.fit.len().to_string());
+    self.pairs(&[(42, "0.0000000001"), (43, "0.0000000001")]);
+    if !sp.fit.is_empty() {
+      self.pair(44, "0.0000000001");
+    }
+    for k in &sp.knots {
+      self.pair(40, &num(*k));
+    }
+    if rational {
+      for w in &sp.weights {
+        self.pair(41, &num(*w));
+      }
+    }
+    for p in &sp.control {
+      self.point(10, *p);
+    }
+    for p in &sp.fit {
+      self.point(11, *p);
+    }
+  }
+}
+
+/// An R2000 (AC1015) file: the tables, blocks and objects AutoCAD expects of that version, with
+/// handles and owners, and SPLINE / ELLIPSE entities.
+fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
+  let mut o = Out { s: String::new(), next: 0x10 };
+  let [vport, ltype, layer, style, view, ucs, appid, dimstyle, block_rec] = std::array::from_fn(|_| o.handle());
+  let (ms, ps, root, groups) = (o.handle(), o.handle(), o.handle(), o.handle());
+
+  o.pairs(&[(0, "SECTION"), (2, "CLASSES"), (0, "ENDSEC")]);
+  o.pairs(&[(0, "SECTION"), (2, "TABLES")]);
+  o.table("VPORT", &vport, 1);
+  o.record("VPORT", &vport, "AcDbViewportTableRecord");
+  o.pairs(&[
+    (2, "*Active"),
+    (70, "0"),
+    (10, "0"),
+    (20, "0"),
+    (11, "1"),
+    (21, "1"),
+    (12, "0"),
+    (22, "0"),
+    (13, "0"),
+    (23, "0"),
+    (14, "10"),
+    (24, "10"),
+    (15, "10"),
+    (25, "10"),
+    (16, "0"),
+    (26, "0"),
+    (36, "1"),
+    (17, "0"),
+    (27, "0"),
+    (37, "0"),
+    (40, "1000"),
+    (41, "1.5"),
+    (42, "50"),
+    (43, "0"),
+    (44, "0"),
+    (50, "0"),
+    (51, "0"),
+    (71, "0"),
+    (72, "100"),
+    (73, "1"),
+    (74, "3"),
+    (75, "0"),
+    (76, "0"),
+    (77, "0"),
+    (78, "0"),
+    (0, "ENDTAB"),
+  ]);
+  o.table("LTYPE", &ltype, 3);
+  for (name, desc) in [("ByBlock", ""), ("ByLayer", ""), ("Continuous", "Solid line")] {
+    o.record("LTYPE", &ltype, "AcDbLinetypeTableRecord");
+    o.pairs(&[(2, name), (70, "0"), (3, desc), (72, "65"), (73, "0"), (40, "0")]);
+  }
+  o.pair(0, "ENDTAB");
+  o.table("LAYER", &layer, 2);
+  for (name, color) in [("0", "7"), ("CONSTRUCTION", "3")] {
+    o.record("LAYER", &layer, "AcDbLayerTableRecord");
+    o.pairs(&[(2, name), (70, "0"), (62, color), (6, "Continuous"), (370, "-3")]);
+  }
+  o.pair(0, "ENDTAB");
+  o.table("STYLE", &style, 1);
+  o.record("STYLE", &style, "AcDbTextStyleTableRecord");
+  o.pairs(&[(2, "Standard"), (70, "0"), (40, "0"), (41, "1"), (50, "0"), (71, "0"), (42, "2.5"), (3, "txt"), (4, "")]);
+  o.pair(0, "ENDTAB");
+  for (name, h) in [("VIEW", &view), ("UCS", &ucs)] {
+    o.table(name, h, 0);
+    o.pair(0, "ENDTAB");
+  }
+  o.table("APPID", &appid, 1);
+  o.record("APPID", &appid, "AcDbRegAppTableRecord");
+  o.pairs(&[(2, "ACAD"), (70, "0"), (0, "ENDTAB")]);
+  o.table("DIMSTYLE", &dimstyle, 1);
+  o.pairs(&[(100, "AcDbDimStyleTable"), (71, "0")]);
+  o.record("DIMSTYLE", &dimstyle, "AcDbDimStyleTableRecord");
+  o.pairs(&[(2, "Standard"), (70, "0"), (0, "ENDTAB")]);
+  o.table("BLOCK_RECORD", &block_rec, 2);
+  for (name, h) in [("*Model_Space", &ms), ("*Paper_Space", &ps)] {
+    o.pairs(&[
+      (0, "BLOCK_RECORD"),
+      (5, h),
+      (330, &block_rec),
+      (100, "AcDbSymbolTableRecord"),
+      (100, "AcDbBlockTableRecord"),
+      (2, name),
+    ]);
+  }
+  o.pairs(&[(0, "ENDTAB"), (0, "ENDSEC")]);
+
+  o.pairs(&[(0, "SECTION"), (2, "BLOCKS")]);
+  for (name, owner) in [("*Model_Space", &ms), ("*Paper_Space", &ps)] {
+    o.entity("BLOCK", owner, "0", "AcDbBlockBegin");
+    o.pairs(&[(2, name), (70, "0"), (10, "0"), (20, "0"), (30, "0"), (3, name), (1, "")]);
+    o.entity("ENDBLK", owner, "0", "AcDbBlockEnd");
+  }
+  o.pair(0, "ENDSEC");
+
+  o.pairs(&[(0, "SECTION"), (2, "ENTITIES")]);
+  for (e, cons) in entities {
+    let layer = if *cons { "CONSTRUCTION" } else { "0" };
+    match e {
+      Entity::Line { a, b } => {
+        o.entity("LINE", &ms, layer, "AcDbLine");
+        o.point(10, *a);
+        o.point(11, *b);
+      }
+      Entity::Circle { center, radius } => {
+        o.entity("CIRCLE", &ms, layer, "AcDbCircle");
+        o.point(10, *center);
+        o.pair(40, &num(*radius));
+      }
+      Entity::Arc { center, radius, start, end } => {
+        o.entity("ARC", &ms, layer, "AcDbCircle");
+        o.point(10, *center);
+        o.pair(40, &num(*radius));
+        o.pair(100, "AcDbArc");
+        o.pair(50, &num(start.rem_euclid(TAU).to_degrees()));
+        o.pair(51, &num(end.rem_euclid(TAU).to_degrees()));
+      }
+      Entity::Point { at } => {
+        o.entity("POINT", &ms, layer, "AcDbPoint");
+        o.point(10, *at);
+      }
+      Entity::Ellipse { center, major, ratio, start, end } => {
+        o.entity("ELLIPSE", &ms, layer, "AcDbEllipse");
+        o.point(10, *center);
+        o.point(11, *major);
+        o.pairs(&[(210, "0"), (220, "0"), (230, "1")]);
+        o.pair(40, &num(*ratio));
+        let a0 = start.rem_euclid(TAU);
+        let sweep = (end - start).rem_euclid(TAU);
+        let sweep = if sweep < 1e-12 { TAU } else { sweep };
+        o.pair(41, &num(a0));
+        o.pair(42, &num(a0 + sweep));
+      }
+      Entity::Bezier { p } => {
+        o.entity("SPLINE", &ms, layer, "AcDbSpline");
+        o.spline(&Spline::from_beziers(&[*p]));
+      }
+      Entity::Spline(sp) => {
+        o.entity("SPLINE", &ms, layer, "AcDbSpline");
+        o.spline(sp);
+      }
+    }
+  }
+  o.pair(0, "ENDSEC");
+
+  o.pairs(&[(0, "SECTION"), (2, "OBJECTS")]);
+  o.pairs(&[(0, "DICTIONARY"), (5, &root), (330, "0"), (100, "AcDbDictionary"), (281, "1")]);
+  o.pairs(&[(3, "ACAD_GROUP"), (350, &groups)]);
+  o.pairs(&[(0, "DICTIONARY"), (5, &groups), (330, &root), (100, "AcDbDictionary"), (281, "1")]);
+  o.pairs(&[(0, "ENDSEC"), (0, "EOF")]);
+
+  let mut head = Out { s: String::new(), next: 0 };
+  head.pair(999, "CLFusion DXF export (mm)");
+  head.pairs(&[(0, "SECTION"), (2, "HEADER"), (9, "$ACADVER"), (1, "AC1015"), (9, "$HANDSEED")]);
+  head.pair(5, &format!("{:X}", o.next));
+  head.pairs(&[(9, "$INSUNITS"), (70, "4"), (9, "$MEASUREMENT"), (70, "1"), (0, "ENDSEC")]);
+  head.s + &o.s
 }

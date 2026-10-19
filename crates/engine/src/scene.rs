@@ -131,8 +131,16 @@ impl SceneBuilder {
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
     let editing = s.edit_sketch.is_some();
 
+    // a version comparison replaces the bodies
+    if let Some(d) = &s.diff {
+      crate::diff::draw(d, &mut scene);
+    }
+
     // bodies
     for body in &s.model.bodies {
+      if s.diff.is_some() {
+        continue;
+      }
       let shown = match &opts.only_bodies {
         Some(only) => only.contains(&body.id),
         None => s.body_visible(body.id),

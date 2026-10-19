@@ -273,6 +273,10 @@ cmds! {
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
   "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
   "sketch.blend" => "Blend curve: a spline joining the ends of two curves, tangent (g1) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
+  "hub.comment" => "Comment on a version (default: the open one, else the latest)", "{item?, version?, text}";
+  "hub.comments" => "Comments on an item's versions", "{item?, version?}";
+  "hub.comment.delete" => "Delete a comment", "{item?, comment}";
+  "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

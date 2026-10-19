@@ -21,6 +21,7 @@
 //! clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
 //! clfusion-cli hub list '{"project": "Default Project"}'
 //! clfusion-cli hub versions '{"item": "i3"}'
+//! clfusion-cli hub comment '{"item": "i3", "version": 2, "text": "check the fillet"}'
 //! clfusion-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
 //! ```
 //!

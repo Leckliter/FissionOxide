@@ -11,6 +11,7 @@
 pub mod archive;
 pub mod dxf;
 mod glb;
+pub mod nurbs;
 mod obj;
 mod ply;
 mod stl;

@@ -33,6 +33,7 @@ enum Prompt {
   RenameFolder(String, String),
   RenameItem(String, String),
   Milestone(String, u32, String),
+  Comment(String, u32, String),
 }
 
 /// The Save dialog's fields.
@@ -535,6 +536,7 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
             ui.label(RichText::new(desc).small());
           }
           ui.label(RichText::new(format!("{} · {}", s(&v, "time"), s(&v, "author"))).small().color(theme::MUTED));
+          version_comments(app, ui, &id, &v);
           ui.horizontal(|ui| {
             if ui.small_button("Open").clicked() {
               app.open_hub_item(&id, Some(n as u32));
@@ -558,11 +560,17 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
                 app.data.prompt = Some(Prompt::Milestone(id.clone(), n as u32, String::new()));
               }
             }
+            if ui.small_button("💬").on_hover_text("Comment on this version").clicked() {
+              app.data.prompt = Some(Prompt::Comment(id.clone(), n as u32, String::new()));
+            }
             if is_design
               && !is_latest
-              && ui.small_button("Compare").on_hover_text("What changed from this version to the latest").clicked()
+              && ui
+                .small_button("Compare")
+                .on_hover_text("What changed from this version to the latest, shown in the viewport too")
+                .clicked()
             {
-              app.data.compare = hub(app, "hub.compare", json!({"item": id, "a": n}));
+              compare(app, &id, n);
             }
             if !is_latest && ui.small_button("🗑").on_hover_text("Delete this version").clicked() {
               hub(app, "hub.version.delete", json!({"item": id, "version": n}));
@@ -642,6 +650,7 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
     Prompt::RenameFolder(..) => ("Rename folder", "New name"),
     Prompt::RenameItem(..) => ("Rename design", "New name"),
     Prompt::Milestone(..) => ("Mark milestone", "Milestone name (e.g. Sent to shop)"),
+    Prompt::Comment(..) => ("Comment on version", "Your comment"),
   };
   let mut done = false;
   let mut cancel = false;
@@ -651,6 +660,7 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
       let text = match &mut p {
         Prompt::NewProject(t) | Prompt::NewFolder(t) | Prompt::RenameProject(t) => t,
         Prompt::RenameFolder(_, t) | Prompt::RenameItem(_, t) | Prompt::Milestone(_, _, t) => t,
+        Prompt::Comment(_, _, t) => t,
       };
       let r = ui.add(egui::TextEdit::singleline(text).hint_text(hint).desired_width(260.0));
       r.request_focus();
@@ -690,6 +700,9 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
     Prompt::Milestone(id, n, name) => {
       hub(app, "hub.milestone", json!({"item": id, "version": n, "name": name})).map(|_| ())
     }
+    Prompt::Comment(id, n, text) => {
+      hub(app, "hub.comment", json!({"item": id, "version": n, "text": text})).map(|_| ())
+    }
   };
   let _ = ok;
   app.data.stale = true;
@@ -704,6 +717,20 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
     c.get("b").and_then(Value::as_u64).unwrap_or(0)
   );
   egui::Window::new(title).open(&mut open).default_width(360.0).show(ctx, |ui| {
+    if let Some(d) = c.get("diff") {
+      let vol = |k: &str| d.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+      ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("■ added").color(theme::ICON_GREEN));
+        ui.label(RichText::new(format!("{:.1} mm³", vol("added_mm3"))).small());
+        ui.label(RichText::new("■ removed").color(theme::ERROR));
+        ui.label(RichText::new(format!("{:.1} mm³", vol("removed_mm3"))).small());
+        ui.label(RichText::new("□ unchanged").color(theme::MUTED));
+      });
+      ui.label(
+        RichText::new("The viewport shows the comparison until this window closes.").small().color(theme::MUTED),
+      );
+      ui.separator();
+    }
     let changes = c.get("changes").and_then(Value::as_array).cloned().unwrap_or_default();
     if changes.is_empty() {
       ui.label("No differences in the timeline or parameters.");
@@ -726,6 +753,40 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
   });
   if !open {
     app.data.compare = None;
+    if app.s.diff.is_some() {
+      let _ = app.s.execute("hub.diff", &json!({"clear": true}));
+      app.render_key = None;
+    }
+  }
+}
+
+/// Compares version `n` with the latest: the timeline/parameter changes, and the geometry in
+/// the viewport (added green, removed red, unchanged ghosted).
+fn compare(app: &mut App, item: &str, n: u64) {
+  let Some(mut c) = hub(app, "hub.compare", json!({"item": item, "a": n})) else { return };
+  match app.s.execute("hub.diff", &json!({"item": item, "a": n})) {
+    Ok(d) => c["diff"] = d,
+    // a version without bodies (or that fails to rebuild) still gets the text comparison
+    Err(e) => app.status = Some((format!("no geometry comparison: {}", e.0), false)),
+  }
+  app.render_key = None;
+  app.data.compare = Some(c);
+}
+
+/// A version's comments, each with a delete button.
+fn version_comments(app: &mut App, ui: &mut egui::Ui, item: &str, v: &Value) {
+  let comments = v.get("comments").and_then(Value::as_array).cloned().unwrap_or_default();
+  for c in comments {
+    ui.horizontal_wrapped(|ui| {
+      ui.label(RichText::new("💬").small());
+      ui.label(RichText::new(s(&c, "author")).strong().small());
+      ui.label(RichText::new(s(&c, "text")).small());
+      ui.label(RichText::new(s(&c, "time_text")).small().color(theme::MUTED));
+      if ui.small_button("×").on_hover_text("Delete this comment").clicked() {
+        hub(app, "hub.comment.delete", json!({"item": item, "comment": s(&c, "id")}));
+        app.data.stale = true;
+      }
+    });
   }
 }
 

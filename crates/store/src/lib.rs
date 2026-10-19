@@ -14,16 +14,23 @@
 //! <root>/items/<item>/v3.clf        version 3 of a design (or v3.<ext> for other files)
 //! <root>/items/<item>/v3.png        its thumbnail
 //! <root>/items/<item>/v3.orig.step  the file a version was uploaded from, if it was translated
+//! <root>/hub.lock                   held while hub.json is rewritten
 //! ```
 //!
+//! (Newer version files carry a tag of the process that wrote them: `v3-k2x9.clf`.)
+//!
 //! Version files are written once and never modified; `hub.json` is replaced atomically, so a
-//! crash mid-save never corrupts earlier versions. The index is re-read on [`Store::open`], so
-//! the app and the CLI can share one hub.
+//! crash mid-save never corrupts earlier versions. The index is re-read on [`Store::open`] and
+//! merged with the one on disk on every write, so the app, the CLI and other machines sharing
+//! the hub through a sync folder don't lose each other's changes (see [`sync`]). Versions can
+//! carry **comments**.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+pub mod sync;
 
 pub const HUB_FORMAT_VERSION: u32 = 1;
 const INDEX: &str = "hub.json";
@@ -159,6 +166,18 @@ pub struct Version {
   /// Free-form facts for the version list (feature/body counts, file inspection results ...).
   #[serde(default)]
   pub stats: serde_json::Value,
+  /// Review comments on this version, oldest first.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub comments: Vec<Comment>,
+}
+
+/// A comment on a version.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Comment {
+  pub id: String,
+  pub author: String,
+  pub time: Timestamp,
+  pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -269,6 +288,12 @@ pub struct Change {
 pub struct Store {
   root: PathBuf,
   index: Index,
+  /// The index as last read from or written to disk: the common ancestor when merging.
+  base: Index,
+  /// This process's tag in new ids and file names.
+  tag: String,
+  /// Conflict copies merged when the hub was opened.
+  merged: usize,
 }
 
 impl Store {
@@ -294,41 +319,106 @@ impl Store {
     home.map(|h| h.join(".local/share/clfusion")).unwrap_or_else(|| PathBuf::from("clfusion-data"))
   }
 
-  /// Opens (or creates) a hub at `root`.
+  /// Opens (or creates) a hub at `root`, merging in any conflict copies of its index.
   pub fn open(root: &Path) -> Result<Store> {
     std::fs::create_dir_all(root.join("items"))?;
-    let path = root.join(INDEX);
-    let index = match std::fs::read_to_string(&path) {
-      Ok(s) => {
-        let idx: Index = serde_json::from_str(&s)?;
-        if idx.format_version > HUB_FORMAT_VERSION {
-          return Err(invalid(format!(
-            "the hub at {} was written by a newer CLFusion (format {})",
-            root.display(),
-            idx.format_version
-          )));
-        }
-        idx
+    let index = Self::read_index(root)?.unwrap_or_default();
+    let mut st = Store { root: root.to_path_buf(), base: index.clone(), index, tag: sync::writer_tag(), merged: 0 };
+    st.merge_conflict_copies()?;
+    Ok(st)
+  }
+
+  /// `hub.json`, or `None` if there is none yet.
+  fn read_index(root: &Path) -> Result<Option<Index>> {
+    match std::fs::read_to_string(root.join(INDEX)) {
+      Ok(s) => Ok(Some(Self::parse_index(root, &s)?)),
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+      Err(e) => Err(e.into()),
+    }
+  }
+
+  fn parse_index(root: &Path, s: &str) -> Result<Index> {
+    let idx: Index = serde_json::from_str(s)?;
+    if idx.format_version > HUB_FORMAT_VERSION {
+      return Err(invalid(format!(
+        "the hub at {} was written by a newer CLFusion (format {})",
+        root.display(),
+        idx.format_version
+      )));
+    }
+    Ok(idx)
+  }
+
+  /// Folds conflict copies of `hub.json` into the index and removes them once that is saved.
+  /// Copies that don't parse (still syncing?) are left for next time.
+  fn merge_conflict_copies(&mut self) -> Result<()> {
+    let copies = sync::conflict_copies(&self.root);
+    let mut used = Vec::new();
+    for c in copies {
+      let Ok(text) = std::fs::read_to_string(&c) else { continue };
+      let Ok(other) = Self::parse_index(&self.root, &text) else { continue };
+      // versions already in hub.json keep their numbers; the copy's clashing ones move
+      let merged =
+        sync::merge(&serde_json::Value::Null, &serde_json::to_value(&other)?, &serde_json::to_value(&self.index)?);
+      self.index = serde_json::from_value(merged)?;
+      self.index.next_id = self.index.next_id.max(other.next_id);
+      used.push(c);
+    }
+    if used.is_empty() {
+      return Ok(());
+    }
+    if self.persist_inner()? {
+      for c in &used {
+        let _ = std::fs::remove_file(c);
       }
-      Err(e) if e.kind() == std::io::ErrorKind::NotFound => Index::default(),
-      Err(e) => return Err(e.into()),
-    };
-    Ok(Store { root: root.to_path_buf(), index })
+      self.merged = used.len();
+    }
+    Ok(())
+  }
+
+  /// How many conflict copies of the index were merged when the hub was opened.
+  pub fn merged_conflicts(&self) -> usize {
+    self.merged
   }
 
   pub fn root(&self) -> &Path {
     &self.root
   }
 
-  fn persist(&self) -> Result<()> {
-    let tmp = self.root.join(format!("{INDEX}.tmp"));
+  fn persist(&mut self) -> Result<()> {
+    self.persist_inner().map(|_| ())
+  }
+
+  /// Writes the index under the hub lock, first merging in what other processes wrote since it
+  /// was read. Without the lock it goes to a conflict copy instead (merged on a later open);
+  /// returns whether `hub.json` itself was written.
+  fn persist_inner(&mut self) -> Result<bool> {
+    let Some(_lock) = sync::lock(&self.root, &self.tag)? else {
+      let path = self.root.join(sync::conflict_name(&self.tag));
+      std::fs::write(path, serde_json::to_string_pretty(&self.index)?)?;
+      return Ok(false);
+    };
+    if let Some(disk) = Self::read_index(&self.root)?
+      && disk != self.base
+    {
+      let merged = sync::merge(
+        &serde_json::to_value(&self.base)?,
+        &serde_json::to_value(&self.index)?,
+        &serde_json::to_value(&disk)?,
+      );
+      let mut idx: Index = serde_json::from_value(merged)?;
+      idx.next_id = self.index.next_id.max(disk.next_id);
+      self.index = idx;
+    }
+    let tmp = self.root.join(format!("{INDEX}.{}.tmp", self.tag));
     std::fs::write(&tmp, serde_json::to_string_pretty(&self.index)?)?;
     std::fs::rename(&tmp, self.root.join(INDEX))?;
-    Ok(())
+    self.base = self.index.clone();
+    Ok(true)
   }
 
   fn new_id(&mut self, prefix: &str) -> String {
-    let id = format!("{prefix}{}", self.index.next_id);
+    let id = format!("{prefix}{}-{}", self.index.next_id, self.tag);
     self.index.next_id += 1;
     id
   }
@@ -576,7 +666,18 @@ impl Store {
   }
 
   pub fn read_version(&self, item: &str, version: Option<u32>) -> Result<Vec<u8>> {
-    Ok(std::fs::read(self.version_path(item, version)?)?)
+    let path = self.version_path(item, version)?;
+    std::fs::read(&path).map_err(|e| {
+      if e.kind() == std::io::ErrorKind::NotFound {
+        // a shared hub's index can arrive through the sync folder before the version file
+        StoreError::NotFound(format!(
+          "{} isn't in the hub folder (yet): if the hub is shared through a sync folder, it may still be syncing",
+          path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()
+        ))
+      } else {
+        e.into()
+      }
+    })
   }
 
   pub fn thumbnail(&self, item: &str, version: Option<u32>) -> Option<Vec<u8>> {
@@ -647,14 +748,38 @@ impl Store {
     if self.item(item)?.trashed {
       return Err(invalid("the item is in the trash; restore it first"));
     }
+    self.refresh()?;
     let n = self.write_version(item, content, origin, meta)?;
-    let (project, name) = {
+    let (project, name, file) = {
       let it = self.item(item)?;
-      (it.project.clone(), it.name.clone())
+      (it.project.clone(), it.name.clone(), it.versions.last().map(|v| v.file.clone()))
     };
     self.log(&project, Some(item), format!("saved {name} v{n}"));
     self.persist()?;
-    Ok(n)
+    Ok(self.number_of(item, file).unwrap_or(n))
+  }
+
+  /// A version's number by its file name: after a merge renumbered a clash, the one it got.
+  fn number_of(&self, item: &str, file: Option<String>) -> Option<u32> {
+    self.item(item).ok()?.versions.iter().find(|v| Some(&v.file) == file.as_ref()).map(|v| v.number)
+  }
+
+  /// Picks up what other processes (or machines) wrote to the hub since it was read.
+  pub fn refresh(&mut self) -> Result<()> {
+    let Some(disk) = Self::read_index(&self.root)? else { return Ok(()) };
+    if disk == self.base {
+      return Ok(());
+    }
+    let merged = sync::merge(
+      &serde_json::to_value(&self.base)?,
+      &serde_json::to_value(&self.index)?,
+      &serde_json::to_value(&disk)?,
+    );
+    let mut idx: Index = serde_json::from_value(merged)?;
+    idx.next_id = self.index.next_id.max(disk.next_id);
+    self.index = idx;
+    self.base = disk;
+    Ok(())
   }
 
   fn write_version(&mut self, item: &str, content: &[u8], origin: Origin, meta: VersionMeta) -> Result<u32> {
@@ -665,14 +790,18 @@ impl Store {
       (it.next_number(), it.ext.clone())
     };
     // never reuse a number whose file exists (left over from an interrupted save)
-    while dir.join(format!("v{n}.{ext}")).exists() || dir.join(format!("v{n}.png")).exists() {
+    let tag = self.tag.clone();
+    while [format!("v{n}.{ext}"), format!("v{n}.png"), format!("v{n}-{tag}.{ext}")].iter().any(|f| dir.join(f).exists())
+    {
       n += 1;
     }
-    let file = format!("v{n}.{ext}");
+    // the tag keeps two machines saving the same item at once from writing the same file
+    let stem = format!("v{n}-{tag}");
+    let file = format!("{stem}.{ext}");
     write_new(&dir.join(&file), content)?;
     let thumbnail = match &meta.thumbnail_png {
       Some(png) => {
-        let t = format!("v{n}.png");
+        let t = format!("{stem}.png");
         write_new(&dir.join(&t), png)?;
         Some(t)
       }
@@ -687,7 +816,7 @@ impl Store {
           .chars()
           .filter(char::is_ascii_alphanumeric)
           .collect();
-        let o = format!("v{n}.orig.{oext}");
+        let o = format!("{stem}.orig.{oext}");
         write_new(&dir.join(&o), bytes)?;
         Some(o)
       }
@@ -707,6 +836,7 @@ impl Store {
       thumbnail,
       original,
       stats: meta.stats,
+      comments: Vec::new(),
     });
     it.modified = t;
     Ok(n)
@@ -726,14 +856,15 @@ impl Store {
       stats,
       ..VersionMeta::default()
     };
+    self.refresh()?;
     let n = self.write_version(item, &content, Origin::Promoted { from: version }, meta)?;
-    let (project, name) = {
+    let (project, name, file) = {
       let it = self.item(item)?;
-      (it.project.clone(), it.name.clone())
+      (it.project.clone(), it.name.clone(), it.versions.last().map(|v| v.file.clone()))
     };
     self.log(&project, Some(item), format!("promoted {name} v{version} to v{n}"));
     self.persist()?;
-    Ok(n)
+    Ok(self.number_of(item, file).unwrap_or(n))
   }
 
   /// Sets (or with `None`/empty, clears) a version's milestone name.
@@ -905,7 +1036,7 @@ impl Store {
     self.index.items.iter().filter(|i| !i.trashed && self.project(&i.project).is_ok_and(|p| !p.trashed))
   }
 
-  /// Items whose name, version descriptions or milestones contain `query` (case-insensitive).
+  /// Items whose name, version descriptions, milestones or comments contain `query` (case-insensitive).
   pub fn search(&self, query: &str) -> Vec<&Item> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
@@ -918,6 +1049,7 @@ impl Store {
           || i.versions.iter().any(|v| {
             v.description.to_lowercase().contains(&q)
               || v.milestone.as_ref().is_some_and(|m| m.to_lowercase().contains(&q))
+              || v.comments.iter().any(|c| c.text.to_lowercase().contains(&q))
           })
       })
       .collect();
@@ -940,6 +1072,62 @@ impl Store {
   /// Total bytes used by version files.
   pub fn disk_usage(&self) -> u64 {
     self.index.items.iter().flat_map(|i| i.versions.iter()).map(|v| v.size).sum()
+  }
+  // ---- comments ----
+
+  /// Adds a comment to a version; returns its id.
+  pub fn add_comment(&mut self, item: &str, version: u32, text: &str) -> Result<String> {
+    let text = text.trim();
+    if text.is_empty() {
+      return Err(invalid("the comment is empty"));
+    }
+    if text.len() > 10_000 {
+      return Err(invalid("the comment is too long"));
+    }
+    self.item(item)?.version(version).ok_or_else(|| StoreError::NotFound(format!("no version {version}")))?;
+    let id = self.new_id("c");
+    let it = self.item_mut(item)?;
+    let (project, name) = (it.project.clone(), it.name.clone());
+    if let Some(v) = it.versions.iter_mut().find(|v| v.number == version) {
+      v.comments.push(Comment { id: id.clone(), author: user(), time: now(), text: text.to_string() });
+    }
+    let short: String = text.chars().take(60).collect();
+    let more = if short.len() < text.len() { "…" } else { "" };
+    self.log(&project, Some(item), format!("commented on {name} v{version}: \"{short}{more}\""));
+    self.persist()?;
+    Ok(id)
+  }
+
+  /// Comments on an item's versions (`version` = one version only), oldest first, with the
+  /// version number each belongs to.
+  pub fn comments(&self, item: &str, version: Option<u32>) -> Result<Vec<(u32, &Comment)>> {
+    let it = self.item(item)?;
+    if let Some(n) = version {
+      it.version(n).ok_or_else(|| StoreError::NotFound(format!("{} has no version {n}", it.name)))?;
+    }
+    let mut v: Vec<(u32, &Comment)> = it
+      .versions
+      .iter()
+      .filter(|v| version.is_none_or(|n| v.number == n))
+      .flat_map(|v| v.comments.iter().map(move |c| (v.number, c)))
+      .collect();
+    v.sort_by_key(|(_, c)| c.time);
+    Ok(v)
+  }
+
+  /// Deletes a comment.
+  pub fn delete_comment(&mut self, item: &str, comment: &str) -> Result<()> {
+    let it = self.item_mut(item)?;
+    let before: usize = it.versions.iter().map(|v| v.comments.len()).sum();
+    for v in &mut it.versions {
+      v.comments.retain(|c| c.id != comment);
+    }
+    if it.versions.iter().map(|v| v.comments.len()).sum::<usize>() == before {
+      return Err(StoreError::NotFound(format!("no comment '{comment}'")));
+    }
+    let (project, name) = (it.project.clone(), it.name.clone());
+    self.log(&project, Some(item), format!("deleted a comment on {name}"));
+    self.persist()
   }
 }
 
