@@ -3,6 +3,7 @@
 02-cylinder
 03-box-through-hole
 04-revolve-vase
+05-taper-extrude
 06-symmetric-extrude
 07-fillet-all-edges
 08-chamfer

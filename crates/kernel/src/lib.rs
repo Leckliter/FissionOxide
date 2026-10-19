@@ -550,8 +550,27 @@ impl Shape {
     if !(height.is_finite() && height.abs() > 1e-9 && angle.is_finite() && angle.abs() < 1.5) {
       return Err(KernelError::Input("taper needs a height and an angle under 85°".into()));
     }
-    // OCCT measures the height along the drafted sides
-    Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+    // A straight prism with its sides drafted about the base plane keeps sharp corners, as in
+    // Fusion; OCCT's drafted prism rounds them when the taper goes outward.
+    self.drafted_prism(height, angle).or_else(|_| {
+      // OCCT measures the height along the drafted sides
+      Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+    })
+  }
+
+  fn drafted_prism(&self, height: f64, angle: f64) -> Result<Shape> {
+    let base = self.faces()?.into_iter().next().ok_or(KernelError::Input("taper needs a face".into()))?;
+    let n = base.normal;
+    let prism = self.extrude(n * height)?;
+    let caps = |f: &FaceInfo| f.kind == SurfaceKind::Plane && f.normal.dot(n).abs() > 1.0 - 1e-9;
+    let sides: Vec<u32> = prism.faces()?.iter().filter(|f| !caps(f)).map(|f| f.id).collect();
+    let r = prism.draft(&sides, base.origin, n * height.signum(), angle)?;
+    // the sides must have leaned the right way
+    let (v, v0) = (r.mass()?.volume, prism.mass()?.volume);
+    if r.solid_count() != 1 || (angle > 0.0) != (v < v0) {
+      return Err(KernelError::Kernel("drafted prism went the wrong way".into()));
+    }
+    Ok(r)
   }
 
   /// This planar face grown (d > 0) or shrunk (d < 0) all round.
