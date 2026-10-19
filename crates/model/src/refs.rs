@@ -22,6 +22,11 @@ pub struct FaceRef {
   pub normal: [f64; 3],
   #[serde(default)]
   pub planar: bool,
+  /// Bounds of the face when it was last found (both zero until then).
+  #[serde(default, skip_serializing_if = "is_zero")]
+  pub lo: [f64; 3],
+  #[serde(default, skip_serializing_if = "is_zero")]
+  pub hi: [f64; 3],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +56,42 @@ fn is_zero(p: &[f64; 3]) -> bool {
 
 impl FaceRef {
   pub fn from_face(body: BodyId, f: &FaceInfo, at: DVec3) -> FaceRef {
-    FaceRef { body, point: at.to_array(), normal: f.normal.to_array(), planar: f.kind == SurfaceKind::Plane }
+    FaceRef {
+      body,
+      point: at.to_array(),
+      normal: f.normal.to_array(),
+      planar: f.kind == SurfaceKind::Plane,
+      lo: [0.0; 3],
+      hi: [0.0; 3],
+    }
+  }
+
+  /// Every face this reference stands for (1-based ids). A flat face that later features split
+  /// (a slot cut across it) is every piece still in its plane within its old bounds; otherwise
+  /// the best match, as [`FaceRef::resolve`] finds it.
+  pub fn resolve_all(&self, faces: &[FaceInfo], mesh: Option<&TriMesh>, scale: f64) -> Vec<u32> {
+    let (lo, hi) = (DVec3::from(self.lo), DVec3::from(self.hi));
+    if let (true, Some(m)) = (self.planar && lo != hi, mesh) {
+      let (p, n) = (DVec3::from(self.point), DVec3::from(self.normal));
+      let tol = 1e-6 * scale.max(1.0);
+      let pieces: Vec<u32> = faces
+        .iter()
+        .filter(|f| f.kind == SurfaceKind::Plane && f.normal.dot(n) > 1.0 - 1e-9)
+        .filter(|f| (p - f.origin).dot(f.normal).abs() <= tol)
+        .filter(|f| {
+          face_bounds(m, f.id).is_some_and(|(a, b)| {
+            let o = b.min(hi) - a.max(lo);
+            // overlapping across the plane (along the normal the bounds are flat)
+            o.min_element() > -tol && [o.x, o.y, o.z].iter().filter(|v| **v > tol).count() >= 2
+          })
+        })
+        .map(|f| f.id)
+        .collect();
+      if !pieces.is_empty() {
+        return pieces;
+      }
+    }
+    self.resolve(faces, mesh, scale).into_iter().collect()
   }
 
   /// Picks the best matching face (1-based id). `mesh` is the body's tessellation, used to check
@@ -73,9 +113,19 @@ impl FaceRef {
         }
         let q = p - f.normal * (p - f.origin).dot(f.normal);
         let inside = mesh.is_some_and(|m| point_in_face(m, f.id, q));
-        // inside wins outright; then the closest plane, then the closest centroid
         let off = (p - f.origin).dot(f.normal).abs();
-        (if inside { 0.0 } else { 10.0 * scale }) + off + 0.01 * (q - f.center).length()
+        let reach = (q - f.center).length();
+        // A face still in the picked plane comes first, even when an inserted feature cut a gap
+        // where the point was (a slot across the top keeps a sketch on the top, not the slot's
+        // floor); then a face the point lies over on another plane (the face moved), the
+        // closest plane first; then the closest plane and centroid.
+        let tier = match (off <= 1e-6 * scale, inside) {
+          (true, true) => 0.0,
+          (true, false) if reach <= 1.5 * f.area.sqrt() => 1.0,
+          (false, true) => 3.0,
+          _ => 10.0,
+        };
+        tier * scale + off + 0.01 * reach
       } else {
         if align.abs() < 0.999 {
           continue;
@@ -209,6 +259,22 @@ fn adjacent_normals(e: &EdgeInfo, faces: &[FaceInfo]) -> (DVec3, DVec3) {
   let (a, b) = (n(e.faces[0]), n(e.faces[1]));
   // canonical order so signatures compare regardless of face numbering
   if (a.x, a.y, a.z) <= (b.x, b.y, b.z) { (a, b) } else { (b, a) }
+}
+
+/// Bounds of a face's triangles in a body's tessellation.
+pub fn face_bounds(m: &TriMesh, face: u32) -> Option<(DVec3, DVec3)> {
+  let mut b: Option<(DVec3, DVec3)> = None;
+  for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+    if m.tri_face.get(t) != Some(&face) {
+      continue;
+    }
+    for &i in tri {
+      let Some(q) = m.positions.get(i as usize) else { continue };
+      let q = DVec3::new(q[0] as f64, q[1] as f64, q[2] as f64);
+      b = Some(b.map_or((q, q), |(lo, hi)| (lo.min(q), hi.max(q))));
+    }
+  }
+  b
 }
 
 /// Is `p` (on the face's plane) inside one of the face's triangles?

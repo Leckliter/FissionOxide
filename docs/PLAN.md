@@ -104,7 +104,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows |
 | 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds |
-| 1 | Stable references | started: a filleted edge that an inserted feature splits keeps the fillet on every piece (it used to jump to a look-alike edge silently); `tests/edits.rs` covers dimension edits, inserted and deleted features. Next: OCCT modification history |
+| 1 | Stable references | started: split edges and split faces keep their features on every piece, and a sketch stays on its face when an inserted feature cuts a gap under its pick point (both used to jump silently to a look-alike); `tests/edits.rs` covers these. Next: OCCT modification history |
 
 ### Reference part failures to fix
 

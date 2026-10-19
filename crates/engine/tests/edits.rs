@@ -91,3 +91,60 @@ fn later_features_follow_edits() {
     check("3 hole moved x 20 -> 40", &s, 48000.0 - hole - ring);
   }
 }
+
+fn block(s: &mut Session) {
+  run(s, "sketch.create", json!({"plane": "xy"}));
+  run(s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [60, 40]}));
+  run(s, "sketch.finish", json!({}));
+  run(s, "extrude", json!({"distance": 20}));
+}
+
+/// The block's top face, as a picked face.
+fn top_face(s: &Session) -> Value {
+  let b = &s.model.bodies[0];
+  let f = b.faces().iter().filter(|f| f.normal.z > 0.99).max_by(|a, c| a.origin.z.total_cmp(&c.origin.z)).unwrap().id;
+  json!({"body": b.id.0, "face": f})
+}
+
+#[test]
+fn faces_split_by_inserted_features_keep_their_features() {
+  // 5: boss sketched on the top face; a slot across the top inserted before it
+  {
+    let mut s = Session::default();
+    block(&mut s);
+    let tf = top_face(&s);
+    run(&mut s, "sketch.create", json!({"plane": tf}));
+    run(&mut s, "sketch.circle", json!({"center": [10, 10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 10, "operation": "join"}));
+    let boss = std::f64::consts::PI * 16.0 * 10.0;
+    check("5 before", &s, 48000.0 + boss);
+    run(&mut s, "timeline.marker", json!({"at": 2}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+    run(&mut s, "sketch.rect", json!({"corner1": [25, -5], "corner2": [35, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 5, "flip": true, "operation": "cut"}));
+    run(&mut s, "timeline.marker", json!({"at": null}));
+    check("5 slot inserted before the boss", &s, 48000.0 - 10.0 * 40.0 * 5.0 + boss);
+  }
+  // 6: shell open at the top; a slot across the top inserted before it splits the top in two
+  {
+    let mut s = Session::default();
+    block(&mut s);
+    let tf = top_face(&s);
+    run(&mut s, "shell", json!({"faces": [tf], "thickness": 2}));
+    check("6 before", &s, 48000.0 - 56.0 * 36.0 * 18.0);
+    run(&mut s, "timeline.marker", json!({"at": 2}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+    run(&mut s, "sketch.rect", json!({"corner1": [25, -5], "corner2": [35, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 5, "flip": true, "operation": "cut"}));
+    run(&mut s, "timeline.marker", json!({"at": null}));
+    // both halves open: a tray (walls and floor 2) bridged across by the slot as a U channel 2 thick
+    // tray: 48000 - 56*36*18; slot part removed from the tray's walls: 10*2*5 on each long side;
+    // channel: (14 wide x 7 tall - 10 x 5 hollow) over the 36 inside the walls
+    let tray = 48000.0 - 56.0 * 36.0 * 18.0 - 2.0 * (10.0 * 2.0 * 5.0);
+    let channel = (14.0 * 7.0 - 10.0 * 5.0) * 36.0;
+    check("6 slot inserted before the shell", &s, tray + channel);
+  }
+}
