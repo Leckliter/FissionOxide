@@ -19,12 +19,12 @@ the original part.
 | 05-taper-extrude/taper-5 | pass | 54574.7 | 8782.0 | 0.0 s |  |
 | 05-taper-extrude/height-20 | pass | 37974.1 | 7349.8 | 0.0 s |  |
 | 06-symmetric-extrude/distance-25 | pass | 50000.0 | 9000.0 | 0.0 s |  |
-| 07-fillet-all-edges/radius-5 | pass | 22236.0 | 4399.1 | 0.1 s |  |
-| 07-fillet-all-edges/height-24 | pass | 28109.9 | 5265.7 | 0.1 s |  |
+| 07-fillet-all-edges/radius-5 | pass | 22236.0 | 4399.1 | 0.2 s |  |
+| 07-fillet-all-edges/height-24 | pass | 28109.9 | 5265.7 | 0.2 s |  |
 | 08-chamfer/distance-4 | pass | 22965.3 | 4845.4 | 0.0 s |  |
 | 09-shell/thickness-3 | pass | 19608.0 | 13612.0 | 0.0 s |  |
 | 09-shell/height-40 | pass | 17072.0 | 17432.0 | 0.0 s |  |
-| 10-rect-pattern-holes/thickness-8 | pass | 47685.7 | 16291.0 | 0.4 s |  |
+| 10-rect-pattern-holes/thickness-8 | pass | 47685.7 | 16291.0 | 0.5 s |  |
 | 11-circular-pattern-flange/thickness-16 | pass | 106814.2 | 22902.2 | 0.2 s |  |
 | 12-mirror-feature/block-14 | pass | 27688.1 | 6949.4 | 0.0 s |  |
 | 13-combine-join/cylinder-30 | pass | 41047.8 | 7880.4 | 0.0 s |  |
@@ -34,8 +34,8 @@ the original part.
 | 24-user-parameters/height-25-hole-20 | pass | 52146.0 | 10742.5 | 0.0 s |  |
 | 43-cut-splits-body/cut-moved | pass | 28000.0 | 7200.0 | 0.0 s |  |
 | 44-shell-l-bracket/thickness-3 | pass | 11796.0 | 8464.0 | 0.1 s |  |
-| 46-shell-two-open-faces/thickness-4 | pass | 20688.0 | 11272.0 | 0.0 s |  |
-| 62-heat-sink/base-8 | pass | 48750.0 | 41750.0 | 1.0 s |  |
+| 46-shell-two-open-faces/thickness-4 | pass | 20688.0 | 11272.0 | 0.1 s |  |
+| 62-heat-sink/base-8 | pass | 48750.0 | 41750.0 | 1.1 s |  |
 | 67-sm-base-flange/thickness-4 | pass | 24000.0 | 13280.0 | 0.0 s |  |
 | 68-sm-edge-flange/thickness-3 | pass | 22520.6 | 16064.1 | 0.1 s |  |
 | 68-sm-edge-flange/height-30 | pass | 21472.6 | 18107.5 | 0.1 s |  |
