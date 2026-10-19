@@ -712,12 +712,17 @@ const DRAWING_MODIFY: &[E] = &[
   c("Delete", Icon::Remove, D(Kind::DrawingMoveView)),
   E::Sep,
   c("Sheet Settings", Icon::SheetSettings, D(Kind::DrawingSettings)),
+  E::Sep,
+  c("New Sheet", Icon::Plus, D(Kind::Form(&crate::sheet::DRAWING_NEW_SHEET))),
+  c("Edit Sheet", Icon::SheetSettings, D(Kind::Form(&crate::sheet::DRAWING_EDIT_SHEET))),
 ];
 
 const DRAWING_DIMENSIONS: &[E] = &[
   c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D"),
   c("Ordinate Dimension", Icon::OrdinateDim, D(Kind::Form(&forms::DRAWING_ORDINATE))),
   c("Angular Dimension", Icon::AngleDim, D(Kind::Form(&forms::DRAWING_ANGLE))),
+  c("Baseline Dimension", Icon::OrdinateDim, D(Kind::Form(&crate::sheet::DRAWING_BASELINE))),
+  c("Chain Dimension", Icon::Dimension, D(Kind::Form(&crate::sheet::DRAWING_CHAIN))),
 ];
 
 const DRAWING_TEXT: &[E] = &[c("Text", Icon::SkText, D(Kind::DrawingNote)).k("T")];
@@ -728,12 +733,16 @@ const DRAWING_TABLES: &[E] = &[
   E::Sep,
   c("Balloon", Icon::Balloon, D(Kind::Form(&forms::DRAWING_BALLOON))),
   c("Auto Balloon", Icon::Balloon, D(Kind::DrawingSettings)),
+  E::Sep,
+  c("Revision Table", Icon::TitleBlock, D(Kind::Form(&crate::sheet::DRAWING_REVISION))),
 ];
 
 const DRAWING_SYMBOLS: &[E] = &[
   c("Feature Control Frame", Icon::FeatureControl, D(Kind::Form(&forms::DRAWING_FCF))),
   c("Datum Identifier", Icon::DatumId, D(Kind::Form(&forms::DRAWING_DATUM))),
   c("Surface Texture", Icon::SurfaceTexture, D(Kind::Form(&forms::DRAWING_FINISH))),
+  c("Weld Symbol", Icon::Fillet, D(Kind::Form(&crate::sheet::DRAWING_WELD))),
+  c("Datum Target", Icon::DatumId, D(Kind::Form(&crate::sheet::DRAWING_DATUM_TARGET))),
 ];
 
 const DRAWING_EXPORT: &[E] = &[

@@ -294,6 +294,24 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 - **Balloons** (`drawing.balloon`) carry a component's parts list item number, worked out each
   time the drawing is drawn, so they renumber when the parts list changes; `auto_balloons`
   balloons every row that has none.
+- **Sheets** (`drawing.add_sheet`, `drawing.set_sheet`, `drawing.remove_sheet`): a drawing has
+  one or more sheets, each with its own views, notes, size and scale and a title block that
+  numbers it ("Drawing1 · 2/3"); views go on the sheet named by `sheet`, else the active one (the
+  last added, or the tab clicked in the Drawing workspace), and `drawing.move_view` moves them
+  across. `drawing.export` writes every sheet: a PDF page each, a DXF with the sheets side by
+  side, `name-1.svg`, `name-2.svg`, … (or one sheet with `sheet`). Drawings saved before sheets
+  open as one sheet.
+- **Baseline** (`drawing.baseline`) and **chain** (`drawing.chain`) dimensions: rows of
+  dimensions from one origin, stacked `spacing` apart, or between consecutive points on one line.
+- **Weld symbols** (`drawing.weld`): fillet, square, V, bevel, U, J, plug, spot and seam welds
+  on the arrow side, the other side or both, with size, length-pitch, all-around, field weld and
+  a tail; AWS A2.4 layout for ASME drawings (arrow side below the reference line), ISO 2553 for
+  ISO ones (a dashed identification line).
+- **Datum targets** (`drawing.datum_target`, points or circular areas) and **composite** position
+  and profile frames (`lower` on `drawing.feature_control`).
+- **Revision table** (`drawing.revision`, `drawing.remove_revision`) in the first sheet's top right
+  corner; the next letter (ASME Y14.35: no I, O, Q, S, X, Z) by default, and the title block shows
+  the latest revision.
 
 ## File formats
 

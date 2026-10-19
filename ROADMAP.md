@@ -17,7 +17,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
 | Sheet     | Rounded bends between press-brake lofted flange facets; later cuts in a lofted flange's flat pattern; a flat pattern sketch that follows the model |
 | Assembly  | Screw and cam motion; contact sets during viewport drags; nested sub-assemblies from inserted designs |
-| Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
+| Drawing   | Weld symbol contours, finishes and back/melt-through welds; composite frames in the Feature Control Frame dialog; datum target lines; picking dimension points on the sheet |
 | UI        | Manipulators for more commands (shell, draft, patterns); a triad that turns about any axis |
 | View      | Silhouette edges and hidden-line (dashed) display styles; GPU frustum culling and level of detail for huge assemblies |
 | Manufacture | 3D adaptive roughing; pencil, steep-and-shallow and contour finishing; holder and fixture collision checks; arcs (G2/G3) in G-code; turning and 4/5-axis |

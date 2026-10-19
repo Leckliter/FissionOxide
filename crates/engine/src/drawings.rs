@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use fox_model::drawing::{
   Axis, BreakDirection, Characteristic, DEFAULT_GAP, Datums, DimOrientation, Drawing, DrawingDim, FinishProcess,
-  MaterialCondition, ProjectionAngle, SheetSize, Standard, ViewBreak, ViewKind, render, scale_text,
+  MaterialCondition, ProjectionAngle, SheetSize, Standard, ViewBreak, ViewKind, scale_text,
 };
+use fox_model::drawing::{FIRST_SHEET, FrameTier, render_sheet, render_sheets};
 use fox_model::{BodyId, ComponentId};
 use serde_json::{Value, json};
 
@@ -39,11 +40,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let kind = view_kind(p.get("kind").ok_or(CmdError::new("missing 'kind'"))?)?;
       let at = at(p)?;
       let hidden = p.get("hidden_lines").and_then(Value::as_bool);
+      let sheet = sheet_of(s, id, p)?;
       let view = s.edit(|d| {
         let dr = d.drawing_mut(id).ok_or(CmdError::new("no such drawing"))?;
         let v = dr.add_view(kind, at);
-        if let (Some(h), Some(view)) = (hidden, dr.views.iter_mut().find(|x| x.id == v)) {
-          view.hidden_lines = h;
+        if let Some(view) = dr.views.iter_mut().find(|x| x.id == v) {
+          view.sheet = sheet;
+          if let Some(h) = hidden {
+            view.hidden_lines = h;
+          }
         }
         Ok(v)
       })?;
@@ -64,9 +69,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let id = drawing_id(s, p)?;
       let view = req_u32(p, "view")?;
       let at = at(p)?;
+      let sheet = match p.get("sheet") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(sheet_of(s, id, p)?),
+      };
       s.edit(|d| {
         let dr = d.drawing_mut(id).ok_or(CmdError::new("no such drawing"))?;
-        dr.views.iter_mut().find(|v| v.id == view).ok_or(CmdError::new("no such view"))?.at = at;
+        let v = dr.views.iter_mut().find(|v| v.id == view).ok_or(CmdError::new("no such view"))?;
+        v.at = at;
+        if let Some(sheet) = sheet {
+          v.sheet = sheet;
+        }
         Ok(())
       })?;
       Ok(json!({}))
@@ -93,8 +106,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "drawing.note" => (|| {
       let id = drawing_id(s, p)?;
-      let note =
-        DrawingDim::Note { at: at(p)?.ok_or(CmdError::new("missing 'at'"))?, text: req_str(p, "text")?.to_string() };
+      let note = DrawingDim::Note {
+        at: at(p)?.ok_or(CmdError::new("missing 'at'"))?,
+        text: req_str(p, "text")?.to_string(),
+        sheet: sheet_of(s, id, p)?,
+      };
       s.edit(|d| {
         d.drawing_mut(id).ok_or(CmdError::new("no such drawing"))?.dimensions.push(note);
         Ok(())
@@ -140,16 +156,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "drawing.export" => (|| {
       let id = drawing_id(s, p)?;
       let path = PathBuf::from(req_str(p, "path")?);
-      let d = s.design.drawing(id).ok_or(CmdError::new("no such drawing"))?;
-      let plot = render(d, &s.design, &s.model).map_err(CmdError::new)?;
-      let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-      match ext.as_str() {
-        "svg" => std::fs::write(&path, plot.svg())?,
-        "pdf" => std::fs::write(&path, plot.pdf())?,
-        "dxf" => std::fs::write(&path, plot.dxf())?,
-        o => return Err(CmdError::new(format!("unknown drawing format '.{o}' (svg, pdf, dxf)"))),
-      }
-      Ok(json!({"path": path, "items": plot.items.len()}))
+      export(s, id, &path, p)
     })(),
     "drawing.break" => (|| {
       let id = drawing_id(s, p)?;
@@ -199,11 +206,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         view: view_of(s, id, p)?,
         origin: req_vec3(p, "origin")?,
         points,
-        orientation: match opt_str(p, "orientation").or(opt_str(p, "direction")).unwrap_or("horizontal") {
-          "horizontal" | "x" => DimOrientation::Horizontal,
-          "vertical" | "y" => DimOrientation::Vertical,
-          o => return Err(CmdError::new(format!("unknown orientation '{o}' (horizontal, vertical)"))),
-        },
+        orientation: axis_of(p)?,
         offset: opt_num(s, p, "offset")?.unwrap_or(10.0),
       };
       annotate(s, id, dim)
@@ -247,11 +250,21 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       if tolerance <= 0.0 {
         return Err(CmdError::new("the tolerance must be positive"));
       }
-      let modifier = match opt_str(p, "modifier").unwrap_or("none") {
-        "none" | "rfs" | "" => None,
-        "mmc" | "m" => Some(MaterialCondition::Mmc),
-        "lmc" | "l" => Some(MaterialCondition::Lmc),
-        o => return Err(CmdError::new(format!("unknown modifier '{o}' (none, mmc, lmc)"))),
+      let modifier = modifier_of(p)?;
+      let diameter = p.get("diameter").and_then(Value::as_bool).unwrap_or(false);
+      let lower = match p.get("lower") {
+        None | Some(Value::Null) => None,
+        Some(l) => {
+          let tier = FrameTier {
+            tolerance: req_num(s, l, "tolerance")?,
+            diameter: l.get("diameter").and_then(Value::as_bool).unwrap_or(diameter),
+            modifier: modifier_of(l)?,
+            datums: labels(l, "datums")?,
+          };
+          let upper = FrameTier { tolerance, diameter, modifier, datums: datums.clone() };
+          tier.check_composite(characteristic, &upper).map_err(CmdError::new)?;
+          Some(tier)
+        }
       };
       let dim = DrawingDim::FeatureControl {
         view: view_of(s, id, p)?,
@@ -259,9 +272,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         offset: offset_of(p)?.unwrap_or([12.0, 12.0]),
         characteristic,
         tolerance,
-        diameter: p.get("diameter").and_then(Value::as_bool).unwrap_or(false),
+        diameter,
         modifier,
         datums,
+        lower,
       };
       annotate(s, id, dim)
     })(),
@@ -334,8 +348,69 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       })?;
       Ok(json!({}))
     })(),
-    _ => return None,
+    _ => return sheets::run(s, name, p),
   })
+}
+
+/// `modifier`: none (rfs) | mmc | lmc.
+fn modifier_of(p: &Value) -> Result<Option<MaterialCondition>, CmdError> {
+  Ok(match opt_str(p, "modifier").unwrap_or("none") {
+    "none" | "rfs" | "" => None,
+    "mmc" | "m" => Some(MaterialCondition::Mmc),
+    "lmc" | "l" => Some(MaterialCondition::Lmc),
+    o => return Err(CmdError::new(format!("unknown modifier '{o}' (none, mmc, lmc)"))),
+  })
+}
+
+/// `orientation` (or `direction`): horizontal | vertical, default horizontal.
+fn axis_of(p: &Value) -> Result<DimOrientation, CmdError> {
+  match opt_str(p, "orientation").or(opt_str(p, "direction")).unwrap_or("horizontal") {
+    "horizontal" | "x" => Ok(DimOrientation::Horizontal),
+    "vertical" | "y" => Ok(DimOrientation::Vertical),
+    o => Err(CmdError::new(format!("unknown orientation '{o}' (horizontal, vertical)"))),
+  }
+}
+
+/// `sheet`, which must be in the drawing (default the active sheet, else the first).
+fn sheet_of(s: &Session, id: u32, p: &Value) -> Result<u32, CmdError> {
+  let d = s.design.drawing(id).ok_or(CmdError::new("no such drawing"))?;
+  match p.get("sheet") {
+    None | Some(Value::Null) => match s.drawing_sheet {
+      Some((dr, sheet)) if dr == id && d.has_sheet(sheet) => Ok(sheet),
+      _ => Ok(d.sheet_list().first().map_or(FIRST_SHEET, |x| x.id)),
+    },
+    Some(_) => {
+      let n = req_u32(p, "sheet")?;
+      d.has_sheet(n).then_some(n).ok_or(CmdError::new(format!("no sheet {n} in the drawing")))
+    }
+  }
+}
+
+/// Writes a drawing: a PDF gets a page per sheet and a DXF the sheets side by side; an SVG holds
+/// one sheet, so several sheets go to `name-1.svg`, `name-2.svg`, …. With `sheet`, only that one.
+fn export(s: &Session, id: u32, path: &std::path::Path, p: &Value) -> CmdResult {
+  let d = s.design.drawing(id).ok_or(CmdError::new("no such drawing"))?;
+  let plots = match p.get("sheet") {
+    None | Some(Value::Null) => render_sheets(d, &s.design, &s.model).map_err(CmdError::new)?,
+    Some(_) => vec![render_sheet(d, &s.design, &s.model, sheet_of(s, id, p)?).map_err(CmdError::new)?],
+  };
+  let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+  let mut paths = vec![path.to_path_buf()];
+  match ext.as_str() {
+    "svg" if plots.len() == 1 => std::fs::write(path, plots[0].svg())?,
+    "svg" => {
+      let stem = path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+      paths = (1..=plots.len()).map(|n| path.with_file_name(format!("{stem}-{n}.svg"))).collect();
+      for (f, plot) in paths.iter().zip(&plots) {
+        std::fs::write(f, plot.svg())?;
+      }
+    }
+    "pdf" => std::fs::write(path, fox_model::plot::pdf_pages(&plots))?,
+    "dxf" => std::fs::write(path, fox_model::plot::dxf_sheets(&plots))?,
+    o => return Err(CmdError::new(format!("unknown drawing format '.{o}' (svg, pdf, dxf)"))),
+  }
+  let items: usize = plots.iter().map(|x| x.items.len()).sum();
+  Ok(json!({"path": paths[0], "paths": paths, "sheets": plots.len(), "items": items}))
 }
 
 /// Adds a dimension or annotation; returns its index (for drawing.remove_dimension).
@@ -556,21 +631,41 @@ fn parse_scale(t: &str) -> Result<f64, CmdError> {
 
 fn info(s: &Session, id: u32) -> CmdResult {
   let d = s.design.drawing(id).ok_or(CmdError::new("no such drawing"))?;
-  let plot = render(d, &s.design, &s.model);
+  let plot = render_sheets(d, &s.design, &s.model);
   let scale = d.scale.map(scale_text);
+  let sheets: Vec<Value> = d
+    .sheet_list()
+    .iter()
+    .map(|x| {
+      json!({
+        "id": x.id,
+        "name": x.name,
+        "sheet": format!("{:?}", x.size.unwrap_or(d.sheet)),
+        "scale": x.scale.map(scale_text),
+        "views": d.views.iter().filter(|v| v.sheet == x.id).map(|v| v.id).collect::<Vec<_>>(),
+      })
+    })
+    .collect();
   Ok(json!({
     "drawing": d.id,
     "name": d.name,
     "sheet": format!("{:?}", d.sheet),
     "scale": scale.unwrap_or_else(|| "auto".into()),
-    "views": d.views.iter().map(|v| json!({"id": v.id, "kind": v.kind, "at": v.at, "breaks": v.breaks})).collect::<Vec<_>>(),
+    "views": d.views.iter().map(|v| json!({"id": v.id, "kind": v.kind, "at": v.at, "breaks": v.breaks, "sheet": v.sheet})).collect::<Vec<_>>(),
     "dimensions": d.dimensions.len(),
     "standard": d.standard,
     "auto_balloons": d.auto_balloons,
     "error": plot.as_ref().err(),
-    "text": plot.as_ref().map(|p| p.texts().iter().map(|t| t.to_string()).collect::<Vec<_>>()).unwrap_or_default(),
+    "text": plot
+      .as_ref()
+      .map(|p| p.iter().flat_map(|x| x.texts()).map(str::to_string).collect::<Vec<_>>())
+      .unwrap_or_default(),
+    "sheets": sheets,
+    "revisions": d.revisions,
   }))
 }
+
+mod sheets;
 
 #[cfg(test)]
 mod tests;

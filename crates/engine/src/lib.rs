@@ -156,6 +156,9 @@ pub struct Session {
   pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
   pub diff: Option<diff::DiffView>,
+  /// The drawing sheet being worked on, (drawing, sheet): where new views and notes go when a
+  /// command names no sheet. `drawing.add_sheet` moves it to the new sheet.
+  pub drawing_sheet: Option<(u32, u32)>,
 }
 
 impl Default for Session {
@@ -184,6 +187,7 @@ impl Session {
       toolpaths_of: None,
       simulation: None,
       diff: None,
+      drawing_sheet: None,
     };
     s.rebuild();
     s

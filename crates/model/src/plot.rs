@@ -156,6 +156,11 @@ impl Plot {
 
   /// A one-page PDF (vector, Helvetica text).
   pub fn pdf(&self) -> Vec<u8> {
+    pdf_pages(std::slice::from_ref(self))
+  }
+
+  /// The PDF content stream of the page.
+  fn pdf_content(&self) -> String {
     let k = 72.0 / 25.4;
     let mut c = String::new();
     c.push_str("1 J 1 j\n");
@@ -208,31 +213,7 @@ impl Plot {
         _ => {}
       }
     }
-    let objs = [
-      "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-      format!(
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-        self.width * k,
-        self.height * k
-      ),
-      format!("<< /Length {} >>\nstream\n{c}endstream", c.len()),
-      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
-    ];
-    let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-      offsets.push(out.len());
-      out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-    }
-    let xref = out.len();
-    let mut tail = format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1);
-    for o in offsets {
-      let _ = writeln!(tail, "{o:010} 00000 n ");
-    }
-    let _ = write!(tail, "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1);
-    out.extend_from_slice(tail.as_bytes());
-    out
+    c
   }
 
   /// DXF (R12, mm): one layer per pen, text as TEXT entities.
@@ -285,6 +266,76 @@ impl Plot {
     }
     s.push_str("0\nENDSEC\n0\nEOF\n");
     s
+  }
+}
+
+/// A PDF with one page per plot (each its own size), sharing one font.
+pub fn pdf_pages(plots: &[Plot]) -> Vec<u8> {
+  let k = 72.0 / 25.4;
+  // 1 catalog, 2 pages, 3 font, then a page and its contents per plot
+  let page = |i: usize| 4 + 2 * i;
+  let kids: Vec<String> = (0..plots.len()).map(|i| format!("{} 0 R", page(i))).collect();
+  let mut objs = vec![
+    "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+    format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), plots.len()),
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+  ];
+  for (i, p) in plots.iter().enumerate() {
+    let c = p.pdf_content();
+    objs.push(format!(
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>",
+      p.width * k,
+      p.height * k,
+      page(i) + 1
+    ));
+    objs.push(format!("<< /Length {} >>\nstream\n{c}endstream", c.len()));
+  }
+  let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
+  let mut offsets = Vec::new();
+  for (i, o) in objs.iter().enumerate() {
+    offsets.push(out.len());
+    out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+  }
+  let xref = out.len();
+  let mut tail = format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1);
+  for o in offsets {
+    let _ = writeln!(tail, "{o:010} 00000 n ");
+  }
+  let _ = write!(tail, "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1);
+  out.extend_from_slice(tail.as_bytes());
+  out
+}
+
+/// Gap (mm) between the sheets of a multi-sheet DXF.
+pub const SHEET_GAP: f64 = 20.0;
+
+/// One DXF with the sheets side by side, left to right, [`SHEET_GAP`] apart.
+pub fn dxf_sheets(plots: &[Plot]) -> String {
+  let mut all = Plot::default();
+  let mut x = 0.0;
+  for p in plots {
+    all.items.extend(p.items.iter().map(|it| it.moved(x)));
+    all.width = x + p.width;
+    all.height = all.height.max(p.height);
+    x += p.width + SHEET_GAP;
+  }
+  all.dxf()
+}
+
+impl Item {
+  /// The item moved `dx` mm to the right.
+  fn moved(&self, dx: f64) -> Item {
+    let mv = |p: &[f64; 2]| [p[0] + dx, p[1]];
+    match self {
+      Item::Line { pen, points } => Item::Line { pen: *pen, points: points.iter().map(mv).collect() },
+      Item::Fill { points } => Item::Fill { points: points.iter().map(mv).collect() },
+      Item::Text { at, size, text, anchor } => {
+        Item::Text { at: mv(at), size: *size, text: text.clone(), anchor: *anchor }
+      }
+      Item::RotatedText { at, size, text, angle } => {
+        Item::RotatedText { at: mv(at), size: *size, text: text.clone(), angle: *angle }
+      }
+    }
   }
 }
 
@@ -347,5 +398,36 @@ mod tests {
     let xref = text.find("xref").unwrap();
     assert!(text.contains(&format!("startxref\n{xref}")));
     assert!(p.dxf().contains("%%c10"));
+  }
+
+  #[test]
+  fn several_sheets() {
+    let a = Plot {
+      width: 297.0,
+      height: 210.0,
+      items: vec![Item::Line { pen: Pen::Thin, points: vec![[0.0, 0.0], [5.0, 0.0]] }],
+    };
+    let b = Plot {
+      width: 420.0,
+      height: 297.0,
+      items: vec![Item::Line { pen: Pen::Thin, points: vec![[1.0, 2.0], [3.0, 4.0]] }],
+    };
+    let pdf = pdf_pages(&[a.clone(), b.clone()]);
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/Kids [4 0 R 6 0 R] /Count 2"), "{text}");
+    assert_eq!(text.matches("/Type /Page /Parent").count(), 2);
+    // each page keeps its own size (A4 and A3 landscape, in points)
+    assert!(text.contains("/MediaBox [0 0 841.89 595.28]") && text.contains("/MediaBox [0 0 1190.55 841.89]"));
+    // every object the xref lists is where it says
+    let xref = text.find("xref").unwrap();
+    let offsets: Vec<usize> = text[xref..].lines().skip(3).take(7).map(|l| l[..10].parse().unwrap()).collect();
+    for (i, o) in offsets.iter().enumerate() {
+      assert!(text[*o..].starts_with(&format!("{} 0 obj", i + 1)), "object {}", i + 1);
+    }
+    // one page is what Plot::pdf writes
+    assert!(String::from_utf8_lossy(&a.pdf()).contains("/Count 1"));
+    // the DXF puts the second sheet right of the first, a gap apart
+    let dxf = dxf_sheets(&[a, b]);
+    assert!(dxf.contains(&format!("10\n{}\n20\n2\n", 297.0 + SHEET_GAP + 1.0)), "{dxf}");
   }
 }
