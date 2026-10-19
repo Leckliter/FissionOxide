@@ -386,6 +386,7 @@ impl Ctx<'_> {
           });
         }
         let mut n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
+        let mut trim = None;
         let (start, length) = match extent.kind {
           ExtentKind::OneSide => (0.0, self.len(&extent.distance)?),
           ExtentKind::Symmetric => {
@@ -406,14 +407,31 @@ impl Ctx<'_> {
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
             if info.kind != clf_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
-              return Err("extrude to a flat face parallel to the sketch".into());
+              // a curved or tilted face: extrude through and trim to it
+              let offset = self.len(&extent.distance)?;
+              if (info.center - sk.plane.origin).dot(n) < 0.0 {
+                n = -n;
+              }
+              trim = Some(solid::Trim::Face { body: bi, face: fid, offset });
+              (0.0, self.through_all(&sk.plane))
+            } else {
+              let mut d = (info.origin - sk.plane.origin).dot(n);
+              if d < 0.0 {
+                n = -n;
+                d = -d;
+              }
+              (0.0, d + self.len(&extent.distance)?)
             }
-            let mut d = (info.origin - sk.plane.origin).dot(n);
-            if d < 0.0 {
+          }
+          ExtentKind::ToBody => {
+            let fr = extent.to.as_mut().ok_or("pick the body to extrude to")?;
+            let bi = self.body_index(fr.body)?;
+            let center = self.state.bodies[bi].shape.mass().map_err(ke)?.center_of_mass;
+            if (center - sk.plane.origin).dot(n) < 0.0 {
               n = -n;
-              d = -d;
             }
-            (0.0, d + self.len(&extent.distance)?)
+            trim = Some(solid::Trim::Body { body: bi });
+            (0.0, self.through_all(&sk.plane))
           }
         };
         let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
@@ -450,7 +468,10 @@ impl Ctx<'_> {
             tools.push(solid(&face)?);
           }
         }
-        let tool = union_all(tools)?;
+        let mut tool = union_all(tools)?;
+        if let Some(t) = trim {
+          tool = self.trim_to_object(tool, t, &sk.plane)?;
+        }
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
@@ -471,14 +492,22 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2 } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback } => {
         let r = self.len(radius)?;
+        let sb = match setback.as_deref().map(str::trim) {
+          Some(e) if !e.is_empty() => Some(self.len(e)?),
+          _ => None,
+        };
+        let round = |s: &Shape, f: Shape, ids: &[u32]| match sb {
+          Some(sb) => solid::setback(s, &f, ids, sb),
+          None => Ok(f),
+        };
         match radius2 {
           Some(r2) => {
             let r2 = self.len(r2)?;
-            self.edge_op(id, edges, |s, ids| s.fillet_variable(ids, r, r2))
+            self.edge_op(id, edges, |s, ids| round(s, s.fillet_variable(ids, r, r2)?, ids))
           }
-          None => self.edge_op(id, edges, |s, ids| s.fillet(ids, r)),
+          None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
       FeatureKind::Chamfer { edges, distance, distance2, angle } => {
@@ -726,7 +755,7 @@ impl Ctx<'_> {
         self.state.bodies.retain(|b| !bodies.contains(&b.id));
         Ok(None)
       }
-      FeatureKind::Loft { sections, ruled, closed, operation } => {
+      FeatureKind::Loft { sections, ruled, closed, operation, rails, centerline } => {
         let mut faces = Vec::new();
         for (i, sec) in sections.iter().enumerate() {
           let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
@@ -737,11 +766,11 @@ impl Ctx<'_> {
           .ok_or(format!("section {} has no profile", i + 1))?;
           faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?);
         }
-        let tool = Shape::loft(&faces, *ruled, *closed).map_err(ke)?;
+        let tool = self.loft_guided(&faces, *ruled, *closed, rails, centerline.as_ref())?;
         self.operate(id, tool, *operation)?;
         Ok(None)
       }
-      FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation } => {
+      FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation, rail, twist } => {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
         let segs = sheet::open_path(&ps.sketch, path_curves)?;
@@ -750,9 +779,10 @@ impl Ctx<'_> {
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
         }
+        let guide = self.sweep_guide(rail.as_ref(), twist)?;
         let mut tools = Vec::new();
         for p in &chosen {
-          tools.push(Shape::face(&sk.plane, p).map_err(ke)?.sweep(&path).map_err(ke)?);
+          tools.push(solid::sweep(&Shape::face(&sk.plane, p).map_err(ke)?, &path, &guide)?);
         }
         self.operate(id, union_all(tools)?, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
@@ -1244,6 +1274,9 @@ impl Ctx<'_> {
           self.state.bodies[bi] = nb;
         }
         Ok(None)
+      }
+      kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
+        self.apply_solid(id, kind)
       }
       other => self.apply_extra(id, other),
     }
@@ -1894,6 +1927,10 @@ fn ke(e: KernelError) -> String {
 
 mod extra;
 pub use extra::iso_pitch;
+mod solid;
+pub use solid::boundary_cells;
+#[cfg(test)]
+mod tests_solid;
 
 #[cfg(test)]
 mod tests;

@@ -106,14 +106,14 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face, to?: face, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face|to_body, to?: face (flat or curved) | {body}, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
-  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
-  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], operation?}";
+  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
-  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable", "{edges: [{body, edge} | {point}], radius, radius2?}";
+  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; setback re-blends corners where three edges meet", "{edges: [{body, edge} | {point}], radius, radius2?, setback?}";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
@@ -214,6 +214,11 @@ cmds! {
   "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
+  "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?}";
+  "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?}";
+  "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
+  "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
+  "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -230,6 +235,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cam::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::solid::run(s, name, p) {
     return r;
   }
   match name {
@@ -412,16 +420,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "two_sides" => ExtentKind::TwoSides,
         "through_all" | "all" => ExtentKind::ThroughAll,
         "to_face" | "to" => ExtentKind::ToFace,
+        "to_body" | "to_object" => ExtentKind::ToBody,
         other => return Err(CmdError::new(format!("unknown extent '{other}'"))),
       };
       let distance = match kind {
         ExtentKind::ThroughAll => "0".to_string(),
-        ExtentKind::ToFace => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+        ExtentKind::ToFace | ExtentKind::ToBody => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
         _ => req_expr(p, "distance")?,
       };
       let to = match (kind, p.get("to")) {
         (ExtentKind::ToFace, Some(f)) => Some(face_ref(s, f)?),
         (ExtentKind::ToFace, None) => return Err(CmdError::new("to_face needs 'to': a face")),
+        (ExtentKind::ToBody, Some(b)) => Some(crate::solid::body_face_ref(s, b)?),
+        (ExtentKind::ToBody, None) => return Err(CmdError::new("to_body needs 'to': a body")),
         _ => None,
       };
       let thin_side = match opt_str(p, "thin_side").unwrap_or("inside") {
@@ -469,9 +480,21 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       s.edit_sketch = None;
       let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      let mut rails = Vec::new();
+      for v in p.get("rails").and_then(Value::as_array).into_iter().flatten() {
+        rails.push(crate::solid::path_ref(s, v)?);
+      }
+      let centerline = p.get("centerline").map(|v| crate::solid::path_ref(s, v)).transpose()?;
       add_feature(
         s,
-        FeatureKind::Loft { sections, ruled: flag("ruled"), closed: flag("closed"), operation: operation(p)? },
+        FeatureKind::Loft {
+          sections,
+          ruled: flag("ruled"),
+          closed: flag("closed"),
+          operation: operation(p)?,
+          rails,
+          centerline,
+        },
       )
     }
     "sweep" => {
@@ -480,7 +503,19 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let sk = sketch_for_feature(s, p)?;
       let profiles = profile_points(s, sk, p)?;
       let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
-      add_feature(s, FeatureKind::Sweep { sketch: sk, profiles, path_sketch, path_curves, operation: operation(p)? })
+      let rail = p.get("rail").map(|v| crate::solid::path_ref(s, v)).transpose()?;
+      add_feature(
+        s,
+        FeatureKind::Sweep {
+          sketch: sk,
+          profiles,
+          path_sketch,
+          path_curves,
+          operation: operation(p)?,
+          rail,
+          twist: opt_expr(p, "twist").unwrap_or_default(),
+        },
+      )
     }
     "hole" => {
       let sk = sketch_for_feature(s, p)?;
@@ -523,7 +558,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "fillet" => {
       let edges = edge_refs(s, p)?;
-      add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")?, radius2: opt_expr(p, "radius2") })
+      add_feature(
+        s,
+        FeatureKind::Fillet {
+          edges,
+          radius: req_expr(p, "radius")?,
+          radius2: opt_expr(p, "radius2"),
+          setback: opt_expr(p, "setback"),
+        },
+      )
     }
     "chamfer" => {
       let edges = edge_refs(s, p)?;
@@ -1336,7 +1379,7 @@ pub(crate) fn sketch_for_feature(s: &mut Session, p: &Value) -> Result<FeatureId
 }
 
 /// `profiles`: absent/"all" → all; list of [x,y] interior points or region indices.
-fn profile_points(s: &Session, sketch: FeatureId, p: &Value) -> Result<Vec<[f64; 2]>, CmdError> {
+pub(crate) fn profile_points(s: &Session, sketch: FeatureId, p: &Value) -> Result<Vec<[f64; 2]>, CmdError> {
   let Some(list) = p.get("profiles").and_then(Value::as_array) else { return Ok(Vec::new()) };
   let regions = s.model.sketches.get(&sketch).map(|r| r.profiles.clone()).unwrap_or_default();
   let mut out = Vec::new();

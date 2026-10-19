@@ -99,4 +99,19 @@ void write_iges(const Shape &s, rust::Str path);
 std::unique_ptr<Shape> read_iges(rust::Str path);
 std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
+// Second batch of solid features (features2.cpp).
+std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail);
+std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist);
+std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine);
+std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails);
+std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,
+                                   rust::Slice<const double> dir, double depth, bool deboss, bool wrap);
+std::unique_ptr<Shape> boundary_cells(const Shape &tools);
+int32_t classify(const Shape &s, double x, double y, double z);
+std::unique_ptr<Shape> plane_face(rust::Slice<const double> plane, double size);
+std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offset, rust::Slice<const double> at,
+                                     rust::Slice<const double> toward);
+double side_of(const Shape &face, double x, double y, double z);
+std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double> points, double radius);
+
 } // namespace clf

@@ -24,9 +24,10 @@ change a parameter and watch the whole history rebuild.
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
   rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
   split each other, so two overlapping rectangles give three regions without trimming.
-- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face; taper
-  angle; thin walls inside/outside/centred; new body, join, cut, intersect), revolve, fillet
-  (constant or variable radius), chamfer (equal, two distances, or distance and angle),
+- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face — flat or
+  curved, with an offset past it — or to a body; taper angle; thin walls inside/outside/centred;
+  new body, join, cut, intersect), revolve, fillet (constant or variable radius, setback corners
+  where three filleted edges meet), chamfer (equal, two distances, or distance and angle),
   press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
   rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
 - **Construction geometry.** Planes offset, at an angle, midway, through three points or two
@@ -38,9 +39,13 @@ change a parameter and watch the whole history rebuild.
   threads with ISO metric coarse pitches by default, coils with round, square or triangular
   wire, solid or hollow pipes along a path, ribs and webs that grow until they meet the body.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
-- **More solid features.** Loft (smooth or ruled, open or closed), sweep along a path of lines
-  and arcs, holes at sketch points (simple, counterbore, countersink, drill point, through all),
-  split body by a plane or by another body, draft.
+- **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
+  sweep along a path of lines and arcs (with a guide rail that turns and scales the profile, or a
+  twist angle), holes at sketch points (simple, counterbore, countersink, drill point, through
+  all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
+  on flat or curved faces (projected, or wrapped around a cylinder), boundary fill (pick the
+  closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
+  surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
 - **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
   sketch, ruled surfaces between edges, offset surfaces, trim with a plane, stitch surfaces into
   a solid, unstitch, reverse normals, and thicken faces or surfaces into solids.
