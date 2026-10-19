@@ -144,7 +144,7 @@ pub(crate) fn path_d1(path: &[Bz], u: f64) -> P {
   path.get(i).map(|b| bz_d1(b, t)).unwrap_or([1.0, 0.0])
 }
 
-fn path_closed(path: &[Bz]) -> bool {
+pub(crate) fn path_closed(path: &[Bz]) -> bool {
   match (path.first(), path.last()) {
     (Some(a), Some(b)) => dist(a[0], b[3]) < 1e-9,
     _ => false,
@@ -262,14 +262,17 @@ pub(crate) fn path_meets_geo(path: &[Bz], g: &Geo) -> Vec<(f64, P)> {
     Geo::Line { .. } => None,
   };
   let mut out: Vec<(f64, P)> = Vec::new();
+  // the chain's own ends count when they lie on the curve to within rounding
+  let snap = |v: f64, end: bool| if end && v.abs() < 1e-10 { 0.0 } else { v };
+  let n = path.len();
   for (i, b) in path.iter().enumerate() {
     if cull.is_some_and(|c| !overlap(bbox(b), c, 1e-6)) {
       continue;
     }
-    let mut prev = (0.0, f(b[0]));
+    let mut prev = (0.0, snap(f(b[0]), i == 0));
     for k in 1..=SAMPLES {
       let t = k as f64 / SAMPLES as f64;
-      let v = f(bz_at(b, t));
+      let v = snap(f(bz_at(b, t)), k == SAMPLES && i + 1 == n);
       let root = if prev.1 == 0.0 {
         Some(prev.0)
       } else if prev.1 * v < 0.0 {
@@ -422,6 +425,9 @@ impl Sketch {
     if let Some(g) = self.geo(id) {
       return Some(Shape::Geo(g));
     }
+    if let Some(path) = self.elliptic_path(id) {
+      return Some(Shape::Free(path));
+    }
     let bz = self.beziers(id);
     (!bz.is_empty()).then_some(Shape::Free(bz))
   }
@@ -468,13 +474,14 @@ impl Sketch {
       CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
         Some((*points.first()?, *points.last()?))
       }
+      CurveKind::EllipticalArc { start, end, .. } => Some((*start, *end)),
       CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => None,
     }
   }
 
   /// Makes curve `id` (or a new curve when None) the Bézier chain `pieces` from point `start` to
   /// point `end`, with new points for the joints and handles between.
-  fn put_bezier(
+  pub(crate) fn put_bezier(
     &mut self,
     id: Option<CurveId>,
     pieces: &[Bz],
@@ -506,7 +513,7 @@ impl Sketch {
   }
 
   /// Drops tangency / curvature constraints of `curve` at a joint that is no longer on it.
-  fn drop_smooth_at(&mut self, curve: CurveId, at: P) {
+  pub(crate) fn drop_smooth_at(&mut self, curve: CurveId, at: P) {
     let ends_near = |s: &Sketch, other: CurveId| {
       s.ends(other).is_some_and(|(a, b)| [a, b].iter().any(|p| s.pos(*p).is_some_and(|q| dist(q, at) < 1e-6)))
     };
@@ -526,7 +533,7 @@ impl Sketch {
   }
 
   /// Moves tangency / curvature constraints of `old` at the joint `at` over to `new`.
-  fn retarget_smooth(&mut self, old: CurveId, new: CurveId, at: P) {
+  pub(crate) fn retarget_smooth(&mut self, old: CurveId, new: CurveId, at: P) {
     let near_end = |s: &Sketch, other: CurveId| {
       s.ends(other).is_some_and(|(a, b)| [a, b].iter().any(|p| s.pos(*p).is_some_and(|q| dist(q, at) < 1e-6)))
     };
@@ -656,7 +663,11 @@ impl Sketch {
         (CurveKind::Arc { center, .. } | CurveKind::Circle { center, .. }, _) => {
           self.put_curve(id, CurveKind::Arc { center: *center, start: *a, end: *b }, c.construction)?
         }
-        (_, Shape::Free(path)) => self.put_bezier(id, &path_sub(path, *t0, *t1), *a, *b, c.construction)?,
+        (CurveKind::Ellipse { center, major, minor } | CurveKind::EllipticalArc { center, major, minor, .. }, _) => {
+          let kind = CurveKind::EllipticalArc { center: *center, major: *major, minor: *minor, start: *a, end: *b };
+          self.put_curve(id, kind, c.construction)?
+        }
+        (_, Shape::Free(path)) => self.put_piece(id, &c.kind, path, (*t0, *t1), (*a, *b), c.construction)?,
         _ => return Err(SketchError::NoCurve(curve)),
       };
       out.push(nid);
@@ -683,7 +694,12 @@ impl Sketch {
   }
 
   /// Replaces curve `id`'s kind, or adds a new curve.
-  fn put_curve(&mut self, id: Option<CurveId>, kind: CurveKind, construction: bool) -> Result<CurveId, SketchError> {
+  pub(crate) fn put_curve(
+    &mut self,
+    id: Option<CurveId>,
+    kind: CurveKind,
+    construction: bool,
+  ) -> Result<CurveId, SketchError> {
     match id.and_then(|i| self.curve_mut(i)) {
       Some(c) => {
         c.kind = kind;
@@ -740,7 +756,7 @@ impl Sketch {
           let p = path_at(&path, t);
           let np = self.add_point(p[0], p[1]);
           self.drop_smooth_at(curve, start_pos);
-          self.put_bezier(Some(curve), &path_sub(&path, t, n), np, last, c.construction)?;
+          self.put_piece(Some(curve), &c.kind, &path, (t, n), (np, last), c.construction)?;
           self.add_constraint(ConstraintKind::PointOnCurve { p: np, curve: other })?;
           vec![curve]
         }
@@ -748,15 +764,15 @@ impl Sketch {
           let p = path_at(&path, t);
           let np = self.add_point(p[0], p[1]);
           self.drop_smooth_at(curve, end_pos);
-          self.put_bezier(Some(curve), &path_sub(&path, 0.0, t), first, np, c.construction)?;
+          self.put_piece(Some(curve), &c.kind, &path, (0.0, t), (first, np), c.construction)?;
           self.add_constraint(ConstraintKind::PointOnCurve { p: np, curve: other })?;
           vec![curve]
         }
         (Some((t0, o0)), Some((t1, o1))) => {
           let (p0, p1) = (path_at(&path, t0), path_at(&path, t1));
           let (n0, n1) = (self.add_point(p0[0], p0[1]), self.add_point(p1[0], p1[1]));
-          self.put_bezier(Some(curve), &path_sub(&path, 0.0, t0), first, n0, c.construction)?;
-          let second = self.put_bezier(None, &path_sub(&path, t1, n), n1, last, c.construction)?;
+          self.put_piece(Some(curve), &c.kind, &path, (0.0, t0), (first, n0), c.construction)?;
+          let second = self.put_piece(None, &c.kind, &path, (t1, n), (n1, last), c.construction)?;
           self.retarget_smooth(curve, second, end_pos);
           self.add_constraint(ConstraintKind::PointOnCurve { p: n0, curve: o0 })?;
           self.add_constraint(ConstraintKind::PointOnCurve { p: n1, curve: o1 })?;
@@ -866,6 +882,9 @@ impl Sketch {
       fwd.push([e, lerp(e, p, 1.0 / 3.0), lerp(e, p, 2.0 / 3.0), p]);
       (p, other)
     };
+    if self.extend_fit(curve, &c.kind, from_end, hit)? {
+      return Ok(());
+    }
     let pieces = if from_end { fwd } else { path_rev(&fwd) };
     let old_points = crate::curve_points(&c.kind);
     let end = if from_end { last } else { first };
@@ -1292,7 +1311,10 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
       let ccw = left(unit(sub(p, c))?);
       Some(if at_end { (p, ccw, 1.0 / r) } else { (p, mul(ccw, -1.0), -1.0 / r) })
     }
-    CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+    CurveKind::Spline { .. }
+    | CurveKind::ControlSpline { .. }
+    | CurveKind::Bezier { .. }
+    | CurveKind::EllipticalArc { .. } => {
       let bz = crate::kind_beziers(kind, pos);
       if at_end {
         let b = *bz.last()?;
@@ -1374,10 +1396,19 @@ mod tests {
     let arcs = s.break_curve(c, [50.0, 5.0], false, 0.0).unwrap();
     assert_eq!(arcs.len(), 2);
     assert!(s.solve().ok());
-    // a spline breaks into exact Bézier chains
+    // a fit-point spline breaks into fit-point splines, a control-point one into exact Bézier chains
     let sp = spline(&mut s, &[[0.0, 40.0], [10.0, 50.0], [20.0, 40.0], [30.0, 45.0]]);
     let before = s.beziers(sp);
     let parts = s.break_curve(sp, [15.0, 47.0], true, 0.0).unwrap();
+    assert_eq!(parts.len(), 2);
+    for p in &parts {
+      assert!(matches!(s.curve(*p).unwrap().kind, CurveKind::Spline { .. }));
+      assert!(deviation(&before, &s.beziers(*p)) < 1.0, "close to the old shape");
+    }
+    let ids = [[0.0, 60.0], [10.0, 70.0], [20.0, 60.0], [30.0, 65.0]].map(|p| s.add_point(p[0], p[1]));
+    let cs = s.add_curve(CurveKind::ControlSpline { points: ids.to_vec() }).unwrap();
+    let before = s.beziers(cs);
+    let parts = s.break_curve(cs, [15.0, 65.0], true, 0.0).unwrap();
     assert_eq!(parts.len(), 2);
     for p in &parts {
       assert!(matches!(s.curve(*p).unwrap().kind, CurveKind::Bezier { .. }));

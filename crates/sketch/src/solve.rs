@@ -235,6 +235,8 @@ enum Eqn {
   User(usize),
   /// Implicit: an arc's end lies on the circle through its start (index into `sketch.curves`).
   ArcRadius(usize),
+  /// Implicit: an elliptical arc's ends lie on its ellipse (index into `sketch.curves`).
+  EllipseEnds(usize),
 }
 
 /// The equation system for one sketch, with variable mapping and per-constraint branch choices
@@ -302,6 +304,9 @@ impl<'a> System<'a> {
       if matches!(c.kind, CurveKind::Arc { .. }) {
         eqns.push(Eqn::ArcRadius(i));
       }
+      if matches!(c.kind, CurveKind::EllipticalArc { .. }) {
+        eqns.push(Eqn::EllipseEnds(i));
+      }
     }
     let mut sys = System {
       sketch,
@@ -359,6 +364,10 @@ impl<'a> System<'a> {
           self.smooth(x, *a, *b, joint, false)
         }
         Some(ConstraintKind::Curvature { a, b }) => self.smooth(x, *a, *b, joint, true),
+        Some(ConstraintKind::PointOnCurve { p, curve }) if self.ellipse(x, *curve).is_some() => {
+          let e = self.ellipse(x, *curve);
+          vec![e.map(|e| e.residual(self.p(x, *p))).unwrap_or(0.0)]
+        }
         Some(ConstraintKind::PointOnCurve { p, curve }) if self.is_free(*curve) => {
           let path = self.free_path(x, *curve);
           if path.is_empty() { vec![0.0] } else { vec![crate::freeform::path_distance(&path, self.p(x, *p))] }
@@ -366,6 +375,26 @@ impl<'a> System<'a> {
         _ => self.eval(*eq, sign, x),
       },
       Eqn::ArcRadius(_) => self.eval(*eq, sign, x),
+      Eqn::EllipseEnds(i) => match self.sketch.curves.get(*i).map(|c| &c.kind) {
+        Some(CurveKind::EllipticalArc { start, end, .. }) => match self.sketch.curves.get(*i).map(|c| c.id) {
+          Some(id) => match self.ellipse(x, id) {
+            Some(e) => vec![e.residual(self.p(x, *start)), e.residual(self.p(x, *end))],
+            None => vec![0.0, 0.0],
+          },
+          None => vec![0.0, 0.0],
+        },
+        _ => vec![],
+      },
+    }
+  }
+
+  /// The ellipse of an ellipse or elliptical arc at `x`.
+  fn ellipse(&self, x: &[f64], id: CurveId) -> Option<crate::Ellipse2> {
+    match self.curve(id)? {
+      (_, CurveKind::Ellipse { center, major, minor } | CurveKind::EllipticalArc { center, major, minor, .. }) => {
+        crate::Ellipse2::new(self.p(x, *center), self.p(x, *major), *minor)
+      }
+      _ => None,
     }
   }
 
@@ -561,7 +590,7 @@ impl<'a> System<'a> {
           }
         }
       }
-      Eqn::ArcRadius(i) => {
+      Eqn::ArcRadius(i) | Eqn::EllipseEnds(i) => {
         if let Some(c) = self.sketch.curves.get(i) {
           self.curve_vars(c.id, &mut out);
         }
@@ -610,6 +639,7 @@ impl<'a> System<'a> {
         }
         _ => vec![],
       },
+      Eqn::EllipseEnds(_) => vec![],
       Eqn::User(ci) => match self.sketch.constraints.get(ci) {
         Some(c) => self.eval_user(&c.kind, sign, x),
         None => vec![],

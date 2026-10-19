@@ -475,6 +475,8 @@ mod tests_sheet2;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
+mod tests_sketch_curves;
+#[cfg(test)]
 mod tests_solid;
 #[cfg(test)]
 mod tests_surface;

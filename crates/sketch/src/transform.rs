@@ -72,7 +72,7 @@ impl Sketch {
     for c in self.curves.iter_mut().filter(|c| curves.contains(&c.id)) {
       match &mut c.kind {
         CurveKind::Circle { radius, .. } => *radius *= t.scale,
-        CurveKind::Ellipse { minor, .. } => *minor *= t.scale,
+        CurveKind::Ellipse { minor, .. } | CurveKind::EllipticalArc { minor, .. } => *minor *= t.scale,
         _ => {}
       }
     }
@@ -170,6 +170,13 @@ impl Sketch {
         CurveKind::Ellipse { center, major, minor } => {
           CurveKind::Ellipse { center: pt(self, *center)?, major: pt(self, *major)?, minor: minor * t.scale }
         }
+        CurveKind::EllipticalArc { center, major, minor, start, end } => CurveKind::EllipticalArc {
+          center: pt(self, *center)?,
+          major: pt(self, *major)?,
+          minor: minor * t.scale,
+          start: pt(self, *start)?,
+          end: pt(self, *end)?,
+        },
       };
       let id = self.add_curve(kind)?;
       if c.construction {

@@ -970,6 +970,13 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
       put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0), DVec3::ZERO])
     }
     Seg::Bezier { p } => put(3.0, p.map(|q| plane.to_world(q))),
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      let a = major[0].hypot(major[1]).max(1e-300);
+      let v = [center[0] - major[1] / a * minor, center[1] + major[0] / a * minor];
+      let m = [center[0] + major[0], center[1] + major[1]];
+      let range = DVec3::new(start, start + sweep, 0.0);
+      put(4.0, [plane.to_world(center), plane.to_world(m), plane.to_world(v), range])
+    }
   }
 }
 
@@ -986,3 +993,5 @@ mod tests;
 mod tests_features2;
 
 mod sheet2;
+#[cfg(test)]
+mod tests_ellipse;

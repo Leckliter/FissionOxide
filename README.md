@@ -114,7 +114,8 @@ change a parameter and watch the whole history rebuild.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
   follows the body when it changes). Trim, break, extend and offset work on splines and
-  ellipses too; what is left of one is an exact Bézier chain with draggable handles.
+  ellipses too; what is left of an ellipse is an elliptical arc, of a fit-point spline a
+  fit-point spline, and of other splines an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
@@ -141,6 +142,13 @@ change a parameter and watch the whole history rebuild.
   becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
   face — that collect in a Base Feature in the timeline. See
   [Configurations](#configurations-and-base-features).
+- **Elliptical arcs and fit-point splines through the modify tools.** Trimming or breaking an
+  ellipse leaves elliptical arcs (their own curve, also drawn with `sketch.elliptical_arc`) that
+  stay on the ellipse while you constrain, drag, trim and extend them, split profiles where
+  lines and circles cross them, extrude to exact ellipse faces and read and write DXF `ELLIPSE`
+  arcs. A fit-point spline stays a fit-point spline after Trim, Break and Extend (through the
+  fit points it keeps, its new ends holding their direction). Sketch text takes fonts from
+  disk: a font file's path or the name of one in the system's font folders (`sketch.fonts`).
 
 ## Build and run
 

@@ -11,7 +11,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Sketch    | Elliptical arcs as their own curve and fit-point splines that stay fit-point after trim/extend (both become Bézier chains today); fonts from disk for text |
 | Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Features  | Configuration rules (driven by other columns); configured components inside assemblies; move face for curved faces and rotations in direct edits |
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |

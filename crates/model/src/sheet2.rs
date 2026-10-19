@@ -57,6 +57,12 @@ fn seg_len(s: &Seg) -> f64 {
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
     }
+    Seg::EllipseArc { .. } => {
+      let mut pts = Vec::new();
+      s.flatten(&mut pts);
+      pts.push(s.end());
+      pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
+    }
   }
 }
 
@@ -80,6 +86,12 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
       let span = (cum[i] - cum[i - 1]).max(1e-12);
       let k = ((target - cum[i - 1]) / span).clamp(0.0, 1.0);
       [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k]
+    }
+    // by parameter: close to by length for the gentle arcs a chain carries
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      fox_sketch::Ellipse2::new(center, [center[0] + major[0], center[1] + major[1]], minor)
+        .map(|e| e.at(start + sweep * f))
+        .unwrap_or(center)
     }
   }
 }
@@ -890,6 +902,12 @@ pub fn map_seg(s: &Seg, f: &impl Fn(P2) -> P2, mirror: bool) -> Seg {
     }
     Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius, ccw: ccw != mirror },
     Seg::Bezier { p } => Seg::Bezier { p: p.map(f) },
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      let c = f(center);
+      let m = sub(f([center[0] + major[0], center[1] + major[1]]), c);
+      // a mirror turns the minor axis over: the image runs the parameter backwards
+      Seg::EllipseArc { center: c, major: m, minor, start: start * sg, sweep: sweep * sg }
+    }
   }
 }
 
