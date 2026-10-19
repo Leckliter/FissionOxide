@@ -7,6 +7,7 @@
 
 mod dialogs;
 mod icons;
+mod marking;
 mod panels;
 mod theme;
 mod viewport;
@@ -52,6 +53,10 @@ pub struct App {
   pub tab: panels::Tab,
   /// Timeline playback: time of the next step.
   playing: Option<f64>,
+  /// Last repeatable command, for the marking menu's Repeat.
+  last_cmd: Option<panels::Cmd>,
+  /// The open right-click marking menu.
+  marking: Option<marking::MarkingMenu>,
   /// The canvas (viewport) rectangle, for panels floating over it.
   pub(crate) canvas: egui::Rect,
   /// Inline dimension value editor: (constraint id, text, screen position).
@@ -120,6 +125,8 @@ impl App {
       nav_mode: None,
       tab: panels::Tab::Solid,
       playing: None,
+      last_cmd: None,
+      marking: None,
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
       dim_edit: None,
       rename: None,
@@ -261,7 +268,9 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.dim_edit.is_some() {
+      if self.marking.is_some() {
+        self.marking = None;
+      } else if self.dim_edit.is_some() {
         self.dim_edit = None;
       } else if self.nav_mode.is_some() {
         self.nav_mode = None;
@@ -491,6 +500,7 @@ impl App {
       panels::nav_bar(self, &ctx);
     }
     panels::sketch_palette(self, &ctx);
+    marking::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);

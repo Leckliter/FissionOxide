@@ -58,6 +58,7 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Construction geometry  | Select curves, press X                                      |
 | Extrude / Fillet       | E / F (select profiles or edges first)                      |
 | Edit a feature         | Double-click it in the timeline                             |
+| Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |
 | All commands of a group | Click the group name under the toolbar icons (CREATE ▾, MODIFY ▾, …) |
 | Undo / Redo / Save     | Ctrl+Z / Ctrl+Y / Ctrl+S                                    |
 | Fit view               | F6                                                          |

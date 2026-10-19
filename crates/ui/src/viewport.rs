@@ -144,7 +144,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   tool_preview(app, &painter, &resp, &view);
   hud(app, &painter, &resp, &view);
 
-  if !consumed && app.nav_mode.is_none() {
+  // right-click without dragging opens the marking menu; while it's open it owns the clicks
+  if resp.secondary_clicked()
+    && let Some(p) = resp.interact_pointer_pos()
+  {
+    crate::marking::open(app, p);
+  } else if !consumed && app.nav_mode.is_none() && app.marking.is_none() {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }

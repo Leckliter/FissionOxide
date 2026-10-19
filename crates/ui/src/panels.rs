@@ -219,9 +219,10 @@ fn document_tab(app: &mut App, ui: &mut egui::Ui) {
 
 // ---------------------------------------------------------------- toolbar
 
-/// One toolbar command: shown as an icon in its group and as a row in the group's menu.
+/// One command: shown as an icon in its toolbar group, as a row in the group's menu and in the
+/// marking menu.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Cmd {
+pub(crate) enum Cmd {
   NewSketch,
   Dialog(Kind),
   Params,
@@ -231,10 +232,18 @@ enum Cmd {
   Construction,
   Constraint(&'static str),
   FinishSketch,
+  Undo,
+  Redo,
+  Delete,
+  LookAt,
+  Fit,
+  Home,
+  /// Show or hide the selected bodies.
+  ToggleVisibility,
 }
 
 impl Cmd {
-  fn info(self) -> (Icon, &'static str, &'static str) {
+  pub(crate) fn info(self) -> (Icon, &'static str, &'static str) {
     match self {
       Cmd::NewSketch => (Icon::Sketch, "Create Sketch", "Pick a plane or planar face to sketch on"),
       Cmd::Dialog(k) => match k {
@@ -278,6 +287,13 @@ impl Cmd {
         (icon, name, "Applies to the current selection")
       }
       Cmd::FinishSketch => (Icon::Finish, "Finish Sketch", "Finish the sketch and return to the model"),
+      Cmd::Undo => (Icon::Undo, "Undo", "Undo (Ctrl+Z)"),
+      Cmd::Redo => (Icon::Redo, "Redo", "Redo (Ctrl+Y)"),
+      Cmd::Delete => (Icon::Remove, "Delete", "Delete the selection (Del)"),
+      Cmd::LookAt => (Icon::LookAt, "Look At", "Look at the sketch plane or a selected planar face"),
+      Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
+      Cmd::Home => (Icon::Views, "Home View", "Go to the home view (Home)"),
+      Cmd::ToggleVisibility => (Icon::Eye, "Show/Hide", "Show or hide the selected bodies"),
     }
   }
 
@@ -291,7 +307,19 @@ impl Cmd {
     }
   }
 
-  fn run(self, app: &mut App) {
+  /// Commands that the marking menu's Repeat can run again.
+  pub(crate) fn repeatable(self) -> bool {
+    match self {
+      Cmd::NewSketch | Cmd::Dialog(_) => true,
+      Cmd::SketchTool(t) => t != Tool::Select,
+      _ => false,
+    }
+  }
+
+  pub(crate) fn run(self, app: &mut App) {
+    if self.repeatable() {
+      app.last_cmd = Some(self);
+    }
     match self {
       Cmd::NewSketch => app.new_sketch(),
       Cmd::Dialog(k) => app.start(k),
@@ -308,6 +336,33 @@ impl Cmd {
       Cmd::Construction => app.toggle_construction(),
       Cmd::Constraint(kind) => apply_constraint(app, kind),
       Cmd::FinishSketch => app.finish_sketch(),
+      Cmd::Undo => {
+        if app.s.can_undo() {
+          app.cancel_dialog();
+          app.s.undo();
+        }
+      }
+      Cmd::Redo => {
+        if app.s.can_redo() {
+          app.s.redo();
+        }
+      }
+      Cmd::Delete => app.delete_selection(),
+      Cmd::LookAt => app.look_at_selection(),
+      Cmd::Fit => app.fit_view(),
+      Cmd::Home => {
+        app.cam.set_view(StandardView::Home);
+        app.fit_view();
+      }
+      Cmd::ToggleVisibility => {
+        let bodies: Vec<BodyId> =
+          app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
+        for b in bodies {
+          let visible = app.s.body_visible(b);
+          app.run("body.visible", json!({"body": b.0, "visible": !visible}));
+        }
+        app.s.selection.clear();
+      }
     }
   }
 }
