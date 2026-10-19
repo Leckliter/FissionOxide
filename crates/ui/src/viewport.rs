@@ -45,6 +45,20 @@ pub enum Tool {
   Spline,
   Trim,
   Extend,
+  Rect3,
+  Circle2P,
+  Circle3P,
+  TangentArc,
+  CircPolygon,
+  EdgePolygon,
+  OverallSlot,
+  CenterSlot,
+  ArcSlot3,
+  ArcSlotCenter,
+  ControlSpline,
+  Ellipse,
+  Conic,
+  MidpointLine,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -429,7 +443,7 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     return;
   }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
-  if app.tool == Tool::Spline {
+  if matches!(app.tool, Tool::Spline | Tool::ControlSpline) {
     // clicking the last point again finishes the spline
     if app.tstate.pts.last().is_some_and(|l| (l[0] - p[0]).hypot(l[1] - p[1]) < 1e-9) {
       finish_spline(app);
@@ -474,6 +488,60 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
       Some(("sketch.slot", json!({"sketch": sid, "start": a, "end": b, "width": w.max(0.1)})))
     }
     Tool::Point => Some(("sketch.point", json!({"sketch": sid, "at": p}))),
+    Tool::Rect3 if n == 3 => Some(("sketch.rect", json!({"sketch": sid, "points": [first, pts[1], p]}))),
+    Tool::Circle2P if n == 2 => Some(("sketch.circle", json!({"sketch": sid, "through": [first, p]}))),
+    Tool::Circle3P if n == 3 => Some(("sketch.circle", json!({"sketch": sid, "through": [first, pts[1], p]}))),
+    Tool::CircPolygon if n == 2 => {
+      Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6, "circumscribed": true})))
+    }
+    Tool::EdgePolygon if n == 2 => Some(("sketch.polygon", json!({"sketch": sid, "edge": [first, p], "sides": 6}))),
+    Tool::OverallSlot | Tool::CenterSlot if n == 3 => {
+      let w = 2.0 * point_line_dist(p, first, pts[1]);
+      let mut q = json!({"sketch": sid, "end": pts[1], "width": w.max(0.1)});
+      if app.tool == Tool::CenterSlot {
+        q["center"] = json!(first);
+      } else {
+        q["start"] = json!(first);
+        q["kind"] = json!("overall");
+      }
+      Some(("sketch.slot", q))
+    }
+    Tool::ArcSlot3 | Tool::ArcSlotCenter if n == 4 => {
+      // the width is twice the last click's distance from the arc
+      let (a, b, c) = (first, pts[1], pts[2]);
+      let (center, r) = if app.tool == Tool::ArcSlotCenter {
+        (Some(a), (b[0] - a[0]).hypot(b[1] - a[1]))
+      } else {
+        let o = clf_engine::sketch::circumcenter(a, b, c);
+        (o, o.map(|o| (a[0] - o[0]).hypot(a[1] - o[1])).unwrap_or(0.0))
+      };
+      let w = center.map(|o| 2.0 * ((p[0] - o[0]).hypot(p[1] - o[1]) - r).abs()).unwrap_or(1.0).max(0.1);
+      let q = if app.tool == Tool::ArcSlotCenter {
+        json!({"sketch": sid, "arc_center": a, "start": b, "end": c, "width": w})
+      } else {
+        json!({"sketch": sid, "start": a, "mid": b, "end": c, "width": w})
+      };
+      Some(("sketch.slot", q))
+    }
+    Tool::Ellipse if n == 3 => {
+      let minor = point_line_dist(p, first, pts[1]);
+      Some(("sketch.ellipse", json!({"sketch": sid, "center": first, "major": pts[1], "minor": minor.max(0.01)})))
+    }
+    Tool::Conic if n == 3 => {
+      Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
+    }
+    Tool::MidpointLine if n == 2 => {
+      let a = [2.0 * first[0] - p[0], 2.0 * first[1] - p[1]];
+      Some(("sketch.line", json!({"sketch": sid, "points": [a, p]})))
+    }
+    Tool::TangentArc if n == 2 => match tangent_curve(app, sk, first) {
+      Some(curve) => Some(("sketch.arc", json!({"sketch": sid, "tangent": curve, "start": first, "end": p}))),
+      None => {
+        app.status = Some(("Tangent arc: start on the end of a line or arc".into(), true));
+        app.tstate.pts.clear();
+        None
+      }
+    },
     _ => None,
   };
   if let Some((c, params)) = cmd {
@@ -491,13 +559,25 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
 /// Commits the fit-point spline being drawn (Enter, or clicking its last point again).
 /// Returns whether there was a spline to commit.
 pub fn finish_spline(app: &mut App) -> bool {
-  if app.tool != Tool::Spline || app.tstate.pts.len() < 2 {
+  if !matches!(app.tool, Tool::Spline | Tool::ControlSpline) || app.tstate.pts.len() < 2 {
     return false;
   }
   let pts = std::mem::take(&mut app.tstate.pts);
   let Some(sk) = app.s.edit_sketch else { return false };
-  app.run("sketch.spline", json!({"sketch": sk.0, "points": pts}));
+  let cmd = if app.tool == Tool::Spline { "sketch.spline" } else { "sketch.control_spline" };
+  app.run(cmd, json!({"sketch": sk.0, "points": pts}));
   true
+}
+
+/// The line or arc that ends at a sketch point (a tangent arc starts there).
+fn tangent_curve(app: &App, sk: FeatureId, at: [f64; 2]) -> Option<u32> {
+  let sketch = app.s.design.sketch(sk).ok()?;
+  let near = |id: PointId| sketch.pos(id).is_some_and(|q| (q[0] - at[0]).hypot(q[1] - at[1]) < 1e-6);
+  sketch.curves.iter().rev().find_map(|c| match c.kind {
+    CurveKind::Line { a, b } if near(a) || near(b) => Some(c.id.0),
+    CurveKind::Arc { start, end, .. } if near(start) || near(end) => Some(c.id.0),
+    _ => None,
+  })
 }
 
 fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -856,10 +936,49 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   let pts = &app.tstate.pts;
   match (app.tool, pts.as_slice()) {
     (Tool::Line, [.., last]) => line(*last, cur),
-    (Tool::Spline, [_, ..]) => {
+    (Tool::Spline | Tool::ControlSpline | Tool::Conic | Tool::ArcSlot3 | Tool::ArcSlotCenter, [_, ..]) => {
       let mut all = pts.clone();
       all.push(cur);
       poly(&all, false);
+    }
+    (Tool::Rect3, [a]) => line(*a, cur),
+    (Tool::Rect3, [a, b]) => {
+      let (ux, uy) = (b[0] - a[0], b[1] - a[1]);
+      let l = ux.hypot(uy).max(1e-12);
+      let (nx, ny) = (-uy / l, ux / l);
+      let h = (cur[0] - a[0]) * nx + (cur[1] - a[1]) * ny;
+      poly(&[*a, *b, [b[0] + nx * h, b[1] + ny * h], [a[0] + nx * h, a[1] + ny * h]], true);
+    }
+    (Tool::Circle2P, [a]) => {
+      circle([(a[0] + cur[0]) / 2.0, (a[1] + cur[1]) / 2.0], (cur[0] - a[0]).hypot(cur[1] - a[1]) / 2.0)
+    }
+    (Tool::Circle3P, [a]) => line(*a, cur),
+    (Tool::Circle3P, [a, b]) => {
+      if let Some(c) = clf_engine::sketch::circumcenter(*a, *b, cur) {
+        circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
+      }
+    }
+    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc | Tool::MidpointLine, [a]) => line(*a, cur),
+    (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
+    (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
+      line(*a, *b);
+      let w = point_line_dist(cur, *a, *b);
+      if app.tool == Tool::Ellipse {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let r = dx.hypot(dy).max(1e-12);
+        let (c, s) = (dx / r, dy / r);
+        let pts: Vec<[f64; 2]> = (0..=64)
+          .map(|i| {
+            let t = std::f64::consts::TAU * i as f64 / 64.0;
+            let (x, y) = (r * t.cos(), w * t.sin());
+            [a[0] + x * c - y * s, a[1] + x * s + y * c]
+          })
+          .collect();
+        poly(&pts, false);
+      } else {
+        circle(*a, w);
+        circle(*b, w);
+      }
     }
     (Tool::Rect, [a]) => poly(&[*a, [cur[0], a[1]], cur, [a[0], cur[1]]], true),
     (Tool::CenterRect, [c]) => {
@@ -912,6 +1031,22 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Spline) => "Spline: click fit points · click the last point again or Enter to finish",
     (true, Tool::Trim) => "Trim: click the piece of a curve to remove",
     (true, Tool::Extend) => "Extend: click near the end of a line to extend it to the next curve",
+    (true, Tool::Rect3) => "3-point rectangle: two corners along one side, then the height",
+    (true, Tool::Circle2P) => "2-point circle: the two ends of a diameter",
+    (true, Tool::Circle3P) => "3-point circle: three points on the circle",
+    (true, Tool::TangentArc) => "Tangent arc: click the end of a line or arc, then the arc's end",
+    (true, Tool::CircPolygon) => "Circumscribed polygon: centre, then the middle of a side",
+    (true, Tool::EdgePolygon) => "Edge polygon: the two ends of one side",
+    (true, Tool::OverallSlot) => "Overall slot: the two ends, then the width",
+    (true, Tool::CenterSlot) => "Centre point slot: centre, one end, then the width",
+    (true, Tool::ArcSlot3) => "3-point arc slot: start, a point on the arc, end, then the width",
+    (true, Tool::ArcSlotCenter) => "Centre point arc slot: arc centre, start, end, then the width",
+    (true, Tool::ControlSpline) => {
+      "Control point spline: click control points · click the last again or Enter to finish"
+    }
+    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the minor axis",
+    (true, Tool::Conic) => "Conic: start, end, then the apex it bends towards",
+    (true, Tool::MidpointLine) => "Midpoint line: the midpoint, then one end",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
     (true, Tool::Select) => "Select / drag points · Del deletes · constraints apply to the selection",
     (false, _) => return,
@@ -1242,7 +1377,9 @@ fn manipulator(
     egui::FontId::proportional(12.0),
     Color32::from_gray(40),
   );
-  if hot && resp.drag_started_by(egui::PointerButton::Primary) {
+  // a drag starts only once the pointer has moved: test where the press began
+  let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - b).length() < 14.0);
+  if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
     app.drag = Some(Drag::Manip);
   }
   if matches!(app.drag, Some(Drag::Manip)) {
@@ -1264,7 +1401,7 @@ fn manipulator(
     ctx.request_repaint();
     return true;
   }
-  hot
+  hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
 }
 
 /// The Measure dialog's result: a line between the closest points with the distance.

@@ -7,6 +7,7 @@
 
 mod data_panel;
 mod dialogs;
+mod forms;
 mod icons;
 mod marking;
 mod menus;
@@ -465,6 +466,7 @@ impl App {
         (Key::H, dialogs::Kind::Hole),
         (Key::Q, dialogs::Kind::PressPull),
         (Key::J, dialogs::Kind::Joint),
+        (Key::A, dialogs::Kind::Form(&forms::APPEARANCE)),
       ] {
         if pressed(k, Modifiers::NONE) {
           self.start(d);

@@ -76,6 +76,8 @@ pub enum Kind {
   DrawingNote,
   DrawingTitle,
   DrawingSettings,
+  /// A declarative command dialog (see [`crate::forms`]).
+  Form(&'static crate::forms::Form),
 }
 
 impl Kind {
@@ -97,7 +99,7 @@ impl Kind {
       Kind::Combine => "COMBINE",
       Kind::Move => "MOVE / ROTATE",
       Kind::OffsetPlane => "OFFSET PLANE",
-      Kind::Inspect => "PROPERTIES",
+      Kind::Inspect => "MEASURE",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -130,6 +132,7 @@ impl Kind {
       Kind::MotionStudy => "MOTION STUDY",
       Kind::CopyComponent => "DUPLICATE COMPONENT",
       Kind::NewDrawing => "CREATE DRAWING",
+      Kind::Form(f) => f.title,
       Kind::DrawingView => "DRAWING VIEW",
       Kind::DrawingMoveView => "MOVE VIEW",
       Kind::DrawingDimension => "DIMENSION",
@@ -177,6 +180,7 @@ impl Kind {
       Kind::Material => Icon::PhysMaterial,
       Kind::Interference => Icon::Interference,
       Kind::Bom => Icon::Bom,
+      Kind::Form(f) => f.icon,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
       Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
@@ -221,6 +225,7 @@ impl Kind {
       Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
       Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
+      Kind::Form(f) => (f.name, f.hint),
       Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
       Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
@@ -249,6 +254,9 @@ impl Kind {
   /// Dialogs whose input is picked edges/faces/bodies of the model: they preview on demand,
   /// because a preview changes the very geometry being picked.
   fn picks_model(self) -> bool {
+    if let Kind::Form(f) = self {
+      return f.picks_model;
+    }
     matches!(
       self,
       Kind::Fillet
@@ -408,6 +416,8 @@ pub struct Dialog {
   xyz: [String; 3],
   /// Create Drawing's standard views (see [`VIEWS`]).
   view_on: [bool; 7],
+  /// A form dialog's values.
+  form: crate::forms::State,
 }
 
 const VIEWS: [(&str, &str); 7] = [
@@ -493,6 +503,10 @@ impl Dialog {
       view: None,
       xyz: ["0".into(), "0".into(), "0".into()],
       view_on: [true, true, true, true, false, false, false],
+      form: match kind {
+        Kind::Form(f) => crate::forms::State::new(f),
+        _ => crate::forms::State::default(),
+      },
     }
   }
 
@@ -754,6 +768,9 @@ impl Dialog {
     if kind.reports() {
       d.refresh_report(&mut app.s);
     }
+    if let Kind::Form(f) = kind {
+      d.form.sync(f, &app.s, app.last_sketch.or_else(|| last_unconsumed_sketch(&app.s)));
+    }
     d.dirty = !d.picks();
     d
   }
@@ -867,6 +884,7 @@ impl Dialog {
     }
     let op = self.op;
     Some(match self.kind {
+      Kind::Form(f) => crate::forms::engine_command(f, self.form.params(f)),
       Kind::PickPlane | Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::CenterOfMass => {
         return None;
       }
@@ -1231,6 +1249,7 @@ impl Dialog {
       return true;
     }
     match self.kind {
+      Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude | Kind::Revolve => self.sketch.is_some(),
       Kind::Fillet | Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty(),
@@ -1380,6 +1399,11 @@ impl Dialog {
       return;
     }
     match self.kind {
+      Kind::Form(f) if !self.applied || !self.picks() => {
+        if self.form.sync(f, s, last_unconsumed_sketch(s)) {
+          self.dirty = !self.picks();
+        }
+      }
       Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Flange
         if !(self.kind == Kind::Flange && self.choice == "edge") =>
       {
@@ -1652,6 +1676,7 @@ impl Dialog {
 
   fn missing_input(&self) -> &'static str {
     match self.kind {
+      Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
       Kind::Extrude | Kind::Revolve => "select a profile",
       Kind::Fillet | Kind::Chamfer => "select edges",
       Kind::Shell => "select faces to remove",
@@ -1934,11 +1959,129 @@ impl Dialog {
         ui.end_row();
       }
       Kind::Inspect => inspect(app, ui),
+      Kind::Form(f) => {
+        let mut dirty = false;
+        self.form_fields(f, app, ui, &mut dirty);
+        if dirty && (!self.picks() || self.applied) {
+          self.dirty = true;
+        }
+      }
       _ => {
         let mut dirty = false;
         self.more_fields(app, ui, &mut dirty);
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
+        }
+      }
+    }
+  }
+
+  /// A form dialog's inputs: selection chips, value fields, check boxes and drop-downs.
+  fn form_fields(&mut self, f: &'static crate::forms::Form, app: &mut App, ui: &mut egui::Ui, dirty: &mut bool) {
+    use crate::forms::Input;
+    let accent = self.accent();
+    let s = &app.s;
+    for (i, input) in f.inputs.iter().enumerate() {
+      let v = self.form.values[i].clone();
+      match input {
+        Input::Faces { label, .. } | Input::Edges { label, .. } | Input::Curves { label, .. } => {
+          ui.label(*label);
+          let n = v.as_array().map(Vec::len).unwrap_or(0);
+          sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+          ui.end_row();
+        }
+        Input::Bodies { label, .. } => {
+          ui.label(*label);
+          let n = v.as_array().map(Vec::len).unwrap_or(0);
+          let text = match n {
+            0 => "Select".to_string(),
+            1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
+            n => format!("{n} bodies"),
+          };
+          sel_chip(ui, accent, &text, n > 0);
+          ui.end_row();
+        }
+        Input::Face { label, .. } | Input::Edge { label, .. } => {
+          ui.label(*label);
+          sel_chip(ui, accent, if v.is_null() { "Select" } else { "1 selected" }, !v.is_null());
+          ui.end_row();
+        }
+        Input::Sketch { label, .. } => {
+          ui.label(*label);
+          let list = Self::sketches(app, None);
+          let cur = v.as_u64().and_then(|id| list.iter().find(|(f, _)| f.0 as u64 == id)).map(|(_, n)| n.clone());
+          egui::ComboBox::from_id_salt(("form-sketch", i))
+            .selected_text(cur.unwrap_or("Pick a sketch".into()))
+            .width(140.0)
+            .show_ui(ui, |ui| {
+              for (id, name) in &list {
+                if ui.selectable_label(v.as_u64() == Some(id.0 as u64), name).clicked() {
+                  self.form.values[i] = json!(id.0);
+                  self.form.chosen[i] = Some(json!(id.0));
+                  *dirty = true;
+                }
+              }
+            });
+          ui.end_row();
+        }
+        Input::Plane { label, .. } | Input::Axis { label, .. } => {
+          ui.label(*label);
+          let plane = matches!(input, Input::Plane { .. });
+          let options: Vec<(Value, String)> = if plane {
+            let mut o: Vec<(Value, String)> = [("xy", "XY plane"), ("xz", "XZ plane"), ("yz", "YZ plane")]
+              .iter()
+              .map(|(k, l)| (json!(k), l.to_string()))
+              .collect();
+            for (id, _) in &s.model.planes {
+              let name = s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default();
+              o.push((json!({"feature": id.0}), name));
+            }
+            o
+          } else {
+            let mut o: Vec<(Value, String)> =
+              ["x", "y", "z"].iter().map(|k| (json!(k), format!("{} axis", k.to_uppercase()))).collect();
+            for id in s.model.axes.keys() {
+              let name = s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default();
+              o.push((json!({"axis": id.0}), name));
+            }
+            o
+          };
+          let shown = options
+            .iter()
+            .find(|(k, _)| *k == v)
+            .map(|(_, l)| l.clone())
+            .unwrap_or_else(|| if plane { "Picked face".into() } else { "Picked edge".into() });
+          egui::ComboBox::from_id_salt(("form-ref", i)).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+            for (k, l) in &options {
+              if ui.selectable_label(*k == v, l).clicked() {
+                self.form.values[i] = k.clone();
+                self.form.chosen[i] = Some(k.clone());
+                *dirty = true;
+              }
+            }
+          });
+          ui.end_row();
+        }
+        Input::Expr { label, .. } | Input::Text { label, .. } => {
+          let mut t = v.as_str().unwrap_or("").to_string();
+          Self::field(ui, label, &mut t, dirty);
+          self.form.values[i] = json!(t);
+        }
+        Input::Check { label, .. } => {
+          let mut b = v.as_bool().unwrap_or(false);
+          Self::check(ui, label, &mut b, dirty);
+          self.form.values[i] = json!(b);
+        }
+        Input::Choice { label, options, .. } => {
+          let cur = v.as_str().unwrap_or("");
+          let mut sel: &'static str = options.iter().find(|(k, _)| *k == cur).map(|(k, _)| *k).unwrap_or("");
+          Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
+          self.form.values[i] = json!(sel);
+        }
+        Input::Vec3 { label, .. } => {
+          let mut xyz: [String; 3] = [0, 1, 2].map(|k| v.get(k).and_then(Value::as_str).unwrap_or("0").to_string());
+          Self::xyz_row(ui, label, &mut xyz, dirty);
+          self.form.values[i] = json!(xyz);
         }
       }
     }
@@ -3579,5 +3722,93 @@ mod tests {
     assert_eq!((dr.views.len(), dr.dimensions.len(), dr.title.title.as_str()), (6, 2, "Bracket"));
     let plot = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
     assert!(plot.texts().contains(&"BREAK SHARP EDGES"));
+  }
+
+  /// A form dialog with the selection set, values overridden by key.
+  fn form(s: &mut Session, f: &'static crate::forms::Form, sel: Vec<Sel>, set: &[(&str, Value)]) -> Dialog {
+    let mut d = Dialog::blank(Kind::Form(f));
+    s.selection = sel;
+    d.form.sync(f, s, None);
+    for (k, v) in set {
+      let i = f.inputs.iter().position(|x| x.key() == *k).unwrap_or_else(|| panic!("{} has no {k}", f.name));
+      d.form.values[i] = v.clone();
+    }
+    d
+  }
+
+  #[test]
+  fn form_dialogs() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "cylinder", json!({"radius": 5, "height": 20}));
+    let b = s.model.bodies[0].id;
+    let side =
+      s.model.bodies[0].faces().iter().find(|f| f.kind == clf_engine::kernel::SurfaceKind::Cylinder).unwrap().id;
+    let mut d = form(&mut s, &THREAD, vec![Sel::Face { body: b, face: side }], &[("modeled", json!(true))]);
+    let v0 = s.model.bodies[0].shape.mass().unwrap().volume;
+    apply(&mut s, &mut d);
+    assert!(s.model.bodies[0].shape.mass().unwrap().volume < v0);
+    d.applied = false;
+
+    let mut s = Session::default();
+    let mut d = form(&mut s, &COIL, vec![], &[]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+    d.applied = false;
+    let b = s.model.bodies[0].id;
+    let mut d = form(&mut s, &APPEARANCE, vec![Sel::Body { body: b }], &[("appearance", json!("Copper"))]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.design.body_settings(b).unwrap().color, Some([190, 112, 72]));
+    d.applied = false;
+
+    // construction geometry from picks and drop-downs
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let mut d = form(&mut s, &MIDPLANE, vec![Sel::Face { body: b, face: top }], &[]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.planes.len(), 1);
+    d.applied = false;
+    let mut d = form(&mut s, &AXIS_TWO_PLANES, vec![], &[("a", json!("xz")), ("b", json!("yz"))]);
+    // the drop-down choices survive a selection sync
+    d.form.chosen = vec![Some(json!("xz")), Some(json!("yz"))];
+    d.form.sync(&AXIS_TWO_PLANES, &s, None);
+    apply(&mut s, &mut d);
+    let (_, dir) = s.model.axes.values().next().copied().unwrap();
+    assert!(dir.z.abs() > 0.999, "{dir:?}");
+    d.applied = false;
+    let mut d = form(&mut s, &PLANE_THREE_POINTS, vec![], &[("c", json!(["0", "0", "10"]))]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = form(&mut s, &SCALE, vec![Sel::Body { body: b }], &[("factor", json!("0.5"))]);
+    apply(&mut s, &mut d);
+    assert!((s.model.bodies[0].shape.mass().unwrap().volume - 500.0).abs() < 1e-6);
+    d.applied = false;
+
+    // text in the sketch being edited
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let mut d = form(&mut s, &SK_TEXT, vec![], &[("text", json!("Hi"))]);
+    apply(&mut s, &mut d);
+    let sk = s.edit_sketch.unwrap();
+    assert!(!s.model.sketches[&sk].profiles.is_empty());
+  }
+
+  #[test]
+  fn extrude_arrow_drags_the_distance() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let mut d = Dialog::blank(Kind::Extrude);
+    d.sketch = s.edit_sketch;
+    run(&mut s, "sketch.finish", json!({}));
+    let m = d.manipulator(&s).unwrap();
+    assert!((m.value - 10.0).abs() < 1e-9 && m.dir.z > 0.99);
+    d.set_manipulator(-7.26, 0.5);
+    assert!(d.flip && d.distance == "7.5 mm", "{} {}", d.flip, d.distance);
+    apply(&mut s, &mut d);
+    let bb = s.model.bodies[0].shape.mass().unwrap();
+    assert!((bb.bbox_min.z + 7.5).abs() < 1e-6, "{bb:?}");
   }
 }

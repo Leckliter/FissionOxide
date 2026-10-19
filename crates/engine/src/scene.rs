@@ -251,6 +251,46 @@ impl SceneBuilder {
       });
     }
 
+    // construction axes (dashed, through the model), points and cosmetic threads
+    let reach = scene_size(s) * 0.4;
+    for (id, (o, d)) in &s.model.axes {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+        continue;
+      }
+      scene.lines.push(Polyline {
+        points: vec![(*o - *d * reach).as_vec3().to_array(), (*o + *d * reach).as_vec3().to_array()],
+        color: [200, 140, 40, 255],
+        width: 1.5,
+        id: 0,
+        on_top: false,
+        dashed: true,
+        behind: false,
+      });
+    }
+    for (id, p) in &s.model.points {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+        continue;
+      }
+      scene.markers.push(Marker {
+        at: p.as_vec3().to_array(),
+        color: [200, 140, 40, 255],
+        size: 5.0,
+        id: 0,
+        on_top: true,
+      });
+    }
+    for (_, helix) in &s.model.threads {
+      scene.lines.push(Polyline {
+        points: helix.iter().map(|p| p.as_vec3().to_array()).collect(),
+        color: [90, 96, 108, 255],
+        width: 1.0,
+        id: 0,
+        on_top: false,
+        dashed: false,
+        behind: false,
+      });
+    }
+
     if !opts.hide_grid {
       grid(&mut scene, s);
     }
