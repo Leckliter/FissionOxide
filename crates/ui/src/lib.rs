@@ -99,6 +99,8 @@ pub struct App {
   /// A regeneration running in the background, and when it started. While it runs the UI shows
   /// the last image and takes no input (nothing may call the kernel; see `Session::begin`).
   pub(crate) rebuild: Option<(clf_engine::Rebuild, f64)>,
+  /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
+  pub manufacture: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -184,6 +186,7 @@ impl App {
       section: None,
       analysis: None,
       rebuild: None,
+      manufacture: false,
     }
   }
 
@@ -374,6 +377,48 @@ impl App {
     }
   }
 
+  /// Computes the last setup's toolpaths; `report` puts the machining time in the status bar.
+  pub fn cam_generate(&mut self, report: bool) {
+    if self.s.design.cam.is_empty() {
+      if report {
+        self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
+      }
+      return;
+    }
+    match self.s.execute("cam.generate", &json!({})) {
+      Ok(r) if report => {
+        let ops = r["operations"].as_array().map(Vec::len).unwrap_or(0);
+        let min = r["minutes"].as_f64().unwrap_or(0.0);
+        self.status = Some((
+          format!("{ops} operation(s) · about {:.0} min {:.0} s machining", min.floor(), (min.fract() * 60.0).round()),
+          false,
+        ));
+      }
+      Ok(_) => {}
+      Err(e) => {
+        self.s.toolpaths.clear();
+        self.s.toolpaths_of = None;
+        self.status = Some((e.0, true));
+      }
+    }
+  }
+
+  /// Writes the last setup's G-code to a file the user picks.
+  pub fn cam_post(&mut self) {
+    if self.s.design.cam.is_empty() {
+      self.status = Some(("Create a setup first (SETUP ▸ New Setup)".into(), false));
+      return;
+    }
+    if let Some(p) = rfd::FileDialog::new()
+      .add_filter("G-code", &["nc", "tap", "gcode", "ngc"])
+      .set_file_name(format!("{}.nc", self.s.design.name))
+      .save_file()
+      && let Some(r) = self.run("cam.post", json!({"path": p}))
+    {
+      self.status = Some((format!("Wrote {} lines of G-code to {}", r["lines"], p.display()), false));
+    }
+  }
+
   /// Insert a file into the current design.
   pub fn import(&mut self) {
     for p in data_panel::pick_importable("Insert into the design", true) {
@@ -436,6 +481,9 @@ impl App {
     }
     if pressed(Key::N, Modifiers::COMMAND) {
       self.new_design();
+    }
+    if pressed(Key::G, Modifiers::COMMAND) && self.manufacture {
+      self.cam_generate(true);
     }
     if pressed(Key::B, Modifiers::COMMAND) && self.drawing.is_none() {
       self.run_background("compute_all", json!({}));
@@ -731,6 +779,11 @@ impl App {
     }
     if self.data.save.is_none() {
       self.shortcuts(&ctx);
+    }
+    // the Manufacture workspace keeps its toolpaths in step with the design
+    if self.manufacture && !self.s.design.cam.is_empty() && self.s.toolpaths_of.map(|t| t.1) != Some(self.s.revision) {
+      self.cam_generate(false);
+      self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);

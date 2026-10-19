@@ -582,6 +582,11 @@ impl Shape {
     Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)?.solids()
   }
 
+  /// This shape split where `tool` crosses it, as one shape (surfaces included).
+  pub fn split_raw(&self, tool: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)
+  }
+
   /// One face (1-based face-map index) as a shape of its own.
   pub fn face_shape(&self, face: u32) -> Result<Shape> {
     Shape::wrap(sys::face_at_index(self.get()?, face)?)
@@ -655,6 +660,30 @@ impl Shape {
   /// A single point (for measuring to a point).
   pub fn vertex(p: DVec3) -> Result<Shape> {
     Shape::wrap(sys::make_vertex(p.x, p.y, p.z)?)
+  }
+
+  /// Every loop of this planar face offset by `d` (negative = inwards) as ordered polylines;
+  /// empty once the offset vanishes. An offset can split a region into several loops.
+  pub fn offset_loops(&self, d: f64, deflection: f64) -> Result<Vec<Vec<DVec3>>> {
+    let e = sys::offset_polylines(self.get()?, d, deflection.clamp(1e-4, 100.0))?;
+    let pts: Vec<DVec3> = e.points.chunks_exact(3).map(|c| DVec3::new(c[0], c[1], c[2])).collect();
+    Ok(
+      e.offsets
+        .windows(2)
+        .filter_map(|w| pts.get(w[0] as usize..w[1] as usize).map(<[DVec3]>::to_vec))
+        .filter(|l| l.len() > 2)
+        .collect(),
+    )
+  }
+
+  /// A ruled surface between this edge and another.
+  pub fn ruled_to(&self, other: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::ruled(self.get()?, other.get()?)?)
+  }
+
+  /// Surfaces offset by `d` along their normals (a new surface, the original is kept).
+  pub fn offset_surface(&self, d: f64) -> Result<Shape> {
+    Shape::wrap(sys::offset_shape(self.get()?, d)?)
   }
 
   /// The same shape with its orientation (face normals) reversed.

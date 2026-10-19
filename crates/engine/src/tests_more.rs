@@ -319,3 +319,86 @@ fn parameter_change_regenerates_in_the_background() {
   s.finish_rebuild(job.unwrap());
   assert!((volume(&s) - 1000.0).abs() < 1e-6);
 }
+
+#[test]
+fn milling_setup_toolpaths_and_gcode() {
+  let mut s = Session::default();
+  // a 60 × 40 × 20 block with a 30 × 20 pocket 8 deep and a through hole
+  block(&mut s, 60.0, 40.0, 20.0);
+  run(&mut s, "sketch.create", json!({"plane": {"point": [30, 20, 20], "normal": [0, 0, 1]}}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, 10], "corner2": [40, 30]}));
+  run(&mut s, "extrude", json!({"distance": 8, "flip": true, "operation": "cut"}));
+  run(&mut s, "sketch.create", json!({"plane": {"point": [50, 20, 20], "normal": [0, 0, 1]}}));
+  run(&mut s, "sketch.circle", json!({"center": [50, 20], "diameter": 6}));
+  run(&mut s, "extrude", json!({"extent": "through_all", "flip": true, "operation": "cut"}));
+  let st = run(&mut s, "cam.setup", json!({"stock_side": 3, "stock_top": 2}));
+  assert_eq!(st["stock"][1][2].as_f64().unwrap(), 22.0);
+  run(&mut s, "cam.face", json!({"tool_diameter": 20, "stepdown": 1}));
+  run(&mut s, "cam.pocket", json!({"floors": [{"point": [25, 20, 12]}], "tool_diameter": 6, "stepdown": 2}));
+  run(&mut s, "cam.contour", json!({"tool_diameter": 6, "stepdown": 5}));
+  run(&mut s, "cam.drill", json!({"tool_diameter": 6, "peck": 3}));
+  let g = run(&mut s, "cam.generate", json!({}));
+  assert_eq!(g["operations"].as_array().unwrap().len(), 4, "{g}");
+  assert!(g["minutes"].as_f64().unwrap() > 0.0);
+  // the pocket stays inside its walls: the tool centre keeps a radius from them
+  let pocket = &s.toolpaths[1];
+  for m in pocket.moves.iter().filter(|m| !m.rapid) {
+    assert!(
+      m.to.x >= 13.0 - 1e-6 && m.to.x <= 37.0 + 1e-6 && m.to.y >= 13.0 - 1e-6 && m.to.y <= 27.0 + 1e-6,
+      "{:?}",
+      m.to
+    );
+    assert!(m.to.z >= 12.0 - 1e-6);
+  }
+  assert!(pocket.moves.iter().any(|m| (m.to.z - 12.0).abs() < 1e-6), "reaches the floor");
+  // the contour runs a radius outside the part, below its bottom
+  let contour = &s.toolpaths[2];
+  for m in contour.moves.iter().filter(|m| !m.rapid && m.to.z < 19.0) {
+    // distance from the 60 × 40 outline: the tool radius (rounded corners included)
+    let dx = (-m.to.x).max(m.to.x - 60.0).max(0.0);
+    let dy = (-m.to.y).max(m.to.y - 40.0).max(0.0);
+    assert!((dx.hypot(dy) - 3.0).abs() < 0.05, "{:?}", m.to);
+  }
+  assert!(contour.moves.iter().any(|m| m.to.z < 0.0));
+  let drill = s.toolpaths[3].drill.as_ref().unwrap();
+  assert_eq!(drill.0.len(), 1);
+  let code = run(&mut s, "cam.post", json!({}))["gcode"].as_str().unwrap().to_string();
+  assert!(code.contains("T1 M6") && code.contains("T2 M6") && code.contains("G83") && code.ends_with("%\n"), "{code}");
+  // work coordinates: nothing cuts above the stock top (Z0)
+  for l in code.lines().filter(|l| l.starts_with("G1")) {
+    if let Some(z) = l.split_whitespace().find(|w| w.starts_with('Z')) {
+      assert!(z[1..].parse::<f64>().unwrap() <= 1e-9, "{l}");
+    }
+  }
+  // operations follow the model: a deeper pocket moves the toolpath
+  let f = s.design.features.iter().find(|f| f.name == "Extrude2").unwrap().id.0;
+  run(
+    &mut s,
+    "feature.edit",
+    json!({"feature": f, "set": {"extent": {"kind": "one_side", "distance": "12", "flip": true}}}),
+  );
+  run(&mut s, "cam.generate", json!({}));
+  assert!(s.toolpaths[1].moves.iter().any(|m| (m.to.z - 8.0).abs() < 1e-6));
+  let saved: crate::model::Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
+  assert_eq!(saved.cam.len(), 1);
+}
+
+#[test]
+fn ruled_offset_and_trim_surfaces() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  // a ruled surface between the top front and top back edges is the top face again
+  run(&mut s, "surface.ruled", json!({"a": {"point": [0, -5, 5]}, "b": {"point": [0, 5, 5]}}));
+  let ruled = s.model.bodies.last().unwrap();
+  assert!((ruled.shape.mass().unwrap().area - 200.0).abs() < 1e-6);
+  let id = ruled.id.0;
+  run(&mut s, "surface.offset", json!({"bodies": [id], "distance": 3}));
+  let off = s.model.bodies.last().unwrap().shape.mass().unwrap();
+  assert!(
+    (off.area - 200.0).abs() < 1e-6 && (off.bbox_min.z - 8.0).abs() < 1e-3 || (off.bbox_min.z - 2.0).abs() < 1e-3,
+    "{off:?}"
+  );
+  run(&mut s, "surface.trim", json!({"bodies": [id], "tool": "yz"}));
+  let b = s.model.bodies.iter().find(|b| b.id.0 == id).unwrap();
+  assert!((b.shape.mass().unwrap().area - 100.0).abs() < 1e-6, "{}", b.shape.mass().unwrap().area);
+}

@@ -342,6 +342,9 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
 /// The section and analysis settings as render parameters.
 fn view_params(app: &App) -> serde_json::Value {
   let mut v = app.analysis.clone().unwrap_or(json!({}));
+  if app.manufacture {
+    v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
+  }
   if let Some(sec) = &app.section {
     v["section"] = sec.clone();
   }

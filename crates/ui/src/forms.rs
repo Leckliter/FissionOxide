@@ -31,6 +31,11 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// Selected faces, if any (left out of the command when none are).
+  FacesOpt {
+    key: &'static str,
+    label: &'static str,
+  },
   /// The next selected face; with `near`, also its centre under that key.
   Face {
     key: &'static str,
@@ -103,6 +108,7 @@ impl Input {
   pub fn key(&self) -> &'static str {
     match self {
       Input::Faces { key, .. }
+      | Input::FacesOpt { key, .. }
       | Input::Face { key, .. }
       | Input::Edges { key, .. }
       | Input::Edge { key, .. }
@@ -140,7 +146,13 @@ impl State {
         Input::Check { .. } => json!(false),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
-        Input::Faces { .. } | Input::Edges { .. } | Input::Bodies { .. } | Input::Curves { .. } => json!([]),
+        Input::Faces { .. }
+        | Input::FacesOpt { .. }
+        | Input::Edges { .. }
+        | Input::Bodies { .. }
+        | Input::Curves { .. } => {
+          json!([])
+        }
         Input::Plane { .. } => json!("xy"),
         Input::Axis { .. } => json!("z"),
         _ => Value::Null,
@@ -197,7 +209,7 @@ impl State {
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
-        Input::Faces { .. } => json!(faces),
+        Input::Faces { .. } | Input::FacesOpt { .. } => json!(faces),
         Input::Face { .. } => {
           nf += 1;
           let f = faces.get(nf - 1).cloned().unwrap_or(Value::Null);
@@ -260,7 +272,7 @@ impl State {
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
       match input {
-        Input::Curves { .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
+        Input::Curves { .. } | Input::FacesOpt { .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
         Input::Bodies { required: false, .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
         Input::Expr { .. } | Input::Text { .. } if v.as_str().is_some_and(|t| t.trim().is_empty()) => continue,
         Input::Face { near: Some(n), .. } => {
@@ -885,3 +897,128 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
     _ => (form.cmd, p),
   }
 }
+
+pub static RULED: Form = Form {
+  title: "RULED",
+  name: "Ruled",
+  hint: "A ruled surface between two edges",
+  icon: Icon::Ruled,
+  cmd: "surface.ruled",
+  fixed: &[],
+  inputs: &[Input::Edge { key: "a", label: "First edge" }, Input::Edge { key: "b", label: "Second edge" }],
+  picks_model: false,
+};
+
+pub static SURFACE_OFFSET: Form = Form {
+  title: "OFFSET",
+  name: "Offset",
+  hint: "New surfaces offset from faces along their normals",
+  icon: Icon::SurfOffset,
+  cmd: "surface.offset",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Faces" },
+    Input::Expr { key: "distance", label: "Distance", default: "2 mm" },
+  ],
+  picks_model: true,
+};
+
+pub static TRIM: Form = Form {
+  title: "TRIM",
+  name: "Trim",
+  hint: "Trim surface bodies with a plane",
+  icon: Icon::Trim,
+  cmd: "surface.trim",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Surfaces", required: true },
+    Input::Plane { key: "tool", label: "Trimming tool" },
+    Input::Check { key: "flip", label: "Keep the other side" },
+  ],
+  picks_model: true,
+};
+
+pub static CAM_SETUP: Form = Form {
+  title: "SETUP",
+  name: "New Setup",
+  hint: "A milling setup: the stock around the part and its work origin",
+  icon: Icon::Box,
+  cmd: "cam.setup",
+  fixed: &[],
+  inputs: &[
+    Input::Text { key: "name", label: "Name", default: "" },
+    Input::Expr { key: "stock_side", label: "Stock side offset", default: "2" },
+    Input::Expr { key: "stock_top", label: "Stock top offset", default: "1" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_FACE: Form = Form {
+  title: "FACE",
+  name: "Face",
+  hint: "Face the stock down to the top of the part",
+  icon: Icon::Extrude,
+  cmd: "cam.face",
+  fixed: &[],
+  inputs: &[
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "20 mm" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.7" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "1 mm" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_POCKET: Form = Form {
+  title: "2D POCKET",
+  name: "2D Pocket",
+  hint: "Clear pockets down to their flat floors",
+  icon: Icon::Shell,
+  cmd: "cam.pocket",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "floors", label: "Pocket floors" },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.4" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "2 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
+    Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_CONTOUR: Form = Form {
+  title: "2D CONTOUR",
+  name: "2D Contour",
+  hint: "Cut around the outline of faces (default the part's bottom)",
+  icon: Icon::SkOffset,
+  cmd: "cam.contour",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "faces", label: "Outline faces (default bottom)" },
+    Input::Check { key: "inside", label: "Inside the outline" },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "2 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
+    Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_DRILL: Form = Form {
+  title: "DRILL",
+  name: "Drill",
+  hint: "Drill vertical holes (default every hole)",
+  icon: Icon::Hole,
+  cmd: "cam.drill",
+  fixed: &[],
+  inputs: &[
+    Input::FacesOpt { key: "holes", label: "Holes (default all)" },
+    Input::Expr { key: "tool_diameter", label: "Drill diameter", default: "6 mm" },
+    Input::Expr { key: "peck", label: "Peck depth (0 = none)", default: "0" },
+    Input::Expr { key: "plunge", label: "Feed (mm/min)", default: "200" },
+  ],
+  picks_model: false,
+};

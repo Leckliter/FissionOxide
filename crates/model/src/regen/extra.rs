@@ -378,6 +378,67 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::Ruled { a, b } => {
+        let (ba, ea) = self.edge_info(a)?;
+        let (bb, eb) = self.edge_info(b)?;
+        let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
+        let sb = self.state.bodies[bb].shape.edge_shape(eb.id).map_err(ke)?;
+        let face = sa.ruled_to(&sb).map_err(ke)?;
+        self.new_body(id, face);
+        Ok(None)
+      }
+      FeatureKind::SurfaceOffset { faces, bodies, distance } => {
+        let d = self.len(distance)?;
+        let mut skins = Vec::new();
+        for (bi, fids) in self.faces_by_body(faces)? {
+          for f in fids {
+            skins.push(self.state.bodies[bi].shape.face_shape(f).map_err(ke)?);
+          }
+        }
+        for b in bodies.iter() {
+          let bi = self.body_index(*b)?;
+          skins.push(self.state.bodies[bi].shape.clone());
+        }
+        if skins.is_empty() {
+          return Err("select faces or bodies to offset".into());
+        }
+        for skin in skins {
+          let off = skin.offset_surface(d).map_err(ke)?;
+          self.new_body(id, off);
+        }
+        Ok(None)
+      }
+      FeatureKind::Trim { bodies, tool, flip } => {
+        let pl = self.resolve_plane(tool)?;
+        let n = pl.normal() * if *flip { -1.0 } else { 1.0 };
+        let size = self.through_all(&pl);
+        let sq = Loop {
+          segs: vec![
+            Seg::Line { a: [-size, -size], b: [size, -size] },
+            Seg::Line { a: [size, -size], b: [size, size] },
+            Seg::Line { a: [size, size], b: [-size, size] },
+            Seg::Line { a: [-size, size], b: [-size, -size] },
+          ],
+        };
+        let cutter = Shape::face(&pl, &Profile { outer: sq, holes: vec![] }).map_err(ke)?;
+        for b in bodies.iter() {
+          let bi = self.body_index(*b)?;
+          let split = self.state.bodies[bi].shape.split_raw(&cutter).map_err(ke)?;
+          // keep the faces behind the plane
+          let mut keep = Vec::new();
+          for f in split.faces().map_err(ke)? {
+            if (f.center - pl.origin).dot(n) < 0.0 {
+              keep.push(split.face_shape(f.id).map_err(ke)?);
+            }
+          }
+          if keep.is_empty() {
+            return Err("nothing is left behind the plane (try Flip)".into());
+          }
+          let skin = Shape::compound(keep.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
+          self.state.bodies[bi] = self.state.bodies[bi].with_shape(skin, id);
+        }
+        Ok(None)
+      }
       FeatureKind::ReverseNormal { bodies } => {
         for b in bodies.iter() {
           let bi = self.body_index(*b)?;

@@ -11,6 +11,8 @@
 #include <string>
 
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepFill.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepAlgoAPI_Defeaturing.hxx>
@@ -662,8 +664,9 @@ MassProps mass_props(const Shape &s) {
   GProp_GProps surf;
   BRepGProp::SurfaceProperties(s.s, surf);
   out.area = surf.Mass();
+  // the tight box: the default one is loose around curved (fillet, B-spline) faces
   Bnd_Box box;
-  BRepBndLib::Add(s.s, box);
+  BRepBndLib::AddOptimal(s.s, box, Standard_False, Standard_False);
   if (!box.IsVoid()) {
     double x0, y0, z0, x1, y1, z1;
     box.Get(x0, y0, z0, x1, y1, z1);
@@ -1845,6 +1848,75 @@ EdgeData face_loops(const Shape &s, double deflection) {
   out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
   return out;
   CLF_CATCH("face loops")
+}
+
+// Every loop of a planar face offset by d (d < 0 inwards), as ordered polylines; empty when the
+// offset vanishes. Toolpaths use these: an offset can split a region into several.
+EdgeData offset_polylines(const Shape &face, double d, double deflection) {
+  CLF_TRY
+  EdgeData out;
+  if (face.s.ShapeType() != TopAbs_FACE) throw std::runtime_error("offset needs a face");
+  BRepOffsetAPI_MakeOffset mk(TopoDS::Face(face.s), GeomAbs_Arc);
+  try {
+    mk.Perform(d);
+  } catch (...) {
+    return out;
+  }
+  if (!mk.IsDone()) return out;
+  uint32_t k = 0;
+  for (TopExp_Explorer wx(mk.Shape(), TopAbs_WIRE); wx.More(); wx.Next()) {
+    out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+    out.edge_ids.push_back(++k);
+    bool first_edge = true;
+    for (BRepTools_WireExplorer we(TopoDS::Wire(wx.Current())); we.More(); we.Next()) {
+      const TopoDS_Edge &e = we.Current();
+      if (BRep_Tool::Degenerated(e)) continue;
+      BRepAdaptor_Curve c(e);
+      GCPnts_TangentialDeflection td(c, 0.1, deflection);
+      int n = td.NbPoints();
+      bool rev = e.Orientation() == TopAbs_REVERSED;
+      for (int j = first_edge ? 1 : 2; j <= n; ++j) {
+        gp_Pnt p = td.Value(rev ? n - j + 1 : j);
+        out.points.push_back(p.X());
+        out.points.push_back(p.Y());
+        out.points.push_back(p.Z());
+      }
+      first_edge = false;
+    }
+  }
+  out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 3));
+  return out;
+  CLF_CATCH("offset loops")
+}
+
+// A ruled surface between two edges.
+std::unique_ptr<Shape> ruled(const Shape &a, const Shape &b) {
+  CLF_TRY
+  if (a.s.ShapeType() != TopAbs_EDGE || b.s.ShapeType() != TopAbs_EDGE) throw std::runtime_error("pick two edges");
+  TopoDS_Edge ea = TopoDS::Edge(a.s), eb = TopoDS::Edge(b.s);
+  // run both edges the same way, or the surface twists
+  auto ends = [](const TopoDS_Edge &e) {
+    BRepAdaptor_Curve c(e);
+    gp_Pnt p0 = c.Value(c.FirstParameter()), p1 = c.Value(c.LastParameter());
+    if (e.Orientation() == TopAbs_REVERSED) std::swap(p0, p1);
+    return std::make_pair(p0, p1);
+  };
+  auto [a0, a1] = ends(ea);
+  auto [b0, b1] = ends(eb);
+  if (a0.Distance(b0) + a1.Distance(b1) > a0.Distance(b1) + a1.Distance(b0)) eb = TopoDS::Edge(eb.Reversed());
+  TopoDS_Face f = BRepFill::Face(ea, eb);
+  return wrap(f);
+  CLF_CATCH("ruled surface")
+}
+
+// Surfaces (or a solid's skin) offset by d along their normals.
+std::unique_ptr<Shape> offset_shape(const Shape &s, double d) {
+  CLF_TRY
+  BRepOffsetAPI_MakeOffsetShape mk;
+  mk.PerformBySimple(s.s, d);
+  if (!mk.IsDone()) throw std::runtime_error("the surface can't be offset that far");
+  return wrap(mk.Shape());
+  CLF_CATCH("offset surface")
 }
 
 std::unique_ptr<Shape> make_vertex(double x, double y, double z) {

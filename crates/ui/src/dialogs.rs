@@ -2034,7 +2034,10 @@ impl Dialog {
     for (i, input) in f.inputs.iter().enumerate() {
       let v = self.form.values[i].clone();
       match input {
-        Input::Faces { label, .. } | Input::Edges { label, .. } | Input::Curves { label, .. } => {
+        Input::Faces { label, .. }
+        | Input::FacesOpt { label, .. }
+        | Input::Edges { label, .. }
+        | Input::Curves { label, .. } => {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
           sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
@@ -3940,5 +3943,29 @@ mod tests {
     apply(&mut s, &mut d);
     let bb = s.model.bodies[0].shape.mass().unwrap();
     assert!((bb.bbox_min.z + 7.5).abs() < 1e-6, "{bb:?}");
+  }
+
+  #[test]
+  fn manufacture_forms() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let mut d = form(&mut s, &CAM_SETUP, vec![], &[("name", json!("Op 10"))]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.design.cam[0].name, "Op 10");
+    d.applied = false;
+    // pocket the top face as if it were a floor: a facing-like clearing at Z = 10
+    let mut d = form(&mut s, &CAM_POCKET, vec![Sel::Face { body: b, face: top }], &[("tool_diameter", json!("8 mm"))]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = form(&mut s, &CAM_CONTOUR, vec![], &[]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    assert_eq!(s.design.cam[0].operations.len(), 2);
+    assert_eq!(s.design.cam[0].operations[0].tool.diameter, 8.0);
+    run(&mut s, "cam.generate", json!({}));
+    assert_eq!(s.toolpaths.len(), 2);
   }
 }

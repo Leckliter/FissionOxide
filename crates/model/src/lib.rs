@@ -10,6 +10,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod assembly;
+pub mod cam;
 pub mod construct;
 pub mod drawing;
 pub mod meshops;
@@ -66,6 +67,9 @@ pub struct Design {
   /// 2D drawings of the design.
   #[serde(default)]
   pub drawings: Vec<drawing::Drawing>,
+  /// Manufacture setups (CAM).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub cam: Vec<cam::Setup>,
   #[serde(default)]
   next_id: u32,
 }
@@ -871,6 +875,26 @@ pub enum FeatureKind {
   Unstitch {
     bodies: Vec<BodyId>,
   },
+  /// A ruled surface between two edges.
+  Ruled {
+    a: EdgeRef,
+    b: EdgeRef,
+  },
+  /// New surface bodies offset from faces or bodies along their normals.
+  SurfaceOffset {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    bodies: Vec<BodyId>,
+    distance: String,
+  },
+  /// Trims surface bodies with a plane, keeping the side behind it (or in front, flipped).
+  Trim {
+    bodies: Vec<BodyId>,
+    tool: PlaneRef,
+    #[serde(default)]
+    flip: bool,
+  },
   /// Flips the normals of surface bodies.
   ReverseNormal {
     bodies: Vec<BodyId>,
@@ -993,6 +1017,9 @@ impl FeatureKind {
       FeatureKind::Stitch { .. } => "Stitch",
       FeatureKind::Unstitch { .. } => "Unstitch",
       FeatureKind::ReverseNormal { .. } => "ReverseNormal",
+      FeatureKind::Ruled { .. } => "Ruled",
+      FeatureKind::SurfaceOffset { .. } => "Offset",
+      FeatureKind::Trim { .. } => "Trim",
       FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
       FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
       FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
@@ -1035,7 +1062,9 @@ impl FeatureKind {
       FeatureKind::PlaneBy { def } => def.depends_on(),
       FeatureKind::ConstructionAxis { def } => def.depends_on(),
       FeatureKind::ConstructionPoint { def } => def.depends_on(),
-      FeatureKind::Coil { plane, .. } | FeatureKind::SplitFace { tool: plane, .. } => plane_dep(plane),
+      FeatureKind::Coil { plane, .. }
+      | FeatureKind::SplitFace { tool: plane, .. }
+      | FeatureKind::Trim { tool: plane, .. } => plane_dep(plane),
       FeatureKind::Pipe { path_sketch, .. } => vec![*path_sketch],
       FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
       FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
@@ -1093,6 +1122,7 @@ impl Design {
       sheet_metal_rules: Vec::new(),
       components: Vec::new(),
       drawings: Vec::new(),
+      cam: Vec::new(),
       next_id: 1,
     }
   }
@@ -1612,6 +1642,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Thicken { thickness, .. } => f(thickness),
+    FeatureKind::SurfaceOffset { distance, .. } => f(distance),
+    FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
     FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
     FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
     FeatureKind::Stitch { tolerance, .. } => f(tolerance),

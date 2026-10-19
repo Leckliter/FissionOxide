@@ -74,6 +74,9 @@ std::unique_ptr<Shape> patch(const Shape &boundary);
 EdgeData face_loops(const Shape &s, double deflection);
 std::unique_ptr<Shape> reversed(const Shape &s);
 std::unique_ptr<Shape> make_vertex(double x, double y, double z);
+std::unique_ptr<Shape> ruled(const Shape &a, const Shape &b);
+std::unique_ptr<Shape> offset_shape(const Shape &s, double d);
+EdgeData offset_polylines(const Shape &face, double d, double deflection);
 
 uint32_t solid_count(const Shape &s);
 std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i);

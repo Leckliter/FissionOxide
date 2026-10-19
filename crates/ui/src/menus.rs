@@ -318,8 +318,8 @@ const SURFACE_CREATE: &[E] = &[
   x("Loft", Icon::Loft).o(),
   c("Patch", Icon::Patch, D(Kind::Form(&forms::PATCH))).o(),
   c("Patch from Sketch", Icon::Patch, D(Kind::Form(&forms::PATCH_SKETCH))).o(),
-  x("Ruled", Icon::Ruled).o(),
-  x("Offset", Icon::SurfOffset).o(),
+  c("Ruled", Icon::Ruled, D(Kind::Form(&forms::RULED))).o(),
+  c("Offset", Icon::SurfOffset, D(Kind::Form(&forms::SURFACE_OFFSET))).o(),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
@@ -334,7 +334,7 @@ const SURFACE_MODIFY: &[E] = &[
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
-  x("Trim", Icon::Trim),
+  c("Trim", Icon::Trim, D(Kind::Form(&forms::TRIM))),
   x("Untrim", Icon::Untrim).o(),
   x("Extend", Icon::Extend).o(),
   c("Stitch", Icon::Stitch, D(Kind::Form(&forms::STITCH))).o(),
@@ -716,6 +716,37 @@ const DRAWING: [Group; 7] = [
   Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
 ];
 
+const CAM_SETUP: &[E] = &[c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP)))];
+
+const CAM_2D: &[E] = &[
+  c("Face", Icon::Extrude, D(Kind::Form(&forms::CAM_FACE))),
+  c("2D Pocket", Icon::Shell, D(Kind::Form(&forms::CAM_POCKET))),
+  c("2D Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR))),
+  E::Sep,
+  x("2D Adaptive Clearing", Icon::Shell),
+  x("Slot", Icon::Slot),
+  x("Trace", Icon::Line),
+  x("Thread", Icon::Thread),
+  x("Bore", Icon::Hole),
+  x("Engrave", Icon::SkText),
+];
+
+const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
+
+const CAM_ACTIONS: &[E] = &[
+  c("Generate", Icon::Play, Cmd::CamGenerate).k("Ctrl+G"),
+  c("Post Process", Icon::ExportDxf, Cmd::CamPost),
+  c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+];
+
+/// The Manufacture workspace's MILLING tab.
+const MILLING: [Group; 4] = [
+  Group { label: "SETUP", quick: &["New Setup"], menu: CAM_SETUP },
+  Group { label: "2D", quick: &["Face", "2D Pocket", "2D Contour"], menu: CAM_2D },
+  Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
+  Group { label: "ACTIONS", quick: &["Generate", "Post Process"], menu: CAM_ACTIONS },
+];
+
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
@@ -837,6 +868,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Utilities => (&UTILITIES, &[]),
     Tab::Sketch => (&SKETCH, &[]),
     Tab::Drawing => (&DRAWING, &[]),
+    Tab::Milling => (&MILLING, &[]),
   };
   let mut pick: Option<Item> = None;
   for g in own.iter().chain(shared.iter()) {

@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 mod assembly;
+mod cam;
 mod commands;
 mod drawings;
 mod features;
@@ -131,6 +132,10 @@ pub struct Session {
   pub store_root: Option<PathBuf>,
   /// The hub item and version the design was opened from or last saved to.
   pub hub: Option<HubLink>,
+  /// Toolpaths last generated (`cam.generate`), drawn in the Manufacture workspace.
+  pub toolpaths: Vec<clf_model::cam::Toolpath>,
+  /// The setup and design revision they were generated for.
+  pub toolpaths_of: Option<(u32, u64)>,
 }
 
 impl Default for Session {
@@ -154,6 +159,8 @@ impl Session {
       revision: 0,
       store_root: None,
       hub: None,
+      toolpaths: Vec::new(),
+      toolpaths_of: None,
     };
     s.rebuild();
     s

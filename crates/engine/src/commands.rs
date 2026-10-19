@@ -141,11 +141,23 @@ cmds! {
   "surface.stitch" => "Sew surface bodies together (into a solid when they close)", "{bodies, tolerance?}";
   "surface.unstitch" => "Break bodies into one surface body per face", "{bodies}";
   "surface.reverse" => "Flip surface normals", "{bodies}";
+  "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
+  "surface.offset" => "New surfaces offset from faces or bodies", "{faces? | bodies?, distance}";
+  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it; flip for the other)", "{bodies, tool: plane, flip?}";
   "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
   "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
   "body.appearance" => "Set the appearance of bodies (a library name or [r,g,b]; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
+  "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner", "{name?, body?, stock_side?, stock_top?}";
+  "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool: {diameter, number?, rpm?, feed?, plunge?} | tool_diameter, stepover?: fraction, stepdown?}";
+  "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands)", "{setup?, floors: [face], tool | tool_diameter, stepover?, stepdown?, stock_to_leave?}";
+  "cam.contour" => "2D contour around the outline of faces (default the part's bottom), down through the part", "{setup?, faces?, inside?, tool | tool_diameter, stepdown?, stock_to_leave?}";
+  "cam.drill" => "Drill vertical holes (default every hole); peck > 0 pecks", "{setup?, holes?: [face], tool | tool_diameter, peck?}";
+  "cam.generate" => "Compute a setup's toolpaths (shown in the viewport): moves, length and time", "{setup?}";
+  "cam.post" => "Write a setup's G-code (Fanuc/Haas, metric, G54); without a path, returns it", "{setup?, path?}";
+  "cam.list" => "Setups and their operations", "{}";
+  "cam.delete" => "Delete a setup, or one of its operations", "{setup?, operation?}";
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
@@ -215,6 +227,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::features::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::cam::run(s, name, p) {
     return r;
   }
   match name {

@@ -27,6 +27,8 @@ pub enum Tab {
   Sketch,
   /// The Drawing workspace's single tab.
   Drawing,
+  /// The Manufacture workspace's milling tab.
+  Milling,
 }
 
 impl Tab {
@@ -44,6 +46,7 @@ impl Tab {
       Tab::Manage => "MANAGE",
       Tab::Sketch => "SKETCH",
       Tab::Drawing => "DRAWING",
+      Tab::Milling => "MILLING",
     }
   }
 }
@@ -309,6 +312,10 @@ pub(crate) enum Cmd {
   Filter(&'static str),
   /// Recompute the whole timeline (in the background).
   ComputeAll,
+  /// Manufacture: compute the toolpaths, write G-code, delete the setup.
+  CamGenerate,
+  CamPost,
+  CamDelete,
 }
 
 impl Cmd {
@@ -397,6 +404,9 @@ impl Cmd {
       },
       Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
       Cmd::ComputeAll => (Icon::ComputeAll, "Compute All", "Recompute the whole timeline (Ctrl+B)"),
+      Cmd::CamGenerate => (Icon::Play, "Generate", "Compute the setup's toolpaths and machining time"),
+      Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code (.nc)"),
+      Cmd::CamDelete => (Icon::Remove, "Delete Setup", "Delete the last setup and its operations"),
       Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
       Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
       Cmd::SelectOther => {
@@ -499,6 +509,13 @@ impl Cmd {
       Cmd::DrawingExport(e) => app.export_drawing(e),
       Cmd::FinishDrawing => app.close_drawing(),
       Cmd::ComputeAll => app.run_background("compute_all", json!({})),
+      Cmd::CamGenerate => app.cam_generate(true),
+      Cmd::CamPost => app.cam_post(),
+      Cmd::CamDelete => {
+        if app.run("cam.delete", json!({})).is_some() {
+          app.status = Some(("Setup deleted".into(), false));
+        }
+      }
       Cmd::SelectAll => {
         app.run("select.all", json!({}));
       }
@@ -623,8 +640,20 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
     ui.painter().text(
       rect.center() - vec2(8.0, 0.0),
       egui::Align2::CENTER_CENTER,
-      if app.drawing.is_some() { "DRAWING" } else { "DESIGN" },
-      egui::FontId::proportional(if app.drawing.is_some() { 12.5 } else { 13.5 }),
+      if app.drawing.is_some() {
+        "DRAWING"
+      } else if app.manufacture {
+        "MANUFACTURE"
+      } else {
+        "DESIGN"
+      },
+      egui::FontId::proportional(if app.manufacture {
+        10.0
+      } else if app.drawing.is_some() {
+        12.5
+      } else {
+        13.5
+      }),
       Color32::from_gray(30),
     );
     icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
@@ -633,13 +662,36 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       let drawing = app.drawing.is_some();
       for (i, w) in WORKSPACES.iter().enumerate() {
         // Design and Drawing are CLFusion's workspaces
-        let current = if *w == "Drawing" { drawing } else { i == 0 && !drawing };
-        let r = ui.add_enabled(i == 0 || *w == "Drawing", egui::Button::selectable(current, *w));
+        let current = match *w {
+          "Drawing" => drawing,
+          "Manufacture" => app.manufacture && !drawing,
+          _ => i == 0 && !drawing && !app.manufacture,
+        };
+        let r =
+          ui.add_enabled(matches!(*w, "Design" | "Drawing" | "Manufacture"), egui::Button::selectable(current, *w));
         if r.clicked() {
           ui.close();
-          match (*w, drawing) {
-            ("Drawing", false) => app.open_drawing_workspace(),
-            ("Design", true) => app.close_drawing(),
+          match *w {
+            "Drawing" if !drawing => {
+              app.manufacture = false;
+              app.open_drawing_workspace();
+            }
+            "Design" => {
+              app.manufacture = false;
+              if drawing {
+                app.close_drawing();
+              }
+            }
+            "Manufacture" => {
+              if drawing {
+                app.close_drawing();
+              }
+              app.cancel_dialog();
+              if app.s.edit_sketch.is_some() {
+                app.finish_sketch();
+              }
+              app.manufacture = true;
+            }
             _ => {}
           }
         }
@@ -655,7 +707,10 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.drawing.is_some() {
       tabs = vec![Tab::Drawing];
       app.tab = Tab::Drawing;
-    } else if app.tab == Tab::Drawing {
+    } else if app.manufacture {
+      tabs = vec![Tab::Milling];
+      app.tab = Tab::Milling;
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling) {
       app.tab = Tab::Solid;
     }
     if sketching {
@@ -1908,6 +1963,9 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Stitch { .. } => Icon::Stitch,
     FeatureKind::Unstitch { .. } => Icon::Unstitch,
     FeatureKind::ReverseNormal { .. } => Icon::ReverseNormal,
+    FeatureKind::Ruled { .. } => Icon::Ruled,
+    FeatureKind::SurfaceOffset { .. } => Icon::SurfOffset,
+    FeatureKind::Trim { .. } => Icon::Trim,
     FeatureKind::Mesh { op, .. } => match op {
       clf_engine::model::construct::MeshOp::Reduce => Icon::Reduce,
       clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,

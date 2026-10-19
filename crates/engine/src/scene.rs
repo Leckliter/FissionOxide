@@ -95,6 +95,8 @@ pub struct ViewOptions {
   pub analysis: Option<clf_render::Analysis>,
   /// Colour bodies by how sharply they curve.
   pub curvature: bool,
+  /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
+  pub toolpaths: bool,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -341,6 +343,9 @@ impl SceneBuilder {
 
     if !opts.hide_grid {
       grid(&mut scene, s);
+    }
+    if opts.toolpaths {
+      toolpath_lines(&mut scene, s);
     }
     scene.analysis = opts.analysis;
     (scene, picks)
@@ -794,6 +799,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     let flip = sec.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false);
     o.section = Some(view_plane(s, &plane, offset, flip)?);
   }
+  o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   let pull = match p.get("pull") {
     Some(serde_json::Value::String(a)) => match a.as_str() {
       "x" => [1.0, 0.0, 0.0],
@@ -815,4 +821,53 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     Some(other) => return Err(format!("unknown analysis '{other}' (zebra, draft, accessibility, curvature)")),
   }
   Ok(o)
+}
+
+/// Toolpaths (cutting moves blue, rapids dashed orange) and the stock box of their setup.
+fn toolpath_lines(scene: &mut Scene, s: &Session) {
+  let line = |scene: &mut Scene, pts: Vec<[f32; 3]>, color: [u8; 4], dashed: bool, width: f32| {
+    scene.lines.push(Polyline { points: pts, color, width, id: 0, on_top: false, dashed, behind: false });
+  };
+  if let Some((id, _)) = s.toolpaths_of
+    && let Some(st) = s.design.cam.iter().find(|c| c.id == id)
+    && let Ok((lo, hi)) = clf_model::cam::stock(st, &s.model)
+  {
+    let c = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).as_vec3().to_array();
+    for z in [lo.z, hi.z] {
+      line(
+        scene,
+        vec![c(lo.x, lo.y, z), c(hi.x, lo.y, z), c(hi.x, hi.y, z), c(lo.x, hi.y, z), c(lo.x, lo.y, z)],
+        [120, 130, 150, 255],
+        true,
+        1.0,
+      );
+    }
+    for (x, y) in [(lo.x, lo.y), (hi.x, lo.y), (hi.x, hi.y), (lo.x, hi.y)] {
+      line(scene, vec![c(x, y, lo.z), c(x, y, hi.z)], [120, 130, 150, 255], true, 1.0);
+    }
+  }
+  for tp in &s.toolpaths {
+    let mut run: Vec<[f32; 3]> = Vec::new();
+    let mut rapid = false;
+    let mut at: Option<DVec3> = None;
+    for m in &tp.moves {
+      let p = m.to.as_vec3().to_array();
+      if m.rapid != rapid && !run.is_empty() {
+        let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
+        line(scene, std::mem::take(&mut run), color, rapid, if rapid { 1.0 } else { 1.5 });
+      }
+      if run.is_empty()
+        && let Some(a) = at
+      {
+        run.push(a.as_vec3().to_array());
+      }
+      rapid = m.rapid;
+      run.push(p);
+      at = Some(m.to);
+    }
+    if run.len() > 1 {
+      let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
+      line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
+    }
+  }
 }

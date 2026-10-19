@@ -127,6 +127,9 @@ pub(crate) mod ffi {
     fn face_loops(s: &Shape, deflection: f64) -> Result<EdgeData>;
     fn reversed(s: &Shape) -> Result<UniquePtr<Shape>>;
     fn make_vertex(x: f64, y: f64, z: f64) -> Result<UniquePtr<Shape>>;
+    fn ruled(a: &Shape, b: &Shape) -> Result<UniquePtr<Shape>>;
+    fn offset_shape(s: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
+    fn offset_polylines(face: &Shape, d: f64, deflection: f64) -> Result<EdgeData>;
 
     fn solid_count(s: &Shape) -> u32;
     fn solid_at(s: &Shape, i: u32) -> Result<UniquePtr<Shape>>;

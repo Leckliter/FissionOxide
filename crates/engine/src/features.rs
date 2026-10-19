@@ -185,6 +185,20 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let bodies = body_list(s, p)?;
       add_feature(s, FeatureKind::Unstitch { bodies })
     })(),
+    "surface.ruled" => (|| {
+      let (a, b) = (edge(s, p, "a")?, edge(s, p, "b")?);
+      add_feature(s, FeatureKind::Ruled { a, b })
+    })(),
+    "surface.offset" => (|| {
+      let faces = if p.get("faces").is_some() { faces(s, p)? } else { Vec::new() };
+      let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+      add_feature(s, FeatureKind::SurfaceOffset { faces, bodies, distance: req_expr(p, "distance")? })
+    })(),
+    "surface.trim" => (|| {
+      let bodies = body_list(s, p)?;
+      let tool = plane_of(s, p, "tool")?;
+      add_feature(s, FeatureKind::Trim { bodies, tool, flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false) })
+    })(),
     "surface.reverse" => (|| {
       let bodies = body_list(s, p)?;
       add_feature(s, FeatureKind::ReverseNormal { bodies })
