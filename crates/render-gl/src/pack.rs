@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use clf_render::{Marker, Mesh, Polyline};
+use fox_render::{Marker, Mesh, Polyline};
 
 /// Floats per mesh vertex: position, normal, colour bits, id bits.
 pub const MESH_STRIDE: usize = 8;

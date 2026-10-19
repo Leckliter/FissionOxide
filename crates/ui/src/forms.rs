@@ -2,8 +2,8 @@
 //! asks for. They run through the same preview machinery as the hand-built dialogs in
 //! [`crate::dialogs`] (a preview is the command applied; OK keeps it, Cancel withdraws it).
 
-use clf_engine::model::{BodyId, FeatureId, FeatureKind};
-use clf_engine::{Sel, Session};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind};
+use fox_engine::{Sel, Session};
 use serde_json::{Map, Value, json};
 
 use crate::icons::Icon;
@@ -426,7 +426,7 @@ impl State {
 fn planar(s: &Session, body: BodyId, face: u32) -> bool {
   s.model
     .body(body)
-    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == clf_engine::kernel::SurfaceKind::Plane))
+    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == fox_engine::kernel::SurfaceKind::Plane))
     .unwrap_or(false)
 }
 
@@ -992,7 +992,7 @@ pub static SK_TEXT: Form = Form {
   cmd: "sketch.text.form",
   fixed: &[],
   inputs: &[
-    Input::Text { key: "text", label: "Text", default: "CLFusion" },
+    Input::Text { key: "text", label: "Text", default: "FissionOxide" },
     Input::Expr { key: "height", label: "Height", default: "5" },
     Input::Expr { key: "x", label: "X", default: "0" },
     Input::Expr { key: "y", label: "Y", default: "0" },
@@ -1696,8 +1696,8 @@ pub fn prefill(form: &Form, state: &mut State, s: &Session) {
   for (i, input) in form.inputs.iter().enumerate() {
     let v = match input.key() {
       "text" => json!(t.text),
-      "height" => json!(clf_engine::sketch::Dim::new(t.height).expr),
-      "angle" => json!(clf_engine::sketch::Dim::new(t.angle.to_degrees()).expr),
+      "height" => json!(fox_engine::sketch::Dim::new(t.height).expr),
+      "angle" => json!(fox_engine::sketch::Dim::new(t.angle.to_degrees()).expr),
       "font" => json!(t.font),
       _ => continue,
     };

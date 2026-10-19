@@ -1,8 +1,8 @@
 //! Tests for the Manufacture workspace: the tool library, entries and tabs, rest machining,
 //! adaptive clearing, 3D finishing, the stock simulation and the post-processors.
 
-use clf_kernel::glam::DVec3;
-use clf_model::cam::{self, post};
+use fox_kernel::glam::DVec3;
+use fox_model::cam::{self, post};
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -18,7 +18,7 @@ fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
 }
 
 fn hub(name: &str) -> std::path::PathBuf {
-  let dir = std::env::temp_dir().join(format!("clf-cam-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-cam-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&dir);
   dir
 }
@@ -124,7 +124,7 @@ fn ramp_and_helix_entries_never_plunge_into_the_material() {
       // the circle through three of them
       let (a, b, c) = (down[0].truncate(), down[down.len() / 3].truncate(), down[2 * down.len() / 3].truncate());
       let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
-      let c = clf_kernel::glam::DVec2::new(
+      let c = fox_kernel::glam::DVec2::new(
         (a.length_squared() * (b.y - c.y) + b.length_squared() * (c.y - a.y) + c.length_squared() * (a.y - b.y)) / d,
         (a.length_squared() * (c.x - b.x) + b.length_squared() * (a.x - c.x) + c.length_squared() * (b.x - a.x)) / d,
       );

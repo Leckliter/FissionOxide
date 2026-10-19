@@ -1,6 +1,6 @@
 //! Orbit benchmark: the CPU rasterizer against the GPU renderer on a large patterned part.
 //!
-//! `cargo run --release -p clf-render-gl --features headless --example bench [-- N SEGMENTS WIDTH HEIGHT]`
+//! `cargo run --release -p fox-render-gl --features headless --example bench [-- N SEGMENTS WIDTH HEIGHT]`
 //!
 //! The part is a plate with an N × N pattern of bosses, each a tessellated cylinder with a domed
 //! top and its own pick ids per face, with edge loops like a B-rep body's. Without a GPU, Mesa's
@@ -9,8 +9,8 @@
 use std::f32::consts::{PI, TAU};
 use std::time::Instant;
 
-use clf_render::{Camera, Mesh, Polyline, Scene};
-use clf_render_gl::Renderer;
+use fox_render::{Camera, Mesh, Polyline, Scene};
+use fox_render_gl::Renderer;
 
 fn boss(m: &mut Mesh, lines: &mut Vec<Polyline>, c: [f32; 2], r: f32, h: f32, seg: u32, id: &mut u32) {
   let base = m.positions.len() as u32;
@@ -110,7 +110,7 @@ fn main() -> Result<(), String> {
   let scene = part(n, seg);
   let tris: usize = scene.meshes.iter().map(|m| m.indices.len() / 3).sum();
   let segs: usize = scene.lines.iter().map(|l| l.points.len() - 1).sum();
-  let hx = clf_render_gl::headless::context()?;
+  let hx = fox_render_gl::headless::context()?;
   let gl = &hx.gl;
   let renderer_name = hx.renderer_name();
   println!("{n}×{n} bosses: {tris} triangles, {segs} edge segments, {w}×{h} px; OpenGL: {renderer_name}");
@@ -123,7 +123,7 @@ fn main() -> Result<(), String> {
   for k in 0..frames.min(4) {
     let mut c = cam;
     c.orbit(0.02 * k as f64, 0.0);
-    std::hint::black_box(clf_render::render(&scene, &c, w, h));
+    std::hint::black_box(fox_render::render(&scene, &c, w, h));
   }
   let cpu = ms(t) / frames.min(4) as f64;
 

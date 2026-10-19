@@ -3,7 +3,7 @@
 Status: pieces 1–4 below are built (`crates/trace`, `crates/exchange/src/svg.rs`,
 `crates/engine/src/trace.rs`, `crates/ui/src/trace.rs`); section 5 is what's left.
 
-Turn a photo, logo or scan into clean, closed sketch geometry inside CLFusion — the job the
+Turn a photo, logo or scan into clean, closed sketch geometry inside FissionOxide — the job the
 separate TracingKit tool was meant to do for Fusion 360, without the SVG round trip. In Fusion a
 traced SVG has to be imported, then checked for gaps, slivers and overlaps by hand; here the
 tracer writes lines, arcs and splines straight into the sketch, and the sketch's own profile
@@ -38,7 +38,7 @@ The same thing is a command, so the CLI, scripts and AI agents (MCP) get it too:
 
 ## Pieces
 
-### 1. `clf-trace` crate — the tracer (pure Rust, no OpenCASCADE)
+### 1. `fox-trace` crate — the tracer (pure Rust, no OpenCASCADE)
 
 Image in, closed contours out. No dependency on the sketch or engine crates, so it can also
 become a standalone tool or a WebAssembly module later.
@@ -128,7 +128,7 @@ corners, half transparent) so you can see how well the outline follows it.
 ### 5. Later
 
 - **Canvas**: keep the image attached to a sketch plane or face as a model item (saved in the
-  `.clfz`), with opacity, calibration from two picked points and a known distance, as Fusion's
+  `.foxz`), with opacity, calibration from two picked points and a known distance, as Fusion's
   Insert Canvas. Tracing then starts from a canvas.
 - **Centre-line tracing**: skeletonise strokes into open single lines, for engraving and
   V-carving (single-line text, line art).
@@ -138,7 +138,7 @@ corners, half transparent) so you can see how well the outline follows it.
 
 ## Order of work
 
-1. `clf-trace` with tests (in parallel with 2).
+1. `fox-trace` with tests (in parallel with 2).
 2. SVG import/export with tests.
 3. `sketch.trace` and `trace.info` in the engine, with tests that check the traced sketch has the
    expected profiles (the strongest proof that everything closed).

@@ -7,7 +7,7 @@
 //! The growth is computed once on a grid of tool centres (distance transforms and iso-lines,
 //! see [`super::region`]) and replayed at every depth.
 
-use clf_kernel::glam::{DVec2, DVec3};
+use fox_kernel::glam::{DVec2, DVec3};
 
 use super::region::{Grid, Region, simplify};
 use super::{Entry, MAX_PASSES, Operation, Path};

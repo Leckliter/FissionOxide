@@ -1,4 +1,4 @@
-//! `clfusion-cli mcp`: a Model Context Protocol server on stdio, so AI agents can drive CLFusion.
+//! `fissionoxide-cli mcp`: a Model Context Protocol server on stdio, so AI agents can drive FissionOxide.
 //!
 //! Every engine command is a tool (dots become underscores: `sheet.edge_flange` →
 //! `sheet_edge_flange`) taking the command's JSON parameters; `view_render` returns a PNG of the
@@ -6,7 +6,7 @@
 
 use std::io::{BufRead, Write};
 
-use clf_engine::{COMMANDS, Session};
+use fox_engine::{COMMANDS, Session};
 use serde_json::{Value, json};
 
 const PROTOCOL: &str = "2025-06-18";
@@ -58,8 +58,8 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
     "initialize" => Ok(json!({
       "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL),
       "capabilities": {"tools": {}},
-      "serverInfo": {"name": "clfusion", "version": env!("CARGO_PKG_VERSION")},
-      "instructions": "CLFusion parametric CAD. Units are mm and degrees unless an expression says otherwise. \
+      "serverInfo": {"name": "fissionoxide", "version": env!("CARGO_PKG_VERSION")},
+      "instructions": "FissionOxide parametric CAD. Units are mm and degrees unless an expression says otherwise. \
         Faces and edges can be picked by a point on them ({\"point\": [x, y, z]}). Call 'info' to see the \
         design, 'help' for every command, and 'view_render' to look at the model.",
     })),
@@ -69,7 +69,7 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
       let name = params.get("name").and_then(Value::as_str).unwrap_or("");
       let args = params.get("arguments").cloned().unwrap_or(json!({}));
       Ok(if name == "view_render" && args.get("path").is_none() {
-        match clf_engine::scene::render_png(s, &args) {
+        match fox_engine::scene::render_png(s, &args) {
           Ok(png) => json!({"content": [{"type": "image", "data": base64(&png), "mimeType": "image/png"}]}),
           Err(e) => json!({"content": [{"type": "text", "text": e.0}], "isError": true}),
         }
@@ -123,7 +123,7 @@ mod tests {
   fn lists_and_calls_tools() {
     let mut s = Session::default();
     let init = handle(&mut s, &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})).unwrap();
-    assert_eq!(init["result"]["serverInfo"]["name"], "clfusion");
+    assert_eq!(init["result"]["serverInfo"]["name"], "fissionoxide");
     assert!(handle(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none());
     let list = handle(&mut s, &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).unwrap();
     let names: Vec<&str> =

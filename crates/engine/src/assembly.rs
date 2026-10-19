@@ -1,9 +1,9 @@
 //! Assembly commands: components, joints, motion, interference and the bill of materials (joint
 //! origins, rigid groups, motion links, contact sets and inserted designs are in [`crate::mates`]).
 
-use clf_kernel::BoolOp;
-use clf_model::assembly::{self, JointGeometry, JointKind, JointLimits};
-use clf_model::{BodyId, ComponentId, FeatureId, FeatureKind};
+use fox_kernel::BoolOp;
+use fox_model::assembly::{self, JointGeometry, JointKind, JointLimits};
+use fox_model::{BodyId, ComponentId, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
 use crate::commands::{edge_ref_of, expr_of, face_ref, ids, opt_expr, opt_str, req_str, req_u32, req_vec3};
@@ -231,12 +231,12 @@ fn motion_study(s: &Session, p: &Value) -> CmdResult {
   if !matches!(s.design.feature(id).map(|f| &f.kind), Some(FeatureKind::Joint { .. })) {
     return Err(CmdError::new("that feature is not a joint"));
   }
-  let kind = if matches!(field, "rotation" | "pitch") { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
+  let kind = if matches!(field, "rotation" | "pitch") { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
   let scope = s.model.params.clone();
-  let from = clf_expr::eval(&expr_of(p.get("from").ok_or(CmdError::new("missing 'from'"))?)?, kind, &scope)?;
-  let to = clf_expr::eval(&expr_of(p.get("to").ok_or(CmdError::new("missing 'to'"))?)?, kind, &scope)?;
+  let from = fox_expr::eval(&expr_of(p.get("from").ok_or(CmdError::new("missing 'from'"))?)?, kind, &scope)?;
+  let to = fox_expr::eval(&expr_of(p.get("to").ok_or(CmdError::new("missing 'to'"))?)?, kind, &scope)?;
   let steps = p.get("steps").and_then(Value::as_u64).unwrap_or(8).clamp(1, 360) as usize;
-  let shown = |v: f64| if kind == clf_expr::Kind::Angle { v.to_degrees() } else { v };
+  let shown = |v: f64| if kind == fox_expr::Kind::Angle { v.to_degrees() } else { v };
   let contact = mates::has_contacts(&s.design);
   let mut trial = mates::Trial::new(s, id);
   let mut out = Vec::new();
@@ -273,12 +273,12 @@ fn drive_to_contact(s: &mut Session, id: FeatureId, set: serde_json::Map<String,
     "slide2" => slide2.clone(),
     _ => pitch.clone(),
   };
-  let kind = |k: &str| if matches!(k, "rotation" | "pitch") { clf_expr::Kind::Angle } else { clf_expr::Kind::Length };
+  let kind = |k: &str| if matches!(k, "rotation" | "pitch") { fox_expr::Kind::Angle } else { fox_expr::Kind::Length };
   let mut from = Vec::new();
   let mut to = Vec::new();
   for (k, v) in &set {
-    from.push((k.clone(), clf_expr::eval(&now(k), kind(k), &scope)?));
-    to.push((k.clone(), clf_expr::eval(v.as_str().unwrap_or_default(), kind(k), &scope)?));
+    from.push((k.clone(), fox_expr::eval(&now(k), kind(k), &scope)?));
+    to.push((k.clone(), fox_expr::eval(v.as_str().unwrap_or_default(), kind(k), &scope)?));
   }
   let mut trial = mates::Trial::new(s, id);
   let clash = trial.clash(&set);
@@ -295,11 +295,11 @@ fn drive_to_contact(s: &mut Session, id: FeatureId, set: serde_json::Map<String,
 }
 
 /// Pairs of bodies (in different components) that overlap, with the overlap volume.
-fn interference(bodies: &[clf_model::regen::Body], s: &Session) -> Vec<Value> {
+fn interference(bodies: &[fox_model::regen::Body], s: &Session) -> Vec<Value> {
   interference_in(&s.design, bodies)
 }
 
-fn interference_in(d: &clf_model::Design, bodies: &[clf_model::regen::Body]) -> Vec<Value> {
+fn interference_in(d: &fox_model::Design, bodies: &[fox_model::regen::Body]) -> Vec<Value> {
   let comp = |b: BodyId| d.component_of(b).map(|c| c.id);
   let apart = |a: BodyId, b: BodyId| comp(a).is_none() || comp(a) != comp(b);
   overlaps(bodies, &apart).into_iter().map(|(a, b, v)| json!({"bodies": [a.0, b.0], "volume_mm3": v})).collect()
@@ -307,7 +307,7 @@ fn interference_in(d: &clf_model::Design, bodies: &[clf_model::regen::Body]) -> 
 
 /// Pairs of bodies that `check` accepts and that overlap, with the overlap volume.
 pub(crate) fn overlaps(
-  bodies: &[clf_model::regen::Body],
+  bodies: &[fox_model::regen::Body],
   check: &dyn Fn(BodyId, BodyId) -> bool,
 ) -> Vec<(BodyId, BodyId, f64)> {
   let boxes: Vec<_> = bodies.iter().map(|b| b.shape.mass().ok().map(|m| (m.bbox_min, m.bbox_max))).collect();

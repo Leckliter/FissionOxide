@@ -1,10 +1,10 @@
 //! Assembly commands added after joints: saved joint origins, rigid groups, motion links,
 //! contact sets, and components inserted from other designs in the data hub as linked references.
 
-use clf_model::assembly::{ContactSet, HubSource, MotionAxis};
-use clf_model::regen::{Body, Model, Regenerator};
-use clf_model::{BodyId, ComponentId, Design, FeatureId, FeatureKind, JointKind};
-use clf_store::{ItemKind, Store};
+use fox_model::assembly::{ContactSet, HubSource, MotionAxis};
+use fox_model::regen::{Body, Model, Regenerator};
+use fox_model::{BodyId, ComponentId, Design, FeatureId, FeatureKind, JointKind};
+use fox_store::{ItemKind, Store};
 use serde_json::{Map, Value, json};
 
 use crate::commands::{expr_of, ids, opt_expr, opt_str, req_str, req_u32};

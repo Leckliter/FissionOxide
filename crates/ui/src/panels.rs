@@ -2,14 +2,15 @@
 //! (workspace switcher, tabs and tool groups), the browser, comments, navigation bar and
 //! sketch palette floating over the canvas, the timeline, and the parameters window.
 
-use clf_engine::model::{BodyId, FeatureId, FeatureKind};
-use clf_engine::render::StandardView;
-use clf_engine::{Sel, Session};
 use egui::{Color32, Pos2, Rect, RichText, Stroke, Vec2, pos2, vec2};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind};
+use fox_engine::render::StandardView;
+use fox_engine::{Sel, Session};
 use serde_json::json;
 
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};
+use crate::logo;
 use crate::theme;
 use crate::viewport::NavMode;
 use crate::{App, RenameTarget, Tool};
@@ -69,6 +70,9 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::hover());
+        logo::paint(ui.painter(), r.shrink(2.0));
+        ui.add_space(4.0);
         if bar_icon(ui, Icon::DataPanel, if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }, true)
           .clicked()
         {
@@ -120,7 +124,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           ui.painter().rect(r, 3.0, theme::CONTEXT_TAB, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
           icons::draw_color(ui.painter(), r.shrink(5.0), Icon::Assistant);
           if resp.on_hover_text("Autodesk Assistant").clicked() {
-            app.status = Some(("The Autodesk Assistant isn't part of CLFusion".into(), false));
+            app.status = Some(("The Autodesk Assistant isn't part of FissionOxide".into(), false));
           }
           let _ = icons::icon_button(ui, Icon::Configure, 28.0, "Extensions", false, None);
         });
@@ -188,7 +192,7 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.close();
     app.save(true);
   }
-  if ui.button("Save to File...").on_hover_text("Write a .clf or .clfz file on this computer").clicked() {
+  if ui.button("Save to File...").on_hover_text("Write a .fox or .foxz file on this computer").clicked() {
     ui.close();
     app.save_file(true);
   }
@@ -202,7 +206,7 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     app.import();
   }
   ui.menu_button("Export", |ui| {
-    for f in clf_engine::exchange::FORMATS.iter().filter(|f| f.export) {
+    for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
       let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
       if ui.button(label).on_hover_text(f.note).clicked() {
         ui.close();
@@ -228,7 +232,12 @@ fn help_menu(ui: &mut egui::Ui) {
   ui.label("Sketch: L line · R rectangle · C circle · A arc · P point · D dimension · X construction");
   ui.label("Model: E extrude · F fillet · Esc cancel · Del delete · F6 fit · Home view");
   ui.separator();
-  ui.label(RichText::new("CLFusion — parametric CAD on OpenCASCADE").color(theme::MUTED));
+  ui.horizontal(|ui| {
+    let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), egui::Sense::hover());
+    logo::paint(ui.painter(), r);
+    ui.label(RichText::new("FissionOxide").strong());
+    ui.label(RichText::new("parametric CAD on OpenCASCADE").color(theme::MUTED));
+  });
 }
 
 fn avatar(ui: &mut egui::Ui) {
@@ -645,7 +654,8 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
                     ui.vertical(|ui| {
                       ui.add_space(18.0);
                       ui.label(
-                        RichText::new(format!("{} tools aren't in CLFusion yet", other.label())).color(theme::MUTED),
+                        RichText::new(format!("{} tools aren't in FissionOxide yet", other.label()))
+                          .color(theme::MUTED),
                       );
                     });
                   }
@@ -687,7 +697,7 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       ui.set_min_width(180.0);
       let drawing = app.drawing.is_some();
       for (i, w) in WORKSPACES.iter().enumerate() {
-        // Design and Drawing are CLFusion's workspaces
+        // Design and Drawing are FissionOxide's workspaces
         let current = match *w {
           "Drawing" => drawing,
           "Manufacture" => app.manufacture && !drawing,
@@ -1443,11 +1453,12 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           row(ui, "Snap", &mut |ui| {
             ui.checkbox(&mut app.snap, "");
           });
-          // options CLFusion doesn't have yet are listed, greyed, as in Fusion's palette
+          // options FissionOxide doesn't have yet are listed, greyed, as in Fusion's palette
           for (label, on) in [("Slice", false), ("Profile", true), ("Points", true)] {
             row(ui, label, &mut |ui| {
               let mut v = on;
-              ui.add_enabled(false, egui::Checkbox::without_text(&mut v)).on_disabled_hover_text("Not in CLFusion yet");
+              ui.add_enabled(false, egui::Checkbox::without_text(&mut v))
+                .on_disabled_hover_text("Not in FissionOxide yet");
             });
           }
           row(ui, "Dimensions", &mut |ui| {
@@ -1459,7 +1470,8 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
           for (label, on) in [("Projected Geometries", true), ("Construction Geometries", true), ("3D Sketch", false)] {
             row(ui, label, &mut |ui| {
               let mut v = on;
-              ui.add_enabled(false, egui::Checkbox::without_text(&mut v)).on_disabled_hover_text("Not in CLFusion yet");
+              ui.add_enabled(false, egui::Checkbox::without_text(&mut v))
+                .on_disabled_hover_text("Not in FissionOxide yet");
             });
           }
           if let Some(r) = app.s.model.sketches.get(&sk) {
@@ -1571,7 +1583,7 @@ pub fn assistant_tab(app: &mut App, ctx: &egui::Context) {
       let pos = pos2(rect.center().x - galley.size().y / 2.0, rect.top() + 36.0 + w);
       p.add(egui::epaint::TextShape::new(pos, galley, ink).with_angle(-std::f32::consts::FRAC_PI_2));
       if resp.clicked() {
-        app.status = Some(("The Autodesk Assistant isn't part of CLFusion".into(), false));
+        app.status = Some(("The Autodesk Assistant isn't part of FissionOxide".into(), false));
       }
     });
 }
@@ -1885,15 +1897,15 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     if points.len() == 2
       && curves.is_empty()
       && let (Some(a), Some(b)) =
-        (sketch.pos(clf_engine::sketch::PointId(points[0])), sketch.pos(clf_engine::sketch::PointId(points[1])))
+        (sketch.pos(fox_engine::sketch::PointId(points[0])), sketch.pos(fox_engine::sketch::PointId(points[1])))
     {
       let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
       jobs.push((kind, json!({"sketch": sk.0, "type": kind, "points": points})));
     }
     for c in &curves {
-      let ends = sketch.curve_points(clf_engine::sketch::CurveId(*c));
-      if let Some(curve) = sketch.curve(clf_engine::sketch::CurveId(*c))
-        && matches!(curve.kind, clf_engine::sketch::CurveKind::Line { .. })
+      let ends = sketch.curve_points(fox_engine::sketch::CurveId(*c));
+      if let Some(curve) = sketch.curve(fox_engine::sketch::CurveId(*c))
+        && matches!(curve.kind, fox_engine::sketch::CurveKind::Line { .. })
         && let (Some(a), Some(b)) =
           (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p)))
       {
@@ -1939,7 +1951,7 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
 }
 
 fn feature_icon(k: &FeatureKind) -> Icon {
-  use clf_engine::model::Primitive;
+  use fox_engine::model::Primitive;
   match k {
     FeatureKind::Sketch { .. } => Icon::Sketch,
     FeatureKind::Extrude { .. } => Icon::Extrude,
@@ -1996,9 +2008,9 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::SurfaceOffset { .. } => Icon::SurfOffset,
     FeatureKind::Trim { .. } => Icon::Trim,
     FeatureKind::Mesh { op, .. } => match op {
-      clf_engine::model::construct::MeshOp::Reduce => Icon::Reduce,
-      clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
-      clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
+      fox_engine::model::construct::MeshOp::Reduce => Icon::Reduce,
+      fox_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
+      fox_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
     },
     FeatureKind::Emboss { .. } => Icon::Emboss,
     FeatureKind::BoundaryFill { .. } => Icon::BoundaryFill,
@@ -2111,13 +2123,13 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
         }
         let value = app.s.model.params.get(&p.name).copied();
         let shown = match (value, p.kind) {
-          (Some(v), clf_engine::model::ParamKind::Angle) => {
-            clf_engine::model::sketch::Dim::new(v.to_degrees()).expr + "°"
+          (Some(v), fox_engine::model::ParamKind::Angle) => {
+            fox_engine::model::sketch::Dim::new(v.to_degrees()).expr + "°"
           }
-          (Some(v), clf_engine::model::ParamKind::Length) => {
-            format!("{} mm", clf_engine::model::sketch::Dim::new(v).expr)
+          (Some(v), fox_engine::model::ParamKind::Length) => {
+            format!("{} mm", fox_engine::model::sketch::Dim::new(v).expr)
           }
-          (Some(v), _) => clf_engine::model::sketch::Dim::new(v).expr,
+          (Some(v), _) => fox_engine::model::sketch::Dim::new(v).expr,
           (None, _) => "error".into(),
         };
         let err = app.s.model.param_errors.get(&p.name).cloned();

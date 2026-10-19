@@ -2,13 +2,13 @@ use super::*;
 use serde_json::json;
 
 fn temp_root(name: &str) -> PathBuf {
-  let d = std::env::temp_dir().join(format!("clf-store-test-{name}-{}", std::process::id()));
+  let d = std::env::temp_dir().join(format!("fox-store-test-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);
   d
 }
 
 fn design() -> NewItem<'static> {
-  NewItem { project: "", folder: None, name: "", kind: ItemKind::Design, ext: "clf" }
+  NewItem { project: "", folder: None, name: "", kind: ItemKind::Design, ext: "fox" }
 }
 
 #[test]
@@ -145,9 +145,9 @@ fn version_files_are_immutable() {
     )
     .unwrap();
   // a stray file where v2 would go (an interrupted save): it is kept, and the save skips to v3
-  std::fs::write(s.item_dir(&item).join("v2.clf"), b"stray").unwrap();
+  std::fs::write(s.item_dir(&item).join("v2.fox"), b"stray").unwrap();
   assert_eq!(s.add_version(&item, b"2", Origin::Saved, VersionMeta::default()).unwrap(), 3);
-  assert_eq!(std::fs::read(s.item_dir(&item).join("v2.clf")).unwrap(), b"stray");
+  assert_eq!(std::fs::read(s.item_dir(&item).join("v2.fox")).unwrap(), b"stray");
   assert_eq!(s.read_version(&item, None).unwrap(), b"2");
   let _ = std::fs::remove_dir_all(&root);
 }

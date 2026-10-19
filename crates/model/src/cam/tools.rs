@@ -255,7 +255,7 @@ mod tests {
 
   #[test]
   fn library_file_round_trip() {
-    let dir = std::env::temp_dir().join(format!("clf-tools-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("fox-tools-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     // a hub without a library gets the standard one
     let mut lib = Library::load(&dir).unwrap();

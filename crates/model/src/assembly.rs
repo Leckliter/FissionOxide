@@ -6,8 +6,8 @@
 //! within the degrees of freedom of the joint type. Motion values are expressions, so parameters
 //! drive mechanisms and limits are checked on every rebuild.
 
-use clf_kernel::glam::{DMat4, DVec3};
-use clf_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
+use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
 use serde::{Deserialize, Serialize};
 
 use crate::refs::{EdgeRef, FaceRef};

@@ -1,12 +1,12 @@
 [package]
-name = "clf-sketch"
+name = "fox-sketch"
 description = "2D constrained sketches: geometry, constraint solver, profile detection"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clf-expr.workspace = true
+fox-expr.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 ttf-parser.workspace = true

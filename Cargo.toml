@@ -9,17 +9,17 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 
 [workspace.dependencies]
-clf-expr = { path = "crates/expr" }
-clf-sketch = { path = "crates/sketch" }
-clf-kernel = { path = "crates/kernel" }
-clf-model = { path = "crates/model" }
-clf-render = { path = "crates/render" }
-clf-engine = { path = "crates/engine" }
-clf-ui = { path = "crates/ui" }
-clf-exchange = { path = "crates/exchange" }
-clf-store = { path = "crates/store" }
-clf-trace = { path = "crates/trace" }
-clf-render-gl = { path = "crates/render-gl" }
+fox-expr = { path = "crates/expr" }
+fox-sketch = { path = "crates/sketch" }
+fox-kernel = { path = "crates/kernel" }
+fox-model = { path = "crates/model" }
+fox-render = { path = "crates/render" }
+fox-engine = { path = "crates/engine" }
+fox-ui = { path = "crates/ui" }
+fox-exchange = { path = "crates/exchange" }
+fox-store = { path = "crates/store" }
+fox-trace = { path = "crates/trace" }
+fox-render-gl = { path = "crates/render-gl" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

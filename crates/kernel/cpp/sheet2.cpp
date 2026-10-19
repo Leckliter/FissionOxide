@@ -15,7 +15,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace clf {
+namespace fox {
 
 namespace {
 
@@ -62,4 +62,4 @@ std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<co
   }
 }
 
-} // namespace clf
+} // namespace fox

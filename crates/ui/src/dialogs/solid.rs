@@ -2,8 +2,8 @@
 //! twist, loft rails and centre line, extrude to an object, and the emboss / boundary fill /
 //! replace face forms (their extra inputs and timeline editing).
 
-use clf_engine::model::{BodyId, FeatureId, FeatureKind, OriginPlane, PlaneRef};
-use clf_engine::{Sel, Session};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind, OriginPlane, PlaneRef};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, sel_chip};
@@ -283,7 +283,7 @@ impl Dialog {
       .filter_map(|b| b.as_u64().map(|b| BodyId(b as u32)))
       .collect();
     let refs: Vec<PlaneRef> = planes.iter().filter_map(plane_ref).collect();
-    let Ok(cells) = clf_engine::model::regen::boundary_cells(&s.model, &ids, &refs) else {
+    let Ok(cells) = fox_engine::model::regen::boundary_cells(&s.model, &ids, &refs) else {
       // e.g. editing a fill whose tools it removed: keep the picks as they are
       self.form.cells.clear();
       return;
@@ -344,12 +344,12 @@ fn plane_ref(v: &Value) -> Option<PlaneRef> {
 
 /// A point inside a solid: its centre of mass, or a probe of its box when that falls outside.
 fn inner_point(
-  s: &clf_engine::kernel::Shape,
-  com: clf_engine::kernel::glam::DVec3,
-  lo: clf_engine::kernel::glam::DVec3,
-  hi: clf_engine::kernel::glam::DVec3,
-) -> clf_engine::kernel::glam::DVec3 {
-  let inside = |p| s.classify(p).is_ok_and(|w| w == clf_engine::kernel::Inside::In);
+  s: &fox_engine::kernel::Shape,
+  com: fox_engine::kernel::glam::DVec3,
+  lo: fox_engine::kernel::glam::DVec3,
+  hi: fox_engine::kernel::glam::DVec3,
+) -> fox_engine::kernel::glam::DVec3 {
+  let inside = |p| s.classify(p).is_ok_and(|w| w == fox_engine::kernel::Inside::In);
   if inside(com) {
     return com;
   }
@@ -357,7 +357,7 @@ fn inner_point(
   for i in 1..n {
     for j in 1..n {
       for k in 1..n {
-        let p = lo + (hi - lo) * clf_engine::kernel::glam::DVec3::new(i as f64, j as f64, k as f64) / n as f64;
+        let p = lo + (hi - lo) * fox_engine::kernel::glam::DVec3::new(i as f64, j as f64, k as f64) / n as f64;
         if inside(p) {
           return p;
         }
@@ -405,7 +405,7 @@ pub(super) fn form_edit_set(f: &Form, values: &[Value]) -> Value {
 
 #[cfg(test)]
 mod tests {
-  use clf_engine::kernel::SurfaceKind;
+  use fox_engine::kernel::SurfaceKind;
   use serde_json::{Value, json};
 
   use super::*;
@@ -504,7 +504,7 @@ mod tests {
     let mut s = Session::default();
     run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
     let b = &s.model.bodies[0];
-    let corner = clf_engine::kernel::glam::DVec3::new(10.0, 10.0, 20.0);
+    let corner = fox_engine::kernel::glam::DVec3::new(10.0, 10.0, 20.0);
     let edges: Vec<Value> = b
       .edges()
       .iter()

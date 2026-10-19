@@ -2,7 +2,7 @@
 //! exceptions to errors, so nothing here can abort the process.
 #![allow(unsafe_code, clippy::too_many_arguments, clippy::module_inception)]
 
-#[cxx::bridge(namespace = "clf")]
+#[cxx::bridge(namespace = "fox")]
 pub(crate) mod ffi {
   struct MeshData {
     positions: Vec<f64>,
@@ -64,7 +64,7 @@ pub(crate) mod ffi {
   }
 
   unsafe extern "C++" {
-    include!("clf-kernel/cpp/kernel.hxx");
+    include!("fox-kernel/cpp/kernel.hxx");
 
     type Shape;
 
@@ -173,7 +173,7 @@ pub(crate) mod ffi {
     fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
     // surface workspace (cpp/surface2.cpp)
-    include!("clf-kernel/cpp/surface2.hxx");
+    include!("fox-kernel/cpp/surface2.hxx");
     fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
     fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
     fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
@@ -185,6 +185,6 @@ pub(crate) mod ffi {
 
 // SAFETY: a Shape is a TopoDS_Shape, whose handles OCCT reference-counts atomically. The engine
 // moves a design's shapes to a worker thread for background regeneration and back; while that
-// runs the other thread makes no kernel calls (see `clf_engine::Rebuild`), so no shape is used
+// runs the other thread makes no kernel calls (see `fox_engine::Rebuild`), so no shape is used
 // from two threads at once.
 unsafe impl Send for ffi::Shape {}

@@ -1,6 +1,6 @@
 //! The toolbar's tool groups and their drop-down menus for every tab of the Design workspace,
 //! laid out entry for entry like Fusion's: same order, separators, shortcuts, submenus and
-//! greyed-out items. Entries CLFusion can run carry a [`Cmd`]; the rest are listed so the
+//! greyed-out items. Entries FissionOxide can run carry a [`Cmd`]; the rest are listed so the
 //! toolbar reads like Fusion and say so in the status line when clicked.
 //!
 //! To wire up a new command, give its entry a `Cmd` (and add the command itself in
@@ -20,7 +20,7 @@ pub(crate) struct Item {
   tint: Tint,
   /// Keyboard shortcut shown in the menu.
   key: &'static str,
-  /// What it runs; None when CLFusion doesn't have the command yet.
+  /// What it runs; None when FissionOxide doesn't have the command yet.
   cmd: Option<Cmd>,
   /// Greyed out, as Fusion shows commands unavailable in the current context.
   disabled: bool,
@@ -34,12 +34,12 @@ pub(crate) enum E {
   Sub(&'static str, &'static [E]),
 }
 
-/// A command CLFusion runs.
+/// A command FissionOxide runs.
 const fn c(label: &'static str, icon: Icon, cmd: Cmd) -> E {
   E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: Some(cmd), disabled: false })
 }
 
-/// A Fusion command CLFusion doesn't have yet.
+/// A Fusion command FissionOxide doesn't have yet.
 const fn x(label: &'static str, icon: Icon) -> E {
   E::I(Item { label, icon, tint: Tint::Blue, key: "", cmd: None, disabled: false })
 }
@@ -256,14 +256,14 @@ const INSERT: &[E] = &[
   x("Insert a manufacturer part", Icon::Manufacturer).off(),
   x("Insert TraceParts Supplier Components", Icon::Manufacturer).off(),
   E::Sep,
-  // not in Fusion's menu: CLFusion's STEP import
+  // not in Fusion's menu: FissionOxide's STEP import
   c("Insert STEP", Icon::Import, Cmd::InsertStep),
 ];
 
 const ASSEMBLE: &[E] = &[
   x("Add To Assembly", Icon::AddToAssembly),
   E::Sep,
-  // not in Fusion's menu: CLFusion's component and joint commands
+  // not in Fusion's menu: FissionOxide's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
@@ -924,7 +924,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
   if let Some(it) = pick {
     match it.cmd {
       Some(c) => c.run(app),
-      None => app.status = Some((format!("{} isn't in CLFusion yet", it.label), false)),
+      None => app.status = Some((format!("{} isn't in FissionOxide yet", it.label), false)),
     }
   }
   true
@@ -943,7 +943,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
       for label in g.quick.iter().take(MAX_QUICK) {
         let Some(it) = find(g.menu, label) else { continue };
         let hint = match (it.cmd.is_some(), it.key.is_empty()) {
-          (false, _) => "Not in CLFusion yet".to_string(),
+          (false, _) => "Not in FissionOxide yet".to_string(),
           (true, true) => String::new(),
           (true, false) => format!("Shortcut: {}", it.key),
         };

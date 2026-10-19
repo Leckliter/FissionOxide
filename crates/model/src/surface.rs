@@ -1,7 +1,7 @@
 //! Surface workspace data: how extended edges continue, which loops Untrim removes, the tools
 //! Trim cuts with besides a plane, and per-face offset distances.
 
-use clf_sketch::CurveId;
+use fox_sketch::CurveId;
 use serde::{Deserialize, Serialize};
 
 use crate::{BodyId, FaceRef, FeatureId};
@@ -20,11 +20,11 @@ pub enum ExtendMode {
 }
 
 impl ExtendMode {
-  pub fn kernel(self) -> clf_kernel::Extension {
+  pub fn kernel(self) -> fox_kernel::Extension {
     match self {
-      ExtendMode::Natural => clf_kernel::Extension::Natural,
-      ExtendMode::Tangent => clf_kernel::Extension::Tangent,
-      ExtendMode::Perpendicular => clf_kernel::Extension::Perpendicular,
+      ExtendMode::Natural => fox_kernel::Extension::Natural,
+      ExtendMode::Tangent => fox_kernel::Extension::Tangent,
+      ExtendMode::Perpendicular => fox_kernel::Extension::Perpendicular,
     }
   }
 }
@@ -43,11 +43,11 @@ pub enum UntrimLoops {
 }
 
 impl UntrimLoops {
-  pub fn kernel(self) -> clf_kernel::Untrim {
+  pub fn kernel(self) -> fox_kernel::Untrim {
     match self {
-      UntrimLoops::All => clf_kernel::Untrim::All,
-      UntrimLoops::Inner => clf_kernel::Untrim::Inner,
-      UntrimLoops::Outer => clf_kernel::Untrim::Outer,
+      UntrimLoops::All => fox_kernel::Untrim::All,
+      UntrimLoops::Inner => fox_kernel::Untrim::Inner,
+      UntrimLoops::Outer => fox_kernel::Untrim::Outer,
     }
   }
 }

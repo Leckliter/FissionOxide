@@ -21,7 +21,7 @@ enum Ent {
 
 /// The drawing written as DXF and read back.
 fn dxf(s: &mut Session) -> Vec<Ent> {
-  let dir = std::env::temp_dir().join(format!("clf-annot-{}-{:?}", std::process::id(), std::thread::current().id()));
+  let dir = std::env::temp_dir().join(format!("fox-annot-{}-{:?}", std::process::id(), std::thread::current().id()));
   std::fs::create_dir_all(&dir).unwrap();
   let path = dir.join("d.dxf");
   run(s, "drawing.export", json!({"path": path}));
@@ -202,7 +202,7 @@ fn ordinate_and_angle_dimensions() {
     "drawing.angle",
     json!({"view": 1, "vertex": [0, 0, 0], "a": [200, 0, 0], "b": [200, 0, 10], "radius": 30}),
   );
-  let want = format!("{}°", clf_model::drawing::fmt_len((10.0f64 / 200.0).atan().to_degrees()));
+  let want = format!("{}°", fox_model::drawing::fmt_len((10.0f64 / 200.0).atan().to_degrees()));
   assert!(info_text(&mut s).contains(&want), "{want}");
   assert!(texts(&dxf(&mut s)).contains(&want.replace('°', "%%d")));
   // ISO writes a decimal comma
@@ -276,7 +276,7 @@ fn gdt_symbols_follow_the_standard() {
   for want in ["%%c0,1", "0,05", "Ra 1,6", "0,2"] {
     assert!(texts(&e).iter().any(|x| x == want), "missing {want}: {:?}", texts(&e));
   }
-  let dir = std::env::temp_dir().join(format!("clf-gdt-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-gdt-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let svg = dir.join("d.svg");
   let pdf = dir.join("d.pdf");
@@ -322,7 +322,7 @@ fn balloons_follow_the_parts_list() {
   assert_eq!(numbers(&e), vec!["2"]);
   let arm = s.design.components.iter().find(|c| c.name == "Arm").unwrap().id;
   let (at, _) = text_at(&e, "2");
-  let item = clf_model::drawing::bom_rows(&s.design).iter().position(|r| r.components.contains(&arm));
+  let item = fox_model::drawing::bom_rows(&s.design).iter().position(|r| r.components.contains(&arm));
   assert_eq!(item, Some(1));
 
   // the parts list changes, the balloon follows: Base gone, Arm is item 1
@@ -349,14 +349,14 @@ fn balloons_follow_the_parts_list() {
   assert!(s.execute("drawing.balloon", &json!({"view": 1, "component": "Nope"})).is_err());
 
   // everything saves with the design, and older files without the new fields still open
-  let back = clf_model::Design::from_json(&s.design.to_json()).unwrap();
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
   assert_eq!(back.drawings, s.design.drawings);
   let mut old: Value = serde_json::from_str(&s.design.to_json()).unwrap();
   let d = &mut old["drawings"][0];
   d.as_object_mut().unwrap().remove("standard");
   d.as_object_mut().unwrap().remove("auto_balloons");
   d["dimensions"] = json!([]);
-  let back = clf_model::Design::from_json(&old.to_string()).unwrap();
-  assert_eq!(back.drawings[0].standard, clf_model::drawing::Standard::Asme);
+  let back = fox_model::Design::from_json(&old.to_string()).unwrap();
+  assert_eq!(back.drawings[0].standard, fox_model::drawing::Standard::Asme);
   assert!(!back.drawings[0].auto_balloons);
 }

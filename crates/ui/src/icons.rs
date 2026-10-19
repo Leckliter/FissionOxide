@@ -273,7 +273,7 @@ enum Tone {
   White,
   Purple,
   PurpleLight,
-  // CLFusion's own families, each dark slate with one accent: sketch (teal vertices), sketch
+  // FissionOxide's own families, each dark slate with one accent: sketch (teal vertices), sketch
   // edits (coral), constraints (violet) and construction geometry (amber)
   Slate,
   Teal,

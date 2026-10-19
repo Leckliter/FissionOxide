@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{EdgeLine, Plane, Shape, TriMesh};
-use clf_model::{BodyId, FeatureId, FeatureKind};
-use clf_render::{Marker, Mesh, Polyline, Scene};
-use clf_sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{EdgeLine, Plane, Shape, TriMesh};
+use fox_model::{BodyId, FeatureId, FeatureKind};
+use fox_render::{Marker, Mesh, Polyline, Scene};
+use fox_sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
@@ -27,7 +27,7 @@ pub enum Pick {
   Face { body: BodyId, face: u32 },
   Edge { body: BodyId, edge: u32 },
   SketchPoint { sketch: FeatureId, point: PointId },
-  SketchCurve { sketch: FeatureId, curve: clf_sketch::CurveId },
+  SketchCurve { sketch: FeatureId, curve: fox_sketch::CurveId },
   Profile { sketch: FeatureId, index: usize },
 }
 
@@ -96,7 +96,7 @@ pub struct ViewOptions {
   /// Section analysis: bodies are cut away on the side the plane's normal points to, and the
   /// cut is capped.
   pub section: Option<Plane>,
-  pub analysis: Option<clf_render::Analysis>,
+  pub analysis: Option<fox_render::Analysis>,
   /// Colour bodies by how sharply they curve.
   pub curvature: bool,
   /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
@@ -270,7 +270,7 @@ impl SceneBuilder {
         let lift = r.plane.normal().as_vec3() * 0.002;
         let mut pm = mesh_of(m, vec![id; m.indices.len() / 3], color, None);
         for p in pm.positions.iter_mut() {
-          *p = (clf_kernel::glam::Vec3::from(*p) + lift).to_array();
+          *p = (fox_kernel::glam::Vec3::from(*p) + lift).to_array();
         }
         scene.meshes.push(pm);
       }
@@ -450,7 +450,7 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let is_free = clf_sketch::curve_points(&c.kind).iter().any(|p| free.contains(p))
+    let is_free = fox_sketch::curve_points(&c.kind).iter().any(|p| free.contains(p))
       || matches!(c.kind, CurveKind::Circle { .. }) && !fully_dimensioned_circle(sk, c.id, free);
     let color = if selected.contains(&pick) {
       SELECT_COLOR
@@ -515,7 +515,7 @@ fn sketch_lines(
         SELECT_COLOR
       } else if hover == Some(pick) {
         HOVER_COLOR
-      } else if p.id == clf_sketch::ORIGIN {
+      } else if p.id == fox_sketch::ORIGIN {
         [200, 60, 40, 255]
       } else if free.contains(&p.id) {
         SKETCH_FREE
@@ -529,7 +529,7 @@ fn sketch_lines(
 
 /// A circle's radius is "free" when the solver reports it so; we approximate with the presence of
 /// a radius/diameter/equal/tangent constraint once its centre is fixed.
-fn fully_dimensioned_circle(sk: &Sketch, c: clf_sketch::CurveId, free: &[PointId]) -> bool {
+fn fully_dimensioned_circle(sk: &Sketch, c: fox_sketch::CurveId, free: &[PointId]) -> bool {
   let centre_fixed = sk.curve_points(c).first().is_some_and(|p| !free.contains(p));
   centre_fixed
     && sk.constraints.iter().any(|k| match &k.kind {
@@ -547,7 +547,7 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
       let mut out = Vec::new();
       for b in &bz {
         for k in 0..24 {
-          out.push(clf_sketch::bezier_at(b, k as f64 / 24.0));
+          out.push(fox_sketch::bezier_at(b, k as f64 / 24.0));
         }
       }
       out.extend(bz.last().map(|b| b[3]));
@@ -555,9 +555,9 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
     }
     CurveKind::Ellipse { center, major, minor } => match (sk.pos(*center), sk.pos(*major)) {
       (Some(c), Some(m)) => {
-        let bz = clf_sketch::ellipse_beziers(c, m, *minor);
+        let bz = fox_sketch::ellipse_beziers(c, m, *minor);
         let mut out: Vec<[f64; 2]> =
-          bz.iter().flat_map(|b| (0..16).map(move |k| clf_sketch::bezier_at(b, k as f64 / 16.0))).collect();
+          bz.iter().flat_map(|b| (0..16).map(move |k| fox_sketch::bezier_at(b, k as f64 / 16.0))).collect();
         out.extend(bz.first().map(|b| b[0]));
         out
       }
@@ -674,7 +674,7 @@ fn clip_mesh(m: &mut Mesh, pl: &Plane) {
 
 /// The cut face where a section plane passes through a body, tessellated.
 fn section_cap(shape: &Shape, pl: &Plane, size: f64) -> Option<TriMesh> {
-  use clf_sketch::{Loop, Profile, Seg};
+  use fox_sketch::{Loop, Profile, Seg};
   let r = size * 4.0;
   let sq = Loop {
     segs: vec![
@@ -764,7 +764,7 @@ pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
 /// `distance` the camera fits the bodies shown.
 pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::CmdError> {
   use crate::CmdError;
-  use clf_render::{Camera, StandardView};
+  use fox_render::{Camera, StandardView};
   use serde_json::Value;
   let size = |k: &str, d: u64| p.get(k).and_then(Value::as_u64).unwrap_or(d).clamp(16, 8192) as u32;
   let (w, h) = (size("width", 1000), size("height", 700));
@@ -772,7 +772,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
   let scope = s.model.params.clone();
   let angle = |k: &str| -> Result<Option<f64>, CmdError> {
     crate::commands::opt_expr(p, k)
-      .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &scope))
+      .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &scope))
       .transpose()
       .map_err(CmdError::from)
   };
@@ -817,7 +817,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     cam.target = crate::commands::req_vec3(p, "target")?;
   }
   if let Some(d) = crate::commands::opt_expr(p, "distance") {
-    cam.distance = clf_expr::eval(&d, clf_expr::Kind::Length, &scope)?.max(1e-3);
+    cam.distance = fox_expr::eval(&d, fox_expr::Kind::Length, &scope)?.max(1e-3);
   }
   let opts = ViewOptions {
     hide_sketches: !flag("sketches", false),
@@ -832,7 +832,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     scene.background_top = [c[0], c[1], c[2], 255];
     scene.background_bottom = scene.background_top;
   }
-  clf_render::render(&scene, &cam, w, h).to_png().map_err(CmdError::new)
+  fox_render::render(&scene, &cam, w, h).to_png().map_err(CmdError::new)
 }
 
 /// Every body face a ray passes through, nearest first (one hit per face): for "Select Other",
@@ -926,12 +926,12 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
   };
   match p.get("analysis").and_then(serde_json::Value::as_str) {
     None => {}
-    Some("zebra") => o.analysis = Some(clf_render::Analysis::Zebra { stripes: 24.0 }),
+    Some("zebra") => o.analysis = Some(fox_render::Analysis::Zebra { stripes: 24.0 }),
     Some("draft") => {
       let a = p.get("angle").and_then(serde_json::Value::as_f64).unwrap_or(1.0).to_radians() as f32;
-      o.analysis = Some(clf_render::Analysis::Draft { pull, angle: a })
+      o.analysis = Some(fox_render::Analysis::Draft { pull, angle: a })
     }
-    Some("accessibility") => o.analysis = Some(clf_render::Analysis::Accessibility { dir: pull }),
+    Some("accessibility") => o.analysis = Some(fox_render::Analysis::Accessibility { dir: pull }),
     Some("curvature") => o.curvature = true,
     Some(other) => return Err(format!("unknown analysis '{other}' (zebra, draft, accessibility, curvature)")),
   }
@@ -945,7 +945,7 @@ fn toolpath_lines(scene: &mut Scene, s: &Session) {
   };
   if let Some((id, _)) = s.toolpaths_of
     && let Some(st) = s.design.cam.iter().find(|c| c.id == id)
-    && let Ok((lo, hi)) = clf_model::cam::stock(st, &s.model)
+    && let Ok((lo, hi)) = fox_model::cam::stock(st, &s.model)
   {
     let c = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).as_vec3().to_array();
     for z in [lo.z, hi.z] {

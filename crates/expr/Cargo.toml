@@ -1,5 +1,5 @@
 [package]
-name = "clf-expr"
+name = "fox-expr"
 description = "Parameter expressions with units (\"width / 2 + 3 mm\")"
 version.workspace = true
 edition.workspace = true

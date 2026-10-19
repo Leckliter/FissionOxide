@@ -1,5 +1,5 @@
 use super::*;
-use clf_sketch::{PtSpec, Sketch, find_profiles};
+use fox_sketch::{PtSpec, Sketch, find_profiles};
 
 fn rect_profile(w: f64, h: f64) -> Profile {
   let mut s = Sketch::new();
@@ -115,7 +115,7 @@ fn mesh_edges_and_exchange() {
   assert_eq!(m.positions.len(), m.normals.len());
   let lines = a.edge_lines(0.05).unwrap();
   assert!(lines.len() >= 12);
-  let dir = std::env::temp_dir().join(format!("clf-kernel-test-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-kernel-test-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let step = dir.join("part.step");
   write_step([&a], &step).unwrap();
@@ -195,7 +195,7 @@ fn hidden_line_projection() {
 #[test]
 fn iges_and_brep_files() {
   let a = block().fillet(&[1], 2.0).unwrap();
-  let dir = std::env::temp_dir().join(format!("clf-kernel-iges-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-kernel-iges-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let iges = dir.join("part.igs");
   write_iges([&a], &iges).unwrap();

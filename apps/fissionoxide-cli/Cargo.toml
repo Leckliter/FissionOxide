@@ -1,16 +1,16 @@
 [package]
-name = "clfusion-cli"
-description = "Headless CLFusion: run command scripts, export, render, inspect"
+name = "fissionoxide-cli"
+description = "Headless FissionOxide: run command scripts, export, render, inspect"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "clfusion-cli"
+name = "fissionoxide-cli"
 path = "src/main.rs"
 
 [dependencies]
-clf-engine.workspace = true
+fox-engine.workspace = true
 serde_json.workspace = true
 env_logger.workspace = true
 log.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "clf-render"
+name = "fox-render"
 description = "Software 3D rasterizer: shaded meshes, edges, sketch lines, picking buffer"
 version.workspace = true
 edition.workspace = true

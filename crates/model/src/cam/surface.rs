@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use clf_kernel::glam::{DVec2, DVec3};
+use fox_kernel::glam::{DVec2, DVec3};
 
 use super::region::{Grid, simplify};
 use super::sim::Heightfield;
@@ -35,7 +35,7 @@ impl Surface<'_> {
     let lo = plo.truncate() - DVec2::splat(r + h);
     let hi = phi.truncate() + DVec2::splat(r + h);
     let mut part = Heightfield::new(lo, hi, h, 0.0);
-    let meshes: Vec<&clf_kernel::TriMesh> = super::bodies(setup, model).into_iter().filter_map(|b| b.mesh()).collect();
+    let meshes: Vec<&fox_kernel::TriMesh> = super::bodies(setup, model).into_iter().filter_map(|b| b.mesh()).collect();
     if meshes.is_empty() {
       return Err("the part has no surface to machine".into());
     }
@@ -43,11 +43,11 @@ impl Surface<'_> {
     // the faces to machine, on the same grid
     let mut target = part.clone();
     if !faces.is_empty() {
-      let mut picked: Vec<clf_kernel::TriMesh> = Vec::new();
+      let mut picked: Vec<fox_kernel::TriMesh> = Vec::new();
       for f in faces {
         let (b, id) = resolve(model, f)?;
         let m = b.mesh().ok_or("a body has no mesh")?;
-        let mut sub = clf_kernel::TriMesh { positions: m.positions.clone(), ..Default::default() };
+        let mut sub = fox_kernel::TriMesh { positions: m.positions.clone(), ..Default::default() };
         for (t, tri) in m.indices.chunks_exact(3).enumerate() {
           if m.tri_face.get(t) == Some(&id) {
             sub.indices.extend_from_slice(tri);

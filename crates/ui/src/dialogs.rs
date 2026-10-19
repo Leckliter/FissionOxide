@@ -4,9 +4,9 @@
 //! applies the new one, so OK just keeps the last preview and Cancel withdraws it — exactly one
 //! undo step per feature, as in Fusion.
 
-use clf_engine::model::{AxisRef, BodyId, ExtentKind, FeatureId, FeatureKind, Operation, PlaneRef, Primitive};
-use clf_engine::{Sel, Session};
 use egui::RichText;
+use fox_engine::model::{AxisRef, BodyId, ExtentKind, FeatureId, FeatureKind, Operation, PlaneRef, Primitive};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use crate::icons::Icon;
@@ -348,14 +348,14 @@ impl Kind {
 /// A drag arrow in the viewport (see [`Dialog::manipulator`]).
 #[derive(Debug, Clone, Copy)]
 pub struct Manipulator {
-  pub origin: clf_engine::kernel::glam::DVec3,
-  pub dir: clf_engine::kernel::glam::DVec3,
+  pub origin: fox_engine::kernel::glam::DVec3,
+  pub dir: fox_engine::kernel::glam::DVec3,
   pub value: f64,
 }
 
 /// The world plane a dialog's plane value ("xy", {"feature"}, {"body", "face"}) names.
-fn plane_of(s: &Session, v: &Value) -> Option<clf_engine::kernel::Plane> {
-  use clf_engine::kernel::Plane;
+fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
+  use fox_engine::kernel::Plane;
   if let Some(n) = v.as_str() {
     return Some(match n {
       "xz" => Plane::XZ,
@@ -369,7 +369,7 @@ fn plane_of(s: &Session, v: &Value) -> Option<clf_engine::kernel::Plane> {
   let body = BodyId(v.get("body")?.as_u64()? as u32);
   let face = v.get("face")?.as_u64()? as u32;
   let f = s.model.body(body)?.faces().iter().find(|f| f.id == face).copied()?;
-  clf_engine::model::regen::sketch_plane_on(f.normal, f.origin).ok()
+  fox_engine::model::regen::sketch_plane_on(f.normal, f.origin).ok()
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
@@ -750,7 +750,7 @@ impl Dialog {
       Kind::Fold => {
         d.angle = "90 deg".into();
         d.line = d.sketch.and_then(|sk| s.design.sketch(sk).ok()).and_then(|sk| {
-          sk.curves.iter().rev().find(|c| matches!(c.kind, clf_engine::sketch::CurveKind::Line { .. })).map(|c| c.id.0)
+          sk.curves.iter().rev().find(|c| matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. })).map(|c| c.id.0)
         });
       }
       Kind::Rip => d.distance = "0.5 mm".into(),
@@ -926,7 +926,7 @@ impl Dialog {
         d.a = a;
         d.b = b;
         d.c = c;
-        d.at = [clf_engine::sketch::Dim::new(at[0]).expr, clf_engine::sketch::Dim::new(at[1]).expr];
+        d.at = [fox_engine::sketch::Dim::new(at[0]).expr, fox_engine::sketch::Dim::new(at[1]).expr];
         d.op = op_str(*operation);
         d
       }
@@ -1466,7 +1466,7 @@ impl Dialog {
   /// value points (unit) and the current value along it (mm). Extrude distance and offset plane
   /// offset, as in Fusion.
   pub fn manipulator(&self, s: &Session) -> Option<Manipulator> {
-    let len = |e: &str| clf_engine::expr::eval(e, clf_engine::expr::Kind::Length, &s.model.params).ok();
+    let len = |e: &str| fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &s.model.params).ok();
     match self.kind {
       Kind::Extrude if matches!(self.extent, "one_side" | "symmetric" | "two_sides") => {
         let r = s.model.sketches.get(&self.sketch?)?;
@@ -1491,22 +1491,22 @@ impl Dialog {
     match self.kind {
       Kind::Extrude => {
         self.flip = v < 0.0;
-        self.distance = format!("{} mm", clf_engine::sketch::Dim::new(v.abs()).expr);
+        self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v.abs()).expr);
       }
-      Kind::OffsetPlane => self.distance = format!("{} mm", clf_engine::sketch::Dim::new(v).expr),
+      Kind::OffsetPlane => self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v).expr),
       _ => return,
     }
     self.dirty = true;
   }
 
   /// The point a report dialog marks in the viewport (centre of mass).
-  pub fn marker(&self) -> Option<clf_engine::kernel::glam::DVec3> {
+  pub fn marker(&self) -> Option<fox_engine::kernel::glam::DVec3> {
     if self.kind != Kind::CenterOfMass {
       return None;
     }
     let c: Vec<f64> = self.report.as_ref()?.get("center")?.as_array()?.iter().filter_map(Value::as_f64).collect();
     match c.as_slice() {
-      [x, y, z] => Some(clf_engine::kernel::glam::DVec3::new(*x, *y, *z)),
+      [x, y, z] => Some(fox_engine::kernel::glam::DVec3::new(*x, *y, *z)),
       _ => None,
     }
   }
@@ -2608,7 +2608,7 @@ impl Dialog {
         ui.label("Material");
         let cur = self.name.clone();
         egui::ComboBox::from_id_salt("mat").selected_text(&cur).width(140.0).show_ui(ui, |ui| {
-          for (m, _) in clf_engine::model::assembly::MATERIALS {
+          for (m, _) in fox_engine::model::assembly::MATERIALS {
             if ui.selectable_label(cur == *m, *m).clicked() {
               self.name = m.to_string();
               *dirty = true;
@@ -3018,18 +3018,18 @@ impl Dialog {
         self.name = d.name.clone();
         self.position = SHEETS
           .iter()
-          .find(|(k, _)| clf_engine::model::drawing::SheetSize::parse(k) == Some(d.sheet))
+          .find(|(k, _)| fox_engine::model::drawing::SheetSize::parse(k) == Some(d.sheet))
           .map(|(k, _)| *k)
           .unwrap_or("a3");
-        self.a = d.scale.map(clf_engine::model::drawing::scale_text).unwrap_or("auto".into());
+        self.a = d.scale.map(fox_engine::model::drawing::scale_text).unwrap_or("auto".into());
         self.choice = match d.projection {
-          clf_engine::model::drawing::ProjectionAngle::FirstAngle => "first_angle",
+          fox_engine::model::drawing::ProjectionAngle::FirstAngle => "first_angle",
           _ => "third_angle",
         };
         self.flag = d.auto_dimensions;
         self.flag2 = d.parts_list;
         self.extent = match d.standard {
-          clf_engine::model::drawing::Standard::Iso => "iso",
+          fox_engine::model::drawing::Standard::Iso => "iso",
           _ => "asme",
         };
         self.keep_tools = d.auto_balloons;
@@ -3112,15 +3112,15 @@ impl Dialog {
     self.e = r.relief_depth;
     self.distance2 = r.gap;
     self.position = match r.relief {
-      clf_engine::model::ReliefShape::Rectangular => "rectangular",
-      clf_engine::model::ReliefShape::Round => "round",
-      clf_engine::model::ReliefShape::None => "none",
+      fox_engine::model::ReliefShape::Rectangular => "rectangular",
+      fox_engine::model::ReliefShape::Round => "round",
+      fox_engine::model::ReliefShape::None => "none",
     };
     self.corner_relief = match r.corner_relief {
-      clf_engine::model::CornerRelief::None => "none",
-      clf_engine::model::CornerRelief::Round => "round",
-      clf_engine::model::CornerRelief::Square => "square",
-      clf_engine::model::CornerRelief::Tear => "tear",
+      fox_engine::model::CornerRelief::None => "none",
+      fox_engine::model::CornerRelief::Round => "round",
+      fox_engine::model::CornerRelief::Square => "square",
+      fox_engine::model::CornerRelief::Tear => "tear",
     };
     self.corner_relief_size = r.corner_relief_size;
     self.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
@@ -3299,7 +3299,7 @@ impl Dialog {
     let Ok(s) = app.s.design.sketch(sk) else { return vec![] };
     s.curves
       .iter()
-      .filter(|c| matches!(c.kind, clf_engine::sketch::CurveKind::Line { .. }))
+      .filter(|c| matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. }))
       .map(|c| (c.id.0, format!("Sketch line {}{}", c.id.0, if c.construction { " (construction)" } else { "" })))
       .collect()
   }
@@ -3344,7 +3344,7 @@ fn inspect(app: &mut App, ui: &mut egui::Ui) {
           ui.end_row();
         }
         if let (Some(f), Some(t)) = (v3("from"), v3("to")) {
-          use clf_engine::kernel::glam::DVec3;
+          use fox_engine::kernel::glam::DVec3;
           app.measure = Some((DVec3::from(f), DVec3::from(t), format!("{d:.3} mm")));
         }
       }
@@ -3521,7 +3521,7 @@ fn op_str(o: Operation) -> &'static str {
 fn is_planar(s: &Session, body: BodyId, face: u32) -> bool {
   s.model
     .body(body)
-    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == clf_engine::kernel::SurfaceKind::Plane))
+    .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == fox_engine::kernel::SurfaceKind::Plane))
     .unwrap_or(false)
 }
 
@@ -3609,7 +3609,7 @@ fn joints(s: &Session) -> Vec<(u32, String)> {
 
 /// The views of a drawing: id and a label like "2 · Top".
 pub(crate) fn drawing_views(s: &Session, drawing: u32) -> Vec<(u32, String)> {
-  use clf_engine::model::drawing::ViewKind as V;
+  use fox_engine::model::drawing::ViewKind as V;
   let Some(d) = s.design.drawing(drawing) else { return Vec::new() };
   d.views
     .iter()
@@ -3666,8 +3666,8 @@ fn drawing_standard(choice: &str) -> Value {
 fn mirror_line(s: &Session, curves: &[u32]) -> Option<u32> {
   let sk = s.design.sketch(s.edit_sketch?).ok()?;
   curves.iter().rev().copied().find(|c| {
-    sk.curve(clf_engine::sketch::CurveId(*c))
-      .is_some_and(|c| matches!(c.kind, clf_engine::sketch::CurveKind::Line { .. }))
+    sk.curve(fox_engine::sketch::CurveId(*c))
+      .is_some_and(|c| matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. }))
   })
 }
 
@@ -3709,12 +3709,12 @@ mod tests {
     assert!(d.applied && d.error.is_none(), "{:?}: {:?} {:?}", d.kind, d.error, d.command());
   }
 
-  fn face(s: &Session, body: usize, pick: impl Fn(&clf_engine::kernel::FaceInfo) -> bool) -> Value {
+  fn face(s: &Session, body: usize, pick: impl Fn(&fox_engine::kernel::FaceInfo) -> bool) -> Value {
     let b = &s.model.bodies[body];
     json!({"body": b.id.0, "face": b.faces().iter().find(|f| pick(f)).unwrap().id})
   }
 
-  fn edge(s: &Session, body: usize, pick: impl Fn(&clf_engine::kernel::EdgeInfo) -> bool) -> Value {
+  fn edge(s: &Session, body: usize, pick: impl Fn(&fox_engine::kernel::EdgeInfo) -> bool) -> Value {
     let b = &s.model.bodies[body];
     json!({"body": b.id.0, "edge": b.edges().iter().find(|e| pick(e)).unwrap().id})
   }
@@ -4055,7 +4055,7 @@ mod tests {
     apply(&mut s, &mut d);
     let dr = s.design.drawing(id).unwrap();
     assert_eq!((dr.views.len(), dr.dimensions.len(), dr.title.title.as_str()), (6, 2, "Bracket"));
-    let plot = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
+    let plot = fox_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
     assert!(plot.texts().contains(&"BREAK SHARP EDGES"));
   }
 
@@ -4078,7 +4078,7 @@ mod tests {
     run(&mut s, "cylinder", json!({"radius": 5, "height": 20}));
     let b = s.model.bodies[0].id;
     let side =
-      s.model.bodies[0].faces().iter().find(|f| f.kind == clf_engine::kernel::SurfaceKind::Cylinder).unwrap().id;
+      s.model.bodies[0].faces().iter().find(|f| f.kind == fox_engine::kernel::SurfaceKind::Cylinder).unwrap().id;
     let mut d = form(&mut s, &THREAD, vec![Sel::Face { body: b, face: side }], &[("modeled", json!(true))]);
     let v0 = s.model.bodies[0].shape.mass().unwrap().volume;
     apply(&mut s, &mut d);
@@ -4200,9 +4200,9 @@ mod tests {
     assert_eq!(dr.dimensions.len(), 6);
     assert!(matches!(
       dr.dimensions[2],
-      clf_engine::model::drawing::DrawingDim::FeatureControl { offset: [12.0, 12.0], .. }
+      fox_engine::model::drawing::DrawingDim::FeatureControl { offset: [12.0, 12.0], .. }
     ));
-    let text = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
+    let text = fox_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
     for want in ["Ø0.1", "A", "1.6", "1"] {
       assert!(text.texts().contains(&want), "missing {want}: {:?}", text.texts());
     }
@@ -4284,7 +4284,7 @@ mod tests {
   #[test]
   fn manufacture_forms_tools_entries_and_posts() {
     use crate::forms::*;
-    use clf_engine::model::cam::{Entry, OpKind, ToolKind};
+    use fox_engine::model::cam::{Entry, OpKind, ToolKind};
     let mut s = Session::default();
     run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 10}));
     let b = s.model.bodies[0].id;

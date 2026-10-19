@@ -1,4 +1,4 @@
-// C++ side of the CLFusion kernel bridge to OpenCASCADE.
+// C++ side of the FissionOxide kernel bridge to OpenCASCADE.
 //
 // Every entry point catches *all* exceptions (OCCT's Standard_Failure does not derive from
 // std::exception) and rethrows std::runtime_error, which cxx turns into a Rust Err. Nothing that
@@ -9,7 +9,7 @@
 #include <TopoDS_Shape.hxx>
 #include "rust/cxx.h"
 
-namespace clf {
+namespace fox {
 
 struct Shape {
   TopoDS_Shape s;
@@ -117,4 +117,4 @@ std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double>
 std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<const double> b,
                                      rust::Slice<const double> u);
 
-} // namespace clf
+} // namespace fox

@@ -1,5 +1,5 @@
-//! Opening, importing and exporting every file format CLFusion knows (see
-//! [`clf_exchange::FORMATS`]).
+//! Opening, importing and exporting every file format FissionOxide knows (see
+//! [`fox_exchange::FORMATS`]).
 //!
 //! Opening a non-native file makes a new design from it, as Fusion does: a STEP, IGES or mesh
 //! becomes a design with one Import feature, a DXF a design with one sketch. Importing adds the
@@ -7,12 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
-use clf_exchange::archive::{Archive, read_clfz, write_clfz};
-use clf_exchange::dxf::{Drawing, Entity, read_dxf, write_dxf};
-use clf_exchange::svg::{read_svg, write_svg};
-use clf_exchange::{FormatKind, Mesh, format_for_path};
-use clf_model::{Design, FeatureId, FeatureKind, MeshData};
-use clf_sketch::{CurveKind, PtSpec, Sketch};
+use fox_exchange::archive::{Archive, read_foxz, write_foxz};
+use fox_exchange::dxf::{Drawing, Entity, read_dxf, write_dxf};
+use fox_exchange::svg::{read_svg, write_svg};
+use fox_exchange::{FormatKind, Mesh, format_for_path};
+use fox_model::{Design, FeatureId, FeatureKind, MeshData};
+use fox_sketch::{CurveKind, PtSpec, Sketch};
 use serde_json::{Value, json};
 
 use crate::{CmdError, CmdResult, Session};
@@ -36,11 +36,11 @@ fn file_name(path: &Path) -> String {
 
 fn unknown(path: &Path) -> CmdError {
   let known: Vec<String> =
-    clf_exchange::FORMATS.iter().flat_map(|f| f.extensions.iter().map(|e| format!(".{e}"))).collect();
-  CmdError::new(format!("{}: unknown file type (CLFusion reads {})", path.display(), known.join(" ")))
+    fox_exchange::FORMATS.iter().flat_map(|f| f.extensions.iter().map(|e| format!(".{e}"))).collect();
+  CmdError::new(format!("{}: unknown file type (FissionOxide reads {})", path.display(), known.join(" ")))
 }
 
-fn ex(e: clf_exchange::ExchangeError) -> CmdError {
+fn ex(e: fox_exchange::ExchangeError) -> CmdError {
   CmdError::new(e.to_string())
 }
 
@@ -49,16 +49,16 @@ fn ex(e: clf_exchange::ExchangeError) -> CmdError {
 pub fn open(path: &Path) -> Result<Session, CmdError> {
   let fmt = format_for_path(path).ok_or_else(|| unknown(path))?;
   if !fmt.import {
-    return Err(CmdError::new(format!("CLFusion can't read {} files", fmt.name)));
+    return Err(CmdError::new(format!("FissionOxide can't read {} files", fmt.name)));
   }
   match fmt.id {
-    "clf" => {
+    "fox" => {
       let mut s = Session::new(Design::load(path)?);
       s.path = Some(path.to_path_buf());
       Ok(s)
     }
-    "clfz" => {
-      let a = read_clfz(&std::fs::read(path)?).map_err(ex)?;
+    "foxz" => {
+      let a = read_foxz(&std::fs::read(path)?).map_err(ex)?;
       let mut s = Session::new(Design::from_json(&a.design)?);
       s.path = Some(path.to_path_buf());
       Ok(s)
@@ -75,16 +75,16 @@ pub fn open(path: &Path) -> Result<Session, CmdError> {
   }
 }
 
-/// Saves the design: `.clfz` writes an archive (with a thumbnail), anything else `.clf` JSON.
+/// Saves the design: `.foxz` writes an archive (with a thumbnail), anything else `.fox` JSON.
 pub fn save_design(s: &Session, path: &Path) -> Result<(), CmdError> {
-  if ext_of(path) == "clfz" {
+  if matches!(ext_of(path).as_str(), "foxz" | "clfz") {
     let a = Archive {
       name: s.design.name.clone(),
       design: s.design.to_json(),
       thumbnail: thumbnail_png(s, 256, 256),
       history: Vec::new(),
     };
-    std::fs::write(path, write_clfz(&a).map_err(ex)?)?;
+    std::fs::write(path, write_foxz(&a).map_err(ex)?)?;
   } else {
     s.design.save(path)?;
   }
@@ -95,25 +95,25 @@ pub fn save_design(s: &Session, path: &Path) -> Result<(), CmdError> {
 pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   let fmt = format_for_path(path).ok_or_else(|| unknown(path))?;
   if !fmt.import {
-    return Err(CmdError::new(format!("CLFusion can't read {} files", fmt.name)));
+    return Err(CmdError::new(format!("FissionOxide can't read {} files", fmt.name)));
   }
   let name = file_name(path);
   match fmt.id {
     "step" | "iges" | "brep" => {
       let shapes = match fmt.id {
-        "step" => clf_kernel::read_step(path)?,
-        "iges" => clf_kernel::read_iges(path)?,
-        _ => clf_kernel::read_brep_file(path)?,
+        "step" => fox_kernel::read_step(path)?,
+        "iges" => fox_kernel::read_iges(path)?,
+        _ => fox_kernel::read_brep_file(path)?,
       };
       let breps = shapes.iter().map(|sh| sh.to_brep()).collect::<Result<Vec<_>, _>>()?;
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "stl" | "obj" | "ply" | "3mf" => {
-      let meshes = clf_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      let meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
       import_meshes(s, name, meshes, p)
     }
     "dxf" | "svg" => import_dxf(s, path, p),
-    "clf" | "clfz" => {
+    "fox" | "foxz" => {
       // insert another design's bodies (as exact geometry) into this one
       let other = open(path)?;
       if other.model.bodies.is_empty() {
@@ -131,7 +131,7 @@ fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Valu
   let tris: usize = meshes.iter().map(Mesh::triangle_count).sum();
   if tris > MAX_MESH_TRIANGLES {
     return Err(CmdError::new(format!(
-      "{file_name} has {tris} triangles; CLFusion turns meshes of up to {MAX_MESH_TRIANGLES} into bodies (decimate it first)"
+      "{file_name} has {tris} triangles; FissionOxide turns meshes of up to {MAX_MESH_TRIANGLES} into bodies (decimate it first)"
     )));
   }
   let merge = p.get("merge_coplanar").and_then(Value::as_bool).unwrap_or(true);
@@ -171,7 +171,7 @@ fn add_import(s: &mut Session, kind: FeatureKind) -> CmdResult {
 /// A Fusion archive: its geometry is proprietary, but standard-format files packed inside it can
 /// be imported.
 fn import_fusion(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
-  let info = clf_exchange::archive::inspect_fusion(&std::fs::read(path)?).map_err(ex)?;
+  let info = fox_exchange::archive::inspect_fusion(&std::fs::read(path)?).map_err(ex)?;
   if info.embedded.is_empty() {
     return Err(CmdError::new(format!(
       "{} is an Autodesk Fusion archive. Fusion stores its geometry in Autodesk's proprietary ShapeManager \
@@ -181,7 +181,7 @@ fn import_fusion(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       info.brep_blobs
     )));
   }
-  let dir = std::env::temp_dir().join(format!("clf-f3d-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-f3d-{}", std::process::id()));
   std::fs::create_dir_all(&dir)?;
   let mut results = Vec::new();
   for (name, data) in &info.embedded {
@@ -287,7 +287,7 @@ fn snap(sk: &Sketch, at: [f64; 2]) -> PtSpec {
   }
 }
 
-fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<clf_sketch::CurveId>, CmdError> {
+fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<fox_sketch::CurveId>, CmdError> {
   let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
   Ok(match e {
     Entity::Line { a, b } => {
@@ -350,7 +350,7 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
   let mut out = Vec::new();
   let mut on_curve = std::collections::HashSet::new();
   for c in &sk.curves {
-    for p in clf_sketch::curve_points(&c.kind) {
+    for p in fox_sketch::curve_points(&c.kind) {
       on_curve.insert(p);
     }
     if c.kind.is_freeform() {
@@ -388,7 +388,7 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
     out.push((e, c.construction));
   }
   for p in &sk.points {
-    if p.id != clf_sketch::ORIGIN && !on_curve.contains(&p.id) {
+    if p.id != fox_sketch::ORIGIN && !on_curve.contains(&p.id) {
       out.push((Entity::Point { at: [p.x, p.y] }, false));
     }
   }
@@ -396,12 +396,12 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
 }
 
 /// Export tessellation: finer than display.
-fn fine_tol(b: &clf_model::regen::Body) -> f64 {
+fn fine_tol(b: &fox_model::regen::Body) -> f64 {
   (b.diagonal() * 0.0005).clamp(0.002, 0.1)
 }
 
 /// The bodies an export writes: `bodies` ids, or every visible body.
-fn export_bodies<'a>(s: &'a Session, p: &Value) -> Result<Vec<&'a clf_model::regen::Body>, CmdError> {
+fn export_bodies<'a>(s: &'a Session, p: &Value) -> Result<Vec<&'a fox_model::regen::Body>, CmdError> {
   let wanted: Vec<u32> = p
     .get("bodies")
     .and_then(Value::as_array)
@@ -421,7 +421,7 @@ fn export_bodies<'a>(s: &'a Session, p: &Value) -> Result<Vec<&'a clf_model::reg
 
 /// Meshes of the bodies. `weld` merges the per-face vertices (watertight meshes for 3D printing)
 /// and drops normals.
-pub fn body_meshes(s: &Session, bodies: &[&clf_model::regen::Body], weld: bool) -> Vec<Mesh> {
+pub fn body_meshes(s: &Session, bodies: &[&fox_model::regen::Body], weld: bool) -> Vec<Mesh> {
   bodies
     .iter()
     .filter_map(|b| {
@@ -443,19 +443,19 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
   let path = PathBuf::from(p.get("path").and_then(Value::as_str).ok_or(CmdError::new("missing 'path'"))?);
   let fmt = format_for_path(&path).ok_or_else(|| unknown(&path))?;
   if !fmt.export {
-    return Err(CmdError::new(format!("CLFusion can't write {} files ({})", fmt.name, fmt.note)));
+    return Err(CmdError::new(format!("FissionOxide can't write {} files ({})", fmt.name, fmt.note)));
   }
   let mut out = json!({"path": path, "format": fmt.id});
   match fmt.kind {
     FormatKind::Design | FormatKind::Archive => {
-      if fmt.id == "clfz" {
+      if fmt.id == "foxz" {
         let a = Archive {
           name: s.design.name.clone(),
           design: s.design.to_json(),
           thumbnail: thumbnail_png(s, 256, 256),
           history: Vec::new(),
         };
-        std::fs::write(&path, write_clfz(&a).map_err(ex)?)?;
+        std::fs::write(&path, write_foxz(&a).map_err(ex)?)?;
       } else {
         s.design.save(&path)?;
       }
@@ -464,9 +464,9 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
       let bodies = export_bodies(s, p)?;
       let shapes = bodies.iter().map(|b| &b.shape);
       match fmt.id {
-        "step" => clf_kernel::write_step(shapes, &path)?,
-        "iges" => clf_kernel::write_iges(shapes, &path)?,
-        _ => clf_kernel::write_brep_file(shapes, &path)?,
+        "step" => fox_kernel::write_step(shapes, &path)?,
+        "iges" => fox_kernel::write_iges(shapes, &path)?,
+        _ => fox_kernel::write_brep_file(shapes, &path)?,
       }
       out["bodies"] = json!(bodies.len());
     }
@@ -476,10 +476,10 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
       let meshes = body_meshes(s, &bodies, weld);
       let bytes = match fmt.id {
         "stl" if p.get("ascii").and_then(Value::as_bool).unwrap_or(false) => {
-          clf_exchange::write_stl_ascii(&meshes).into_bytes()
+          fox_exchange::write_stl_ascii(&meshes).into_bytes()
         }
-        "3mf" => clf_exchange::write_3mf(&meshes, thumbnail_png(s, 256, 256).as_deref()).map_err(ex)?,
-        id => clf_exchange::write_mesh(id, &meshes).map_err(ex)?,
+        "3mf" => fox_exchange::write_3mf(&meshes, thumbnail_png(s, 256, 256).as_deref()).map_err(ex)?,
+        id => fox_exchange::write_mesh(id, &meshes).map_err(ex)?,
       };
       std::fs::write(&path, bytes)?;
       out["bodies"] = json!(bodies.len());
@@ -491,7 +491,7 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
         return Err(CmdError::new("a flat pattern DXF holds one sheet metal body; pass 'bodies': [id]"));
       };
       let flat = b.flat_pattern(None).map_err(CmdError::new)?;
-      std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?;
+      std::fs::write(&path, fox_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?;
       out["flat_pattern"] = json!(b.id.0);
     }
     FormatKind::Sketch => {
@@ -536,16 +536,16 @@ pub fn inspect(path: &Path) -> CmdResult {
   let mut out = json!({"path": path, "format": fmt, "size": size});
   match fmt.id {
     "f3d" => {
-      let info = clf_exchange::archive::inspect_fusion(&std::fs::read(path)?).map_err(ex)?;
+      let info = fox_exchange::archive::inspect_fusion(&std::fs::read(path)?).map_err(ex)?;
       out["fusion"] = info.summary();
     }
-    "clfz" => {
-      let a = read_clfz(&std::fs::read(path)?).map_err(ex)?;
+    "foxz" => {
+      let a = read_foxz(&std::fs::read(path)?).map_err(ex)?;
       out["name"] = json!(a.name);
       out["versions"] = json!(a.history.iter().map(|v| v.info.clone()).collect::<Vec<_>>());
     }
     "stl" | "obj" | "ply" | "3mf" => {
-      let m = clf_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      let m = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
       out["meshes"] = json!(
         m.iter()
           .map(|m| json!({"name": m.name, "triangles": m.triangle_count(), "bounds": m.bounds()}))
@@ -564,13 +564,13 @@ pub fn inspect(path: &Path) -> CmdResult {
 
 /// A PNG preview of the design from the home view.
 pub fn thumbnail_png(s: &Session, w: u32, h: u32) -> Option<Vec<u8>> {
-  use clf_render::{Camera, StandardView};
+  use fox_render::{Camera, StandardView};
   let mut cam = Camera::default();
   cam.set_view(StandardView::Home);
   let (lo, hi) =
-    s.model.bounds().unwrap_or((clf_kernel::glam::DVec3::splat(-50.0), clf_kernel::glam::DVec3::splat(50.0)));
+    s.model.bounds().unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
   cam.fit(lo, hi, w as f64 / h.max(1) as f64);
   let opts = crate::scene::ViewOptions { hide_grid: true, ..crate::scene::ViewOptions::default() };
   let (scene, _) = crate::scene::SceneBuilder::default().build(s, &opts);
-  clf_render::render(&scene, &cam, w, h).to_png().ok()
+  fox_render::render(&scene, &cam, w, h).to_png().ok()
 }

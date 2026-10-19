@@ -1,8 +1,8 @@
-//! File formats for CLFusion that don't need the B-rep kernel: triangle meshes (STL, OBJ, PLY,
-//! 3MF, glTF, USDZ), 2D sketch geometry (DXF, SVG), CLFusion design archives (`.clfz`) and inspection
+//! File formats for FissionOxide that don't need the B-rep kernel: triangle meshes (STL, OBJ, PLY,
+//! 3MF, glTF, USDZ), 2D sketch geometry (DXF, SVG), FissionOxide design archives (`.foxz`) and inspection
 //! of Autodesk Fusion archives (`.f3d`/`.f3z`).
 //!
-//! B-rep formats (STEP, IGES, BRep) go through `clf-kernel`; [`FORMATS`] lists every format the
+//! B-rep formats (STEP, IGES, BRep) go through `fox-kernel`; [`FORMATS`] lists every format the
 //! app reads or writes so the UI, CLI and engine agree on one table.
 //!
 //! Units are millimetres throughout; readers convert from the file's units where the format says.
@@ -51,7 +51,7 @@ pub type Result<T> = std::result::Result<T, ExchangeError>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormatKind {
-  /// A full parametric CLFusion design.
+  /// A full parametric FissionOxide design.
   Design,
   /// A packaged design (archive with thumbnail and optional version history).
   Archive,
@@ -77,7 +77,7 @@ pub struct Format {
 
 macro_rules! formats {
   ($( $id:literal, $name:literal, [$($ext:literal),*], $kind:ident, $imp:literal, $exp:literal, $note:literal; )*) => {
-    /// Every format CLFusion knows, in the order the file dialogs list them.
+    /// Every format FissionOxide knows, in the order the file dialogs list them.
     pub const FORMATS: &[Format] = &[ $( Format {
       id: $id, name: $name, extensions: &[$($ext),*], kind: FormatKind::$kind, import: $imp, export: $exp, note: $note,
     } ),* ];
@@ -85,8 +85,8 @@ macro_rules! formats {
 }
 
 formats! {
-  "clf", "CLFusion design", ["clf"], Design, true, true, "Native parametric design (JSON): timeline, sketches, parameters";
-  "clfz", "CLFusion archive", ["clfz"], Archive, true, true, "Design + thumbnail + optional version history in one zip (CLFusion's .f3d/.f3z)";
+  "fox", "FissionOxide design", ["fox", "clf"], Design, true, true, "Native parametric design (JSON): timeline, sketches, parameters";
+  "foxz", "FissionOxide archive", ["foxz", "clfz"], Archive, true, true, "Design + thumbnail + optional version history in one zip (FissionOxide's .f3d/.f3z)";
   "f3d", "Autodesk Fusion archive", ["f3d", "f3z"], Archive, true, false, "Stored in the data panel with its thumbnail; geometry is Fusion's proprietary ShapeManager B-rep and can't be read - export STEP from Fusion for geometry";
   "step", "STEP", ["step", "stp"], Brep, true, true, "AP214 solids";
   "iges", "IGES", ["iges", "igs"], Brep, true, true, "Trimmed surfaces / solids";
@@ -209,7 +209,7 @@ pub fn read_mesh(ext: &str, bytes: &[u8]) -> Result<Vec<Mesh>> {
     "obj" => read_obj(bytes),
     "ply" => read_ply(bytes).map(|m| vec![m]),
     "3mf" => read_3mf(bytes),
-    e => Err(ExchangeError::fmt(format!("'.{e}' is not a mesh format CLFusion reads (stl, obj, ply, 3mf)"))),
+    e => Err(ExchangeError::fmt(format!("'.{e}' is not a mesh format FissionOxide reads (stl, obj, ply, 3mf)"))),
   }
 }
 
@@ -222,7 +222,7 @@ pub fn write_mesh(ext: &str, meshes: &[Mesh]) -> Result<Vec<u8>> {
     "3mf" => write_3mf(meshes, None),
     "glb" => write_glb(meshes),
     "usdz" => write_usdz(meshes),
-    e => Err(ExchangeError::fmt(format!("'.{e}' is not a mesh format CLFusion writes"))),
+    e => Err(ExchangeError::fmt(format!("'.{e}' is not a mesh format FissionOxide writes"))),
   }
 }
 

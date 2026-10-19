@@ -7,8 +7,8 @@
 //! refreshed so references follow gradual changes (a block getting taller drags the sketch on its
 //! top face up with it).
 
-use clf_kernel::glam::DVec3;
-use clf_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind, TriMesh};
+use fox_kernel::glam::DVec3;
+use fox_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind, TriMesh};
 use serde::{Deserialize, Serialize};
 
 use crate::BodyId;

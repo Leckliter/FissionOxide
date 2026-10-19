@@ -1,7 +1,7 @@
 //! Commands for lofted and miter flanges and flat patterns as sketches.
 
-use clf_model::{CornerMode, CornerRelief, FeatureKind, LoftMethod, LoftProfile, OriginPlane, PlaneRef};
-use clf_sketch::CurveId;
+use fox_model::{CornerMode, CornerRelief, FeatureKind, LoftMethod, LoftProfile, OriginPlane, PlaneRef};
+use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
 use crate::commands::{
@@ -58,7 +58,7 @@ pub(crate) fn corner_mode(p: &Value) -> Result<CornerMode, CmdError> {
 /// corner relief of a sheet metal rule (default the default rule).
 fn corner_closure(s: &mut Session, p: &Value) -> CmdResult {
   let id = match p.get("feature").and_then(Value::as_u64) {
-    Some(f) => clf_model::FeatureId(u32::try_from(f).map_err(|_| CmdError::new("bad feature id"))?),
+    Some(f) => fox_model::FeatureId(u32::try_from(f).map_err(|_| CmdError::new("bad feature id"))?),
     None => s
       .design
       .features
@@ -110,7 +110,7 @@ fn loft_profile(s: &Session, p: &Value, k: &str) -> Result<LoftProfile, CmdError
     .as_u64()
     .or_else(|| v.get("sketch").and_then(Value::as_u64))
     .ok_or(CmdError::new(format!("'{k}' needs a sketch")))?;
-  let sketch = clf_model::FeatureId(u32::try_from(id).map_err(|_| CmdError::new("bad sketch id"))?);
+  let sketch = fox_model::FeatureId(u32::try_from(id).map_err(|_| CmdError::new("bad sketch id"))?);
   s.design.sketch(sketch)?;
   Ok(LoftProfile { sketch, curves: ids(v, "curves").into_iter().map(CurveId).collect() })
 }
@@ -139,7 +139,7 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
   let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
   let fid = match &face {
     Some(r) => Some(r.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or(CmdError::new("no such face"))?),
-    None => clf_model::sheet::default_face(body.faces()),
+    None => fox_model::sheet::default_face(body.faces()),
   };
   let flat = body.flat_pattern(fid).map_err(CmdError::new)?;
   let developed = body.sheet.as_ref().is_some_and(|i| i.developed.is_some());
@@ -150,13 +150,13 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
   };
   let (plane, sketch) = if let (true, Some(fid)) = (on_face, fid) {
     let info = *body.faces().iter().find(|f| f.id == fid).ok_or(CmdError::new("no such face"))?;
-    let pl = clf_model::regen::sketch_plane_on(info.normal, info.origin).map_err(CmdError::new)?;
-    let sk = clf_model::sheet2::flat_sketch(&flat, &pl, [0.0, 0.0]).map_err(CmdError::new)?;
+    let pl = fox_model::regen::sketch_plane_on(info.normal, info.origin).map_err(CmdError::new)?;
+    let sk = fox_model::sheet2::flat_sketch(&flat, &pl, [0.0, 0.0]).map_err(CmdError::new)?;
     (PlaneRef::Face { face: face_ref(s, &json!({"body": id.0, "face": fid}))? }, sk)
   } else {
-    let sk = clf_model::sheet2::flat_sketch(&flat, &flat.plane, [0.0, 0.0]).map_err(CmdError::new)?;
+    let sk = fox_model::sheet2::flat_sketch(&flat, &flat.plane, [0.0, 0.0]).map_err(CmdError::new)?;
     let (lo, _) = sk.bounds().ok_or(CmdError::new("the flat pattern is empty"))?;
-    let sk = clf_model::sheet2::flat_sketch(&flat, &flat.plane, [-lo[0], -lo[1]]).map_err(CmdError::new)?;
+    let sk = fox_model::sheet2::flat_sketch(&flat, &flat.plane, [-lo[0], -lo[1]]).map_err(CmdError::new)?;
     (PlaneRef::Origin { plane: OriginPlane::Xy }, sk)
   };
   let (curves, bends) = (sketch.curves.len(), flat.bends.len());

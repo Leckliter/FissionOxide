@@ -1,6 +1,6 @@
 //! Design archives.
 //!
-//! `.clfz` is CLFusion's packaged design, the counterpart of Fusion's `.f3d`/`.f3z`: a zip with
+//! `.foxz` is FissionOxide's packaged design, the counterpart of Fusion's `.f3d`/`.f3z`: a zip with
 //! the design, a thumbnail and (optionally) every saved version, so a design and its history can
 //! travel as one file.
 //!
@@ -15,23 +15,23 @@ use serde_json::{Value, json};
 
 use crate::{ExchangeError, Result};
 
-pub const CLFZ_FORMAT_VERSION: u32 = 1;
+pub const FOXZ_FORMAT_VERSION: u32 = 1;
 
-/// One stored version inside a `.clfz`.
+/// One stored version inside a `.foxz`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchivedVersion {
   /// Version metadata (number, time, description, milestone ...), as the data store records it.
   pub info: Value,
-  /// The design JSON (`.clf`) of that version.
+  /// The design JSON (`.fox`) of that version.
   pub design: String,
   pub thumbnail: Option<Vec<u8>>,
 }
 
-/// The contents of a `.clfz`.
+/// The contents of a `.foxz`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Archive {
   pub name: String,
-  /// The current design JSON (`.clf`).
+  /// The current design JSON (`.fox`).
   pub design: String,
   pub thumbnail: Option<Vec<u8>>,
   /// Earlier versions, oldest first (empty when the archive carries only the current design).
@@ -42,12 +42,12 @@ fn zip_opts() -> zip::write::SimpleFileOptions {
   zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)
 }
 
-pub fn write_clfz(a: &Archive) -> Result<Vec<u8>> {
+pub fn write_foxz(a: &Archive) -> Result<Vec<u8>> {
   let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
   let mut versions = Vec::new();
   for (k, v) in a.history.iter().enumerate() {
     let n = v.info.get("number").and_then(Value::as_u64).unwrap_or(k as u64 + 1);
-    let file = format!("history/v{n}.clf");
+    let file = format!("history/v{n}.fox");
     w.start_file(&file, zip_opts())?;
     w.write_all(v.design.as_bytes())?;
     let thumb = match &v.thumbnail {
@@ -61,18 +61,18 @@ pub fn write_clfz(a: &Archive) -> Result<Vec<u8>> {
     };
     versions.push(json!({"info": v.info, "file": file, "thumbnail": thumb}));
   }
-  w.start_file("design.clf", zip_opts())?;
+  w.start_file("design.fox", zip_opts())?;
   w.write_all(a.design.as_bytes())?;
   if let Some(png) = &a.thumbnail {
     w.start_file("thumbnail.png", zip_opts())?;
     w.write_all(png)?;
   }
   let manifest = json!({
-    "format": "clfz",
-    "format_version": CLFZ_FORMAT_VERSION,
-    "generator": concat!("CLFusion ", env!("CARGO_PKG_VERSION")),
+    "format": "foxz",
+    "format_version": FOXZ_FORMAT_VERSION,
+    "generator": concat!("FissionOxide ", env!("CARGO_PKG_VERSION")),
     "name": a.name,
-    "design": "design.clf",
+    "design": "design.fox",
     "thumbnail": a.thumbnail.as_ref().map(|_| "thumbnail.png"),
     "versions": versions,
   });
@@ -92,18 +92,19 @@ fn read_entry<R: Read + std::io::Seek>(z: &mut zip::ZipArchive<R>, name: &str) -
   Ok(v)
 }
 
-pub fn read_clfz(bytes: &[u8]) -> Result<Archive> {
+pub fn read_foxz(bytes: &[u8]) -> Result<Archive> {
   let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
   let manifest: Value = serde_json::from_slice(&read_entry(&mut z, "manifest.json")?)?;
-  if manifest.get("format").and_then(Value::as_str) != Some("clfz") {
-    return Err(ExchangeError::fmt("not a CLFusion archive"));
+  // "clfz" archives come from before the rename to FissionOxide and read the same
+  if !matches!(manifest.get("format").and_then(Value::as_str), Some("foxz" | "clfz")) {
+    return Err(ExchangeError::fmt("not a FissionOxide archive"));
   }
   let fv = manifest.get("format_version").and_then(Value::as_u64).unwrap_or(0);
-  if fv > CLFZ_FORMAT_VERSION as u64 {
-    return Err(ExchangeError::fmt(format!("archive format {fv} is newer than this CLFusion supports")));
+  if fv > FOXZ_FORMAT_VERSION as u64 {
+    return Err(ExchangeError::fmt(format!("archive format {fv} is newer than this FissionOxide supports")));
   }
   let text = |b: Vec<u8>| String::from_utf8(b).map_err(|_| ExchangeError::fmt("design is not UTF-8"));
-  let design_name = manifest.get("design").and_then(Value::as_str).unwrap_or("design.clf").to_string();
+  let design_name = manifest.get("design").and_then(Value::as_str).unwrap_or("design.fox").to_string();
   let design = text(read_entry(&mut z, &design_name)?)?;
   let thumbnail = match manifest.get("thumbnail").and_then(Value::as_str) {
     Some(t) => Some(read_entry(&mut z, t)?),

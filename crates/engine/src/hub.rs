@@ -1,15 +1,15 @@
 //! `hub.*` commands: the data panel. Projects, folders and designs with full version history
-//! (see [`clf_store`]).
+//! (see [`fox_store`]).
 //!
 //! A session remembers which hub item its design came from ([`HubLink`]), so `hub.save` adds a
 //! new version to that item, as Save does in Fusion, instead of asking for a file name.
 
 use std::path::{Path, PathBuf};
 
-use clf_exchange::archive::{Archive, ArchivedVersion, read_clfz, write_clfz};
-use clf_exchange::format_for_path;
-use clf_model::Design;
-use clf_store::{Item, ItemKind, NewItem, Origin, Store, Version, VersionMeta};
+use fox_exchange::archive::{Archive, ArchivedVersion, read_foxz, write_foxz};
+use fox_exchange::format_for_path;
+use fox_model::Design;
+use fox_store::{Item, ItemKind, NewItem, Origin, Store, Version, VersionMeta};
 use serde_json::{Value, json};
 
 use crate::{CmdError, CmdResult, Session, files};
@@ -21,8 +21,8 @@ pub struct HubLink {
   pub version: u32,
 }
 
-impl From<clf_store::StoreError> for CmdError {
-  fn from(e: clf_store::StoreError) -> Self {
+impl From<fox_store::StoreError> for CmdError {
+  fn from(e: fox_store::StoreError) -> Self {
     CmdError(e.to_string())
   }
 }
@@ -72,7 +72,7 @@ pub fn version_json(v: &Version) -> Value {
   json!({
     "number": v.number,
     "created": v.created,
-    "time": clf_store::format_time(v.created),
+    "time": fox_store::format_time(v.created),
     "author": v.author,
     "description": v.description,
     "milestone": v.milestone,
@@ -97,7 +97,7 @@ pub fn item_json(st: &Store, it: &Item) -> Value {
     "path": path,
     "created": it.created,
     "modified": it.modified,
-    "modified_time": clf_store::format_time(it.modified),
+    "modified_time": fox_store::format_time(it.modified),
     "trashed": it.trashed,
     "versions": it.versions.len(),
     "latest": it.latest().map(version_json),
@@ -151,7 +151,7 @@ fn with_named_copy<T>(
   ext: &str,
   f: impl FnOnce(&Path) -> Result<T, CmdError>,
 ) -> Result<T, CmdError> {
-  let dir = std::env::temp_dir().join(format!("clf-hub-{}-{}", std::process::id(), clf_store::now()));
+  let dir = std::env::temp_dir().join(format!("fox-hub-{}-{}", std::process::id(), fox_store::now()));
   std::fs::create_dir_all(&dir)?;
   let safe: String =
     name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' }).collect();
@@ -254,7 +254,7 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           let project = project_of(&mut st, p)?;
           let name = opt(p, "name").map(str::to_string).unwrap_or_else(|| s.design.name.clone());
           let at =
-            NewItem { project: &project, folder: opt(p, "folder"), name: &name, kind: ItemKind::Design, ext: "clf" };
+            NewItem { project: &project, folder: opt(p, "folder"), name: &name, kind: ItemKind::Design, ext: "fox" };
           st.create_item(at, content.as_bytes(), Origin::Saved, m)?
         }
       };
@@ -324,7 +324,7 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let a = req_version(p, "a")?;
       let b = version_of(p, "b")?.or(it.latest().map(|v| v.number)).unwrap_or(a);
       let load = |n: u32| -> Result<Value, CmdError> { Ok(serde_json::from_slice(&st.read_version(&item, Some(n))?)?) };
-      let changes = clf_store::compare_designs(&load(a)?, &load(b)?);
+      let changes = fox_store::compare_designs(&load(a)?, &load(b)?);
       Ok(json!({"item": item, "a": a, "b": b, "changes": changes}))
     }
     "hub.item.rename" => {
@@ -391,7 +391,7 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let list: Vec<Value> = st
         .activity(project.as_deref(), opt(p, "item"), limit)
         .iter()
-        .map(|a| json!({"time": a.time, "when": clf_store::format_time(a.time), "author": a.author, "project": a.project, "item": a.item, "text": a.text}))
+        .map(|a| json!({"time": a.time, "when": fox_store::format_time(a.time), "author": a.author, "project": a.project, "item": a.item, "text": a.text}))
         .collect();
       Ok(json!(list))
     }
@@ -401,7 +401,7 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   }
 }
 
-/// Puts a file in the hub. CLFusion designs and archives become designs (an archive's whole
+/// Puts a file in the hub. FissionOxide designs and archives become designs (an archive's whole
 /// version history is recreated); importable formats are translated into a design that keeps the
 /// original file; anything else (e.g. a Fusion `.f3d`) is stored as-is with its preview.
 fn upload(s: &Session, st: &mut Store, p: &Value) -> CmdResult {
@@ -415,10 +415,10 @@ fn upload(s: &Session, st: &mut Store, p: &Value) -> CmdResult {
   let folder = opt(p, "folder");
   let origin = Origin::Uploaded { file: file.clone() };
   fn design_at<'a>(project: &'a str, folder: Option<&'a str>, name: &'a str) -> NewItem<'a> {
-    NewItem { project, folder, name, kind: ItemKind::Design, ext: "clf" }
+    NewItem { project, folder, name, kind: ItemKind::Design, ext: "fox" }
   }
   match fmt.id {
-    "clf" => {
+    "fox" => {
       let tmp = files::open(&path)?;
       let m = VersionMeta {
         thumbnail_png: files::thumbnail_png(&tmp, 256, 256),
@@ -428,8 +428,8 @@ fn upload(s: &Session, st: &mut Store, p: &Value) -> CmdResult {
       let (id, v) = st.create_item(design_at(&project, folder, &name), tmp.design.to_json().as_bytes(), origin, m)?;
       Ok(json!({"item": id, "version": v, "kind": "design"}))
     }
-    "clfz" => {
-      let a = read_clfz(&bytes).map_err(|e| CmdError::new(e.to_string()))?;
+    "foxz" => {
+      let a = read_foxz(&bytes).map_err(|e| CmdError::new(e.to_string()))?;
       // replay the archived history oldest first, then the current design
       let mut steps: Vec<(String, Option<Vec<u8>>, Value)> =
         a.history.iter().map(|v| (v.design.clone(), v.thumbnail.clone(), v.info.clone())).collect();
@@ -473,7 +473,7 @@ fn upload(s: &Session, st: &mut Store, p: &Value) -> CmdResult {
       Err(e) => {
         // can't translate (a Fusion archive): keep the file itself, with what can be read of it
         let (thumb, stats) = if fmt.id == "f3d" {
-          match clf_exchange::archive::inspect_fusion(&bytes) {
+          match fox_exchange::archive::inspect_fusion(&bytes) {
             Ok(info) => (info.thumbnail.clone(), info.summary()),
             Err(_) => (None, Value::Null),
           }
@@ -499,7 +499,7 @@ fn upload(s: &Session, st: &mut Store, p: &Value) -> CmdResult {
 }
 
 /// Writes a version out of the hub. The target's extension picks the format: the item's own
-/// type copies the stored file, `.clfz` packs the design with its whole history, and any export
+/// type copies the stored file, `.foxz` packs the design with its whole history, and any export
 /// format translates (e.g. a stored design to `.step`).
 fn download(st: &Store, s: &Session, p: &Value) -> CmdResult {
   let item = item_of(s, p)?;
@@ -511,7 +511,7 @@ fn download(st: &Store, s: &Session, p: &Value) -> CmdResult {
     std::fs::write(&target, st.read_version(&item, version)?)?;
     return Ok(json!({"path": target}));
   }
-  if ext == "clfz" && it.kind == ItemKind::Design {
+  if ext == "foxz" && it.kind == ItemKind::Design {
     let upto = version.or(it.latest().map(|v| v.number)).unwrap_or(0);
     let mut history = Vec::new();
     for v in it.versions.iter().filter(|v| v.number <= upto) {
@@ -521,7 +521,7 @@ fn download(st: &Store, s: &Session, p: &Value) -> CmdResult {
     }
     let current = history.last().map(|h| h.design.clone()).unwrap_or_default();
     let a = Archive { name: it.name.clone(), design: current, thumbnail: st.thumbnail(&item, Some(upto)), history };
-    std::fs::write(&target, write_clfz(&a).map_err(|e| CmdError::new(e.to_string()))?)?;
+    std::fs::write(&target, write_foxz(&a).map_err(|e| CmdError::new(e.to_string()))?)?;
     return Ok(json!({"path": target, "versions": a.history.len()}));
   }
   let tmp = session_for(st, &item, version)?;

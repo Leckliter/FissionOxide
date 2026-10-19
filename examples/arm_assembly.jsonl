@@ -34,4 +34,4 @@
 {"cmd": "assembly.interference"}
 {"cmd": "assembly.bom"}
 {"cmd": "drawing.create", "name": "Assembly", "views": ["front", "top", "iso"]}
-{"cmd": "drawing.title", "part_number": "SA-001", "author": "CLFusion"}
+{"cmd": "drawing.title", "part_number": "SA-001", "author": "FissionOxide"}

@@ -1,7 +1,7 @@
 use super::*;
 use crate::*;
-use clf_kernel::glam::DVec3;
-use clf_sketch::{PtSpec, Sketch};
+use fox_kernel::glam::DVec3;
+use fox_sketch::{PtSpec, Sketch};
 use std::f64::consts::PI;
 
 const XY: PlaneRef = PlaneRef::Origin { plane: OriginPlane::Xy };
@@ -202,7 +202,7 @@ fn extrude_up_to_a_curved_face_or_a_body() {
   let (mut d, cyl, sk) = bar_under_a_cylinder();
   let m = regenerate(&mut d);
   let body = &m.bodies[0];
-  let side = body.faces().iter().find(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).unwrap();
+  let side = body.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
   let to = FaceRef::from_face(body.id, side, DVec3::new(20.0, 0.0, -20.0));
   let e = extrude_to(&mut d, sk, ExtentKind::ToFace, to.clone(), "0");
   let m = regenerate(&mut d);
@@ -233,7 +233,7 @@ fn extrude_up_to_a_curved_face_or_a_body() {
   let sk2 = sketch(&mut d, far, rect([100.0, -5.0], [120.0, 5.0]));
   let m = regenerate(&mut d);
   let body = &m.bodies[0];
-  let side = body.faces().iter().find(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).unwrap();
+  let side = body.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
   let to = FaceRef::from_face(body.id, side, DVec3::new(20.0, 0.0, -20.0));
   let e = extrude_to(&mut d, sk2, ExtentKind::ToBody, to, "0");
   let m = regenerate(&mut d);
@@ -250,7 +250,7 @@ fn cylinder_and_square() -> (Design, FeatureId, FaceRef, f64) {
   let m = regenerate(&mut d);
   ok(&m);
   let body = &m.bodies[0];
-  let side = body.faces().iter().find(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).unwrap();
+  let side = body.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
   (d.clone(), sk, FaceRef::from_face(body.id, side, DVec3::new(0.0, -20.0, 20.0)), vol(body))
 }
 
@@ -391,7 +391,7 @@ fn replace_face_with_a_plane_or_a_curved_face() {
   let cyl = primitive(&mut d, Primitive::Cylinder { radius: "50".into(), height: "60".into() }, YZ, [10.0, -35.0]);
   let m = regenerate(&mut d);
   let cb = bodies_of(&m, cyl)[0];
-  let side = cb.faces().iter().find(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).unwrap();
+  let side = cb.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
   let target = FaceRef::from_face(cb.id, side, DVec3::new(20.0, 10.0, 15.0));
   d.add_feature(FeatureKind::ReplaceFace { faces: vec![top], target: Some(target), plane: None }).unwrap();
   let m = regenerate(&mut d);

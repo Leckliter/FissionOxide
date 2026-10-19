@@ -1,14 +1,14 @@
 //! The 3D viewport: rendering, camera navigation, picking, sketch tools, dimension labels and the
 //! ViewCube.
 
-use clf_engine::Sel;
-use clf_engine::kernel::Plane;
-use clf_engine::kernel::glam::DVec3;
-use clf_engine::model::FeatureId;
-use clf_engine::render::{self, StandardView, ray_plane};
-use clf_engine::scene::{Pick, ViewOptions};
-use clf_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
+use fox_engine::Sel;
+use fox_engine::kernel::Plane;
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::model::FeatureId;
+use fox_engine::render::{self, StandardView, ray_plane};
+use fox_engine::scene::{Pick, ViewOptions};
+use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
@@ -100,7 +100,7 @@ pub struct ToolState {
   /// Dimension tool: first picked entity.
   dim_first: Option<Pick>,
   /// Design before a sketch-point drag started.
-  drag_backup: Option<clf_engine::model::Design>,
+  drag_backup: Option<fox_engine::model::Design>,
   /// Dimension command waiting for its value.
   pending_dim: Option<serde_json::Value>,
   /// Curves picked so far by a curve-picking tool, with where each was clicked.
@@ -334,7 +334,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   if app.render_key.as_ref() == Some(&key) && app.tex.is_some() {
     return;
   }
-  let analysis = match clf_engine::scene::view_options(&app.s, &key.view) {
+  let analysis = match fox_engine::scene::view_options(&app.s, &key.view) {
     Ok(o) => o,
     Err(e) => {
       app.status = Some((e, true));
@@ -418,7 +418,7 @@ fn round_to(v: f64, step: f64) -> f64 {
 
 fn grid_step(app: &App, view: &View) -> f64 {
   let world_per_px = app.cam.view_height() / view.h.max(1) as f64;
-  clf_engine::scene::nice_step(world_per_px * 40.0)
+  fox_engine::scene::nice_step(world_per_px * 40.0)
 }
 
 fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
@@ -429,7 +429,7 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if resp.drag_started_by(egui::PointerButton::Primary)
     && app.tool == Tool::Select
     && let Some(Pick::SketchPoint { sketch, point }) = app.hover
-    && point != clf_engine::sketch::ORIGIN
+    && point != fox_engine::sketch::ORIGIN
   {
     app.tstate.drag_backup = Some(app.s.design.clone());
     app.drag = Some(Drag::SketchPoint { sketch, point });
@@ -571,7 +571,7 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
       let (center, r) = if app.tool == Tool::ArcSlotCenter {
         (Some(a), (b[0] - a[0]).hypot(b[1] - a[1]))
       } else {
-        let o = clf_engine::sketch::circumcenter(a, b, c);
+        let o = fox_engine::sketch::circumcenter(a, b, c);
         (o, o.map(|o| (a[0] - o[0]).hypot(a[1] - o[1])).unwrap_or(0.0))
       };
       let w = center.map(|o| 2.0 * ((p[0] - o[0]).hypot(p[1] - o[1]) - r).abs()).unwrap_or(1.0).max(0.1);
@@ -697,7 +697,7 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
 fn tangent_radius(app: &App, sk: FeatureId, curves: &[u32], at: [f64; 2]) -> f64 {
   let Ok(sketch) = app.s.design.sketch(sk) else { return 1.0 };
   let d: Vec<f64> =
-    curves.iter().filter_map(|c| sketch.distance_to_curve(clf_engine::sketch::CurveId(*c), at)).collect();
+    curves.iter().filter_map(|c| sketch.distance_to_curve(fox_engine::sketch::CurveId(*c), at)).collect();
   let r = d.iter().sum::<f64>() / d.len().max(1) as f64;
   let step = 10f64.powf(r.max(1e-6).log10().floor() - 2.0);
   ((r / step).round() * step).max(1e-3)
@@ -727,7 +727,7 @@ fn drag_point_live(app: &mut App, view: &View, pos: Pos2, sketch: FeatureId, poi
   let r = sk.drag(point, to);
   let solved = sk.clone();
   if let Some(res) = app.s.model.sketches.get_mut(&sketch) {
-    res.profiles = clf_engine::sketch::find_profiles(&solved);
+    res.profiles = fox_engine::sketch::find_profiles(&solved);
     res.sketch = solved;
     res.report = r;
     app.s.revision += 1;
@@ -800,7 +800,7 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       return;
     }
   };
-  let text = current.map(|v| clf_engine::sketch::Dim::new(v).expr).unwrap_or_default();
+  let text = current.map(|v| fox_engine::sketch::Dim::new(v).expr).unwrap_or_default();
   // stash the pending dimension in the editor (constraint id 0 = new)
   app.dim_edit = Some((0, text, pos));
   app.tstate.pending_dim = Some(cmd);
@@ -811,7 +811,7 @@ fn dist(s: &Sketch, a: PointId, b: PointId) -> Option<f64> {
   Some((p[0] - q[0]).hypot(p[1] - q[1]))
 }
 
-fn line_angle(s: &Sketch, a: clf_engine::sketch::CurveId, b: clf_engine::sketch::CurveId) -> Option<f64> {
+fn line_angle(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch::CurveId) -> Option<f64> {
   let dir = |c| -> Option<[f64; 2]> {
     let pts = s.curve_points(c);
     let (p, q) = (s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?);
@@ -947,12 +947,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   consumed
 }
 
-fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &clf_engine::sketch::Dim) -> Option<([f64; 2], String)> {
+fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> Option<([f64; 2], String)> {
   let numeric = dim.expr.trim().parse::<f64>().is_ok();
   let val = if k.is_angle() {
-    format!("{}°", clf_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
+    format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
   } else {
-    clf_engine::sketch::Dim::new(dim.value).expr
+    fox_engine::sketch::Dim::new(dim.value).expr
   };
   let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
@@ -1022,7 +1022,7 @@ fn glyph(k: &ConstraintKind) -> Icon {
 fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
   if let Some(c) = k.curves().first() {
     let curve = s.curve(*c)?;
-    let pts = clf_engine::scene::curve_polyline(s, &curve.kind);
+    let pts = fox_engine::scene::curve_polyline(s, &curve.kind);
     let m = *pts.get(pts.len() / 2)?;
     let m = if pts.len() == 2 { [(pts[0][0] + pts[1][0]) / 2.0, (pts[0][1] + pts[1][1]) / 2.0] } else { m };
     return Some((m, c.0));
@@ -1088,7 +1088,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     (Tool::Circle3P, [a]) => line(*a, cur),
     (Tool::Circle3P, [a, b]) => {
-      if let Some(c) = clf_engine::sketch::circumcenter(*a, *b, cur) {
+      if let Some(c) = fox_engine::sketch::circumcenter(*a, *b, cur) {
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
@@ -1122,7 +1122,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     (Tool::Circle | Tool::Polygon, [c]) => circle(*c, (cur[0] - c[0]).hypot(cur[1] - c[1])),
     (Tool::Arc3 | Tool::CenterArc | Tool::Slot, [a]) => line(*a, cur),
     (Tool::Arc3, [a, b]) => {
-      if let Some(c) = clf_engine::sketch::circumcenter(*a, cur, *b) {
+      if let Some(c) = fox_engine::sketch::circumcenter(*a, cur, *b) {
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
@@ -1139,7 +1139,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   if let Some(p) = s(cur) {
     let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
     painter.circle_stroke(p, 4.0, Stroke::new(1.5, col));
-    let txt = format!("{}, {}", clf_engine::sketch::Dim::new(cur[0]).expr, clf_engine::sketch::Dim::new(cur[1]).expr);
+    let txt = format!("{}, {}", fox_engine::sketch::Dim::new(cur[0]).expr, fox_engine::sketch::Dim::new(cur[1]).expr);
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -1162,8 +1162,8 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
   let at = plane.to_local(hit);
   let r = tangent_radius(app, sk, &curves, at);
   let Ok(mut sketch) = app.s.design.sketch(sk).cloned() else { return };
-  let ids: Vec<_> = curves.iter().map(|c| clf_engine::sketch::CurveId(*c)).collect();
-  let Ok(c) = sketch.add_tangent_circle(&ids, Some(clf_engine::sketch::Dim::new(r)), at) else { return };
+  let ids: Vec<_> = curves.iter().map(|c| fox_engine::sketch::CurveId(*c)).collect();
+  let Ok(c) = sketch.add_tangent_circle(&ids, Some(fox_engine::sketch::Dim::new(r)), at) else { return };
   let Some(center) = sketch.curve_points(c).first().and_then(|p| sketch.pos(*p)) else { return };
   let stroke = Stroke::new(1.5, Color32::from_rgb(30, 110, 235));
   let pts: Vec<Pos2> = (0..=64)
@@ -1176,7 +1176,7 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
     painter.line_segment([w[0], w[1]], stroke);
   }
   if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
-    let txt = format!("R {}", clf_engine::sketch::Dim::new(r).expr);
+    let txt = format!("R {}", fox_engine::sketch::Dim::new(r).expr);
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -1447,7 +1447,7 @@ fn finish_box(app: &mut App, view: &View, a: Pos2, b: Pos2, add: bool) {
   let (filter, priority) = (app.sel_filter, app.sel_priority);
   // per target: pixels inside and pixels anywhere
   let mut hits: Vec<(Sel, usize, usize)> = Vec::new();
-  let mut whole: std::collections::HashMap<clf_engine::model::BodyId, usize> = std::collections::HashMap::new();
+  let mut whole: std::collections::HashMap<fox_engine::model::BodyId, usize> = std::collections::HashMap::new();
   for (&id, &n) in &inside {
     let Some(p) = app.picks.get(id) else { continue };
     let keep = if sketching {
@@ -1481,7 +1481,7 @@ fn finish_box(app: &mut App, view: &View, a: Pos2, b: Pos2, add: bool) {
         *whole.entry(body).or_default() += all;
       }
     }
-    let mut body_px: std::collections::HashMap<clf_engine::model::BodyId, usize> = std::collections::HashMap::new();
+    let mut body_px: std::collections::HashMap<fox_engine::model::BodyId, usize> = std::collections::HashMap::new();
     for id in &frame.ids {
       if let Some(Pick::Face { body, .. } | Pick::Edge { body, .. }) = app.picks.get(*id)
         && whole.contains_key(&body)
@@ -1507,7 +1507,7 @@ fn finish_box(app: &mut App, view: &View, a: Pos2, b: Pos2, add: bool) {
 /// Opens the Select Other list for what lies under `pos`.
 fn open_select_other(app: &mut App, view: &View, pos: Pos2) {
   let (o, d) = view.ray(&app.cam, pos);
-  let hits = clf_engine::scene::ray_hits(&app.s, o, d);
+  let hits = fox_engine::scene::ray_hits(&app.s, o, d);
   app.other = Some(crate::select::OtherMenu::new(&app.s, pos, app.hover, &hits));
 }
 
@@ -1551,7 +1551,7 @@ fn manipulator(
   painter.text(
     b + side * 14.0 + dir2 * 4.0,
     egui::Align2::LEFT_CENTER,
-    format!("{} mm", clf_engine::sketch::Dim::new(m.value).expr),
+    format!("{} mm", fox_engine::sketch::Dim::new(m.value).expr),
     egui::FontId::proportional(12.0),
     Color32::from_gray(40),
   );

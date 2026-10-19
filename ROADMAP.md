@@ -1,6 +1,6 @@
-# CLFusion roadmap
+# FissionOxide roadmap
 
-CLFusion covers Fusion's core solid-modeling loop (sketch, constrain, dimension, extrude,
+FissionOxide covers Fusion's core solid-modeling loop (sketch, constrain, dimension, extrude,
 revolve, sweep, loft, holes, threads, coils, ribs, fillet, chamfer, shell, draft, pattern,
 mirror, parameters, timeline editing), construction geometry, surfaces, mesh tools, sheet metal,
 assemblies with joints, drawings, inspection and analysis, a 2.5-axis Manufacture workspace, the
@@ -22,7 +22,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
 | View      | Silhouette edges and hidden-line (dashed) display styles; GPU frustum culling and level of detail for huge assemblies |
 | Manufacture | 3D adaptive roughing; pencil, steep-and-shallow and contour finishing; holder and fixture collision checks; arcs (G2/G3) in G-code; turning and 4/5-axis |
-| Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
+| Plugins   | Installable `.foxplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Tracing   | Canvas (an image kept on a plane, calibrated); centre-line tracing for engraving; constraints on traced geometry; see [docs/TRACING.md](docs/TRACING.md) |
 
 ## Files and data

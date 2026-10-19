@@ -11,7 +11,7 @@ fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-  let d = std::env::temp_dir().join(format!("clf-trace-{tag}-{}", std::process::id()));
+  let d = std::env::temp_dir().join(format!("fox-trace-{tag}-{}", std::process::id()));
   std::fs::create_dir_all(&d).unwrap();
   d
 }

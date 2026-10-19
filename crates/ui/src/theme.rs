@@ -1,6 +1,6 @@
 //! Colours and style. The layout follows Autodesk Fusion's light theme (grey application bar,
 //! light toolbar, browser rows floating on a near-white canvas, light command dialogs); the
-//! colours are CLFusion's own and shared with the icons: slate for text and lines, one blue
+//! colours are FissionOxide's own and shared with the icons: slate for text and lines, one blue
 //! accent for selection and primary actions, and each command family's accent in its dialogs.
 
 use egui::{Color32, CornerRadius, Stroke};

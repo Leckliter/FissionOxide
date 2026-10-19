@@ -41,7 +41,7 @@ fn build_a_plate_with_commands() {
     .edges()
     .iter()
     .filter(|e| {
-      e.kind == clf_kernel::CurveKind::Line && e.faces[1] != 0 && (e.end - e.start).normalize().z.abs() > 0.99
+      e.kind == fox_kernel::CurveKind::Line && e.faces[1] != 0 && (e.end - e.start).normalize().z.abs() > 0.99
     })
     .map(|e| json!({"body": b.id.0, "edge": e.id}))
     .collect();
@@ -67,7 +67,7 @@ fn build_a_plate_with_commands() {
 fn export_save_reopen() {
   let mut s = Session::default();
   plate(&mut s);
-  let dir = std::env::temp_dir().join(format!("clf-engine-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-engine-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   for ext in ["step", "stl", "obj"] {
     let path = dir.join(format!("plate.{ext}"));
@@ -75,7 +75,7 @@ fn export_save_reopen() {
     assert!(std::fs::metadata(&path).unwrap().len() > 100);
   }
   assert!(s.execute("export", &json!({"path": dir.join("x.dwg")})).is_err());
-  let file = dir.join("plate.clf");
+  let file = dir.join("plate.fox");
   run(&mut s, "save", json!({"path": file}));
   let v = total_volume(&s);
   let mut t = Session::default();
@@ -176,7 +176,7 @@ fn scene_builds_and_picks() {
   let frame = render::render(&scene, &cam, 400, 300);
   let id = frame.pick(200.0, 150.0, 3, |_| true);
   assert!(matches!(picks.get(id), Some(scene::Pick::Face { .. } | scene::Pick::Edge { .. })), "{:?}", picks.get(id));
-  if let Ok(dir) = std::env::var("CLF_SNAPSHOT_DIR") {
+  if let Ok(dir) = std::env::var("FOX_SNAPSHOT_DIR") {
     frame.save_png(&std::path::Path::new(&dir).join("plate.png")).unwrap();
   }
 }
@@ -197,7 +197,7 @@ fn sheet_metal_with_commands() {
   assert!(r["error"].is_null(), "{r}");
   let info = run(&mut s, "info", json!({}));
   assert_eq!(info["bodies"][0]["sheet_metal"]["thickness"], 1.5, "{info}");
-  let dxf = std::env::temp_dir().join(format!("clf-flat-{}.dxf", std::process::id()));
+  let dxf = std::env::temp_dir().join(format!("fox-flat-{}.dxf", std::process::id()));
   let flat = run(&mut s, "sheet.flat_pattern", json!({"path": dxf}));
   assert_eq!(flat["bends"].as_array().unwrap().len(), 2, "{flat}");
   let ba = std::f64::consts::PI / 2.0 * (2.0 + 0.4 * 1.5);
@@ -323,7 +323,7 @@ fn assembly_with_a_revolute_joint() {
     let m = s.model.bodies.iter().find(|x| x.id.0 == arm).unwrap().shape.mass().unwrap();
     (m.bbox_min, m.bbox_max)
   };
-  let near = |a: clf_kernel::glam::DVec3, b: [f64; 3]| (a - clf_kernel::glam::DVec3::from(b)).length() < 1e-3;
+  let near = |a: fox_kernel::glam::DVec3, b: [f64; 3]| (a - fox_kernel::glam::DVec3::from(b)).length() < 1e-3;
   let (lo, hi) = bbox(&s);
   assert!(near(lo, [40.0, 20.0, 10.0]) && near(hi, [120.0, 40.0, 15.0]), "{lo:?} {hi:?}");
   run(&mut s, "joint.drive", json!({"joint": j, "rotation": "90 deg"}));
@@ -374,7 +374,7 @@ fn drawings_with_views_dimensions_and_export() {
     run(&mut s, "drawing.add_view", json!({"kind": {"detail": 2, "center": [40, 25, 6], "radius": 10, "factor": 3}}));
   assert!(det["view"].as_u64().is_some(), "{det}");
   run(&mut s, "drawing.dimension", json!({"view": 1, "a": [0, 0, 0], "b": [40, 0, 6], "orientation": "horizontal"}));
-  run(&mut s, "drawing.title", json!({"part_number": "CLF-001", "material": "Aluminum"}));
+  run(&mut s, "drawing.title", json!({"part_number": "FOX-001", "material": "Aluminum"}));
   run(&mut s, "drawing.set", json!({"scale": "1:1", "projection": "first_angle"}));
   let info = run(&mut s, "drawing.info", json!({}));
   assert!(info["error"].is_null(), "{info}");
@@ -383,7 +383,7 @@ fn drawings_with_views_dimensions_and_export() {
     text.iter().any(|t| t == "SECTION E-E") && text.iter().any(|t| t == "1:1") && text.iter().any(|t| t == "40"),
     "{text:?}"
   );
-  let dir = std::env::temp_dir().join(format!("clf-drawing-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-drawing-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   for ext in ["svg", "pdf", "dxf"] {
     let path = dir.join(format!("plate.{ext}"));
@@ -395,7 +395,7 @@ fn drawings_with_views_dimensions_and_export() {
   run(&mut s, "param.set", json!({"name": "thick", "expr": "9"}));
   let text: Vec<String> = serde_json::from_value(run(&mut s, "drawing.info", json!({}))["text"].clone()).unwrap();
   assert!(text.iter().any(|t| t == "9"), "{text:?}");
-  let back = clf_model::Design::from_json(&s.design.to_json()).unwrap();
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
   assert_eq!(back.drawings, s.design.drawings);
 }
 
@@ -441,7 +441,7 @@ fn sketch_modify_tools_and_project() {
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
-  let d = std::env::temp_dir().join(format!("clf-engine-{name}-{}", std::process::id()));
+  let d = std::env::temp_dir().join(format!("fox-engine-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);
   std::fs::create_dir_all(&d).unwrap();
   d
@@ -462,8 +462,8 @@ fn every_format_round_trips() {
     ("obj", 5.0),
     ("3mf", 5.0),
     ("ply", 5.0),
-    ("clf", 1e-6),
-    ("clfz", 1e-6),
+    ("fox", 1e-6),
+    ("foxz", 1e-6),
   ] {
     let path = dir.join(format!("plate.{ext}"));
     let r = run(&mut s, "export", json!({"path": path}));
@@ -476,11 +476,11 @@ fn every_format_round_trips() {
     assert!((total_volume(&t) - v).abs() < tol, "{ext}: {} vs {v}", total_volume(&t));
     assert!(t.model.errors().is_empty(), "{ext}: {:?}", t.model.errors());
     // native designs keep their path, translations start unsaved
-    assert_eq!(t.path.is_some(), ext == "clf" || ext == "clfz", "{ext}");
+    assert_eq!(t.path.is_some(), ext == "fox" || ext == "foxz", "{ext}");
   }
   // the parametric timeline survives the archive
   let mut t = Session::default();
-  run(&mut t, "open", json!({"path": dir.join("plate.clfz")}));
+  run(&mut t, "open", json!({"path": dir.join("plate.foxz")}));
   assert_eq!(t.design, s.design);
   for ext in ["glb", "usdz"] {
     let path = dir.join(format!("plate.{ext}"));
@@ -608,7 +608,7 @@ fn hub_versions_milestones_and_history() {
   assert!(run(&mut s, "hub.activity", json!({})).as_array().unwrap().len() >= 6);
   assert_eq!(run(&mut s, "hub.recent", json!({}))[0]["id"], item);
   // export the whole history as an archive and bring it back as a new item
-  let arch = root.join("plate.clfz");
+  let arch = root.join("plate.foxz");
   assert_eq!(run(&mut s, "hub.download", json!({"path": arch}))["versions"], 3);
   let up = run(&mut s, "hub.upload", json!({"path": arch, "name": "Plate (restored)"}));
   let restored = up["item"].as_str().unwrap();
@@ -740,7 +740,7 @@ fn splines_and_sketch_chamfers_make_profiles() {
   assert!(r["error"].is_null(), "{r}");
   let v = total_volume(&s);
   assert!(v > 30.0 * 10.0 * 5.0 && v < 30.0 * 20.0 * 5.0, "{v}");
-  assert!(s.model.bodies[0].faces().iter().any(|f| f.kind == clf_kernel::SurfaceKind::Other), "a smooth spline face");
+  assert!(s.model.bodies[0].faces().iter().any(|f| f.kind == fox_kernel::SurfaceKind::Other), "a smooth spline face");
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   let c: Vec<u64> = serde_json::from_value(
@@ -916,7 +916,7 @@ fn sketch_info_reports_frames_lengths_and_profile_curves() {
   let r = run(&mut s, "plane.offset", json!({"plane": {"origin": [5, 5, 5], "normal": [0, 0, 2]}}));
   assert!(r["error"].is_null(), "{r}");
   let pl = s.model.planes.get(&FeatureId(r["feature"].as_u64().unwrap() as u32)).unwrap();
-  assert!((pl.origin - clf_kernel::glam::DVec3::new(5.0, 5.0, 5.0)).length() < 1e-9);
+  assert!((pl.origin - fox_kernel::glam::DVec3::new(5.0, 5.0, 5.0)).length() < 1e-9);
   assert!(s.execute("sketch.create", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}})).is_err());
 }
 
@@ -941,7 +941,7 @@ fn transform_and_insert_sketch_geometry() {
     .unwrap()
     .curves
     .iter()
-    .find(|c| matches!(c.kind, clf_sketch::CurveKind::Circle { .. }))
+    .find(|c| matches!(c.kind, fox_sketch::CurveKind::Circle { .. }))
     .unwrap()
     .id;
   assert_eq!(s.design.sketch(FeatureId(sk)).unwrap().radius(circle), Some(4.0));
@@ -953,7 +953,7 @@ fn transform_and_insert_sketch_geometry() {
   let dst = s.edit_sketch.unwrap().0;
   let r = run(&mut s, "sketch.insert", json!({"from": {"sketch": sk}, "translate": [-120, 0]}));
   assert_eq!(r["curves"].as_array().unwrap().len(), 5);
-  let dir = std::env::temp_dir().join(format!("clf-insert-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-insert-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let dxf = dir.join("part.dxf");
   run(&mut s, "export", json!({"path": dxf, "sketch": sk}));
@@ -961,11 +961,11 @@ fn transform_and_insert_sketch_geometry() {
   assert_eq!(r["curves"].as_array().unwrap().len(), 5);
   let info = run(&mut s, "sketch.info", json!({"sketch": dst}));
   assert_eq!(info["profiles"].as_array().unwrap().len(), 4, "two rings and two discs");
-  let clf = dir.join("lib.clf");
-  run(&mut s, "save", json!({"path": clf}));
-  let r = run(&mut s, "sketch.insert", json!({"from": {"path": clf, "sketch": sk}, "curves": [circle.0]}));
+  let fox = dir.join("lib.fox");
+  run(&mut s, "save", json!({"path": fox}));
+  let r = run(&mut s, "sketch.insert", json!({"from": {"path": fox, "sketch": sk}, "curves": [circle.0]}));
   assert_eq!(r["curves"].as_array().unwrap().len(), 1);
-  assert!(s.execute("sketch.insert", &json!({"from": {"path": clf, "sketch": "nope"}})).is_err());
+  assert!(s.execute("sketch.insert", &json!({"from": {"path": fox, "sketch": "nope"}})).is_err());
   let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -999,7 +999,7 @@ fn render_to_a_file() {
   let mut s = Session::default();
   let a = run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}))["result_bodies"][0].as_u64().unwrap();
   run(&mut s, "box", json!({"at": [60, 0], "width": 5, "depth": 5, "height": 5, "operation": "new_body"}));
-  let path = std::env::temp_dir().join(format!("clf-render-{}.png", std::process::id()));
+  let path = std::env::temp_dir().join(format!("fox-render-{}.png", std::process::id()));
   let r = run(
     &mut s,
     "view.render",

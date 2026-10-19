@@ -163,7 +163,7 @@ fn load_thumbs(app: &mut App, ctx: &egui::Context) {
   if want.is_empty() {
     return;
   }
-  let Ok(store) = clf_engine::hub::open_store(&app.s) else { return };
+  let Ok(store) = fox_engine::hub::open_store(&app.s) else { return };
   for (item, n) in want {
     let tex = store.thumbnail(&item, Some(n as u32)).and_then(|png| {
       let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).ok()?.to_rgba8();
@@ -397,7 +397,7 @@ fn item_list(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: boo
 }
 
 fn item_rows(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: bool) {
-  let now = clf_engine::store::now();
+  let now = fox_engine::store::now();
   for it in items {
     let id = s(&it, "id");
     let latest = it.get("latest").cloned().unwrap_or(Value::Null);
@@ -422,7 +422,7 @@ fn item_rows(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: boo
             let when = latest
               .get("created")
               .and_then(Value::as_u64)
-              .map(|t| clf_engine::store::relative_time(t, now))
+              .map(|t| fox_engine::store::relative_time(t, now))
               .unwrap_or_default();
             let kind = if s(&it, "kind") == "file" { format!(" · .{}", s(&it, "ext")) } else { String::new() };
             ui.label(RichText::new(format!("v{n} · {when}{kind}")).small().color(theme::MUTED));
@@ -577,7 +577,7 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn activity_tab(app: &mut App, ui: &mut egui::Ui) {
-  let now = clf_engine::store::now();
+  let now = fox_engine::store::now();
   let list = app.data.other.as_array().cloned().unwrap_or_default();
   egui::ScrollArea::vertical()
     .id_salt("hub-activity")
@@ -586,7 +586,7 @@ fn activity_tab(app: &mut App, ui: &mut egui::Ui) {
     .show(ui, |ui| {
       for a in list {
         let when =
-          a.get("time").and_then(Value::as_u64).map(|t| clf_engine::store::relative_time(t, now)).unwrap_or_default();
+          a.get("time").and_then(Value::as_u64).map(|t| fox_engine::store::relative_time(t, now)).unwrap_or_default();
         ui.horizontal_wrapped(|ui| {
           ui.label(RichText::new(s(&a, "author")).strong().small());
           ui.label(RichText::new(s(&a, "text")).small());
@@ -732,14 +732,14 @@ fn compare_window(app: &mut App, ctx: &egui::Context) {
 fn import_filter() -> (Vec<&'static str>, Vec<(&'static str, Vec<&'static str>)>) {
   let mut all = Vec::new();
   let mut each = Vec::new();
-  for f in clf_engine::exchange::FORMATS.iter().filter(|f| f.import) {
+  for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.import) {
     all.extend_from_slice(f.extensions);
     each.push((f.name, f.extensions.to_vec()));
   }
   (all, each)
 }
 
-/// A file dialog listing every format CLFusion reads.
+/// A file dialog listing every format FissionOxide reads.
 pub fn pick_importable(title: &str, multiple: bool) -> Vec<std::path::PathBuf> {
   let (all, each) = import_filter();
   let mut d = rfd::FileDialog::new().set_title(title).add_filter("All supported files", &all);
@@ -766,11 +766,11 @@ fn upload_dialog(app: &mut App) {
 
 fn download_dialog(app: &mut App, item: &str, version: Option<u32>, name: &str, ext: &str) {
   let mut d = rfd::FileDialog::new().set_file_name(format!("{name}.{ext}"));
-  if ext == "clf" {
-    d = d.add_filter("CLFusion archive with history", &["clfz"]);
+  if ext == "fox" {
+    d = d.add_filter("FissionOxide archive with history", &["foxz"]);
   }
   d = d.add_filter("Same format", &[ext]);
-  for f in clf_engine::exchange::FORMATS.iter().filter(|f| f.export && f.id != "clfz") {
+  for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export && f.id != "foxz") {
     d = d.add_filter(f.name, f.extensions);
   }
   if let Some(p) = d.save_file()

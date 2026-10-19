@@ -5,14 +5,14 @@ use serde_json::json;
 use crate::{ExchangeError, Mesh, Result};
 
 /// Writes meshes as a GLB. glTF is metres and Y-up, so a root node scales by 0.001 and turns
-/// CLFusion's Z-up into Y-up.
+/// FissionOxide's Z-up into Y-up.
 pub fn write_glb(meshes: &[Mesh]) -> Result<Vec<u8>> {
   let mut bin: Vec<u8> = Vec::new();
   let mut views = Vec::new();
   let mut accessors = Vec::new();
   let mut gl_meshes = Vec::new();
   let mut nodes = vec![json!({
-    "name": "CLFusion",
+    "name": "FissionOxide",
     "scale": [0.001, 0.001, 0.001],
     // -90 degrees about X: Z-up -> Y-up
     "rotation": [-std::f64::consts::FRAC_1_SQRT_2, 0.0, 0.0, std::f64::consts::FRAC_1_SQRT_2],
@@ -63,7 +63,7 @@ pub fn write_glb(meshes: &[Mesh]) -> Result<Vec<u8>> {
     nodes.push(json!({"name": m.name, "mesh": gl_meshes.len() - 1}));
   }
   let doc = json!({
-    "asset": {"version": "2.0", "generator": "CLFusion"},
+    "asset": {"version": "2.0", "generator": "FissionOxide"},
     "scene": 0,
     "scenes": [{"nodes": [0]}],
     "nodes": nodes,

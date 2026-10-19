@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::*;
-use clf_sketch::{PtSpec, Sketch, find_profiles};
+use fox_sketch::{PtSpec, Sketch, find_profiles};
 
 fn rect(plane: &Plane, a: [f64; 2], b: [f64; 2]) -> Shape {
   let mut s = Sketch::new();

@@ -1,6 +1,6 @@
 //! The viewport's cost per orbit frame on a real model, CPU path against GPU path.
 //!
-//! `cargo run --release -p clf-ui --example viewport_bench [-- COUNT WIDTH HEIGHT]`
+//! `cargo run --release -p fox-ui --example viewport_bench [-- COUNT WIDTH HEIGHT]`
 //!
 //! Builds the example bracket (`examples/bracket.jsonl`), patterns it COUNT × COUNT, then orbits:
 //! the CPU path rebuilds the scene and rasterizes it every frame (the render key includes the
@@ -9,10 +9,10 @@
 
 use std::time::Instant;
 
-use clf_engine::Session;
-use clf_engine::render::Camera;
-use clf_engine::scene::{SceneBuilder, ViewOptions};
-use clf_render_gl::Renderer;
+use fox_engine::Session;
+use fox_engine::render::Camera;
+use fox_engine::scene::{SceneBuilder, ViewOptions};
+use fox_render_gl::Renderer;
 use serde_json::{Value, json};
 
 fn ms(t: Instant) -> f64 {
@@ -53,11 +53,11 @@ fn main() -> Result<(), String> {
     let mut c = cam;
     c.orbit(0.02 * k as f64, 0.0);
     let (scene, _) = builder.build(&s, &opts);
-    std::hint::black_box(clf_engine::render::render(&scene, &c, w, h));
+    std::hint::black_box(fox_engine::render::render(&scene, &c, w, h));
   }
   let cpu = ms(t) / frames as f64;
 
-  let hx = clf_render_gl::headless::context()?;
+  let hx = fox_render_gl::headless::context()?;
   let gl = &hx.gl;
   let name = hx.renderer_name();
   let mut r = Renderer::new(gl)?;

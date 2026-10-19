@@ -1,5 +1,5 @@
 //! Image tracing: a photo or logo traced into closed sketch curves (`sketch.trace`), or just
-//! measured (`trace.info`). The tracer itself is [`clf_trace`]; this maps its pixel contours
+//! measured (`trace.info`). The tracer itself is [`fox_trace`]; this maps its pixel contours
 //! onto the sketch, centred on `at` and scaled to the requested size.
 
 use std::collections::HashMap;
@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use clf_sketch::{CurveKind, PointId, Sketch};
-use clf_trace::{Contour, Fit, Image, Mode, Options, Seg, Trace};
+use fox_sketch::{CurveKind, PointId, Sketch};
+use fox_trace::{Contour, Fit, Image, Mode, Options, Seg, Trace};
 use serde_json::{Value, json};
 
 use crate::CmdError;
@@ -29,7 +29,7 @@ fn load(path: &Path) -> Result<Arc<Image>, CmdError> {
   {
     return Ok(img.clone());
   }
-  let img = Arc::new(clf_trace::load(path).map_err(|e| CmdError::new(format!("{}: {e}", path.display())))?);
+  let img = Arc::new(fox_trace::load(path).map_err(|e| CmdError::new(format!("{}: {e}", path.display())))?);
   if let Ok(mut last) = LAST.lock() {
     *last = Some((path.to_path_buf(), stamp, img.clone()));
   }
@@ -103,7 +103,7 @@ pub(crate) fn options(p: &Value) -> Result<Options, CmdError> {
 /// Runs the tracer on the `image` parameter.
 pub(crate) fn run(p: &Value) -> Result<Trace, CmdError> {
   let img = load(Path::new(req_str(p, "image")?))?;
-  clf_trace::trace(&img, &options(p)?).map_err(|e| CmdError::new(e.to_string()))
+  fox_trace::trace(&img, &options(p)?).map_err(|e| CmdError::new(e.to_string()))
 }
 
 /// Parameter values, for sizes given as expressions ("120 mm", "plate_w - 10").
@@ -114,15 +114,15 @@ fn mm_per_px(p: &Value, t: &Trace, scope: &Scope) -> Result<f64, CmdError> {
   let eval = |k: &str, kind| -> Result<Option<f64>, CmdError> {
     match p.get(k) {
       None | Some(Value::Null) => Ok(None),
-      Some(v) => Ok(Some(clf_expr::eval(&expr_of(v)?, kind, scope)?)),
+      Some(v) => Ok(Some(fox_expr::eval(&expr_of(v)?, kind, scope)?)),
     }
   };
-  let k = if let Some(s) = eval("scale", clf_expr::Kind::Unitless)? {
+  let k = if let Some(s) = eval("scale", fox_expr::Kind::Unitless)? {
     s
-  } else if let Some(h) = eval("height", clf_expr::Kind::Length)? {
+  } else if let Some(h) = eval("height", fox_expr::Kind::Length)? {
     h / f64::from(t.height.max(1))
   } else {
-    eval("width", clf_expr::Kind::Length)?.unwrap_or(DEFAULT_WIDTH) / f64::from(t.width.max(1))
+    eval("width", fox_expr::Kind::Length)?.unwrap_or(DEFAULT_WIDTH) / f64::from(t.width.max(1))
   };
   if k <= 0.0 || !k.is_finite() {
     return Err(CmdError::new("the traced size must be positive"));
@@ -197,7 +197,7 @@ impl Place {
 
 /// Adds one closed contour; consecutive segments share their end points.
 fn add_contour(sk: &mut Sketch, c: &Contour, place: &Place) -> Result<(), CmdError> {
-  let err = |e: clf_sketch::SketchError| CmdError::new(e.to_string());
+  let err = |e: fox_sketch::SketchError| CmdError::new(e.to_string());
   if let [Seg::Circle { center, radius }] = c.segs.as_slice() {
     let q = place.map(*center);
     let center = sk.add_point(q[0], q[1]);
@@ -320,7 +320,7 @@ fn inside(poly: &[[f64; 2]], q: [f64; 2]) -> bool {
 
 /// Which of the sketch's profiles are traced ink (inside a shape and not in one of its holes),
 /// as opposed to the holes the outlines also enclose: what an extrude of the trace should pick.
-pub(crate) fn ink_profiles(placed: &Placed, profiles: &[clf_sketch::Profile]) -> Vec<usize> {
+pub(crate) fn ink_profiles(placed: &Placed, profiles: &[fox_sketch::Profile]) -> Vec<usize> {
   let (s, c) = (-placed.angle).sin_cos();
   profiles
     .iter()

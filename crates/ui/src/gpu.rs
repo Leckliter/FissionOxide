@@ -1,24 +1,24 @@
-//! The viewport's GPU renderer: [`clf_render_gl`] drawn through an egui paint callback.
+//! The viewport's GPU renderer: [`fox_render_gl`] drawn through an egui paint callback.
 //!
-//! The scene is the same [`clf_engine::render::Scene`] the CPU rasterizer draws; it is built only
+//! The scene is the same [`fox_engine::render::Scene`] the CPU rasterizer draws; it is built only
 //! when something other than the camera changes and uploaded once, so orbiting, panning and
 //! zooming only redraw what's on the GPU. Hover-only changes keep the uploaded meshes and just
 //! change their highlight. Picking reads the GPU's id buffer back into `App::frame` whenever the
 //! image settles (not during orbit/pan/zoom drags, which don't pick), so `Frame::pick` and
 //! window selection work unchanged, with the pick table that belongs to those ids.
 //!
-//! The CPU rasterizer takes over when the setting is off (`CLF_RENDERER=cpu` turns it off at
+//! The CPU rasterizer takes over when the setting is off (`FOX_RENDERER=cpu` turns it off at
 //! start), when eframe has no OpenGL context (headless, tests) and when the GPU renderer fails to
 //! start (no OpenGL 3.3 / ES 3.0, shader errors): the error shows in the status bar and in the
 //! Display Settings menu.
 
 use std::sync::{Arc, Mutex};
 
-use clf_engine::render::{Camera, Frame, Scene};
-use clf_engine::scene::PickTable;
-use clf_render_gl::Renderer;
 use eframe::{egui_glow, glow};
 use egui::{Color32, Rect};
+use fox_engine::render::{Camera, Frame, Scene};
+use fox_engine::scene::PickTable;
+use fox_render_gl::Renderer;
 
 use crate::viewport::Drag;
 use crate::{App, RenderKey};
@@ -55,7 +55,7 @@ struct Shared {
 
 impl Gpu {
   pub fn new(gl: Option<Arc<glow::Context>>) -> Gpu {
-    let enabled = std::env::var("CLF_RENDERER").map(|v| !v.eq_ignore_ascii_case("cpu")).unwrap_or(true);
+    let enabled = std::env::var("FOX_RENDERER").map(|v| !v.eq_ignore_ascii_case("cpu")).unwrap_or(true);
     Gpu {
       enabled,
       failed: gl.is_none().then(|| "no OpenGL context".to_string()),
@@ -222,7 +222,7 @@ pub fn settings(app: &mut App, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use clf_engine::Session;
+  use fox_engine::Session;
 
   #[test]
   fn without_opengl_the_cpu_renderer_draws() {
@@ -257,7 +257,7 @@ mod tests {
     moved.size = [200, 160];
     assert!(!scene_changed(&app, &moved));
     let hovered = RenderKey {
-      hover: Some(clf_engine::scene::Pick::Face { body: clf_engine::model::BodyId(1), face: 2 }),
+      hover: Some(fox_engine::scene::Pick::Face { body: fox_engine::model::BodyId(1), face: 2 }),
       ..key.clone()
     };
     assert!(scene_changed(&app, &hovered));

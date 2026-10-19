@@ -1,7 +1,7 @@
 //! The parametric design: user parameters and a timeline of features (sketches, extrudes,
 //! revolves, fillets, ...) that regenerate into solid bodies.
 //!
-//! A [`Design`] is pure data (saved as JSON, `.clf` files). [`regen::Regenerator`] replays it
+//! A [`Design`] is pure data (saved as JSON, `.fox` files). [`regen::Regenerator`] replays it
 //! through the kernel into a [`regen::Model`]: bodies, solved sketches, construction planes and a
 //! per-feature status, the way Fusion's timeline turns red on a failing feature without stopping
 //! the features after it.
@@ -24,12 +24,12 @@ pub mod surface;
 use serde::{Deserialize, Serialize};
 
 pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
-pub use clf_expr::Kind as ParamKind;
-pub use clf_kernel as kernel;
-pub use clf_sketch as sketch;
+pub use fox_expr::Kind as ParamKind;
+pub use fox_kernel as kernel;
+pub use fox_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
 
-use clf_sketch::{CurveId, PointId, Sketch};
+use fox_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
 pub const FORMAT_VERSION: u32 = 1;
@@ -1592,7 +1592,7 @@ impl Design {
   }
 
   pub fn add_parameter(&mut self, name: &str, expr: &str, kind: ParamKind, comment: &str) -> Result<(), DesignError> {
-    if !clf_expr::is_valid_parameter_name(name) {
+    if !fox_expr::is_valid_parameter_name(name) {
       return Err(DesignError::BadParameterName(name.to_string()));
     }
     if self.parameter(name).is_some() {
@@ -1622,19 +1622,19 @@ impl Design {
       return Err(DesignError::NoParameter(name.to_string()));
     }
     for p in &self.parameters {
-      if p.name != name && clf_expr::identifiers(&p.expr).iter().any(|i| i == name) {
+      if p.name != name && fox_expr::identifiers(&p.expr).iter().any(|i| i == name) {
         return Err(DesignError::InUse(name.to_string(), format!("parameter {}", p.name)));
       }
     }
     for f in &self.features {
-      if expr_strings(&f.kind).iter().any(|e| clf_expr::identifiers(e).iter().any(|i| i == name)) {
+      if expr_strings(&f.kind).iter().any(|e| fox_expr::identifiers(e).iter().any(|i| i == name)) {
         return Err(DesignError::InUse(name.to_string(), f.name.clone()));
       }
     }
     for r in &self.sheet_metal_rules {
       if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap, &r.corner_relief_size]
         .iter()
-        .any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
+        .any(|e| fox_expr::identifiers(e).iter().any(|i| i == name))
       {
         return Err(DesignError::InUse(name.to_string(), format!("sheet metal rule {}", r.name)));
       }
@@ -1645,7 +1645,7 @@ impl Design {
 
   /// Renames a parameter and rewrites every expression that uses it.
   pub fn rename_parameter(&mut self, old: &str, new: &str) -> Result<(), DesignError> {
-    if !clf_expr::is_valid_parameter_name(new) {
+    if !fox_expr::is_valid_parameter_name(new) {
       return Err(DesignError::BadParameterName(new.to_string()));
     }
     if self.parameter(new).is_some() {

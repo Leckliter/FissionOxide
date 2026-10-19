@@ -1,7 +1,7 @@
 //! Tests for joint origins, rigid groups, motion links, contact sets and components inserted
 //! from the data hub.
 
-use clf_kernel::glam::DVec3;
+use fox_kernel::glam::DVec3;
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -238,7 +238,7 @@ fn contact_sets_stop_motion_at_contact() {
 
 #[test]
 fn inserted_hub_designs_update_and_unlink() {
-  let dir = std::env::temp_dir().join(format!("clf-engine-insert-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-engine-insert-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&dir);
   // the source design: one bolt-ish block, saved to the hub
   let mut src = Session { store_root: Some(dir.clone()), ..Session::default() };
@@ -270,7 +270,7 @@ fn inserted_hub_designs_update_and_unlink() {
   assert_eq!(comp.bodies.len(), 2);
   assert_eq!(s.model.bodies.len(), 3);
   // the inserted bodies are stored in the design: they come back without the hub
-  let reopened = Session::new(clf_model::Design::from_json(&s.design.to_json()).unwrap());
+  let reopened = Session::new(fox_model::Design::from_json(&s.design.to_json()).unwrap());
   assert_eq!(reopened.model.bodies.len(), 3);
   assert!(reopened.model.errors().is_empty());
   // jointing and the parts list treat it like any component

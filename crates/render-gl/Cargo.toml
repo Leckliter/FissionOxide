@@ -1,12 +1,12 @@
 [package]
-name = "clf-render-gl"
-description = "OpenGL (glow) renderer for clf-render scenes: the desktop viewport's GPU path, with an id buffer for picking"
+name = "fox-render-gl"
+description = "OpenGL (glow) renderer for fox-render scenes: the desktop viewport's GPU path, with an id buffer for picking"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clf-render.workspace = true
+fox-render.workspace = true
 glam.workspace = true
 glow = "0.17"
 bytemuck = "1"
@@ -17,7 +17,7 @@ glutin = { version = "0.32", default-features = false, features = ["egl"], optio
 headless = ["dep:glutin"]
 
 [dev-dependencies]
-clf-render-gl = { path = ".", features = ["headless"] }
+fox-render-gl = { path = ".", features = ["headless"] }
 
 # Every glow call is `unsafe`, so this crate can't inherit the workspace's `unsafe_code = "forbid"`.
 # It denies it instead and allows it only in the module that talks to OpenGL.

@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use clf_render::{Analysis, Camera, Frame, NO_ID, Scene};
+use fox_render::{Analysis, Camera, Frame, NO_ID, Scene};
 use glam::Vec3;
 use glow::HasContext;
 
@@ -427,7 +427,7 @@ impl Renderer {
   /// CPU rasterizer's order: background, opaque meshes, lines and markers, transparent meshes,
   /// then what's drawn on top.
   pub fn draw(&mut self, gl: &Gl, cam: &Camera, width: u32, height: u32) -> Result<(), String> {
-    let (w, h) = (width.clamp(1, clf_render::MAX_DIM), height.clamp(1, clf_render::MAX_DIM));
+    let (w, h) = (width.clamp(1, fox_render::MAX_DIM), height.clamp(1, fox_render::MAX_DIM));
     self.ensure_target(gl, w, h)?;
     let Some(t) = &self.target else { return Err("no render target".into()) };
     let vp = cam.view_proj(w, h).as_mat4().to_cols_array();
@@ -699,7 +699,7 @@ impl Renderer {
     Some(px)
   }
 
-  /// Renders a scene into a complete [`Frame`] (colour and ids), like [`clf_render::render`].
+  /// Renders a scene into a complete [`Frame`] (colour and ids), like [`fox_render::render`].
   pub fn render(&mut self, gl: &Gl, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Frame, String> {
     self.set_scene(gl, scene, false)?;
     self.draw(gl, cam, width, height)?;
@@ -731,7 +731,7 @@ impl Renderer {
   }
 }
 
-fn shape(m: &clf_render::Mesh) -> (usize, usize, usize) {
+fn shape(m: &fox_render::Mesh) -> (usize, usize, usize) {
   (m.positions.len(), m.indices.len(), m.tri_ids.len())
 }
 
@@ -767,7 +767,7 @@ fn program(gl: &Gl, header: &str, vs: &str, fs: &str, uniforms: &[&'static str])
   }
 }
 
-fn upload_mesh(gl: &Gl, m: &clf_render::Mesh) -> Result<GpuMesh, String> {
+fn upload_mesh(gl: &Gl, m: &fox_render::Mesh) -> Result<GpuMesh, String> {
   let d = pack::mesh(m);
   let stride = (MESH_STRIDE * 4) as i32;
   unsafe {

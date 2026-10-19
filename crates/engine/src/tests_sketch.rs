@@ -27,7 +27,7 @@ fn ids(v: &Value) -> Vec<u64> {
 fn editable_text_regenerates_its_extrusion() {
   let mut s = Session::default();
   let sid = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
-  let fid = clf_model::FeatureId(sid as u32);
+  let fid = fox_model::FeatureId(sid as u32);
   let t = run(&mut s, "sketch.text", json!({"at": [0, 0], "text": "I", "height": 10}));
   let text = t["text"].as_u64().unwrap();
   assert_eq!(t["profiles"], 1, "{t}");
@@ -68,12 +68,12 @@ fn editable_text_regenerates_its_extrusion() {
 
 #[test]
 fn text_survives_save_and_open() {
-  let dir = std::env::temp_dir().join(format!("clf-text-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("fox-text-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
-  let path = dir.join("text.clf");
+  let path = dir.join("text.fox");
   let mut s = Session::default();
   let sid = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
-  let fid = clf_model::FeatureId(sid as u32);
+  let fid = fox_model::FeatureId(sid as u32);
   run(&mut s, "sketch.text", json!({"at": [5, 5], "text": "Hi", "height": 8, "angle": 30}));
   run(&mut s, "save", json!({"path": path}));
   let mut s2 = Session::default();
@@ -90,7 +90,7 @@ fn break_tangent_circles_and_blend_from_commands() {
   let mut s = Session::default();
   run(&mut s, "param.add", json!({"name": "r", "expr": "4 mm"}));
   let sid = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
-  let fid = clf_model::FeatureId(sid as u32);
+  let fid = fox_model::FeatureId(sid as u32);
   let h = run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}))["curves"][0].as_u64().unwrap();
   let v = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 40]]}))["curves"][0].as_u64().unwrap();
   // 2-tangent circle driven by a parameter
@@ -98,13 +98,13 @@ fn break_tangent_circles_and_blend_from_commands() {
   let circle = c["circle"].as_u64().unwrap();
   run(&mut s, "param.set", json!({"name": "r", "expr": "6 mm"}));
   let sk = s.design.sketch(fid).unwrap();
-  let centre = sk.pos(sk.curve_points(clf_sketch::CurveId(circle as u32))[0]).unwrap();
+  let centre = sk.pos(sk.curve_points(fox_sketch::CurveId(circle as u32))[0]).unwrap();
   assert!((centre[0] - 6.0).abs() < 1e-6 && (centre[1] - 6.0).abs() < 1e-6, "{centre:?}");
   // 3-tangent: the incircle of a right triangle
   let d = run(&mut s, "sketch.line", json!({"points": [[40, 0], [0, 40]]}))["curves"][0].as_u64().unwrap();
   let t = run(&mut s, "sketch.tangent_circle", json!({"curves": [h, v, d]}));
   let sk = s.design.sketch(fid).unwrap();
-  let r = sk.radius(clf_sketch::CurveId(t["circle"].as_u64().unwrap() as u32)).unwrap();
+  let r = sk.radius(fox_sketch::CurveId(t["circle"].as_u64().unwrap() as u32)).unwrap();
   assert!((r - (80.0 - 40.0 * 2f64.sqrt()) / 2.0).abs() < 1e-6, "{r}");
   // break the hypotenuse at a point
   let b = run(&mut s, "sketch.break", json!({"curve": d, "at": [30, 10], "at_point": true}));

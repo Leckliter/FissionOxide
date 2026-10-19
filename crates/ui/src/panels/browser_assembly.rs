@@ -1,8 +1,8 @@
 //! Browser folders for joint origins, rigid groups, motion links, contact sets and components
 //! inserted from the data hub.
 
-use clf_engine::Sel;
-use clf_engine::model::{ComponentId, FeatureId, FeatureKind};
+use fox_engine::Sel;
+use fox_engine::model::{ComponentId, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
 use super::{is_open, tree_row};

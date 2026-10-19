@@ -2,8 +2,8 @@
 //! same pick ids, up to rasterization differences along edges. Skipped (with a note) where no
 //! OpenGL context can be created.
 
-use clf_render::{Analysis, Camera, Frame, Marker, Mesh, NO_ID, Polyline, Scene, StandardView};
-use clf_render_gl::Renderer;
+use fox_render::{Analysis, Camera, Frame, Marker, Mesh, NO_ID, Polyline, Scene, StandardView};
+use fox_render_gl::Renderer;
 
 /// A UV sphere with one pick id per latitude band, so faces meet along seams like a B-rep body.
 fn sphere(center: [f32; 3], r: f32, n: u32, id0: u32, color: [u8; 4]) -> Mesh {
@@ -104,7 +104,7 @@ fn cams() -> Vec<(&'static str, Camera)> {
 
 #[test]
 fn gpu_matches_cpu() {
-  let h = match clf_render_gl::headless::context() {
+  let h = match fox_render_gl::headless::context() {
     Ok(h) => h,
     Err(e) => {
       eprintln!("skipped: no OpenGL context ({e})");
@@ -132,11 +132,11 @@ fn gpu_matches_cpu() {
       s.meshes[1].colors.clear();
     }
     for (name, cam) in cams() {
-      let cpu = clf_render::render(&s, &cam, 320, 240);
+      let cpu = fox_render::render(&s, &cam, 320, 240);
       let gpu = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
       let d = compare(&cpu, &gpu);
       eprintln!("{name} {analysis:?}: {:.2}% colour, {:.2}% ids differ", d.color * 100.0, d.ids * 100.0);
-      if std::env::var_os("CLF_PARITY_PNG").is_some() {
+      if std::env::var_os("FOX_PARITY_PNG").is_some() {
         let _ = cpu.save_png(std::path::Path::new(&format!("/tmp/parity-{name}-cpu.png")));
         let _ = gpu.save_png(std::path::Path::new(&format!("/tmp/parity-{name}-gpu.png")));
       }
@@ -149,7 +149,7 @@ fn gpu_matches_cpu() {
 
 #[test]
 fn picks_are_exact_and_hover_reuses_meshes() {
-  let Ok(h) = clf_render_gl::headless::context() else { return };
+  let Ok(h) = fox_render_gl::headless::context() else { return };
   let Ok(mut r) = Renderer::new(&h.gl) else { return };
   let mut cam = Camera { distance: 120.0, ortho: true, ..Camera::default() };
   cam.set_view(StandardView::Top);
@@ -159,7 +159,7 @@ fn picks_are_exact_and_hover_reuses_meshes() {
   assert_eq!(f.pick(200.0, 150.0, 0, |_| true), 52, "the on-top axis covers the centre");
   assert_eq!(f.pick(205.0, 150.0, 0, |_| true), 8, "the transparent quad still picks");
   assert_eq!(f.pick(2.0, 2.0, 0, |_| true), NO_ID);
-  let cpu = clf_render::render(&s, &cam, 400, 300);
+  let cpu = fox_render::render(&s, &cam, 400, 300);
   for (x, y) in [(200.0, 150.0), (205.0, 150.0), (230.0, 150.0), (300.0, 150.0), (60.0, 40.0)] {
     assert_eq!(f.pick(x, y, 0, |_| true), cpu.pick(x, y, 0, |_| true), "at {x},{y}");
   }
@@ -169,7 +169,7 @@ fn picks_are_exact_and_hover_reuses_meshes() {
   r.set_scene(&h.gl, &hovered, true).expect("set");
   r.draw(&h.gl, &cam, 400, 300).expect("draw");
   let px = r.read_rgba(&h.gl).expect("rgba");
-  let cpu = clf_render::render(&hovered, &cam, 400, 300);
+  let cpu = fox_render::render(&hovered, &cam, 400, 300);
   let same =
     px.chunks_exact(4).zip(cpu.rgba.chunks_exact(4)).filter(|(a, b)| (0..3).all(|k| a[k].abs_diff(b[k]) <= 12));
   assert!(same.count() as f64 / (400.0 * 300.0) > 0.97);
