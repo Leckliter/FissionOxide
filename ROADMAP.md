@@ -23,6 +23,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Manufacture | 3D adaptive roughing; pencil, steep-and-shallow and contour finishing; holder and fixture collision checks; arcs (G2/G3) in G-code; turning and 4/5-axis |
 | Plugins   | Installable `.foxplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Tracing   | Canvas (an image kept on a plane, calibrated); centre-line tracing for engraving; constraints on traced geometry; see [docs/TRACING.md](docs/TRACING.md) |
+| Fabrication | Nesting on sheets (`jagua-rs`); 2D cuts kept in the design with a viewport preview; Langmuir FireControl and Ruida posts checked on real machines; per-contour lead positions |
 
 ## Files and data
 

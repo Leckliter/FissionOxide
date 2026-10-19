@@ -336,6 +336,8 @@ pub(crate) enum Cmd {
   CaptureHistory,
   /// Freeform or paint selection (window selection is [`Cmd::WindowSelect`]).
   SelectMode(crate::select::Mode),
+  /// Fabrication: the 2D cut window (laser, plasma, waterjet G-code).
+  Cut2d,
 }
 
 impl Cmd {
@@ -482,6 +484,11 @@ impl Cmd {
         "Freeform Selection",
         "Drag a loop: setting off to the right selects what's inside, to the left what it touches",
       ),
+      Cmd::Cut2d => (
+        Icon::ExportDxf,
+        "2D Cut",
+        "Laser, plasma or waterjet G-code (or DXF) for a flat pattern or sketch: kerf, leads, micro-joints",
+      ),
     }
   }
 
@@ -615,6 +622,7 @@ impl Cmd {
         app.set_tool(Tool::Select);
         app.status = Some((Cmd::SelectMode(m).info().2.into(), false));
       }
+      Cmd::Cut2d => app.open_cut_window(),
     }
   }
 }

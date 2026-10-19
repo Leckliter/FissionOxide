@@ -13,6 +13,9 @@
 //! fissionoxide-cli convert IN OUT                 (any readable format to any writable one)
 //! fissionoxide-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
 //! fissionoxide-cli mcp [IN.fox]                   (Model Context Protocol server on stdio)
+//! fissionoxide-cli cut IN.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] ['{json}']
+//!                                                 (flat pattern, faces or sketch to cut G-code or DXF)
+//! fissionoxide-cli cut machines                   (laser, plasma and waterjet machine profiles)
 //! ```
 //!
 //! `--hub DIR` (or `FOX_DATA_DIR`) picks the data hub directory for every subcommand.
@@ -188,12 +191,37 @@ fn run(args: &[String]) -> Result<(), String> {
       }
       if failed > 0 { Err(format!("{failed} command(s) failed")) } else { Ok(()) }
     }
+    "cut" => {
+      let first = rest.first().ok_or_else(usage)?;
+      if first == "machines" {
+        let mut s = session(Session::default());
+        for m in exec(&mut s, "cut.machines", &json!({}))?.as_array().into_iter().flatten() {
+          out(m);
+        }
+        return Ok(());
+      }
+      let mut s = configure(open(first)?, rest)?;
+      let mut params: Value = match rest.iter().skip(1).find(|a| a.trim_start().starts_with('{')) {
+        Some(j) => serde_json::from_str(j).map_err(|e| format!("bad JSON parameters: {e}"))?,
+        None => json!({}),
+      };
+      if let Some(target) = rest.get(1).filter(|a| !a.starts_with("--") && !a.trim_start().starts_with('{')) {
+        params["path"] = json!(target);
+      }
+      for k in ["machine", "process", "units"] {
+        if let Some(v) = flag(rest, &format!("--{k}")) {
+          params[k] = json!(v);
+        }
+      }
+      out(&exec(&mut s, "cut.gcode", &params)?);
+      Ok(())
+    }
     _ => Err(usage()),
   }
 }
 
 fn usage() -> String {
-  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | mcp [F.fox] | formats | commands  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {

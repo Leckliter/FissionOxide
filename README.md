@@ -141,6 +141,9 @@ change a parameter and watch the whole history rebuild.
   becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
   face — that collect in a Base Feature in the timeline. See
   [Configurations](#configurations-and-base-features).
+- **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
+  DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
+  machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
 
 ## Build and run
 
@@ -407,6 +410,34 @@ The simulation is a heightfield seen from above (no undercuts, no holder geometr
 are no 3D roughing, 4/5-axis or turning toolpaths yet: check the G-code against your machine
 before running it.
 
+### 2D cutting: laser, plasma, waterjet
+
+**2D Cut** (Manufacture ▸ ACTIONS, or `cut.gcode`) turns a sheet metal flat pattern, flat faces
+or a sketch's closed loops into a cutting program. The contours are offset by half the kerf
+into the scrap with true arcs, holes and parts nested in holes are found and cut before the
+contour around them, the rest go nearest first, and each contour starts with a lead-in (arc or
+line, shortened to fit small holes) and ends with an optional overcut and lead-out, all on the
+scrap side. Micro-joints (tabs) keep parts in the sheet, and small holes can run at a reduced
+feed. The part is on the right of the cut by default (outlines clockwise), the good side of a
+clockwise-swirl plasma torch.
+
+Machine profiles: GRBL and FluidNC lasers (M4 power that follows the speed), LinuxCNC
+QtPlasmaC (`M3 $0`, material table via `M190`), plasma with torch heights in the G-code
+(Mach-style), Wazer-style waterjet (lines only) and R12 DXF of the part geometry for OMAX-style
+software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
+pierce delay and heights per material); add your own with `cut.machine.add` (kept in the hub's
+`machines.json`). Rapids are real rapids and there is no limit on processes.
+
+```sh
+fissionoxide-cli cut machines
+fissionoxide-cli cut bracket.fox bracket.ngc --machine qtplasmac --process "3 mm mild steel, 45 A"
+fissionoxide-cli cut bracket.fox bracket.gcode --machine grbl_laser '{"kerf": 0.15, "tabs": 2, "lead_in": "line"}'
+fissionoxide-cli exec plate.fox '{"cmd": "cut.gcode", "sketch": 1, "machine": "dxf", "path": "plate.dxf"}'
+```
+
+The machine dialects were written from their documentation, not run on the machines: check a
+program in your control's preview (and on scrap) before cutting parts. Nesting is not there yet.
+
 ## Headless CLI and scripting
 
 ```sh
@@ -547,6 +578,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
+| `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).

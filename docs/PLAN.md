@@ -103,6 +103,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
 | 0 | Reference parts harness | done: **72 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
+| 3 | 2D cutting and machine posts (items 1, 2) | done: `fox-cut` crate, `cut.*` commands, `fissionoxide-cli cut`, 2D Cut window; posts not yet run on real machines |
 
 ### Reference part failures to fix
 

@@ -291,6 +291,11 @@ cmds! {
   "hub.comments" => "Comments on an item's versions", "{item?, version?}";
   "hub.comment.delete" => "Delete a comment", "{item?, comment}";
   "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
+  "cut.machines" => "Laser, plasma and waterjet machine profiles (built in, and the hub's machines.json) with their processes", "{}";
+  "cut.machine.add" => "Add or replace a machine profile in the hub: G-code templates and any number of processes", "{machine: {id, name, kind?: laser|plasma|waterjet|dxf, extension?, arcs?, header?, pierce?, off?, footer?, rapid?, line?, arc_cw?, arc_ccw?, max_power?, rapid_rate?, processes?: [{name, kerf?, feed?, power?, pierce_delay?, ...}]}}";
+  "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
+  "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
+  "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -320,6 +325,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::config::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::cut::run(s, name, p) {
     return r;
   }
   match name {

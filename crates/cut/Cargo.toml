@@ -1,0 +1,14 @@
+[package]
+name = "fox-cut"
+description = "2D cutting for lasers, plasma and waterjets: kerf, leads, tabs, cut order, machine posts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cavalier_contours.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

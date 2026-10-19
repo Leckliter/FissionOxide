@@ -795,6 +795,7 @@ const CAM_ACTIONS: &[E] = &[
   c("Simulate", Icon::MotionStudy, Cmd::CamSimulate),
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
   c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+  c("2D Cut (Laser, Plasma, Waterjet)", Icon::ExportDxf, Cmd::Cut2d),
 ];
 
 /// The Manufacture workspace's MILLING tab.
