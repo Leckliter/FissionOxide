@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push waits for the running job instead of cancelling it: a cancelled run would throw away
+# a half-done OCCT build before it reaches the cache.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_TOOLCHAIN: 1.97.0
+  # Crates that build without OpenCASCADE: they give feedback in a couple of minutes.
+  PURE_CRATES: -p clf-expr -p clf-sketch -p clf-exchange -p clf-store -p clf-render
+
+jobs:
+  fast:
+    name: fmt + pure crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned so a new stable's clippy lints can't turn main red overnight; bump it on purpose.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo fmt --all --check
+      - run: cargo clippy $PURE_CRATES --all-targets -- -D warnings
+      - run: cargo test $PURE_CRATES
+
+  full:
+    name: clippy + tests (workspace)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ pkg-config \
+            libxkbcommon-x11-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libwayland-dev libgl1-mesa-dev libegl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - name: OCCT cache key
+        id: occt
+        run: |
+          ver=$(grep -A1 '^name = "occt-sys"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          echo "key=occt-${{ runner.os }}-${ver}-${{ hashFiles('crates/kernel/build.rs') }}" >> "$GITHUB_OUTPUT"
+          echo "dir=$HOME/occt" >> "$GITHUB_OUTPUT"
+      - name: Restore OCCT
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.occt.outputs.dir }}
+          key: ${{ steps.occt.outputs.key }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      # Cache miss: build OCCT from source once (about 20 minutes), keep only its install
+      # (include/ and lib/) and save that straight away, so a later failing step can't lose it.
+      - name: Build OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build -p clf-kernel
+          mkdir -p "${{ steps.occt.outputs.dir }}"
+          cp -r target/OCCT/include target/OCCT/lib "${{ steps.occt.outputs.dir }}/"
+          rm -rf target/OCCT
+      - name: Save OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.occt.outputs.dir }}
+          key: ${{ steps.occt.outputs.key }}
+      # From here on the kernel links against the cached install and never builds OCCT.
+      - run: echo "CLF_OCCT_DIR=${{ steps.occt.outputs.dir }}" >> "$GITHUB_ENV"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
