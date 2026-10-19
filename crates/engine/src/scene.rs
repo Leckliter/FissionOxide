@@ -141,8 +141,7 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
-      let base =
-        s.design.body_settings(body.id).and_then(|b| b.color).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
+      let base = s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
       let base = if selected_bodies.contains(&body.id) { mix(base, SELECT_COLOR, 0.45) } else { base };
       let base = if editing { mix(base, [255, 255, 255, 255], 0.35) } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();

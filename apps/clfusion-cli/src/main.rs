@@ -16,6 +16,8 @@
 //! ```
 //!
 //! `--hub DIR` (or `CLF_DATA_DIR`) picks the data hub directory for every subcommand.
+//! `--configuration NAME` picks a configuration of the design for `export`, `convert`, `render`,
+//! `info` and the `--export`/`--png` outputs of `run`.
 //!
 //! ```text
 //! clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
@@ -87,7 +89,7 @@ fn run(args: &[String]) -> Result<(), String> {
       Ok(())
     }
     "convert" => {
-      let mut s = open(rest.first().ok_or_else(usage)?)?;
+      let mut s = configure(open(rest.first().ok_or_else(usage)?)?, rest)?;
       let target = rest.get(1).ok_or_else(usage)?;
       out(&exec(&mut s, "export", &json!({"path": target}))?);
       Ok(())
@@ -113,7 +115,7 @@ fn run(args: &[String]) -> Result<(), String> {
       Ok(())
     }
     "info" => {
-      let mut s = open(rest.first().ok_or_else(usage)?)?;
+      let mut s = configure(open(rest.first().ok_or_else(usage)?)?, rest)?;
       out(&exec(&mut s, "info", &json!({}))?);
       Ok(())
     }
@@ -128,13 +130,13 @@ fn run(args: &[String]) -> Result<(), String> {
       Ok(())
     }
     "export" => {
-      let mut s = open(rest.first().ok_or_else(usage)?)?;
+      let mut s = configure(open(rest.first().ok_or_else(usage)?)?, rest)?;
       let target = rest.get(1).ok_or_else(usage)?;
       out(&exec(&mut s, "export", &json!({"path": target}))?);
       Ok(())
     }
     "render" => {
-      let s = open(rest.first().ok_or_else(usage)?)?;
+      let s = configure(open(rest.first().ok_or_else(usage)?)?, rest)?;
       let target = rest.get(1).ok_or_else(usage)?;
       png(&s, Path::new(target), flag(rest, "--view").as_deref(), flag(rest, "--size").as_deref())
     }
@@ -176,6 +178,7 @@ fn run(args: &[String]) -> Result<(), String> {
       if let Some(p) = flag(rest, "--save") {
         s.save_to(Path::new(&p)).map_err(|e| e.0)?;
       }
+      let mut s = configure(s, rest)?;
       for e in flags(rest, "--export") {
         out(&exec(&mut s, "export", &json!({"path": e}))?);
       }
@@ -189,7 +192,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | mcp [F.clf] | formats | commands  (all take --hub DIR)".into()
+  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | mcp [F.clf] | formats | commands  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {
@@ -204,6 +207,14 @@ fn session(mut s: Session) -> Session {
 
 fn open(p: &str) -> Result<Session, String> {
   Session::open(&PathBuf::from(p)).map(session).map_err(|e| e.0)
+}
+
+/// Applies `--configuration NAME` (a configuration of the design) to a session.
+fn configure(mut s: Session, args: &[String]) -> Result<Session, String> {
+  if let Some(name) = flag(args, "--configuration") {
+    exec(&mut s, "config.activate", &json!({"name": name}))?;
+  }
+  Ok(s)
 }
 
 fn exec(s: &mut Session, cmd: &str, params: &Value) -> Result<Value, String> {

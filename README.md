@@ -123,6 +123,12 @@ change a parameter and watch the whole history rebuild.
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
   scripts all drive the same engine — and `clfusion-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
+- **Configurations and base features.** A configuration table of named variants that override
+  parameters, feature suppression, appearances and joint values; switch the active one from the
+  browser, edit them in a table, export any of them. Turn design history off (the timeline
+  becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
+  face — that collect in a Base Feature in the timeline. See
+  [Configurations](#configurations-and-base-features).
 
 ## Build and run
 
@@ -459,6 +465,26 @@ It returns the counts, each colour layer, and `ink`: a point inside each traced 
 `extrude`'s `profiles`. `trace.info` reports the same without changing the design, and
 [`examples/trace_logo.jsonl`](examples/trace_logo.jsonl) traces and extrudes a badge. The
 pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
+
+## Configurations and base features
+
+A configuration is a named row of overrides: parameter expressions, suppressed or unsuppressed
+features, body appearances and joint motion values; anything it doesn't override keeps the
+design's own value. The browser's Configurations folder switches between them (click a row),
+and Solid → Configure → Display Configuration Table edits every cell. Exports can pick a
+configuration without switching to it:
+
+```sh
+clfusion-cli run examples/configurations.jsonl --save plate.clf
+clfusion-cli export plate.clf plate-large.step --configuration Large
+clfusion-cli render plate.clf plain.png --configuration Plain
+```
+
+Direct edits (Solid → Modify → Direct Edit, or `direct.move_face`, `direct.press_pull`,
+`direct.delete_face`) don't record parameters: they go into a Base Feature in the timeline,
+replayed on whatever the features before it build. Capture Design History off collapses the
+timeline into one base feature holding the bodies as they are (Undo brings the history back);
+on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](docs/CONFIGURATIONS.md).
 
 ## Architecture
 

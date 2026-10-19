@@ -222,6 +222,12 @@ impl Regenerator {
   /// Replays the design. Sketch positions are written back after solving, and face/edge
   /// references are refreshed to the faces/edges they resolved to.
   pub fn regenerate(&mut self, design: &mut Design) -> Model {
+    // an active configuration regenerates a copy with its overrides (see config.rs)
+    if let Some(mut eff) = crate::config::effective(design) {
+      let model = self.regenerate(&mut eff);
+      crate::config::write_back(design, &eff);
+      return model;
+    }
     let (params, param_errors) = eval_params(design);
     let mates = assemble::mates(design, &params);
     let mut key = {
@@ -2003,3 +2009,7 @@ mod assemble;
 mod tests;
 #[cfg(test)]
 mod tests_sheet2;
+
+mod direct;
+#[cfg(test)]
+mod tests_config;

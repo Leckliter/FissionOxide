@@ -11,7 +11,7 @@ use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
-use crate::{App, Tool, assembly_forms, theme};
+use crate::{App, Tool, assembly_forms, config_ui, theme};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Item {
@@ -183,11 +183,23 @@ const SOLID_MODIFY: &[E] = &[
   c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
+  E::Sep,
+  E::Sub("Direct Edit", DIRECT_EDIT),
+];
+
+const DIRECT_EDIT: &[E] = &[
+  c("Move Face", Icon::Move, D(Kind::Form(&config_ui::DIRECT_MOVE_FACE))),
+  c("Press Pull", Icon::PressPull, D(Kind::Form(&config_ui::DIRECT_PRESS_PULL))),
+  c("Delete Face", Icon::RemoveBody, D(Kind::Form(&config_ui::DIRECT_DELETE_FACE))),
+  E::Sep,
+  c("Create Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_START))),
+  c("Finish Base Feature", Icon::Box, D(Kind::Form(&config_ui::BASE_FINISH))),
+  c("Capture Design History", Icon::Box, Cmd::CaptureHistory),
 ];
 
 const CONFIGURE: &[E] = &[
-  x("Configure", Icon::Configure),
-  x("Display Configuration Table", Icon::ConfigTable),
+  c("Configure", Icon::Configure, Cmd::ConfigTable),
+  c("Display Configuration Table", Icon::ConfigTable, Cmd::ConfigTable),
   x("Create Configuration Rules", Icon::ConfigRules),
 ];
 

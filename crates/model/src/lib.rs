@@ -11,7 +11,9 @@
 
 pub mod assembly;
 pub mod cam;
+pub mod config;
 pub mod construct;
+pub mod direct;
 pub mod drawing;
 pub mod meshops;
 pub mod plot;
@@ -78,6 +80,12 @@ pub struct Design {
   /// Assembly contact sets (see [`assembly::ContactSet`]).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub contact_sets: Vec<assembly::ContactSet>,
+  /// Configurations: named variants overriding parameters, suppression, appearances and joints.
+  #[serde(default, skip_serializing_if = "config::ConfigTable::is_empty")]
+  pub configurations: config::ConfigTable,
+  /// "Capture design history" is off: direct edits collect in a base feature.
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub history_off: bool,
   #[serde(default)]
   next_id: u32,
 }
@@ -1195,6 +1203,14 @@ pub enum FeatureKind {
     #[serde(default = "zeros")]
     translate: [String; 3],
   },
+  /// Non-parametric geometry: frozen bodies and direct edits (move face, press-pull, delete
+  /// face) replayed in order. See [`direct`].
+  BaseFeature {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bodies: Vec<direct::BaseBody>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    edits: Vec<direct::DirectEdit>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1331,6 +1347,7 @@ impl FeatureKind {
       FeatureKind::RigidGroup { .. } => "RigidGroup",
       FeatureKind::MotionLink { .. } => "MotionLink",
       FeatureKind::InsertDesign { .. } => "Insert",
+      FeatureKind::BaseFeature { .. } => "BaseFeature",
     }
   }
 
@@ -1449,6 +1466,8 @@ impl Design {
       attributes: Vec::new(),
       cam: Vec::new(),
       contact_sets: Vec::new(),
+      configurations: config::ConfigTable::default(),
+      history_off: false,
       next_id: 1,
     }
   }
@@ -1639,6 +1658,12 @@ impl Design {
         return Err(DesignError::InUse(name.to_string(), format!("sheet metal rule {}", r.name)));
       }
     }
+    if let Some(c) = self.configurations.uses_parameter(name) {
+      return Err(DesignError::InUse(name.to_string(), format!("configuration {c}")));
+    }
+    for c in &mut self.configurations.list {
+      c.clear(&config::Column::Parameter { name: name.to_string() });
+    }
     self.parameters.retain(|p| p.name != name);
     Ok(())
   }
@@ -1672,6 +1697,7 @@ impl Design {
         *e = rename_ident(e, old, new);
       }
     }
+    self.configurations.rename_parameter(old, new);
     Ok(())
   }
 
@@ -2054,6 +2080,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::RigidGroup { .. } => {}
+    FeatureKind::BaseFeature { .. } => {}
   }
 }
 

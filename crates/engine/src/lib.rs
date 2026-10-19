@@ -9,6 +9,7 @@
 mod assembly;
 mod cam;
 mod commands;
+pub mod config;
 mod drawings;
 mod features;
 pub mod files;
@@ -448,6 +449,8 @@ mod tests;
 mod tests_assembly;
 #[cfg(test)]
 mod tests_cam;
+#[cfg(test)]
+mod tests_config;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
