@@ -15,7 +15,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Features  | Sweep with guide rails / twist; loft rails; emboss; boundary fill; replace face; extrude to a curved face; setback fillets |
 | Features  | Configurations (table-driven variants); base features (direct editing without history) |
 | Surface   | Extend, untrim; trim with a body or sketch; offset with variable distance     |
-| Sheet     | Lofted and miter flanges; corner closure; flat pattern as a sketch           |
+| Sheet     | Rounded bends between press-brake lofted flange facets; later cuts in a lofted flange's flat pattern; a flat pattern sketch that follows the model |
 | Assembly  | Contact sets; motion links; rigid groups; joint origins; insert a component from another design |
 | Drawing   | Broken views; ordinate and angle dimensions; GD&T; balloons                  |
 | Selection | Freeform and paint selection; vertex picking                                 |

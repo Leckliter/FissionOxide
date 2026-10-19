@@ -99,4 +99,8 @@ void write_iges(const Shape &s, rust::Str path);
 std::unique_ptr<Shape> read_iges(rust::Str path);
 std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
+// sheet2.cpp
+std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<const double> b,
+                                     rust::Slice<const double> u);
+
 } // namespace clf

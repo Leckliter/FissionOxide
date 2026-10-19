@@ -151,6 +151,9 @@ pub(crate) mod ffi {
     fn write_iges(s: &Shape, path: &str) -> Result<()>;
     fn read_iges(path: &str) -> Result<UniquePtr<Shape>>;
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
+
+    // sheet2.cpp
+    fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

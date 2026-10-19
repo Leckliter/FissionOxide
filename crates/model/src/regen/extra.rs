@@ -464,6 +464,7 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

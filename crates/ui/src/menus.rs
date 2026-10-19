@@ -379,7 +379,8 @@ const SHEET_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
   c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
   c("Hem", Icon::Hem, D(Kind::Hem)),
-  x("Lofted Flange", Icon::LoftedFlange),
+  c("Lofted Flange", Icon::LoftedFlange, D(Kind::Form(&forms::LOFTED_FLANGE))),
+  c("Miter Flange", Icon::Flange, D(Kind::Form(&forms::MITER_FLANGE))),
   c("Fold", Icon::Fold, D(Kind::Fold)),
   c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
@@ -393,6 +394,7 @@ const SHEET_CREATE: &[E] = &[
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
+  c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   x("Joint Origin", Icon::JointOrigin),
 ];
 
@@ -400,7 +402,7 @@ const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
   c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
-  x("Corner Closure", Icon::CornerClosure),
+  c("Corner Closure", Icon::CornerClosure, D(Kind::Form(&forms::CORNER_CLOSURE))),
   x("Join by bend", Icon::Configure),
   c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,

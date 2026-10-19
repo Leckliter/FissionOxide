@@ -48,12 +48,15 @@ change a parameter and watch the whole history rebuild.
   clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
-  Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
-  line, Rip, Convert to Sheet Metal (sharp corners become bends, with corner reliefs), Unfold
-  and Refold in the timeline (cuts made while flat are carried back onto the bends), mitered
-  corners between flanges, rectangular or round bend reliefs, and a flat pattern with bend lines
-  exported as DXF (also STEP/STL). The unfolder works on the B-rep, so holes and cuts anywhere —
-  even across bends — come out in the flat pattern.
+  Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
+  profiles (die-formed or press-brake with a bend count), Miter Flange (a sketch profile swept
+  along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
+  corners become bends, with corner reliefs), Unfold and Refold in the timeline (cuts made while
+  flat are carried back onto the bends), corner closures where flanges meet (miter, open,
+  closed, overlap) with round, square or tear corner reliefs, rectangular or round bend reliefs,
+  and a flat pattern with bend lines exported as DXF (also STEP/STL) or made into an editable
+  sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
+  bends running straight into other bends — come out in the flat pattern.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
   parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
@@ -154,7 +157,29 @@ Sheet metal bodies are ordinary solids that carry their rule, so every other fea
 cuts, fillets, patterns) works on them. Bends are true cylinders: the flat length of a bend is
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
 sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
-`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`.
+`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`; `sheet.flat_sketch` makes the same
+outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
+XY at the origin, to dimension, extrude or export.
+
+```sh
+clfusion-cli run examples/sheet_hopper.jsonl --save hopper.clf
+```
+
+- **Lofted flange** (`sheet.lofted_flange`): a sheet between two sketch profiles, both closed or
+  both open; the profiles are one face of the sheet. Points of the two profiles are matched by
+  arc length, keeping the corners of either as facet boundaries, and closed profiles are opened
+  at a seam (the rule's gap) so the flange can unfold. *Die formed* is one smooth surface;
+  *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
+  pattern is the neutral layer developed facet by facet (later cuts on the flange aren't in it).
+- **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
+  edge, starting on it, swept along a chain of edges of one face; the profile is where the face
+  of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.
+- **Corner closure**: where two flanges of one feature meet, `corners` is `miter` (cut along
+  the bisector, leaving the rule's gap), `open`, `closed` (mitred with no gap, a welded seam) or
+  `overlap` (the first flange runs over the end of the second). The rule's `corner_relief`
+  (`round`, `square`, `tear`; `corner_relief_size`) cuts a relief at the corner through the
+  sheet and the bends; overlapping corners get a square one unless the rule says otherwise.
+  `sheet.corner_closure` changes both on an existing flange.
 
 ## Assemblies and drawings
 

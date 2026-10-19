@@ -444,7 +444,16 @@ pub struct Dialog {
   view_on: [bool; 7],
   /// A form dialog's values.
   form: crate::forms::State,
+  /// Edge flange corner closure (see [`CORNERS`]).
+  corners: &'static str,
+  /// Sheet metal rule corner relief (see [`CORNER_RELIEFS`]) and its size.
+  corner_relief: &'static str,
+  corner_relief_size: String,
 }
+
+const CORNERS: [(&str, &str); 4] = [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+const CORNER_RELIEFS: [(&str, &str); 4] =
+  [("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")];
 
 const VIEWS: [(&str, &str); 7] = [
   ("front", "Front"),
@@ -533,6 +542,9 @@ impl Dialog {
         Kind::Form(f) => crate::forms::State::new(f),
         _ => crate::forms::State::default(),
       },
+      corners: "miter",
+      corner_relief: "none",
+      corner_relief_size: String::new(),
     }
   }
 
@@ -993,7 +1005,7 @@ impl Dialog {
           "sheet.edge_flange",
           json!({
             "edges": self.edges, "height": self.distance, "angle": self.angle, "flip": self.flip,
-            "position": self.position,
+            "position": self.position, "corners": self.corners,
           }),
         ),
         "contour" => {
@@ -1039,6 +1051,7 @@ impl Dialog {
         json!({
           "name": self.name, "thickness": self.a, "bend_radius": self.b, "k_factor": self.c,
           "relief": self.position, "relief_width": self.d, "relief_depth": self.e, "gap": self.distance2,
+          "corner_relief": self.corner_relief, "corner_relief_size": self.corner_relief_size,
         }),
       ),
       Kind::NewComponent => ("component.create", json!({"name": self.name, "bodies": self.bodies})),
@@ -2284,6 +2297,7 @@ impl Dialog {
             Self::field(ui, "Height", &mut self.distance, dirty);
             Self::field(ui, "Bend angle", &mut self.angle, dirty);
             Self::choose(ui, "Position", "pos", &mut self.position, &POSITIONS, dirty);
+            Self::choose(ui, "Corners", "corners", &mut self.corners, &CORNERS, dirty);
           }
           "contour" => {
             ui.label("Sketch");
@@ -2388,6 +2402,8 @@ impl Dialog {
         Self::field(ui, "Relief width", &mut self.d, dirty);
         Self::field(ui, "Relief depth", &mut self.e, dirty);
         Self::field(ui, "Gap", &mut self.distance2, dirty);
+        Self::choose(ui, "Corner relief", "crelief", &mut self.corner_relief, &CORNER_RELIEFS, dirty);
+        Self::field(ui, "Corner relief size", &mut self.corner_relief_size, dirty);
         ui.label("");
         ui.label(RichText::new("empty = from the thickness").small().color(theme::MUTED));
         ui.end_row();
@@ -2955,6 +2971,13 @@ impl Dialog {
       clf_engine::model::ReliefShape::Round => "round",
       clf_engine::model::ReliefShape::None => "none",
     };
+    self.corner_relief = match r.corner_relief {
+      clf_engine::model::CornerRelief::None => "none",
+      clf_engine::model::CornerRelief::Round => "round",
+      clf_engine::model::CornerRelief::Square => "square",
+      clf_engine::model::CornerRelief::Tear => "tear",
+    };
+    self.corner_relief_size = r.corner_relief_size;
     self.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
     if self.rules.is_empty() {
       self.rules.push(self.name.clone());

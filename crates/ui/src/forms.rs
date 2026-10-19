@@ -206,6 +206,22 @@ impl State {
         _ => {}
       }
     }
+    // sketches of the picked curves, then of picked profiles (the n-th sketch input takes the n-th)
+    let mut sketches: Vec<FeatureId> = curves.iter().map(|c| c.0).collect();
+    sketches.extend(
+      s.selection.iter().filter_map(|x| if let Sel::Profile { sketch, .. } = x { Some(*sketch) } else { None }),
+    );
+    sketches.dedup();
+    let mut seen = Vec::new();
+    sketches.retain(|f| {
+      if seen.contains(f) {
+        false
+      } else {
+        seen.push(*f);
+        true
+      }
+    });
+    let mut ns = 0;
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
@@ -225,7 +241,12 @@ impl State {
         Input::Curves { .. } => json!(curves.iter().map(|c| c.1).collect::<Vec<_>>()),
         Input::Sketch { .. } => {
           let chosen = self.chosen[i].as_ref().and_then(Value::as_u64).map(|f| FeatureId(f as u32));
-          let sk = curves.first().map(|c| c.0).or(profile_sketch).or(chosen).or(s.edit_sketch).or(last_sketch);
+          ns += 1;
+          let sk = if ns == 1 {
+            curves.first().map(|c| c.0).or(profile_sketch).or(chosen).or(s.edit_sketch).or(last_sketch)
+          } else {
+            sketches.get(ns - 1).copied().or(chosen)
+          };
           sk.map(|f| json!(f.0)).unwrap_or(Value::Null)
         }
         Input::Plane { .. } => {
@@ -1022,3 +1043,79 @@ pub static CAM_DRILL: Form = Form {
   ],
   picks_model: false,
 };
+
+pub static LOFTED_FLANGE: Form = Form {
+  title: "LOFTED FLANGE",
+  name: "Lofted Flange",
+  hint: "Sheet metal between two profiles (pick a profile in each sketch); closed profiles get a seam",
+  icon: Icon::LoftedFlange,
+  cmd: "sheet.lofted_flange",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "from", label: "First profile" },
+    Input::Sketch { key: "to", label: "Second profile" },
+    Input::Choice {
+      key: "method",
+      label: "Method",
+      options: &[("die_formed", "Die formed"), ("press_brake", "Press brake")],
+    },
+    Input::Expr { key: "bends", label: "Bends (press brake)", default: "8" },
+    Input::Check { key: "flip", label: "Flip side" },
+  ],
+  picks_model: false,
+};
+
+pub static MITER_FLANGE: Form = Form {
+  title: "MITER FLANGE",
+  name: "Miter Flange",
+  hint: "Sweep an open profile, drawn across the first edge and starting on it, along sheet edges",
+  icon: Icon::Flange,
+  cmd: "sheet.miter_flange",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Sketch { key: "sketch", label: "Profile sketch" },
+    Input::Curves { key: "curves", label: "Profile curves (default all)" },
+    Input::Choice { key: "corners", label: "Corners", options: CORNERS },
+  ],
+  picks_model: true,
+};
+
+pub static CORNER_CLOSURE: Form = Form {
+  title: "CORNER CLOSURE",
+  name: "Corner Closure",
+  hint: "How the last edge or miter flange closes its corners, and the rule's corner relief",
+  icon: Icon::CornerClosure,
+  cmd: "sheet.corner_closure",
+  fixed: &[],
+  inputs: &[
+    Input::Choice { key: "corners", label: "Corners", options: CORNERS },
+    Input::Choice {
+      key: "relief",
+      label: "Corner relief",
+      options: &[("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")],
+    },
+    Input::Expr { key: "relief_size", label: "Relief size (empty = default)", default: "" },
+  ],
+  picks_model: false,
+};
+
+pub static FLAT_SKETCH: Form = Form {
+  title: "FLAT PATTERN SKETCH",
+  name: "Flat Pattern Sketch",
+  hint: "The flat pattern as an editable sketch: outline and bend lines",
+  icon: Icon::FlatPattern,
+  cmd: "sheet.flat_sketch",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "body", label: "Body (default the sheet metal body)", required: false },
+    Input::Choice {
+      key: "on",
+      label: "Place on",
+      options: &[("face", "Stationary face"), ("xy", "XY plane at the origin")],
+    },
+  ],
+  picks_model: false,
+};
+
+const CORNERS: &[(&str, &str)] = &[("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
