@@ -11,13 +11,13 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Sketch    | Break; 2/3-tangent circles; blend curve; splines and ellipses in trim/offset; tangency and curvature constraints on splines; editable (not exploded) text |
-| Features  | Sweep with guide rails / twist; loft rails; emboss; boundary fill; replace face; extrude to a curved face; setback fillets |
+| Sketch    | Elliptical arcs as their own curve and fit-point splines that stay fit-point after trim/extend (both become Bézier chains today); fonts from disk for text |
+| Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Features  | Configurations (table-driven variants); base features (direct editing without history) |
-| Surface   | Extend, untrim; trim with a body or sketch; offset with variable distance     |
-| Sheet     | Lofted and miter flanges; corner closure; flat pattern as a sketch           |
-| Assembly  | Contact sets; motion links; rigid groups; joint origins; insert a component from another design |
-| Drawing   | Broken views; ordinate and angle dimensions; GD&T; balloons                  |
+| Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
+| Sheet     | Rounded bends between press-brake lofted flange facets; later cuts in a lofted flange's flat pattern; a flat pattern sketch that follows the model |
+| Assembly  | Pick saved joint origins and joints in the viewport (dialogs name them today); screw and cam motion; contact sets during viewport drags; nested sub-assemblies from inserted designs |
+| Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
 | Selection | Freeform and paint selection; vertex picking                                 |
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
 | View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |

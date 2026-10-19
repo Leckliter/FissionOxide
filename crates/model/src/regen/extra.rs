@@ -387,27 +387,7 @@ impl Ctx<'_> {
         self.new_body(id, face);
         Ok(None)
       }
-      FeatureKind::SurfaceOffset { faces, bodies, distance } => {
-        let d = self.len(distance)?;
-        let mut skins = Vec::new();
-        for (bi, fids) in self.faces_by_body(faces)? {
-          for f in fids {
-            skins.push(self.state.bodies[bi].shape.face_shape(f).map_err(ke)?);
-          }
-        }
-        for b in bodies.iter() {
-          let bi = self.body_index(*b)?;
-          skins.push(self.state.bodies[bi].shape.clone());
-        }
-        if skins.is_empty() {
-          return Err("select faces or bodies to offset".into());
-        }
-        for skin in skins {
-          let off = skin.offset_surface(d).map_err(ke)?;
-          self.new_body(id, off);
-        }
-        Ok(None)
-      }
+      FeatureKind::SurfaceOffset { .. } => self.apply_surface(id, kind),
       FeatureKind::Trim { bodies, tool, flip } => {
         let pl = self.resolve_plane(tool)?;
         let n = pl.normal() * if *flip { -1.0 } else { 1.0 };
@@ -464,6 +444,14 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::SurfaceExtend { .. } | FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {
+        self.apply_surface(id, kind)
+      }
+      FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
+      FeatureKind::JointOrigin { .. }
+      | FeatureKind::RigidGroup { .. }
+      | FeatureKind::MotionLink { .. }
+      | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
@@ -830,7 +818,7 @@ fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
 }
 
 /// One wire per chosen sketch curve (default every non-construction curve).
-fn sketch_wires(
+pub(super) fn sketch_wires(
   plane: &Plane,
   sketch: &clf_sketch::Sketch,
   curves: &[clf_sketch::CurveId],

@@ -5,6 +5,7 @@
 //! ViewCube, sketch palette and command dialogs floating over it; the timeline at the bottom. The UI is thin: every action goes through [`Session::execute`] commands.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod assembly_forms;
 mod cam_ui;
 mod data_panel;
 mod dialogs;

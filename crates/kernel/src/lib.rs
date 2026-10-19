@@ -953,5 +953,14 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
   }
 }
 
+mod features2;
+pub use features2::Inside;
+mod surface;
+pub use surface::{Extension, Untrim};
+
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_features2;
+
+mod sheet2;

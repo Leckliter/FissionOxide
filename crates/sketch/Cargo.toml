@@ -9,6 +9,8 @@ license.workspace = true
 clf-expr.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+ttf-parser.workspace = true
+epaint_default_fonts.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

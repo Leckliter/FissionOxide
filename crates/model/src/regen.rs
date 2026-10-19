@@ -75,6 +75,13 @@ impl Body {
   /// face).
   pub fn flat_pattern(&self, face: Option<u32>) -> Result<FlatPattern, String> {
     let sheet = self.sheet.as_ref().ok_or("the body is not sheet metal")?;
+    // a lofted flange brings its own flat pattern (while the body is as it was built)
+    if let Some(dev) = &sheet.developed {
+      let volume = self.shape.mass().map(|m| m.volume).unwrap_or(0.0);
+      if (volume - dev.volume).abs() <= 1e-6 * dev.volume.abs().max(1.0) {
+        return dev.flat_pattern(sheet.thickness);
+      }
+    }
     let face = face.or_else(|| sheet::default_face(self.faces())).ok_or("the body has no planar face")?;
     sheet::flat_pattern(&self.shape, self.faces(), face, sheet)
   }
@@ -138,6 +145,12 @@ struct State {
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
   body_counter: u32,
+  /// Saved joint origins: component and frame (as the component is now).
+  joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
+  /// How far joints have moved each component.
+  placed: BTreeMap<crate::ComponentId, DMat4>,
+  /// Rigid groups so far.
+  groups: Vec<Vec<crate::ComponentId>>,
 }
 
 /// The regenerated design.
@@ -156,6 +169,10 @@ pub struct Model {
   /// Evaluated parameter values (mm / rad).
   pub params: HashMap<String, f64>,
   pub param_errors: HashMap<String, String>,
+  /// Saved joint origins: component and frame, where the component ended up.
+  pub joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
+  /// How far joints have moved each component (identity if they haven't).
+  pub placed: BTreeMap<crate::ComponentId, DMat4>,
 }
 
 impl Model {
@@ -206,11 +223,13 @@ impl Regenerator {
   /// references are refreshed to the faces/edges they resolved to.
   pub fn regenerate(&mut self, design: &mut Design) -> Model {
     let (params, param_errors) = eval_params(design);
+    let mates = assemble::mates(design, &params);
     let mut key = {
       let mut h = DefaultHasher::new();
       serde_json::to_string(&design.parameters).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.sheet_metal_rules).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.components).unwrap_or_default().hash(&mut h);
+      mates.key().hash(&mut h);
       h.finish()
     };
     let active = design.active_len();
@@ -243,8 +262,14 @@ impl Regenerator {
       st.suppressed = feature.suppressed;
       if !feature.suppressed {
         let targets = feature.targets.clone();
-        let mut ctx =
-          Ctx { params: &params, rules: &rules, components: &components, targets: &targets, state: &mut state };
+        let mut ctx = Ctx {
+          params: &params,
+          rules: &rules,
+          components: &components,
+          targets: &targets,
+          state: &mut state,
+          mates: &mates,
+        };
         let id = feature.id;
         let mut kind = feature.kind.clone();
         match ctx.apply(id, &mut kind) {
@@ -274,6 +299,8 @@ impl Regenerator {
       status,
       params,
       param_errors,
+      joint_origins: state.joint_origins,
+      placed: state.placed,
     }
   }
 }
@@ -342,6 +369,7 @@ struct Ctx<'a> {
   /// The current feature's join/cut targets (empty = any body it touches).
   targets: &'a [BodyId],
   state: &'a mut State,
+  mates: &'a assemble::Mates,
 }
 
 type FResult = Result<Option<String>, String>;
@@ -390,6 +418,7 @@ impl Ctx<'_> {
           });
         }
         let mut n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
+        let mut trim = None;
         let (start, length) = match extent.kind {
           ExtentKind::OneSide => (0.0, self.len(&extent.distance)?),
           ExtentKind::Symmetric => {
@@ -410,14 +439,31 @@ impl Ctx<'_> {
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
             if info.kind != clf_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
-              return Err("extrude to a flat face parallel to the sketch".into());
+              // a curved or tilted face: extrude through and trim to it
+              let offset = self.len(&extent.distance)?;
+              if (info.center - sk.plane.origin).dot(n) < 0.0 {
+                n = -n;
+              }
+              trim = Some(solid::Trim::Face { body: bi, face: fid, offset });
+              (0.0, self.through_all(&sk.plane))
+            } else {
+              let mut d = (info.origin - sk.plane.origin).dot(n);
+              if d < 0.0 {
+                n = -n;
+                d = -d;
+              }
+              (0.0, d + self.len(&extent.distance)?)
             }
-            let mut d = (info.origin - sk.plane.origin).dot(n);
-            if d < 0.0 {
+          }
+          ExtentKind::ToBody => {
+            let fr = extent.to.as_mut().ok_or("pick the body to extrude to")?;
+            let bi = self.body_index(fr.body)?;
+            let center = self.state.bodies[bi].shape.mass().map_err(ke)?.center_of_mass;
+            if (center - sk.plane.origin).dot(n) < 0.0 {
               n = -n;
-              d = -d;
             }
-            (0.0, d + self.len(&extent.distance)?)
+            trim = Some(solid::Trim::Body { body: bi });
+            (0.0, self.through_all(&sk.plane))
           }
         };
         let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
@@ -454,7 +500,10 @@ impl Ctx<'_> {
             tools.push(solid(&face)?);
           }
         }
-        let tool = union_all(tools)?;
+        let mut tool = union_all(tools)?;
+        if let Some(t) = trim {
+          tool = self.trim_to_object(tool, t, &sk.plane)?;
+        }
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
@@ -475,14 +524,22 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2 } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback } => {
         let r = self.len(radius)?;
+        let sb = match setback.as_deref().map(str::trim) {
+          Some(e) if !e.is_empty() => Some(self.len(e)?),
+          _ => None,
+        };
+        let round = |s: &Shape, f: Shape, ids: &[u32]| match sb {
+          Some(sb) => solid::setback(s, &f, ids, sb),
+          None => Ok(f),
+        };
         match radius2 {
           Some(r2) => {
             let r2 = self.len(r2)?;
-            self.edge_op(id, edges, |s, ids| s.fillet_variable(ids, r, r2))
+            self.edge_op(id, edges, |s, ids| round(s, s.fillet_variable(ids, r, r2)?, ids))
           }
-          None => self.edge_op(id, edges, |s, ids| s.fillet(ids, r)),
+          None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
       FeatureKind::Chamfer { edges, distance, distance2, angle } => {
@@ -730,7 +787,7 @@ impl Ctx<'_> {
         self.state.bodies.retain(|b| !bodies.contains(&b.id));
         Ok(None)
       }
-      FeatureKind::Loft { sections, ruled, closed, operation } => {
+      FeatureKind::Loft { sections, ruled, closed, operation, rails, centerline } => {
         let mut faces = Vec::new();
         for (i, sec) in sections.iter().enumerate() {
           let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
@@ -741,11 +798,11 @@ impl Ctx<'_> {
           .ok_or(format!("section {} has no profile", i + 1))?;
           faces.push(Shape::face(&sk.plane, &prof).map_err(ke)?);
         }
-        let tool = Shape::loft(&faces, *ruled, *closed).map_err(ke)?;
+        let tool = self.loft_guided(&faces, *ruled, *closed, rails, centerline.as_ref())?;
         self.operate(id, tool, *operation)?;
         Ok(None)
       }
-      FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation } => {
+      FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation, rail, twist } => {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
         let segs = sheet::open_path(&ps.sketch, path_curves)?;
@@ -754,9 +811,10 @@ impl Ctx<'_> {
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
         }
+        let guide = self.sweep_guide(rail.as_ref(), twist)?;
         let mut tools = Vec::new();
         for p in &chosen {
-          tools.push(Shape::face(&sk.plane, p).map_err(ke)?.sweep(&path).map_err(ke)?);
+          tools.push(solid::sweep(&Shape::face(&sk.plane, p).map_err(ke)?, &path, &guide)?);
         }
         self.operate(id, union_all(tools)?, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
@@ -934,7 +992,7 @@ impl Ctx<'_> {
             BendPosition::Inside => -(r + t) * half,
             BendPosition::Outside => -r * half,
           };
-          Ok((sheet::flange_section(r, t, a, straight.max(0.0)), shift))
+          Ok((sheet::flange_section(r, t, a, straight.max(0.0)), shift, crate::sheet2::bend_top(r, t, a)))
         })
       }
       FeatureKind::Hem { edges, length, gap, flip } => {
@@ -948,7 +1006,8 @@ impl Ctx<'_> {
           if straight < -1e-9 {
             return Err(format!("the hem must be at least {:.3} mm long", r + t));
           }
-          Ok((sheet::flange_section(r, t, std::f64::consts::PI, straight.max(0.0)), 0.0))
+          let top = crate::sheet2::bend_top(r, t, std::f64::consts::PI);
+          Ok((sheet::flange_section(r, t, std::f64::consts::PI, straight.max(0.0)), 0.0, top))
         })
       }
       FeatureKind::Bend { sketch, line, angle, flip, flip_side } => {
@@ -1084,12 +1143,13 @@ impl Ctx<'_> {
         {
           return Err("the fixed component no longer exists".into());
         }
-        let motion = assembly::Motion {
+        let mut motion = assembly::Motion {
           rotation: self.angle(rotation)?,
           slide: self.len(slide)?,
           slide2: self.len(slide2)?,
           pitch: self.angle(pitch)?,
         };
+        self.mates.drive(id, &mut motion);
         if let Some((lo, hi)) = &limits.rotation {
           let (lo, hi) = (self.angle(lo)?, self.angle(hi)?);
           if !(lo - 1e-9..=hi + 1e-9).contains(&motion.rotation) {
@@ -1119,15 +1179,7 @@ impl Ctx<'_> {
           *as_built,
           motion,
         );
-        let bodies: Vec<usize> = comp.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect();
-        if bodies.is_empty() {
-          return Err(format!("{} has no bodies", comp.name));
-        }
-        for bi in bodies {
-          let s = self.state.bodies[bi].shape.transformed(m).map_err(ke)?;
-          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
-        }
-        Ok(None)
+        self.move_component(id, *moving, *fixed, m)
       }
       FeatureKind::CopyComponent { source, translate } => {
         let comp = self.components.iter().find(|c| c.id == *source).ok_or("the source component no longer exists")?;
@@ -1249,6 +1301,9 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
+        self.apply_solid(id, kind)
+      }
       other => self.apply_extra(id, other),
     }
   }
@@ -1286,7 +1341,9 @@ impl Ctx<'_> {
   /// Edge flanges and hems: for each straight sheet edge, `section` gives the bend's section (in
   /// the plane across the edge, see [`sheet::flange_section`]) and how far back from the edge
   /// the bend starts; the sheet is trimmed back that far and the bends are joined on. Flanges
-  /// that stop short of an edge's end get bend reliefs; flanges meeting at a corner are mitered.
+  /// that stop short of an edge's end get bend reliefs; flanges meeting at a corner are closed
+  /// as `corners` says, with the rule's corner relief. `section` also gives the height of the
+  /// bend (what a corner relief clears).
   fn edge_flanges(
     &mut self,
     feature: FeatureId,
@@ -1294,7 +1351,7 @@ impl Ctx<'_> {
     flip: bool,
     (o1, o2): (f64, f64),
     corners: CornerMode,
-    section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64), String>,
+    section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64, f64), String>,
   ) -> FResult {
     struct Flange {
       start: DVec3,
@@ -1326,7 +1383,7 @@ impl Ctx<'_> {
         return Err("the body is unfolded".into());
       }
       let t = info.thickness;
-      let (profile, shift) = section(&info)?;
+      let (profile, shift, bend_top) = section(&info)?;
       let mut list: Vec<Flange> = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
@@ -1362,7 +1419,9 @@ impl Ctx<'_> {
         return Err("the selected edges could not be found".into());
       }
       // corners shared by two flanges bending the same way
-      if corners == CornerMode::Miter {
+      let (xout, xin) = crate::sheet2::section_extents(&profile, bend_top);
+      let mut relief_at: Vec<(DVec3, DVec3, DVec3, DVec3)> = Vec::new();
+      {
         for i in 0..list.len() {
           for j in i + 1..list.len() {
             if list[i].b.dot(list[j].b) < 0.9999 {
@@ -1376,15 +1435,27 @@ impl Ctx<'_> {
                 }
                 let (wi, wj) = (list[i].w, list[j].w);
                 let corner = pi + (wi + wj) * shift;
+                relief_at.push((list[i].base + (pi - list[i].start) + (wi + wj) * shift, wi, wj, list[i].b));
                 let diag = wi + wj;
                 let Some(n) = diag.cross(list[i].b).try_normalize() else { continue };
                 // flange i lies on the side its edge runs to from the corner
                 let into_i = if ei == 0 { list[i].dir } else { -list[i].dir };
                 let n = if (into_i + wi).dot(n) > 0.0 { n } else { -n };
+                match corners {
+                  CornerMode::Open => continue,
+                  CornerMode::Miter | CornerMode::Closed => {
+                    let gap = if corners == CornerMode::Closed { 0.0 } else { info.gap };
+                    list[i].cuts.push((corner + n * (gap / 2.0), n));
+                    list[j].cuts.push((corner - n * (gap / 2.0), -n));
+                  }
+                  // i runs out to j's outside; j stops the gap short of i's wall
+                  CornerMode::Overlap => {
+                    list[i].cuts.push((pi + wj * (shift + xout), -wj));
+                    list[j].cuts.push((pi + wi * (shift + xin - info.gap), -wi));
+                  }
+                }
                 list[i].ext[ei] = true;
                 list[j].ext[ej] = true;
-                list[i].cuts.push((corner + n * (info.gap / 2.0), n));
-                list[j].cuts.push((corner - n * (info.gap / 2.0), -n));
               }
             }
           }
@@ -1471,6 +1542,16 @@ impl Ctx<'_> {
       for f in &tools {
         shape = shape.boolean(f, BoolOp::Union).map_err(ke)?;
       }
+      // corner reliefs (overlapping bends need one: square unless the rule says otherwise)
+      let relief = match (info.corner_relief, corners) {
+        (crate::CornerRelief::None, CornerMode::Overlap) => crate::CornerRelief::Square,
+        (r, _) => r,
+      };
+      for (at, wi, wj, up) in &relief_at {
+        if let Some(cut) = crate::sheet2::corner_relief(*at, *wi, *wj, *up, bend_top, &info, relief)? {
+          shape = shape.boolean(&cut, BoolOp::Subtract).map_err(ke)?;
+        }
+      }
       let shape = shape.unified().map_err(ke)?;
       self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, feature);
     }
@@ -1537,7 +1618,10 @@ impl Ctx<'_> {
           put(sketch, start, ps);
           put(sketch, end, pe);
         }
-        CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => {}
+        CurveKind::Spline { .. }
+        | CurveKind::ControlSpline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::Bezier { .. } => {}
       }
     }
     lost
@@ -1567,6 +1651,7 @@ impl Ctx<'_> {
         *edge = EdgeRef::from_edge(edge.body, info, body.faces());
         assembly::edge_frame(info, body.faces())
       }
+      assembly::JointGeometry::Origin { origin } => self.origin_frame(*origin),
     }
   }
 
@@ -1905,6 +1990,16 @@ fn ke(e: KernelError) -> String {
 
 mod extra;
 pub use extra::iso_pitch;
+mod solid;
+pub use solid::boundary_cells;
+mod sheet2;
+mod surface;
+#[cfg(test)]
+mod tests_solid;
+
+mod assemble;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_sheet2;

@@ -353,7 +353,7 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
     for p in clf_sketch::curve_points(&c.kind) {
       on_curve.insert(p);
     }
-    if matches!(c.kind, CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) {
+    if c.kind.is_freeform() {
       if exact {
         for p in sk.beziers(c.id) {
           out.push((Entity::Bezier { p }, c.construction));
@@ -367,7 +367,12 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       continue;
     }
     let e = match c.kind {
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } => continue,
+      CurveKind::Spline { .. }
+      | CurveKind::ControlSpline { .. }
+      | CurveKind::Ellipse { .. }
+      | CurveKind::Bezier { .. } => {
+        continue;
+      }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },
       CurveKind::Circle { center, radius } => Entity::Circle { center: pos(center), radius },
       CurveKind::Arc { center, start, end } => {

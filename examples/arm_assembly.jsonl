@@ -1,4 +1,6 @@
-# A base plate and a swing arm joined by a revolute joint; "swing" drives the arm.
+# A base plate and a swing arm joined by a revolute joint; "swing" drives the arm. A counterweight
+# is rigidly grouped with the arm, a pin sits on a saved joint origin, a gauge block is driven by
+# the swing through a motion link, and a contact set stops the arm where it meets the gauge.
 # Ends with an interference check, a bill of materials and a drawing of the assembly.
 {"cmd": "new", "name": "Swing arm"}
 {"cmd": "param.add", "name": "swing", "expr": "30 deg", "kind": "angle"}
@@ -6,12 +8,29 @@
 {"cmd": "cylinder", "radius": 5, "height": 10, "at": [50, 30], "operation": "cut"}
 {"cmd": "box", "width": 80, "depth": 20, "height": 5, "at": [40, 200]}
 {"cmd": "cylinder", "radius": 5, "height": 5, "at": [10, 200], "operation": "cut"}
+{"cmd": "box", "width": 10, "depth": 20, "height": 10, "at": [-5, 200]}
 {"cmd": "component.create", "name": "Base", "bodies": [1000]}
 {"cmd": "component.ground", "component": 1}
 {"cmd": "component.create", "name": "Arm", "bodies": [3000]}
 {"cmd": "component.material", "component": 2, "material": "Aluminum"}
+{"cmd": "component.create", "name": "Counterweight", "bodies": [5000]}
+{"cmd": "rigid_group", "components": [2, 3], "name": "ArmAndWeight"}
 {"cmd": "joint", "moving": 2, "moving_origin": {"edge": {"point": [15, 200, 0]}}, "fixed": 1, "fixed_origin": {"edge": {"point": [55, 30, 10]}}, "kind": "revolute", "rotation": "swing", "limits": {"rotation": ["-90 deg", "90 deg"]}}
-{"cmd": "motion.study", "joint": 5, "from": "-90 deg", "to": "90 deg", "steps": 6}
+{"cmd": "motion.study", "joint": 7, "from": "-90 deg", "to": "90 deg", "steps": 6}
+# A pin through the pivot, jointed to a saved joint origin on the top of the arm's hole
+{"cmd": "cylinder", "radius": 4, "height": 20, "at": [0, -100]}
+{"cmd": "component.create", "name": "Pin", "bodies": [8000]}
+{"cmd": "joint_origin", "component": 4, "at": [0, -100, 0], "z": [0, 0, -1], "name": "PinBottom"}
+{"cmd": "joint_origin", "edge": {"point": [55, 30, 15]}, "name": "ArmHole"}
+{"cmd": "joint", "moving_origin": {"origin": "PinBottom"}, "fixed_origin": {"origin": "ArmHole"}, "offset": "-15 mm"}
+# A gauge block slides along the base's front, driven by the swing: 90° of swing moves it 20 mm
+{"cmd": "box", "width": 10, "depth": 10, "height": 20, "at": [80, -20]}
+{"cmd": "component.create", "name": "Gauge", "bodies": [12000]}
+{"cmd": "joint", "moving": 5, "moving_origin": {"at": [80, -20, 0]}, "fixed": 1, "fixed_origin": {"at": [80, -20, 0], "z": [1, 0, 0]}, "kind": "slider", "as_built": true}
+{"cmd": "motion_link", "leader": 7, "follower": 13, "leader_value": "90 deg", "follower_value": "20 mm"}
+# The arm can't pass through the gauge: swinging it down stops where they touch
+{"cmd": "contact_set.create", "components": [2, 5], "name": "Gauge stop"}
+{"cmd": "motion.study", "joint": 7, "from": "30 deg", "to": "-90 deg", "steps": 6}
 {"cmd": "assembly.interference"}
 {"cmd": "assembly.bom"}
 {"cmd": "drawing.create", "name": "Assembly", "views": ["front", "top", "iso"]}

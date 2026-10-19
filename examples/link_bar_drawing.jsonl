@@ -1,0 +1,24 @@
+# A long flat bar with a hole at each end, drawn with a broken front view, ordinate and angular
+# dimensions, GD&T and surface finish. Change "len" and the drawing follows.
+{"cmd": "new", "name": "Link bar"}
+{"cmd": "param.add", "name": "len", "expr": "400 mm"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [400, 30]}
+{"cmd": "sketch.dimension", "type": "distance", "curves": [5], "value": "len"}
+{"cmd": "extrude", "distance": 12}
+{"cmd": "sketch.create", "plane": {"point": [0, 0, 12], "normal": [0, 0, 1]}}
+{"cmd": "sketch.circle", "center": [20, 15], "diameter": 10}
+{"cmd": "sketch.circle", "center": [380, 15], "diameter": 10}
+{"cmd": "extrude", "extent": "through_all", "flip": true, "operation": "cut"}
+{"cmd": "drawing.create", "name": "Link bar", "views": ["top", "front"], "sheet": "a3", "scale": "1:2"}
+# the middle of the bar left out of both views
+{"cmd": "drawing.break", "view": 1, "from": 60, "to": 340}
+{"cmd": "drawing.break", "view": 2, "from": 60, "to": 340}
+{"cmd": "drawing.ordinate", "view": 1, "origin": [0, 0, 12], "points": [[20, 15, 12], [380, 15, 12], [400, 0, 12]]}
+{"cmd": "drawing.angle", "view": 2, "vertex": [0, 0, 0], "a": [30, 0, 0], "b": [0, 0, 12], "radius": 12}
+{"cmd": "drawing.datum", "view": 2, "point": [200, 0, 0], "offset": [0, -14]}
+{"cmd": "drawing.feature_control", "view": 2, "point": [380, 0, 12], "characteristic": "parallelism", "tolerance": 0.05, "datums": ["A"], "offset": [10, 14]}
+{"cmd": "drawing.feature_control", "view": 1, "point": [380, 20, 12], "characteristic": "position", "tolerance": 0.1, "diameter": true, "modifier": "mmc", "datums": ["A"], "offset": [8, 22]}
+{"cmd": "drawing.surface_finish", "view": 2, "point": [40, 0, 12], "roughness": 1.6, "process": "removal"}
+{"cmd": "drawing.title", "part_number": "LB-400", "material": "Steel"}
+{"cmd": "drawing.export", "path": "link_bar.pdf"}

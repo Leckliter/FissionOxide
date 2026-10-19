@@ -950,6 +950,27 @@ gp_Pnt bend_map(const Place &p, const gp_Pnt &X) {
   return p.P0.Translated(p.A * s + p.V * (phi * p.Rn));
 }
 
+// Whether a cylinder is the bend `p` (another face of it).
+bool same_bend(const Place &p, const gp_Cylinder &cy) {
+  return std::abs(cy.Radius() - p.R) < 1e-6 && cy.Axis().Direction().IsParallel(gp_Dir(p.a), 1e-6) &&
+         gp_Lin(cy.Axis()).Distance(p.O) < 1e-6;
+}
+
+// The rigid 3D → flat map of the plane tangent to bend `p` along its line through X (where a face
+// beyond the bend continues).
+gp_Trsf bend_line_frame(const Place &p, const gp_Pnt &X) {
+  double phi = bend_angle(p, X);
+  gp_Vec r = p.r0 * std::cos(phi) + p.b * std::sin(phi);
+  gp_Vec w = p.r0 * -std::sin(phi) + p.b * std::cos(phi);
+  gp_Pnt o3 = p.O.Translated(r * p.R);
+  gp_Pnt o2 = p.P0.Translated(p.V * (phi * p.Rn));
+  gp_Ax3 from(o3, gp_Dir(p.a.Crossed(w)), gp_Dir(p.a));
+  gp_Ax3 to(o2, gp_Dir(p.A.Crossed(p.V)), gp_Dir(p.A));
+  gp_Trsf T;
+  T.SetDisplacement(from, to);
+  return T;
+}
+
 TopoDS_Edge flat_edge(const TopoDS_Edge &e, const Place &p) {
   TopoDS_Vertex v1, v2;
   TopExp::Vertices(e, v1, v2, Standard_True);
@@ -1083,10 +1104,13 @@ Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, do
         Place pg;
         if (gt == GeomAbs_Plane && !pf.cyl) {
           pg.T = pf.T; // coplanar neighbour
-        } else if (gt == GeomAbs_Cylinder && !pf.cyl) {
+        } else if (gt == GeomAbs_Cylinder && (!pf.cyl || !same_bend(pf, gs.Cylinder()))) {
           gp_Cylinder cy = gs.Cylinder();
           BRepAdaptor_Curve ec(E);
           if (ec.GetType() != GeomAbs_Line || !ec.Line().Direction().IsParallel(cy.Axis().Direction(), 1e-6)) continue;
+          // a bend running straight into another bend: unroll the first up to their shared line
+          gp_Trsf T = pf.T;
+          if (pf.cyl) T = bend_line_frame(pf, M);
           pg.cyl = true;
           pg.a = gp_Vec(cy.Axis().Direction());
           pg.O = cy.Location();
@@ -1104,26 +1128,14 @@ Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, do
           double r_in = pg.inner ? pg.R : pg.R - thickness;
           if (r_in < -1e-9) throw std::runtime_error("unfold: a bend is tighter than the sheet thickness");
           pg.Rn = std::max(r_in, 0.0) + k_factor * thickness;
-          pg.P0 = pg.O.Translated(pg.r0 * pg.R).Transformed(pf.T);
-          pg.A = pg.a.Transformed(pf.T);
-          pg.V = pg.b.Transformed(pf.T);
+          pg.P0 = pg.O.Translated(pg.r0 * pg.R).Transformed(T);
+          pg.A = pg.a.Transformed(T);
+          pg.V = pg.b.Transformed(T);
         } else if (gt == GeomAbs_Plane && pf.cyl) {
           BRepAdaptor_Curve ec(E);
           if (ec.GetType() != GeomAbs_Line) continue;
-          double phi = bend_angle(pf, M);
-          gp_Vec r = pf.r0 * std::cos(phi) + pf.b * std::sin(phi);
-          gp_Vec w = pf.r0 * -std::sin(phi) + pf.b * std::cos(phi);
-          gp_Pnt o3 = pf.O.Translated(r * pf.R);
-          gp_Pnt o2 = pf.P0.Translated(pf.V * (phi * pf.Rn));
-          gp_Ax3 from(o3, gp_Dir(pf.a.Crossed(w)), gp_Dir(pf.a));
-          gp_Ax3 to(o2, gp_Dir(pf.A.Crossed(pf.V)), gp_Dir(pf.A));
-          pg.T.SetDisplacement(from, to);
+          pg.T = bend_line_frame(pf, M);
         } else if (gt == GeomAbs_Cylinder && pf.cyl) {
-          gp_Cylinder cy = gs.Cylinder();
-          if (std::abs(cy.Radius() - pf.R) > 1e-6 || !cy.Axis().Direction().IsParallel(gp_Dir(pf.a), 1e-6) ||
-              gp_Lin(cy.Axis()).Distance(pf.O) > 1e-6) {
-            throw std::runtime_error("unfold: bends that run straight into other bends are not supported");
-          }
           pg = pf; // the same bend split into several faces
           pg.repeat = true;
         } else {

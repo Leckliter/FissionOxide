@@ -362,13 +362,11 @@ dependencies = [
  "clf-sketch",
  "clf-store",
  "clf-trace",
- "epaint_default_fonts",
  "image",
  "log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "ttf-parser",
  "zip",
 ]
 
@@ -431,9 +429,11 @@ name = "clf-sketch"
 version = "0.1.0"
 dependencies = [
  "clf-expr",
+ "epaint_default_fonts",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "ttf-parser",
 ]
 
 [[package]]

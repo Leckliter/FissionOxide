@@ -16,17 +16,21 @@ change a parameter and watch the whole history rebuild.
 - **Constrained sketches.** Line/polyline and midpoint lines; two-point, centre and 3-point
   rectangles; centre, 2-point and 3-point circles; 3-point, centre and tangent arcs; fit and
   control point splines, ellipses and conics; inscribed, circumscribed and edge polygons; centre,
-  overall, centre-point and arc slots; points and text (glyph outlines you can extrude); 20 constraint types (coincident, horizontal,
+  overall, centre-point and arc slots; 2- and 3-tangent circles; blend curves (tangent or
+  curvature continuous); points and editable text (glyph outlines you can extrude, rebuilt
+  when you change the string, font, size or angle; double-click a letter to edit); 21 constraint types (coincident, horizontal,
   vertical, parallel, perpendicular, tangent, equal, concentric, midpoint, collinear,
-  symmetric, fix, point-on-curve); driving dimensions (distance, horizontal/vertical,
+  symmetric, fix, point-on-curve, curvature; tangency and curvature work on spline ends,
+  which grow tangent handles); driving dimensions (distance, horizontal/vertical,
   radius, diameter, angle, point-to-line). The solver reports degrees of freedom, colours
   free geometry blue, and you can drag points.
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
   rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
   split each other, so two overlapping rectangles give three regions without trimming.
-- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face; taper
-  angle; thin walls inside/outside/centred; new body, join, cut, intersect), revolve, fillet
-  (constant or variable radius), chamfer (equal, two distances, or distance and angle),
+- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face — flat or
+  curved, with an offset past it — or to a body; taper angle; thin walls inside/outside/centred;
+  new body, join, cut, intersect), revolve, fillet (constant or variable radius, setback corners
+  where three filleted edges meet), chamfer (equal, two distances, or distance and angle),
   press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
   rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
 - **Construction geometry.** Planes offset, at an angle, midway, through three points or two
@@ -38,32 +42,47 @@ change a parameter and watch the whole history rebuild.
   threads with ISO metric coarse pitches by default, coils with round, square or triangular
   wire, solid or hollow pipes along a path, ribs and webs that grow until they meet the body.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
-- **More solid features.** Loft (smooth or ruled, open or closed), sweep along a path of lines
-  and arcs, holes at sketch points (simple, counterbore, countersink, drill point, through all),
-  split body by a plane or by another body, draft.
+- **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
+  sweep along a path of lines and arcs (with a guide rail that turns and scales the profile, or a
+  twist angle), holes at sketch points (simple, counterbore, countersink, drill point, through
+  all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
+  on flat or curved faces (projected, or wrapped around a cylinder), boundary fill (pick the
+  closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
+  surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
 - **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
-  sketch, ruled surfaces between edges, offset surfaces, trim with a plane, stitch surfaces into
-  a solid, unstitch, reverse normals, and thicken faces or surfaces into solids.
+  sketch, ruled surfaces between edges, offset surfaces (with per-face distances for a variable
+  offset), trim with a plane, a solid, another surface or sketch curves projected onto them
+  (keep either side, or pick the pieces to keep), untrim (remove holes and/or restore the
+  untrimmed boundary), extend open edges (natural, tangent or perpendicular), stitch surfaces
+  into a solid, unstitch, reverse normals, and thicken faces or surfaces into solids
+  (`examples/surface_shroud.jsonl`).
 - **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
   clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
-  Flange (any angle, adjacent/inside/outside bend position, offsets), Hem, Bend along a sketch
-  line, Rip, Convert to Sheet Metal (sharp corners become bends, with corner reliefs), Unfold
-  and Refold in the timeline (cuts made while flat are carried back onto the bends), mitered
-  corners between flanges, rectangular or round bend reliefs, and a flat pattern with bend lines
-  exported as DXF (also STEP/STL). The unfolder works on the B-rep, so holes and cuts anywhere —
-  even across bends — come out in the flat pattern.
+  Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
+  profiles (die-formed or press-brake with a bend count), Miter Flange (a sketch profile swept
+  along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
+  corners become bends, with corner reliefs), Unfold and Refold in the timeline (cuts made while
+  flat are carried back onto the bends), corner closures where flanges meet (miter, open,
+  closed, overlap) with round, square or tear corner reliefs, rectangular or round bend reliefs,
+  and a flat pattern with bend lines exported as DXF (also STEP/STL) or made into an editable
+  sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
+  bends running straight into other bends — come out in the flat pattern.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
   parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
   bill of materials with masses. Component copies are linked: edit the original and every
-  copy follows.
+  copy follows. Saved joint origins, rigid groups, motion links (gears, rack and pinion), contact
+  sets that stop motion where bodies touch, and components inserted from other designs in the
+  data hub as linked references that update to the source's newest version.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
   section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
-  hidden-line projections; automatic overall dimensions, hole callouts and centre marks; manual
-  dimensions, notes, a title block and an assembly parts list; export to PDF, SVG and DXF. Drawings live in the design
-  and follow parameter changes.
+  hidden-line projections; broken views; automatic overall dimensions, hole callouts and centre marks; manual,
+  ordinate and angular dimensions (true lengths across breaks); GD&T feature control frames, datum identifiers and
+  surface texture symbols per ASME or ISO; notes, a title block, an assembly parts list and balloons that follow it
+  (or are placed automatically); export to PDF, SVG and DXF. Drawings live in the design and follow parameter
+  changes.
 - **Selecting and inspecting, as in Fusion.** Window selection (left to right picks what is
   inside, right to left what the box touches), Select Other (Alt+click or hold) for what's behind
   the front face, selection priority (face, edge, body, component) and filters, Select All and
@@ -81,9 +100,10 @@ change a parameter and watch the whole history rebuild.
   LinuxCNC and Mach3/4 in mm or inches. See [Manufacture](#manufacture-cam).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
-- **Sketch tools.** Fillet, chamfer, offset, trim, extend, mirror (symmetry-constrained),
+- **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
-  follows the body when it changes).
+  follows the body when it changes). Trim, break, extend and offset work on splines and
+  ellipses too; what is left of one is an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
@@ -151,6 +171,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Data panel             | The data panel icon in the top-left corner, or File → Show data panel |
 | Open / insert files    | Ctrl+O / File → Insert, or drop files on the window         |
 | Fit view               | F6                                                          |
+| Tangent circles        | 2-Tangent Circle: click two curves, then where the circle goes (the cursor sets its size); 3-Tangent: click three curves near where it should touch |
+| Blend curve            | Click near the ends of two curves (G2); Shift+click the second for G1 |
+| Break                  | Click a curve: it splits at the crossings either side of the click, or at the click |
+| Edit text              | Double-click a letter (or Modify → Edit Text); Explode Text makes plain curves |
+
+## Sketch text and blends
+
+```sh
+clfusion-cli run examples/name_plate.jsonl --save plate.clf --png plate.png
+```
+
+A plate outlined by two lines joined with G2 blend curves, with raised text that is edited
+after it was extruded (`sketch.text_edit`): the letters regenerate and the extrusion follows.
+Text stays a text entity in the sketch (string, font, height, angle and an anchor point you can
+dimension or drag); `sketch.text_explode` turns it into plain curves, and older files with
+exploded text open unchanged.
 
 ## Sheet metal
 
@@ -163,7 +199,29 @@ Sheet metal bodies are ordinary solids that carry their rule, so every other fea
 cuts, fillets, patterns) works on them. Bends are true cylinders: the flat length of a bend is
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
 sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
-`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`.
+`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`; `sheet.flat_sketch` makes the same
+outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
+XY at the origin, to dimension, extrude or export.
+
+```sh
+clfusion-cli run examples/sheet_hopper.jsonl --save hopper.clf
+```
+
+- **Lofted flange** (`sheet.lofted_flange`): a sheet between two sketch profiles, both closed or
+  both open; the profiles are one face of the sheet. Points of the two profiles are matched by
+  arc length, keeping the corners of either as facet boundaries, and closed profiles are opened
+  at a seam (the rule's gap) so the flange can unfold. *Die formed* is one smooth surface;
+  *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
+  pattern is the neutral layer developed facet by facet (later cuts on the flange aren't in it).
+- **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
+  edge, starting on it, swept along a chain of edges of one face; the profile is where the face
+  of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.
+- **Corner closure**: where two flanges of one feature meet, `corners` is `miter` (cut along
+  the bisector, leaving the rule's gap), `open`, `closed` (mitred with no gap, a welded seam) or
+  `overlap` (the first flange runs over the end of the second). The rule's `corner_relief`
+  (`round`, `square`, `tear`; `corner_relief_size`) cuts a relief at the corner through the
+  sheet and the bends; overlapping corners get a square one unless the rule says otherwise.
+  `sheet.corner_closure` changes both on an existing flange.
 
 ## Assemblies and drawings
 
@@ -178,6 +236,44 @@ a circular edge (its centre and axis) or an explicit point. The moving component
 brought onto the fixed one with the Z axes facing each other (so faces mate); `flip` aligns them
 instead, `angle` and `offset` adjust the placement, and the joint's motion (`rotation`, `slide`,
 `slide2`, `pitch`, depending on the type) can be any expression.
+
+- **Joint origins** (`joint_origin`) save a frame on a component — a face, an edge or a point,
+  turned, offset or flipped — that joints use as `{"origin": "Name"}`. It moves with its
+  component, so whatever is jointed to it follows the component's own joints.
+- **Rigid groups** (`rigid_group`) make components move as one: joints after the group in the
+  timeline move every member, and members a joint before it didn't move (say, a part modeled
+  next to an already jointed one) keep their place relative to the others as those move.
+- **Motion links** (`motion_link`) drive one joint's motion from another's: when the leader
+  moves `leader_value`, the follower moves `follower_value` (`360 deg` ↔ `2 * pi * 5 mm` is a
+  rack and pinion with a 5 mm pitch radius). Links chain; loops are reported.
+- **Contact sets** (`contact_set.create`) list components that can't pass through each other:
+  Drive Joints and motion studies stop where their bodies first touch.
+- **Insert Component** (`component.insert`, or right-click a design in the data panel) brings a
+  hub design in as a component. Its bodies are stored in the design, so it opens without the
+  hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
+  gets it, and `component.break_link` keeps a local copy.
+
+Drawings annotate model points in a view, so annotations move with their view and follow
+parameter changes:
+
+```sh
+clfusion-cli run examples/link_bar_drawing.jsonl --save link_bar.clf
+clfusion-cli exec link_bar.clf '{"cmd": "param.set", "name": "len", "expr": "600"}' --save link_bar.clf
+clfusion-cli exec link_bar.clf '{"cmd": "drawing.export", "path": "link_bar.dxf"}'
+```
+
+- **Broken views** (`drawing.break`) leave a stretch of a view out, between two break lines a
+  `gap` apart; dimensions, ordinates and hole callouts still read the true length.
+- **Ordinate** (`drawing.ordinate`) and **angular** (`drawing.angle`) dimensions.
+- **GD&T** (`drawing.feature_control`, `drawing.datum`, `drawing.surface_finish`): the 14
+  characteristics with Ø zones, MMC/LMC and up to three datums; the drawing's `standard` (ASME,
+  the default, or ISO) sets the decimal sign, the surface texture layout ("1.6" in the V, or
+  "Ra 1,6" on the extension line) and which characteristics exist (ASME Y14.5-2018 has no
+  concentricity or symmetry).
+- **Balloons** (`drawing.balloon`) carry a component's parts list item number, worked out each
+  time the drawing is drawn, so they renumber when the parts list changes; `auto_balloons`
+  balloons every row that has none.
+
 ## File formats
 
 | Format                          | Open / insert | Export | Notes                                                           |

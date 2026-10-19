@@ -316,6 +316,8 @@ pub(crate) enum Cmd {
   CamGenerate,
   CamPost,
   CamDelete,
+  /// Insert a design from the data hub as a component (opens the data panel).
+  InsertComponent,
   /// Manufacture: run the stock simulation; open the tool library.
   CamSimulate,
   CamTools,
@@ -377,6 +379,10 @@ impl Cmd {
         Tool::Conic => (Icon::Conic, "Conic Curve", "Curve from start to end bent towards an apex"),
         Tool::MidpointLine => (Icon::MidpointLine, "Midpoint Line", "Line from its midpoint"),
         Tool::Select => (Icon::Select, "Select", "Select sketch geometry"),
+        Tool::Break => (Icon::SkBreak, "Break", "Split a curve at its crossings, keeping every piece"),
+        Tool::Circle2T => (Icon::Circle2T, "2-Tangent Circle", "Circle tangent to two curves"),
+        Tool::Circle3T => (Icon::Circle3T, "3-Tangent Circle", "Circle tangent to three curves"),
+        Tool::Blend => (Icon::BlendCurve, "Blend Curve", "Curvature-continuous spline joining two curve ends"),
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {
@@ -410,6 +416,9 @@ impl Cmd {
       Cmd::CamGenerate => (Icon::Play, "Generate", "Compute the setup's toolpaths and machining time"),
       Cmd::CamPost => (Icon::ExportDxf, "Post Process", "Write the setup's G-code with its post-processor"),
       Cmd::CamDelete => (Icon::Remove, "Delete Setup", "Delete the last setup and its operations"),
+      Cmd::InsertComponent => {
+        (Icon::InsertComponent, "Insert Component", "Insert a design from the data panel as a linked component")
+      }
       Cmd::CamSimulate => {
         (Icon::MotionStudy, "Simulate", "Cut the stock with the toolpaths and check for gouges and collisions")
       }
@@ -523,6 +532,13 @@ impl Cmd {
           app.status = Some(("Setup deleted".into(), false));
         }
       }
+      Cmd::InsertComponent => {
+        if !app.data.open {
+          app.data.toggle();
+        }
+        app.status =
+          Some(("Right-click a design in the Data Panel and choose Insert into Current Design".into(), false));
+      }
       Cmd::CamSimulate => app.cam_simulate(),
       Cmd::CamTools => app.open_tool_library(),
       Cmd::SelectAll => {
@@ -572,6 +588,7 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
     "midpoint" => (Icon::Midpoint, "Midpoint"),
     "concentric" => (Icon::Concentric, "Concentric"),
     "collinear" => (Icon::Collinear, "Collinear"),
+    "curvature" => (Icon::Curvature, "Curvature"),
     _ => (Icon::Symmetric, "Symmetry"),
   }
 }
@@ -988,6 +1005,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   sketches_section(app, ui);
   planes_section(app, ui);
   joints_section(app, ui);
+  browser_assembly::sections(app, ui);
   drawings_section(app, ui);
 }
 
@@ -1980,6 +1998,18 @@ fn feature_icon(k: &FeatureKind) -> Icon {
       clf_engine::model::construct::MeshOp::Smooth => Icon::Smooth,
       clf_engine::model::construct::MeshOp::Convert => Icon::ConvertMesh,
     },
+    FeatureKind::Emboss { .. } => Icon::Emboss,
+    FeatureKind::BoundaryFill { .. } => Icon::BoundaryFill,
+    FeatureKind::ReplaceFace { .. } => Icon::ReplaceFace,
+    FeatureKind::SurfaceExtend { .. } => Icon::Extend,
+    FeatureKind::Untrim { .. } => Icon::Untrim,
+    FeatureKind::TrimWith { .. } => Icon::Trim,
+    FeatureKind::LoftedFlange { .. } => Icon::LoftedFlange,
+    FeatureKind::MiterFlange { .. } => Icon::Flange,
+    FeatureKind::JointOrigin { .. } => Icon::JointOrigin,
+    FeatureKind::RigidGroup { .. } => Icon::Component,
+    FeatureKind::MotionLink { .. } => Icon::DriveJoint,
+    FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
   }
 }
 
@@ -2121,3 +2151,5 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
     app.show_params = false;
   }
 }
+
+mod browser_assembly;

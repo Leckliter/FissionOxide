@@ -13,6 +13,8 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod solid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
   PickPlane,
@@ -371,8 +373,13 @@ fn plane_of(s: &Session, v: &Value) -> Option<clf_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
-const EXTENTS: [(&str, &str); 4] =
-  [("one_side", "One side"), ("symmetric", "Symmetric"), ("two_sides", "Two sides"), ("through_all", "All")];
+const EXTENTS: [(&str, &str); 5] = [
+  ("one_side", "One side"),
+  ("symmetric", "Symmetric"),
+  ("two_sides", "Two sides"),
+  ("through_all", "All"),
+  ("to_object", "To object"),
+];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -450,9 +457,22 @@ pub struct Dialog {
   view_on: [bool; 7],
   /// A form dialog's values.
   form: crate::forms::State,
+  /// Setback, guide rails, twist, centre line, extrude object (see [`solid`]).
+  solid: solid::Extra,
+  /// Edge flange corner closure (see [`CORNERS`]).
+  corners: &'static str,
+  /// Sheet metal rule corner relief (see [`CORNER_RELIEFS`]) and its size.
+  corner_relief: &'static str,
+  corner_relief_size: String,
+  /// Joint: the saved joint origin (by name) used instead of a pick on each side; empty = the pick.
+  saved: [String; 2],
   /// Trace Image's settings and last result.
   pub trace: Option<Box<crate::trace::TraceState>>,
 }
+
+const CORNERS: [(&str, &str); 4] = [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+const CORNER_RELIEFS: [(&str, &str); 4] =
+  [("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")];
 
 const VIEWS: [(&str, &str); 7] = [
   ("front", "Front"),
@@ -541,6 +561,11 @@ impl Dialog {
         Kind::Form(f) => crate::forms::State::new(f),
         _ => crate::forms::State::default(),
       },
+      solid: solid::Extra::default(),
+      corners: "miter",
+      corner_relief: "none",
+      corner_relief_size: String::new(),
+      saved: [String::new(), String::new()],
       trace: (kind == Kind::TraceImage).then(Box::default),
     }
   }
@@ -673,6 +698,7 @@ impl Dialog {
       Kind::NewDrawing => {
         d.name = format!("Drawing{}", s.design.drawings.len() + 1);
         d.position = "a3";
+        d.extent = "asme";
         d.choice = "third_angle";
         d.a = "auto".into();
         d.flag = true;
@@ -805,6 +831,12 @@ impl Dialog {
     }
     if let Kind::Form(f) = kind {
       d.form.sync(f, &app.s, app.last_sketch.or_else(|| last_unconsumed_sketch(&app.s)));
+      crate::forms::prefill(f, &mut d.form, &app.s);
+    }
+    if let Kind::Form(f) = kind
+      && f.cmd.starts_with("drawing.")
+    {
+      d.form.set_drawing(f, &app.s, app.drawing);
     }
     if kind == Kind::Section && app.section.is_none() {
       // a picked planar face, else the front plane through the middle of the model
@@ -840,8 +872,12 @@ impl Dialog {
           ExtentKind::Symmetric => "symmetric",
           ExtentKind::TwoSides => "two_sides",
           ExtentKind::ThroughAll => "through_all",
-          ExtentKind::ToFace => "to_face",
+          ExtentKind::ToFace | ExtentKind::ToBody => "to_object",
         };
+        if let ExtentKind::ToFace | ExtentKind::ToBody = extent.kind {
+          let kind = if extent.kind == ExtentKind::ToBody { "to_body" } else { "to_face" };
+          d.load_object(kind, serde_json::to_value(&extent.to).unwrap_or_default());
+        }
         d.op = op_str(*operation);
         d
       }
@@ -860,9 +896,10 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges, .. } => {
+      FeatureKind::Fillet { radius, edges, setback, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
+        d.load_setback(setback);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
@@ -921,6 +958,9 @@ impl Dialog {
         d.angle = angle.clone();
         d
       }
+      kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
+        solid::edit_form(kind)?
+      }
       _ => return None,
     };
     d.editing = Some(id);
@@ -947,14 +987,17 @@ impl Dialog {
       }
       Kind::Loft => (
         "loft",
-        json!({
+        self.with_guides(json!({
           "sections": self.sections.iter().map(|(sk, p)| json!({"sketch": sk, "profile": p})).collect::<Vec<_>>(),
           "ruled": self.flag, "closed": self.flag2, "operation": op,
-        }),
+        })),
       ),
-      Kind::Sweep => {
-        ("sweep", json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}))
-      }
+      Kind::Sweep => (
+        "sweep",
+        self.with_guides(
+          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}),
+        ),
+      ),
       Kind::Hole => {
         let mut p = json!({
           "sketch": self.sketch?.0, "kind": self.choice, "diameter": self.a, "flip": self.flip,
@@ -1002,7 +1045,7 @@ impl Dialog {
           "sheet.edge_flange",
           json!({
             "edges": self.edges, "height": self.distance, "angle": self.angle, "flip": self.flip,
-            "position": self.position,
+            "position": self.position, "corners": self.corners,
           }),
         ),
         "contour" => {
@@ -1048,19 +1091,33 @@ impl Dialog {
         json!({
           "name": self.name, "thickness": self.a, "bend_radius": self.b, "k_factor": self.c,
           "relief": self.position, "relief_width": self.d, "relief_depth": self.e, "gap": self.distance2,
+          "corner_relief": self.corner_relief, "corner_relief_size": self.corner_relief_size,
         }),
       ),
       Kind::NewComponent => ("component.create", json!({"name": self.name, "bodies": self.bodies})),
       Kind::Joint => {
-        let (_, mo) = self.origins.first()?;
-        let (_, fo) = self.origins.get(1)?;
-        (
-          "joint",
-          json!({
-            "moving": (*self.comps.first()?)?, "moving_origin": mo, "fixed": self.comps.get(1).copied().flatten(),
-            "fixed_origin": fo, "kind": self.choice, "angle": self.angle, "offset": self.distance, "flip": self.flip,
-          }),
-        )
+        // a saved joint origin (by name) stands in for that side's pick
+        let mut picks = self.origins.iter().map(|(_, o)| o).zip(&self.comps);
+        let mut side = |saved: &str| {
+          if saved.is_empty() {
+            picks.next().map(|(o, c)| (o.clone(), *c))
+          } else {
+            Some((json!({"origin": saved}), None))
+          }
+        };
+        let (mo, mc) = side(&self.saved[0])?;
+        let (fo, fc) = side(&self.saved[1])?;
+        let mut p = json!({
+          "moving_origin": mo, "fixed_origin": fo, "kind": self.choice, "angle": self.angle, "offset": self.distance,
+          "flip": self.flip,
+        });
+        if self.saved[0].is_empty() {
+          p["moving"] = json!(mc?);
+        }
+        if self.saved[1].is_empty() {
+          p["fixed"] = json!(fc);
+        }
+        ("joint", p)
       }
       Kind::Material => {
         ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
@@ -1110,6 +1167,7 @@ impl Dialog {
           json!({
             "name": self.name, "views": views, "sheet": self.position, "scale": scale_value(&self.a),
             "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+            "standard": drawing_standard(self.extent),
           }),
         )
       }
@@ -1118,6 +1176,7 @@ impl Dialog {
         json!({
           "drawing": self.target?, "rename": self.name, "sheet": self.position, "scale": scale_value(&self.a),
           "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+          "standard": drawing_standard(self.extent), "auto_balloons": self.keep_tools,
         }),
       ),
       Kind::DrawingView => {
@@ -1175,10 +1234,10 @@ impl Dialog {
       }
       Kind::Extrude => (
         "extrude",
-        json!({
+        self.with_object(json!({
           "sketch": self.sketch?.0, "profiles": self.profiles, "distance": self.distance, "distance2": self.distance2,
           "extent": self.extent, "flip": self.flip, "operation": op,
-        }),
+        }))?,
       ),
       Kind::Revolve => {
         let axis = match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
@@ -1191,7 +1250,7 @@ impl Dialog {
           json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": self.angle, "operation": op}),
         )
       }
-      Kind::Fillet => ("fillet", json!({"edges": self.edges, "radius": self.radius})),
+      Kind::Fillet => ("fillet", self.with_setback(json!({"edges": self.edges, "radius": self.radius}), false)),
       Kind::Chamfer => ("chamfer", json!({"edges": self.edges, "distance": self.radius})),
       Kind::Shell => ("shell", json!({"faces": self.faces, "thickness": self.radius})),
       Kind::Box => (
@@ -1242,11 +1301,13 @@ impl Dialog {
   fn edit_set(&self) -> Option<Value> {
     Some(match self.kind {
       Kind::Extrude => json!({
-        "extent": {"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip},
+        "extent": self.edit_extent(
+          json!({"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip}),
+        ),
         "operation": self.op,
       }),
       Kind::Revolve => json!({"angle": self.angle, "operation": self.op}),
-      Kind::Fillet => json!({"radius": self.radius}),
+      Kind::Fillet => self.with_setback(json!({"radius": self.radius}), true),
       Kind::Chamfer => json!({"distance": self.radius}),
       Kind::Shell => json!({"thickness": self.radius}),
       Kind::Box => {
@@ -1265,6 +1326,7 @@ impl Dialog {
       }
       Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
       Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
+      Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       _ => return None,
     })
   }
@@ -1329,7 +1391,10 @@ impl Dialog {
       }
       Kind::Hem | Kind::Rip => !self.edges.is_empty(),
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => !self.bodies.is_empty(),
-      Kind::Joint => self.origins.len() >= 2 && self.comps.first().is_some_and(Option::is_some),
+      Kind::Joint => {
+        let need = self.saved.iter().filter(|n| n.is_empty()).count();
+        self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
+      }
       Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
@@ -1484,6 +1549,9 @@ impl Dialog {
         if !pts.is_empty() && pts != self.profiles {
           self.profiles = pts;
           self.dirty = true;
+        }
+        if self.kind == Kind::Extrude {
+          self.sync_object(s);
         }
       }
       Kind::Fillet | Kind::Chamfer if !self.applied => {
@@ -1807,6 +1875,9 @@ impl Dialog {
           ui.label("Extent");
           self.combo(ui, "extent", &EXTENTS, true);
           ui.end_row();
+          if self.extent == "to_object" {
+            self.object_row(ui);
+          }
           if self.extent != "through_all" {
             ui.label(if self.extent == "two_sides" { "Distance 1" } else { "Distance" });
             self.text(ui, true);
@@ -1875,6 +1946,9 @@ impl Dialog {
           self.dirty = true;
         }
         ui.end_row();
+        if self.kind == Kind::Fillet {
+          self.setback_row(ui, creating);
+        }
       }
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
         ui.label("Plane");
@@ -2167,6 +2241,31 @@ impl Dialog {
           Self::xyz_row(ui, label, &mut xyz, dirty);
           self.form.values[i] = json!(xyz);
         }
+        Input::DrawingView { label, .. } | Input::Component { label, .. } => {
+          ui.label(*label);
+          let list: Vec<(u32, String)> = if matches!(input, Input::DrawingView { .. }) {
+            self.form.drawing.map(|d| drawing_views(s, d)).unwrap_or_default()
+          } else {
+            s.design.components.iter().map(|c| (c.id.0, c.name.clone())).collect()
+          };
+          let cur = list.iter().find(|(id, _)| v.as_u64() == Some(*id as u64)).map(|(_, n)| n.clone());
+          let none = if list.is_empty() { "None" } else { "Pick one" };
+          egui::ComboBox::from_id_salt(("form-item", i))
+            .selected_text(cur.unwrap_or(none.into()))
+            .width(140.0)
+            .show_ui(ui, |ui| {
+              for (id, name) in &list {
+                if ui.selectable_label(v.as_u64() == Some(*id as u64), name).clicked() {
+                  self.form.values[i] = json!(id);
+                  *dirty = true;
+                }
+              }
+            });
+          ui.end_row();
+        }
+        Input::Profiles { .. } | Input::FaceOther { .. } | Input::PlaneOpt { .. } | Input::Cells { .. } => {
+          self.solid_form_field(f, i, app, ui, dirty);
+        }
       }
     }
   }
@@ -2205,6 +2304,7 @@ impl Dialog {
         }
         Self::check(ui, "Ruled (straight between sections)", &mut self.flag, dirty);
         Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
+        self.loft_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
       }
       Kind::Sweep => {
@@ -2226,6 +2326,7 @@ impl Dialog {
           },
         );
         ui.end_row();
+        self.sweep_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
       }
       Kind::Hole => {
@@ -2315,6 +2416,7 @@ impl Dialog {
             Self::field(ui, "Height", &mut self.distance, dirty);
             Self::field(ui, "Bend angle", &mut self.angle, dirty);
             Self::choose(ui, "Position", "pos", &mut self.position, &POSITIONS, dirty);
+            Self::choose(ui, "Corners", "corners", &mut self.corners, &CORNERS, dirty);
           }
           "contour" => {
             ui.label("Sketch");
@@ -2419,6 +2521,8 @@ impl Dialog {
         Self::field(ui, "Relief width", &mut self.d, dirty);
         Self::field(ui, "Relief depth", &mut self.e, dirty);
         Self::field(ui, "Gap", &mut self.distance2, dirty);
+        Self::choose(ui, "Corner relief", "crelief", &mut self.corner_relief, &CORNER_RELIEFS, dirty);
+        Self::field(ui, "Corner relief size", &mut self.corner_relief_size, dirty);
         ui.label("");
         ui.label(RichText::new("empty = from the thickness").small().color(theme::MUTED));
         ui.end_row();
@@ -2464,13 +2568,29 @@ impl Dialog {
         ui.end_row();
       }
       Kind::Joint => {
+        let saved = saved_origins(&app.s);
+        let first = usize::from(self.saved[0].is_empty());
         ui.label("Component 1");
-        chip(ui, self.origins.len().min(1), "origin");
+        if self.saved[0].is_empty() {
+          chip(ui, self.origins.len().min(1), "origin");
+        } else {
+          ui.label(&self.saved[0]);
+        }
         ui.end_row();
+        if !saved.is_empty() {
+          Self::saved_origin(ui, "jo-a", &mut self.saved[0], &saved, dirty);
+        }
         ui.label("Component 2");
-        chip(ui, self.origins.len().saturating_sub(1).min(1), "origin");
+        if self.saved[1].is_empty() {
+          chip(ui, self.origins.len().saturating_sub(first).min(1), "origin");
+        } else {
+          ui.label(&self.saved[1]);
+        }
         ui.end_row();
-        if !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
+        if !saved.is_empty() {
+          Self::saved_origin(ui, "jo-b", &mut self.saved[1], &saved, dirty);
+        }
+        if self.saved[0].is_empty() && !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
           ui.label("");
           ui.label(RichText::new("the first body isn't in a component").color(theme::WARNING));
           ui.end_row();
@@ -2735,6 +2855,11 @@ impl Dialog {
         Self::choose(ui, "Projection", "proj", &mut self.choice, &PROJECTIONS, dirty);
         Self::check(ui, "Automatic dimensions", &mut self.flag, dirty);
         Self::check(ui, "Parts list", &mut self.flag2, dirty);
+        const STANDARDS: [(&str, &str); 2] = [("asme", "ASME"), ("iso", "ISO")];
+        Self::choose(ui, "Standard", "dstd", &mut self.extent, &STANDARDS, dirty);
+        if self.kind == Kind::DrawingSettings {
+          Self::check(ui, "Auto balloons", &mut self.keep_tools, dirty);
+        }
         if self.kind == Kind::DrawingSettings {
           ui.label("");
           if panels::secondary_button(ui, "Delete Drawing").clicked() {
@@ -2903,6 +3028,11 @@ impl Dialog {
         };
         self.flag = d.auto_dimensions;
         self.flag2 = d.parts_list;
+        self.extent = match d.standard {
+          clf_engine::model::drawing::Standard::Iso => "iso",
+          _ => "asme",
+        };
+        self.keep_tools = d.auto_balloons;
       }
       Kind::DrawingTitle => {
         let t = &d.title;
@@ -2986,6 +3116,13 @@ impl Dialog {
       clf_engine::model::ReliefShape::Round => "round",
       clf_engine::model::ReliefShape::None => "none",
     };
+    self.corner_relief = match r.corner_relief {
+      clf_engine::model::CornerRelief::None => "none",
+      clf_engine::model::CornerRelief::Round => "round",
+      clf_engine::model::CornerRelief::Square => "square",
+      clf_engine::model::CornerRelief::Tear => "tear",
+    };
+    self.corner_relief_size = r.corner_relief_size;
     self.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
     if self.rules.is_empty() {
       self.rules.push(self.name.clone());
@@ -3022,6 +3159,25 @@ impl Dialog {
       for (k, l) in items {
         if ui.selectable_label(*cur == *k, *l).clicked() {
           *cur = k;
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
+  /// A joint side's choice between the picked geometry and a saved joint origin.
+  fn saved_origin(ui: &mut egui::Ui, id: &str, cur: &mut String, saved: &[String], dirty: &mut bool) {
+    ui.label("");
+    let shown = if cur.is_empty() { "Picked geometry" } else { cur.as_str() };
+    egui::ComboBox::from_id_salt(id).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      if ui.selectable_label(cur.is_empty(), "Picked geometry").clicked() {
+        cur.clear();
+        *dirty = true;
+      }
+      for n in saved {
+        if ui.selectable_label(cur == n, n).clicked() {
+          *cur = n.clone();
           *dirty = true;
         }
       }
@@ -3432,6 +3588,16 @@ fn sel_sections(s: &Session) -> Vec<(u32, [f64; 2])> {
 }
 
 /// Joints in the timeline: id and name.
+/// Names of the saved joint origins.
+fn saved_origins(s: &Session) -> Vec<String> {
+  s.design
+    .features
+    .iter()
+    .filter(|f| matches!(f.kind, FeatureKind::JointOrigin { .. }))
+    .map(|f| f.name.clone())
+    .collect()
+}
+
 fn joints(s: &Session) -> Vec<(u32, String)> {
   s.design
     .features
@@ -3489,6 +3655,11 @@ fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
       _ => None,
     })
     .collect()
+}
+
+/// The drafting standard picked in the drawing dialogs (null leaves the drawing's as it is).
+fn drawing_standard(choice: &str) -> Value {
+  if matches!(choice, "asme" | "iso") { json!(choice) } else { Value::Null }
 }
 
 /// The mirror line among the picked curves: the last picked line.
@@ -4001,6 +4172,116 @@ mod tests {
   }
 
   #[test]
+  fn drawing_annotation_forms() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 200, "depth": 20, "height": 10, "at": [100, 10]}));
+    let b = s.model.bodies[0].id.0;
+    run(&mut s, "component.create", json!({"name": "Bar", "bodies": [b]}));
+    run(&mut s, "drawing.create", json!({"views": ["front", "top"]}));
+    let id = s.design.drawings[0].id;
+    let forms: [(&'static Form, Vec<(&str, Value)>); 7] = [
+      (&DRAWING_BREAK, vec![]),
+      (&DRAWING_ORDINATE, vec![("points", json!("20 0 0; 200 0 0"))]),
+      (&DRAWING_ANGLE, vec![("a", json!(["200", "0", "0"])), ("b", json!(["200", "0", "10"]))]),
+      (&DRAWING_FCF, vec![("diameter", json!(true)), ("modifier", json!("mmc"))]),
+      (&DRAWING_DATUM, vec![]),
+      (&DRAWING_FINISH, vec![("process", json!("removal"))]),
+      (&DRAWING_BALLOON, vec![]),
+    ];
+    for (f, set) in forms {
+      let mut d = form(&mut s, f, vec![], &set);
+      d.form.set_drawing(f, &s, Some(id));
+      apply(&mut s, &mut d);
+      d.applied = false;
+    }
+    let dr = &s.design.drawings[0];
+    assert_eq!(dr.views[0].breaks.len(), 1);
+    assert_eq!(dr.dimensions.len(), 6);
+    assert!(matches!(
+      dr.dimensions[2],
+      clf_engine::model::drawing::DrawingDim::FeatureControl { offset: [12.0, 12.0], .. }
+    ));
+    let text = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
+    for want in ["Ø0.1", "A", "1.6", "1"] {
+      assert!(text.texts().contains(&want), "missing {want}: {:?}", text.texts());
+    }
+  }
+
+  #[test]
+  fn surface_forms() {
+    use crate::forms::*;
+    let area = |s: &Session, b: BodyId| s.model.body(b).unwrap().shape.mass().unwrap().area;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = s.edit_sketch.unwrap().0;
+    run(&mut s, "surface.patch", json!({"sketch": sk}));
+    let b = s.model.bodies[0].id;
+    // extend the edge at x = 10 by the default 5 mm
+    let e = s.model.bodies[0].edges().iter().find(|e| (e.mid.x - 10.0).abs() < 1e-6).unwrap().id;
+    let mut d = form(&mut s, &EXTEND, vec![Sel::Edge { body: b, edge: e }], &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // trim with a sphere picked by a face: it cuts a round hole and stays itself
+    run(&mut s, "sphere", json!({"at": [5, 5], "radius": 2}));
+    let tool = s.model.bodies[1].id;
+    let sel = vec![Sel::Body { body: b }, Sel::Face { body: tool, face: 1 }];
+    let mut d = form(&mut s, &TRIM_BODY, sel, &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - (150.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-6, "{}", area(&s, b));
+    assert!(s.model.body(tool).is_some());
+    d.applied = false;
+    // untrim the hole
+    let mut d = form(&mut s, &UNTRIM, vec![Sel::Face { body: b, face: 1 }], &[("loops", json!("inner"))]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 150.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // trim with a sketch line at x = 5: the side left of it goes
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[5, -1], [5, 11]]}));
+    let sk = s.edit_sketch.unwrap();
+    let curve = s.design.sketch(sk).unwrap().curves[0].id;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = form(&mut s, &TRIM_SKETCH, vec![Sel::Body { body: b }, Sel::SketchCurve { sketch: sk, curve }], &[]);
+    apply(&mut s, &mut d);
+    assert!((area(&s, b) - 100.0).abs() < 1e-6, "{}", area(&s, b));
+    d.applied = false;
+    // a variable offset: the whole body by 2, its one face by 3
+    let n = s.model.bodies.len();
+    let sel = vec![Sel::Face { body: b, face: 1 }];
+    let mut d = form(&mut s, &VARIABLE_OFFSET, sel, &[("distance2", json!("3 mm"))]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), n + 1);
+    let z = s.model.bodies.last().unwrap().faces()[0].origin.z;
+    assert!((z.abs() - 3.0).abs() < 1e-6, "{z}");
+  }
+
+  #[test]
+  fn joint_to_a_saved_joint_origin() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+    run(&mut s, "box", json!({"width": 80, "depth": 20, "height": 5, "at": [40, 200]}));
+    let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    run(&mut s, "component.create", json!({"name": "Base", "bodies": [base]}));
+    run(&mut s, "component.create", json!({"name": "Arm", "bodies": [arm]}));
+    let top = face(&s, 0, |f| f.normal.z > 0.9);
+    run(&mut s, "joint_origin", json!({"face": top, "name": "Top"}));
+    assert_eq!(saved_origins(&s), vec!["Top".to_string()]);
+    // the fixed side is the saved origin: one pick (the moving side) is enough
+    let mut d = Dialog::blank(Kind::Joint);
+    d.choice = "rigid";
+    d.saved[1] = "Top".into();
+    (d.angle, d.distance) = ("0 deg".into(), "0 mm".into());
+    d.origins = vec![(arm, json!({"face": face(&s, 1, |f| f.normal.z < -0.9)}))];
+    d.comps = vec![s.design.component_of(BodyId(arm)).map(|c| c.id.0)];
+    apply(&mut s, &mut d);
+    let m = s.model.bodies.iter().find(|b| b.id.0 == arm).unwrap().shape.mass().unwrap();
+    assert!((m.bbox_min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox_min);
+  }
+
+  #[test]
   fn manufacture_forms_tools_entries_and_posts() {
     use crate::forms::*;
     use clf_engine::model::cam::{Entry, OpKind, ToolKind};
@@ -4031,5 +4312,37 @@ mod tests {
     let r = run(&mut s, "cam.simulate", json!({}));
     assert!(r["removed"].as_array().unwrap().len() == 4);
     assert!(s.simulation.is_some());
+  }
+
+  #[test]
+  fn text_forms_edit_and_explode() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let mut d = form(&mut s, &SK_TEXT, vec![], &[("text", json!("AB")), ("font", json!("mono"))]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let sketch = s.design.sketch(FeatureId(sk)).unwrap();
+    let (glyph, font) = (sketch.texts[0].curves[0], sketch.texts[0].font.clone());
+    assert_eq!(font, "mono");
+    // Edit Text opens with the picked text's values
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: glyph }];
+    let mut d = form(&mut s, &SK_TEXT_EDIT, sel.clone(), &[]);
+    prefill(&SK_TEXT_EDIT, &mut d.form, &s);
+    let i = SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == "text").unwrap();
+    assert_eq!(d.form.values[i], json!("AB"));
+    d.form.values[i] = json!("ABC");
+    let h = SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == "angle").unwrap();
+    d.form.values[h] = json!("90");
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    assert_eq!((t.text.as_str(), t.font.as_str()), ("ABC", "mono"));
+    assert!((t.angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    let glyph = t.curves[0];
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: glyph }];
+    let mut d = form(&mut s, &SK_TEXT_EXPLODE, sel, &[]);
+    apply(&mut s, &mut d);
+    assert!(s.design.sketch(FeatureId(sk)).unwrap().texts.is_empty());
   }
 }

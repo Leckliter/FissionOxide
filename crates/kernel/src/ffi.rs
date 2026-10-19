@@ -151,6 +151,35 @@ pub(crate) mod ffi {
     fn write_iges(s: &Shape, path: &str) -> Result<()>;
     fn read_iges(path: &str) -> Result<UniquePtr<Shape>>;
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
+
+    // second batch of solid features (cpp/features2.cpp)
+    fn sweep_rail(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
+    fn sweep_twist(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
+    fn sweep_sections(sections: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_rails(sections: &Shape, rails: &Shape) -> Result<UniquePtr<Shape>>;
+    fn emboss_tool(
+      body: &Shape,
+      face: u32,
+      profiles: &Shape,
+      dir: &[f64],
+      depth: f64,
+      deboss: bool,
+      wrap: bool,
+    ) -> Result<UniquePtr<Shape>>;
+    fn boundary_cells(tools: &Shape) -> Result<UniquePtr<Shape>>;
+    fn classify(s: &Shape, x: f64, y: f64, z: f64) -> Result<i32>;
+    fn plane_face(plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
+    fn extended_face(face: &Shape, size: f64, offset: f64, at: &[f64], toward: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
+    fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
+    // surface workspace (cpp/surface2.cpp)
+    include!("clf-kernel/cpp/surface2.hxx");
+    fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
+    fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
+    fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
+    fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
+    // sheet2.cpp
+    fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

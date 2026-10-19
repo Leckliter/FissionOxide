@@ -18,6 +18,8 @@ pub mod plot;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
+pub mod sheet2;
+pub mod surface;
 
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +75,9 @@ pub struct Design {
   /// Manufacture setups (CAM).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cam: Vec<cam::Setup>,
+  /// Assembly contact sets (see [`assembly::ContactSet`]).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub contact_sets: Vec<assembly::ContactSet>,
   #[serde(default)]
   next_id: u32,
 }
@@ -112,6 +117,13 @@ pub struct SheetMetalRule {
   /// Gap left at mitered corners and rips; empty = half the thickness.
   #[serde(default)]
   pub gap: String,
+  /// Notch cut where two flanges' bends meet at a corner.
+  #[serde(default)]
+  pub corner_relief: CornerRelief,
+  /// Corner relief size (square side / round diameter / tear width); empty = default, see
+  /// [`sheet::SheetInfo::corner_relief_size`].
+  #[serde(default)]
+  pub corner_relief_size: String,
 }
 
 impl Default for SheetMetalRule {
@@ -125,6 +137,8 @@ impl Default for SheetMetalRule {
       relief_width: String::new(),
       relief_depth: String::new(),
       gap: String::new(),
+      corner_relief: CornerRelief::None,
+      corner_relief_size: String::new(),
     }
   }
 }
@@ -147,6 +161,42 @@ pub enum CornerMode {
   Miter,
   /// Leave the flanges as they are (an open corner).
   Open,
+  /// Run both flanges into the corner and join them along the bisector (a closed, welded seam).
+  Closed,
+  /// The first flange runs over the end of the second, which stops the rule's gap short of it.
+  Overlap,
+}
+
+/// The notch cut where two flanges' bends meet at a corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerRelief {
+  #[default]
+  None,
+  Round,
+  Square,
+  Tear,
+}
+
+/// One profile of a lofted flange: a sketch's largest closed profile, or an open chain of its
+/// curves.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LoftProfile {
+  pub sketch: FeatureId,
+  /// The chain's curves; empty = the sketch's largest closed profile, else all its curves.
+  #[serde(default)]
+  pub curves: Vec<CurveId>,
+}
+
+/// How a lofted flange is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LoftMethod {
+  /// One smooth surface (formed in a die).
+  #[default]
+  DieFormed,
+  /// Flat facets joined by straight bends (formed on a press brake).
+  PressBrake,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -299,8 +349,10 @@ pub enum ExtentKind {
   TwoSides,
   /// Through every body, in the chosen direction.
   ThroughAll,
-  /// Up to a planar face (`to`), plus `distance` past it.
+  /// Up to a face (`to`, flat or curved), plus `distance` past it.
   ToFace,
+  /// Up to the body `to` is on: the extrusion stops where it meets the body.
+  ToBody,
 }
 
 /// Which way a thin extrusion's wall grows from the profile's outline.
@@ -361,6 +413,15 @@ impl Extent {
 pub struct SketchLink {
   pub curve: CurveId,
   pub edge: EdgeRef,
+}
+
+/// Curves of a sketch used as a path: a sweep's guide rail, a loft's rail or centre line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathRef {
+  pub sketch: FeatureId,
+  /// The curves; empty = every non-construction curve of the sketch.
+  #[serde(default)]
+  pub curves: Vec<CurveId>,
 }
 
 /// One loft section: a profile of a sketch.
@@ -453,6 +514,10 @@ pub enum FeatureKind {
     /// Variable radius: the radius at each edge's end (it runs from `radius` at the start).
     #[serde(default)]
     radius2: Option<String>,
+    /// Setback corners: where three or more of the edges meet, the corner is re-blended with a
+    /// smooth patch starting this far from the vertex.
+    #[serde(default)]
+    setback: Option<String>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -573,6 +638,12 @@ pub enum FeatureKind {
     closed: bool,
     #[serde(default)]
     operation: Operation,
+    /// Curves the loft's sides follow (they must touch every section).
+    #[serde(default)]
+    rails: Vec<PathRef>,
+    /// A path the sections are placed along (instead of rails).
+    #[serde(default)]
+    centerline: Option<PathRef>,
   },
   /// Sweeps profiles along a path (an open chain of lines and arcs in another sketch).
   Sweep {
@@ -585,6 +656,12 @@ pub enum FeatureKind {
     path_curves: Vec<CurveId>,
     #[serde(default)]
     operation: Operation,
+    /// A guide rail: the profile turns and scales to keep touching it.
+    #[serde(default)]
+    rail: Option<PathRef>,
+    /// Twist angle from start to end of the path (no rail); empty = none.
+    #[serde(default)]
+    twist: String,
   },
   /// Drilled holes at sketch points, into the material (against the sketch normal).
   Hole {
@@ -936,6 +1013,9 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: Vec<BodyId>,
     distance: String,
+    /// Faces offset by distances of their own (variable offset).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    face_distances: Vec<surface::FaceDistance>,
   },
   /// Trims surface bodies with a plane, keeping the side behind it (or in front, flipped).
   Trim {
@@ -965,6 +1045,172 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_folded: bool,
   },
+  /// Sketch profiles (or text) raised from or sunk into a face, flat or curved.
+  Emboss {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    face: FaceRef,
+    depth: String,
+    /// Sink into the face instead of raising.
+    #[serde(default)]
+    deboss: bool,
+    /// Wrap around a cylindrical face (keeping lengths) instead of projecting.
+    #[serde(default)]
+    wrap: bool,
+  },
+  /// Solids from the closed cells that bodies and planes bound.
+  BoundaryFill {
+    #[serde(default)]
+    tools: Vec<BodyId>,
+    #[serde(default)]
+    planes: Vec<PlaneRef>,
+    /// A point inside each cell to keep; empty = every cell.
+    #[serde(default)]
+    cells: Vec<[f64; 3]>,
+    #[serde(default)]
+    operation: Operation,
+    /// Remove the tool bodies afterwards.
+    #[serde(default)]
+    remove_tools: bool,
+  },
+  /// Replaces flat faces of a body with a surface (a face of another body, or a plane): the
+  /// body grows or shrinks to it and the neighbouring faces are extended or trimmed.
+  ReplaceFace {
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    target: Option<FaceRef>,
+    #[serde(default)]
+    plane: Option<PlaneRef>,
+  },
+  /// Extends open edges of surface bodies outward by a distance.
+  SurfaceExtend {
+    edges: Vec<EdgeRef>,
+    distance: String,
+    #[serde(default)]
+    mode: surface::ExtendMode,
+  },
+  /// Removes holes from faces and/or restores their untrimmed outer boundary.
+  Untrim {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    bodies: Vec<BodyId>,
+    #[serde(default)]
+    loops: surface::UntrimLoops,
+  },
+  /// Trims surface bodies with another body or with sketch curves projected onto them.
+  TrimWith {
+    bodies: Vec<BodyId>,
+    tool: surface::TrimTool,
+    /// Keep the other side.
+    #[serde(default)]
+    flip: bool,
+    /// Points picking the pieces to keep (instead of a side).
+    #[serde(default)]
+    keep: Vec<[f64; 3]>,
+  },
+  /// Sheet metal lofted flange: a sheet between two profiles (closed profiles are opened by the
+  /// rule's gap so the flange unfolds). The profiles are one face of the sheet.
+  LoftedFlange {
+    from: LoftProfile,
+    to: LoftProfile,
+    #[serde(default)]
+    method: LoftMethod,
+    /// Press brake: how many bends (facet boundaries) to aim for.
+    #[serde(default = "lofted_bends")]
+    bends: String,
+    /// Put the material on the other side of the profiles.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    rule: String,
+  },
+  /// Sheet metal miter flange: an open sketch profile (drawn across the first edge, starting on
+  /// it) swept along a chain of sheet edges, with mitred corners.
+  MiterFlange {
+    sketch: FeatureId,
+    /// The profile's curves; empty = every non-construction line and arc in the sketch.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    edges: Vec<EdgeRef>,
+    #[serde(default)]
+    corners: CornerMode,
+  },
+  /// A saved joint origin on a component: a frame (from a face, an edge or a point, then
+  /// offset, turned and flipped) that joints can mate to and that moves with the component.
+  JointOrigin {
+    #[serde(default = "no_component")]
+    component: ComponentId,
+    #[serde(default = "origin_point")]
+    geometry: JointGeometry,
+    /// Rotation about the origin's Z axis.
+    #[serde(default = "zero")]
+    angle: String,
+    /// Offset along the origin's Z axis.
+    #[serde(default = "zero")]
+    offset: String,
+    /// Reverse the Z axis.
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Components that move as one: a joint moving any of them moves them all.
+  RigidGroup {
+    #[serde(default)]
+    components: Vec<ComponentId>,
+    /// Where joints had put each member when the group was made (column-major matrices, one per
+    /// component). Members that joints haven't moved since, e.g. bodies modeled after the joint,
+    /// are brought along by the others' movement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    poses: Vec<[f64; 16]>,
+  },
+  /// Drives one joint's motion from another's (gears, rack and pinion, leadscrews): when the
+  /// leader moves `leader_value`, the follower moves `follower_value`.
+  MotionLink {
+    #[serde(default = "no_feature")]
+    leader: FeatureId,
+    #[serde(default)]
+    leader_motion: assembly::MotionAxis,
+    #[serde(default = "no_feature")]
+    follower: FeatureId,
+    #[serde(default)]
+    follower_motion: assembly::MotionAxis,
+    #[serde(default = "full_turn")]
+    leader_value: String,
+    #[serde(default = "full_turn")]
+    follower_value: String,
+    #[serde(default)]
+    reverse: bool,
+  },
+  /// A component inserted from another design: the source's bodies, stored as BRep text. With a
+  /// `source`, it is a linked reference to a data hub design that can be updated to the source's
+  /// newest version (or unlinked to keep a local copy).
+  InsertDesign {
+    #[serde(default)]
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<assembly::HubSource>,
+    #[serde(default)]
+    breps: Vec<String>,
+    #[serde(default = "zeros")]
+    translate: [String; 3],
+  },
+}
+
+fn lofted_bends() -> String {
+  "8".to_string()
+}
+
+fn no_component() -> ComponentId {
+  ComponentId(0)
+}
+
+fn no_feature() -> FeatureId {
+  FeatureId(0)
+}
+
+fn origin_point() -> JointGeometry {
+  JointGeometry::Point { point: [0.0; 3], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] }
 }
 
 fn stitch_tolerance() -> String {
@@ -1072,6 +1318,19 @@ impl FeatureKind {
       FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
       FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
       FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
+      FeatureKind::Emboss { deboss: true, .. } => "Deboss",
+      FeatureKind::Emboss { .. } => "Emboss",
+      FeatureKind::BoundaryFill { .. } => "BoundaryFill",
+      FeatureKind::ReplaceFace { .. } => "ReplaceFace",
+      FeatureKind::SurfaceExtend { .. } => "Extend",
+      FeatureKind::Untrim { .. } => "Untrim",
+      FeatureKind::TrimWith { .. } => "Trim",
+      FeatureKind::LoftedFlange { .. } => "LoftedFlange",
+      FeatureKind::MiterFlange { .. } => "MiterFlange",
+      FeatureKind::JointOrigin { .. } => "JointOrigin",
+      FeatureKind::RigidGroup { .. } => "RigidGroup",
+      FeatureKind::MotionLink { .. } => "MotionLink",
+      FeatureKind::InsertDesign { .. } => "Insert",
     }
   }
 
@@ -1081,6 +1340,7 @@ impl FeatureKind {
       FeatureKind::Flange { rule, .. }
       | FeatureKind::ContourFlange { rule, .. }
       | FeatureKind::ConvertToSheetMetal { rule, .. } => Some(rule.as_str()),
+      FeatureKind::LoftedFlange { rule, .. } => Some(rule.as_str()),
       _ => None,
     }
   }
@@ -1103,8 +1363,12 @@ impl FeatureKind {
       | FeatureKind::ContourFlange { sketch, .. }
       | FeatureKind::Hole { sketch, .. }
       | FeatureKind::Bend { sketch, .. } => vec![*sketch],
-      FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.sketch).collect(),
-      FeatureKind::Sweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::Loft { sections, rails, centerline, .. } => {
+        sections.iter().map(|s| s.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
+      }
+      FeatureKind::Sweep { sketch, path_sketch, rail, .. } => {
+        std::iter::once(*sketch).chain(std::iter::once(*path_sketch)).chain(rail.iter().map(|r| r.sketch)).collect()
+      }
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
@@ -1126,6 +1390,17 @@ impl FeatureKind {
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
       FeatureKind::CircularPattern { axis, .. } => axis_dep(axis),
       FeatureKind::Move { axis: Some(axis), .. } => axis_dep(axis),
+      FeatureKind::Emboss { sketch, .. } => vec![*sketch],
+      FeatureKind::BoundaryFill { planes, .. } => planes.iter().flat_map(plane_dep).collect(),
+      FeatureKind::ReplaceFace { plane: Some(plane), .. } => plane_dep(plane),
+      FeatureKind::TrimWith { tool: surface::TrimTool::Sketch { sketch, .. }, .. } => vec![*sketch],
+      FeatureKind::LoftedFlange { from, to, .. } => vec![from.sketch, to.sketch],
+      FeatureKind::MiterFlange { sketch, .. } => vec![*sketch],
+      FeatureKind::Joint { moving_origin, fixed_origin, .. } => {
+        [moving_origin, fixed_origin].into_iter().filter_map(assembly::JointGeometry::origin).collect()
+      }
+      FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
+      FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       _ => vec![],
     }
   }
@@ -1173,6 +1448,7 @@ impl Design {
       drawings: Vec::new(),
       attributes: Vec::new(),
       cam: Vec::new(),
+      contact_sets: Vec::new(),
       next_id: 1,
     }
   }
@@ -1356,7 +1632,7 @@ impl Design {
       }
     }
     for r in &self.sheet_metal_rules {
-      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap]
+      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap, &r.corner_relief_size]
         .iter()
         .any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
       {
@@ -1384,9 +1660,15 @@ impl Design {
       for_each_expr(&mut f.kind, &mut |e| *e = rename_ident(e, old, new));
     }
     for r in &mut self.sheet_metal_rules {
-      for e in
-        [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor, &mut r.relief_width, &mut r.relief_depth, &mut r.gap]
-      {
+      for e in [
+        &mut r.thickness,
+        &mut r.bend_radius,
+        &mut r.k_factor,
+        &mut r.relief_width,
+        &mut r.relief_depth,
+        &mut r.gap,
+        &mut r.corner_relief_size,
+      ] {
         *e = rename_ident(e, old, new);
       }
     }
@@ -1449,8 +1731,21 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+      if let FeatureKind::JointOrigin { component, .. } = &f.kind
+        && *component == id
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
+      if let FeatureKind::RigidGroup { components, .. } = &f.kind
+        && components.contains(&id)
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
     }
     self.components.retain(|c| c.id != id);
+    for cs in &mut self.contact_sets {
+      cs.components.retain(|c| *c != id);
+    }
     Ok(())
   }
 
@@ -1583,9 +1878,9 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, .. } => {
+    FeatureKind::Fillet { radius, radius2, setback, .. } => {
       f(radius);
-      if let Some(r) = radius2 {
+      for r in [radius2, setback].into_iter().flatten() {
         f(r);
       }
     }
@@ -1708,7 +2003,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Thicken { thickness, .. } => f(thickness),
-    FeatureKind::SurfaceOffset { distance, .. } => f(distance),
+    FeatureKind::SurfaceOffset { distance, face_distances, .. } => {
+      f(distance);
+      for fd in face_distances {
+        f(&mut fd.distance);
+      }
+    }
     FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
     FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
     FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
@@ -1720,7 +2020,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::Patch { .. }
     | FeatureKind::Unstitch { .. }
     | FeatureKind::ReverseNormal { .. } => {}
-    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } | FeatureKind::SplitBody { .. } => {}
+    FeatureKind::Loft { .. } | FeatureKind::SplitBody { .. } => {}
+    FeatureKind::Sweep { twist, .. } => {
+      if !twist.is_empty() {
+        f(twist);
+      }
+    }
     FeatureKind::Mirror { .. }
     | FeatureKind::Combine { .. }
     | FeatureKind::Import { .. }
@@ -1729,6 +2034,26 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. } => {}
+    FeatureKind::Emboss { depth, .. } => f(depth),
+    FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. } => {}
+    FeatureKind::SurfaceExtend { distance, .. } => f(distance),
+    FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
+    FeatureKind::LoftedFlange { bends, .. } => f(bends),
+    FeatureKind::MiterFlange { .. } => {}
+    FeatureKind::JointOrigin { angle, offset, .. } => {
+      f(angle);
+      f(offset);
+    }
+    FeatureKind::MotionLink { leader_value, follower_value, .. } => {
+      f(leader_value);
+      f(follower_value);
+    }
+    FeatureKind::InsertDesign { translate, .. } => {
+      for t in translate.iter_mut() {
+        f(t);
+      }
+    }
+    FeatureKind::RigidGroup { .. } => {}
   }
 }
 
