@@ -21,6 +21,7 @@ roughly in the order it would pay off.
 | UI        | Drag manipulators (arrows) for extrude distance and other values             |
 | UI        | Transparent preview bodies, section analysis, measure between two entities   |
 | View      | GPU renderer (wgpu) for big models; the CPU one stays for the CLI            |
+| Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 
 ## Files and data
 
