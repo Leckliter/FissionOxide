@@ -100,6 +100,26 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 
 | Phase | Item | State |
 |---|---|---|
-| 0 | Green build and CI | in progress |
-| 0 | Reference parts harness | in progress |
+| 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
+| 0 | Reference parts harness | done: **70 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
+
+### Reference part failures to fix
+
+Wrong results:
+
+- **05** An outward taper extrude rounds the corners (10 faces, should be 6).
+- **26** The profile finder doesn't split a circle where a tangent line ends on it, so a belt
+  shape never becomes a region. The solver also leaves tangent points about 4e-5 mm off.
+- **42** Hole walls are split into two faces where overlapping patterned holes meet; volume is
+  right. Needs face unification after booleans.
+- **83** A symmetric thicken leaves a cylindrical wall as two unrecognised faces.
+- **69, 75** Sheet metal corners: tray corners and the trimming of a second edge flange differ
+  from the reference convention.
+
+Missing options:
+
+- **37** Fillet at the apex of a loft-to-point (no edge found where expected).
+- **44, 45** Shell with sharp (intersection) joins; only rounded joins exist.
+- **78–81** Variable fillets: radius down to zero, chord length, taper to fit, several radii
+  along the edge.
