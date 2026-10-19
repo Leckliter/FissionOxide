@@ -42,6 +42,9 @@ pub enum Tool {
   Slot,
   Point,
   Dimension,
+  Spline,
+  Trim,
+  Extend,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -234,13 +237,16 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     pick_kind(|p| matches!(p, Pick::Edge { .. })).or(exact)
   };
   // while a sketch tool draws, only points matter for snapping
-  if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
+  if sketching && matches!(app.tool, Tool::Trim | Tool::Extend) {
+    // trim / extend pick curves
+    app.hover = pick_kind(|p| matches!(p, Pick::SketchCurve { .. }));
+  } else if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   }
 }
 
 fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
-  let profiles_of: Vec<FeatureId> = app.dialog.as_ref().and_then(|d| d.profile_sketch()).into_iter().collect();
+  let profiles_of: Vec<FeatureId> = app.dialog.as_ref().map(|d| d.profile_sketches()).unwrap_or_default();
   let key = RenderKey {
     revision: app.s.revision,
     cam: app.cam,
@@ -351,15 +357,36 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   }
   let sketching = app.s.edit_sketch.is_some();
   if !sketching || app.tool == Tool::Select {
-    select_click(app, add);
+    // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
+    select_click(app, add || app.dialog.is_some());
     return;
   }
   if app.tool == Tool::Dimension {
     dimension_click(app, pos, add);
     return;
   }
-  let Some((sk, _)) = sketch_plane(app) else { return };
+  let Some((sk, plane)) = sketch_plane(app) else { return };
+  if matches!(app.tool, Tool::Trim | Tool::Extend) {
+    let (o, d) = view.ray(&app.cam, pos);
+    let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
+    let mut params = json!({"sketch": sk.0, "at": plane.to_local(hit)});
+    if let Some(Pick::SketchCurve { curve, .. }) = app.hover {
+      params["curve"] = json!(curve.0);
+    }
+    let cmd = if app.tool == Tool::Trim { "sketch.trim" } else { "sketch.extend" };
+    app.run(cmd, params);
+    return;
+  }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
+  if app.tool == Tool::Spline {
+    // clicking the last point again finishes the spline
+    if app.tstate.pts.last().is_some_and(|l| (l[0] - p[0]).hypot(l[1] - p[1]) < 1e-9) {
+      finish_spline(app);
+    } else {
+      app.tstate.pts.push(p);
+    }
+    return;
+  }
   let pts = &mut app.tstate.pts;
   pts.push(p);
   let n = pts.len();
@@ -408,6 +435,18 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
       app.tstate.pts.pop();
     }
   }
+}
+
+/// Commits the fit-point spline being drawn (Enter, or clicking its last point again).
+/// Returns whether there was a spline to commit.
+pub fn finish_spline(app: &mut App) -> bool {
+  if app.tool != Tool::Spline || app.tstate.pts.len() < 2 {
+    return false;
+  }
+  let pts = std::mem::take(&mut app.tstate.pts);
+  let Some(sk) = app.s.edit_sketch else { return false };
+  app.run("sketch.spline", json!({"sketch": sk.0, "points": pts}));
+  true
 }
 
 fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -733,7 +772,7 @@ fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
 /// Rubber-band preview of the shape being drawn.
 fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
   let Some((_, plane)) = sketch_plane(app) else { return };
-  if app.tool == Tool::Select || app.tool == Tool::Dimension {
+  if matches!(app.tool, Tool::Select | Tool::Dimension | Tool::Trim | Tool::Extend) {
     return;
   }
   let Some(pos) = resp.hover_pos() else { return };
@@ -765,6 +804,11 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   let pts = &app.tstate.pts;
   match (app.tool, pts.as_slice()) {
     (Tool::Line, [.., last]) => line(*last, cur),
+    (Tool::Spline, [_, ..]) => {
+      let mut all = pts.clone();
+      all.push(cur);
+      poly(&all, false);
+    }
     (Tool::Rect, [a]) => poly(&[*a, [cur[0], a[1]], cur, [a[0], cur[1]]], true),
     (Tool::CenterRect, [c]) => {
       let o = [2.0 * c[0] - cur[0], 2.0 * c[1] - cur[1]];
@@ -813,6 +857,9 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Polygon) => "Polygon: centre, then a vertex",
     (true, Tool::Slot) => "Slot: first centre, second centre, then the width",
     (true, Tool::Point) => "Point: click to place",
+    (true, Tool::Spline) => "Spline: click fit points · click the last point again or Enter to finish",
+    (true, Tool::Trim) => "Trim: click the piece of a curve to remove",
+    (true, Tool::Extend) => "Extend: click near the end of a line to extend it to the next curve",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
     (true, Tool::Select) => "Select / drag points · Del deletes · constraints apply to the selection",
     (false, _) => return,

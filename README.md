@@ -88,10 +88,13 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Orbit / pan / zoom     | Right-drag / middle-drag (or Shift+right-drag) / wheel, or the navigation bar's Orbit, Pan and Zoom modes |
 | Standard views         | Click the ViewCube faces; ⌂ or Home for the home view       |
 | New sketch             | Select a planar face, then Create Sketch, or pick XY/XZ/YZ; double-click an origin plane in the browser |
-| Sketch tools           | L line, R rectangle, C circle, A arc, P point, D dimension  |
+| Sketch tools           | L line, R rectangle, C circle, A arc, P point, D dimension, T trim, O offset |
+| Spline                 | Fit Point Spline: click points, then click the last one again (or Enter) |
 | Angle dimension        | Dimension tool: Shift-click a line, then click another line |
 | Construction geometry  | Select curves, press X                                      |
 | Extrude / Fillet       | E / F (select profiles or edges first)                      |
+| Hole / Press Pull / Joint | H / Q / J                                                |
+| Picking in a command   | With a command dialog open, clicks add to (or remove from) its selection |
 | Edit a feature         | Double-click it in the timeline                             |
 | Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |
 | All commands of a group | Click the group name under the toolbar icons (CREATE ▾, MODIFY ▾, …) |

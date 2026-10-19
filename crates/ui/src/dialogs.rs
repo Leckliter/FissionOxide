@@ -32,6 +32,36 @@ pub enum Kind {
   Move,
   OffsetPlane,
   Inspect,
+  Loft,
+  Sweep,
+  Hole,
+  PressPull,
+  Draft,
+  SplitBody,
+  // sheet metal
+  Flange,
+  Hem,
+  Fold,
+  ConvertSheet,
+  Rip,
+  Unfold,
+  SheetRules,
+  FlatPattern,
+  // assembly
+  NewComponent,
+  Joint,
+  Material,
+  Interference,
+  Bom,
+  // sketch modify (run on the sketch being edited)
+  SkFillet,
+  SkChamfer,
+  SkChamfer2,
+  SkOffset,
+  SkMirror,
+  SkCircPattern,
+  SkRectPattern,
+  Project,
 }
 
 impl Kind {
@@ -54,6 +84,32 @@ impl Kind {
       Kind::Move => "MOVE / ROTATE",
       Kind::OffsetPlane => "OFFSET PLANE",
       Kind::Inspect => "PROPERTIES",
+      Kind::Loft => "LOFT",
+      Kind::Sweep => "SWEEP",
+      Kind::Hole => "HOLE",
+      Kind::PressPull => "PRESS PULL",
+      Kind::Draft => "DRAFT",
+      Kind::SplitBody => "SPLIT BODY",
+      Kind::Flange => "FLANGE",
+      Kind::Hem => "HEM",
+      Kind::Fold => "FOLD",
+      Kind::ConvertSheet => "CONVERT TO SHEET METAL",
+      Kind::Rip => "RIP",
+      Kind::Unfold => "UNFOLD",
+      Kind::SheetRules => "SHEET METAL RULES",
+      Kind::FlatPattern => "FLAT PATTERN",
+      Kind::NewComponent => "NEW COMPONENT",
+      Kind::Joint => "JOINT",
+      Kind::Material => "PHYSICAL MATERIAL",
+      Kind::Interference => "INTERFERENCE",
+      Kind::Bom => "BILL OF MATERIALS",
+      Kind::SkFillet => "SKETCH FILLET",
+      Kind::SkChamfer | Kind::SkChamfer2 => "SKETCH CHAMFER",
+      Kind::SkOffset => "OFFSET",
+      Kind::SkMirror => "SKETCH MIRROR",
+      Kind::SkCircPattern => "CIRCULAR PATTERN",
+      Kind::SkRectPattern => "RECTANGULAR PATTERN",
+      Kind::Project => "PROJECT",
     }
   }
 
@@ -76,13 +132,107 @@ impl Kind {
       Kind::Move => Icon::Move,
       Kind::OffsetPlane => Icon::Plane,
       Kind::Inspect => Icon::Measure,
+      Kind::Loft => Icon::Loft,
+      Kind::Sweep => Icon::Sweep,
+      Kind::Hole => Icon::Hole,
+      Kind::PressPull => Icon::PressPull,
+      Kind::Draft => Icon::Draft,
+      Kind::SplitBody => Icon::SplitBody,
+      Kind::Flange => Icon::Flange,
+      Kind::Hem => Icon::Hem,
+      Kind::Fold => Icon::Fold,
+      Kind::ConvertSheet => Icon::ConvertSheet,
+      Kind::Rip => Icon::Rip,
+      Kind::Unfold => Icon::Unfold,
+      Kind::SheetRules => Icon::SmRules,
+      Kind::FlatPattern => Icon::FlatPattern,
+      Kind::NewComponent => Icon::Component,
+      Kind::Joint => Icon::JointOrigin,
+      Kind::Material => Icon::PhysMaterial,
+      Kind::Interference => Icon::Interference,
+      Kind::Bom => Icon::Bom,
+      Kind::SkFillet => Icon::SkFillet,
+      Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
+      Kind::SkOffset => Icon::SkOffset,
+      Kind::SkMirror => Icon::SkMirror,
+      Kind::SkCircPattern => Icon::SkCircPattern,
+      Kind::SkRectPattern => Icon::SkRectPattern,
+      Kind::Project => Icon::Project,
     }
+  }
+
+  /// Icon, name and tooltip of the dialogs added with the loft … sketch-modify commands.
+  pub(crate) fn info(self) -> (Icon, &'static str, &'static str) {
+    let (name, hint) = match self {
+      Kind::Loft => ("Loft", "Blend through profiles on two or more sketches"),
+      Kind::Sweep => ("Sweep", "Sweep a profile along a path sketch"),
+      Kind::Hole => ("Hole", "Drill holes at a sketch's points (H)"),
+      Kind::PressPull => ("Press Pull", "Push or pull faces along their normals (Q)"),
+      Kind::Draft => ("Draft", "Taper faces about a pull direction"),
+      Kind::SplitBody => ("Split Body", "Split bodies along a plane or planar face"),
+      Kind::Flange => ("Flange", "Sheet metal from a profile, an open path or sheet edges"),
+      Kind::Hem => ("Hem", "Fold sheet edges back on themselves"),
+      Kind::Fold => ("Fold", "Bend a flat sheet along a sketch line"),
+      Kind::ConvertSheet => ("Convert to Sheet Metal", "Turn a thin solid into sheet metal"),
+      Kind::Rip => ("Rip", "Slit a solid along edges so it can unfold"),
+      Kind::Unfold => ("Unfold", "Flatten a sheet metal body onto a face"),
+      Kind::SheetRules => ("Sheet Metal Rules", "Thickness, bend radius and reliefs of sheet metal"),
+      Kind::FlatPattern => ("Create Flat Pattern", "Flat pattern size and bends, and DXF export"),
+      Kind::NewComponent => ("New Component", "Make a component from the selected bodies"),
+      Kind::Joint => ("Joint", "Join two components at a face or edge of each"),
+      Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
+      Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
+      Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
+      Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
+      Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
+      Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
+      Kind::SkOffset => ("Offset", "Offset a chain of curves (O)"),
+      Kind::SkMirror => ("Mirror", "Mirror sketch curves across a line"),
+      Kind::SkCircPattern => ("Circular Pattern", "Copy sketch curves around a point"),
+      Kind::SkRectPattern => ("Rectangular Pattern", "Copy sketch curves in rows and columns"),
+      Kind::Project => ("Project", "Project a body's or face's edges into the sketch"),
+      _ => (self.title(), ""),
+    };
+    (self.icon(), name, hint)
   }
 
   /// Dialogs whose input is picked edges/faces/bodies of the model: they preview on demand,
   /// because a preview changes the very geometry being picked.
   fn picks_model(self) -> bool {
-    matches!(self, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::Combine)
+    matches!(
+      self,
+      Kind::Fillet
+        | Kind::Chamfer
+        | Kind::Shell
+        | Kind::Combine
+        | Kind::PressPull
+        | Kind::Draft
+        | Kind::Hem
+        | Kind::Rip
+        | Kind::ConvertSheet
+        | Kind::Unfold
+        | Kind::Joint
+    )
+  }
+
+  /// Dialogs that only show information (no OK, nothing applied).
+  fn reports(self) -> bool {
+    matches!(self, Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom)
+  }
+
+  /// Dialogs that change the sketch being edited.
+  pub fn sketch_edit(self) -> bool {
+    matches!(
+      self,
+      Kind::SkFillet
+        | Kind::SkChamfer
+        | Kind::SkChamfer2
+        | Kind::SkOffset
+        | Kind::SkMirror
+        | Kind::SkCircPattern
+        | Kind::SkRectPattern
+        | Kind::Project
+    )
   }
 }
 
@@ -131,6 +281,31 @@ pub struct Dialog {
   at: [String; 2],
   translate: [String; 3],
   keep_tools: bool,
+  /// Loft sections: sketch and a point inside the profile.
+  sections: Vec<(u32, [f64; 2])>,
+  /// Sweep path sketch.
+  path: Option<FeatureId>,
+  /// Picked sketch curves.
+  curves: Vec<u32>,
+  /// Mirror / fold line.
+  line: Option<u32>,
+  /// Joint origins in pick order: body and `{"face"|"edge": ...}`.
+  origins: Vec<(u32, Value)>,
+  /// Components of the picked bodies / joint origins (None = a root body).
+  comps: Vec<Option<u32>>,
+  /// Hole type, flange type or joint type.
+  choice: &'static str,
+  /// Edge flange position / sheet metal relief shape.
+  position: &'static str,
+  rule: String,
+  rules: Vec<String>,
+  flag: bool,
+  flag2: bool,
+  d: String,
+  e: String,
+  name: String,
+  /// Output of report dialogs (flat pattern, interference, BOM).
+  report: Option<Value>,
 }
 
 impl Dialog {
@@ -171,7 +346,28 @@ impl Dialog {
       at: ["0".into(), "0".into()],
       translate: ["0".into(), "0".into(), "0".into()],
       keep_tools: false,
+      sections: Vec::new(),
+      path: None,
+      curves: Vec::new(),
+      line: None,
+      origins: Vec::new(),
+      comps: Vec::new(),
+      choice: "",
+      position: "",
+      rule: String::new(),
+      rules: Vec::new(),
+      flag: false,
+      flag2: false,
+      d: String::new(),
+      e: String::new(),
+      name: String::new(),
+      report: None,
     }
+  }
+
+  /// Does this dialog preview on demand (see [`Kind::picks_model`])?
+  fn picks(&self) -> bool {
+    self.kind.picks_model() || (self.kind == Kind::Flange && self.choice == "edge")
   }
 
   /// Opens a dialog for a new feature, capturing the current selection.
@@ -188,7 +384,9 @@ impl Dialog {
         d.profiles.push(p.interior_point());
       }
     }
-    if matches!(kind, Kind::Extrude | Kind::Revolve) && d.sketch.is_none() {
+    if matches!(kind, Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold)
+      && d.sketch.is_none()
+    {
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
       if let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
@@ -236,6 +434,89 @@ impl Dialog {
       Kind::Mirror => d.join = false,
       Kind::RectPattern | Kind::CircPattern => d.join = false,
       Kind::Combine => d.op = "join",
+      Kind::Loft => {
+        d.sections = sel_sections(s);
+      }
+      Kind::Sweep => {
+        d.path = s
+          .design
+          .features
+          .iter()
+          .take(s.design.active_len())
+          .rev()
+          .find(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && Some(f.id) != d.sketch)
+          .map(|f| f.id);
+      }
+      Kind::Hole => {
+        d.choice = "simple";
+        d.a = "5 mm".into();
+        d.b = "10 mm".into();
+        d.c = "9 mm".into();
+        d.d = "3 mm".into();
+        d.e = "90 deg".into();
+        d.op = "cut";
+      }
+      Kind::PressPull => d.distance = "2 mm".into(),
+      Kind::Draft => {
+        d.angle = "3 deg".into();
+        d.plane = json!("xy");
+        d.plane_label = "XY plane".into();
+      }
+      Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::Flange => {
+        // edges picked → edge flange; a sketch of open curves only → contour flange
+        let open_only = d.sketch.and_then(|sk| s.model.sketches.get(&sk)).is_some_and(|r| r.profiles.is_empty());
+        d.choice = if !d.edges.is_empty() {
+          "edge"
+        } else if open_only {
+          "contour"
+        } else {
+          "base"
+        };
+        d.distance = "10 mm".into();
+        d.angle = "90 deg".into();
+        d.position = "adjacent";
+        d.op = "new_body";
+      }
+      Kind::Hem => {
+        d.distance = "5 mm".into();
+        d.distance2 = "0.5 mm".into();
+      }
+      Kind::Fold => {
+        d.angle = "90 deg".into();
+        d.line = d.sketch.and_then(|sk| s.design.sketch(sk).ok()).and_then(|sk| {
+          sk.curves.iter().rev().find(|c| matches!(c.kind, clf_engine::sketch::CurveKind::Line { .. })).map(|c| c.id.0)
+        });
+      }
+      Kind::Rip => d.distance = "0.5 mm".into(),
+      Kind::SheetRules => {
+        d.load_rule(s, "");
+      }
+      Kind::NewComponent => {
+        d.name = format!("Component{}", s.design.components.len() + 1);
+      }
+      Kind::Joint => {
+        d.choice = "rigid";
+        d.angle = "0 deg".into();
+        d.distance = "0 mm".into();
+        d.origins = sel_origins(s);
+      }
+      Kind::Material => d.name = "Steel".into(),
+      Kind::SkFillet => d.radius = "2 mm".into(),
+      Kind::SkChamfer | Kind::SkChamfer2 => {
+        d.distance = "2 mm".into();
+        d.distance2 = "3 mm".into();
+      }
+      Kind::SkOffset => d.distance = "2 mm".into(),
+      Kind::SkCircPattern => {
+        d.count = "6".into();
+        d.angle = "360 deg".into();
+      }
+      Kind::SkRectPattern => {
+        d.count = "3".into();
+        d.count2 = "2".into();
+      }
+      Kind::Project => d.flag = true,
       Kind::Extrude => {
         // extruding from a face sketch defaults to Join, like Fusion
         if let Some(sk) = d.sketch
@@ -246,12 +527,40 @@ impl Dialog {
       }
       _ => {}
     }
+    if matches!(
+      kind,
+      Kind::SkFillet
+        | Kind::SkChamfer
+        | Kind::SkChamfer2
+        | Kind::SkOffset
+        | Kind::SkMirror
+        | Kind::SkCircPattern
+        | Kind::SkRectPattern
+    ) {
+      d.curves = sel_curves(s);
+      if kind == Kind::SkMirror {
+        d.line = mirror_line(s, &d.curves);
+        d.curves.retain(|c| Some(*c) != d.line);
+      }
+    }
+    d.comps = d.bodies.iter().map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
+    if kind == Kind::Joint {
+      d.comps = d.origins.iter().map(|(b, _)| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
+    }
+    if matches!(kind, Kind::Flange | Kind::ConvertSheet) {
+      d.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
+    }
     // Fusion finishes the sketch when a feature starts from it
-    if matches!(kind, Kind::Extrude | Kind::Revolve) && app.s.edit_sketch.is_some() {
+    if matches!(kind, Kind::Extrude | Kind::Revolve | Kind::Loft | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold)
+      && app.s.edit_sketch.is_some()
+    {
       app.last_sketch = app.s.edit_sketch;
       let _ = app.s.execute("sketch.finish", &json!({}));
     }
-    d.dirty = !kind.picks_model();
+    if kind.reports() {
+      d.refresh_report(&mut app.s);
+    }
+    d.dirty = !d.picks();
     d
   }
 
@@ -363,7 +672,149 @@ impl Dialog {
     }
     let op = self.op;
     Some(match self.kind {
-      Kind::PickPlane | Kind::Inspect => return None,
+      Kind::PickPlane | Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom => return None,
+      Kind::Loft => (
+        "loft",
+        json!({
+          "sections": self.sections.iter().map(|(sk, p)| json!({"sketch": sk, "profile": p})).collect::<Vec<_>>(),
+          "ruled": self.flag, "closed": self.flag2, "operation": op,
+        }),
+      ),
+      Kind::Sweep => {
+        ("sweep", json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}))
+      }
+      Kind::Hole => {
+        let mut p = json!({
+          "sketch": self.sketch?.0, "kind": self.choice, "diameter": self.a, "flip": self.flip,
+        });
+        if self.flag {
+          p["through_all"] = json!(true);
+        } else {
+          p["depth"] = json!(self.b);
+        }
+        match self.choice {
+          "counterbore" => {
+            p["head_diameter"] = json!(self.c);
+            p["head_depth"] = json!(self.d);
+          }
+          "countersink" => {
+            p["head_diameter"] = json!(self.c);
+            p["head_angle"] = json!(self.e);
+          }
+          _ => {}
+        }
+        ("hole", p)
+      }
+      Kind::PressPull => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
+      Kind::Draft => {
+        ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
+      }
+      Kind::SplitBody => {
+        let mut p = json!({"plane": self.plane});
+        if !self.bodies.is_empty() {
+          p["bodies"] = json!(self.bodies);
+        }
+        ("split", p)
+      }
+      Kind::Flange => match self.choice {
+        "edge" => (
+          "sheet.edge_flange",
+          json!({
+            "edges": self.edges, "height": self.distance, "angle": self.angle, "flip": self.flip,
+            "position": self.position,
+          }),
+        ),
+        "contour" => {
+          let mut p =
+            json!({"sketch": self.sketch?.0, "distance": self.distance, "symmetric": self.flag, "flip": self.flip});
+          self.put_rule(&mut p);
+          ("sheet.contour_flange", p)
+        }
+        _ => {
+          let mut p = json!({"sketch": self.sketch?.0, "profiles": self.profiles, "flip": self.flip, "operation": op});
+          self.put_rule(&mut p);
+          ("sheet.flange", p)
+        }
+      },
+      Kind::Hem => {
+        ("sheet.hem", json!({"edges": self.edges, "length": self.distance, "gap": self.distance2, "flip": self.flip}))
+      }
+      Kind::Fold => (
+        "sheet.bend",
+        json!({"sketch": self.sketch?.0, "line": self.line?, "angle": self.angle, "flip": self.flip, "flip_side": self.flag}),
+      ),
+      Kind::ConvertSheet => {
+        let mut p = json!({"body": self.bodies.first()?});
+        if let Some(f) = self.faces.first() {
+          p["face"] = f.clone();
+        }
+        self.put_rule(&mut p);
+        ("sheet.convert", p)
+      }
+      Kind::Rip => ("sheet.rip", json!({"edges": self.edges, "gap": self.distance})),
+      Kind::Unfold => {
+        let mut p = json!({});
+        if let Some(b) = self.bodies.first() {
+          p["body"] = json!(b);
+        }
+        if let Some(f) = self.faces.first() {
+          p["face"] = f.clone();
+        }
+        ("sheet.unfold", p)
+      }
+      Kind::SheetRules => (
+        "sheet.rule",
+        json!({
+          "name": self.name, "thickness": self.a, "bend_radius": self.b, "k_factor": self.c,
+          "relief": self.position, "relief_width": self.d, "relief_depth": self.e, "gap": self.distance2,
+        }),
+      ),
+      Kind::NewComponent => ("component.create", json!({"name": self.name, "bodies": self.bodies})),
+      Kind::Joint => {
+        let (_, mo) = self.origins.first()?;
+        let (_, fo) = self.origins.get(1)?;
+        (
+          "joint",
+          json!({
+            "moving": (*self.comps.first()?)?, "moving_origin": mo, "fixed": self.comps.get(1).copied().flatten(),
+            "fixed_origin": fo, "kind": self.choice, "angle": self.angle, "offset": self.distance, "flip": self.flip,
+          }),
+        )
+      }
+      Kind::Material => {
+        ("component.material", json!({"component": self.comps.iter().flatten().next()?, "material": self.name}))
+      }
+      Kind::SkFillet => ("sketch.fillet", json!({"curves": self.curves, "radius": self.radius})),
+      Kind::SkChamfer => ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance})),
+      Kind::SkChamfer2 => {
+        ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "distance2": self.distance2}))
+      }
+      Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
+      Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
+      Kind::SkCircPattern => (
+        "sketch.pattern_circ",
+        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle}),
+      ),
+      Kind::SkRectPattern => {
+        let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
+        let mut p = json!({
+          "curves": self.curves, "direction": v(&self.dir), "count": self.count.trim().parse::<u64>().ok()?,
+          "spacing": self.spacing,
+        });
+        if self.use_dir2 {
+          p["direction2"] = json!(v(&self.dir2));
+          p["count2"] = json!(self.count2.trim().parse::<u64>().ok()?);
+          p["spacing2"] = json!(self.spacing2);
+        }
+        ("sketch.pattern_rect", p)
+      }
+      Kind::Project => {
+        let mut p = json!({"body": self.bodies.first()?, "associative": self.flag});
+        if let Some(f) = self.faces.first().and_then(|f| f.get("face")) {
+          p["face"] = f.clone();
+        }
+        ("sketch.project", p)
+      }
       Kind::Extrude => (
         "extrude",
         json!({
@@ -469,6 +920,10 @@ impl Dialog {
     self.dirty = false;
     let selection = s.selection.clone();
     self.withdraw(s);
+    if self.kind.reports() {
+      self.refresh_report(s);
+      return;
+    }
     let Some((cmd, params)) = self.command() else {
       return;
     };
@@ -482,7 +937,7 @@ impl Dialog {
       }
       Err(e) => self.error = Some(e.0),
     }
-    if !self.kind.picks_model() {
+    if !self.picks() {
       s.selection = selection;
     }
   }
@@ -497,6 +952,24 @@ impl Dialog {
       Kind::Fillet | Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
+      Kind::Loft => self.sections.len() >= 2,
+      Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
+      Kind::Hole | Kind::Fold => self.sketch.is_some(),
+      Kind::PressPull | Kind::Draft => !self.faces.is_empty(),
+      Kind::Flange => {
+        if self.choice == "edge" {
+          !self.edges.is_empty()
+        } else {
+          self.sketch.is_some()
+        }
+      }
+      Kind::Hem | Kind::Rip => !self.edges.is_empty(),
+      Kind::ConvertSheet | Kind::NewComponent | Kind::Project => !self.bodies.is_empty(),
+      Kind::Joint => self.origins.len() >= 2 && self.comps.first().is_some_and(Option::is_some),
+      Kind::Material => self.comps.iter().any(Option::is_some),
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
+      Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
+      Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
       _ => true,
     }
   }
@@ -506,7 +979,7 @@ impl Dialog {
       s.undo();
       s.drop_redo();
       self.applied = false;
-      if self.kind.picks_model() && self.editing.is_none() {
+      if self.picks() && self.editing.is_none() {
         // the picks are valid again on the un-previewed model
         s.selection = self.picked_selection();
       }
@@ -529,6 +1002,16 @@ impl Dialog {
     if self.kind == Kind::Combine {
       out.extend(self.bodies.iter().map(|b| Sel::Body { body: BodyId(*b) }));
     }
+    if self.kind == Kind::Joint {
+      out.clear();
+      for (b, o) in &self.origins {
+        if let Some(i) = o.get("face").and_then(|f| get(f, "face")) {
+          out.push(Sel::Face { body: BodyId(*b), face: i });
+        } else if let Some(i) = o.get("edge").and_then(|e| get(e, "edge")) {
+          out.push(Sel::Edge { body: BodyId(*b), edge: i });
+        }
+      }
+    }
     out
   }
 
@@ -538,7 +1021,7 @@ impl Dialog {
 
   /// Is a model-picking dialog's preview showing? (Viewport clicks withdraw it first.)
   pub fn previewing_model(&self) -> bool {
-    self.applied && self.kind.picks_model() && self.editing.is_none()
+    self.applied && self.picks() && self.editing.is_none()
   }
 
   pub fn unpreview(&mut self, s: &mut Session) {
@@ -546,8 +1029,13 @@ impl Dialog {
   }
 
   /// Sketch whose profiles should stay visible/pickable while this dialog is open.
-  pub fn profile_sketch(&self) -> Option<FeatureId> {
-    matches!(self.kind, Kind::Extrude | Kind::Revolve).then_some(self.sketch).flatten()
+  pub fn profile_sketches(&self) -> Vec<FeatureId> {
+    match self.kind {
+      Kind::Extrude | Kind::Revolve | Kind::Flange | Kind::Hole | Kind::Fold => self.sketch.into_iter().collect(),
+      Kind::Sweep => self.sketch.into_iter().chain(self.path).collect(),
+      Kind::Loft => self.sections.iter().map(|(sk, _)| FeatureId(*sk)).collect(),
+      _ => Vec::new(),
+    }
   }
 
   /// Picks up selection changes made in the viewport while the dialog is open.
@@ -556,7 +1044,9 @@ impl Dialog {
       return;
     }
     match self.kind {
-      Kind::Extrude | Kind::Revolve => {
+      Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Flange
+        if !(self.kind == Kind::Flange && self.choice == "edge") =>
+      {
         let mut pts = Vec::new();
         for sel in &s.selection {
           if let Sel::Profile { sketch, index } = sel
@@ -585,6 +1075,80 @@ impl Dialog {
           self.edges = e;
         }
       }
+      Kind::Loft => {
+        let secs = sel_sections(s);
+        if !secs.is_empty() && secs != self.sections {
+          self.sections = secs;
+          self.dirty = true;
+        }
+      }
+      Kind::Hem | Kind::Rip | Kind::Flange if !self.applied => {
+        let e = sel_edges(s);
+        if e != self.edges {
+          self.edges = e;
+        }
+      }
+      Kind::PressPull | Kind::Draft if !self.applied => {
+        let f = sel_faces(s);
+        if f != self.faces {
+          self.faces = f;
+        }
+      }
+      Kind::ConvertSheet | Kind::Unfold | Kind::Project if !self.applied || !self.picks() => {
+        let f: Vec<Value> = sel_faces(s).into_iter().take(1).collect();
+        let b = sel_bodies(s);
+        if (f != self.faces || b != self.bodies) && (!b.is_empty() || self.kind != Kind::Project) {
+          self.faces = f;
+          self.bodies = b;
+          self.dirty = !self.picks();
+        }
+      }
+      Kind::SplitBody => {
+        let b = sel_only_bodies(s);
+        if b != self.bodies {
+          self.bodies = b;
+          self.dirty = true;
+        }
+      }
+      Kind::NewComponent | Kind::Material => {
+        let b = sel_bodies(s);
+        if b != self.bodies {
+          self.comps = b.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
+          self.bodies = b;
+          self.dirty = true;
+        }
+      }
+      Kind::Joint if !self.applied => {
+        let o = sel_origins(s);
+        if o != self.origins {
+          self.comps = o.iter().map(|(b, _)| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
+          self.origins = o;
+        }
+      }
+      Kind::SkFillet
+      | Kind::SkChamfer
+      | Kind::SkChamfer2
+      | Kind::SkOffset
+      | Kind::SkMirror
+      | Kind::SkCircPattern
+      | Kind::SkRectPattern => {
+        let mut c = sel_curves(s);
+        if self.kind == Kind::SkMirror {
+          c.retain(|x| Some(*x) != self.line);
+        }
+        if !c.is_empty() && c != self.curves {
+          self.curves = c;
+          self.dirty = true;
+        }
+      }
+      Kind::FlatPattern => {
+        let b = sel_bodies(s);
+        if b != self.bodies {
+          self.bodies = b;
+          self.faces = sel_faces(s).into_iter().take(1).collect();
+          self.dirty = true;
+        }
+      }
       Kind::Shell if !self.applied => {
         let f: Vec<Value> = s
           .selection
@@ -598,7 +1162,7 @@ impl Dialog {
         }
       }
       Kind::Combine | Kind::Mirror | Kind::RectPattern | Kind::CircPattern | Kind::Move
-        if !self.applied || !self.kind.picks_model() =>
+        if !self.applied || !self.picks() =>
       {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
@@ -612,7 +1176,7 @@ impl Dialog {
         }
         if !b.is_empty() && b != self.bodies {
           self.bodies = b;
-          self.dirty = !self.kind.picks_model();
+          self.dirty = !self.picks();
         }
       }
       _ => {}
@@ -672,8 +1236,8 @@ impl Dialog {
                 egui::FontId::proportional(11.0),
                 theme::GROUP_LABEL,
               );
-              if !matches!(self.kind, Kind::PickPlane | Kind::Inspect) {
-                if self.kind.picks_model() && self.editing.is_none() {
+              if self.kind != Kind::PickPlane && !self.kind.reports() {
+                if self.picks() && self.editing.is_none() {
                   let mut on = self.applied;
                   if ui.checkbox(&mut on, "Preview").changed() {
                     if self.applied {
@@ -740,6 +1304,20 @@ impl Dialog {
       Kind::Fillet | Kind::Chamfer => "select edges",
       Kind::Shell => "select faces to remove",
       Kind::Combine => "select a target body and tool bodies",
+      Kind::Loft => "select profiles on two or more sketches",
+      Kind::Sweep => "select a profile and a path sketch",
+      Kind::Hole => "sketch points to drill (Point tool) are needed",
+      Kind::Fold => "pick a sketch with a bend line",
+      Kind::PressPull | Kind::Draft => "select faces",
+      Kind::Flange if self.choice == "edge" => "select sheet edges",
+      Kind::Flange => "select a profile",
+      Kind::Hem | Kind::Rip => "select edges",
+      Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
+      Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
+      Kind::Material => "select a body of a component",
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
+      Kind::SkMirror => "select curves and a mirror line",
+      Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
       _ => "missing input",
     }
   }
@@ -999,7 +1577,567 @@ impl Dialog {
         ui.end_row();
       }
       Kind::Inspect => inspect(app, ui),
+      _ => {
+        let mut dirty = false;
+        self.more_fields(app, ui, &mut dirty);
+        if dirty && (!self.picks() || self.applied) {
+          self.dirty = true;
+        }
+      }
     }
+  }
+
+  /// Fields of the loft … sketch-modify dialogs.
+  fn more_fields(&mut self, app: &mut App, ui: &mut egui::Ui, dirty: &mut bool) {
+    let accent = self.accent();
+    let chip = |ui: &mut egui::Ui, n: usize, what: &str| {
+      let text = if n == 0 { "Select".to_string() } else { format!("{n} {what}") };
+      sel_chip(ui, accent, &text, n > 0);
+    };
+    const HOLES: [(&str, &str); 3] =
+      [("simple", "Simple"), ("counterbore", "Counterbore"), ("countersink", "Countersink")];
+    const FLANGES: [(&str, &str); 3] =
+      [("base", "Base (profile)"), ("edge", "Edge"), ("contour", "Contour (open path)")];
+    const POSITIONS: [(&str, &str); 3] = [("adjacent", "Adjacent"), ("inside", "Inside"), ("outside", "Outside")];
+    const RELIEFS: [(&str, &str); 3] = [("rectangular", "Rectangular"), ("round", "Round"), ("none", "None")];
+    const JOINTS: [(&str, &str); 7] = [
+      ("rigid", "Rigid"),
+      ("revolute", "Revolute"),
+      ("slider", "Slider"),
+      ("cylindrical", "Cylindrical"),
+      ("pin_slot", "Pin-slot"),
+      ("planar", "Planar"),
+      ("ball", "Ball"),
+    ];
+    match self.kind {
+      Kind::Loft => {
+        ui.label("Profiles");
+        chip(ui, self.sections.len(), "profiles");
+        ui.end_row();
+        for (i, (sk, _)) in self.sections.iter().enumerate() {
+          ui.label(RichText::new(format!("  Section {}", i + 1)).color(theme::MUTED));
+          ui.label(app.s.design.feature(FeatureId(*sk)).map(|f| f.name.clone()).unwrap_or_default());
+          ui.end_row();
+        }
+        Self::check(ui, "Ruled (straight between sections)", &mut self.flag, dirty);
+        Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
+        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
+      }
+      Kind::Sweep => {
+        ui.label("Profile");
+        chip(ui, self.profiles.len(), "selected");
+        ui.end_row();
+        ui.label("Path");
+        let list = Self::sketches(app, self.sketch);
+        let cur = self.path.and_then(|p| list.iter().find(|(id, _)| *id == p)).map(|(_, n)| n.clone());
+        egui::ComboBox::from_id_salt("path").selected_text(cur.unwrap_or("Pick a sketch".into())).width(140.0).show_ui(
+          ui,
+          |ui| {
+            for (id, n) in &list {
+              if ui.selectable_label(self.path == Some(*id), n).clicked() {
+                self.path = Some(*id);
+                *dirty = true;
+              }
+            }
+          },
+        );
+        ui.end_row();
+        Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
+      }
+      Kind::Hole => {
+        ui.label("Sketch");
+        ui.label(self.sketch.and_then(|s| app.s.design.feature(s)).map(|f| f.name.clone()).unwrap_or("none".into()));
+        ui.end_row();
+        ui.label("Placement");
+        ui.label(RichText::new("at the sketch's points").color(theme::MUTED));
+        ui.end_row();
+        Self::choose(ui, "Hole type", "hole", &mut self.choice, &HOLES, dirty);
+        Self::field(ui, "Diameter", &mut self.a, dirty);
+        if self.choice != "simple" {
+          Self::field(ui, "Head diameter", &mut self.c, dirty);
+          if self.choice == "counterbore" {
+            Self::field(ui, "Head depth", &mut self.d, dirty);
+          } else {
+            Self::field(ui, "Head angle", &mut self.e, dirty);
+          }
+        }
+        Self::check(ui, "Through all", &mut self.flag, dirty);
+        if !self.flag {
+          Self::field(ui, "Depth", &mut self.b, dirty);
+        }
+        Self::check(ui, "Flip direction", &mut self.flip, dirty);
+      }
+      Kind::PressPull => {
+        ui.label("Faces");
+        chip(ui, self.faces.len(), "selected");
+        ui.end_row();
+        Self::field(ui, "Distance", &mut self.distance, dirty);
+      }
+      Kind::Draft => {
+        ui.label("Faces");
+        chip(ui, self.faces.len(), "selected");
+        ui.end_row();
+        ui.label("Pull direction");
+        let before = self.plane_label.clone();
+        self.plane_choice(ui);
+        *dirty |= before != self.plane_label;
+        ui.end_row();
+        Self::field(ui, "Angle", &mut self.angle, dirty);
+        Self::check(ui, "Flip", &mut self.flip, dirty);
+      }
+      Kind::SplitBody => {
+        ui.label("Bodies to split");
+        sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
+        ui.end_row();
+        ui.label("Splitting tool");
+        self.plane_choice(ui);
+        ui.end_row();
+      }
+      Kind::Flange => {
+        let before = self.choice;
+        Self::choose(ui, "Type", "flange", &mut self.choice, &FLANGES, dirty);
+        if before != self.choice {
+          self.withdraw(&mut app.s);
+        }
+        match self.choice {
+          "edge" => {
+            ui.label("Edges");
+            chip(ui, self.edges.len(), "selected");
+            ui.end_row();
+            Self::field(ui, "Height", &mut self.distance, dirty);
+            Self::field(ui, "Bend angle", &mut self.angle, dirty);
+            Self::choose(ui, "Position", "pos", &mut self.position, &POSITIONS, dirty);
+          }
+          "contour" => {
+            ui.label("Sketch");
+            ui.label(self.sketch.and_then(|s| app.s.design.feature(s)).map(|f| f.name.clone()).unwrap_or_default());
+            ui.end_row();
+            Self::field(ui, "Distance", &mut self.distance, dirty);
+            Self::check(ui, "Symmetric", &mut self.flag, dirty);
+            self.rule_combo(ui);
+          }
+          _ => {
+            ui.label("Profiles");
+            chip(ui, self.profiles.len(), "selected");
+            ui.end_row();
+            self.rule_combo(ui);
+            Self::choose(ui, "Operation", "op", &mut self.op, &OPS[..2], dirty);
+          }
+        }
+        Self::check(ui, "Flip", &mut self.flip, dirty);
+      }
+      Kind::Hem => {
+        ui.label("Edges");
+        chip(ui, self.edges.len(), "selected");
+        ui.end_row();
+        Self::field(ui, "Length", &mut self.distance, dirty);
+        Self::field(ui, "Gap", &mut self.distance2, dirty);
+        Self::check(ui, "Flip", &mut self.flip, dirty);
+      }
+      Kind::Fold => {
+        ui.label("Sketch");
+        let list = Self::sketches(app, None);
+        let cur = self.sketch.and_then(|p| list.iter().find(|(id, _)| *id == p)).map(|(_, n)| n.clone());
+        egui::ComboBox::from_id_salt("fsk").selected_text(cur.unwrap_or_default()).width(140.0).show_ui(ui, |ui| {
+          for (id, n) in &list {
+            if ui.selectable_label(self.sketch == Some(*id), n).clicked() {
+              self.sketch = Some(*id);
+              self.line = None;
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+        ui.label("Bend line");
+        let lines = self.sketch_lines(app);
+        let cur = self.line.map(|l| format!("Sketch line {l}")).unwrap_or("Pick a line".into());
+        egui::ComboBox::from_id_salt("fline").selected_text(cur).width(140.0).show_ui(ui, |ui| {
+          for (id, label) in lines {
+            if ui.selectable_label(self.line == Some(id), label).clicked() {
+              self.line = Some(id);
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+        Self::field(ui, "Angle", &mut self.angle, dirty);
+        Self::check(ui, "Flip direction", &mut self.flip, dirty);
+        Self::check(ui, "Fold the other side", &mut self.flag, dirty);
+      }
+      Kind::ConvertSheet => {
+        ui.label("Body");
+        chip(ui, self.bodies.len().min(1), "body");
+        ui.end_row();
+        ui.label("Stationary face");
+        chip(ui, self.faces.len(), "face");
+        ui.end_row();
+        self.rule_combo(ui);
+      }
+      Kind::Rip => {
+        ui.label("Edges");
+        chip(ui, self.edges.len(), "selected");
+        ui.end_row();
+        Self::field(ui, "Gap", &mut self.distance, dirty);
+      }
+      Kind::Unfold => {
+        ui.label("Body");
+        if self.bodies.is_empty() {
+          ui.label(RichText::new("the sheet metal body").color(theme::MUTED));
+        } else {
+          chip(ui, 1, "body");
+        }
+        ui.end_row();
+        ui.label("Stationary face");
+        chip(ui, self.faces.len(), "face");
+        ui.end_row();
+      }
+      Kind::SheetRules => {
+        ui.label("Rule");
+        let cur = self.name.clone();
+        egui::ComboBox::from_id_salt("rules").selected_text(&cur).width(140.0).show_ui(ui, |ui| {
+          for r in self.rules.clone() {
+            if ui.selectable_label(cur == r, &r).clicked() {
+              self.withdraw(&mut app.s);
+              self.load_rule(&app.s, &r);
+            }
+          }
+        });
+        ui.end_row();
+        Self::field(ui, "Name", &mut self.name, dirty);
+        Self::field(ui, "Thickness", &mut self.a, dirty);
+        Self::field(ui, "Bend radius", &mut self.b, dirty);
+        Self::field(ui, "K factor", &mut self.c, dirty);
+        Self::choose(ui, "Bend relief", "relief", &mut self.position, &RELIEFS, dirty);
+        Self::field(ui, "Relief width", &mut self.d, dirty);
+        Self::field(ui, "Relief depth", &mut self.e, dirty);
+        Self::field(ui, "Gap", &mut self.distance2, dirty);
+        ui.label("");
+        ui.label(RichText::new("empty = from the thickness").small().color(theme::MUTED));
+        ui.end_row();
+      }
+      Kind::FlatPattern => {
+        ui.label("Body");
+        if self.bodies.is_empty() {
+          ui.label(RichText::new("the sheet metal body").color(theme::MUTED));
+        } else {
+          chip(ui, 1, "body");
+        }
+        ui.end_row();
+        if let Some(r) = self.report.clone() {
+          if let Some([w, h]) = r.get("size").and_then(|v| serde_json::from_value::<[f64; 2]>(v.clone()).ok()) {
+            ui.label("Flat size");
+            ui.label(format!("{w:.2} × {h:.2} mm"));
+            ui.end_row();
+          }
+          let bends = r.get("bends").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+          ui.label("Bends");
+          ui.label(bends.to_string());
+          ui.end_row();
+          ui.label("Export");
+          if panels::secondary_button(ui, "DXF…").clicked()
+            && let Some(path) =
+              rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name("flat pattern.dxf").save_file()
+          {
+            let mut p = json!({"path": path});
+            if let Some(b) = self.bodies.first() {
+              p["body"] = json!(b);
+            }
+            if app.run("sheet.flat_pattern", p).is_some() {
+              app.status = Some((format!("Exported {}", path.display()), false));
+            }
+          }
+          ui.end_row();
+        }
+      }
+      Kind::NewComponent => {
+        Self::field(ui, "Name", &mut self.name, dirty);
+        ui.label("Bodies");
+        chip(ui, self.bodies.len(), "selected");
+        ui.end_row();
+      }
+      Kind::Joint => {
+        ui.label("Component 1");
+        chip(ui, self.origins.len().min(1), "origin");
+        ui.end_row();
+        ui.label("Component 2");
+        chip(ui, self.origins.len().saturating_sub(1).min(1), "origin");
+        ui.end_row();
+        if !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
+          ui.label("");
+          ui.label(RichText::new("the first body isn't in a component").color(theme::WARNING));
+          ui.end_row();
+        }
+        Self::choose(ui, "Motion", "joint", &mut self.choice, &JOINTS, dirty);
+        Self::field(ui, "Angle", &mut self.angle, dirty);
+        Self::field(ui, "Offset", &mut self.distance, dirty);
+        Self::check(ui, "Flip", &mut self.flip, dirty);
+      }
+      Kind::Material => {
+        ui.label("Component");
+        let n = self.comps.iter().flatten().count();
+        chip(ui, n.min(1), "component");
+        ui.end_row();
+        ui.label("Material");
+        let cur = self.name.clone();
+        egui::ComboBox::from_id_salt("mat").selected_text(&cur).width(140.0).show_ui(ui, |ui| {
+          for (m, _) in clf_engine::model::assembly::MATERIALS {
+            if ui.selectable_label(cur == *m, *m).clicked() {
+              self.name = m.to_string();
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+      }
+      Kind::Interference => {
+        let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
+        ui.label("Result");
+        ui.label(if rows.is_empty() { "No interference".to_string() } else { format!("{} overlaps", rows.len()) });
+        ui.end_row();
+        for r in rows {
+          let ids: Vec<u32> = r
+            .get("bodies")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_u64().map(|v| v as u32)).collect())
+            .unwrap_or_default();
+          let names: Vec<String> = ids.iter().map(|b| app.s.body_name(BodyId(*b))).collect();
+          if ui.link(names.join(" ↔ ")).clicked() {
+            app.s.selection = ids.iter().map(|b| Sel::Body { body: BodyId(*b) }).collect();
+          }
+          ui.label(format!("{:.3} mm³", r.get("volume_mm3").and_then(Value::as_f64).unwrap_or(0.0)));
+          ui.end_row();
+        }
+        ui.label("");
+        if panels::secondary_button(ui, "Compute").clicked() {
+          self.refresh_report(&mut app.s);
+        }
+        ui.end_row();
+      }
+      Kind::Bom => {
+        let rows = self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default();
+        if rows.is_empty() {
+          ui.label("No components");
+          ui.end_row();
+        }
+        for r in rows {
+          let t = |k: &str| r.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+          let f = |k: &str| r.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+          ui.label(RichText::new(t("name")).strong());
+          ui.label(format!("{} · {:.1} g", t("material"), f("mass_g")));
+          ui.end_row();
+        }
+      }
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => {
+        ui.label("Lines");
+        chip(ui, self.curves.len(), "selected");
+        ui.end_row();
+        if self.kind == Kind::SkFillet {
+          Self::field(ui, "Radius", &mut self.radius, dirty);
+        } else {
+          Self::field(
+            ui,
+            if self.kind == Kind::SkChamfer { "Distance" } else { "Distance 1" },
+            &mut self.distance,
+            dirty,
+          );
+          if self.kind == Kind::SkChamfer2 {
+            Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+          }
+        }
+      }
+      Kind::SkOffset => {
+        ui.label("Curves");
+        chip(ui, self.curves.len(), "selected");
+        ui.end_row();
+        Self::field(ui, "Offset position", &mut self.distance, dirty);
+      }
+      Kind::SkMirror => {
+        ui.label("Objects");
+        chip(ui, self.curves.len(), "selected");
+        ui.end_row();
+        ui.label("Mirror line");
+        let lines = self.sketch_lines_of(app.s.edit_sketch, app);
+        let cur = self.line.map(|l| format!("Sketch line {l}")).unwrap_or("Pick a line".into());
+        egui::ComboBox::from_id_salt("mline").selected_text(cur).width(140.0).show_ui(ui, |ui| {
+          for (id, label) in lines {
+            if ui.selectable_label(self.line == Some(id), label).clicked() {
+              self.line = Some(id);
+              self.curves.retain(|c| *c != id);
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+      }
+      Kind::SkCircPattern => {
+        ui.label("Objects");
+        chip(ui, self.curves.len(), "selected");
+        ui.end_row();
+        ui.label("Center X, Y");
+        ui.horizontal(|ui| {
+          for v in self.at.iter_mut() {
+            if ui.add(egui::TextEdit::singleline(v).desired_width(64.0)).changed() {
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+        Self::field(ui, "Quantity", &mut self.count, dirty);
+        Self::field(ui, "Total angle", &mut self.angle, dirty);
+      }
+      Kind::SkRectPattern => {
+        ui.label("Objects");
+        chip(ui, self.curves.len(), "selected");
+        ui.end_row();
+        const DIRS: [(&str, &str); 2] = [("x", "Horizontal"), ("y", "Vertical")];
+        let mut d1: &'static str = if self.dir == "y" { "y" } else { "x" };
+        Self::choose(ui, "Direction", "sdir1", &mut d1, &DIRS, dirty);
+        self.dir = d1.into();
+        Self::field(ui, "Quantity", &mut self.count, dirty);
+        Self::field(ui, "Distance", &mut self.spacing, dirty);
+        Self::check(ui, "Second direction", &mut self.use_dir2, dirty);
+        if self.use_dir2 {
+          let mut d2: &'static str = if self.dir2 == "x" { "x" } else { "y" };
+          Self::choose(ui, "Direction 2", "sdir2", &mut d2, &DIRS, dirty);
+          self.dir2 = d2.into();
+          Self::field(ui, "Quantity 2", &mut self.count2, dirty);
+          Self::field(ui, "Distance 2", &mut self.spacing2, dirty);
+        }
+      }
+      Kind::Project => {
+        ui.label("Geometry");
+        let what = if self.faces.is_empty() { "body" } else { "face" };
+        chip(ui, self.bodies.len().min(1), what);
+        ui.end_row();
+        Self::check(ui, "Projected link (follows the body)", &mut self.flag, dirty);
+      }
+      _ => {}
+    }
+  }
+
+  /// Re-runs a report dialog's query.
+  fn refresh_report(&mut self, s: &mut Session) {
+    let r = match self.kind {
+      Kind::FlatPattern => {
+        let mut p = json!({});
+        if let Some(b) = self.bodies.first() {
+          p["body"] = json!(b);
+        }
+        if let Some(f) = self.faces.first() {
+          p["face"] = f.clone();
+        }
+        s.execute("sheet.flat_pattern", &p)
+      }
+      Kind::Interference => s.execute("assembly.interference", &json!({})),
+      Kind::Bom => s.execute("assembly.bom", &json!({})),
+      _ => return,
+    };
+    match r {
+      Ok(v) => {
+        self.report = Some(v);
+        self.error = None;
+      }
+      Err(e) => {
+        self.report = None;
+        self.error = Some(e.0);
+      }
+    }
+  }
+
+  /// Fills the rule fields from the named rule ("" = the default rule).
+  fn load_rule(&mut self, s: &Session, name: &str) {
+    let r = s.design.sheet_rule(name).unwrap_or_default();
+    self.name = r.name.clone();
+    self.a = r.thickness;
+    self.b = r.bend_radius;
+    self.c = r.k_factor;
+    self.d = r.relief_width;
+    self.e = r.relief_depth;
+    self.distance2 = r.gap;
+    self.position = match r.relief {
+      clf_engine::model::ReliefShape::Rectangular => "rectangular",
+      clf_engine::model::ReliefShape::Round => "round",
+      clf_engine::model::ReliefShape::None => "none",
+    };
+    self.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
+    if self.rules.is_empty() {
+      self.rules.push(self.name.clone());
+    }
+  }
+
+  fn put_rule(&self, p: &mut Value) {
+    if !self.rule.is_empty() {
+      p["rule"] = json!(self.rule);
+    }
+  }
+
+  /// A text field that re-previews when edited.
+  fn field(ui: &mut egui::Ui, label: &str, v: &mut String, dirty: &mut bool) {
+    ui.label(label);
+    if ui.add(egui::TextEdit::singleline(v).desired_width(140.0)).changed() {
+      *dirty = true;
+    }
+    ui.end_row();
+  }
+
+  /// A drop-down of (key, label) choices that re-previews when changed.
+  fn choose(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    cur: &mut &'static str,
+    items: &[(&'static str, &'static str)],
+    dirty: &mut bool,
+  ) {
+    ui.label(label);
+    let shown = items.iter().find(|(k, _)| k == cur).map(|(_, l)| *l).unwrap_or(cur);
+    egui::ComboBox::from_id_salt(id).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      for (k, l) in items {
+        if ui.selectable_label(*cur == *k, *l).clicked() {
+          *cur = k;
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
+  fn check(ui: &mut egui::Ui, label: &str, v: &mut bool, dirty: &mut bool) {
+    ui.label("");
+    if ui.checkbox(v, label).changed() {
+      *dirty = true;
+    }
+    ui.end_row();
+  }
+
+  fn rule_combo(&mut self, ui: &mut egui::Ui) {
+    ui.label("Rule");
+    let shown = if self.rule.is_empty() { "Default".to_string() } else { self.rule.clone() };
+    egui::ComboBox::from_id_salt("rule").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      if ui.selectable_label(self.rule.is_empty(), "Default").clicked() {
+        self.rule.clear();
+        self.dirty = true;
+      }
+      for r in self.rules.clone() {
+        if ui.selectable_label(self.rule == r, &r).clicked() {
+          self.rule = r;
+          self.dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
+  /// Sketches other than `but`, newest first, for picking a path.
+  fn sketches(app: &App, but: Option<FeatureId>) -> Vec<(FeatureId, String)> {
+    let d = &app.s.design;
+    d.features
+      .iter()
+      .take(d.active_len())
+      .rev()
+      .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && Some(f.id) != but)
+      .map(|f| (f.id, f.name.clone()))
+      .collect()
   }
 
   fn text(&mut self, ui: &mut egui::Ui, distance: bool) {
@@ -1067,7 +2205,11 @@ impl Dialog {
   }
 
   fn sketch_lines(&self, app: &App) -> Vec<(u32, String)> {
-    let Some(sk) = self.sketch else { return vec![] };
+    self.sketch_lines_of(self.sketch, app)
+  }
+
+  fn sketch_lines_of(&self, sketch: Option<FeatureId>, app: &App) -> Vec<(u32, String)> {
+    let Some(sk) = sketch else { return vec![] };
     let Ok(s) = app.s.design.sketch(sk) else { return vec![] };
     s.curves
       .iter()
@@ -1187,6 +2329,76 @@ fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
     .map(|f| f.id)
 }
 
+fn sel_edges(s: &Session) -> Vec<Value> {
+  s.selection
+    .iter()
+    .filter_map(|x| if let Sel::Edge { body, edge } = x { Some(json!({"body": body.0, "edge": edge})) } else { None })
+    .collect()
+}
+
+fn sel_faces(s: &Session) -> Vec<Value> {
+  s.selection
+    .iter()
+    .filter_map(|x| if let Sel::Face { body, face } = x { Some(json!({"body": body.0, "face": face})) } else { None })
+    .collect()
+}
+
+/// Bodies of the selected bodies, faces and edges.
+fn sel_bodies(s: &Session) -> Vec<u32> {
+  let mut b: Vec<u32> = Vec::new();
+  for x in &s.selection {
+    if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = x
+      && !b.contains(&body.0)
+    {
+      b.push(body.0);
+    }
+  }
+  b
+}
+
+fn sel_only_bodies(s: &Session) -> Vec<u32> {
+  s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect()
+}
+
+fn sel_curves(s: &Session) -> Vec<u32> {
+  s.selection.iter().filter_map(|x| if let Sel::SketchCurve { curve, .. } = x { Some(curve.0) } else { None }).collect()
+}
+
+/// Loft sections from the selected profiles, one per sketch, in pick order.
+fn sel_sections(s: &Session) -> Vec<(u32, [f64; 2])> {
+  let mut out: Vec<(u32, [f64; 2])> = Vec::new();
+  for x in &s.selection {
+    if let Sel::Profile { sketch, index } = x
+      && let Some(p) = s.model.sketches.get(sketch).and_then(|r| r.profiles.get(*index))
+      && !out.iter().any(|(sk, _)| *sk == sketch.0)
+    {
+      out.push((sketch.0, p.interior_point()));
+    }
+  }
+  out
+}
+
+/// Joint origins: the selected faces and edges, in pick order.
+fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
+  s.selection
+    .iter()
+    .filter_map(|x| match x {
+      Sel::Face { body, face } => Some((body.0, json!({"face": {"body": body.0, "face": face}}))),
+      Sel::Edge { body, edge } => Some((body.0, json!({"edge": {"body": body.0, "edge": edge}}))),
+      _ => None,
+    })
+    .collect()
+}
+
+/// The mirror line among the picked curves: the last picked line.
+fn mirror_line(s: &Session, curves: &[u32]) -> Option<u32> {
+  let sk = s.design.sketch(s.edit_sketch?).ok()?;
+  curves.iter().rev().copied().find(|c| {
+    sk.curve(clf_engine::sketch::CurveId(*c))
+      .is_some_and(|c| matches!(c.kind, clf_engine::sketch::CurveKind::Line { .. }))
+  })
+}
+
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
@@ -1208,4 +2420,254 @@ fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> 
     p.line_segment([x + egui::vec2(4.0, -4.0), x + egui::vec2(-4.0, 4.0)], s);
   }
   resp
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
+    s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd} {p}: {}", e.0))
+  }
+
+  /// Previews the dialog's command and checks it applied without an error.
+  fn apply(s: &mut Session, d: &mut Dialog) {
+    assert!(d.ready(), "{:?} not ready", d.kind);
+    d.preview(s);
+    assert!(d.applied && d.error.is_none(), "{:?}: {:?} {:?}", d.kind, d.error, d.command());
+  }
+
+  fn face(s: &Session, body: usize, pick: impl Fn(&clf_engine::kernel::FaceInfo) -> bool) -> Value {
+    let b = &s.model.bodies[body];
+    json!({"body": b.id.0, "face": b.faces().iter().find(|f| pick(f)).unwrap().id})
+  }
+
+  fn edge(s: &Session, body: usize, pick: impl Fn(&clf_engine::kernel::EdgeInfo) -> bool) -> Value {
+    let b = &s.model.bodies[body];
+    json!({"body": b.id.0, "edge": b.edges().iter().find(|e| pick(e)).unwrap().id})
+  }
+
+  fn interior(s: &Session, sk: u32) -> [f64; 2] {
+    s.model.sketches[&FeatureId(sk)].profiles[0].interior_point()
+  }
+
+  #[test]
+  fn loft_sweep_and_hole_dialogs() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"center": [0, 0], "corner": [20, 20]}));
+    let a = s.edit_sketch.unwrap().0;
+    run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}));
+    let plane = s.design.features.last().unwrap().id.0;
+    run(&mut s, "sketch.create", json!({"plane": {"feature": plane}}));
+    run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+    let b = s.edit_sketch.unwrap().0;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = Dialog::blank(Kind::Loft);
+    d.sections = vec![(a, interior(&s, a)), (b, interior(&s, b))];
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+    let path = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 3}));
+    let mut d = Dialog::blank(Kind::Sweep);
+    d.sketch = s.edit_sketch;
+    d.path = Some(path);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 60, "depth": 40, "height": 10}));
+    let top = face(&s, 0, |f| f.normal.z > 0.9);
+    run(&mut s, "sketch.create", json!({"plane": top}));
+    run(&mut s, "sketch.point", json!({"at": [10, 5]}));
+    let before = s.model.bodies[0].shape.mass().unwrap().volume;
+    let mut d = Dialog::blank(Kind::Hole);
+    d.sketch = s.edit_sketch;
+    run(&mut s, "sketch.finish", json!({}));
+    d.choice = "counterbore";
+    d.a = "5 mm".into();
+    d.b = "6 mm".into();
+    d.c = "9 mm".into();
+    d.d = "2 mm".into();
+    apply(&mut s, &mut d);
+    assert!(s.model.bodies[0].shape.mass().unwrap().volume < before);
+  }
+
+  #[test]
+  fn modify_dialogs() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 20}));
+    let mut d = Dialog::blank(Kind::PressPull);
+    d.faces = vec![face(&s, 0, |f| f.normal.z > 0.9)];
+    d.distance = "5 mm".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::Draft);
+    let b = &s.model.bodies[0];
+    d.faces =
+      b.faces().iter().filter(|f| f.normal.z.abs() < 0.1).map(|f| json!({"body": b.id.0, "face": f.id})).collect();
+    d.angle = "3 deg".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::SplitBody);
+    d.plane = json!("xz");
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 2);
+  }
+
+  #[test]
+  fn sheet_metal_dialogs() {
+    let mut s = Session::default();
+    let mut d = Dialog::blank(Kind::SheetRules);
+    d.load_rule(&s, "");
+    d.name = "Alu".into();
+    d.a = "1.5 mm".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
+    let mut d = Dialog::blank(Kind::Flange);
+    d.choice = "base";
+    d.sketch = s.edit_sketch;
+    d.rule = "Alu".into();
+    run(&mut s, "sketch.finish", json!({}));
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::Flange);
+    d.choice = "edge";
+    d.edges = vec![edge(&s, 0, |e| e.length > 79.0 && e.mid.y > 39.0 && e.mid.z > 1.0)];
+    d.distance = "15 mm".into();
+    d.angle = "90 deg".into();
+    d.position = "adjacent";
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::Hem);
+    d.edges = vec![edge(&s, 0, |e| e.length > 79.0 && e.mid.y < 1.0 && e.mid.z > 1.0)];
+    d.distance = "5 mm".into();
+    d.distance2 = "0.5 mm".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::FlatPattern);
+    d.refresh_report(&mut s);
+    assert!(d.report.as_ref().is_some_and(|r| r["bends"].as_array().unwrap().len() == 2), "{:?}", d.error);
+    let mut d = Dialog::blank(Kind::Unfold);
+    apply(&mut s, &mut d);
+
+    // fold a flat sheet along a sketch line
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
+    run(&mut s, "sheet.flange", json!({}));
+    let top = face(&s, 0, |f| f.normal.z > 0.9);
+    run(&mut s, "sketch.create", json!({"plane": top}));
+    let line = run(&mut s, "sketch.line", json!({"points": [[40, -5], [40, 45]]}));
+    let mut d = Dialog::blank(Kind::Fold);
+    d.sketch = s.edit_sketch;
+    d.line = line["curves"].as_array().and_then(|a| a.first()).and_then(Value::as_u64).map(|v| v as u32);
+    d.angle = "90 deg".into();
+    run(&mut s, "sketch.finish", json!({}));
+    apply(&mut s, &mut d);
+
+    // convert a thin box, then rip a shelled box
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 2}));
+    let mut d = Dialog::blank(Kind::ConvertSheet);
+    d.bodies = vec![s.model.bodies[0].id.0];
+    d.faces = vec![face(&s, 0, |f| f.normal.z < -0.9)];
+    apply(&mut s, &mut d);
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 20}));
+    let top = face(&s, 0, |f| f.normal.z > 0.9);
+    run(&mut s, "shell", json!({"faces": [top], "thickness": 1}));
+    let mut d = Dialog::blank(Kind::Rip);
+    d.edges = vec![edge(&s, 0, |e| e.length > 18.0 && e.length < 20.5 && e.mid.z > 5.0)];
+    d.distance = "0.5 mm".into();
+    apply(&mut s, &mut d);
+  }
+
+  #[test]
+  fn assembly_dialogs() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+    run(&mut s, "box", json!({"width": 80, "depth": 20, "height": 5, "at": [40, 200]}));
+    let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    for (b, n) in [(base, "Base"), (arm, "Arm")] {
+      let mut d = Dialog::blank(Kind::NewComponent);
+      d.bodies = vec![b];
+      d.name = n.into();
+      apply(&mut s, &mut d);
+    }
+    let comp = |s: &Session, b: u32| s.design.component_of(BodyId(b)).map(|c| c.id.0);
+    let mut d = Dialog::blank(Kind::Material);
+    d.comps = vec![comp(&s, arm)];
+    d.name = "Aluminum".into();
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::Joint);
+    d.choice = "rigid";
+    d.origins = vec![
+      (arm, json!({"face": face(&s, 1, |f| f.normal.z < -0.9)})),
+      (base, json!({"face": face(&s, 0, |f| f.normal.z > 0.9)})),
+    ];
+    d.comps = vec![comp(&s, arm), comp(&s, base)];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::Bom);
+    d.refresh_report(&mut s);
+    assert_eq!(d.report.as_ref().and_then(Value::as_array).map(Vec::len), Some(2));
+    let mut d = Dialog::blank(Kind::Interference);
+    d.refresh_report(&mut s);
+    assert!(d.report.is_some(), "{:?}", d.error);
+  }
+
+  #[test]
+  fn sketch_modify_dialogs() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [100, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let r = run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    let lines: Vec<u32> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    let mut d = Dialog::blank(Kind::SkFillet);
+    d.curves = lines[..2].to_vec();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::SkChamfer2);
+    d.curves = lines[2..4].to_vec();
+    d.distance = "2 mm".into();
+    d.distance2 = "3 mm".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let c = run(&mut s, "sketch.circle", json!({"center": [20, 40], "radius": 3}));
+    let circle = c["curves"][0].as_u64().unwrap() as u32;
+    let mut d = Dialog::blank(Kind::SkOffset);
+    d.curves = vec![circle];
+    d.distance = "1 mm".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::SkMirror);
+    d.curves = vec![circle];
+    d.line = Some(lines[0]);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::SkCircPattern);
+    d.curves = vec![circle];
+    d.count = "4".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::SkRectPattern);
+    d.curves = vec![circle];
+    d.count = "2".into();
+    d.use_dir2 = true;
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::Project);
+    d.bodies = vec![s.model.bodies[0].id.0];
+    d.flag = true;
+    apply(&mut s, &mut d);
+    run(&mut s, "sketch.spline", json!({"points": [[0, -10], [10, -5], [20, -10]]}));
+    run(&mut s, "sketch.trim", json!({"at": [30, 0]}));
+  }
 }

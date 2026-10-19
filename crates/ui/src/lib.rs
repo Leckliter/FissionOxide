@@ -368,6 +368,7 @@ impl App {
         self.dim_edit = None;
       } else if self.nav_mode.is_some() {
         self.nav_mode = None;
+      } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
       } else if !self.tstate.is_empty() {
         viewport::reset_tool_state(self);
       } else if self.tool != Tool::Select {
@@ -378,6 +379,9 @@ impl App {
         self.s.selection.clear();
       }
       self.dim_edit = None;
+    }
+    if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
+      viewport::finish_spline(self);
     }
     if pressed(Key::Delete, Modifiers::NONE) || pressed(Key::Backspace, Modifiers::NONE) {
       self.delete_selection();
@@ -398,6 +402,7 @@ impl App {
         (Key::A, Tool::Arc3),
         (Key::P, Tool::Point),
         (Key::D, Tool::Dimension),
+        (Key::T, Tool::Trim),
       ] {
         if pressed(k, Modifiers::NONE) {
           self.set_tool(t);
@@ -405,6 +410,9 @@ impl App {
       }
       if pressed(Key::X, Modifiers::NONE) {
         self.toggle_construction();
+      }
+      if pressed(Key::O, Modifiers::NONE) {
+        self.start(dialogs::Kind::SkOffset);
       }
     } else {
       if pressed(Key::E, Modifiers::NONE) {
@@ -416,8 +424,15 @@ impl App {
       if pressed(Key::M, Modifiers::NONE) {
         self.start(dialogs::Kind::Move);
       }
-      if pressed(Key::I, Modifiers::NONE) {
-        self.start(dialogs::Kind::Inspect);
+      for (k, d) in [
+        (Key::I, dialogs::Kind::Inspect),
+        (Key::H, dialogs::Kind::Hole),
+        (Key::Q, dialogs::Kind::PressPull),
+        (Key::J, dialogs::Kind::Joint),
+      ] {
+        if pressed(k, Modifiers::NONE) {
+          self.start(d);
+        }
       }
     }
   }

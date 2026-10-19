@@ -123,13 +123,13 @@ const SOLID_CREATE: &[E] = &[
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
   c("Revolve", Icon::Revolve, D(Kind::Revolve)),
-  x("Sweep", Icon::Sweep),
-  x("Loft", Icon::Loft),
+  c("Sweep", Icon::Sweep, D(Kind::Sweep)),
+  c("Loft", Icon::Loft, D(Kind::Loft)),
   x("Rib", Icon::Rib),
   x("Web", Icon::Web),
   x("Emboss", Icon::Emboss),
   E::Sep,
-  x("Hole", Icon::Hole).k("H"),
+  c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   x("Thread", Icon::Thread),
   E::Sep,
   c("Box", Icon::Box, D(Kind::Box)),
@@ -151,19 +151,19 @@ const SOLID_CREATE: &[E] = &[
 ];
 
 const SOLID_MODIFY: &[E] = &[
-  x("Press Pull", Icon::PressPull).k("Q"),
+  c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
   E::Sep,
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
   c("Shell", Icon::Shell, D(Kind::Shell)),
-  x("Draft", Icon::Draft),
+  c("Draft", Icon::Draft, D(Kind::Draft)),
   x("Scale", Icon::Scale),
   c("Combine", Icon::Combine, D(Kind::Combine)),
   x("Offset Face", Icon::OffsetFace),
   x("Replace Face", Icon::ReplaceFace),
   x("Split Face", Icon::SplitFace),
-  x("Split Body", Icon::SplitBody),
+  c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   x("Silhouette Split", Icon::SilhouetteSplit),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
@@ -173,14 +173,14 @@ const SOLID_MODIFY: &[E] = &[
   E::Sep,
   E::Sub("Simplify", SIMPLIFY),
   E::Sep,
-  x("Physical Material", Icon::PhysMaterial),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   x("Appearance", Icon::Appearance).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
   E::Sep,
-  x("Bill of Materials", Icon::Bom),
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
 const CONFIGURE: &[E] = &[
@@ -217,7 +217,7 @@ const CONSTRUCT: &[E] = &[
 
 const INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
-  x("Interference", Icon::Interference),
+  c("Interference", Icon::Interference, D(Kind::Interference)),
   x("Section Analysis", Icon::Section),
   E::Sep,
   x("Curvature Comb Analysis", Icon::CurvComb),
@@ -258,7 +258,13 @@ const INSERT: &[E] = &[
   c("Insert STEP", Icon::Import, Cmd::InsertStep),
 ];
 
-const ASSEMBLE: &[E] = &[x("Add To Assembly", Icon::AddToAssembly)];
+const ASSEMBLE: &[E] = &[
+  x("Add To Assembly", Icon::AddToAssembly),
+  E::Sep,
+  // not in Fusion's menu: CLFusion's component and joint commands
+  c("New Component", Icon::Component, D(Kind::NewComponent)),
+  c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+];
 
 const SELECTION_TOOLS: &[E] =
   &[x("Select All", Icon::Select).k("Ctrl+A"), x("Select Other", Icon::Select), x("Invert Selection", Icon::Select)];
@@ -315,7 +321,7 @@ const SURFACE_CREATE: &[E] = &[
 ];
 
 const SURFACE_MODIFY: &[E] = &[
-  x("Press Pull", Icon::PressPull).k("Q"),
+  c("Press Pull", Icon::PressPull, D(Kind::PressPull)).k("Q"),
   c("Fillet", Icon::Fillet, D(Kind::Fillet)).k("F"),
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
@@ -327,21 +333,21 @@ const SURFACE_MODIFY: &[E] = &[
   x("Reverse Normal", Icon::ReverseNormal).o(),
   x("Scale", Icon::Scale),
   x("Split Face", Icon::SplitFace),
-  x("Split Body", Icon::SplitBody),
+  c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
   x("Align", Icon::Align),
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
-  x("Physical Material", Icon::PhysMaterial),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   x("Appearance", Icon::Appearance).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
   E::Sep,
-  x("Bill of Materials", Icon::Bom),
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
 const MESH_CREATE: &[E] = &[
@@ -362,31 +368,31 @@ const EXPORT: &[E] = &[c("3D Print", Icon::Print3d, Cmd::Print3d)];
 
 const SHEET_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  x("Flange (Base/Edge/Contour)", Icon::Flange),
-  x("Hem", Icon::Hem),
+  c("Flange (Base/Edge/Contour)", Icon::Flange, D(Kind::Flange)),
+  c("Hem", Icon::Hem, D(Kind::Hem)),
   x("Lofted Flange", Icon::LoftedFlange),
-  x("Fold", Icon::Fold),
-  x("Convert to Sheet Metal", Icon::ConvertSheet).k("Ctrl+Alt+S"),
+  c("Fold", Icon::Fold, D(Kind::Fold)),
+  c("Convert to Sheet Metal", Icon::ConvertSheet, D(Kind::ConvertSheet)).k("Ctrl+Alt+S"),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
   E::Sep,
-  x("Hole", Icon::Hole).k("H"),
+  c("Hole", Icon::Hole, D(Kind::Hole)).k("H"),
   x("Thread", Icon::Thread),
   E::Sep,
   E::Sub("Pattern", PATTERN),
   c("Mirror", Icon::Mirror, D(Kind::Mirror)),
   E::Sep,
-  x("Create Flat Pattern", Icon::FlatPattern),
+  c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
   x("Joint Origin", Icon::JointOrigin),
 ];
 
 const SHEET_MODIFY: &[E] = &[
-  x("Unfold", Icon::Unfold),
-  x("Sheet Metal Rules", Icon::SmRules),
+  c("Unfold", Icon::Unfold, D(Kind::Unfold)),
+  c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
   x("Corner Closure", Icon::CornerClosure),
   x("Join by bend", Icon::Configure),
-  x("Rip", Icon::Rip),
+  c("Rip", Icon::Rip, D(Kind::Rip)),
   E::Sep,
   x("Sheet Metal Fillet", Icon::Configure),
   x("Sheet Metal Chamfer", Icon::Configure),
@@ -398,14 +404,14 @@ const SHEET_MODIFY: &[E] = &[
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
-  x("Physical Material", Icon::PhysMaterial),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   x("Appearance", Icon::Appearance).k("A"),
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
   E::Sep,
-  x("Bill of Materials", Icon::Bom),
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
 const MESH_MODIFY: &[E] = &[
@@ -427,13 +433,13 @@ const MESH_MODIFY: &[E] = &[
   E::Sep,
   x("Convert Mesh", Icon::ConvertMesh).g(),
   E::Sep,
-  x("Physical Material", Icon::PhysMaterial),
+  c("Physical Material", Icon::PhysMaterial, D(Kind::Material)),
   x("Appearance", Icon::Appearance).k("A"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
   E::Sep,
-  x("Bill of Materials", Icon::Bom),
+  c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
 /// Groups every Design tab ends with.
@@ -519,10 +525,11 @@ const SK_SLOT: &[E] = &[
   x("Center Point Arc Slot", Icon::ArcSlotCenter),
 ];
 
-const SK_SPLINE: &[E] = &[x("Fit Point Spline", Icon::SplineFit), x("Control Point Spline", Icon::SplineCtrl)];
+const SK_SPLINE: &[E] =
+  &[c("Fit Point Spline", Icon::SplineFit, T(Tool::Spline)), x("Control Point Spline", Icon::SplineCtrl)];
 
 const SK_PROJECT: &[E] = &[
-  x("Project", Icon::Project).k("P"),
+  c("Project", Icon::Project, D(Kind::Project)).k("P"),
   x("Intersect", Icon::Intersect),
   x("Include 3D Geometry", Icon::Include3D),
   x("Project To Surface", Icon::ProjectSurface),
@@ -542,9 +549,9 @@ const SKETCH_CREATE: &[E] = &[
   c("Point", Icon::Point, T(Tool::Point)),
   x("Text", Icon::SkText),
   E::Sep,
-  x("Mirror", Icon::SkMirror),
-  x("Circular Pattern", Icon::SkCircPattern),
-  x("Rectangular Pattern", Icon::SkRectPattern),
+  c("Mirror", Icon::SkMirror, D(Kind::SkMirror)),
+  c("Circular Pattern", Icon::SkCircPattern, D(Kind::SkCircPattern)),
+  c("Rectangular Pattern", Icon::SkRectPattern, D(Kind::SkRectPattern)),
   E::Sep,
   E::Sub("Project / Include", SK_PROJECT),
   E::Sep,
@@ -552,19 +559,19 @@ const SKETCH_CREATE: &[E] = &[
 ];
 
 const SK_CHAMFER: &[E] = &[
-  x("Equal Distance Chamfer", Icon::SkChamfer),
-  x("Distance-Distance Chamfer", Icon::SkChamfer),
+  c("Equal Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer)),
+  c("Distance-Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer2)),
   x("Distance-Angle Chamfer", Icon::SkChamfer),
 ];
 
 const SKETCH_MODIFY: &[E] = &[
-  x("Fillet", Icon::SkFillet),
+  c("Fillet", Icon::SkFillet, D(Kind::SkFillet)),
   E::Sub("Chamfer", SK_CHAMFER),
   x("Blend Curve", Icon::BlendCurve),
-  x("Offset", Icon::SkOffset).k("O"),
+  c("Offset", Icon::SkOffset, D(Kind::SkOffset)).k("O"),
   E::Sep,
-  x("Trim", Icon::SkTrim).k("T"),
-  x("Extend", Icon::SkExtend),
+  c("Trim", Icon::SkTrim, T(Tool::Trim)).k("T"),
+  c("Extend", Icon::SkExtend, T(Tool::Extend)),
   x("Break", Icon::SkBreak),
   x("Sketch Scale", Icon::SkScale),
   x("Move/Copy", Icon::Move).k("M"),
@@ -645,7 +652,7 @@ const SKETCH: [Group; 9] = [
 ];
 
 const MANAGE: [Group; 1] =
-  [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[x("Bill of Materials", Icon::Bom)] }];
+  [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
 const ADD_INS: &[E] =
   &[x("Scripts and Add-Ins...", Icon::Scripts).k("Shift+S"), x("Design and Make Marketplace", Icon::Marketplace)];
@@ -659,7 +666,7 @@ const UTILITY: &[E] = &[
 // UTILITIES' INSPECT has no Environment Map Analysis
 const UTIL_INSPECT: &[E] = &[
   c("Measure", Icon::Measure, D(Kind::Inspect)).k("I"),
-  x("Interference", Icon::Interference),
+  c("Interference", Icon::Interference, D(Kind::Interference)),
   x("Section Analysis", Icon::Section),
   E::Sep,
   x("Curvature Comb Analysis", Icon::CurvComb),
