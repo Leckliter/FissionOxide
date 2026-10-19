@@ -15,6 +15,7 @@ pub mod files;
 pub mod hub;
 mod inspect;
 pub mod scene;
+mod solid;
 mod text;
 
 use std::path::PathBuf;
@@ -439,3 +440,5 @@ impl Session {
 mod tests;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_solid;

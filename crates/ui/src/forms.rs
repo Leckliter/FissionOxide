@@ -112,6 +112,29 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// Selected sketch profiles, as points inside them (left out when none: every profile).
+  Profiles {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// The last selected face on another body than the first selected face (a replacement
+  /// surface); a form with one keeps its `Faces` to the first face's body.
+  FaceOther {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// An optional construction or origin plane from a drop-down (never from picks).
+  PlaneOpt {
+    key: &'static str,
+    label: &'static str,
+  },
+  /// Boundary fill cells of the bodies in the `tools` input, ticked to keep: points inside them
+  /// (left out when none are ticked: every cell).
+  Cells {
+    key: &'static str,
+    label: &'static str,
+    tools: &'static str,
+  },
 }
 
 impl Input {
@@ -133,7 +156,11 @@ impl Input {
       | Input::Choice { key, .. }
       | Input::Vec3 { key, .. }
       | Input::DrawingView { key, .. }
-      | Input::Component { key, .. } => key,
+      | Input::Component { key, .. }
+      | Input::Profiles { key, .. }
+      | Input::FaceOther { key, .. }
+      | Input::PlaneOpt { key, .. }
+      | Input::Cells { key, .. } => key,
     }
   }
 }
@@ -148,6 +175,10 @@ pub struct State {
   near: Vec<Option<[f64; 3]>>,
   /// The open drawing, for drawing commands.
   pub drawing: Option<u32>,
+  /// Boundary fill cells found for the current tools: a point inside each and its volume.
+  pub cells: Vec<([f64; 3], f64)>,
+  /// The tools those cells were found for.
+  pub cells_for: Value,
 }
 
 impl State {
@@ -164,7 +195,9 @@ impl State {
         | Input::FacesOpt { .. }
         | Input::Edges { .. }
         | Input::Bodies { .. }
-        | Input::Curves { .. } => {
+        | Input::Curves { .. }
+        | Input::Profiles { .. }
+        | Input::Cells { .. } => {
           json!([])
         }
         Input::Plane { .. } => json!("xy"),
@@ -172,7 +205,14 @@ impl State {
         _ => Value::Null,
       })
       .collect();
-    State { values, chosen: vec![None; form.inputs.len()], near: vec![None; form.inputs.len()], drawing: None }
+    State {
+      values,
+      chosen: vec![None; form.inputs.len()],
+      near: vec![None; form.inputs.len()],
+      drawing: None,
+      cells: Vec::new(),
+      cells_for: Value::Null,
+    }
   }
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
@@ -220,9 +260,29 @@ impl State {
         _ => {}
       }
     }
+    // a replacement surface is a face on another body; the faces to replace stay on the first
+    let mut faces = faces;
+    let mut other = Value::Null;
+    if form.inputs.iter().any(|i| matches!(i, Input::FaceOther { .. })) && !faces.is_empty() {
+      let first = faces[0]["body"].clone();
+      other = faces.iter().rev().find(|f| f["body"] != first).cloned().unwrap_or(Value::Null);
+      faces.retain(|f| f["body"] == first);
+    }
+    let profiles: Vec<[f64; 2]> = s
+      .selection
+      .iter()
+      .filter_map(|x| match x {
+        Sel::Profile { sketch, index } => {
+          s.model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.interior_point())
+        }
+        _ => None,
+      })
+      .collect();
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
       let v = match input {
+        Input::Profiles { .. } => json!(profiles),
+        Input::FaceOther { .. } => other.clone(),
         Input::Faces { .. } | Input::FacesOpt { .. } => json!(faces),
         Input::Face { .. } => {
           nf += 1;
@@ -292,7 +352,11 @@ impl State {
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
       match input {
-        Input::Curves { .. } | Input::FacesOpt { .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
+        Input::Curves { .. } | Input::FacesOpt { .. } | Input::Profiles { .. } | Input::Cells { .. }
+          if v.as_array().is_some_and(Vec::is_empty) =>
+        {
+          continue;
+        }
         Input::Bodies { required: false, .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
         Input::Expr { .. } | Input::Text { .. } if v.as_str().is_some_and(|t| t.trim().is_empty()) => continue,
         Input::Face { near: Some(n), .. } => {
@@ -1230,4 +1294,54 @@ pub static DRAWING_BALLOON: Form = Form {
     Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
   ],
   picks_model: false,
+};
+
+pub static EMBOSS: Form = Form {
+  title: "EMBOSS",
+  name: "Emboss",
+  hint: "Raise or sink sketch profiles or text on a face, flat or curved",
+  icon: Icon::Emboss,
+  cmd: "emboss",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Profiles { key: "profiles", label: "Profiles" },
+    Input::Face { key: "face", label: "Face", near: None },
+    Input::Expr { key: "depth", label: "Depth", default: "1 mm" },
+    Input::Check { key: "deboss", label: "Deboss (sink into the face)" },
+    Input::Check { key: "wrap", label: "Wrap around a cylinder" },
+  ],
+  picks_model: true,
+};
+
+pub static BOUNDARY_FILL: Form = Form {
+  title: "BOUNDARY FILL",
+  name: "Boundary Fill",
+  hint: "Solids from the closed cells that bodies and a plane bound",
+  icon: Icon::BoundaryFill,
+  cmd: "boundary_fill",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "tools", label: "Tools", required: true },
+    Input::PlaneOpt { key: "planes", label: "Plane" },
+    Input::Cells { key: "cells", label: "Cells", tools: "tools" },
+    Input::Choice { key: "operation", label: "Operation", options: OPS },
+    Input::Check { key: "remove_tools", label: "Remove tools" },
+  ],
+  picks_model: true,
+};
+
+pub static REPLACE_FACE: Form = Form {
+  title: "REPLACE FACE",
+  name: "Replace Face",
+  hint: "Replace flat faces with a face of another body (or a plane); neighbours extend or trim",
+  icon: Icon::ReplaceFace,
+  cmd: "replace_face",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Source faces" },
+    Input::FaceOther { key: "target", label: "Target face" },
+    Input::PlaneOpt { key: "plane", label: "Or a plane" },
+  ],
+  picks_model: true,
 };

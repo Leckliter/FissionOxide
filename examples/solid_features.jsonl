@@ -1,0 +1,18 @@
+# A knob on a base: a setback fillet on the base's corner, "CL" embossed (wrapped) around the
+# knob and a twisted fin swept up from its top. Change "depth" or "twist" and everything follows.
+{"cmd": "new", "name": "Solid features"}
+{"cmd": "param.add", "name": "depth", "expr": "1 mm", "comment": "emboss depth"}
+{"cmd": "param.add", "name": "twist", "expr": "90 deg", "comment": "fin twist"}
+{"cmd": "box", "width": 60, "depth": 60, "height": 10}
+{"cmd": "fillet", "edges": [{"point": [0, 30, 10]}, {"point": [30, 0, 10]}, {"point": [30, 30, 5]}], "radius": "3 mm", "setback": "7 mm"}
+{"cmd": "cylinder", "plane": {"point": [0, 0, 10], "normal": [0, 0, 1]}, "radius": 15, "height": 40, "operation": "join"}
+{"cmd": "plane.offset", "plane": "xz", "offset": 40}
+{"cmd": "sketch.create", "plane": {"feature": 4}}
+{"cmd": "sketch.text", "at": [-9, 26], "text": "CL", "height": 8}
+{"cmd": "emboss", "face": {"point": [0, -15, 30]}, "depth": "depth", "wrap": true}
+{"cmd": "sketch.create", "plane": "yz"}
+{"cmd": "sketch.line", "points": [[0, 50], [0, 80]]}
+{"cmd": "sketch.create", "plane": {"point": [0, 0, 50], "normal": [0, 0, 1]}}
+{"cmd": "sketch.rect", "corner1": [-8, -2], "corner2": [8, 2]}
+{"cmd": "sweep", "path": 7, "twist": "twist", "operation": "join"}
+{"cmd": "info"}

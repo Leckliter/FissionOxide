@@ -13,6 +13,8 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod solid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
   PickPlane,
@@ -365,8 +367,13 @@ fn plane_of(s: &Session, v: &Value) -> Option<clf_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
-const EXTENTS: [(&str, &str); 4] =
-  [("one_side", "One side"), ("symmetric", "Symmetric"), ("two_sides", "Two sides"), ("through_all", "All")];
+const EXTENTS: [(&str, &str); 5] = [
+  ("one_side", "One side"),
+  ("symmetric", "Symmetric"),
+  ("two_sides", "Two sides"),
+  ("through_all", "All"),
+  ("to_object", "To object"),
+];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -444,6 +451,8 @@ pub struct Dialog {
   view_on: [bool; 7],
   /// A form dialog's values.
   form: crate::forms::State,
+  /// Setback, guide rails, twist, centre line, extrude object (see [`solid`]).
+  solid: solid::Extra,
 }
 
 const VIEWS: [(&str, &str); 7] = [
@@ -533,6 +542,7 @@ impl Dialog {
         Kind::Form(f) => crate::forms::State::new(f),
         _ => crate::forms::State::default(),
       },
+      solid: solid::Extra::default(),
     }
   }
 
@@ -837,8 +847,12 @@ impl Dialog {
           ExtentKind::Symmetric => "symmetric",
           ExtentKind::TwoSides => "two_sides",
           ExtentKind::ThroughAll => "through_all",
-          ExtentKind::ToFace => "to_face",
+          ExtentKind::ToFace | ExtentKind::ToBody => "to_object",
         };
+        if let ExtentKind::ToFace | ExtentKind::ToBody = extent.kind {
+          let kind = if extent.kind == ExtentKind::ToBody { "to_body" } else { "to_face" };
+          d.load_object(kind, serde_json::to_value(&extent.to).unwrap_or_default());
+        }
         d.op = op_str(*operation);
         d
       }
@@ -857,9 +871,10 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges, .. } => {
+      FeatureKind::Fillet { radius, edges, setback, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
+        d.load_setback(setback);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
@@ -918,6 +933,9 @@ impl Dialog {
         d.angle = angle.clone();
         d
       }
+      kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
+        solid::edit_form(kind)?
+      }
       _ => return None,
     };
     d.editing = Some(id);
@@ -944,14 +962,17 @@ impl Dialog {
       }
       Kind::Loft => (
         "loft",
-        json!({
+        self.with_guides(json!({
           "sections": self.sections.iter().map(|(sk, p)| json!({"sketch": sk, "profile": p})).collect::<Vec<_>>(),
           "ruled": self.flag, "closed": self.flag2, "operation": op,
-        }),
+        })),
       ),
-      Kind::Sweep => {
-        ("sweep", json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}))
-      }
+      Kind::Sweep => (
+        "sweep",
+        self.with_guides(
+          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}),
+        ),
+      ),
       Kind::Hole => {
         let mut p = json!({
           "sketch": self.sketch?.0, "kind": self.choice, "diameter": self.a, "flip": self.flip,
@@ -1173,10 +1194,10 @@ impl Dialog {
       }
       Kind::Extrude => (
         "extrude",
-        json!({
+        self.with_object(json!({
           "sketch": self.sketch?.0, "profiles": self.profiles, "distance": self.distance, "distance2": self.distance2,
           "extent": self.extent, "flip": self.flip, "operation": op,
-        }),
+        }))?,
       ),
       Kind::Revolve => {
         let axis = match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
@@ -1189,7 +1210,7 @@ impl Dialog {
           json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": self.angle, "operation": op}),
         )
       }
-      Kind::Fillet => ("fillet", json!({"edges": self.edges, "radius": self.radius})),
+      Kind::Fillet => ("fillet", self.with_setback(json!({"edges": self.edges, "radius": self.radius}), false)),
       Kind::Chamfer => ("chamfer", json!({"edges": self.edges, "distance": self.radius})),
       Kind::Shell => ("shell", json!({"faces": self.faces, "thickness": self.radius})),
       Kind::Box => (
@@ -1240,11 +1261,13 @@ impl Dialog {
   fn edit_set(&self) -> Option<Value> {
     Some(match self.kind {
       Kind::Extrude => json!({
-        "extent": {"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip},
+        "extent": self.edit_extent(
+          json!({"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip}),
+        ),
         "operation": self.op,
       }),
       Kind::Revolve => json!({"angle": self.angle, "operation": self.op}),
-      Kind::Fillet => json!({"radius": self.radius}),
+      Kind::Fillet => self.with_setback(json!({"radius": self.radius}), true),
       Kind::Chamfer => json!({"distance": self.radius}),
       Kind::Shell => json!({"thickness": self.radius}),
       Kind::Box => {
@@ -1263,6 +1286,7 @@ impl Dialog {
       }
       Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
       Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
+      Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       _ => return None,
     })
   }
@@ -1477,6 +1501,9 @@ impl Dialog {
         if !pts.is_empty() && pts != self.profiles {
           self.profiles = pts;
           self.dirty = true;
+        }
+        if self.kind == Kind::Extrude {
+          self.sync_object(s);
         }
       }
       Kind::Fillet | Kind::Chamfer if !self.applied => {
@@ -1791,6 +1818,9 @@ impl Dialog {
           ui.label("Extent");
           self.combo(ui, "extent", &EXTENTS, true);
           ui.end_row();
+          if self.extent == "to_object" {
+            self.object_row(ui);
+          }
           if self.extent != "through_all" {
             ui.label(if self.extent == "two_sides" { "Distance 1" } else { "Distance" });
             self.text(ui, true);
@@ -1859,6 +1889,9 @@ impl Dialog {
           self.dirty = true;
         }
         ui.end_row();
+        if self.kind == Kind::Fillet {
+          self.setback_row(ui, creating);
+        }
       }
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
         ui.label("Plane");
@@ -2166,6 +2199,9 @@ impl Dialog {
             });
           ui.end_row();
         }
+        Input::Profiles { .. } | Input::FaceOther { .. } | Input::PlaneOpt { .. } | Input::Cells { .. } => {
+          self.solid_form_field(f, i, app, ui, dirty);
+        }
       }
     }
   }
@@ -2204,6 +2240,7 @@ impl Dialog {
         }
         Self::check(ui, "Ruled (straight between sections)", &mut self.flag, dirty);
         Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
+        self.loft_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
       }
       Kind::Sweep => {
@@ -2225,6 +2262,7 @@ impl Dialog {
           },
         );
         ui.end_row();
+        self.sweep_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
       }
       Kind::Hole => {

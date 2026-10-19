@@ -299,8 +299,10 @@ pub enum ExtentKind {
   TwoSides,
   /// Through every body, in the chosen direction.
   ThroughAll,
-  /// Up to a planar face (`to`), plus `distance` past it.
+  /// Up to a face (`to`, flat or curved), plus `distance` past it.
   ToFace,
+  /// Up to the body `to` is on: the extrusion stops where it meets the body.
+  ToBody,
 }
 
 /// Which way a thin extrusion's wall grows from the profile's outline.
@@ -361,6 +363,15 @@ impl Extent {
 pub struct SketchLink {
   pub curve: CurveId,
   pub edge: EdgeRef,
+}
+
+/// Curves of a sketch used as a path: a sweep's guide rail, a loft's rail or centre line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathRef {
+  pub sketch: FeatureId,
+  /// The curves; empty = every non-construction curve of the sketch.
+  #[serde(default)]
+  pub curves: Vec<CurveId>,
 }
 
 /// One loft section: a profile of a sketch.
@@ -453,6 +464,10 @@ pub enum FeatureKind {
     /// Variable radius: the radius at each edge's end (it runs from `radius` at the start).
     #[serde(default)]
     radius2: Option<String>,
+    /// Setback corners: where three or more of the edges meet, the corner is re-blended with a
+    /// smooth patch starting this far from the vertex.
+    #[serde(default)]
+    setback: Option<String>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -573,6 +588,12 @@ pub enum FeatureKind {
     closed: bool,
     #[serde(default)]
     operation: Operation,
+    /// Curves the loft's sides follow (they must touch every section).
+    #[serde(default)]
+    rails: Vec<PathRef>,
+    /// A path the sections are placed along (instead of rails).
+    #[serde(default)]
+    centerline: Option<PathRef>,
   },
   /// Sweeps profiles along a path (an open chain of lines and arcs in another sketch).
   Sweep {
@@ -585,6 +606,12 @@ pub enum FeatureKind {
     path_curves: Vec<CurveId>,
     #[serde(default)]
     operation: Operation,
+    /// A guide rail: the profile turns and scales to keep touching it.
+    #[serde(default)]
+    rail: Option<PathRef>,
+    /// Twist angle from start to end of the path (no rail); empty = none.
+    #[serde(default)]
+    twist: String,
   },
   /// Drilled holes at sketch points, into the material (against the sketch normal).
   Hole {
@@ -965,6 +992,44 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_folded: bool,
   },
+  /// Sketch profiles (or text) raised from or sunk into a face, flat or curved.
+  Emboss {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    face: FaceRef,
+    depth: String,
+    /// Sink into the face instead of raising.
+    #[serde(default)]
+    deboss: bool,
+    /// Wrap around a cylindrical face (keeping lengths) instead of projecting.
+    #[serde(default)]
+    wrap: bool,
+  },
+  /// Solids from the closed cells that bodies and planes bound.
+  BoundaryFill {
+    #[serde(default)]
+    tools: Vec<BodyId>,
+    #[serde(default)]
+    planes: Vec<PlaneRef>,
+    /// A point inside each cell to keep; empty = every cell.
+    #[serde(default)]
+    cells: Vec<[f64; 3]>,
+    #[serde(default)]
+    operation: Operation,
+    /// Remove the tool bodies afterwards.
+    #[serde(default)]
+    remove_tools: bool,
+  },
+  /// Replaces flat faces of a body with a surface (a face of another body, or a plane): the
+  /// body grows or shrinks to it and the neighbouring faces are extended or trimmed.
+  ReplaceFace {
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    target: Option<FaceRef>,
+    #[serde(default)]
+    plane: Option<PlaneRef>,
+  },
 }
 
 fn stitch_tolerance() -> String {
@@ -1072,6 +1137,10 @@ impl FeatureKind {
       FeatureKind::Mesh { op: construct::MeshOp::Reduce, .. } => "Reduce",
       FeatureKind::Mesh { op: construct::MeshOp::Smooth, .. } => "Smooth",
       FeatureKind::Mesh { op: construct::MeshOp::Convert, .. } => "ConvertMesh",
+      FeatureKind::Emboss { deboss: true, .. } => "Deboss",
+      FeatureKind::Emboss { .. } => "Emboss",
+      FeatureKind::BoundaryFill { .. } => "BoundaryFill",
+      FeatureKind::ReplaceFace { .. } => "ReplaceFace",
     }
   }
 
@@ -1103,8 +1172,12 @@ impl FeatureKind {
       | FeatureKind::ContourFlange { sketch, .. }
       | FeatureKind::Hole { sketch, .. }
       | FeatureKind::Bend { sketch, .. } => vec![*sketch],
-      FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.sketch).collect(),
-      FeatureKind::Sweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::Loft { sections, rails, centerline, .. } => {
+        sections.iter().map(|s| s.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
+      }
+      FeatureKind::Sweep { sketch, path_sketch, rail, .. } => {
+        std::iter::once(*sketch).chain(std::iter::once(*path_sketch)).chain(rail.iter().map(|r| r.sketch)).collect()
+      }
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
@@ -1126,6 +1199,9 @@ impl FeatureKind {
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
       FeatureKind::CircularPattern { axis, .. } => axis_dep(axis),
       FeatureKind::Move { axis: Some(axis), .. } => axis_dep(axis),
+      FeatureKind::Emboss { sketch, .. } => vec![*sketch],
+      FeatureKind::BoundaryFill { planes, .. } => planes.iter().flat_map(plane_dep).collect(),
+      FeatureKind::ReplaceFace { plane: Some(plane), .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -1583,9 +1659,9 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, .. } => {
+    FeatureKind::Fillet { radius, radius2, setback, .. } => {
       f(radius);
-      if let Some(r) = radius2 {
+      for r in [radius2, setback].into_iter().flatten() {
         f(r);
       }
     }
@@ -1720,7 +1796,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::Patch { .. }
     | FeatureKind::Unstitch { .. }
     | FeatureKind::ReverseNormal { .. } => {}
-    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } | FeatureKind::SplitBody { .. } => {}
+    FeatureKind::Loft { .. } | FeatureKind::SplitBody { .. } => {}
+    FeatureKind::Sweep { twist, .. } => {
+      if !twist.is_empty() {
+        f(twist);
+      }
+    }
     FeatureKind::Mirror { .. }
     | FeatureKind::Combine { .. }
     | FeatureKind::Import { .. }
@@ -1729,6 +1810,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. } => {}
+    FeatureKind::Emboss { depth, .. } => f(depth),
+    FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. } => {}
   }
 }
 
