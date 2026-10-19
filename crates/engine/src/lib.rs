@@ -16,9 +16,9 @@ pub mod hub;
 mod inspect;
 mod mates;
 pub mod scene;
+mod sheet2;
 mod solid;
 mod surfaces;
-mod sheet2;
 
 use std::path::PathBuf;
 
@@ -445,11 +445,15 @@ impl Session {
 mod tests;
 #[cfg(test)]
 mod tests_assembly;
+#[cfg(test)]
 mod tests_cam;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
-mod tests_solid;
-mod tests_surface;
 mod tests_sheet2;
+#[cfg(test)]
 mod tests_sketch;
+#[cfg(test)]
+mod tests_solid;
+#[cfg(test)]
+mod tests_surface;

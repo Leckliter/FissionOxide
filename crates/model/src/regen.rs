@@ -1992,10 +1992,10 @@ mod extra;
 pub use extra::iso_pitch;
 mod solid;
 pub use solid::boundary_cells;
+mod sheet2;
+mod surface;
 #[cfg(test)]
 mod tests_solid;
-mod surface;
-mod sheet2;
 
 mod assemble;
 

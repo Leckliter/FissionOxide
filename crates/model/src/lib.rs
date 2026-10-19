@@ -18,8 +18,8 @@ pub mod plot;
 pub mod refs;
 pub mod regen;
 pub mod sheet;
-pub mod surface;
 pub mod sheet2;
+pub mod surface;
 
 use serde::{Deserialize, Serialize};
 
