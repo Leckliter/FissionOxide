@@ -203,7 +203,7 @@ cmds! {
   "assembly.interference" => "Overlapping bodies of different components", "{}";
   "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
   "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
-  "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?}";
+  "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?, standard?: asme|iso, auto_balloons?}";
   "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
   "drawing.remove_view" => "Remove a view", "{drawing?, view}";
   "drawing.move_view" => "Place a view (sheet mm; null = automatic)", "{drawing?, view, at}";
@@ -214,6 +214,15 @@ cmds! {
   "drawing.list" => "List drawings", "{}";
   "drawing.delete" => "Delete a drawing", "{drawing?}";
   "drawing.export" => "Write a drawing as .svg, .pdf or .dxf", "{drawing?, path}";
+  "drawing.break" => "Broken view: leave a stretch of a view out (model mm along the view's horizontal or vertical); dimensions keep the true length", "{drawing?, view, from, to, direction?: horizontal|vertical, gap?: sheet mm}";
+  "drawing.remove_breaks" => "Remove a view's breaks", "{drawing?, view}";
+  "drawing.ordinate" => "Ordinate dimensions: distances of points from an origin along the view's horizontal or vertical", "{drawing?, view?, origin: [x,y,z], points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?}";
+  "drawing.angle" => "Angular dimension at a vertex between the edges to two points", "{drawing?, view?, vertex: [x,y,z], a: [x,y,z], b: [x,y,z], radius?: sheet mm}";
+  "drawing.feature_control" => "GD&T feature control frame on a model point (per the drawing's standard)", "{drawing?, view?, point: [x,y,z], offset?: [x,y] sheet mm, characteristic: straightness|flatness|circularity|cylindricity|profile_of_line|profile_of_surface|angularity|perpendicularity|parallelism|position|concentricity|symmetry|circular_runout|total_runout, tolerance, diameter?, modifier?: none|mmc|lmc, datums?: [\"A\", ...]}";
+  "drawing.datum" => "Datum feature identifier on a model point (next free letter by default)", "{drawing?, view?, point: [x,y,z], offset?: [x,y], label?}";
+  "drawing.surface_finish" => "Surface texture symbol (Ra, µm) on a model point", "{drawing?, view?, point: [x,y,z], offset?: [x,y], roughness, process?: any|removal|no_removal}";
+  "drawing.balloon" => "Balloon with a component's parts list item number (follows the parts list)", "{drawing?, view?, component: id|name, point?: [x,y,z], offset?: [x,y]}";
+  "drawing.remove_dimension" => "Remove a dimension, note or annotation by index", "{drawing?, index}";
   "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";

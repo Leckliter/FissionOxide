@@ -664,6 +664,7 @@ impl Dialog {
       Kind::NewDrawing => {
         d.name = format!("Drawing{}", s.design.drawings.len() + 1);
         d.position = "a3";
+        d.extent = "asme";
         d.choice = "third_angle";
         d.a = "auto".into();
         d.flag = true;
@@ -796,6 +797,11 @@ impl Dialog {
     }
     if let Kind::Form(f) = kind {
       d.form.sync(f, &app.s, app.last_sketch.or_else(|| last_unconsumed_sketch(&app.s)));
+    }
+    if let Kind::Form(f) = kind
+      && f.cmd.starts_with("drawing.")
+    {
+      d.form.set_drawing(f, &app.s, app.drawing);
     }
     if kind == Kind::Section && app.section.is_none() {
       // a picked planar face, else the front plane through the middle of the model
@@ -1100,6 +1106,7 @@ impl Dialog {
           json!({
             "name": self.name, "views": views, "sheet": self.position, "scale": scale_value(&self.a),
             "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+            "standard": drawing_standard(self.extent),
           }),
         )
       }
@@ -1108,6 +1115,7 @@ impl Dialog {
         json!({
           "drawing": self.target?, "rename": self.name, "sheet": self.position, "scale": scale_value(&self.a),
           "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+          "standard": drawing_standard(self.extent), "auto_balloons": self.keep_tools,
         }),
       ),
       Kind::DrawingView => {
@@ -2136,6 +2144,28 @@ impl Dialog {
           Self::xyz_row(ui, label, &mut xyz, dirty);
           self.form.values[i] = json!(xyz);
         }
+        Input::DrawingView { label, .. } | Input::Component { label, .. } => {
+          ui.label(*label);
+          let list: Vec<(u32, String)> = if matches!(input, Input::DrawingView { .. }) {
+            self.form.drawing.map(|d| drawing_views(s, d)).unwrap_or_default()
+          } else {
+            s.design.components.iter().map(|c| (c.id.0, c.name.clone())).collect()
+          };
+          let cur = list.iter().find(|(id, _)| v.as_u64() == Some(*id as u64)).map(|(_, n)| n.clone());
+          let none = if list.is_empty() { "None" } else { "Pick one" };
+          egui::ComboBox::from_id_salt(("form-item", i))
+            .selected_text(cur.unwrap_or(none.into()))
+            .width(140.0)
+            .show_ui(ui, |ui| {
+              for (id, name) in &list {
+                if ui.selectable_label(v.as_u64() == Some(*id as u64), name).clicked() {
+                  self.form.values[i] = json!(id);
+                  *dirty = true;
+                }
+              }
+            });
+          ui.end_row();
+        }
       }
     }
   }
@@ -2704,6 +2734,11 @@ impl Dialog {
         Self::choose(ui, "Projection", "proj", &mut self.choice, &PROJECTIONS, dirty);
         Self::check(ui, "Automatic dimensions", &mut self.flag, dirty);
         Self::check(ui, "Parts list", &mut self.flag2, dirty);
+        const STANDARDS: [(&str, &str); 2] = [("asme", "ASME"), ("iso", "ISO")];
+        Self::choose(ui, "Standard", "dstd", &mut self.extent, &STANDARDS, dirty);
+        if self.kind == Kind::DrawingSettings {
+          Self::check(ui, "Auto balloons", &mut self.keep_tools, dirty);
+        }
         if self.kind == Kind::DrawingSettings {
           ui.label("");
           if panels::secondary_button(ui, "Delete Drawing").clicked() {
@@ -2872,6 +2907,11 @@ impl Dialog {
         };
         self.flag = d.auto_dimensions;
         self.flag2 = d.parts_list;
+        self.extent = match d.standard {
+          clf_engine::model::drawing::Standard::Iso => "iso",
+          _ => "asme",
+        };
+        self.keep_tools = d.auto_balloons;
       }
       Kind::DrawingTitle => {
         let t = &d.title;
@@ -3460,6 +3500,11 @@ fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
     .collect()
 }
 
+/// The drafting standard picked in the drawing dialogs (null leaves the drawing's as it is).
+fn drawing_standard(choice: &str) -> Value {
+  if matches!(choice, "asme" | "iso") { json!(choice) } else { Value::Null }
+}
+
 /// The mirror line among the picked curves: the last picked line.
 fn mirror_line(s: &Session, curves: &[u32]) -> Option<u32> {
   let sk = s.design.sketch(s.edit_sketch?).ok()?;
@@ -3967,5 +4012,42 @@ mod tests {
     assert_eq!(s.design.cam[0].operations[0].tool.diameter, 8.0);
     run(&mut s, "cam.generate", json!({}));
     assert_eq!(s.toolpaths.len(), 2);
+  }
+
+  #[test]
+  fn drawing_annotation_forms() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 200, "depth": 20, "height": 10, "at": [100, 10]}));
+    let b = s.model.bodies[0].id.0;
+    run(&mut s, "component.create", json!({"name": "Bar", "bodies": [b]}));
+    run(&mut s, "drawing.create", json!({"views": ["front", "top"]}));
+    let id = s.design.drawings[0].id;
+    let forms: [(&'static Form, Vec<(&str, Value)>); 7] = [
+      (&DRAWING_BREAK, vec![]),
+      (&DRAWING_ORDINATE, vec![("points", json!("20 0 0; 200 0 0"))]),
+      (&DRAWING_ANGLE, vec![("a", json!(["200", "0", "0"])), ("b", json!(["200", "0", "10"]))]),
+      (&DRAWING_FCF, vec![("diameter", json!(true)), ("modifier", json!("mmc"))]),
+      (&DRAWING_DATUM, vec![]),
+      (&DRAWING_FINISH, vec![("process", json!("removal"))]),
+      (&DRAWING_BALLOON, vec![]),
+    ];
+    for (f, set) in forms {
+      let mut d = form(&mut s, f, vec![], &set);
+      d.form.set_drawing(f, &s, Some(id));
+      apply(&mut s, &mut d);
+      d.applied = false;
+    }
+    let dr = &s.design.drawings[0];
+    assert_eq!(dr.views[0].breaks.len(), 1);
+    assert_eq!(dr.dimensions.len(), 6);
+    assert!(matches!(
+      dr.dimensions[2],
+      clf_engine::model::drawing::DrawingDim::FeatureControl { offset: [12.0, 12.0], .. }
+    ));
+    let text = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
+    for want in ["Ø0.1", "A", "1.6", "1"] {
+      assert!(text.texts().contains(&want), "missing {want}: {:?}", text.texts());
+    }
   }
 }
