@@ -8,11 +8,27 @@
 //! clfusion-cli export IN.clf OUT.step|stl|obj
 //! clfusion-cli render IN.clf OUT.png [--view V] [--size WxH]
 //! clfusion-cli commands
+//! clfusion-cli formats
+//! clfusion-cli inspect FILE
+//! clfusion-cli convert IN OUT                 (any readable format to any writable one)
+//! clfusion-cli hub SUBCOMMAND ['{json}'] [--open FILE]   (hub.SUBCOMMAND on the data hub)
+//! clfusion-cli mcp [IN.clf]                   (Model Context Protocol server on stdio)
+//! ```
+//!
+//! `--hub DIR` (or `CLF_DATA_DIR`) picks the data hub directory for every subcommand.
+//!
+//! ```text
+//! clfusion-cli hub save '{"description": "first cut"}' --open bracket.clf
+//! clfusion-cli hub list '{"project": "Default Project"}'
+//! clfusion-cli hub versions '{"item": "i3"}'
+//! clfusion-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
 //! ```
 //!
 //! A script is one JSON command per line: `{"cmd": "extrude", "distance": 10}` (the remaining
 //! keys are the parameters) or `{"command": "...", "params": {...}}`. Blank lines and lines
 //! starting with `#` are ignored. Each result is printed as one JSON line.
+
+mod mcp;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -46,9 +62,50 @@ fn out(v: &Value) {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
+  if let Some(dir) = flag(args, "--hub") {
+    HUB.with(|h| *h.borrow_mut() = Some(PathBuf::from(dir)));
+  }
   let Some(sub) = args.first() else { return Err(usage()) };
   let rest = &args[1..];
   match sub.as_str() {
+    "mcp" => {
+      let s = match rest.first() {
+        Some(p) => open(p)?,
+        None => session(Session::default()),
+      };
+      mcp::serve(s)
+    }
+    "formats" => {
+      for f in clf_engine::exchange::FORMATS {
+        out(&json!(f));
+      }
+      Ok(())
+    }
+    "inspect" => {
+      let mut s = session(Session::default());
+      out(&exec(&mut s, "inspect", &json!({"path": rest.first().ok_or_else(usage)?}))?);
+      Ok(())
+    }
+    "convert" => {
+      let mut s = open(rest.first().ok_or_else(usage)?)?;
+      let target = rest.get(1).ok_or_else(usage)?;
+      out(&exec(&mut s, "export", &json!({"path": target}))?);
+      Ok(())
+    }
+    "hub" => {
+      let cmd = rest.first().ok_or_else(usage)?;
+      let params: Value = match rest.get(1).filter(|a| !a.starts_with("--")) {
+        Some(j) => serde_json::from_str(j).map_err(|e| format!("bad JSON parameters: {e}"))?,
+        None => json!({}),
+      };
+      let mut s = match flag(rest, "--open") {
+        Some(p) => open(&p)?,
+        None => session(Session::default()),
+      };
+      let name = if cmd.starts_with("hub.") { cmd.clone() } else { format!("hub.{cmd}") };
+      out(&exec(&mut s, &name, &params)?);
+      Ok(())
+    }
     "commands" | "help" => {
       for c in COMMANDS {
         out(&json!({"cmd": c.id, "help": c.help, "params": c.params}));
@@ -92,7 +149,7 @@ fn run(args: &[String]) -> Result<(), String> {
       };
       let mut s = match flag(rest, "--open") {
         Some(p) => open(&p)?,
-        None => Session::default(),
+        None => session(Session::default()),
       };
       let mut failed = 0;
       for (n, line) in text.lines().enumerate() {
@@ -132,11 +189,21 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | render F.clf OUT.png | commands".into()
+  "usage: clfusion-cli run SCRIPT [--open F.clf] [--save F.clf] [--export F.step] [--png F.png] | exec F.clf JSON | info F.clf | export F.clf OUT | convert IN OUT | inspect FILE | render F.clf OUT.png | hub CMD [JSON] [--open F] | mcp [F.clf] | formats | commands  (all take --hub DIR)".into()
+}
+
+thread_local! {
+  static HUB: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Applies `--hub DIR` to a session.
+fn session(mut s: Session) -> Session {
+  s.store_root = HUB.with(|h| h.borrow().clone());
+  s
 }
 
 fn open(p: &str) -> Result<Session, String> {
-  Session::open(&PathBuf::from(p)).map_err(|e| e.0)
+  Session::open(&PathBuf::from(p)).map(session).map_err(|e| e.0)
 }
 
 fn exec(s: &mut Session, cmd: &str, params: &Value) -> Result<Value, String> {

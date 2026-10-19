@@ -54,6 +54,15 @@ pub(crate) mod ffi {
     bbox_max: [f64; 3],
   }
 
+  /// A hidden-line projection: 2D polylines with a kind each (0 visible, 1 visible tangent edge,
+  /// 2 visible silhouette, 3 hidden, 4 hidden silhouette) and full circles (cx, cy, r, kind).
+  struct HlrData {
+    points: Vec<f64>,
+    offsets: Vec<u32>,
+    kinds: Vec<u8>,
+    circles: Vec<f64>,
+  }
+
   unsafe extern "C++" {
     include!("clf-kernel/cpp/kernel.hxx");
 
@@ -78,6 +87,27 @@ pub(crate) mod ffi {
     fn transform(s: &Shape, m: &[f64]) -> Result<UniquePtr<Shape>>;
     fn mirror(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn unfold(s: &Shape, face: u32, thickness: f64, k_factor: f64, bends: &mut Vec<f64>) -> Result<UniquePtr<Shape>>;
+    fn face_at_index(s: &Shape, face: u32) -> Result<UniquePtr<Shape>>;
+    fn refold_cuts(
+      folded: &Shape,
+      face: u32,
+      thickness: f64,
+      k_factor: f64,
+      removed: &Shape,
+    ) -> Result<UniquePtr<Shape>>;
+    fn fillet_radii(s: &Shape, edges: &[u32], radii: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn draft_prism(face: &Shape, height: f64, angle: f64) -> Result<UniquePtr<Shape>>;
+    fn offset_face(face: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
+    fn chamfer2(s: &Shape, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<UniquePtr<Shape>>;
+    fn fillet_var(s: &Shape, edges: &[u32], r1: f64, r2: f64) -> Result<UniquePtr<Shape>>;
+    fn split_by_shape(s: &Shape, tool: &Shape) -> Result<UniquePtr<Shape>>;
+    fn hlr_project(s: &Shape, view: &[f64], deflection: f64) -> Result<HlrData>;
+    fn make_wire(segs: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn make_pipe(face: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
+    fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
+    fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
+    fn draft(s: &Shape, faces: &[u32], plane: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
 
     fn solid_count(s: &Shape) -> u32;
     fn solid_at(s: &Shape, i: u32) -> Result<UniquePtr<Shape>>;
@@ -95,5 +125,9 @@ pub(crate) mod ffi {
     fn read_step(path: &str) -> Result<UniquePtr<Shape>>;
     fn write_brep(s: &Shape) -> Result<String>;
     fn read_brep(data: &str) -> Result<UniquePtr<Shape>>;
+    fn solidify(s: &Shape, tol: f64) -> Result<UniquePtr<Shape>>;
+    fn write_iges(s: &Shape, path: &str) -> Result<()>;
+    fn read_iges(path: &str) -> Result<UniquePtr<Shape>>;
+    fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
   }
 }

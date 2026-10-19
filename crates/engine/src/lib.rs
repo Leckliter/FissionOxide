@@ -6,7 +6,11 @@
 //! can also script.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod assembly;
 mod commands;
+mod drawings;
+pub mod files;
+pub mod hub;
 pub mod scene;
 
 use std::path::PathBuf;
@@ -15,11 +19,14 @@ use clf_model::regen::{Model, Regenerator};
 use clf_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
+pub use clf_exchange as exchange;
 pub use clf_kernel as kernel;
 pub use clf_model as model;
 pub use clf_render as render;
 pub use clf_sketch as sketch;
+pub use clf_store as store;
 pub use commands::{COMMANDS, CommandSpec};
+pub use hub::HubLink;
 
 /// Undo history depth.
 const MAX_UNDO: usize = 200;
@@ -105,6 +112,10 @@ pub struct Session {
   pub edit_sketch: Option<FeatureId>,
   /// Bumped whenever the model is regenerated (UI caches key off it).
   pub revision: u64,
+  /// The data hub directory (`None` = [`store::Store::default_root`]).
+  pub store_root: Option<PathBuf>,
+  /// The hub item and version the design was opened from or last saved to.
+  pub hub: Option<HubLink>,
 }
 
 impl Default for Session {
@@ -126,16 +137,21 @@ impl Session {
       selection: Vec::new(),
       edit_sketch: None,
       revision: 0,
+      store_root: None,
+      hub: None,
     };
     s.rebuild();
     s
   }
 
+  /// Opens any readable file: a `.clf`/`.clfz` design, or a STEP, IGES, mesh, DXF ... file as a
+  /// new design (see [`files`]).
   pub fn open(path: &std::path::Path) -> Result<Session, CmdError> {
-    let d = Design::load(path)?;
-    let mut s = Session::new(d);
-    s.path = Some(path.to_path_buf());
-    Ok(s)
+    files::open(path)
+  }
+
+  pub fn hub_root(&self) -> PathBuf {
+    self.store_root.clone().unwrap_or_else(store::Store::default_root)
   }
 
   /// Runs a command by name with JSON parameters.
@@ -253,8 +269,9 @@ impl Session {
     self.design.body_settings(id).map(|s| s.visible).unwrap_or(true)
   }
 
+  /// Saves to a file (`.clfz` writes an archive, anything else `.clf` JSON).
   pub fn save_to(&mut self, path: &std::path::Path) -> Result<(), CmdError> {
-    self.design.save(path)?;
+    files::save_design(self, path)?;
     self.path = Some(path.to_path_buf());
     self.dirty = false;
     Ok(())

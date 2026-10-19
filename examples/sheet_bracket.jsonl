@@ -1,0 +1,17 @@
+# A sheet metal mounting bracket: base flange, two edge flanges, a hem and holes, then the flat
+# pattern as DXF. Change "thick" or the rule and the whole part (and the flat pattern) follows.
+{"cmd": "new", "name": "Sheet bracket"}
+{"cmd": "param.add", "name": "thick", "expr": "1.5 mm", "comment": "sheet thickness"}
+{"cmd": "param.add", "name": "wall", "expr": "25 mm", "comment": "flange height"}
+{"cmd": "sheet.rule", "name": "Steel 1.5", "thickness": "thick", "bend_radius": "thick", "k_factor": 0.44}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [120, 80]}
+{"cmd": "sheet.flange"}
+{"cmd": "sheet.edge_flange", "edges": [{"point": [60, 80, 1.5]}, {"point": [60, 0, 1.5]}], "height": "wall"}
+{"cmd": "sheet.hem", "edges": [{"point": [120, 40, 1.5]}], "length": "8 mm", "gap": "0.5 mm"}
+{"cmd": "sketch.create", "plane": {"point": [40, 40, 1.5], "normal": [0, 0, 1]}}
+{"cmd": "sketch.point", "at": [20, 20]}
+{"cmd": "sketch.point", "at": [20, 60]}
+{"cmd": "sketch.point", "at": [90, 40]}
+{"cmd": "hole", "diameter": "5 mm", "through_all": true}
+{"cmd": "sheet.flat_pattern"}

@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use clf_kernel::glam::DVec3;
 use clf_model::{
-  AxisRef, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId, FeatureKind, Operation,
-  OriginPlane, ParamKind, PlaneRef, Primitive,
+  AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
+  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  SheetMetalRule, ThinSide,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -31,10 +32,42 @@ cmds! {
   "help" => "List commands", "{}";
   "info" => "Design summary: parameters, timeline with status, bodies with mass properties", "{}";
   "new" => "Start a new design", "{name?}";
-  "open" => "Open a .clf design", "{path}";
-  "save" => "Save the design (.clf JSON)", "{path?}";
-  "export" => "Export bodies: .step/.stp, .stl, .obj (format from the extension)", "{path, bodies?: [id]}";
-  "import" => "Import solids from a STEP file as a new feature", "{path}";
+  "open" => "Open a design (.clf, .clfz) or any importable file as a new design", "{path}";
+  "save" => "Save the design to a file (.clf JSON, or .clfz archive)", "{path?}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf (sketch), .clf .clfz", "{path, bodies?: [id], sketch?, ascii?: bool}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF (new sketch), .clf/.clfz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
+  "formats" => "Every file format with import/export support", "{}";
+  "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
+  "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
+  "hub.projects" => "List projects", "{}";
+  "hub.project.create" => "New project", "{name}";
+  "hub.project.rename" => "Rename a project", "{project, name}";
+  "hub.project.delete" => "Move a project to the trash", "{project}";
+  "hub.project.restore" => "Restore a trashed project", "{project}";
+  "hub.folder.create" => "New folder", "{project?, parent?, name}";
+  "hub.folder.rename" => "Rename a folder", "{folder, name}";
+  "hub.folder.delete" => "Delete an empty folder", "{folder}";
+  "hub.list" => "Folders and items in a project folder", "{project?, folder?}";
+  "hub.save" => "Save the design to the hub: a new version of its item, or a new item", "{project?, folder?, name?, description?, milestone?, new?: bool}";
+  "hub.open" => "Open a hub item (latest or a given version)", "{item, version?}";
+  "hub.versions" => "Version history of an item", "{item?}";
+  "hub.promote" => "Make an old version the latest (copies it as a new version)", "{item?, version}";
+  "hub.milestone" => "Mark a version as a milestone (no name clears it)", "{item?, version, name?}";
+  "hub.describe" => "Set a version's description", "{item?, version, description}";
+  "hub.version.delete" => "Delete an old, non-milestone version", "{item?, version}";
+  "hub.compare" => "What changed between two versions of a design", "{item?, a, b?}";
+  "hub.item.rename" => "Rename an item", "{item?, name}";
+  "hub.item.move" => "Move an item to another project/folder", "{item?, project?, folder?}";
+  "hub.item.copy" => "Copy an item version to a new item", "{item?, version?, project?, folder?, name?}";
+  "hub.item.delete" => "Move an item to the trash", "{item?}";
+  "hub.item.restore" => "Restore an item from the trash", "{item}";
+  "hub.item.purge" => "Permanently delete a trashed item", "{item}";
+  "hub.trash" => "Trashed items and projects", "{project?}";
+  "hub.recent" => "Recently opened or saved items", "{limit?}";
+  "hub.search" => "Find items by name, version description or milestone", "{query}";
+  "hub.activity" => "Activity feed", "{project?, item?, limit?}";
+  "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
+  "hub.download" => "Write an item version to a file; the extension picks the format (.clfz includes history)", "{item?, version?, path, ...export options}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
   "param.add" => "Add a user parameter", "{name, expr, kind?: length|angle|unitless, comment?}";
@@ -58,10 +91,27 @@ cmds! {
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.info" => "Sketch geometry, constraints, profiles and degrees of freedom", "{sketch?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all, distance2?, flip?, operation?: new_body|join|cut|intersect}";
+  "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
+  "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
+  "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
+  "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
+  "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
+  "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
+  "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
+  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
+  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
+  "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face, to?: face, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
-  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it)", "{edges: [{body, edge} | {point}], radius}";
-  "chamfer" => "Bevel edges", "{edges: [{body, edge}], distance}";
+  "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], operation?}";
+  "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
+  "split" => "Split bodies along a plane", "{plane, bodies?}";
+  "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
+  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable", "{edges: [{body, edge} | {point}], radius, radius2?}";
+  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
+  "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
+  "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?})", "{faces: [{body, face} | {point}], thickness}";
   "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?}";
   "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?}";
@@ -71,7 +121,7 @@ cmds! {
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
-  "move" => "Move/rotate bodies", "{bodies?, translate?: [x,y,z], axis?, angle?}";
+  "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
@@ -83,22 +133,71 @@ cmds! {
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "select" => "Set the selection", "{items: [Sel]}";
+  "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
+  "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
+  "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
+  "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
+  "component.rename" => "Rename a component", "{component, name}";
+  "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";
+  "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
+  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
+  "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
+  "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
+  "assembly.interference" => "Overlapping bodies of different components", "{}";
+  "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
+  "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
+  "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?}";
+  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
+  "drawing.remove_view" => "Remove a view", "{drawing?, view}";
+  "drawing.move_view" => "Place a view (sheet mm; null = automatic)", "{drawing?, view, at}";
+  "drawing.dimension" => "Dimension two model points in a view", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?}";
+  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text}";
+  "drawing.title" => "Fill in the title block", "{drawing?, title?, author?, part_number?, material?, revision?, company?}";
+  "drawing.info" => "A drawing's views, scale and text", "{drawing?}";
+  "drawing.list" => "List drawings", "{}";
+  "drawing.delete" => "Delete a drawing", "{drawing?}";
+  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf", "{drawing?, path}";
+  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
+  "sheet.rules" => "List the sheet metal rules", "{}";
+  "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
+  "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join}";
+  "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open}";
+  "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
+  "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
+  "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body); sharp corners become bends", "{body, face?: {body, face} | {point}, rule?, bends?}";
+  "sheet.rip" => "Slit a solid along edges (e.g. a shelled box's corners) so it can unfold", "{edges: [{body, edge} | {point}], gap?}";
+  "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
+  "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
+  "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  if let Some(r) = crate::assembly::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::drawings::run(s, name, p) {
+    return r;
+  }
   match name {
     "help" => {
       Ok(json!(COMMANDS.iter().map(|c| json!({"id": c.id, "help": c.help, "params": c.params})).collect::<Vec<_>>()))
     }
     "info" => Ok(info(s)),
     "new" => {
+      let root = s.store_root.take();
       *s = Session::new(Design::new(opt_str(p, "name").unwrap_or("Untitled")));
+      s.store_root = root;
       Ok(json!({}))
     }
     "open" => {
       let path = PathBuf::from(req_str(p, "path")?);
-      *s = Session::open(&path)?;
-      Ok(json!({"features": s.design.features.len()}))
+      let root = s.store_root.take();
+      let opened = Session::open(&path);
+      s.store_root = root.clone();
+      *s = opened?;
+      s.store_root = root;
+      Ok(json!({"features": s.design.features.len(), "bodies": s.model.bodies.len()}))
     }
     "save" => {
       let path = match opt_str(p, "path") {
@@ -108,17 +207,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.save_to(&path)?;
       Ok(json!({"path": path}))
     }
-    "export" => export(s, p),
+    "export" => crate::files::export(s, p),
     "import" => {
       let path = PathBuf::from(req_str(p, "path")?);
-      let shapes = clf_kernel::read_step(&path)?;
-      let breps: Result<Vec<String>, _> = shapes.iter().map(|sh| sh.to_brep()).collect();
-      let breps = breps?;
-      let file_name = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-      let n = breps.len();
-      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Import { file_name, breps })?))?;
-      Ok(json!({"feature": id.0, "solids": n}))
+      crate::files::import(s, &path, p)
     }
+    "formats" => Ok(json!(clf_exchange::FORMATS)),
+    "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
+    n if n.starts_with("hub.") => crate::hub::run(s, n, p),
     "undo" => Ok(json!({"done": s.undo()})),
     "redo" => Ok(json!({"done": s.redo()})),
     "param.add" => {
@@ -151,7 +247,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.create" => {
       let plane = plane_ref(s, p.get("plane").unwrap_or(&json!("xy")))?;
-      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new() })?))?;
+      let id =
+        s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new(), links: Vec::new() })?))?;
       s.edit_sketch = Some(id);
       Ok(json!({"sketch": id.0}))
     }
@@ -166,7 +263,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({}))
     }
     "sketch.line" | "sketch.rect" | "sketch.circle" | "sketch.arc" | "sketch.polygon" | "sketch.slot"
-    | "sketch.point" => draw(s, name, p),
+    | "sketch.point" | "sketch.spline" => draw(s, name, p),
     "sketch.constrain" => constrain(s, p),
     "sketch.dimension" => dimension(s, p),
     "sketch.set_dimension" => {
@@ -229,6 +326,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({"dof": r.dof}))
     }
     "sketch.info" => sketch_info(s, p),
+    "sketch.fillet"
+    | "sketch.chamfer"
+    | "sketch.offset"
+    | "sketch.trim"
+    | "sketch.extend"
+    | "sketch.mirror"
+    | "sketch.pattern_rect"
+    | "sketch.pattern_circ" => modify(s, name, p),
+    "sketch.project" => project(s, p),
     "extrude" => {
       let sk = sketch_for_feature(s, p)?;
       let profiles = profile_points(s, sk, p)?;
@@ -237,14 +343,34 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "symmetric" => ExtentKind::Symmetric,
         "two_sides" => ExtentKind::TwoSides,
         "through_all" | "all" => ExtentKind::ThroughAll,
+        "to_face" | "to" => ExtentKind::ToFace,
         other => return Err(CmdError::new(format!("unknown extent '{other}'"))),
       };
-      let distance = if kind == ExtentKind::ThroughAll { "0".to_string() } else { req_expr(p, "distance")? };
+      let distance = match kind {
+        ExtentKind::ThroughAll => "0".to_string(),
+        ExtentKind::ToFace => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+        _ => req_expr(p, "distance")?,
+      };
+      let to = match (kind, p.get("to")) {
+        (ExtentKind::ToFace, Some(f)) => Some(face_ref(s, f)?),
+        (ExtentKind::ToFace, None) => return Err(CmdError::new("to_face needs 'to': a face")),
+        _ => None,
+      };
+      let thin_side = match opt_str(p, "thin_side").unwrap_or("inside") {
+        "inside" => ThinSide::Inside,
+        "outside" => ThinSide::Outside,
+        "center" => ThinSide::Center,
+        o => return Err(CmdError::new(format!("unknown thin side '{o}' (inside, outside, center)"))),
+      };
       let extent = Extent {
         kind,
         distance,
         distance2: opt_expr(p, "distance2").unwrap_or_else(|| "0".into()),
         flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        taper: opt_expr(p, "taper").unwrap_or_default(),
+        thin: opt_expr(p, "thin").unwrap_or_default(),
+        thin_side,
+        to,
       };
       let operation = operation(p)?;
       add_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation })
@@ -256,13 +382,104 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into());
       add_feature(s, FeatureKind::Revolve { sketch: sk, profiles, axis, angle, operation: operation(p)? })
     }
+    "loft" => {
+      let list = p.get("sections").and_then(Value::as_array).ok_or(CmdError::new("missing 'sections'"))?;
+      let mut sections = Vec::new();
+      for v in list {
+        let (sketch, profile) = match v.as_u64() {
+          Some(id) => (id, None),
+          None => (
+            v.get("sketch")
+              .and_then(Value::as_u64)
+              .ok_or(CmdError::new("a section is a sketch id or {sketch, profile?}"))?,
+            opt_pt(v, "profile")?,
+          ),
+        };
+        let sketch = FeatureId(u32::try_from(sketch).map_err(|_| CmdError::new("bad sketch id"))?);
+        s.design.sketch(sketch)?;
+        sections.push(LoftSection { sketch, profile });
+      }
+      s.edit_sketch = None;
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Loft { sections, ruled: flag("ruled"), closed: flag("closed"), operation: operation(p)? },
+      )
+    }
+    "sweep" => {
+      let path_sketch = FeatureId(req_u32(p, "path")?);
+      s.design.sketch(path_sketch)?;
+      let sk = sketch_for_feature(s, p)?;
+      let profiles = profile_points(s, sk, p)?;
+      let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
+      add_feature(s, FeatureKind::Sweep { sketch: sk, profiles, path_sketch, path_curves, operation: operation(p)? })
+    }
+    "hole" => {
+      let sk = sketch_for_feature(s, p)?;
+      let kind = match opt_str(p, "kind").unwrap_or("simple") {
+        "simple" => HoleKind::Simple,
+        "counterbore" => HoleKind::Counterbore,
+        "countersink" => HoleKind::Countersink,
+        o => return Err(CmdError::new(format!("unknown hole kind '{o}' (simple, counterbore, countersink)"))),
+      };
+      let through_all = p.get("through_all").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Hole {
+          sketch: sk,
+          points: ids(p, "points").into_iter().map(PointId).collect(),
+          kind,
+          diameter: req_expr(p, "diameter")?,
+          depth: if through_all { "0".into() } else { req_expr(p, "depth")? },
+          through_all,
+          tip_angle: opt_expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()),
+          head_diameter: opt_expr(p, "head_diameter").unwrap_or_else(|| "0".into()),
+          head_depth: opt_expr(p, "head_depth").unwrap_or_else(|| "0".into()),
+          head_angle: opt_expr(p, "head_angle").unwrap_or_else(|| "90 deg".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        },
+      )
+    }
+    "split" => {
+      let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
+      add_feature(s, FeatureKind::SplitBody { bodies: body_sel(p), plane })
+    }
+    "draft" => {
+      let mut faces = Vec::new();
+      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+        faces.push(face_ref(s, f)?);
+      }
+      let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
+      let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip })
+    }
     "fillet" => {
       let edges = edge_refs(s, p)?;
-      add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")? })
+      add_feature(s, FeatureKind::Fillet { edges, radius: req_expr(p, "radius")?, radius2: opt_expr(p, "radius2") })
     }
     "chamfer" => {
       let edges = edge_refs(s, p)?;
-      add_feature(s, FeatureKind::Chamfer { edges, distance: req_expr(p, "distance")? })
+      add_feature(
+        s,
+        FeatureKind::Chamfer {
+          edges,
+          distance: req_expr(p, "distance")?,
+          distance2: opt_expr(p, "distance2"),
+          angle: opt_expr(p, "angle"),
+        },
+      )
+    }
+    "press_pull" => {
+      let mut faces = Vec::new();
+      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
+        faces.push(face_ref(s, f)?);
+      }
+      add_feature(s, FeatureKind::OffsetFaces { faces, distance: req_expr(p, "distance")? })
+    }
+    "split_by_body" => {
+      let tool = BodyId(req_u32(p, "tool")?);
+      let remove_tool = p.get("remove_tool").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::SplitByBody { bodies: body_sel(p), tool, remove_tool })
     }
     "shell" => {
       let mut faces = Vec::new();
@@ -425,21 +642,193 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       s.selection = items;
       Ok(json!({}))
     }
+    "sheet.rule" => {
+      let name = opt_str(p, "name").unwrap_or("Default").to_string();
+      let mut rule = s
+        .design
+        .sheet_metal_rules
+        .iter()
+        .find(|r| r.name == name)
+        .cloned()
+        .unwrap_or_else(|| SheetMetalRule { name: name.clone(), ..s.design.sheet_rule("").unwrap_or_default() });
+      for (k, slot) in [
+        ("thickness", &mut rule.thickness),
+        ("bend_radius", &mut rule.bend_radius),
+        ("k_factor", &mut rule.k_factor),
+        ("relief_width", &mut rule.relief_width),
+        ("relief_depth", &mut rule.relief_depth),
+        ("gap", &mut rule.gap),
+      ] {
+        if let Some(e) = opt_expr(p, k) {
+          *slot = e;
+        }
+      }
+      if let Some(r) = opt_str(p, "relief") {
+        rule.relief = match r {
+          "rectangular" => ReliefShape::Rectangular,
+          "round" => ReliefShape::Round,
+          "none" => ReliefShape::None,
+          o => return Err(CmdError::new(format!("unknown relief '{o}' (rectangular, round, none)"))),
+        };
+      }
+      let info = clf_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
+      s.edit(|d| Ok(d.set_sheet_rule(rule)?))?;
+      Ok(json!({"name": name, "thickness": info.thickness, "bend_radius": info.bend_radius, "k_factor": info.k_factor}))
+    }
+    "sheet.rules" => {
+      let scope = params_scope(s);
+      let mut rules = s.design.sheet_metal_rules.clone();
+      if rules.is_empty() {
+        rules.push(SheetMetalRule::default());
+      }
+      Ok(json!(
+        rules
+          .iter()
+          .map(|r| {
+            let v = clf_model::sheet::eval_rule(r, &scope);
+            json!({
+              "name": r.name, "thickness": r.thickness, "bend_radius": r.bend_radius, "k_factor": r.k_factor,
+              "values": v.as_ref().ok().map(|i| [i.thickness, i.bend_radius, i.k_factor]),
+              "error": v.err(),
+            })
+          })
+          .collect::<Vec<_>>()
+      ))
+    }
+    "sheet.rule_remove" => {
+      let name = req_str(p, "name")?.to_string();
+      s.edit(|d| Ok(d.remove_sheet_rule(&name)?))?;
+      Ok(json!({}))
+    }
+    "sheet.flange" => {
+      let sk = sketch_for_feature(s, p)?;
+      let profiles = profile_points(s, sk, p)?;
+      let operation = operation(p)?;
+      if !matches!(operation, Operation::NewBody | Operation::Join) {
+        return Err(CmdError::new("a flange makes a new body or joins one"));
+      }
+      let rule = rule_name(s, p)?;
+      let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Flange { sketch: sk, profiles, rule, flip, operation })
+    }
+    "sheet.contour_flange" => {
+      let sk = sketch_for_feature(s, p)?;
+      let curves = ids(p, "curves").into_iter().map(CurveId).collect();
+      let rule = rule_name(s, p)?;
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::ContourFlange {
+          sketch: sk,
+          curves,
+          distance: req_expr(p, "distance")?,
+          symmetric: flag("symmetric"),
+          flip: flag("flip"),
+          flip_direction: flag("flip_direction"),
+          rule,
+        },
+      )
+    }
+    "sheet.edge_flange" => {
+      let edges = edge_refs(s, p)?;
+      let position = match opt_str(p, "position").unwrap_or("adjacent") {
+        "adjacent" => BendPosition::Adjacent,
+        "inside" => BendPosition::Inside,
+        "outside" => BendPosition::Outside,
+        o => return Err(CmdError::new(format!("unknown bend position '{o}' (adjacent, inside, outside)"))),
+      };
+      add_feature(
+        s,
+        FeatureKind::EdgeFlange {
+          edges,
+          height: req_expr(p, "height")?,
+          angle: opt_expr(p, "angle").unwrap_or_else(|| "90 deg".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+          position,
+          offset_start: opt_expr(p, "offset_start").unwrap_or_else(|| "0".into()),
+          offset_end: opt_expr(p, "offset_end").unwrap_or_else(|| "0".into()),
+          corners: match opt_str(p, "corners").unwrap_or("miter") {
+            "miter" => CornerMode::Miter,
+            "open" => CornerMode::Open,
+            o => return Err(CmdError::new(format!("unknown corner mode '{o}' (miter, open)"))),
+          },
+        },
+      )
+    }
+    "sheet.hem" => {
+      let edges = edge_refs(s, p)?;
+      add_feature(
+        s,
+        FeatureKind::Hem {
+          edges,
+          length: req_expr(p, "length")?,
+          gap: opt_expr(p, "gap").unwrap_or_else(|| "0.5 mm".into()),
+          flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+        },
+      )
+    }
+    "sheet.bend" => {
+      let sk = sketch_for_feature(s, p)?;
+      let line = CurveId(req_u32(p, "line")?);
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(
+        s,
+        FeatureKind::Bend {
+          sketch: sk,
+          line,
+          angle: req_expr(p, "angle")?,
+          flip: flag("flip"),
+          flip_side: flag("flip_side"),
+        },
+      )
+    }
+    "sheet.convert" => {
+      let body = BodyId(req_u32(p, "body")?);
+      let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
+      let rule = rule_name(s, p)?;
+      let bends = p.get("bends").and_then(Value::as_bool).unwrap_or(true);
+      add_feature(s, FeatureKind::ConvertToSheetMetal { body, face, rule, bends })
+    }
+    "sheet.rip" => {
+      let edges = edge_refs(s, p)?;
+      add_feature(s, FeatureKind::Rip { edges, gap: opt_expr(p, "gap").unwrap_or_default() })
+    }
+    "sheet.refold" => {
+      let body = match p.get("body") {
+        Some(_) => BodyId(req_u32(p, "body")?),
+        None => {
+          let mut it = s.model.bodies.iter().filter(|b| b.unfolded.is_some());
+          match (it.next(), it.next()) {
+            (Some(b), None) => b.id,
+            (None, _) => return Err(CmdError::new("there is no unfolded body")),
+            _ => return Err(CmdError::new("there are several unfolded bodies; pass 'body'")),
+          }
+        }
+      };
+      add_feature(s, FeatureKind::Refold { body })
+    }
+    "sheet.unfold" => {
+      let body = sheet_body(s, p)?;
+      let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
+      let keep_folded = p.get("keep_folded").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Unfold { body, face, keep_folded })
+    }
+    "sheet.flat_pattern" => flat_pattern(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
 
 // ---------------------------------------------------------------- parameters helpers
 
-fn req_str<'a>(p: &'a Value, k: &str) -> Result<&'a str, CmdError> {
+pub(crate) fn req_str<'a>(p: &'a Value, k: &str) -> Result<&'a str, CmdError> {
   p.get(k).and_then(Value::as_str).ok_or_else(|| CmdError::new(format!("missing '{k}'")))
 }
 
-fn opt_str<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
+pub(crate) fn opt_str<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
   p.get(k).and_then(Value::as_str)
 }
 
-fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
+pub(crate) fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
   p.get(k)
     .and_then(Value::as_u64)
     .and_then(|v| u32::try_from(v).ok())
@@ -447,7 +836,7 @@ fn req_u32(p: &Value, k: &str) -> Result<u32, CmdError> {
 }
 
 /// An expression: a JSON number or a string ("40 mm", "width/2").
-fn expr_of(v: &Value) -> Result<String, CmdError> {
+pub(crate) fn expr_of(v: &Value) -> Result<String, CmdError> {
   match v {
     Value::String(s) if !s.trim().is_empty() => Ok(s.clone()),
     Value::Number(n) => {
@@ -461,7 +850,7 @@ fn req_expr(p: &Value, k: &str) -> Result<String, CmdError> {
   expr_of(p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))?)
 }
 
-fn opt_expr(p: &Value, k: &str) -> Option<String> {
+pub(crate) fn opt_expr(p: &Value, k: &str) -> Option<String> {
   p.get(k).and_then(|v| expr_of(v).ok())
 }
 
@@ -495,7 +884,7 @@ fn opt_pt(p: &Value, k: &str) -> Result<Option<[f64; 2]>, CmdError> {
   }
 }
 
-fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
+pub(crate) fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
   let a = p.get(k).and_then(Value::as_array).ok_or_else(|| CmdError::new(format!("'{k}' must be [x, y, z]")))?;
   match a.as_slice() {
     [x, y, z] => match (x.as_f64(), y.as_f64(), z.as_f64()) {
@@ -506,7 +895,7 @@ fn req_vec3(p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
   }
 }
 
-fn ids(p: &Value, k: &str) -> Vec<u32> {
+pub(crate) fn ids(p: &Value, k: &str) -> Vec<u32> {
   p.get(k)
     .and_then(Value::as_array)
     .map(|a| a.iter().filter_map(|v| v.as_u64().and_then(|v| u32::try_from(v).ok())).collect())
@@ -537,6 +926,9 @@ fn operation(p: &Value) -> Result<Operation, CmdError> {
 }
 
 fn body_sel(p: &Value) -> BodySel {
+  if let Some(c) = p.get("component").and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok()) {
+    return BodySel::Component { id: clf_model::ComponentId(c) };
+  }
   let v = ids(p, "bodies");
   if v.is_empty() { BodySel::All } else { BodySel::Bodies { ids: v.into_iter().map(BodyId).collect() } }
 }
@@ -555,6 +947,79 @@ fn feature_status(s: &Session, id: FeatureId) -> Value {
     "warning": st.and_then(|x| x.warning.clone()),
     "bodies": s.model.bodies.len(),
   })
+}
+
+/// `rule`: a rule name that must exist (empty / absent = the default rule).
+fn rule_name(s: &Session, p: &Value) -> Result<String, CmdError> {
+  let name = opt_str(p, "rule").unwrap_or("").to_string();
+  if s.design.sheet_rule(&name).is_none() {
+    return Err(CmdError::new(format!("there is no sheet metal rule '{name}'")));
+  }
+  Ok(name)
+}
+
+/// `body`, or the only sheet metal body.
+fn sheet_body(s: &Session, p: &Value) -> Result<BodyId, CmdError> {
+  if p.get("body").is_some() {
+    return Ok(BodyId(req_u32(p, "body")?));
+  }
+  let mut sheets = s.model.bodies.iter().filter(|b| b.sheet.as_ref().is_some_and(|i| !i.flat));
+  match (sheets.next(), sheets.next()) {
+    (Some(b), None) => Ok(b.id),
+    (None, _) => Err(CmdError::new("there is no sheet metal body")),
+    _ => Err(CmdError::new("there are several sheet metal bodies; pass 'body'")),
+  }
+}
+
+fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
+  let id = sheet_body(s, p)?;
+  let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
+  let face = match p.get("face") {
+    Some(f) => {
+      let r = face_ref(s, f)?;
+      if r.body != id {
+        return Err(CmdError::new("the stationary face must be on the body"));
+      }
+      Some(r.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or(CmdError::new("no such face"))?)
+    }
+    None => None,
+  };
+  let flat = body.flat_pattern(face).map_err(CmdError::new)?;
+  let m = flat.shape.mass()?;
+  // size in the stationary plane
+  let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+  for e in flat.shape.edge_lines(0.05)? {
+    for q in e.points {
+      let l = flat.plane.to_local(q);
+      for k in 0..2 {
+        lo[k] = lo[k].min(l[k]);
+        hi[k] = hi[k].max(l[k]);
+      }
+    }
+  }
+  if let Some(path) = opt_str(p, "path") {
+    let path = PathBuf::from(path);
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+      "dxf" => std::fs::write(&path, clf_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
+      "step" | "stp" => clf_kernel::write_step([&flat.shape], &path)?,
+      "stl" => clf_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
+      o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),
+    }
+  }
+  Ok(json!({
+    "body": id.0,
+    "size": [hi[0] - lo[0], hi[1] - lo[1]],
+    "area_mm2": m.volume / body.sheet.as_ref().map(|i| i.thickness).unwrap_or(1.0),
+    "volume_mm3": m.volume,
+    "bends": flat.bends.iter().map(|b| json!({
+      "angle_deg": b.angle.to_degrees(),
+      "length": (b.end - b.start).length(),
+      "direction": if b.inner { "up" } else { "down" },
+      "start": flat.plane.to_local(b.start),
+      "end": flat.plane.to_local(b.end),
+    })).collect::<Vec<_>>(),
+  }))
 }
 
 // ---------------------------------------------------------------- references
@@ -585,7 +1050,7 @@ fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
 }
 
 /// {"body", "face"} by index, or {"point": [x,y,z], "normal"?: [x,y,z]} — the face at a point.
-fn face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError> {
+pub(crate) fn face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError> {
   if v.get("point").is_some() {
     let (body, face) =
       face_at(s, DVec3::from(req_vec3(v, "point")?), v.get("normal").map(|_| req_vec3(v, "normal")).transpose()?)?;
@@ -674,18 +1139,23 @@ fn seg_dist3(a: DVec3, b: DVec3, p: DVec3) -> f64 {
   (a + ab * t - p).length()
 }
 
+/// {"body", "edge"} or {"point": [x,y,z]} on the edge.
+pub(crate) fn edge_ref_of(s: &Session, e: &Value) -> Result<EdgeRef, CmdError> {
+  let (body, edge) = if e.get("point").is_some() {
+    edge_at(s, DVec3::from(req_vec3(e, "point")?))?
+  } else {
+    (BodyId(req_u32(e, "body")?), req_u32(e, "edge")?)
+  };
+  let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
+  let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
+  Ok(EdgeRef::from_edge(body, info, b.faces()))
+}
+
 fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
   let list = p.get("edges").and_then(Value::as_array).ok_or(CmdError::new("missing 'edges'"))?;
   let mut out = Vec::new();
   for e in list {
-    let (body, edge) = if e.get("point").is_some() {
-      edge_at(s, DVec3::from(req_vec3(e, "point")?))?
-    } else {
-      (BodyId(req_u32(e, "body")?), req_u32(e, "edge")?)
-    };
-    let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
-    let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
-    out.push(EdgeRef::from_edge(body, info, b.faces()));
+    out.push(edge_ref_of(s, e)?);
   }
   if out.is_empty() {
     return Err(CmdError::new("no edges given"));
@@ -759,6 +1229,180 @@ fn profile_points(s: &Session, sketch: FeatureId, p: &Value) -> Result<Vec<[f64;
     }
   }
   Ok(out)
+}
+
+// ---------------------------------------------------------------- sketch modify
+
+fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  let sk = sketch_id(s, p)?;
+  let scope = params_scope(s);
+  let curves: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
+  let num =
+    |k: &str, kind: clf_expr::Kind| -> Result<f64, CmdError> { Ok(clf_expr::eval(&req_expr(p, k)?, kind, &scope)?) };
+  let count = |k: &str| -> Result<usize, CmdError> {
+    p.get(k).and_then(Value::as_u64).map(|v| v as usize).ok_or(CmdError::new(format!("missing '{k}'")))
+  };
+  enum Op {
+    Fillet(f64),
+    Chamfer(f64, f64),
+    Offset(f64),
+    Trim(Option<CurveId>, [f64; 2]),
+    Extend(Option<CurveId>, [f64; 2]),
+    Mirror(CurveId),
+    Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
+    Circ([f64; 2], usize, f64),
+  }
+  let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
+  let op = match name {
+    "sketch.fillet" => Op::Fillet(num("radius", clf_expr::Kind::Length)?),
+    "sketch.chamfer" => {
+      let d = num("distance", clf_expr::Kind::Length)?;
+      let d2 = opt_expr(p, "distance2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?;
+      Op::Chamfer(d, d2.unwrap_or(d))
+    }
+    "sketch.offset" => Op::Offset(num("distance", clf_expr::Kind::Length)?),
+    "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
+    "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
+    "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
+    "sketch.pattern_rect" => Op::Rect(
+      opt_pt(p, "direction")?.unwrap_or([1.0, 0.0]),
+      count("count")?,
+      num("spacing", clf_expr::Kind::Length)?,
+      opt_pt(p, "direction2")?.unwrap_or([0.0, 1.0]),
+      p.get("count2").and_then(Value::as_u64).unwrap_or(1) as usize,
+      opt_expr(p, "spacing2").map(|e| clf_expr::eval(&e, clf_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
+    ),
+    _ => Op::Circ(
+      opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
+      count("count")?,
+      opt_expr(p, "angle")
+        .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &scope))
+        .transpose()?
+        .unwrap_or(std::f64::consts::TAU),
+    ),
+  };
+  let made = s.edit(move |d| {
+    let sketch = d.sketch_mut(sk)?;
+    let pick = |sketch: &Sketch, c: Option<CurveId>, at: [f64; 2]| -> Result<CurveId, CmdError> {
+      match c {
+        Some(c) => Ok(c),
+        None => sketch.nearest_curve(at, 1.0).ok_or(CmdError::new("no curve there")),
+      }
+    };
+    let made = match op {
+      Op::Fillet(r) => {
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a fillet needs two lines")) };
+        vec![sketch.fillet(*a, *b, r)?]
+      }
+      Op::Chamfer(d1, d2) => {
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a chamfer needs two lines")) };
+        vec![sketch.chamfer(*a, *b, d1, d2)?]
+      }
+      Op::Offset(dist) => sketch.offset(&curves, dist)?,
+      Op::Trim(c, at) => {
+        let c = pick(sketch, c, at)?;
+        sketch.trim(c, at)?
+      }
+      Op::Extend(c, at) => {
+        let c = pick(sketch, c, at)?;
+        sketch.extend(c, at)?;
+        vec![c]
+      }
+      Op::Mirror(line) => sketch.mirror(&curves, line)?,
+      Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
+      Op::Circ(c, n, a) => sketch.pattern_circ(&curves, c, n, a)?,
+    };
+    if !sketch.solve().ok() {
+      return Err(CmdError::new("the result conflicts with the sketch's constraints"));
+    }
+    Ok(made)
+  })?;
+  let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
+  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+}
+
+/// Projects body edges onto the sketch plane as fixed geometry. Straight and circular edges stay
+/// linked to the body (they move when it changes) unless `associative` is false.
+fn project(s: &mut Session, p: &Value) -> CmdResult {
+  let sk = sketch_id(s, p)?;
+  let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
+  let body = s.model.body(BodyId(req_u32(p, "body")?)).ok_or(CmdError::new("no such body"))?;
+  let face = p.get("face").and_then(Value::as_u64).map(|f| f as u32);
+  let associative = p.get("associative").and_then(Value::as_bool).unwrap_or(true);
+  let n = plane.normal();
+  let lines = body.shape.edge_lines((body.diagonal() * 0.001).clamp(0.005, 0.2))?;
+  enum E {
+    Line([f64; 2], [f64; 2]),
+    Circle([f64; 2], f64),
+    Arc([f64; 2], [f64; 2], [f64; 2]),
+  }
+  let mut todo: Vec<(E, Option<EdgeRef>)> = Vec::new();
+  for e in body.edges().iter().filter(|e| face.is_none_or(|f| e.faces.contains(&f))) {
+    let l = |v: clf_kernel::glam::DVec3| plane.to_local(v);
+    let link = associative.then(|| EdgeRef::from_edge(body.id, e, body.faces()));
+    match e.kind {
+      clf_kernel::CurveKind::Line => todo.push((E::Line(l(e.start), l(e.end)), link)),
+      clf_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
+        if (e.start - e.end).length() < 1e-6 {
+          todo.push((E::Circle(l(e.center), e.radius), link));
+        } else {
+          todo.push((E::Arc(l(e.start), l(e.mid), l(e.end)), link));
+        }
+      }
+      clf_kernel::CurveKind::Degenerate => {}
+      _ => {
+        if let Some(pl) = lines.iter().find(|x| x.id == e.id) {
+          for w in pl.points.windows(2) {
+            todo.push((E::Line(l(w[0]), l(w[1])), None));
+          }
+        }
+      }
+    }
+  }
+  let made = s.edit(move |d| {
+    let mut new_links = Vec::new();
+    let sketch = d.sketch_mut(sk)?;
+    let before: Vec<PointId> = sketch.points.iter().map(|p| p.id).collect();
+    let at = |sketch: &Sketch, q: [f64; 2]| match sketch.nearest_point(q, 1e-6, &[]) {
+      Some(id) if !before.contains(&id) => PtSpec::Point(id),
+      _ => PtSpec::At(q[0], q[1]),
+    };
+    let mut made = Vec::new();
+    for (e, link) in &todo {
+      let id = match *e {
+        E::Line(a, b) => {
+          if (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-6 {
+            continue;
+          }
+          let (sa, sb) = (at(sketch, a), at(sketch, b));
+          sketch.add_line(sa, sb)?.0
+        }
+        E::Circle(c, r) => {
+          let sc = at(sketch, c);
+          let id = sketch.add_circle(sc, r)?;
+          sketch.add_constraint(ConstraintKind::Radius { curve: id, value: Dim::new(r) })?;
+          id
+        }
+        E::Arc(a, m, b) => {
+          let (sa, sb) = (at(sketch, a), at(sketch, b));
+          sketch.add_arc_3pt(sa, m, sb)?
+        }
+      };
+      made.push(id);
+      if let Some(edge) = link {
+        new_links.push(clf_model::SketchLink { curve: id, edge: edge.clone() });
+      }
+    }
+    for pt in sketch.points.iter_mut().filter(|p| !before.contains(&p.id)) {
+      pt.fixed = true;
+    }
+    if let Some(FeatureKind::Sketch { links, .. }) = d.feature_mut(sk).map(|f| &mut f.kind) {
+      links.extend(new_links);
+    }
+    Ok(made)
+  })?;
+  let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
+  Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
 }
 
 // ---------------------------------------------------------------- sketch drawing
@@ -868,6 +1512,24 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let c = req_pt(&p, "center")?;
         let cs = snap(sketch, c);
         sketch.add_polygon(cs, req_pt(&p, "vertex")?, sides)?;
+      }
+      "sketch.spline" => {
+        let pts: Vec<[f64; 2]> = p
+          .get("points")
+          .and_then(Value::as_array)
+          .ok_or(CmdError::new("missing 'points'"))?
+          .iter()
+          .map(|v| pt_of(v).ok_or(CmdError::new("points must be [x, y]")))
+          .collect::<Result<_, _>>()?;
+        if pts.len() < 2 {
+          return Err(CmdError::new("a spline needs 2 or more points"));
+        }
+        let mut ids = Vec::new();
+        for q in pts {
+          let spec = snap(sketch, q);
+          ids.push(sketch.resolve(spec)?);
+        }
+        sketch.add_curve(CurveKind::Spline { points: ids })?;
       }
       "sketch.slot" => {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
@@ -1083,6 +1745,9 @@ fn info(s: &Session) -> Value {
         "bbox": m.map(|m| [m.bbox_min.to_array(), m.bbox_max.to_array()]),
         "faces": b.faces().len(),
         "edges": b.edges().len(),
+        "sheet_metal": b.sheet.as_ref().map(|i| json!({
+          "rule": i.rule, "thickness": i.thickness, "bend_radius": i.bend_radius, "k_factor": i.k_factor, "flat": i.flat,
+        })),
       })
     })
     .collect();
@@ -1115,41 +1780,11 @@ fn info(s: &Session) -> Value {
     "timeline": timeline,
     "bodies": bodies,
     "editing_sketch": s.edit_sketch.map(|f| f.0),
+    "components": s.design.components.iter().map(|c| json!({
+      "id": c.id.0, "name": c.name, "bodies": c.bodies.iter().map(|b| b.0).collect::<Vec<_>>(),
+      "grounded": c.grounded, "material": c.material,
+    })).collect::<Vec<_>>(),
   })
-}
-
-fn export(s: &Session, p: &Value) -> CmdResult {
-  let path = PathBuf::from(req_str(p, "path")?);
-  let wanted: Vec<u32> = ids(p, "bodies");
-  let bodies: Vec<&clf_model::regen::Body> = s
-    .model
-    .bodies
-    .iter()
-    .filter(|b| if wanted.is_empty() { s.body_visible(b.id) } else { wanted.contains(&b.id.0) })
-    .collect();
-  if bodies.is_empty() {
-    return Err(CmdError::new("there are no bodies to export"));
-  }
-  let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-  match ext.as_str() {
-    "step" | "stp" => clf_kernel::write_step(bodies.iter().map(|b| &b.shape), &path)?,
-    "stl" => {
-      let meshes: Vec<_> = bodies.iter().filter_map(|b| b.shape.tessellate(fine_tol(b)).ok()).collect();
-      clf_kernel::write_stl(&meshes, &path)?
-    }
-    "obj" => {
-      let meshes: Vec<_> =
-        bodies.iter().filter_map(|b| b.shape.tessellate(fine_tol(b)).ok().map(|m| (s.body_name(b.id), m))).collect();
-      clf_kernel::write_obj(&meshes, &path)?
-    }
-    o => return Err(CmdError::new(format!("unknown export format '.{o}' (step, stl, obj)"))),
-  }
-  Ok(json!({"path": path, "bodies": bodies.len()}))
-}
-
-/// Export tessellation: finer than display.
-fn fine_tol(b: &clf_model::regen::Body) -> f64 {
-  (b.diagonal() * 0.0005).clamp(0.002, 0.1)
 }
 
 /// Selection helpers shared with the UI.

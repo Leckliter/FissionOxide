@@ -63,8 +63,10 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        if bar_icon(ui, Icon::DataPanel, "Show Data Panel", true).clicked() {
-          app.status = Some(("The Data Panel (cloud projects) isn't part of CLFusion yet".into(), false));
+        if bar_icon(ui, Icon::DataPanel, if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }, true)
+          .clicked()
+        {
+          app.data.toggle();
         }
         ui.add_space(6.0);
         let file = caret_button(ui, Icon::File, "File", true);
@@ -138,34 +140,63 @@ fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egu
 }
 
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(220.0);
+  ui.set_min_width(240.0);
   if ui.button("New Design            Ctrl+N").clicked() {
     app.new_design();
     ui.close();
   }
-  if ui.button("Open...                  Ctrl+O").clicked() {
+  if ui
+    .button("Open...                  Ctrl+O")
+    .on_hover_text("Designs, or STEP, IGES, STL, OBJ, 3MF, PLY, DXF … as a new design")
+    .clicked()
+  {
     ui.close();
     app.open_dialog();
   }
+  ui.menu_button("Open Recent", |ui| {
+    let recent =
+      app.s.execute("hub.recent", &json!({"limit": 12})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    if recent.is_empty() {
+      ui.label(RichText::new("Nothing saved yet").color(theme::MUTED));
+    }
+    for it in recent {
+      let id = it["id"].as_str().unwrap_or_default().to_string();
+      let label =
+        format!("{}  v{}", it["name"].as_str().unwrap_or_default(), it["latest"]["number"].as_u64().unwrap_or(0));
+      if ui.button(label).clicked() {
+        ui.close();
+        app.open_hub_item(&id, None);
+      }
+    }
+  });
+  if ui.button(if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }).clicked() {
+    app.data.toggle();
+    ui.close();
+  }
   ui.separator();
-  if ui.button("Save                      Ctrl+S").clicked() {
+  if ui.button("Save                      Ctrl+S").on_hover_text("Save a new version to the data panel").clicked() {
     ui.close();
     app.save(false);
   }
-  if ui.button("Save As...").clicked() {
+  if ui.button("Save As...          Ctrl+Shift+S").on_hover_text("Save as a new design in the data panel").clicked() {
     ui.close();
     app.save(true);
   }
+  if ui.button("Save to File...").on_hover_text("Write a .clf or .clfz file on this computer").clicked() {
+    ui.close();
+    app.save_file(true);
+  }
   ui.separator();
-  if ui.button("Insert STEP...").clicked() {
+  if ui.button("Insert into Design...").on_hover_text("Add the bodies (or DXF sketch) from a file").clicked() {
     ui.close();
     app.import();
   }
   ui.menu_button("Export", |ui| {
-    for (label, ext) in [("STEP Files (*.step)", "step"), ("STL Files (*.stl)", "stl"), ("OBJ Files (*.obj)", "obj")] {
-      if ui.button(label).clicked() {
+    for f in clf_engine::exchange::FORMATS.iter().filter(|f| f.export) {
+      let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
+      if ui.button(label).on_hover_text(f.note).clicked() {
         ui.close();
-        app.export(ext);
+        app.export(f.id);
       }
     }
   });
@@ -1561,6 +1592,8 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Extrude { .. } => Icon::Extrude,
     FeatureKind::Revolve { .. } => Icon::Revolve,
     FeatureKind::Fillet { .. } => Icon::Fillet,
+    FeatureKind::OffsetFaces { .. } => Icon::Extrude,
+    FeatureKind::SplitByBody { .. } => Icon::Combine,
     FeatureKind::Chamfer { .. } => Icon::Chamfer,
     FeatureKind::Shell { .. } => Icon::Shell,
     FeatureKind::Primitive { shape: Primitive::Box { .. }, .. } => Icon::Box,
@@ -1575,6 +1608,19 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Combine { .. } => Icon::Combine,
     FeatureKind::Import { .. } => Icon::Import,
     FeatureKind::RemoveBodies { .. } => Icon::Remove,
+    FeatureKind::Flange { .. }
+    | FeatureKind::ContourFlange { .. }
+    | FeatureKind::EdgeFlange { .. }
+    | FeatureKind::Hem { .. }
+    | FeatureKind::Bend { .. } => Icon::Extrude,
+    FeatureKind::ConvertToSheetMetal { .. }
+    | FeatureKind::Unfold { .. }
+    | FeatureKind::Refold { .. }
+    | FeatureKind::Rip { .. } => Icon::Shell,
+    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => Icon::Extrude,
+    FeatureKind::Hole { .. } => Icon::Cylinder,
+    FeatureKind::SplitBody { .. } | FeatureKind::Joint { .. } | FeatureKind::CopyComponent { .. } => Icon::Combine,
+    FeatureKind::Draft { .. } => Icon::Chamfer,
   }
 }
 

@@ -11,6 +11,8 @@ clf-sketch.workspace = true
 clf-kernel.workspace = true
 clf-model.workspace = true
 clf-render.workspace = true
+clf-exchange.workspace = true
+clf-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -18,3 +20,6 @@ log.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+zip.workspace = true

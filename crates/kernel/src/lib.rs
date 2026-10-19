@@ -201,6 +201,77 @@ pub struct MassProps {
   pub bbox_max: DVec3,
 }
 
+/// A bend in a flat pattern: its centre line (in the flat), angle, and whether the bend's inside
+/// is on the stationary face's side of the sheet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bend {
+  pub start: DVec3,
+  pub end: DVec3,
+  /// Radians.
+  pub angle: f64,
+  pub inner: bool,
+}
+
+/// What a projected drawing line is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineKind {
+  Visible,
+  /// A visible edge between tangent faces (drawn thin or left out).
+  Tangent,
+  /// A visible silhouette of a curved face.
+  Outline,
+  Hidden,
+  HiddenOutline,
+}
+
+impl LineKind {
+  pub fn hidden(self) -> bool {
+    matches!(self, LineKind::Hidden | LineKind::HiddenOutline)
+  }
+}
+
+/// A 2D polyline of a projection, in view coordinates (mm, x right, y up).
+#[derive(Debug, Clone)]
+pub struct ProjLine {
+  pub kind: LineKind,
+  pub points: Vec<[f64; 2]>,
+}
+
+/// A full circle seen face-on in a projection (holes, bosses).
+#[derive(Debug, Clone, Copy)]
+pub struct ProjCircle {
+  pub center: [f64; 2],
+  pub radius: f64,
+  pub kind: LineKind,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Projection {
+  pub lines: Vec<ProjLine>,
+  pub circles: Vec<ProjCircle>,
+}
+
+impl Projection {
+  /// Bounding box of the visible and hidden lines.
+  pub fn bounds(&self) -> Option<([f64; 2], [f64; 2])> {
+    let mut it = self.lines.iter().flat_map(|l| l.points.iter());
+    let first = *it.next()?;
+    Some(
+      it.fold((first, first), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])),
+    )
+  }
+}
+
+fn line_kind(k: u8) -> LineKind {
+  match k {
+    0 => LineKind::Visible,
+    1 => LineKind::Tangent,
+    2 => LineKind::Outline,
+    3 => LineKind::Hidden,
+    _ => LineKind::HiddenOutline,
+  }
+}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
 
@@ -359,6 +430,157 @@ impl Shape {
     Shape::wrap(sys::unify(self.get()?)?)
   }
 
+  /// Flattens a sheet metal solid into the plane of `face` (1-based, planar), which stays put.
+  /// Bends are rolled out to the length of their neutral layer, `inner radius + k_factor ×
+  /// thickness` from the axis.
+  pub fn unfold(&self, face: u32, thickness: f64, k_factor: f64) -> Result<(Shape, Vec<Bend>)> {
+    if !(thickness > 1e-9 && thickness.is_finite()) {
+      return Err(KernelError::Input("sheet thickness must be positive".into()));
+    }
+    if !(0.0..=1.0).contains(&k_factor) {
+      return Err(KernelError::Input("the K-factor must be between 0 and 1".into()));
+    }
+    let mut raw = Vec::new();
+    let flat = Shape::wrap(sys::unfold(self.get()?, face, thickness, k_factor, &mut raw)?)?;
+    let bends = raw
+      .chunks_exact(8)
+      .map(|c| Bend {
+        start: DVec3::new(c[0], c[1], c[2]),
+        end: DVec3::new(c[3], c[4], c[5]),
+        angle: c[6],
+        inner: c[7] > 0.5,
+      })
+      .collect();
+    Ok((flat, bends))
+  }
+
+  /// An open chain of sketch segments on `plane` as a wire (sweep paths).
+  pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
+    let mut data = Vec::new();
+    for s in segs {
+      push_seg(&mut data, plane, s);
+    }
+    if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
+      return Err(KernelError::Input("the path is empty or not finite".into()));
+    }
+    Shape::wrap(sys::make_wire(&data)?)
+  }
+
+  /// Sweeps this face along a path wire.
+  pub fn sweep(&self, path: &Shape) -> Result<Shape> {
+    let r = Shape::wrap(sys::make_pipe(self.get()?, path.get()?)?)?;
+    if r.solid_count() == 0 { Err(KernelError::Kernel("the sweep made no solid".into())) } else { Ok(r) }
+  }
+
+  /// A solid through the outer boundaries of the given faces, in order.
+  pub fn loft(sections: &[Shape], ruled: bool, closed: bool) -> Result<Shape> {
+    if sections.len() < 2 {
+      return Err(KernelError::Input("a loft needs at least two profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    let r = Shape::wrap(sys::make_loft(c.get()?, ruled, closed)?)?;
+    if r.solid_count() == 0 { Err(KernelError::Kernel("the loft made no solid".into())) } else { Ok(r) }
+  }
+
+  /// The solids on either side of a plane (one or more pieces).
+  pub fn split(&self, origin: DVec3, normal: DVec3) -> Result<Vec<Shape>> {
+    let n = normal.try_normalize().ok_or(KernelError::Input("zero normal".into()))?;
+    let m = self.mass()?;
+    let size =
+      4.0 * ((m.bbox_max - m.bbox_min).length() + (m.bbox_max + m.bbox_min).length() / 2.0 + origin.length()) + 10.0;
+    let r = Shape::wrap(sys::split_by_plane(self.get()?, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], size)?)?;
+    r.solids()
+  }
+
+  /// Tapers faces (1-based) by `angle` radians about a neutral plane, pulling along its normal.
+  pub fn draft(&self, faces: &[u32], origin: DVec3, pull: DVec3, angle: f64) -> Result<Shape> {
+    let n = pull.try_normalize().ok_or(KernelError::Input("zero pull direction".into()))?;
+    if !(angle.is_finite() && angle.abs() < std::f64::consts::FRAC_PI_2) {
+      return Err(KernelError::Input("the draft angle must be under 90°".into()));
+    }
+    Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
+  }
+
+  /// For a sheet that was unfolded onto `face` (see [`Shape::unfold`]): the material to cut from
+  /// this folded shape for the solids `removed` from its flat pattern.
+  pub fn refold_cuts(&self, face: u32, thickness: f64, k_factor: f64, removed: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::refold_cuts(self.get()?, face, thickness, k_factor, removed.get()?)?)
+  }
+
+  /// Rounds edges (1-based) with a radius each.
+  pub fn fillet_each(&self, edges: &[(u32, f64)]) -> Result<Shape> {
+    if edges.iter().any(|(_, r)| !(*r > 1e-9 && r.is_finite())) {
+      return Err(KernelError::Input("fillet radii must be positive".into()));
+    }
+    let (ids, radii): (Vec<u32>, Vec<f64>) = edges.iter().copied().unzip();
+    Shape::wrap(sys::fillet_radii(self.get()?, &ids, &radii)?)
+  }
+
+  /// Hidden-line projection seen from `toward_viewer` with `right` as the screen's x axis.
+  pub fn project(&self, toward_viewer: DVec3, right: DVec3, deflection: f64) -> Result<Projection> {
+    let z = toward_viewer.try_normalize().ok_or(KernelError::Input("zero view direction".into()))?;
+    let x = (right - z * right.dot(z)).try_normalize().ok_or(KernelError::Input("bad view right axis".into()))?;
+    let d = sys::hlr_project(self.get()?, &[z.x, z.y, z.z, x.x, x.y, x.z], deflection.clamp(1e-4, 10.0))?;
+    let pts: Vec<[f64; 2]> = d.points.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+    let mut lines = Vec::with_capacity(d.kinds.len());
+    for (k, kind) in d.kinds.iter().enumerate() {
+      let (Some(&a), Some(&b)) = (d.offsets.get(k), d.offsets.get(k + 1)) else { continue };
+      if let Some(slice) = pts.get(a as usize..b as usize) {
+        lines.push(ProjLine { kind: line_kind(*kind), points: slice.to_vec() });
+      }
+    }
+    let circles = d
+      .circles
+      .chunks_exact(4)
+      .map(|c| ProjCircle { center: [c[0], c[1]], radius: c[2], kind: line_kind(c[3] as u8) })
+      .collect();
+    Ok(Projection { lines, circles })
+  }
+
+  /// This planar face extruded `height` along its normal with sides drafted by `angle` radians
+  /// (positive tapers inward).
+  pub fn extrude_tapered(&self, height: f64, angle: f64) -> Result<Shape> {
+    if !(height.is_finite() && height.abs() > 1e-9 && angle.is_finite() && angle.abs() < 1.5) {
+      return Err(KernelError::Input("taper needs a height and an angle under 85°".into()));
+    }
+    // OCCT measures the height along the drafted sides
+    Shape::wrap(sys::draft_prism(self.get()?, height / angle.cos(), angle)?)
+  }
+
+  /// This planar face grown (d > 0) or shrunk (d < 0) all round.
+  pub fn offset_face(&self, d: f64) -> Result<Shape> {
+    if !d.is_finite() {
+      return Err(KernelError::Input("offset must be finite".into()));
+    }
+    Shape::wrap(sys::offset_face(self.get()?, d)?)
+  }
+
+  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians.
+  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<Shape> {
+    if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
+      return Err(KernelError::Input("chamfer sizes must be positive".into()));
+    }
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)
+  }
+
+  /// Fillets edges with the radius running from `r1` to `r2` along each edge.
+  pub fn fillet_variable(&self, edges: &[u32], r1: f64, r2: f64) -> Result<Shape> {
+    if !(r1 > 1e-9 && r2 > 1e-9 && r1.is_finite() && r2.is_finite()) {
+      return Err(KernelError::Input("fillet radii must be positive".into()));
+    }
+    Shape::wrap(sys::fillet_var(self.get()?, edges, r1, r2)?)
+  }
+
+  /// The pieces of this solid cut by another shape.
+  pub fn split_by(&self, tool: &Shape) -> Result<Vec<Shape>> {
+    Shape::wrap(sys::split_by_shape(self.get()?, tool.get()?)?)?.solids()
+  }
+
+  /// One face (1-based face-map index) as a shape of its own.
+  pub fn face_shape(&self, face: u32) -> Result<Shape> {
+    Shape::wrap(sys::face_at_index(self.get()?, face)?)
+  }
+
   pub fn solid_count(&self) -> usize {
     self.inner.as_ref().map(|s| sys::solid_count(s) as usize).unwrap_or(0)
   }
@@ -367,6 +589,36 @@ impl Shape {
   pub fn solids(&self) -> Result<Vec<Shape>> {
     let s = self.get()?;
     (0..sys::solid_count(s)).map(|i| Shape::wrap(sys::solid_at(s, i)?)).collect()
+  }
+
+  /// The bodies in this shape: its solids, or the shape itself when it has none (an open
+  /// shell or loose surfaces from a mesh or IGES file).
+  pub fn bodies(&self) -> Result<Vec<Shape>> {
+    let solids = self.solids()?;
+    if solids.is_empty() { Ok(vec![self.clone()]) } else { Ok(solids) }
+  }
+
+  /// Sews loose faces and shells together and closes watertight shells into solids.
+  pub fn sewn(&self, tolerance: f64) -> Result<Shape> {
+    Shape::wrap(sys::solidify(self.get()?, tolerance.clamp(1e-7, 1.0))?)
+  }
+
+  /// A faceted body from a triangle mesh (positions in mm, three indices per triangle). A
+  /// watertight mesh becomes a solid, anything else an open shell. With `merge_coplanar`,
+  /// coplanar triangles are merged into single faces (meshes exported from CAD get their flat
+  /// faces back); this is skipped for very large meshes.
+  pub fn from_mesh(positions: &[[f32; 3]], indices: &[u32], merge_coplanar: bool) -> Result<Shape> {
+    if indices.len() < 3 || !indices.len().is_multiple_of(3) {
+      return Err(KernelError::Input("the mesh has no triangles".into()));
+    }
+    if indices.iter().any(|&i| i as usize >= positions.len()) {
+      return Err(KernelError::Input("mesh vertex index out of range".into()));
+    }
+    let pos: Vec<f64> = positions.iter().flat_map(|p| p.iter().map(|&c| c as f64)).collect();
+    if pos.iter().any(|v| !v.is_finite()) {
+      return Err(KernelError::Input("non-finite mesh coordinates".into()));
+    }
+    Shape::wrap(sys::mesh_to_shape(&pos, indices, merge_coplanar)?)
   }
 
   pub fn compound<'a>(shapes: impl IntoIterator<Item = &'a Shape>) -> Result<Shape> {
@@ -486,12 +738,42 @@ pub fn write_step<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) 
   Ok(sys::write_step(c.get()?, p)?)
 }
 
-/// Reads every solid from a STEP file.
+/// Reads the bodies of a STEP file: every solid, or, for a file of surfaces, the sewn shells.
 pub fn read_step(path: &Path) -> Result<Vec<Shape>> {
   let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
-  let s = Shape::wrap(sys::read_step(p)?)?;
-  let solids = s.solids()?;
-  if solids.is_empty() { Err(KernelError::Empty) } else { Ok(solids) }
+  imported_bodies(Shape::wrap(sys::read_step(p)?)?)
+}
+
+/// Writes shapes to an IGES file (millimetres, B-rep entities).
+pub fn write_iges<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) -> Result<()> {
+  let c = Shape::compound(shapes)?;
+  let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
+  Ok(sys::write_iges(c.get()?, p)?)
+}
+
+/// Reads the bodies of an IGES file. IGES usually carries trimmed surfaces rather than solids,
+/// so faces are sewn and closed shells become solids.
+pub fn read_iges(path: &Path) -> Result<Vec<Shape>> {
+  let p = path.to_str().ok_or(KernelError::Input("path is not UTF-8".into()))?;
+  imported_bodies(Shape::wrap(sys::read_iges(p)?)?)
+}
+
+/// Writes shapes as an OCCT `.brep` file.
+pub fn write_brep_file<'a>(shapes: impl IntoIterator<Item = &'a Shape>, path: &Path) -> Result<()> {
+  let c = Shape::compound(shapes)?;
+  std::fs::write(path, c.to_brep()?).map_err(|e| KernelError::Input(format!("{}: {e}", path.display())))
+}
+
+pub fn read_brep_file(path: &Path) -> Result<Vec<Shape>> {
+  let text = std::fs::read_to_string(path).map_err(|e| KernelError::Input(format!("{}: {e}", path.display())))?;
+  imported_bodies(Shape::from_brep(&text)?)
+}
+
+/// Solids if there are any; otherwise the faces sewn into shells (and solids where closed).
+fn imported_bodies(s: Shape) -> Result<Vec<Shape>> {
+  let s = if s.solid_count() == 0 { s.sewn(1e-3)? } else { s };
+  let bodies = s.bodies()?;
+  if bodies.is_empty() { Err(KernelError::Empty) } else { Ok(bodies) }
 }
 
 /// Writes meshes as one binary STL.
@@ -542,19 +824,22 @@ pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<(
 }
 
 fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
-  let mut put = |kind: f64, p: [DVec3; 3]| {
+  let mut put = |kind: f64, p: [DVec3; 4]| {
     out.push(kind);
     for v in p {
       out.extend_from_slice(&[v.x, v.y, v.z]);
     }
   };
   match *s {
-    Seg::Line { a, b } => put(0.0, [plane.to_world(a), plane.to_world(b), DVec3::ZERO]),
-    Seg::Arc { .. } => put(1.0, [plane.to_world(s.start()), plane.to_world(s.mid()), plane.to_world(s.end())]),
+    Seg::Line { a, b } => put(0.0, [plane.to_world(a), plane.to_world(b), DVec3::ZERO, DVec3::ZERO]),
+    Seg::Arc { .. } => {
+      put(1.0, [plane.to_world(s.start()), plane.to_world(s.mid()), plane.to_world(s.end()), DVec3::ZERO])
+    }
     Seg::Circle { center, radius, ccw } => {
       let n = if ccw { plane.normal() } else { -plane.normal() };
-      put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0)])
+      put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0), DVec3::ZERO])
     }
+    Seg::Bezier { p } => put(3.0, p.map(|q| plane.to_world(q))),
   }
 }
 

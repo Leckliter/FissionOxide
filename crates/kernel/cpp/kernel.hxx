@@ -20,6 +20,7 @@ struct EdgeData;
 struct FaceInfo;
 struct EdgeInfo;
 struct MassProps;
+struct HlrData;
 
 std::unique_ptr<Shape> shape_clone(const Shape &s);
 bool shape_is_null(const Shape &s);
@@ -41,6 +42,25 @@ std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, 
 std::unique_ptr<Shape> transform(const Shape &s, rust::Slice<const double> m);
 std::unique_ptr<Shape> mirror(const Shape &s, rust::Slice<const double> plane);
 std::unique_ptr<Shape> unify(const Shape &s);
+std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
+                              rust::Vec<double> &bends);
+std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face);
+std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double thickness, double k_factor,
+                                   const Shape &removed);
+std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> edges,
+                                    rust::Slice<const double> radii);
+std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angle);
+std::unique_ptr<Shape> offset_face(const Shape &face, double d);
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle);
+std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2);
+std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool);
+HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection);
+std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs);
+std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine);
+std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed);
+std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> plane, double size);
+std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, rust::Slice<const double> plane,
+                             double angle);
 
 uint32_t solid_count(const Shape &s);
 std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i);
@@ -58,5 +78,9 @@ void write_step(const Shape &s, rust::Str path);
 std::unique_ptr<Shape> read_step(rust::Str path);
 rust::String write_brep(const Shape &s);
 std::unique_ptr<Shape> read_brep(rust::Str data);
+std::unique_ptr<Shape> solidify(const Shape &s, double tol);
+void write_iges(const Shape &s, rust::Str path);
+std::unique_ptr<Shape> read_iges(rust::Str path);
+std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
 } // namespace clf

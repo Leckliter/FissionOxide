@@ -471,7 +471,7 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       }
       Some(CurveKind::Circle { radius, .. }) => (json!({"type": "diameter", "curves": [curve.0]}), Some(2.0 * radius)),
       Some(CurveKind::Arc { .. }) => (json!({"type": "radius", "curves": [curve.0]}), sketch.radius(curve)),
-      None => return,
+      Some(CurveKind::Spline { .. }) | None => return,
     },
     (None, Some(Pick::SketchPoint { .. })) => {
       app.tstate.dim_first = hover;

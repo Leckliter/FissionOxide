@@ -178,7 +178,13 @@ impl SceneBuilder {
       let Some(r) = s.model.sketches.get(&f.id) else { continue };
       let is_edit = s.edit_sketch == Some(f.id);
       let consumed = s.design.features.iter().take(active).any(|g| match &g.kind {
-        FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => *sketch == f.id,
+        FeatureKind::Extrude { sketch, .. }
+        | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::Flange { sketch, .. }
+        | FeatureKind::ContourFlange { sketch, .. }
+        | FeatureKind::Hole { sketch, .. } => *sketch == f.id,
+        FeatureKind::Sweep { sketch, path_sketch, .. } => *sketch == f.id || *path_sketch == f.id,
+        FeatureKind::Loft { sections, .. } => sections.iter().any(|s| s.sketch == f.id),
         _ => false,
       });
       let show = !f.suppressed && (is_edit || !consumed || opts.show_profiles_of.contains(&f.id));
@@ -399,6 +405,17 @@ fn fully_dimensioned_circle(sk: &Sketch, c: clf_sketch::CurveId, free: &[PointId
 /// Flattened curve in sketch coordinates.
 pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   match kind {
+    CurveKind::Spline { points } => {
+      let fit: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
+      let mut out = Vec::new();
+      for b in clf_sketch::spline_beziers(&fit) {
+        for k in 0..24 {
+          out.push(clf_sketch::bezier_at(&b, k as f64 / 24.0));
+        }
+      }
+      out.extend(fit.last());
+      out
+    }
     CurveKind::Line { a, b } => match (sk.pos(*a), sk.pos(*b)) {
       (Some(a), Some(b)) => vec![a, b],
       _ => vec![],

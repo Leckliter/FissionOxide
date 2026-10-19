@@ -6,18 +6,25 @@
 //! per-feature status, the way Fusion's timeline turns red on a failing feature without stopping
 //! the features after it.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
+// `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod assembly;
+pub mod drawing;
+pub mod plot;
 pub mod refs;
 pub mod regen;
+pub mod sheet;
 
 use serde::{Deserialize, Serialize};
 
+pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
 pub use clf_expr::Kind as ParamKind;
 pub use clf_kernel as kernel;
 pub use clf_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
 
-use clf_sketch::{CurveId, Sketch};
+use clf_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
 pub const FORMAT_VERSION: u32 = 1;
@@ -47,6 +54,16 @@ pub struct Design {
   /// Per-body display settings (visibility, colour), by body id.
   #[serde(default)]
   pub bodies: Vec<BodySettings>,
+  /// Sheet metal rules (material thickness, bend radius, K-factor). Sheet metal features name
+  /// one; the first is the default.
+  #[serde(default)]
+  pub sheet_metal_rules: Vec<SheetMetalRule>,
+  /// Components: named groups of bodies that joints move together.
+  #[serde(default)]
+  pub components: Vec<Component>,
+  /// 2D drawings of the design.
+  #[serde(default)]
+  pub drawings: Vec<drawing::Drawing>,
   #[serde(default)]
   next_id: u32,
 }
@@ -63,6 +80,64 @@ pub struct Parameter {
   pub kind: ParamKind,
   #[serde(default)]
   pub comment: String,
+}
+
+/// A sheet metal rule, as in Fusion: the material settings sheet metal features share.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SheetMetalRule {
+  pub name: String,
+  pub thickness: String,
+  /// Inside bend radius.
+  pub bend_radius: String,
+  /// Where the neutral layer sits, as a fraction of the thickness from the inside of a bend.
+  pub k_factor: String,
+  /// Notches cut beside flanges that don't run the full edge.
+  #[serde(default)]
+  pub relief: ReliefShape,
+  /// Relief width; empty = the thickness.
+  #[serde(default)]
+  pub relief_width: String,
+  /// How far reliefs reach past the bend; empty = half the thickness.
+  #[serde(default)]
+  pub relief_depth: String,
+  /// Gap left at mitered corners and rips; empty = half the thickness.
+  #[serde(default)]
+  pub gap: String,
+}
+
+impl Default for SheetMetalRule {
+  fn default() -> Self {
+    SheetMetalRule {
+      name: "Default".into(),
+      thickness: "1 mm".into(),
+      bend_radius: "1 mm".into(),
+      k_factor: "0.44".into(),
+      relief: ReliefShape::Rectangular,
+      relief_width: String::new(),
+      relief_depth: String::new(),
+      gap: String::new(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReliefShape {
+  #[default]
+  Rectangular,
+  Round,
+  None,
+}
+
+/// What edge flanges built together do where they meet at a corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerMode {
+  /// Run both flanges into the corner and cut them along the bisector, leaving the rule's gap.
+  #[default]
+  Miter,
+  /// Leave the flanges as they are (an open corner).
+  Open,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -165,6 +240,19 @@ pub enum ExtentKind {
   TwoSides,
   /// Through every body, in the chosen direction.
   ThroughAll,
+  /// Up to a planar face (`to`), plus `distance` past it.
+  ToFace,
+}
+
+/// Which way a thin extrusion's wall grows from the profile's outline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinSide {
+  /// Into the profile.
+  #[default]
+  Inside,
+  Outside,
+  Center,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,6 +265,17 @@ pub struct Extent {
   pub distance2: String,
   #[serde(default)]
   pub flip: bool,
+  /// Side taper (angle; positive narrows). Empty = none.
+  #[serde(default)]
+  pub taper: String,
+  /// Wall thickness of a thin extrusion. Empty = solid.
+  #[serde(default)]
+  pub thin: String,
+  #[serde(default)]
+  pub thin_side: ThinSide,
+  /// The face a `to_face` extent stops at.
+  #[serde(default)]
+  pub to: Option<FaceRef>,
 }
 
 fn zero() -> String {
@@ -185,8 +284,55 @@ fn zero() -> String {
 
 impl Extent {
   pub fn distance(d: impl Into<String>) -> Self {
-    Extent { kind: ExtentKind::OneSide, distance: d.into(), distance2: zero(), flip: false }
+    Extent {
+      kind: ExtentKind::OneSide,
+      distance: d.into(),
+      distance2: zero(),
+      flip: false,
+      taper: String::new(),
+      thin: String::new(),
+      thin_side: ThinSide::Inside,
+      to: None,
+    }
   }
+}
+
+/// A sketch curve that tracks a body edge (projected geometry, as in Fusion).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SketchLink {
+  pub curve: CurveId,
+  pub edge: EdgeRef,
+}
+
+/// One loft section: a profile of a sketch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoftSection {
+  pub sketch: FeatureId,
+  /// A point inside the profile; `None` = the sketch's largest profile.
+  #[serde(default)]
+  pub profile: Option<[f64; 2]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HoleKind {
+  #[default]
+  Simple,
+  Counterbore,
+  Countersink,
+}
+
+/// Where an edge flange's bend sits relative to the picked edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BendPosition {
+  /// The bend starts at the edge; the sheet gets longer.
+  #[default]
+  Adjacent,
+  /// The flange's outside face lands on the edge (the sheet is trimmed back).
+  Inside,
+  /// The flange's inside face lands on the edge.
+  Outside,
 }
 
 /// Which bodies a body-level feature acts on.
@@ -197,6 +343,10 @@ pub enum BodySel {
   All,
   Bodies {
     ids: Vec<BodyId>,
+  },
+  /// Every body of a component.
+  Component {
+    id: ComponentId,
   },
 }
 
@@ -211,10 +361,14 @@ pub enum Primitive {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // plain data, cloned rarely
 pub enum FeatureKind {
   Sketch {
     plane: PlaneRef,
     sketch: Sketch,
+    /// Sketch curves projected from body edges; they follow the edges as the model changes.
+    #[serde(default)]
+    links: Vec<SketchLink>,
   },
   Extrude {
     sketch: FeatureId,
@@ -237,10 +391,32 @@ pub enum FeatureKind {
   Fillet {
     edges: Vec<EdgeRef>,
     radius: String,
+    /// Variable radius: the radius at each edge's end (it runs from `radius` at the start).
+    #[serde(default)]
+    radius2: Option<String>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
     distance: String,
+    /// Two-distance chamfer: the distance on the other face.
+    #[serde(default)]
+    distance2: Option<String>,
+    /// Distance-and-angle chamfer.
+    #[serde(default)]
+    angle: Option<String>,
+  },
+  /// Press-pull: planar faces pushed out (join) or in (cut) along their normals.
+  OffsetFaces {
+    faces: Vec<FaceRef>,
+    distance: String,
+  },
+  /// Splits bodies with another body (kept unless `remove_tool`).
+  SplitByBody {
+    #[serde(default)]
+    bodies: BodySel,
+    tool: BodyId,
+    #[serde(default)]
+    remove_tool: bool,
   },
   Shell {
     /// Faces to open; the rest of each body becomes a wall of `thickness`.
@@ -315,14 +491,266 @@ pub enum FeatureKind {
     #[serde(default)]
     keep_tools: bool,
   },
-  /// Bodies imported from a STEP file, stored losslessly as OCCT BRep text.
+  /// Bodies imported from a file: exact geometry (STEP, IGES, BRep) stored losslessly as OCCT
+  /// BRep text, and/or triangle meshes (STL, OBJ, 3MF, PLY) that become faceted bodies.
   Import {
     file_name: String,
+    #[serde(default)]
     breps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    meshes: Vec<MeshData>,
   },
   RemoveBodies {
     bodies: Vec<BodyId>,
   },
+  /// Solid through profiles of several sketches, in order.
+  Loft {
+    sections: Vec<LoftSection>,
+    /// Straight (ruled) faces between sections instead of smooth ones.
+    #[serde(default)]
+    ruled: bool,
+    /// Loop back to the first section.
+    #[serde(default)]
+    closed: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Sweeps profiles along a path (an open chain of lines and arcs in another sketch).
+  Sweep {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    path_sketch: FeatureId,
+    /// The path's curves; empty = every non-construction line and arc of the path sketch.
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Drilled holes at sketch points, into the material (against the sketch normal).
+  Hole {
+    sketch: FeatureId,
+    /// Hole centres; empty = every sketch point that isn't part of a curve.
+    #[serde(default)]
+    points: Vec<PointId>,
+    #[serde(default)]
+    kind: HoleKind,
+    diameter: String,
+    /// Depth of the full-diameter part; ignored when `through_all`.
+    #[serde(default = "zero")]
+    depth: String,
+    #[serde(default)]
+    through_all: bool,
+    /// Drill point angle (0 = flat bottom).
+    #[serde(default = "drill_point")]
+    tip_angle: String,
+    #[serde(default = "zero")]
+    head_diameter: String,
+    /// Counterbore depth.
+    #[serde(default = "zero")]
+    head_depth: String,
+    /// Countersink included angle.
+    #[serde(default = "countersink")]
+    head_angle: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Splits bodies in two along a plane.
+  SplitBody {
+    #[serde(default)]
+    bodies: BodySel,
+    plane: PlaneRef,
+  },
+  /// Tapers faces by an angle about a neutral plane (pulling along its normal).
+  Draft {
+    faces: Vec<FaceRef>,
+    plane: PlaneRef,
+    angle: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Sheet metal flange from closed sketch profiles: a flat sheet of the rule's thickness.
+  Flange {
+    sketch: FeatureId,
+    #[serde(default)]
+    profiles: Vec<[f64; 2]>,
+    /// Sheet metal rule name; empty = the design's default rule.
+    #[serde(default)]
+    rule: String,
+    /// Thicken against the sketch normal instead of along it.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    operation: Operation,
+  },
+  /// Sheet metal contour flange: an open sketch path (lines and arcs) becomes one face of a bent
+  /// sheet; sharp corners get the rule's bend radius. The section is extruded `distance` along
+  /// the sketch normal.
+  ContourFlange {
+    sketch: FeatureId,
+    /// The path's curves; empty = every non-construction line and arc in the sketch.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    distance: String,
+    #[serde(default)]
+    symmetric: bool,
+    /// Put the material on the right of the path (default left).
+    #[serde(default)]
+    flip: bool,
+    /// Extrude against the sketch normal.
+    #[serde(default)]
+    flip_direction: bool,
+    #[serde(default)]
+    rule: String,
+  },
+  /// Sheet metal edge flange: a wall bent up from straight edges of a sheet.
+  EdgeFlange {
+    edges: Vec<EdgeRef>,
+    /// Flange height, measured from the outside of the sheet to the tip.
+    height: String,
+    #[serde(default = "right_angle")]
+    angle: String,
+    /// Bend towards the far side of the sheet instead of the side the edge is on.
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    position: BendPosition,
+    /// Shorten the flange from the edge's start / end (the sheet gets bend reliefs there).
+    #[serde(default = "zero")]
+    offset_start: String,
+    #[serde(default = "zero")]
+    offset_end: String,
+    #[serde(default)]
+    corners: CornerMode,
+  },
+  /// Sheet metal hem: the edge folded back 180° onto the sheet.
+  Hem {
+    edges: Vec<EdgeRef>,
+    /// From the outside of the fold to the end of the hem.
+    length: String,
+    /// Space between the sheet and the folded-back part.
+    gap: String,
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Sheet metal bend along a sketch line drawn on a flat face of the sheet. The bend is
+  /// centred on the line; the side the line's left normal points to swings up (towards the
+  /// sketch's side of the sheet) unless flipped.
+  Bend {
+    sketch: FeatureId,
+    line: CurveId,
+    angle: String,
+    /// Bend away from the sketch side.
+    #[serde(default)]
+    flip: bool,
+    /// Swing the other side of the line.
+    #[serde(default)]
+    flip_side: bool,
+  },
+  /// Turns a thin solid into sheet metal (thickness is measured from the body).
+  ConvertToSheetMetal {
+    body: BodyId,
+    /// The face that defines the sheet's side; default the largest planar face.
+    #[serde(default)]
+    face: Option<FaceRef>,
+    #[serde(default)]
+    rule: String,
+    /// Round sharp corners between the sheet's faces into bends of the rule's radius.
+    #[serde(default = "yes")]
+    bends: bool,
+  },
+  /// Slits a solid along edges (e.g. the corners of a shelled box) so it can unfold.
+  Rip {
+    edges: Vec<EdgeRef>,
+    /// Slit width; empty = the sheet rule's gap.
+    #[serde(default)]
+    gap: String,
+  },
+  /// Folds an unfolded sheet back up, carrying cuts made while it was flat.
+  Refold {
+    body: BodyId,
+  },
+  /// Positions a component by mating one of its joint origins to another's, leaving the joint's
+  /// motion (rotation / slide) free to drive.
+  Joint {
+    /// The component that moves.
+    moving: ComponentId,
+    moving_origin: JointGeometry,
+    /// The component it attaches to; `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    fixed_origin: JointGeometry,
+    kind: JointKind,
+    /// Fixed rotation about the joint's Z axis.
+    #[serde(default = "zero")]
+    angle: String,
+    /// Fixed offset along the joint's Z axis.
+    #[serde(default = "zero")]
+    offset: String,
+    /// Point the Z axes the same way instead of against each other.
+    #[serde(default)]
+    flip: bool,
+    /// Keep the moving component where it is (an as-built joint): only the motion moves it.
+    #[serde(default)]
+    as_built: bool,
+    /// Motion: rotation about Z (revolute, cylindrical, pin-slot, planar, ball).
+    #[serde(default = "zero")]
+    rotation: String,
+    /// Motion: slide along Z (slider, cylindrical) or X (pin-slot, planar).
+    #[serde(default = "zero")]
+    slide: String,
+    /// Motion: slide along Y (planar).
+    #[serde(default = "zero")]
+    slide2: String,
+    /// Motion: tilt about X (ball).
+    #[serde(default = "zero")]
+    pitch: String,
+    #[serde(default)]
+    limits: JointLimits,
+  },
+  /// Another instance of a component: copies of its bodies, rebuilt from the source on every
+  /// change (edit the original and every copy follows), placed by `translate`. Joints can then
+  /// position the copy's component like any other.
+  CopyComponent {
+    source: ComponentId,
+    #[serde(default = "zeros")]
+    translate: [String; 3],
+  },
+  /// Flattens a sheet metal body onto its stationary face.
+  Unfold {
+    body: BodyId,
+    /// Stationary face; default the largest planar face.
+    #[serde(default)]
+    face: Option<FaceRef>,
+    /// Keep the folded body and add the flat pattern as a new body.
+    #[serde(default)]
+    keep_folded: bool,
+  },
+}
+
+fn drill_point() -> String {
+  "118 deg".to_string()
+}
+
+fn countersink() -> String {
+  "90 deg".to_string()
+}
+
+fn right_angle() -> String {
+  "90 deg".to_string()
+}
+
+/// An imported triangle mesh (millimetres).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeshData {
+  pub name: String,
+  /// x, y, z per vertex.
+  pub positions: Vec<f32>,
+  /// Three vertex indices per triangle.
+  pub indices: Vec<u32>,
+  /// Merge coplanar triangles into planar faces when building the body.
+  #[serde(default)]
+  pub merge_coplanar: bool,
 }
 
 fn one() -> String {
@@ -345,6 +773,8 @@ impl FeatureKind {
       FeatureKind::Extrude { .. } => "Extrude",
       FeatureKind::Revolve { .. } => "Revolve",
       FeatureKind::Fillet { .. } => "Fillet",
+      FeatureKind::OffsetFaces { .. } => "PressPull",
+      FeatureKind::SplitByBody { .. } => "Split",
       FeatureKind::Chamfer { .. } => "Chamfer",
       FeatureKind::Shell { .. } => "Shell",
       FeatureKind::Primitive { shape: Primitive::Box { .. }, .. } => "Box",
@@ -359,6 +789,32 @@ impl FeatureKind {
       FeatureKind::Combine { .. } => "Combine",
       FeatureKind::Import { .. } => "Import",
       FeatureKind::RemoveBodies { .. } => "Remove",
+      FeatureKind::Loft { .. } => "Loft",
+      FeatureKind::Sweep { .. } => "Sweep",
+      FeatureKind::Hole { .. } => "Hole",
+      FeatureKind::SplitBody { .. } => "Split",
+      FeatureKind::Draft { .. } => "Draft",
+      FeatureKind::Flange { .. } => "Flange",
+      FeatureKind::ContourFlange { .. } => "ContourFlange",
+      FeatureKind::EdgeFlange { .. } => "EdgeFlange",
+      FeatureKind::Hem { .. } => "Hem",
+      FeatureKind::Bend { .. } => "Bend",
+      FeatureKind::ConvertToSheetMetal { .. } => "ConvertToSheetMetal",
+      FeatureKind::Unfold { .. } => "Unfold",
+      FeatureKind::Rip { .. } => "Rip",
+      FeatureKind::Joint { .. } => "Joint",
+      FeatureKind::CopyComponent { .. } => "Copy",
+      FeatureKind::Refold { .. } => "Refold",
+    }
+  }
+
+  /// The sheet metal rule a feature names, if it is a sheet metal feature with one.
+  pub fn sheet_rule(&self) -> Option<&str> {
+    match self {
+      FeatureKind::Flange { rule, .. }
+      | FeatureKind::ContourFlange { rule, .. }
+      | FeatureKind::ConvertToSheetMetal { rule, .. } => Some(rule.as_str()),
+      _ => None,
     }
   }
 
@@ -370,7 +826,15 @@ impl FeatureKind {
     };
     match self {
       FeatureKind::Sketch { plane, .. } => plane_dep(plane),
-      FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
+      FeatureKind::Extrude { sketch, .. }
+      | FeatureKind::Revolve { sketch, .. }
+      | FeatureKind::Flange { sketch, .. }
+      | FeatureKind::ContourFlange { sketch, .. }
+      | FeatureKind::Hole { sketch, .. }
+      | FeatureKind::Bend { sketch, .. } => vec![*sketch],
+      FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.sketch).collect(),
+      FeatureKind::Sweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
       _ => vec![],
@@ -415,6 +879,9 @@ impl Design {
       features: Vec::new(),
       marker: None,
       bodies: Vec::new(),
+      sheet_metal_rules: Vec::new(),
+      components: Vec::new(),
+      drawings: Vec::new(),
       next_id: 1,
     }
   }
@@ -581,6 +1048,14 @@ impl Design {
         return Err(DesignError::InUse(name.to_string(), f.name.clone()));
       }
     }
+    for r in &self.sheet_metal_rules {
+      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap]
+        .iter()
+        .any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
+      {
+        return Err(DesignError::InUse(name.to_string(), format!("sheet metal rule {}", r.name)));
+      }
+    }
     self.parameters.retain(|p| p.name != name);
     Ok(())
   }
@@ -601,6 +1076,118 @@ impl Design {
     for f in &mut self.features {
       for_each_expr(&mut f.kind, &mut |e| *e = rename_ident(e, old, new));
     }
+    for r in &mut self.sheet_metal_rules {
+      for e in
+        [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor, &mut r.relief_width, &mut r.relief_depth, &mut r.gap]
+      {
+        *e = rename_ident(e, old, new);
+      }
+    }
+    Ok(())
+  }
+
+  // ---- drawings ----
+
+  pub fn drawing(&self, id: u32) -> Option<&drawing::Drawing> {
+    self.drawings.iter().find(|d| d.id == id)
+  }
+
+  pub fn drawing_mut(&mut self, id: u32) -> Option<&mut drawing::Drawing> {
+    self.drawings.iter_mut().find(|d| d.id == id)
+  }
+
+  /// A new drawing with the given views; returns its id.
+  pub fn add_drawing(&mut self, name: &str, views: Vec<drawing::ViewKind>) -> u32 {
+    let id = self.drawings.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+    let name = if name.trim().is_empty() { format!("Drawing{id}") } else { name.to_string() };
+    self.drawings.push(drawing::Drawing::new(id, name, views));
+    id
+  }
+
+  // ---- components ----
+
+  pub fn component(&self, id: ComponentId) -> Option<&Component> {
+    self.components.iter().find(|c| c.id == id)
+  }
+
+  pub fn component_mut(&mut self, id: ComponentId) -> Option<&mut Component> {
+    self.components.iter_mut().find(|c| c.id == id)
+  }
+
+  /// The component a body belongs to.
+  pub fn component_of(&self, body: BodyId) -> Option<&Component> {
+    self.components.iter().find(|c| c.bodies.contains(&body))
+  }
+
+  /// A new component holding `bodies` (taken out of any component they were in).
+  pub fn add_component(&mut self, name: &str, bodies: Vec<BodyId>) -> Result<ComponentId, DesignError> {
+    if self.components.len() >= MAX_PARAMETERS {
+      return Err(DesignError::TooMany);
+    }
+    let id = ComponentId(self.components.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    for c in &mut self.components {
+      c.bodies.retain(|b| !bodies.contains(b));
+    }
+    let name = if name.trim().is_empty() { format!("Component{}", id.0) } else { name.to_string() };
+    self.components.push(Component { id, name, bodies, grounded: false, material: String::new() });
+    Ok(id)
+  }
+
+  /// Deletes a component (its bodies go back to the root) unless a joint uses it.
+  pub fn remove_component(&mut self, id: ComponentId) -> Result<(), DesignError> {
+    let c = self.component(id).ok_or(DesignError::File(format!("no component {}", id.0)))?;
+    for f in &self.features {
+      if let FeatureKind::Joint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
+    }
+    self.components.retain(|c| c.id != id);
+    Ok(())
+  }
+
+  // ---- sheet metal rules ----
+
+  fn clone_rules(&self) -> Rules {
+    Rules { list: self.sheet_metal_rules.clone() }
+  }
+
+  /// The rule a sheet metal feature uses: by name, or the default (the first rule, else the
+  /// built-in one) for an empty name.
+  pub fn sheet_rule(&self, name: &str) -> Option<SheetMetalRule> {
+    self.clone_rules().get(name).ok()
+  }
+
+  /// Adds a rule or replaces the one with the same name.
+  pub fn set_sheet_rule(&mut self, rule: SheetMetalRule) -> Result<(), DesignError> {
+    if rule.name.trim().is_empty() {
+      return Err(DesignError::BadParameterName(rule.name));
+    }
+    match self.sheet_metal_rules.iter_mut().find(|r| r.name == rule.name) {
+      Some(r) => *r = rule,
+      None => {
+        if self.sheet_metal_rules.len() >= MAX_PARAMETERS {
+          return Err(DesignError::TooMany);
+        }
+        self.sheet_metal_rules.push(rule)
+      }
+    }
+    Ok(())
+  }
+
+  /// Removes a rule unless a feature names it.
+  pub fn remove_sheet_rule(&mut self, name: &str) -> Result<(), DesignError> {
+    if !self.sheet_metal_rules.iter().any(|r| r.name == name) {
+      return Err(DesignError::NoParameter(name.to_string()));
+    }
+    let is_default = self.sheet_metal_rules.first().is_some_and(|r| r.name == name);
+    for f in &self.features {
+      if f.kind.sheet_rule().is_some_and(|r| r == name || (r.is_empty() && is_default)) {
+        return Err(DesignError::InUse(name.to_string(), f.name.clone()));
+      }
+    }
+    self.sheet_metal_rules.retain(|r| r.name != name);
     Ok(())
   }
 
@@ -651,6 +1238,24 @@ impl Design {
   }
 }
 
+/// The rules a regeneration resolves sheet metal features against.
+pub(crate) struct Rules {
+  list: Vec<SheetMetalRule>,
+}
+
+impl Rules {
+  pub(crate) fn get(&self, name: &str) -> Result<SheetMetalRule, String> {
+    if name.is_empty() {
+      return Ok(self.list.first().cloned().unwrap_or_default());
+    }
+    match self.list.iter().find(|r| r.name == name) {
+      Some(r) => Ok(r.clone()),
+      None if name == "Default" && self.list.is_empty() => Ok(SheetMetalRule::default()),
+      None => Err(format!("there is no sheet metal rule '{name}'")),
+    }
+  }
+}
+
 /// Applies `f` to every expression string inside a feature.
 pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
   match kind {
@@ -664,10 +1269,27 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Extrude { extent, .. } => {
       f(&mut extent.distance);
       f(&mut extent.distance2);
+      for e in [&mut extent.taper, &mut extent.thin] {
+        if !e.is_empty() {
+          f(e);
+        }
+      }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, .. } => f(radius),
-    FeatureKind::Chamfer { distance, .. } => f(distance),
+    FeatureKind::Fillet { radius, radius2, .. } => {
+      f(radius);
+      if let Some(r) = radius2 {
+        f(r);
+      }
+    }
+    FeatureKind::Chamfer { distance, distance2, angle, .. } => {
+      f(distance);
+      for e in [distance2, angle].into_iter().flatten() {
+        f(e);
+      }
+    }
+    FeatureKind::OffsetFaces { distance, .. } => f(distance),
+    FeatureKind::SplitByBody { .. } => {}
     FeatureKind::Shell { thickness, .. } => f(thickness),
     FeatureKind::Primitive { shape, .. } => match shape {
       Primitive::Box { width, depth, height } => {
@@ -702,10 +1324,51 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
       f(angle);
     }
+    FeatureKind::ContourFlange { distance, .. } => f(distance),
+    FeatureKind::EdgeFlange { height, angle, offset_start, offset_end, .. } => {
+      f(height);
+      f(angle);
+      f(offset_start);
+      f(offset_end);
+    }
+    FeatureKind::Hole { diameter, depth, tip_angle, head_diameter, head_depth, head_angle, .. } => {
+      for e in [diameter, depth, tip_angle, head_diameter, head_depth, head_angle] {
+        f(e);
+      }
+    }
+    FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
+    FeatureKind::Joint { angle, offset, rotation, slide, slide2, pitch, limits, .. } => {
+      for e in [angle, offset, rotation, slide, slide2, pitch] {
+        f(e);
+      }
+      for (lo, hi) in [&mut limits.rotation, &mut limits.slide].into_iter().flatten() {
+        f(lo);
+        f(hi);
+      }
+    }
+    FeatureKind::CopyComponent { translate, .. } => {
+      for t in translate.iter_mut() {
+        f(t);
+      }
+    }
+    FeatureKind::Rip { gap, .. } => {
+      if !gap.is_empty() {
+        f(gap)
+      }
+    }
+    FeatureKind::Hem { length, gap, .. } => {
+      f(length);
+      f(gap);
+    }
+    FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } | FeatureKind::SplitBody { .. } => {}
     FeatureKind::Mirror { .. }
     | FeatureKind::Combine { .. }
     | FeatureKind::Import { .. }
-    | FeatureKind::RemoveBodies { .. } => {}
+    | FeatureKind::RemoveBodies { .. }
+    | FeatureKind::Flange { .. }
+    | FeatureKind::ConvertToSheetMetal { .. }
+    | FeatureKind::Unfold { .. }
+    | FeatureKind::Refold { .. } => {}
   }
 }
 
@@ -747,7 +1410,11 @@ mod tests {
   fn add_remove_features_with_dependents() {
     let mut d = Design::new("t");
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new() })
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
       .unwrap();
     let e = d
       .add_feature(FeatureKind::Extrude {
@@ -786,7 +1453,11 @@ mod tests {
     assert!(d.add_parameter("width", "1", ParamKind::Length, "").is_err());
     assert!(d.add_parameter("mm", "1", ParamKind::Length, "").is_err());
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new() })
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
       .unwrap();
     d.add_feature(FeatureKind::Extrude {
       sketch: s,
@@ -807,8 +1478,12 @@ mod tests {
   fn json_round_trip_and_hostile_files() {
     let mut d = Design::new("Bracket");
     d.add_parameter("t", "3", ParamKind::Length, "thickness").unwrap();
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: Sketch::new() })
-      .unwrap();
+    d.add_feature(FeatureKind::Sketch {
+      plane: PlaneRef::Origin { plane: OriginPlane::Xz },
+      sketch: Sketch::new(),
+      links: Vec::new(),
+    })
+    .unwrap();
     let back = Design::from_json(&d.to_json()).unwrap();
     assert_eq!(back, d);
     assert!(Design::from_json("{").is_err());
