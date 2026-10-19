@@ -102,7 +102,9 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
 | 0 | Reference parts harness | done: **79 of 83 pass**, see [reference-parts.md](reference-parts.md) |
-| 0 | Edit checks, fuzzing | not started |
+| 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows |
+| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds |
+| 1 | Stable references | started: a filleted edge that an inserted feature splits keeps the fillet on every piece (it used to jump to a look-alike edge silently); `tests/edits.rs` covers dimension edits, inserted and deleted features. Next: OCCT modification history |
 | 2 | Flat-pattern DXF | layers by role (`CUT`, `BEND_UP`, `BEND_DOWN`, `ETCH`, `NOTES`), bend notes and a `SHEET` note; validator `sheet.check_dxf` / `fissionoxide-cli check-dxf` (closed, unbranched contours, no duplicates, minimum feature size, holes clear of bends); the sheet metal reference DXFs pass it, except 74, whose slot (cut while flat) deliberately crosses a bend and is reported. Splines are still written as short lines |
 | 2 | Sheet metal corners | edge flange `butt` corners (SolidCraft's convention, case 69) and setbacks that trim an earlier flange's bend (case 75); corner references measured against Fusion still to come |
 
