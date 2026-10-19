@@ -57,6 +57,28 @@ impl Kind {
     }
   }
 
+  fn icon(self) -> Icon {
+    match self {
+      Kind::PickPlane => Icon::Sketch,
+      Kind::Extrude => Icon::Extrude,
+      Kind::Revolve => Icon::Revolve,
+      Kind::Fillet => Icon::Fillet,
+      Kind::Chamfer => Icon::Chamfer,
+      Kind::Shell => Icon::Shell,
+      Kind::Box => Icon::Box,
+      Kind::Cylinder => Icon::Cylinder,
+      Kind::Sphere => Icon::Sphere,
+      Kind::Torus => Icon::Torus,
+      Kind::RectPattern => Icon::Pattern,
+      Kind::CircPattern => Icon::CircPattern,
+      Kind::Mirror => Icon::Mirror,
+      Kind::Combine => Icon::Combine,
+      Kind::Move => Icon::Move,
+      Kind::OffsetPlane => Icon::Plane,
+      Kind::Inspect => Icon::Measure,
+    }
+  }
+
   /// Dialogs whose input is picked edges/faces/bodies of the model: they preview on demand,
   /// because a preview changes the very geometry being picked.
   fn picks_model(self) -> bool {
@@ -624,7 +646,7 @@ impl Dialog {
         panels::dialog_frame().show(ui, |ui| {
           ui.set_width(width);
           ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-          panels::dialog_header(ui, &title, width);
+          panels::dialog_header(ui, self.kind.icon(), &title, width);
           egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
             egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
@@ -641,13 +663,13 @@ impl Dialog {
             ui.horizontal(|ui| {
               ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
               let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 24.0), egui::Sense::hover());
-              ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme::ICON_INK));
+              ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme::GROUP_LABEL));
               ui.painter().text(
                 r.center(),
                 egui::Align2::CENTER_CENTER,
                 "i",
                 egui::FontId::proportional(11.0),
-                theme::ICON_INK,
+                theme::GROUP_LABEL,
               );
               if !matches!(self.kind, Kind::PickPlane | Kind::Inspect) {
                 if self.kind.picks_model() && self.editing.is_none() {
@@ -664,7 +686,7 @@ impl Dialog {
                   if panels::secondary_button(ui, "Cancel").clicked() {
                     cancel = true;
                   }
-                  if panels::primary_button(ui, "OK").clicked() {
+                  if panels::primary_button(ui, "OK", self.accent()).clicked() {
                     ok = true;
                   }
                 });
@@ -706,6 +728,11 @@ impl Dialog {
     keep && !self.closed
   }
 
+  /// The command family's accent colour, used by this dialog's chips and OK button.
+  fn accent(&self) -> egui::Color32 {
+    crate::icons::accent_of(self.kind.icon())
+  }
+
   fn missing_input(&self) -> &'static str {
     match self.kind {
       Kind::Extrude | Kind::Revolve => "select a profile",
@@ -738,9 +765,9 @@ impl Dialog {
         if self.editing.is_some() {
           ui.label("(unchanged)");
         } else if n == 0 {
-          sel_chip(ui, "Select (all regions)", false);
+          sel_chip(ui, self.accent(), "Select (all regions)", false);
         } else {
-          sel_chip(ui, &format!("{n} selected"), true);
+          sel_chip(ui, self.accent(), &format!("{n} selected"), true);
         }
         ui.end_row();
         if self.kind == Kind::Extrude {
@@ -799,7 +826,7 @@ impl Dialog {
           if self.kind == Kind::Shell { ("Faces", self.faces.len()) } else { ("Edges", self.edges.len()) };
         ui.label(what);
         if creating {
-          sel_chip(ui, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
+          sel_chip(ui, self.accent(), &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
         } else {
           ui.label(format!("{n} (unchanged)"));
         }
@@ -865,7 +892,7 @@ impl Dialog {
           ui.end_row();
         } else {
           ui.label("Bodies");
-          sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
+          sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
           ui.end_row();
           ui.label("");
           if ui.checkbox(&mut self.join, "Join to original").changed() {
@@ -876,7 +903,7 @@ impl Dialog {
       }
       Kind::RectPattern | Kind::CircPattern => {
         ui.label("Bodies");
-        sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
+        sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
         if self.kind == Kind::RectPattern {
           ui.label("Direction");
@@ -936,8 +963,8 @@ impl Dialog {
       Kind::Combine => {
         ui.label("Target");
         match self.bodies.first() {
-          Some(b) => sel_chip(ui, &app.s.body_name(BodyId(*b)), true),
-          None => sel_chip(ui, "Select", false),
+          Some(b) => sel_chip(ui, self.accent(), &app.s.body_name(BodyId(*b)), true),
+          None => sel_chip(ui, self.accent(), "Select", false),
         };
         ui.end_row();
         ui.label("Tools");
@@ -952,7 +979,7 @@ impl Dialog {
       }
       Kind::Move => {
         ui.label("Bodies");
-        sel_chip(ui, &self.bodies_label(), !self.bodies.is_empty());
+        sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
         for (i, l) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
           ui.label(*l);
@@ -1159,27 +1186,25 @@ fn last_unconsumed_sketch(s: &Session) -> Option<FeatureId> {
     .map(|f| f.id)
 }
 
-/// Fusion's selection input: a "Select" chip until something is picked, then a blue chip with
-/// the count and a ✕ beside it.
-fn sel_chip(ui: &mut egui::Ui, text: &str, has: bool) -> egui::Response {
+/// A selection input: a white "Select" chip until something is picked, then a chip tinted with
+/// the command's accent showing the count, with a ✕ beside it.
+fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
   let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 52.0, 22.0), egui::Sense::hover());
   let chip = egui::Rect::from_min_size(rect.min, egui::vec2(tw + 32.0, 22.0));
   let p = ui.painter();
   let ir = egui::Rect::from_center_size(chip.left_center() + egui::vec2(12.0, 0.0), egui::Vec2::splat(15.0));
+  let fill = if has { crate::icons::tint_of(accent, 0.84) } else { egui::Color32::WHITE };
+  let stroke = if has { accent } else { theme::BORDER };
+  p.rect(chip, 3.0, fill, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+  crate::icons::draw(p, ir, Icon::Select, accent);
+  p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
   if has {
-    p.rect_filled(chip, 2.0, theme::ACCENT);
-    crate::icons::draw(p, ir, Icon::Select, egui::Color32::WHITE);
-    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, egui::Color32::WHITE);
     let x = egui::pos2(chip.right() + 10.0, chip.center().y);
-    let s = egui::Stroke::new(1.4, egui::Color32::from_gray(70));
+    let s = egui::Stroke::new(1.4, theme::GROUP_LABEL);
     p.line_segment([x + egui::vec2(-4.0, -4.0), x + egui::vec2(4.0, 4.0)], s);
     p.line_segment([x + egui::vec2(4.0, -4.0), x + egui::vec2(-4.0, 4.0)], s);
-  } else {
-    p.rect(chip, 2.0, egui::Color32::WHITE, egui::Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
-    crate::icons::draw(p, ir, Icon::Select, theme::ICON_INK);
-    p.text(chip.left_center() + egui::vec2(24.0, 0.0), egui::Align2::LEFT_CENTER, text, font, theme::TEXT);
   }
   resp
 }

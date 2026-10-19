@@ -1,7 +1,7 @@
-//! Colours and style, modelled on Autodesk Fusion's light theme: a grey application bar with a
-//! wide document tab, a light-grey toolbar with workspace tabs and bold blue icons, a
-//! near-white canvas with the browser rows floating directly on it, and light-grey command
-//! dialogs.
+//! Colours and style. The layout follows Autodesk Fusion's light theme (grey application bar,
+//! light toolbar, browser rows floating on a near-white canvas, light command dialogs); the
+//! colours are CLFusion's own and shared with the icons: slate for text and lines, one blue
+//! accent for selection and primary actions, and each command family's accent in its dialogs.
 
 use egui::{Color32, CornerRadius, Stroke};
 
@@ -13,29 +13,29 @@ pub const TOOLBAR: Color32 = Color32::from_rgb(243, 243, 243);
 pub const CONTEXT_TAB: Color32 = Color32::from_rgb(214, 233, 250);
 pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255);
 /// Header bars of the floating BROWSER and COMMENTS panels.
-pub const FLOAT_HEADER: Color32 = Color32::from_rgb(236, 236, 236);
+pub const FLOAT_HEADER: Color32 = Color32::from_rgb(238, 240, 243);
 /// Grey pills behind browser row labels.
-pub const PILL: Color32 = Color32::from_rgba_premultiplied(226, 226, 226, 225);
+pub const PILL: Color32 = Color32::from_rgba_premultiplied(229, 232, 237, 230);
 /// The dark pill of the browser's root component.
-pub const PILL_ROOT: Color32 = Color32::from_rgb(96, 96, 96);
-pub const BORDER: Color32 = Color32::from_rgb(208, 208, 208);
-pub const SEPARATOR: Color32 = Color32::from_rgb(220, 220, 220);
-/// Fusion blue: selection, active tab underline, OK button.
-pub const ACCENT: Color32 = Color32::from_rgb(6, 150, 215);
-pub const ACCENT_DARK: Color32 = Color32::from_rgb(0, 119, 178);
+pub const PILL_ROOT: Color32 = Color32::from_rgb(52, 64, 82);
+pub const BORDER: Color32 = Color32::from_rgb(204, 210, 218);
+pub const SEPARATOR: Color32 = Color32::from_rgb(220, 225, 231);
+/// The blue accent (the solid-modelling icon blue): selection, active tab, primary actions.
+pub const ACCENT: Color32 = Color32::from_rgb(30, 136, 229);
+pub const ACCENT_DARK: Color32 = Color32::from_rgb(18, 104, 190);
 /// Light blue behind hovered / selected rows and buttons.
-pub const HOVER: Color32 = Color32::from_rgb(229, 241, 251);
-pub const SELECTED: Color32 = Color32::from_rgb(204, 228, 247);
+pub const HOVER: Color32 = Color32::from_rgb(232, 242, 252);
+pub const SELECTED: Color32 = Color32::from_rgb(208, 229, 250);
 pub const ERROR: Color32 = Color32::from_rgb(214, 48, 39);
 pub const WARNING: Color32 = Color32::from_rgb(232, 155, 0);
-pub const TEXT: Color32 = Color32::from_rgb(40, 40, 40);
-pub const MUTED: Color32 = Color32::from_rgb(120, 120, 120);
-pub const GROUP_LABEL: Color32 = Color32::from_rgb(45, 45, 45);
+pub const TEXT: Color32 = Color32::from_rgb(44, 54, 70);
+pub const MUTED: Color32 = Color32::from_rgb(112, 122, 136);
+pub const GROUP_LABEL: Color32 = Color32::from_rgb(52, 64, 82);
 /// Command dialog title bar and body.
-pub const DIALOG_HEADER: Color32 = Color32::from_rgb(232, 232, 232);
-pub const DIALOG_BODY: Color32 = Color32::from_rgb(247, 247, 247);
+pub const DIALOG_HEADER: Color32 = Color32::from_rgb(240, 242, 245);
+pub const DIALOG_BODY: Color32 = Color32::from_rgb(250, 251, 252);
 /// Timeline strip.
-pub const TIMELINE: Color32 = Color32::from_rgb(238, 238, 238);
+pub const TIMELINE: Color32 = Color32::from_rgb(238, 240, 243);
 
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
 pub const ICON_INK: Color32 = Color32::from_rgb(52, 64, 82);

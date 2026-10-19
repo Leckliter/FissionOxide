@@ -285,6 +285,16 @@ impl Tint {
   }
 }
 
+/// The accent colour of `icon`'s family, for UI that should match a command (its dialog).
+pub fn accent_of(icon: Icon) -> Color32 {
+  family(icon).accent()
+}
+
+/// A light tint of `c` for backgrounds (selection chips, the primary button).
+pub fn tint_of(c: Color32, amount: f32) -> Color32 {
+  mix(c, Color32::WHITE, amount)
+}
+
 /// The accent family an icon belongs to when no tint is given.
 fn family(icon: Icon) -> Tint {
   use Icon::*;
@@ -877,8 +887,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::Body => k.block(0.1, 0.38, 0.66, 0.9, 0.26, Light, Fill, Dark),
     Icon::SketchSmall => {
       k.solid(&[(0.08, 0.2), (0.92, 0.2), (0.92, 0.84), (0.08, 0.84)], White);
-      k.path(&[(0.22, 0.7), (0.22, 0.36), (0.54, 0.36)], Red);
-      k.circle((0.64, 0.6), 0.12, None, Some(Red));
+      k.path(&[(0.22, 0.7), (0.22, 0.36), (0.54, 0.36)], Teal);
+      k.circle((0.64, 0.6), 0.12, None, Some(Teal));
     }
     Icon::Eye => {
       k.ellipse((0.5, 0.5), 0.46, 0.28, Some(White), Ink);

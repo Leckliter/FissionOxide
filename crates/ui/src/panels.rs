@@ -551,7 +551,7 @@ fn float_header(ui: &mut egui::Ui, title: &str, open: &mut bool, width: f32) {
   let p = ui.painter();
   p.rect(rect, 2.0, theme::FLOAT_HEADER, Stroke::new(1.0, Color32::from_gray(212)), egui::StrokeKind::Inside);
   let c = rect.left_center() + vec2(12.0, 0.0);
-  let ink = Color32::from_gray(70);
+  let ink = theme::GROUP_LABEL;
   for dx in [-3.0, 3.0] {
     let t = c + vec2(dx, 0.0);
     let pts = if *open {
@@ -637,7 +637,7 @@ fn tree_row(
   if expand.is_some() {
     let tr = Rect::from_center_size(pos2(x + 4.0, cy), Vec2::splat(14.0));
     let r = ui.interact(tr, id.with("tri"), egui::Sense::click());
-    tree_triangle(&p, tr.center(), open, root, if r.hovered() { theme::ACCENT } else { Color32::from_gray(70) });
+    tree_triangle(&p, tr.center(), open, root, if r.hovered() { theme::ACCENT } else { theme::GROUP_LABEL });
     if r.clicked() {
       open = !open;
       ui.data_mut(|d| d.insert_temp(open_id, open));
@@ -659,7 +659,7 @@ fn tree_row(
   let (fill, stroke) = if selected {
     (theme::SELECTED, Stroke::new(1.0, theme::ACCENT))
   } else if resp.hovered() {
-    (if root { Color32::from_gray(80) } else { theme::HOVER }, Stroke::new(1.0, theme::SELECTED))
+    (if root { Color32::from_rgb(72, 86, 106) } else { theme::HOVER }, Stroke::new(1.0, theme::SELECTED))
   } else {
     (if root { theme::PILL_ROOT } else { theme::PILL }, Stroke::NONE)
   };
@@ -670,8 +670,8 @@ fn tree_row(
   if root {
     // the activation radio of the root component
     let c = pos2(pill.right() + 12.0, cy);
-    p.circle(c, 7.0, Color32::WHITE, Stroke::new(1.0, Color32::from_gray(90)));
-    p.circle_filled(c, 3.5, Color32::from_gray(60));
+    p.circle(c, 7.0, Color32::WHITE, Stroke::new(1.0, theme::GROUP_LABEL));
+    p.circle_filled(c, 3.5, theme::GROUP_LABEL);
   }
   if resp.double_clicked() {
     ev.double_clicked = true;
@@ -999,7 +999,7 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
 /// The small drop-down caret after a navigation bar icon.
 fn nav_caret(ui: &mut egui::Ui) {
   let (r, _) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::hover());
-  icons::chevron(ui.painter(), r.center(), Color32::from_gray(80));
+  icons::chevron(ui.painter(), r.center(), theme::GROUP_LABEL);
 }
 
 fn nav_sep(ui: &mut egui::Ui) {
@@ -1023,7 +1023,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         let width = 270.0;
         ui.set_width(width);
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        dialog_header(ui, "SKETCH PALETTE", width);
+        dialog_header(ui, Icon::Sketch, "SKETCH PALETTE", width);
         egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 14, top: 6, bottom: 8 }).show(ui, |ui| {
           ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
           let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
@@ -1098,7 +1098,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         ui.painter().rect_filled(sep, 0.0, Color32::from_gray(215));
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if secondary_button(ui, "Finish Sketch").clicked() {
+            if primary_button(ui, "Finish Sketch", icons::accent_of(Icon::Sketch)).clicked() {
               app.finish_sketch();
             }
           });
@@ -1116,17 +1116,19 @@ pub fn dialog_frame() -> egui::Frame {
     .shadow(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(35) })
 }
 
-/// The light title bar of a command dialog: the ⊖ collapse button, the title and ▸▸.
-pub fn dialog_header(ui: &mut egui::Ui, title: &str, width: f32) {
-  let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), egui::Sense::hover());
+/// The title bar of a command dialog: the command's icon and title, ▸▸, and a thin rule in the
+/// command family's accent colour.
+pub fn dialog_header(ui: &mut egui::Ui, icon: Icon, title: &str, width: f32) {
+  let (rect, _) = ui.allocate_exact_size(vec2(width, 30.0), egui::Sense::hover());
   let p = ui.painter();
-  p.rect_filled(rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, theme::DIALOG_HEADER);
-  p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, Color32::from_gray(212)));
-  let ink = Color32::from_gray(55);
-  let c = rect.left_center() + vec2(14.0, 0.0);
-  p.circle_filled(c, 6.0, ink);
-  p.line_segment([c - vec2(3.0, 0.0), c + vec2(3.0, 0.0)], Stroke::new(1.5, Color32::WHITE));
-  p.text(rect.left_center() + vec2(27.0, 0.0), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(12.5), ink);
+  p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::DIALOG_HEADER);
+  p.line_segment(
+    [rect.left_bottom() + vec2(0.0, -1.0), rect.right_bottom() + vec2(0.0, -1.0)],
+    Stroke::new(2.0, icons::accent_of(icon)),
+  );
+  let ink = theme::GROUP_LABEL;
+  icons::draw_color(p, Rect::from_center_size(rect.left_center() + vec2(16.0, 0.0), Vec2::splat(18.0)), icon);
+  p.text(rect.left_center() + vec2(32.0, 0.0), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(12.5), ink);
   for dx in [-14.0, -8.0] {
     let t = rect.right_center() + vec2(dx, 0.0);
     p.add(egui::Shape::convex_polygon(
@@ -1137,17 +1139,25 @@ pub fn dialog_header(ui: &mut egui::Ui, title: &str, width: f32) {
   }
 }
 
-/// The OK button. Fusion draws OK and Cancel alike, in light grey.
-pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-  secondary_button(ui, label)
+/// The primary dialog button (OK, Finish Sketch): a light tint of the command's accent with an
+/// accent border.
+pub fn primary_button(ui: &mut egui::Ui, label: &str, accent: Color32) -> egui::Response {
+  ui.add(
+    egui::Button::new(RichText::new(label).color(theme::TEXT))
+      .fill(icons::tint_of(accent, 0.84))
+      .stroke(Stroke::new(1.0, accent))
+      .corner_radius(3)
+      .min_size(vec2(72.0, 24.0)),
+  )
 }
 
-/// Light grey dialog button (OK, Cancel, Finish Sketch).
+/// The secondary dialog button (Cancel, Close): white with a slate-grey border.
 pub fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
   ui.add(
-    egui::Button::new(label)
-      .fill(Color32::from_gray(236))
-      .stroke(Stroke::new(1.0, Color32::from_gray(176)))
+    egui::Button::new(RichText::new(label).color(theme::TEXT))
+      .fill(Color32::WHITE)
+      .stroke(Stroke::new(1.0, theme::BORDER))
+      .corner_radius(3)
       .min_size(vec2(72.0, 24.0)),
   )
 }
@@ -1163,7 +1173,7 @@ pub fn assistant_tab(app: &mut App, ctx: &egui::Context) {
       let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 260.0), egui::Sense::click());
       let p = ui.painter();
       p.rect_filled(rect, 2.0, if resp.hovered() { theme::HOVER } else { theme::FLOAT_HEADER });
-      let ink = Color32::from_gray(80);
+      let ink = theme::GROUP_LABEL;
       for dy in [-3.0, 3.0] {
         let t = rect.center_top() + vec2(dy, 14.0);
         p.add(egui::Shape::convex_polygon(
@@ -1303,7 +1313,7 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.x = 0.0;
         let n = app.s.design.features.len();
         let active = app.s.design.active_len();
-        let ink = Some(Color32::from_gray(70));
+        let ink = Some(theme::GROUP_LABEL);
         if icons::icon_button(ui, Icon::ToStart, 22.0, "Move to beginning", false, ink).clicked() {
           app.run("timeline.marker", json!({"at": 0}));
         }
