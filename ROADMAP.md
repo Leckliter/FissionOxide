@@ -22,6 +22,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | UI        | More drag manipulators (fillet radius, press-pull, move/rotate triad); transparent preview bodies |
 | View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |
 | Manufacture | Adaptive clearing, rest machining, 3D toolpaths, stock simulation, tool library, post-processor library, ramp/helical entries, tabs |
+| Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 
 ## Files and data
 
