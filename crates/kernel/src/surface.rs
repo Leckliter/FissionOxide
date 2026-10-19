@@ -59,7 +59,7 @@ impl Shape {
 
   /// Which side of this trimming tool `p` is on. A solid gives +1 inside, -1 outside and 0 on
   /// its skin; surfaces give the signed distance along the nearest face's normal.
-  pub fn side_of(&self, p: DVec3) -> Result<f64> {
+  pub fn trim_side(&self, p: DVec3) -> Result<f64> {
     Ok(sys::classify_point(self.get()?, p.x, p.y, p.z)?)
   }
 

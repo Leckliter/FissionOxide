@@ -23,7 +23,7 @@ enum Side {
 impl Side {
   fn of(&self, p: DVec3) -> Result<f64, String> {
     match self {
-      Side::Body(tool) => tool.side_of(p).map_err(ke),
+      Side::Body(tool) => tool.trim_side(p).map_err(ke),
       Side::Profiles(plane, profiles) => {
         let q = plane.to_local(p);
         Ok(if profiles.iter().any(|pr| pr.contains(q)) { 1.0 } else { -1.0 })
