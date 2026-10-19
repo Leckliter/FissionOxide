@@ -1,6 +1,7 @@
 use super::*;
 use crate::archive::{Archive, ArchivedVersion, inspect_fusion, read_clfz, write_clfz};
-use crate::dxf::{Entity, bulge_arc, read_dxf, write_dxf};
+use crate::dxf::{Drawing, Entity, bulge_arc, read_dxf, write_dxf};
+use crate::svg::{read_svg, write_svg};
 use std::io::Write as _;
 
 /// A closed unit-ish cube: 8 vertices, 12 outward-facing triangles.
@@ -279,4 +280,542 @@ fn fusion_archive_inspection() {
   assert_eq!(f.embedded.len(), 1);
   assert!(f.designs.contains(&"FusionAssetName".to_string()), "{:?}", f.designs);
   assert!(inspect_fusion(b"not a zip").is_err());
+}
+
+// --- SVG ---------------------------------------------------------------------------------------
+
+/// A 100 x 100 mm page with one user unit per millimetre: (x, y) lands on (x, 100 - y).
+fn svg_doc(body: &str) -> Drawing {
+  let s = format!(
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">{body}</svg>"#
+  );
+  read_svg(s.as_bytes()).unwrap()
+}
+
+fn near(a: [f64; 2], b: [f64; 2], tol: f64) -> bool {
+  (a[0] - b[0]).hypot(a[1] - b[1]) < tol
+}
+
+fn ents(d: &Drawing) -> Vec<Entity> {
+  d.entities.iter().map(|e| e.0).collect()
+}
+
+fn lines(d: &Drawing) -> Vec<([f64; 2], [f64; 2])> {
+  d.entities.iter().filter_map(|e| if let Entity::Line { a, b } = e.0 { Some((a, b)) } else { None }).collect()
+}
+
+fn beziers(d: &Drawing) -> Vec<[[f64; 2]; 4]> {
+  d.entities.iter().filter_map(|e| if let Entity::Bezier { p } = e.0 { Some(p) } else { None }).collect()
+}
+
+fn arcs(d: &Drawing) -> Vec<([f64; 2], f64, f64, f64)> {
+  d.entities
+    .iter()
+    .filter_map(|e| {
+      if let Entity::Arc { center, radius, start, end } = e.0 { Some((center, radius, start, end)) } else { None }
+    })
+    .collect()
+}
+
+/// Counter-clockwise sweep of an arc, in (0, 2 pi].
+fn sweep(start: f64, end: f64) -> f64 {
+  let s = (end - start).rem_euclid(std::f64::consts::TAU);
+  if s == 0.0 { std::f64::consts::TAU } else { s }
+}
+
+/// Start and end points of a curve entity.
+fn ends_of(e: &Entity) -> ([f64; 2], [f64; 2]) {
+  match *e {
+    Entity::Line { a, b } => (a, b),
+    Entity::Bezier { p } => (p[0], p[3]),
+    Entity::Arc { center, radius, start, end } => {
+      (Entity::arc_point(center, radius, start), Entity::arc_point(center, radius, end))
+    }
+    Entity::Circle { center, .. } | Entity::Point { at: center } => (center, center),
+  }
+}
+
+#[test]
+fn svg_line_polyline_polygon() {
+  let d = svg_doc(
+    r#"<line x1="10" y1="10" x2="20" y2="30"/>
+       <polyline points="0,0 10,0 10,10"/>
+       <polygon points="50 50, 60 50 55 60"/>"#,
+  );
+  let l = lines(&d);
+  assert_eq!(l.len(), 1 + 2 + 3);
+  assert!(near(l[0].0, [10.0, 90.0], 1e-12) && near(l[0].1, [20.0, 70.0], 1e-12), "{l:?}");
+  assert!(near(l[2].1, [10.0, 90.0], 1e-12));
+  // the polygon closes back to its first point exactly
+  assert_eq!(l[5].1, l[3].0);
+  assert!(near(l[3].0, [50.0, 50.0], 1e-12));
+}
+
+#[test]
+fn svg_rect_circle_ellipse() {
+  let d = svg_doc(r#"<rect x="10" y="20" width="30" height="40"/><circle cx="50" cy="50" r="5"/>"#);
+  let l = lines(&d);
+  assert_eq!(l.len(), 4);
+  let corners: Vec<_> = l.iter().map(|l| l.0).collect();
+  for c in [[10.0, 80.0], [40.0, 80.0], [40.0, 40.0], [10.0, 40.0]] {
+    assert!(corners.iter().any(|p| near(*p, c, 1e-12)), "{c:?} {corners:?}");
+  }
+  assert_eq!(l[3].1, l[0].0);
+  assert!(
+    matches!(d.entities[4].0, Entity::Circle { center, radius } if near(center, [50.0, 50.0], 1e-12) && (radius - 5.0).abs() < 1e-12)
+  );
+
+  // an ellipse becomes four closed cubic pieces on the ellipse
+  let d = svg_doc(r#"<ellipse cx="50" cy="50" rx="20" ry="10"/>"#);
+  let b = beziers(&d);
+  assert_eq!(b.len(), 4);
+  assert_eq!(b[3][3], b[0][0]);
+  for p in &b {
+    for t in [0.0, 0.25, 0.5, 0.75] {
+      let q = Entity::bezier_point(p, t);
+      let r = ((q[0] - 50.0) / 20.0).hypot((q[1] - 50.0) / 10.0);
+      assert!((r - 1.0).abs() < 1e-3, "{q:?}");
+    }
+  }
+  // a circle with rx == ry in an ellipse element is a circle
+  let d = svg_doc(r#"<ellipse cx="50" cy="50" rx="7" ry="7"/>"#);
+  assert!(matches!(d.entities[0].0, Entity::Circle { radius, .. } if (radius - 7.0).abs() < 1e-12));
+}
+
+#[test]
+fn svg_rounded_rect_corners_are_convex_arcs() {
+  let d = svg_doc(r#"<rect x="10" y="10" width="40" height="20" rx="5"/>"#);
+  assert_eq!(lines(&d).len(), 4);
+  let a = arcs(&d);
+  assert_eq!(a.len(), 4);
+  // rect spans x 10..50, y (CAD) 70..90
+  let corners = [[10.0, 70.0], [50.0, 70.0], [50.0, 90.0], [10.0, 90.0]];
+  for (c, r, s, e) in a {
+    assert!((r - 5.0).abs() < 1e-12);
+    assert!((sweep(s, e) - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{s} {e}");
+    let mid = Entity::arc_point(c, r, s + sweep(s, e) / 2.0);
+    let k = corners.iter().map(|k| (k[0] - mid[0]).hypot(k[1] - mid[1])).fold(f64::MAX, f64::min);
+    assert!((k - 5.0 * (2f64.sqrt() - 1.0)).abs() < 1e-9, "{mid:?}");
+  }
+  // ry alone sets rx too
+  let d = svg_doc(r#"<rect x="0" y="0" width="10" height="10" ry="2"/>"#);
+  assert!(arcs(&d).iter().all(|a| (a.1 - 2.0).abs() < 1e-12));
+}
+
+#[test]
+fn svg_relative_and_absolute_commands_agree() {
+  let forms = [
+    "M10 10 L20 10 L20 20 L10 20 Z",
+    "m10 10 l10 0 0 10 -10 0 z",
+    "M10,10H20V20H10z",
+    "m10,10h10v10h-10Z",
+    "M10 10 20 10 20 20 10 20z",
+  ];
+  let first = ents(&svg_doc(&format!(r#"<path d="{}"/>"#, forms[0])));
+  assert_eq!(first.len(), 4);
+  for f in &forms[1..] {
+    let d = svg_doc(&format!(r#"<path d="{f}"/>"#));
+    assert_eq!(ents(&d), first, "{f}");
+  }
+  // compact numbers: "1.5.5" is 1.5 0.5, "-" separates, exponents
+  let d = svg_doc(r#"<path d="M1.5.5L1e1-2e-0l-.5.5"/>"#);
+  let l = lines(&d);
+  assert!(near(l[0].0, [1.5, 99.5], 1e-12) && near(l[0].1, [10.0, 102.0], 1e-12), "{l:?}");
+  assert!(near(l[1].1, [9.5, 101.5], 1e-12));
+  // after z, drawing continues from the subpath start
+  let d = svg_doc(r#"<path d="M0 0 l10 0 l0 10 z l 5 5"/>"#);
+  let l = lines(&d);
+  assert_eq!(l.len(), 4);
+  assert!(near(l[3].0, [0.0, 100.0], 1e-12) && near(l[3].1, [5.0, 95.0], 1e-12));
+}
+
+#[test]
+fn svg_cubic_smooth_and_quadratic() {
+  let d = svg_doc(r#"<path d="M0 0 C 0 10 10 10 10 0 S 20 -10 20 0 s 10 10 10 0"/>"#);
+  let b = beziers(&d);
+  assert_eq!(b.len(), 3);
+  // S reflects the previous second control point (10, 10) about (10, 0): (10, -10) -> CAD (10, 110)
+  assert!(near(b[1][1], [10.0, 110.0], 1e-12), "{:?}", b[1]);
+  assert!(near(b[2][1], [20.0, 90.0], 1e-12) && near(b[2][3], [30.0, 100.0], 1e-12), "{:?}", b[2]);
+  // S with no cubic before uses the current point
+  let b = beziers(&svg_doc(r#"<path d="M0 0 L5 0 S 10 10 15 0"/>"#));
+  assert!(near(b[0][1], [5.0, 100.0], 1e-12));
+
+  // quadratics become exact cubics; T reflects the control point
+  let d = svg_doc(r#"<path d="M0 0 Q 10 20 20 0 T 40 0 q 10 -20 20 0 t 20 0"/>"#);
+  let b = beziers(&d);
+  assert_eq!(b.len(), 4);
+  let quad = |p0: [f64; 2], c: [f64; 2], p1: [f64; 2], t: f64| {
+    let u = 1.0 - t;
+    [0, 1].map(|k| u * u * p0[k] + 2.0 * u * t * c[k] + t * t * p1[k])
+  };
+  let user = |p: [f64; 2]| [p[0], 100.0 - p[1]];
+  let expect = [
+    ([0.0, 0.0], [10.0, 20.0], [20.0, 0.0]),
+    ([20.0, 0.0], [30.0, -20.0], [40.0, 0.0]),
+    ([40.0, 0.0], [50.0, -20.0], [60.0, 0.0]),
+    ([60.0, 0.0], [70.0, 20.0], [80.0, 0.0]),
+  ];
+  for (p, (a, c, z)) in b.iter().zip(expect) {
+    for t in [0.0, 0.2, 0.5, 0.9, 1.0] {
+      assert!(near(Entity::bezier_point(p, t), user(quad(a, c, z, t)), 1e-12), "{p:?} {t}");
+    }
+  }
+}
+
+/// A page centred on the origin: user (x, y) lands on (x, -y).
+fn centred(body: &str) -> Drawing {
+  let s = format!(
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="-50 -50 100 100">{body}</svg>"#
+  );
+  read_svg(s.as_bytes()).unwrap()
+}
+
+#[test]
+fn svg_circular_arcs_become_arcs_with_the_right_direction() {
+  use std::f64::consts::{FRAC_PI_2, PI};
+  // screen-clockwise quarter around (0, 0): in CAD (y up) it runs clockwise from (10, 0) to
+  // (0, -10), so the counter-clockwise arc goes from -90 to 0 degrees
+  let a = arcs(&centred(r#"<path d="M 10 0 A 10 10 0 0 1 0 10"/>"#));
+  assert_eq!(a.len(), 1);
+  let (c, r, s, e) = a[0];
+  assert!(near(c, [0.0, 0.0], 1e-12) && (r - 10.0).abs() < 1e-12);
+  assert!((s + FRAC_PI_2).abs() < 1e-12 && e.abs() < 1e-12, "{s} {e}");
+
+  // sweep 0: the other centre (10, 10) -> CAD (10, -10); in CAD the arc runs counter-clockwise
+  // from (10, 0) (90 degrees about the centre) to (0, -10) (180 degrees)
+  let (c, _, s, e) = arcs(&centred(r#"<path d="M 10 0 A 10 10 0 0 0 0 10"/>"#))[0];
+  assert!(near(c, [10.0, -10.0], 1e-12));
+  assert!((s - FRAC_PI_2).abs() < 1e-12 && (e - PI).abs() < 1e-12, "{s} {e}");
+
+  // large arc: three quarters
+  let (c, _, s, e) = arcs(&centred(r#"<path d="M 10 0 a 10 10 0 1 1 -10 10"/>"#))[0];
+  assert!(near(c, [10.0, -10.0], 1e-12));
+  assert!((sweep(s, e) - 1.5 * PI).abs() < 1e-12);
+
+  // radii too small grow to fit: a semicircle of radius 5
+  let (c, r, s, e) = arcs(&centred(r#"<path d="M0 0 A 1 1 0 0 1 10 0"/>"#))[0];
+  assert!(near(c, [5.0, 0.0], 1e-12) && (r - 5.0).abs() < 1e-12 && (sweep(s, e) - PI).abs() < 1e-12);
+
+  // a similarity transform keeps it circular; a mirror flips the direction back
+  let (c, r, ..) = arcs(&centred(r#"<path transform="rotate(30) scale(2)" d="M 10 0 A 10 10 0 0 1 0 10"/>"#))[0];
+  assert!(near(c, [0.0, 0.0], 1e-12) && (r - 20.0).abs() < 1e-9);
+  let (_, _, s, e) = arcs(&centred(r#"<path transform="scale(1,-1)" d="M 10 0 A 10 10 0 0 1 0 10"/>"#))[0];
+  assert!(s.abs() < 1e-12 && (e - FRAC_PI_2).abs() < 1e-12, "{s} {e}");
+
+  // two half arcs make a full circle's worth of arcs that meet the subpath ends
+  let d = centred(r#"<path d="M -5 0 A 5 5 0 0 1 5 0 A 5 5 0 0 1 -5 0 Z"/>"#);
+  assert_eq!(arcs(&d).len(), 2);
+  assert_eq!(d.entities.len(), 2);
+}
+
+#[test]
+fn svg_elliptical_arcs_become_beziers() {
+  use std::f64::consts::PI;
+  // a half ellipse 20 x 10, rotated 30 degrees: two pieces, end points exact
+  let d = centred(r#"<path d="M 0 0 A 20 10 30 0 1 34.641016151377546 20"/>"#);
+  let b = beziers(&d);
+  assert!(arcs(&d).is_empty());
+  assert_eq!(b.len(), 2, "{b:?}");
+  assert_eq!(b[0][0], [0.0, 0.0]);
+  assert!(near(b[1][3], [20.0 * 3f64.sqrt(), -20.0], 1e-12));
+  assert_eq!(b[0][3], b[1][0]);
+  // every point sits on the ellipse (in CAD: centre (17.32, -10), axis at -30 degrees)
+  let (cx, cy, phi) = (10.0 * 3f64.sqrt(), -10.0, -PI / 6.0);
+  for p in &b {
+    for t in [0.0, 0.3, 0.5, 0.8] {
+      let q = Entity::bezier_point(p, t);
+      let (dx, dy) = (q[0] - cx, q[1] - cy);
+      let (u, v) = (dx * phi.cos() + dy * phi.sin(), -dx * phi.sin() + dy * phi.cos());
+      // a 90 degree cubic is within 3e-4 of the true curve
+      assert!(((u / 20.0).hypot(v / 10.0) - 1.0).abs() < 5e-4, "{q:?}");
+    }
+  }
+  // a circular arc under a non-uniform scale or a skew is no longer circular
+  for t in ["scale(2,1)", "skewX(20)"] {
+    let d = centred(&format!(r#"<path transform="{t}" d="M 10 0 A 10 10 0 0 1 0 10"/>"#));
+    assert!(arcs(&d).is_empty() && beziers(&d).len() == 1, "{t}");
+  }
+  // a big elliptical arc is split into pieces of at most 90 degrees
+  let d = centred(r#"<path d="M 20 0 A 20 10 0 1 1 0 10"/>"#);
+  assert_eq!(beziers(&d).len(), 3);
+  // zero radius is a straight line
+  let d = centred(r#"<path d="M 0 0 A 0 10 0 0 1 10 0"/>"#);
+  assert_eq!(lines(&d).len(), 1);
+}
+
+#[test]
+fn svg_transforms_and_nested_groups() {
+  let one = |body: &str| -> Vec<([f64; 2], [f64; 2])> { lines(&svg_doc(body)) };
+  let cad = |x: f64, y: f64| [x, 100.0 - y];
+  // nested groups compose outside-in
+  let l = one(r#"<g transform="translate(10,20)"><g transform="scale(2)"><line x1="0" y1="0" x2="5" y2="0"/></g></g>"#);
+  assert!(near(l[0].0, cad(10.0, 20.0), 1e-12) && near(l[0].1, cad(20.0, 20.0), 1e-12), "{l:?}");
+  // rotate about a centre
+  let l = one(r#"<line transform="rotate(90 10 10)" x1="10" y1="10" x2="20" y2="10"/>"#);
+  assert!(near(l[0].1, cad(10.0, 20.0), 1e-12), "{l:?}");
+  // a list applies right to left: rotate first, then translate
+  let l = one(r#"<line transform="translate(10) rotate(90)" x1="0" y1="0" x2="1" y2="0"/>"#);
+  assert!(near(l[0].0, cad(10.0, 0.0), 1e-12) && near(l[0].1, cad(10.0, 1.0), 1e-12), "{l:?}");
+  // matrix, skews, comma-separated lists
+  let l = one(r#"<line transform="matrix(1,0,0,1,5,6)" x1="0" y1="0" x2="1" y2="0"/>"#);
+  assert!(near(l[0].0, cad(5.0, 6.0), 1e-12));
+  let l = one(r#"<line transform="skewX(45)" x1="0" y1="10" x2="0" y2="20"/>"#);
+  assert!(near(l[0].0, cad(10.0, 10.0), 1e-12) && near(l[0].1, cad(20.0, 20.0), 1e-12), "{l:?}");
+  let l = one(r#"<line transform="skewY(45)" x1="10" y1="0" x2="20" y2="0"/>"#);
+  assert!(near(l[0].0, cad(10.0, 10.0), 1e-12), "{l:?}");
+  let l = one(r#"<g transform="scale(2, 3),translate(1 1)"><line x1="0" y1="0" x2="1" y2="0"/></g>"#);
+  assert!(near(l[0].0, cad(2.0, 3.0), 1e-12) && near(l[0].1, cad(4.0, 3.0), 1e-12), "{l:?}");
+  // transforms on a group and its shape both apply
+  let l = one(r#"<g transform="translate(5,0)"><path transform="translate(0,5)" d="M0 0 h1"/></g>"#);
+  assert!(near(l[0].0, cad(5.0, 5.0), 1e-12));
+}
+
+#[test]
+fn svg_viewbox_and_units() {
+  // 2 x 1 inches over 200 x 100 user units: 0.254 mm per unit
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" width="2in" height="1in" viewBox="0 0 200 100">
+    <line x1="0" y1="0" x2="200" y2="100"/></svg>"#;
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].0, [0.0, 25.4], 1e-12) && near(l[0].1, [50.8, 0.0], 1e-12), "{l:?}");
+  // millimetres, half a millimetre per unit
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="25mm" viewBox="0 0 100 50">
+    <circle cx="50" cy="10" r="4"/></svg>"#;
+  let d = read_svg(s.as_bytes()).unwrap();
+  assert!(
+    matches!(d.entities[0].0, Entity::Circle { center, radius } if near(center, [25.0, 20.0], 1e-12) && (radius - 2.0).abs() < 1e-12)
+  );
+  // no viewBox: px at 96 dpi
+  let s =
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="96px" height="96"><line x1="0" y1="0" x2="96" y2="0"/></svg>"#;
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].0, [0.0, 25.4], 1e-12) && near(l[0].1, [25.4, 25.4], 1e-12), "{l:?}");
+  // points and centimetres, and no width at all (px)
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" width="72pt" viewBox="0 0 72 72"><line x1="0" y1="72" x2="72" y2="72"/></svg>"#;
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].1, [25.4, 0.0], 1e-12), "{l:?}");
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10cm" height="10cm" viewBox="0 0 10 10"><line x1="0" y1="10" x2="1" y2="10"/></svg>"#;
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].1, [10.0, 0.0], 1e-12), "{l:?}");
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><line x1="0" y1="96" x2="96" y2="96"/></svg>"#;
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].1, [25.4, 0.0], 1e-12), "{l:?}");
+}
+
+#[test]
+fn svg_closed_subpaths_end_at_their_start() {
+  // rounding in relative coordinates leaves a sliver: it folds into the segment before
+  let d = svg_doc(r#"<path d="M0 0 l10 0 l0 10 l-9.9998 -10.0002 z"/>"#);
+  let l = lines(&d);
+  assert_eq!(l.len(), 3, "{l:?}");
+  assert_eq!(l[2].1, l[0].0);
+  let d = svg_doc(r#"<path d="M0 0 L10 0 C 10 10 0 10 0.0003 0 Z"/>"#);
+  assert_eq!(d.entities.len(), 2);
+  assert_eq!(beziers(&d)[0][3], lines(&d)[0].0);
+  // a real gap gets a closing line
+  let d = svg_doc(r#"<path d="M0 0 L10 0 L10 10 Z"/>"#);
+  let l = lines(&d);
+  assert_eq!(l.len(), 3);
+  assert_eq!(l[2].1, l[0].0);
+  // an open path stays open
+  assert_eq!(lines(&svg_doc(r#"<path d="M0 0 L10 0 L10 10"/>"#)).len(), 2);
+  // a path data error keeps what came before
+  let d = svg_doc(r#"<path d="M0 0 L10 0 L10 10 X 5 5"/>"#);
+  assert_eq!(lines(&d).len(), 2);
+  assert_eq!(d.skipped.len(), 1);
+}
+
+#[test]
+fn svg_skips_non_drawing_content() {
+  let d = svg_doc(
+    r##"<!-- a comment -->
+    <title>t</title><desc>d</desc>
+    <style><![CDATA[ .a { stroke: red } ]]></style>
+    <defs><path id="p" d="M0 0 L1 1"/><clipPath id="c"><rect width="5" height="5"/></clipPath></defs>
+    <mask id="m"><circle r="3"/></mask>
+    <symbol id="s"><line x2="5"/></symbol>
+    <use href="#p"/><image href="x.png" width="5" height="5"/>
+    <text x="0" y="0">hi<tspan>there</tspan></text>
+    <path style="display:none" d="M0 0 L5 5"/>
+    <line x1="0" y1="0" x2="1" y2="0" style="stroke:#000;fill:none;stroke-width:0.1"/>"##,
+  );
+  assert_eq!(d.entities.len(), 1);
+  for k in ["use", "image", "text", "hidden element"] {
+    assert_eq!(d.skipped.get(k), Some(&1), "{k}: {:?}", d.skipped);
+  }
+  // prefixed SVG elements are SVG too
+  let s = r#"<svg:svg xmlns:svg="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10">
+    <svg:g><svg:line x1="0" y1="0" x2="1" y2="0"/></svg:g></svg:svg>"#;
+  assert_eq!(read_svg(s.as_bytes()).unwrap().entities.len(), 1);
+}
+
+#[test]
+fn svg_inkscape_document() {
+  let s = r##"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.3 (0e150ed6c4, 2023-07-21)"
+   sodipodi:docname="drawing.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     inkscape:document-units="mm" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-10,5)">
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.264583"
+       d="m 30,40 h 50 v 30 h -50 z"
+       id="rect1"
+       sodipodi:nodetypes="ccccc" />
+    <circle
+       style="fill:none;stroke:#000000;stroke-width:0.264583"
+       id="path2"
+       cx="60"
+       cy="100"
+       r="10" />
+    <path
+       sodipodi:type="arc"
+       sodipodi:cx="0"
+       sodipodi:rx="5"
+       d="M 105,150 A 5,5 0 0 1 100,155 5,5 0 0 1 95,150"
+       sodipodi:open="true" />
+    <text xml:space="preserve" x="10" y="10" id="text1"><tspan id="tspan1" x="10" y="10">Hello</tspan></text>
+  </g>
+  <g inkscape:label="Construction" inkscape:groupmode="layer" id="layer2">
+    <path d="M 0,0 L 10,10" />
+  </g>
+  <g inkscape:label="Hidden" inkscape:groupmode="layer" id="layer3" style="display:none">
+    <path d="M 0,0 L 10,10" />
+  </g>
+</svg>
+"##;
+  let d = read_svg(s.as_bytes()).unwrap();
+  let l = lines(&d);
+  assert_eq!(l.len(), 4 + 1);
+  // the rectangle's first corner: (30, 40) + (-10, 5) on an A4 page
+  assert!(near(l[0].0, [20.0, 252.0], 1e-9), "{l:?}");
+  assert_eq!(l[3].1, l[0].0);
+  assert!(d.entities.iter().any(|e| matches!(e.0, Entity::Circle { center, .. } if near(center, [50.0, 192.0], 1e-9))));
+  assert_eq!(arcs(&d).len(), 2);
+  assert_eq!(d.entities.iter().filter(|e| e.1).count(), 1, "the construction layer");
+  assert_eq!(d.skipped.get("text"), Some(&1));
+  assert_eq!(d.skipped.get("hidden element"), Some(&1));
+}
+
+#[test]
+fn svg_illustrator_document() {
+  let s = "<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<!-- Generator: Adobe Illustrator 27.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version=\"1.1\" id=\"Layer_1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" x=\"0px\" y=\"0px\"
+\t viewBox=\"0 0 200 100\" style=\"enable-background:new 0 0 200 100;\" xml:space=\"preserve\">
+<style type=\"text/css\">
+\t.st0{fill:none;stroke:#000000;stroke-miterlimit:10;}
+</style>
+<g>
+\t<path class=\"st0\" d=\"M10.5,20.25c0,5.52,4.48,10,10,10s10-4.48,10-10s-4.48-10-10-10S10.5,14.73,10.5,20.25z\"/>
+\t<polygon class=\"st0\" points=\"50,10 70,10 60,30 \t\"/>
+\t<rect x=\"100\" y=\"10\" class=\"st0\" width=\"40\" height=\"20\"/>
+\t<line class=\"st0\" x1=\"150\" y1=\"10\" x2=\"190\" y2=\"90\"/>
+</g>
+</svg>
+";
+  let d = read_svg(s.as_bytes()).unwrap();
+  let b = beziers(&d);
+  assert_eq!(b.len(), 4);
+  assert_eq!(b[3][3], b[0][0], "the circle-ish path is closed");
+  assert_eq!(lines(&d).len(), 3 + 4 + 1);
+  // no width: user units are px
+  let px = 25.4 / 96.0;
+  assert!(near(b[0][0], [10.5 * px, (100.0 - 20.25) * px], 1e-12), "{:?}", b[0][0]);
+  assert!(d.skipped.is_empty(), "{:?}", d.skipped);
+}
+
+#[test]
+fn svg_round_trip() {
+  use std::f64::consts::{FRAC_PI_2, PI};
+  let ents = vec![
+    // a slot: line, arc, line, arc (one closed path)
+    (Entity::Line { a: [0.0, 0.0], b: [20.0, 0.0] }, false),
+    (Entity::Arc { center: [20.0, 5.0], radius: 5.0, start: -FRAC_PI_2, end: FRAC_PI_2 }, false),
+    (Entity::Line { a: [20.0, 10.0], b: [0.0, 10.0] }, false),
+    (Entity::Arc { center: [0.0, 5.0], radius: 5.0, start: FRAC_PI_2, end: 3.0 * FRAC_PI_2 }, false),
+    (Entity::Circle { center: [10.0, 5.0], radius: 2.5 }, false),
+    // an open chain whose first line runs backwards, and an arc traversed clockwise
+    (Entity::Line { a: [10.0, 30.0], b: [0.0, 30.0] }, false),
+    (Entity::Line { a: [10.0, 30.0], b: [10.0, 40.0] }, false),
+    (Entity::Arc { center: [15.0, 40.0], radius: 5.0, start: 0.0, end: PI }, false),
+    (Entity::Bezier { p: [[20.0, 40.0], [25.0, 50.0], [30.0, 30.0], [-35.0, -40.0]] }, false),
+    // construction, and a point (which SVG can't hold)
+    (Entity::Line { a: [-5.0, -5.0], b: [25.0, 15.0] }, true),
+    (Entity::Point { at: [1.0, 2.0] }, false),
+  ];
+  let text = write_svg(&ents);
+  assert_eq!(text.matches("<path").count(), 3, "{text}");
+  assert_eq!(text.matches("<circle").count(), 1);
+  assert_eq!(text.matches(" Z").count(), 1);
+  assert!(text.contains("mm\" height=\""));
+  let d = read_svg(text.as_bytes()).unwrap();
+  assert!(d.skipped.is_empty());
+  let back: Vec<_> = d.entities.clone();
+  let want: Vec<_> = ents.iter().filter(|e| !matches!(e.0, Entity::Point { .. })).collect();
+  assert_eq!(back.len(), want.len(), "{back:?}");
+  let tol = 1e-6;
+  let same = |x: &Entity, y: &Entity| -> bool {
+    match (*x, *y) {
+      (Entity::Circle { center: c0, radius: r0 }, Entity::Circle { center: c1, radius: r1 }) => {
+        near(c0, c1, tol) && (r0 - r1).abs() < tol
+      }
+      (
+        Entity::Arc { center: c0, radius: r0, start: s0, end: e0 },
+        Entity::Arc { center: c1, radius: r1, start: s1, end: e1 },
+      ) => {
+        let (p0, q0) = ends_of(x);
+        let (p1, q1) = ends_of(y);
+        near(c0, c1, tol)
+          && (r0 - r1).abs() < tol
+          && near(p0, p1, tol)
+          && near(q0, q1, tol)
+          && (sweep(s0, e0) - sweep(s1, e1)).abs() < tol
+      }
+      (Entity::Line { a, b }, Entity::Line { a: c, b: e }) => {
+        (near(a, c, tol) && near(b, e, tol)) || (near(a, e, tol) && near(b, c, tol))
+      }
+      (Entity::Bezier { p }, Entity::Bezier { p: q }) => {
+        (0..4).all(|i| near(p[i], q[i], tol)) || (0..4).all(|i| near(p[i], q[3 - i], tol))
+      }
+      _ => false,
+    }
+  };
+  for (e, cons) in &want {
+    assert!(back.iter().any(|(b, c)| c == cons && same(e, b)), "{e:?} missing from {back:?}");
+  }
+  // and again: the second export is identical
+  assert_eq!(write_svg(&back).matches("<path").count(), 3);
+}
+
+#[test]
+fn svg_rejects_other_files() {
+  for bad in
+    [&b""[..], b"hello world", b"<html><body><svg/></body></html>", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR", b"\x1f\x8b\x08\0"]
+  {
+    let e = read_svg(bad).unwrap_err().to_string();
+    assert!(e.contains("SVG"), "{e}");
+  }
+  assert!(read_svg(b"<svg xmlns='http://www.w3.org/2000/svg'><g><line x2='1'/></svg>").is_err());
+  // an empty but valid SVG is fine
+  assert!(read_svg(b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap().entities.is_empty());
 }

@@ -14,15 +14,40 @@ use crate::{ExchangeError, Result};
 /// One 2D entity in millimetres. Arcs run counter-clockwise from `start` to `end` (radians).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Entity {
-  Line { a: [f64; 2], b: [f64; 2] },
-  Circle { center: [f64; 2], radius: f64 },
-  Arc { center: [f64; 2], radius: f64, start: f64, end: f64 },
-  Point { at: [f64; 2] },
+  Line {
+    a: [f64; 2],
+    b: [f64; 2],
+  },
+  Circle {
+    center: [f64; 2],
+    radius: f64,
+  },
+  Arc {
+    center: [f64; 2],
+    radius: f64,
+    start: f64,
+    end: f64,
+  },
+  Point {
+    at: [f64; 2],
+  },
+  /// A cubic Bézier: start, two control points, end. DXF reading never produces one (SVG does);
+  /// DXF writing flattens it to lines.
+  Bezier {
+    p: [[f64; 2]; 4],
+  },
 }
 
 impl Entity {
   pub fn arc_point(center: [f64; 2], radius: f64, angle: f64) -> [f64; 2] {
     [center[0] + radius * angle.cos(), center[1] + radius * angle.sin()]
+  }
+
+  /// The point at `t` (0..1) on a cubic Bézier.
+  pub fn bezier_point(p: &[[f64; 2]; 4], t: f64) -> [f64; 2] {
+    let u = 1.0 - t;
+    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+    [0, 1].map(|k| w[0] * p[0][k] + w[1] * p[1][k] + w[2] * p[2][k] + w[3] * p[3][k])
   }
 }
 
@@ -297,6 +322,19 @@ pub fn write_dxf(entities: &[(Entity, bool)]) -> String {
         pair(8, layer);
         for (c, v) in [(10, at[0]), (20, at[1]), (30, 0.0)] {
           pair(c, &num(v));
+        }
+      }
+      Entity::Bezier { p } => {
+        // R12 has no splines: short lines
+        const STEPS: usize = 16;
+        for i in 0..STEPS {
+          let a = Entity::bezier_point(&p, i as f64 / STEPS as f64);
+          let b = Entity::bezier_point(&p, (i + 1) as f64 / STEPS as f64);
+          pair(0, "LINE");
+          pair(8, layer);
+          for (c, v) in [(10, a[0]), (20, a[1]), (30, 0.0), (11, b[0]), (21, b[1]), (31, 0.0)] {
+            pair(c, &num(v));
+          }
         }
       }
     }

@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use clf_exchange::archive::{Archive, read_clfz, write_clfz};
-use clf_exchange::dxf::{Entity, read_dxf, write_dxf};
+use clf_exchange::dxf::{Drawing, Entity, read_dxf, write_dxf};
+use clf_exchange::svg::{read_svg, write_svg};
 use clf_exchange::{FormatKind, Mesh, format_for_path};
 use clf_model::{Design, FeatureId, FeatureKind, MeshData};
 use clf_sketch::{CurveKind, PtSpec, Sketch};
@@ -111,7 +112,7 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       let meshes = clf_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
       import_meshes(s, name, meshes, p)
     }
-    "dxf" => import_dxf(s, path, p),
+    "dxf" | "svg" => import_dxf(s, path, p),
     "clf" | "clfz" => {
       // insert another design's bodies (as exact geometry) into this one
       let other = open(path)?;
@@ -199,11 +200,27 @@ fn import_fusion(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   )
 }
 
-/// A DXF becomes a new sketch (on `plane`, default XY) with endpoints joined.
+/// A DXF or SVG file's 2D geometry.
+fn read_drawing(path: &Path) -> Result<Drawing, CmdError> {
+  let bytes = std::fs::read(path)?;
+  let svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+  if svg { read_svg(&bytes) } else { read_dxf(&bytes) }.map_err(ex)
+}
+
+fn skipped_warning(path: &Path, d: &Drawing) -> Option<String> {
+  let kind =
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg")) { "SVG content" } else { "DXF entities" };
+  (!d.skipped.is_empty()).then(|| {
+    let list: Vec<String> = d.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    format!("skipped unsupported {kind}: {}", list.join(", "))
+  })
+}
+
+/// A DXF or SVG becomes a new sketch (on `plane`, default XY) with endpoints joined.
 fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
-  let drawing = read_dxf(&std::fs::read(path)?).map_err(ex)?;
+  let drawing = read_drawing(path)?;
   if drawing.entities.is_empty() {
-    return Err(CmdError::new(format!("{} has no lines, arcs, circles or polylines", file_name(path))));
+    return Err(CmdError::new(format!("{} has no lines, arcs, circles or curves", file_name(path))));
   }
   let was_editing = s.edit_sketch;
   let plane = p.get("plane").cloned().unwrap_or(json!("xy"));
@@ -242,17 +259,16 @@ fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   };
   let mut out =
     json!({"sketch": id.0, "curves": added, "profiles": s.model.sketches.get(&id).map(|r| r.profiles.len())});
-  if !drawing.skipped.is_empty() {
-    let list: Vec<String> = drawing.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
-    out["warning"] = json!(format!("skipped unsupported DXF entities: {}", list.join(", ")));
+  if let Some(w) = skipped_warning(path, &drawing) {
+    out["warning"] = json!(w);
   }
   Ok(out)
 }
 
-/// The curves of a DXF file as a free-standing sketch (endpoints joined), and a warning about
-/// skipped entities.
+/// The curves of a DXF or SVG file as a free-standing sketch (endpoints joined), and a warning
+/// about skipped entities.
 pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdError> {
-  let drawing = read_dxf(&std::fs::read(path)?).map_err(ex)?;
+  let drawing = read_drawing(path)?;
   let mut sk = Sketch::new();
   for (e, construction) in &drawing.entities {
     if let Some(c) = add_entity(&mut sk, *e)?
@@ -261,11 +277,7 @@ pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdErr
       sk.set_construction(c, true)?;
     }
   }
-  let warning = (!drawing.skipped.is_empty()).then(|| {
-    let list: Vec<String> = drawing.skipped.iter().map(|(k, n)| format!("{n} {k}")).collect();
-    format!("skipped unsupported DXF entities: {}", list.join(", "))
-  });
-  Ok((sk, warning))
+  Ok((sk, skipped_warning(path, &drawing)))
 }
 
 fn snap(sk: &Sketch, at: [f64; 2]) -> PtSpec {
@@ -310,6 +322,18 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<clf_sketch::CurveId>,
       let e0 = sk.resolve(e0)?;
       Some(sk.add_curve(CurveKind::Arc { center: c, start: s0, end: e0 })?)
     }
+    Entity::Bezier { p } => {
+      if !finite(&p.concat()) || p.iter().all(|q| (q[0] - p[0][0]).hypot(q[1] - p[0][1]) < DXF_SNAP) {
+        return Ok(None);
+      }
+      // end points join neighbours; control points never snap
+      let a = snap(sk, p[0]);
+      let a = sk.resolve(a)?;
+      let (c1, c2) = (sk.add_point(p[1][0], p[1][1]), sk.add_point(p[2][0], p[2][1]));
+      let b = snap(sk, p[3]);
+      let b = sk.resolve(b)?;
+      Some(sk.add_curve(CurveKind::ControlSpline { points: vec![a, c1, c2, b] })?)
+    }
     Entity::Point { at } => {
       if finite(&at) && sk.nearest_point(at, DXF_SNAP, &[]).is_none() {
         sk.add_point(at[0], at[1]);
@@ -319,8 +343,9 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<clf_sketch::CurveId>,
   })
 }
 
-/// Sketch geometry as DXF entities (sketch coordinates).
-fn sketch_entities(sk: &Sketch) -> Vec<(Entity, bool)> {
+/// Sketch geometry as DXF entities (sketch coordinates); `exact` keeps splines as Béziers
+/// (SVG) instead of short lines (DXF R12).
+fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
   let pos = |id| sk.pos(id).unwrap_or([0.0, 0.0]);
   let mut out = Vec::new();
   let mut on_curve = std::collections::HashSet::new();
@@ -329,6 +354,12 @@ fn sketch_entities(sk: &Sketch) -> Vec<(Entity, bool)> {
       on_curve.insert(p);
     }
     if matches!(c.kind, CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) {
+      if exact {
+        for p in sk.beziers(c.id) {
+          out.push((Entity::Bezier { p }, c.construction));
+        }
+        continue;
+      }
       // DXF gets the spline as short lines
       for w in sk.spline_points(c.id).windows(2) {
         out.push((Entity::Line { a: w[0], b: w[1] }, c.construction));
@@ -480,11 +511,12 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
         .get(&id)
         .map(|r| &r.sketch)
         .ok_or(CmdError::new("that sketch isn't computed (rolled back?)"))?;
-      let ents = sketch_entities(sk);
+      let svg = fmt.id == "svg";
+      let ents = sketch_entities(sk, svg);
       if ents.is_empty() {
         return Err(CmdError::new("the sketch is empty"));
       }
-      std::fs::write(&path, write_dxf(&ents))?;
+      std::fs::write(&path, if svg { write_svg(&ents) } else { write_dxf(&ents) })?;
       out["sketch"] = json!(id.0);
       out["entities"] = json!(ents.len());
     }
@@ -515,8 +547,8 @@ pub fn inspect(path: &Path) -> CmdResult {
           .collect::<Vec<_>>()
       );
     }
-    "dxf" => {
-      let d = read_dxf(&std::fs::read(path)?).map_err(ex)?;
+    "dxf" | "svg" => {
+      let d = read_drawing(path)?;
       out["entities"] = json!(d.entities.len());
       out["skipped"] = json!(d.skipped);
     }
