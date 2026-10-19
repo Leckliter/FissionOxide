@@ -1058,8 +1058,12 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
 
 /// Components with their bodies; right-click to rename, ground, duplicate or delete.
 fn components_section(app: &mut App, ui: &mut egui::Ui) {
-  let comps: Vec<(u32, String, bool, Vec<BodyId>)> =
-    app.s.design.components.iter().map(|c| (c.id.0, c.name.clone(), c.grounded, c.bodies.clone())).collect();
+  // sub-components follow their parent, one level deeper
+  let comps: Vec<(u32, String, bool, Vec<BodyId>, usize)> = browser_assembly::component_tree(app)
+    .into_iter()
+    .filter_map(|(id, depth)| app.s.design.component(fox_engine::model::ComponentId(id)).map(|c| (id, c, depth)))
+    .map(|(id, c, depth)| (id, c.name.clone(), c.grounded, c.bodies.clone(), depth))
+    .collect();
   if comps.is_empty() {
     return;
   }
@@ -1068,11 +1072,21 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
   if !is_open(ui, id, true) {
     return;
   }
-  for (cid, name, grounded, bodies) in comps {
+  let mut closed_at: Option<usize> = None;
+  for (cid, name, grounded, bodies, depth) in comps {
+    if closed_at.is_some_and(|d| depth > d) {
+      continue;
+    }
+    closed_at = None;
+    let flexible = browser_assembly::flexible_of(app, cid);
     let label = if grounded { format!("{name}  (grounded)") } else { name.clone() };
+    let label = match flexible {
+      Some(true) => format!("{label}  (flexible)"),
+      _ => label,
+    };
     let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
     let row = id.with(cid);
-    let ev = tree_row(ui, row, 2, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
+    let ev = tree_row(ui, row, 2 + depth, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
     if ev.clicked || ev.double_clicked {
       app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
     }
@@ -1096,6 +1110,17 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
           app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
           app.start(Kind::Material);
         }
+        if let Some(flex) = flexible {
+          let (text, tip) = if flex {
+            ("Make Rigid", "Keep the sub-assembly's joints where its source design put them")
+          } else {
+            ("Make Flexible", "Solve the sub-assembly's own joints here so they can be driven")
+          };
+          if ui.button(text).on_hover_text(tip).clicked() {
+            ui.close();
+            app.run("component.flexible", json!({"component": cid, "flexible": !flex}));
+          }
+        }
         ui.separator();
         if ui.button("Delete Component").on_hover_text("Its bodies go back to the root").clicked() {
           ui.close();
@@ -1103,11 +1128,13 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         }
       });
     }
-    if is_open(ui, row, false) {
+    if !is_open(ui, row, false) {
+      closed_at = Some(depth);
+    } else {
       for b in bodies {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
-        let ev = tree_row(ui, row.with(b.0), 3, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let ev = tree_row(ui, row.with(b.0), 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
         }
@@ -2063,6 +2090,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::MotionLink { .. } => Icon::DriveJoint,
     FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
     FeatureKind::BaseFeature { .. } => Icon::Box,
+    FeatureKind::CamFollower { .. } => Icon::DriveJoint,
   }
 }
 

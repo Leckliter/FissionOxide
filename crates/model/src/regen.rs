@@ -1160,6 +1160,7 @@ impl Ctx<'_> {
         slide2,
         pitch,
         limits,
+        lead,
       } => {
         let comp = self.components.iter().find(|c| c.id == *moving).ok_or("the moving component no longer exists")?;
         if comp.grounded {
@@ -1177,6 +1178,15 @@ impl Ctx<'_> {
           pitch: self.angle(pitch)?,
         };
         self.mates.drive(id, &mut motion);
+        if *joint_kind == assembly::JointKind::Screw {
+          motion.slide = assembly::screw_slide(motion.rotation, self.len(lead)?);
+        }
+        if self.mates.cam(id).is_some() {
+          let (fixed_frame, moving_frame) = (self.joint_frame(fixed_origin)?, self.joint_frame(moving_origin)?);
+          let (kind, a, o, fl, ab) = (*joint_kind, self.angle(angle)?, self.len(offset)?, *flip, *as_built);
+          let place = |m: assembly::Motion| assembly::joint_transform(fixed_frame, moving_frame, kind, a, o, fl, ab, m);
+          motion.slide = self.cam_slide(id, moving_frame, &place, motion)?;
+        }
         if let Some((lo, hi)) = &limits.rotation {
           let (lo, hi) = (self.angle(lo)?, self.angle(hi)?);
           if !(lo - 1e-9..=hi + 1e-9).contains(&motion.rotation) {
@@ -2108,5 +2118,8 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 }
 
 mod direct;
+mod subasm;
 #[cfg(test)]
 mod tests_config;
+#[cfg(test)]
+mod tests_subasm;

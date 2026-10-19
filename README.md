@@ -80,7 +80,10 @@ change a parameter and watch the whole history rebuild.
   bill of materials with masses. Component copies are linked: edit the original and every
   copy follows. Saved joint origins, rigid groups, motion links (gears, rack and pinion), contact
   sets that stop motion where bodies touch, and components inserted from other designs in the
-  data hub as linked references that update to the source's newest version.
+  data hub as linked references that update to the source's newest version. Screw joints
+  (rotation advances by a lead), cam followers that stay in contact with a turning cam, and
+  inserted assemblies kept as nested sub-assemblies (rigid or flexible) with a bill of
+  materials by level.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
   section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
   hidden-line projections; broken views; automatic overall dimensions, hole callouts and centre marks; manual,
@@ -293,6 +296,19 @@ instead, `angle` and `offset` adjust the placement, and the joint's motion (`rot
   hub design in as a component. Its bodies are stored in the design, so it opens without the
   hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
   gets it, and `component.break_link` keeps a local copy.
+- **Screw joints** (`"kind": "screw"` with a `lead`) slide along their axis by the lead for every
+  turn of rotation (a negative lead is left-handed); motion links can turn them but not slide them.
+- **Cam followers** (`cam_follower`) set a sliding joint's slide so its component stays in contact
+  with a cam component wherever the cam's own joint has turned it: a knife edge touches where
+  the slide line meets the cam, a flat follower the cam's furthest point; `clearance` keeps a
+  gap (a roller's radius). Motion studies of the cam move the follower too.
+- **Sub-assemblies.** Inserting a design that has components keeps them, as children of the
+  inserted component (the browser nests them; `component.parent` nests components by hand).
+  Joints that move a component move everything below it. The source's joints come along:
+  rigid (the default) keeps the positions the source solved; `component.flexible` solves them
+  again in this design so `component.drive` can move them (`component.sub_joints` lists them).
+  `assembly.bom` is indented by level, or `"view": "top"` (top-level totals) or `"parts"`
+  (leaf parts with quantities).
 
 Drawings annotate model points in a view, so annotations move with their view and follow
 parameter changes:

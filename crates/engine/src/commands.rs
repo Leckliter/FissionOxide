@@ -207,11 +207,11 @@ cmds! {
   "component.rename" => "Rename a component", "{component, name}";
   "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";
   "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
-  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
+  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
   "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
   "assembly.interference" => "Overlapping bodies of different components", "{}";
-  "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
+  "assembly.bom" => "Bill of materials: components, materials, volumes and masses; indented by sub-assembly level, top level only, or parts only", "{view?: indented|top|parts}";
   "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
   "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?, standard?: asme|iso, auto_balloons?}";
   "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
@@ -294,6 +294,11 @@ cmds! {
   "sheet.check_dxf" => "Check a flat pattern DXF (a file, or a sheet metal body's flat pattern) against shop rules: closed contours, no duplicates, minimum feature size, holes clear of bends", "{path? | body?, face?, min_feature?, hole_to_bend?}";
   "sketch.fonts" => "Fonts sketch text can use: built in, and font files in the system's font folders (FOX_FONT_DIR first); a text's font may also be a font file's path", "{}";
   "sketch.elliptical_arc" => "Elliptical arc: the ellipse from its centre, major axis end and minor radius, counter-clockwise from the point nearest start to the one nearest end", "{center, major: [x,y], minor, start: [x,y], end: [x,y]}";
+  "cam_follower" => "Cam motion: a joint's slide keeps its follower in contact with a cam component as the cam moves", "{cam: component | bodies: [body], follower: joint id or name, flat?: bool, clearance?, name?}";
+  "component.flexible" => "Solve an inserted sub-assembly's own joints in this design (flexible) or keep the source's positions (rigid)", "{component, flexible?: bool}";
+  "component.sub_joints" => "The joints inside an inserted sub-assembly, with their motions", "{component}";
+  "component.drive" => "Drive a joint inside a flexible inserted sub-assembly", "{component, joint: name, rotation?, slide?, slide2?, pitch?}";
+  "component.parent" => "Move a component into another one (a sub-assembly), or back to the top level", "{component, parent?: component | null}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
