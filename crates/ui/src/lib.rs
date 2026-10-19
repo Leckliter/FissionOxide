@@ -15,6 +15,7 @@ mod panels;
 mod select;
 mod sheet;
 mod theme;
+mod trace;
 mod viewport;
 
 use std::path::PathBuf;
@@ -368,7 +369,7 @@ impl App {
       .save_file()
     {
       let mut params = json!({"path": p});
-      if id == "dxf" {
+      if id == "dxf" || id == "svg" {
         params["sketch"] = json!(self.s.edit_sketch.or(self.last_sketch).map(|s| s.0));
       }
       if self.run("export", params).is_some() {
@@ -449,6 +450,8 @@ impl App {
           self.status = Some((format!("Uploaded {}", p.display()), false));
         }
         self.data.invalidate();
+      } else if trace::is_image(&p) {
+        self.trace_image(p);
       } else if self.s.design.features.is_empty() && !self.s.dirty {
         self.open_path(&p);
       } else {
@@ -623,6 +626,20 @@ impl App {
     if let Some(d) = self.dialog.as_mut() {
       d.preview(&mut self.s);
     }
+  }
+
+  /// Opens Trace Image on `path` (a dropped image) in the sketch being edited.
+  pub fn trace_image(&mut self, path: PathBuf) {
+    if self.s.edit_sketch.is_none() {
+      self.status = Some(("Start or edit a sketch, then drop the image on it to trace it".into(), true));
+      return;
+    }
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::TraceImage);
+    d.trace = Some(Box::new(trace::TraceState::with_image(path)));
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
   }
 
   pub fn cancel_dialog(&mut self) {

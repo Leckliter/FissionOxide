@@ -82,6 +82,8 @@ pub enum Kind {
   Section,
   /// Surface analysis: zebra, draft, accessibility or curvature.
   Analysis(&'static str),
+  /// Trace an image into the sketch being edited.
+  TraceImage,
 }
 
 impl Kind {
@@ -127,6 +129,7 @@ impl Kind {
       Kind::SkFillet => "SKETCH FILLET",
       Kind::SkChamfer | Kind::SkChamfer2 => "SKETCH CHAMFER",
       Kind::SkOffset => "OFFSET",
+      Kind::TraceImage => "TRACE IMAGE",
       Kind::SkMirror => "SKETCH MIRROR",
       Kind::SkCircPattern => "CIRCULAR PATTERN",
       Kind::SkRectPattern => "RECTANGULAR PATTERN",
@@ -199,6 +202,7 @@ impl Kind {
       Kind::SkFillet => Icon::SkFillet,
       Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
       Kind::SkOffset => Icon::SkOffset,
+      Kind::TraceImage => Icon::TraceImage,
       Kind::SkMirror => Icon::SkMirror,
       Kind::SkCircPattern => Icon::SkCircPattern,
       Kind::SkRectPattern => Icon::SkRectPattern,
@@ -250,6 +254,7 @@ impl Kind {
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
       Kind::SkOffset => ("Offset", "Offset a chain of curves (O)"),
+      Kind::TraceImage => ("Trace Image", "Trace a photo, logo or scan into closed sketch curves"),
       Kind::SkMirror => ("Mirror", "Mirror sketch curves across a line"),
       Kind::SkCircPattern => ("Circular Pattern", "Copy sketch curves around a point"),
       Kind::SkRectPattern => ("Rectangular Pattern", "Copy sketch curves in rows and columns"),
@@ -333,6 +338,7 @@ impl Kind {
         | Kind::SkCircPattern
         | Kind::SkRectPattern
         | Kind::Project
+        | Kind::TraceImage
     )
   }
 }
@@ -444,6 +450,8 @@ pub struct Dialog {
   view_on: [bool; 7],
   /// A form dialog's values.
   form: crate::forms::State,
+  /// Trace Image's settings and last result.
+  pub trace: Option<Box<crate::trace::TraceState>>,
 }
 
 const VIEWS: [(&str, &str); 7] = [
@@ -533,6 +541,7 @@ impl Dialog {
         Kind::Form(f) => crate::forms::State::new(f),
         _ => crate::forms::State::default(),
       },
+      trace: (kind == Kind::TraceImage).then(Box::default),
     }
   }
 
@@ -1062,6 +1071,7 @@ impl Dialog {
         ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "distance2": self.distance2}))
       }
       Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
+      Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
       Kind::SkCircPattern => (
         "sketch.pattern_circ",
@@ -1279,7 +1289,11 @@ impl Dialog {
     if !self.ready() {
       return;
     }
-    match s.execute(cmd, &params) {
+    let result = s.execute(cmd, &params);
+    if let Some(t) = self.trace.as_mut() {
+      t.result = result.as_ref().ok().cloned();
+    }
+    match result {
       Ok(v) => {
         self.applied = true;
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
@@ -1320,6 +1334,7 @@ impl Dialog {
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
+      Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
       Kind::DriveJoint | Kind::CopyComponent => self.target.is_some(),
       Kind::NewDrawing => self.view_on.iter().any(|v| *v),
       Kind::DrawingMoveView | Kind::DrawingDimension => self.target.is_some() && self.view.is_some(),
@@ -1743,6 +1758,7 @@ impl Dialog {
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
       Kind::SkMirror => "select curves and a mirror line",
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
+      Kind::TraceImage => "pick an image to trace",
       Kind::DriveJoint => "the design has no joints",
       Kind::CopyComponent => "the design has no components",
       Kind::NewDrawing => "pick at least one view",
@@ -2015,6 +2031,13 @@ impl Dialog {
         if dirty && (!self.picks() || self.applied) {
           self.dirty = true;
         }
+      }
+      Kind::TraceImage => {
+        let mut dirty = false;
+        if let Some(t) = self.trace.as_mut() {
+          crate::trace::fields(t, ui, &mut dirty);
+        }
+        self.dirty |= dirty;
       }
       _ => {
         let mut dirty = false;

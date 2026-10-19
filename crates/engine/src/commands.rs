@@ -34,8 +34,8 @@ cmds! {
   "new" => "Start a new design", "{name?}";
   "open" => "Open a design (.clf, .clfz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.clf JSON, or .clfz archive)", "{path?}";
-  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf (sketch), .clf .clfz", "{path, bodies?: [id], sketch?, ascii?: bool}";
-  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF (new sketch), .clf/.clfz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .clf .clfz", "{path, bodies?: [id], sketch?, ascii?: bool}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .clf/.clfz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
   "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
@@ -95,7 +95,9 @@ cmds! {
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
-  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF file or a sketch in a .clf/.clfz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
+  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .clf/.clfz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
+  "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?}";
+  "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
@@ -443,6 +445,23 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &curves, &t)?))?;
       Ok(json!({"curves": added.iter().map(|c| c.0).collect::<Vec<_>>(), "warning": warning}))
     }
+    "sketch.trace" => {
+      let sk = sketch_id(s, p)?;
+      let at = opt_pt(p, "at")?.unwrap_or([0.0, 0.0]);
+      let angle = opt_expr(p, "angle")
+        .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &params_scope(s)))
+        .transpose()?
+        .unwrap_or(0.0);
+      let (src, mut out) = crate::trace::sketch(p, at)?;
+      let t = clf_sketch::Xform2 { angle, center: at, ..Default::default() };
+      let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &[], &t)?))?;
+      out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
+      out["profiles"] = json!(s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0));
+      out["at"] = json!(at);
+      out["angle"] = json!(angle);
+      Ok(out)
+    }
+    "trace.info" => crate::trace::info(p),
     "sketch.fillet"
     | "sketch.chamfer"
     | "sketch.offset"
@@ -1215,11 +1234,11 @@ fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), 
   };
   let path = PathBuf::from(path);
   let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-  if ext == "dxf" {
+  if ext == "dxf" || ext == "svg" {
     return crate::files::dxf_sketch(&path);
   }
   if ext != "clf" && ext != "clfz" {
-    return Err(CmdError::new("insert from a .dxf, .clf or .clfz file"));
+    return Err(CmdError::new("insert from a .dxf, .svg, .clf or .clfz file"));
   }
   let other = Session::open(&path)?;
   let want = from.get("sketch");

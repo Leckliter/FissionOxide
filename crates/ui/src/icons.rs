@@ -228,6 +228,7 @@ pub enum Icon {
   SplineCtrl,
   Conic,
   SkText,
+  TraceImage,
   SkMirror,
   SkCircPattern,
   SkRectPattern,
@@ -1557,6 +1558,15 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.vtx((0.08, 0.9));
       k.vtx((0.92, 0.9));
       k.vtx((0.5, 0.12));
+    }
+    Icon::TraceImage => {
+      // a photo, and the closed outline traced from it
+      k.solid(&[(0.04, 0.08), (0.7, 0.08), (0.7, 0.62), (0.04, 0.62)], BlueLight);
+      k.fill(&[(0.04, 0.62), (0.24, 0.32), (0.44, 0.62)], White);
+      k.circle((0.52, 0.26), 0.07, Some(White), None);
+      k.skc(&[(0.3, 0.5), (0.6, 0.4), (0.92, 0.54), (0.96, 0.84), (0.66, 0.96), (0.36, 0.86)], Slate);
+      k.circle((0.6, 0.4), 0.06, Some(Teal), None);
+      k.circle((0.96, 0.84), 0.06, Some(Teal), None);
     }
     Icon::SkText => {
       k.text((0.42, 0.46), "A", 0.78, Slate);

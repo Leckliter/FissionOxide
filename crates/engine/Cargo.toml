@@ -13,6 +13,7 @@ clf-model.workspace = true
 clf-render.workspace = true
 clf-exchange.workspace = true
 clf-store.workspace = true
+clf-trace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -25,3 +26,4 @@ workspace = true
 
 [dev-dependencies]
 zip.workspace = true
+image.workspace = true
