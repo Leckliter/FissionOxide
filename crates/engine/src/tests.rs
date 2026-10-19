@@ -421,6 +421,11 @@ fn sketch_modify_tools_and_project() {
   let r = run(&mut s, "extrude", json!({"distance": 5}));
   assert!(r["error"].is_null(), "{r}");
   assert!((total_volume(&s) - 30.0 * 20.0 * 15.0).abs() < 1e-6);
+  // the projection follows the box: make it wider and the extrusion above follows
+  let bx = s.design.features[0].id.0;
+  run(&mut s, "feature.edit", json!({"feature": bx, "set": {"shape": {"type": "box", "width": "50", "depth": "20", "height": "10"}}}));
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  assert!((total_volume(&s) - 50.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {

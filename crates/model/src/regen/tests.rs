@@ -23,7 +23,7 @@ fn block_design() -> (Design, FeatureId, FeatureId) {
   let mut d = Design::new("block");
   d.add_parameter("w", "40 mm", ParamKind::Length, "").unwrap();
   d.add_parameter("h", "10 mm", ParamKind::Length, "").unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("w", "20") }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("w", "20"), links: Vec::new() }).unwrap();
   let e = d
     .add_feature(FeatureKind::Extrude {
       sketch: s,
@@ -68,7 +68,7 @@ fn hole_on_top_face_follows_height_changes() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(20.0, 10.0), 3.0).unwrap();
-  let hs = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole }).unwrap();
+  let hs = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
     profiles: vec![],
@@ -118,7 +118,7 @@ fn join_cut_and_split_bodies() {
   // a second, overlapping block joined in
   let mut s2 = Sketch::new();
   s2.add_rectangle([30.0, 0.0], [50.0, 20.0]).unwrap();
-  let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2 }).unwrap();
+  let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: s2,
     profiles: vec![],
@@ -133,7 +133,7 @@ fn join_cut_and_split_bodies() {
   // a slot cut right through the middle splits the body in two
   let mut s3 = Sketch::new();
   s3.add_rectangle([20.0, -5.0], [24.0, 25.0]).unwrap();
-  let s3 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s3 }).unwrap();
+  let s3 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s3, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: s3,
     profiles: vec![],
@@ -154,7 +154,7 @@ fn revolve_around_sketch_line() {
   let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(0.0, 50.0)).unwrap();
   s.set_construction(axis, true).unwrap();
   let sk =
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: s }).unwrap();
+    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: s, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Revolve {
     sketch: sk,
     profiles: vec![],
@@ -329,7 +329,7 @@ fn edge_near(m: &Model, p: [f64; 3]) -> EdgeRef {
 }
 
 fn plate_flange(d: &mut Design) {
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("100", "50") }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("100", "50"), links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Flange {
     sketch: s,
     profiles: vec![],
@@ -352,7 +352,7 @@ fn flange_edge_flange_and_flat_pattern() {
   // a hole in the base, then a 20 mm flange up from the top edge at y = 50
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(50.0, 25.0), 5.0).unwrap();
-  let hs = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: hole }).unwrap();
+  let hs = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: hole, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
     profiles: vec![],
@@ -423,7 +423,7 @@ fn contour_flange_unfolds_to_its_flat_length() {
   path.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(50.0, 0.0)).unwrap();
   path.add_line(PtSpec::At(50.0, 0.0), PtSpec::At(50.0, 30.0)).unwrap();
   path.add_line(PtSpec::At(50.0, 30.0), PtSpec::At(80.0, 30.0)).unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: path }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: path, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::ContourFlange {
     sketch: s,
     curves: vec![],
@@ -457,7 +457,7 @@ fn contour_flange_unfolds_to_its_flat_length() {
 #[test]
 fn convert_solid_to_sheet_metal() {
   let mut d = sheet_design();
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("60", "40") }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: rect_sketch("60", "40"), links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: s,
     profiles: vec![],
@@ -526,7 +526,7 @@ fn bend_along_a_sketch_line() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut sk = Sketch::new();
   let (line, _) = sk.add_line(PtSpec::At(70.0, -10.0), PtSpec::At(70.0, 60.0)).unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: sk }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: sk, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Bend { sketch: s, line, angle: "90 deg".into(), flip: false, flip_side: true }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);
@@ -654,7 +654,7 @@ fn refold_carries_cuts_made_in_the_flat() {
   let fm = m.bodies[0].shape.mass().unwrap();
   let mut slot = Sketch::new();
   slot.add_rectangle([40.0, 45.0], [60.0, 60.0]).unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: slot }).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: slot, links: Vec::new() }).unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: s,
     profiles: vec![],

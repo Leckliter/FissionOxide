@@ -98,7 +98,7 @@ cmds! {
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
-  "sketch.project" => "Project a body's edges (or one face's edges) into the sketch as fixed geometry", "{body, face?}";
+  "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all, distance2?, flip?, operation?: new_body|join|cut|intersect}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, operation?}";
@@ -242,7 +242,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.create" => {
       let plane = plane_ref(s, p.get("plane").unwrap_or(&json!("xy")))?;
-      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new() })?))?;
+      let id = s.edit(|d| Ok(d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new(), links: Vec::new() })?))?;
       s.edit_sketch = Some(id);
       Ok(json!({"sketch": id.0}))
     }
@@ -1264,12 +1264,14 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
 }
 
-/// Projects body edges onto the sketch plane as fixed geometry.
+/// Projects body edges onto the sketch plane as fixed geometry. Straight and circular edges stay
+/// linked to the body (they move when it changes) unless `associative` is false.
 fn project(s: &mut Session, p: &Value) -> CmdResult {
   let sk = sketch_id(s, p)?;
   let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
   let body = s.model.body(BodyId(req_u32(p, "body")?)).ok_or(CmdError::new("no such body"))?;
   let face = p.get("face").and_then(Value::as_u64).map(|f| f as u32);
+  let associative = p.get("associative").and_then(Value::as_bool).unwrap_or(true);
   let n = plane.normal();
   let lines = body.shape.edge_lines((body.diagonal() * 0.001).clamp(0.005, 0.2))?;
   enum E {
@@ -1277,29 +1279,31 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
     Circle([f64; 2], f64),
     Arc([f64; 2], [f64; 2], [f64; 2]),
   }
-  let mut todo = Vec::new();
+  let mut todo: Vec<(E, Option<EdgeRef>)> = Vec::new();
   for e in body.edges().iter().filter(|e| face.is_none_or(|f| e.faces.contains(&f))) {
     let l = |v: clf_kernel::glam::DVec3| plane.to_local(v);
+    let link = associative.then(|| EdgeRef::from_edge(body.id, e, body.faces()));
     match e.kind {
-      clf_kernel::CurveKind::Line => todo.push(E::Line(l(e.start), l(e.end))),
+      clf_kernel::CurveKind::Line => todo.push((E::Line(l(e.start), l(e.end)), link)),
       clf_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
         if (e.start - e.end).length() < 1e-6 {
-          todo.push(E::Circle(l(e.center), e.radius));
+          todo.push((E::Circle(l(e.center), e.radius), link));
         } else {
-          todo.push(E::Arc(l(e.start), l(e.mid), l(e.end)));
+          todo.push((E::Arc(l(e.start), l(e.mid), l(e.end)), link));
         }
       }
       clf_kernel::CurveKind::Degenerate => {}
       _ => {
         if let Some(pl) = lines.iter().find(|x| x.id == e.id) {
           for w in pl.points.windows(2) {
-            todo.push(E::Line(l(w[0]), l(w[1])));
+            todo.push((E::Line(l(w[0]), l(w[1])), None));
           }
         }
       }
     }
   }
   let made = s.edit(move |d| {
+    let mut new_links = Vec::new();
     let sketch = d.sketch_mut(sk)?;
     let before: Vec<PointId> = sketch.points.iter().map(|p| p.id).collect();
     let at = |sketch: &Sketch, q: [f64; 2]| match sketch.nearest_point(q, 1e-6, &[]) {
@@ -1307,28 +1311,36 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
       _ => PtSpec::At(q[0], q[1]),
     };
     let mut made = Vec::new();
-    for e in &todo {
-      match *e {
+    for (e, link) in &todo {
+      let id = match *e {
         E::Line(a, b) => {
-          if (a[0] - b[0]).hypot(a[1] - b[1]) > 1e-6 {
-            let (sa, sb) = (at(sketch, a), at(sketch, b));
-            made.push(sketch.add_line(sa, sb)?.0);
+          if (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-6 {
+            continue;
           }
+          let (sa, sb) = (at(sketch, a), at(sketch, b));
+          sketch.add_line(sa, sb)?.0
         }
         E::Circle(c, r) => {
           let sc = at(sketch, c);
           let id = sketch.add_circle(sc, r)?;
           sketch.add_constraint(ConstraintKind::Radius { curve: id, value: Dim::new(r) })?;
-          made.push(id);
+          id
         }
         E::Arc(a, m, b) => {
           let (sa, sb) = (at(sketch, a), at(sketch, b));
-          made.push(sketch.add_arc_3pt(sa, m, sb)?);
+          sketch.add_arc_3pt(sa, m, sb)?
         }
+      };
+      made.push(id);
+      if let Some(edge) = link {
+        new_links.push(clf_model::SketchLink { curve: id, edge: edge.clone() });
       }
     }
     for pt in sketch.points.iter_mut().filter(|p| !before.contains(&p.id)) {
       pt.fixed = true;
+    }
+    if let Some(FeatureKind::Sketch { links, .. }) = d.feature_mut(sk).map(|f| &mut f.kind) {
+      links.extend(new_links);
     }
     Ok(made)
   })?;

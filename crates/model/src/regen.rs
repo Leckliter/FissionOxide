@@ -343,14 +343,15 @@ impl Ctx<'_> {
 
   fn apply(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::Sketch { plane, sketch } => {
+      FeatureKind::Sketch { plane, sketch, links } => {
         let pl = self.resolve_plane(plane)?;
+        let lost = self.refresh_links(&pl, sketch, links);
         let dim_errors: Vec<(ConstraintId, String)> =
           sketch.evaluate_dims(self.params).into_iter().map(|(c, e)| (c, e.to_string())).collect();
         let report = sketch.solve();
         let profiles = find_profiles(sketch);
         let r = SketchResult { plane: pl, sketch: sketch.clone(), profiles, report, dim_errors };
-        let w = sketch_warning(&r);
+        let w = sketch_warning(&r).or_else(|| (lost > 0).then(|| format!("{lost} projected edge(s) could not be found")));
         self.state.sketches.insert(id, r);
         Ok(w)
       }
@@ -1307,6 +1308,71 @@ impl Ctx<'_> {
       self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, feature);
     }
     Ok(missing.then(|| "some edges could not be found".to_string()))
+  }
+
+  // ---- projected sketch geometry ----
+
+  /// Moves projected sketch curves onto their edges' current positions. Returns how many edges
+  /// were not found.
+  fn refresh_links(&self, plane: &Plane, sketch: &mut clf_sketch::Sketch, links: &mut [crate::SketchLink]) -> usize {
+    let mut lost = 0;
+    for link in links.iter_mut() {
+      let Ok(bi) = self.body_index(link.edge.body) else {
+        lost += 1;
+        continue;
+      };
+      let body = &self.state.bodies[bi];
+      let Some(eid) = link.edge.resolve(body.edges(), body.faces(), body.diagonal()) else {
+        lost += 1;
+        continue;
+      };
+      let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
+      link.edge = EdgeRef::from_edge(link.edge.body, &e, body.faces());
+      let l = |v: DVec3| plane.to_local(v);
+      let Some(kind) = sketch.curve(link.curve).map(|c| c.kind.clone()) else { continue };
+      let put = |sketch: &mut clf_sketch::Sketch, p: clf_sketch::PointId, at: [f64; 2]| {
+        if let Some(q) = sketch.point_mut(p) {
+          q.x = at[0];
+          q.y = at[1];
+        }
+      };
+      match kind {
+        CurveKind::Line { a, b } => {
+          let (s, t) = (l(e.start), l(e.end));
+          // keep the line's direction: match its ends to the nearer edge ends
+          let near_a = sketch.pos(a).map(|p| (p[0] - s[0]).hypot(p[1] - s[1]) <= (p[0] - t[0]).hypot(p[1] - t[1]));
+          let (pa, pb) = if near_a.unwrap_or(true) { (s, t) } else { (t, s) };
+          put(sketch, a, pa);
+          put(sketch, b, pb);
+        }
+        CurveKind::Circle { center, .. } => {
+          put(sketch, center, l(e.center));
+          if let Some(c) = sketch.curve_mut(link.curve)
+            && let CurveKind::Circle { radius, .. } = &mut c.kind
+          {
+            *radius = e.radius;
+          }
+          for c in &mut sketch.constraints {
+            if let clf_sketch::ConstraintKind::Radius { curve, value } = &mut c.kind
+              && *curve == link.curve
+            {
+              *value = clf_sketch::Dim::new(e.radius);
+            }
+          }
+        }
+        CurveKind::Arc { center, start, end } => {
+          let (s, m, t) = (l(e.start), l(e.mid), l(e.end));
+          let Some(c) = clf_sketch::circumcenter(s, m, t) else { continue };
+          // the sketch arc runs counter-clockwise from start to end
+          let ccw = (s[0] - c[0]) * (m[1] - c[1]) - (s[1] - c[1]) * (m[0] - c[0]) > 0.0;
+          let (ps, pe) = if ccw { (s, t) } else { (t, s) };
+          put(sketch, center, c);
+          put(sketch, start, ps);
+          put(sketch, end, pe);
+        }
+      }
+    }
+    lost
   }
 
   // ---- assemblies ----

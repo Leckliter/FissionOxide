@@ -264,6 +264,13 @@ impl Extent {
   }
 }
 
+/// A sketch curve that tracks a body edge (projected geometry, as in Fusion).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SketchLink {
+  pub curve: CurveId,
+  pub edge: EdgeRef,
+}
+
 /// One loft section: a profile of a sketch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoftSection {
@@ -326,6 +333,9 @@ pub enum FeatureKind {
   Sketch {
     plane: PlaneRef,
     sketch: Sketch,
+    /// Sketch curves projected from body edges; they follow the edges as the model changes.
+    #[serde(default)]
+    links: Vec<SketchLink>,
   },
   Extrude {
     sketch: FeatureId,
@@ -1312,7 +1322,7 @@ mod tests {
   fn add_remove_features_with_dependents() {
     let mut d = Design::new("t");
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new() })
+      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new(), links: Vec::new() })
       .unwrap();
     let e = d
       .add_feature(FeatureKind::Extrude {
@@ -1351,7 +1361,7 @@ mod tests {
     assert!(d.add_parameter("width", "1", ParamKind::Length, "").is_err());
     assert!(d.add_parameter("mm", "1", ParamKind::Length, "").is_err());
     let s = d
-      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new() })
+      .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xy }, sketch: Sketch::new(), links: Vec::new() })
       .unwrap();
     d.add_feature(FeatureKind::Extrude {
       sketch: s,
@@ -1372,7 +1382,7 @@ mod tests {
   fn json_round_trip_and_hostile_files() {
     let mut d = Design::new("Bracket");
     d.add_parameter("t", "3", ParamKind::Length, "thickness").unwrap();
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: Sketch::new() })
+    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { plane: OriginPlane::Xz }, sketch: Sketch::new(), links: Vec::new() })
       .unwrap();
     let back = Design::from_json(&d.to_json()).unwrap();
     assert_eq!(back, d);
