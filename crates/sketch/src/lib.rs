@@ -14,6 +14,7 @@ mod profile;
 mod solve;
 mod tangent;
 mod text;
+mod transform;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ pub use build::{PtSpec, circumcenter};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
 pub use text::{SketchText, TextId, text_fonts};
+pub use transform::{TransformReport, Xform2};
 
 /// The sketch origin: always present, always fixed at (0, 0).
 pub const ORIGIN: PointId = PointId(0);

@@ -322,6 +322,32 @@ impl Sketch {
     }
   }
 
+  /// Moves, turns and scales the texts that have glyphs among `curves` (as Move/Scale did their
+  /// curves); `moved` are the points already moved.
+  pub(crate) fn transform_texts(
+    &mut self,
+    curves: &[CurveId],
+    t: &crate::Xform2,
+    moved: &[PointId],
+  ) -> Result<(), SketchError> {
+    let hit: Vec<TextId> =
+      self.texts.iter().filter(|x| x.curves.iter().any(|c| curves.contains(c))).map(|x| x.id).collect();
+    for id in hit {
+      let Some((anchor, height, angle)) = self.text(id).map(|x| (x.anchor, x.height, x.angle)) else { continue };
+      if !moved.contains(&anchor)
+        && let Some(p) = self.point_mut(anchor).filter(|p| !p.fixed)
+      {
+        [p.x, p.y] = t.apply([p.x, p.y]);
+      }
+      if let Some(x) = self.texts.iter_mut().find(|x| x.id == id) {
+        x.height = height * t.scale;
+        x.angle = angle + t.angle;
+      }
+      self.regenerate_text(id)?;
+    }
+    Ok(())
+  }
+
   /// Errors for modify tools that would edit a text's glyphs.
   pub(crate) fn not_text(&self, curve: CurveId) -> Result<(), SketchError> {
     match self.text_of(curve) {
@@ -362,6 +388,21 @@ mod tests {
     s.remove_curve(c).unwrap();
     assert!(s.texts.is_empty() && s.curves.is_empty());
     assert_eq!(s.points.len(), 1, "only the origin is left");
+  }
+
+  #[test]
+  fn moving_and_scaling_glyphs_moves_and_scales_the_text() {
+    let mut s = Sketch::new();
+    let t = s.add_text(PtSpec::At(10.0, 0.0), "T", "sans", 5.0, 0.0).unwrap();
+    let curves = s.text(t).unwrap().curves.clone();
+    let xf = Xform2 { scale: 2.0, angle: 0.0, center: [0.0, 0.0], translate: [5.0, 0.0] };
+    s.transform(&curves, &xf).unwrap();
+    assert!(s.solve().ok());
+    let txt = s.text(t).unwrap();
+    assert!((txt.height - 10.0).abs() < 1e-12);
+    assert_eq!(s.pos(txt.anchor), Some([25.0, 0.0]));
+    let (min, max) = s.bounds().unwrap();
+    assert!(min[0] >= 25.0 - 1e-6 && (max[1] - 10.0).abs() < 0.3, "{min:?} {max:?}");
   }
 
   #[test]

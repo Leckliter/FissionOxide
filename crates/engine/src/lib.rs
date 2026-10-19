@@ -119,6 +119,8 @@ pub struct Session {
   pub(crate) regen: Regenerator,
   undo: Vec<Design>,
   redo: Vec<Design>,
+  /// Undo depth when the open transaction began: its edits collapse into one undo step.
+  txn: Option<usize>,
   /// Where the design was last opened from / saved to.
   pub path: Option<PathBuf>,
   pub dirty: bool,
@@ -151,6 +153,7 @@ impl Session {
       regen: Regenerator::default(),
       undo: Vec::new(),
       redo: Vec::new(),
+      txn: None,
       path: None,
       dirty: false,
       selection: Vec::new(),
@@ -198,9 +201,7 @@ impl Session {
     match f(&mut self.design) {
       Ok(v) => {
         self.undo.push(before);
-        if self.undo.len() > MAX_UNDO {
-          self.undo.remove(0);
-        }
+        self.trim_undo();
         self.redo.clear();
         self.dirty = true;
         self.rebuild();
@@ -213,7 +214,54 @@ impl Session {
     }
   }
 
+  fn trim_undo(&mut self) {
+    if self.txn.is_none() && self.undo.len() > MAX_UNDO {
+      self.undo.drain(..self.undo.len() - MAX_UNDO);
+    }
+  }
+
+  /// Starts grouping edits: until [`Session::commit_transaction`] they become a single undo step, and
+  /// [`Session::rollback_transaction`] discards them all. Transactions don't nest.
+  pub fn begin_transaction(&mut self) -> Result<(), CmdError> {
+    if self.txn.is_some() {
+      return Err(CmdError::new("a transaction is already open"));
+    }
+    self.txn = Some(self.undo.len());
+    Ok(())
+  }
+
+  /// Ends the open transaction, keeping its edits as one undo step. Returns whether anything
+  /// changed.
+  pub fn commit_transaction(&mut self) -> Result<bool, CmdError> {
+    let start = self.txn.take().ok_or(CmdError::new("no transaction is open"))?;
+    let changed = self.undo.len() > start;
+    self.undo.truncate(start + 1);
+    self.trim_undo();
+    Ok(changed)
+  }
+
+  /// Ends the open transaction, restoring the design as it was when it began.
+  pub fn rollback_transaction(&mut self) -> Result<bool, CmdError> {
+    let start = self.txn.take().ok_or(CmdError::new("no transaction is open"))?;
+    if self.undo.len() <= start {
+      return Ok(false);
+    }
+    self.design = self.undo.swap_remove(start);
+    self.undo.truncate(start);
+    self.redo.clear();
+    self.after_history();
+    Ok(true)
+  }
+
+  pub fn in_transaction(&self) -> bool {
+    self.txn.is_some()
+  }
+
   pub fn undo(&mut self) -> bool {
+    // inside a transaction, only its own edits can be undone
+    if self.txn.is_some_and(|start| self.undo.len() <= start) {
+      return false;
+    }
     match self.undo.pop() {
       Some(d) => {
         self.redo.push(std::mem::replace(&mut self.design, d));
@@ -241,7 +289,7 @@ impl Session {
   }
 
   pub fn can_undo(&self) -> bool {
-    !self.undo.is_empty()
+    self.undo.len() > self.txn.unwrap_or(0)
   }
 
   pub fn can_redo(&self) -> bool {
@@ -307,9 +355,7 @@ impl Session {
     match f(&mut self.design) {
       Ok(v) => {
         self.undo.push(before);
-        if self.undo.len() > MAX_UNDO {
-          self.undo.remove(0);
-        }
+        self.trim_undo();
         self.redo.clear();
         self.dirty = true;
         Ok(v)
