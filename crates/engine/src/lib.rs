@@ -10,6 +10,7 @@ mod assembly;
 mod cam;
 mod commands;
 pub mod config;
+mod cut;
 pub mod diff;
 mod drawings;
 mod features;
@@ -472,6 +473,8 @@ mod tests_cam;
 mod tests_cam3d;
 #[cfg(test)]
 mod tests_config;
+#[cfg(test)]
+mod tests_cut;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]

@@ -8,6 +8,7 @@
 mod assembly_forms;
 mod cam_ui;
 mod config_ui;
+mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
@@ -121,6 +122,8 @@ pub struct App {
   pub(crate) manip: manipulators::State,
   /// The bodies as the open dialog found them, drawn as ghosts behind its preview.
   pub(crate) ghost: preview::Ghost,
+  /// The 2D cut window (laser, plasma, waterjet), while open.
+  pub cut_window: Option<cut_ui::CutWindow>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -216,6 +219,7 @@ impl App {
       region: select::Region::default(),
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
+      cut_window: None,
     }
   }
 
@@ -893,6 +897,7 @@ impl App {
     data_panel::save_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
+    cut_ui::cut_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

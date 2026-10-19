@@ -108,6 +108,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | 1 | Stable references | started: a filleted edge that an inserted feature splits keeps the fillet on every piece (it used to jump to a look-alike edge silently); `tests/edits.rs` covers dimension edits, inserted and deleted features. Next: OCCT modification history |
 | 2 | Flat-pattern DXF | layers by role (`CUT`, `BEND_UP`, `BEND_DOWN`, `ETCH`, `NOTES`), bend notes and a `SHEET` note; validator `sheet.check_dxf` / `fissionoxide-cli check-dxf` (closed, unbranched contours, no duplicates, minimum feature size, holes clear of bends); the sheet metal reference DXFs pass it, except 74, whose slot (cut while flat) deliberately crosses a bend and is reported. Splines are still written as short lines |
 | 2 | Sheet metal corners | edge flange `butt` corners (SolidCraft's convention, case 69) and setbacks that trim an earlier flange's bend (case 75); corner references measured against Fusion still to come |
+| 3 | 2D cutting and machine posts (items 1, 2) | done: `fox-cut` crate, `cut.*` commands, `fissionoxide-cli cut`, 2D Cut window; posts not yet run on real machines |
 
 ### Reference part failures to fix
 
