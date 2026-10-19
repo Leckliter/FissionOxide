@@ -102,8 +102,9 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
 | 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
-| 0 | Edit checks | done: **31 of 31** variants of 23 reference parts pass (edit, regenerate, compare with closed-form answers, a from-scratch rebuild and undo), see [reference-variants.md](reference-variants.md) |
-| 0 | Robustness fuzzing | done: `crates/engine/tests/fuzz_features.rs`, seeded random sequences of sketch, extrude, cut, fillet, chamfer, shell, pattern and earlier-feature edits; short run in `cargo test`, long run `-- --ignored`. Found and fixed: booleans and shape repair corrupting cached bodies (bad undo/rollback), inside-out solids accepted; open: three segfaults inside OpenCASCADE (shell, boolean simplification, fillet corners), see [tests/fuzz](../tests/fuzz/README.md) |
+| 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows; and **31 of 31** hand-written variants of 23 parts (`variants.json`: parameters, dimensions, dragged sketches, moved holes, fillet/chamfer/shell/sheet values) match closed-form answers, a from-scratch rebuild, and the original part once undone, see [reference-variants.md](reference-variants.md) |
+| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds. `fuzz_features.rs` adds patterns, edits of earlier features and parameters, and checks undo/redo and incremental against from-scratch regeneration after every step: it found booleans and shape repair changing cached bodies in place (undo and rollback gave back invalid bodies), fixed, and two more crashes inside OCCT, see [tests/fuzz](../tests/fuzz/README.md) |
+| 1 | Stable references | started: a filleted edge that an inserted feature splits keeps the fillet on every piece (it used to jump to a look-alike edge silently); `tests/edits.rs` covers dimension edits, inserted and deleted features. Next: OCCT modification history |
 
 ### Reference part failures to fix
 

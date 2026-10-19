@@ -145,8 +145,6 @@ struct Fuzz {
   problems: Vec<String>,
   steps_kept: usize,
   steps_rejected: usize,
-  /// A shell step has been kept.
-  shelled: bool,
 }
 
 fn line(cmd: &str, p: &Value) -> String {
@@ -170,7 +168,6 @@ impl Fuzz {
       problems: Vec::new(),
       steps_kept: 0,
       steps_rejected: 0,
-      shelled: false,
     }
   }
 
@@ -300,12 +297,8 @@ impl Fuzz {
           }
         }
       }
-      // shell, opening one random planar face. Shelling a body a second time can crash inside
-      // OpenCASCADE (tests/fuzz/shell-offset-segfault.jsonl), so only once unless FOX_FUZZ_RESHELL.
+      // shell, opening one random planar face
       6 => {
-        if self.shelled && std::env::var_os("FOX_FUZZ_RESHELL").is_none() {
-          return None;
-        }
         let b = &bb[self.rng.below(bb.len())];
         let faces: Vec<u32> = self
           .s
@@ -483,7 +476,6 @@ impl Fuzz {
     }
     self.log.extend(step.commands.iter().map(|(c, p)| line(c, p)));
     self.steps_kept += 1;
-    self.shelled |= step.what.starts_with("shell");
   }
 }
 
@@ -508,7 +500,12 @@ fn fuzz(seed: u64, steps: usize) -> (Vec<String>, usize, usize) {
   (f.problems, f.steps_kept, f.steps_rejected)
 }
 
+/// The tests here take turns: OpenCASCADE gives different results when two threads use it at
+/// once, even on unrelated shapes (seen as incremental and from-scratch regeneration disagreeing).
+static KERNEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn run_seeds(first: u64, seeds: u64, steps: usize) {
+  let _turn = KERNEL.lock().unwrap_or_else(|e| e.into_inner());
   let mut problems = Vec::new();
   for seed in first..first + seeds {
     let (p, kept, rejected) = fuzz(seed, steps);
@@ -522,12 +519,9 @@ fn env(name: &str, default: u64) -> u64 {
   std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
-/// Seed 2 is left out: it crashes inside OpenCASCADE (tests/fuzz/unify-same-domain-segfault.jsonl).
 #[test]
 fn fuzz_short() {
-  for seed in [1, 3, 4, 5] {
-    run_seeds(seed, 1, 12);
-  }
+  run_seeds(env("FOX_FUZZ_SEED", 1), 4, 12);
 }
 
 #[test]
@@ -543,4 +537,37 @@ fn fuzz_long() {
 fn fuzz_found_bugs() {
   run_seeds(1007, 1, 30);
   run_seeds(1022, 1, 30);
+}
+
+/// The scripts in `tests/fuzz/` crashed the process inside OpenCASCADE at their last command. Every
+/// command before it must still work, and the last must fail as an error or leave valid solids.
+#[test]
+fn crash_scripts_fail_cleanly() {
+  let _turn = KERNEL.lock().unwrap_or_else(|e| e.into_inner());
+  let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fuzz");
+  let mut scripts: Vec<_> = std::fs::read_dir(&dir)
+    .unwrap()
+    .filter_map(|e| e.ok().map(|e| e.path()))
+    .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+    .collect();
+  scripts.sort();
+  assert!(!scripts.is_empty());
+  for path in scripts {
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    let mut s = Session::default();
+    for (i, l) in lines.iter().enumerate() {
+      let mut p: Value = serde_json::from_str(l).unwrap();
+      let cmd = p["cmd"].as_str().unwrap().to_string();
+      p.as_object_mut().unwrap().remove("cmd");
+      let r = s.execute(&cmd, &p);
+      if i + 1 < lines.len() {
+        assert!(r.is_ok(), "{}: line {} {cmd}: {:?}", path.display(), i + 1, r.err());
+      }
+    }
+    s.edit_sketch = None;
+    if s.model.errors().is_empty() {
+      measure(&s).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    }
+  }
 }

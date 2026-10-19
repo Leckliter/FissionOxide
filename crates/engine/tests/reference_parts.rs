@@ -1,7 +1,12 @@
 //! Builds every reference part in `tests/reference/` from its `part.jsonl` and compares the result
 //! with its `expected.json` (see `tests/reference/README.md`).
 //!
-//! Fails when a case listed in `tests/reference/baseline.txt` stops passing. Set
+//! Each passing part is also edited: its first extrusion's distance is changed in place and the
+//! timeline rebuilt, which must give the same part as building the script with that distance
+//! from scratch. A difference means a later feature lost track of the faces or edges it was on.
+//!
+//! Fails when a case listed in `tests/reference/baseline.txt` stops passing, or one listed in
+//! `tests/reference/edit-baseline.txt` stops surviving the edit. Set
 //! `FOX_REFERENCE_REPORT=1` to rewrite `docs/reference-parts.md`, and `FOX_REFERENCE=name` to run
 //! the cases whose directory name contains `name`.
 
@@ -31,6 +36,8 @@ struct Case {
   /// Measured values, for the report.
   measured: Option<Measured>,
   seconds: f64,
+  /// The edit check: `None` when the part has no extrusion distance to change.
+  edit: Option<Result<(), String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -170,10 +177,108 @@ fn step_round_trip(s: &Session, m: &Measured, dir: &Path) -> Result<(), String> 
   Ok(())
 }
 
+/// Changes the first extrusion's distance (by +15%) in place and checks the rebuilt part:
+/// against one built from scratch with that distance, or, where the script's later picks (points
+/// on faces and edges) no longer land on the changed part, by checking the edit keeps every face
+/// and that editing it back restores the part exactly. `None` when there is nothing to edit.
+fn edit_check(script: &str, before: &Measured) -> Option<Result<(), String>> {
+  let lines: Vec<&str> = script.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+  let parsed: Vec<(String, Value)> = lines.iter().map(|l| parse_line(l)).collect::<Result<_, _>>().ok()?;
+  // the first extrusion with a plain distance that later commands build on
+  let at = parsed.iter().position(|(c, p)| c == "extrude" && p["distance"].is_number())?;
+  if at + 1 == parsed.len() {
+    return None;
+  }
+  let d = parsed[at].1["distance"].as_f64()?;
+  let new = (d * 1.15 * 1e4).round() / 1e4;
+
+  // from scratch with the new distance, when the script's picks still land
+  let mut fresh = parsed.clone();
+  fresh[at].1["distance"] = json!(new);
+  let script2: String = fresh.iter().map(|(c, p)| format!("{}\n", line_of(c, p))).collect();
+  let want = build(&script2).ok().and_then(|s| measure(&s).ok());
+
+  // built as it was, then edited
+  let mut s = Session::default();
+  let mut feature = None;
+  for (i, (c, p)) in parsed.iter().enumerate() {
+    let r = s.execute(c, p).ok()?;
+    if i == at {
+      feature = r["feature"].as_u64();
+    }
+  }
+  let id = feature?;
+  let kind = serde_json::to_value(&s.design.features.iter().find(|f| u64::from(f.id.0) == id)?.kind).ok()?;
+  let set = |s: &mut Session, dist: f64| -> Result<Measured, String> {
+    let mut extent = kind["extent"].clone();
+    extent["distance"] = json!(dist.to_string());
+    s.execute("feature.edit", &json!({"feature": id, "set": {"extent": extent}}))
+      .map_err(|e| format!("the edit was refused: {}", e.0))?;
+    let errors = s.model.errors();
+    if !errors.is_empty() {
+      return Err(format!("after the edit: {errors:?}"));
+    }
+    measure(s)
+  };
+  let what = format!("extrude distance {d} -> {new}");
+  let got = match set(&mut s, new) {
+    Ok(m) => m,
+    Err(e) => return Some(Err(format!("{what}: {e}"))),
+  };
+  let mut diffs = Vec::new();
+  match want {
+    Some(want) => {
+      if (want.volume - before.volume).abs() <= 1e-6 * before.volume {
+        return None; // the change doesn't show in the part (a cut through all, say)
+      }
+      diffs.extend(differences(&got, &want, "built fresh"));
+    }
+    None => {
+      if (got.volume - before.volume).abs() <= 1e-6 * before.volume {
+        diffs.push("the edit didn't change the part".into());
+      }
+      if got.faces != before.faces {
+        diffs.push(format!("faces {} (before the edit: {})", got.faces, before.faces));
+      }
+      match set(&mut s, d) {
+        Ok(back) => {
+          diffs.extend(differences(&back, before, "before the edits").into_iter().map(|e| format!("edited back: {e}")))
+        }
+        Err(e) => diffs.push(format!("edited back: {e}")),
+      }
+    }
+  }
+  Some(if diffs.is_empty() { Ok(()) } else { Err(format!("{what}: {}", diffs.join(", "))) })
+}
+
+fn differences(got: &Measured, want: &Measured, what: &str) -> Vec<String> {
+  let close = |a: f64, b: f64| (a - b).abs() <= 1e-6 * b.abs().max(1.0);
+  let mut diffs = Vec::new();
+  if got.solids != want.solids {
+    diffs.push(format!("solids {} ({what}: {})", got.solids, want.solids));
+  }
+  if !close(got.volume, want.volume) {
+    diffs.push(format!("volume {:.3} ({what}: {:.3})", got.volume, want.volume));
+  }
+  if !close(got.area, want.area) {
+    diffs.push(format!("area {:.3} ({what}: {:.3})", got.area, want.area));
+  }
+  if got.faces != want.faces {
+    diffs.push(format!("faces {} ({what}: {})", got.faces, want.faces));
+  }
+  diffs
+}
+
+fn line_of(cmd: &str, params: &Value) -> String {
+  let mut v = params.clone();
+  v["cmd"] = json!(cmd);
+  v.to_string()
+}
+
 fn run_case(dir: &Path, scratch: &Path) -> Case {
   let name = dir.file_name().unwrap().to_string_lossy().into_owned();
   let start = Instant::now();
-  let mut case = Case { name, outcome: Outcome::NotPorted, measured: None, seconds: 0.0 };
+  let mut case = Case { name, outcome: Outcome::NotPorted, measured: None, seconds: 0.0, edit: None };
   let Ok(script) = std::fs::read_to_string(dir.join("part.jsonl")) else {
     return case;
   };
@@ -189,7 +294,13 @@ fn run_case(dir: &Path, scratch: &Path) -> Case {
         diffs.push(e);
       }
       case.measured = Some(m);
-      if diffs.is_empty() { Outcome::Pass } else { Outcome::Fail(diffs.join("; ")) }
+      if diffs.is_empty() {
+        case.edit = std::panic::catch_unwind(|| edit_check(&script, case.measured.as_ref().unwrap()))
+          .unwrap_or_else(|_| Some(Err("panicked".into())));
+        Outcome::Pass
+      } else {
+        Outcome::Fail(diffs.join("; "))
+      }
     }
   };
   case.seconds = start.elapsed().as_secs_f64();
@@ -209,7 +320,16 @@ fn report(cases: &[Case]) -> String {
     cases.len()
   )
   .unwrap();
-  writeln!(s, "| Case | Result | Volume mm³ | Area mm² | Time | Notes |\n|---|---|---|---|---|---|").unwrap();
+  let edits = cases.iter().filter(|c| c.edit.is_some()).count();
+  let edits_ok = cases.iter().filter(|c| matches!(c.edit, Some(Ok(())))).count();
+  writeln!(
+    s,
+    "**{edits_ok} of {edits} survive an edit**: their first extrusion's distance, changed in place,\n\
+     rebuilds correctly (see the README for how that is checked).\n"
+  )
+  .unwrap();
+  writeln!(s, "| Case | Result | Edit | Volume mm³ | Area mm² | Time | Notes |\n|---|---|---|---|---|---|---|")
+    .unwrap();
   for c in cases {
     let (result, notes) = match &c.outcome {
       Outcome::NotPorted => ("not ported", String::new()),
@@ -221,7 +341,14 @@ fn report(cases: &[Case]) -> String {
       .as_ref()
       .map_or((String::new(), String::new()), |m| (format!("{:.1}", m.volume), format!("{:.1}", m.area)));
     let t = if matches!(c.outcome, Outcome::NotPorted) { String::new() } else { format!("{:.1} s", c.seconds) };
-    writeln!(s, "| {} | {result} | {v} | {a} | {t} | {notes} |", c.name).unwrap();
+    let (edit, notes) = match &c.edit {
+      None => ("", notes),
+      Some(Ok(())) => ("ok", notes),
+      Some(Err(e)) => {
+        ("**fail**", format!("{notes}{}edit: {}", if notes.is_empty() { "" } else { "; " }, e.replace('|', "\\|")))
+      }
+    };
+    writeln!(s, "| {} | {result} | {edit} | {v} | {a} | {t} | {notes} |", c.name).unwrap();
   }
   writeln!(s, "\nEdit checks on these parts: [reference-variants.md](reference-variants.md).").unwrap();
   s
@@ -229,6 +356,7 @@ fn report(cases: &[Case]) -> String {
 
 #[test]
 fn reference_parts() {
+  let _turn = KERNEL.lock().unwrap_or_else(|e| e.into_inner());
   let root = root();
   let filter = std::env::var("FOX_REFERENCE").ok();
   let mut dirs: Vec<PathBuf> = std::fs::read_dir(root.join("tests/reference"))
@@ -248,6 +376,9 @@ fn reference_parts() {
       Outcome::Pass => println!("pass  {} ({:.1} s)", c.name, c.seconds),
       Outcome::Fail(e) => println!("FAIL  {}: {e}", c.name),
     }
+    if let Some(Err(e)) = &c.edit {
+      println!("EDIT  {}: {e}", c.name);
+    }
   }
   if std::env::var_os("FOX_REFERENCE_REPORT").is_some() && filter.is_none() {
     std::fs::write(root.join("docs/reference-parts.md"), report(&cases)).unwrap();
@@ -266,13 +397,30 @@ fn reference_parts() {
   if !new.is_empty() {
     println!("\nNow passing; add to tests/reference/baseline.txt:\n{}", new.join("\n"));
   }
+  let edit_baseline = std::fs::read_to_string(root.join("tests/reference/edit-baseline.txt")).unwrap_or_default();
+  let edit_baseline: Vec<&str> =
+    edit_baseline.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+  let edit_ok = |name: &str| cases.iter().any(|c| c.name == name && matches!(c.edit, Some(Ok(()))));
+  let edit_regressed: Vec<&str> = edit_baseline.iter().copied().filter(|n| ran(n) && !edit_ok(n)).collect();
+  let edit_new: Vec<&str> = cases
+    .iter()
+    .filter(|c| matches!(c.edit, Some(Ok(()))) && !edit_baseline.contains(&c.name.as_str()))
+    .map(|c| c.name.as_str())
+    .collect();
+  if !edit_new.is_empty() {
+    println!("\nNow surviving the edit; add to tests/reference/edit-baseline.txt:\n{}", edit_new.join("\n"));
+  }
   assert!(regressed.is_empty(), "reference parts that used to pass now fail: {regressed:?}");
+  assert!(edit_regressed.is_empty(), "reference parts that used to survive an edit now don't: {edit_regressed:?}");
 }
 
 // Edit checks: `variants.json` next to a case lists edits to make to the built part and what the
 // edited part must measure (see `tests/reference/README.md`). Each variant edits the existing
 // model, which regenerates incrementally; the result must also match a from-scratch regeneration
 // of the edited design, and undoing the edits must bring the original part back.
+
+/// The tests here take turns: OpenCASCADE gives different results when two threads use it at once.
+static KERNEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct VariantCase {
   /// `case/variant`.
@@ -397,6 +545,7 @@ fn variant_report(cases: &[VariantCase]) -> String {
 /// `tests/reference/variant-baseline.txt` stops passing.
 #[test]
 fn reference_variants() {
+  let _turn = KERNEL.lock().unwrap_or_else(|e| e.into_inner());
   let root = root();
   let filter = std::env::var("FOX_REFERENCE").ok();
   let mut dirs: Vec<PathBuf> = std::fs::read_dir(root.join("tests/reference"))

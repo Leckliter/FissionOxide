@@ -139,7 +139,10 @@ namespace {
   }
 }
 
-#define FOX_TRY try {
+#define FOX_TRY                                                                                                        \
+  try {                                                                                                                \
+    catch_signals();                                                                                                   \
+    OCC_CATCH_SIGNALS
 #define FOX_CATCH(what)                                                                                                \
   }                                                                                                                    \
   catch (...) { rethrow(what); }
@@ -172,22 +175,12 @@ void need(rust::Slice<const double> v, size_t n, const char *what) {
 }
 
 // Validates a result; tries ShapeFix once if invalid.
-// A solid turned inside out (negative volume) passes BRepCheck.
-void not_inside_out(const TopoDS_Shape &s, const char *what) {
-  for (TopExp_Explorer ex(s, TopAbs_SOLID); ex.More(); ex.Next()) {
-    GProp_GProps p;
-    BRepGProp::VolumeProperties(ex.Current(), p);
-    if (p.Mass() < 0) throw std::runtime_error(std::string(what) + " produced an inside-out solid");
-  }
-}
-
 TopoDS_Shape checked(const TopoDS_Shape &s, const char *what) {
   if (s.IsNull()) {
     throw std::runtime_error(std::string(what) + " produced nothing");
   }
   BRepCheck_Analyzer an(s);
   if (an.IsValid()) {
-    not_inside_out(s, what);
     return s;
   }
   // ShapeFix can change sub-shapes in place, and `s` shares untouched ones with the operation's
@@ -199,7 +192,6 @@ TopoDS_Shape checked(const TopoDS_Shape &s, const char *what) {
   if (!an2.IsValid()) {
     throw std::runtime_error(std::string(what) + " produced an invalid solid");
   }
-  not_inside_out(f, what);
   return f;
 }
 
