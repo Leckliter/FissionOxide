@@ -150,3 +150,9 @@ pub(crate) mod ffi {
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
   }
 }
+
+// SAFETY: a Shape is a TopoDS_Shape, whose handles OCCT reference-counts atomically. The engine
+// moves a design's shapes to a worker thread for background regeneration and back; while that
+// runs the other thread makes no kernel calls (see `clf_engine::Rebuild`), so no shape is used
+// from two threads at once.
+unsafe impl Send for ffi::Shape {}

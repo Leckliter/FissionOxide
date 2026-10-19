@@ -68,6 +68,7 @@ cmds! {
   "hub.activity" => "Activity feed", "{project?, item?, limit?}";
   "hub.upload" => "Upload a file: designs and importable formats become designs, others (e.g. .f3d) are stored as files", "{path, project?, folder?, name?}";
   "hub.download" => "Write an item version to a file; the extension picks the format (.clfz includes history)", "{item?, version?, path, ...export options}";
+  "compute_all" => "Recompute the whole timeline from scratch", "{}";
   "undo" => "Undo", "{}";
   "redo" => "Redo", "{}";
   "param.add" => "Add a user parameter", "{name, expr, kind?: length|angle|unitless, comment?}";
@@ -252,6 +253,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "formats" => Ok(json!(clf_exchange::FORMATS)),
     "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
     n if n.starts_with("hub.") => crate::hub::run(s, n, p),
+    "compute_all" => {
+      s.regen.clear();
+      s.rebuild();
+      Ok(json!({"errors": s.model.errors()}))
+    }
     "undo" => Ok(json!({"done": s.undo()})),
     "redo" => Ok(json!({"done": s.redo()})),
     "param.add" => {

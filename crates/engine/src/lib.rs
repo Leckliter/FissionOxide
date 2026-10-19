@@ -102,10 +102,21 @@ pub enum Sel {
   },
 }
 
+/// A regeneration running on another thread (see [`Session::begin`]).
+pub struct Rebuild {
+  handle: std::thread::JoinHandle<(Design, Model, Regenerator)>,
+}
+
+impl Rebuild {
+  pub fn is_finished(&self) -> bool {
+    self.handle.is_finished()
+  }
+}
+
 pub struct Session {
   pub design: Design,
   pub model: Model,
-  regen: Regenerator,
+  pub(crate) regen: Regenerator,
   undo: Vec<Design>,
   redo: Vec<Design>,
   /// Where the design was last opened from / saved to.
@@ -244,9 +255,98 @@ impl Session {
 
   /// Regenerates the model from the design.
   pub fn rebuild(&mut self) {
+    let model = self.regen.regenerate(&mut self.design);
+    self.install(model);
+  }
+
+  /// Starts a command whose regeneration can run in the background: `param.set` and
+  /// `compute_all`. The design changes now (with an undo step); the returned [`Rebuild`]
+  /// computes the model on another thread. Until [`Session::finish_rebuild`] takes it back, the
+  /// session's model is the old one and **nothing on this thread may call the kernel** (render
+  /// the last image, block input). Other commands run at once and return `None`.
+  pub fn begin(&mut self, name: &str, params: &Value) -> Result<(Value, Option<Rebuild>), CmdError> {
+    match name {
+      "param.set" => {
+        let pname = commands::req_str(params, "name")?.to_string();
+        let expr = commands::expr_of(params.get("expr").ok_or(CmdError::new("missing 'expr'"))?)?;
+        // check the new value before committing to a rebuild
+        let list: Vec<(String, String, clf_model::ParamKind)> = self
+          .design
+          .parameters
+          .iter()
+          .map(|p| (p.name.clone(), if p.name == pname { expr.clone() } else { p.expr.clone() }, p.kind))
+          .collect();
+        if !list.iter().any(|(n, ..)| *n == pname) {
+          return Err(CmdError::new(format!("no parameter '{pname}'")));
+        }
+        for (n, v) in clf_expr::eval_parameters(&list) {
+          if let Err(e) = v {
+            return Err(CmdError::new(format!("{n}: {e}")));
+          }
+        }
+        self.edit_deferred(|d| Ok(d.set_parameter(&pname, &expr)?))?;
+        Ok((serde_json::json!({}), Some(self.start_rebuild())))
+      }
+      "compute_all" => {
+        self.regen.clear();
+        Ok((serde_json::json!({}), Some(self.start_rebuild())))
+      }
+      _ => Ok((self.execute(name, params)?, None)),
+    }
+  }
+
+  /// [`Session::edit`] without the regeneration (see [`Session::begin`]).
+  fn edit_deferred<T>(&mut self, f: impl FnOnce(&mut Design) -> Result<T, CmdError>) -> Result<T, CmdError> {
+    let before = self.design.clone();
+    match f(&mut self.design) {
+      Ok(v) => {
+        self.undo.push(before);
+        if self.undo.len() > MAX_UNDO {
+          self.undo.remove(0);
+        }
+        self.redo.clear();
+        self.dirty = true;
+        Ok(v)
+      }
+      Err(e) => {
+        self.design = before;
+        Err(e)
+      }
+    }
+  }
+
+  /// Hands the design and the timeline cache to a worker thread that regenerates them.
+  fn start_rebuild(&mut self) -> Rebuild {
+    let mut design = self.design.clone();
+    let mut regen = std::mem::take(&mut self.regen);
+    let handle = std::thread::spawn(move || {
+      let model = regen.regenerate(&mut design);
+      (design, model, regen)
+    });
+    Rebuild { handle }
+  }
+
+  /// Takes a background regeneration's result into the session (waiting if it isn't done).
+  pub fn finish_rebuild(&mut self, r: Rebuild) {
+    match r.handle.join() {
+      Ok((design, model, regen)) => {
+        // the worker wrote solved sketch positions and refreshed references into its copy
+        self.design = design;
+        self.regen = regen;
+        self.install(model);
+      }
+      Err(_) => {
+        // a panic in the kernel: start over on this thread
+        self.regen.clear();
+        self.rebuild();
+      }
+    }
+  }
+
+  fn install(&mut self, model: Model) {
     let before: std::collections::HashMap<BodyId, FeatureId> =
       self.model.bodies.iter().map(|b| (b.id, b.feature)).collect();
-    self.model = self.regen.regenerate(&mut self.design);
+    self.model = model;
     self.revision += 1;
     // Face/edge indices are only meaningful for the shape they were picked on: drop selections
     // on bodies that a feature has changed since.

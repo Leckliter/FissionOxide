@@ -96,6 +96,9 @@ pub struct App {
   pub section: Option<Value>,
   /// Surface analysis: `{analysis, pull?, angle?}`.
   pub analysis: Option<Value>,
+  /// A regeneration running in the background, and when it started. While it runs the UI shows
+  /// the last image and takes no input (nothing may call the kernel; see `Session::begin`).
+  pub(crate) rebuild: Option<(clf_engine::Rebuild, f64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -180,11 +183,46 @@ impl App {
       measure: None,
       section: None,
       analysis: None,
+      rebuild: None,
     }
+  }
+
+  /// Runs a command whose regeneration can happen in the background (parameter changes, Compute
+  /// All), so a long timeline doesn't freeze the window.
+  pub fn run_background(&mut self, cmd: &str, params: Value) {
+    if self.rebuild.is_some() {
+      self.status = Some(("Still computing — wait for it to finish".into(), false));
+      return;
+    }
+    self.cancel_dialog();
+    match self.s.begin(cmd, &params) {
+      Ok((_, Some(job))) => self.rebuild = Some((job, now())),
+      Ok((_, None)) => {}
+      Err(e) => self.status = Some((e.0, true)),
+    }
+  }
+
+  /// Takes a finished background regeneration back. Returns whether one is still running.
+  fn poll_rebuild(&mut self) -> bool {
+    if self.rebuild.as_ref().is_some_and(|(job, _)| job.is_finished())
+      && let Some((job, start)) = self.rebuild.take()
+    {
+      self.s.finish_rebuild(job);
+      let errors = self.s.model.errors();
+      self.status = Some(match errors.first() {
+        Some(e) => (e.clone(), true),
+        None => (format!("Computed in {:.1} s", now() - start), false),
+      });
+    }
+    self.rebuild.is_some()
   }
 
   /// Runs a command, reporting errors in the status bar. Returns the result on success.
   pub fn run(&mut self, cmd: &str, params: Value) -> Option<Value> {
+    if self.rebuild.is_some() {
+      self.status = Some(("Still computing — wait for it to finish".into(), false));
+      return None;
+    }
     match self.s.execute(cmd, &params) {
       Ok(v) => {
         if let Some(e) = v.get("error").and_then(Value::as_str) {
@@ -398,6 +436,9 @@ impl App {
     }
     if pressed(Key::N, Modifiers::COMMAND) {
       self.new_design();
+    }
+    if pressed(Key::B, Modifiers::COMMAND) && self.drawing.is_none() {
+      self.run_background("compute_all", json!({}));
     }
     if pressed(Key::A, Modifiers::COMMAND) && self.drawing.is_none() {
       self.run("select.all", json!({}));
@@ -684,6 +725,10 @@ impl App {
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
+    if self.poll_rebuild() {
+      self.draw_busy(ui, &ctx);
+      return;
+    }
     if self.data.save.is_none() {
       self.shortcuts(&ctx);
     }
@@ -735,8 +780,92 @@ impl App {
   }
 }
 
+impl App {
+  /// The window while a background regeneration runs: the panels as they were, the last
+  /// viewport image dimmed with a progress note, and a cover that takes all input.
+  fn draw_busy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    panels::app_bar(self, ui);
+    panels::toolbar(self, ui);
+    if self.drawing.is_none() {
+      panels::timeline(self, ui);
+    }
+    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+      let rect = ui.available_rect_before_wrap();
+      let painter = ui.painter_at(rect);
+      if let Some(tex) = &self.tex {
+        painter.image(
+          tex.id(),
+          rect,
+          egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+          egui::Color32::from_gray(200),
+        );
+      }
+    });
+    panels::browser(self, ctx);
+    let elapsed = self.rebuild.as_ref().map(|(_, t)| now() - t).unwrap_or(0.0);
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("busy-cover")).fixed_pos(screen.min).order(egui::Order::Foreground).show(ctx, |ui| {
+      let (r, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+      ui.painter().rect_filled(r, 0.0, egui::Color32::from_black_alpha(16));
+      if elapsed > 0.15 {
+        let c = self.canvas.center();
+        let text = format!("Computing…  {elapsed:.1} s");
+        let g = ui.painter().layout_no_wrap(text, egui::FontId::proportional(15.0), theme::TEXT);
+        let b = egui::Rect::from_center_size(c, g.size() + egui::vec2(36.0, 22.0));
+        ui.painter().rect_filled(b, 6.0, egui::Color32::WHITE);
+        ui.painter().rect_stroke(b, 6.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        let a = (elapsed * 6.0) as f32;
+        let dot = b.left_center() + egui::vec2(14.0, 0.0);
+        ui.painter().circle_stroke(dot, 5.0, egui::Stroke::new(1.0, theme::BORDER));
+        ui.painter().circle_filled(
+          dot + egui::vec2(a.cos(), a.sin()) * 5.0,
+          2.0,
+          egui::Color32::from_rgb(30, 110, 235),
+        );
+        ui.painter().galley(b.min + egui::vec2(26.0, 11.0), g, theme::TEXT);
+      }
+    });
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+  }
+}
+
+/// Seconds since the app started (for timing background work).
+fn now() -> f64 {
+  static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+  START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
+}
+
 impl eframe::App for App {
   fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
     self.draw(ui);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn parameter_changes_run_in_the_background() {
+    let mut app = App::with_session(Session::default());
+    for (c, p) in [
+      ("param.add", json!({"name": "h", "expr": "10"})),
+      ("sketch.create", json!({"plane": "xy"})),
+      ("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]})),
+      ("extrude", json!({"distance": "h"})),
+    ] {
+      app.run(c, p).unwrap();
+    }
+    app.run_background("param.set", json!({"name": "h", "expr": "30"}));
+    assert!(app.rebuild.is_some());
+    // commands wait for it
+    assert!(app.run("info", json!({})).is_none());
+    while app.poll_rebuild() {
+      std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let v = app.s.model.bodies[0].shape.mass().unwrap().volume;
+    assert!((v - 3000.0).abs() < 1e-6, "{v}");
+    app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
+    assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
   }
 }

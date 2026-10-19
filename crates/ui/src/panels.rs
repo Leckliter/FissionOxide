@@ -307,6 +307,8 @@ pub(crate) enum Cmd {
   Priority(crate::select::Priority),
   /// Toggle a selection filter: bodies, faces, edges, sketches or profiles.
   Filter(&'static str),
+  /// Recompute the whole timeline (in the background).
+  ComputeAll,
 }
 
 impl Cmd {
@@ -394,6 +396,7 @@ impl Cmd {
         _ => (Icon::ExportSvg, "SVG Export", "Write the drawing as an SVG"),
       },
       Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
+      Cmd::ComputeAll => (Icon::ComputeAll, "Compute All", "Recompute the whole timeline (Ctrl+B)"),
       Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
       Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
       Cmd::SelectOther => {
@@ -495,6 +498,7 @@ impl Cmd {
       }
       Cmd::DrawingExport(e) => app.export_drawing(e),
       Cmd::FinishDrawing => app.close_drawing(),
+      Cmd::ComputeAll => app.run_background("compute_all", json!({})),
       Cmd::SelectAll => {
         app.run("select.all", json!({}));
       }
@@ -2002,7 +2006,7 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
         }
         if r.lost_focus() {
           if text != p.expr {
-            app.run("param.set", json!({"name": p.name, "expr": text}));
+            app.run_background("param.set", json!({"name": p.name, "expr": text}));
           }
           ui.data_mut(|d| d.remove::<String>(id));
         }

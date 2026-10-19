@@ -180,7 +180,7 @@ const SOLID_MODIFY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -354,7 +354,7 @@ const SURFACE_MODIFY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -419,7 +419,7 @@ const SHEET_MODIFY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -447,7 +447,7 @@ const MESH_MODIFY: &[E] = &[
   c("Appearance", Icon::Appearance, D(Kind::Form(&forms::APPEARANCE))).k("A"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
   E::Sep,
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
@@ -725,7 +725,7 @@ const ADD_INS: &[E] =
 const UTILITY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
   x("Manage Threads Library", Icon::Configure),
-  x("Compute All", Icon::ComputeAll).k("Ctrl+B"),
+  c("Compute All", Icon::ComputeAll, Cmd::ComputeAll).k("Ctrl+B"),
 ];
 
 // UTILITIES' INSPECT has no Environment Map Analysis

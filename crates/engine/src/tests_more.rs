@@ -296,3 +296,26 @@ fn section_view_is_capped() {
   let cut = scene.meshes.iter().find(|m| m.analyze).unwrap();
   assert!(cut.positions.iter().enumerate().all(|(i, p)| !cut.indices.contains(&(i as u32)) || p[1] >= 10.0 - 1e-4));
 }
+
+#[test]
+fn parameter_change_regenerates_in_the_background() {
+  let mut s = Session::default();
+  run(&mut s, "param.add", json!({"name": "h", "expr": "10 mm"}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+  run(&mut s, "extrude", json!({"distance": "h"}));
+  let rev = s.revision;
+  let (_, job) = s.begin("param.set", &json!({"name": "h", "expr": "25 mm"})).unwrap();
+  let job = job.unwrap();
+  // the old model stays until the job is taken back
+  assert!((volume(&s) - 1000.0).abs() < 1e-6);
+  s.finish_rebuild(job);
+  assert!(s.revision > rev);
+  assert!((volume(&s) - 2500.0).abs() < 1e-6, "{}", volume(&s));
+  assert!(s.begin("param.set", &json!({"name": "h", "expr": "nope +"})).is_err());
+  assert!(s.undo());
+  assert!((volume(&s) - 1000.0).abs() < 1e-6);
+  let (_, job) = s.begin("compute_all", &json!({})).unwrap();
+  s.finish_rebuild(job.unwrap());
+  assert!((volume(&s) - 1000.0).abs() < 1e-6);
+}
