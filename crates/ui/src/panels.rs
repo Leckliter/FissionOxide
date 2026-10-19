@@ -1488,13 +1488,13 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
   if kind == "hv" {
     let Ok(sketch) = app.s.design.sketch(sk) else { return };
     let mut jobs: Vec<(&'static str, serde_json::Value)> = Vec::new();
-    if points.len() == 2 && curves.is_empty() {
-      if let (Some(a), Some(b)) =
+    if points.len() == 2
+      && curves.is_empty()
+      && let (Some(a), Some(b)) =
         (sketch.pos(clf_engine::sketch::PointId(points[0])), sketch.pos(clf_engine::sketch::PointId(points[1])))
-      {
-        let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
-        jobs.push((kind, json!({"sketch": sk.0, "type": kind, "points": points})));
-      }
+    {
+      let kind = if (b[0] - a[0]).abs() >= (b[1] - a[1]).abs() { "horizontal" } else { "vertical" };
+      jobs.push((kind, json!({"sketch": sk.0, "type": kind, "points": points})));
     }
     for c in &curves {
       let ends = sketch.curve_points(clf_engine::sketch::CurveId(*c));
