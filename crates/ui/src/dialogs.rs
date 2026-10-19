@@ -2032,7 +2032,7 @@ impl Dialog {
               .iter()
               .map(|(k, l)| (json!(k), l.to_string()))
               .collect();
-            for (id, _) in &s.model.planes {
+            for id in s.model.planes.keys() {
               let name = s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_default();
               o.push((json!({"feature": id.0}), name));
             }
