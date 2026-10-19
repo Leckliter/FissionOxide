@@ -25,6 +25,8 @@ pub enum Tab {
   Utilities,
   Manage,
   Sketch,
+  /// The Drawing workspace's single tab.
+  Drawing,
 }
 
 impl Tab {
@@ -41,6 +43,7 @@ impl Tab {
       Tab::Utilities => "UTILITIES",
       Tab::Manage => "MANAGE",
       Tab::Sketch => "SKETCH",
+      Tab::Drawing => "DRAWING",
     }
   }
 }
@@ -186,6 +189,10 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.close();
     app.save_file(true);
   }
+  if ui.button("New Drawing from Design").on_hover_text("A drawing of this design (the Drawing workspace)").clicked() {
+    ui.close();
+    app.start(Kind::NewDrawing);
+  }
   ui.separator();
   if ui.button("Insert into Design...").on_hover_text("Add the bodies (or DXF sketch) from a file").clicked() {
     ui.close();
@@ -286,6 +293,12 @@ pub(crate) enum Cmd {
   Home,
   /// Show or hide the selected bodies.
   ToggleVisibility,
+  /// A drawing view dialog preset to a view type (front, section, detail, …).
+  DrawingView(&'static str),
+  /// Write the open drawing as pdf / dxf / svg.
+  DrawingExport(&'static str),
+  /// Back to the Design workspace.
+  FinishDrawing,
 }
 
 impl Cmd {
@@ -346,6 +359,19 @@ impl Cmd {
       Cmd::Fit => (Icon::Fit, "Fit", "Fit the design in the view (F6)"),
       Cmd::Home => (Icon::Views, "Home View", "Go to the home view (Home)"),
       Cmd::ToggleVisibility => (Icon::Eye, "Show/Hide", "Show or hide the selected bodies"),
+      Cmd::DrawingView(k) => match k {
+        "section" => (Icon::SectionView, "Section View", "A view cut across the part"),
+        "detail" => (Icon::DetailView, "Detail View", "An enlarged circle of another view"),
+        "flat" => (Icon::FlatPattern, "Flat Pattern View", "A sheet metal body's flat pattern"),
+        "top" => (Icon::ProjectedView, "Projected View", "A view projected from the base view"),
+        _ => (Icon::BaseView, "Base View", "A standard view of the design"),
+      },
+      Cmd::DrawingExport(e) => match e {
+        "pdf" => (Icon::ExportPdf, "PDF Export", "Write the drawing as a PDF"),
+        "dxf" => (Icon::ExportDxf, "DXF Export", "Write the drawing as a DXF"),
+        _ => (Icon::ExportSvg, "SVG Export", "Write the drawing as an SVG"),
+      },
+      Cmd::FinishDrawing => (Icon::Finish, "Finish Drawing", "Back to the Design workspace"),
     }
   }
 
@@ -412,6 +438,14 @@ impl Cmd {
         }
       }
       Cmd::LookAt => app.look_at_selection(),
+      Cmd::DrawingView(k) => {
+        app.start(Kind::DrawingView);
+        if let Some(d) = app.dialog.as_mut() {
+          d.set_choice(k);
+        }
+      }
+      Cmd::DrawingExport(e) => app.export_drawing(e),
+      Cmd::FinishDrawing => app.close_drawing(),
       Cmd::Fit => app.fit_view(),
       Cmd::Home => {
         app.cam.set_view(StandardView::Home);
@@ -519,23 +553,30 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
     let fill = if resp.hovered() { theme::HOVER } else { Color32::from_rgb(248, 248, 248) };
     ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, Color32::from_gray(196)), egui::StrokeKind::Inside);
     ui.painter().text(
-      rect.center() - vec2(6.0, 0.0),
+      rect.center() - vec2(8.0, 0.0),
       egui::Align2::CENTER_CENTER,
-      "DESIGN",
-      egui::FontId::proportional(13.5),
+      if app.drawing.is_some() { "DRAWING" } else { "DESIGN" },
+      egui::FontId::proportional(if app.drawing.is_some() { 12.5 } else { 13.5 }),
       Color32::from_gray(30),
     );
     icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
     egui::Popup::menu(&resp).show(|ui| {
       ui.set_min_width(180.0);
+      let drawing = app.drawing.is_some();
       for (i, w) in WORKSPACES.iter().enumerate() {
-        let r = ui.add_enabled(i == 0, egui::Button::selectable(i == 0, *w));
+        // Design and Drawing are CLFusion's workspaces
+        let current = if *w == "Drawing" { drawing } else { i == 0 && !drawing };
+        let r = ui.add_enabled(i == 0 || *w == "Drawing", egui::Button::selectable(current, *w));
         if r.clicked() {
           ui.close();
+          match (*w, drawing) {
+            ("Drawing", false) => app.open_drawing_workspace(),
+            ("Design", true) => app.close_drawing(),
+            _ => {}
+          }
         }
       }
     });
-    let _ = app;
   });
 }
 
@@ -543,6 +584,12 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
   ui.horizontal(|ui| {
     ui.spacing_mut().item_spacing.x = 4.0;
     let mut tabs: Vec<Tab> = Tab::MAIN.to_vec();
+    if app.drawing.is_some() {
+      tabs = vec![Tab::Drawing];
+      app.tab = Tab::Drawing;
+    } else if app.tab == Tab::Drawing {
+      app.tab = Tab::Solid;
+    }
     if sketching {
       tabs.push(Tab::Sketch);
     }
@@ -728,6 +775,8 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
     |ui| {
       let width = 270.0;
       ui.set_width(width);
+      // an Area's room is last frame's size; give the tree room to grow when rows are added
+      ui.set_max_height(canvas.height().max(150.0));
       ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
       float_header(ui, "BROWSER", &mut app.browser_open, width);
       if !app.browser_open {
@@ -802,9 +851,157 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
     }
   }
+  components_section(app, ui);
   bodies_section(app, ui);
   sketches_section(app, ui);
   planes_section(app, ui);
+  joints_section(app, ui);
+  drawings_section(app, ui);
+}
+
+/// Components with their bodies; right-click to rename, ground, duplicate or delete.
+fn components_section(app: &mut App, ui: &mut egui::Ui) {
+  let comps: Vec<(u32, String, bool, Vec<BodyId>)> =
+    app.s.design.components.iter().map(|c| (c.id.0, c.name.clone(), c.grounded, c.bodies.clone())).collect();
+  if comps.is_empty() {
+    return;
+  }
+  let id = egui::Id::new("tree-components");
+  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
+  if !is_open(ui, id, true) {
+    return;
+  }
+  for (cid, name, grounded, bodies) in comps {
+    let label = if grounded { format!("{name}  (grounded)") } else { name.clone() };
+    let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    let row = id.with(cid);
+    let ev = tree_row(ui, row, 2, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
+    if ev.clicked || ev.double_clicked {
+      app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+    }
+    if let Some(r) = ev.response {
+      r.context_menu(|ui| {
+        if ui.button("Rename").clicked() {
+          ui.close();
+          app.rename = Some((RenameTarget::Component(cid), name.clone()));
+        }
+        if ui.button(if grounded { "Unground" } else { "Ground" }).clicked() {
+          ui.close();
+          app.run("component.ground", json!({"component": cid, "grounded": !grounded}));
+        }
+        if ui.button("Duplicate").clicked() {
+          ui.close();
+          app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+          app.start(Kind::CopyComponent);
+        }
+        if ui.button("Physical Material").clicked() {
+          ui.close();
+          app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
+          app.start(Kind::Material);
+        }
+        ui.separator();
+        if ui.button("Delete Component").on_hover_text("Its bodies go back to the root").clicked() {
+          ui.close();
+          app.run("component.delete", json!({"component": cid}));
+        }
+      });
+    }
+    if is_open(ui, row, false) {
+      for b in bodies {
+        let name = app.s.body_name(b);
+        let sel = app.s.selection.contains(&Sel::Body { body: b });
+        let ev = tree_row(ui, row.with(b.0), 3, None, None, Icon::Body, &name, sel, theme::TEXT);
+        if ev.clicked {
+          toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+        }
+      }
+    }
+  }
+}
+
+/// Joints: double-click to drive one.
+fn joints_section(app: &mut App, ui: &mut egui::Ui) {
+  let joints: Vec<(FeatureId, String)> = app
+    .s
+    .design
+    .features
+    .iter()
+    .filter(|f| matches!(f.kind, FeatureKind::Joint { .. }))
+    .map(|f| (f.id, f.name.clone()))
+    .collect();
+  if joints.is_empty() {
+    return;
+  }
+  let id = egui::Id::new("tree-joints");
+  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Joints", false, theme::TEXT);
+  if !is_open(ui, id, true) {
+    return;
+  }
+  for (fid, name) in joints {
+    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::JointOrigin, &name, false, theme::TEXT);
+    let drive = |app: &mut App, kind: Kind| {
+      app.start(kind);
+      if let Some(d) = app.dialog.as_mut() {
+        d.set_target(&app.s, fid.0);
+      }
+    };
+    if ev.double_clicked {
+      drive(app, Kind::DriveJoint);
+    }
+    if let Some(r) = ev.response {
+      r.on_hover_text("Double-click to drive").context_menu(|ui| {
+        if ui.button("Drive Joint").clicked() {
+          ui.close();
+          drive(app, Kind::DriveJoint);
+        }
+        if ui.button("Motion Study").clicked() {
+          ui.close();
+          drive(app, Kind::MotionStudy);
+        }
+        if ui.button("Rename").clicked() {
+          ui.close();
+          app.rename = Some((RenameTarget::Feature(fid.0), name.clone()));
+        }
+        ui.separator();
+        if ui.button("Delete").clicked() {
+          ui.close();
+          app.run("feature.delete", json!({"feature": fid.0}));
+        }
+      });
+    }
+  }
+}
+
+/// Drawings of the design: double-click to open one in the Drawing workspace.
+fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
+  let drawings: Vec<(u32, String)> = app.s.design.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
+  if drawings.is_empty() {
+    return;
+  }
+  let id = egui::Id::new("tree-drawings");
+  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Drawings", false, theme::TEXT);
+  if !is_open(ui, id, true) {
+    return;
+  }
+  for (did, name) in drawings {
+    let ev = tree_row(ui, id.with(did), 2, None, None, Icon::NewDrawing, &name, false, theme::TEXT);
+    if ev.double_clicked {
+      app.open_drawing(did);
+    }
+    if let Some(r) = ev.response {
+      r.on_hover_text("Double-click to open").context_menu(|ui| {
+        if ui.button("Open").clicked() {
+          ui.close();
+          app.open_drawing(did);
+        }
+        ui.separator();
+        if ui.button("Delete").clicked() {
+          ui.close();
+          app.run("drawing.delete", json!({"drawing": did}));
+        }
+      });
+    }
+  }
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
@@ -1662,6 +1859,9 @@ fn rename_popup(app: &mut App, ctx: &egui::Context) {
             }
             RenameTarget::Body(b) => {
               app.run("body.rename", json!({"body": b, "name": text}));
+            }
+            RenameTarget::Component(c) => {
+              app.run("component.rename", json!({"component": c, "name": text}));
             }
           }
           keep = false;

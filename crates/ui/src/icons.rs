@@ -189,6 +189,20 @@ pub enum Icon {
   SmRules,
   CornerClosure,
   Rip,
+  Refold,
+  DriveJoint,
+  MotionStudy,
+  NewDrawing,
+  BaseView,
+  ProjectedView,
+  SectionView,
+  DetailView,
+  PartsList,
+  TitleBlock,
+  SheetSettings,
+  ExportPdf,
+  ExportDxf,
+  ExportSvg,
   Print3d,
   Scripts,
   Marketplace,
@@ -1709,6 +1723,93 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
     Icon::CornerClosure => {
       k.solid(&[(0.06, 0.2), (0.46, 0.5), (0.46, 0.94), (0.06, 0.64)], Blue);
       k.solid(&[(0.94, 0.2), (0.54, 0.5), (0.54, 0.94), (0.94, 0.64)], BlueLight);
+    }
+    Icon::Refold => {
+      // a flat sheet with a dashed bend line, the near half folded up
+      k.solid(&[(0.04, 0.62), (0.5, 0.62), (0.5, 0.94), (0.04, 0.94)], White);
+      k.solid(&[(0.5, 0.62), (0.94, 0.1), (0.94, 0.42), (0.5, 0.94)], Blue);
+      k.dashed((0.5, 0.56), (0.5, 0.98), Ink);
+    }
+    Icon::DriveJoint => {
+      k.solid(&[(0.06, 0.62), (0.94, 0.62), (0.94, 0.94), (0.06, 0.94)], White);
+      k.circle((0.5, 0.62), 0.12, Some(Blue), Some(Ink));
+      k.arc((0.5, 0.62), 0.36, 0.3, PI - 0.3, Blue);
+      k.arrow_head((0.84, 0.48), (0.4, 1.0), 0.16, Blue);
+    }
+    Icon::MotionStudy => {
+      k.solid(&[(0.04, 0.12), (0.96, 0.12), (0.96, 0.88), (0.04, 0.88)], White);
+      k.line((0.04, 0.34), (0.96, 0.34), Ink);
+      for x in [0.26, 0.48, 0.7] {
+        k.line((x, 0.12), (x, 0.34), Ink);
+      }
+      k.path(&[(0.1, 0.78), (0.3, 0.52), (0.52, 0.7), (0.72, 0.46), (0.9, 0.58)], Blue);
+    }
+    Icon::NewDrawing | Icon::SheetSettings => {
+      // a sheet with a border and title block
+      k.solid(&[(0.04, 0.12), (0.96, 0.12), (0.96, 0.88), (0.04, 0.88)], White);
+      k.closed(&[(0.12, 0.2), (0.88, 0.2), (0.88, 0.8), (0.12, 0.8)], Ink);
+      k.fill(&[(0.56, 0.66), (0.88, 0.66), (0.88, 0.8), (0.56, 0.8)], Blue);
+      if icon == Icon::SheetSettings {
+        k.circle((0.34, 0.44), 0.13, None, Some(Blue));
+        k.circle((0.34, 0.44), 0.04, Some(Blue), None);
+      } else {
+        k.block(0.2, 0.36, 0.44, 0.6, 0.08, Light, Fill, Dark);
+      }
+    }
+    Icon::BaseView | Icon::ProjectedView | Icon::SectionView | Icon::DetailView => {
+      k.solid(&[(0.04, 0.12), (0.96, 0.12), (0.96, 0.88), (0.04, 0.88)], White);
+      match icon {
+        Icon::BaseView => k.block(0.24, 0.36, 0.7, 0.76, 0.12, BlueLight, Blue, BlueDark),
+        Icon::ProjectedView => {
+          k.closed(&[(0.12, 0.5), (0.4, 0.5), (0.4, 0.78), (0.12, 0.78)], Ink);
+          k.fill(&[(0.6, 0.22), (0.88, 0.22), (0.88, 0.5), (0.6, 0.5)], BlueLight);
+          k.closed(&[(0.6, 0.22), (0.88, 0.22), (0.88, 0.5), (0.6, 0.5)], Blue);
+          k.dashed((0.4, 0.5), (0.6, 0.5), Ink);
+        }
+        Icon::SectionView => {
+          k.closed(&[(0.18, 0.26), (0.82, 0.26), (0.82, 0.74), (0.18, 0.74)], Ink);
+          // hatching on the cut half
+          for (a, b) in [
+            ((0.18, 0.5), (0.3, 0.26)),
+            ((0.18, 0.74), (0.42, 0.26)),
+            ((0.3, 0.74), (0.5, 0.34)),
+            ((0.42, 0.74), (0.5, 0.58)),
+          ] {
+            k.line(a, b, Blue);
+          }
+          k.thick((0.5, 0.14), (0.5, 0.86), Blue, 1.2);
+        }
+        _ => {
+          k.closed(&[(0.1, 0.4), (0.46, 0.4), (0.46, 0.8), (0.1, 0.8)], Ink);
+          k.circle((0.38, 0.46), 0.1, None, Some(Blue));
+          k.circle((0.72, 0.42), 0.2, Some(BlueLight), Some(Blue));
+          k.line((0.46, 0.44), (0.52, 0.42), Blue);
+        }
+      }
+    }
+    Icon::PartsList | Icon::TitleBlock => {
+      k.solid(&[(0.06, 0.16), (0.94, 0.16), (0.94, 0.84), (0.06, 0.84)], White);
+      k.fill(&[(0.06, 0.16), (0.94, 0.16), (0.94, 0.34), (0.06, 0.34)], Blue);
+      for y in [0.5, 0.67] {
+        k.line((0.06, y), (0.94, y), Ink);
+      }
+      if icon == Icon::PartsList {
+        k.line((0.3, 0.34), (0.3, 0.84), Ink);
+      } else {
+        k.line((0.5, 0.34), (0.5, 0.84), Ink);
+      }
+    }
+    Icon::ExportPdf | Icon::ExportDxf | Icon::ExportSvg => {
+      k.solid(&[(0.16, 0.04), (0.84, 0.04), (0.84, 0.96), (0.16, 0.96)], White);
+      k.fill(&[(0.16, 0.62), (0.84, 0.62), (0.84, 0.96), (0.16, 0.96)], Ink);
+      let t = match icon {
+        Icon::ExportPdf => "PDF",
+        Icon::ExportDxf => "DXF",
+        _ => "SVG",
+      };
+      k.text((0.5, 0.79), t, 0.26, White);
+      k.thick((0.5, 0.42), (0.5, 0.1), Blue, 1.4);
+      k.arrow_head((0.5, 0.04), (0.0, -1.0), 0.16, Blue);
     }
     Icon::Rip => {
       k.solid(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], Blue);

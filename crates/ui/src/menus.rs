@@ -264,6 +264,9 @@ const ASSEMBLE: &[E] = &[
   // not in Fusion's menu: CLFusion's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
+  c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
+  c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
 ];
 
 const SELECTION_TOOLS: &[E] =
@@ -389,6 +392,7 @@ const SHEET_CREATE: &[E] = &[
 
 const SHEET_MODIFY: &[E] = &[
   c("Unfold", Icon::Unfold, D(Kind::Unfold)),
+  c("Refold Faces", Icon::Refold, D(Kind::Refold)),
   c("Sheet Metal Rules", Icon::SmRules, D(Kind::SheetRules)),
   x("Corner Closure", Icon::CornerClosure),
   x("Join by bend", Icon::Configure),
@@ -651,6 +655,59 @@ const SKETCH: [Group; 9] = [
   Group { label: "FINISH SKETCH", quick: &["Finish Sketch"], menu: FINISH },
 ];
 
+use Cmd::DrawingExport as X;
+use Cmd::DrawingView as V;
+
+const DRAWING_CREATE: &[E] = &[
+  c("Base View", Icon::BaseView, V("front")),
+  c("Projected View", Icon::ProjectedView, V("top")),
+  E::Sep,
+  c("Section View", Icon::SectionView, V("section")),
+  c("Detail View", Icon::DetailView, V("detail")),
+  c("Flat Pattern View", Icon::FlatPattern, V("flat")),
+  E::Sep,
+  c("Create Drawing", Icon::NewDrawing, D(Kind::NewDrawing)),
+];
+
+const DRAWING_MODIFY: &[E] = &[
+  c("Move", Icon::Move, D(Kind::DrawingMoveView)).k("M"),
+  c("Delete", Icon::Remove, D(Kind::DrawingMoveView)),
+  E::Sep,
+  c("Sheet Settings", Icon::SheetSettings, D(Kind::DrawingSettings)),
+];
+
+const DRAWING_DIMENSIONS: &[E] = &[c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D")];
+
+const DRAWING_TEXT: &[E] = &[c("Text", Icon::SkText, D(Kind::DrawingNote)).k("T")];
+
+const DRAWING_TABLES: &[E] = &[
+  c("Parts List", Icon::PartsList, D(Kind::DrawingSettings)),
+  c("Title Block", Icon::TitleBlock, D(Kind::DrawingTitle)),
+];
+
+const DRAWING_EXPORT: &[E] = &[
+  c("PDF Export", Icon::ExportPdf, X("pdf")),
+  c("DXF Export", Icon::ExportDxf, X("dxf")),
+  c("SVG Export", Icon::ExportSvg, X("svg")),
+];
+
+const FINISH_DRAWING: &[E] = &[c("Finish Drawing", Icon::Finish, Cmd::FinishDrawing)];
+
+/// The Drawing workspace's toolbar.
+const DRAWING: [Group; 7] = [
+  Group {
+    label: "CREATE",
+    quick: &["Base View", "Projected View", "Section View", "Detail View"],
+    menu: DRAWING_CREATE,
+  },
+  Group { label: "MODIFY", quick: &["Move", "Sheet Settings"], menu: DRAWING_MODIFY },
+  Group { label: "DIMENSIONS", quick: &["Dimension"], menu: DRAWING_DIMENSIONS },
+  Group { label: "TEXT", quick: &["Text"], menu: DRAWING_TEXT },
+  Group { label: "TABLES", quick: &["Parts List", "Title Block"], menu: DRAWING_TABLES },
+  Group { label: "EXPORT", quick: &["PDF Export", "DXF Export", "SVG Export"], menu: DRAWING_EXPORT },
+  Group { label: "FINISH DRAWING", quick: &["Finish Drawing"], menu: FINISH_DRAWING },
+];
+
 const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
@@ -771,6 +828,7 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Manage => (&MANAGE, &[]),
     Tab::Utilities => (&UTILITIES, &[]),
     Tab::Sketch => (&SKETCH, &[]),
+    Tab::Drawing => (&DRAWING, &[]),
   };
   let mut pick: Option<Item> = None;
   for g in own.iter().chain(shared.iter()) {
@@ -813,7 +871,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     panels::group_label(ui, g.label, w, open)
   });
   egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick));
-  if g.label == "FINISH SKETCH" {
+  if matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING") {
     ui.painter()
       .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
   }

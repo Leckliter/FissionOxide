@@ -94,6 +94,8 @@ On Linux the app needs the usual X11/Wayland libraries (`libxkbcommon-x11`, Mesa
 | Construction geometry  | Select curves, press X                                      |
 | Extrude / Fillet       | E / F (select profiles or edges first)                      |
 | Hole / Press Pull / Joint | H / Q / J                                                |
+| Drawings               | Workspace switcher → Drawing (or File → New Drawing from Design); wheel zooms the sheet, right-drag pans, double-click fits; Finish Drawing returns |
+| Components and joints  | Right-click a component in the browser to rename, ground, duplicate or delete it; double-click a joint to drive it |
 | Picking in a command   | With a command dialog open, clicks add to (or remove from) its selection |
 | Edit a feature         | Double-click it in the timeline                             |
 | Marking menu           | Right-click (without dragging): click an item, or anywhere in its direction; the list below has commands for what you clicked |

@@ -62,6 +62,19 @@ pub enum Kind {
   SkCircPattern,
   SkRectPattern,
   Project,
+  Refold,
+  // assembly motion and component copies
+  DriveJoint,
+  MotionStudy,
+  CopyComponent,
+  // drawings
+  NewDrawing,
+  DrawingView,
+  DrawingMoveView,
+  DrawingDimension,
+  DrawingNote,
+  DrawingTitle,
+  DrawingSettings,
 }
 
 impl Kind {
@@ -110,6 +123,17 @@ impl Kind {
       Kind::SkCircPattern => "CIRCULAR PATTERN",
       Kind::SkRectPattern => "RECTANGULAR PATTERN",
       Kind::Project => "PROJECT",
+      Kind::Refold => "REFOLD FACES",
+      Kind::DriveJoint => "DRIVE JOINTS",
+      Kind::MotionStudy => "MOTION STUDY",
+      Kind::CopyComponent => "DUPLICATE COMPONENT",
+      Kind::NewDrawing => "CREATE DRAWING",
+      Kind::DrawingView => "DRAWING VIEW",
+      Kind::DrawingMoveView => "MOVE VIEW",
+      Kind::DrawingDimension => "DIMENSION",
+      Kind::DrawingNote => "TEXT",
+      Kind::DrawingTitle => "TITLE BLOCK",
+      Kind::DrawingSettings => "SHEET SETTINGS",
     }
   }
 
@@ -158,6 +182,17 @@ impl Kind {
       Kind::SkCircPattern => Icon::SkCircPattern,
       Kind::SkRectPattern => Icon::SkRectPattern,
       Kind::Project => Icon::Project,
+      Kind::Refold => Icon::Refold,
+      Kind::DriveJoint => Icon::DriveJoint,
+      Kind::MotionStudy => Icon::MotionStudy,
+      Kind::CopyComponent => Icon::Component,
+      Kind::NewDrawing => Icon::NewDrawing,
+      Kind::DrawingSettings => Icon::SheetSettings,
+      Kind::DrawingView => Icon::BaseView,
+      Kind::DrawingMoveView => Icon::Move,
+      Kind::DrawingDimension => Icon::Dimension,
+      Kind::DrawingNote => Icon::SkText,
+      Kind::DrawingTitle => Icon::TitleBlock,
     }
   }
 
@@ -191,6 +226,17 @@ impl Kind {
       Kind::SkCircPattern => ("Circular Pattern", "Copy sketch curves around a point"),
       Kind::SkRectPattern => ("Rectangular Pattern", "Copy sketch curves in rows and columns"),
       Kind::Project => ("Project", "Project a body's or face's edges into the sketch"),
+      Kind::Refold => ("Refold Faces", "Fold an unfolded sheet back up, keeping cuts made while flat"),
+      Kind::DriveJoint => ("Drive Joints", "Set a joint's rotation and slide"),
+      Kind::MotionStudy => ("Motion Study", "Step a joint through a range and check for interference"),
+      Kind::CopyComponent => ("Duplicate Component", "Another instance of a component that follows the original"),
+      Kind::NewDrawing => ("Create Drawing", "A drawing of the design with standard views"),
+      Kind::DrawingView => ("Base View", "Add a view to the drawing"),
+      Kind::DrawingMoveView => ("Move View", "Place or delete a drawing view"),
+      Kind::DrawingDimension => ("Dimension", "Dimension two model points in a view"),
+      Kind::DrawingNote => ("Text", "A note on the sheet"),
+      Kind::DrawingTitle => ("Title Block", "Fill in the title block"),
+      Kind::DrawingSettings => ("Sheet Settings", "Sheet size, scale, projection and tables"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -212,12 +258,26 @@ impl Kind {
         | Kind::ConvertSheet
         | Kind::Unfold
         | Kind::Joint
+        | Kind::Refold
     )
   }
 
   /// Dialogs that only show information (no OK, nothing applied).
   fn reports(self) -> bool {
-    matches!(self, Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom)
+    matches!(self, Kind::Inspect | Kind::FlatPattern | Kind::Interference | Kind::Bom | Kind::MotionStudy)
+  }
+
+  /// Dialogs of the Drawing workspace.
+  pub fn drawing(self) -> bool {
+    matches!(
+      self,
+      Kind::DrawingView
+        | Kind::DrawingMoveView
+        | Kind::DrawingDimension
+        | Kind::DrawingNote
+        | Kind::DrawingTitle
+        | Kind::DrawingSettings
+    )
   }
 
   /// Dialogs that change the sketch being edited.
@@ -306,7 +366,40 @@ pub struct Dialog {
   name: String,
   /// Output of report dialogs (flat pattern, interference, BOM).
   report: Option<Value>,
+  /// Joint, component or drawing the dialog works on; Split Body's tool body.
+  target: Option<u32>,
+  /// Drawing view.
+  view: Option<u32>,
+  /// Second model point (drawing dimensions).
+  xyz: [String; 3],
+  /// Create Drawing's standard views (see [`VIEWS`]).
+  view_on: [bool; 7],
 }
+
+const VIEWS: [(&str, &str); 7] = [
+  ("front", "Front"),
+  ("top", "Top"),
+  ("right", "Right"),
+  ("iso", "Isometric"),
+  ("back", "Back"),
+  ("bottom", "Bottom"),
+  ("left", "Left"),
+];
+const VIEW_KINDS: [(&str, &str); 10] = [
+  ("front", "Front"),
+  ("top", "Top"),
+  ("right", "Right"),
+  ("iso", "Isometric"),
+  ("back", "Back"),
+  ("bottom", "Bottom"),
+  ("left", "Left"),
+  ("section", "Section"),
+  ("detail", "Detail"),
+  ("flat", "Flat pattern"),
+];
+const SHEETS: [(&str, &str); 7] =
+  [("a4", "A4"), ("a3", "A3"), ("a2", "A2"), ("a1", "A1"), ("a0", "A0"), ("letter", "Letter"), ("tabloid", "Tabloid")];
+const PROJECTIONS: [(&str, &str); 2] = [("third_angle", "Third angle"), ("first_angle", "First angle")];
 
 impl Dialog {
   fn blank(kind: Kind) -> Dialog {
@@ -362,7 +455,23 @@ impl Dialog {
       e: String::new(),
       name: String::new(),
       report: None,
+      target: None,
+      view: None,
+      xyz: ["0".into(), "0".into(), "0".into()],
+      view_on: [true, true, true, true, false, false, false],
     }
+  }
+
+  /// Presets the type (drawing views): the toolbar's Base / Section / Detail View entries.
+  pub fn set_choice(&mut self, choice: &'static str) {
+    self.choice = choice;
+    self.dirty = true;
+  }
+
+  /// Points a joint dialog at a joint (browser double-click).
+  pub fn set_target(&mut self, s: &Session, target: u32) {
+    self.target = Some(target);
+    self.load_joint(s);
   }
 
   /// Does this dialog preview on demand (see [`Kind::picks_model`])?
@@ -463,6 +572,53 @@ impl Dialog {
         d.plane_label = "XY plane".into();
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::DriveJoint | Kind::MotionStudy => {
+        d.target = joints(s).first().map(|(id, _)| *id);
+        d.position = "rotation";
+        d.a = "-45 deg".into();
+        d.b = "45 deg".into();
+        d.count = "8".into();
+        d.load_joint(s);
+      }
+      Kind::CopyComponent => {
+        d.target = sel_bodies(s)
+          .iter()
+          .find_map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0))
+          .or_else(|| s.design.components.first().map(|c| c.id.0));
+        d.translate = ["50 mm".into(), "0 mm".into(), "0 mm".into()];
+      }
+      Kind::NewDrawing => {
+        d.name = format!("Drawing{}", s.design.drawings.len() + 1);
+        d.position = "a3";
+        d.choice = "third_angle";
+        d.a = "auto".into();
+        d.flag = true;
+        d.flag2 = true;
+      }
+      Kind::DrawingView => {
+        d.choice = "front";
+        d.axis = "x".into();
+        d.distance = "0".into();
+        d.radius = "10".into();
+        d.count = "2".into();
+        d.flag = true;
+        d.at = [String::new(), String::new()];
+        if let Some(e) = sel_edges(s).first() {
+          d.xyz = edge_point(s, e, false).map(|v| v.map(|x| format!("{x:.3}"))).unwrap_or(d.xyz.clone());
+        }
+      }
+      Kind::DrawingDimension => {
+        d.choice = "aligned";
+        d.distance = "10".into();
+        if let Some(e) = sel_edges(s).first() {
+          d.translate = edge_point(s, e, true).map(|v| v.map(|x| format!("{x:.3}"))).unwrap_or(d.translate.clone());
+          d.xyz = edge_point(s, e, false).map(|v| v.map(|x| format!("{x:.3}"))).unwrap_or(d.xyz.clone());
+        }
+      }
+      Kind::DrawingNote => {
+        d.name = "NOTE".into();
+        d.at = ["20".into(), "20".into()];
+      }
       Kind::Flange => {
         // edges picked → edge flange; a sketch of open curves only → contour flange
         let open_only = d.sketch.and_then(|sk| s.model.sketches.get(&sk)).is_some_and(|r| r.profiles.is_empty());
@@ -546,6 +702,10 @@ impl Dialog {
     d.comps = d.bodies.iter().map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
     if kind == Kind::Joint {
       d.comps = d.origins.iter().map(|(b, _)| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
+    }
+    if kind.drawing() {
+      d.target = app.drawing;
+      d.load_drawing(s);
     }
     if matches!(kind, Kind::Flange | Kind::ConvertSheet) {
       d.rules = s.design.sheet_metal_rules.iter().map(|r| r.name.clone()).collect();
@@ -709,6 +869,15 @@ impl Dialog {
       Kind::Draft => {
         ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
       }
+      Kind::SplitBody if self.target.is_some() => {
+        let tool = self.target?;
+        let bodies: Vec<u32> = self.bodies.iter().copied().filter(|b| *b != tool).collect();
+        let mut p = json!({"tool": tool, "remove_tool": self.flag});
+        if !bodies.is_empty() {
+          p["bodies"] = json!(bodies);
+        }
+        ("split_by_body", p)
+      }
       Kind::SplitBody => {
         let mut p = json!({"plane": self.plane});
         if !self.bodies.is_empty() {
@@ -808,6 +977,82 @@ impl Dialog {
         }
         ("sketch.pattern_rect", p)
       }
+      Kind::Refold => {
+        let mut p = json!({});
+        if let Some(b) = self.bodies.first() {
+          p["body"] = json!(b);
+        }
+        ("sheet.refold", p)
+      }
+      Kind::DriveJoint => (
+        "joint.drive",
+        json!({"joint": self.target?, "rotation": self.angle, "slide": self.distance, "slide2": self.distance2}),
+      ),
+      Kind::MotionStudy => return None,
+      Kind::CopyComponent => ("component.copy", json!({"component": self.target?, "translate": self.translate})),
+      Kind::NewDrawing => {
+        let views: Vec<&str> = VIEWS.iter().zip(self.view_on).filter(|(_, on)| *on).map(|((k, _), _)| *k).collect();
+        (
+          "drawing.create",
+          json!({
+            "name": self.name, "views": views, "sheet": self.position, "scale": scale_value(&self.a),
+            "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+          }),
+        )
+      }
+      Kind::DrawingSettings => (
+        "drawing.set",
+        json!({
+          "drawing": self.target?, "rename": self.name, "sheet": self.position, "scale": scale_value(&self.a),
+          "projection": self.choice, "auto_dimensions": self.flag, "parts_list": self.flag2,
+        }),
+      ),
+      Kind::DrawingView => {
+        let num = |t: &str| t.trim().parse::<f64>().ok();
+        let kind = match self.choice {
+          "section" => json!({"section": self.axis, "offset": num(&self.distance)?, "flip": self.flip}),
+          "flat" => json!({"flat": self.bodies.first()?}),
+          "detail" => json!({
+            "detail": self.view?, "center": self.xyz.iter().map(|v| num(v)).collect::<Option<Vec<_>>>()?,
+            "radius": num(&self.radius)?, "factor": num(&self.count)?,
+          }),
+          k => json!(k),
+        };
+        let mut p = json!({"drawing": self.target?, "kind": kind, "hidden_lines": self.flag});
+        if let (Some(x), Some(y)) = (num(&self.at[0]), num(&self.at[1])) {
+          p["at"] = json!([x, y]);
+        }
+        ("drawing.add_view", p)
+      }
+      Kind::DrawingMoveView => {
+        let num = |t: &str| t.trim().parse::<f64>().ok();
+        let at = if self.flag { Value::Null } else { json!([num(&self.at[0])?, num(&self.at[1])?]) };
+        ("drawing.move_view", json!({"drawing": self.target?, "view": self.view?, "at": at}))
+      }
+      Kind::DrawingDimension => {
+        let pt = |v: &[String; 3]| v.iter().map(|x| x.trim().parse::<f64>().ok()).collect::<Option<Vec<_>>>();
+        (
+          "drawing.dimension",
+          json!({
+            "drawing": self.target?, "view": self.view?, "a": pt(&self.translate)?, "b": pt(&self.xyz)?,
+            "orientation": self.choice, "offset": self.distance.trim().parse::<f64>().ok()?,
+          }),
+        )
+      }
+      Kind::DrawingNote => {
+        let num = |t: &str| t.trim().parse::<f64>().ok();
+        (
+          "drawing.note",
+          json!({"drawing": self.target?, "at": [num(&self.at[0])?, num(&self.at[1])?], "text": self.name}),
+        )
+      }
+      Kind::DrawingTitle => (
+        "drawing.title",
+        json!({
+          "drawing": self.target?, "title": self.name, "author": self.a, "part_number": self.b,
+          "material": self.c, "revision": self.d, "company": self.e,
+        }),
+      ),
       Kind::Project => {
         let mut p = json!({"body": self.bodies.first()?, "associative": self.flag});
         if let Some(f) = self.faces.first().and_then(|f| f.get("face")) {
@@ -970,6 +1215,10 @@ impl Dialog {
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
+      Kind::DriveJoint | Kind::CopyComponent => self.target.is_some(),
+      Kind::NewDrawing => self.view_on.iter().any(|v| *v),
+      Kind::DrawingMoveView | Kind::DrawingDimension => self.target.is_some() && self.view.is_some(),
+      Kind::DrawingView => self.target.is_some() && (self.choice != "flat" || !self.bodies.is_empty()),
       _ => true,
     }
   }
@@ -1092,6 +1341,19 @@ impl Dialog {
         let f = sel_faces(s);
         if f != self.faces {
           self.faces = f;
+        }
+      }
+      Kind::Refold if !self.applied => {
+        let b = sel_bodies(s);
+        if b != self.bodies {
+          self.bodies = b;
+        }
+      }
+      Kind::DrawingView => {
+        let b = sel_bodies(s);
+        if !b.is_empty() && b != self.bodies {
+          self.bodies = b;
+          self.dirty = self.choice == "flat";
         }
       }
       Kind::ConvertSheet | Kind::Unfold | Kind::Project if !self.applied || !self.picks() => {
@@ -1279,6 +1541,9 @@ impl Dialog {
         keep = false;
         app.s.selection.clear();
         app.status = Some((format!("{} done", self.kind.title().to_lowercase()), false));
+        if self.kind == Kind::NewDrawing {
+          app.drawing = app.s.design.drawings.last().map(|d| d.id);
+        }
       } else if !self.applied && self.error.is_none() {
         self.error = Some(self.missing_input().into());
       } else if self.applied {
@@ -1318,6 +1583,11 @@ impl Dialog {
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
       Kind::SkMirror => "select curves and a mirror line",
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
+      Kind::DriveJoint => "the design has no joints",
+      Kind::CopyComponent => "the design has no components",
+      Kind::NewDrawing => "pick at least one view",
+      Kind::DrawingMoveView | Kind::DrawingDimension => "pick a view",
+      Kind::DrawingView if self.choice == "flat" => "select a sheet metal body",
       _ => "missing input",
     }
   }
@@ -1690,8 +1960,32 @@ impl Dialog {
         sel_chip(ui, accent, &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
         ui.label("Splitting tool");
-        self.plane_choice(ui);
+        let shown = match self.target {
+          Some(b) => app.s.body_name(BodyId(b)),
+          None => self.plane_label.clone(),
+        };
+        let bodies: Vec<(u32, String)> = app.s.model.bodies.iter().map(|b| (b.id.0, app.s.body_name(b.id))).collect();
+        egui::ComboBox::from_id_salt("splittool").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+          for (l, p) in [("XY plane", "xy"), ("XZ plane", "xz"), ("YZ plane", "yz")] {
+            if ui.selectable_label(self.target.is_none() && self.plane_label == l, l).clicked() {
+              self.target = None;
+              self.plane = json!(p);
+              self.plane_label = l.into();
+              *dirty = true;
+            }
+          }
+          ui.separator();
+          for (id, n) in &bodies {
+            if ui.selectable_label(self.target == Some(*id), n).clicked() {
+              self.target = Some(*id);
+              *dirty = true;
+            }
+          }
+        });
         ui.end_row();
+        if self.target.is_some() {
+          Self::check(ui, "Remove the tool body", &mut self.flag, dirty);
+        }
       }
       Kind::Flange => {
         let before = self.choice;
@@ -2004,6 +2298,191 @@ impl Dialog {
           Self::field(ui, "Distance 2", &mut self.spacing2, dirty);
         }
       }
+      Kind::Refold => {
+        ui.label("Body");
+        if self.bodies.is_empty() {
+          ui.label(RichText::new("the unfolded sheet").color(theme::MUTED));
+        } else {
+          chip(ui, 1, "body");
+        }
+        ui.end_row();
+      }
+      Kind::DriveJoint | Kind::MotionStudy => {
+        ui.label("Joint");
+        let list = joints(&app.s);
+        let cur = list.iter().find(|(j, _)| Some(*j) == self.target).map(|(_, n)| n.clone());
+        let mut picked = false;
+        egui::ComboBox::from_id_salt("joint").selected_text(cur.unwrap_or("No joints".into())).width(140.0).show_ui(
+          ui,
+          |ui| {
+            for (j, n) in &list {
+              if ui.selectable_label(self.target == Some(*j), n).clicked() {
+                self.target = Some(*j);
+                picked = true;
+              }
+            }
+          },
+        );
+        ui.end_row();
+        if picked {
+          self.withdraw(&mut app.s);
+          self.load_joint(&app.s);
+          self.report = None;
+        }
+        if self.kind == Kind::DriveJoint {
+          Self::field(ui, "Rotation", &mut self.angle, dirty);
+          Self::field(ui, "Slide", &mut self.distance, dirty);
+          Self::field(ui, "Slide 2", &mut self.distance2, dirty);
+        } else {
+          const MOTIONS: [(&str, &str); 4] =
+            [("rotation", "Rotation"), ("slide", "Slide"), ("slide2", "Slide 2"), ("pitch", "Pitch")];
+          // the study runs on demand: it rebuilds the design at every step
+          let mut later = false;
+          Self::choose(ui, "Motion", "motion", &mut self.position, &MOTIONS, &mut later);
+          Self::field(ui, "From", &mut self.a, &mut later);
+          Self::field(ui, "To", &mut self.b, &mut later);
+          Self::field(ui, "Steps", &mut self.count, &mut later);
+          ui.label("");
+          if panels::secondary_button(ui, "Run").clicked() {
+            self.refresh_report(&mut app.s);
+          }
+          ui.end_row();
+          for row in self.report.as_ref().and_then(Value::as_array).cloned().unwrap_or_default() {
+            let v = row.get("value").and_then(Value::as_f64).unwrap_or(0.0);
+            let unit = if matches!(self.position, "rotation" | "pitch") { "°" } else { " mm" };
+            ui.label(RichText::new(format!("  {v:.1}{unit}")).color(theme::MUTED));
+            let clashes = row.get("interference").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+            match row.get("error").and_then(Value::as_str) {
+              Some(e) => ui.label(RichText::new(e).color(theme::ERROR)),
+              None if clashes > 0 => ui.label(RichText::new(format!("{clashes} interference")).color(theme::WARNING)),
+              None => ui.label("clear"),
+            };
+            ui.end_row();
+          }
+        }
+      }
+      Kind::CopyComponent => {
+        ui.label("Component");
+        let list: Vec<(u32, String)> = app.s.design.components.iter().map(|c| (c.id.0, c.name.clone())).collect();
+        let cur = list.iter().find(|(c, _)| Some(*c) == self.target).map(|(_, n)| n.clone());
+        egui::ComboBox::from_id_salt("comp").selected_text(cur.unwrap_or("No components".into())).width(140.0).show_ui(
+          ui,
+          |ui| {
+            for (c, n) in &list {
+              if ui.selectable_label(self.target == Some(*c), n).clicked() {
+                self.target = Some(*c);
+                *dirty = true;
+              }
+            }
+          },
+        );
+        ui.end_row();
+        for (i, l) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
+          Self::field(ui, l, &mut self.translate[i], dirty);
+        }
+      }
+      Kind::NewDrawing | Kind::DrawingSettings => {
+        Self::field(ui, "Name", &mut self.name, dirty);
+        if self.kind == Kind::NewDrawing {
+          ui.label("Views");
+          ui.vertical(|ui| {
+            for (i, (_, l)) in VIEWS.iter().enumerate() {
+              if ui.checkbox(&mut self.view_on[i], *l).changed() {
+                *dirty = true;
+              }
+            }
+          });
+          ui.end_row();
+        }
+        Self::choose(ui, "Sheet size", "sheet", &mut self.position, &SHEETS, dirty);
+        Self::field(ui, "Scale", &mut self.a, dirty);
+        Self::choose(ui, "Projection", "proj", &mut self.choice, &PROJECTIONS, dirty);
+        Self::check(ui, "Automatic dimensions", &mut self.flag, dirty);
+        Self::check(ui, "Parts list", &mut self.flag2, dirty);
+        if self.kind == Kind::DrawingSettings {
+          ui.label("");
+          if panels::secondary_button(ui, "Delete Drawing").clicked() {
+            self.withdraw(&mut app.s);
+            if app.run("drawing.delete", json!({"drawing": self.target})).is_some() {
+              app.drawing = None;
+              self.closed = true;
+            }
+          }
+          ui.end_row();
+        }
+      }
+      Kind::DrawingView => {
+        Self::choose(ui, "View", "vkind", &mut self.choice, &VIEW_KINDS, dirty);
+        match self.choice {
+          "section" => {
+            const AXES: [(&str, &str); 3] = [("x", "Across X"), ("y", "Across Y"), ("z", "Across Z")];
+            let mut a: &'static str = AXES.iter().find(|(k, _)| *k == self.axis).map(|(k, _)| *k).unwrap_or("x");
+            Self::choose(ui, "Cut", "vaxis", &mut a, &AXES, dirty);
+            self.axis = a.into();
+            Self::field(ui, "Offset (mm)", &mut self.distance, dirty);
+            Self::check(ui, "Flip", &mut self.flip, dirty);
+          }
+          "detail" => {
+            self.view_combo(app, ui, "Parent view", dirty);
+            Self::xyz_row(ui, "Centre (model)", &mut self.xyz, dirty);
+            Self::field(ui, "Radius (mm)", &mut self.radius, dirty);
+            Self::field(ui, "Enlargement", &mut self.count, dirty);
+          }
+          "flat" => {
+            ui.label("Body");
+            chip(ui, self.bodies.len().min(1), "body");
+            ui.end_row();
+          }
+          _ => {}
+        }
+        Self::xy_row(ui, "Position (sheet)", &mut self.at, dirty);
+        ui.label("");
+        ui.label(RichText::new("empty = placed automatically").small().color(theme::MUTED));
+        ui.end_row();
+        Self::check(ui, "Hidden lines", &mut self.flag, dirty);
+      }
+      Kind::DrawingMoveView => {
+        if self.view_combo(app, ui, "View", dirty) {
+          self.withdraw(&mut app.s);
+          self.load_view_at(&app.s);
+        }
+        Self::check(ui, "Place automatically", &mut self.flag, dirty);
+        if !self.flag {
+          Self::xy_row(ui, "Centre (sheet mm)", &mut self.at, dirty);
+        }
+        ui.label("");
+        if panels::secondary_button(ui, "Delete View").clicked() && self.view.is_some() {
+          self.withdraw(&mut app.s);
+          if app.run("drawing.remove_view", json!({"drawing": self.target, "view": self.view})).is_some() {
+            self.closed = true;
+          }
+        }
+        ui.end_row();
+      }
+      Kind::DrawingDimension => {
+        self.view_combo(app, ui, "View", dirty);
+        Self::xyz_row(ui, "Point 1 (model)", &mut self.translate, dirty);
+        Self::xyz_row(ui, "Point 2 (model)", &mut self.xyz, dirty);
+        const ORIENT: [(&str, &str); 3] =
+          [("aligned", "Aligned"), ("horizontal", "Horizontal"), ("vertical", "Vertical")];
+        Self::choose(ui, "Orientation", "orient", &mut self.choice, &ORIENT, dirty);
+        Self::field(ui, "Offset (sheet mm)", &mut self.distance, dirty);
+        ui.label("");
+        ui.label(RichText::new("a selected model edge fills the points").small().color(theme::MUTED));
+        ui.end_row();
+      }
+      Kind::DrawingNote => {
+        Self::field(ui, "Text", &mut self.name, dirty);
+        Self::xy_row(ui, "Position (sheet mm)", &mut self.at, dirty);
+      }
+      Kind::DrawingTitle => {
+        Self::field(ui, "Title", &mut self.name, dirty);
+        Self::field(ui, "Author", &mut self.a, dirty);
+        Self::field(ui, "Part number", &mut self.b, dirty);
+        Self::field(ui, "Material", &mut self.c, dirty);
+        Self::field(ui, "Revision", &mut self.d, dirty);
+        Self::field(ui, "Company", &mut self.e, dirty);
+      }
       Kind::Project => {
         ui.label("Geometry");
         let what = if self.faces.is_empty() { "body" } else { "face" };
@@ -2030,6 +2509,16 @@ impl Dialog {
       }
       Kind::Interference => s.execute("assembly.interference", &json!({})),
       Kind::Bom => s.execute("assembly.bom", &json!({})),
+      Kind::MotionStudy => match self.target {
+        Some(j) => s.execute(
+          "motion.study",
+          &json!({
+            "joint": j, "motion": self.position, "from": self.a, "to": self.b,
+            "steps": self.count.trim().parse::<u64>().unwrap_or(8),
+          }),
+        ),
+        None => return,
+      },
       _ => return,
     };
     match r {
@@ -2042,6 +2531,104 @@ impl Dialog {
         self.error = Some(e.0);
       }
     }
+  }
+
+  /// Fills the drive fields from the joint's current motion.
+  fn load_joint(&mut self, s: &Session) {
+    if let Some(FeatureKind::Joint { rotation, slide, slide2, .. }) =
+      self.target.and_then(|j| s.design.feature(FeatureId(j))).map(|f| &f.kind)
+    {
+      self.angle = rotation.clone();
+      self.distance = slide.clone();
+      self.distance2 = slide2.clone();
+    }
+  }
+
+  /// Fills the drawing dialogs' fields from the open drawing.
+  fn load_drawing(&mut self, s: &Session) {
+    let Some(d) = self.target.and_then(|id| s.design.drawing(id)) else { return };
+    self.view = d.views.first().map(|v| v.id);
+    match self.kind {
+      Kind::DrawingSettings => {
+        self.name = d.name.clone();
+        self.position = SHEETS
+          .iter()
+          .find(|(k, _)| clf_engine::model::drawing::SheetSize::parse(k) == Some(d.sheet))
+          .map(|(k, _)| *k)
+          .unwrap_or("a3");
+        self.a = d.scale.map(clf_engine::model::drawing::scale_text).unwrap_or("auto".into());
+        self.choice = match d.projection {
+          clf_engine::model::drawing::ProjectionAngle::FirstAngle => "first_angle",
+          _ => "third_angle",
+        };
+        self.flag = d.auto_dimensions;
+        self.flag2 = d.parts_list;
+      }
+      Kind::DrawingTitle => {
+        let t = &d.title;
+        self.name = t.title.clone();
+        self.a = t.author.clone();
+        self.b = t.part_number.clone();
+        self.c = t.material.clone();
+        self.d = t.revision.clone();
+        self.e = t.company.clone();
+      }
+      Kind::DrawingMoveView => self.load_view_at(s),
+      _ => {}
+    }
+  }
+
+  fn load_view_at(&mut self, s: &Session) {
+    let at = self
+      .target
+      .and_then(|id| s.design.drawing(id))
+      .and_then(|d| d.views.iter().find(|v| Some(v.id) == self.view))
+      .and_then(|v| v.at);
+    self.flag = at.is_none();
+    self.at = at.map(|[x, y]| [format!("{x:.1}"), format!("{y:.1}")]).unwrap_or(["".into(), "".into()]);
+  }
+
+  /// A drop-down of the open drawing's views.
+  fn view_combo(&mut self, app: &App, ui: &mut egui::Ui, label: &str, dirty: &mut bool) -> bool {
+    let views = self.target.map(|id| drawing_views(&app.s, id)).unwrap_or_default();
+    ui.label(label);
+    let cur = views.iter().find(|(v, _)| Some(*v) == self.view).map(|(_, l)| l.clone()).unwrap_or("Pick a view".into());
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(("view", label)).selected_text(cur).width(140.0).show_ui(ui, |ui| {
+      for (v, l) in &views {
+        if ui.selectable_label(self.view == Some(*v), l).clicked() {
+          self.view = Some(*v);
+          *dirty = true;
+          changed = true;
+        }
+      }
+    });
+    ui.end_row();
+    changed
+  }
+
+  fn xyz_row(ui: &mut egui::Ui, label: &str, v: &mut [String; 3], dirty: &mut bool) {
+    ui.label(label);
+    ui.horizontal(|ui| {
+      for x in v.iter_mut() {
+        if ui.add(egui::TextEdit::singleline(x).desired_width(44.0)).changed() {
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
+  fn xy_row(ui: &mut egui::Ui, label: &str, v: &mut [String; 2], dirty: &mut bool) {
+    ui.label(label);
+    ui.horizontal(|ui| {
+      for x in v.iter_mut() {
+        if ui.add(egui::TextEdit::singleline(x).desired_width(64.0)).changed() {
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
   }
 
   /// Fills the rule fields from the named rule ("" = the default rule).
@@ -2378,6 +2965,54 @@ fn sel_sections(s: &Session) -> Vec<(u32, [f64; 2])> {
   out
 }
 
+/// Joints in the timeline: id and name.
+fn joints(s: &Session) -> Vec<(u32, String)> {
+  s.design
+    .features
+    .iter()
+    .filter(|f| matches!(f.kind, FeatureKind::Joint { .. }))
+    .map(|f| (f.id.0, f.name.clone()))
+    .collect()
+}
+
+/// The views of a drawing: id and a label like "2 · Top".
+pub(crate) fn drawing_views(s: &Session, drawing: u32) -> Vec<(u32, String)> {
+  use clf_engine::model::drawing::ViewKind as V;
+  let Some(d) = s.design.drawing(drawing) else { return Vec::new() };
+  d.views
+    .iter()
+    .map(|v| {
+      let kind = match &v.kind {
+        V::Section { .. } => "Section".to_string(),
+        V::Flat { .. } => "Flat pattern".to_string(),
+        V::Detail { .. } => "Detail".to_string(),
+        V::Iso => "Isometric".to_string(),
+        k => format!("{k:?}"),
+      };
+      (v.id, format!("{} · {kind}", v.id))
+    })
+    .collect()
+}
+
+/// "auto" → null, "1:2" stays text, "0.5" → a number.
+fn scale_value(t: &str) -> Value {
+  let t = t.trim();
+  if t.is_empty() || t.eq_ignore_ascii_case("auto") {
+    Value::Null
+  } else {
+    t.parse::<f64>().map(|v| json!(v)).unwrap_or_else(|_| json!(t))
+  }
+}
+
+/// Start (or end) point of a picked edge `{body, edge}`.
+fn edge_point(s: &Session, e: &Value, start: bool) -> Option<[f64; 3]> {
+  let b = s.model.body(BodyId(e.get("body")?.as_u64()? as u32))?;
+  let id = e.get("edge")?.as_u64()? as u32;
+  let e = b.edges().iter().find(|x| x.id == id)?;
+  let p = if start { e.start } else { e.end };
+  Some([p.x, p.y, p.z])
+}
+
 /// Joint origins: the selected faces and edges, in pick order.
 fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
   s.selection
@@ -2669,5 +3304,121 @@ mod tests {
     apply(&mut s, &mut d);
     run(&mut s, "sketch.spline", json!({"points": [[0, -10], [10, -5], [20, -10]]}));
     run(&mut s, "sketch.trim", json!({"at": [30, 0]}));
+  }
+
+  #[test]
+  fn remaining_engine_commands() {
+    // split by body, refold
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 40, "height": 10}));
+    run(&mut s, "cylinder", json!({"radius": 5, "height": 30, "at": [20, 20]}));
+    let (plate, pin) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    let mut d = Dialog::blank(Kind::SplitBody);
+    d.bodies = vec![plate];
+    d.target = Some(pin);
+    apply(&mut s, &mut d);
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [80, 40]}));
+    run(&mut s, "sheet.flange", json!({}));
+    run(&mut s, "sheet.edge_flange", json!({"edges": [{"point": [40, 40, 1]}], "height": 15}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let mut d = Dialog::blank(Kind::Refold);
+    apply(&mut s, &mut d);
+
+    // components: duplicate, joint, drive, motion study
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+    run(&mut s, "box", json!({"width": 80, "depth": 20, "height": 5, "at": [40, 200]}));
+    let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    let b = run(&mut s, "component.create", json!({"bodies": [base]}))["component"].as_u64().unwrap() as u32;
+    let a = run(&mut s, "component.create", json!({"bodies": [arm]}))["component"].as_u64().unwrap() as u32;
+    let mut d = Dialog::blank(Kind::CopyComponent);
+    d.target = Some(b);
+    d.translate = ["0".into(), "-100 mm".into(), "0".into()];
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let j = run(
+      &mut s,
+      "joint",
+      json!({"moving": a, "moving_origin": {"at": [10, 200, 0]}, "fixed": b, "fixed_origin": {"at": [50, 30, 10]}, "kind": "revolute"}),
+    )["feature"]
+      .as_u64()
+      .unwrap() as u32;
+    let mut d = Dialog::blank(Kind::DriveJoint);
+    d.set_target(&s, j);
+    d.angle = "30 deg".into();
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let mut d = Dialog::blank(Kind::MotionStudy);
+    d.target = Some(j);
+    d.position = "rotation";
+    d.a = "0 deg".into();
+    d.b = "90 deg".into();
+    d.count = "3".into();
+    d.refresh_report(&mut s);
+    assert_eq!(d.report.as_ref().and_then(Value::as_array).map(Vec::len), Some(4), "{:?}", d.error);
+
+    // drawings
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 20}));
+    let mut d = Dialog::blank(Kind::NewDrawing);
+    d.name = "Part".into();
+    d.position = "a4";
+    d.choice = "first_angle";
+    d.a = "1:2".into();
+    apply(&mut s, &mut d);
+    let id = s.design.drawings.last().unwrap().id;
+    let views = drawing_views(&s, id);
+    assert_eq!(views.len(), 4);
+    let mut d = Dialog::blank(Kind::DrawingSettings);
+    d.target = Some(id);
+    d.load_drawing(&s);
+    assert_eq!((d.position, d.choice, d.a.as_str()), ("a4", "first_angle", "1:2"));
+    d.a = "auto".into();
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingView);
+    d.target = Some(id);
+    d.choice = "section";
+    d.axis = "x".into();
+    d.distance = "0".into();
+    d.at = [String::new(), String::new()];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingView);
+    d.target = Some(id);
+    d.choice = "detail";
+    d.view = Some(views[0].0);
+    d.xyz = ["0".into(), "0".into(), "0".into()];
+    d.radius = "8".into();
+    d.count = "2".into();
+    d.at = ["60".into(), "60".into()];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingMoveView);
+    d.target = Some(id);
+    d.view = Some(views[1].0);
+    d.at = ["100".into(), "80".into()];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingDimension);
+    d.target = Some(id);
+    d.view = Some(views[0].0);
+    d.choice = "aligned";
+    d.distance = "8".into();
+    d.translate = ["-20".into(), "-15".into(), "0".into()];
+    d.xyz = ["20".into(), "-15".into(), "0".into()];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingNote);
+    d.target = Some(id);
+    d.name = "BREAK SHARP EDGES".into();
+    d.at = ["20".into(), "20".into()];
+    apply(&mut s, &mut d);
+    let mut d = Dialog::blank(Kind::DrawingTitle);
+    d.target = Some(id);
+    d.name = "Bracket".into();
+    apply(&mut s, &mut d);
+    let dr = s.design.drawing(id).unwrap();
+    assert_eq!((dr.views.len(), dr.dimensions.len(), dr.title.title.as_str()), (6, 2, "Bracket"));
+    let plot = clf_engine::model::drawing::render(dr, &s.design, &s.model).unwrap();
+    assert!(plot.texts().contains(&"BREAK SHARP EDGES"));
   }
 }

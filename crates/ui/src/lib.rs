@@ -11,6 +11,7 @@ mod icons;
 mod marking;
 mod menus;
 mod panels;
+mod sheet;
 mod theme;
 mod viewport;
 
@@ -73,12 +74,19 @@ pub struct App {
   last_sketch: Option<clf_engine::model::FeatureId>,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
+  /// The drawing open in the Drawing workspace; None = the Design workspace.
+  pub drawing: Option<u32>,
+  /// The open drawing's rendered sheet, keyed by (design revision, drawing).
+  sheet_cache: Option<((u64, u32), Result<clf_engine::model::plot::Plot, String>)>,
+  /// Sheet zoom and pan in the Drawing workspace.
+  sheet_view: (f32, egui::Vec2),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RenameTarget {
   Feature(u32),
   Body(u32),
+  Component(u32),
 }
 
 /// Everything that changes the rendered image.
@@ -122,6 +130,9 @@ impl App {
       dialog: None,
       status: None,
       show_params: false,
+      drawing: None,
+      sheet_cache: None,
+      sheet_view: (1.0, egui::Vec2::ZERO),
       show_edges: true,
       show_grid: true,
       show_dims: true,
@@ -183,6 +194,7 @@ impl App {
   fn replace_session(&mut self, mut s: Session) {
     s.store_root = self.s.store_root.clone();
     self.s = s;
+    self.drawing = None;
     self.dialog = None;
     self.tool = Tool::Select;
     self.fit_view();
@@ -230,6 +242,7 @@ impl App {
   pub fn new_design(&mut self) {
     let root = self.s.store_root.clone();
     self.s = Session::default();
+    self.drawing = None;
     self.s.store_root = root;
     self.dialog = None;
     self.tool = Tool::Select;
@@ -380,6 +393,10 @@ impl App {
       }
       self.dim_edit = None;
     }
+    if self.drawing.is_some() {
+      // the model's shortcuts don't apply on a drawing sheet
+      return;
+    }
     if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
       viewport::finish_spline(self);
     }
@@ -434,6 +451,44 @@ impl App {
           self.start(d);
         }
       }
+    }
+  }
+
+  /// Switches to the Drawing workspace: the last drawing, or Create Drawing when there is none.
+  pub fn open_drawing_workspace(&mut self) {
+    match self.s.design.drawings.last().map(|d| d.id) {
+      Some(id) => self.open_drawing(id),
+      None => self.start(dialogs::Kind::NewDrawing),
+    }
+  }
+
+  pub fn open_drawing(&mut self, id: u32) {
+    self.cancel_dialog();
+    if self.s.edit_sketch.is_some() {
+      self.finish_sketch();
+    }
+    self.drawing = Some(id);
+    self.sheet_view = (1.0, egui::Vec2::ZERO);
+  }
+
+  /// Back to the Design workspace.
+  pub fn close_drawing(&mut self) {
+    if self.dialog.as_ref().is_some_and(|d| d.kind.drawing()) {
+      self.cancel_dialog();
+    }
+    self.drawing = None;
+    self.tab = panels::Tab::Solid;
+  }
+
+  /// Writes the open drawing as .pdf, .dxf or .svg.
+  pub fn export_drawing(&mut self, ext: &str) {
+    let Some(id) = self.drawing else { return };
+    let name = self.s.design.drawing(id).map(|d| d.name.clone()).unwrap_or_else(|| "drawing".into());
+    if let Some(p) =
+      rfd::FileDialog::new().add_filter(ext.to_uppercase(), &[ext]).set_file_name(format!("{name}.{ext}")).save_file()
+      && self.run("drawing.export", json!({"drawing": id, "path": p})).is_some()
+    {
+      self.status = Some((format!("Exported {}", p.display()), false));
     }
   }
 
@@ -606,21 +661,29 @@ impl App {
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
-    panels::timeline(self, ui);
+    if self.drawing.is_none() {
+      panels::timeline(self, ui);
+    }
     data_panel::show(self, ui);
-    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-      viewport::show(self, ui);
-    });
-    if self.show_comments {
-      panels::comments(self, &ctx);
+    if self.drawing.is_some() {
+      egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        sheet::show(self, ui);
+      });
+    } else {
+      egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        viewport::show(self, ui);
+      });
+      if self.show_comments {
+        panels::comments(self, &ctx);
+      }
+      panels::browser(self, &ctx);
+      if self.show_navbar {
+        panels::nav_bar(self, &ctx);
+      }
+      panels::assistant_tab(self, &ctx);
+      panels::sketch_palette(self, &ctx);
+      marking::show(self, &ctx);
     }
-    panels::browser(self, &ctx);
-    if self.show_navbar {
-      panels::nav_bar(self, &ctx);
-    }
-    panels::assistant_tab(self, &ctx);
-    panels::sketch_palette(self, &ctx);
-    marking::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
     panels::selection_info(self, &ctx);
