@@ -54,7 +54,9 @@ The crates that don't link OpenCASCADE build and test in seconds, so iterate on 
 cargo test -p clf-expr -p clf-sketch -p clf-exchange -p clf-store -p clf-render
 ```
 
-CI (`.github/workflows/ci.yml`) runs two jobs on every push and pull request to `main`:
+CI (`.github/workflows/ci.yml`) uses a pinned Rust (`RUST_TOOLCHAIN`, currently 1.97.0) so a new
+stable's clippy lints don't break `main` unannounced; bump it in its own pull request, fixing the
+new lints there. It runs two jobs on every push and pull request to `main`:
 
 - **fmt + pure crates**: `cargo fmt --check`, then clippy and tests for the five crates above.
   Results in a few minutes.

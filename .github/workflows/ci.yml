@@ -13,6 +13,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  RUST_TOOLCHAIN: 1.97.0
   # Crates that build without OpenCASCADE: they give feedback in a couple of minutes.
   PURE_CRATES: -p clf-expr -p clf-sketch -p clf-exchange -p clf-store -p clf-render
 
@@ -23,8 +24,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned so a new stable's clippy lints can't turn main red overnight; bump it on purpose.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,8 +50,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends cmake g++ pkg-config \
             libxkbcommon-x11-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libwayland-dev libgl1-mesa-dev libegl1-mesa-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
       - name: OCCT cache key
         id: occt
