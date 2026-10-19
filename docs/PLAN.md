@@ -101,7 +101,7 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **72 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Reference parts harness | done: **73 of 83 pass**, see [reference-parts.md](reference-parts.md) |
 | 0 | Edit checks, fuzzing | not started |
 
 ### Reference part failures to fix
@@ -109,8 +109,6 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 Wrong results:
 
 - **05** An outward taper extrude rounds the corners (10 faces, should be 6).
-- **26** The profile finder doesn't split a circle where a tangent line ends on it, so a belt
-  shape never becomes a region. The solver also leaves tangent points about 4e-5 mm off.
 - **42** Hole walls are split into two faces where overlapping patterned holes meet; volume is
   right. Needs face unification after booleans.
 - **83** A symmetric thicken leaves a cylindrical wall as two unrecognised faces.

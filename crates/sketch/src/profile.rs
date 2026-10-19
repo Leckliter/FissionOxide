@@ -19,6 +19,9 @@ use crate::{CurveKind, Sketch, angle_of, ccw_sweep, dist};
 
 /// Points closer than this are the same graph vertex.
 const MERGE_TOL: f64 = 1e-6;
+/// How far a computed tangent meeting point may sit from a curve end lying on the other curve and
+/// still be taken as that end (a tangency known to 1e-9 is only known to ~1e-4 along the curve).
+const TANGENT_SLACK: f64 = 1e-3;
 /// Segments per full turn when an arc is flattened for area / containment tests.
 const ARC_STEPS: f64 = 96.0;
 /// Hostile-input guard on edges considered.
@@ -428,9 +431,22 @@ fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg
     return (segs.into_iter().chain(curved).collect(), circles);
   }
   let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); geos.len()];
+  // ends of segment `k` lying on curve `h`
+  let ends_on = |k: usize, h: &Geo| -> Vec<[f64; 2]> {
+    if k >= n_segs {
+      return Vec::new();
+    }
+    let g = &geos[k];
+    [g.at(0.0), g.at(g.end_param())].into_iter().filter(|&p| h.contains(p) && h.distance(p) <= MERGE_TOL).collect()
+  };
   for i in 0..geos.len() {
     for j in i + 1..geos.len() {
-      for p in meet(&geos[i], &geos[j]) {
+      // An end lying on the other curve splits it there. Near a tangency the computed meeting
+      // point can sit well along the curve from that end (a solved tangent point is within a hair
+      // of the circle but not of the exact tangency), so the end wins over a meeting point near it.
+      let ends: Vec<[f64; 2]> = ends_on(i, &geos[j]).into_iter().chain(ends_on(j, &geos[i])).collect();
+      let meets = meet(&geos[i], &geos[j]).into_iter().filter(|&p| !ends.iter().any(|&e| dist(e, p) <= TANGENT_SLACK));
+      for p in meets.chain(ends.iter().copied()) {
         if geos[i].contains(p) && geos[j].contains(p) {
           cuts[i].push(geos[i].param(p));
           cuts[j].push(geos[j].param(p));
@@ -644,5 +660,32 @@ mod crossing_tests {
     let p = find_profiles(&s);
     assert_eq!(p.len(), 2, "two half discs");
     assert!(p.iter().all(|r| (r.area() - std::f64::consts::PI * 50.0).abs() < 0.5), "areas are of flattened arcs");
+  }
+
+  #[test]
+  fn lines_ending_tangent_on_circles_make_a_belt() {
+    // circles r 20 and r 10, 50 apart, with both outer tangent lines; the solver leaves tangent
+    // points slid along the line by ~4e-5 (only ~4e-11 off the circle), so place them like that
+    let (r1, r2, c2) = (20.0, 10.0, [50.0, 0.0]);
+    let a = ((r1 - r2) / 50.0f64).acos();
+    let mut s = Sketch::new();
+    s.add_circle(PtSpec::At(0.0, 0.0), r1).unwrap();
+    s.add_circle(PtSpec::At(c2[0], c2[1]), r2).unwrap();
+    for sign in [1.0, -1.0] {
+      let n = [a.cos(), sign * a.sin()];
+      let p1 = [r1 * n[0], r1 * n[1]];
+      let p2 = [c2[0] + r2 * n[0], c2[1] + r2 * n[1]];
+      let l = dist(p1, p2);
+      let t = [(p2[0] - p1[0]) / l, (p2[1] - p1[1]) / l];
+      let slide = 4e-5;
+      s.add_line(
+        PtSpec::At(p1[0] - t[0] * slide, p1[1] - t[1] * slide),
+        PtSpec::At(p2[0] + t[0] * slide, p2[1] + t[1] * slide),
+      )
+      .unwrap();
+    }
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 3, "two discs and the band between them");
+    assert!(p.iter().any(|r| r.contains([25.0, 0.0])), "the band is a region");
   }
 }

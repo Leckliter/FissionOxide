@@ -23,4 +23,4 @@
 {"cmd": "sketch.dimension", "type": "diameter", "curves": [6], "value": 8}
 {"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 3], "value": 50}
 {"cmd": "sketch.finish"}
-{"cmd": "extrude", "sketch": 1, "profiles": [[33.966938129, 3.270846467], [-14.989460287, -0.58293216], [24.864886795, 15.009169832], [22.190413953, -14.049128569]], "distance": 5, "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[40.805781774, 0.225705389], [-18.988255743, 0.466135515], [27.799951083, 13.717152545], [27.799951102, -13.717152541]], "distance": 5, "operation": "new_body"}

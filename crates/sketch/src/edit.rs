@@ -103,6 +103,17 @@ impl Geo {
     matches!(*self, Geo::Arc { sweep, .. } if sweep >= TAU - 1e-12)
   }
 
+  /// Distance from a point to the extended curve (infinite line, full circle).
+  pub(crate) fn distance(&self, p: P) -> f64 {
+    match *self {
+      Geo::Line { a, b } => match unit(sub(b, a)) {
+        Some(d) => cross(d, sub(p, a)).abs(),
+        None => dist(a, p),
+      },
+      Geo::Arc { c, r, .. } => (dist(c, p) - r).abs(),
+    }
+  }
+
   /// Is a point of the (extended) curve within its extent?
   pub(crate) fn contains(&self, p: P) -> bool {
     let t = self.param(p);

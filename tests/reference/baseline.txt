@@ -23,6 +23,7 @@
 23-bracket-multifeature
 24-user-parameters
 25-sketch-triangle
+26-sketch-belt
 27-sketch-trapezoid
 28-blind-pocket-fillets
 29-two-sided-and-partial-revolve
