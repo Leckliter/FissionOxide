@@ -751,3 +751,266 @@ fn splines_and_sketch_chamfers_make_profiles() {
   run(&mut s, "extrude", json!({"distance": 1}));
   assert!((total_volume(&s) - (200.0 - 3.0)).abs() < 1e-6, "{}", total_volume(&s));
 }
+
+#[test]
+fn transactions_group_and_roll_back() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+  run(&mut s, "transaction.begin", json!({}));
+  assert!(s.execute("transaction.begin", &json!({})).is_err(), "no nesting");
+  run(&mut s, "param.add", json!({"name": "w", "expr": "20"}));
+  run(&mut s, "box", json!({"at": [50, 0], "width": "w", "depth": 5, "height": 5}));
+  // a failing parameter change reverts only itself, not the transaction
+  assert!(s.execute("param.set", &json!({"name": "w", "expr": "nope"})).is_err());
+  assert_eq!(s.model.bodies.len(), 2);
+  assert_eq!(run(&mut s, "transaction.commit", json!({}))["changed"], true);
+  // one undo removes the whole group
+  assert!(s.undo());
+  assert_eq!(s.model.bodies.len(), 1);
+  assert!(s.design.parameters.is_empty());
+  assert!(s.redo());
+  assert_eq!(s.model.bodies.len(), 2);
+
+  run(&mut s, "transaction.begin", json!({}));
+  let first = s.model.bodies[0].id.0;
+  run(&mut s, "body.remove", json!({"bodies": [first]}));
+  assert_eq!(s.model.bodies.len(), 1);
+  assert_eq!(run(&mut s, "transaction.rollback", json!({}))["changed"], true);
+  assert_eq!(s.model.bodies.len(), 2);
+  // undo inside a transaction can't reach edits made before it
+  run(&mut s, "transaction.begin", json!({}));
+  assert!(!s.undo());
+  assert_eq!(run(&mut s, "transaction.commit", json!({}))["changed"], false);
+  assert!(s.execute("transaction.commit", &json!({})).is_err());
+}
+
+#[test]
+fn body_topology_lists_faces_and_edges() {
+  let mut s = Session::default();
+  let r = run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let body = r["result_bodies"][0].as_u64().unwrap();
+  let t = run(&mut s, "body.topology", json!({"body": body}));
+  let faces = t["faces"].as_array().unwrap();
+  let edges = t["edges"].as_array().unwrap();
+  assert_eq!((faces.len(), edges.len()), (6, 12));
+  let top = faces.iter().find(|f| f["normal"][2].as_f64().unwrap() > 0.9).unwrap();
+  assert_eq!(top["kind"], "plane");
+  assert!((top["area"].as_f64().unwrap() - 200.0).abs() < 1e-6);
+  assert_eq!(top["edges"].as_array().unwrap().len(), 4);
+  for e in edges {
+    assert_eq!(e["faces"].as_array().unwrap().len(), 2, "{e}");
+    assert_eq!(e["kind"], "line");
+  }
+  let total: f64 = edges.iter().map(|e| e["length"].as_f64().unwrap()).sum();
+  assert!((total - 4.0 * (20.0 + 10.0 + 5.0)).abs() < 1e-6, "{total}");
+  let only = run(&mut s, "body.topology", json!({"body": body, "faces": false}));
+  assert!(only.get("faces").is_none() && only["edges"].is_array());
+  assert!(s.execute("body.topology", &json!({"body": 999})).is_err());
+}
+
+#[test]
+fn colour_selection_and_sketch_visibility() {
+  let mut s = Session::default();
+  plate(&mut s);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "body.appearance", json!({"body": b, "color": "#ff8000"}));
+  assert_eq!(run(&mut s, "info", json!({}))["bodies"][0]["color"], "#ff8000");
+  run(&mut s, "body.appearance", json!({"body": b, "color": [0, 16, 255]}));
+  assert_eq!(s.design.body_settings(BodyId(b)).unwrap().color, Some([0, 16, 255]));
+  assert!(s.execute("body.appearance", &json!({"body": b, "color": "#12"})).is_err());
+  assert!(s.undo());
+  assert_eq!(s.design.body_settings(BodyId(b)).unwrap().color, Some([255, 128, 0]));
+  run(&mut s, "body.appearance", json!({"body": b, "color": null}));
+  assert!(run(&mut s, "info", json!({}))["bodies"][0]["color"].is_null());
+
+  run(&mut s, "select", json!({"items": [{"type": "body", "body": b}]}));
+  assert_eq!(run(&mut s, "selection", json!({})), json!([{"type": "body", "body": b}]));
+
+  // consumed sketches are hidden automatically; the flag overrides that either way
+  let sketch = s.design.features.iter().find(|f| f.kind.base_name() == "Sketch").unwrap().id;
+  let sketch_meshes = |s: &Session, hide: bool| {
+    let opts = scene::ViewOptions { hide_sketches: hide, ..Default::default() };
+    scene::SceneBuilder::default().build(s, &opts).0.meshes.len()
+  };
+  let auto = sketch_meshes(&s, false);
+  run(&mut s, "sketch.visible", json!({"sketch": sketch.0, "visible": true}));
+  assert!(sketch_meshes(&s, false) > auto);
+  assert!(sketch_meshes(&s, true) < sketch_meshes(&s, false));
+  run(&mut s, "sketch.visible", json!({"sketch": sketch.0, "visible": null}));
+  assert_eq!(sketch_meshes(&s, false), auto);
+}
+
+#[test]
+fn attributes_follow_their_targets() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}));
+  let sk = s.edit_sketch.unwrap().0;
+  let curve = run(&mut s, "sketch.info", json!({}))["curves"][0]["id"].as_u64().unwrap();
+  let r = run(&mut s, "extrude", json!({"distance": 5}));
+  let (feature, body) = (r["feature"].as_u64().unwrap(), r["result_bodies"][0].as_u64().unwrap());
+  let g = "com.example.tabs";
+  run(&mut s, "attribute.set", json!({"target": {"body": body}, "group": g, "name": "role", "value": "panel"}));
+  run(&mut s, "attribute.set", json!({"target": {"feature": feature}, "group": g, "name": "tab", "value": {"id": 3}}));
+  run(
+    &mut s,
+    "attribute.set",
+    json!({"target": {"sketch": sk, "curve": curve}, "group": g, "name": "edge", "value": 1}),
+  );
+  run(&mut s, "attribute.set", json!({"group": g, "name": "version", "value": 2}));
+  // set replaces
+  run(&mut s, "attribute.set", json!({"target": {"body": body}, "group": g, "name": "role", "value": "letter"}));
+  let on_body = run(&mut s, "attribute.get", json!({"target": {"body": body}}));
+  assert_eq!(on_body, json!([{"target": {"body": body}, "group": g, "name": "role", "value": "letter"}]));
+  assert_eq!(run(&mut s, "attribute.get", json!({}))[0]["value"], 2);
+  let tabs = run(&mut s, "attribute.find", json!({"name": "tab"}));
+  assert_eq!(tabs[0]["target"], json!({"feature": feature}));
+  assert_eq!(run(&mut s, "attribute.find", json!({"value": "letter"})).as_array().unwrap().len(), 1);
+  assert!(s.execute("attribute.set", &json!({"target": {"body": 999}, "group": g, "name": "x", "value": 1})).is_err());
+  // round-trips through a file
+  let d: Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
+  assert_eq!(d.attributes.len(), 4);
+  // deleting the sketch deletes the extrude and the attributes on both
+  run(&mut s, "feature.delete", json!({"feature": sk}));
+  assert_eq!(run(&mut s, "attribute.find", json!({"group": g})).as_array().unwrap().len(), 1);
+  assert_eq!(s.design.attributes.len(), 2, "the body's attribute stays stored, but its body is gone");
+  assert!(s.undo());
+  assert_eq!(run(&mut s, "attribute.find", json!({"group": g})).as_array().unwrap().len(), 4);
+  assert_eq!(run(&mut s, "attribute.delete", json!({"target": {"body": body}, "group": g}))["removed"], 1);
+}
+
+#[test]
+fn sketch_info_reports_frames_lengths_and_profile_curves() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "normal": [1, 0, 0], "x": [0, 1, 0]}}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [30, 20]}));
+  run(&mut s, "sketch.circle", json!({"center": [15, 10], "radius": 4}));
+  run(&mut s, "sketch.line", json!({"points": [[40, 0], [50, 0]]}));
+  run(&mut s, "sketch.spline", json!({"points": [[0, 30], [10, 35], [20, 30]]}));
+  let i = run(&mut s, "sketch.info", json!({"samples": true, "loops": true}));
+  assert_eq!(i["plane"]["origin"], json!([0.0, 0.0, 10.0]));
+  assert_eq!(i["plane"]["normal"], json!([1.0, 0.0, 0.0]));
+  assert_eq!(i["plane"]["x"], json!([0.0, 1.0, 0.0]));
+  let c: Vec<u64> = i["curves"].as_array().unwrap().iter().map(|c| c["id"].as_u64().unwrap()).collect();
+  assert_eq!(c.len(), 7);
+  let geo = i["geometry"].as_array().unwrap();
+  let len = |id: u64| geo.iter().find(|g| g["curve"] == id).unwrap()["length"].as_f64().unwrap();
+  let lens = [len(c[0]), len(c[1])];
+  assert!(lens.contains(&30.0) && lens.contains(&20.0), "{lens:?}");
+  assert!((len(c[4]) - std::f64::consts::TAU * 4.0).abs() < 1e-9);
+  assert!(len(c[6]) > 20.0 && len(c[6]) < 23.0, "{}", len(c[6]));
+  assert!(geo[0]["samples"].as_array().unwrap().len() >= 2);
+  let profiles = i["profiles"].as_array().unwrap();
+  assert_eq!(profiles.len(), 2, "ring and disc");
+  let ring = profiles.iter().find(|p| p["holes"] == 1).unwrap();
+  let mut outer: Vec<u64> = ring["curves"].as_array().unwrap().iter().map(|c| c.as_u64().unwrap()).collect();
+  outer.sort();
+  assert_eq!(outer, c[..4].to_vec());
+  assert_eq!(ring["hole_curves"], json!([[c[4]]]));
+  assert_eq!(ring["bbox"], json!([[0.0, 0.0], [30.0, 20.0]]));
+  assert!((ring["perimeter"].as_f64().unwrap() - (100.0 + std::f64::consts::TAU * 4.0)).abs() < 0.05);
+  assert!(ring["outer"].as_array().unwrap().len() == 4);
+  assert_eq!(i["open_curves"], json!([c[5], c[6]]));
+
+  // a free plane can also be a timeline construction plane
+  let r = run(&mut s, "plane.offset", json!({"plane": {"origin": [5, 5, 5], "normal": [0, 0, 2]}}));
+  assert!(r["error"].is_null(), "{r}");
+  let pl = s.model.planes.get(&FeatureId(r["feature"].as_u64().unwrap() as u32)).unwrap();
+  assert!((pl.origin - clf_kernel::glam::DVec3::new(5.0, 5.0, 5.0)).length() < 1e-9);
+  assert!(s.execute("sketch.create", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}})).is_err());
+}
+
+#[test]
+fn transform_and_insert_sketch_geometry() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, 10], "corner2": [30, 20]}));
+  run(&mut s, "sketch.circle", json!({"center": [20, 15], "radius": 2}));
+  let sk = s.edit_sketch.unwrap().0;
+  let bbox = |s: &mut Session| run(s, "sketch.info", json!({"sketch": sk}))["profiles"][0]["bbox"].clone();
+  run(&mut s, "sketch.transform", json!({"scale": 2, "center": [20, 15]}));
+  assert_eq!(bbox(&mut s), json!([[0.0, 5.0], [40.0, 25.0]]));
+  let r = run(&mut s, "sketch.transform", json!({"angle": "90 deg", "center": [20, 15], "translate": [100, 0]}));
+  assert!(!r["removed_constraints"].as_array().unwrap().is_empty(), "horizontal/vertical constraints go");
+  let b = bbox(&mut s);
+  let near = |v: &Value, x: f64| (v.as_f64().unwrap() - x).abs() < 1e-6;
+  assert!(near(&b[0][0], 110.0) && near(&b[0][1], -5.0) && near(&b[1][0], 130.0) && near(&b[1][1], 35.0), "{b}");
+  let circle = s
+    .design
+    .sketch(FeatureId(sk))
+    .unwrap()
+    .curves
+    .iter()
+    .find(|c| matches!(c.kind, clf_sketch::CurveKind::Circle { .. }))
+    .unwrap()
+    .id;
+  assert_eq!(s.design.sketch(FeatureId(sk)).unwrap().radius(circle), Some(4.0));
+  assert!(s.execute("sketch.transform", &json!({"scale": -1})).is_err());
+
+  // insert from another sketch and from a DXF written by export
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  let dst = s.edit_sketch.unwrap().0;
+  let r = run(&mut s, "sketch.insert", json!({"from": {"sketch": sk}, "translate": [-120, 0]}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 5);
+  let dir = std::env::temp_dir().join(format!("clf-insert-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let dxf = dir.join("part.dxf");
+  run(&mut s, "export", json!({"path": dxf, "sketch": sk}));
+  let r = run(&mut s, "sketch.insert", json!({"from": {"path": dxf}, "scale": 0.5}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 5);
+  let info = run(&mut s, "sketch.info", json!({"sketch": dst}));
+  assert_eq!(info["profiles"].as_array().unwrap().len(), 4, "two rings and two discs");
+  let clf = dir.join("lib.clf");
+  run(&mut s, "save", json!({"path": clf}));
+  let r = run(&mut s, "sketch.insert", json!({"from": {"path": clf, "sketch": sk}, "curves": [circle.0]}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 1);
+  assert!(s.execute("sketch.insert", &json!({"from": {"path": clf, "sketch": "nope"}})).is_err());
+  let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn join_and_cut_only_touch_their_targets() {
+  let mut s = Session::default();
+  let a = run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}))["result_bodies"][0].as_u64().unwrap();
+  let b = run(&mut s, "box", json!({"at": [15, 0], "width": 20, "depth": 20, "height": 10, "operation": "new_body"}))
+    ["result_bodies"][0]
+    .as_u64()
+    .unwrap();
+  assert_eq!(s.model.bodies.len(), 2);
+  let vol = |s: &Session, id: u64| s.model.body(BodyId(id as u32)).unwrap().shape.mass().unwrap().volume;
+  let (va, vb) = (vol(&s, a), vol(&s, b));
+  // a cylinder through the overlap cuts only body b
+  let r = run(&mut s, "cylinder", json!({"at": [8, 0], "radius": 2, "height": 10, "operation": "cut", "targets": [b]}));
+  assert_eq!(r["result_bodies"], json!([b]));
+  assert!((vol(&s, a) - va).abs() < 1e-6);
+  assert!(vol(&s, b) < vb);
+  // a tab joined to a only, though it touches both
+  run(&mut s, "box", json!({"at": [8, 12], "width": 4, "depth": 6, "height": 2, "operation": "join", "targets": [a]}));
+  assert_eq!(s.model.bodies.len(), 2);
+  assert!(vol(&s, a) > va);
+  assert!(
+    s.execute("box", &json!({"width": 1, "depth": 1, "height": 1, "operation": "cut", "targets": [99]})).is_err()
+  );
+}
+
+#[test]
+fn render_to_a_file() {
+  let mut s = Session::default();
+  let a = run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}))["result_bodies"][0].as_u64().unwrap();
+  run(&mut s, "box", json!({"at": [60, 0], "width": 5, "depth": 5, "height": 5, "operation": "new_body"}));
+  let path = std::env::temp_dir().join(format!("clf-render-{}.png", std::process::id()));
+  let r = run(
+    &mut s,
+    "view.render",
+    json!({"path": path, "width": 120, "height": 80, "yaw": 45, "pitch": 30, "ortho": true, "bodies": [a], "background": "#ffffff"}),
+  );
+  assert!(r["bytes"].as_u64().unwrap() > 100);
+  let png = std::fs::read(&path).unwrap();
+  assert_eq!(&png[1..4], b"PNG");
+  let be = |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
+  assert_eq!((be(16), be(20)), (120, 80), "IHDR size");
+  let _ = std::fs::remove_file(&path);
+  assert!(s.execute("view.render", &json!({"path": path, "view": "sideways"})).is_err());
+  assert!(s.execute("view.render", &json!({"path": path, "bodies": [99]})).is_err());
+}

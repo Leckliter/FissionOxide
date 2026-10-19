@@ -254,7 +254,15 @@ impl Regenerator {
       self.cache.truncate(i);
       st.suppressed = feature.suppressed;
       if !feature.suppressed {
-        let mut ctx = Ctx { params: &params, rules: &rules, components: &components, state: &mut state, mates: &mates };
+        let targets = feature.targets.clone();
+        let mut ctx = Ctx {
+          params: &params,
+          rules: &rules,
+          components: &components,
+          targets: &targets,
+          state: &mut state,
+          mates: &mates,
+        };
         let id = feature.id;
         let mut kind = feature.kind.clone();
         match ctx.apply(id, &mut kind) {
@@ -351,6 +359,8 @@ struct Ctx<'a> {
   params: &'a HashMap<String, f64>,
   rules: &'a crate::Rules,
   components: &'a [crate::Component],
+  /// The current feature's join/cut targets (empty = any body it touches).
+  targets: &'a [BodyId],
   state: &'a mut State,
   mates: &'a assemble::Mates,
 }
@@ -1594,6 +1604,12 @@ impl Ctx<'_> {
         }
         sketch_plane_on(info.normal, info.origin)
       }
+      PlaneRef::Free { origin, normal, x } => {
+        let (o, n) = (DVec3::from(*origin), DVec3::from(*normal));
+        let auto = sketch_plane_on(n, o)?.x;
+        let x = x.map(DVec3::from).filter(|x| x.cross(n).length() > 1e-9).unwrap_or(auto);
+        Plane::from_normal(o, n, x).map_err(|e| e.to_string())
+      }
     }
   }
 
@@ -1710,6 +1726,7 @@ impl Ctx<'_> {
   fn operate(&mut self, feature: FeatureId, tool: Shape, op: Operation) -> Result<(), String> {
     let tool_box = tool.mass().map(|m| (m.bbox_min, m.bbox_max)).map_err(ke)?;
     let overlapping: Vec<usize> = (0..self.state.bodies.len())
+      .filter(|&i| self.targets.is_empty() || self.targets.contains(&self.state.bodies[i].id))
       .filter(|&i| self.state.bodies[i].bbox().is_some_and(|b| boxes_touch(b, tool_box)))
       .collect();
     match op {
