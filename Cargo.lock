@@ -947,6 +947,7 @@ version = "0.1.0"
 name = "fox-engine"
 version = "0.1.0"
 dependencies = [
+ "epaint_default_fonts",
  "fox-exchange",
  "fox-expr",
  "fox-kernel",

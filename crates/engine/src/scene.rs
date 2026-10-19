@@ -578,7 +578,10 @@ fn fully_dimensioned_circle(sk: &Sketch, c: fox_sketch::CurveId, free: &[PointId
 /// Flattened curve in sketch coordinates.
 pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   match kind {
-    CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+    CurveKind::Spline { .. }
+    | CurveKind::ControlSpline { .. }
+    | CurveKind::Bezier { .. }
+    | CurveKind::EllipticalArc { .. } => {
       let bz = sk.kind_beziers(kind);
       let mut out = Vec::new();
       for b in &bz {

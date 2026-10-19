@@ -106,7 +106,7 @@ cmds! {
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
-  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono, explode?}";
+  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -292,6 +292,8 @@ cmds! {
   "hub.comment.delete" => "Delete a comment", "{item?, comment}";
   "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
   "sheet.check_dxf" => "Check a flat pattern DXF (a file, or a sheet metal body's flat pattern) against shop rules: closed contours, no duplicates, minimum feature size, holes clear of bends", "{path? | body?, face?, min_feature?, hole_to_bend?}";
+  "sketch.fonts" => "Fonts sketch text can use: built in, and font files in the system's font folders (FOX_FONT_DIR first); a text's font may also be a font file's path", "{}";
+  "sketch.elliptical_arc" => "Elliptical arc: the ellipse from its centre, major axis end and minor radius, counter-clockwise from the point nearest start to the one nearest end", "{center, major: [x,y], minor, start: [x,y], end: [x,y]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1135,6 +1137,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.break"
     | "sketch.tangent_circle"
     | "sketch.blend" => sketch_tools::run(s, name, p),
+    "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -2691,3 +2694,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
 }
 
 mod sketch_tools;
+
+mod sketch_curves;

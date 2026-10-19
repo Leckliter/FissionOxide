@@ -9,6 +9,9 @@
 
 mod build;
 mod edit;
+mod ellipse;
+mod fitspline;
+mod fonts;
 mod freeform;
 mod profile;
 mod solve;
@@ -20,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub use build::{PtSpec, circumcenter};
+pub use ellipse::{Ellipse2, ellipse_arc_beziers};
+pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
 pub use text::{SketchText, TextId, text_fonts};
@@ -112,6 +117,16 @@ pub enum CurveKind {
   Bezier {
     points: Vec<PointId>,
   },
+  /// An arc of an ellipse (centre, end of the major axis and minor radius as for `Ellipse`),
+  /// counter-clockwise from `start` to `end`, both on the ellipse. What trimming or breaking an
+  /// ellipse leaves.
+  EllipticalArc {
+    center: PointId,
+    major: PointId,
+    minor: f64,
+    start: PointId,
+    end: PointId,
+  },
 }
 
 impl CurveKind {
@@ -124,8 +139,17 @@ impl CurveKind {
   pub fn is_freeform(&self) -> bool {
     matches!(
       self,
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. } | CurveKind::Bezier { .. }
+      CurveKind::Spline { .. }
+        | CurveKind::ControlSpline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::Bezier { .. }
+        | CurveKind::EllipticalArc { .. }
     )
+  }
+
+  /// Ellipses and elliptical arcs.
+  pub fn is_elliptic(&self) -> bool {
+    matches!(self, CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. })
   }
 }
 
@@ -449,7 +473,7 @@ impl Sketch {
     {
       return Err(SketchError::InvalidValue("a Bézier chain needs 3n + 1 points (n = 1..1000)".into()));
     }
-    if let CurveKind::Ellipse { center, major, minor } = kind {
+    if let CurveKind::Ellipse { center, major, minor } | CurveKind::EllipticalArc { center, major, minor, .. } = kind {
       let (c, m) = (self.pos(center), self.pos(major));
       let a = c.zip(m).map(|(c, m)| dist(c, m)).unwrap_or(0.0);
       if !(minor.is_finite() && minor > 0.0 && a > 0.0) {
@@ -551,7 +575,8 @@ impl Sketch {
       | CurveKind::Spline { .. }
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
-      | CurveKind::Bezier { .. } => None,
+      | CurveKind::Bezier { .. }
+      | CurveKind::EllipticalArc { .. } => None,
     }
   }
 
@@ -580,8 +605,8 @@ impl Sketch {
     out
   }
 
-  /// A curve as profile segments (sketch coordinates): lines, arcs and circles exactly, splines
-  /// and ellipses as Bézier pieces.
+  /// A curve as profile segments (sketch coordinates): lines, arcs, circles, ellipses and
+  /// elliptical arcs exactly (a whole ellipse as two halves), splines as Bézier pieces.
   pub fn curve_segs(&self, id: CurveId) -> Vec<Seg> {
     let Some(c) = self.curve(id) else { return Vec::new() };
     match &c.kind {
@@ -599,6 +624,7 @@ impl Sketch {
         }
         _ => Vec::new(),
       },
+      k if k.is_elliptic() => ellipse::kind_segs(k, &|p| self.pos(p)),
       _ => self.beziers(id).into_iter().map(|p| Seg::Bezier { p }).collect(),
     }
   }
@@ -648,7 +674,7 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Ellipse { .. } => {
+        CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => {
           for p in self.spline_points(c.id) {
             add(p);
           }
@@ -698,7 +724,8 @@ impl Sketch {
       CurveKind::Spline { .. }
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
-      | CurveKind::Bezier { .. } => {
+      | CurveKind::Bezier { .. }
+      | CurveKind::EllipticalArc { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;
@@ -842,6 +869,7 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     }
     CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
+    CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
   }
 }
 
@@ -870,6 +898,10 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
     CurveKind::Ellipse { center, major, minor } => match (pos(*center), pos(*major)) {
       (Some(c), Some(m)) => ellipse_beziers(c, m, *minor),
       _ => Vec::new(),
+    },
+    CurveKind::EllipticalArc { .. } => match ellipse::arc_of(kind, pos) {
+      Some((e, t0, sweep)) => e.beziers(t0, sweep, std::f64::consts::FRAC_PI_4),
+      None => Vec::new(),
     },
     _ => Vec::new(),
   }

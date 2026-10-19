@@ -118,6 +118,8 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
+#include <Geom_Ellipse.hxx>
+#include <gp_Elips.hxx>
 
 namespace fox {
 
@@ -211,11 +213,40 @@ bool shape_is_null(const Shape &s) { return s.s.IsNull(); }
 int32_t shape_type(const Shape &s) { return s.s.IsNull() ? -1 : static_cast<int32_t>(s.s.ShapeType()); }
 
 namespace {
+// An elliptical arc (kind 4): centre p0, the point at parameter 0 p1, the point at parameter π/2
+// p2, and the parameter range p3.x → p3.y (decreasing runs the other way).
+TopoDS_Edge ellipse_edge(rust::Slice<const double> segs, size_t o) {
+  gp_Pnt c = pnt(segs, o + 1);
+  gp_Vec u(c, pnt(segs, o + 4)), v(c, pnt(segs, o + 7));
+  double a = u.Magnitude(), b = v.Magnitude(), t0 = segs[o + 10], t1 = segs[o + 11];
+  if (a < 1e-9 || b < 1e-9 || u.CrossMagnitude(v) < 1e-12 * a * b || std::abs(t1 - t0) < 1e-12)
+    throw std::runtime_error("degenerate elliptical arc in profile");
+  gp_Dir n(u.Crossed(v)), x(u);
+  if (a < b) {
+    // OCCT wants the major radius first: turn the parameter a quarter so v is the x axis
+    x = gp_Dir(v);
+    std::swap(a, b);
+    t0 -= M_PI / 2;
+    t1 -= M_PI / 2;
+  }
+  if (t1 < t0) {
+    // the mirror image of the parameter runs forwards
+    n.Reverse();
+    t0 = -t0;
+    t1 = -t1;
+  }
+  Handle(Geom_Ellipse) e = new Geom_Ellipse(gp_Elips(gp_Ax2(c, n, x), a, b));
+  BRepBuilderAPI_MakeEdge me(e, t0, t1);
+  if (!me.IsDone()) throw std::runtime_error("degenerate elliptical arc in profile");
+  return me.Edge();
+}
+
 // Edge `seg` of a segment list (13 doubles each, see make_face).
 TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
   size_t o = seg * 13;
   need(segs, o + 13, "segments");
   int kind = static_cast<int>(segs[o]);
+  if (kind == 4) return ellipse_edge(segs, o);
   if (kind == 0) {
     BRepBuilderAPI_MakeEdge me(pnt(segs, o + 1), pnt(segs, o + 4));
     if (!me.IsDone()) throw std::runtime_error("degenerate line in profile");
@@ -246,6 +277,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
 // plane: origin(3) normal(3) xdir(3)
 // segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
+//   kind 4, an elliptical arc: see ellipse_edge
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
                                  rust::Slice<const uint32_t> loop_lens) {

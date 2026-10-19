@@ -418,8 +418,53 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<fox_sketch::CurveId>,
       Some(sk.add_curve(CurveKind::Ellipse { center: c, major: m, minor })?)
     }
     Entity::Spline(sp) => add_spline(sk, &sp)?,
-    Entity::Ellipse { .. } => add_chain(sk, &e.beziers())?,
+    Entity::Ellipse { center, major, ratio, start, end } => add_elliptical_arc(sk, center, major, ratio, start, end)?,
   })
+}
+
+/// A DXF elliptical arc as an elliptical arc curve: its ends join neighbours, its centre snaps.
+fn add_elliptical_arc(
+  sk: &mut Sketch,
+  center: [f64; 2],
+  major: [f64; 2],
+  ratio: f64,
+  start: f64,
+  end: f64,
+) -> Result<Option<fox_sketch::CurveId>, CmdError> {
+  let a = major[0].hypot(major[1]);
+  let minor = a * ratio;
+  if ![center[0], center[1], major[0], major[1], minor, start, end].iter().all(|x| x.is_finite()) || minor < DXF_SNAP {
+    return Ok(None);
+  }
+  let m = [center[0] + major[0], center[1] + major[1]];
+  let Some(e) = fox_sketch::Ellipse2::new(center, m, minor) else { return Ok(None) };
+  let (ps, pe) = (e.at(start), e.at(end));
+  if dist(ps, pe) < DXF_SNAP {
+    return Ok(None);
+  }
+  let c = snap(sk, center);
+  let c = sk.resolve(c)?;
+  let mp = sk.add_point(m[0], m[1]);
+  let s0 = snap(sk, ps);
+  let s0 = sk.resolve(s0)?;
+  let e0 = snap(sk, pe);
+  let e0 = sk.resolve(e0)?;
+  Ok(Some(sk.add_curve(CurveKind::EllipticalArc { center: c, major: mp, minor, start: s0, end: e0 })?))
+}
+
+/// An elliptical arc as a DXF ELLIPSE with its start and end parameters (the axes swapped when
+/// the minor radius is the larger, as DXF wants).
+fn elliptical_arc_entity(sk: &Sketch, kind: &CurveKind) -> Option<Entity> {
+  let CurveKind::EllipticalArc { center, major, minor, start, end } = *kind else { return None };
+  let (c, m) = (sk.pos(center)?, sk.pos(major)?);
+  let e = fox_sketch::Ellipse2::new(c, m, minor)?;
+  let t0 = e.param(sk.pos(start)?);
+  let sweep = (e.param(sk.pos(end)?) - t0).rem_euclid(std::f64::consts::TAU);
+  let sweep = if sweep < 1e-12 { std::f64::consts::TAU } else { sweep };
+  let Entity::Ellipse { major, ratio, .. } = Entity::ellipse(c, [m[0] - c[0], m[1] - c[1]], minor) else { return None };
+  // with the axes swapped the DXF parameter runs a quarter turn behind
+  let shift = if minor > e.a { -std::f64::consts::FRAC_PI_2 } else { 0.0 };
+  Some(Entity::Ellipse { center: c, major, ratio, start: t0 + shift, end: t0 + shift + sweep })
 }
 
 /// A DXF spline as the sketch curve that draws it exactly: a fit-point spline when the file's
@@ -534,6 +579,10 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
         CurveKind::Spline { points, .. } => {
           Entity::Spline(Spline { fit: pts(points), ..Spline::from_beziers(&sk.beziers(c.id)) })
         }
+        CurveKind::EllipticalArc { .. } => match elliptical_arc_entity(sk, &c.kind) {
+          Some(e) => e,
+          None => continue,
+        },
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
       out.push((e, c.construction));
@@ -543,7 +592,8 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       CurveKind::Spline { .. }
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
-      | CurveKind::Bezier { .. } => {
+      | CurveKind::Bezier { .. }
+      | CurveKind::EllipticalArc { .. } => {
         continue;
       }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },

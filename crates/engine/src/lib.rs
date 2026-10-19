@@ -480,6 +480,8 @@ mod tests_sheet3;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
+mod tests_sketch_curves;
+#[cfg(test)]
 mod tests_solid;
 #[cfg(test)]
 mod tests_surface;

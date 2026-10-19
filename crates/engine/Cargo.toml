@@ -25,3 +25,4 @@ workspace = true
 [dev-dependencies]
 zip.workspace = true
 image.workspace = true
+epaint_default_fonts.workspace = true

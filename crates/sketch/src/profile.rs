@@ -52,6 +52,16 @@ pub enum Seg {
   Bezier {
     p: [[f64; 2]; 4],
   },
+  /// An arc of an ellipse: `major` is the semi-major axis (the point at parameter 0 relative to
+  /// the centre), `minor` the radius along `major` turned a quarter left; from parameter `start`
+  /// sweeping `sweep` radians (positive = counter-clockwise).
+  EllipseArc {
+    center: [f64; 2],
+    major: [f64; 2],
+    minor: f64,
+    start: f64,
+    sweep: f64,
+  },
 }
 
 impl Seg {
@@ -61,6 +71,7 @@ impl Seg {
       Seg::Arc { center, radius, start_angle, .. } => polar(center, radius, start_angle),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[0],
+      Seg::EllipseArc { center, major, minor, start, .. } => ellipse_point(center, major, minor, start),
     }
   }
 
@@ -70,6 +81,7 @@ impl Seg {
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[3],
+      Seg::EllipseArc { center, major, minor, start, sweep } => ellipse_point(center, major, minor, start + sweep),
     }
   }
 
@@ -80,6 +92,9 @@ impl Seg {
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep / 2.0),
       Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { TAU / 2.0 } else { -TAU / 2.0 }),
       Seg::Bezier { p } => crate::bezier_at(&p, 0.5),
+      Seg::EllipseArc { center, major, minor, start, sweep } => {
+        ellipse_point(center, major, minor, start + sweep / 2.0)
+      }
     }
   }
 
@@ -91,6 +106,36 @@ impl Seg {
       }
       Seg::Circle { center, radius, ccw } => Seg::Circle { center, radius, ccw: !ccw },
       Seg::Bezier { p } => Seg::Bezier { p: [p[3], p[2], p[1], p[0]] },
+      Seg::EllipseArc { center, major, minor, start, sweep } => {
+        Seg::EllipseArc { center, major, minor, start: start + sweep, sweep: -sweep }
+      }
+    }
+  }
+
+  /// Direction of travel leaving the start and arriving at the end (not unit length; zero for a
+  /// whole circle).
+  pub fn end_tangents(&self) -> ([f64; 2], [f64; 2]) {
+    match *self {
+      Seg::Line { a, b } => ([b[0] - a[0], b[1] - a[1]], [b[0] - a[0], b[1] - a[1]]),
+      Seg::Arc { start_angle, sweep, .. } => {
+        let t = |a: f64| [-a.sin() * sweep, a.cos() * sweep];
+        (t(start_angle), t(start_angle + sweep))
+      }
+      Seg::Circle { .. } => ([0.0, 0.0], [0.0, 0.0]),
+      Seg::Bezier { p } => {
+        let (a, b) =
+          (if dist(p[0], p[1]) > 1e-12 { p[1] } else { p[2] }, if dist(p[3], p[2]) > 1e-12 { p[2] } else { p[1] });
+        ([a[0] - p[0][0], a[1] - p[0][1]], [p[3][0] - b[0], p[3][1] - b[1]])
+      }
+      Seg::EllipseArc { major, minor, start, sweep, .. } => {
+        let a = major[0].hypot(major[1]).max(1e-300);
+        let v = [-major[1] / a * minor, major[0] / a * minor];
+        let d = |t: f64| {
+          let (s, c) = t.sin_cos();
+          [(-major[0] * s + v[0] * c) * sweep, (-major[1] * s + v[1] * c) * sweep]
+        };
+        (d(start), d(start + sweep))
+      }
     }
   }
 
@@ -114,6 +159,12 @@ impl Seg {
       Seg::Bezier { p } => {
         for i in 0..16 {
           out.push(crate::bezier_at(&p, i as f64 / 16.0));
+        }
+      }
+      Seg::EllipseArc { center, major, minor, start, sweep } => {
+        let n = ((sweep.abs() / TAU) * ARC_STEPS).ceil().max(2.0) as usize;
+        for i in 0..n {
+          out.push(ellipse_point(center, major, minor, start + sweep * i as f64 / n as f64));
         }
       }
     }
@@ -303,10 +354,12 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         }
         edges.push((u, v, seg));
       }
-      CurveKind::Spline { .. }
-      | CurveKind::ControlSpline { .. }
-      | CurveKind::Ellipse { .. }
-      | CurveKind::Bezier { .. } => {
+      CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => {
+        edges.extend(
+          sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (0, 0, s)),
+        );
+      }
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
         for b in sketch.beziers(c.id) {
           if dist(b[0], b[3]) > MERGE_TOL {
             edges.push((0, 0, Seg::Bezier { p: b }));
@@ -424,13 +477,16 @@ fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg
   use crate::edit::{Geo, meet};
   // spline pieces don't split (yet); they join the graph as they are
   let (curved, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::Bezier { .. }));
+  // elliptical arcs split where lines, arcs and circles cross them (and split those), not each other
+  let (elliptic, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::EllipseArc { .. }));
   let n_segs = segs.len();
   let mut geos: Vec<Geo> = segs.iter().filter_map(Geo::of_seg).collect();
   geos.extend(circles.iter().map(|(c, r)| Geo::Arc { c: *c, r: *r, a0: 0.0, sweep: TAU }));
   if geos.len() > 2000 {
-    return (segs.into_iter().chain(curved).collect(), circles);
+    return (segs.into_iter().chain(curved).chain(elliptic).collect(), circles);
   }
   let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); geos.len()];
+  let elliptic = crate::ellipse::split_profile_arcs(elliptic, &geos, n_segs, &mut cuts, MERGE_TOL);
   // ends of segment `k` lying on curve `h`
   let ends_on = |k: usize, h: &Geo| -> Vec<[f64; 2]> {
     if k >= n_segs {
@@ -497,6 +553,7 @@ fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg
     }
   }
   out.extend(curved);
+  out.extend(elliptic);
   (out, left)
 }
 
@@ -520,7 +577,21 @@ fn departure_angle(s: &Seg) -> f64 {
       };
       angle_of(p[0], q)
     }
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      let p0 = ellipse_point(center, major, minor, start);
+      let p1 = ellipse_point(center, major, minor, start + sweep * 1e-3);
+      angle_of(p0, p1)
+    }
   }
+}
+
+/// The point at parameter `t` of the ellipse with this centre, semi-major axis vector and minor
+/// radius.
+pub(crate) fn ellipse_point(c: [f64; 2], major: [f64; 2], minor: f64, t: f64) -> [f64; 2] {
+  let a = major[0].hypot(major[1]).max(1e-300);
+  let v = [-major[1] / a * minor, major[0] / a * minor];
+  let (s, co) = t.sin_cos();
+  [c[0] + major[0] * co + v[0] * s, c[1] + major[1] * co + v[1] * s]
 }
 
 fn polar(c: [f64; 2], r: f64, a: f64) -> [f64; 2] {
