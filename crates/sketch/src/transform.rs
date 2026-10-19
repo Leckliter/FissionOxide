@@ -107,6 +107,7 @@ impl Sketch {
       }
     }
     self.constraints.retain(|c| !report.removed.contains(&c.id));
+    self.transform_texts(curves, t, &moved)?;
     for con in self.constraints.iter_mut() {
       if let ConstraintKind::Fix { p, x, y } = &mut con.kind
         && moved.contains(p)
@@ -155,8 +156,13 @@ impl Sketch {
         CurveKind::Arc { center, start, end } => {
           CurveKind::Arc { center: pt(self, *center)?, start: pt(self, *start)?, end: pt(self, *end)? }
         }
-        CurveKind::Spline { points } => {
-          CurveKind::Spline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
+        CurveKind::Spline { points, start_handle, end_handle } => CurveKind::Spline {
+          points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()?,
+          start_handle: start_handle.map(|p| pt(self, p)).transpose()?,
+          end_handle: end_handle.map(|p| pt(self, p)).transpose()?,
+        },
+        CurveKind::Bezier { points } => {
+          CurveKind::Bezier { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
         }
         CurveKind::ControlSpline { points } => {
           CurveKind::ControlSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }

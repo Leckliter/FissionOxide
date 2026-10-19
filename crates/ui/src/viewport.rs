@@ -59,6 +59,17 @@ pub enum Tool {
   Ellipse,
   Conic,
   MidpointLine,
+  Break,
+  Circle2T,
+  Circle3T,
+  Blend,
+}
+
+impl Tool {
+  /// Tools that click curves (where on the curve matters) rather than place points.
+  pub fn picks_curves(self) -> bool {
+    matches!(self, Tool::Trim | Tool::Extend | Tool::Break | Tool::Circle2T | Tool::Circle3T | Tool::Blend)
+  }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,17 +103,20 @@ pub struct ToolState {
   drag_backup: Option<clf_engine::model::Design>,
   /// Dimension command waiting for its value.
   pending_dim: Option<serde_json::Value>,
+  /// Curves picked so far by a curve-picking tool, with where each was clicked.
+  curves: Vec<(u32, [f64; 2])>,
 }
 
 impl ToolState {
   pub fn is_empty(&self) -> bool {
-    self.pts.is_empty() && self.dim_first.is_none()
+    self.pts.is_empty() && self.dim_first.is_none() && self.curves.is_empty()
   }
 }
 
 pub fn reset_tool_state(app: &mut App) {
   app.tstate.pts.clear();
   app.tstate.dim_first = None;
+  app.tstate.curves.clear();
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -280,8 +294,8 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     pick_kind(|p| matches!(p, Pick::Edge { .. })).or(exact)
   };
   // while a sketch tool draws, only points matter for snapping
-  if sketching && matches!(app.tool, Tool::Trim | Tool::Extend) {
-    // trim / extend pick curves
+  if sketching && app.tool.picks_curves() {
+    // trim / extend / break / tangent circles / blend pick curves
     app.hover = pick_kind(|p| matches!(p, Pick::SketchCurve { .. }));
   } else if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
@@ -445,6 +459,15 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if !sketching || app.tool == Tool::Select {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
     select_click(app, add || app.dialog.is_some());
+    // double-clicking a letter of a text edits the text
+    if resp.double_clicked()
+      && app.dialog.is_none()
+      && let Some(Pick::SketchCurve { sketch, curve }) = app.hover
+      && app.s.design.sketch(sketch).is_ok_and(|s| s.text_of(curve).is_some())
+    {
+      app.s.selection = vec![Sel::SketchCurve { sketch, curve }];
+      app.start(crate::dialogs::Kind::Form(&crate::forms::SK_TEXT_EDIT));
+    }
     return;
   }
   if app.tool == Tool::Dimension {
@@ -461,6 +484,10 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     }
     let cmd = if app.tool == Tool::Trim { "sketch.trim" } else { "sketch.extend" };
     app.run(cmd, params);
+    return;
+  }
+  if app.tool.picks_curves() {
+    curve_tool_click(app, view, pos, ctx.input(|i| i.modifiers.shift));
     return;
   }
   let Some((p, snapped)) = sketch_cursor(app, view, pos) else { return };
@@ -601,6 +628,70 @@ fn tangent_curve(app: &App, sk: FeatureId, at: [f64; 2]) -> Option<u32> {
   })
 }
 
+/// Break, 2/3-tangent circle and blend: clicks pick curves (a 2-tangent circle's last click sets
+/// its size and place).
+fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
+  let Some((sk, plane)) = sketch_plane(app) else { return };
+  let (o, d) = view.ray(&app.cam, pos);
+  let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
+  let at = plane.to_local(hit);
+  let hovered = match app.hover {
+    Some(Pick::SketchCurve { curve, .. }) => Some(curve.0),
+    _ => None,
+  };
+  if app.tool == Tool::Break {
+    let snap = SNAP_PX as f64 * app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+    let mut params = json!({"sketch": sk.0, "at": at, "snap": snap});
+    if let Some(c) = hovered {
+      params["curve"] = json!(c);
+    }
+    app.run("sketch.break", params);
+    return;
+  }
+  let picked = app.tstate.curves.len();
+  // the 2-tangent circle's third click is anywhere: it places the circle
+  if app.tool == Tool::Circle2T && picked == 2 {
+    let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+    let r = tangent_radius(app, sk, &curves, at);
+    app.tstate.curves.clear();
+    app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "radius": r, "near": at}));
+    return;
+  }
+  let Some(c) = hovered else {
+    app.status = Some(("Click a curve".into(), true));
+    return;
+  };
+  if app.tstate.curves.iter().any(|x| x.0 == c) {
+    return;
+  }
+  app.tstate.curves.push((c, at));
+  let picks = app.tstate.curves.clone();
+  let curves: Vec<u32> = picks.iter().map(|c| c.0).collect();
+  match (app.tool, picks.as_slice()) {
+    (Tool::Circle3T, [a, b, c]) => {
+      app.tstate.curves.clear();
+      let near = [(a.1[0] + b.1[0] + c.1[0]) / 3.0, (a.1[1] + b.1[1] + c.1[1]) / 3.0];
+      app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "near": near}));
+    }
+    (Tool::Blend, [a, b]) => {
+      app.tstate.curves.clear();
+      let continuity = if shift { "g1" } else { "g2" };
+      app.run("sketch.blend", json!({"sketch": sk.0, "curves": curves, "near": [a.1, b.1], "continuity": continuity}));
+    }
+    _ => {}
+  }
+}
+
+/// A 2-tangent circle's radius for a cursor at `at`: its mean distance to the two curves.
+fn tangent_radius(app: &App, sk: FeatureId, curves: &[u32], at: [f64; 2]) -> f64 {
+  let Ok(sketch) = app.s.design.sketch(sk) else { return 1.0 };
+  let d: Vec<f64> =
+    curves.iter().filter_map(|c| sketch.distance_to_curve(clf_engine::sketch::CurveId(*c), at)).collect();
+  let r = d.iter().sum::<f64>() / d.len().max(1) as f64;
+  let step = 10f64.powf(r.max(1e-6).log10().floor() - 2.0);
+  ((r / step).round() * step).max(1e-3)
+}
+
 fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
   let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
   let l = dx.hypot(dy);
@@ -663,7 +754,13 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       }
       Some(CurveKind::Circle { radius, .. }) => (json!({"type": "diameter", "curves": [curve.0]}), Some(2.0 * radius)),
       Some(CurveKind::Arc { .. }) => (json!({"type": "radius", "curves": [curve.0]}), sketch.radius(curve)),
-      Some(CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Ellipse { .. }) | None => return,
+      Some(
+        CurveKind::Spline { .. }
+        | CurveKind::ControlSpline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::Bezier { .. },
+      )
+      | None => return,
     },
     (None, Some(Pick::SketchPoint { .. })) => {
       app.tstate.dim_first = hover;
@@ -905,6 +1002,7 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
     ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Curvature { .. } => Icon::Curvature,
     _ => Icon::Fix,
   }
 }
@@ -925,10 +1023,14 @@ fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
 /// Rubber-band preview of the shape being drawn.
 fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
   let Some((_, plane)) = sketch_plane(app) else { return };
-  if matches!(app.tool, Tool::Select | Tool::Dimension | Tool::Trim | Tool::Extend) {
+  if matches!(app.tool, Tool::Select | Tool::Dimension) || app.tool.picks_curves() && app.tool != Tool::Circle2T {
     return;
   }
   let Some(pos) = resp.hover_pos() else { return };
+  if app.tool == Tool::Circle2T {
+    tangent_circle_preview(app, painter, view, pos, plane);
+    return;
+  }
   let Some((cur, snapped)) = sketch_cursor(app, view, pos) else { return };
   let s = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
   let stroke = Stroke::new(1.5, Color32::from_rgb(30, 110, 235));
@@ -1037,6 +1139,43 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   }
 }
 
+/// The 2-tangent circle the next click would place.
+fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: Pos2, plane: Plane) {
+  let Some(sk) = app.s.edit_sketch else { return };
+  let curves: Vec<u32> = app.tstate.curves.iter().map(|c| c.0).collect();
+  if curves.len() != 2 {
+    return;
+  }
+  let (o, d) = view.ray(&app.cam, pos);
+  let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
+  let at = plane.to_local(hit);
+  let r = tangent_radius(app, sk, &curves, at);
+  let Ok(mut sketch) = app.s.design.sketch(sk).cloned() else { return };
+  let ids: Vec<_> = curves.iter().map(|c| clf_engine::sketch::CurveId(*c)).collect();
+  let Ok(c) = sketch.add_tangent_circle(&ids, Some(clf_engine::sketch::Dim::new(r)), at) else { return };
+  let Some(center) = sketch.curve_points(c).first().and_then(|p| sketch.pos(*p)) else { return };
+  let stroke = Stroke::new(1.5, Color32::from_rgb(30, 110, 235));
+  let pts: Vec<Pos2> = (0..=64)
+    .filter_map(|i| {
+      let t = std::f64::consts::TAU * i as f64 / 64.0;
+      view.to_screen(&app.cam, plane.to_world([center[0] + r * t.cos(), center[1] + r * t.sin()]))
+    })
+    .collect();
+  for w in pts.windows(2) {
+    painter.line_segment([w[0], w[1]], stroke);
+  }
+  if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
+    let txt = format!("R {}", clf_engine::sketch::Dim::new(r).expr);
+    painter.text(
+      p + Vec2::new(10.0, 10.0),
+      egui::Align2::LEFT_TOP,
+      txt,
+      egui::FontId::proportional(11.0),
+      Color32::from_gray(70),
+    );
+  }
+}
+
 /// Hints in the corner of the viewport.
 fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) {
   let hint = match (app.s.edit_sketch.is_some(), app.tool) {
@@ -1070,6 +1209,13 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::MidpointLine) => "Midpoint line: the midpoint, then one end",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
     (true, Tool::Select) => "Select / drag points · Del deletes · constraints apply to the selection",
+    (true, Tool::Break) => "Break: click a curve to split it at its crossings (or where you click)",
+    (true, Tool::Circle2T) => match app.tstate.curves.len() {
+      0 | 1 => "2-tangent circle: click two lines, circles or arcs",
+      _ => "2-tangent circle: click to place it (the size follows the cursor)",
+    },
+    (true, Tool::Circle3T) => "3-tangent circle: click three lines, circles or arcs near where it should touch",
+    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G1 (tangent only)",
     (false, _) => return,
   };
   if app.status.is_some() {

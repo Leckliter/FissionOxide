@@ -207,7 +207,7 @@ pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String
         }
         segs.push(Seg::Arc { center: c, radius: len2(sub(s, c)), start_angle: a0, sweep });
       }
-      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } => {
+      CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
         segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p }));
       }
       CurveKind::Ellipse { .. } => {

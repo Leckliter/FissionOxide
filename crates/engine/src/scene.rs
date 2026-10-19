@@ -476,7 +476,40 @@ fn sketch_lines(
     });
   }
   if editing {
-    for p in &sk.points {
+    // spline tangent handles and Bézier handles: a thin line from the curve to each handle
+    for c in &sk.curves {
+      let mut legs: Vec<(PointId, PointId)> = Vec::new();
+      match &c.kind {
+        CurveKind::Spline { points, start_handle, end_handle } => {
+          legs.extend(points.first().copied().zip(*start_handle));
+          legs.extend(points.last().copied().zip(*end_handle));
+        }
+        CurveKind::Bezier { points } => {
+          for k in (0..points.len().saturating_sub(1)).step_by(3) {
+            legs.push((points[k], points[k + 1]));
+            legs.extend(points.get(k + 3).map(|e| (*e, points[k + 2])));
+          }
+        }
+        _ => {}
+      }
+      for (e, h) in legs {
+        if let (Some(e), Some(h)) = (sk.pos(e), sk.pos(h)) {
+          scene.lines.push(Polyline {
+            points: vec![w(e), w(h)],
+            color: SKETCH_CONSTRUCTION,
+            width: 1.0,
+            id: 0,
+            on_top: true,
+            dashed: true,
+            behind: false,
+          });
+        }
+      }
+    }
+    // a text's glyph points are its own business: only its anchor is shown
+    let glyph_points: std::collections::HashSet<PointId> =
+      sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+    for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
       let pick = Pick::SketchPoint { sketch: sid, point: p.id };
       let color = if selected.contains(&pick) {
         SELECT_COLOR
@@ -509,13 +542,8 @@ fn fully_dimensioned_circle(sk: &Sketch, c: clf_sketch::CurveId, free: &[PointId
 /// Flattened curve in sketch coordinates.
 pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
   match kind {
-    CurveKind::Spline { points } | CurveKind::ControlSpline { points } => {
-      let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| sk.pos(*p)).collect();
-      let bz = if matches!(kind, CurveKind::Spline { .. }) {
-        clf_sketch::spline_beziers(&pts)
-      } else {
-        clf_sketch::bspline_beziers(&pts)
-      };
+    CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+      let bz = sk.kind_beziers(kind);
       let mut out = Vec::new();
       for b in &bz {
         for k in 0..24 {

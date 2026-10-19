@@ -987,7 +987,7 @@ pub static APPEARANCE: Form = Form {
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Text as sketch outlines you can extrude",
+  hint: "Editable text whose outlines you can extrude",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
@@ -997,6 +997,7 @@ pub static SK_TEXT: Form = Form {
     Input::Expr { key: "x", label: "X", default: "0" },
     Input::Expr { key: "y", label: "Y", default: "0" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
+    Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
   ],
   picks_model: false,
 };
@@ -1016,7 +1017,7 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
       (
         "sketch.text",
-        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle")}),
+        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle"), "font": p.get("font").cloned().unwrap_or(json!("sans"))}),
       )
     }
     // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
@@ -1060,6 +1061,14 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
         "surface.offset",
         json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "distance": p.get("distance").cloned().unwrap_or(json!("0")), "face_distances": fds}),
       )
+    }
+    "sketch.text_edit.form" => {
+      let mut q = p.clone();
+      // the angle box is in degrees: a plain number is what the command takes
+      if let Some(a) = p.get("angle").and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()) {
+        q["angle"] = json!(a);
+      }
+      ("sketch.text_edit", q)
     }
     _ => (form.cmd, p),
   }
@@ -1232,6 +1241,25 @@ pub static DRAWING_BREAK: Form = Form {
     Input::Expr { key: "from", label: "From (model mm)", default: "20" },
     Input::Expr { key: "to", label: "To (model mm)", default: "60" },
     Input::Expr { key: "gap", label: "Gap (sheet mm)", default: "6" },
+  ],
+  picks_model: false,
+};
+
+const TEXT_FONTS: &[(&str, &str)] = &[("sans", "Sans (Ubuntu Light)"), ("mono", "Mono (Hack)")];
+
+pub static SK_TEXT_EDIT: Form = Form {
+  title: "EDIT TEXT",
+  name: "Edit Text",
+  hint: "Change a sketch text (select one of its letters); its outlines regenerate",
+  icon: Icon::SkText,
+  cmd: "sketch.text_edit.form",
+  fixed: &[],
+  inputs: &[
+    Input::Curves { key: "curves", label: "Letter of the text" },
+    Input::Text { key: "text", label: "Text", default: "" },
+    Input::Expr { key: "height", label: "Height", default: "" },
+    Input::Expr { key: "angle", label: "Angle (deg)", default: "" },
+    Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
   ],
   picks_model: false,
 };
@@ -1641,3 +1669,40 @@ pub static CAM_SCALLOP: Form = Form {
   ],
   picks_model: false,
 };
+
+pub static SK_TEXT_EXPLODE: Form = Form {
+  title: "EXPLODE TEXT",
+  name: "Explode Text",
+  hint: "Turn a sketch text into plain lines and splines",
+  icon: Icon::SkText,
+  cmd: "sketch.text_explode",
+  fixed: &[],
+  inputs: &[Input::Curves { key: "curves", label: "Letter of the text" }],
+  picks_model: false,
+};
+
+/// Fills a form from what it edits when it opens (Edit Text: the selected text's values).
+pub fn prefill(form: &Form, state: &mut State, s: &Session) {
+  if !std::ptr::eq(form, &SK_TEXT_EDIT) {
+    return;
+  }
+  let Some(sk) = s.edit_sketch else { return };
+  let Ok(sketch) = s.design.sketch(sk) else { return };
+  let picked = s.selection.iter().find_map(|x| match x {
+    Sel::SketchCurve { curve, .. } => sketch.text_of(*curve),
+    _ => None,
+  });
+  let Some(t) = picked.or(sketch.texts.first().map(|t| t.id)).and_then(|id| sketch.text(id)) else { return };
+  for (i, input) in form.inputs.iter().enumerate() {
+    let v = match input.key() {
+      "text" => json!(t.text),
+      "height" => json!(clf_engine::sketch::Dim::new(t.height).expr),
+      "angle" => json!(clf_engine::sketch::Dim::new(t.angle.to_degrees()).expr),
+      "font" => json!(t.font),
+      _ => continue,
+    };
+    if let Some(slot) = state.values.get_mut(i) {
+      *slot = v;
+    }
+  }
+}

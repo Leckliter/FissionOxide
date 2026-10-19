@@ -88,7 +88,7 @@ cmds! {
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix, points?: [id], curves?: [id]}";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -104,7 +104,7 @@ cmds! {
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
-  "sketch.text" => "Text as sketch curves (closed outlines you can extrude)", "{at: [x,y], text, height?, angle?}";
+  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -266,6 +266,11 @@ cmds! {
   "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
   "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
+  "sketch.text_edit" => "Change a text's string, height, angle, font or position (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, at?: [x,y]}";
+  "sketch.text_explode" => "Turn a text into plain curves", "{text_id? | curve?}";
+  "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
+  "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
+  "sketch.blend" => "Blend curve: a spline joining the ends of two curves, tangent (g1) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -398,8 +403,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.spline"
     | "sketch.control_spline"
     | "sketch.ellipse"
-    | "sketch.conic"
-    | "sketch.text" => draw(s, name, p),
+    | "sketch.conic" => draw(s, name, p),
     "sketch.constrain" => constrain(s, p),
     "sketch.dimension" => dimension(s, p),
     "sketch.set_dimension" => {
@@ -1073,6 +1077,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::Unfold { body, face, keep_folded })
     }
     "sheet.flat_pattern" => flat_pattern(s, p),
+    "sketch.text"
+    | "sketch.text_edit"
+    | "sketch.text_explode"
+    | "sketch.break"
+    | "sketch.tangent_circle"
+    | "sketch.blend" => sketch_tools::run(s, name, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -2156,7 +2166,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           let spec = snap(sketch, q);
           ids.push(sketch.resolve(spec)?);
         }
-        sketch.add_curve(CurveKind::Spline { points: ids })?;
+        sketch.add_curve(CurveKind::spline(ids))?;
       }
       "sketch.slot" if p.get("arc_center").is_some() || p.get("mid").is_some() => {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
@@ -2232,13 +2242,6 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let ids =
           vec![sketch.resolve(a)?, sketch.add_point(c1[0], c1[1]), sketch.add_point(c2[0], c2[1]), sketch.resolve(b)?];
         sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
-      }
-      "sketch.text" => {
-        let at = req_pt(&p, "at")?;
-        let text = req_str(&p, "text")?;
-        let height = p.get("height").and_then(Value::as_f64).unwrap_or(5.0);
-        let angle = p.get("angle").and_then(Value::as_f64).unwrap_or(0.0).to_radians();
-        crate::text::add_text(sketch, at, text, height, angle)?;
       }
       _ => {
         let at = req_pt(&p, "at")?;
@@ -2365,6 +2368,10 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
         need_p(2)?;
         need_c(1)?;
         ConstraintKind::Symmetric { a: pts[0], b: pts[1], line: cs[0] }
+      }
+      "curvature" | "smooth" | "g2" => {
+        need_c(2)?;
+        ConstraintKind::Curvature { a: cs[0], b: cs[1] }
       }
       o => return Err(CmdError::new(format!("unknown constraint '{o}'"))),
     };
@@ -2531,6 +2538,10 @@ fn sketch_info(s: &Session, p: &Value) -> CmdResult {
     "dof": r.map(|r| r.report.dof),
     "solved": r.map(|r| r.report.ok()),
     "free_points": r.map(|r| r.report.free_points.iter().map(|p| p.0).collect::<Vec<_>>()),
+    "texts": sketch.texts.iter().map(|t| json!({
+      "id": t.id.0, "text": t.text, "font": t.font, "height": t.height, "angle": t.angle.to_degrees(),
+      "anchor": t.anchor.0, "at": sketch.pos(t.anchor), "curves": t.curves.iter().map(|c| c.0).collect::<Vec<_>>()
+    })).collect::<Vec<_>>(),
   }))
 }
 
@@ -2626,3 +2637,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
     })
     .collect()
 }
+
+mod sketch_tools;
