@@ -68,7 +68,7 @@ impl Ctx<'_> {
         let mut by_body: Vec<(usize, Vec<u32>)> = Vec::new();
         for e in edges.iter_mut() {
           let (bi, info) = self.edge_info(e)?;
-          if info.face2 != 0 {
+          if info.faces[1] != 0 {
             return Err("only open (boundary) edges of a surface can be extended".into());
           }
           match by_body.iter_mut().find(|(b, _)| *b == bi) {

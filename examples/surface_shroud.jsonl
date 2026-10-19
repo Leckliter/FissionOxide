@@ -7,7 +7,7 @@
 {"cmd": "sketch.arc", "center": [0, 0], "start": [40, 0], "end": [0, 40]}
 {"cmd": "surface.extrude", "distance": "30 mm"}
 {"cmd": "surface.extend", "edges": [{"point": [40, 0, 15]}, {"point": [0, 40, 15]}], "distance": "wrap", "mode": "natural"}
-{"cmd": "sketch.create", "plane": {"point": [0, 0, 0], "normal": [1, 1, 0]}}
-{"cmd": "sketch.circle", "center": [0, 15], "radius": 8}
+{"cmd": "sketch.create", "plane": "yz"}
+{"cmd": "sketch.circle", "center": [12, 15], "radius": 8}
 {"cmd": "surface.trim", "bodies": [2000], "tool": {"sketch": 4}}
 {"cmd": "thicken", "bodies": [2000], "thickness": "2 mm"}

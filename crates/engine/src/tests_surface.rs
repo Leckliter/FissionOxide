@@ -79,7 +79,7 @@ fn extend_curved_surfaces() {
   run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
   run(&mut s, "surface.extrude", json!({"distance": 10}));
   let id = last(&s);
-  run(&mut s, "surface.extend", json!({"edges": [{"point": [5, 0, 10]}], "distance": 4}));
+  run(&mut s, "surface.extend", json!({"edges": [{"point": [-5, 0, 10]}], "distance": 4}));
   assert!(close(area(&s, id), 2.0 * PI * 5.0 * 14.0, 1e-3), "{}", area(&s, id));
   // a quarter cylinder's straight edge: natural carries the arc on round, tangent goes straight
   for (mode, x_min) in [("natural", 10.0 * (0.5f64).cos()), ("tangent", 0.0)] {

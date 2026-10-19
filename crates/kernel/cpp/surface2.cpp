@@ -22,7 +22,6 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ReShape.hxx>
-#include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomAPI_Interpolate.hxx>
@@ -42,6 +41,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
@@ -186,51 +186,40 @@ TopoDS_Face ruled_strip(const TopoDS_Face &f, const TopoDS_Edge &e, double d, bo
   Handle(Geom2d_Curve) c2 = BRep_Tool::CurveOnSurface(e, f, f0, l0);
   if (c2.IsNull()) throw std::runtime_error("the edge has no curve on its face");
   Handle(Geom_Surface) surf = BRep_Tool::Surface(f);
-  BRepTopAdaptor_FClass2d cls(f, 1e-7);
+  // in parameter space the face lies left of a forward edge (of the forward face), right of a
+  // reversed one, whichever way the face itself faces
+  TopoDS_Edge ef = edge_in_face(e, TopoDS::Face(f.Oriented(TopAbs_FORWARD)));
+  double off_side = ef.Orientation() == TopAbs_REVERSED ? 1.0 : -1.0;
   const int n = c.GetType() == GeomAbs_Line ? 2 : 33;
   std::vector<gp_Pnt> pts(n);
   std::vector<gp_Vec> dirs(n);
-  double sign = 0.0;
   for (int i = 0; i < n; ++i) {
     double t = t0 + (t1 - t0) * i / (n - 1);
     gp_Pnt p;
     gp_Vec tan;
     c.D1(t, p, tan);
     double s = f0 + (l0 - f0) * (t - t0) / (t1 - t0);
-    gp_Pnt2d uv = c2->Value(s);
-    gp_Vec nrm = face_normal(f, surf, uv.X(), uv.Y());
-    if (nrm.Magnitude() < 1e-12 || tan.Magnitude() < 1e-12) throw std::runtime_error("the surface has no normal at the edge");
-    nrm.Normalize();
-    gp_Vec out = perpendicular ? nrm : tan.Crossed(nrm);
-    if (!perpendicular) {
-      if (out.Magnitude() < 1e-12) throw std::runtime_error("the edge has no direction across the surface");
-      out.Normalize();
-      // decide once which way is off the face: step inside along the parameter-space normal
-      if (sign == 0.0) {
-        gp_Vec2d d2;
-        gp_Pnt2d q;
-        c2->D1(s, q, d2);
-        gp_Vec du, dv;
-        gp_Pnt sp;
-        surf->D1(uv.X(), uv.Y(), sp, du, dv);
-        // the parameter-space direction that maps closest to `out`
-        double a11 = du.Dot(du), a12 = du.Dot(dv), a22 = dv.Dot(dv);
-        double b1 = out.Dot(du), b2 = out.Dot(dv);
-        double det = a11 * a22 - a12 * a12;
-        if (std::abs(det) < 1e-18) throw std::runtime_error("the surface is degenerate at the edge");
-        gp_Vec2d step((b1 * a22 - b2 * a12) / det, (a11 * b2 - a12 * b1) / det);
-        double len = step.Magnitude();
-        double umin, umax, vmin, vmax;
-        BRepTools::UVBounds(f, umin, umax, vmin, vmax);
-        double eps = 1e-4 * std::max(umax - umin, vmax - vmin);
-        if (len < 1e-18) throw std::runtime_error("the surface is degenerate at the edge");
-        gp_Pnt2d probe(uv.X() + step.X() / len * eps, uv.Y() + step.Y() / len * eps);
-        sign = cls.Perform(probe) == TopAbs_IN ? -1.0 : 1.0;
+    gp_Pnt2d uv;
+    gp_Vec2d duv;
+    c2->D1(s, uv, duv);
+    gp_Vec out;
+    if (perpendicular) {
+      out = face_normal(f, surf, uv.X(), uv.Y());
+    } else {
+      gp_Pnt sp;
+      gp_Vec du, dv;
+      surf->D1(uv.X(), uv.Y(), sp, du, dv);
+      // the parameter-space normal pointing off the face, mapped onto the surface
+      gp_Vec2d o2(-duv.Y() * off_side, duv.X() * off_side);
+      out = du * o2.X() + dv * o2.Y();
+      if (tan.Magnitude() > 1e-12) {
+        gp_Vec tn = tan.Normalized();
+        out -= tn * out.Dot(tn);
       }
-      out *= sign;
     }
+    if (out.Magnitude() < 1e-12) throw std::runtime_error("the edge has no direction to extend in");
     pts[i] = p;
-    dirs[i] = out;
+    dirs[i] = out.Normalized();
   }
   bool constant = true;
   for (int i = 1; i < n; ++i) {
@@ -272,9 +261,19 @@ std::unique_ptr<Shape> extend_edges(const Shape &s, rust::Slice<const uint32_t> 
       if (id < 1 || static_cast<int>(id) > emap.Extent()) throw std::runtime_error("no such edge");
       TopoDS_Edge e = TopoDS::Edge(emap(static_cast<int>(id)));
       if (BRep_Tool::Degenerated(e)) throw std::runtime_error("the edge has no length");
-      const TopTools_ListOfShape &fs = owners.FindFromKey(e);
-      if (fs.Extent() != 1) throw std::runtime_error("only open (boundary) edges of a surface can be extended");
-      TopoDS_Face f = TopoDS::Face(fs.First());
+      // distinct faces at the edge (a face can be listed once per use of the edge)
+      TopoDS_Face f;
+      int nfaces = 0;
+      for (TopTools_ListIteratorOfListOfShape it(owners.FindFromKey(e)); it.More(); it.Next()) {
+        if (f.IsNull() || !f.IsSame(it.Value())) {
+          if (!f.IsNull()) ++nfaces;
+          f = TopoDS::Face(it.Value());
+        }
+      }
+      if (!f.IsNull()) ++nfaces;
+      if (nfaces != 1 || BRep_Tool::IsClosed(e, f)) {
+        throw std::runtime_error("only open (boundary) edges of a surface can be extended");
+      }
       TopoDS_Edge ef = edge_in_face(e, f);
       TopoDS_Face strip;
       if (mode == 0) strip = natural_strip(f, ef, d);
