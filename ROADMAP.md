@@ -23,13 +23,14 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | View      | GPU renderer (wgpu or OpenGL through egui) for big models; the CPU one stays for the CLI |
 | Manufacture | Adaptive clearing, rest machining, 3D toolpaths, stock simulation, tool library, post-processor library, ramp/helical entries, tabs |
 | Plugins   | Installable `.clfplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
+| Tracing   | Canvas (an image kept on a plane, calibrated); centre-line tracing for engraving; constraints on traced geometry; see [docs/TRACING.md](docs/TRACING.md) |
 
 ## Files and data
 
 | Area     | Item                                                                           |
 |----------|--------------------------------------------------------------------------------|
 | Formats  | ACIS SAT/SMT, Parasolid (x_t), DWG, FBX: need closed-source or licensed SDKs   |
-| Formats  | DXF splines and ellipses as entities (exported as lines today); SVG sketch import/export |
+| Formats  | DXF splines and ellipses as entities (exported as lines today)               |
 | Formats  | STEP with colours, names and assembly structure (needs OCCT's XCAF toolkit)    |
 | Data     | Sharing a hub between machines (sync folder or server), comments on versions   |
 | Data     | Visual diff between two versions in the viewport                              |

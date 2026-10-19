@@ -79,11 +79,16 @@ fn traced_sketch_extrudes() {
   png(&image, plate_and_disc);
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
-  run(&mut s, "sketch.trace", json!({"image": image, "width": 200, "fit": "lines"}));
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 200, "fit": "lines"}));
+  // the square-with-hole and the disc are ink; the disc inside the hole is not
+  assert_eq!(r["ink"].as_array().unwrap().len(), 2, "{r}");
   run(&mut s, "sketch.finish", json!({}));
-  run(&mut s, "extrude", json!({"distance": 3}));
-  assert!(!s.model.bodies.is_empty());
+  run(&mut s, "extrude", json!({"distance": 3, "profiles": r["ink"]}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  let pi = std::f64::consts::PI;
+  let want = (3600.0 - pi * 144.0 + pi * 400.0) * 3.0;
+  let v: f64 = s.model.bodies.iter().map(|b| b.shape.mass().unwrap().volume).sum();
+  assert!((v - want).abs() / want < 0.02, "volume {v} vs {want}");
   let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -95,9 +100,14 @@ fn every_fit_and_placement_option_closes() {
   for fit in ["lines", "arcs", "curves"] {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
-    let r =
-      run(&mut s, "sketch.trace", json!({"image": image, "height": 50, "at": [10, -5], "angle": "30 deg", "fit": fit}));
-    assert_eq!(r["size"], json!([100.0, 50.0]), "{fit}");
+    run(&mut s, "param.add", json!({"name": "tall", "expr": "2 in"}));
+    let r = run(
+      &mut s,
+      "sketch.trace",
+      json!({"image": image, "height": "tall - 0.8 mm", "at": [10, -5], "angle": "30 deg", "fit": fit}),
+    );
+    let size = [r["size"][0].as_f64().unwrap(), r["size"][1].as_f64().unwrap()];
+    assert!((size[0] - 100.0).abs() < 1e-9 && (size[1] - 50.0).abs() < 1e-9, "{fit}: {size:?}");
     assert_eq!(profiles(&mut s).len(), 3, "{fit}");
   }
   let _ = std::fs::remove_dir_all(&dir);

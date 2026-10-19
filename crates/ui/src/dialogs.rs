@@ -1715,6 +1715,14 @@ impl Dialog {
         keep = false;
         app.s.selection.clear();
         app.status = Some((format!("{} done", self.kind.title().to_lowercase()), false));
+        // select the traced shapes (not their holes), ready to extrude
+        if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
+          let ink = r["ink_profiles"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>());
+          if let Some(ink) = ink.filter(|i| !i.is_empty()) {
+            app.s.selection = ink.iter().map(|i| Sel::Profile { sketch, index: *i as usize }).collect();
+            app.status = Some((format!("Traced {} shapes, selected: Extrude (E) makes them solid", ink.len()), false));
+          }
+        }
         if self.kind == Kind::NewDrawing {
           app.drawing = app.s.design.drawings.last().map(|d| d.id);
         }

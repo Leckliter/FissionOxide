@@ -1,4 +1,7 @@
-# Image tracing plan
+# Image tracing
+
+Status: pieces 1–4 below are built (`crates/trace`, `crates/exchange/src/svg.rs`,
+`crates/engine/src/trace.rs`, `crates/ui/src/trace.rs`); section 5 is what's left.
 
 Turn a photo, logo or scan into clean, closed sketch geometry inside CLFusion — the job the
 separate TracingKit tool was meant to do for Fusion 360, without the SVG round trip. In Fusion a
@@ -8,7 +11,8 @@ finder confirms that every shape is a closed region before you extrude, flange o
 
 ## What the user gets
 
-1. While editing a sketch: **Insert → Trace Image…** (also on the sketch toolbar).
+1. While editing a sketch: **Insert → Trace Image…** or **Create → Trace Image…**. Opening or
+   dropping a picture does the same, starting a sketch on the XY plane if none is being edited.
 2. Pick a PNG/JPEG/BMP/WebP. The image appears on the sketch plane, half transparent, with the
    traced outlines drawn over it.
 3. Adjust, with the preview updating as you go:
@@ -22,7 +26,8 @@ finder confirms that every shape is a closed region before you extrude, flange o
      splines (smoothest, fewest entities).
    - **Size**: width in model units (height follows), and where the image centre sits.
 4. The dialog reports *N shapes (M holes), K curves, all closed* — or names what was dropped.
-5. OK adds the curves to the sketch as one undo step. They are ordinary sketch geometry:
+5. OK adds the curves to the sketch as one undo step and selects the traced shapes (not their
+   holes), so Extrude straight away makes the part. They are ordinary sketch geometry:
    dimension them, trim them, extrude them, flatten them into a DXF.
 
 The same thing is a command, so the CLI, scripts and AI agents (MCP) get it too:
@@ -94,14 +99,17 @@ Useful on its own (the roadmap already lists it) and for anyone who already has 
 ```
 {sketch?, image: path, mode?: "outline"|"colors", threshold?, colors?, layers?: [index],
  invert?, blur?, specks?, holes?, tolerance?, corners?, fit?: "lines"|"arcs"|"curves",
- width? | height? | scale?, at?: [x, y]}
-→ {curves: [id], shapes, holes, layers: [{color, shapes}], width, height, warning?}
+ width? | height? (expressions) | scale?, at?: [x, y], angle?}
+→ {curves: [id], shapes, holes, layers: [{index, color, background, shapes, holes}], size: [w, h],
+   pixels: [w, h], profiles, ink: [[x, y]], ink_profiles: [index], at, angle, warning?}
 ```
 
 The trace becomes a temporary `Sketch` (as `sketch.insert` does with a DXF), and is merged with
 `insert_from`, so it is one undo step and touches nothing else. Image pixels map to sketch
 millimetres with the image centred on `at` (default the sketch origin), scaled to `width`
-(default 100 mm). Lines share end points, arcs use the sketch's counter-clockwise convention,
+(default 100 mm) and turned by `angle`. `ink` is a point inside each traced shape and outside
+its holes (found by classifying every resulting profile against the traced contours), so
+`extrude {profiles: ink}` builds the shapes with their holes open. Lines share end points, arcs use the sketch's counter-clockwise convention,
 cubic segments become 4-point control splines (exactly a Bézier, as text glyphs do).
 
 `trace.info` runs the trace without changing the design and returns the counts and each

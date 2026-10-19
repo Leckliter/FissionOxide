@@ -244,6 +244,12 @@ impl App {
   }
 
   pub fn open_path(&mut self, p: &std::path::Path) {
+    if trace::is_image(p) {
+      // a picture opens as a new design with a sketch to trace it into
+      self.replace_session(Session::default());
+      self.trace_image(p.to_path_buf());
+      return;
+    }
     match Session::open(p) {
       Ok(s) => {
         self.replace_session(s);
@@ -628,11 +634,14 @@ impl App {
     }
   }
 
-  /// Opens Trace Image on `path` (a dropped image) in the sketch being edited.
+  /// Opens Trace Image on `path` (an opened or dropped image) in the sketch being edited, or in
+  /// a new sketch on the XY plane.
   pub fn trace_image(&mut self, path: PathBuf) {
     if self.s.edit_sketch.is_none() {
-      self.status = Some(("Start or edit a sketch, then drop the image on it to trace it".into(), true));
-      return;
+      self.create_sketch(json!("xy"));
+      if self.s.edit_sketch.is_none() {
+        return;
+      }
     }
     self.cancel_dialog();
     self.tool = Tool::Select;

@@ -96,7 +96,7 @@ cmds! {
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
   "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .clf/.clfz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
-  "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?}";
+  "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
@@ -452,16 +452,20 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         .map(|e| clf_expr::eval(&e, clf_expr::Kind::Angle, &params_scope(s)))
         .transpose()?
         .unwrap_or(0.0);
-      let (src, mut out) = crate::trace::sketch(p, at)?;
+      let (src, mut out, placed) = crate::trace::sketch(p, at, angle, &params_scope(s))?;
       let t = clf_sketch::Xform2 { angle, center: at, ..Default::default() };
       let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &[], &t)?))?;
       out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
-      out["profiles"] = json!(s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0));
+      let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.as_slice()).unwrap_or_default();
+      let ink = crate::trace::ink_profiles(&placed, profiles);
+      out["ink"] = json!(ink.iter().map(|i| profiles[*i].interior_point()).collect::<Vec<_>>());
+      out["ink_profiles"] = json!(ink);
+      out["profiles"] = json!(profiles.len());
       out["at"] = json!(at);
       out["angle"] = json!(angle);
       Ok(out)
     }
-    "trace.info" => crate::trace::info(p),
+    "trace.info" => crate::trace::info(p, &params_scope(s)),
     "sketch.fillet"
     | "sketch.chamfer"
     | "sketch.offset"

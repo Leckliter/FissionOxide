@@ -2,6 +2,7 @@
 //! measured (`trace.info`). The tracer itself is [`clf_trace`]; this maps its pixel contours
 //! onto the sketch, centred on `at` and scaled to the requested size.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -11,7 +12,7 @@ use clf_trace::{Contour, Fit, Image, Mode, Options, Seg, Trace};
 use serde_json::{Value, json};
 
 use crate::CmdError;
-use crate::commands::{opt_str, req_str};
+use crate::commands::{expr_of, opt_str, req_str};
 
 /// Default traced width (mm) when no size is given.
 const DEFAULT_WIDTH: f64 = 100.0;
@@ -105,14 +106,23 @@ pub(crate) fn run(p: &Value) -> Result<Trace, CmdError> {
   clf_trace::trace(&img, &options(p)?).map_err(|e| CmdError::new(e.to_string()))
 }
 
-/// Millimetres per traced pixel: from `width`, `height` or `scale` (mm per pixel).
-fn mm_per_px(p: &Value, t: &Trace) -> Result<f64, CmdError> {
-  let k = if let Some(s) = num(p, "scale")? {
+/// Parameter values, for sizes given as expressions ("120 mm", "plate_w - 10").
+pub(crate) type Scope = HashMap<String, f64>;
+
+/// Millimetres per traced pixel: from `width`, `height` (lengths) or `scale` (mm per pixel).
+fn mm_per_px(p: &Value, t: &Trace, scope: &Scope) -> Result<f64, CmdError> {
+  let eval = |k: &str, kind| -> Result<Option<f64>, CmdError> {
+    match p.get(k) {
+      None | Some(Value::Null) => Ok(None),
+      Some(v) => Ok(Some(clf_expr::eval(&expr_of(v)?, kind, scope)?)),
+    }
+  };
+  let k = if let Some(s) = eval("scale", clf_expr::Kind::Unitless)? {
     s
-  } else if let Some(h) = num(p, "height")? {
+  } else if let Some(h) = eval("height", clf_expr::Kind::Length)? {
     h / f64::from(t.height.max(1))
   } else {
-    num(p, "width")?.unwrap_or(DEFAULT_WIDTH) / f64::from(t.width.max(1))
+    eval("width", clf_expr::Kind::Length)?.unwrap_or(DEFAULT_WIDTH) / f64::from(t.width.max(1))
   };
   if k <= 0.0 || !k.is_finite() {
     return Err(CmdError::new("the traced size must be positive"));
@@ -165,9 +175,9 @@ fn summary(t: &Trace, k: f64) -> Value {
 }
 
 /// `trace.info`: what a trace would give, without changing the design.
-pub(crate) fn info(p: &Value) -> Result<Value, CmdError> {
+pub(crate) fn info(p: &Value, scope: &Scope) -> Result<Value, CmdError> {
   let t = run(p)?;
-  let k = mm_per_px(p, &t)?;
+  let k = mm_per_px(p, &t, scope)?;
   Ok(summary(&t, k))
 }
 
@@ -252,11 +262,94 @@ fn on_bisector(c: [f64; 2], a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
   [c[0] - t * d[0], c[1] - t * d[1]]
 }
 
+/// A contour as a closed polygon (pixels), curves sampled finely enough to classify regions.
+fn polygon(c: &Contour) -> Vec<[f64; 2]> {
+  const N: usize = 16;
+  let mut out = Vec::new();
+  for seg in &c.segs {
+    match *seg {
+      Seg::Line { a, .. } => out.push(a),
+      Seg::Arc { a, b, center, ccw } => {
+        let (a0, mut a1) = ((a[1] - center[1]).atan2(a[0] - center[0]), (b[1] - center[1]).atan2(b[0] - center[0]));
+        let tau = std::f64::consts::TAU;
+        if ccw && a1 <= a0 {
+          a1 += tau;
+        } else if !ccw && a1 >= a0 {
+          a1 -= tau;
+        }
+        let r = (a[0] - center[0]).hypot(a[1] - center[1]);
+        for i in 0..N {
+          let t = a0 + (a1 - a0) * i as f64 / N as f64;
+          out.push([center[0] + r * t.cos(), center[1] + r * t.sin()]);
+        }
+      }
+      Seg::Cubic { a, c1, c2, b } => {
+        for i in 0..N {
+          let t = i as f64 / N as f64;
+          let u = 1.0 - t;
+          let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+          out.push([
+            w[0] * a[0] + w[1] * c1[0] + w[2] * c2[0] + w[3] * b[0],
+            w[0] * a[1] + w[1] * c1[1] + w[2] * c2[1] + w[3] * b[1],
+          ]);
+        }
+      }
+      Seg::Circle { center, radius } => {
+        for i in 0..4 * N {
+          let t = std::f64::consts::TAU * i as f64 / (4 * N) as f64;
+          out.push([center[0] + radius * t.cos(), center[1] + radius * t.sin()]);
+        }
+      }
+    }
+  }
+  out
+}
+
+fn inside(poly: &[[f64; 2]], q: [f64; 2]) -> bool {
+  let mut odd = false;
+  let mut j = poly.len().wrapping_sub(1);
+  for (i, a) in poly.iter().enumerate() {
+    let b = poly[j];
+    if (a[1] > q[1]) != (b[1] > q[1]) && q[0] < a[0] + (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) {
+      odd = !odd;
+    }
+    j = i;
+  }
+  odd
+}
+
+/// Which of the sketch's profiles are traced ink (inside a shape and not in one of its holes),
+/// as opposed to the holes the outlines also enclose: what an extrude of the trace should pick.
+pub(crate) fn ink_profiles(placed: &Placed, profiles: &[clf_sketch::Profile]) -> Vec<usize> {
+  let (s, c) = (-placed.angle).sin_cos();
+  profiles
+    .iter()
+    .enumerate()
+    .filter(|(_, pr)| {
+      // the region's inside point back in traced pixels
+      let q = pr.interior_point();
+      let (dx, dy) = (q[0] - placed.place.at[0], q[1] - placed.place.at[1]);
+      let (x, y) = (dx * c - dy * s, dx * s + dy * c);
+      let px = [placed.place.cx + x / placed.place.k, placed.place.cy + y / placed.place.k];
+      placed.polygons.iter().any(|layer| layer.iter().filter(|poly| inside(poly, px)).count() % 2 == 1)
+    })
+    .map(|(i, _)| i)
+    .collect()
+}
+
+/// Where a trace went, to tell its ink from its holes afterwards.
+pub(crate) struct Placed {
+  place: Place,
+  pub angle: f64,
+  /// The drawn layers' contours as polygons (pixels), one list per layer.
+  polygons: Vec<Vec<Vec<[f64; 2]>>>,
+}
+
 /// The traced curves of the chosen layers as a standalone sketch (merged into the target sketch
 /// by `insert_from`), with the summary the command returns.
-pub(crate) fn sketch(p: &Value, at: [f64; 2]) -> Result<(Sketch, Value), CmdError> {
+pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Result<(Sketch, Value, Placed), CmdError> {
   let t = run(p)?;
-  let k = mm_per_px(p, &t)?;
+  let k = mm_per_px(p, &t, scope)?;
   let place = Place { k, cx: f64::from(t.width) / 2.0, cy: f64::from(t.height) / 2.0, at };
   let layers = chosen_layers(p, &t)?;
   let mut sk = Sketch::new();
@@ -278,5 +371,6 @@ pub(crate) fn sketch(p: &Value, at: [f64; 2]) -> Result<(Sketch, Value), CmdErro
   if shapes == 0 {
     out["warning"] = json!("nothing was traced: try another threshold, Invert, or fewer ignored specks");
   }
-  Ok((sk, out))
+  let polygons = layers.iter().map(|&i| t.layers[i].contours.iter().map(polygon).collect()).collect();
+  Ok((sk, out, Placed { place, angle, polygons }))
 }

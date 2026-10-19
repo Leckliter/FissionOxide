@@ -1,0 +1,8 @@
+# A shop badge traced from a picture (examples/logo.png) and extruded 3 mm. Run from the repo root.
+# sketch.trace returns "ink": a point inside each traced shape (not inside its holes); the extrude
+# below lists those points so the ring, star, letters and tag come out with their holes open.
+{"cmd": "new", "name": "Traced badge"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.trace", "image": "examples/logo.png", "width": 160}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "distance": 3, "profiles": [[46.1, -19.033], [-29.9, 37.766], [-30.0, 12.461], [-24.643, -21.451], [-35.4, -25.172], [-14.321, -21.647], [-45.573, -28.275]]}
