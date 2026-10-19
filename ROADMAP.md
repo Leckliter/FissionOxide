@@ -15,7 +15,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Features  | Configuration rules (driven by other columns); configured components inside assemblies; move face for curved faces and rotations in direct edits |
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
-| Sheet     | Rounded bends between press-brake lofted flange facets; later cuts in a lofted flange's flat pattern; a flat pattern sketch that follows the model |
+| Sheet     | A flat pattern sketch that follows the model; rounded bends where press-brake folds converge on a corner (they stay sharp); splines in flat pattern DXFs |
 | Assembly  | Screw and cam motion; contact sets during viewport drags; nested sub-assemblies from inserted designs |
 | Drawing   | Baseline and chain dimensions; GD&T composite frames and datum targets; weld symbols; revision table; multiple sheets |
 | UI        | Manipulators for more commands (shell, draft, patterns); a triad that turns about any axis |

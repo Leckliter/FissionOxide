@@ -81,6 +81,10 @@ impl Body {
       if (volume - dev.volume).abs() <= 1e-6 * dev.volume.abs().max(1.0) {
         return dev.flat_pattern(sheet.thickness);
       }
+      // cut since: carry the cuts into the developed flat
+      if dev.built.is_some() {
+        return crate::sheet3::developed_with_cuts(dev, sheet.thickness, &self.shape);
+      }
     }
     let face = face.or_else(|| sheet::default_face(self.faces())).ok_or("the body has no planar face")?;
     sheet::flat_pattern(&self.shape, self.faces(), face, sheet)
@@ -1389,6 +1393,8 @@ impl Ctx<'_> {
       ext: [bool; 2],
       /// Keep-sides of miter planes (origin, normal).
       cuts: Vec<(DVec3, DVec3)>,
+      /// Butt corners at the start / end: where the bend and the wall stop, from that end.
+      butt: [Option<(f64, f64)>; 2],
     }
     let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
     for (i, e) in edges.iter().enumerate() {
@@ -1436,6 +1442,7 @@ impl Ctx<'_> {
           b: (b - w * b.dot(w)).normalize_or_zero(),
           ext: [false, false],
           cuts: Vec::new(),
+          butt: [None, None],
         });
       }
       if list.is_empty() {
@@ -1476,6 +1483,13 @@ impl Ctx<'_> {
                     list[i].cuts.push((pi + wj * (shift + xout), -wj));
                     list[j].cuts.push((pi + wi * (shift + xin - info.gap), -wi));
                   }
+                  CornerMode::Butt => {
+                    let into_j = if ej == 0 { list[j].dir } else { -list[j].dir };
+                    let (fi, fj) = ((into_i, wi), (into_j, wj));
+                    list[i].butt[ei] = crate::sheet3::butt_corner(fi, fj, shift, shift + xin, info.gap);
+                    list[j].butt[ej] = crate::sheet3::butt_corner(fj, fi, shift, shift + xin, info.gap);
+                    continue;
+                  }
                 }
                 list[i].ext[ei] = true;
                 list[j].ext[ej] = true;
@@ -1493,18 +1507,49 @@ impl Ctx<'_> {
         for (o, n) in &f.cuts {
           tool = tool.boolean(&sheet::half_space(*o, *n, 4.0 * reach)?, BoolOp::Intersect).map_err(ke)?;
         }
+        // past a butt corner's bend end only the wall goes on
+        for (k, end) in f.butt.iter().enumerate() {
+          let Some((bend, _)) = end else { continue };
+          let (lo, hi) = if k == 0 { (s0, *bend) } else { (f.len - bend, s1) };
+          if hi - lo > 1e-9 {
+            let plane = Plane { origin: f.base + f.w * shift + f.dir * lo, x: f.w, y: f.b };
+            let rect = sheet::rectangle([-reach, -3.0 * t], [reach, bend_top]);
+            let under = Shape::face(&plane, &rect).map_err(ke)?.extrude(f.dir * (hi - lo)).map_err(ke)?;
+            tool = tool.boolean(&under, BoolOp::Subtract).map_err(ke)?;
+          }
+        }
         Ok(tool)
       };
       let mut spans = Vec::new();
       for f in &list {
-        let s0 = if f.ext[0] { -reach } else { o1 };
-        let s1 = if f.ext[1] { f.len + reach } else { f.len - o2 };
+        let s0 = if f.ext[0] {
+          -reach
+        } else if let Some((_, wall)) = f.butt[0] {
+          wall
+        } else {
+          o1
+        };
+        let s1 = if f.ext[1] {
+          f.len + reach
+        } else if let Some((_, wall)) = f.butt[1] {
+          f.len - wall
+        } else {
+          f.len - o2
+        };
         spans.push((s0, s1));
         if shift < -1e-9 {
           let (c0, c1) = (o1.max(0.0), f.len - o2.max(0.0));
           let plane = Plane { origin: f.base + f.w * shift + f.dir * c0, x: f.w, y: f.b };
           let rect = sheet::rectangle([0.0, -2.0 * t], [t - shift, t]);
           cuts.push(Shape::face(&plane, &rect).map_err(ke)?.extrude(f.dir * (c1 - c0)).map_err(ke)?);
+          // an earlier flange's bend past an end of the edge is trimmed by the setback too
+          for (free, at, out) in [(o1 < 1e-9, f.start, -f.dir), (o2 < 1e-9, f.end, f.dir)] {
+            let (r, edges) = (info.bend_radius, body.edges());
+            if let Some((pl, prof)) = free.then(|| crate::sheet3::bend_past_end(edges, at, out, f.w, r, t)).flatten() {
+              let pl = Plane { origin: pl.origin + f.w * shift, ..pl };
+              cuts.push(Shape::face(&pl, &prof).map_err(ke)?.extrude(f.w * (t - shift)).map_err(ke)?);
+            }
+          }
         }
         // bend reliefs where the flange stops short of the edge's end
         if info.relief != ReliefShape::None {

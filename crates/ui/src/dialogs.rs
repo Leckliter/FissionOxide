@@ -473,7 +473,8 @@ pub struct Dialog {
   manip: manip::Cache,
 }
 
-const CORNERS: [(&str, &str); 4] = [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+const CORNERS: [(&str, &str); 5] =
+  [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap"), ("butt", "Butt")];
 const CORNER_RELIEFS: [(&str, &str); 4] =
   [("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")];
 

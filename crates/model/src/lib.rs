@@ -22,6 +22,7 @@ pub mod refs;
 pub mod regen;
 pub mod sheet;
 pub mod sheet2;
+pub mod sheet3;
 pub mod surface;
 
 use serde::{Deserialize, Serialize};
@@ -175,6 +176,9 @@ pub enum CornerMode {
   Closed,
   /// The first flange runs over the end of the second, which stops the rule's gap short of it.
   Overlap,
+  /// The walls run on, cut square, until their inside corners are the rule's gap apart; the
+  /// bends stop where the sheet does, leaving an open corner relief under the walls.
+  Butt,
 }
 
 /// The notch cut where two flanges' bends meet at a corner.
@@ -1146,6 +1150,9 @@ pub enum FeatureKind {
     flip: bool,
     #[serde(default)]
     rule: String,
+    /// Press brake: round the bends between facets to the rule's bend radius (else sharp folds).
+    #[serde(default)]
+    rounded: bool,
   },
   /// Sheet metal miter flange: an open sketch profile (drawn across the first edge, starting on
   /// it) swept along a chain of sheet edges, with mitred corners.

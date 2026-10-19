@@ -664,7 +664,7 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
         return Err(CmdError::new("a flat pattern DXF holds one sheet metal body; pass 'bodies': [id]"));
       };
       let flat = b.flat_pattern(None).map_err(CmdError::new)?;
-      std::fs::write(&path, fox_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?;
+      std::fs::write(&path, crate::sheet2::flat_dxf(b, &flat)?)?;
       out["flat_pattern"] = json!(b.id.0);
     }
     FormatKind::Sketch => {

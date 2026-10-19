@@ -999,6 +999,10 @@ class Converter:
       params = {"position": pos}
       if f.get("flip"):
         params["flip"] = True
+      if len(f.get("edges") or []) > 1:
+        self.comment("the source's corners: walls run on, cut square, until their inside corners are the rule gap (the thickness) apart")
+        self.cmd("sheet.rule", name=rule, gap="sm_thickness")
+        params["corners"] = "butt"
       self.cmd("sheet.edge_flange", True, edges=self.edges(f, T), height=f["height"], angle=f"{f['angle']} deg",
                **params)
     elif t == "contour":

@@ -10,18 +10,20 @@ use crate::{FeatureId, FeatureKind, LoftProfile, Operation};
 impl Ctx<'_> {
   pub(super) fn apply_sheet2(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::LoftedFlange { from, to, method, bends, flip, rule } => {
+      FeatureKind::LoftedFlange { from, to, method, bends, flip, rule, rounded } => {
         let info = self.sheet_info(rule)?;
         let (a, b) = (self.loft_chain(from)?, self.loft_chain(to)?);
         let n = self.count(bends)?;
-        let (shape, mut dev) = sheet2::lofted_flange(&a, &b, *method, n, *flip, &info)?;
+        let (shape, mut dev, warning) = sheet2::lofted_flange(&a, &b, *method, n, *flip, *rounded, &info)?;
         self.operate(id, shape, Operation::NewBody)?;
         for b in self.state.bodies.iter_mut().filter(|b| b.feature == id && b.sheet.is_none()) {
-          // the flat pattern holds while the body keeps this volume
+          // the flat pattern holds while the body keeps this volume; later cuts are what's
+          // missing from the body as built
           dev.volume = b.shape.mass().map(|m| m.volume).unwrap_or(dev.volume);
+          dev.built = Some(std::sync::Arc::new(std::sync::Mutex::new(b.shape.clone())));
           b.sheet = Some(SheetInfo { developed: Some(std::sync::Arc::new(dev.clone())), ..info.clone() });
         }
-        Ok(None)
+        Ok(warning)
       }
       FeatureKind::MiterFlange { sketch, curves, edges, corners } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
