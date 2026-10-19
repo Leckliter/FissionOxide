@@ -54,6 +54,15 @@ pub(crate) mod ffi {
     bbox_max: [f64; 3],
   }
 
+  /// A hidden-line projection: 2D polylines with a kind each (0 visible, 1 visible tangent edge,
+  /// 2 visible silhouette, 3 hidden, 4 hidden silhouette) and full circles (cx, cy, r, kind).
+  struct HlrData {
+    points: Vec<f64>,
+    offsets: Vec<u32>,
+    kinds: Vec<u8>,
+    circles: Vec<f64>,
+  }
+
   unsafe extern "C++" {
     include!("clf-kernel/cpp/kernel.hxx");
 
@@ -80,6 +89,15 @@ pub(crate) mod ffi {
     fn unify(s: &Shape) -> Result<UniquePtr<Shape>>;
     fn unfold(s: &Shape, face: u32, thickness: f64, k_factor: f64, bends: &mut Vec<f64>) -> Result<UniquePtr<Shape>>;
     fn face_at_index(s: &Shape, face: u32) -> Result<UniquePtr<Shape>>;
+    fn refold_cuts(
+      folded: &Shape,
+      face: u32,
+      thickness: f64,
+      k_factor: f64,
+      removed: &Shape,
+    ) -> Result<UniquePtr<Shape>>;
+    fn fillet_radii(s: &Shape, edges: &[u32], radii: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn hlr_project(s: &Shape, view: &[f64], deflection: f64) -> Result<HlrData>;
     fn make_wire(segs: &[f64]) -> Result<UniquePtr<Shape>>;
     fn make_pipe(face: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
     fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;

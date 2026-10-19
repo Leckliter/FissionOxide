@@ -13,7 +13,7 @@ use clf_kernel::glam::DVec3;
 use clf_kernel::{Bend, FaceInfo, Plane, Shape, SurfaceKind};
 use clf_sketch::{CurveId, CurveKind, Loop, Profile, Seg, Sketch};
 
-use crate::SheetMetalRule;
+use crate::{ReliefShape, SheetMetalRule};
 
 /// Points closer than this join a path.
 const JOIN_TOL: f64 = 1e-6;
@@ -27,8 +27,25 @@ pub struct SheetInfo {
   /// Inside bend radius, mm.
   pub bend_radius: f64,
   pub k_factor: f64,
+  pub relief: ReliefShape,
+  pub relief_width: f64,
+  /// Past the bend.
+  pub relief_depth: f64,
+  /// Mitered corners and rips.
+  pub gap: f64,
   /// The body is a flat pattern (after Unfold).
   pub flat: bool,
+}
+
+/// What Refold needs to fold a flat pattern back up.
+#[derive(Debug, Clone)]
+pub struct Unfolded {
+  /// The body before it was unfolded.
+  pub folded: Shape,
+  /// Its stationary face.
+  pub face: u32,
+  /// The flat pattern as unfolded (later changes are found by comparing with it).
+  pub flat: Shape,
 }
 
 impl SheetInfo {
@@ -54,7 +71,24 @@ pub fn eval_rule(rule: &SheetMetalRule, params: &HashMap<String, f64>) -> Result
   if !(0.0..=1.0).contains(&k_factor) {
     return Err(format!("rule {}: the K-factor must be between 0 and 1", rule.name));
   }
-  Ok(SheetInfo { rule: rule.name.clone(), thickness, bend_radius, k_factor, flat: false })
+  let or = |e: &str, default: f64| -> Result<f64, String> { if e.trim().is_empty() { Ok(default) } else { len(e) } };
+  let relief_width = or(&rule.relief_width, thickness)?;
+  let relief_depth = or(&rule.relief_depth, thickness / 2.0)?;
+  let gap = or(&rule.gap, thickness / 2.0)?;
+  if !(relief_width > 0.0 && relief_depth >= 0.0 && gap > 0.0) {
+    return Err(format!("rule {}: relief sizes and the gap must be positive", rule.name));
+  }
+  Ok(SheetInfo {
+    rule: rule.name.clone(),
+    thickness,
+    bend_radius,
+    k_factor,
+    relief: rule.relief,
+    relief_width,
+    relief_depth,
+    gap,
+    flat: false,
+  })
 }
 
 // ---------------------------------------------------------------- 2D helpers
@@ -296,6 +330,32 @@ pub fn rectangle(lo: P2, hi: P2) -> Profile {
   Profile { outer: Loop { segs }, holes: Vec::new() }
 }
 
+/// A bend relief notch in (along the edge, across it; + = outward) coordinates: `along` is the
+/// notch's span, it reaches from `outer` in to `inner`, with a round inner end for round reliefs.
+pub fn relief_profile(along: (f64, f64), inner: f64, outer: f64, round: bool) -> Profile {
+  let (a0, a1) = along;
+  let w = a1 - a0;
+  if !round || inner + w / 2.0 >= outer {
+    return rectangle([a0, inner], [a1, outer]);
+  }
+  let c = [(a0 + a1) / 2.0, inner + w / 2.0];
+  let segs = vec![
+    Seg::Line { a: [a1, outer], b: [a0, outer] },
+    Seg::Line { a: [a0, outer], b: [a0, c[1]] },
+    Seg::Arc { center: c, radius: w / 2.0, start_angle: PI, sweep: PI },
+    Seg::Line { a: [a1, c[1]], b: [a1, outer] },
+  ];
+  Profile { outer: Loop { segs }, holes: Vec::new() }
+}
+
+/// A slab standing in for the half-space in front of a plane (towards `normal`).
+pub fn half_space(origin: DVec3, normal: DVec3, size: f64) -> Result<Shape, String> {
+  let n = normal.try_normalize().ok_or("zero normal")?;
+  let pl = Plane::from_normal(origin, n, DVec3::X).map_err(|e| e.to_string())?;
+  let face = Shape::face(&pl, &rectangle([-size, -size], [size, size])).map_err(|e| e.to_string())?;
+  face.extrude(n * size).map_err(|e| e.to_string())
+}
+
 /// The two planar faces at a sheet edge: (the sheet face, the side wall). The sheet face is the
 /// one with the other side of the sheet `t` behind it.
 pub fn edge_faces(faces: &[FaceInfo], ids: [u32; 2], edge_len: f64, t: f64) -> Option<(FaceInfo, FaceInfo)> {
@@ -387,6 +447,96 @@ pub fn measure_thickness(faces: &[FaceInfo], face: u32) -> Option<f64> {
     .map(|g| (f.origin - g.origin).dot(f.normal))
     .filter(|d| *d > 1e-6)
     .min_by(f64::total_cmp)
+}
+
+/// Sharp straight corners between two faces of a sheet `t` thick, with the fillet radius that
+/// turns each into a bend of inside radius `r`: outside corners get r + t, inside corners r.
+pub fn sharp_corners(faces: &[FaceInfo], edges: &[clf_kernel::EdgeInfo], t: f64, r: f64) -> Vec<(u32, f64)> {
+  let skin = |id: u32| {
+    faces
+      .iter()
+      .find(|f| f.id == id && f.kind == SurfaceKind::Plane)
+      .copied()
+      .filter(|f| measure_thickness(faces, f.id).is_some_and(|d| (d - t).abs() < 1e-3 * t.max(1.0)))
+  };
+  let mut out = Vec::new();
+  for e in edges {
+    if e.kind != clf_kernel::CurveKind::Line || e.faces[1] == 0 {
+      continue;
+    }
+    let (Some(f1), Some(f2)) = (skin(e.faces[0]), skin(e.faces[1])) else { continue };
+    if f1.normal.dot(f2.normal).abs() > 0.9999 {
+      continue;
+    }
+    let convex = (f1.center - e.mid).dot(f2.normal) < 0.0;
+    out.push((e.id, if convex { r + t } else { r }));
+  }
+  out
+}
+
+/// Square corner reliefs where two sharp outside corners of a sheet (future bends) meet, sized to
+/// clear both bends: boxes at the corner reaching `r + t + relief width` along each edge and up
+/// the third direction.
+pub fn corner_reliefs(
+  faces: &[FaceInfo],
+  edges: &[clf_kernel::EdgeInfo],
+  sheet: &SheetInfo,
+  diagonal: f64,
+) -> Result<Vec<Shape>, String> {
+  let (t, r) = (sheet.thickness, sheet.bend_radius);
+  let convex: Vec<&clf_kernel::EdgeInfo> = sharp_corners(faces, edges, t, r)
+    .iter()
+    .filter(|(_, rad)| *rad > r + t * 0.5)
+    .filter_map(|(id, _)| edges.iter().find(|e| e.id == *id))
+    .collect();
+  let centre = faces.iter().fold(DVec3::ZERO, |a, f| a + f.center * f.area) / faces.iter().map(|f| f.area).sum::<f64>();
+  let size = r + t + sheet.relief_width;
+  let reach = 2.0 * (r + t) + 4.0 * sheet.gap + t;
+  let mut out = Vec::new();
+  let mut done: Vec<DVec3> = Vec::new();
+  for (i, a) in convex.iter().enumerate() {
+    for b in convex.iter().skip(i + 1) {
+      let (da, db) = ((a.end - a.start).normalize_or_zero(), (b.end - b.start).normalize_or_zero());
+      if da.dot(db).abs() > 0.999 {
+        continue;
+      }
+      // the nearest pair of ends
+      let Some((pa, pb)) = [a.start, a.end]
+        .iter()
+        .flat_map(|p| [b.start, b.end].map(|q| (*p, q)))
+        .min_by(|x, y| (x.0 - x.1).length().total_cmp(&(y.0 - y.1).length()))
+      else {
+        continue;
+      };
+      if (pa - pb).length() > reach {
+        continue;
+      }
+      // where the two edge lines meet (closest points)
+      let w = a.start - b.start;
+      let (aa, bb, cc, dd, ee) = (da.dot(da), da.dot(db), db.dot(db), da.dot(w), db.dot(w));
+      let den = aa * cc - bb * bb;
+      if den.abs() < 1e-12 {
+        continue;
+      }
+      let sa = (bb * ee - cc * dd) / den;
+      let sb = (aa * ee - bb * dd) / den;
+      let v = ((a.start + da * sa) + (b.start + db * sb)) / 2.0;
+      if done.iter().any(|q| (*q - v).length() < 1e-6) {
+        continue;
+      }
+      done.push(v);
+      let x = da * (centre - v).dot(da).signum();
+      let y = (db - x * db.dot(x)).normalize_or_zero();
+      let y = y * (centre - v).dot(y).signum();
+      let z = x.cross(y);
+      let z = z * (centre - v).dot(z).signum();
+      let m = t + diagonal * 1e-3;
+      let pl = Plane { origin: v - (x + y + z) * m, x, y };
+      let face = Shape::face(&pl, &rectangle([0.0, 0.0], [size + m, size + m])).map_err(|e| e.to_string())?;
+      out.push(face.extrude(z * (size + m)).map_err(|e| e.to_string())?);
+    }
+  }
+  Ok(out)
 }
 
 /// A flattened sheet metal body.

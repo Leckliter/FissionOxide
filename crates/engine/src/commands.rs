@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use clf_kernel::glam::DVec3;
 use clf_model::{
-  AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId, FeatureKind,
-  HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, SheetMetalRule,
+  AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
+  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
+  SheetMetalRule,
 };
 use clf_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -88,15 +89,17 @@ cmds! {
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "select" => "Set the selection", "{items: [Sel]}";
-  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?}";
+  "sheet.rule" => "Add or change a sheet metal rule (the first rule is the default)", "{name?, thickness?, bend_radius?, k_factor?, relief?: rectangular|round|none, relief_width?, relief_depth?, gap?}";
   "sheet.rules" => "List the sheet metal rules", "{}";
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
   "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
-  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
   "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
-  "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body)", "{body, face?: {body, face} | {point}, rule?}";
+  "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body); sharp corners become bends", "{body, face?: {body, face} | {point}, rule?, bends?}";
+  "sheet.rip" => "Slit a solid along edges (e.g. a shelled box's corners) so it can unfold", "{edges: [{body, edge} | {point}], gap?}";
+  "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
 }
@@ -521,12 +524,25 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         .find(|r| r.name == name)
         .cloned()
         .unwrap_or_else(|| SheetMetalRule { name: name.clone(), ..s.design.sheet_rule("").unwrap_or_default() });
-      for (k, slot) in
-        [("thickness", &mut rule.thickness), ("bend_radius", &mut rule.bend_radius), ("k_factor", &mut rule.k_factor)]
-      {
+      for (k, slot) in [
+        ("thickness", &mut rule.thickness),
+        ("bend_radius", &mut rule.bend_radius),
+        ("k_factor", &mut rule.k_factor),
+        ("relief_width", &mut rule.relief_width),
+        ("relief_depth", &mut rule.relief_depth),
+        ("gap", &mut rule.gap),
+      ] {
         if let Some(e) = opt_expr(p, k) {
           *slot = e;
         }
+      }
+      if let Some(r) = opt_str(p, "relief") {
+        rule.relief = match r {
+          "rectangular" => ReliefShape::Rectangular,
+          "round" => ReliefShape::Round,
+          "none" => ReliefShape::None,
+          o => return Err(CmdError::new(format!("unknown relief '{o}' (rectangular, round, none)"))),
+        };
       }
       let info = clf_model::sheet::eval_rule(&rule, &params_scope(s)).map_err(CmdError::new)?;
       s.edit(|d| Ok(d.set_sheet_rule(rule)?))?;
@@ -604,6 +620,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           position,
           offset_start: opt_expr(p, "offset_start").unwrap_or_else(|| "0".into()),
           offset_end: opt_expr(p, "offset_end").unwrap_or_else(|| "0".into()),
+          corners: match opt_str(p, "corners").unwrap_or("miter") {
+            "miter" => CornerMode::Miter,
+            "open" => CornerMode::Open,
+            o => return Err(CmdError::new(format!("unknown corner mode '{o}' (miter, open)"))),
+          },
         },
       )
     }
@@ -638,7 +659,26 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let body = BodyId(req_u32(p, "body")?);
       let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
       let rule = rule_name(s, p)?;
-      add_feature(s, FeatureKind::ConvertToSheetMetal { body, face, rule })
+      let bends = p.get("bends").and_then(Value::as_bool).unwrap_or(true);
+      add_feature(s, FeatureKind::ConvertToSheetMetal { body, face, rule, bends })
+    }
+    "sheet.rip" => {
+      let edges = edge_refs(s, p)?;
+      add_feature(s, FeatureKind::Rip { edges, gap: opt_expr(p, "gap").unwrap_or_default() })
+    }
+    "sheet.refold" => {
+      let body = match p.get("body") {
+        Some(_) => BodyId(req_u32(p, "body")?),
+        None => {
+          let mut it = s.model.bodies.iter().filter(|b| b.unfolded.is_some());
+          match (it.next(), it.next()) {
+            (Some(b), None) => b.id,
+            (None, _) => return Err(CmdError::new("there is no unfolded body")),
+            _ => return Err(CmdError::new("there are several unfolded bodies; pass 'body'")),
+          }
+        }
+      };
+      add_feature(s, FeatureKind::Refold { body })
     }
     "sheet.unfold" => {
       let body = sheet_body(s, p)?;

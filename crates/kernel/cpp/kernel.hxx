@@ -20,6 +20,7 @@ struct EdgeData;
 struct FaceInfo;
 struct EdgeInfo;
 struct MassProps;
+struct HlrData;
 
 std::unique_ptr<Shape> shape_clone(const Shape &s);
 bool shape_is_null(const Shape &s);
@@ -44,6 +45,11 @@ std::unique_ptr<Shape> unify(const Shape &s);
 std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
                               rust::Vec<double> &bends);
 std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face);
+std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double thickness, double k_factor,
+                                   const Shape &removed);
+std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> edges,
+                                    rust::Slice<const double> radii);
+HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection);
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs);
 std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine);
 std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed);

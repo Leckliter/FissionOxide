@@ -311,6 +311,7 @@ fn sheet_design() -> Design {
     thickness: "t".into(),
     bend_radius: "3 mm".into(),
     k_factor: "0.5".into(),
+    ..SheetMetalRule::default()
   })
   .unwrap();
   d
@@ -370,6 +371,7 @@ fn flange_edge_flange_and_flat_pattern() {
       position: BendPosition::Adjacent,
       offset_start: "0".into(),
       offset_end: "0".into(),
+      corners: CornerMode::Miter,
     })
     .unwrap();
   let m = regenerate(&mut d);
@@ -466,7 +468,7 @@ fn convert_solid_to_sheet_metal() {
   let m = regenerate(&mut d);
   let body = m.bodies[0].id;
   assert!(m.bodies[0].flat_pattern(None).is_err(), "not sheet metal yet");
-  d.add_feature(FeatureKind::ConvertToSheetMetal { body, face: None, rule: String::new() }).unwrap();
+  d.add_feature(FeatureKind::ConvertToSheetMetal { body, face: None, rule: String::new(), bends: true }).unwrap();
   let m = regenerate(&mut d);
   assert!(m.errors().is_empty(), "{:?}", m.errors());
   assert!(m.status.last().unwrap().warning.as_ref().unwrap().contains("3.000 mm thick"));
@@ -480,6 +482,7 @@ fn convert_solid_to_sheet_metal() {
     position: BendPosition::Adjacent,
     offset_start: "5".into(),
     offset_end: "5".into(),
+    corners: CornerMode::Miter,
   })
   .unwrap();
   let m = regenerate(&mut d);
@@ -537,4 +540,137 @@ fn bend_along_a_sketch_line() {
   let fm = flat.shape.mass().unwrap();
   let size = fm.bbox_max - fm.bbox_min;
   assert!((size.x - 100.0).abs() < 1e-3 && (size.y - 50.0).abs() < 1e-3, "{size:?}");
+}
+
+fn flange_on(d: &mut Design, edges: Vec<EdgeRef>, offsets: (&str, &str)) -> FeatureId {
+  d.add_feature(FeatureKind::EdgeFlange {
+    edges,
+    height: "20".into(),
+    angle: "90 deg".into(),
+    flip: false,
+    position: BendPosition::Adjacent,
+    offset_start: offsets.0.into(),
+    offset_end: offsets.1.into(),
+    corners: CornerMode::Miter,
+  })
+  .unwrap()
+}
+
+#[test]
+fn flanges_meeting_at_a_corner_are_mitered() {
+  for position in [BendPosition::Adjacent, BendPosition::Inside] {
+    let mut d = sheet_design();
+    plate_flange(&mut d);
+    let m = regenerate(&mut d);
+    let edges = vec![edge_near(&m, [50.0, 50.0, 2.0]), edge_near(&m, [100.0, 25.0, 2.0])];
+    let f = flange_on(&mut d, edges, ("0", "0"));
+    let FeatureKind::EdgeFlange { position: p, .. } = &mut d.feature_mut(f).unwrap().kind else { panic!() };
+    *p = position;
+    let m = regenerate(&mut d);
+    ok(&m);
+    assert_eq!(m.bodies.len(), 1);
+    assert!(m.bodies[0].shape.is_valid());
+    let mm = m.bodies[0].shape.mass().unwrap();
+    // the walls reach into the corner (mitered), not just along their own edges
+    let reach = if position == BendPosition::Adjacent { 105.0 } else { 100.0 };
+    assert!((mm.bbox_max.x - reach).abs() < 1e-6 && (mm.bbox_max.y - (reach - 50.0)).abs() < 1e-6, "{mm:?}");
+    let flat = m.bodies[0].flat_pattern(None).unwrap();
+    assert_eq!(flat.bends.len(), 2, "{position:?}");
+    assert!(flat.shape.is_valid());
+  }
+}
+
+#[test]
+fn partial_flanges_get_bend_reliefs() {
+  let volume_with = |relief: ReliefShape| {
+    let mut d = sheet_design();
+    d.sheet_metal_rules[0].relief = relief;
+    plate_flange(&mut d);
+    let m = regenerate(&mut d);
+    let e = edge_near(&m, [50.0, 50.0, 2.0]);
+    flange_on(&mut d, vec![e], ("10", "10"));
+    let m = regenerate(&mut d);
+    ok(&m);
+    assert!(m.bodies[0].flat_pattern(None).is_ok());
+    volume(&m)
+  };
+  let none = volume_with(ReliefShape::None);
+  // two notches, relief width t = 2, half a thickness (1) into the sheet, through t = 2
+  assert!((none - volume_with(ReliefShape::Rectangular) - 2.0 * 2.0 * 1.0 * 2.0).abs() < 1e-6);
+  assert!(none - volume_with(ReliefShape::Round) > 1.0);
+}
+
+#[test]
+fn shelled_box_rips_converts_and_unfolds() {
+  let mut d = sheet_design();
+  d.add_feature(FeatureKind::Primitive {
+    shape: Primitive::Box { width: "60".into(), depth: "40".into(), height: "30".into() },
+    plane: XY,
+    at: [30.0, 20.0],
+    operation: Operation::NewBody,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  let b = &m.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap();
+  d.add_feature(FeatureKind::Shell { faces: vec![FaceRef::from_face(b.id, top, top.center)], thickness: "2".into() })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let corners = [[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [0.0, 40.0]];
+  let edges = corners.iter().map(|c| edge_near(&m, [c[0], c[1], 15.0])).collect();
+  d.add_feature(FeatureKind::Rip { edges, gap: String::new() }).unwrap();
+  let body = m.bodies[0].id;
+  d.add_feature(FeatureKind::ConvertToSheetMetal { body, face: None, rule: String::new(), bends: true }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 1);
+  let cyl = m.bodies[0].faces().iter().filter(|f| f.kind == clf_kernel::SurfaceKind::Cylinder).count();
+  assert_eq!(cyl, 8, "four bends, inside and outside");
+  let flat = m.bodies[0].flat_pattern(None).unwrap();
+  assert_eq!(flat.bends.len(), 4);
+  let fm = flat.shape.mass().unwrap();
+  let size = fm.bbox_max - fm.bbox_min;
+  // outside dims kept: walls of 30 − (r + t) plus a bend allowance each side of the base
+  let ba = PI / 2.0 * (3.0 + 0.5 * 2.0);
+  let (lx, ly) = (60.0 - 10.0 + 2.0 * (ba + 25.0), 40.0 - 10.0 + 2.0 * (ba + 25.0));
+  assert!((size.x - lx).abs() < 1e-3 && (size.y - ly).abs() < 1e-3 && (size.z - 2.0).abs() < 1e-4, "{size:?}");
+}
+
+#[test]
+fn refold_carries_cuts_made_in_the_flat() {
+  let mut d = sheet_design();
+  plate_flange(&mut d);
+  let m = regenerate(&mut d);
+  let e = edge_near(&m, [50.0, 50.0, 2.0]);
+  flange_on(&mut d, vec![e], ("0", "0"));
+  let m = regenerate(&mut d);
+  let folded = volume(&m);
+  let body = m.bodies[0].id;
+  d.add_feature(FeatureKind::Unfold { body, face: None, keep_folded: false }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  // a slot across the bend zone of the flat (it starts at y = 50, is 2π long)
+  let fm = m.bodies[0].shape.mass().unwrap();
+  let mut slot = Sketch::new();
+  slot.add_rectangle([40.0, 45.0], [60.0, 60.0]).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: slot }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: s,
+    profiles: vec![],
+    extent: Extent { kind: ExtentKind::Symmetric, ..Extent::distance("10") },
+    operation: Operation::Cut,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let cut = fm.volume - volume(&m);
+  assert!((cut - 20.0 * 15.0 * 2.0).abs() < 1e-3, "{cut}");
+  d.add_feature(FeatureKind::Refold { body }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let mm = m.bodies[0].shape.mass().unwrap();
+  assert!((mm.bbox_max.z - 20.0).abs() < 1e-3, "folded again: {mm:?}");
+  // K = 0.5: the folded cut has the flat cut's volume
+  assert!(((folded - mm.volume) - cut).abs() / cut < 0.01, "{} vs {cut}", folded - mm.volume);
 }

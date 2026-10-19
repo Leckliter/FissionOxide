@@ -81,6 +81,18 @@ pub struct SheetMetalRule {
   pub bend_radius: String,
   /// Where the neutral layer sits, as a fraction of the thickness from the inside of a bend.
   pub k_factor: String,
+  /// Notches cut beside flanges that don't run the full edge.
+  #[serde(default)]
+  pub relief: ReliefShape,
+  /// Relief width; empty = the thickness.
+  #[serde(default)]
+  pub relief_width: String,
+  /// How far reliefs reach past the bend; empty = half the thickness.
+  #[serde(default)]
+  pub relief_depth: String,
+  /// Gap left at mitered corners and rips; empty = half the thickness.
+  #[serde(default)]
+  pub gap: String,
 }
 
 impl Default for SheetMetalRule {
@@ -90,8 +102,32 @@ impl Default for SheetMetalRule {
       thickness: "1 mm".into(),
       bend_radius: "1 mm".into(),
       k_factor: "0.44".into(),
+      relief: ReliefShape::Rectangular,
+      relief_width: String::new(),
+      relief_depth: String::new(),
+      gap: String::new(),
     }
   }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReliefShape {
+  #[default]
+  Rectangular,
+  Round,
+  None,
+}
+
+/// What edge flanges built together do where they meet at a corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerMode {
+  /// Run both flanges into the corner and cut them along the bisector, leaving the rule's gap.
+  #[default]
+  Miter,
+  /// Leave the flanges as they are (an open corner).
+  Open,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -495,11 +531,13 @@ pub enum FeatureKind {
     flip: bool,
     #[serde(default)]
     position: BendPosition,
-    /// Shorten the flange from the edge's start / end.
+    /// Shorten the flange from the edge's start / end (the sheet gets bend reliefs there).
     #[serde(default = "zero")]
     offset_start: String,
     #[serde(default = "zero")]
     offset_end: String,
+    #[serde(default)]
+    corners: CornerMode,
   },
   /// Sheet metal hem: the edge folded back 180° onto the sheet.
   Hem {
@@ -533,6 +571,20 @@ pub enum FeatureKind {
     face: Option<FaceRef>,
     #[serde(default)]
     rule: String,
+    /// Round sharp corners between the sheet's faces into bends of the rule's radius.
+    #[serde(default = "yes")]
+    bends: bool,
+  },
+  /// Slits a solid along edges (e.g. the corners of a shelled box) so it can unfold.
+  Rip {
+    edges: Vec<EdgeRef>,
+    /// Slit width; empty = the sheet rule's gap.
+    #[serde(default)]
+    gap: String,
+  },
+  /// Folds an unfolded sheet back up, carrying cuts made while it was flat.
+  Refold {
+    body: BodyId,
   },
   /// Flattens a sheet metal body onto its stationary face.
   Unfold {
@@ -604,6 +656,8 @@ impl FeatureKind {
       FeatureKind::Bend { .. } => "Bend",
       FeatureKind::ConvertToSheetMetal { .. } => "ConvertToSheetMetal",
       FeatureKind::Unfold { .. } => "Unfold",
+      FeatureKind::Rip { .. } => "Rip",
+      FeatureKind::Refold { .. } => "Refold",
     }
   }
 
@@ -846,7 +900,9 @@ impl Design {
       }
     }
     for r in &self.sheet_metal_rules {
-      if [&r.thickness, &r.bend_radius, &r.k_factor].iter().any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
+      if [&r.thickness, &r.bend_radius, &r.k_factor, &r.relief_width, &r.relief_depth, &r.gap]
+        .iter()
+        .any(|e| clf_expr::identifiers(e).iter().any(|i| i == name))
       {
         return Err(DesignError::InUse(name.to_string(), format!("sheet metal rule {}", r.name)));
       }
@@ -872,7 +928,9 @@ impl Design {
       for_each_expr(&mut f.kind, &mut |e| *e = rename_ident(e, old, new));
     }
     for r in &mut self.sheet_metal_rules {
-      for e in [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor] {
+      for e in
+        [&mut r.thickness, &mut r.bend_radius, &mut r.k_factor, &mut r.relief_width, &mut r.relief_depth, &mut r.gap]
+      {
         *e = rename_ident(e, old, new);
       }
     }
@@ -1052,6 +1110,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
+    FeatureKind::Rip { gap, .. } => {
+      if !gap.is_empty() {
+        f(gap)
+      }
+    }
     FeatureKind::Hem { length, gap, .. } => {
       f(length);
       f(gap);
@@ -1063,7 +1126,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::RemoveBodies { .. }
     | FeatureKind::Flange { .. }
     | FeatureKind::ConvertToSheetMetal { .. }
-    | FeatureKind::Unfold { .. } => {}
+    | FeatureKind::Unfold { .. }
+    | FeatureKind::Refold { .. } => {}
   }
 }
 

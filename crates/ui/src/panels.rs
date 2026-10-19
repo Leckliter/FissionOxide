@@ -432,7 +432,10 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     | FeatureKind::EdgeFlange { .. }
     | FeatureKind::Hem { .. }
     | FeatureKind::Bend { .. } => Icon::Extrude,
-    FeatureKind::ConvertToSheetMetal { .. } | FeatureKind::Unfold { .. } => Icon::Shell,
+    FeatureKind::ConvertToSheetMetal { .. }
+    | FeatureKind::Unfold { .. }
+    | FeatureKind::Refold { .. }
+    | FeatureKind::Rip { .. } => Icon::Shell,
     FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => Icon::Extrude,
     FeatureKind::Hole { .. } => Icon::Cylinder,
     FeatureKind::SplitBody { .. } => Icon::Combine,

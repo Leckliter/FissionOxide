@@ -12,10 +12,10 @@ use clf_kernel::glam::{DMat4, DVec3};
 use clf_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
 use clf_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
-use crate::sheet::{self, FlatPattern, SheetInfo};
+use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
-  AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId, FeatureKind,
-  HoleKind, Operation, ParamKind, PlaneRef, Primitive,
+  AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
+  FeatureKind, HoleKind, Operation, ParamKind, PlaneRef, Primitive, ReliefShape,
 };
 
 /// New bodies one feature may create.
@@ -33,6 +33,8 @@ pub struct Body {
   pub feature: FeatureId,
   /// Set on sheet metal bodies.
   pub sheet: Option<SheetInfo>,
+  /// Set on unfolded sheets (for Refold).
+  pub unfolded: Option<Box<Unfolded>>,
   mesh: OnceCell<Option<TriMesh>>,
   faces: OnceCell<Vec<FaceInfo>>,
   edges: OnceCell<Vec<EdgeInfo>>,
@@ -52,6 +54,7 @@ impl Body {
       shape,
       feature,
       sheet: None,
+      unfolded: None,
       mesh: OnceCell::new(),
       faces: OnceCell::new(),
       edges: OnceCell::new(),
@@ -59,7 +62,11 @@ impl Body {
   }
 
   fn with_shape(&self, shape: Shape, feature: FeatureId) -> Body {
-    Body { sheet: self.sheet.clone(), ..Body::new(self.id, self.name.clone(), shape, feature) }
+    Body {
+      sheet: self.sheet.clone(),
+      unfolded: self.unfolded.clone(),
+      ..Body::new(self.id, self.name.clone(), shape, feature)
+    }
   }
 
   /// The flat pattern of a sheet metal body, unfolded onto `face` (default: the largest planar
@@ -747,7 +754,7 @@ impl Ctx<'_> {
         self.tag_sheet(id, &info);
         Ok(None)
       }
-      FeatureKind::EdgeFlange { edges, height, angle, flip, position, offset_start, offset_end } => {
+      FeatureKind::EdgeFlange { edges, height, angle, flip, position, offset_start, offset_end, corners } => {
         let h = self.len(height)?;
         let a = self.angle(angle)?;
         let offsets = (self.len(offset_start)?, self.len(offset_end)?);
@@ -755,7 +762,7 @@ impl Ctx<'_> {
           return Err("the flange angle must be between 0 and 180 degrees (use Hem for 180)".into());
         }
         let position = *position;
-        self.edge_flanges(id, edges, *flip, offsets, |info| {
+        self.edge_flanges(id, edges, *flip, offsets, *corners, |info| {
           let (t, r) = (info.thickness, info.bend_radius);
           let half = (a / 2.0).tan();
           let straight = h - (r + t) * half;
@@ -775,7 +782,7 @@ impl Ctx<'_> {
         if !(g >= 0.01) {
           return Err("the hem gap must be at least 0.01 mm (a closed hem would fuse to the sheet)".into());
         }
-        self.edge_flanges(id, edges, *flip, (0.0, 0.0), |info| {
+        self.edge_flanges(id, edges, *flip, (0.0, 0.0), CornerMode::Miter, |info| {
           let (t, r) = (info.thickness, g / 2.0);
           let straight = l - (r + t);
           if straight < -1e-9 {
@@ -863,7 +870,7 @@ impl Ctx<'_> {
         self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         Ok(None)
       }
-      FeatureKind::ConvertToSheetMetal { body, face, rule } => {
+      FeatureKind::ConvertToSheetMetal { body, face, rule, bends } => {
         let mut info = self.sheet_info(rule)?;
         let bi = self.body_index(*body)?;
         let fid = self.pick_face(bi, face.as_mut())?;
@@ -874,10 +881,103 @@ impl Ctx<'_> {
           format!("the body is {t:.3} mm thick, the rule says {:.3} mm; using the body's thickness", info.thickness)
         });
         info.thickness = t;
-        let mut nb = self.state.bodies[bi].with_shape(self.state.bodies[bi].shape.clone(), id);
+        let mut shape = b.shape.clone();
+        if *bends && !sheet::sharp_corners(b.faces(), b.edges(), t, info.bend_radius).is_empty() {
+          if info.bend_radius <= 1e-9 {
+            return Err("the rule's bend radius must be above zero to turn corners into bends".into());
+          }
+          // where two bends meet, cut a square corner relief so each bend ends on a flat face
+          for relief in sheet::corner_reliefs(b.faces(), b.edges(), &info, b.diagonal())? {
+            shape = shape.boolean(&relief, BoolOp::Subtract).map_err(ke)?;
+          }
+          let (faces, edges) = (shape.faces().map_err(ke)?, shape.edges().map_err(ke)?);
+          let corners = sheet::sharp_corners(&faces, &edges, t, info.bend_radius);
+          shape = shape.fillet_each(&corners).map_err(|e| format!("turning corners into bends: {e}"))?;
+        }
+        let mut nb = self.state.bodies[bi].with_shape(shape, id);
         nb.sheet = Some(info);
         self.state.bodies[bi] = nb;
         Ok(warn)
+      }
+      FeatureKind::Rip { edges, gap } => {
+        let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
+        for (i, e) in edges.iter().enumerate() {
+          by_body.entry(e.body).or_default().push(i);
+        }
+        if by_body.is_empty() {
+          return Err("select edges to rip".into());
+        }
+        for (bid, idxs) in by_body {
+          let bi = self.body_index(bid)?;
+          let body = &self.state.bodies[bi];
+          let mut tools = Vec::new();
+          for i in idxs {
+            let Some(er) = edges.get_mut(i) else { continue };
+            let eid = er.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("an edge could not be found")?;
+            let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
+            *er = EdgeRef::from_edge(bid, &e, body.faces());
+            let face = |id: u32| body.faces().iter().find(|f| f.id == id && f.kind == clf_kernel::SurfaceKind::Plane);
+            let (Some(f1), Some(f2)) = (face(e.faces[0]), face(e.faces[1])) else {
+              return Err("rip along a straight edge between two flat faces".into());
+            };
+            if e.kind != clf_kernel::CurveKind::Line {
+              return Err("rip along a straight edge between two flat faces".into());
+            }
+            let t = match &body.sheet {
+              Some(s) => s.thickness,
+              None => sheet::measure_thickness(body.faces(), f1.id).ok_or("the faces at the edge aren't a sheet")?,
+            };
+            let g = if gap.trim().is_empty() {
+              match &body.sheet {
+                Some(s) => s.gap,
+                None => t / 2.0,
+              }
+            } else {
+              self.len(gap)?
+            };
+            if !(g > 1e-6) {
+              return Err("the rip gap must be positive".into());
+            }
+            let inward = -(f1.normal + f2.normal).try_normalize().ok_or("the faces at the edge are flat")?;
+            let across = (f1.normal - f2.normal).normalize_or_zero();
+            let dir = (e.end - e.start).normalize_or_zero();
+            let plane = Plane { origin: e.start, x: across, y: inward };
+            let rect = sheet::rectangle([-g / 2.0, -g], [g / 2.0, 4.0 * t]);
+            tools.push(Shape::face(&plane, &rect).map_err(ke)?.extrude(dir * e.length).map_err(ke)?);
+          }
+          let mut shape = body.shape.clone();
+          for tool in &tools {
+            shape = shape.boolean(tool, BoolOp::Subtract).map_err(ke)?;
+          }
+          self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+          self.split_multi(id, bid);
+        }
+        Ok(None)
+      }
+      FeatureKind::Refold { body } => {
+        let bi = self.body_index(*body)?;
+        let b = &self.state.bodies[bi];
+        let st = b.unfolded.clone().ok_or("the body isn't unfolded")?;
+        let mut info = b.sheet.clone().ok_or("the body is not sheet metal")?;
+        let mut folded = st.folded.clone();
+        match st.flat.boolean(&b.shape, BoolOp::Subtract) {
+          Ok(removed) => {
+            let tool = st.folded.refold_cuts(st.face, info.thickness, info.k_factor, &removed).map_err(ke)?;
+            // the pieces overlap a little, so cut them one at a time
+            for piece in tool.solids().map_err(ke)? {
+              folded = folded.boolean(&piece, BoolOp::Subtract).map_err(ke)?;
+            }
+          }
+          Err(KernelError::Empty) => {}
+          Err(e) => return Err(e.to_string()),
+        }
+        let added = b.shape.boolean(&st.flat, BoolOp::Subtract).is_ok_and(|a| a.mass().is_ok_and(|m| m.volume > 1e-6));
+        info.flat = false;
+        let mut nb = self.state.bodies[bi].with_shape(folded, id);
+        nb.sheet = Some(info);
+        nb.unfolded = None;
+        self.state.bodies[bi] = nb;
+        Ok(added.then(|| "material added while unfolded isn't carried into the folded part".to_string()))
       }
       FeatureKind::Unfold { body, face, keep_folded } => {
         let bi = self.body_index(*body)?;
@@ -889,14 +989,17 @@ impl Ctx<'_> {
         let fid = self.pick_face(bi, face.as_mut())?;
         let flat = self.state.bodies[bi].flat_pattern(Some(fid))?;
         info.flat = true;
+        let state = Unfolded { folded: self.state.bodies[bi].shape.clone(), face: fid, flat: flat.shape.clone() };
         if *keep_folded {
           let nid = self.new_body(id, flat.shape);
           if let Some(b) = self.state.bodies.iter_mut().find(|b| b.id == nid) {
             b.sheet = Some(info);
+            b.unfolded = Some(Box::new(state));
           }
         } else {
           let mut nb = self.state.bodies[bi].with_shape(flat.shape, id);
           nb.sheet = Some(info);
+          nb.unfolded = Some(Box::new(state));
           self.state.bodies[bi] = nb;
         }
         Ok(None)
@@ -936,15 +1039,31 @@ impl Ctx<'_> {
 
   /// Edge flanges and hems: for each straight sheet edge, `section` gives the bend's section (in
   /// the plane across the edge, see [`sheet::flange_section`]) and how far back from the edge
-  /// the bend starts; the sheet is trimmed back that far and the bends are joined on.
+  /// the bend starts; the sheet is trimmed back that far and the bends are joined on. Flanges
+  /// that stop short of an edge's end get bend reliefs; flanges meeting at a corner are mitered.
   fn edge_flanges(
     &mut self,
     feature: FeatureId,
     edges: &mut [EdgeRef],
     flip: bool,
     (o1, o2): (f64, f64),
+    corners: CornerMode,
     section: impl Fn(&SheetInfo) -> Result<(clf_sketch::Profile, f64), String>,
   ) -> FResult {
+    struct Flange {
+      start: DVec3,
+      end: DVec3,
+      dir: DVec3,
+      len: f64,
+      /// Bend-side skin point at the edge start.
+      base: DVec3,
+      w: DVec3,
+      b: DVec3,
+      /// Extend past the start / end into a miter.
+      ext: [bool; 2],
+      /// Keep-sides of miter planes (origin, normal).
+      cuts: Vec<(DVec3, DVec3)>,
+    }
     let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
     for (i, e) in edges.iter().enumerate() {
       by_body.entry(e.body).or_default().push(i);
@@ -962,8 +1081,7 @@ impl Ctx<'_> {
       }
       let t = info.thickness;
       let (profile, shift) = section(&info)?;
-      let mut flanges = Vec::new();
-      let mut cuts = Vec::new();
+      let mut list: Vec<Flange> = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
         let Some(eid) = er.resolve(body.edges(), body.faces(), body.diagonal()) else {
@@ -977,29 +1095,98 @@ impl Ctx<'_> {
         }
         let (panel, wall) = sheet::edge_faces(body.faces(), e.faces, e.length, t)
           .ok_or("pick an edge where a face of the sheet meets a square side")?;
-        let dir = (e.end - e.start).normalize_or_zero();
-        let (s0, s1) = (o1, e.length - o2);
-        if s1 - s0 < 1e-6 {
+        if e.length - o1 - o2 < 1e-6 {
           return Err("the offsets leave no flange".into());
         }
         let b = if flip { -panel.normal } else { panel.normal };
         let w = wall.normal;
-        let origin = e.start + if flip { -panel.normal * t } else { DVec3::ZERO } + w * shift + dir * s0;
-        let plane = Plane { origin, x: w, y: (b - w * b.dot(w)).normalize_or_zero() };
-        flanges.push(Shape::face(&plane, &profile).map_err(ke)?.extrude(dir * (s1 - s0)).map_err(ke)?);
-        if shift < -1e-9 {
-          let rect = sheet::rectangle([shift, -2.0 * t], [t, t]);
-          cuts.push(Shape::face(&plane, &rect).map_err(ke)?.extrude(dir * (s1 - s0)).map_err(ke)?);
+        list.push(Flange {
+          start: e.start,
+          end: e.end,
+          dir: (e.end - e.start).normalize_or_zero(),
+          len: e.length,
+          base: e.start + if flip { -panel.normal * t } else { DVec3::ZERO },
+          w,
+          b: (b - w * b.dot(w)).normalize_or_zero(),
+          ext: [false, false],
+          cuts: Vec::new(),
+        });
+      }
+      if list.is_empty() {
+        return Err("the selected edges could not be found".into());
+      }
+      // corners shared by two flanges bending the same way
+      if corners == CornerMode::Miter {
+        for i in 0..list.len() {
+          for j in i + 1..list.len() {
+            if list[i].b.dot(list[j].b) < 0.9999 {
+              continue;
+            }
+            for (ei, pi) in [(0usize, list[i].start), (1, list[i].end)] {
+              for (ej, pj) in [(0usize, list[j].start), (1, list[j].end)] {
+                let offset_free = |end: usize| if end == 0 { o1 < 1e-9 } else { o2 < 1e-9 };
+                if (pi - pj).length() > 1e-6 || !offset_free(ei) || !offset_free(ej) {
+                  continue;
+                }
+                let (wi, wj) = (list[i].w, list[j].w);
+                let corner = pi + (wi + wj) * shift;
+                let diag = wi + wj;
+                let Some(n) = diag.cross(list[i].b).try_normalize() else { continue };
+                // flange i lies on the side its edge runs to from the corner
+                let into_i = if ei == 0 { list[i].dir } else { -list[i].dir };
+                let n = if (into_i + wi).dot(n) > 0.0 { n } else { -n };
+                list[i].ext[ei] = true;
+                list[j].ext[ej] = true;
+                list[i].cuts.push((corner + n * (info.gap / 2.0), n));
+                list[j].cuts.push((corner - n * (info.gap / 2.0), -n));
+              }
+            }
+          }
         }
       }
-      if flanges.is_empty() {
-        return Err("the selected edges could not be found".into());
+      let reach = (body.diagonal() + 10.0 * t) * 2.0;
+      let mut tools = Vec::new();
+      let mut cuts = Vec::new();
+      for f in &list {
+        let s0 = if f.ext[0] { -reach } else { o1 };
+        let s1 = if f.ext[1] { f.len + reach } else { f.len - o2 };
+        let plane = Plane { origin: f.base + f.w * shift + f.dir * s0, x: f.w, y: f.b };
+        let mut tool = Shape::face(&plane, &profile).map_err(ke)?.extrude(f.dir * (s1 - s0)).map_err(ke)?;
+        for (o, n) in &f.cuts {
+          tool = tool.boolean(&sheet::half_space(*o, *n, 4.0 * reach)?, BoolOp::Intersect).map_err(ke)?;
+        }
+        tools.push(tool);
+        if shift < -1e-9 {
+          let (c0, c1) = (o1.max(0.0), f.len - o2.max(0.0));
+          let plane = Plane { origin: f.base + f.w * shift + f.dir * c0, x: f.w, y: f.b };
+          let rect = sheet::rectangle([0.0, -2.0 * t], [t - shift, t]);
+          cuts.push(Shape::face(&plane, &rect).map_err(ke)?.extrude(f.dir * (c1 - c0)).map_err(ke)?);
+        }
+        // bend reliefs where the flange stops short of the edge's end
+        if info.relief != ReliefShape::None {
+          let round = info.relief == ReliefShape::Round;
+          let pl = Plane { origin: f.base + f.b * t, x: f.dir, y: f.w };
+          let inner = shift.min(0.0) - info.relief_depth;
+          for (on, span) in
+            [(o1 > 1e-9, (o1 - info.relief_width, o1)), (o2 > 1e-9, (f.len - o2, f.len - o2 + info.relief_width))]
+          {
+            if !on {
+              continue;
+            }
+            let span = (span.0.max(0.0), span.1.min(f.len));
+            if span.1 - span.0 < 1e-6 {
+              continue;
+            }
+            let prof = sheet::relief_profile(span, inner, t, round);
+            cuts.push(Shape::face(&pl, &prof).map_err(ke)?.extrude(-f.b * (3.0 * t)).map_err(ke)?);
+          }
+        }
       }
       let mut shape = body.shape.clone();
       for c in &cuts {
         shape = shape.boolean(c, BoolOp::Subtract).map_err(ke)?;
       }
-      for f in &flanges {
+      for f in &tools {
         shape = shape.boolean(f, BoolOp::Union).map_err(ke)?;
       }
       let shape = shape.unified().map_err(ke)?;

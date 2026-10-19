@@ -27,6 +27,9 @@
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <HLRAlgo_Projector.hxx>
+#include <HLRBRep_Algo.hxx>
+#include <HLRBRep_HLRToShape.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
@@ -45,7 +48,14 @@
 #include <Bnd_Box.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <Geom2dAPI_Interpolate.hxx>
+#include <Geom2d_BSplineCurve.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <BRepLib.hxx>
+#include <TColgp_HArray1OfPnt2d.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_Surface.hxx>
@@ -936,25 +946,32 @@ TopoDS_Shape fuse_all(const std::vector<TopoDS_Shape> &shapes, double fuzzy) {
 
 } // namespace
 
-// face: 1-based stationary planar face. bends: 8 doubles per bend, appended: centre line start(3)
-// end(3) in the flat, the bend angle (rad) and 1 if the bend's inside is on the stationary skin.
-std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
-                              rust::Vec<double> &bends) {
-  CLF_TRY
-  if (!(thickness > 0)) throw std::runtime_error("unfold: thickness must be positive");
+namespace {
+
+// The unfolding plan: where every face of the stationary skin goes in the flat.
+struct Unfolding {
   TopTools_IndexedMapOfShape faces;
-  index_map(s.s, TopAbs_FACE, faces);
+  std::map<int, Place> placed;
+  gp_Pln pln;
+  gp_Vec n0;
+};
+
+Unfolding plan_unfold(const TopoDS_Shape &s, uint32_t face, double thickness, double k_factor) {
+  if (!(thickness > 0)) throw std::runtime_error("unfold: thickness must be positive");
+  Unfolding u;
+  TopTools_IndexedMapOfShape &faces = u.faces;
+  index_map(s, TopAbs_FACE, faces);
   if (face < 1 || static_cast<int>(face) > faces.Extent()) throw std::runtime_error("unfold: no such face");
   TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
-  TopExp::MapShapesAndAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+  TopExp::MapShapesAndAncestors(s, TopAbs_EDGE, TopAbs_FACE, edge_faces);
 
   const TopoDS_Face &F0 = TopoDS::Face(faces(static_cast<int>(face)));
   if (BRepAdaptor_Surface(F0).GetType() != GeomAbs_Plane) throw std::runtime_error("the stationary face must be planar");
   gp_Pnt c0 = face_inner_point(F0);
-  gp_Vec n0 = face_normal(F0, c0);
-  gp_Pln pln(c0, gp_Dir(n0));
+  u.n0 = face_normal(F0, c0).Normalized();
+  u.pln = gp_Pln(c0, gp_Dir(u.n0));
 
-  std::map<int, Place> placed;
+  std::map<int, Place> &placed = u.placed;
   placed[static_cast<int>(face)] = Place{};
   std::deque<int> queue{static_cast<int>(face)};
   while (!queue.empty()) {
@@ -1028,6 +1045,21 @@ std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, d
     }
   }
 
+  return u;
+}
+
+} // namespace
+
+// face: 1-based stationary planar face. bends: 8 doubles per bend, appended: centre line start(3)
+// end(3) in the flat, the bend angle (rad) and 1 if the bend's inside is on the stationary skin.
+std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, double k_factor,
+                              rust::Vec<double> &bends) {
+  CLF_TRY
+  Unfolding u = plan_unfold(s.s, face, thickness, k_factor);
+  const TopTools_IndexedMapOfShape &faces = u.faces;
+  const std::map<int, Place> &placed = u.placed;
+  const gp_Pln &pln = u.pln;
+  const gp_Vec &n0 = u.n0;
   std::vector<TopoDS_Shape> flat;
   for (const auto &[fi, pl] : placed) {
     const TopoDS_Face &F = TopoDS::Face(faces(fi));
@@ -1065,6 +1097,214 @@ std::unique_ptr<Shape> unfold(const Shape &s, uint32_t face, double thickness, d
   }
   return wrap(checked(fuse_all(solids, 1e-5), "flat pattern"));
   CLF_CATCH("unfold")
+}
+
+namespace {
+
+// A piece of a flat-pattern cut back on the folded part: the solid it removes there.
+// Planar regions: the piece moved back and pushed through the thickness. Bends: the piece mapped
+// onto the bend's cylinder (the flat → (angle, axial) map is affine) and thickened radially.
+TopoDS_Shape refold_piece(const TopoDS_Face &piece, const Place &pl, double t, const gp_Vec &n0) {
+  if (!pl.cyl) {
+    gp_Trsf inv = pl.T.Inverted();
+    BRepBuilderAPI_Transform tr(piece, inv, Standard_True);
+    gp_Vec n = n0.Transformed(inv);
+    BRepPrimAPI_MakePrism mk(tr.Shape(), n * -t, Standard_True);
+    mk.Build();
+    if (!mk.IsDone()) throw std::runtime_error("refold: could not rebuild a cut");
+    return mk.Shape();
+  }
+  if (pl.Rn < 1e-9) throw std::runtime_error("refold: a bend has no length in the flat");
+  // u runs from r0 towards a × r0 on a direct cylinder; our angle runs towards b
+  double sense = pl.b.Dot(pl.a.Crossed(pl.r0)) > 0 ? 1.0 : -1.0;
+  // pad the cut radially so it clears both skins
+  double pad = 0.05 * t;
+  double rb = pl.inner ? pl.R + t : pl.R - t;
+  double r_start = pl.inner ? pl.R - pad : pl.R + pad;
+  double depth = (pl.inner ? 1.0 : -1.0) * (t + 2 * pad);
+  if (r_start <= 1e-9 || rb < -1e-9) throw std::runtime_error("refold: bend too tight");
+  Handle(Geom_CylindricalSurface) cyl =
+      new Geom_CylindricalSurface(gp_Ax3(pl.O, gp_Dir(pl.a), gp_Dir(pl.r0)), r_start);
+  auto uv = [&](const gp_Pnt &q) {
+    gp_Vec d(pl.P0, q);
+    return gp_Pnt2d(sense * d.Dot(pl.V) / pl.Rn, d.Dot(pl.A));
+  };
+  TopoDS_Wire outer = BRepTools::OuterWire(piece);
+  std::vector<TopoDS_Wire> wires;
+  for (TopExp_Explorer wx(piece, TopAbs_WIRE); wx.More(); wx.Next()) {
+    const TopoDS_Wire &w = TopoDS::Wire(wx.Current());
+    BRepBuilderAPI_MakeWire mw;
+    for (BRepTools_WireExplorer we(w, piece); we.More(); we.Next()) {
+      const TopoDS_Edge &e = we.Current();
+      if (BRep_Tool::Degenerated(e)) continue;
+      BRepAdaptor_Curve c(e);
+      TopoDS_Vertex v1, v2;
+      TopExp::Vertices(e, v1, v2, Standard_True);
+      gp_Pnt2d a2 = uv(BRep_Tool::Pnt(v1)), b2 = uv(BRep_Tool::Pnt(v2));
+      Handle(Geom2d_Curve) c2;
+      if (c.GetType() == GeomAbs_Line) {
+        if (a2.Distance(b2) < 1e-9) continue;
+        c2 = GCE2d_MakeSegment(a2, b2).Value();
+      } else {
+        const int n = 24;
+        Handle(TColgp_HArray1OfPnt2d) pts = new TColgp_HArray1OfPnt2d(1, n + 1);
+        double f = c.FirstParameter(), l = c.LastParameter();
+        bool rev = e.Orientation() == TopAbs_REVERSED;
+        for (int i = 0; i <= n; ++i) {
+          double tt = rev ? l - (l - f) * i / n : f + (l - f) * i / n;
+          pts->SetValue(i + 1, uv(c.Value(tt)));
+        }
+        pts->SetValue(1, a2);
+        pts->SetValue(n + 1, b2);
+        Geom2dAPI_Interpolate interp(pts, Standard_False, 1e-9);
+        interp.Perform();
+        if (!interp.IsDone()) throw std::runtime_error("refold: could not map a curve onto a bend");
+        c2 = interp.Curve();
+      }
+      BRepBuilderAPI_MakeEdge me(c2, cyl);
+      if (!me.IsDone()) throw std::runtime_error("refold: could not map an edge onto a bend");
+      TopoDS_Edge oe = me.Edge();
+      BRepLib::BuildCurves3d(oe);
+      mw.Add(oe);
+      if (!mw.IsDone()) throw std::runtime_error("refold: a cut outline did not close on a bend");
+    }
+    if (!mw.IsDone()) continue;
+    if (w.IsSame(outer)) wires.insert(wires.begin(), mw.Wire());
+    else wires.push_back(mw.Wire());
+  }
+  if (wires.empty()) throw std::runtime_error("refold: empty cut on a bend");
+  BRepBuilderAPI_MakeFace mf(cyl, wires[0], Standard_True);
+  for (size_t i = 1; i < wires.size(); ++i) mf.Add(wires[i]);
+  if (!mf.IsDone()) throw std::runtime_error("refold: could not make a cut face on a bend");
+  ShapeFix_Face fix(mf.Face());
+  fix.Perform();
+  BRepOffsetAPI_MakeThickSolid thick;
+  thick.MakeThickSolidBySimple(fix.Face(), depth);
+  thick.Build();
+  if (!thick.IsDone()) throw std::runtime_error("refold: could not thicken a cut on a bend");
+  TopoDS_Shape out = thick.Shape();
+  // the face's orientation decides the solid's; turn it outside-out
+  for (TopExp_Explorer sx(out, TopAbs_SOLID); sx.More(); sx.Next()) {
+    TopoDS_Solid so = TopoDS::Solid(sx.Current());
+    BRepLib::OrientClosedSolid(so);
+    return so;
+  }
+  throw std::runtime_error("refold: thickening a cut on a bend made no solid");
+}
+
+} // namespace
+
+// The material to remove from the folded part for cuts made in its flat pattern. `removed`
+// holds the solids cut out of the flat (through the thickness).
+std::unique_ptr<Shape> refold_cuts(const Shape &folded, uint32_t face, double thickness, double k_factor,
+                                   const Shape &removed) {
+  CLF_TRY
+  Unfolding u = plan_unfold(folded.s, face, thickness, k_factor);
+  std::vector<std::pair<TopoDS_Shape, const Place *>> regions;
+  for (const auto &[fi, pl] : u.placed) {
+    const TopoDS_Face &F = TopoDS::Face(u.faces(fi));
+    if (pl.cyl) {
+      regions.emplace_back(flat_bend_face(F, pl, u.pln), &pl);
+    } else {
+      BRepBuilderAPI_Transform tr(F, pl.T, Standard_True);
+      regions.emplace_back(tr.Shape(), &pl);
+    }
+  }
+  TopoDS_Compound out;
+  BRep_Builder bld;
+  bld.MakeCompound(out);
+  int n = 0;
+  for (TopExp_Explorer fx(removed.s, TopAbs_FACE); fx.More(); fx.Next()) {
+    const TopoDS_Face &rf = TopoDS::Face(fx.Current());
+    BRepAdaptor_Surface rs(rf);
+    if (rs.GetType() != GeomAbs_Plane) continue;
+    if (!rs.Plane().Axis().Direction().IsParallel(u.pln.Axis().Direction(), 1e-6) ||
+        u.pln.Distance(rs.Plane().Location()) > 1e-5) {
+      continue;
+    }
+    for (const auto &[region, pl] : regions) {
+      BRepAlgoAPI_Common common(rf, region);
+      common.SetFuzzyValue(1e-6);
+      common.Build();
+      if (!common.IsDone()) continue;
+      for (TopExp_Explorer px(common.Shape(), TopAbs_FACE); px.More(); px.Next()) {
+        bld.Add(out, refold_piece(TopoDS::Face(px.Current()), *pl, thickness, u.n0));
+        ++n;
+      }
+    }
+  }
+  if (n == 0) throw std::runtime_error("refold: no cuts reach the flat pattern's face");
+  return wrap(out);
+  CLF_CATCH("refold")
+}
+
+// Like fillet, with a radius per edge.
+std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> edges,
+                                    rust::Slice<const double> radii) {
+  CLF_TRY
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_EDGE, map);
+  BRepFilletAPI_MakeFillet mk(s.s);
+  int added = 0;
+  for (size_t k = 0; k < edges.size() && k < radii.size(); ++k) {
+    uint32_t i = edges[k];
+    if (i >= 1 && static_cast<int>(i) <= map.Extent() && radii[k] > 0) {
+      mk.Add(radii[k], TopoDS::Edge(map(static_cast<int>(i))));
+      ++added;
+    }
+  }
+  if (added == 0) throw std::runtime_error("no edges to fillet");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
+  return wrap(checked(mk.Shape(), "fillet"));
+  CLF_CATCH("fillet")
+}
+
+// Hidden-line projection. view: direction towards the viewer(3), screen right(3).
+HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection) {
+  CLF_TRY
+  need(view, 6, "view");
+  HlrData out;
+  Handle(HLRBRep_Algo) algo = new HLRBRep_Algo();
+  algo->Add(s.s);
+  gp_Ax2 ax(gp::Origin(), dir(view, 0), dir(view, 3));
+  algo->Projector(HLRAlgo_Projector(ax));
+  algo->Update();
+  algo->Hide();
+  HLRBRep_HLRToShape h(algo);
+  out.offsets.push_back(0);
+  auto add = [&](const TopoDS_Shape &sh, uint8_t kind) {
+    if (sh.IsNull()) return;
+    for (TopExp_Explorer ex(sh, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge &e = TopoDS::Edge(ex.Current());
+      try {
+        BRepAdaptor_Curve c(e);
+        if (c.GetType() == GeomAbs_Circle && std::abs(c.LastParameter() - c.FirstParameter() - 2 * M_PI) < 1e-6) {
+          gp_Circ ci = c.Circle();
+          for (double v : {ci.Location().X(), ci.Location().Y(), ci.Radius(), static_cast<double>(kind)})
+            out.circles.push_back(v);
+        }
+        GCPnts_TangentialDeflection disc(c, 0.1, deflection);
+        if (disc.NbPoints() < 2) continue;
+        for (int i = 1; i <= disc.NbPoints(); ++i) {
+          gp_Pnt p = disc.Value(i);
+          out.points.push_back(p.X());
+          out.points.push_back(p.Y());
+        }
+        out.offsets.push_back(static_cast<uint32_t>(out.points.size() / 2));
+        out.kinds.push_back(kind);
+      } catch (...) {
+        continue;
+      }
+    }
+  };
+  add(h.VCompound(), 0);
+  add(h.Rg1LineVCompound(), 1);
+  add(h.OutLineVCompound(), 2);
+  add(h.HCompound(), 3);
+  add(h.OutLineHCompound(), 4);
+  return out;
+  CLF_CATCH("projection")
 }
 
 } // namespace clf

@@ -212,6 +212,66 @@ pub struct Bend {
   pub inner: bool,
 }
 
+/// What a projected drawing line is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineKind {
+  Visible,
+  /// A visible edge between tangent faces (drawn thin or left out).
+  Tangent,
+  /// A visible silhouette of a curved face.
+  Outline,
+  Hidden,
+  HiddenOutline,
+}
+
+impl LineKind {
+  pub fn hidden(self) -> bool {
+    matches!(self, LineKind::Hidden | LineKind::HiddenOutline)
+  }
+}
+
+/// A 2D polyline of a projection, in view coordinates (mm, x right, y up).
+#[derive(Debug, Clone)]
+pub struct ProjLine {
+  pub kind: LineKind,
+  pub points: Vec<[f64; 2]>,
+}
+
+/// A full circle seen face-on in a projection (holes, bosses).
+#[derive(Debug, Clone, Copy)]
+pub struct ProjCircle {
+  pub center: [f64; 2],
+  pub radius: f64,
+  pub kind: LineKind,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Projection {
+  pub lines: Vec<ProjLine>,
+  pub circles: Vec<ProjCircle>,
+}
+
+impl Projection {
+  /// Bounding box of the visible and hidden lines.
+  pub fn bounds(&self) -> Option<([f64; 2], [f64; 2])> {
+    let mut it = self.lines.iter().flat_map(|l| l.points.iter());
+    let first = *it.next()?;
+    Some(
+      it.fold((first, first), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])),
+    )
+  }
+}
+
+fn line_kind(k: u8) -> LineKind {
+  match k {
+    0 => LineKind::Visible,
+    1 => LineKind::Tangent,
+    2 => LineKind::Outline,
+    3 => LineKind::Hidden,
+    _ => LineKind::HiddenOutline,
+  }
+}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
 
@@ -439,6 +499,42 @@ impl Shape {
       return Err(KernelError::Input("the draft angle must be under 90°".into()));
     }
     Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
+  }
+
+  /// For a sheet that was unfolded onto `face` (see [`Shape::unfold`]): the material to cut from
+  /// this folded shape for the solids `removed` from its flat pattern.
+  pub fn refold_cuts(&self, face: u32, thickness: f64, k_factor: f64, removed: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::refold_cuts(self.get()?, face, thickness, k_factor, removed.get()?)?)
+  }
+
+  /// Rounds edges (1-based) with a radius each.
+  pub fn fillet_each(&self, edges: &[(u32, f64)]) -> Result<Shape> {
+    if edges.iter().any(|(_, r)| !(*r > 1e-9 && r.is_finite())) {
+      return Err(KernelError::Input("fillet radii must be positive".into()));
+    }
+    let (ids, radii): (Vec<u32>, Vec<f64>) = edges.iter().copied().unzip();
+    Shape::wrap(sys::fillet_radii(self.get()?, &ids, &radii)?)
+  }
+
+  /// Hidden-line projection seen from `toward_viewer` with `right` as the screen's x axis.
+  pub fn project(&self, toward_viewer: DVec3, right: DVec3, deflection: f64) -> Result<Projection> {
+    let z = toward_viewer.try_normalize().ok_or(KernelError::Input("zero view direction".into()))?;
+    let x = (right - z * right.dot(z)).try_normalize().ok_or(KernelError::Input("bad view right axis".into()))?;
+    let d = sys::hlr_project(self.get()?, &[z.x, z.y, z.z, x.x, x.y, x.z], deflection.clamp(1e-4, 10.0))?;
+    let pts: Vec<[f64; 2]> = d.points.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+    let mut lines = Vec::with_capacity(d.kinds.len());
+    for (k, kind) in d.kinds.iter().enumerate() {
+      let (Some(&a), Some(&b)) = (d.offsets.get(k), d.offsets.get(k + 1)) else { continue };
+      if let Some(slice) = pts.get(a as usize..b as usize) {
+        lines.push(ProjLine { kind: line_kind(*kind), points: slice.to_vec() });
+      }
+    }
+    let circles = d
+      .circles
+      .chunks_exact(4)
+      .map(|c| ProjCircle { center: [c[0], c[1]], radius: c[2], kind: line_kind(c[3] as u8) })
+      .collect();
+    Ok(Projection { lines, circles })
   }
 
   /// One face (1-based face-map index) as a shape of its own.
