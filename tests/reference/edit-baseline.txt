@@ -92,3 +92,8 @@
 426-cylinder-emboss-wrap
 # Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
 421-to-curved-face-join
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+491-cut-two-tools-keep
+492-join-two-tools
+493-intersect-two-tools
+494-cut-splits-target

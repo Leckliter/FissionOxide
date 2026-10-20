@@ -193,3 +193,8 @@
 258-g2-line-u-turn
 259-g1-arc-line-arch
 260-g2-arc-line-arch
+# Reference parts that pass; see README.md. One directory name per line.
+491-cut-two-tools-keep
+492-join-two-tools
+493-intersect-two-tools
+494-cut-splits-target
