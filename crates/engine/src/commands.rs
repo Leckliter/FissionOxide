@@ -112,7 +112,7 @@ cmds! {
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
-  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
+  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -1902,7 +1902,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
     Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
-    Circ([f64; 2], usize, f64),
+    Circ([f64; 2], usize, f64, bool),
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
   let op = match name {
@@ -1931,6 +1931,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &scope))
         .transpose()?
         .unwrap_or(std::f64::consts::TAU),
+      p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
     ),
   };
   let made = s.edit(move |d| {
@@ -1962,7 +1963,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       Op::Mirror(line) => sketch.mirror(&curves, line)?,
       Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
-      Op::Circ(c, n, a) => sketch.pattern_circ(&curves, c, n, a)?,
+      Op::Circ(c, n, a, sym) => sketch.pattern_circ(&curves, c, n, a, sym)?,
     };
     if !sketch.solve().ok() {
       return Err(CmdError::new("the result conflicts with the sketch's constraints"));
