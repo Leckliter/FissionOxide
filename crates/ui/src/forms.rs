@@ -994,7 +994,7 @@ pub static APPEARANCE: Form = Form {
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Editable text whose outlines you can extrude",
+  hint: "Editable text whose outlines you can extrude, at a point or along a picked curve",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
@@ -1014,6 +1014,13 @@ pub static SK_TEXT: Form = Form {
     Input::Choice { key: "halign", label: "Horizontal alignment", options: TEXT_HALIGN },
     Input::Choice { key: "valign", label: "Vertical alignment", options: TEXT_VALIGN },
     Input::Expr { key: "spacing", label: "Character spacing (%)", default: "0" },
+    Input::Curves { key: "path", label: "Along path (optional)" },
+    Input::Check { key: "below", label: "Below the path" },
+    Input::Choice {
+      key: "align",
+      label: "Path alignment",
+      options: &[("left", "Left"), ("center", "Center"), ("right", "Right")],
+    },
   ],
   picks_model: false,
 };
@@ -1077,7 +1084,23 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       "point",
       json!({"method": "vertex", "point": {"vertex": p.get("edge").cloned().unwrap_or(Value::Null), "end": p.get("end") == Some(&json!("end"))}}),
     ),
-    "sketch.text.form" => ("sketch.text", text_params(&p)),
+    "sketch.text.form" => {
+      let mut q = text_params(&p);
+      // a picked curve lays the text along it instead of at the point
+      if let Some(curve) = p.get("path").and_then(Value::as_array).and_then(|a| a.first()) {
+        if let Some(o) = q.as_object_mut() {
+          o.remove("at");
+          o.remove("angle");
+        }
+        q["path"] = curve.clone();
+        q["above"] = json!(p.get("below") != Some(&json!(true)));
+        q["align"] = p.get("align").cloned().unwrap_or(json!("left"));
+        if let Some(sk) = p.get("sketch") {
+          q["sketch"] = sk.clone();
+        }
+      }
+      ("sketch.text", q)
+    }
     // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
     c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);

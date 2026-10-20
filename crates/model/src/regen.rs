@@ -449,7 +449,7 @@ impl Ctx<'_> {
       }
       FeatureKind::Extrude { sketch, profiles, extent, operation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err(if sk.profiles.is_empty() {
             "the sketch has no closed profiles".into()
@@ -571,7 +571,7 @@ impl Ctx<'_> {
       }
       FeatureKind::Revolve { sketch, profiles, axis, angle, operation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err("no profiles to revolve".into());
         }
@@ -946,7 +946,7 @@ impl Ctx<'_> {
         for (i, sec) in sections.iter().enumerate() {
           let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
           let prof = match sec.profile {
-            Some(p) => pick_profiles(&sk.profiles, &[p]).0.into_iter().next(),
+            Some(p) => pick_profiles(sk, &[p]).0.into_iter().next(),
             None => sk.profiles.first().cloned(),
           };
           match (prof, lone_point(&sk.sketch)) {
@@ -964,7 +964,7 @@ impl Ctx<'_> {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
         let path = crate::include::sketch_path(ps, path_curves)?;
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
         }
@@ -1097,7 +1097,7 @@ impl Ctx<'_> {
       FeatureKind::Flange { sketch, profiles, rule, flip, operation } => {
         let info = self.sheet_info(rule)?;
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err(if sk.profiles.is_empty() {
             "the sketch has no closed profiles (use Contour Flange for open lines)".into()
@@ -2214,9 +2214,16 @@ pub fn plane_matrix(p: &Plane) -> DMat4 {
   DMat4::from_cols(p.x.extend(0.0), p.y.extend(0.0), p.normal().extend(0.0), p.origin.extend(1.0))
 }
 
-fn pick_profiles(all: &[Profile], points: &[[f64; 2]]) -> (Vec<Profile>, bool) {
+/// The regions of a sketch that `points` pick (the smallest holding each point), and whether a
+/// point missed. No points means every region except glyph counters (a text's profile is its ink,
+/// as in Fusion).
+fn pick_profiles(sk: &SketchResult, points: &[[f64; 2]]) -> (Vec<Profile>, bool) {
+  let all = &sk.profiles;
   if points.is_empty() {
-    return (all.to_vec(), false);
+    if sk.sketch.texts.is_empty() {
+      return (all.to_vec(), false);
+    }
+    return (all.iter().filter(|p| !sk.sketch.is_text_counter(p)).cloned().collect(), false);
   }
   let mut out: Vec<Profile> = Vec::new();
   let mut missing = false;

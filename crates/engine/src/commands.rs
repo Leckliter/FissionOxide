@@ -105,8 +105,8 @@ cmds! {
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
+  "sketch.text" => "Editable text: closed glyph outlines you can extrude (their counters left out), regenerated when the text changes (explode: plain curves); along a curve with path", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?, path?: curve id, above?: bool (default true), align?: left|center|right}";
   "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
-  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -275,7 +275,7 @@ cmds! {
   "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
   "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
-  "sketch.text_edit" => "Change a text's string, height, angle, font or position (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, bold?, italic?, underline?, halign?, valign?, spacing?, at?: [x,y]}";
+  "sketch.text_edit" => "Change a text's string, height, angle, font, style, position or path (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, bold?, italic?, underline?, halign?, valign?, spacing?, at?: [x,y], path?: curve id | null, above?, align?}";
   "sketch.text_explode" => "Turn a text into plain curves", "{text_id? | curve?}";
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
   "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
@@ -2889,7 +2889,8 @@ fn sketch_info(s: &Session, p: &Value) -> CmdResult {
     "free_points": r.map(|r| r.report.free_points.iter().map(|p| p.0).collect::<Vec<_>>()),
     "texts": sketch.texts.iter().map(|t| json!({
       "id": t.id.0, "text": t.text, "font": t.font, "height": t.height, "angle": t.angle.to_degrees(),
-      "anchor": t.anchor.0, "at": sketch.pos(t.anchor), "curves": t.curves.iter().map(|c| c.0).collect::<Vec<_>>()
+      "anchor": t.anchor.0, "at": sketch.pos(t.anchor), "curves": t.curves.iter().map(|c| c.0).collect::<Vec<_>>(),
+      "path": t.path
     })).collect::<Vec<_>>(),
   }))
 }

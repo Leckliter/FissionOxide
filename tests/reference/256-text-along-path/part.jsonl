@@ -1,7 +1,7 @@
 # 256-text-along-path: added by the parity loop from a Fusion probe
-# Sketch text "LL" in Arial, 5 mm capitals, along a 20 mm radius quarter arc (above the path, left aligned), extruded 2 mm. Fox's sketch.text has no path option; `path` names the arc as Fusion's setAsAlongPath would.
+# Sketch text "LL" in Arial, 5 mm capitals, along a 20 mm radius quarter arc (above the path, left aligned), extruded 2 mm. `path` names the arc (curve 3), as Fusion's setAsAlongPath does.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "end": [0, 20], "construction": true}
-{"cmd": "sketch.text", "path": 1, "above": true, "text": "LL", "height": 5, "font": "arial"}
+{"cmd": "sketch.text", "path": 3, "above": true, "text": "LL", "height": 5, "font": "arial"}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 2, "operation": "new_body"}

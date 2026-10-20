@@ -108,7 +108,7 @@ impl Ctx<'_> {
     match kind {
       FeatureKind::Emboss { sketch, profiles, face, depth, deboss, wrap, horizontal, vertical, rotation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err("no profiles to emboss".into());
         }
