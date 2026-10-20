@@ -1,7 +1,7 @@
 # 157-clockwise-sweep-sector: added by the parity loop from a Fusion probe
 # clockwise-sweep-sector: Center point arc drawn clockwise: centre (0,0), start (20,0), end (0,-20) swept -90 deg (clockwise, the minor quarter); closed to the centre by two lines; quarter disc R20 extruded 8 on XY.
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
-{"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "end": [0, -20]}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "sweep": -90}
 {"cmd": "sketch.line", "points": [[0.0, -20.0], [0, 0]]}
 {"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
 {"cmd": "sketch.finish"}

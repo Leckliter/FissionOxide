@@ -166,6 +166,43 @@ fn splines_and_ellipses_in_trim_extend_offset_and_constraints() {
 }
 
 #[test]
+fn centre_arc_sweeps_clockwise() {
+  // Fusion's Center Point Arc runs either way: a typed negative sweep, or `clockwise`, draws the
+  // quarter below the start instead of the three quarters above it
+  let quarter = std::f64::consts::PI * 400.0 / 4.0 * 8.0;
+  for arc in [
+    json!({"center": [0, 0], "start": [20, 0], "sweep": -90}),
+    json!({"center": [0, 0], "start": [20, 0], "end": [0, -20], "clockwise": true}),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.arc", arc.clone());
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, 0], [20, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"sketch": 1, "distance": 8}));
+    let v = volume(&s);
+    assert!((v - quarter).abs() < 1e-3 * quarter, "{arc}: {v} vs {quarter}");
+  }
+  // a positive sweep stays counter-clockwise: 270° is the pac-man
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "sweep": "270 deg"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, 0], [20, 0]]}));
+  // zero, a full turn, or both an end and a sweep are refused
+  for bad in [
+    json!({"center": [0, 0], "start": [20, 0], "sweep": 0}),
+    json!({"center": [0, 0], "start": [20, 0], "sweep": 360}),
+    json!({"center": [0, 0], "start": [20, 0], "end": [0, 20], "sweep": 90}),
+  ] {
+    assert!(s.execute("sketch.arc", &bad).is_err(), "{bad}");
+  }
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 8}));
+  let v = volume(&s);
+  assert!((v - 3.0 * quarter).abs() < 1e-3 * quarter, "{v} vs {}", 3.0 * quarter);
+}
+
+#[test]
 fn fixing_a_circle_locks_it_and_deleting_the_fix_frees_it() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
