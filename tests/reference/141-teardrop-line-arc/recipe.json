@@ -1,0 +1,171 @@
+{
+ "id": "teardrop-line-arc",
+ "name": "teardrop-line-arc",
+ "description": "Arc R10 centred at the origin (ends drawn at +-75 deg) closed by two lines from its ends to a fixed apex (30,0). Each line is tangent to the arc at the shared end, moving the ends to +-70.53 deg: area 473.90, extruded 10.",
+ "exercises": [
+  "sketch",
+  "tangent constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       2.58819,
+       9.659258
+      ]
+     },
+     "mid": {
+      "at": [
+       -10,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       2.58819,
+       -9.659258
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       2.58819,
+       -9.659258
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       30,
+       0
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       2.58819,
+       9.659258
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "a1.center",
+      "origin"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l1.end"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "l1",
+      "a1"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "l2",
+      "a1"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "radius",
+     "refs": [
+      "a1"
+     ],
+     "value": 10
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "l1",
+        "l2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}
