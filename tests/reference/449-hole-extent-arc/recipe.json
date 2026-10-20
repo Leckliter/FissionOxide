@@ -1,0 +1,248 @@
+{
+ "id": "hole-extent-arc",
+ "name": "hole-extent-arc",
+ "description": "120x60x5 plate; d6 hole at (100,15) cut through; feature patterned 5x along the 3-point arc (100,15)-(60,45)-(20,15), extent 80 mm of arc length (20 mm apart), identical orientation.",
+ "exercises": [
+  "path_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       120,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       120,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       120,
+       60
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       120,
+       60
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       60
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       60
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "PathSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       100,
+       15
+      ]
+     },
+     "mid": [
+      60,
+      45
+     ],
+     "end": {
+      "at": [
+       20,
+       15
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "ref": "a1.start",
+      "at": [
+       100.0,
+       15.0
+      ]
+     },
+     "radius": 3,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Hole1",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "PathSketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "through_all",
+    "direction": "positive"
+   }
+  },
+  {
+   "op": "path_pattern",
+   "name": "PathPattern1",
+   "pattern_of": "features",
+   "features": [
+    "Hole1"
+   ],
+   "path": {
+    "sketch": "PathSketch",
+    "curves": [
+     "a1"
+    ]
+   },
+   "count": 5,
+   "distance": 80,
+   "distance_type": "extent",
+   "orientation": "identical"
+  }
+ ]
+}

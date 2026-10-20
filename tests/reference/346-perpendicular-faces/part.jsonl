@@ -1,0 +1,11 @@
+# 346-perpendicular-faces: added by the parity loop from a Fusion probe
+# perpendicular-faces: 40x30x20 box; midplane between the x=40 face and the top face (z=20), which meet on an edge: the 45 deg bisector through that edge; box split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane", "method": "midplane", "a": {"point": [40, 15, 10]}, "b": {"point": [20, 15, 20]}}
+{"cmd": "split", "plane": {"feature": 3}}

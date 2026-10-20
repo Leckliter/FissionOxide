@@ -1,0 +1,152 @@
+{
+ "id": "break-arc-at-crossing",
+ "name": "break-arc-at-crossing",
+ "description": "Semicircular arc r20 (from (-20,0) over (0,20) to (20,0)) on a line y=0 (x -30..30), crossed by a vertical line x=0 (y -5..30); Break the arc at (10,17.32), splitting it where x=0 crosses; delete the right piece; extrude the quarter disc 10 mm.",
+ "exercises": [
+  "sketch",
+  "break",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "id": "a",
+     "start": {
+      "at": [
+       -20,
+       0
+      ]
+     },
+     "mid": {
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "ln",
+     "start": {
+      "at": [
+       -30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "v",
+     "start": {
+      "at": [
+       0,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "break",
+     "curve": "a",
+     "at": {
+      "at": [
+       10,
+       17.3205
+      ]
+     },
+     "pieces": {
+      "al": [
+       -10,
+       17.3205
+      ],
+      "ar": [
+       10,
+       17.3205
+      ]
+     },
+     "delete": [
+      "ar"
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "al",
+        "ln",
+        "v"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

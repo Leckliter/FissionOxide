@@ -1,0 +1,170 @@
+{
+ "id": "bodies-partial-angle",
+ "name": "bodies-partial-angle",
+ "description": "Tab 10x6x5 at x 20..30, y -3..3; body circular-patterned 4x over 90 deg about Z (instances at 0/30/60/90 deg).",
+ "exercises": [
+  "extrude",
+  "circular_pattern bodies"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Tab_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       20,
+       -3
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       -3
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       30,
+       -3
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       30,
+       3
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       30,
+       3
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       20,
+       3
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       20,
+       3
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       20,
+       -3
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Tab",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Tab_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "circular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "axis": {
+    "ref": "world Z axis",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   },
+   "count": 4,
+   "total_angle": 90,
+   "symmetric": false
+  }
+ ]
+}

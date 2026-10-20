@@ -1,0 +1,14 @@
+# 227-side-face-points-blind-holes: added by the parity loop from a Fusion probe
+# side-face-points-blind-holes: 60x40x10 plate; sketch points on the front face (y=0; sketch x = world X, sketch y = world Z) at (15,5) and (42,4); one simple d6 blind hole, depth 20 with a 118 deg tip, at both points, into the plate along +Y.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 40]]}
+{"cmd": "sketch.line", "points": [[60, 40], [0, 40]]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.point", "at": [15, 5]}
+{"cmd": "sketch.point", "at": [42, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "hole", "sketch": 3, "diameter": 6, "depth": 20, "tip_angle": "118 deg"}

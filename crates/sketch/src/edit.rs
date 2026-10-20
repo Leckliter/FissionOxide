@@ -110,7 +110,10 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } | crate::Seg::Conic { .. } => return None,
+      crate::Seg::Bezier { .. }
+      | crate::Seg::EllipseArc { .. }
+      | crate::Seg::Conic { .. }
+      | crate::Seg::Quintic { .. } => return None,
     })
   }
 
@@ -228,7 +231,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => {
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         return None;
       }
     })
@@ -269,7 +273,7 @@ impl Sketch {
             }
           }
         }
-        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
+        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
           for q in points {
             if *q == old {
               *q = new;
@@ -367,7 +371,9 @@ impl Sketch {
   }
 
   /// Bevels the corner where two lines meet: the lines are cut back `d1` and `d2` from the corner
-  /// and joined by a new line.
+  /// and joined by a new line. Lines that don't share an end are bevelled where they, or their
+  /// extensions, cross: each keeps its end farther from the crossing and is extended or trimmed
+  /// to the chamfer.
   pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
@@ -382,12 +388,29 @@ impl Sketch {
     let (a2, b2) = ends(self, l2)?;
     let near =
       |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
-    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
-      .into_iter()
-      .find(|(p, _, q, _)| near(self, *p, *q))
-      .ok_or(SketchError::WrongGeometry("a sketch chamfer", "two lines that meet at an end"))?;
     let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
-    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
+    let shared = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
+      .into_iter()
+      .find(|(p, _, q, _)| near(self, *p, *q));
+    // lines that share an end bevel that corner; otherwise the corner is where the lines (or their
+    // extensions) cross, and each line keeps its end farther from it: a line that stops short is
+    // extended to the chamfer, one that runs past the corner is trimmed back
+    let (c1, f1, c2, f2, p) = match shared {
+      Some((c1, f1, c2, f2)) => (c1, f1, c2, f2, pos(c1)?),
+      None => {
+        let (pa1, pb1, pa2, pb2) = (pos(a1)?, pos(b1)?, pos(a2)?, pos(b2)?);
+        let (r, s) = (sub(pb1, pa1), sub(pb2, pa2));
+        let den = cross(r, s);
+        if den.abs() <= 1e-9 * (dot(r, r) * dot(s, s)).sqrt().max(EPS) {
+          return Err(SketchError::InvalidValue("the lines are parallel".into()));
+        }
+        let p = add(pa1, mul(r, cross(sub(pa2, pa1), s) / den));
+        let (c1, f1) = if dist(pa1, p) <= dist(pb1, p) { (a1, b1) } else { (b1, a1) };
+        let (c2, f2) = if dist(pa2, p) <= dist(pb2, p) { (a2, b2) } else { (b2, a2) };
+        (c1, f1, c2, f2, p)
+      }
+    };
+    let (q1, q2) = (pos(f1)?, pos(f2)?);
     let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
       return Err(SketchError::InvalidValue("zero-length line".into()));
     };
@@ -583,6 +606,13 @@ impl Sketch {
           let (s, e, apex) = (get(self, start)?, get(self, end)?, get(self, apex)?);
           let (start, end) = if flip { (e, s) } else { (s, e) };
           CurveKind::Conic { start, end, apex, rho }
+        }
+        CurveKind::QuinticSpline { points } => {
+          let mut points = points.iter().map(|p| get(self, *p)).collect::<Result<Vec<_>, _>>()?;
+          if flip {
+            points.reverse();
+          }
+          CurveKind::QuinticSpline { points }
         }
       };
       let nid = self.add_curve(kind)?;
@@ -863,6 +893,41 @@ mod tests {
     assert_eq!(p.len(), 1);
     let expect = 800.0 - (25.0 - std::f64::consts::PI * 25.0 / 4.0);
     assert!((p[0].area() - expect).abs() < 0.05, "{}", p[0].area());
+  }
+
+  #[test]
+  fn chamfer_extends_or_trims_lines_to_their_crossing() {
+    // the right and top lines stop short of the (40,30) corner
+    let mut s = Sketch::new();
+    let line = |s: &mut Sketch, a: P, b: P| {
+      let (p, q) = (s.add_point(a[0], a[1]), s.add_point(b[0], b[1]));
+      s.add_curve(CurveKind::Line { a: p, b: q }).unwrap()
+    };
+    line(&mut s, [0.0, 0.0], [40.0, 0.0]);
+    let right = line(&mut s, [40.0, 0.0], [40.0, 20.0]);
+    let top = line(&mut s, [30.0, 30.0], [0.0, 30.0]);
+    line(&mut s, [0.0, 30.0], [0.0, 0.0]);
+    s.chamfer(right, top, 5.0, 5.0).unwrap();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert!((p[0].area() - (1200.0 - 12.5)).abs() < 1e-6, "{}", p[0].area());
+
+    // the right and top lines run past the corner
+    let mut s = Sketch::new();
+    line(&mut s, [0.0, 0.0], [40.0, 0.0]);
+    let right = line(&mut s, [40.0, 0.0], [40.0, 36.0]);
+    let top = line(&mut s, [46.0, 30.0], [0.0, 30.0]);
+    line(&mut s, [0.0, 30.0], [0.0, 0.0]);
+    s.chamfer(right, top, 7.0, 7.0).unwrap();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert!((p[0].area() - (1200.0 - 24.5)).abs() < 1e-6, "{}", p[0].area());
+
+    // parallel lines have no corner
+    let mut s = Sketch::new();
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let b = line(&mut s, [0.0, 5.0], [10.0, 5.0]);
+    assert!(s.chamfer(a, b, 1.0, 1.0).is_err());
   }
 
   #[test]

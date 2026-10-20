@@ -1,0 +1,4 @@
+# 400-yz-plane: added by the parity loop from a Fusion probe
+# yz-plane: Box on YZ (plane x = +Y, y = +Z, normal +X): 30 along Y, 20 along Z, height 12 along +X, base centred at (5,10): spans X 0..12, Y -10..20, Z 0..20.
+# hand-written; Fusion side is the equivalent sketch rectangle + extrude
+{"cmd": "box", "plane": "yz", "at": [5, 10], "width": 30, "depth": 20, "height": 12}

@@ -1,0 +1,10 @@
+# 488-tangent-chain-stadium-top: added by the parity loop from a Fusion probe
+# tangent-chain-stadium-top: 40x20 stadium extruded 15, equal 2 mm chamfer on one top edge with tangent chain (whole top loop).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.arc", "start": [40, 0], "mid": [50, 10], "end": [40, 20]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.arc", "start": [0, 20], "mid": [-10, 10], "end": [0, 0]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 15, "operation": "new_body"}
+{"cmd": "chamfer", "edges": [{"point": [20.0, 0.0, 15.0]}, {"point": [50.0, 10.0, 15.0]}, {"point": [20.0, 20.0, 15.0]}, {"point": [-10.0, 10.0, 15.0]}], "distance": 2}

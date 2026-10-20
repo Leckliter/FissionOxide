@@ -1,0 +1,156 @@
+{
+ "id": "rect-corner-distance-angle",
+ "name": "rect-corner-distance-angle",
+ "description": "40x30 rectangle; Distance and Angle sketch chamfer at the (40,0) vertex, 10 along the bottom line (first) at 30 deg from it; extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_chamfer_distance_angle",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "ref": "b.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "ref": "r.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "ref": "t.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "b.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "chamfer_distance_angle",
+     "id": "ch",
+     "lines": [
+      "b",
+      "r"
+     ],
+     "distance": 10,
+     "angle_deg": 30
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "r",
+        "t",
+        "l",
+        "ch"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

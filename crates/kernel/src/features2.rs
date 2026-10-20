@@ -20,6 +20,38 @@ impl Shape {
     if self.solid_count() == 0 { Err(KernelError::Kernel(format!("the {what} made no solid"))) } else { Ok(self) }
   }
 
+  /// Fusion's shell directions: walls `inside` the body's surface, `outside` it, or both (either
+  /// may be zero, not both), opening the given faces (none: a closed, hollow body).
+  pub fn shell_sides(&self, faces: &[u32], inside: f64, outside: f64, round: bool) -> Result<Shape> {
+    let ok = |t: f64| t.is_finite() && t >= 0.0;
+    if !(ok(inside) && ok(outside)) || inside + outside <= 1e-9 {
+      return Err(KernelError::Input("shell thickness must be positive".into()));
+    }
+    if faces.is_empty() {
+      // with nothing opened OCCT gives the offset solid: the hollow is what lies between
+      let offset = |t: f64| -> Result<Shape> {
+        if t.abs() <= 1e-9 {
+          return Ok(self.clone());
+        }
+        Shape::wrap(sys::shell(self.get()?, faces, t, round)?)?.outward()?.solid_or("shell")
+      };
+      return offset(outside)?.boolean(&offset(-inside)?, crate::BoolOp::Subtract);
+    }
+    if outside <= 1e-9 {
+      return self.shell(faces, inside, round);
+    }
+    // a positive offset keeps the inside surface: the walls grow outward
+    let out = Shape::wrap(sys::shell(self.get()?, faces, outside, round)?)?.solid_or("shell")?;
+    if out.mass()?.volume <= 1e-9 {
+      return Err(KernelError::Kernel("shell failed (outside walls)".into()));
+    }
+    if inside <= 1e-9 {
+      return Ok(out);
+    }
+    let r = out.boolean(&self.shell(faces, inside, round)?, crate::BoolOp::Union)?;
+    r.unified()
+  }
+
   /// Sweeps this profile along a path wire, oriented and scaled to keep touching a guide rail.
   pub fn sweep_rail(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
     Shape::wrap(sys::sweep_rail(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")

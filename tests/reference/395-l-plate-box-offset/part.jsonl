@@ -1,0 +1,13 @@
+# 395-l-plate-box-offset: added by the parity loop from a Fusion probe
+# l-plate-box-offset: L plate (x 0..40, y 0..30, legs 10, 8 thick) plus a Bounding Solid box grown 2 mm
+# Fox has no bounding-solid command; this builds only the plate (the closest it can do).
+# sketch Sketch1: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

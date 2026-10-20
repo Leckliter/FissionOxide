@@ -1,0 +1,12 @@
+# 344-face-and-offset-plane: added by the parity loop from a Fusion probe
+# face-and-offset-plane: 40x30x20 box; midplane between the top face (z=20, normal +z) and XY offset 4 (z=12); box mirrored across it as a second body (z 4..24).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "xy", "offset": 4}
+{"cmd": "plane", "method": "midplane", "a": {"point": [20, 15, 20]}, "b": {"feature": 3}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": false}

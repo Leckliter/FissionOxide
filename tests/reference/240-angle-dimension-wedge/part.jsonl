@@ -1,0 +1,14 @@
+# 240-angle-dimension-wedge: added by the parity loop from a Fusion probe
+# angle-dimension-wedge: Right-triangle wedge: horizontal base 40 from the origin, vertical side, hypotenuse at a 30 deg angle dimension to the base (drawn at ~35 deg); extruded 12.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0.5, 0.4], [40, -1]]}
+{"cmd": "sketch.line", "points": [[40, -1], [41, 28]]}
+{"cmd": "sketch.line", "points": [[41, 28], [0.5, 0.4]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [5]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "angle", "curves": [3, 6], "value": "30 deg"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 12, "operation": "new_body"}

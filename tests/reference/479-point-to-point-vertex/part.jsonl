@@ -1,0 +1,18 @@
+# 479-point-to-point-vertex: added by the parity loop from a Fusion probe
+# Align (point mode): the 10 mm cube's corner (40,0,0) aligned to the box's top corner (20,20,10).
+# Fox has no Align command; the closest is a Move by the vector between the two points.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[40, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [50, 10]]}
+{"cmd": "sketch.line", "points": [[50, 10], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [40, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "move", "bodies": [4000], "translate": [-20, 20, 10]}

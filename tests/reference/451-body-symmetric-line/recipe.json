@@ -1,0 +1,210 @@
+{
+ "id": "body-symmetric-line",
+ "name": "body-symmetric-line",
+ "description": "Cube 6x6x6 at x 47..53, y 10..16; body patterned along the line (0,0)->(100,0), 5 instances 15 mm apart, symmetric (both ways from the path start, so copies at -30..+30 mm along X); separate bodies.",
+ "exercises": [
+  "path_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Block_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       47,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       53,
+       10
+      ]
+     },
+     "id": "b1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b1.end",
+      "at": [
+       53,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       53,
+       16
+      ]
+     },
+     "id": "b2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b2.end",
+      "at": [
+       53,
+       16
+      ]
+     },
+     "end": {
+      "at": [
+       47,
+       16
+      ]
+     },
+     "id": "b3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b3.end",
+      "at": [
+       47,
+       16
+      ]
+     },
+     "end": {
+      "ref": "b1.start",
+      "at": [
+       47,
+       10
+      ]
+     },
+     "id": "b4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Block",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Block_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b1",
+        "b2",
+        "b3",
+        "b4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Block"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "PathSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       100,
+       0
+      ]
+     },
+     "id": "p1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "path_pattern",
+   "name": "PathPattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Block"
+   ],
+   "path": {
+    "sketch": "PathSketch",
+    "curves": [
+     "p1"
+    ]
+   },
+   "count": 5,
+   "spacing": 15,
+   "symmetric": true,
+   "orientation": "identical"
+  }
+ ]
+}

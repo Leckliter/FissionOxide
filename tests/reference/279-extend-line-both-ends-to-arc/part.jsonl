@@ -1,0 +1,10 @@
+# 279-extend-line-both-ends-to-arc: added by the parity loop from a Fusion probe
+# extend-line-both-ends-to-arc: Semicircular arc r20 (from (20,0) over (0,20) to (-20,0)) on a line y=0 (x -20..20), and a short line y=10 from x=-5 to 5; Extend the short line from its right end and then its left end, so it reaches the arc at x=+-17.32; extrude the circular segment above y=10 by 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [20, 0], "mid": [0, 20], "end": [-20, 0]}
+{"cmd": "sketch.line", "points": [[-20, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[-5, 10], [5, 10]]}
+{"cmd": "sketch.extend", "at": [4, 10]}
+{"cmd": "sketch.extend", "at": [-4, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[0, 15]], "distance": 10, "operation": "new_body"}
