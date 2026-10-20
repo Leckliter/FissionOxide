@@ -61,7 +61,7 @@ impl CubeState {
   }
 
   /// A world direction in cube axes.
-  fn to_cube(&self, v: DVec3) -> DVec3 {
+  fn in_cube(&self, v: DVec3) -> DVec3 {
     self.frame.transpose() * v
   }
 
@@ -84,14 +84,14 @@ impl CubeState {
 
   /// The face the camera looks straight at, if it does.
   pub fn face_view(&self, cam: &Camera) -> Option<Spot> {
-    let d = self.to_cube(cam.eye_dir());
+    let d = self.in_cube(cam.eye_dir());
     let s = snap(d);
     (spot_vec(s).dot(d) > 0.9999).then_some(s)
   }
 
   /// `v` moved onto the nearest of the cube's axes (in world).
   fn snap_world(&self, v: DVec3) -> DVec3 {
-    self.frame * spot_vec(snap(self.to_cube(v)))
+    self.frame * spot_vec(snap(self.in_cube(v)))
   }
 
   /// From a face view, the view one face over: the face at the top, bottom, right or left of
@@ -159,7 +159,7 @@ struct Basis {
 impl Basis {
   fn new(state: &CubeState, cam: &Camera) -> Self {
     let (right, up, back) = cam.basis();
-    Basis { right: state.to_cube(right), up: state.to_cube(up), back: state.to_cube(back) }
+    Basis { right: state.in_cube(right), up: state.in_cube(up), back: state.in_cube(back) }
   }
 
   /// Screen offset from the cube's centre of a point in cube axes (y down).

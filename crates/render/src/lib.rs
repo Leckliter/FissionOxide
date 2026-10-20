@@ -868,7 +868,7 @@ mod tests {
     cam.look_from(-DVec3::Y, DVec3::X);
     let (right, up, back) = cam.basis();
     assert!((back + DVec3::Y).length() < 1e-9 && (up - DVec3::X).length() < 1e-9, "{up}");
-    assert!((right - DVec3::Z).length() < 1e-9, "{right}");
+    assert!((right + DVec3::Z).length() < 1e-9, "{right}");
     // straight down the turn goes into the yaw
     cam.look_from(DVec3::Z, -DVec3::X);
     let (_, up, _) = cam.basis();

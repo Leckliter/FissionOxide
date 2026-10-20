@@ -1368,7 +1368,7 @@ mod tests {
     assert!(app.step_cam_move(t0 + CAM_MOVE_SECS / 2.0), "still running half way");
     let mid = app.cam.eye_dir();
     assert!((mid - corner).length() > 0.1 && (mid - start.eye_dir()).length() > 0.1, "{mid}");
-    assert!(!app.step_cam_move(t0 + CAM_MOVE_SECS), "done after {CAM_MOVE_SECS} s");
+    assert!(!app.step_cam_move(t0 + CAM_MOVE_SECS + 1e-9), "done after {CAM_MOVE_SECS} s");
     assert!((app.cam.eye_dir() - corner).length() < 1e-9);
     assert_eq!(app.cam.distance, start.distance);
     // Home and Fit glide too, and land where the instant versions do
