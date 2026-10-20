@@ -45,6 +45,7 @@ fn form_box_is_a_smooth_solid_with_a_face_per_side() {
 fn form_cage_on_a_plane() {
   // a cube cage: every vertex is extraordinary (valence 3), so each cage face is a face
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let v: Vec<[f64; 3]> = (0..8)
     .map(|i| [if i & 1 == 0 { 0.0 } else { 10.0 }, if i & 2 == 0 { 0.0 } else { 10.0 }, (i >> 2) as f64 * 10.0])
     .collect();

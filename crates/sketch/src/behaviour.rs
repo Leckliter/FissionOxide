@@ -59,10 +59,18 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Fusion's sketch frames: the XZ origin plane is x = +X, y = −Z (normal +Y), the YZ plane
+/// x = −Z, y = +Y (normal +X), and a face or free plane facing down (−Z) has x = −X, y = +Y.
+/// Without it the XZ plane is x = +X, y = +Z (normal −Y), YZ is x = +Y, y = +Z, and a downward
+/// plane has x = +X, y = −Y. Where a plane sits is resolved at regeneration and shared by every
+/// feature on it (sketches, primitives, construction planes), so this is a design-level flag:
+/// read it from the design's set (`Design::frames`), not a sketch's.
+pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  FUSION_SKETCH_FRAMES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

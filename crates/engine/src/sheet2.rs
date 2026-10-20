@@ -153,7 +153,7 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
   };
   let (plane, sketch) = if let (true, Some(fid)) = (on_face, fid) {
     let info = *body.faces().iter().find(|f| f.id == fid).ok_or(CmdError::new("no such face"))?;
-    let pl = fox_model::regen::sketch_plane_on(info.normal, info.origin).map_err(CmdError::new)?;
+    let pl = fox_model::regen::sketch_plane_on(info.normal, info.origin, s.design.frames()).map_err(CmdError::new)?;
     let sk = fox_model::sheet2::flat_sketch(&flat, &pl, [0.0, 0.0]).map_err(CmdError::new)?;
     (PlaneRef::Face { face: face_ref(s, &json!({"body": id.0, "face": fid}))?, x: None }, sk)
   } else {

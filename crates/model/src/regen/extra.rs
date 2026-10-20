@@ -678,7 +678,10 @@ impl Ctx<'_> {
         Plane::from_normal(o, n, d).map_err(ke)
       }
       PlaneDef::Midplane { a, b } => {
-        let (pa, pb) = (self.resolve_plane(a)?, self.resolve_plane(b)?);
+        // the bisector it picks was matched to Fusion with the legacy normals (XZ facing −Y; case
+        // 347): with Fusion's (+Y) it would take the other bisector between XY and XZ
+        let legacy = crate::Frames::Legacy;
+        let (pa, pb) = (self.resolve_plane_framed(a, legacy)?, self.resolve_plane_framed(b, legacy)?);
         let (na, nb) = (pa.normal(), pb.normal());
         if na.cross(nb).length() < 1e-9 {
           let mid = pa.origin + na * ((pb.origin - pa.origin).dot(na) / 2.0);
@@ -687,7 +690,7 @@ impl Ctx<'_> {
         let (o, _) = plane_line(&pa, &pb).ok_or("the planes don't meet")?;
         let nb = if na.dot(nb) < 0.0 { -nb } else { nb };
         let mut n = na + nb;
-        if let (PlaneRef::Face { face: fa }, PlaneRef::Face { face: fb }) = (a, b) {
+        if let (PlaneRef::Face { face: fa, .. }, PlaneRef::Face { face: fb, .. }) = (a, b) {
           // two body faces: Fusion takes the bisector that runs between them, with their centroids
           // on opposite sides (through the body at a convex edge), not the one outside it
           let (ca, cb) = (self.face_info(fa)?.1.origin, self.face_info(fb)?.1.origin);

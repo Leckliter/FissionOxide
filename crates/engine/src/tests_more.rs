@@ -118,6 +118,7 @@ fn construction_planes_axes_and_points() {
 #[test]
 fn axis_through_sketch_line_or_axis() {
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let sk = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].as_u64().unwrap();
   let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]]}))["curves"][0].as_u64().unwrap();
   run(&mut s, "sketch.finish", json!({}));
@@ -178,6 +179,7 @@ fn coil_and_pipe() {
 #[test]
 fn rib_grows_to_the_floor() {
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   // a U channel: base 40×20×4 with walls 4 thick, 20 tall
   block(&mut s, 40.0, 20.0, 4.0);
   run(&mut s, "sketch.create", json!({"plane": {"point": [20, 10, 4], "normal": [0, 0, 1]}}));
@@ -185,16 +187,12 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "sketch.rect", json!({"corner1": [36, 0], "corner2": [40, 20]}));
   run(&mut s, "extrude", json!({"distance": 20, "operation": "join"}));
   let v0 = volume(&s);
-<<<<<<< HEAD
-  // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10; sketch y = −Z)
-=======
   // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10)
->>>>>>> origin/main
   run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
   let pl = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
   // a line across the top between the walls; the rib grows down to the floor
-  run(&mut s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
+  run(&mut s, "sketch.line", json!({"points": [[4, 20], [36, 20]]}));
   run(&mut s, "rib", json!({"thickness": 2}));
   let added = volume(&s) - v0;
   assert!((added - 32.0 * 16.0 * 2.0).abs() < 1.0, "rib added {added}");
@@ -327,8 +325,9 @@ fn sketch_tools_make_profiles() {
 #[test]
 fn section_view_is_capped() {
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   block(&mut s, 40.0, 20.0, 10.0);
-  let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": 10, "flip": true}})).unwrap();
+  let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": -10}})).unwrap();
   let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
   // the body mesh, clipped, and the cap
   let caps: Vec<_> = scene.meshes.iter().filter(|m| !m.analyze && !m.indices.is_empty()).collect();

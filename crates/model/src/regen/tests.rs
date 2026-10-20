@@ -312,16 +312,20 @@ fn cache_reuses_unchanged_prefix() {
 
 #[test]
 fn sketch_plane_on_faces_is_world_aligned() {
-  let top = sketch_plane_on(DVec3::Z, DVec3::new(5.0, 5.0, 10.0)).unwrap();
-  assert_eq!(top.x, DVec3::X);
-  assert!((top.origin - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-12);
-  // a downward face keeps Y up, so X points left (as in Fusion)
-  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0)).unwrap();
+  for frames in [Frames::Legacy, Frames::Fusion] {
+    let top = sketch_plane_on(DVec3::Z, DVec3::new(5.0, 5.0, 10.0), frames).unwrap();
+    assert_eq!(top.x, DVec3::X);
+    assert!((top.origin - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-12);
+    let front = sketch_plane_on(-DVec3::Y, DVec3::new(5.0, 0.0, 3.0), frames).unwrap();
+    assert!((front.x - DVec3::X).length() < 1e-12 && (front.y - DVec3::Z).length() < 1e-12);
+    let back = sketch_plane_on(DVec3::Y, DVec3::new(5.0, 20.0, 3.0), frames).unwrap();
+    assert!((back.x + DVec3::X).length() < 1e-12 && (back.y - DVec3::Z).length() < 1e-12);
+  }
+  // a downward face: legacy keeps X = +X (so Y = −Y); Fusion keeps Y up, so X points left
+  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0), Frames::Legacy).unwrap();
+  assert!((bottom.x - DVec3::X).length() < 1e-12 && (bottom.y + DVec3::Y).length() < 1e-12);
+  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0), Frames::Fusion).unwrap();
   assert!((bottom.x + DVec3::X).length() < 1e-12 && (bottom.y - DVec3::Y).length() < 1e-12);
-  let front = sketch_plane_on(-DVec3::Y, DVec3::new(5.0, 0.0, 3.0)).unwrap();
-  assert!((front.x - DVec3::X).length() < 1e-12 && (front.y - DVec3::Z).length() < 1e-12);
-  let back = sketch_plane_on(DVec3::Y, DVec3::new(5.0, 20.0, 3.0)).unwrap();
-  assert!((back.x + DVec3::X).length() < 1e-12 && (back.y - DVec3::Z).length() < 1e-12);
 }
 
 #[test]
@@ -771,4 +775,123 @@ fn flanges_from_separate_features_leave_an_open_corner() {
   assert_eq!(m.bodies.len(), 1);
   let flat = m.bodies[0].flat_pattern(None).unwrap();
   assert_eq!(flat.bends.len(), 2);
+}
+
+/// The block (x 0..40, y 0..20, z 0..10) with a 3 mm extruded rectangle sketched on XZ, on YZ,
+/// on a plane offset 5 from XZ and on the block's bottom face, each a new body. `legacy` makes it
+/// as a build before Fusion's frames saved it: no behaviour flags in the design or its sketches,
+/// written to JSON and read back.
+fn frames_design(legacy: bool) -> (Design, Model, [FeatureId; 4]) {
+  let (mut d, _, _) = block_design();
+  let corners = [[1.0, 2.0], [4.0, 7.0]];
+  let rect = || {
+    let mut s = Sketch::new();
+    s.add_rectangle(corners[0], corners[1]).unwrap();
+    s
+  };
+  let sketch_on = |d: &mut Design, plane: PlaneRef, sketch: Sketch| {
+    let s = d.add_feature(FeatureKind::Sketch { plane, sketch, links: Vec::new() }).unwrap();
+    let e = FeatureKind::Extrude {
+      sketch: s,
+      profiles: vec![],
+      extent: Extent::distance("3"),
+      operation: Operation::NewBody,
+    };
+    (s, d.add_feature(e).unwrap())
+  };
+  let xz = sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Xz }, rect());
+  let yz = sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Yz }, rect());
+  let base = PlaneRef::Origin { plane: OriginPlane::Xz };
+  let off = d.add_feature(FeatureKind::ConstructionPlane { base, offset: "5".into() }).unwrap();
+  let off = sketch_on(&mut d, PlaneRef::Construction { feature: off }, rect());
+  let m = regenerate(&mut d);
+  let body = &m.bodies[0];
+  let bottom = body.faces().iter().find(|f| f.normal.z < -0.9).unwrap();
+  let face = FaceRef::from_face(body.id, bottom, bottom.center);
+  let down = sketch_on(&mut d, PlaneRef::Face { face, x: None }, rect());
+  if legacy {
+    d.behaviours = Behaviours::legacy();
+    for f in &mut d.features {
+      if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+        sketch.behaviours = Behaviours::legacy();
+      }
+    }
+    let json = d.to_json();
+    assert!(!json.contains("behaviours"), "a file without flags");
+    d = Design::from_json(&json).unwrap();
+    assert!(d.behaviours.is_empty() && d.version == 2);
+  }
+  let m = regenerate(&mut d);
+  ok(&m);
+  (d, m, [xz.0, yz.0, off.0, down.0])
+}
+
+/// Every sketch point's world position, and each extruded body's bounding box, volume and faces.
+fn check_frames(
+  m: &Model,
+  d: &Design,
+  sketches: [FeatureId; 4],
+  world: [fn([f64; 2]) -> DVec3; 4],
+  boxes: [[[f64; 3]; 2]; 4],
+) {
+  for (k, s) in sketches.iter().enumerate() {
+    let r = &m.sketches[s];
+    assert!(r.sketch.points.len() >= 5, "sketch {k}: the origin and four corners");
+    for p in &r.sketch.points {
+      let at = [p.x, p.y];
+      let (got, want) = (r.plane.to_world(at), world[k](at));
+      assert!((got - want).length() < 1e-9, "sketch {k}: {at:?} at {got} (expected {want})");
+    }
+    let ext = d.features.iter().position(|f| f.id == *s).map(|i| d.features[i + 1].id).unwrap();
+    let bodies: Vec<_> = m.bodies.iter().filter(|b| b.feature == ext).collect();
+    assert_eq!(bodies.len(), 1, "sketch {k}");
+    let mass = bodies[0].shape.mass().unwrap();
+    assert!((mass.volume - 3.0 * 5.0 * 3.0).abs() < 1e-6, "sketch {k}: volume {}", mass.volume);
+    assert_eq!(bodies[0].faces().len(), 6, "sketch {k}");
+    let [lo, hi] = boxes[k].map(DVec3::from);
+    assert!((mass.bbox_min - lo).length() < 1e-6 && (mass.bbox_max - hi).length() < 1e-6, "sketch {k}: {mass:?}");
+  }
+}
+
+#[test]
+fn designs_saved_before_fusion_frames_keep_their_geometry() {
+  // the frames main always had: XZ x = X, y = Z (normal −Y); YZ x = Y, y = Z (normal +X); an
+  // offset from XZ goes to +Y; a downward face x = X, y = −Y
+  let (d, m, sketches) = frames_design(true);
+  assert_eq!(d.frames(), Frames::Legacy);
+  let world: [fn([f64; 2]) -> DVec3; 4] = [
+    |p| DVec3::new(p[0], 0.0, p[1]),
+    |p| DVec3::new(0.0, p[0], p[1]),
+    |p| DVec3::new(p[0], 5.0, p[1]),
+    |p| DVec3::new(p[0], -p[1], 0.0),
+  ];
+  let boxes = [
+    [[1.0, -3.0, 2.0], [4.0, 0.0, 7.0]],
+    [[0.0, 1.0, 2.0], [3.0, 4.0, 7.0]],
+    [[1.0, 2.0, 2.0], [4.0, 5.0, 7.0]],
+    [[1.0, -7.0, -3.0], [4.0, -2.0, 0.0]],
+  ];
+  check_frames(&m, &d, sketches, world, boxes);
+  // and it saves as it was read: still no flags
+  assert!(!d.to_json().contains("behaviours"));
+}
+
+#[test]
+fn new_designs_get_fusion_frames() {
+  // XZ x = X, y = −Z (normal +Y); YZ x = −Z, y = Y (normal +X); a downward face x = −X, y = Y
+  let (d, m, sketches) = frames_design(false);
+  assert_eq!(d.frames(), Frames::Fusion);
+  let world: [fn([f64; 2]) -> DVec3; 4] = [
+    |p| DVec3::new(p[0], 0.0, -p[1]),
+    |p| DVec3::new(0.0, p[1], -p[0]),
+    |p| DVec3::new(p[0], 5.0, -p[1]),
+    |p| DVec3::new(-p[0], p[1], 0.0),
+  ];
+  let boxes = [
+    [[1.0, 0.0, -7.0], [4.0, 3.0, -2.0]],
+    [[0.0, 2.0, -4.0], [3.0, 7.0, -1.0]],
+    [[1.0, 5.0, -7.0], [4.0, 8.0, -2.0]],
+    [[-4.0, 2.0, -3.0], [-1.0, 7.0, 0.0]],
+  ];
+  check_frames(&m, &d, sketches, world, boxes);
 }

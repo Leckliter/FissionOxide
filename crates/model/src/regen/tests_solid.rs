@@ -57,11 +57,12 @@ fn bodies_of(m: &Model, f: FeatureId) -> Vec<&Body> {
 #[test]
 fn sweep_along_a_rail_then_twisted() {
   let mut d = Design::new("sweep");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let prof = sketch(&mut d, XY, circle(5.0));
-  // path and rail in one sketch on the XZ plane (sketch x = X, sketch y = −Z)
+  // path and rail in one sketch on the front plane (sketch x = X, sketch y = Z)
   let mut ps = Sketch::new();
-  let path = ps.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, -50.0)).unwrap().0;
-  let rail = ps.add_line(PtSpec::At(5.0, 0.0), PtSpec::At(10.0, -50.0)).unwrap().0;
+  let path = ps.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 50.0)).unwrap().0;
+  let rail = ps.add_line(PtSpec::At(5.0, 0.0), PtSpec::At(10.0, 50.0)).unwrap().0;
   let path_sketch = sketch(&mut d, XZ, ps);
   let sw = d
     .add_feature(FeatureKind::Sweep {
@@ -102,14 +103,15 @@ fn sweep_along_a_rail_then_twisted() {
 #[test]
 fn loft_with_rails_or_a_centre_line() {
   let mut d = Design::new("loft");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let a = sketch(&mut d, XY, circle(10.0));
   let top = offset_plane(&mut d, XY, "40");
   let b = sketch(&mut d, top, circle(10.0));
-  // two rails bulging out to x = ±15 at mid-height, and a straight centre line (sketch y = −Z)
+  // two rails bulging out to x = ±15 at mid-height, and a straight centre line
   let mut rs = Sketch::new();
-  let r1 = rs.add_arc_3pt(PtSpec::At(10.0, 0.0), [15.0, -20.0], PtSpec::At(10.0, -40.0)).unwrap();
-  let r2 = rs.add_arc_3pt(PtSpec::At(-10.0, 0.0), [-15.0, -20.0], PtSpec::At(-10.0, -40.0)).unwrap();
-  let c = rs.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, -40.0)).unwrap().0;
+  let r1 = rs.add_arc_3pt(PtSpec::At(10.0, 0.0), [15.0, 20.0], PtSpec::At(10.0, 40.0)).unwrap();
+  let r2 = rs.add_arc_3pt(PtSpec::At(-10.0, 0.0), [-15.0, 20.0], PtSpec::At(-10.0, 40.0)).unwrap();
+  let c = rs.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 40.0)).unwrap().0;
   let rails = sketch(&mut d, XZ, rs);
   let sections = vec![LoftSection { sketch: a, profile: None }, LoftSection { sketch: b, profile: None }];
   let loft = d
@@ -254,13 +256,10 @@ fn extrude_up_to_a_curved_face_or_a_body() {
 /// it (y = −30), and its side face.
 fn cylinder_and_square() -> (Design, FeatureId, FaceRef, f64) {
   let mut d = Design::new("emboss");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   primitive(&mut d, Primitive::Cylinder { radius: "20".into(), height: "40".into() }, XY, [0.0, 0.0]);
   let front = offset_plane(&mut d, XZ, "-30");
-<<<<<<< HEAD
-  let sk = sketch(&mut d, front, rect([-5.0, -25.0], [5.0, -15.0]));
-=======
   let sk = sketch(&mut d, front, rect([-5.0, 15.0], [5.0, 25.0]));
->>>>>>> origin/main
   let m = regenerate(&mut d);
   ok(&m);
   let body = &m.bodies[0];
@@ -386,6 +385,7 @@ fn block() -> (Design, FaceRef) {
 #[test]
 fn replace_face_with_a_plane_or_a_curved_face() {
   let (mut d, top) = block();
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let up = offset_plane(&mut d, XY, "15");
   let r = d
     .add_feature(FeatureKind::ReplaceFace { faces: vec![top.clone()], target: None, plane: Some(up.clone()) })
@@ -405,7 +405,8 @@ fn replace_face_with_a_plane_or_a_curved_face() {
 
   // a big cylinder along X whose top runs at z = 15 over y = 10
   let (mut d, top) = block();
-  let cyl = primitive(&mut d, Primitive::Cylinder { radius: "50".into(), height: "60".into() }, YZ, [35.0, 10.0]);
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  let cyl = primitive(&mut d, Primitive::Cylinder { radius: "50".into(), height: "60".into() }, YZ, [10.0, -35.0]);
   let m = regenerate(&mut d);
   let cb = bodies_of(&m, cyl)[0];
   let side = cb.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();

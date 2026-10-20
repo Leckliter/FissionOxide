@@ -130,6 +130,7 @@ fn rounded_press_brake_bends() {
 fn cuts_in_a_lofted_flange_reach_its_flat_pattern() {
   // a 40 square to a 20 square, 30 up: four flat trapezoids
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   run(&mut s, "sheet.rule", json!({"name": "Steel", "thickness": 2, "bend_radius": 3, "k_factor": 0.5}));
   let a = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].clone();
   run(&mut s, "sketch.rect", json!({"corner1": [-20, -20], "corner2": [20, 20]}));
@@ -142,7 +143,7 @@ fn cuts_in_a_lofted_flange_reach_its_flat_pattern() {
   let flat0 = run(&mut s, "sheet.flat_pattern", json!({"body": body}))["volume_mm3"].as_f64().unwrap();
   // a d6 hole through the y = ±15 (at z 15) faces, off the seam in the middle of a side
   let sk = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].clone();
-  run(&mut s, "sketch.circle", json!({"center": [8, -15], "radius": 3}));
+  run(&mut s, "sketch.circle", json!({"center": [8, 15], "radius": 3}));
   run(
     &mut s,
     "extrude",

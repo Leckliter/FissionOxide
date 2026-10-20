@@ -1151,11 +1151,12 @@ mod tests {
   #[test]
   fn emboss_form_and_its_timeline_edit() {
     let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
     run(&mut s, "cylinder", json!({"radius": 20, "height": 40}));
-    run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -30}));
+    run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 30}));
     let front = s.design.features.last().unwrap().id.0;
     run(&mut s, "sketch.create", json!({"plane": {"feature": front}}));
-    run(&mut s, "sketch.rect", json!({"corner1": [-5, -25], "corner2": [5, -15]}));
+    run(&mut s, "sketch.rect", json!({"corner1": [-5, 15], "corner2": [5, 25]}));
     let sk = s.edit_sketch.unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let b = s.model.bodies[0].id;
@@ -1213,6 +1214,7 @@ mod tests {
   #[test]
   fn fillet_setback_sweep_twist_loft_rails_and_extrude_to_object() {
     let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
     run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
     let b = &s.model.bodies[0];
     let corner = fox_engine::kernel::glam::DVec3::new(10.0, 10.0, 20.0);
@@ -1232,8 +1234,9 @@ mod tests {
     assert!(matches!(&f.kind, FeatureKind::Fillet { setback: Some(x), .. } if x == "7"));
 
     let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
     run(&mut s, "sketch.create", json!({"plane": "xz"}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -30]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
     let path = s.edit_sketch.unwrap();
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
     run(&mut s, "sketch.rect", json!({"corner1": [-4, -2], "corner2": [4, 2]}));
@@ -1246,6 +1249,7 @@ mod tests {
     assert!(s.model.bodies[0].shape.mass().unwrap().bbox_max.y > 3.0);
 
     let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
     run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
     let a = s.edit_sketch.unwrap();
@@ -1255,7 +1259,7 @@ mod tests {
     run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
     let b = s.edit_sketch.unwrap();
     run(&mut s, "sketch.create", json!({"plane": "xz"}));
-    run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, -20], "end": [10, -40]}));
+    run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, 20], "end": [10, 40]}));
     let rail = s.edit_sketch.unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Loft);
@@ -1268,6 +1272,7 @@ mod tests {
 
     // extrude a bar up to the cylinder above it, picked in the viewport
     let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
     run(&mut s, "cylinder", json!({"plane": "yz", "radius": 20, "height": 40}));
     run(&mut s, "plane.offset", json!({"plane": "xy", "offset": -40}));
     let below = s.design.features.last().unwrap().id.0;

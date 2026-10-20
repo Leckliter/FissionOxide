@@ -17,7 +17,7 @@ use crate::assembly;
 use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
-  FeatureKind, HoleKind, Operation, ParamKind, PlaneRef, Primitive, ReliefShape,
+  FeatureKind, Frames, HoleKind, Operation, ParamKind, PlaneRef, Primitive, ReliefShape,
 };
 
 /// New bodies one feature may create.
@@ -397,7 +397,6 @@ struct Ctx<'a> {
   /// The design's behaviour flags: gate a feature-level geometry change on
   /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
   /// [`fox_sketch::behaviour`].
-  #[allow(dead_code)] // read by the first regen-level gate
   behaviours: &'a crate::Behaviours,
 }
 
@@ -800,8 +799,8 @@ impl Ctx<'_> {
       FeatureKind::ConstructionPlane { base, offset } => {
         let pl = self.resolve_plane(base)?;
         let d = self.len(offset)?;
-        // XZ keeps its frame but offsets along +Y, as in Fusion
-        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign() } else { 1.0 };
+        // offsets from XZ go along +Y in either frame, as in Fusion
+        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign(self.frames()) } else { 1.0 };
         self.state.planes.insert(id, pl.offset(sign * d));
         Ok(None)
       }
@@ -1887,9 +1886,19 @@ impl Ctx<'_> {
 
   // ---- references ----
 
+  /// How this design frames origin planes and downward planes.
+  fn frames(&self) -> Frames {
+    Frames::of(self.behaviours)
+  }
+
   fn resolve_plane(&mut self, p: &mut PlaneRef) -> Result<Plane, String> {
+    self.resolve_plane_framed(p, self.frames())
+  }
+
+  /// [`Ctx::resolve_plane`] with the origin and downward planes framed as `frames` says.
+  fn resolve_plane_framed(&mut self, p: &mut PlaneRef, frames: Frames) -> Result<Plane, String> {
     match p {
-      PlaneRef::Origin { plane } => Ok(plane.plane()),
+      PlaneRef::Origin { plane } => Ok(plane.plane(frames)),
       PlaneRef::Construction { feature } => {
         self.state.planes.get(feature).copied().ok_or_else(|| "its construction plane failed".to_string())
       }
@@ -1902,7 +1911,7 @@ impl Ctx<'_> {
         if info.kind != fox_kernel::SurfaceKind::Plane {
           return Err("the face is not planar".into());
         }
-        let pl = sketch_plane_on(info.normal, info.origin)?;
+        let pl = sketch_plane_on(info.normal, info.origin, frames)?;
         match x.map(DVec3::from).filter(|x| x.cross(info.normal).length() > 1e-9) {
           Some(x) => Plane::from_normal(pl.origin, info.normal, x).map_err(|e| e.to_string()),
           None => Ok(pl),
@@ -1910,7 +1919,7 @@ impl Ctx<'_> {
       }
       PlaneRef::Free { origin, normal, x } => {
         let (o, n) = (DVec3::from(*origin), DVec3::from(*normal));
-        let auto = sketch_plane_on(n, o)?.x;
+        let auto = sketch_plane_on(n, o, frames)?.x;
         let x = x.map(DVec3::from).filter(|x| x.cross(n).length() > 1e-9).unwrap_or(auto);
         Plane::from_normal(o, n, x).map_err(|e| e.to_string())
       }
@@ -2208,13 +2217,14 @@ fn resolve_face_pieces(fr: &mut FaceRef, body: &Body) -> Vec<u32> {
 }
 
 /// The sketch plane Fusion would put on a planar face: origin = the world origin projected onto
-/// the face, axes aligned with the world (X right; up = Z for vertical faces; Y up on horizontal
-/// faces, so a downward face has X pointing left).
-pub fn sketch_plane_on(normal: DVec3, point: DVec3) -> Result<Plane, String> {
+/// the face, axes aligned with the world (X right; up = Z for vertical faces). On a horizontal
+/// face Y is up in Fusion's frames, so a downward face has X pointing left; legacy frames keep
+/// X = +X there (and Y = −Y).
+pub fn sketch_plane_on(normal: DVec3, point: DVec3, frames: Frames) -> Result<Plane, String> {
   let n = normal.try_normalize().ok_or("zero normal")?;
   let origin = n * point.dot(n);
   let (x, _y) = if n.z.abs() > 0.9 {
-    (if n.z > 0.0 { DVec3::X } else { DVec3::NEG_X }, DVec3::Y)
+    (if n.z < 0.0 && frames == Frames::Fusion { DVec3::NEG_X } else { DVec3::X }, DVec3::Y)
   } else {
     let up = (DVec3::Z - n * DVec3::Z.dot(n)).normalize_or_zero();
     (up.cross(n), up)

@@ -3,9 +3,6 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use super::*;
 use fox_sketch::{PtSpec, Sketch, find_profiles};
 
-/// The front plane: sketch x = X, sketch y = Z (up).
-const FRONT: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::Z };
-
 fn rect(plane: &Plane, a: [f64; 2], b: [f64; 2]) -> Shape {
   let mut s = Sketch::new();
   s.add_rectangle(a, b).unwrap();
@@ -20,7 +17,7 @@ fn circle(plane: &Plane, r: f64) -> Shape {
 
 /// A straight path up the Z axis.
 fn z_path(len: f64) -> Shape {
-  Shape::path(&FRONT, &[Seg::Line { a: [0.0, 0.0], b: [0.0, len] }]).unwrap()
+  Shape::path(&Plane::XZ, &[Seg::Line { a: [0.0, 0.0], b: [0.0, len] }]).unwrap()
 }
 
 fn volume(s: &Shape) -> f64 {
@@ -34,7 +31,7 @@ fn close(a: f64, b: f64, rel: f64) -> bool {
 #[test]
 fn sweep_with_a_guide_rail_scales_the_profile() {
   // a circle swept up 50 mm while a rail leans out from r = 5 to r = 10: a cone frustum
-  let rail = Shape::path(&FRONT, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 50.0] }]).unwrap();
+  let rail = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 50.0] }]).unwrap();
   let s = circle(&Plane::XY, 5.0).sweep_rail(&z_path(50.0), &rail).unwrap();
   let expected = PI * 50.0 / 3.0 * (25.0 + 50.0 + 100.0);
   assert!(close(volume(&s), expected, 0.01), "{} vs {expected}", volume(&s));
@@ -83,7 +80,7 @@ fn bulging_rail(x0: f64, bulge: f64) -> Shape {
   let s = bulge.signum();
   let center = [x0 - s * c, 20.0];
   let (start, sweep) = if s > 0.0 { (-half, 2.0 * half) } else { (PI + half, -2.0 * half) };
-  Shape::path(&FRONT, &[Seg::Arc { center, radius: r, start_angle: start, sweep }]).unwrap()
+  Shape::path(&Plane::XZ, &[Seg::Arc { center, radius: r, start_angle: start, sweep }]).unwrap()
 }
 
 #[test]
@@ -109,7 +106,7 @@ fn loft_follows_rails() {
   let m = s.mass().unwrap();
   assert!(m.volume > 16_000.0 && (m.bbox_max.y - 10.0).abs() < 0.3, "{m:?}");
   // a rail that misses the sections is an error
-  let far = Shape::path(&FRONT, &[Seg::Line { a: [50.0, 0.0], b: [50.0, 40.0] }]).unwrap();
+  let far = Shape::path(&Plane::XZ, &[Seg::Line { a: [50.0, 0.0], b: [50.0, 40.0] }]).unwrap();
   assert!(Shape::loft_rails(&sections, &[far]).is_err());
 }
 

@@ -39,9 +39,10 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
     shapes.push(model.body(*b).map(|b| b.shape.clone()).ok_or(format!("body {} no longer exists", b.0))?);
   }
   let mut pls = Vec::new();
+  // only where each plane is matters here, so the frames are left as they always were
   for p in planes {
     pls.push(match p {
-      PlaneRef::Origin { plane } => plane.plane(),
+      PlaneRef::Origin { plane } => plane.plane(crate::Frames::Legacy),
       PlaneRef::Construction { feature } => *model.planes.get(feature).ok_or("its construction plane failed")?,
       PlaneRef::Face { face, .. } => {
         let body = model.body(face.body).ok_or("the plane's body no longer exists")?;
@@ -50,7 +51,7 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
         if info.kind != SurfaceKind::Plane {
           return Err("the face is not planar".into());
         }
-        super::sketch_plane_on(info.normal, info.origin)?
+        super::sketch_plane_on(info.normal, info.origin, crate::Frames::Legacy)?
       }
       // only where the plane is and which way it faces matter here
       PlaneRef::Free { origin, normal, .. } => {

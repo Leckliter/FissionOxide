@@ -367,13 +367,14 @@ pub struct Manipulator {
 
 /// The world plane a dialog's plane value ("xy", {"feature"}, {"body", "face"}) names.
 fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
-  use fox_engine::kernel::Plane;
+  use fox_engine::model::OriginPlane;
   if let Some(n) = v.as_str() {
-    return Some(match n {
-      "xz" => Plane::XZ,
-      "yz" => Plane::YZ,
-      _ => Plane::XY,
-    });
+    let plane = match n {
+      "xz" => OriginPlane::Xz,
+      "yz" => OriginPlane::Yz,
+      _ => OriginPlane::Xy,
+    };
+    return Some(plane.plane(s.design.frames()));
   }
   if let Some(f) = v.get("feature").and_then(Value::as_u64) {
     return s.model.planes.get(&FeatureId(f as u32)).copied();
@@ -381,7 +382,7 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
   let body = BodyId(v.get("body")?.as_u64()? as u32);
   let face = v.get("face")?.as_u64()? as u32;
   let f = s.model.body(body)?.faces().iter().find(|f| f.id == face).copied()?;
-  fox_engine::model::regen::sketch_plane_on(f.normal, f.origin).ok()
+  fox_engine::model::regen::sketch_plane_on(f.normal, f.origin, s.design.frames()).ok()
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
@@ -884,7 +885,9 @@ impl Dialog {
         Sel::Face { body, face } if is_planar(&app.s, *body, *face) => Some(json!({"body": body.0, "face": face})),
         _ => None,
       });
-      let mid = app.s.model.bounds().map(|(a, b)| (a.y + b.y) / 2.0).unwrap_or(0.0);
+      // (the offset runs along the XZ plane's normal: −Y or +Y, as the design frames it)
+      let n = fox_engine::model::OriginPlane::Xz.plane(app.s.design.frames()).normal();
+      let mid = app.s.model.bounds().map(|(a, b)| n.dot((a + b) / 2.0)).unwrap_or(0.0);
       app.section = Some(match face {
         Some(f) => json!({"plane": f, "offset": 0.0, "flip": true}),
         None => json!({"plane": "xz", "offset": (mid * 1000.0).round() / 1000.0, "flip": false}),
@@ -1547,8 +1550,11 @@ impl Dialog {
       Kind::OffsetPlane => {
         let base = plane_of(s, &self.plane)?;
         // offsets from XZ go along +Y (see `OriginPlane::offset_sign`)
-        let sign =
-          if self.plane.as_str() == Some("xz") { fox_engine::model::OriginPlane::Xz.offset_sign() } else { 1.0 };
+        let sign = if self.plane.as_str() == Some("xz") {
+          fox_engine::model::OriginPlane::Xz.offset_sign(s.design.frames())
+        } else {
+          1.0
+        };
         Some(Manipulator { origin: base.origin, dir: sign * base.normal(), value: len(&self.distance)? })
       }
       _ => self.more_manipulator(s),

@@ -2295,7 +2295,13 @@ const PLANE_RGB: [u8; 3] = [236, 150, 52];
 /// The planes Create Sketch offers in the viewport, as (`sketch.create` plane, plane): the
 /// origin planes and the construction planes.
 fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
-  let mut out = vec![(json!("xy"), Plane::XY), (json!("xz"), Plane::XZ), (json!("yz"), Plane::YZ)];
+  use fox_engine::model::OriginPlane;
+  let frames = app.s.design.frames();
+  let mut out = vec![
+    (json!("xy"), Plane::XY),
+    (json!("xz"), OriginPlane::Xz.plane(frames)),
+    (json!("yz"), OriginPlane::Yz.plane(frames)),
+  ];
   for (id, pl) in &app.s.model.planes {
     if !app.s.design.feature(*id).is_some_and(|f| f.suppressed) {
       out.push((json!({"feature": id.0}), *pl));

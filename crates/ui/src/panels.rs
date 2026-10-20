@@ -1709,11 +1709,13 @@ pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: Row
 
 /// Runs an origin plane row's menu command.
 pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
-  let pl = match plane {
-    "xz" => fox_engine::kernel::Plane::XZ,
-    "yz" => fox_engine::kernel::Plane::YZ,
-    _ => fox_engine::kernel::Plane::XY,
+  use fox_engine::model::OriginPlane;
+  let origin = match plane {
+    "xz" => OriginPlane::Xz,
+    "yz" => OriginPlane::Yz,
+    _ => OriginPlane::Xy,
   };
+  let pl = origin.plane(app.s.design.frames());
   match cmd {
     RowCmd::CreateSketch => app.create_sketch(json!(plane)),
     RowCmd::OffsetPlane => {

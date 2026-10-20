@@ -1016,8 +1016,8 @@ pub fn view_plane(s: &Session, v: &serde_json::Value, offset: f64, flip: bool) -
   let base = if let Some(n) = v.as_str() {
     match n.to_ascii_lowercase().as_str() {
       "xy" | "top" => Plane::XY,
-      "xz" | "front" => Plane::XZ,
-      "yz" | "right" => Plane::YZ,
+      "xz" | "front" => fox_model::OriginPlane::Xz.plane(s.design.frames()),
+      "yz" | "right" => fox_model::OriginPlane::Yz.plane(s.design.frames()),
       o => return Err(format!("unknown plane '{o}'")),
     }
   } else if let Some(f) = v.get("feature").and_then(serde_json::Value::as_u64) {
