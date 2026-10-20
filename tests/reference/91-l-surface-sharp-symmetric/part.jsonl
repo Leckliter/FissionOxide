@@ -1,0 +1,11 @@
+# 91-l-surface-sharp-symmetric: added by the parity loop from a Fusion probe
+# Open L of two lines on XY ((0,0)-(30,0)-(30,20)) extruded 25 mm as a two-face surface; thickened
+# 2 mm symmetrically (Fusion: 2 mm each side) into a new body (Fusion's Sharp type mitres the outer corner square; Fox has
+# no thicken type option), the surface then removed.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "surface.extrude", "sketch": 1, "distance": 25}
+{"cmd": "thicken", "bodies": [2000], "thickness": 2, "symmetric": true, "operation": "new_body"}
+{"cmd": "body.remove", "bodies": [2000]}
