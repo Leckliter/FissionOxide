@@ -128,6 +128,8 @@ pub struct ViewOptions {
   pub toolpaths: bool,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
+  /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
+  pub opacity: Vec<(BodyId, u8)>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -205,8 +207,12 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
+      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1);
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
+        if let Some(a) = alpha {
+          mesh.color[3] = a;
+        }
         if let Some(pl) = &opts.section {
           clip_mesh(mesh, pl);
         }
