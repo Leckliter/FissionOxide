@@ -278,6 +278,7 @@ const ASSEMBLE: &[E] = &[
   // not in Fusion's menu: FissionOxide's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),

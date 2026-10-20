@@ -680,6 +680,10 @@ impl App {
     }
     use panels::Cmd;
     let sketching = self.s.edit_sketch.is_some();
+    // Shift+J before J, which would take it too
+    if pressed(Key::J, Modifiers::SHIFT) {
+      self.launch(Cmd::Dialog(dialogs::Kind::AsBuiltJoint));
+    }
     // modelling commands; in a sketch they finish it first (E extrudes its profiles), except A,
     // which is the sketch's Arc
     for (k, d) in [

@@ -1124,6 +1124,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     closed_at = None;
     let flexible = browser_assembly::flexible_of(app, cid);
     let label = if grounded { format!("{name}  (grounded)") } else { name.clone() };
+    let label = if app.s.active_component.is_some_and(|a| a.0 == cid) { format!("{label}  (active)") } else { label };
     let label = match flexible {
       Some(true) => format!("{label}  (flexible)"),
       _ => label,
@@ -1139,6 +1140,8 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         marking::peek(app, bodies.clone(), name.clone());
       }
       r.context_menu(|ui| {
+        component_menu(app, ui, cid, &name);
+        ui.separator();
         if ui.button("Rename").clicked() {
           ui.close();
           app.rename = Some((RenameTarget::Component(cid), name.clone()));
@@ -1187,6 +1190,95 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
         }
       }
     }
+  }
+}
+
+/// The Fusion part of a browser component's right-click menu: Activate, New Component,
+/// Show/Hide, Isolate, Save Copy As, Properties and Find in Window. (Fusion's Open, Insert and
+/// Create Selection Set need engine work FissionOxide doesn't have yet.)
+fn component_menu(app: &mut App, ui: &mut egui::Ui, cid: u32, name: &str) {
+  let active = app.s.active_component.is_some_and(|a| a.0 == cid);
+  let (text, param) =
+    if active { ("Activate Top Level", json!({})) } else { ("Activate Component", json!({"component": cid})) };
+  if menu_item(ui, Icon::Component, text, None).on_hover_text("New bodies go into the active component").clicked() {
+    ui.close();
+    app.run("component.activate", param);
+  }
+  if menu_item(ui, Icon::Component, "New Component", None).on_hover_text("An empty component inside this one").clicked()
+  {
+    ui.close();
+    app.s.selection.clear();
+    app.start(Kind::NewComponent);
+    if let Some(d) = app.dialog.as_mut() {
+      d.for_component(&app.s, cid);
+    }
+  }
+  ui.separator();
+  let bodies = component_bodies(app, cid);
+  let visible = bodies.iter().any(|b| app.s.body_visible(*b));
+  if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
+    ui.close();
+    marking::show_hide(app, &bodies);
+  }
+  let isolated = app.ctx_menu.isolate.is_some();
+  if menu_item(ui, Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, None).clicked() {
+    ui.close();
+    app.ctx_menu.isolate = if isolated { None } else { Some(bodies.clone()) };
+  }
+  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
+    ui.close();
+    marking::find_in_window(app, &bodies, None);
+  }
+  ui.separator();
+  if menu_item(ui, Icon::Save, "Save Copy As", None)
+    .on_hover_text("Save the component's bodies to a STEP, IGES or BRep file")
+    .clicked()
+  {
+    ui.close();
+    save_component_copy(app, name, &bodies);
+  }
+  if menu_item(ui, Icon::Measure, "Properties", None).clicked() {
+    ui.close();
+    app.start(Kind::ComponentProps);
+    if let Some(d) = app.dialog.as_mut() {
+      d.for_component(&app.s, cid);
+    }
+  }
+}
+
+/// A component's bodies and those of every component below it.
+fn component_bodies(app: &App, cid: u32) -> Vec<BodyId> {
+  let d = &app.s.design;
+  let mut comps = vec![fox_engine::model::ComponentId(cid)];
+  let mut k = 0;
+  while k < comps.len() && comps.len() < 4096 {
+    let p = comps[k];
+    comps.extend(
+      d.components.iter().filter(|c| c.parent == Some(p) && !comps.contains(&c.id)).map(|c| c.id).collect::<Vec<_>>(),
+    );
+    k += 1;
+  }
+  comps.iter().filter_map(|c| d.component(*c)).flat_map(|c| c.bodies.iter().copied()).collect()
+}
+
+/// Save Copy As: the component's bodies to an exact (STEP, IGES or BRep) file.
+fn save_component_copy(app: &mut App, name: &str, bodies: &[BodyId]) {
+  if bodies.is_empty() {
+    app.status = Some((format!("{name} has no bodies to save"), true));
+    return;
+  }
+  let Some(p) = rfd::FileDialog::new()
+    .add_filter("STEP", &["step", "stp"])
+    .add_filter("IGES", &["iges", "igs"])
+    .add_filter("BRep", &["brep"])
+    .set_file_name(format!("{name}.step"))
+    .save_file()
+  else {
+    return;
+  };
+  let ids: Vec<u32> = bodies.iter().map(|b| b.0).collect();
+  if app.run("export", json!({"path": p, "bodies": ids})).is_some() {
+    app.status = Some((format!("Saved a copy of {name} as {}", p.display()), false));
   }
 }
 

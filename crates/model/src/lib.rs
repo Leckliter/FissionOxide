@@ -1819,7 +1819,17 @@ impl Design {
       c.bodies.retain(|b| !bodies.contains(b));
     }
     let name = if name.trim().is_empty() { format!("Component{}", id.0) } else { name.to_string() };
-    self.components.push(Component { id, name, bodies, grounded: false, material: String::new(), parent: None });
+    self.components.push(Component {
+      id,
+      name,
+      bodies,
+      grounded: false,
+      material: String::new(),
+      parent: None,
+      part_number: String::new(),
+      description: String::new(),
+      sheet_metal: false,
+    });
     Ok(id)
   }
 

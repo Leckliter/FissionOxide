@@ -19,8 +19,47 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         }
       }
       let name = opt_str(p, "name").unwrap_or("").to_string();
-      let id = s.edit(|d| Ok(d.add_component(&name, bodies)?))?;
+      let parent = match p.get("parent") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(component_id(s, p, "parent")?),
+      };
+      let props = Properties::of(p)?;
+      let id = s.edit(|d| {
+        let id = d.add_component(&name, bodies)?;
+        let c = d.component_mut(id).ok_or(CmdError::new("no such component"))?;
+        c.parent = parent;
+        props.set(c);
+        Ok(id)
+      })?;
+      if p.get("activate").and_then(Value::as_bool).unwrap_or(false) {
+        s.active_component = Some(id);
+      }
       Ok(json!({"component": id.0, "name": s.design.component(id).map(|c| c.name.clone())}))
+    })(),
+    "component.properties" => (|| {
+      let id = component_id(s, p, "component")?;
+      let props = Properties::of(p)?;
+      if !props.is_empty() {
+        s.edit(|d| {
+          props.set(d.component_mut(id).ok_or(CmdError::new("no such component"))?);
+          Ok(())
+        })?;
+      }
+      let c = s.design.component(id).ok_or(CmdError::new("no such component"))?;
+      Ok(json!({
+        "component": id.0, "name": c.name, "part_number": c.part_number, "description": c.description,
+        "type": if c.sheet_metal { "sheet_metal" } else { "standard" },
+        "material": if c.material.is_empty() { "Steel" } else { c.material.as_str() },
+        "bodies": c.bodies.len(), "grounded": c.grounded, "parent": c.parent.map(|x| x.0),
+        "active": s.active_component == Some(id),
+      }))
+    })(),
+    "component.activate" => (|| {
+      s.active_component = match p.get("component") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(component_id(s, p, "component")?),
+      };
+      Ok(json!({"active": s.active_component.map(|c| c.0)}))
     })(),
     "component.add_bodies" => (|| {
       let id = component_id(s, p, "component")?;
@@ -121,6 +160,52 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "assembly.bom" => crate::subassembly::bom(s, p),
     _ => return mates::run(s, name, p),
   })
+}
+
+/// A component's Fusion properties as a command gives them (absent = unchanged).
+#[derive(Default)]
+struct Properties {
+  name: Option<String>,
+  part_number: Option<String>,
+  description: Option<String>,
+  sheet_metal: Option<bool>,
+}
+
+impl Properties {
+  fn of(p: &Value) -> Result<Properties, CmdError> {
+    let text = |k: &str| opt_str(p, k).map(str::to_string);
+    let sheet_metal = match opt_str(p, "type") {
+      None => None,
+      Some("standard") => Some(false),
+      Some("sheet_metal") => Some(true),
+      Some(o) => return Err(CmdError::new(format!("unknown component type '{o}' (standard, sheet_metal)"))),
+    };
+    Ok(Properties {
+      name: text("name").filter(|n| !n.trim().is_empty()),
+      part_number: text("part_number"),
+      description: text("description"),
+      sheet_metal,
+    })
+  }
+
+  fn is_empty(&self) -> bool {
+    self.name.is_none() && self.part_number.is_none() && self.description.is_none() && self.sheet_metal.is_none()
+  }
+
+  fn set(&self, c: &mut fox_model::Component) {
+    if let Some(n) = &self.name {
+      c.name = n.clone();
+    }
+    if let Some(n) = &self.part_number {
+      c.part_number = n.clone();
+    }
+    if let Some(d) = &self.description {
+      c.description = d.clone();
+    }
+    if let Some(m) = self.sheet_metal {
+      c.sheet_metal = m;
+    }
+  }
 }
 
 fn component_id(s: &Session, p: &Value, k: &str) -> Result<ComponentId, CmdError> {

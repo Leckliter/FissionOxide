@@ -58,6 +58,10 @@ pub enum Kind {
   // assembly
   NewComponent,
   Joint,
+  /// Joint two components where they already sit (Fusion's As-built Joint).
+  AsBuiltJoint,
+  /// A component's properties (name, part number, description, type).
+  ComponentProps,
   Material,
   Interference,
   Bom,
@@ -130,6 +134,8 @@ impl Kind {
       Kind::FlatPattern => "FLAT PATTERN",
       Kind::NewComponent => "NEW COMPONENT",
       Kind::Joint => "JOINT",
+      Kind::AsBuiltJoint => "AS-BUILT JOINT",
+      Kind::ComponentProps => "PROPERTIES",
       Kind::Material => "PHYSICAL MATERIAL",
       Kind::Interference => "INTERFERENCE",
       Kind::Bom => "BILL OF MATERIALS",
@@ -196,7 +202,8 @@ impl Kind {
       Kind::SheetRules => Icon::SmRules,
       Kind::FlatPattern => Icon::FlatPattern,
       Kind::NewComponent => Icon::Component,
-      Kind::Joint => Icon::JointOrigin,
+      Kind::Joint | Kind::AsBuiltJoint => Icon::JointOrigin,
+      Kind::ComponentProps => Icon::Component,
       Kind::Material => Icon::PhysMaterial,
       Kind::Interference => Icon::Interference,
       Kind::Bom => Icon::Bom,
@@ -246,8 +253,10 @@ impl Kind {
       Kind::Unfold => ("Unfold", "Flatten a sheet metal body onto a face"),
       Kind::SheetRules => ("Sheet Metal Rules", "Thickness, bend radius and reliefs of sheet metal"),
       Kind::FlatPattern => ("Create Flat Pattern", "Flat pattern size and bends, and DXF export"),
-      Kind::NewComponent => ("New Component", "Make a component from the selected bodies"),
+      Kind::NewComponent => ("New Component", "Make an empty component, or one from the selected bodies"),
       Kind::Joint => ("Joint", "Join two components at a face or edge of each"),
+      Kind::AsBuiltJoint => ("As-built Joint", "Joint two components where they already sit"),
+      Kind::ComponentProps => ("Properties", "A component's name, part number, description and type"),
       Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
       Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
@@ -302,6 +311,7 @@ impl Kind {
         | Kind::ConvertSheet
         | Kind::Unfold
         | Kind::Joint
+        | Kind::AsBuiltJoint
         | Kind::Refold
     )
   }
@@ -481,6 +491,8 @@ pub struct Dialog {
 
 const CORNERS: [(&str, &str); 5] =
   [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap"), ("butt", "Butt")];
+const COMPONENT_TYPES: [(&str, &str); 2] = [("standard", "Standard"), ("sheet_metal", "Sheet Metal")];
+const COMPONENT_FROM: [(&str, &str); 2] = [("empty", "Empty Component"), ("bodies", "From Bodies")];
 const CORNER_RELIEFS: [(&str, &str); 4] =
   [("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")];
 
@@ -774,6 +786,15 @@ impl Dialog {
       }
       Kind::NewComponent => {
         d.name = format!("Component{}", s.design.components.len() + 1);
+        d.position = "standard";
+        // Fusion starts empty; selected bodies make it From Bodies
+        d.choice = if sel_bodies(s).is_empty() { "empty" } else { "bodies" };
+        d.flag2 = true;
+      }
+      Kind::AsBuiltJoint => {
+        d.choice = "rigid";
+        d.origins = sel_as_built(s);
+        d.e = "2 mm".into();
       }
       Kind::Joint => {
         d.choice = "rigid";
@@ -825,7 +846,7 @@ impl Dialog {
       }
     }
     d.comps = d.bodies.iter().map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
-    if kind == Kind::Joint {
+    if matches!(kind, Kind::Joint | Kind::AsBuiltJoint) {
       d.comps = d.origins.iter().map(|(b, _)| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
     }
     if kind.drawing() {
@@ -1115,7 +1136,36 @@ impl Dialog {
           "corner_relief": self.corner_relief, "corner_relief_size": self.corner_relief_size,
         }),
       ),
-      Kind::NewComponent => ("component.create", json!({"name": self.name, "bodies": self.bodies})),
+      Kind::NewComponent => {
+        // Activate is applied on OK (see `show`): previews come and go
+        let bodies: &[u32] = if self.choice == "empty" { &[] } else { &self.bodies };
+        let kind = if self.position.is_empty() { "standard" } else { self.position };
+        (
+          "component.create",
+          json!({
+            "name": self.name, "bodies": bodies, "type": kind, "part_number": self.d,
+            "description": self.e, "parent": self.target,
+          }),
+        )
+      }
+      Kind::ComponentProps => (
+        "component.properties",
+        json!({
+          "component": self.target?, "name": self.name, "part_number": self.d, "description": self.e,
+          "type": self.position,
+        }),
+      ),
+      Kind::AsBuiltJoint => {
+        let (moving, fixed, at) = self.as_built_picks()?;
+        let mut p = json!({
+          "moving": moving, "fixed": fixed, "moving_origin": at, "fixed_origin": at, "kind": self.choice,
+          "as_built": true,
+        });
+        if self.choice == "screw" {
+          p["lead"] = json!(self.e);
+        }
+        ("joint", p)
+      }
       Kind::Joint => {
         // a saved joint origin (by name) stands in for that side's pick
         let mut picks = self.origins.iter().map(|(_, o)| o).zip(&self.comps);
@@ -1422,7 +1472,10 @@ impl Dialog {
         }
       }
       Kind::Hem | Kind::Rip => !self.edges.is_empty(),
-      Kind::ConvertSheet | Kind::NewComponent | Kind::Project => !self.bodies.is_empty(),
+      Kind::NewComponent => self.choice == "empty" || !self.bodies.is_empty(),
+      Kind::ComponentProps => self.target.is_some(),
+      Kind::AsBuiltJoint => self.as_built_picks().is_some(),
+      Kind::ConvertSheet | Kind::Project => !self.bodies.is_empty(),
       Kind::Joint => {
         let need = self.saved.iter().filter(|n| n.is_empty()).count();
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
@@ -1468,17 +1521,44 @@ impl Dialog {
     if self.kind == Kind::Combine {
       out.extend(self.bodies.iter().map(|b| Sel::Body { body: BodyId(*b) }));
     }
-    if self.kind == Kind::Joint {
+    if matches!(self.kind, Kind::Joint | Kind::AsBuiltJoint) {
       out.clear();
       for (b, o) in &self.origins {
         if let Some(i) = o.get("face").and_then(|f| get(f, "face")) {
           out.push(Sel::Face { body: BodyId(*b), face: i });
         } else if let Some(i) = o.get("edge").and_then(|e| get(e, "edge")) {
           out.push(Sel::Edge { body: BodyId(*b), edge: i });
+        } else if o.is_null() {
+          out.push(Sel::Body { body: BodyId(*b) });
         }
       }
     }
     out
+  }
+
+  /// As-built Joint's picks: (moving component, fixed component, position). The first pick is
+  /// on the moving component, the first one on another component (or a root body: the world)
+  /// names the fixed one, and the last picked face, edge or point is the joint's position.
+  fn as_built_picks(&self) -> Option<(u32, Option<u32>, Value)> {
+    let moving = (*self.comps.first()?)?;
+    let fixed = *self.comps.iter().find(|c| **c != Some(moving))?;
+    let at = self.origins.iter().rev().map(|(_, o)| o).find(|o| !o.is_null())?;
+    Some((moving, fixed, at.clone()))
+  }
+
+  /// Points the dialog at a component: Properties loads its values, New Component makes an
+  /// empty child of it (the browser's component menu).
+  pub(crate) fn for_component(&mut self, s: &Session, component: u32) {
+    self.target = Some(component);
+    if self.kind == Kind::NewComponent {
+      self.choice = "empty";
+    } else if let Some(c) = s.design.component(fox_engine::model::ComponentId(component)) {
+      self.name = c.name.clone();
+      self.d = c.part_number.clone();
+      self.e = c.description.clone();
+      self.position = if c.sheet_metal { "sheet_metal" } else { "standard" };
+    }
+    self.dirty = true;
   }
 
   pub fn cancel(&mut self, s: &mut Session) {
@@ -1662,12 +1742,16 @@ impl Dialog {
         let b = sel_bodies(s);
         if b != self.bodies {
           self.comps = b.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
+          if self.kind == Kind::NewComponent && !b.is_empty() && self.bodies.is_empty() {
+            // picking bodies switches an empty component to From Bodies
+            self.choice = "bodies";
+          }
           self.bodies = b;
           self.dirty = true;
         }
       }
-      Kind::Joint if !self.applied => {
-        let o = sel_origins(s);
+      Kind::Joint | Kind::AsBuiltJoint if !self.applied => {
+        let o = if self.kind == Kind::Joint { sel_origins(s) } else { sel_as_built(s) };
         if o != self.origins {
           self.comps = o.iter().map(|(b, _)| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
           self.origins = o;
@@ -1844,6 +1928,13 @@ impl Dialog {
         if self.kind == Kind::NewDrawing {
           app.drawing = app.s.design.drawings.last().map(|d| d.id);
         }
+        // the new component is the newest (ids only grow)
+        if self.kind == Kind::NewComponent
+          && self.flag2
+          && let Some(c) = app.s.design.components.iter().map(|c| c.id.0).max()
+        {
+          app.run("component.activate", json!({"component": c}));
+        }
       } else if !self.applied && self.error.is_none() {
         self.error = Some(self.missing_input().into());
       } else if self.applied {
@@ -1881,6 +1972,10 @@ impl Dialog {
       Kind::Hem | Kind::Rip => "select edges",
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
+      Kind::AsBuiltJoint => {
+        "select the moving component, then the one it's jointed to, then a face, edge or point for the joint"
+      }
+      Kind::ComponentProps => "pick a component in the browser",
       Kind::Material => "select a body of a component",
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
       Kind::SkMirror => "select curves and a mirror line",
@@ -2606,11 +2701,69 @@ impl Dialog {
           ui.end_row();
         }
       }
-      Kind::NewComponent => {
+      Kind::NewComponent | Kind::ComponentProps => {
+        let new = self.kind == Kind::NewComponent;
+        Self::choose(ui, "Type", "comp-type", &mut self.position, &COMPONENT_TYPES, dirty);
         Self::field(ui, "Name", &mut self.name, dirty);
-        ui.label("Bodies");
-        chip(ui, self.bodies.len(), "selected");
+        Self::field(ui, "Part Number", &mut self.d, dirty);
+        Self::field(ui, "Description", &mut self.e, dirty);
+        if new {
+          ui.label("Parent");
+          let list: Vec<(u32, String)> = app.s.design.components.iter().map(|c| (c.id.0, c.name.clone())).collect();
+          let cur = list.iter().find(|(c, _)| Some(*c) == self.target).map(|(_, n)| n.clone());
+          egui::ComboBox::from_id_salt("comp-parent")
+            .selected_text(cur.unwrap_or("Top level".into()))
+            .width(140.0)
+            .show_ui(ui, |ui| {
+              if ui.selectable_label(self.target.is_none(), "Top level").clicked() {
+                self.target = None;
+                *dirty = true;
+              }
+              for (c, n) in &list {
+                if ui.selectable_label(self.target == Some(*c), n).clicked() {
+                  self.target = Some(*c);
+                  *dirty = true;
+                }
+              }
+            });
+          ui.end_row();
+          Self::choose(ui, "Create", "comp-from", &mut self.choice, &COMPONENT_FROM, dirty);
+          if self.choice == "bodies" {
+            ui.label("Bodies");
+            chip(ui, self.bodies.len(), "selected");
+            ui.end_row();
+          }
+          Self::check(ui, "Activate", &mut self.flag2, dirty);
+        } else if let Some(c) = self.target.and_then(|c| app.s.design.component(fox_engine::model::ComponentId(c))) {
+          ui.label("Material");
+          ui.label(if c.material.is_empty() { "Steel" } else { c.material.as_str() });
+          ui.end_row();
+          ui.label("Bodies");
+          ui.label(c.bodies.len().to_string());
+          ui.end_row();
+        }
+      }
+      Kind::AsBuiltJoint => {
+        let n = self.comps.len();
+        let fixed = self.comps.iter().position(|c| self.comps.first().is_some_and(|m| c != m));
+        ui.label("Component 1");
+        chip(ui, n.min(1), "component");
         ui.end_row();
+        ui.label("Component 2");
+        chip(ui, usize::from(fixed.is_some()), "component");
+        ui.end_row();
+        ui.label("Position");
+        chip(ui, usize::from(fixed.is_some() && self.as_built_picks().is_some()), "origin");
+        ui.end_row();
+        if self.comps.first().is_some_and(Option::is_none) {
+          ui.label("");
+          ui.label(RichText::new("the first body isn't in a component").color(theme::WARNING));
+          ui.end_row();
+        }
+        Self::choose(ui, "Motion", "joint", &mut self.choice, &JOINTS, dirty);
+        if self.choice == "screw" {
+          Self::field(ui, "Lead (per turn)", &mut self.e, dirty);
+        }
       }
       Kind::Joint => {
         let saved = saved_origins(&app.s);
@@ -3708,15 +3861,29 @@ fn edge_point(s: &Session, e: &Value, start: bool) -> Option<[f64; 3]> {
 
 /// Joint origins: the selected faces and edges, in pick order.
 fn sel_origins(s: &Session) -> Vec<(u32, Value)> {
+  s.selection.iter().filter_map(|x| origin_of(s, x)).collect()
+}
+
+/// A picked face, edge or point as a joint origin, with its body.
+fn origin_of(s: &Session, x: &Sel) -> Option<(u32, Value)> {
+  match x {
+    Sel::Face { body, face } => Some((body.0, json!({"face": {"body": body.0, "face": face}}))),
+    Sel::Edge { body, edge } => Some((body.0, json!({"edge": {"body": body.0, "edge": edge}}))),
+    Sel::Vertex { body, edge, end } => {
+      fox_engine::scene::vertex_pos(s, *body, *edge, *end).map(|p| (body.0, json!({"at": p.to_array()})))
+    }
+    _ => None,
+  }
+}
+
+/// As-built Joint's picks: faces, edges and points as joint origins, and whole bodies (null)
+/// that only name their component.
+fn sel_as_built(s: &Session) -> Vec<(u32, Value)> {
   s.selection
     .iter()
     .filter_map(|x| match x {
-      Sel::Face { body, face } => Some((body.0, json!({"face": {"body": body.0, "face": face}}))),
-      Sel::Edge { body, edge } => Some((body.0, json!({"edge": {"body": body.0, "edge": edge}}))),
-      Sel::Vertex { body, edge, end } => {
-        fox_engine::scene::vertex_pos(s, *body, *edge, *end).map(|p| (body.0, json!({"at": p.to_array()})))
-      }
-      _ => None,
+      Sel::Body { body } => Some((body.0, Value::Null)),
+      x => origin_of(s, x),
     })
     .collect()
 }
@@ -4002,6 +4169,71 @@ mod tests {
     let mut d = Dialog::blank(Kind::Interference);
     d.refresh_report(&mut s);
     assert!(d.report.is_some(), "{:?}", d.error);
+  }
+
+  #[test]
+  fn new_component_options_and_properties() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+    let body = s.model.bodies[0].id.0;
+    let mut d = Dialog::blank(Kind::NewComponent);
+    d.name = "Frame".into();
+    d.choice = "bodies";
+    d.bodies = vec![body];
+    apply(&mut s, &mut d);
+    let frame = s.design.component_of(BodyId(body)).unwrap().id.0;
+    // an empty sheet metal child of Frame, with a part number and description
+    let mut d = Dialog::blank(Kind::NewComponent);
+    d.for_component(&s, frame);
+    assert_eq!(d.choice, "empty");
+    d.bodies = vec![body];
+    d.name = "Bracket".into();
+    d.position = "sheet_metal";
+    d.d = "BR-01".into();
+    d.e = "Mount".into();
+    apply(&mut s, &mut d);
+    let c = s.design.components.last().unwrap();
+    assert_eq!((c.name.as_str(), c.part_number.as_str(), c.description.as_str()), ("Bracket", "BR-01", "Mount"));
+    assert!(c.sheet_metal && c.bodies.is_empty() && c.parent.map(|p| p.0) == Some(frame));
+    let bracket = c.id.0;
+    // Properties loads and edits them
+    let mut d = Dialog::blank(Kind::ComponentProps);
+    assert!(!d.ready());
+    d.for_component(&s, bracket);
+    assert_eq!((d.d.as_str(), d.position), ("BR-01", "sheet_metal"));
+    d.d = "BR-02".into();
+    d.position = "standard";
+    apply(&mut s, &mut d);
+    let c = s.design.components.last().unwrap();
+    assert!(c.part_number == "BR-02" && !c.sheet_metal);
+  }
+
+  #[test]
+  fn as_built_joint_dialog() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 100, "depth": 60, "height": 10, "at": [50, 30]}));
+    run(&mut s, "box", json!({"width": 40, "depth": 10, "height": 5, "at": [20, 100]}));
+    let (base, arm) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+    for b in [base, arm] {
+      run(&mut s, "component.create", json!({"bodies": [b]}));
+    }
+    let comp = |s: &Session, b: u32| s.design.component_of(BodyId(b)).map(|c| c.id.0);
+    let before = s.model.bodies[1].shape.mass().unwrap().bbox_min;
+    let mut d = Dialog::blank(Kind::AsBuiltJoint);
+    d.choice = "revolute";
+    // the arm (whole body), the base, then the position: an edge of the arm
+    d.origins = vec![(arm, Value::Null), (base, Value::Null)];
+    d.comps = vec![comp(&s, arm), comp(&s, base)];
+    assert!(!d.ready(), "a position is needed");
+    d.origins.push((arm, json!({"edge": edge(&s, 1, |e| e.length > 9.0 && e.length < 11.0)})));
+    d.comps.push(comp(&s, arm));
+    let (moving, fixed, _) = d.as_built_picks().unwrap();
+    assert_eq!((Some(moving), fixed), (comp(&s, arm), comp(&s, base)));
+    apply(&mut s, &mut d);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["as_built"], &p["kind"]), ("joint", &json!(true), &json!("revolute")));
+    // the arm stays where it sits
+    assert!((s.model.bodies[1].shape.mass().unwrap().bbox_min - before).length() < 1e-6);
   }
 
   #[test]

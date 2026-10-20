@@ -200,7 +200,9 @@ cmds! {
   "select.invert" => "Select what isn't selected (of the selected kind)", "{}";
   "measure" => "Measure one entity (properties) or the distance and angle between two; an entity is {body}, {body, face}, {body, edge} or {point, snap?: face|edge}; default the selection", "{a?, b?}";
   "inspect.center_of_mass" => "Centre of mass, volume and mass of bodies (default all visible)", "{bodies?}";
-  "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
+  "component.create" => "New component, empty or from bodies (taken out of other components)", "{name?, bodies?: [id], type?: standard|sheet_metal, part_number?, description?, parent?: component, activate?: bool}";
+  "component.properties" => "A component's properties (name, part number, description, type, material ...); sets those given", "{component, name?, part_number?, description?, type?: standard|sheet_metal}";
+  "component.activate" => "Activate a component: bodies later features make go into it (no component: the top level)", "{component?}";
   "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
   "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
   "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
