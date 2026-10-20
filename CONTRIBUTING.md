@@ -185,6 +185,26 @@ Then make it reachable:
 Add a line to "What works today" in `README.md` and remove the item from `ROADMAP.md` if it
 was there.
 
+## Changing how existing geometry rebuilds
+
+Saved files must keep rebuilding exactly as they did. When a change alters the geometry an
+existing model produces (profile building, the solver, curve evaluation, a feature's result, the
+kernel's face building), gate it on a named behaviour flag instead of bumping `FORMAT_VERSION`:
+
+1. In `crates/sketch/src/behaviour.rs`, add a constant for the name at the end of the list and
+   append it to `CURRENT` (one line each; never rename or remove a published name).
+2. Keep the old code and branch on the flag: `sketch.behaviours.has(NAME)` for sketch-level
+   behaviour (`find_profiles`, `Sketch::solve`, curve evaluation), `self.behaviours.has(NAME)` in
+   the model's `regen::Ctx` for feature-level behaviour (the design's set), and pass the answer to
+   the kernel in `FaceOptions` via `Shape::face_with`.
+3. Test both paths: a sketch or design with `Behaviours::legacy()` builds the old geometry, a new
+   one the new.
+
+`Sketch::new()` and `Design::new()` get all of `CURRENT`; a file keeps the flags it was saved
+with (none if it predates them), and names a build does not know survive a load and save. A
+sketch added to an old design is new geometry and gets `CURRENT`. `FORMAT_VERSION` and
+`Design::migrate` stay for changes to what the stored data means.
+
 ## Releasing
 
 A release is a tag. Bump `version` under `[workspace.package]` in `Cargo.toml` (every crate and
