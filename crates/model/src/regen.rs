@@ -815,12 +815,32 @@ impl Ctx<'_> {
           Operation::Cut => BoolOp::Subtract,
           Operation::Intersect => BoolOp::Intersect,
         };
-        for t in tools.iter() {
-          if t == target {
-            continue;
+        if op == BoolOp::Intersect {
+          // Fusion keeps the part of the target inside any tool, target ∩ (t1 ∪ t2 ∪ …),
+          // not just the part inside every tool
+          let mut union: Option<Shape> = None;
+          for t in tools.iter() {
+            if t == target {
+              continue;
+            }
+            let s = &self.state.bodies[self.body_index(*t)?].shape;
+            union = Some(match union {
+              None => s.clone(),
+              Some(u) => u.boolean(s, BoolOp::Union).map_err(ke)?,
+            });
           }
-          let i = self.body_index(*t)?;
-          shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
+          if let Some(u) = union {
+            shape = shape.boolean(&u, BoolOp::Intersect).map_err(ke)?;
+          }
+        } else {
+          // cutting or joining the tools one at a time equals doing it with their union
+          for t in tools.iter() {
+            if t == target {
+              continue;
+            }
+            let i = self.body_index(*t)?;
+            shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
+          }
         }
         let new_target = self.state.bodies[ti].with_shape(shape, id);
         self.state.bodies[ti] = new_target;
