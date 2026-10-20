@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+386-edges-meeting-at-vertex
+387-edges-extended-intersection
+388-sketch-line-and-edge

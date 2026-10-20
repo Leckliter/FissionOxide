@@ -3,10 +3,11 @@
 
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
-use fox_sketch::{CurveKind, Loop, Profile, Seg};
+use fox_sketch::{Curve3dKind, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
-use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use crate::include::sketch_curve3d;
 use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
@@ -751,10 +752,37 @@ impl Ctx<'_> {
     }
   }
 
+  /// A line as a point on it and its direction, or `None` for a curved body edge.
+  fn straight(&mut self, l: &mut LineRef) -> Result<Option<(DVec3, DVec3)>, String> {
+    match l {
+      LineRef::Edge(e) => {
+        let (_, info) = self.edge_info(e)?;
+        Ok((info.kind == fox_kernel::CurveKind::Line).then_some((info.start, info.end - info.start)))
+      }
+      LineRef::Sketch { sketch, curve } => {
+        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?;
+        match sketch_curve3d(sk, *curve)? {
+          Curve3dKind::Line { a, b } => Ok(Some((DVec3::from(a), DVec3::from(b) - DVec3::from(a)))),
+          _ => Err("the sketch curve is not a line".into()),
+        }
+      }
+      LineRef::Axis { axis } => {
+        self.state.axes.get(axis).copied().map(Some).ok_or_else(|| "its construction axis failed".to_string())
+      }
+    }
+  }
+
   fn point_by(&mut self, def: &mut PointDef) -> Result<DVec3, String> {
     match def {
       PointDef::Ref { point } => self.point_of(point),
       PointDef::TwoEdges { a, b } => {
+        if let (Some(la), Some(lb)) = (self.straight(a)?, self.straight(b)?) {
+          return lines_meet(la, lb);
+        }
+        // a curved edge: where the two edges come closest
+        let (LineRef::Edge(a), LineRef::Edge(b)) = (a, b) else {
+          return Err("pick straight edges or lines".into());
+        };
         let (ba, ea) = self.edge_info(a)?;
         let (bb, eb) = self.edge_info(b)?;
         let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
@@ -819,6 +847,26 @@ fn plane_line(a: &Plane, b: &Plane) -> Option<(DVec3, DVec3)> {
   }
   let (ca, cb) = (na.dot(a.origin), nb.dot(b.origin));
   Some(((nb.cross(l) * ca + l.cross(na) * cb) / l2, l.normalize()))
+}
+
+/// Where two infinite lines (a point and a direction each) cross.
+fn lines_meet((p1, d1): (DVec3, DVec3), (p2, d2): (DVec3, DVec3)) -> Result<DVec3, String> {
+  let (d1, d2) = (
+    d1.try_normalize().ok_or("the first line has no length")?,
+    d2.try_normalize().ok_or("the second line has no length")?,
+  );
+  let n = d1.cross(d2);
+  let n2 = n.length_squared();
+  if n2 < 1e-18 {
+    return Err("the lines are parallel".into());
+  }
+  let w = p2 - p1;
+  let q1 = p1 + d1 * (w.cross(d2).dot(n) / n2);
+  let q2 = p2 + d2 * (w.cross(d1).dot(n) / n2);
+  if (q1 - q2).length() > 1e-4 {
+    return Err("the lines don't meet".into());
+  }
+  Ok((q1 + q2) / 2.0)
 }
 
 /// Any unit vector perpendicular to `d`.
@@ -1100,5 +1148,37 @@ mod tests {
       assert!(d < 1e-2, "{q:?} is {d} off");
     }
     assert!((seg_length(&head) - seg_length(&whole) * 0.3).abs() < 1e-3 * seg_length(&whole));
+  }
+
+  #[test]
+  fn lines_meet_where_extended_and_not_when_skew_or_parallel() {
+    // the L-prism's top edges: y = 4 (x 8..20) and x = 0 (y 0..10) meet extended at (0, 4, 5)
+    let a = (DVec3::new(20.0, 4.0, 5.0), DVec3::new(-12.0, 0.0, 0.0));
+    let b = (DVec3::new(0.0, 0.0, 5.0), DVec3::new(0.0, 10.0, 0.0));
+    assert!((lines_meet(a, b).unwrap() - DVec3::new(0.0, 4.0, 5.0)).length() < 1e-9);
+    let skew = (DVec3::new(0.0, 0.0, 6.0), DVec3::Y);
+    assert!(lines_meet(a, skew).is_err());
+    assert!(lines_meet(a, (DVec3::ZERO, DVec3::X)).is_err());
+  }
+
+  #[test]
+  fn an_old_two_edges_point_reads_as_body_edges() {
+    let e = EdgeRef {
+      body: crate::BodyId(2000),
+      point: [10.0, 0.0, 5.0],
+      dir: [1.0, 0.0, 0.0],
+      n1: [0.0, 0.0, 1.0],
+      n2: [0.0, -1.0, 0.0],
+      circular: false,
+      radius: 0.0,
+      start: [0.0; 3],
+      end: [0.0; 3],
+    };
+    let old = serde_json::json!({"type": "two_edges", "a": e, "b": e});
+    let def: PointDef = serde_json::from_value(old).unwrap();
+    assert_eq!(def, PointDef::TwoEdges { a: LineRef::Edge(e.clone()), b: LineRef::Edge(e) });
+    let line = serde_json::json!({"type": "two_edges", "a": {"sketch": 3, "curve": 3}, "b": {"axis": 5}});
+    let def: PointDef = serde_json::from_value(line).unwrap();
+    assert_eq!(def.depends_on(), vec![FeatureId(3), FeatureId(5)]);
   }
 }

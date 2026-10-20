@@ -1,9 +1,10 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use fox_model::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use fox_model::include::sketch_curve3d;
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
-use fox_sketch::CurveId;
+use fox_sketch::{Curve3dKind, CurveId};
 use serde_json::{Value, json};
 
 use crate::commands::{
@@ -329,6 +330,28 @@ fn edge(s: &Session, p: &Value, k: &str) -> Result<EdgeRef, CmdError> {
   edge_ref_of(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge)")))?)
 }
 
+/// {"sketch", "curve"} (a sketch line) | {"axis": feature} | an edge, as for [`edge_ref_of`].
+fn line(s: &Session, p: &Value, k: &str) -> Result<LineRef, CmdError> {
+  let v = p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge or line)")))?;
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let curve = CurveId(req_u32(v, "curve")?);
+    let r = s.model.sketches.get(&sketch).ok_or(CmdError::new(format!("sketch {} failed to build", sketch.0)))?;
+    return match sketch_curve3d(r, curve).map_err(|e| CmdError::new(format!("sketch {}: {e}", sketch.0)))? {
+      Curve3dKind::Line { .. } => Ok(LineRef::Sketch { sketch, curve }),
+      _ => Err(CmdError::new(format!("sketch {} curve {} is not a line", sketch.0, curve.0))),
+    };
+  }
+  if v.get("axis").is_some() {
+    let axis = FeatureId(req_u32(v, "axis")?);
+    if !s.model.axes.contains_key(&axis) {
+      return Err(CmdError::new("that feature is not a construction axis"));
+    }
+    return Ok(LineRef::Axis { axis });
+  }
+  Ok(LineRef::Edge(edge_ref_of(s, v)?))
+}
+
 fn plane_of(s: &Session, p: &Value, k: &str) -> Result<PlaneRef, CmdError> {
   plane_ref(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (a plane)")))?)
 }
@@ -410,7 +433,7 @@ fn axis(s: &mut Session, p: &Value) -> CmdResult {
 fn point(s: &mut Session, p: &Value) -> CmdResult {
   let def = match opt_str(p, "method").unwrap_or("") {
     "vertex" | "at" | "center_of_edge" => PointDef::Ref { point: pref(s, p, "point")? },
-    "two_edges" => PointDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PointDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "three_planes" => {
       PointDef::ThreePlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")?, c: plane_of(s, p, "c")? }
     }

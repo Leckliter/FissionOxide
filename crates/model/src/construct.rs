@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use fox_sketch::CurveId;
+
 use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, PlaneRef};
 
 /// A point used to build construction geometry.
@@ -21,6 +23,29 @@ pub enum PointRef {
   Center { edge: EdgeRef },
   /// A construction point feature.
   Construction { feature: FeatureId },
+}
+
+/// An edge or line used to build construction geometry. Untagged, so a plain edge reference
+/// (as saved before sketch lines and axes were accepted) still reads as [`LineRef::Edge`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LineRef {
+  /// A line of a sketch, where the sketch puts it in the model.
+  Sketch { sketch: FeatureId, curve: CurveId },
+  /// A construction axis feature.
+  Axis { axis: FeatureId },
+  /// An edge of a body.
+  Edge(EdgeRef),
+}
+
+impl LineRef {
+  fn feature(&self) -> Option<FeatureId> {
+    match self {
+      LineRef::Sketch { sketch, .. } => Some(*sketch),
+      LineRef::Axis { axis } => Some(*axis),
+      LineRef::Edge(_) => None,
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,8 +89,9 @@ pub enum AxisDef {
 pub enum PointDef {
   /// A vertex, a circle's centre, or a point in space.
   Ref { point: PointRef },
-  /// Where two edges meet (the midpoint of their closest approach).
-  TwoEdges { a: EdgeRef, b: EdgeRef },
+  /// Where two lines meet, extended if need be: body edges, sketch lines or construction axes.
+  /// Curved body edges fall back to the midpoint of the edges' closest approach.
+  TwoEdges { a: LineRef, b: LineRef },
   /// Where three planes meet.
   ThreePlanes { a: PlaneRef, b: PlaneRef, c: PlaneRef },
   /// The centre of a sphere or torus face, or of a circular edge's face.
@@ -167,6 +193,7 @@ impl PointDef {
       PointDef::Ref { point } => point.feature().into_iter().collect(),
       PointDef::ThreePlanes { a, b, c } => [a, b, c].iter().filter_map(|p| plane_dep(p)).collect(),
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
+      PointDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
       _ => vec![],
     }
   }
