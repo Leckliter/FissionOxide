@@ -84,7 +84,7 @@ cmds! {
   "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
-  "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end} | {tangent: curve, start, end}";
+  "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end, clockwise?: bool} | {center, start, sweep: angle (negative = clockwise)} | {tangent: curve, start, end}";
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
@@ -2252,9 +2252,24 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       "sketch.arc" => {
         if let Some(c) = opt_pt(&p, "center")? {
-          let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
+          let st = req_pt(&p, "start")?;
+          // Fusion's typed sweep angle: signed, negative runs clockwise
+          let (en, clockwise) = match opt_expr(&p, "sweep") {
+            Some(e) => {
+              if p.get("end").is_some() {
+                return Err(CmdError::new("give the arc's 'end' or its 'sweep', not both"));
+              }
+              let sweep = fox_expr::eval(&e, fox_expr::Kind::Angle, &scope)?;
+              if !(sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
+                return Err(CmdError::new("an arc sweeps more than 0 and less than 360 degrees"));
+              }
+              let a = (st[1] - c[1]).atan2(st[0] - c[0]) + sweep;
+              ([c[0] + a.cos(), c[1] + a.sin()], sweep < 0.0)
+            }
+            None => (req_pt(&p, "end")?, p.get("clockwise").and_then(Value::as_bool).unwrap_or(false)),
+          };
           let (cs, ss) = (snap(sketch, c), snap(sketch, st));
-          sketch.add_arc_center(cs, ss, en)?;
+          sketch.add_arc_center_dir(cs, ss, en, clockwise)?;
         } else {
           let (st, mid, en) = (req_pt(&p, "start")?, req_pt(&p, "mid")?, req_pt(&p, "end")?);
           let (ss, es) = (snap(sketch, st), snap(sketch, en));
