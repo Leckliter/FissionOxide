@@ -700,7 +700,12 @@ impl Ctx<'_> {
         if n.length() < 1e-9 {
           return Err("the three points are in a line".into());
         }
-        Plane::from_normal(a, n, b - a).map_err(ke)
+        // Fusion's frame: the world origin dropped onto the plane, x = Z × n (world X when the
+        // normal is along Z), y = n × x
+        let n = n.normalize();
+        let x = DVec3::Z.cross(n);
+        let x = if x.length() < 1e-9 { DVec3::X } else { x };
+        Plane::from_normal(n * n.dot(a), n, x).map_err(ke)
       }
       PlaneDef::TwoEdges { a, b } => {
         let (_, ea) = self.edge_info(a)?;

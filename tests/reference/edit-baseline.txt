@@ -71,3 +71,8 @@
 348-xz-plane-offset-mirror
 349-top-face-offset-mirror
 350-side-face-negative-offset-mirror-join
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+356-box-corner-three-vertices
+357-sketch-points-and-vertex
+358-sketch-on-plane-hole
+359-sketch-on-plane-reversed-order

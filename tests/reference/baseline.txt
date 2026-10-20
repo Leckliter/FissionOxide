@@ -157,3 +157,8 @@
 349-top-face-offset-mirror
 350-side-face-negative-offset-mirror-join
 351-yz-negative-offset-sketch-extrude
+# Reference parts that pass; see README.md. One directory name per line.
+356-box-corner-three-vertices
+357-sketch-points-and-vertex
+358-sketch-on-plane-hole
+359-sketch-on-plane-reversed-order

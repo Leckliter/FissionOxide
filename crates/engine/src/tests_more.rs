@@ -77,6 +77,20 @@ fn construction_planes_axes_and_points() {
     json!({"method": "three_points", "a": {"at": [0, 0, 3]}, "b": {"at": [1, 0, 3]}, "c": {"at": [0, 1, 3]}}),
   );
   let f3 = three["feature"].as_u64().unwrap();
+  // Fusion's sketch frame: the world origin dropped onto the plane, x = Z × n (world X for +Z)
+  let pl = s.model.planes[&crate::model::FeatureId(f3 as u32)];
+  assert!(
+    (pl.origin - fox_kernel::glam::DVec3::new(0.0, 0.0, 3.0)).length() < 1e-9
+      && (pl.x - fox_kernel::glam::DVec3::X).length() < 1e-9
+  );
+  let tilted = run(
+    &mut s,
+    "plane",
+    json!({"method": "three_points", "a": {"at": [40, 0, 0]}, "b": {"at": [0, 30, 0]}, "c": {"at": [0, 0, 20]}}),
+  );
+  let pl = s.model.planes[&crate::model::FeatureId(tilted["feature"].as_u64().unwrap() as u32)];
+  assert!((pl.x - fox_kernel::glam::DVec3::new(-0.8, 0.6, 0.0)).length() < 1e-9, "{pl:?}");
+  assert!((pl.origin - fox_kernel::glam::DVec3::new(5.9016, 7.8689, 11.8033)).length() < 1e-3, "{pl:?}");
   run(&mut s, "split", json!({"plane": {"feature": f3}}));
   assert_eq!(s.model.bodies.len(), 2);
   // axis along an edge, plane at 45° about it
