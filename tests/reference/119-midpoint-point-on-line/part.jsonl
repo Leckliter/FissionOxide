@@ -1,0 +1,22 @@
+# 119-midpoint-point-on-line: added by the parity loop from a Fusion probe
+# midpoint-point-on-line: House pentagon whose apex is constrained to the midpoint of a construction line from the origin to (30,60); base 40, walls 20; solves to (0,0),(40,0),(40,20),(15,30),(0,20); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[1, 1], [38, -1]]}
+{"cmd": "sketch.line", "points": [[38, -1], [41, 19]]}
+{"cmd": "sketch.line", "points": [[41, 19], [14, 33]]}
+{"cmd": "sketch.line", "points": [[14, 33], [2, 21]]}
+{"cmd": "sketch.line", "points": [[2, 21], [1, 1]]}
+{"cmd": "sketch.line", "points": [[1, 1], [32, 58]]}
+{"cmd": "sketch.construction", "curves": [12]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [5]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [10]}
+{"cmd": "sketch.constrain", "type": "midpoint", "points": [6], "curves": [12]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [2, 4], "value": 20}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 8], "value": 20}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 11], "value": 30}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 11], "value": 60}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

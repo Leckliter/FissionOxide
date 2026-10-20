@@ -124,6 +124,11 @@ impl Sketch {
       {
         [*x, *y] = t.apply([*x, *y]);
       }
+      if let ConstraintKind::FixRadius { curve, radius } = &mut con.kind
+        && curves.contains(curve)
+      {
+        *radius *= t.scale;
+      }
       if (t.scale - 1.0).abs() > 1e-12
         && scaled.contains(&con.id)
         && let Some(d) = con.kind.dim_mut()

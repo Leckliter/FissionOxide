@@ -1,0 +1,7 @@
+# 195-rotated-offset-ellipse-xz: added by the parity loop from a Fusion probe
+# rotated-offset-ellipse-xz: XZ sketch (sketch y = -Z): ellipse centre (5,3), major-axis end (17,8) (a=13, axis tilted atan(5/12)), minor radius 6; extruded 5 along +Y.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.ellipse", "center": [5, 3], "major": [17, 8], "minor": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

@@ -1,0 +1,12 @@
+# 110-equal-arcs: added by the parity loop from a Fusion probe
+# equal-arcs: Two half discs (arc closed by a horizontal line): the first centred at the origin with radius dimension 8, the second drawn R5 with its centre fixed at (30,0) and made equal to the first; both extruded 5 as R8 half discs.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [14, 0], "end": [-14, 0]}
+{"cmd": "sketch.line", "points": [[-14, 0], [14, 0]]}
+{"cmd": "sketch.arc", "center": [30, 0], "start": [35, 0], "end": [25, 0]}
+{"cmd": "sketch.line", "points": [[25, 0], [35, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [6]}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [9, 3]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [3], "value": 8}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body", "profiles": [[0, 3], [30, 3]]}

@@ -1,0 +1,21 @@
+# 97-u-channel-collinear-tops: added by the parity loop from a Fusion probe
+# u-channel-collinear-tops: right leg top drawn at y=26, made collinear with the left leg top (y=20).
+# Fox ids: l1=2 (0->1), l2=5 (1->4), l3=8 (4->7, auto H id 9 deleted), l4=11 (7->10), l5=14 (10->13), l6=17 (13->16), l7=20 (16->19), l8=22 (19->0)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 26]]}
+{"cmd": "sketch.line", "points": [[40, 26], [30, 26]]}
+{"cmd": "sketch.line", "points": [[30, 26], [30, 8]]}
+{"cmd": "sketch.line", "points": [[30, 8], [10, 8]]}
+{"cmd": "sketch.line", "points": [[10, 8], [10, 20]]}
+{"cmd": "sketch.line", "points": [[10, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.delete", "constraints": [9]}
+{"cmd": "sketch.constrain", "type": "collinear", "curves": [8, 20]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 40}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [19, 0], "value": 20}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [16, 19], "value": 10}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [10, 13], "value": 20}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [13, 16], "value": 12}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,7 @@
+# 180-conic-parabola-rho-half: added by the parity loop from a Fusion probe
+# conic-parabola-rho-half: Conic (0,0)->(40,0), apex (20,20), rho 0.5 (parabola), closed by the chord; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[40, 0], [0, 0]]}
+{"cmd": "sketch.conic", "start": [0, 0], "end": [40, 0], "apex": [20, 20], "rho": 0.5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

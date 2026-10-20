@@ -59,6 +59,19 @@ impl Sketch {
   /// Arc around `center` from `start`, counter-clockwise to the direction of `end` (the end point
   /// is projected onto the circle through `start`).
   pub fn add_arc_center(&mut self, center: PtSpec, start: PtSpec, end: [f64; 2]) -> Result<CurveId, SketchError> {
+    self.add_arc_center_dir(center, start, end, false)
+  }
+
+  /// Arc around `center` from `start` to the direction of `end`, clockwise when `clockwise` is
+  /// set. Arcs are stored counter-clockwise, so a clockwise one runs from the new end point back
+  /// to `start`.
+  pub fn add_arc_center_dir(
+    &mut self,
+    center: PtSpec,
+    start: PtSpec,
+    end: [f64; 2],
+    clockwise: bool,
+  ) -> Result<CurveId, SketchError> {
     let c = self.spec_pos(center)?;
     let s = self.spec_pos(start)?;
     let r = dist(c, s);
@@ -73,7 +86,9 @@ impl Sketch {
     let center = self.resolve(center)?;
     let start = self.resolve(start)?;
     let end = self.add_point(e[0], e[1]);
-    self.add_curve(CurveKind::Arc { center, start, end })
+    let kind =
+      if clockwise { CurveKind::Arc { center, start: end, end: start } } else { CurveKind::Arc { center, start, end } };
+    self.add_curve(kind)
   }
 
   /// Arc through three points (start, a point on the arc, end).

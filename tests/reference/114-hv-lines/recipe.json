@@ -1,0 +1,212 @@
+{
+ "id": "hv-lines",
+ "name": "Horizontal/Vertical: hv-lines",
+ "description": "Quadrilateral drawn tilted from the origin: (0.5,0.5)-(30,2)-(28,20)-(14,19). Horizontal/Vertical makes the near-horizontal bottom and top lines horizontal and the near-vertical right line vertical; bottom 30, right 20, top 15 wide, so a trapezoid (0,0)-(30,0)-(30,20)-(15,20) area 450, extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "horizontal",
+  "vertical",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.5,
+       0.5
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       2
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       30,
+       2
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       28,
+       20
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       28,
+       20
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       14,
+       19
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       14,
+       19
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0.5,
+       0.5
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l3"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 30,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l2.start",
+      "l2.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "vertical"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l3.end",
+      "l3.start"
+     ],
+     "value": 15,
+     "unit": "mm",
+     "orientation": "horizontal"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

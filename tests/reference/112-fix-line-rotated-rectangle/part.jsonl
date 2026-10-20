@@ -1,0 +1,14 @@
+# 112-fix-line-rotated-rectangle: added by the parity loop from a Fusion probe
+# fix-line-rotated-rectangle: Slanted line (10,5)-(34,23) fixed as a whole; perpendicular sides from both ends, opposite side parallel, side dimensioned 15 (drawn 10): a 30x15 rectangle rotated atan(3/4); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 5], [34, 23]]}
+{"cmd": "sketch.line", "points": [[34, 23], [28, 31]]}
+{"cmd": "sketch.line", "points": [[28, 31], [4, 13]]}
+{"cmd": "sketch.line", "points": [[4, 13], [10, 5]]}
+{"cmd": "sketch.constrain", "type": "fix", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [3, 5]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [3, 8]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [7, 3]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [2, 4], "value": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

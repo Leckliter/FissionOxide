@@ -1,0 +1,7 @@
+# 152-axis-aligned-offset-third-point: added by the parity loop from a Fusion probe
+# axis-aligned-offset-third-point: 3-point rectangle (0,0)-(40,0) with third point (25,30): height 30 across the first side; extruded 10 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "points": [[0, 0], [40, 0], [25, 30]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

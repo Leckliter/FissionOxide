@@ -1,0 +1,124 @@
+{
+ "id": "concentric-circle-to-ellipse",
+ "name": "Circle made concentric with an ellipse",
+ "description": "Ellipse centred on the origin, major end (20,0), minor radius 10; circle R4 drawn at (5,3), made concentric with the ellipse. Elliptic plate with a centred R4 hole, extruded 6.",
+ "exercises": [
+  "sketch",
+  "concentric constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "ellipse",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "major": [
+      20,
+      0
+     ],
+     "minor": 10,
+     "id": "e1"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       5,
+       3
+      ]
+     },
+     "radius": 4,
+     "id": "c1"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "concentric",
+     "refs": [
+      "e1",
+      "c1"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "e1"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  }
+ ]
+}

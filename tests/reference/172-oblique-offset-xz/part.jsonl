@@ -1,0 +1,7 @@
+# 172-oblique-offset-xz: added by the parity loop from a Fusion probe
+# oblique-offset-xz: Center to center slot, oblique, off-origin on XZ: arc centres (-5, 3) -> (12, 14), width 5; extruded 3.
+# sketch SlotSketch: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [-5, 3], "end": [12, 14], "width": 5, "kind": "center_to_center"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}
