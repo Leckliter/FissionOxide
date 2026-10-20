@@ -273,7 +273,7 @@ cmds! {
   "sketch.text_explode" => "Turn a text into plain curves", "{text_id? | curve?}";
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
   "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
-  "sketch.blend" => "Blend curve: a spline joining the ends of two curves, tangent (g1) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
+  "sketch.blend" => "Blend curve: Fusion's spline joining the ends of two curves, tangent (g1, the default) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
   "config.list" => "Configurations (named variants), the active one and whether design history is captured", "{}";
   "config.create" => "Add a configuration, empty or copying another's overrides", "{name, copy?, activate?: bool}";
   "config.delete" => "Delete a configuration", "{name}";

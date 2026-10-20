@@ -188,3 +188,8 @@
 431-vertex-offset-angle
 432-face-flip
 433-offset-xy
+# Reference parts that pass; see README.md. One directory name per line.
+257-g1-line-u-turn
+258-g2-line-u-turn
+259-g1-arc-line-arch
+260-g2-arc-line-arch

@@ -181,7 +181,8 @@ fn blend(s: &mut Session, p: &Value) -> CmdResult {
     Some(_) => return Err(CmdError::new("'near' is one [x, y] per curve")),
     None => None,
   };
-  let g2 = match opt_str(p, "continuity").unwrap_or("g2") {
+  // tangent continuous unless asked, as Fusion
+  let g2 = match opt_str(p, "continuity").unwrap_or("g1") {
     "g2" | "G2" | "curvature" => true,
     "g1" | "G1" | "tangent" => false,
     other => return Err(CmdError::new(format!("unknown continuity '{other}' (g1 or g2)"))),

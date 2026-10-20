@@ -16,6 +16,7 @@ mod fitspline;
 mod fonts;
 mod freeform;
 mod profile;
+mod quintic;
 mod solve;
 mod tangent;
 mod text;
@@ -31,6 +32,7 @@ pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
+pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};
 pub use solve::{SolveReport, SolveStatus};
 pub use text::{SketchText, TextId, text_fonts};
 pub use transform::{TransformReport, Xform2};
@@ -145,6 +147,12 @@ pub enum CurveKind {
     apex: PointId,
     rho: f64,
   },
+  /// A clamped quintic B-spline through its first and last of ten control points, its five
+  /// spans even (knots 0 ×6, 0.2, 0.4, 0.6, 0.8, 1 ×6): Fusion's fitted spline through two
+  /// points, as Blend Curve makes.
+  QuinticSpline {
+    points: Vec<PointId>,
+  },
 }
 
 impl CurveKind {
@@ -163,6 +171,7 @@ impl CurveKind {
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
         | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. }
     )
   }
 
@@ -515,6 +524,11 @@ impl Sketch {
     {
       return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
     }
+    if let CurveKind::QuinticSpline { points } = &kind
+      && points.len() != QUINTIC_POINTS
+    {
+      return Err(SketchError::InvalidValue(format!("a quintic spline needs {QUINTIC_POINTS} control points")));
+    }
     if let CurveKind::Bezier { points } = &kind
       && (points.len() < 4 || points.len() > 3001 || points.len() % 3 != 1)
     {
@@ -675,7 +689,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => None,
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => None,
     }
   }
 
@@ -728,6 +743,10 @@ impl Sketch {
         (Some(s), Some(a), Some(e)) if dist(s, e) > 1e-9 => vec![Seg::Conic { p: [s, a, e], w: conic_weight(*rho) }],
         _ => Vec::new(),
       },
+      CurveKind::QuinticSpline { points } => match quintic::ctrl_of(points, &|p| self.pos(p)) {
+        Some(p) if dist(p[0], p[QUINTIC_POINTS - 1]) > 1e-9 => vec![Seg::Quintic { p }],
+        _ => Vec::new(),
+      },
       _ => self.beziers(id).into_iter().map(|p| Seg::Bezier { p }).collect(),
     }
   }
@@ -770,7 +789,10 @@ impl Sketch {
             add([p[0] + r, p[1] + r]);
           }
         }
-        CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+        CurveKind::Spline { .. }
+        | CurveKind::ControlSpline { .. }
+        | CurveKind::Bezier { .. }
+        | CurveKind::QuinticSpline { .. } => {
           for p in curve_points(&c.kind) {
             if let Some(p) = self.pos(p) {
               add(p);
@@ -829,7 +851,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => {
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;
@@ -1021,7 +1044,9 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Spline { points, start_handle, end_handle } => {
       points.iter().copied().chain(*start_handle).chain(*end_handle).collect()
     }
-    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
+    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
+      points.clone()
+    }
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
     CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
     CurveKind::Conic { start, end, apex, .. } => vec![*start, *apex, *end],
@@ -1062,6 +1087,9 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
       (Some(s), Some(a), Some(e)) => conic_beziers(&[s, a, e], conic_weight(*rho)),
       _ => Vec::new(),
     },
+    CurveKind::QuinticSpline { points } => {
+      quintic::ctrl_of(points, pos).map(|p| quintic_beziers(&p)).unwrap_or_default()
+    }
     _ => Vec::new(),
   }
 }

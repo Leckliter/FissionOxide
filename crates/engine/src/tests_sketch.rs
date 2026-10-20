@@ -112,7 +112,7 @@ fn break_tangent_circles_and_blend_from_commands() {
   // blend two line ends with a curvature-continuous spline
   let l1 = run(&mut s, "sketch.line", json!({"points": [[100, 0], [110, 0]]}))["curves"][0].as_u64().unwrap();
   let l2 = run(&mut s, "sketch.line", json!({"points": [[130, 20], [130, 30]]}))["curves"][0].as_u64().unwrap();
-  let bl = run(&mut s, "sketch.blend", json!({"curves": [l1, l2], "near": [[110, 0], [130, 20]]}));
+  let bl = run(&mut s, "sketch.blend", json!({"curves": [l1, l2], "near": [[110, 0], [130, 20]], "continuity": "g2"}));
   assert!(bl["blend"].as_u64().is_some());
   let info = run(&mut s, "sketch.info", json!({}));
   let curvature = info["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "curvature").count();

@@ -916,6 +916,7 @@ fn seg_point(s: &Seg, u: f64) -> [f64; 2] {
       [center[0] + major[0] * c + v[0] * sn, center[1] + major[1] * c + v[1] * sn]
     }
     Seg::Conic { p, w } => fox_sketch::conic_at(&p, w, u),
+    Seg::Quintic { p } => fox_sketch::quintic_at(&p, u),
   }
 }
 
@@ -980,6 +981,8 @@ fn seg_head(s: &Seg, len: f64) -> Seg {
       let mid = [((1.0 - u) * p[0][0] + u * w * p[1][0]) / w01, ((1.0 - u) * p[0][1] + u * w * p[1][1]) / w01];
       Seg::Conic { p: [p[0], mid, fox_sketch::conic_at(&p, w, u)], w: w01 / w012.sqrt() }
     }
+    // path_head cuts a quintic spline's cubic pieces instead
+    Seg::Quintic { .. } => *s,
   }
 }
 
@@ -995,7 +998,14 @@ fn path_head(segs: &[Seg], len: f64) -> Vec<Seg> {
       continue;
     }
     if left > 1e-9 {
-      out.push(seg_head(s, left));
+      match *s {
+        // a piece of a quintic spline is no longer one: take its cubic pieces instead
+        Seg::Quintic { p } => {
+          let pieces: Vec<Seg> = fox_sketch::quintic_beziers(&p).into_iter().map(|p| Seg::Bezier { p }).collect();
+          out.extend(path_head(&pieces, left));
+        }
+        _ => out.push(seg_head(s, left)),
+      }
     }
     break;
   }
@@ -1013,7 +1023,7 @@ fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
     }
     Seg::Circle { center, radius, .. } => ([center[0] + radius, center[1]], [0.0, 1.0]),
     Seg::Bezier { p } => (p[0], [p[1][0] - p[0][0], p[1][1] - p[0][1]]),
-    Seg::EllipseArc { .. } | Seg::Conic { .. } => (s.start(), s.end_tangents().0),
+    Seg::EllipseArc { .. } | Seg::Conic { .. } | Seg::Quintic { .. } => (s.start(), s.end_tangents().0),
   }
 }
 

@@ -986,6 +986,13 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
     Seg::Conic { p, w } => {
       put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
     }
+    Seg::Quintic { p } => {
+      // ten control points over three records: 4, 4 and 2
+      let w = p.map(|q| plane.to_world(q));
+      put(6.0, [w[0], w[1], w[2], w[3]]);
+      put(6.0, [w[4], w[5], w[6], w[7]]);
+      put(6.0, [w[8], w[9], DVec3::ZERO, DVec3::ZERO]);
+    }
   }
 }
 

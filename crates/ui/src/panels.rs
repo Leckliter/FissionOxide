@@ -409,7 +409,9 @@ impl Cmd {
         Tool::Break => (Icon::SkBreak, "Break", "Split a curve at its crossings, keeping every piece"),
         Tool::Circle2T => (Icon::Circle2T, "2-Tangent Circle", "Circle tangent to two curves"),
         Tool::Circle3T => (Icon::Circle3T, "3-Tangent Circle", "Circle tangent to three curves"),
-        Tool::Blend => (Icon::BlendCurve, "Blend Curve", "Curvature-continuous spline joining two curve ends"),
+        Tool::Blend => {
+          (Icon::BlendCurve, "Blend Curve", "Tangent (or curvature) continuous spline joining two curve ends")
+        }
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {
