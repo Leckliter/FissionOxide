@@ -665,6 +665,32 @@ pub enum BendPosition {
   Outside,
 }
 
+/// Where Join by Bend puts its bend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinBendPosition {
+  /// The bend is tangent to both flanges, which are extended (or trimmed) to meet it.
+  #[default]
+  Tangent,
+  /// The bend starts at the first edge (that flange stays as it is); its radius is what makes it
+  /// tangent to the second flange, which alone is extended.
+  First,
+  /// The bend starts at the second edge; only the first flange is extended.
+  Second,
+}
+
+/// The bend relief Join by Bend cuts where a flange runs on past the end of the bend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinRelief {
+  /// The rule's relief shape and size.
+  #[default]
+  Rule,
+  Rectangular,
+  Round,
+  None,
+}
+
 /// Which bodies a body-level feature acts on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1469,6 +1495,37 @@ pub enum FeatureKind {
     #[serde(default)]
     corners: CornerMode,
   },
+  /// Sheet metal Join by Bend: joins two separate sheet metal bodies, an edge picked on a flange
+  /// of each, with a bend; flanges are extended (or trimmed) to meet it. The first body keeps
+  /// the result.
+  JoinByBend {
+    edge1: EdgeRef,
+    edge2: EdgeRef,
+    /// Inside bend radius; empty = the first body's rule.
+    #[serde(default)]
+    bend_radius: String,
+    #[serde(default)]
+    position: JoinBendPosition,
+    #[serde(default)]
+    relief: JoinRelief,
+  },
+  /// Sheet metal fillet: rounds edges that run through the sheet's thickness (flange corners),
+  /// so the rounding shows in the flat pattern.
+  SheetFillet {
+    edges: Vec<EdgeRef>,
+    radius: String,
+  },
+  /// Sheet metal chamfer: bevels edges that run through the sheet's thickness, by an equal
+  /// distance or two distances (`distance` on the edge's first face, `distance2` on the other;
+  /// `flipped` swaps them).
+  SheetChamfer {
+    edges: Vec<EdgeRef>,
+    distance: String,
+    #[serde(default)]
+    distance2: Option<String>,
+    #[serde(default)]
+    flipped: bool,
+  },
   /// A saved joint origin on a component: a frame (from a face, an edge or a point, then
   /// offset, turned and flipped) that joints can mate to and that moves with the component.
   JointOrigin {
@@ -1861,6 +1918,9 @@ impl FeatureKind {
       FeatureKind::TrimWith { .. } => "Trim",
       FeatureKind::LoftedFlange { .. } => "LoftedFlange",
       FeatureKind::MiterFlange { .. } => "MiterFlange",
+      FeatureKind::JoinByBend { .. } => "JoinByBend",
+      FeatureKind::SheetFillet { .. } => "SheetMetalFillet",
+      FeatureKind::SheetChamfer { .. } => "SheetMetalChamfer",
       FeatureKind::JointOrigin { .. } => "JointOrigin",
       FeatureKind::RigidGroup { .. } => "RigidGroup",
       FeatureKind::MotionLink { .. } => "MotionLink",
@@ -2755,6 +2815,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
     FeatureKind::LoftedFlange { bends, .. } => f(bends),
     FeatureKind::MiterFlange { .. } => {}
+    FeatureKind::JoinByBend { bend_radius, .. } => {
+      if !bend_radius.is_empty() {
+        f(bend_radius)
+      }
+    }
+    FeatureKind::SheetFillet { radius, .. } => f(radius),
+    FeatureKind::SheetChamfer { distance, distance2, .. } => {
+      f(distance);
+      if let Some(d) = distance2 {
+        f(d);
+      }
+    }
     FeatureKind::JointOrigin { angle, offset, offset_x, offset_y, .. } => {
       f(angle);
       f(offset);

@@ -1731,6 +1731,66 @@ pub static CORNER_CLOSURE: Form = Form {
   picks_model: false,
 };
 
+pub static JOIN_BY_BEND: Form = Form {
+  title: "JOIN BY BEND",
+  name: "Join by bend",
+  hint: "Join two sheet metal bodies with a bend: pick an edge on each flange",
+  icon: Icon::Fold,
+  cmd: "sheet.join_by_bend",
+  fixed: &[],
+  inputs: &[
+    Input::Edge { key: "edge1", label: "Edge one" },
+    Input::Edge { key: "edge2", label: "Edge two" },
+    Input::Choice {
+      key: "position",
+      label: "Bend position",
+      options: &[("tangent", "Tangent to both"), ("first", "From edge one"), ("second", "From edge two")],
+    },
+    Input::Expr { key: "bend_radius", label: "Bend radius (empty = rule)", default: "" },
+    Input::Choice {
+      key: "relief",
+      label: "Bend relief",
+      options: &[("rule", "Rule"), ("rectangular", "Rectangular"), ("round", "Round"), ("none", "None")],
+    },
+  ],
+  picks_model: true,
+};
+
+pub static SHEET_FILLET: Form = Form {
+  title: "SHEET METAL FILLET",
+  name: "Sheet Metal Fillet",
+  hint: "Round edges that run through the sheet's thickness; the rounding stays in the flat pattern",
+  icon: Icon::Fillet,
+  cmd: "sheet.fillet",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Expr { key: "radius", label: "Radius", default: "2 mm" },
+  ],
+  picks_model: true,
+};
+
+pub static SHEET_CHAMFER: Form = Form {
+  title: "SHEET METAL CHAMFER",
+  name: "Sheet Metal Chamfer",
+  hint: "Bevel edges that run through the sheet's thickness; the bevel stays in the flat pattern",
+  icon: Icon::Chamfer,
+  cmd: "sheet.chamfer",
+  fixed: &[],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Edges" },
+    Input::Choice {
+      key: "chamfer_type",
+      label: "Chamfer type",
+      options: &[("equal", "Equal distance"), ("two_distances", "Two distances")],
+    },
+    Input::Expr { key: "distance", label: "Distance", default: "2 mm" },
+    Input::Expr { key: "distance2", label: "Distance 2 (two distances)", default: "2 mm" },
+    Input::Check { key: "flipped", label: "Flip" },
+  ],
+  picks_model: true,
+};
+
 pub static FLAT_SKETCH: Form = Form {
   title: "FLAT PATTERN SKETCH",
   name: "Flat Pattern Sketch",
