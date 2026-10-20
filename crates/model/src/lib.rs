@@ -1423,6 +1423,24 @@ pub enum FeatureKind {
     #[serde(default)]
     flip: bool,
   },
+  /// Assembly constraint (Center): moves a component the least it can so its plane lands on a
+  /// plane of another component, `offset` apart along the fixed plane's normal. Each side is one
+  /// plane or the midplane between two parallel ones, so centring a part between two faces is a
+  /// pair of faces on each side. Motion along the plane stays where it is.
+  PlaneConstraint {
+    #[serde(default = "no_component")]
+    moving: ComponentId,
+    /// One plane, or two whose midplane is used.
+    #[serde(default)]
+    moving_planes: Vec<PlaneRef>,
+    /// The component it is placed against; `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    #[serde(default)]
+    fixed_planes: Vec<PlaneRef>,
+    #[serde(default = "zero")]
+    offset: String,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1563,6 +1581,7 @@ impl FeatureKind {
       FeatureKind::CamFollower { .. } => "Cam",
       FeatureKind::Form { .. } => "Form",
       FeatureKind::AlignConstraint { .. } => "Align",
+      FeatureKind::PlaneConstraint { .. } => "CenterConstraint",
     }
   }
 
@@ -1637,6 +1656,9 @@ impl FeatureKind {
       FeatureKind::Form { plane, .. } => plane_dep(plane),
       FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, .. } => {
         [moving_geometry, fixed_geometry].into_iter().filter_map(assembly::JointGeometry::origin).collect()
+        }
+      FeatureKind::PlaneConstraint { moving_planes, fixed_planes, .. } => {
+        moving_planes.iter().chain(fixed_planes).flat_map(plane_dep).collect()
       }
       _ => vec![],
     }
@@ -2038,6 +2060,11 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+      if let FeatureKind::PlaneConstraint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
     }
     // its sub-components move up a level
     let up = self.component(id).and_then(|c| c.parent);
@@ -2413,6 +2440,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
     FeatureKind::Form { .. } => {}
     FeatureKind::AlignConstraint { offset, .. } => f(offset),
+    FeatureKind::PlaneConstraint { offset, .. } => f(offset),
   }
 }
 

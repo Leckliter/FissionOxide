@@ -2739,6 +2739,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::CamFollower { .. } => Icon::DriveJoint,
     FeatureKind::Form { .. } => Icon::CreateForm,
     FeatureKind::AlignConstraint { .. } => Icon::JointOrigin,
+    FeatureKind::PlaneConstraint { .. } => Icon::Combine,
   }
 }
 

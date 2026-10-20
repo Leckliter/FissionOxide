@@ -332,3 +332,41 @@ fn align_moves_a_component_only_as_far_as_the_relation_needs() {
     .is_err()
   );
 }
+
+#[test]
+fn center_constraint_moves_a_component_only_along_the_plane_normal() {
+  let mut s = Session::default();
+  run(&mut s, "param.add", json!({"name": "wall", "expr": "10 mm"}));
+  // a channel of two walls, inner faces at x = 10 and x = 40
+  run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 10, "at": [5, 10]}));
+  run(&mut s, "box", json!({"width": "wall", "depth": 20, "height": 10, "at": [45, 10]}));
+  let walls: Vec<u32> = s.model.bodies.iter().map(|b| b.id.0).collect();
+  let channel = run(&mut s, "component.create", json!({"name": "Channel", "bodies": walls}))["component"].clone();
+  run(&mut s, "component.ground", json!({"component": channel}));
+  let (_, block) = part(&mut s, "Block", [10.0, 10.0, 10.0], [65.0, 15.0]);
+  let c = run(
+    &mut s,
+    "constraint.center",
+    json!({
+      "moving_faces": [{"point": [60, 15, 5]}, {"point": [70, 15, 5]}],
+      "fixed_faces": [{"point": [10, 10, 5]}, {"point": [40, 10, 5]}],
+    }),
+  );
+  // centred in x; y and z stay where they were
+  let (lo, hi) = bbox(&s, block);
+  assert!(near(lo, [20.0, 10.0, 0.0], 1e-6) && near(hi, [30.0, 20.0, 10.0], 1e-6), "{lo} {hi}");
+  // it re-solves when the channel changes: a 20 mm wall puts the inner face at x = 35
+  run(&mut s, "param.set", json!({"name": "wall", "expr": "20 mm"}));
+  let (lo, _) = bbox(&s, block);
+  assert!(near(lo, [17.5, 10.0, 0.0], 1e-6), "{lo}");
+  // an offset moves it along the fixed midplane's normal (+x, the first fixed face's)
+  run(&mut s, "feature.edit", json!({"feature": c["feature"], "set": {"offset": "2 mm"}}));
+  let (lo, _) = bbox(&s, block);
+  assert!(near(lo, [19.5, 10.0, 0.0], 1e-6), "{lo}");
+  // the grounded channel can't be the one that moves
+  let bad = s.execute(
+    "constraint.center",
+    &json!({"moving_faces": [{"point": [10, 10, 5]}], "fixed_faces": [{"point": [0, 10, 5]}], "fixed": null}),
+  );
+  assert!(bad.unwrap()["error"].as_str().is_some_and(|e| e.contains("grounded")));
+}

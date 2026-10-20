@@ -3,10 +3,10 @@
 
 use fox_kernel::BoolOp;
 use fox_model::assembly::{self, JointGeometry, JointKind, JointLimits};
-use fox_model::{BodyId, ComponentId, FeatureId, FeatureKind};
+use fox_model::{BodyId, ComponentId, FeatureId, FeatureKind, PlaneRef};
 use serde_json::{Value, json};
 
-use crate::commands::{edge_ref_of, expr_of, face_ref, ids, opt_expr, opt_str, req_str, req_u32, req_vec3};
+use crate::commands::{edge_ref_of, expr_of, face_ref, ids, opt_expr, opt_str, plane_ref, req_str, req_u32, req_vec3};
 use crate::{CmdError, CmdResult, Session, mates};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -100,6 +100,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       Ok(json!({"feature": fid.0, "component": cid.0, "error": st.and_then(|x| x.error.clone())}))
     })(),
     "joint" => joint(s, p),
+    "constraint.center" => center_constraint(s, p),
     "joint.drive" => (|| {
       let id = FeatureId(req_u32(p, "joint")?);
       let mut set = serde_json::Map::new();
@@ -223,6 +224,40 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
     "name": s.design.feature(id).map(|f| f.name.clone()),
     "error": st.and_then(|x| x.error.clone()),
   }))
+}
+
+/// Center constraint: `moving_faces` (one plane, or two whose midplane is used) placed on the
+/// midplane between `fixed_faces`, moving the component only along that plane's normal.
+fn center_constraint(s: &mut Session, p: &Value) -> CmdResult {
+  let planes = |s: &Session, k: &str| -> Result<Vec<PlaneRef>, CmdError> {
+    let a = p.get(k).and_then(Value::as_array).ok_or(CmdError::new(format!("missing '{k}' (one or two faces)")))?;
+    if a.is_empty() || a.len() > 2 {
+      return Err(CmdError::new(format!("'{k}' is one face or plane, or two")));
+    }
+    a.iter().map(|v| plane_ref(s, v)).collect()
+  };
+  let moving_planes = planes(s, "moving_faces")?;
+  let fixed_planes = planes(s, "fixed_faces")?;
+  // a component given, else the one the first picked face is on
+  let owner = |planes: &[PlaneRef]| match planes.first() {
+    Some(PlaneRef::Face { face }) => s.design.component_of(face.body).map(|c| c.id),
+    _ => None,
+  };
+  let moving = match (p.get("moving"), owner(&moving_planes)) {
+    (None, Some(c)) => c,
+    _ => component_id(s, p, "moving")?,
+  };
+  let fixed = match (p.get("fixed"), owner(&fixed_planes)) {
+    (None, c) => c,
+    (Some(Value::Null), _) => None,
+    (Some(_), _) => Some(component_id(s, p, "fixed")?),
+  };
+  let offset = opt_expr(p, "offset").unwrap_or_else(|| "0".into());
+  let id = s.edit(|d| {
+    Ok(d.add_feature(FeatureKind::PlaneConstraint { moving, moving_planes, fixed, fixed_planes, offset })?)
+  })?;
+  mates::rename(s, id, p)?;
+  Ok(mates::feature_json(s, id))
 }
 
 fn kind_is_screw(k: &FeatureKind) -> bool {

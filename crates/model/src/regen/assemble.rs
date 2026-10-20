@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use fox_kernel::Shape;
-use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::glam::{DMat4, DQuat, DVec3};
 
 use super::{Ctx, FResult, ke};
 use crate::assembly::{self, MotionAxis};
@@ -281,6 +281,29 @@ impl Ctx<'_> {
         self.transform_components(id, &lagging, lead)?;
         Ok(None)
       }
+      FeatureKind::PlaneConstraint { moving, moving_planes, fixed, fixed_planes, offset } => {
+        let comp = self.component(*moving)?;
+        if comp.grounded {
+          return Err(format!("{} is grounded", comp.name));
+        }
+        if let Some(f) = fixed {
+          self.component(*f)?;
+          if f == moving {
+            return Err("a component can't be constrained to itself".into());
+          }
+        }
+        let off = self.len(offset)?;
+        let (pm, nm) = self.midplane(moving_planes, "moving")?;
+        let (pf, nf) = self.midplane(fixed_planes, "fixed")?;
+        // the least rotation that makes the planes parallel (none when they already are), about
+        // the moving plane's point, then the move along the fixed normal
+        let to = if nm.dot(nf) < 0.0 { -nf } else { nf };
+        let turn = DMat4::from_translation(pm)
+          * DMat4::from_quat(DQuat::from_rotation_arc(nm, to))
+          * DMat4::from_translation(-pm);
+        let m = DMat4::from_translation(nf * ((pf - pm).dot(nf) + off)) * turn;
+        self.move_component(id, *moving, *fixed, m)
+      }
       FeatureKind::MotionLink { .. } | FeatureKind::CamFollower { .. } => match self.mates.errors.get(&id) {
         Some(e) => Err(e.clone()),
         None => Ok(None),
@@ -341,6 +364,26 @@ impl Ctx<'_> {
       JointGeometry::Edge { .. } => AlignShape::Axis,
       JointGeometry::Point { .. } | JointGeometry::Origin { .. } => AlignShape::Point,
     })
+  }
+
+  /// A point and unit normal of one plane, or of the midplane between two parallel planes (the
+  /// normal is the first plane's).
+  fn midplane(&mut self, planes: &mut [crate::PlaneRef], side: &str) -> Result<(DVec3, DVec3), String> {
+    let mut resolved = Vec::new();
+    for p in planes.iter_mut() {
+      let pl = self.resolve_plane(p).map_err(|e| format!("a {side} plane: {e}"))?;
+      resolved.push((pl.origin, pl.normal().normalize()));
+    }
+    match resolved[..] {
+      [one] => Ok(one),
+      [(a, n), (b, m)] => {
+        if n.cross(m).length() > 1e-6 {
+          return Err(format!("the two {side} planes aren't parallel"));
+        }
+        Ok((a + n * ((b - a).dot(n) / 2.0), n))
+      }
+      _ => Err(format!("the {side} side needs one plane or two")),
+    }
   }
 
   /// A saved joint origin's frame where its component is now.
