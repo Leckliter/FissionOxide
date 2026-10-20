@@ -16,6 +16,7 @@ use crate::{App, panels};
 mod extrude;
 mod live;
 mod manip;
+mod move_copy;
 mod solid;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
@@ -475,6 +476,8 @@ pub struct Dialog {
   pub trace: Option<Box<crate::trace::TraceState>>,
   /// Where the viewport manipulators sit (see [`manip`]).
   manip: manip::Cache,
+  /// Move/Copy's inputs (see [`move_copy`]).
+  mv: move_copy::MoveForm,
   /// Live preview (see [`live`]).
   live: live::Live,
 }
@@ -581,6 +584,7 @@ impl Dialog {
       saved: [String::new(), String::new()],
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
+      mv: move_copy::MoveForm::default(),
       live: live::Live::default(),
     }
   }
@@ -666,6 +670,14 @@ impl Dialog {
       Kind::Mirror => d.join = false,
       Kind::RectPattern | Kind::CircPattern => d.join = false,
       Kind::Combine => d.op = "join",
+      // Move turns by nothing until asked (the blank dialog's angle is a full turn)
+      Kind::Move => {
+        d.angle = "0 deg".into();
+        // in an open sketch with curves picked, the sketch objects move
+        if s.edit_sketch.is_some() && !sel_curves(s).is_empty() {
+          d.mv.object = "sketch";
+        }
+      }
       Kind::Loft => {
         d.sections = sel_sections(s);
       }
@@ -905,14 +917,7 @@ impl Dialog {
         d.sketch = Some(*sketch);
         d.angle = angle.clone();
         d.op = op_str(*operation);
-        d.axis = match axis {
-          AxisRef::X => "x".into(),
-          AxisRef::Y => "y".into(),
-          AxisRef::Z => "z".into(),
-          AxisRef::SketchLine { curve } => format!("line:{}", curve.0),
-          AxisRef::Edge { .. } => "edge".into(),
-          AxisRef::Construction { feature } => format!("axis:{}", feature.0),
-        };
+        d.axis = axis_key(axis);
         d
       }
       FeatureKind::Fillet { radius, edges, setback, chord, sets, .. } => {
@@ -973,10 +978,9 @@ impl Dialog {
         d.join = *join;
         d
       }
-      FeatureKind::Move { translate, angle, .. } => {
+      kind @ FeatureKind::Move { .. } => {
         let mut d = Dialog::blank(Kind::Move);
-        d.translate = translate.clone();
-        d.angle = angle.clone();
+        d.load_move(kind);
         d
       }
       kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
@@ -1316,14 +1320,7 @@ impl Dialog {
         let (target, tools) = self.bodies.split_first()?;
         ("combine", json!({"target": target, "tools": tools, "operation": op, "keep_tools": self.keep_tools}))
       }
-      Kind::Move => {
-        let mut p = json!({"bodies": self.bodies, "translate": self.translate});
-        if !matches!(self.angle.trim(), "" | "0" | "0 deg") {
-          p["axis"] = json!(self.axis);
-          p["angle"] = json!(self.angle);
-        }
-        ("move", p)
-      }
+      Kind::Move => self.move_command()?,
     })
   }
 
@@ -1355,7 +1352,7 @@ impl Dialog {
         json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join})
       }
       Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
-      Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
+      Kind::Move => self.move_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       _ => return None,
     })
@@ -1410,6 +1407,7 @@ impl Dialog {
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
+      Kind::Move => self.move_ready(),
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
       Kind::Hole | Kind::Fold => self.sketch.is_some(),
@@ -1709,9 +1707,8 @@ impl Dialog {
           self.faces = f;
         }
       }
-      Kind::Combine | Kind::Mirror | Kind::RectPattern | Kind::CircPattern | Kind::Move
-        if !self.applied || !self.picks() =>
-      {
+      Kind::Move => self.sync_move(s),
+      Kind::Combine | Kind::Mirror | Kind::RectPattern | Kind::CircPattern if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
           let id = match x {
@@ -1871,6 +1868,7 @@ impl Dialog {
       Kind::Chamfer => "select edges",
       Kind::Shell => "select faces to remove",
       Kind::Combine => "select a target body and tool bodies",
+      Kind::Move => self.move_missing().unwrap_or("missing input"),
       Kind::Loft => "select profiles on two or more sketches",
       Kind::Sweep => "select a profile and a path sketch",
       Kind::Hole => "sketch points to drill (Point tool) are needed",
@@ -2107,26 +2105,7 @@ impl Dialog {
         ui.checkbox(&mut self.keep_tools, "Keep tools");
         ui.end_row();
       }
-      Kind::Move => {
-        ui.label("Bodies");
-        sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
-        ui.end_row();
-        for (i, l) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
-          ui.label(*l);
-          if value_edit(ui, &mut self.translate[i]).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
-        ui.label("Rotate about");
-        self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
-        ui.end_row();
-        ui.label("Angle");
-        if value_edit(ui, &mut self.angle).changed() {
-          self.dirty = true;
-        }
-        ui.end_row();
-      }
+      Kind::Move => self.move_fields(app, ui),
       Kind::Inspect => inspect(app, ui),
       Kind::Section => section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
@@ -3551,6 +3530,18 @@ fn analysis_fields(app: &mut App, ui: &mut egui::Ui, kind: &'static str) {
   ui.label(RichText::new(legend).small().color(theme::MUTED));
   ui.end_row();
   app.analysis = on.then_some(a);
+}
+
+/// A stored axis as the dialogs' axis choice names it ("x", "line:3", "axis:7").
+fn axis_key(axis: &AxisRef) -> String {
+  match axis {
+    AxisRef::X => "x".into(),
+    AxisRef::Y => "y".into(),
+    AxisRef::Z => "z".into(),
+    AxisRef::SketchLine { curve } => format!("line:{}", curve.0),
+    AxisRef::Edge { .. } => "edge".into(),
+    AxisRef::Construction { feature } => format!("axis:{}", feature.0),
+  }
 }
 
 fn axis_label(a: &str) -> String {

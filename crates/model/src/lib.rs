@@ -642,7 +642,9 @@ pub enum FeatureKind {
     #[serde(default = "yes")]
     join: bool,
   },
-  /// Moves bodies: translation then rotation about an axis.
+  /// Moves bodies: turned about `pivot` by `rotate` (about X, then Y, then Z; Fusion's Free
+  /// Move angles), then the translation, then the rotation about `axis`. With `copy` the bodies
+  /// stay and the moved ones are added as new bodies (Fusion's Create Copy).
   Move {
     #[serde(default)]
     bodies: BodySel,
@@ -652,6 +654,13 @@ pub enum FeatureKind {
     axis: Option<AxisRef>,
     #[serde(default = "zero")]
     angle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotate: Option<[String; 3]>,
+    /// The point `rotate` turns about (default the origin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pivot: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    copy: bool,
   },
   /// Boolean between bodies: tools are joined into / cut from / intersected with the target.
   Combine {
@@ -2058,8 +2067,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       f(count);
       f(angle);
     }
-    FeatureKind::Move { translate, angle, .. } => {
-      for t in translate.iter_mut() {
+    FeatureKind::Move { translate, angle, rotate, .. } => {
+      for t in translate.iter_mut().chain(rotate.iter_mut().flatten()) {
         f(t);
       }
       f(angle);
