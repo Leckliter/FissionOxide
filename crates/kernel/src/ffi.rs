@@ -198,6 +198,10 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // a body's silhouette on a plane (cpp/silhouette.cpp)
+    include!("fox-kernel/cpp/silhouette.hxx");
+    fn silhouette(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

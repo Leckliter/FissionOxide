@@ -82,3 +82,7 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+231-plate-hole-top-face-offset
+232-wedge-slanted-face-foreshortened
+233-plate-hole-body-silhouette
+234-cylinder-body-silhouette

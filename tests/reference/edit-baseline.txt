@@ -47,3 +47,5 @@
 80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
+231-plate-hole-top-face-offset
+233-plate-hole-body-silhouette
