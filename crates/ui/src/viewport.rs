@@ -223,7 +223,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
 fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
   let (shift, scroll, zoom) = ctx.input(|i| (i.modifiers.shift, i.smooth_scroll_delta(), i.zoom_delta()));
-  if resp.hovered() {
+  // the canvas still zooms with the pointer over its own overlays (the ViewCube), not over
+  // panels and dialogs drawn above it
+  if ctx.rect_contains_pointer(resp.layer_id, resp.rect) {
     let mut factor = 1.0;
     if scroll.y.abs() > 0.0 {
       factor *= (-scroll.y as f64 * 0.0015).exp();
@@ -232,7 +234,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       factor /= zoom as f64;
     }
     if (factor - 1.0f64).abs() > 1e-6 {
-      let toward = resp.hover_pos().and_then(|p| {
+      let toward = ctx.pointer_latest_pos().and_then(|p| {
         let (o, d) = view.ray(&app.cam, p);
         let (_, _, back) = app.cam.basis();
         ray_plane(o, d, DVec3::from(app.cam.target), back)
@@ -1265,7 +1267,8 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
   );
 }
 
-/// A clickable orientation cube in the top-right corner. Returns true when it took the click.
+/// A clickable orientation cube in the top-right corner. Returns true when it took the click or
+/// is being dragged.
 fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
   let size = 50.0f32;
   let center = view.rect.right_top() + Vec2::new(-92.0, 80.0);
@@ -1297,8 +1300,19 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     visible.push((facing, corners.to_vec(), label, v));
   }
   visible.sort_by(|x, y| x.0.total_cmp(&y.0));
-  let pointer = ui.input(|i| i.pointer.hover_pos());
-  let clicked = ui.input(|i| i.pointer.primary_clicked());
+  // the cube with its Home and menu buttons is a widget like any other, so a dialog, menu or panel
+  // drawn over it takes the pointer instead
+  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
+  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
+  let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
+  let resp = ui.interact(cube_area.union(home).union(menu), ui.id().with("viewcube"), Sense::click_and_drag());
+  // dragging the cube orbits, as on Fusion's
+  if resp.dragged_by(egui::PointerButton::Primary) {
+    let d = resp.drag_delta();
+    app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008);
+  }
+  let pointer = if resp.dragged() { None } else { resp.hover_pos() };
+  let clicked = resp.clicked();
   let mut hit: Option<StandardView> = None;
   for (facing, pts, _, v) in &visible {
     if *facing > 0.0 && pointer.is_some_and(|p| point_in_quad(p, pts)) {
@@ -1375,7 +1389,6 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     }
   }
   // the ViewCube menu button under the cube
-  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
   let menu_hover = pointer.is_some_and(|p| menu.contains(p));
   crate::icons::draw(
     painter,
@@ -1384,7 +1397,6 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
     if menu_hover { crate::theme::ACCENT } else { Color32::from_gray(70) },
   );
   // home button
-  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
   let home_hover = pointer.is_some_and(|p| home.contains(p));
   let hc = if home_hover { crate::theme::ACCENT } else { Color32::from_gray(90) };
   let hs = Stroke::new(1.5, hc);
@@ -1417,8 +1429,7 @@ fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &Vi
       return true;
     }
   }
-  let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
-  pointer.is_some_and(|p| cube_area.contains(p) || home.contains(p) || menu.contains(p)) && clicked
+  clicked || resp.dragged()
 }
 
 fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {

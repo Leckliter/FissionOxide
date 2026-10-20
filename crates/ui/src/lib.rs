@@ -14,6 +14,8 @@ mod dialogs;
 mod forms;
 mod gpu;
 mod icons;
+#[cfg(test)]
+mod input_tests;
 mod logo;
 mod manipulators;
 mod marking;
