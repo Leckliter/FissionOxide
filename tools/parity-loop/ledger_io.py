@@ -148,8 +148,12 @@ MAX_FIX_ATTEMPTS = 2
 def needs_fix(e):
   """A probed gap with no fixer PR waiting on review, and fixer attempts left."""
   fix = e.get("fix") or {}
+  # An attempt whose process died mid-run (state still agent/interrupted) resumes even if it was the
+  # last one: it hasn't finished, so it hasn't used the attempt up.
+  interrupted = fix.get("state") in ("agent", "interrupted") and not pid_alive(fix.get("pid"))
   return (e.get("scope") == "design" and e["status"] in (MISMATCH, FOX_MISSING)
-          and fix.get("state") not in ("pr-open", "pushed") and fix.get("attempts", 0) < MAX_FIX_ATTEMPTS
+          and fix.get("state") not in ("pr-open", "pushed")
+          and (fix.get("attempts", 0) < MAX_FIX_ATTEMPTS or interrupted)
           and not e.get("no_fix"))
 
 
