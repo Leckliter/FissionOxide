@@ -141,10 +141,10 @@ impl Sketch {
   }
 
   /// A circle tangent to two curves with radius `radius`, or to three curves (`radius` None).
-  /// Curves are lines, circles or arcs (lines count as infinite, arcs as whole circles). `near`
-  /// picks the side of each line the circle sits on (its quadrant, as in Fusion); of the circles
-  /// left, the one whose centre is nearest `near` is drawn. Two curves also get a radius
-  /// dimension.
+  /// Curves are lines, circles or arcs (lines count as infinite, arcs as whole circles). With two
+  /// curves, `near` picks the side of each line the circle sits on (its quadrant, as in Fusion);
+  /// of the circles left, the one whose centre is nearest `near` is drawn. Two curves also get a
+  /// radius dimension.
   pub fn add_tangent_circle(
     &mut self,
     curves: &[CurveId],
@@ -203,9 +203,11 @@ impl Sketch {
       }
       best
     };
-    // Like Fusion, the pick names the side of each line the circle sits on (the quadrant it is
-    // in); the nearest centre decides among what's left, and among everything if nothing fits.
-    let best = nearest(&combos(true)).or_else(|| nearest(&combos(false)));
+    // Like Fusion's 2-Tangent Circle, the pick names the side of each line the circle sits on (the
+    // quadrant it is in); the nearest centre decides among what's left, and among everything if
+    // nothing fits. A 3-tangent circle (no radius) takes the nearest centre of all, as before.
+    let best =
+      if n == 2 { nearest(&combos(true)).or_else(|| nearest(&combos(false))) } else { nearest(&combos(false)) };
     let (_, c, r) = best.ok_or(SketchError::InvalidValue("no circle is tangent to those curves".into()))?;
     let center = self.add_point(c[0], c[1]);
     let circle = self.add_curve(CurveKind::Circle { center, radius: r })?;
@@ -270,5 +272,19 @@ mod tests {
     assert!(s.solve().ok());
     let (o, r) = (s.pos(s.curve_points(t)[0]).unwrap(), s.radius(t).unwrap());
     assert!((o[1] - r).abs() < 1e-6 && (dist(o, [10.0, 5.0]) - 5.0 - r).abs() < 1e-6, "{o:?} {r}");
+  }
+
+  #[test]
+  fn three_tangent_circle_ignores_the_picks_side_of_each_line() {
+    // 3-4-5 triangle, picked just outside the hypotenuse: the 2-curve side rule would give the
+    // excircle beyond it (radius 6 at (6, 6)); three curves keep the nearest centre, the incircle
+    let mut s = Sketch::new();
+    let (a, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(4.0, 0.0)).unwrap();
+    let (b, _) = s.add_line(PtSpec::At(4.0, 0.0), PtSpec::At(0.0, 3.0)).unwrap();
+    let (c, _) = s.add_line(PtSpec::At(0.0, 3.0), PtSpec::At(0.0, 0.0)).unwrap();
+    let t = s.add_tangent_circle(&[a, b, c], None, [2.2, 1.6]).unwrap();
+    assert!(s.solve().ok());
+    let (o, r) = (s.pos(s.curve_points(t)[0]).unwrap(), s.radius(t).unwrap());
+    assert!((r - 1.0).abs() < 1e-6 && dist(o, [1.0, 1.0]) < 1e-6, "{o:?} {r}");
   }
 }

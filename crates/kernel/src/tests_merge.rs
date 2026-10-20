@@ -37,7 +37,11 @@ fn mesh_volume(p: &fox_sketch::Profile) -> f64 {
 
 fn with(mut s: Sketch, names: &[&str]) -> Sketch {
   for n in names {
-    s.behaviours.enable_pending_for_tests(n);
+    if PENDING.contains(n) {
+      s.behaviours.enable_pending_for_tests(n);
+    } else {
+      s.behaviours.insert(*n);
+    }
   }
   s
 }
@@ -101,6 +105,7 @@ fn separate_curves_joined_smoothly_stay_separate_edges() {
 #[test]
 fn a_circle_split_where_lines_touch_it_merges_back_with_one_edge_split_arcs() {
   let mut s = Sketch::new();
+  s.behaviours = fox_sketch::Behaviours::legacy();
   s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
   // dangling lines ending on the circle split it, then are pruned from the profile
   s.add_line(PtSpec::At(20.0, 0.0), PtSpec::At(10.0, 0.0)).unwrap();
