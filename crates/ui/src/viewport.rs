@@ -111,6 +111,45 @@ pub struct ToolState {
   pending_dim: Option<serde_json::Value>,
   /// Curves picked so far by a curve-picking tool, with where each was clicked.
   curves: Vec<(u32, [f64; 2])>,
+  /// Heads-up value boxes of the shape being drawn.
+  hud: HeadsUp,
+}
+
+/// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
+/// active box, Tab moves to the next, Enter places the point; typed values become driving
+/// dimensions.
+#[derive(Default)]
+struct HeadsUp {
+  /// What was typed in each box ("" = the box follows the cursor).
+  typed: [String; 2],
+  /// The box with the keyboard.
+  active: usize,
+  /// The active box's text while it is being typed in.
+  buf: Option<String>,
+  /// Give the active box the keyboard this frame (selecting its text when true).
+  focus: Option<bool>,
+  /// The last cursor position on the sketch plane, and the point it snapped to.
+  cursor: Option<([f64; 2], Option<PointId>)>,
+}
+
+/// What a heads-up box sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+  Length,
+  Angle,
+  Width,
+  Height,
+  Diameter,
+}
+
+/// The heads-up boxes of `tool` once it has `n` points.
+fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
+  match (tool, n) {
+    (Tool::Line, 1..) => &[Field::Length, Field::Angle],
+    (Tool::Rect | Tool::CenterRect, 1) => &[Field::Width, Field::Height],
+    (Tool::Circle, 1) => &[Field::Diameter],
+    _ => &[],
+  }
 }
 
 impl ToolState {
@@ -123,6 +162,7 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.pts.clear();
   app.tstate.dim_first = None;
   app.tstate.curves.clear();
+  app.tstate.hud = HeadsUp::default();
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -198,6 +238,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   dim_editor(app, &ctx);
   tool_preview(app, &painter, &resp, &view);
+  heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
   hud(app, &painter, &resp, &view);
   if let Some(Drag::Box { start, now, .. }) = app.drag {
@@ -534,11 +575,21 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     }
     return;
   }
+  place_point(app, sk, p, snapped);
+}
+
+/// Adds the active tool's next point; the last one draws the shape. Values typed in the heads-up
+/// boxes override the cursor and become driving dimensions.
+fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointId>) {
+  let locks = hud_locks(app);
+  let (p, snapped) = if locks.is_empty() { (p, snapped) } else { (hud_apply(app, p), None) };
+  app.tstate.hud = HeadsUp::default();
   let pts = &mut app.tstate.pts;
   pts.push(p);
   let n = pts.len();
   let first = pts[0];
   let sid = sk.0;
+  let chain_from = (n >= 2).then(|| pts[n - 2]);
   let cmd: Option<(&str, serde_json::Value)> = match app.tool {
     Tool::Line if n >= 2 => {
       let a = pts[n - 2];
@@ -553,10 +604,14 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     }
     Tool::Rect if n == 2 => Some(("sketch.rect", json!({"sketch": sid, "corner1": first, "corner2": p}))),
     Tool::CenterRect if n == 2 => Some(("sketch.rect", json!({"sketch": sid, "center": first, "corner": p}))),
-    Tool::Circle if n == 2 => {
-      let r = (p[0] - first[0]).hypot(p[1] - first[1]);
-      Some(("sketch.circle", json!({"sketch": sid, "center": first, "radius": r})))
-    }
+    Tool::Circle if n == 2 => match locks.iter().find(|l| l.0 == Field::Diameter) {
+      // a typed diameter is drawn with its driving dimension
+      Some((_, d)) => Some(("sketch.circle", json!({"sketch": sid, "center": first, "diameter": d}))),
+      None => {
+        let r = (p[0] - first[0]).hypot(p[1] - first[1]);
+        Some(("sketch.circle", json!({"sketch": sid, "center": first, "radius": r})))
+      }
+    },
     Tool::Arc3 if n == 3 => Some(("sketch.arc", json!({"sketch": sid, "start": first, "end": pts[1], "mid": p}))),
     Tool::CenterArc if n == 3 => {
       Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p})))
@@ -631,11 +686,145 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     if !multi {
       app.tstate.pts.clear();
     }
-    if app.run(c, params).is_none() && multi {
+    // the shape and the dimensions locking its typed values are one undo step
+    let grouped = !locks.is_empty() && app.run("transaction.begin", json!({})).is_some();
+    let made = app.run(c, params);
+    if let Some(r) = &made {
+      lock_typed(app, sk, r, &locks, chain_from);
+    }
+    if grouped {
+      app.run("transaction.commit", json!({}));
+    }
+    if made.is_none() && multi {
       // a failed segment drops its point so the chain continues from the last good one
       app.tstate.pts.pop();
     }
   }
+}
+
+/// The heads-up values typed for the shape being drawn, with their text.
+fn hud_locks(app: &App) -> Vec<(Field, String)> {
+  let fields = hud_fields(app.tool, app.tstate.pts.len());
+  fields
+    .iter()
+    .enumerate()
+    .filter(|(i, _)| hud_value(app, *i).is_some())
+    .map(|(i, f)| (*f, app.tstate.hud.typed[i].trim().to_string()))
+    .collect()
+}
+
+/// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
+fn hud_value(app: &App, i: usize) -> Option<f64> {
+  let field = *hud_fields(app.tool, app.tstate.pts.len()).get(i)?;
+  let text = app.tstate.hud.typed.get(i)?.trim();
+  if text.is_empty() {
+    return None;
+  }
+  let kind = if field == Field::Angle { fox_engine::expr::Kind::Angle } else { fox_engine::expr::Kind::Length };
+  let v = fox_engine::expr::eval(text, kind, &app.s.model.params).ok()?;
+  (field == Field::Angle || v > 1e-9).then_some(v)
+}
+
+/// The cursor moved to where the typed heads-up values put it.
+fn hud_apply(app: &App, cur: [f64; 2]) -> [f64; 2] {
+  let Some(&last) = app.tstate.pts.last() else { return cur };
+  if hud_fields(app.tool, app.tstate.pts.len()).is_empty() {
+    return cur;
+  }
+  let v = |i| hud_value(app, i);
+  let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
+  let sign = |d: f64| if d < 0.0 { -1.0 } else { 1.0 };
+  match app.tool {
+    Tool::Line => {
+      let len = v(0).unwrap_or(dx.hypot(dy));
+      let ang = v(1).unwrap_or(dy.atan2(dx));
+      [last[0] + len * ang.cos(), last[1] + len * ang.sin()]
+    }
+    Tool::Rect | Tool::CenterRect => {
+      // a centre rectangle's boxes hold its whole width and height
+      let k = if app.tool == Tool::CenterRect { 0.5 } else { 1.0 };
+      [v(0).map_or(cur[0], |w| last[0] + sign(dx) * w * k), v(1).map_or(cur[1], |h| last[1] + sign(dy) * h * k)]
+    }
+    Tool::Circle => match v(0) {
+      Some(d) => {
+        let l = dx.hypot(dy);
+        let (ux, uy) = if l > 1e-12 { (dx / l, dy / l) } else { (1.0, 0.0) };
+        [last[0] + d / 2.0 * ux, last[1] + d / 2.0 * uy]
+      }
+      None => cur,
+    },
+    _ => cur,
+  }
+}
+
+/// The values the heads-up boxes show for a cursor at `cur`: length and angle (degrees), width
+/// and height, or diameter.
+fn hud_live(app: &App, cur: [f64; 2]) -> [f64; 2] {
+  let Some(&last) = app.tstate.pts.last() else { return [0.0; 2] };
+  let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
+  match app.tool {
+    Tool::Line => [dx.hypot(dy), dy.atan2(dx).to_degrees().rem_euclid(360.0)],
+    Tool::Rect => [dx.abs(), dy.abs()],
+    Tool::CenterRect => [2.0 * dx.abs(), 2.0 * dy.abs()],
+    Tool::Circle => [2.0 * dx.hypot(dy), 0.0],
+    _ => [0.0; 2],
+  }
+}
+
+/// Adds the driving dimensions that lock the typed values of a shape just drawn (`made` is the
+/// draw command's result; a line starts at `from`).
+fn lock_typed(
+  app: &mut App,
+  sk: FeatureId,
+  made: &serde_json::Value,
+  locks: &[(Field, String)],
+  from: Option<[f64; 2]>,
+) {
+  let curves: Vec<u32> = made["curves"]
+    .as_array()
+    .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
+    .unwrap_or_default();
+  for (field, text) in locks {
+    // rectangles are drawn bottom, right, top, left: the bottom sets the width, the right the height
+    let curve = match field {
+      Field::Width | Field::Length => curves.first(),
+      Field::Height => curves.get(1),
+      Field::Angle | Field::Diameter => None,
+    };
+    if let Some(c) = curve {
+      app.run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [c], "value": text}));
+    }
+    if *field == Field::Angle
+      && let (Some(&line), Some(from)) = (curves.first(), from)
+    {
+      lock_angle(app, sk, line, from);
+    }
+  }
+}
+
+/// Locks a chained line's angle to the segment before it. A first segment has nothing to measure
+/// from; a horizontal or vertical one is locked by its H/V constraint already.
+fn lock_angle(app: &mut App, sk: FeatureId, line: u32, from: [f64; 2]) {
+  let Ok(sketch) = app.s.design.sketch(sk) else { return };
+  let near = |id: PointId| sketch.pos(id).is_some_and(|q| (q[0] - from[0]).hypot(q[1] - from[1]) < 1e-6);
+  let prev = sketch.curves.iter().rev().find_map(|c| match c.kind {
+    CurveKind::Line { a, b } if c.id.0 != line && (near(a) || near(b)) => Some(c.id),
+    _ => None,
+  });
+  let Some(prev) = prev else { return };
+  let ends = sketch.curve_points(fox_engine::sketch::CurveId(line));
+  if let (Some(p), Some(q)) = (ends.first().and_then(|p| sketch.pos(*p)), ends.get(1).and_then(|p| sketch.pos(*p)))
+    && ((p[0] - q[0]).abs() < 1e-9 || (p[1] - q[1]).abs() < 1e-9)
+  {
+    return;
+  }
+  let Some(ang) = line_angle(sketch, prev, fox_engine::sketch::CurveId(line)) else { return };
+  let deg = ang.to_degrees();
+  if deg.abs() < 1e-6 || (deg - 180.0).abs() < 1e-6 {
+    return;
+  }
+  let value = format!("{} deg", fox_engine::sketch::Dim::new(deg).expr);
+  app.run("sketch.dimension", json!({"sketch": sk.0, "type": "angle", "curves": [prev.0, line], "value": value}));
 }
 
 /// Commits the fit-point spline being drawn (Enter, or clicking its last point again).
@@ -849,41 +1038,66 @@ fn line_angle(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch:
 /// The floating value box for new or edited dimensions.
 fn dim_editor(app: &mut App, ctx: &egui::Context) {
   let Some((cid, mut text, pos)) = app.dim_edit.take() else { return };
-  let mut keep = true;
+  // a box that wasn't showing last frame (or shows another edit) takes the keyboard with its
+  // text selected
+  let shown_id = egui::Id::new("dim-editor-shown");
+  let pass = ctx.cumulative_pass_nr();
+  let key = (cid, pos.x.to_bits(), pos.y.to_bits());
+  let last = ctx.data(|d| d.get_temp::<((u32, u32, u32), u64)>(shown_id));
+  let fresh = last.is_none_or(|(k, p)| k != key || p + 1 < pass);
+  ctx.data_mut(|d| d.insert_temp(shown_id, (key, pass)));
+  let (mut commit, mut cancel) = (false, false);
   egui::Area::new(egui::Id::new("dim-editor"))
     .fixed_pos(pos + Vec2::new(8.0, -10.0))
     .order(egui::Order::Foreground)
     .show(ctx, |ui| {
-      egui::Frame::popup(ui.style()).show(ui, |ui| {
-        ui.horizontal(|ui| {
-          let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(110.0).hint_text("value or expression"));
-          if !r.has_focus() && !r.lost_focus() {
-            r.request_focus();
-          }
-          let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-          if (r.lost_focus() && enter) || ui.small_button("✔").clicked() {
-            keep = false;
-            let Some(sk) = app.s.edit_sketch else { return };
-            if cid == 0 {
-              if let Some(mut cmd) = app.tstate.pending_dim.take() {
-                cmd["sketch"] = json!(sk.0);
-                cmd["value"] = json!(text);
-                app.run("sketch.dimension", cmd);
-              }
-            } else {
-              app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": text}));
-            }
-          }
-          if ui.small_button("✖").clicked() {
-            keep = false;
-            app.tstate.pending_dim = None;
-          }
-        });
+      egui::Frame::popup(ui.style()).inner_margin(3.0).show(ui, |ui| {
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0).hint_text("value or expression"));
+        if fresh {
+          focus_text(ctx, &r, &text, true);
+        } else if !r.has_focus() && !r.lost_focus() {
+          r.request_focus();
+        }
+        // Enter commits and Esc cancels, as in Fusion (no buttons)
+        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        cancel = esc;
+        commit = enter && !esc && (r.has_focus() || r.lost_focus());
       });
     });
-  if keep {
+  if commit {
+    // the Enter is this box's, not the open dialog's OK
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if let Some(sk) = app.s.edit_sketch {
+      if cid == 0 {
+        if let Some(mut cmd) = app.tstate.pending_dim.take() {
+          cmd["sketch"] = json!(sk.0);
+          cmd["value"] = json!(text);
+          app.run("sketch.dimension", cmd);
+        }
+      } else {
+        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": text}));
+      }
+    }
+  }
+  if cancel {
+    app.tstate.pending_dim = None;
+  }
+  if !commit && !cancel {
     app.dim_edit = Some((cid, text, pos));
   }
+}
+
+/// Gives a text box the keyboard, with all its text selected (typing replaces it) or the caret
+/// at the end.
+pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, select_all: bool) {
+  use egui::text::{CCursor, CCursorRange};
+  r.request_focus();
+  let n = text.chars().count();
+  let mut state = egui::text_edit::TextEditState::load(ctx, r.id).unwrap_or_default();
+  let range =
+    if select_all { CCursorRange::two(CCursor::new(0), CCursor::new(n)) } else { CCursorRange::one(CCursor::new(n)) };
+  state.cursor.set_char_range(Some(range));
+  state.store(ctx, r.id);
 }
 
 // ---------------------------------------------------------------- overlays
@@ -894,6 +1108,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   let Some((sk, plane)) = sketch_plane(app) else { return false };
   let Some(sketch) = app.s.model.sketches.get(&sk).map(|r| r.sketch.clone()) else { return false };
   let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
   let mut consumed = false;
   let font = egui::FontId::proportional(12.0);
   let mut glyph_count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
@@ -904,30 +1119,29 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
       let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim) else { continue };
-      let Some(at) = to_screen(anchor) else { continue };
-      // push linear dimensions off their geometry, away from the sketch's centre
-      let at = match dim_span(&sketch, &c.kind).and_then(|(a, b)| Some((to_screen(a)?, to_screen(b)?))) {
-        Some((a, b)) => {
-          let d = (b - a).normalized();
-          let mut n = Vec2::new(-d.y, d.x);
-          if let Some(cen) = sketch_center(&sketch).and_then(to_screen)
-            && n.dot(at - cen) < 0.0
-          {
-            n = -n;
-          }
-          at + n * 18.0
-        }
-        None => at,
+      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
+      let size = galley.size() + Vec2::new(8.0, 4.0);
+      // extension lines, dimension line and arrows, offset from the geometry as in Fusion
+      let shape = dim_shape(&sketch, &c.kind, dim, size, wpp, &to_screen);
+      let at = match &shape {
+        Some(s) => s.label,
+        None => match to_screen(anchor) {
+          Some(p) => p,
+          None => continue,
+        },
       };
-      let galley = painter.layout_no_wrap(label, font.clone(), Color32::from_rgb(20, 20, 30));
-      let r = Rect::from_center_size(at, galley.size() + Vec2::new(8.0, 4.0));
+      let r = Rect::from_center_size(at, size);
       let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click());
+      if let Some(s) = &shape {
+        let ink = if selected || resp.hovered() { crate::theme::ACCENT } else { DIM_INK };
+        paint_dim(painter, s, ink);
+      }
       let bg = if selected {
         crate::theme::SELECTED
       } else if resp.hovered() {
         crate::theme::HOVER
       } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 170)
+        Color32::from_rgba_unmultiplied(255, 255, 255, 225)
       };
       painter.rect_filled(r, 1.0, bg);
       if selected || resp.hovered() {
@@ -971,6 +1185,232 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   consumed
 }
 
+/// A dimension's leader graphics in screen space: extension and dimension lines, an arc for an
+/// angle, arrowheads (tip and pointing direction) and where the value goes.
+struct DimShape {
+  lines: Vec<[Pos2; 2]>,
+  arc: Vec<Pos2>,
+  arrows: Vec<(Pos2, Vec2)>,
+  label: Pos2,
+}
+
+/// Dimension ink (Fusion draws dimensions in black).
+const DIM_INK: Color32 = Color32::from_rgb(25, 25, 30);
+/// How far a linear dimension sits off its geometry (points).
+const DIM_OFFSET_PX: f64 = 30.0;
+
+fn paint_dim(painter: &egui::Painter, s: &DimShape, col: Color32) {
+  let stroke = Stroke::new(1.0, col);
+  for l in &s.lines {
+    painter.line_segment(*l, stroke);
+  }
+  if s.arc.len() > 1 {
+    painter.add(egui::Shape::line(s.arc.clone(), stroke));
+  }
+  for (tip, dir) in &s.arrows {
+    let d = dir.normalized();
+    if !d.is_finite() || d == Vec2::ZERO {
+      continue;
+    }
+    let (base, n) = (*tip - d * 8.0, d.rot90() * 2.8);
+    painter.add(egui::Shape::convex_polygon(vec![*tip, base + n, base - n], col, Stroke::NONE));
+  }
+}
+
+/// A linear dimension measuring from `p1` to `p2` along `dir` (unit, sketch coordinates): extension
+/// lines out to a dimension line `off` beyond the further point, on the side away from `away`.
+fn linear_shape(
+  p1: [f64; 2],
+  p2: [f64; 2],
+  dir: [f64; 2],
+  away: [f64; 2],
+  off: f64,
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+  let mut n = [-dir[1], dir[0]];
+  let mid = [(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0];
+  if dot(n, [mid[0] - away[0], mid[1] - away[1]]) < 0.0 {
+    n = [-n[0], -n[1]];
+  }
+  let level = dot(p1, n).max(dot(p2, n)) + off;
+  let along = |p: [f64; 2], t: f64| [p[0] + n[0] * t, p[1] + n[1] * t];
+  let (gap, over) = (3.0 * wpp, 4.0 * wpp);
+  let mut lines = Vec::new();
+  let mut feet = Vec::new();
+  for p in [p1, p2] {
+    let h = level - dot(p, n);
+    let foot = along(p, h);
+    if h > gap {
+      lines.push([to_screen(along(p, gap))?, to_screen(along(p, h + over))?]);
+    }
+    feet.push(to_screen(foot)?);
+  }
+  let (a, b) = (feet[0], feet[1]);
+  let d = b - a;
+  let mut arrows = vec![(a, -d), (b, d)];
+  lines.push([a, b]);
+  if d.length() < 26.0 {
+    // too short for arrows inside: they point in from outside
+    let u = d.normalized();
+    arrows = vec![(a, u), (b, -u)];
+    lines.push([a - u * 14.0, a]);
+    lines.push([b, b + u * 14.0]);
+  }
+  Some(DimShape { lines, arc: Vec::new(), arrows, label: a + d / 2.0 })
+}
+
+/// A radius or diameter dimension of the circle around `center` through `on`: arrows on the
+/// circle and a leader out to the value beyond it.
+fn radial_shape(
+  center: [f64; 2],
+  r: f64,
+  on: [f64; 2],
+  diameter: bool,
+  label: Vec2,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let (dx, dy) = (on[0] - center[0], on[1] - center[1]);
+  let l = dx.hypot(dy);
+  if l.is_nan() || l <= 1e-12 {
+    return None;
+  }
+  let (ux, uy) = (dx / l, dy / l);
+  let c = to_screen(center)?;
+  let p = to_screen([center[0] + r * ux, center[1] + r * uy])?;
+  let u = (p - c).normalized();
+  if !u.is_finite() {
+    return None;
+  }
+  // the value sits clear of the circle, its near edge 10 points out
+  let half = (u.x.abs() * label.x + u.y.abs() * label.y) / 2.0;
+  let at = p + u * (half + 10.0);
+  let start = if diameter { to_screen([center[0] - r * ux, center[1] - r * uy])? } else { c };
+  let mut arrows = vec![(p, u)];
+  if diameter {
+    arrows.push((start, -u));
+  }
+  Some(DimShape { lines: vec![[start, at - u * half]], arc: Vec::new(), arrows, label: at })
+}
+
+/// An angle between two lines: an arc between them around where they meet, with extension lines
+/// when the arc lands beyond a line's ends.
+fn angular_shape(
+  s: &Sketch,
+  a: fox_engine::sketch::CurveId,
+  b: fox_engine::sketch::CurveId,
+  value: f64,
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let ends = |c| -> Option<([f64; 2], [f64; 2])> {
+    let pts = s.curve_points(c);
+    Some((s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?))
+  };
+  let ((a0, a1), (b0, b1)) = (ends(a)?, ends(b)?);
+  let (da, db) = ([a1[0] - a0[0], a1[1] - a0[1]], [b1[0] - b0[0], b1[1] - b0[1]]);
+  let cross = da[0] * db[1] - da[1] * db[0];
+  if cross.abs() < 1e-12 {
+    return None;
+  }
+  // where the (extended) lines cross
+  let t = ((b0[0] - a0[0]) * db[1] - (b0[1] - a0[1]) * db[0]) / cross;
+  let o = [a0[0] + da[0] * t, a0[1] + da[1] * t];
+  let dist = |p: [f64; 2]| (p[0] - o[0]).hypot(p[1] - o[1]);
+  let far = |p: [f64; 2], q: [f64; 2]| if dist(p) > dist(q) { p } else { q };
+  let unit = |p: [f64; 2]| {
+    let l = dist(p).max(1e-12);
+    [(p[0] - o[0]) / l, (p[1] - o[1]) / l]
+  };
+  let (fa, fb) = (far(a0, a1), far(b0, b1));
+  let u = unit(fa);
+  let mut v = unit(fb);
+  // the side of line b that shows the dimensioned value (not its supplement)
+  let between = |p: [f64; 2], q: [f64; 2]| (p[0] * q[1] - p[1] * q[0]).atan2(p[0] * q[0] + p[1] * q[1]);
+  if (between(u, v).abs() - value).abs() > (std::f64::consts::PI - between(u, v).abs() - value).abs() {
+    v = [-v[0], -v[1]];
+  }
+  let sweep = between(u, v);
+  let r = (0.7 * dist(fa).min(dist(fb))).clamp(30.0 * wpp, 90.0 * wpp);
+  let start = u[1].atan2(u[0]);
+  let at = |ang: f64, rr: f64| [o[0] + rr * ang.cos(), o[1] + rr * ang.sin()];
+  let arc: Vec<Pos2> = (0..=32).filter_map(|k| to_screen(at(start + sweep * k as f64 / 32.0, r))).collect();
+  if arc.len() < 2 {
+    return None;
+  }
+  let k = arc.len();
+  let arrows = vec![(arc[0], arc[0] - arc[1]), (arc[k - 1], arc[k - 1] - arc[k - 2])];
+  // extension lines from a line's nearer end out to an arc end beyond it
+  let mut lines = Vec::new();
+  for ((p, q), end) in [((a0, a1), at(start, r)), ((b0, b1), at(start + sweep, r))] {
+    let d = [q[0] - p[0], q[1] - p[1]];
+    let len2 = (d[0] * d[0] + d[1] * d[1]).max(1e-24);
+    let t = ((end[0] - p[0]) * d[0] + (end[1] - p[1]) * d[1]) / len2;
+    if !(0.0..=1.0).contains(&t) {
+      let near = if t < 0.0 { p } else { q };
+      lines.push([to_screen(near)?, to_screen(end)?]);
+    }
+  }
+  let mid = to_screen(at(start + sweep / 2.0, r))?;
+  let os = to_screen(o)?;
+  let w = (mid - os).normalized();
+  let label = if w.is_finite() { mid + w * 16.0 } else { mid };
+  Some(DimShape { lines, arc, arrows, label })
+}
+
+/// The leader graphics of dimension `k` (see [`DimShape`]); `size` is its value's box.
+fn dim_shape(
+  s: &Sketch,
+  k: &ConstraintKind,
+  dim: &fox_engine::sketch::Dim,
+  size: Vec2,
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let center = sketch_center(s).unwrap_or([0.0, 0.0]);
+  let off = DIM_OFFSET_PX * wpp;
+  let unit = |p: [f64; 2], q: [f64; 2]| -> Option<[f64; 2]> {
+    let l = (q[0] - p[0]).hypot(q[1] - p[1]);
+    (l > 1e-12).then(|| [(q[0] - p[0]) / l, (q[1] - p[1]) / l])
+  };
+  match k {
+    ConstraintKind::Distance { a, b, .. } => {
+      let (p, q) = (s.pos(*a)?, s.pos(*b)?);
+      linear_shape(p, q, unit(p, q)?, center, off, wpp, to_screen)
+    }
+    ConstraintKind::HorizontalDistance { a, b, .. } => {
+      linear_shape(s.pos(*a)?, s.pos(*b)?, [1.0, 0.0], center, off, wpp, to_screen)
+    }
+    ConstraintKind::VerticalDistance { a, b, .. } => {
+      linear_shape(s.pos(*a)?, s.pos(*b)?, [0.0, 1.0], center, off, wpp, to_screen)
+    }
+    ConstraintKind::PointLineDistance { p, line, .. } => {
+      let pts = s.curve_points(*line);
+      let (l0, l1, pp) = (s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?, s.pos(*p)?);
+      let d = unit(l0, l1)?;
+      let t = (pp[0] - l0[0]) * d[0] + (pp[1] - l0[1]) * d[1];
+      let foot = [l0[0] + d[0] * t, l0[1] + d[1] * t];
+      linear_shape(foot, pp, unit(foot, pp)?, center, off, wpp, to_screen)
+    }
+    ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
+      let c = s.pos(*s.curve_points(*curve).first()?)?;
+      let r = s.radius(*curve)?;
+      // circles are dimensioned at 45°, arcs at their middle
+      let on = match s.curve(*curve).map(|c| &c.kind) {
+        Some(CurveKind::Arc { .. }) => {
+          let pts = fox_engine::scene::curve_polyline(s, &s.curve(*curve)?.kind);
+          *pts.get(pts.len() / 2)?
+        }
+        _ => [c[0] + r * std::f64::consts::FRAC_1_SQRT_2, c[1] + r * std::f64::consts::FRAC_1_SQRT_2],
+      };
+      radial_shape(c, r, on, matches!(k, ConstraintKind::Diameter { .. }), size, to_screen)
+    }
+    ConstraintKind::Angle { a, b, .. } => angular_shape(s, *a, *b, dim.value, wpp, to_screen),
+    _ => None,
+  }
+}
+
 fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> Option<([f64; 2], String)> {
   let numeric = dim.expr.trim().parse::<f64>().is_ok();
   let val = if k.is_angle() {
@@ -1004,16 +1444,6 @@ fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> O
       let pts = s.curve_points(*a);
       Some((mid(*pts.first()?, *pts.get(1)?)?, shown("")))
     }
-    _ => None,
-  }
-}
-
-/// The two points a linear dimension measures between.
-fn dim_span(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], [f64; 2])> {
-  match k {
-    ConstraintKind::Distance { a, b, .. }
-    | ConstraintKind::HorizontalDistance { a, b, .. }
-    | ConstraintKind::VerticalDistance { a, b, .. } => Some((s.pos(*a)?, s.pos(*b)?)),
     _ => None,
   }
 }
@@ -1067,6 +1497,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     return;
   }
   let Some((cur, snapped)) = sketch_cursor(app, view, pos) else { return };
+  // values typed in the heads-up boxes hold the shape to them
+  let cur = hud_apply(app, cur);
   let s = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
   let stroke = Stroke::new(1.5, Color32::from_rgb(30, 110, 235));
   let line = |a: [f64; 2], b: [f64; 2]| {
@@ -1159,10 +1591,13 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     _ => {}
   }
-  // cursor marker and coordinate readout
+  // cursor marker, and a coordinate readout where no heads-up dimensions show
   if let Some(p) = s(cur) {
     let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
     painter.circle_stroke(p, 4.0, Stroke::new(1.5, col));
+    if !hud_fields(app.tool, pts.len()).is_empty() {
+      return;
+    }
     let txt = format!("{}, {}", fox_engine::sketch::Dim::new(cur[0]).expr, fox_engine::sketch::Dim::new(cur[1]).expr);
     painter.text(
       p + Vec2::new(10.0, 10.0),
@@ -1172,6 +1607,215 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       Color32::from_gray(70),
     );
   }
+}
+
+/// Digits typed with no box focused go to the heads-up box of the shape being drawn, or to the
+/// open dialog's primary value, as in Fusion. Runs before the shortcuts, so a digit can't also
+/// switch the selection mode.
+pub fn route_typing(app: &mut App, ctx: &egui::Context) {
+  if ctx.egui_wants_keyboard_input() || app.drawing.is_some() || app.dim_edit.is_some() || app.marking.is_some() {
+    return;
+  }
+  if ctx.input(|i| i.modifiers.command || i.modifiers.alt) {
+    return;
+  }
+  let typed: String = ctx.input(|i| {
+    i.events
+      .iter()
+      .filter_map(|e| match e {
+        egui::Event::Text(t) => Some(t.as_str()),
+        _ => None,
+      })
+      .collect()
+  });
+  if !typed.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') {
+    return;
+  }
+  if app.s.edit_sketch.is_some() && !hud_fields(app.tool, app.tstate.pts.len()).is_empty() {
+    let hud = &mut app.tstate.hud;
+    hud.typed[hud.active] = typed.clone();
+    hud.buf = Some(typed);
+    hud.focus = Some(false);
+  } else if app.dialog.is_some() {
+    crate::dialogs::type_into(ctx, typed);
+  } else {
+    return;
+  }
+  use egui::Key;
+  ctx.input_mut(|i| {
+    i.events.retain(|e| {
+      !matches!(e, egui::Event::Key { key, .. } if matches!(key,
+        Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 | Key::Num6 | Key::Num7 | Key::Num8
+          | Key::Num9 | Key::Minus | Key::Period))
+    })
+  });
+}
+
+/// The heads-up dimensions of the shape being drawn: each value's dimension follows the cursor
+/// with its box. Typing sets the active box, Tab moves to the next, Enter places the point.
+fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let fields = hud_fields(app.tool, app.tstate.pts.len());
+  let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
+    if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
+      app.tstate.hud = HeadsUp::default();
+    }
+    return;
+  };
+  if let Some(pos) = resp.hover_pos()
+    && let Some(c) = sketch_cursor(app, view, pos)
+  {
+    app.tstate.hud.cursor = Some(c);
+  }
+  let Some((raw, snapped)) = app.tstate.hud.cursor else { return };
+  let Some(&last) = app.tstate.pts.last() else { return };
+  let cur = hud_apply(app, raw);
+  let live = hud_live(app, cur);
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let ink = Color32::from_rgb(30, 110, 235);
+  let off = 30.0 * wpp;
+  // each box's dimension graphics, ending where its box goes
+  let mut at: Vec<Option<Pos2>> = Vec::new();
+  for f in fields {
+    let shape = match (app.tool, f) {
+      (Tool::Line, Field::Length) => {
+        let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
+        let l = dx.hypot(dy).max(1e-12);
+        // the dimension sits on the line's left
+        let away = [(last[0] + cur[0]) / 2.0 + dy / l, (last[1] + cur[1]) / 2.0 - dx / l];
+        linear_shape(last, cur, [dx / l, dy / l], away, off, wpp, &to_screen)
+      }
+      (Tool::Line, Field::Angle) => hud_angle_shape(last, cur, wpp, &to_screen),
+      (Tool::Rect | Tool::CenterRect, Field::Width | Field::Height) => {
+        let o = if app.tool == Tool::CenterRect { [2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]] } else { last };
+        let mid = [(o[0] + cur[0]) / 2.0, (o[1] + cur[1]) / 2.0];
+        let corner = [cur[0], o[1]];
+        if *f == Field::Width {
+          linear_shape(o, corner, [1.0, 0.0], mid, off, wpp, &to_screen)
+        } else {
+          linear_shape(corner, cur, [0.0, 1.0], mid, off, wpp, &to_screen)
+        }
+      }
+      (Tool::Circle, Field::Diameter) => {
+        let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
+        radial_shape(last, r, cur, true, Vec2::new(60.0, 18.0), &to_screen)
+      }
+      _ => None,
+    };
+    if let Some(s) = &shape {
+      paint_dim(painter, s, ink);
+    }
+    at.push(shape.map(|s| s.label));
+  }
+  let fmt = |i: usize| {
+    let v = fox_engine::sketch::Dim::new(live[i]).expr;
+    if fields[i] == Field::Angle { format!("{v}°") } else { v }
+  };
+  let n = fields.len();
+  let hud = &mut app.tstate.hud;
+  hud.active = hud.active.min(n - 1);
+  let (tab, shift_tab) = ctx.input(|i| {
+    (i.key_pressed(egui::Key::Tab) && !i.modifiers.shift, i.key_pressed(egui::Key::Tab) && i.modifiers.shift)
+  });
+  let mut commit = false;
+  // Tab with no box focused starts typing in the next box, with its value selected
+  if hud.buf.is_none() && (tab || shift_tab) && !ctx.egui_wants_keyboard_input() && n > 1 {
+    hud.active = (hud.active + 1) % n;
+    let t = if hud.typed[hud.active].is_empty() { fmt(hud.active) } else { hud.typed[hud.active].clone() };
+    hud.buf = Some(t);
+    hud.focus = Some(true);
+  }
+  for (i, p) in at.iter().enumerate() {
+    let Some(p) = *p else { continue };
+    let typed = !hud.typed[i].is_empty();
+    if i == hud.active
+      && let Some(mut buf) = hud.buf.clone()
+    {
+      let mut keep = true;
+      egui::Area::new(egui::Id::new(("hud-box", i)))
+        .fixed_pos(p)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+          let r = ui.add(
+            egui::TextEdit::singleline(&mut buf)
+              .desired_width(62.0)
+              .font(egui::FontId::proportional(12.0))
+              .margin(egui::Margin::symmetric(3, 1))
+              .lock_focus(true),
+          );
+          if let Some(select) = hud.focus.take() {
+            focus_text(ctx, &r, &buf, select);
+          }
+          if r.changed() {
+            hud.typed[i] = buf.clone();
+          }
+          let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+          if r.has_focus() && (tab || shift_tab) && n > 1 {
+            // Tab keeps what was typed and moves on
+            let next = (i + 1) % n;
+            hud.active = next;
+            buf = if hud.typed[next].is_empty() { fmt(next) } else { hud.typed[next].clone() };
+            hud.focus = Some(true);
+          } else if enter && (r.has_focus() || r.lost_focus()) {
+            commit = true;
+            keep = false;
+          } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
+            // Esc (or a click elsewhere) stops typing; the typed values stay until the point is placed
+            keep = false;
+          }
+        });
+      hud.buf = keep.then_some(buf).filter(|_| !commit);
+      continue;
+    }
+    // the other boxes show the live value, or what was typed (locked) in bold
+    let text = if typed { hud.typed[i].clone() } else { fmt(i) };
+    let font = egui::FontId::proportional(12.0);
+    let galley = painter.layout_no_wrap(text, font, if typed { Color32::BLACK } else { Color32::from_gray(60) });
+    let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0, 5.0));
+    let active = i == hud.active;
+    painter.rect(
+      r,
+      2.0,
+      Color32::from_rgba_unmultiplied(255, 255, 255, 235),
+      Stroke::new(if active || typed { 1.5 } else { 1.0 }, if active || typed { ink } else { Color32::from_gray(160) }),
+      egui::StrokeKind::Inside,
+    );
+    painter.galley(r.center() - galley.size() / 2.0, galley, Color32::BLACK);
+  }
+  if commit {
+    // this Enter places the point; it isn't the open dialog's OK
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    place_point(app, sk, raw, snapped);
+  }
+}
+
+/// A line's heads-up angle: an arc from the horizontal to the line at its start.
+fn hud_angle_shape(
+  from: [f64; 2],
+  to: [f64; 2],
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let ang = (to[1] - from[1]).atan2(to[0] - from[0]);
+  let r = 42.0 * wpp;
+  let arc: Vec<Pos2> = (0..=24)
+    .filter_map(|k| {
+      let t = ang * k as f64 / 24.0;
+      to_screen([from[0] + r * t.cos(), from[1] + r * t.sin()])
+    })
+    .collect();
+  let o = to_screen(from)?;
+  let base = to_screen([from[0] + r * 1.3, from[1]])?;
+  let mid =
+    to_screen([from[0] + (r + 22.0 * wpp) * (ang / 2.0).cos(), from[1] + (r + 22.0 * wpp) * (ang / 2.0).sin()])?;
+  let mut arrows = Vec::new();
+  if arc.len() > 2 && ang.abs() > 0.15 {
+    let k = arc.len();
+    arrows.push((arc[0], arc[0] - arc[1]));
+    arrows.push((arc[k - 1], arc[k - 1] - arc[k - 2]));
+  }
+  Some(DimShape { lines: vec![[o, base]], arc, arrows, label: mid })
 }
 
 /// The 2-tangent circle the next click would place.
@@ -1574,4 +2218,162 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
   let r = Rect::from_center_size(mid + Vec2::new(0.0, -14.0), galley.size() + Vec2::new(10.0, 4.0));
   painter.rect_filled(r, 3.0, col);
   painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::WHITE);
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use fox_engine::Session;
+
+  /// An app editing a new sketch on XY with `tool` active.
+  fn sketching(tool: Tool) -> (App, FeatureId) {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    app.set_tool(tool);
+    (app, sk)
+  }
+
+  /// The sketch's dimension values (mm, or degrees for angles), in creation order.
+  fn dims(app: &App, sk: FeatureId) -> Vec<f64> {
+    let s = app.s.design.sketch(sk).unwrap();
+    s.constraints
+      .iter()
+      .filter_map(|c| c.kind.dim().map(|d| if c.kind.is_angle() { d.value.to_degrees() } else { d.value }))
+      .collect()
+  }
+
+  fn typed(app: &mut App, values: [&str; 2]) {
+    app.tstate.hud.typed = values.map(String::from);
+  }
+
+  #[test]
+  fn typed_rectangle_sizes_become_driving_dimensions() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["40", "25 mm"]);
+    // the cursor only gives the direction: up and to the left
+    place_point(&mut app, sk, [-3.0, 7.0], None);
+    assert_eq!(dims(&app, sk), vec![40.0, 25.0]);
+    let (lo, hi) = app.s.design.sketch(sk).unwrap().bounds().unwrap();
+    assert!((lo[0] + 40.0).abs() < 1e-6 && (hi[1] - 25.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    // the rectangle and its dimensions are one undo step
+    app.s.undo();
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+  }
+
+  #[test]
+  fn typed_centre_rectangle_holds_its_whole_size() {
+    let (mut app, sk) = sketching(Tool::CenterRect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["30", ""]);
+    place_point(&mut app, sk, [5.0, 4.0], None);
+    assert_eq!(dims(&app, sk), vec![30.0]);
+    let (lo, hi) = app.s.design.sketch(sk).unwrap().bounds().unwrap();
+    assert!((hi[0] - lo[0] - 30.0).abs() < 1e-6 && (hi[1] - lo[1] - 8.0).abs() < 1e-6, "{lo:?} {hi:?}");
+  }
+
+  #[test]
+  fn typed_line_length_and_angle() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["50", ""]);
+    place_point(&mut app, sk, [3.0, 0.0], None);
+    // the next segment: 20 long at 90° from the X axis, locked to the first one
+    typed(&mut app, ["20", "90"]);
+    place_point(&mut app, sk, [51.0, 1.0], None);
+    assert_eq!(dims(&app, sk), vec![50.0, 20.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let (_, hi) = s.bounds().unwrap();
+    assert!((hi[0] - 50.0).abs() < 1e-6 && (hi[1] - 20.0).abs() < 1e-6, "{hi:?}");
+    // a 45° segment gets an angle to the previous one
+    typed(&mut app, ["10", "135"]);
+    place_point(&mut app, sk, [40.0, 30.0], None);
+    let d = dims(&app, sk);
+    assert_eq!(d.len(), 4, "{d:?}");
+    assert!((d[3] - 45.0).abs() < 1e-6 || (d[3] - 135.0).abs() < 1e-6, "{d:?}");
+  }
+
+  #[test]
+  fn typed_circle_diameter() {
+    let (mut app, sk) = sketching(Tool::Circle);
+    place_point(&mut app, sk, [1.0, 1.0], None);
+    typed(&mut app, ["12", ""]);
+    place_point(&mut app, sk, [2.0, 1.0], None);
+    assert_eq!(dims(&app, sk), vec![12.0]);
+  }
+
+  #[test]
+  fn untyped_boxes_follow_the_cursor() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    assert_eq!(hud_apply(&app, [7.0, -3.0]), [7.0, -3.0]);
+    assert_eq!(hud_live(&app, [7.0, -3.0]), [7.0, 3.0]);
+    place_point(&mut app, sk, [7.0, -3.0], None);
+    assert!(dims(&app, sk).is_empty());
+  }
+
+  fn frame(ctx: &egui::Context, events: Vec<egui::Event>, f: impl FnMut(&egui::Context)) {
+    let mut f = f;
+    let raw = egui::RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+      events,
+      ..Default::default()
+    };
+    let mut out = ctx.run_ui(raw, |ui| f(ui.ctx()));
+    out.textures_delta.clear();
+  }
+
+  fn key(k: egui::Key) -> egui::Event {
+    egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
+  }
+
+  #[test]
+  fn dimension_editor_opens_focused_with_its_value_selected() {
+    let (mut app, sk) = sketching(Tool::Select);
+    app.run("sketch.line", json!({"points": [[0, 0], [58.45, 0]]})).unwrap();
+    let curve = app.s.design.sketch(sk).unwrap().curves[0].id;
+    let Some(CurveKind::Line { a, b }) = app.s.design.sketch(sk).unwrap().curve(curve).map(|c| c.kind.clone()) else {
+      panic!()
+    };
+    app.tstate.pending_dim = Some(json!({"type": "distance", "points": [a.0, b.0]}));
+    app.dim_edit = Some((0, "58.45".into(), Pos2::new(200.0, 200.0)));
+    let ctx = egui::Context::default();
+    frame(&ctx, vec![], |ctx| dim_editor(&mut app, ctx));
+    assert!(ctx.egui_wants_keyboard_input(), "the box has the keyboard");
+    // typing replaces the selected value; Enter commits
+    frame(&ctx, vec![egui::Event::Text("50".into())], |ctx| dim_editor(&mut app, ctx));
+    frame(&ctx, vec![key(egui::Key::Enter)], |ctx| dim_editor(&mut app, ctx));
+    assert!(app.dim_edit.is_none());
+    assert_eq!(dims(&app, sk), vec![50.0]);
+  }
+
+  #[test]
+  fn typed_digits_go_to_the_heads_up_box() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    let ctx = egui::Context::default();
+    frame(&ctx, vec![egui::Event::Text("4".into()), key(egui::Key::Num4)], |ctx| {
+      route_typing(&mut app, ctx);
+      assert!(!ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { .. }))), "digit keys consumed");
+    });
+    assert_eq!(app.tstate.hud.typed[0], "4");
+    assert_eq!(app.tstate.hud.buf.as_deref(), Some("4"));
+    // letters are shortcuts, not values
+    let (mut app, _) = sketching(Tool::Rect);
+    frame(&ctx, vec![egui::Event::Text("l".into())], |ctx| route_typing(&mut app, ctx));
+    assert!(app.tstate.hud.buf.is_none());
+  }
+
+  #[test]
+  fn linear_dimension_sits_off_its_geometry_away_from_the_shape() {
+    // sketch units are screen points, y down
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
+    let s = linear_shape([0.0, 0.0], [100.0, 0.0], [1.0, 0.0], [50.0, 50.0], 30.0, 1.0, &to_screen).unwrap();
+    assert_eq!(s.label, Pos2::new(50.0, -30.0));
+    assert_eq!(s.arrows.len(), 2);
+    // two extension lines and the dimension line
+    assert_eq!(s.lines.len(), 3);
+    assert!(s.lines[..2].iter().all(|l| l[0].x == l[1].x && l[0].y > l[1].y));
+  }
 }

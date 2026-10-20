@@ -904,6 +904,8 @@ impl App {
       return;
     }
     if self.data.save.is_none() {
+      // typed values go to the heads-up box or dialog before shortcuts see the keys
+      viewport::route_typing(self, &ctx);
       self.shortcuts(&ctx);
     }
     // the Manufacture workspace keeps its toolpaths in step with the design
