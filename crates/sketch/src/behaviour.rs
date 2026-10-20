@@ -92,12 +92,13 @@ pub const CURRENT: &[&str] = &[
   ONE_EDGE_ELLIPSE,
   ELLIPSE_CONCENTRIC_PASS,
   ONE_EDGE_SPLIT_ARCS,
+  ONE_EDGE_CONTROL_SPLINE,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
 /// moving its name from here to [`CURRENT`]. Tests turn them on with
 /// [`Behaviours::enable_pending_for_tests`].
-pub const PENDING: &[&str] = &[ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE];
+pub const PENDING: &[&str] = &[ONE_EDGE_FIT_SPLINE];
 
 /// A flag only this crate's own unit tests register, to exercise [`Behaviours::has`].
 const TEST_ONLY: &str = "test_only_dummy";

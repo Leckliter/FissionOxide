@@ -104,7 +104,7 @@ cmds! {
   "sketch.fillet" => "Round the corner where two lines or arcs meet at an end with a tangent arc", "{curves: [line|arc, line|arc], radius}";
   "sketch.chamfer" => "Bevel the corner of two lines (meeting at an end, crossing, or apparently crossing): equal distance, two distances, or distance along the first line and angle from it", "{curves: [line, line], distance, distance2? | angle?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
-  "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
+  "sketch.control_spline" => "B-spline from control points, cubic (default) or quintic", "{points: [[x,y], ...], degree?: 3 | 5}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius or a point on it", "{center, major: [x,y], minor | point: [x,y]}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude (their counters left out), regenerated when the text changes (explode: plain curves); along a curve with path", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?, path?: curve id, above?: bool (default true), align?: left|center|right}";
   "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
@@ -2698,13 +2698,20 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         if pts.len() < 2 {
           return Err(CmdError::new("a control point spline needs 2 or more points"));
         }
+        let degree = match p.get("degree") {
+          None | Some(Value::Null) => 3,
+          Some(d) => match d.as_u64() {
+            Some(d @ (3 | 5)) => d as u8,
+            _ => return Err(CmdError::new("a control point spline's degree is 3 or 5")),
+          },
+        };
         let mut ids = Vec::new();
         for (i, q) in pts.iter().enumerate() {
           // only the ends snap to existing points: the inner control points float off the curve
           let spec = if i == 0 || i + 1 == pts.len() { snap(sketch, *q) } else { PtSpec::At(q[0], q[1]) };
           ids.push(sketch.resolve(spec)?);
         }
-        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+        sketch.add_curve(CurveKind::ControlSpline { points: ids, degree })?;
       }
       "sketch.conic" => {
         let (st, en, apex) = (req_pt(&p, "start")?, req_pt(&p, "end")?, req_pt(&p, "apex")?);

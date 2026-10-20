@@ -142,6 +142,11 @@
 146-acute-wedge
 147-disjoint-lines-xz
 148-acute-wedge-hint-near-vertex
+187-cubic-four-points
+188-cubic-six-points
+189-quintic-six-points
+190-degree5-six-points
+191-degree5-nine-points
 269-rectangle-vertex-corners
 270-triangle-acute-obtuse-vertex
 271-apparent-intersection-gap

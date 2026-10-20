@@ -43,8 +43,9 @@ fn legacy() -> Sketch {
   s
 }
 
-/// The sketch with these behaviours turned on.
+/// The sketch with only these behaviours (pending or current) on.
 fn with(mut s: Sketch, names: &[&str]) -> Sketch {
+  s.behaviours = Behaviours::legacy();
   for n in names {
     s.behaviours.insert(*n);
   }
@@ -130,7 +131,7 @@ fn spline_pieces_become_one_b_spline_edge() {
     let curve = if kind == 0 {
       CurveKind::Spline { points: pts.clone(), start_handle: None, end_handle: None }
     } else {
-      CurveKind::ControlSpline { points: pts.clone() }
+      CurveKind::control_spline(pts.clone())
     };
     let id = s.add_curve(curve).unwrap();
     s.add_curve(CurveKind::Line { a: pts[4], b: pts[0] }).unwrap();
@@ -158,4 +159,23 @@ fn a_path_merges_flagged_pieces() {
   assert_eq!(n(&Shape::path(&Plane::XY, &segs).unwrap()), 3);
   assert_eq!(n(&Shape::path_with(&Plane::XY, &segs, &[false, false, false]).unwrap()), 3);
   assert_eq!(n(&Shape::path_with(&Plane::XY, &segs, &[true, false, false]).unwrap()), 2);
+}
+
+#[test]
+fn a_control_spline_merges_after_a_quintic_that_takes_three_records() {
+  // a blend quintic (three segment records) then a control spline's pieces: the merge flags are
+  // per segment, so the spline's run must be found past the quintic's extra records
+  let mut s = Sketch::new();
+  let q: Vec<_> = (0..10).map(|k| s.add_point(4.0 * k as f64, if k == 0 || k == 9 { 0.0 } else { 6.0 })).collect();
+  s.add_curve(CurveKind::QuinticSpline { points: q.clone() }).unwrap();
+  let mut c = vec![q[9]];
+  c.extend([[30.0, -8.0], [20.0, -2.0], [10.0, -9.0], [4.0, -3.0]].iter().map(|p| s.add_point(p[0], p[1])));
+  c.push(q[0]);
+  let id = s.add_curve(CurveKind::control_spline(c)).unwrap();
+  assert!(s.beziers(id).len() > 1);
+  let legacy = extrude_all(&with(s.clone(), &[]));
+  let merged = extrude_all(&with(s, &[ONE_EDGE_CONTROL_SPLINE]));
+  assert_eq!(merged[0].0, 4, "the quintic's side, the spline's, top and bottom");
+  assert!(legacy[0].0 > 4);
+  assert!((legacy[0].1 - merged[0].1).abs() < 1e-3 * legacy[0].1);
 }
