@@ -1,0 +1,9 @@
+# 276-line-arc-fillet: added by the parity loop from a Fusion probe
+# line-arc-fillet: Quarter disc: line (0,0)-(40,0), arc r=40 about the origin to (0,40), line back; sketch Fillet r=5 between the bottom line and the arc at (40,0); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [40, 0], "end": [0, 40]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.fillet", "curves": [2, 5], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

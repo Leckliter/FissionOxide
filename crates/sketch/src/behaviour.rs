@@ -61,7 +61,7 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
 /// Fit-point splines are Fusion's minimum-energy quintic through the fit points (closed, with no
 /// corner, when the last point is the first), not the Catmull-Rom spline older sketches drew;
-/// trimming and extending one follow it. See `crate::quintic`.
+/// trimming and extending one follow it. See `crate::fitquintic`.
 pub const QUINTIC_FIT_SPLINE: &str = "quintic_fit_spline";
 /// A curvature constraint on a fit-point spline end adds a curvature handle beside the tangent
 /// handle, making the end smooth as in Fusion (the quintic takes the other curve's direction and
@@ -104,7 +104,9 @@ pub fn one_edge_behaviour(kind: &CurveKind) -> Option<&'static str> {
     CurveKind::ControlSpline { .. } => Some(ONE_EDGE_CONTROL_SPLINE),
     CurveKind::Spline { .. } => Some(ONE_EDGE_FIT_SPLINE),
     CurveKind::Arc { .. } | CurveKind::Circle { .. } => Some(ONE_EDGE_SPLIT_ARCS),
-    CurveKind::Line { .. } | CurveKind::Bezier { .. } | CurveKind::Conic { .. } => None,
+    CurveKind::Line { .. } | CurveKind::Bezier { .. } | CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
+      None
+    }
   }
 }
 

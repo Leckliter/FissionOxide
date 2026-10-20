@@ -1,0 +1,99 @@
+{
+ "id": "torus-xy-offset-center",
+ "name": "Torus primitive on XY centred at (5,-8), major radius 20, minor radius 5 (Fusion: r5 circle revolved 360 deg about the Z-parallel axis through (5,-8,0)).",
+ "description": "Torus primitive on XY centred at (5,-8), major radius 20, minor radius 5 (Fusion: r5 circle revolved 360 deg about the Z-parallel axis through (5,-8,0)).",
+ "exercises": [
+  "torus"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S1",
+   "plane": {
+    "ref": "YZ offset",
+    "origin": [
+     5,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     1,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       12,
+       0
+      ]
+     },
+     "radius": 5,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Torus",
+   "operation": "new",
+   "profile": {
+    "sketch": "S1",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "c1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "ref": "free axis",
+    "origin": [
+     5,
+     -8,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Torus"
+   ]
+  }
+ ]
+}

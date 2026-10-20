@@ -1,0 +1,12 @@
+# 342-sketch-points-slanted-revolve: added by the parity loop from a Fusion probe
+# sketch-points-slanted-revolve: Rectangle x 5..10, y 0..8 on XY with sketch points (1,0) and (3,8); axis through the two sketch points; rectangle revolved 360 deg about the slanted axis.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[5, 0], [10, 0]]}
+{"cmd": "sketch.line", "points": [[10, 0], [10, 8]]}
+{"cmd": "sketch.line", "points": [[10, 8], [5, 8]]}
+{"cmd": "sketch.line", "points": [[5, 8], [5, 0]]}
+{"cmd": "sketch.point", "at": [1, 0]}
+{"cmd": "sketch.point", "at": [3, 8]}
+{"cmd": "sketch.finish"}
+{"cmd": "axis", "method": "two_points", "a": {"at": [1, 0, 0]}, "b": {"at": [3, 8, 0]}}
+{"cmd": "revolve", "sketch": 1, "axis": {"axis": 2}, "angle": "360 deg", "operation": "new_body"}

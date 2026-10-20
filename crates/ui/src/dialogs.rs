@@ -92,6 +92,8 @@ pub enum Kind {
   Analysis(&'static str),
   /// Trace an image into the sketch being edited.
   TraceImage,
+  /// Appearance: a library of swatches to drag onto bodies and faces, and the design's own.
+  Appearance,
 }
 
 impl Kind {
@@ -114,6 +116,7 @@ impl Kind {
       Kind::Move => "MOVE / ROTATE",
       Kind::OffsetPlane => "OFFSET PLANE",
       Kind::Inspect => "MEASURE",
+      Kind::Appearance => "APPEARANCE",
       Kind::Loft => "LOFT",
       Kind::Sweep => "SWEEP",
       Kind::Hole => "HOLE",
@@ -181,6 +184,7 @@ impl Kind {
       Kind::Move => Icon::Move,
       Kind::OffsetPlane => Icon::Plane,
       Kind::Inspect => Icon::Measure,
+      Kind::Appearance => Icon::Appearance,
       Kind::Loft => Icon::Loft,
       Kind::Sweep => Icon::Sweep,
       Kind::Hole => Icon::Hole,
@@ -278,6 +282,7 @@ impl Kind {
       Kind::DrawingNote => ("Text", "A note on the sheet"),
       Kind::DrawingTitle => ("Title Block", "Fill in the title block"),
       Kind::DrawingSettings => ("Sheet Settings", "Sheet size, scale, projection and tables"),
+      Kind::Appearance => ("Appearance", "Drag appearances onto bodies or faces (A)"),
       _ => (self.title(), ""),
     };
     (self.icon(), name, hint)
@@ -311,6 +316,7 @@ impl Kind {
     matches!(
       self,
       Kind::Inspect
+        | Kind::Appearance
         | Kind::FlatPattern
         | Kind::Interference
         | Kind::Bom
@@ -475,8 +481,14 @@ pub struct Dialog {
   pub trace: Option<Box<crate::trace::TraceState>>,
   /// Where the viewport manipulators sit (see [`manip`]).
   manip: manip::Cache,
+  /// Measure: the selection filter as it was before the dialog changed it.
+  saved_filter: Option<(crate::select::Priority, bool)>,
+  /// Appearance applies to faces rather than bodies.
+  appearance_faces: bool,
   /// Live preview (see [`live`]).
   live: live::Live,
+  /// Sketch Offset: the distance and side follow the cursor until a click places the offset.
+  follow: bool,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -581,7 +593,10 @@ impl Dialog {
       saved: [String::new(), String::new()],
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
+      saved_filter: None,
+      appearance_faces: false,
       live: live::Live::default(),
+      follow: false,
     }
   }
 
@@ -604,6 +619,11 @@ impl Dialog {
 
   /// Opens a dialog for a new feature, capturing the current selection.
   pub fn open(app: &mut App, kind: Kind) -> Dialog {
+    // Appearance (A) opens Fusion's panel of swatches rather than its command form
+    let kind = match kind {
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::APPEARANCE) => Kind::Appearance,
+      k => k,
+    };
     let mut d = Dialog::blank(kind);
     let s = &app.s;
     // profiles → sketch
@@ -788,7 +808,10 @@ impl Dialog {
         d.distance = "2 mm".into();
         d.distance2 = "3 mm".into();
       }
-      Kind::SkOffset => d.distance = "2 mm".into(),
+      Kind::SkOffset => {
+        d.distance = "2 mm".into();
+        d.follow = true;
+      }
       Kind::SkCircPattern => {
         d.count = "6".into();
         d.angle = "360 deg".into();
@@ -904,6 +927,7 @@ impl Dialog {
         let mut d = Dialog::blank(Kind::Revolve);
         d.sketch = Some(*sketch);
         d.angle = angle.clone();
+        d.solid.rev_full = angle.trim() == "360 deg";
         d.op = op_str(*operation);
         d.axis = match axis {
           AxisRef::X => "x".into(),
@@ -915,24 +939,26 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges, setback, chord, sets, .. } => {
+      FeatureKind::Fillet { radius, edges, setback, chord, sets, radius2, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
-        d.load_setback(setback, *chord);
+        d.load_setback(setback, *chord, radius2);
         d.load_fillet_sets(sets);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Chamfer { distance, edges, .. } => {
+      FeatureKind::Chamfer { distance, edges, distance2, angle, .. } => {
         let mut d = Dialog::blank(Kind::Chamfer);
         d.radius = distance.clone();
+        d.load_chamfer(distance2, angle);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
-      FeatureKind::Shell { thickness, faces, round } => {
+      FeatureKind::Shell { thickness, faces, round, direction, thickness_out, bodies } => {
         let mut d = Dialog::blank(Kind::Shell);
         d.radius = thickness.clone();
         d.flag = *round;
+        d.load_shell(*direction, thickness_out, bodies.len());
         d.faces = vec![Value::Null; faces.len()];
         d
       }
@@ -966,10 +992,11 @@ impl Dialog {
         d.join = *join;
         d
       }
-      FeatureKind::CircularPattern { count, angle, join, .. } => {
+      FeatureKind::CircularPattern { count, angle, symmetric, join, .. } => {
         let mut d = Dialog::blank(Kind::CircPattern);
         d.count = count.clone();
         d.angle = angle.clone();
+        d.symmetric[0] = *symmetric;
         d.join = *join;
         d
       }
@@ -998,6 +1025,7 @@ impl Dialog {
       Kind::Form(f) => crate::forms::engine_command(f, self.form.params(f)),
       Kind::PickPlane
       | Kind::Inspect
+      | Kind::Appearance
       | Kind::FlatPattern
       | Kind::Interference
       | Kind::Bom
@@ -1267,22 +1295,15 @@ impl Dialog {
         }))?)?,
       ),
       Kind::Revolve => {
-        let axis = match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
-          (Some(n), _) => json!({"line": n.parse::<u32>().ok()?}),
-          (_, Some(n)) => json!({"axis": n.parse::<u32>().ok()?}),
-          _ => json!(self.axis),
-        };
+        let (axis, angle) = (self.revolve_axis()?, self.revolve_angle());
         (
           "revolve",
-          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": self.angle, "operation": op}),
+          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": angle, "operation": op}),
         )
       }
       Kind::Fillet => ("fillet", self.fillet_params()),
-      Kind::Chamfer => ("chamfer", json!({"edges": self.edges, "distance": self.radius})),
-      Kind::Shell => (
-        "shell",
-        json!({"faces": self.faces, "thickness": self.radius, "corners": if self.flag { "round" } else { "sharp" }}),
-      ),
+      Kind::Chamfer => ("chamfer", self.chamfer_params(json!({"edges": self.edges}), false)),
+      Kind::Shell => ("shell", self.shell_params()),
       Kind::Box => (
         "box",
         json!({"plane": self.plane, "at": self.at_pt()?, "width": self.a, "depth": self.b, "height": self.c, "operation": op}),
@@ -1310,7 +1331,10 @@ impl Dialog {
       }
       Kind::CircPattern => (
         "pattern.circular",
-        json!({"bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle, "join": self.join}),
+        json!({
+          "bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle,
+          "symmetric": self.symmetric[0], "join": self.join,
+        }),
       ),
       Kind::Combine => {
         let (target, tools) = self.bodies.split_first()?;
@@ -1336,10 +1360,10 @@ impl Dialog {
         )),
         "operation": self.op,
       }),
-      Kind::Revolve => json!({"angle": self.angle, "operation": self.op}),
+      Kind::Revolve => json!({"angle": self.revolve_angle(), "operation": self.op}),
       Kind::Fillet => self.fillet_edit_set(),
-      Kind::Chamfer => json!({"distance": self.radius}),
-      Kind::Shell => json!({"thickness": self.radius, "round": self.flag}),
+      Kind::Chamfer => self.chamfer_params(json!({}), true),
+      Kind::Shell => self.shell_edit_set(),
       Kind::Box => {
         json!({"shape": {"type": "box", "width": self.a, "depth": self.b, "height": self.c}, "at": self.at_pt()?, "operation": self.op})
       }
@@ -1354,7 +1378,9 @@ impl Dialog {
       Kind::RectPattern => {
         json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join})
       }
-      Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
+      Kind::CircPattern => {
+        json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
+      }
       Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       _ => return None,
@@ -1417,7 +1443,7 @@ impl Dialog {
       Kind::Extrude | Kind::Revolve => self.sketch.is_some(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
-      Kind::Shell => !self.faces.is_empty(),
+      Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
@@ -1520,7 +1546,10 @@ impl Dialog {
       }
       Kind::OffsetPlane => {
         let base = plane_of(s, &self.plane)?;
-        Some(Manipulator { origin: base.origin, dir: base.normal(), value: len(&self.distance)? })
+        // offsets from XZ go along +Y (see `OriginPlane::offset_sign`)
+        let sign =
+          if self.plane.as_str() == Some("xz") { fox_engine::model::OriginPlane::Xz.offset_sign() } else { 1.0 };
+        Some(Manipulator { origin: base.origin, dir: sign * base.normal(), value: len(&self.distance)? })
       }
       _ => self.more_manipulator(s),
     }
@@ -1597,6 +1626,9 @@ impl Dialog {
         }
         if self.kind == Kind::Extrude {
           self.sync_object(s);
+        }
+        if self.kind == Kind::Revolve {
+          self.sync_revolve_axis(s);
         }
       }
       Kind::Fillet if !self.applied => {
@@ -1707,15 +1739,11 @@ impl Dialog {
         }
       }
       Kind::Shell if !self.applied => {
-        let f: Vec<Value> = s
-          .selection
-          .iter()
-          .filter_map(
-            |x| if let Sel::Face { body, face } = x { Some(json!({"body": body.0, "face": face})) } else { None },
-          )
-          .collect();
-        if f != self.faces {
+        // faces to open, or whole bodies to hollow
+        let (f, b) = (sel_faces(s), sel_only_bodies(s));
+        if f != self.faces || b != self.bodies {
           self.faces = f;
+          self.bodies = b;
         }
       }
       Kind::Combine | Kind::Mirror | Kind::RectPattern | Kind::CircPattern | Kind::Move
@@ -1878,7 +1906,7 @@ impl Dialog {
       Kind::Extrude | Kind::Revolve => "select a profile",
       Kind::Fillet => "select edges or faces",
       Kind::Chamfer => "select edges",
-      Kind::Shell => "select faces to remove",
+      Kind::Shell => "select faces to remove, or a body",
       Kind::Combine => "select a target body and tool bodies",
       Kind::Loft => "select profiles on two or more sketches",
       Kind::Sweep => "select a profile and a path sketch",
@@ -1927,27 +1955,40 @@ impl Dialog {
         ui.label("Axis");
         let lines = self.sketch_lines(app);
         let current = self.axis.clone();
-        egui::ComboBox::from_id_salt("axis").selected_text(axis_label(&current)).show_ui(ui, |ui| {
-          for a in ["x", "y", "z"] {
-            if ui.selectable_label(current == a, axis_label(a)).clicked() {
-              self.axis = a.into();
+        egui::ComboBox::from_id_salt("axis")
+          .selected_text(axis_label(&current))
+          .show_ui(ui, |ui| {
+            for a in ["x", "y", "z"] {
+              if ui.selectable_label(current == a, axis_label(a)).clicked() {
+                self.axis = a.into();
+                self.dirty = true;
+              }
+            }
+            for (id, label) in lines {
+              let key = format!("line:{id}");
+              if ui.selectable_label(current == key, label).clicked() {
+                self.axis = key;
+                self.dirty = true;
+              }
+            }
+            // construction axes, and an edge picked in the viewport
+            for id in app.s.model.axes.keys() {
+              let key = format!("axis:{}", id.0);
+              let name = app.s.design.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| axis_label(&key));
+              if ui.selectable_label(current == key, name).clicked() {
+                self.axis = key;
+                self.dirty = true;
+              }
+            }
+            if !self.solid.axis_edge.is_null() && ui.selectable_label(current == "edge", axis_label("edge")).clicked() {
+              self.axis = "edge".into();
               self.dirty = true;
             }
-          }
-          for (id, label) in lines {
-            let key = format!("line:{id}");
-            if ui.selectable_label(current == key, label).clicked() {
-              self.axis = key;
-              self.dirty = true;
-            }
-          }
-        });
+          })
+          .response
+          .on_hover_text("Or pick a straight edge, sketch line or construction axis in the canvas");
         ui.end_row();
-        ui.label("Angle");
-        if value_edit(ui, &mut self.angle).changed() {
-          self.dirty = true;
-        }
-        ui.end_row();
+        self.revolve_type_rows(ui);
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
@@ -1956,32 +1997,18 @@ impl Dialog {
         self.fillet_rows(app, ui, creating);
         self.setback_row(ui, creating);
       }
-      Kind::Chamfer | Kind::Shell => {
-        let (what, n) =
-          if self.kind == Kind::Shell { ("Faces", self.faces.len()) } else { ("Edges", self.edges.len()) };
-        ui.label(what);
+      Kind::Chamfer => {
+        let n = self.edges.len();
+        ui.label("Edges");
         if creating {
           sel_chip(ui, self.accent(), &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
         } else {
           ui.label(format!("{n} (unchanged)"));
         }
         ui.end_row();
-        ui.label(match self.kind {
-          Kind::Chamfer => "Distance",
-          _ => "Thickness",
-        });
-        if value_edit(ui, &mut self.radius).changed() && (!creating || self.applied) {
-          self.dirty = true;
-        }
-        ui.end_row();
-        if self.kind == Kind::Shell {
-          ui.label("");
-          if ui.checkbox(&mut self.flag, "Round corners").changed() && (!creating || self.applied) {
-            self.dirty = true;
-          }
-          ui.end_row();
-        }
+        self.chamfer_rows(ui, creating);
       }
+      Kind::Shell => self.shell_rows(ui, creating),
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
         ui.label("Plane");
         ui.label(&self.plane_label);
@@ -2092,6 +2119,11 @@ impl Dialog {
             self.dirty = true;
           }
           ui.end_row();
+          ui.label("");
+          if ui.checkbox(&mut self.symmetric[0], "Symmetric").changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
         }
         ui.label("");
         if ui.checkbox(&mut self.join, "Join instances").changed() {
@@ -2136,7 +2168,8 @@ impl Dialog {
         }
         ui.end_row();
       }
-      Kind::Inspect => inspect(app, ui),
+      Kind::Inspect => self.inspect(app, ui),
+      Kind::Appearance => self.appearance(app, ui),
       Kind::Section => section_fields(app, ui),
       Kind::Analysis(kind) => analysis_fields(app, ui, kind),
       Kind::Form(f) => {
@@ -2756,7 +2789,12 @@ impl Dialog {
         ui.label("Curves");
         chip(ui, self.curves.len(), "selected");
         ui.end_row();
+        let before = self.distance.clone();
         Self::field(ui, "Offset position", &mut self.distance, dirty);
+        if self.distance != before {
+          // a typed distance holds: the offset stops following the cursor
+          self.follow = false;
+        }
       }
       Kind::SkMirror => {
         ui.label("Objects");
@@ -3375,111 +3413,443 @@ impl Dialog {
   }
 }
 
-fn inspect(app: &mut App, ui: &mut egui::Ui) {
-  app.measure = None;
-  let s = &app.s;
-  if s.selection.is_empty() {
-    ui.label("Select a body, face or edge — two to measure between them");
-    ui.end_row();
-    return;
+/// Measure's length units: name and millimetres per unit.
+pub(crate) const MEASURE_UNITS: [(&str, f64); 5] =
+  [("mm", 1.0), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)];
+
+/// How Measure shows its numbers: decimal places and length unit (kept between uses, as in Fusion).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeasureFmt {
+  pub precision: usize,
+  /// Index into [`MEASURE_UNITS`].
+  pub unit: usize,
+}
+
+impl Default for MeasureFmt {
+  fn default() -> Self {
+    MeasureFmt { precision: 3, unit: 0 }
   }
-  let measurable: Vec<Value> = s
+}
+
+impl MeasureFmt {
+  fn unit(&self) -> (&'static str, f64) {
+    MEASURE_UNITS[self.unit.min(MEASURE_UNITS.len() - 1)]
+  }
+
+  fn num(&self, v: f64) -> String {
+    let p = self.precision.min(8);
+    // no "-0.000"
+    let s = format!("{v:.p$}");
+    if s.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') { s.trim_start_matches('-').into() } else { s }
+  }
+
+  pub fn len(&self, mm: f64) -> String {
+    let (u, k) = self.unit();
+    format!("{} {u}", self.num(mm / k))
+  }
+
+  pub fn area(&self, mm2: f64) -> String {
+    let (u, k) = self.unit();
+    format!("{} {u}²", self.num(mm2 / (k * k)))
+  }
+
+  pub fn volume(&self, mm3: f64) -> String {
+    let (u, k) = self.unit();
+    format!("{} {u}³", self.num(mm3 / (k * k * k)))
+  }
+
+  pub fn angle(&self, deg: f64) -> String {
+    format!("{} deg", self.num(deg))
+  }
+}
+
+/// One line of Measure's results; a heading names what was measured.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Readout {
+  pub label: String,
+  pub value: String,
+  pub heading: bool,
+}
+
+fn row(label: &str, value: String) -> Readout {
+  Readout { label: label.into(), value, heading: false }
+}
+
+fn heading(label: &str, value: String) -> Readout {
+  Readout { label: label.into(), value, heading: true }
+}
+
+/// Measure's readouts for a `measure` result: the distance, deltas and angle between two picks,
+/// or one pick's own numbers (a face's area, an edge's length, a vertex's position, a body's
+/// volume).
+pub(crate) fn measure_rows(r: &Value, f: &MeasureFmt) -> Vec<Readout> {
+  let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64);
+  let v3 = |v: &Value, k: &str| -> Option<[f64; 3]> {
+    let a = v.get(k)?.as_array()?;
+    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+  };
+  let xyz = |out: &mut Vec<Readout>, p: [f64; 3]| {
+    for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
+      out.push(row(axis, f.len(p[i])));
+    }
+  };
+  let mut out = Vec::new();
+  if let Some(d) = num(r, "distance") {
+    out.push(heading("Distance", f.len(d)));
+    if let Some(dl) = v3(r, "delta") {
+      for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+        out.push(row(axis, f.len(dl[i].abs())));
+      }
+    }
+    if let Some(a) = num(r, "angle_deg") {
+      out.push(row("Angle", f.angle(a)));
+    }
+    return out;
+  }
+  let words = |s: &str| {
+    let mut c = s.chars();
+    c.next().map(|x| x.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+  };
+  match r.get("kind").and_then(Value::as_str) {
+    Some("face") => {
+      out.push(heading("Face", words(r.get("surface").and_then(Value::as_str).unwrap_or(""))));
+      if let Some(a) = num(r, "area_mm2") {
+        out.push(row("Area", f.area(a)));
+      }
+      if let Some(x) = num(r, "radius") {
+        out.push(row("Radius", f.len(x)));
+      }
+      if let Some(x) = num(r, "diameter") {
+        out.push(row("Diameter", f.len(x)));
+      }
+    }
+    Some("edge") => {
+      out.push(heading("Edge", words(r.get("curve").and_then(Value::as_str).unwrap_or(""))));
+      if let Some(l) = num(r, "length") {
+        out.push(row("Length", f.len(l)));
+      }
+      if let Some(x) = num(r, "radius") {
+        out.push(row("Radius", f.len(x)));
+      }
+      if let Some(x) = num(r, "diameter") {
+        out.push(row("Diameter", f.len(x)));
+      }
+    }
+    Some("point") => {
+      out.push(heading("Vertex", "Position".into()));
+      if let Some(p) = v3(r, "at") {
+        xyz(&mut out, p);
+      }
+    }
+    Some("body") => {
+      out.push(heading("Body", r.get("name").and_then(Value::as_str).unwrap_or("").into()));
+      if let Some(v) = num(r, "volume_mm3") {
+        out.push(row("Volume", f.volume(v)));
+      }
+      if let Some(a) = num(r, "area_mm2") {
+        out.push(row("Area", f.area(a)));
+      }
+      if let Some(d) = v3(r, "size") {
+        let (u, k) = f.unit();
+        out.push(row("Size", format!("{} × {} × {} {u}", f.num(d[0] / k), f.num(d[1] / k), f.num(d[2] / k))));
+      }
+      if let Some(c) = v3(r, "center_of_mass") {
+        out.push(heading("Center of mass", String::new()));
+        xyz(&mut out, c);
+      }
+    }
+    _ => {}
+  }
+  out
+}
+
+/// What Measure measures: the first two selected bodies, faces, edges and vertices, or (with
+/// nothing selected) what the pointer is over.
+fn measure_picks(app: &App) -> (Vec<Value>, bool) {
+  let picks: Vec<Value> = app
+    .s
     .selection
     .iter()
-    .filter(|x| matches!(x, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }))
+    .filter(|x| matches!(x, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }))
+    .take(2)
     .filter_map(|x| serde_json::to_value(x).ok())
     .collect();
-  if measurable.len() == 2 {
-    match app.s.execute("measure", &json!({"a": measurable[0], "b": measurable[1]})) {
-      Ok(r) => {
-        let mm = |k: &str| r.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-        let d = mm("distance");
-        ui.label(RichText::new("Distance").strong());
-        ui.label(RichText::new(format!("{d:.3} mm")).strong());
-        ui.end_row();
-        let v3 = |k: &str| -> Option<[f64; 3]> {
-          let a = r.get(k)?.as_array()?;
-          Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
-        };
-        if let Some(dl) = v3("delta") {
-          for (i, axis) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
-            ui.label(*axis);
-            ui.label(format!("{:.3} mm", dl[i]));
-            ui.end_row();
-          }
-        }
-        if let Some(a) = r.get("angle_deg").and_then(Value::as_f64) {
-          ui.label("Angle");
-          ui.label(format!("{a:.3}°"));
-          ui.end_row();
-        }
-        if let (Some(f), Some(t)) = (v3("from"), v3("to")) {
-          use fox_engine::kernel::glam::DVec3;
-          app.measure = Some((DVec3::from(f), DVec3::from(t), format!("{d:.3} mm")));
-        }
+  if !picks.is_empty() {
+    return (picks, false);
+  }
+  let hover =
+    app.hover.map(|p| p.to_sel()).filter(|x| matches!(x, Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. }));
+  (hover.and_then(|h| serde_json::to_value(h).ok()).into_iter().collect(), true)
+}
+
+impl Dialog {
+  /// Measure's panel: selection filter, precision and units, then the readouts with copy buttons.
+  fn inspect(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    app.measure = None;
+    // Measure picks vertices too, while it's open
+    if self.saved_filter.is_none() {
+      self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
+      app.sel_filter.vertices = true;
+    }
+    ui.label("Selection Filter");
+    ui.horizontal(|ui| {
+      use crate::select::Priority;
+      let whole = matches!(app.sel_priority, Priority::Body | Priority::Component);
+      if ui.selectable_label(whole, "Body").on_hover_text("Pick bodies").clicked() {
+        app.sel_priority = Priority::Body;
       }
+      if ui.selectable_label(!whole, "Face/Edge/Vertex").on_hover_text("Pick faces, edges and vertices").clicked() {
+        app.sel_priority = Priority::Face;
+      }
+    });
+    ui.end_row();
+    let fmt = &mut app.measure_fmt;
+    ui.label("Precision");
+    egui::ComboBox::from_id_salt("measure-precision")
+      .selected_text(if fmt.precision == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(fmt.precision)) })
+      .show_ui(ui, |ui| {
+        for p in 0..=6 {
+          let text = if p == 0 { "0".to_string() } else { format!("0.{}", "0".repeat(p)) };
+          ui.selectable_value(&mut fmt.precision, p, text);
+        }
+      });
+    ui.end_row();
+    ui.label("Units");
+    egui::ComboBox::from_id_salt("measure-units").selected_text(MEASURE_UNITS[fmt.unit].0).show_ui(ui, |ui| {
+      for (i, (u, _)) in MEASURE_UNITS.iter().enumerate() {
+        ui.selectable_value(&mut fmt.unit, i, *u);
+      }
+    });
+    ui.end_row();
+    let fmt = app.measure_fmt;
+    let (picks, hovering) = measure_picks(app);
+    if picks.is_empty() {
+      ui.label("");
+      ui.label(RichText::new("Select a body, face, edge or vertex — two to measure between them").color(theme::MUTED));
+      ui.end_row();
+      return;
+    }
+    let p = if picks.len() == 2 { json!({"a": picks[0], "b": picks[1]}) } else { json!({"a": picks[0]}) };
+    let r = match app.s.execute("measure", &p) {
+      Ok(r) => r,
       Err(e) => {
+        ui.label("");
         ui.label(RichText::new(e.0).color(theme::ERROR));
         ui.end_row();
+        return;
+      }
+    };
+    if let (Some(d), Some(a), Some(b)) = (r.get("distance").and_then(Value::as_f64), r.get("from"), r.get("to")) {
+      use fox_engine::kernel::glam::DVec3;
+      let v3 = |v: &Value| -> Option<DVec3> {
+        let a = v.as_array()?;
+        Some(DVec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+      };
+      if let (Some(a), Some(b)) = (v3(a), v3(b)) {
+        app.measure = Some((a, b, fmt.len(d)));
       }
     }
-    return;
-  }
-  for sel in s.selection.clone().iter().take(6) {
-    match sel {
-      Sel::Body { body } => {
-        if let Some(b) = s.model.body(*body)
-          && let Ok(m) = b.shape.mass()
+    let rows = measure_rows(&r, &fmt);
+    ui.label(RichText::new(if hovering { "Results (hover)" } else { "Results" }).color(theme::GROUP_LABEL));
+    if ui.small_button("Copy all").on_hover_text("Copy every result to the clipboard").clicked() {
+      let text: Vec<String> = rows.iter().map(|r| format!("{}: {}", r.label, r.value)).collect();
+      ui.ctx().copy_text(text.join("\n"));
+      app.status = Some(("Copied the measurements".into(), false));
+    }
+    ui.end_row();
+    for (i, r) in rows.iter().enumerate() {
+      if r.heading {
+        ui.label(RichText::new(&r.label).strong());
+      } else {
+        ui.label(&r.label);
+      }
+      ui.horizontal(|ui| {
+        let v = if r.heading { RichText::new(&r.value).strong() } else { RichText::new(&r.value) };
+        ui.label(v);
+        if !r.value.is_empty()
+          && ui.push_id(i, |ui| ui.small_button("Copy")).inner.on_hover_text("Copy to clipboard").clicked()
         {
-          ui.label(RichText::new(s.body_name(*body)).strong());
-          ui.end_row();
-          ui.label("Volume");
-          ui.label(format!("{:.3} mm³", m.volume));
-          ui.end_row();
-          ui.label("Area");
-          ui.label(format!("{:.3} mm²", m.area));
-          ui.end_row();
-          let d = m.bbox_max - m.bbox_min;
-          ui.label("Size");
-          ui.label(format!("{:.3} × {:.3} × {:.3}", d.x, d.y, d.z));
-          ui.end_row();
-          ui.label("Centre of mass");
-          let c = m.center_of_mass;
-          ui.label(format!("{:.3}, {:.3}, {:.3}", c.x, c.y, c.z));
-          ui.end_row();
+          ui.ctx().copy_text(r.value.clone());
+          app.status = Some((format!("Copied {}", r.value), false));
         }
-      }
-      Sel::Face { body, face } => {
-        if let Some(f) = s.model.body(*body).and_then(|b| b.faces().iter().find(|f| f.id == *face).copied()) {
-          ui.label(RichText::new(format!("Face ({:?})", f.kind)).strong());
-          ui.end_row();
-          ui.label("Area");
-          ui.label(format!("{:.3} mm²", f.area));
-          ui.end_row();
-          if f.radius > 0.0 {
-            ui.label("Radius");
-            ui.label(format!("{:.3} mm", f.radius));
-            ui.end_row();
-          }
-        }
-      }
-      Sel::Edge { body, edge } => {
-        if let Some(e) = s.model.body(*body).and_then(|b| b.edges().iter().find(|e| e.id == *edge).copied()) {
-          ui.label(RichText::new(format!("Edge ({:?})", e.kind)).strong());
-          ui.end_row();
-          ui.label("Length");
-          ui.label(format!("{:.3} mm", e.length));
-          ui.end_row();
-          if e.radius > 0.0 {
-            ui.label("Radius");
-            ui.label(format!("{:.3} mm", e.radius));
-            ui.end_row();
-          }
-        }
-      }
-      _ => {}
+      });
+      ui.end_row();
     }
   }
+
+  /// Fusion's Appearance panel: Apply To (bodies or faces), the appearances In This Design, and
+  /// the library. Swatches drag onto the model, or a click applies one to the selection.
+  fn appearance(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    ui.label("Apply To");
+    ui.horizontal(|ui| {
+      if ui.selectable_label(!self.appearance_faces, "Bodies/Components").clicked() {
+        self.appearance_faces = false;
+      }
+      if ui.selectable_label(self.appearance_faces, "Faces").clicked() {
+        self.appearance_faces = true;
+      }
+    });
+    ui.end_row();
+    let lib = appearance_library(app);
+    let used = in_this_design(app, &lib);
+    let faces = self.appearance_faces;
+    let mut apply: Option<(String, [u8; 3])> = None;
+    for (title, list) in [("In This Design", used), ("Library", lib.iter().map(|(n, c)| (n.clone(), *c, 0)).collect())]
+    {
+      for (i, (name, color, n)) in list.into_iter().enumerate() {
+        ui.label(if i == 0 { RichText::new(title).color(theme::GROUP_LABEL) } else { RichText::new("") });
+        let label = if n > 0 { format!("{name}  ({n})") } else { name.clone() };
+        if swatch_row(ui, (title, i), &label, &name, color, faces) {
+          apply = Some((name, color));
+        }
+        ui.end_row();
+      }
+    }
+    ui.label("");
+    ui.label(
+      RichText::new("Drag a swatch onto a body or face, or click one to apply it to the selection")
+        .small()
+        .color(theme::MUTED),
+    );
+    ui.end_row();
+    if let Some((name, color)) = apply {
+      let sel = app.s.selection.clone();
+      if !apply_appearance(app, &name, color, faces, &sel) {
+        let what = if faces { "faces" } else { "bodies" };
+        app.status = Some((format!("Select {what} first, or drag the swatch onto the model"), false));
+      }
+    }
+  }
+
+  /// Puts back what the dialog changed in the app while open (Measure's selection filter).
+  pub(crate) fn leave(&mut self, app: &mut App) {
+    if let Some((priority, vertices)) = self.saved_filter.take() {
+      app.sel_priority = priority;
+      app.sel_filter.vertices = vertices;
+    }
+  }
+}
+
+/// A swatch dragged from the Appearance panel onto the canvas.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SwatchDrag {
+  pub name: String,
+  pub color: [u8; 3],
+  /// Apply to the face under the pointer rather than its body.
+  pub faces: bool,
+}
+
+/// The appearance library (name, colour), as the engine knows it.
+pub(crate) fn appearance_library(app: &mut App) -> Vec<(String, [u8; 3])> {
+  let Ok(v) = app.s.execute("appearances", &json!({})) else { return Vec::new() };
+  let rgb = |c: &Value| -> Option<[u8; 3]> {
+    let a = c.as_array()?;
+    Some([a.first()?.as_u64()? as u8, a.get(1)?.as_u64()? as u8, a.get(2)?.as_u64()? as u8])
+  };
+  v.as_array()
+    .map(|a| a.iter().filter_map(|x| Some((x.get("name")?.as_str()?.to_string(), rgb(x.get("color")?)?))).collect())
+    .unwrap_or_default()
+}
+
+/// What bodies show without an appearance of their own: Fusion's default, Steel - Satin.
+const DEFAULT_APPEARANCE: [u8; 3] = [186, 190, 196];
+
+/// The appearances the design uses (name, colour, how many bodies and faces carry it), in the
+/// order they are first met. Colours not in the library are named by their hex code.
+pub(crate) fn in_this_design(app: &App, lib: &[(String, [u8; 3])]) -> Vec<(String, [u8; 3], usize)> {
+  let d = &app.s.design;
+  let colors = app
+    .s
+    .model
+    .bodies
+    .iter()
+    .map(|b| d.body_color(b.id).unwrap_or(DEFAULT_APPEARANCE))
+    .chain(d.face_appearances.iter().map(|f| f.color));
+  let mut out: Vec<(String, [u8; 3], usize)> = Vec::new();
+  for c in colors {
+    match out.iter_mut().find(|x| x.1 == c) {
+      Some(x) => x.2 += 1,
+      None => {
+        let name = lib
+          .iter()
+          .find(|(_, lc)| *lc == c)
+          .map(|(n, _)| n.clone())
+          .unwrap_or_else(|| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]));
+        out.push((name, c, 1));
+      }
+    }
+  }
+  out
+}
+
+/// Applies an appearance (a library name, or a "#rrggbb" one) to the bodies of `targets`, or with
+/// `faces` to its faces. Returns whether anything was applied.
+pub(crate) fn apply_appearance(app: &mut App, name: &str, color: [u8; 3], faces: bool, targets: &[Sel]) -> bool {
+  let mut p = if name.starts_with('#') { json!({"color": color}) } else { json!({"appearance": name}) };
+  if faces {
+    let list: Vec<Value> = targets
+      .iter()
+      .filter_map(|t| if let Sel::Face { body, face } = t { Some(json!({"body": body.0, "face": face})) } else { None })
+      .collect();
+    if list.is_empty() {
+      return false;
+    }
+    p["faces"] = json!(list);
+    return app.run("face.appearance", p).is_some();
+  }
+  let mut bodies: Vec<u32> = Vec::new();
+  for t in targets {
+    let b = match t {
+      Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body.0,
+      _ => continue,
+    };
+    if !bodies.contains(&b) {
+      bodies.push(b);
+    }
+  }
+  if bodies.is_empty() {
+    return false;
+  }
+  p["bodies"] = json!(bodies);
+  app.run("body.appearance", p).is_some()
+}
+
+/// One swatch of the Appearance panel: drags as a [`SwatchDrag`]; returns whether it was clicked.
+fn swatch_row(
+  ui: &mut egui::Ui,
+  salt: impl std::hash::Hash + std::fmt::Debug,
+  label: &str,
+  name: &str,
+  color: [u8; 3],
+  faces: bool,
+) -> bool {
+  let size = egui::vec2(ui.available_width().clamp(120.0, 180.0), 20.0);
+  let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+  let resp = ui.interact(rect, ui.id().with(("swatch", salt)), egui::Sense::click_and_drag());
+  resp.dnd_set_drag_payload(SwatchDrag { name: name.to_string(), color, faces });
+  let p = ui.painter();
+  if resp.hovered() {
+    p.rect_filled(rect, 2.0, theme::HOVER);
+  }
+  let fill = egui::Color32::from_rgb(color[0], color[1], color[2]);
+  let sw = egui::Rect::from_center_size(egui::pos2(rect.min.x + 10.0, rect.center().y), egui::vec2(14.0, 14.0));
+  p.rect(sw, 2.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+  p.text(
+    egui::pos2(sw.max.x + 6.0, rect.center().y),
+    egui::Align2::LEFT_CENTER,
+    label,
+    egui::FontId::proportional(12.5),
+    theme::TEXT,
+  );
+  if resp.dragged()
+    && let Some(at) = ui.ctx().pointer_latest_pos()
+  {
+    // the swatch follows the pointer
+    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("swatch-drag"));
+    let r = egui::Rect::from_center_size(at + egui::vec2(14.0, 14.0), egui::vec2(18.0, 18.0));
+    ui.ctx().layer_painter(layer).rect(r, 3.0, fill, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+  }
+  resp.on_hover_text("Drag onto a body or face, or click to apply to the selection").clicked()
 }
 
 /// The section analysis settings, edited in place (the view updates as they change).
@@ -3567,6 +3937,7 @@ fn axis_label(a: &str) -> String {
     "x" => "X axis".into(),
     "y" => "Y axis".into(),
     "z" => "Z axis".into(),
+    "edge" => "Picked edge".into(),
     other => other.replace("line:", "Sketch line ").replace("axis:", "Axis "),
   }
 }
@@ -4435,6 +4806,48 @@ mod tests {
   }
 
   #[test]
+  fn text_form_places_styled_text_in_a_two_corner_box() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let vals = [
+      ("text", json!("Hi")),
+      ("placement", json!("box")),
+      ("x", json!("10")),
+      ("y", json!("0")),
+      ("x2", json!("50")),
+      ("y2", json!("20")),
+      ("halign", json!("right")),
+      ("valign", json!("bottom")),
+      ("bold", json!(true)),
+      ("underline", json!(true)),
+      ("spacing", json!("10")),
+    ];
+    let mut d = form(&mut s, &SK_TEXT, vec![], &vals);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let sketch = s.design.sketch(FeatureId(sk)).unwrap();
+    let t = &sketch.texts[0];
+    assert!(t.style.bold && t.style.underline && !t.style.italic && t.style.spacing == 10.0);
+    // right and bottom of the box: the anchor is its lower right corner
+    assert_eq!(sketch.pos(t.anchor), Some([50.0, 0.0]));
+    let (lo, hi) = sketch.bounds().unwrap();
+    assert!(hi[0] <= 50.0 + 1e-6 && lo[0] > 10.0 && lo[1] < 0.0, "{lo:?} {hi:?}");
+    // Edit Text opens with the style and changes it
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: t.curves[0] }];
+    let mut d = form(&mut s, &SK_TEXT_EDIT, sel, &[]);
+    prefill(&SK_TEXT_EDIT, &mut d.form, &s);
+    let at = |k: &str| SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == k).unwrap();
+    assert_eq!(d.form.values[at("bold")], json!(true));
+    assert_eq!(d.form.values[at("halign")], json!("right"));
+    d.form.values[at("italic")] = json!(true);
+    d.form.values[at("bold")] = json!(false);
+    apply(&mut s, &mut d);
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    assert!(t.style.italic && !t.style.bold && t.style.underline);
+  }
+
+  #[test]
   fn text_forms_edit_and_explode() {
     use crate::forms::*;
     let mut s = Session::default();
@@ -4464,5 +4877,132 @@ mod tests {
     let mut d = form(&mut s, &SK_TEXT_EXPLODE, sel, &[]);
     apply(&mut s, &mut d);
     assert!(s.design.sketch(FeatureId(sk)).unwrap().texts.is_empty());
+  }
+
+  /// Draws a dialog for one frame.
+  fn show_once(app: &mut App, d: &mut Dialog) -> bool {
+    let ctx = egui::Context::default();
+    let raw = egui::RawInput {
+      screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+      ..Default::default()
+    };
+    let mut keep = false;
+    let mut out = ctx.run_ui(raw, |ui| keep = d.show(app, ui.ctx()));
+    out.textures_delta.clear();
+    keep
+  }
+
+  fn labels(rows: &[Readout]) -> Vec<(&str, &str)> {
+    rows.iter().map(|r| (r.label.as_str(), r.value.as_str())).collect()
+  }
+
+  #[test]
+  fn measure_reads_out_single_picks_and_pairs_with_precision_and_units() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+    let b = s.model.bodies[0].id;
+    let body = s.model.body(b).unwrap();
+    let faces: Vec<_> = body.faces().iter().filter(|f| (f.area - 200.0).abs() < 1e-6).map(|f| f.id).collect();
+    let face = faces[0];
+    let edge = body.edges().iter().find(|e| (e.length - 30.0).abs() < 1e-6).unwrap().id;
+    let mm = MeasureFmt::default();
+
+    // a face: its area; an edge: its length; a vertex: its position
+    let r = s.execute("measure", &json!({"a": {"type": "face", "body": b.0, "face": face}})).unwrap();
+    let rows = measure_rows(&r, &mm);
+    assert_eq!(labels(&rows)[..2], [("Face", "Plane"), ("Area", "200.000 mm²")]);
+    assert!(rows[0].heading && !rows[1].heading);
+    let r = s.execute("measure", &json!({"a": {"type": "edge", "body": b.0, "edge": edge}})).unwrap();
+    assert_eq!(labels(&measure_rows(&r, &mm))[1], ("Length", "30.000 mm"));
+    let r = s.execute("measure", &json!({"a": {"type": "vertex", "body": b.0, "edge": edge, "end": true}})).unwrap();
+    let rows = measure_rows(&r, &mm);
+    assert_eq!(rows[0].label, "Vertex");
+    assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Vertex", "X", "Y", "Z"]);
+    assert_eq!(labels(&rows)[3], ("Z", "30.000 mm"));
+    // a body: its volume, in other units and precision
+    let cm1 = MeasureFmt { precision: 1, unit: 1 };
+    let r = s.execute("measure", &json!({"a": {"body": b.0}})).unwrap();
+    let rows = measure_rows(&r, &cm1);
+    assert!(labels(&rows).contains(&("Volume", "6.0 cm³")), "{rows:?}");
+    assert!(labels(&rows).contains(&("Area", "22.0 cm²")), "{rows:?}");
+
+    // two picks: distance, deltas and angle
+    let r = s
+      .execute("measure", &json!({"a": {"body": b.0, "face": faces[0]}, "b": {"body": b.0, "face": faces[1]}}))
+      .unwrap();
+    let inch = MeasureFmt { precision: 2, unit: 3 };
+    let rows = measure_rows(&r, &inch);
+    assert_eq!(labels(&rows)[0], ("Distance", "1.18 in"));
+    assert!(labels(&rows).contains(&("Angle", "180.00 deg")), "{rows:?}");
+    assert_eq!(MeasureFmt { precision: 0, unit: 0 }.len(-0.2), "0 mm");
+  }
+
+  #[test]
+  fn measure_dialog_shows_the_selection_and_restores_the_filter() {
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 20, "height": 30})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    let edge = app.s.model.body(b).unwrap().edges()[0].id;
+    app.s.selection = vec![Sel::Edge { body: b, edge }];
+    let mut d = Dialog::open(&mut app, Kind::Inspect);
+    assert!(show_once(&mut app, &mut d));
+    assert!(app.sel_filter.vertices, "Measure picks vertices");
+    app.s.selection = vec![Sel::Edge { body: b, edge }, Sel::Body { body: b }];
+    assert!(show_once(&mut app, &mut d));
+    assert!(app.measure.is_some(), "two picks draw the distance line");
+    d.leave(&mut app);
+    assert!(!app.sel_filter.vertices);
+  }
+
+  #[test]
+  fn appearance_panel_applies_swatches_to_bodies_and_faces() {
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 20, "height": 30})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    let face = app.s.model.body(b).unwrap().faces()[0].id;
+    // A opens the panel, not the old form
+    let mut d = Dialog::open(&mut app, Kind::Form(&crate::forms::APPEARANCE));
+    assert_eq!(d.kind, Kind::Appearance);
+    assert!(d.kind.reports());
+    assert!(show_once(&mut app, &mut d));
+
+    let lib = appearance_library(&mut app);
+    assert!(lib.len() >= 16 && lib.iter().any(|(n, _)| n == "Copper"));
+    // a new body shows the default appearance
+    assert_eq!(in_this_design(&app, &lib), [("Steel - Satin".to_string(), [186, 190, 196], 1)]);
+
+    let copper = lib.iter().find(|(n, _)| n == "Copper").unwrap().1;
+    assert!(!apply_appearance(&mut app, "Copper", copper, true, &[Sel::Body { body: b }]), "faces mode needs faces");
+    assert!(apply_appearance(&mut app, "Copper", copper, false, &[Sel::Face { body: b, face }]));
+    assert_eq!(app.s.design.body_color(b), Some(copper));
+    assert!(apply_appearance(&mut app, "#102030", [16, 32, 48], true, &[Sel::Face { body: b, face }]));
+    assert_eq!(app.s.design.face_appearances.len(), 1);
+    let used = in_this_design(&app, &lib);
+    assert_eq!(used, [("Copper".to_string(), copper, 1), ("#102030".to_string(), [16, 32, 48], 1)]);
+  }
+
+  #[test]
+  fn named_views_save_and_restore_the_camera() {
+    let mut app = App::with_session(Session::default());
+    app.cam = fox_engine::render::Camera {
+      target: [5.0, 6.0, 7.0],
+      yaw: 1.0,
+      pitch: 0.3,
+      distance: 321.0,
+      fov: 0.5,
+      ortho: true,
+      roll: 0.0,
+    };
+    let saved = app.cam;
+    let name = app.save_named_view().unwrap();
+    assert_eq!(name, "Named View 1");
+    assert!(app.s.dirty, "named views save with the design");
+    app.cam = fox_engine::render::Camera::default();
+    app.restore_named_view(&name);
+    assert_eq!(app.cam_move.map(|m| m.1), Some(saved));
+    // the round trip through the design's JSON keeps it
+    let json = serde_json::to_string(&app.s.design).unwrap();
+    let back: fox_engine::model::Design = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.named_views, app.s.design.named_views);
   }
 }

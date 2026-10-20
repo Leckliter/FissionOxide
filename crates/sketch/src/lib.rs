@@ -13,6 +13,7 @@ mod conic;
 mod curve3d;
 mod edit;
 mod ellipse;
+mod fitquintic;
 mod fitspline;
 mod fonts;
 mod freeform;
@@ -35,8 +36,9 @@ pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
+pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};
 pub use solve::{SolveReport, SolveStatus};
-pub use text::{SketchText, TextId, text_fonts};
+pub use text::{HAlign, SketchText, TextId, TextStyle, VAlign, text_fonts};
 pub use transform::{TransformReport, Xform2};
 
 /// The sketch origin: always present, always fixed at (0, 0).
@@ -109,7 +111,7 @@ pub enum CurveKind {
     end: PointId,
   },
   /// A smooth curve through fit points, drawn as cubic pieces: in a sketch with
-  /// [`behaviour::QUINTIC_FIT_SPLINE`] Fusion's minimum-energy quintic (see `quintic`), closed
+  /// [`behaviour::QUINTIC_FIT_SPLINE`] Fusion's minimum-energy quintic (see `fitquintic`), closed
   /// (periodic, no corner at the start) when the last point is the first; in older sketches a
   /// Catmull-Rom spline, one piece per gap.
   Spline {
@@ -167,6 +169,12 @@ pub enum CurveKind {
     apex: PointId,
     rho: f64,
   },
+  /// A clamped quintic B-spline through its first and last of ten control points, its five
+  /// spans even (knots 0 ×6, 0.2, 0.4, 0.6, 0.8, 1 ×6): Fusion's fitted spline through two
+  /// points, as Blend Curve makes.
+  QuinticSpline {
+    points: Vec<PointId>,
+  },
 }
 
 impl CurveKind {
@@ -185,6 +193,7 @@ impl CurveKind {
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
         | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. }
     )
   }
 
@@ -538,6 +547,11 @@ impl Sketch {
     {
       return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
     }
+    if let CurveKind::QuinticSpline { points } = &kind
+      && points.len() != QUINTIC_POINTS
+    {
+      return Err(SketchError::InvalidValue(format!("a quintic spline needs {QUINTIC_POINTS} control points")));
+    }
     if let CurveKind::Bezier { points } = &kind
       && (points.len() < 4 || points.len() > 3001 || points.len() % 3 != 1)
     {
@@ -702,7 +716,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => None,
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => None,
     }
   }
 
@@ -755,6 +770,10 @@ impl Sketch {
         (Some(s), Some(a), Some(e)) if dist(s, e) > 1e-9 => vec![Seg::Conic { p: [s, a, e], w: conic_weight(*rho) }],
         _ => Vec::new(),
       },
+      CurveKind::QuinticSpline { points } => match quintic::ctrl_of(points, &|p| self.pos(p)) {
+        Some(p) if dist(p[0], p[QUINTIC_POINTS - 1]) > 1e-9 => vec![Seg::Quintic { p }],
+        _ => Vec::new(),
+      },
       _ => self.beziers(id).into_iter().map(|p| Seg::Bezier { p }).collect(),
     }
   }
@@ -797,7 +816,7 @@ impl Sketch {
             add([p[0] + r, p[1] + r]);
           }
         }
-        CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+        CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } | CurveKind::QuinticSpline { .. } => {
           for p in curve_points(&c.kind) {
             if let Some(p) = self.pos(p) {
               add(p);
@@ -867,7 +886,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => {
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;
@@ -1064,7 +1084,9 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
       .chain(*start_curvature)
       .chain(*end_curvature)
       .collect(),
-    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
+    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
+      points.clone()
+    }
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
     CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
     CurveKind::Conic { start, end, apex, .. } => vec![*start, *apex, *end],
@@ -1103,6 +1125,9 @@ pub fn kind_beziers(
       (Some(s), Some(a), Some(e)) => conic_beziers(&[s, a, e], conic_weight(*rho)),
       _ => Vec::new(),
     },
+    CurveKind::QuinticSpline { points } => {
+      quintic::ctrl_of(points, pos).map(|p| quintic_beziers(&p)).unwrap_or_default()
+    }
     _ => Vec::new(),
   }
 }
@@ -1140,8 +1165,8 @@ pub(crate) fn spline_fit(
   let closed = spline_closed(points);
   let ids = if closed { &points[..points.len() - 1] } else { &points[..] };
   let pts: Vec<[f64; 2]> = ids.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
-  let ends = if closed { (quintic::End::Free, quintic::End::Free) } else { spline_ends(kind, pos) };
-  match quintic::Quintic::fit_ends(&pts, closed, ends) {
+  let ends = if closed { (fitquintic::End::Free, fitquintic::End::Free) } else { spline_ends(kind, pos) };
+  match fitquintic::Quintic::fit_ends(&pts, closed, ends) {
     Some(q) => Some(q.beziers()),
     None => {
       let mut pts = pts;
@@ -1164,7 +1189,7 @@ pub fn fit_point_beziers(pts: &[[f64; 2]], closed: bool, quintic: bool) -> Vec<[
   }
   let closed = closed && pts.len() >= 3;
   let inner = if closed { &pts[..pts.len() - 1] } else { pts };
-  match quintic::Quintic::fit(inner, closed, (None, None)) {
+  match fitquintic::Quintic::fit(inner, closed, (None, None)) {
     Some(q) => q.beziers().0,
     None => spline_beziers(pts),
   }
@@ -1187,13 +1212,13 @@ pub(crate) fn spline_handles(
     return None;
   }
   let pts: Vec<[f64; 2]> = points.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
-  quintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.handles()
+  fitquintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.handles()
 }
 
 /// How each end of an open fit-point spline is held: smooth with both handles, by its tangent
 /// handle alone, or free.
-fn spline_ends(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> (quintic::End, quintic::End) {
-  use quintic::End;
+fn spline_ends(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> (fitquintic::End, fitquintic::End) {
+  use fitquintic::End;
   let CurveKind::Spline { start_handle, end_handle, start_curvature, end_curvature, .. } = kind else {
     return (End::Free, End::Free);
   };
@@ -1218,7 +1243,7 @@ pub(crate) fn spline_end_frame(
     return None;
   }
   let pts: Vec<[f64; 2]> = points.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
-  let (p, d1, d2) = quintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.end_derivs(at_end);
+  let (p, d1, d2) = fitquintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.end_derivs(at_end);
   let speed = d1[0].hypot(d1[1]);
   if !(speed > 1e-12) {
     return None;

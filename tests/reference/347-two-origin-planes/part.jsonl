@@ -1,0 +1,11 @@
+# 347-two-origin-planes: added by the parity loop from a Fusion probe
+# two-origin-planes: 40x20x30 box at y 5..25, z 0..30; midplane between the XY and XZ origin planes (a 45 deg plane through the X axis); box split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 5], [40, 5]]}
+{"cmd": "sketch.line", "points": [[40, 5], [40, 25]]}
+{"cmd": "sketch.line", "points": [[40, 25], [0, 25]]}
+{"cmd": "sketch.line", "points": [[0, 25], [0, 5]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "plane", "method": "midplane", "a": "xy", "b": "xz"}
+{"cmd": "split", "plane": {"feature": 3}}

@@ -1,0 +1,271 @@
+{
+ "id": "circle-triangle-slanted-axis",
+ "name": "Hole circle and triangle cutout mirrored about a diagonal",
+ "description": "50x50 square plate on XY from the origin; construction diagonal from (0,0) to (50,50); a radius-5 circle at (38,30) and a triangle (15,5),(35,5),(35,15) below the diagonal, mirrored about it to a circle at (30,38) and a triangle (5,15),(5,35),(15,35); the plate minus the four holes extruded 8.",
+ "exercises": [
+  "sketch mirror",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it.",
+  "sketch_mirror": "a 'mirror' sketch entity copies 'curves' about the sketch line 'line' with symmetry constraints (Fusion's Sketch Mirror); its copies are '<id>.0', '<id>.1', ... in input order."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       0
+      ]
+     },
+     "id": "r1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "r1.end",
+      "at": [
+       50,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       50
+      ]
+     },
+     "id": "r2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "r2.end",
+      "at": [
+       50,
+       50
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       50
+      ]
+     },
+     "id": "r3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "r3.end",
+      "at": [
+       0,
+       50
+      ]
+     },
+     "end": {
+      "ref": "r1.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "r4"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "r1.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "ref": "r2.end",
+      "at": [
+       50,
+       50
+      ]
+     },
+     "id": "ax",
+     "construction": true
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       38,
+       30
+      ]
+     },
+     "radius": 5,
+     "id": "c1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       15,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       35,
+       5
+      ]
+     },
+     "id": "t1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "t1.end",
+      "at": [
+       35,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       35,
+       15
+      ]
+     },
+     "id": "t2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "t2.end",
+      "at": [
+       35,
+       15
+      ]
+     },
+     "end": {
+      "ref": "t1.start",
+      "at": [
+       15,
+       5
+      ]
+     },
+     "id": "t3"
+    },
+    {
+     "type": "mirror",
+     "curves": [
+      "c1",
+      "t1",
+      "t2",
+      "t3"
+     ],
+     "line": "ax",
+     "id": "m"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1",
+        "r2",
+        "r3",
+        "r4"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "c1"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "t1",
+        "t2",
+        "t3"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "m.0"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "m.1",
+        "m.2",
+        "m.3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   }
+  }
+ ]
+}

@@ -1,0 +1,169 @@
+{
+ "id": "sketch-line-revolve",
+ "name": "sketch-line-revolve",
+ "description": "XY sketch: diagonal line (0,0)-(20,20) and a 4x4 square at x 10..14, y 0..4; axis through the sketch line; square revolved 360 deg about it.",
+ "exercises": [
+  "sketch",
+  "construction_axis edge (sketch line)",
+  "revolve"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "d1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       10,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       14,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       14,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       14,
+       4
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       14,
+       4
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       10,
+       4
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       10,
+       4
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       10,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_axis",
+   "name": "Axis1",
+   "method": "edge",
+   "edge": {
+    "sketch": "Base_sketch",
+    "curve": "d1"
+   }
+  },
+  {
+   "op": "revolve",
+   "name": "Revolve1",
+   "operation": "new",
+   "profile": {
+    "sketch": "Base_sketch",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "ref": "Axis1"
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

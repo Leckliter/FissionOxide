@@ -1,0 +1,243 @@
+{
+ "id": "sphere-intersect-cube-yz",
+ "name": "Sphere primitive: sphere-intersect-cube-yz",
+ "description": "40x40x40 cube X/Y -20..20, Z 0..40; sphere primitive r=25 on YZ (x=+Y, y=+Z) at (0,20) = world (0,0,20), intersect: cube with corners rounded off by the sphere.",
+ "exercises": [
+  "sphere"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       -20,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       -20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       20,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       20,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       -20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       -20,
+       20
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       -20,
+       -20
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 40,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Sphere1_sketch",
+   "plane": {
+    "ref": "YZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     1,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "d1",
+     "start": {
+      "at": [
+       25,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       -25,
+       20
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "ref": "d1.end",
+      "at": [
+       -25,
+       20
+      ]
+     },
+     "mid": {
+      "at": [
+       0,
+       45
+      ]
+     },
+     "end": {
+      "ref": "d1.start",
+      "at": [
+       25,
+       20
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Sphere1",
+   "operation": "intersect",
+   "profile": {
+    "sketch": "Sphere1_sketch",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "d1",
+       "a1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "sketch": "Sphere1_sketch",
+    "curve": "d1"
+   },
+   "angle": 360
+  }
+ ]
+}

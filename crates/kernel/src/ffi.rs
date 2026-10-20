@@ -111,6 +111,7 @@ pub(crate) mod ffi {
     fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
     fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
     fn draft(s: &Shape, faces: &[u32], plane: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
+    fn draft_two_sided(s: &Shape, faces: &[u32], plane: &[f64], angle: f64, angle2: f64) -> Result<UniquePtr<Shape>>;
 
     fn edge_at_index(s: &Shape, edge: u32) -> Result<UniquePtr<Shape>>;
     fn min_distance(a: &Shape, b: &Shape) -> Result<Vec<f64>>;
@@ -202,6 +203,19 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // form (T-spline / subdivision) bodies (cpp/form.cpp)
+    include!("fox-kernel/cpp/form.hxx");
+    fn bspline_face(
+      degree: u32,
+      nu: u32,
+      nv: u32,
+      poles: &[f64],
+      uknots: &[f64],
+      umults: &[u32],
+      vknots: &[f64],
+      vmults: &[u32],
+    ) -> Result<UniquePtr<Shape>>;
   }
 }
 

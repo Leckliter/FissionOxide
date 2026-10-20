@@ -1,0 +1,118 @@
+{
+ "id": "sphere-xy-offset-center",
+ "name": "Sphere primitive: sphere-xy-offset-center",
+ "description": "Sphere primitive on XY, centre (10,5) in plane coords, diameter 30, new body: spans X -5..25, Y -10..20, Z -15..15.",
+ "exercises": [
+  "sphere"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sphere1_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "d1",
+     "start": {
+      "at": [
+       25,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       -5,
+       5
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "ref": "d1.end",
+      "at": [
+       -5,
+       5
+      ]
+     },
+     "mid": {
+      "at": [
+       10,
+       20
+      ]
+     },
+     "end": {
+      "ref": "d1.start",
+      "at": [
+       25,
+       5
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Sphere1",
+   "operation": "new",
+   "profile": {
+    "sketch": "Sphere1_sketch",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "d1",
+       "a1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "sketch": "Sphere1_sketch",
+    "curve": "d1"
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Sphere"
+   ]
+  }
+ ]
+}

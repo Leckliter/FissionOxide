@@ -7,6 +7,7 @@ use fox_engine::Session;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
 use fox_engine::model::BodyId;
 use fox_engine::scene::JointMark;
+use fox_engine::sketch::{CurveId, Sketch};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
@@ -54,10 +55,12 @@ impl Dialog {
     fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok()
   }
 
-  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer) or face (Press Pull).
+  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer) or face (Press Pull), or the
+  /// offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
       Kind::PressPull => json!(self.faces.first()),
+      Kind::SkOffset => json!({"offset": self.curves}),
       _ => json!(self.edges.first()),
     }
   }
@@ -72,6 +75,13 @@ impl Dialog {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
+        }
+      }
+      // the offset curves stay as they are under the preview
+      Kind::SkOffset => {
+        let key = self.anchor_key();
+        if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
+          self.manip.anchor = offset_anchor(s, &self.curves).map(|(o, d)| (key, o, d));
         }
       }
       Kind::Move if self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
@@ -93,14 +103,14 @@ impl Dialog {
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
   /// along the first face's normal).
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
-    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull) || self.editing.is_some() {
+    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
       return None;
     }
     let (key, origin, dir) = self.manip.anchor.as_ref()?;
     if *key != self.anchor_key() {
       return None;
     }
-    let field = if self.kind == Kind::PressPull { &self.distance } else { &self.radius };
+    let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
     Some(Manipulator { origin: *origin, dir: *dir, value: self.len(s, field)? })
   }
 
@@ -111,9 +121,41 @@ impl Dialog {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
       Kind::Fillet | Kind::Chamfer => self.radius = mm(v.max(step.max(1e-3))),
       Kind::PressPull => self.distance = mm(v),
+      // an offset is never zero: it keeps to the side it is on
+      Kind::SkOffset => {
+        self.distance = mm(nonzero(v, step));
+        self.follow = false;
+      }
       _ => return false,
     }
     true
+  }
+
+  /// Does Sketch Offset follow the cursor (curves picked, not placed by a click yet)?
+  pub(crate) fn follows_cursor(&self) -> bool {
+    self.kind == Kind::SkOffset && self.follow && !self.curves.is_empty() && self.editing.is_none()
+  }
+
+  /// A click placed the offset: it stays where it is.
+  pub(crate) fn stop_following(&mut self) {
+    self.follow = false;
+  }
+
+  /// Sets Sketch Offset's distance and side from the cursor at `at` (sketch coordinates, open
+  /// sketch), rounded to `step`.
+  pub(crate) fn follow_cursor(&mut self, s: &Session, at: [f64; 2], step: f64) {
+    if !self.follows_cursor() {
+      return;
+    }
+    let Some(sketch) = s.edit_sketch.and_then(|sk| s.design.sketch(sk).ok()) else { return };
+    let curves: Vec<CurveId> = self.curves.iter().map(|c| CurveId(*c)).collect();
+    let Some(v) = offset_at(sketch, &curves, at) else { return };
+    let v = if step > 0.0 { (v / step).round() * step } else { v };
+    let text = mm(nonzero(v, step));
+    if text != self.distance {
+      self.distance = text;
+      self.dirty = true;
+    }
   }
 
   /// Move's translation and its rotation (about a world axis through the origin, applied after
@@ -250,6 +292,84 @@ fn centre(s: &Session, bodies: &[u32]) -> Option<DVec3> {
     }
   }
   (area > 0.0).then(|| sum / area)
+}
+
+/// `v`, or the smallest step on its side when it rounds to nothing.
+fn nonzero(v: f64, step: f64) -> f64 {
+  let min = step.max(1e-3);
+  if v.abs() >= min {
+    v
+  } else if v < 0.0 {
+    -min
+  } else {
+    min
+  }
+}
+
+/// The signed Sketch Offset distance that puts the offset of `curves` through `at`: its distance
+/// from the curves, positive on the side a positive offset goes (outward for a closed chain, to
+/// the left for an open one).
+pub(crate) fn offset_at(sketch: &Sketch, curves: &[CurveId], at: [f64; 2]) -> Option<f64> {
+  let d0 = curves.iter().filter_map(|c| sketch.distance_to_curve(*c, at)).min_by(f64::total_cmp)?;
+  if d0 < 1e-9 {
+    return None;
+  }
+  // which side: the offset by d0 on that side runs through the cursor
+  let miss = |d: f64| -> Option<f64> {
+    let mut trial = sketch.clone();
+    let made = trial.offset(curves, d).ok()?;
+    made.iter().filter_map(|c| trial.distance_to_curve(*c, at)).min_by(f64::total_cmp)
+  };
+  match (miss(d0), miss(-d0)) {
+    (Some(p), Some(n)) => Some(if p <= n { d0 } else { -d0 }),
+    (Some(_), None) => Some(d0),
+    (None, Some(_)) => Some(-d0),
+    (None, None) => None,
+  }
+}
+
+/// The offset arrow's base and direction: the middle of the first offset curve, pointing the way
+/// a positive offset moves it.
+fn offset_anchor(s: &Session, curves: &[u32]) -> Option<(DVec3, DVec3)> {
+  let sk = s.edit_sketch?;
+  let sketch = s.design.sketch(sk).ok()?;
+  let plane = s.model.sketches.get(&sk)?.plane;
+  let ids: Vec<CurveId> = curves.iter().map(|c| CurveId(*c)).collect();
+  let first = sketch.curve(*ids.first()?)?;
+  let line = fox_engine::scene::curve_polyline(sketch, &first.kind);
+  let m = if line.len() == 2 {
+    [(line[0][0] + line[1][0]) / 2.0, (line[0][1] + line[1][1]) / 2.0]
+  } else {
+    *line.get(line.len() / 2)?
+  };
+  let (lo, hi) = sketch.bounds()?;
+  let d = ((hi[0] - lo[0]).hypot(hi[1] - lo[1]) * 1e-3).max(1e-3);
+  let mut trial = sketch.clone();
+  let made = trial.offset(&ids, d).ok()?;
+  // the offset copy's nearest point: the arrow points there
+  let mut best: Option<(f64, [f64; 2])> = None;
+  for c in made {
+    let Some(k) = trial.curve(c) else { continue };
+    let pts = fox_engine::scene::curve_polyline(&trial, &k.kind);
+    for w in pts.windows(2) {
+      let q = closest_on_segment(w[0], w[1], m);
+      let dist = (q[0] - m[0]).hypot(q[1] - m[1]);
+      if best.is_none_or(|b| dist < b.0) {
+        best = Some((dist, q));
+      }
+    }
+  }
+  let q = best?.1;
+  let origin = plane.to_world(m);
+  let dir = (plane.to_world(q) - origin).try_normalize()?;
+  Some((origin, dir))
+}
+
+fn closest_on_segment(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> [f64; 2] {
+  let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+  let l2 = dx * dx + dy * dy;
+  let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+  [a[0] + dx * t, a[1] + dy * t]
 }
 
 /// Where an arrow sits and points for a picked edge (its midpoint, out between its faces) or face
@@ -481,5 +601,46 @@ mod tests {
     s.selection = vec![Sel::Vertex { body: BodyId(base), edge: v.0, end: v.1 }];
     let o = super::super::sel_origins(&s);
     assert_eq!(o, vec![(base, json!({"at": v.2.to_array()}))]);
+  }
+
+  #[test]
+  fn sketch_offset_follows_the_cursor_to_either_side() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let l = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let line = l["curves"][0].as_u64().unwrap() as u32;
+    let sk = s.edit_sketch.unwrap();
+    let sketch = s.design.sketch(sk).unwrap().clone();
+    // an open curve offsets to its left for a positive distance
+    let ids = [CurveId(line)];
+    assert!((offset_at(&sketch, &ids, [5.0, 3.0]).unwrap() - 3.0).abs() < 1e-9);
+    assert!((offset_at(&sketch, &ids, [5.0, -2.0]).unwrap() + 2.0).abs() < 1e-9);
+    assert_eq!(offset_at(&sketch, &ids, [5.0, 0.0]), None, "on the curve: no offset");
+    // the dialog follows the cursor until a click places it, with the arrow on the curve
+    let mut d = Dialog::blank(Kind::SkOffset);
+    d.follow = true;
+    d.curves = vec![line];
+    assert!(d.follows_cursor());
+    d.follow_cursor(&s, [4.0, -2.04], 0.1);
+    assert_eq!(d.distance, "-2 mm");
+    assert!(d.dirty);
+    d.refresh_manip(&s);
+    let m = d.more_manipulator(&s).expect("an offset arrow");
+    assert!(close(m.origin, DVec3::new(5.0, 0.0, 0.0)) && close(m.dir, DVec3::Y), "{:?} {:?}", m.origin, m.dir);
+    assert!((m.value + 2.0).abs() < 1e-9);
+    d.stop_following();
+    d.follow_cursor(&s, [4.0, 7.0], 0.1);
+    assert_eq!(d.distance, "-2 mm", "placed: the cursor no longer moves it");
+    // dragging the arrow sets the distance and stops the following too
+    d.follow = true;
+    assert!(d.set_more_manipulator(3.0, 0.1));
+    assert_eq!(d.distance, "3 mm");
+    assert!(!d.follows_cursor());
+    // a closed chain offsets outward for a positive distance
+    run(&mut s, "sketch.rect", json!({"corner1": [20, 0], "corner2": [30, 10]}));
+    let sketch = s.design.sketch(sk).unwrap().clone();
+    let rect: Vec<CurveId> = sketch.curves.iter().skip(1).map(|c| c.id).collect();
+    assert!((offset_at(&sketch, &rect, [35.0, 5.0]).unwrap() - 5.0).abs() < 1e-9);
+    assert!((offset_at(&sketch, &rect, [25.0, 8.0]).unwrap() + 2.0).abs() < 1e-9);
   }
 }

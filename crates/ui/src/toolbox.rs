@@ -1,5 +1,6 @@
 //! The S toolbox ("Design Shortcuts"), as in Fusion: S over the canvas opens a small box at the
-//! pointer with the recently used commands and a search field. Typing lists every command of
+//! pointer with the commands added to it (Add to Shortcuts), the recently used ones and a search
+//! field. Typing lists every command of
 //! the workspace whose name matches; arrows and Enter, or a click, run one.
 
 use egui::{Color32, Key, Modifiers, Pos2, Rect, Stroke, Vec2, pos2, vec2};
@@ -7,6 +8,7 @@ use egui::{Color32, Key, Modifiers, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use crate::icons;
 use crate::menus::{self, Entry};
 use crate::panels::{Cmd, Tab};
+use crate::tips::Scope;
 use crate::{App, theme};
 
 /// How many recent commands the box remembers and shows.
@@ -30,7 +32,7 @@ impl Toolbox {
 
 /// The toolbar tabs whose commands the box offers: the active workspace's, the open sketch's
 /// first, then the tab showing, then the rest of the Design workspace.
-fn workspace_tabs(app: &App) -> Vec<Tab> {
+pub(crate) fn workspace_tabs(app: &App) -> Vec<Tab> {
   if app.drawing.is_some() {
     return vec![Tab::Drawing];
   }
@@ -92,9 +94,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   let Some(mut tb) = app.toolbox.take() else { return };
   let tabs = workspace_tabs(app);
   let entries = menus::commands(&tabs);
-  let recent: Vec<Entry> =
-    app.recent.iter().filter_map(|c| entries.iter().find(|e| e.cmd == *c).copied()).take(RECENT).collect();
+  let recent = shortcut_row(app, &entries);
   let hits = search(&entries, &tb.query);
+  let keys: Vec<String> =
+    hits.iter().take(MAX_ROWS).map(|e| menus::key_of(&app.prefs, Scope::of(e.tab), e.label).to_string()).collect();
 
   // keys, taken before the search field sees them
   let (up, down, enter, esc) = ctx.input_mut(|i| {
@@ -160,7 +163,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
         ui.spacing_mut().item_spacing.y = 0.0;
         for (k, e) in hits.iter().take(MAX_ROWS).enumerate() {
-          if row(ui, e, k == tb.sel).clicked() {
+          if row(ui, e, &keys[k], k == tb.sel).clicked() {
             run = Some(e.cmd);
           }
         }
@@ -185,8 +188,22 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   }
 }
 
+/// The box's icon row: the commands the user added to it, then the recent ones.
+fn shortcut_row(app: &App, entries: &[Entry]) -> Vec<Entry> {
+  let added = app.prefs.shortcuts.iter().filter_map(|id| entries.iter().find(|e| e.id() == *id));
+  let recent = app.recent.iter().filter_map(|c| entries.iter().find(|e| e.cmd == *c));
+  let mut out: Vec<Entry> = Vec::new();
+  for e in added.chain(recent) {
+    if !out.iter().any(|o| o.cmd == e.cmd) {
+      out.push(*e);
+    }
+  }
+  out.truncate(RECENT.max(app.prefs.shortcuts.len()));
+  out
+}
+
 /// One match: icon, name, and the shortcut key or the tab it comes from.
-fn row(ui: &mut egui::Ui, e: &Entry, hot: bool) -> egui::Response {
+fn row(ui: &mut egui::Ui, e: &Entry, key: &str, hot: bool) -> egui::Response {
   let (rect, resp) = ui.allocate_exact_size(vec2(WIDTH, 24.0), egui::Sense::click());
   let p = ui.painter();
   if hot || resp.hovered() {
@@ -204,8 +221,8 @@ fn row(ui: &mut egui::Ui, e: &Entry, hot: bool) -> egui::Response {
     egui::FontId::proportional(12.5),
     theme::TEXT,
   );
-  let hint = if e.key.is_empty() { e.tab.label().to_string() } else { e.key.to_string() };
-  let color = if e.key.is_empty() { Color32::from_gray(150) } else { theme::TEXT };
+  let hint = if key.is_empty() { e.tab.label().to_string() } else { key.to_string() };
+  let color = if key.is_empty() { Color32::from_gray(150) } else { theme::TEXT };
   p.text(
     pos2(rect.right() - 6.0, rect.center().y),
     egui::Align2::RIGHT_CENTER,

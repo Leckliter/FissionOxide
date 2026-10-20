@@ -58,3 +58,52 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+332-cylinder-axis-circular-pattern
+334-torus-axis-circular-pattern
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+322-rigid-face-offset-angle
+323-revolute-hole-edge-on-pin
+324-cylindrical-hole-face-on-pin
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+335-box-vertical-edge-pattern
+336-prism-slanted-edge-pattern
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+348-xz-plane-offset-mirror
+349-top-face-offset-mirror
+350-side-face-negative-offset-mirror-join
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+356-box-corner-three-vertices
+357-sketch-points-and-vertex
+358-sketch-on-plane-hole
+359-sketch-on-plane-reversed-order
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+391-cylinder-angle-from-xz
+392-offset-cylinder-angle-from-yz
+393-cylinder-at-vertex
+394-sphere-at-vertex
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+403-bodies-partial-angle
+404-bodies-symmetric-angle
+405-features-cut-half-turn
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+423-planar-emboss-ring
+424-planar-deboss
+425-planar-emboss-offset-rotated
+426-cylinder-emboss-wrap
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+421-to-curved-face-join
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+491-cut-two-tools-keep
+492-join-two-tools
+493-intersect-two-tools
+494-cut-splits-target
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+495-delete-fillet-feature
+496-delete-second-body
+497-delete-cut-keep-chamfer
+498-delete-consumed-sketch
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+499-flipped-two-faces
+500-mid-plane-single
+501-mid-plane-symmetric
+502-mid-plane-two-angles

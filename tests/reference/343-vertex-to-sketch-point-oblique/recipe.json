@@ -1,0 +1,216 @@
+{
+ "id": "vertex-to-sketch-point-oblique",
+ "name": "vertex-to-sketch-point-oblique",
+ "description": "20x10x5 box; sketch point (-10,10) on XY; axis through vertex (20,0,5) then the sketch point (oblique 3D line); body patterned 2x over 90 deg about it.",
+ "exercises": [
+  "extrude",
+  "sketch_point",
+  "construction_axis two_points",
+  "circular_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Point_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "point",
+     "id": "p1",
+     "at": [
+      -10,
+      10
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_axis",
+   "name": "Axis1",
+   "method": "two_points",
+   "a": {
+    "vertex": [
+     20,
+     0,
+     5
+    ]
+   },
+   "b": {
+    "sketch": "Point_sketch",
+    "point": "p1"
+   }
+  },
+  {
+   "op": "circular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "axis": {
+    "ref": "Axis1"
+   },
+   "count": 2,
+   "total_angle": 90
+  }
+ ]
+}

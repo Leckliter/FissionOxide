@@ -1,0 +1,5 @@
+# 468-inch-units-plate-hole: added by the parity loop from a Fusion probe
+# inch-units-plate-hole: inch DXF (INSUNITS 1): 2x1 in plate with r0.25 in hole at (0.5,0.5) in, inserted on XY at the origin; plate region extruded 5 mm.
+# hand-written; reads part.dxf from the case folder (absolute path)
+{"cmd": "import", "path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/importdxffilecommand/inch-units-plate-hole/part.dxf", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "extrude", "sketch": 1, "profiles": [[40, 5]], "distance": 5, "operation": "new_body"}

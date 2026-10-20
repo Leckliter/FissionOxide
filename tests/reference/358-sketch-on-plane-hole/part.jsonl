@@ -1,0 +1,14 @@
+# 358-sketch-on-plane-hole: added by the parity loop from a Fusion probe
+# sketch-on-plane-hole: 40x30x20 box; plane through the vertices (40,0,0), (0,30,0), (0,0,20); sketch on it, circle r2 at sketch (1,1), cut 6 mm in the negative normal direction (into the box).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane", "method": "three_points", "a": {"at": [40, 0, 0]}, "b": {"at": [0, 30, 0]}, "c": {"at": [0, 0, 20]}}
+{"cmd": "sketch.create", "plane": {"feature": 3}}
+{"cmd": "sketch.circle", "center": [1, 1], "radius": 2}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 4, "distance": 6, "operation": "cut", "flip": true}

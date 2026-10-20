@@ -1,0 +1,6 @@
+# 420-start-offset-flip-taper: added by the parity loop from a Fusion probe
+# start-offset-flip-taper: Circle r=10 at origin on XY; extrude starts 5 mm below the sketch plane (offset -5) and runs 12 mm in the negative direction with a -8 deg (outward) taper.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 12, "flip": true, "start": -5, "taper": "8 deg", "operation": "new_body"}

@@ -80,6 +80,98 @@ def cargo_env(slot):
 
 # ---- budget ------------------------------------------------------------------------------------
 
+def tests_passed(p):
+  """Whether a cargo test run passed. On Windows, fox-kernel's test binary (on main too) crashes
+  with STATUS_ACCESS_VIOLATION while exiting, after every test has passed; that's not a failure of
+  the branch, so a run counts by its test results when the only problem is that exit crash."""
+  if p.returncode == 0:
+    return True
+  out = p.stdout + p.stderr
+  return ("STATUS_ACCESS_VIOLATION" in out and "test result: ok" in out and "test result: FAILED" not in out
+          and "could not compile" not in out and "panicked" not in out)
+
+
+def foreign_commits(wt, base, branch):
+  """Commits on this fixer branch that are also on another parity/* branch: a fixer must branch
+  from main alone, never from (or copy) another fixer's work."""
+  mine = sh(["git", "rev-list", f"{base}..HEAD"], cwd=wt).stdout.split()
+  others = [r for r in sh(["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/parity/"], cwd=wt
+                          ).stdout.split() if r != branch]
+  found = []
+  for o in others:
+    theirs = set(sh(["git", "rev-list", f"{base}..{o}"], cwd=wt).stdout.split())
+    # Shared commits make this branch the copier unless all of its commits are in theirs (then
+    # the other branch was built on this one, and this one is the original).
+    if theirs & set(mine) and not set(mine) <= theirs:
+      found.append(o)
+  return found
+
+
+def crashed_without_failures(p):
+  """A test binary that died of a native crash (STATUS_*) before reporting any failing test."""
+  out = p.stdout + p.stderr
+  return ("STATUS_" in out and "test result: FAILED" not in out and "panicked" not in out
+          and "could not compile" not in out)
+
+
+def workspace_packages(root):
+  """Every FissionOxide crate's Cargo package name."""
+  out = []
+  for top in ("crates", "apps"):
+    d = os.path.join(root, top)
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+      toml = os.path.join(d, name, "Cargo.toml")
+      if os.path.exists(toml):
+        with open(toml, encoding="utf-8") as fh:
+          pkg = next((l.split("=", 1)[1].strip().strip('"') for l in fh if l.startswith("name")), None)
+        if pkg:
+          out.append(pkg)
+  return out
+
+
+def fresh_slot_for(wt, env):
+  """Fixer slots share a cargo target directory across worktrees, and cargo hashes workspace crates
+  the same in every worktree and checks freshness by file times, so a slot can reuse what another
+  branch compiled (a build script listing a file this branch lacks; or worse, another branch's
+  code passing this branch's tests). When the slot changes worktree, clean the workspace crates;
+  third-party crates stay cached."""
+  marker = os.path.join(env["CARGO_TARGET_DIR"], "parity-worktree.txt")
+  try:
+    with open(marker, encoding="utf-8") as f:
+      last = f.read().strip()
+  except OSError:
+    last = None
+  if last == os.path.normcase(wt):
+    return
+  if os.path.isdir(env["CARGO_TARGET_DIR"]):
+    pkgs = workspace_packages(wt)
+    sh(["cargo", "clean"] + [a for p in pkgs for a in ("-p", p)], cwd=wt, check=False, env=env, timeout=1800)
+  os.makedirs(env["CARGO_TARGET_DIR"], exist_ok=True)
+  with open(marker, "w", encoding="utf-8") as f:
+    f.write(os.path.normcase(wt))
+
+
+def touched_packages(wt, base):
+  """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
+  crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
+  files = sh(["git", "diff", "--name-only", f"{base}...HEAD"], cwd=wt).stdout.split()
+  pkgs = []
+  for f in files:
+    parts = f.split("/")
+    if len(parts) < 3 or parts[0] not in ("crates", "apps"):
+      continue
+    crate = os.path.join(wt, parts[0], parts[1])
+    if not os.path.exists(os.path.join(crate, "src", "lib.rs")):
+      continue
+    with open(os.path.join(crate, "Cargo.toml"), encoding="utf-8") as fh:
+      name = next((l.split("=", 1)[1].strip().strip('"') for l in fh if l.startswith("name")), None)
+    if name and name not in pkgs:
+      pkgs.append(name)
+  if any(p in pkgs for p in ("fox-sketch", "fox-engine")):
+    pkgs += [p for p in ("fox-sketch", "fox-engine") if p not in pkgs]
+  return pkgs
+
+
 class Budget:
   """Caps what this run spends on agents; parity/loop/state.json keeps the running totals."""
 
@@ -113,7 +205,7 @@ class Budget:
     state["runs"] = state["runs"][-500:]
     with open(self.path + ".tmp", "w", encoding="utf-8") as f:
       json.dump(state, f, indent=1)
-    os.replace(self.path + ".tmp", self.path)
+    L.replace(self.path + ".tmp", self.path)
     print(f"  [{kind}] {key}: ${meta.get('cost_usd', 0):.2f}, {meta.get('tokens', 0):,} tokens "
           f"(run total ${self.spent_usd:.2f} of ${self.usd:.2f})", flush=True)
 
@@ -178,6 +270,7 @@ class Loop:
     self.fixing = set()
     self.halt = None  # set when the subscription's usage limit stops an agent
     self.halt_reset = None  # Unix time it resets, when the agent reported one
+    self.fusion_down = None  # set when FoxBridge stops answering mid-run
     self.started = 0  # probes and fixers this run started
     self.claimed = set()  # cargo target slots this process holds
     os.environ["FOX_CLI"] = fox_cli()
@@ -220,9 +313,14 @@ class Loop:
     for t in probers:
       t.cancel()
     await asyncio.gather(*probers, return_exceptions=True)
-    for key in running:
-      self.put_back(key, "still probing at the Fusion cutoff")
-    await asyncio.to_thread(clear_fusion)
+    try:
+      for key in running:
+        try:
+          self.put_back(key, "still probing at the Fusion cutoff")
+        except Exception as ex:  # the entry stays probing and resumes; Fusion must still be cleared
+          print(f"  couldn't put {key} back: {ex}", flush=True)
+    finally:
+      await asyncio.to_thread(clear_fusion)
     print(f"[{stamp()}] Fusion cutoff: probes stopped, scratch documents closed; fixers continue", flush=True)
 
   def stop_requested(self):
@@ -238,6 +336,25 @@ class Loop:
     self.ledger.update(key, note=f"{kind} stopped by the usage limit (resets {resets}); the next run resumes it")
     print(f"  STOP: {self.halt}", flush=True)
     return True
+
+  def fresh_base(self):
+    """origin/<base> just fetched: fixers start from, and are tested against, current main."""
+    sh(["git", "fetch", "origin", self.a.base], cwd=COMMON)
+    return f"origin/{self.a.base}"
+
+  def merge_base_into(self, wt, base):
+    """Merges current main into a fixer branch (committing interrupted work first). Returns '' or,
+    when it conflicts, a note for the agent; the merge is aborted so the agent starts clean."""
+    if sh(["git", "status", "--porcelain"], cwd=wt).stdout.strip():
+      sh(["git", "add", "-A"], cwd=wt)
+      sh(["git", "commit", "-m", "WIP from an interrupted parity fixer\n\nCo-Authored-By: Claude Opus 5.5 "
+          "<noreply@anthropic.com>"], cwd=wt)
+    m = sh(["git", "merge", "--no-edit", base], cwd=wt, check=False)
+    if m.returncode == 0:
+      return ""
+    sh(["git", "merge", "--abort"], cwd=wt, check=False)
+    return (f"\nThis branch conflicts with {base}, which has moved on. First run `git merge {base}`, resolve "
+            "the conflicts keeping main's changes and yours, and commit the merge.\n")
 
   def claim_slot(self):
     """A cargo target directory no other fixer (in any driver process) is using."""
@@ -285,6 +402,9 @@ class Loop:
     finally:
       await asyncio.to_thread(release_fusion, owner)
     self.budget.record("probe", key, meta)
+    # If Fusion died while the agent worked, its report (often "blocked") says nothing about the
+    # feature: this ping raises SystemExit, and the prober puts the entry back.
+    await asyncio.to_thread(client.call)
     if self.usage_stop("probe", key, meta):
       self.ledger.update(key, probe_attempts=attempts - 1)  # stays probing; resumes next run
       return
@@ -355,9 +475,11 @@ class Loop:
     s = slug(key)
     branch = fix.get("branch") or f"parity/{s}"
     wt = fix.get("worktree") or os.path.join(COMMON, ".claude", "worktrees", f"parity-{s}")
+    base = self.fresh_base()
     if not os.path.isdir(wt):
       exists = sh(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], check=False).returncode == 0
-      sh(["git", "worktree", "add"] + ([wt, branch] if exists else ["-b", branch, wt, self.a.base]), cwd=COMMON)
+      sh(["git", "worktree", "add"] + ([wt, branch] if exists else ["-b", branch, wt, base]), cwd=COMMON)
+    merge_note = self.merge_base_into(wt, base)
     cases = entry.get("cases", [])
     for c in cases:
       dst = os.path.join(wt, "tests", "reference", c)
@@ -370,9 +492,10 @@ class Loop:
     self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} started on {branch} in {wt}")
     print(f"fix {key} on {branch} (slot {slot})", flush=True)
     env = cargo_env(slot)
+    await asyncio.to_thread(fresh_slot_for, wt, env)
     verdicts = (entry.get("probe") or {}).get("verdicts") or {}
     report, meta = await agents.run_agent(
-      agents.fix_prompt(entry, wt, cases, verdicts, entry.get("probe") or {}), wt, agents.FIX_SCHEMA,
+      agents.fix_prompt(entry, wt, cases, verdicts, entry.get("probe") or {}) + merge_note, wt, agents.FIX_SCHEMA,
       self.budget.agent_cap(self.a.fix_usd), self.a.fix_turns, env={k: env[k] for k in (
         "CARGO_TARGET_DIR", "FOX_OCCT_DIR") if k in env}, log_path=self.log("fix", key))
     self.budget.record("fix", key, meta)
@@ -382,27 +505,50 @@ class Loop:
       return
     report = report or {"done": False, "summary": "", "title": "", "blocker": "; ".join(meta.get("errors") or [])}
 
-    # Check the agent's work the same way CI will, before anything leaves this machine.
-    print(f"  checking {branch}: cargo test -p fox-engine --test reference_parts", flush=True)
-    test = await asyncio.to_thread(
-      sh, ["cargo", "test", "-p", "fox-engine", "--test", "reference_parts"], wt, False, env, 7200)
-    tail = (test.stdout + test.stderr)[-3000:]
-    with open(self.log("fix", key), "a", encoding="utf-8") as f:
-      f.write("\n---- driver: cargo test -p fox-engine --test reference_parts ----\n" + tail)
-    baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
-    unlisted = [c for c in cases if c not in baseline]
     if sh(["git", "status", "--porcelain"], cwd=wt).stdout.strip():
       sh(["git", "add", "-A"], cwd=wt)
       sh(["git", "commit", "-m", (report.get("title") or f"Parity fix: {entry['name']}")
           + "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"], cwd=wt)
-    ahead = int(sh(["git", "rev-list", "--count", f"{self.a.base}..HEAD"], cwd=wt).stdout.strip() or 0)
-    passed = test.returncode == 0 and not unlisted and ahead > 0
-    fix.update(done=bool(report.get("done")), test_passed=test.returncode == 0, cases_unlisted=unlisted,
+    base = self.fresh_base()
+    conflict = self.merge_base_into(wt, base)
+    foreign = foreign_commits(wt, base, branch)
+    # Check the agent's work the way CI will, before anything leaves this machine: the reference
+    # test, plus the unit tests of every crate the branch touches.
+    checks = [["cargo", "test", "-p", "fox-engine", "--test", "reference_parts"]]
+    checks += [["cargo", "test", "-p", pkg, "--lib", "--", "--skip", "fuzz_found_bugs"]
+               for pkg in touched_packages(wt, base)]
+    failed = None
+    if conflict:
+      failed, checks = f"merging {base} (conflicts)", []
+    elif foreign:
+      failed, checks = f"own-branch check: it carries other fixers' commits ({', '.join(foreign)})", []
+    for cmd in checks:
+      label = " ".join(cmd[:5] if "--lib" in cmd else cmd)
+      print(f"  checking {branch}: {label}", flush=True)
+      test = await asyncio.to_thread(sh, cmd, wt, False, env, 7200)
+      with open(self.log("fix", key), "a", encoding="utf-8") as f:
+        f.write(f"\n---- driver: {label} (exit {test.returncode}) ----\n" + (test.stdout + test.stderr)[-3000:])
+      if not tests_passed(test) and crashed_without_failures(test) and "--lib" in cmd:
+        # An intermittent native crash (heap corruption) with no failing test: OpenCASCADE isn't
+        # thread-safe and the test harness runs tests in parallel. Retry once on one thread.
+        print(f"  {label}: test binary crashed with no failing test; retrying on one thread", flush=True)
+        test = await asyncio.to_thread(sh, cmd + ["--test-threads=1"], wt, False, env, 7200)
+        with open(self.log("fix", key), "a", encoding="utf-8") as f:
+          f.write(f"\n---- driver: {label} --test-threads=1 (exit {test.returncode}) ----\n"
+                  + (test.stdout + test.stderr)[-3000:])
+      if not tests_passed(test):
+        failed = label
+        break
+    baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
+    unlisted = [c for c in cases if c not in baseline]
+    ahead = int(sh(["git", "rev-list", "--count", f"{base}..HEAD"], cwd=wt).stdout.strip() or 0)
+    passed = not failed and not unlisted and ahead > 0
+    fix.update(done=bool(report.get("done")), test_passed=not failed, failed_check=failed, cases_unlisted=unlisted,
                summary=report.get("summary", ""), title=report.get("title", ""), blocker=report.get("blocker", ""),
                finished=now())
     if not passed:
       fix["state"] = "failed"
-      why = ("the reference test failed" if test.returncode else
+      why = (f"`{failed}` failed" if failed else
              f"cases not passing: {', '.join(unlisted)}" if unlisted else "no commits")
       self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} didn't land: {why}. "
                          f"{report.get('blocker', '')}"[:1500])
@@ -410,7 +556,7 @@ class Loop:
       return
     sh(["git", "push", "-u", "origin", branch], cwd=wt)
     fix["state"] = "pushed"
-    self.ledger.update(key, fix=fix, note=f"fixer passed the reference test; pushed {branch}")
+    self.ledger.update(key, fix=fix, note=f"fixer passed the reference test and unit tests; pushed {branch}")
     await self.open_pr(key)
 
   async def open_pr(self, key):
@@ -428,8 +574,8 @@ class Loop:
             f"**Probe:** {(entry.get('probe') or {}).get('summary', '')}\n\n"
             + (f"**New reference cases** (expected.json measured in Fusion): {', '.join(f'`{c}`' for c in cases)}\n\n"
                if cases else "")
-            + "`cargo test -p fox-engine --test reference_parts` passes on this branch, with the new cases in "
-            "baseline.txt.\n\nOpened by the parity loop (`tools/parity-loop`). Not auto-merged.\n\n"
+            + "`cargo test -p fox-engine --test reference_parts` and the unit tests (`--lib`) of every crate this "
+            "branch changes pass on it, with the new cases in baseline.txt.\n\nOpened by the parity loop (`tools/parity-loop`). Not auto-merged.\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
     title = fix.get("title") or f"Match Fusion's {entry['name']}"
     p = sh([gh_exe(), "pr", "create", "--base", self.a.base, "--head", fix["branch"], "--title", title,
@@ -561,7 +707,7 @@ class Loop:
       # Up to --probes of these run at once. Each claims its entry under the ledger lock, so two
       # probes (in this process or another) never take the same one.
       while (claimed[0] < self.a.max_features and self.budget.ok() and not self.halt and not self.stop_requested()
-             and not self.past_cutoff()):
+             and not self.past_cutoff() and not self.fusion_down):
         e = self.ledger.claim_next(keys, self.probing)
         if e is None:
           return
@@ -570,6 +716,10 @@ class Loop:
         self.probing.add(e["key"])
         try:
           await self.probe(e)
+        except SystemExit as ex:  # client.py exits when FoxBridge is unreachable: Fusion is gone
+          self.fusion_down = str(ex)
+          self.put_back(e["key"], f"Fusion went away mid-probe ({ex})")
+          print(f"[{stamp()}] Fusion is unreachable; no more probes this run, fixers continue", flush=True)
         except Exception as ex:  # one probe's failure mustn't stop the others; the entry resumes
           self.ledger.update(e["key"], note=f"probe error (stays probing): {ex}"[:1500])
           print(f"  probe {e['key']} failed: {ex}", flush=True)

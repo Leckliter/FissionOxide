@@ -82,6 +82,18 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+249-ccw-quarter-arc-slot
+250-cw-quarter-arc-slot
+251-major-arc-slot
+252-offset-shallow-arc-slot
+84-circular-solid
+85-circular-hollow
+86-square-section
+87-triangular-partial-path
+88-box-patch-join
+89-box-patch-flip-cut
+90-arc-surface-symmetric
+91-l-surface-sharp-symmetric
 111-fix-point-rectangle
 112-fix-line-rotated-rectangle
 113-fix-circle-equal
@@ -111,13 +123,6 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
-198-open-three-point-arch
-199-open-five-point-wave
-200-uneven-spacing
-201-closed-four-point
-104-spline-arc-curvature
-105-spline-line-curvature
-106-spline-arc-same-turn-curvature
 205-vertical-edge-sweep-path
 206-sketch-line-sweep-path
 217-midpoint-line-on-origin-resize
@@ -126,15 +131,87 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
-249-ccw-quarter-arc-slot
-250-cw-quarter-arc-slot
-251-major-arc-slot
-252-offset-shallow-arc-slot
-84-circular-solid
-85-circular-hollow
-86-square-section
-87-triangular-partial-path
-88-box-patch-join
-89-box-patch-flip-cut
-90-arc-surface-symmetric
-91-l-surface-sharp-symmetric
+269-rectangle-vertex-corners
+270-triangle-acute-obtuse-vertex
+271-apparent-intersection-gap
+272-crossing-lines-overshoot
+# Reference parts that pass; see README.md. One directory name per line.
+332-cylinder-axis-circular-pattern
+333-cone-axis-revolve
+334-torus-axis-circular-pattern
+# Reference parts that pass; see README.md. One directory name per line.
+322-rigid-face-offset-angle
+323-revolute-hole-edge-on-pin
+324-cylindrical-hole-face-on-pin
+# Reference parts that pass; see README.md. One directory name per line.
+344-face-and-offset-plane
+345-opposed-face-and-plane
+346-perpendicular-faces
+347-two-origin-planes
+# Reference parts that pass; see README.md. One directory name per line.
+335-box-vertical-edge-pattern
+336-prism-slanted-edge-pattern
+337-sketch-line-revolve
+# Reference parts that pass; see README.md. One directory name per line.
+348-xz-plane-offset-mirror
+349-top-face-offset-mirror
+350-side-face-negative-offset-mirror-join
+351-yz-negative-offset-sketch-extrude
+# Reference parts that pass; see README.md. One directory name per line.
+356-box-corner-three-vertices
+357-sketch-points-and-vertex
+358-sketch-on-plane-hole
+359-sketch-on-plane-reversed-order
+# Reference parts that pass; see README.md. One directory name per line.
+391-cylinder-angle-from-xz
+392-offset-cylinder-angle-from-yz
+393-cylinder-at-vertex
+394-sphere-at-vertex
+# Reference parts that pass; see README.md. One directory name per line.
+403-bodies-partial-angle
+404-bodies-symmetric-angle
+405-features-cut-half-turn
+# Reference parts that pass; see README.md. One directory name per line.
+423-planar-emboss-ring
+424-planar-deboss
+425-planar-emboss-offset-rotated
+426-cylinder-emboss-wrap
+# Reference parts that pass; see README.md. One directory name per line.
+419-two-sides-tapered
+420-start-offset-flip-taper
+421-to-curved-face-join
+422-thin-closed-circle-center
+# Reference parts that pass; see README.md. One directory name per line.
+417-form-box-smooth
+418-form-box-pulled-top
+# Reference parts that pass; see README.md. One directory name per line.
+431-vertex-offset-angle
+432-face-flip
+433-offset-xy
+# Reference parts that pass; see README.md. One directory name per line.
+257-g1-line-u-turn
+258-g2-line-u-turn
+259-g1-arc-line-arch
+260-g2-arc-line-arch
+# Reference parts that pass; see README.md. One directory name per line.
+491-cut-two-tools-keep
+492-join-two-tools
+493-intersect-two-tools
+494-cut-splits-target
+# Reference parts that pass; see README.md. One directory name per line.
+495-delete-fillet-feature
+496-delete-second-body
+497-delete-cut-keep-chamfer
+498-delete-consumed-sketch
+# Reference parts that pass; see README.md. One directory name per line.
+499-flipped-two-faces
+500-mid-plane-single
+501-mid-plane-symmetric
+502-mid-plane-two-angles
+198-open-three-point-arch
+199-open-five-point-wave
+200-uneven-spacing
+201-closed-four-point
+104-spline-arc-curvature
+105-spline-line-curvature
+106-spline-arc-same-turn-curvature

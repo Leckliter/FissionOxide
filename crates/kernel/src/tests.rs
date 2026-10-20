@@ -309,3 +309,40 @@ fn step_assembly_round_trip_with_names_and_colours() {
   assert_eq!(read_step(&path).unwrap().len(), 3);
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_quintic_spline_is_one_exact_edge() {
+  // a bulge from (20, 0) round to (20, 10), closed by three lines
+  let p: [[f64; 2]; 10] = [
+    [20.0, 0.0],
+    [21.6, 0.0],
+    [24.4, 0.4],
+    [27.6, 2.2],
+    [29.8, 3.3],
+    [29.8, 6.7],
+    [27.6, 7.8],
+    [24.4, 9.6],
+    [21.6, 10.0],
+    [20.0, 10.0],
+  ];
+  let segs = vec![
+    Seg::Quintic { p },
+    Seg::Line { a: [20.0, 10.0], b: [0.0, 10.0] },
+    Seg::Line { a: [0.0, 10.0], b: [0.0, 0.0] },
+    Seg::Line { a: [0.0, 0.0], b: [20.0, 0.0] },
+  ];
+  let profile = Profile { outer: fox_sketch::Loop::new(segs.clone()), holes: Vec::new() };
+  let solid = Shape::face(&Plane::XY, &profile).unwrap().extrude(DVec3::Z).unwrap();
+  assert!(solid.is_valid());
+  assert_eq!(solid.faces().unwrap().len(), 6, "the spline makes one side face");
+  // the area inside the spline's chord, by the shoelace formula on fine samples
+  let n = 20000;
+  let pts: Vec<[f64; 2]> = (0..=n).map(|i| fox_sketch::quintic_at(&p, i as f64 / n as f64)).collect();
+  let bulge =
+    pts.windows(2).map(|w| w[0][0] * w[1][1] - w[1][0] * w[0][1]).sum::<f64>() / 2.0 + (20.0 * 0.0 - 20.0 * 10.0) / 2.0;
+  // (OCCT's default volume integration is good to about 1e-5 on a spline side)
+  assert!((volume(&solid) / (200.0 + bulge) - 1.0).abs() < 1e-4, "{} vs {}", volume(&solid), 200.0 + bulge);
+  // and one edge of a path
+  let path = Shape::path(&Plane::XY, &segs[..2]).unwrap();
+  assert_eq!(path.edges().unwrap().len(), 2);
+}

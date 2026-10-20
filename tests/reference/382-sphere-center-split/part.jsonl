@@ -1,0 +1,10 @@
+# 382-sphere-center-split: added by the parity loop from a Fusion probe
+# sphere-center-split: R10 sphere centred at (0,0,20) (half disc on XZ revolved about Z); point at the sphere face's centre; plane through it and (25,0,0), (0,25,0); sphere split by the plane (halves).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, -10], [0, -30]]}
+{"cmd": "sketch.arc", "start": [0, -30], "mid": [10, -20], "end": [0, -10]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": "z", "angle": "360 deg", "operation": "new_body"}
+{"cmd": "point", "method": "center", "face": {"point": [0, 10, 20]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [25, 0, 0]}, "c": {"at": [0, 25, 0]}}
+{"cmd": "split", "plane": {"feature": 4}}

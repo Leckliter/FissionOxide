@@ -1,0 +1,14 @@
+# 244-sphere-flip-extrude: added by the parity loop from a Fusion probe
+# sphere-flip-extrude: sphere r 5 centred (15, 0, 5); spun profile around Z onto an XZ sketch,
+# flipped to the other side of the axis, no centerline: circle r 5 at x=-15, z=5, extruded 2 mm
+# symmetric as a new body (157.08 mm3) beside the sphere (523.6 mm3).
+# Fox has no spun-profile command; sketch.spun_profile below is the missing feature.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [15, 0], "mid": [20, 5], "end": [15, 10]}
+{"cmd": "sketch.line", "points": [[15, 10], [15, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": {"line": 5}, "angle": 360, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spun_profile", "bodies": ["Body1"], "axis": "z", "flip": true, "centerline": false}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "symmetric", "distance": 1, "operation": "new_body"}

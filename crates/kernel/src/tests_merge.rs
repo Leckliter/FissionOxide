@@ -129,11 +129,8 @@ fn spline_pieces_become_one_b_spline_edge() {
     let mut s = legacy();
     let pts: Vec<_> =
       [[0.0, 0.0], [5.0, 6.0], [12.0, 4.0], [18.0, 9.0], [24.0, 0.0]].iter().map(|p| s.add_point(p[0], p[1])).collect();
-    let curve = if kind == 0 {
-      CurveKind::Spline { points: pts.clone(), start_handle: None, end_handle: None }
-    } else {
-      CurveKind::ControlSpline { points: pts.clone() }
-    };
+    let curve =
+      if kind == 0 { CurveKind::spline(pts.clone()) } else { CurveKind::ControlSpline { points: pts.clone() } };
     let id = s.add_curve(curve).unwrap();
     s.add_curve(CurveKind::Line { a: pts[4], b: pts[0] }).unwrap();
     let pieces = s.beziers(id).len();

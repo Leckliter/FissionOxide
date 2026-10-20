@@ -2,7 +2,7 @@
 //!
 //! Fusion's Curvature constraint turns on a spline end's tangent and curvature handles: the end
 //! keeps its fit point and takes the other curve's direction and curvature, and the rest of the
-//! curve is refitted with the least energy (see `quintic`). The curvature fixes the second
+//! curve is refitted with the least energy (see `fitquintic`). The curvature fixes the second
 //! derivative across the curve, `C'' = κ |C'|² n` (none along it), but the speed `|C'|` at the end
 //! is Fusion's own choice. Measured against `NurbsCurve3D.getData()` on two- to four-point
 //! splines over a range of directions and curvatures (both turning ways), it is, to 1e-8:

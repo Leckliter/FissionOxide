@@ -16,6 +16,19 @@ UNTESTED, PROBING, MATCH, MISMATCH, FOX_MISSING, BLOCKED, FIXING, VERIFIED = (
 PROBE_RESULTS = (MATCH, MISMATCH, FOX_MISSING, BLOCKED)
 
 
+def replace(src, dst, tries=40):
+  """os.replace, retried: on Windows it fails while another process (git, OneDrive, an agent's
+  reader) has the target open."""
+  for i in range(tries):
+    try:
+      os.replace(src, dst)
+      return
+    except PermissionError:
+      if i == tries - 1:
+        raise
+      time.sleep(0.05 * (i + 1))
+
+
 def now():
   return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -60,7 +73,7 @@ class Ledger:
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
       for e in entries:
         f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    os.replace(tmp, self.path)
+    replace(tmp, self.path)
 
   def get(self, key):
     for e in self.read():
@@ -135,8 +148,12 @@ MAX_FIX_ATTEMPTS = 2
 def needs_fix(e):
   """A probed gap with no fixer PR waiting on review, and fixer attempts left."""
   fix = e.get("fix") or {}
+  # An attempt whose process died mid-run (state still agent/interrupted) resumes even if it was the
+  # last one: it hasn't finished, so it hasn't used the attempt up.
+  interrupted = fix.get("state") in ("agent", "interrupted") and not pid_alive(fix.get("pid"))
   return (e.get("scope") == "design" and e["status"] in (MISMATCH, FOX_MISSING)
-          and fix.get("state") not in ("pr-open", "pushed") and fix.get("attempts", 0) < MAX_FIX_ATTEMPTS
+          and fix.get("state") not in ("pr-open", "pushed")
+          and (fix.get("attempts", 0) < MAX_FIX_ATTEMPTS or interrupted)
           and not e.get("no_fix"))
 
 

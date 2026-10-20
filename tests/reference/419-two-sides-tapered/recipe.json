@@ -1,0 +1,147 @@
+{
+ "id": "two-sides-tapered",
+ "name": "two-sides-tapered",
+ "description": "20x20 square centred on XY, extruded two sides: 10 mm up and 6 mm down, each side with a 5 deg inward taper.",
+ "exercises": [
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       -10,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       -10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       10,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       10,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       -10,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       -10,
+       10
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       -10,
+       -10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "two_sides",
+    "side1": 10,
+    "side2_opposite": 6,
+    "taper_deg": 5,
+    "taper2_deg": 5
+   },
+   "result_bodies": [
+    "Body1"
+   ]
+  }
+ ]
+}

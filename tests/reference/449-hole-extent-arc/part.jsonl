@@ -1,0 +1,16 @@
+# 449-hole-extent-arc: added by the parity loop from a Fusion probe
+# hole-extent-arc: 120x60x5 plate; d6 hole at (100,15) cut through; feature patterned 5x along the 3-point arc (100,15)-(60,45)-(20,15), extent 80 mm of arc length (20 mm apart), identical orientation.
+# pattern.path is the command Fox would need (it has none yet): pattern along a sketch path
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [120, 0]]}
+{"cmd": "sketch.line", "points": [[120, 0], [120, 60]]}
+{"cmd": "sketch.line", "points": [[120, 60], [0, 60]]}
+{"cmd": "sketch.line", "points": [[0, 60], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [100, 15], "mid": [60, 45], "end": [20, 15]}
+{"cmd": "sketch.circle", "center": [100, 15], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[100, 15]], "extent": "through_all", "operation": "cut", "targets": [2000]}
+{"cmd": "pattern.path", "features": [4], "path": 3, "path_curves": [1], "count": 5, "distance": 80, "extent": true}

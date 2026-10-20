@@ -1,0 +1,4 @@
+# 412-cylinder-intersect-box: added by the parity loop from a Fusion probe
+# cylinder-intersect-box: 40x40x20 box centred on the origin (z 0..20); cylinder primitive r=25 at origin on XY, height 30, intersect: square with rounded-off corners, 20 tall.
+{"cmd": "box", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "width": 40, "depth": 40, "height": 20}
+{"cmd": "cylinder", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "radius": 25, "height": 30, "operation": "intersect"}
