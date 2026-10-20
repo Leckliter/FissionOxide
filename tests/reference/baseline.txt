@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+472-mm-viewbox-plate-hole
+473-px-path-arc-offset-scale
+474-group-transform-cubic
