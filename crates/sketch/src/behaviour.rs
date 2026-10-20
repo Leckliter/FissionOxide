@@ -77,6 +77,10 @@ pub const XZ_OFFSET_PLUS_Y: &str = "xz_offset_plus_y";
 /// target ∩ (t1 ∪ t2 ∪ …), as in Fusion (#92). Without it the target is intersected with each
 /// tool in turn, target ∩ t1 ∩ t2 ∩ ….
 pub const INTERSECT_ANY_TOOL: &str = "intersect_any_tool";
+/// The solver first tries each ellipse named in a Concentric constraint with its free major-axis
+/// point riding on its centre, so the constraint slides the ellipse rather than turning or
+/// stretching it, as in Fusion. Other ellipses solve as before.
+pub const ELLIPSE_CONCENTRIC_PASS: &str = "ellipse_concentric_pass";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -86,6 +90,7 @@ pub const CURRENT: &[&str] = &[
   XZ_OFFSET_PLUS_Y,
   INTERSECT_ANY_TOOL,
   ONE_EDGE_ELLIPSE,
+  ELLIPSE_CONCENTRIC_PASS,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
