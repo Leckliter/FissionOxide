@@ -103,6 +103,12 @@ pub struct App {
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
   /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
   pub(crate) picked_plane: Option<Value>,
+  /// Origin planes shown in the viewport (the browser's Show/Hide), as `sketch.create` planes.
+  pub(crate) shown_planes: Vec<Value>,
+  /// Sketches whose profiles the browser's Hide Profile turned off.
+  pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
+  /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
+  pub(crate) shown_dims: Vec<fox_engine::model::FeatureId>,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
@@ -148,6 +154,9 @@ pub struct App {
   pub updates: updates::Updates,
   /// A design being opened on another thread (the one the app was started with).
   opening: Option<(PathBuf, std::thread::JoinHandle<Result<Session, fox_engine::CmdError>>)>,
+  /// Whether the window had the keyboard focus last frame, and when it last gained it (egui time).
+  window_focused: bool,
+  activated_at: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -170,6 +179,7 @@ struct RenderKey {
   show_grid: bool,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
+  hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Section and analysis settings.
   view: Value,
   /// Body vertices drawn (the Vertices selection filter).
@@ -275,6 +285,9 @@ impl App {
       cam_move: None,
       pre_sketch_cam: None,
       picked_plane: None,
+      shown_planes: Vec::new(),
+      hidden_profiles: Vec::new(),
+      shown_dims: Vec::new(),
       data: data_panel::DataPanel::default(),
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
@@ -294,6 +307,8 @@ impl App {
       cut_window: None,
       updates: updates::Updates::default(),
       opening: None,
+      window_focused: true,
+      activated_at: f64::NEG_INFINITY,
     }
   }
 
@@ -376,7 +391,9 @@ impl App {
   /// Switches to another session, keeping the hub location.
   fn replace_session(&mut self, mut s: Session) {
     s.store_root = self.s.store_root.clone();
+    let revision = self.s.revision;
     self.s = s;
+    self.swapped_session(revision);
     self.drawing = None;
     self.dialog = None;
     self.tool = Tool::Select;
@@ -384,10 +401,25 @@ impl App {
     self.data.invalidate();
   }
 
+  /// After the session was replaced by another design (opened, new, from the hub). Every session
+  /// starts counting revisions at the same number, and the viewport only rebuilds its scene when
+  /// the revision (or what's shown) changes, so the new one carries on from `old_revision`:
+  /// otherwise the previous design's scene could stay up. The Save dialog was for the old design.
+  fn swapped_session(&mut self, old_revision: u64) {
+    self.s.revision = self.s.revision.max(old_revision + 1);
+    self.render_key = None;
+    self.hover = None;
+    self.ctx_menu.peek.clear();
+    self.ctx_menu.isolate = None;
+    self.data.save = None;
+  }
+
   /// Opens a design (latest or a given version) from the data panel.
   pub fn open_hub_item(&mut self, item: &str, version: Option<u32>) {
     self.cancel_dialog();
+    let revision = self.s.revision;
     if let Some(r) = self.run("hub.open", json!({"item": item, "version": version})) {
+      self.swapped_session(revision);
       self.dialog = None;
       self.tool = Tool::Select;
       self.fit_view();
@@ -431,7 +463,9 @@ impl App {
 
   pub fn new_design(&mut self) {
     let root = self.s.store_root.clone();
+    let revision = self.s.revision;
     self.s = Session::default();
+    self.swapped_session(revision);
     self.drawing = None;
     self.s.store_root = root;
     self.dialog = None;
@@ -970,9 +1004,16 @@ impl App {
   }
 
   fn look_at_sketch(&mut self) {
-    let Some(r) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)) else { return };
-    let n = r.plane.normal();
-    let o = r.plane.origin;
+    let Some(plane) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)).map(|r| r.plane) else {
+      return;
+    };
+    self.look_at_plane(&plane);
+  }
+
+  /// Turns the camera to look straight at a plane (a sketch's, or an origin plane).
+  pub(crate) fn look_at_plane(&mut self, plane: &fox_engine::kernel::Plane) {
+    let n = plane.normal();
+    let o = plane.origin;
     let mut to = self.looking_along(n);
     if self.s.model.bodies.is_empty() {
       to.target = o.to_array();
@@ -1069,6 +1110,11 @@ impl App {
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
+    let (focused, time) = ctx.input(|i| (i.focused, i.time));
+    if focused && !self.window_focused {
+      self.activated_at = time;
+    }
+    self.window_focused = focused;
     if self.poll_opening() {
       self.draw_busy(ui, &ctx);
       return;
@@ -1222,6 +1268,17 @@ fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
   }
 }
 
+impl App {
+  /// Whether the window came to the front just now. The click or key that activates it (or one
+  /// sent along with a later launch's file) wasn't meant for what happens to be under it.
+  pub(crate) fn just_activated(&self, ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.time) - self.activated_at < ACTIVATION_GRACE_SECS
+  }
+}
+
+/// How long after the window comes to the front its input isn't taken as confirming a save.
+const ACTIVATION_GRACE_SECS: f64 = 0.4;
+
 /// Seconds since the app started (for timing background work).
 fn now() -> f64 {
   static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -1252,6 +1309,36 @@ mod tests {
     }
     assert!(app.loading().is_none());
     assert!(!app.s.model.bodies.is_empty() && app.status.as_ref().is_some_and(|s| !s.1));
+  }
+
+  #[test]
+  fn a_design_opened_over_another_is_drawn_and_fitted() {
+    let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/bracket.fox"));
+    let mut app = App::with_session(Session::open(&path).unwrap());
+    let before = app.s.revision;
+    app.cam = Camera::default();
+    app.save(false);
+    // a later launch hands over a file: it opens on another thread (Desktop::open_handed)
+    app.open_file(path.clone());
+    while app.poll_opening() {
+      std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // every session counts its revisions from the same start, and the viewport rebuilds its
+    // scene only when the revision or what's shown changes
+    assert!(app.s.revision > before, "{} after {before}", app.s.revision);
+    assert!(app.render_key.is_none());
+    assert!(app.data.save.is_none(), "the Save dialog was for the design that was replaced");
+    let mut fitted = Camera::default();
+    let (lo, hi) = app.s.model.bounds().unwrap();
+    fitted.fit(lo, hi, 1.6);
+    assert_eq!(app.cam, fitted, "the view is fitted to the opened design");
+    // and so with File > Open and a new design
+    let before = app.s.revision;
+    app.open_path(&path);
+    assert!(app.s.revision > before);
+    let before = app.s.revision;
+    app.new_design();
+    assert!(app.s.revision > before);
   }
 
   fn settle_camera(app: &mut App) {

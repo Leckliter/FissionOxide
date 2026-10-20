@@ -252,6 +252,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   // overlays that take clicks come first
   let mut consumed = false;
+  shown_dims_overlay(app, &painter, &view);
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
@@ -426,6 +427,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_grid: app.show_grid,
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
+    hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
@@ -449,6 +451,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    hide_profiles_of: app.hidden_profiles.clone(),
     show_vertices: key.vertices,
     peek: app.ctx_menu.peek.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
@@ -1159,6 +1162,40 @@ pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, se
 }
 
 // ---------------------------------------------------------------- overlays
+
+/// The dimensions of sketches the browser's Show Dimensions turned on, drawn (not editable)
+/// while they're not being edited.
+fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let font = egui::FontId::proportional(12.0);
+  for sk in &app.shown_dims {
+    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+      continue;
+    }
+    let Some(r) = app.s.model.sketches.get(sk) else { continue };
+    let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
+    for c in &r.sketch.constraints {
+      let Some(dim) = c.kind.dim() else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim) else { continue };
+      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
+      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
+      let at = match &shape {
+        Some(s) => s.label,
+        None => match to_screen(anchor) {
+          Some(p) => p,
+          None => continue,
+        },
+      };
+      if let Some(s) = &shape {
+        paint_dim(painter, s, DIM_INK);
+      }
+      let rect = Rect::from_center_size(at, size);
+      painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+      painter.galley(rect.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+    }
+  }
+}
 
 /// Dimension labels and constraint glyphs of the sketch being edited. Returns true when a click
 /// was consumed.
@@ -2183,7 +2220,7 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
 }
 
 /// Half the side of a plane's square: the size the scene draws construction planes at.
-fn plane_half_size(app: &App) -> f64 {
+pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
@@ -2220,12 +2257,14 @@ struct PlanePick {
 /// browser, if any.
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
-  if !picking && (app.picked_plane.is_none() || app.s.edit_sketch.is_some()) {
+  let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
+  if !picking && picked.is_none() && app.shown_planes.is_empty() {
     return None;
   }
   let mut planes = sketch_planes(app);
   if !picking {
-    planes.retain(|(p, _)| Some(p) == app.picked_plane.as_ref());
+    // the plane picked in the browser, and the origin planes Show/Hide turned on
+    planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));
   }
   let half = plane_half_size(app);
   let hot = if picking && app.drag.is_none() {
@@ -2251,12 +2290,12 @@ fn sketch_planes_overlay(
   let PlanePick { planes, half, picking, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
   let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-  for (i, (_, pl)) in planes.iter().enumerate() {
+  for (i, (p, pl)) in planes.iter().enumerate() {
     let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
     };
-    let lit = hot == Some(i) || !picking;
+    let lit = hot == Some(i) || (!picking && app.picked_plane.as_ref() == Some(p));
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));

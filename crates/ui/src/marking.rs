@@ -71,6 +71,7 @@ enum Action {
   Cancel,
   ShowHide,
   ShowAll,
+  HideAll,
   Isolate,
   Unisolate,
   FindInBrowser(Sel),
@@ -275,6 +276,24 @@ pub(crate) fn find_in_window(app: &mut App, bodies: &[BodyId], sketch: Option<Fe
       hi = hi.max(w);
     }
   }
+  fit_box(app, lo, hi);
+}
+
+/// Find in Window for a plane: fits the view to the square the viewport draws it as.
+pub(crate) fn find_plane_in_window(app: &mut App, plane: &fox_engine::kernel::Plane) {
+  let h = crate::viewport::plane_half_size(app);
+  let mut lo = DVec3::splat(f64::INFINITY);
+  let mut hi = DVec3::splat(f64::NEG_INFINITY);
+  for c in [[-h, -h], [h, -h], [h, h], [-h, h]] {
+    let w = plane.to_world(c);
+    lo = lo.min(w);
+    hi = hi.max(w);
+  }
+  fit_box(app, lo, hi);
+}
+
+/// Fits the view to a world box.
+fn fit_box(app: &mut App, lo: DVec3, hi: DVec3) {
   if !lo.is_finite() || !hi.is_finite() {
     app.status = Some(("Nothing to show in the window".into(), false));
     return;
@@ -316,9 +335,18 @@ pub(crate) fn save_as_mesh(app: &mut App, body: BodyId) {
 }
 
 fn show_all(app: &mut App) {
-  let hidden: Vec<BodyId> = app.s.model.bodies.iter().map(|b| b.id).filter(|b| !app.s.body_visible(*b)).collect();
-  for b in hidden {
-    app.run("body.visible", json!({"body": b.0, "visible": true}));
+  set_all_visible(app, true);
+}
+
+/// Shows or hides every body.
+fn set_all_visible(app: &mut App, visible: bool) {
+  let change: Vec<BodyId> =
+    app.s.model.bodies.iter().map(|b| b.id).filter(|b| app.s.body_visible(*b) != visible).collect();
+  for b in change {
+    app.run("body.visible", json!({"body": b.0, "visible": visible}));
+  }
+  if !visible {
+    app.s.selection.retain(|s| !matches!(s, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }));
   }
 }
 
@@ -422,8 +450,19 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   if app.s.edit_sketch.is_some() {
     v.push(Some(Item::cmd(Cmd::FinishSketch)));
     sep(&mut v);
-    if app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. })) {
+    // Fusion's commands for picked sketch geometry
+    let curve = app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. }));
+    let point = app.s.selection.iter().any(|s| matches!(s, Sel::SketchPoint { .. }));
+    if curve {
       v.push(Some(Item::with_label(Cmd::Construction, "Normal/Construction")));
+    }
+    if curve || point {
+      v.push(Some(Item::cmd(Cmd::Constraint("fix"))));
+    }
+    if curve {
+      v.push(Some(Item::with_label(Cmd::SketchTool(Tool::Dimension), "Dimension")));
+      v.push(Some(Item::cmd(Cmd::SketchTool(Tool::Trim))));
+      sep(&mut v);
     }
     v.push(Some(Item::cmd(Cmd::LookAt)));
     v.push(Some(Item::cmd(Cmd::Fit)));
@@ -517,8 +556,12 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   if !cx.body_sel && !cx.bodies.is_empty() {
     v.push(Some(Item::cmd(Cmd::RemoveBodies)));
   }
-  if app.s.model.bodies.iter().any(|b| !app.s.body_visible(b.id)) {
+  // Fusion always lists Show All; Hide All Bodies is its Show/Hide for every body
+  if !app.s.model.bodies.is_empty() {
     v.push(Some(Item::new(Action::ShowAll, Icon::Eye, "Show All")));
+  }
+  if app.s.model.bodies.iter().any(|b| app.s.body_visible(b.id)) {
+    v.push(Some(Item::new(Action::HideAll, Icon::EyeOff, "Hide All Bodies")));
   }
   if app.ctx_menu.isolate.is_some() {
     v.push(Some(Item::new(Action::Unisolate, Icon::Body, "Unisolate")));
@@ -570,6 +613,7 @@ fn run(app: &mut App, action: Action) {
       show_hide(app, &bodies);
     }
     Action::ShowAll => show_all(app),
+    Action::HideAll => set_all_visible(app, false),
     Action::Isolate => app.ctx_menu.isolate = Some(selected_bodies(app)),
     Action::Unisolate => app.ctx_menu.isolate = None,
     Action::FindInBrowser(s) => find_in_browser(app, s),
@@ -1112,6 +1156,52 @@ mod tests {
     assert!(labels(&overflow(&app, &cx)).iter().any(|l| l == "Show All"));
     run(&mut app, Action::ShowAll);
     assert!(app.s.body_visible(body));
+  }
+
+  #[test]
+  fn empty_canvas_lists_show_all_hide_all_and_unisolate() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let list = |app: &App| {
+      let cx = context(app);
+      labels(&overflow(app, &cx))
+    };
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Show All") && l.iter().any(|l| l == "Hide All Bodies"), "{l:?}");
+    assert!(!l.iter().any(|l| l == "Unisolate"), "{l:?}");
+    run(&mut app, Action::HideAll);
+    assert!(!app.s.body_visible(body));
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Show All") && !l.iter().any(|l| l == "Hide All Bodies"), "{l:?}");
+    run(&mut app, Action::ShowAll);
+    assert!(app.s.body_visible(body));
+    app.ctx_menu.isolate = Some(vec![body]);
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Unisolate"), "{l:?}");
+  }
+
+  #[test]
+  fn sketch_curve_lists_fix_unfix_dimension_and_trim() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("sketch.line", json!({"points": [[5, 5], [15, 5]]}));
+    let curve = app.s.design.sketch(sk).unwrap().curves[0].id;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    for want in ["Normal/Construction", "Fix/UnFix", "Dimension", "Trim"] {
+      assert!(list.iter().any(|l| l == want), "{want} missing from {list:?}");
+    }
+    let fixes = |app: &App| {
+      let s = app.s.design.sketch(sk).unwrap();
+      s.constraints.iter().filter(|c| matches!(c.kind, fox_engine::sketch::ConstraintKind::Fix { .. })).count()
+    };
+    run(&mut app, Action::Cmd(Cmd::Constraint("fix")));
+    assert_eq!(fixes(&app), 2, "both ends fixed");
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    run(&mut app, Action::Cmd(Cmd::Constraint("fix")));
+    assert_eq!(fixes(&app), 0, "a fixed line is unfixed");
   }
 
   #[test]
