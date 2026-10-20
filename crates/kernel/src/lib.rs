@@ -272,6 +272,18 @@ fn line_kind(k: u8) -> LineKind {
   }
 }
 
+/// Behaviour-gated choices for building a face from a sketch profile. The default is the legacy
+/// behaviour, so old files rebuild unchanged; callers fill the fields from the sketch's (or
+/// design's) `Behaviours`, e.g.
+/// `FaceOptions { merge_edges: sk.sketch.behaviours.has(MERGE_SMOOTH_EDGES), ..Default::default() }`.
+/// See `fox_sketch::behaviour`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FaceOptions {
+  /// Smooth consecutive segments (ellipse, spline and arc pieces) may be merged into one edge.
+  /// Not yet acted on.
+  pub merge_edges: bool,
+}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
 
@@ -287,8 +299,18 @@ impl Shape {
     self.inner.as_ref().ok_or(KernelError::Empty)
   }
 
-  /// A planar face from a sketch profile on `plane`.
+  /// A planar face from a sketch profile on `plane`, built the legacy way
+  /// ([`FaceOptions::default`]).
   pub fn face(plane: &Plane, profile: &Profile) -> Result<Shape> {
+    Shape::face_with(plane, profile, FaceOptions::default())
+  }
+
+  /// A planar face from a sketch profile on `plane`, with behaviour-gated `opts` (see
+  /// [`FaceOptions`]).
+  pub fn face_with(plane: &Plane, profile: &Profile, opts: FaceOptions) -> Result<Shape> {
+    // Every option is legacy-off for now. A gated change reads its field here and passes it on to
+    // `sys::make_face` (a new argument in ffi.rs and kernel.cpp), per call or per segment.
+    let FaceOptions { merge_edges: _ } = opts;
     let mut segs = Vec::new();
     let mut lens = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
