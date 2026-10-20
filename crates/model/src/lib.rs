@@ -1659,18 +1659,28 @@ impl Design {
   /// Moves a feature to a new timeline index, refusing moves that would put it before a feature
   /// it depends on (or after one that depends on it).
   pub fn move_feature(&mut self, id: FeatureId, to: usize) -> Result<(), DesignError> {
+    self.check_move(id, to)?;
     let from = self.index_of(id).ok_or(DesignError::NoFeature(id))?;
-    let to = to.min(self.features.len().saturating_sub(1));
     let f = self.features.remove(from);
-    self.features.insert(to, f);
-    // validate ordering
-    let bad = self.features.iter().enumerate().find_map(|(i, feat)| {
-      feat.kind.depends_on().iter().any(|d| self.index_of(*d).is_some_and(|di| di > i)).then(|| feat.name.clone())
-    });
-    if let Some(name) = bad {
-      let f = self.features.remove(to);
-      self.features.insert(from, f);
-      return Err(DesignError::InUse(name, "a feature it would come before".into()));
+    self.features.insert(to.min(self.features.len()), f);
+    Ok(())
+  }
+
+  /// Whether [`Design::move_feature`] would accept moving `id` to timeline index `to`, without
+  /// moving it. Only the references the timeline records directly (sketches, construction
+  /// geometry) are checked; references to bodies need a regeneration to judge.
+  pub fn check_move(&self, id: FeatureId, to: usize) -> Result<(), DesignError> {
+    let from = self.index_of(id).ok_or(DesignError::NoFeature(id))?;
+    let mut order: Vec<FeatureId> = self.features.iter().map(|f| f.id).collect();
+    order.remove(from);
+    order.insert(to.min(order.len()), id);
+    let pos = |f: FeatureId| order.iter().position(|o| *o == f);
+    for (i, fid) in order.iter().enumerate() {
+      let Some(feat) = self.feature(*fid) else { continue };
+      if let Some(dep) = feat.kind.depends_on().into_iter().find(|d| pos(*d).is_some_and(|di| di > i)) {
+        let dep_name = self.feature(dep).map(|f| f.name.clone()).unwrap_or_default();
+        return Err(DesignError::InUse(dep_name, format!("{}, which would come before it", feat.name)));
+      }
     }
     Ok(())
   }

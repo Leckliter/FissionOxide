@@ -2011,7 +2011,17 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
   rename_popup(app, ui.ctx());
 }
 
+/// A drag in progress on the timeline; `gap` is the slot under the pointer (0 = before the
+/// first item, n = after the last).
+#[derive(Clone, Copy, Debug)]
+enum TimelineDrag {
+  Marker { gap: usize },
+  Feature { id: FeatureId, from: usize, gap: usize },
+}
+
 fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
+  let key = egui::Id::new("timeline_drag");
+  let mut drag: Option<TimelineDrag> = ui.data(|d| d.get_temp(key));
   egui::ScrollArea::horizontal()
     .auto_shrink([false, false])
     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -2021,12 +2031,20 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
         ui.spacing_mut().item_spacing.x = 1.0;
         let features: Vec<(FeatureId, String, Icon, bool)> =
           app.s.design.features.iter().map(|f| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed)).collect();
+        let mut rects = Vec::with_capacity(features.len());
+        let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
         for (i, (id, name, icon, suppressed)) in features.into_iter().enumerate() {
-          if i == active {
-            marker(ui);
+          if i == active && marker(ui, marker_dragged).drag_started() {
+            drag = Some(TimelineDrag::Marker { gap: active });
           }
           let st = app.s.model.status(id).cloned().unwrap_or_default();
-          let dim = st.rolled_back || suppressed;
+          // while the marker is dragged, what would roll back greys out already
+          let rolled_back = match drag {
+            Some(TimelineDrag::Marker { gap }) => i >= gap,
+            _ => st.rolled_back,
+          };
+          let dim = rolled_back || suppressed;
+          let moving = matches!(drag, Some(TimelineDrag::Feature { from, .. }) if from == i);
           let selected = app.s.selection.contains(&Sel::Feature { feature: id });
           let editing = app.s.edit_sketch == Some(id);
           let mut hover = name.clone();
@@ -2038,7 +2056,8 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if suppressed {
             hover.push_str("\n(suppressed)");
           }
-          let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::click());
+          let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::click_and_drag());
+          rects.push(rect);
           let p = ui.painter();
           if st.error.is_some() {
             p.rect(
@@ -2057,9 +2076,9 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               egui::StrokeKind::Inside,
             );
           }
-          if selected || editing {
+          if selected || editing || moving {
             p.rect(rect, 2.0, theme::SELECTED, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
-          } else if r.hovered() {
+          } else if r.hovered() && drag.is_none() {
             p.rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
           }
           let ir = Rect::from_center_size(rect.center(), Vec2::splat(20.0));
@@ -2074,7 +2093,11 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               Stroke::new(1.0, theme::ERROR),
             );
           }
-          let r = r.on_hover_text(hover);
+          if r.drag_started() {
+            app.s.selection = vec![Sel::Feature { feature: id }];
+            drag = Some(TimelineDrag::Feature { id, from: i, gap: i });
+          }
+          let r = if drag.is_none() { r.on_hover_text(hover) } else { r };
           if r.clicked() {
             app.s.selection = vec![Sel::Feature { feature: id }];
           }
@@ -2082,16 +2105,88 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
             edit_feature(app, id);
           }
           // hovering an item highlights what it made and names it in the status bar
-          if r.hovered() {
+          if r.hovered() && drag.is_none() {
             marking::peek(app, marking::feature_bodies(app, id), name.clone());
           }
           r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
         }
-        if active >= n {
-          marker(ui);
+        if active >= n && marker(ui, marker_dragged).drag_started() {
+          drag = Some(TimelineDrag::Marker { gap: active });
+        }
+        if let Some(d) = drag.as_mut() {
+          timeline_drag(app, ui, d, &rects, active);
+          if !ui.input(|i| i.pointer.primary_down()) {
+            timeline_drop(app, *d, n, active);
+            drag = None;
+          }
         }
       });
     });
+  ui.data_mut(|d| match drag {
+    Some(v) => _ = d.insert_temp(key, v),
+    None => d.remove::<TimelineDrag>(key),
+  });
+}
+
+/// Where a feature dragged from `from` and dropped in slot `gap` ends up.
+fn moved_to(from: usize, gap: usize) -> usize {
+  if gap > from { gap - 1 } else { gap }
+}
+
+/// Follows the pointer during a timeline drag: snaps to the slot between icons and draws the
+/// marker there, or the insertion line (red where the feature can't go).
+fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize) {
+  let (Some(first), Some(last)) = (rects.first(), rects.last()) else { return };
+  if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+    let gap = rects.iter().filter(|r| r.center().x < pos.x).count();
+    match d {
+      TimelineDrag::Marker { gap: g } | TimelineDrag::Feature { gap: g, .. } => *g = gap,
+    }
+  }
+  ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+  let x = |gap: usize| match gap {
+    0 => first.left() - 1.0,
+    g if g >= rects.len() => last.right() + 1.0,
+    g => (rects[g - 1].right() + rects[g].left()) / 2.0,
+  };
+  let (top, bottom) = (first.center().y - 16.0, first.center().y + 16.0);
+  let p = ui.painter();
+  match *d {
+    TimelineDrag::Marker { gap } if gap != active => paint_marker(p, x(gap), top, bottom, Color32::from_gray(55)),
+    TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
+      let ok = app.s.design.check_move(id, moved_to(from, gap)).is_ok();
+      let c = if ok { theme::ACCENT } else { theme::ERROR };
+      let x = x(gap);
+      p.line_segment([pos2(x, top + 2.0), pos2(x, bottom - 2.0)], Stroke::new(2.0, c));
+      for y in [top + 2.0, bottom - 2.0] {
+        p.line_segment([pos2(x - 3.0, y), pos2(x + 3.0, y)], Stroke::new(2.0, c));
+      }
+      if !ok {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::NotAllowed);
+      }
+    }
+    _ => {}
+  }
+}
+
+/// Finishes a timeline drag: rolls the marker or moves the feature.
+fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize) {
+  match d {
+    TimelineDrag::Marker { gap } if gap != active => {
+      let at = if gap >= n { Value::Null } else { json!(gap) };
+      app.run("timeline.marker", json!({ "at": at }));
+    }
+    TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
+      let to = moved_to(from, gap);
+      match app.s.design.check_move(id, to) {
+        Ok(()) => {
+          app.run("feature.move", json!({"feature": id.0, "to": to}));
+        }
+        Err(e) => app.status = Some((format!("Can't move there: {e}"), true)),
+      }
+    }
+    _ => {}
+  }
 }
 
 /// A timeline item's right-click menu, as in Fusion (less what FissionOxide can't do yet).
@@ -2099,6 +2194,12 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
   if menu_item(ui, icon, "Edit Feature", None).clicked() {
     ui.close();
     edit_feature(app, id);
+  }
+  if let Some(sk) = marking::profile_sketch(app, id)
+    && menu_item(ui, Icon::Sketch, "Edit Profile Sketch", None).clicked()
+  {
+    ui.close();
+    app.edit_sketch(sk);
   }
   // Configure: the feature's suppression becomes a column of the configuration table
   if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone())
@@ -2129,10 +2230,18 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
     app.run("feature.suppress", json!({"feature": id.0}));
   }
   ui.separator();
+  // features without a browser node of their own are found by the bodies they made
   let sel = Sel::Feature { feature: id };
-  if marking::in_browser(app, &sel) && menu_item(ui, Icon::Folder, "Find in Browser", None).clicked() {
+  let node = if marking::in_browser(app, &sel) {
+    Some(sel)
+  } else {
+    marking::feature_bodies(app, id).first().map(|b| Sel::Body { body: *b })
+  };
+  if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, "Find in Browser", None)).inner.clicked()
+    && let Some(node) = node
+  {
     ui.close();
-    marking::find_in_browser(app, sel);
+    marking::find_in_browser(app, node);
   }
   if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
     ui.close();
@@ -2141,20 +2250,28 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
   }
 }
 
-/// The history marker: a dark bar with a grab handle, as in Fusion's timeline.
-fn marker(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(12.0, 32.0), egui::Sense::hover());
-  let x = r.center().x;
-  let c = Color32::from_gray(55);
-  ui.painter().line_segment([pos2(x, r.top() + 4.0), pos2(x, r.bottom())], Stroke::new(2.0, c));
+/// The history marker: a dark bar with a grab handle, as in Fusion's timeline. Drag it to roll
+/// the timeline back or forward; while it's dragged it stays faded where it was.
+fn marker(ui: &mut egui::Ui, dragged: bool) -> egui::Response {
+  let (r, resp) = ui.allocate_exact_size(vec2(12.0, 32.0), egui::Sense::drag());
+  let c = if dragged { Color32::from_gray(175) } else { Color32::from_gray(55) };
+  paint_marker(ui.painter(), r.center().x, r.top(), r.bottom(), c);
+  if resp.hovered() && !dragged {
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+  }
+  resp.on_hover_text("Drag to roll the timeline back or forward")
+}
+
+fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
+  p.line_segment([pos2(x, top + 4.0), pos2(x, bottom)], Stroke::new(2.0, c));
   // the grab handle sits on top, as in Fusion
-  ui.painter().add(egui::Shape::convex_polygon(
+  p.add(egui::Shape::convex_polygon(
     vec![
-      pos2(x - 5.0, r.top()),
-      pos2(x + 5.0, r.top()),
-      pos2(x + 5.0, r.top() + 7.0),
-      pos2(x, r.top() + 11.0),
-      pos2(x - 5.0, r.top() + 7.0),
+      pos2(x - 5.0, top),
+      pos2(x + 5.0, top),
+      pos2(x + 5.0, top + 7.0),
+      pos2(x, top + 11.0),
+      pos2(x - 5.0, top + 7.0),
     ],
     c,
     Stroke::NONE,
