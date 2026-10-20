@@ -1,0 +1,13 @@
+# 524-remove-hole-face: added by the parity loop from a Fusion probe
+# remove-hole-face: 40x30x20 box extruded from a rectangle with a d=10 circle at (20,15) (a through hole), then the hole's cylindrical face is removed and healed (what Remove Features does to holes). Expect a solid box.
+# stand-in for Fusion's Remove Features (no script API): remove_faces on the hole face
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.circle", "center": [20, 15], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[5, 5]], "distance": 20, "operation": "new_body"}
+{"cmd": "remove_faces", "faces": [{"point": [25, 15, 10]}]}
