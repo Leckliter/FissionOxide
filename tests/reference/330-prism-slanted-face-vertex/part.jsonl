@@ -1,0 +1,10 @@
+# 330-prism-slanted-face-vertex: added by the parity loop from a Fusion probe
+# prism-slanted-face-vertex: Right-triangle prism (legs 20 and 10, 8 tall); axis normal to the slanted face through its vertex (0,10,0); body patterned 3x about it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "axis", "method": "normal", "face": {"point": [10, 5, 4], "normal": [0.4472136, 0.8944272, 0]}, "near": [0, 10, 0]}
+{"cmd": "pattern.circular", "axis": {"axis": 3}, "count": 3, "angle": "360 deg", "join": false}

@@ -1,6 +1,7 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
+use fox_kernel::glam::DVec3;
 use fox_model::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
 use fox_sketch::CurveId;
@@ -8,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::commands::{
   add_feature, axis_ref, body_sel, edge_ref_of, expr_of, face_ref, ids, operation, opt_expr, opt_str, plane_ref,
-  req_expr, req_u32, req_vec3, sketch_for_feature,
+  req_expr, req_u32, req_vec3, sketch_for_feature, sketch_line_at,
 };
 use crate::{CmdError, CmdResult, Session};
 
@@ -405,6 +406,35 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
   add_feature(s, FeatureKind::PlaneBy { def })
 }
 
+/// What an axis through an edge runs along: a body edge ({body, edge} or {point}), a sketch line
+/// ({sketch, line}, or {point} on it when no body edge is there) or another axis ({axis}).
+fn axis_along(s: &Session, v: &Value) -> Result<AxisDef, CmdError> {
+  if let Some(f) = v.get("axis") {
+    let feature = FeatureId(req_u32(&json!({"axis": f}), "axis")?);
+    if !s.model.axes.contains_key(&feature) {
+      return Err(CmdError::new("that feature is not a construction axis"));
+    }
+    return Ok(AxisDef::Axis { feature });
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let sk = s.model.sketches.get(&sketch).ok_or(CmdError::new(format!("no sketch {}", sketch.0)))?;
+    let curve = CurveId(req_u32(v, if v.get("line").is_some() { "line" } else { "curve" })?);
+    if !matches!(sk.sketch.curve(curve).map(|c| &c.kind), Some(fox_sketch::CurveKind::Line { .. })) {
+      return Err(CmdError::new(format!("sketch {} has no line {}", sketch.0, curve.0)));
+    }
+    return Ok(AxisDef::SketchLine { sketch, curve });
+  }
+  match edge_ref_of(s, v) {
+    Ok(edge) => Ok(AxisDef::Edge { edge }),
+    Err(e) if v.get("point").is_some() => match sketch_line_at(s, DVec3::from(req_vec3(v, "point")?)) {
+      Ok((sketch, curve)) => Ok(AxisDef::SketchLine { sketch, curve }),
+      Err(_) => Err(e),
+    },
+    Err(e) => Err(e),
+  }
+}
+
 fn axis(s: &mut Session, p: &Value) -> CmdResult {
   let face = |s: &Session| face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?);
   let def = match opt_str(p, "method").unwrap_or("") {
@@ -412,7 +442,7 @@ fn axis(s: &mut Session, p: &Value) -> CmdResult {
     "normal" => AxisDef::Normal { face: face(s)?, near: req_vec3(p, "near")? },
     "two_planes" => AxisDef::TwoPlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "two_points" => AxisDef::TwoPoints { a: pref(s, p, "a")?, b: pref(s, p, "b")? },
-    "edge" => AxisDef::Edge { edge: edge(s, p, "edge")? },
+    "edge" => axis_along(s, p.get("edge").ok_or(CmdError::new("missing 'edge' (an edge, sketch line or axis)"))?)?,
     o => {
       return Err(CmdError::new(format!("unknown axis method '{o}' (face, normal, two_planes, two_points, edge)")));
     }

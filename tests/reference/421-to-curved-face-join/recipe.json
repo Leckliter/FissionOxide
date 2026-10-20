@@ -1,0 +1,218 @@
+{
+ "id": "to-curved-face-join",
+ "name": "to-curved-face-join",
+ "description": "Cylinder r=10, axis along +Y at z=30 (circle on XZ extruded 20 mm, y 0..20); a 10x10 square on XY (x -5..5, y 5..15) extruded up to the cylinder's curved face and joined.",
+ "exercises": [
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       -30
+      ]
+     },
+     "radius": 10,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Cyl"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Sketch2",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       -5,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       5
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       5,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       5,
+       15
+      ]
+     },
+     "end": {
+      "at": [
+       -5,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       -5,
+       15
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       -5,
+       5
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude2",
+   "operation": "join",
+   "profiles": [
+    {
+     "sketch": "Sketch2",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "to_face",
+    "direction": "positive",
+    "face": {
+     "point": [
+      0,
+      10,
+      20
+     ],
+     "type": "Cylinder",
+     "radius": 10
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+# 274-triangle-two-fillets: added by the parity loop from a Fusion probe
+# triangle-two-fillets: Triangle (0,0),(50,0),(10,30); sketch Fillet r=6 at the acute (50,0) vertex and r=3 at the (0,0) vertex; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [0, 0]]}
+{"cmd": "sketch.fillet", "curves": [2, 5], "radius": 6}
+{"cmd": "sketch.fillet", "curves": [6, 2], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

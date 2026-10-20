@@ -1,0 +1,11 @@
+# 211-single-v-physical-cut: added by the parity loop from a Fusion probe
+# single-v-physical-cut: Fox has no isoparametric-curve command; the V curve 12 mm from the edge (x=12) is drawn by hand.
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.line", "points": [[12, 0], [12, 20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[6, 10]], "distance": 4, "flip": true, "operation": "cut"}

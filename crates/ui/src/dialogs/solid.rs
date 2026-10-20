@@ -36,6 +36,42 @@ pub(super) struct Extra {
   edit_sets: Value,
   /// Extrude rows (see [`super::extrude`]).
   pub(super) ext: super::extrude::Rows,
+  /// Fillet radius type Variable: the radius at the edges' ends (`radius` is at their starts).
+  pub(super) variable: bool,
+  pub(super) radius2: String,
+  /// Revolve Type: Full (a whole turn) rather than Angle.
+  pub(super) rev_full: bool,
+  /// Revolve axis picked in the viewport: a straight body edge `{body, edge}` (axis "edge").
+  pub(super) axis_edge: Value,
+  /// The axis pick last seen in the viewport selection.
+  axis_pick: Value,
+  /// Chamfer Type (see [`CHAMFER_TYPES`]) with its second distance or angle.
+  pub(super) chamfer_type: &'static str,
+  pub(super) distance2: String,
+  pub(super) chamfer_angle: String,
+  /// Shell Direction (see [`SHELL_DIRECTIONS`]), the outside thickness when both, and tangent
+  /// chain off (on by default, as in Fusion).
+  pub(super) shell_dir: &'static str,
+  pub(super) thickness_out: String,
+  pub(super) shell_no_chain: bool,
+}
+
+/// Fusion's Chamfer Type.
+pub(super) const CHAMFER_TYPES: [(&str, &str); 3] =
+  [("equal", "Equal distance"), ("two", "Two distances"), ("angle", "Distance and angle")];
+/// Fusion's Shell Direction.
+pub(super) const SHELL_DIRECTIONS: [(&str, &str); 3] = [("inside", "Inside"), ("outside", "Outside"), ("both", "Both")];
+
+/// A combo box over `(key, label)` choices; true when the choice changed.
+fn choice(ui: &mut egui::Ui, id: &str, cur: &mut &'static str, options: &[(&'static str, &str)]) -> bool {
+  let shown = options.iter().find(|(k, _)| k == cur).map(|(_, l)| *l).unwrap_or_default();
+  let mut changed = false;
+  egui::ComboBox::from_id_salt(id).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+    for (k, l) in options {
+      changed |= ui.selectable_value(cur, *k, *l).changed();
+    }
+  });
+  changed
 }
 
 /// One fillet selection set: edges, faces (all their edges) and its radius.
@@ -133,11 +169,27 @@ impl Dialog {
   pub(super) fn setback_row(&mut self, ui: &mut egui::Ui, creating: bool) {
     ui.label("Radius type");
     let mut changed = false;
+    let mut kind = match (self.solid.chord, self.solid.variable) {
+      (true, _) => 1,
+      (_, true) => 2,
+      _ => 0,
+    };
     ui.horizontal(|ui| {
-      changed |= ui.radio_value(&mut self.solid.chord, false, "Constant").changed();
-      changed |= ui.radio_value(&mut self.solid.chord, true, "Chord length").changed();
+      changed |= ui.radio_value(&mut kind, 0, "Constant").changed();
+      changed |= ui.radio_value(&mut kind, 1, "Chord length").changed();
+      changed |= ui.radio_value(&mut kind, 2, "Variable").changed();
     });
+    (self.solid.chord, self.solid.variable) = (kind == 1, kind == 2);
     ui.end_row();
+    if self.solid.variable {
+      // Fusion's variable radius: the first row's radius at the start, this one at the end
+      ui.label("End radius");
+      if self.solid.radius2.is_empty() {
+        self.solid.radius2 = self.radius.clone();
+      }
+      changed |= super::value_edit_w(ui, &mut self.solid.radius2, 140.0).changed();
+      ui.end_row();
+    }
     ui.label("Corner type");
     let shown = if self.solid.setback_corner { "Setback" } else { "Rolling ball" };
     egui::ComboBox::from_id_salt("fillet-corner").selected_text(shown).width(140.0).show_ui(ui, |ui| {
@@ -161,6 +213,12 @@ impl Dialog {
     if self.solid.chord || editing {
       p["chord"] = json!(self.solid.chord);
     }
+    let r2 = if self.solid.variable { self.solid.radius2.trim() } else { "" };
+    if !r2.is_empty() {
+      p["radius2"] = json!(r2);
+    } else if editing {
+      p["radius2"] = Value::Null;
+    }
     let sb = if self.solid.setback_corner { self.solid.setback.trim() } else { "" };
     if !sb.is_empty() {
       p["setback"] = json!(sb);
@@ -170,10 +228,12 @@ impl Dialog {
     p
   }
 
-  pub(super) fn load_setback(&mut self, setback: &Option<String>, chord: bool) {
+  pub(super) fn load_setback(&mut self, setback: &Option<String>, chord: bool, radius2: &Option<String>) {
     self.solid.setback = setback.clone().unwrap_or_default();
     self.solid.setback_corner = !self.solid.setback.trim().is_empty();
     self.solid.chord = chord;
+    self.solid.radius2 = radius2.clone().unwrap_or_default();
+    self.solid.variable = !self.solid.radius2.trim().is_empty();
   }
 
   /// An edited fillet's sets after the first: their edge counts, radii and stored edges.
@@ -262,6 +322,232 @@ impl Dialog {
     }
     self.live_reset();
     self.dirty = self.editing.is_some();
+  }
+
+  // ---- revolve ----
+
+  /// Fusion's Type (Angle or Full) and, for Angle, the angle.
+  pub(super) fn revolve_type_rows(&mut self, ui: &mut egui::Ui) {
+    ui.label("Type");
+    let mut changed = false;
+    ui.horizontal(|ui| {
+      changed |= ui.radio_value(&mut self.solid.rev_full, false, "Angle").changed();
+      changed |= ui.radio_value(&mut self.solid.rev_full, true, "Full").changed();
+    });
+    ui.end_row();
+    if !self.solid.rev_full {
+      ui.label("Angle");
+      changed |= super::value_edit(ui, &mut self.angle).changed();
+      ui.end_row();
+    }
+    if changed {
+      self.dirty = true;
+    }
+  }
+
+  /// The revolve angle: a whole turn for Type Full.
+  pub(super) fn revolve_angle(&self) -> String {
+    if self.solid.rev_full { "360 deg".into() } else { self.angle.clone() }
+  }
+
+  /// The `axis` of the revolve command: X/Y/Z, a sketch line, a construction axis or an edge.
+  pub(super) fn revolve_axis(&self) -> Option<Value> {
+    Some(match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
+      (Some(n), _) => json!({"line": n.parse::<u32>().ok()?}),
+      (_, Some(n)) => json!({"axis": n.parse::<u32>().ok()?}),
+      _ if self.axis == "edge" => Some(self.solid.axis_edge.clone()).filter(|v| !v.is_null())?,
+      _ => json!(self.axis),
+    })
+  }
+
+  /// An axis picked in the viewport: a straight body edge, a line of the revolve's sketch or a
+  /// construction axis (the last one picked).
+  pub(super) fn sync_revolve_axis(&mut self, s: &Session) {
+    let picked = s.selection.iter().rev().find_map(|x| match x {
+      Sel::Edge { body, edge } => {
+        let straight = s.model.body(*body).and_then(|b| b.edges().iter().find(|e| e.id == *edge).map(|e| e.kind));
+        (straight == Some(fox_engine::kernel::CurveKind::Line))
+          .then(|| ("edge".to_string(), json!({"body": body.0, "edge": edge})))
+      }
+      Sel::SketchCurve { sketch, curve } if Some(*sketch) == self.sketch => {
+        let line = s.design.sketch(*sketch).is_ok_and(|sk| {
+          sk.curves.iter().any(|c| c.id == *curve && matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. }))
+        });
+        line.then(|| (format!("line:{}", curve.0), Value::Null))
+      }
+      Sel::Feature { feature } if s.model.axes.contains_key(feature) => {
+        Some((format!("axis:{}", feature.0), Value::Null))
+      }
+      _ => None,
+    });
+    // only a new pick changes the axis (the dropdown may have chosen another since)
+    let key = json!(picked);
+    if key == self.solid.axis_pick {
+      return;
+    }
+    self.solid.axis_pick = key;
+    if let Some((axis, edge)) = picked
+      && (axis != self.axis || edge != self.solid.axis_edge)
+    {
+      self.axis = axis;
+      self.solid.axis_edge = edge;
+      self.dirty = true;
+    }
+  }
+
+  // ---- chamfer ----
+
+  /// Fusion's Chamfer Type with its distances or angle.
+  pub(super) fn chamfer_rows(&mut self, ui: &mut egui::Ui, creating: bool) {
+    if self.solid.chamfer_type.is_empty() {
+      self.solid.chamfer_type = "equal";
+    }
+    ui.label("Chamfer type");
+    let mut changed = choice(ui, "chamfer-type", &mut self.solid.chamfer_type, &CHAMFER_TYPES);
+    ui.end_row();
+    let two = self.solid.chamfer_type == "two";
+    ui.label(if two { "Distance 1" } else { "Distance" });
+    changed |= super::value_edit(ui, &mut self.radius).changed();
+    ui.end_row();
+    let second = match self.solid.chamfer_type {
+      "two" => Some(("Distance 2", &mut self.solid.distance2)),
+      "angle" => Some(("Angle", &mut self.solid.chamfer_angle)),
+      _ => None,
+    };
+    if let Some((label, v)) = second {
+      ui.label(label);
+      if v.is_empty() {
+        *v = if two { self.radius.clone() } else { "45 deg".into() };
+      }
+      changed |= super::value_edit(ui, v).changed();
+      ui.end_row();
+    }
+    if changed && (!creating || self.applied) {
+      self.dirty = true;
+    }
+  }
+
+  /// Chamfer parameters: the distance and, by type, `distance2` or `angle` (`null` when editing
+  /// clears them).
+  pub(super) fn chamfer_params(&self, mut p: Value, editing: bool) -> Value {
+    p["distance"] = json!(self.radius);
+    let (d2, a) = match self.solid.chamfer_type {
+      "two" => (json!(self.solid.distance2), Value::Null),
+      "angle" => (Value::Null, json!(self.solid.chamfer_angle)),
+      _ => (Value::Null, Value::Null),
+    };
+    for (k, v) in [("distance2", d2), ("angle", a)] {
+      if !v.is_null() || editing {
+        p[k] = v;
+      }
+    }
+    p
+  }
+
+  pub(super) fn load_chamfer(&mut self, distance2: &Option<String>, angle: &Option<String>) {
+    self.solid.chamfer_type = match (distance2, angle) {
+      (_, Some(a)) => {
+        self.solid.chamfer_angle = a.clone();
+        "angle"
+      }
+      (Some(d), None) => {
+        self.solid.distance2 = d.clone();
+        "two"
+      }
+      _ => "equal",
+    };
+  }
+
+  // ---- shell ----
+
+  /// Faces or bodies, Tangent Chain, Direction and the inside / outside thicknesses.
+  pub(super) fn shell_rows(&mut self, ui: &mut egui::Ui, creating: bool) {
+    if self.solid.shell_dir.is_empty() {
+      self.solid.shell_dir = "inside";
+    }
+    ui.label("Faces / Body");
+    let (nf, nb) = (self.faces.len(), self.bodies.len());
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    let text = match (nf, nb) {
+      (0, 0) => "Select".to_string(),
+      (f, 0) => n(f, "face", "faces"),
+      (0, b) => n(b, "body", "bodies"),
+      (f, b) => format!("{}, {}", n(f, "face", "faces"), n(b, "body", "bodies")),
+    };
+    if creating {
+      sel_chip(ui, self.accent(), &text, nf + nb > 0);
+    } else {
+      ui.label(format!("{text} (unchanged)"));
+    }
+    ui.end_row();
+    ui.label("Tangent chain");
+    let mut chain = !self.solid.shell_no_chain;
+    if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
+      self.solid.shell_no_chain = !chain;
+    }
+    ui.end_row();
+    ui.label("Direction");
+    let mut changed = choice(ui, "shell-dir", &mut self.solid.shell_dir, &SHELL_DIRECTIONS);
+    ui.end_row();
+    let dir = self.solid.shell_dir;
+    ui.label(if dir == "outside" { "Outside thickness" } else { "Inside thickness" });
+    changed |= super::value_edit(ui, &mut self.radius).changed();
+    ui.end_row();
+    if dir == "both" {
+      ui.label("Outside thickness");
+      if self.solid.thickness_out.is_empty() {
+        self.solid.thickness_out = self.radius.clone();
+      }
+      changed |= super::value_edit(ui, &mut self.solid.thickness_out).changed();
+      ui.end_row();
+    }
+    ui.label("");
+    changed |= ui.checkbox(&mut self.flag, "Round corners").changed();
+    ui.end_row();
+    if changed && (!creating || self.applied) {
+      self.dirty = true;
+    }
+  }
+
+  /// The shell command: faces to open, whole bodies, direction and thicknesses.
+  pub(super) fn shell_params(&self) -> Value {
+    let mut p = json!({
+      "faces": self.faces, "bodies": self.bodies, "thickness": self.radius,
+      "corners": if self.flag { "round" } else { "sharp" }, "tangent_chain": !self.solid.shell_no_chain,
+    });
+    self.shell_direction(&mut p, "outside_thickness");
+    p
+  }
+
+  /// `feature.edit` fields of an edited shell.
+  pub(super) fn shell_edit_set(&self) -> Value {
+    let mut p = json!({"thickness": self.radius, "round": self.flag, "thickness_out": ""});
+    self.shell_direction(&mut p, "thickness_out");
+    p
+  }
+
+  fn shell_direction(&self, p: &mut Value, out_key: &str) {
+    let dir = if self.solid.shell_dir.is_empty() { "inside" } else { self.solid.shell_dir };
+    p["direction"] = json!(dir);
+    if dir == "both" && !self.solid.thickness_out.trim().is_empty() {
+      p[out_key] = json!(self.solid.thickness_out.trim());
+    }
+  }
+
+  pub(super) fn load_shell(
+    &mut self,
+    direction: fox_engine::model::ShellDirection,
+    thickness_out: &str,
+    bodies: usize,
+  ) {
+    use fox_engine::model::ShellDirection as D;
+    self.solid.shell_dir = match direction {
+      D::Inside => "inside",
+      D::Outside => "outside",
+      D::Both => "both",
+    };
+    self.solid.thickness_out = thickness_out.to_string();
+    self.bodies = vec![0; bodies];
   }
 
   // ---- sweep and loft ----
@@ -627,6 +913,7 @@ pub(super) fn form_edit_set(f: &Form, values: &[Value]) -> Value {
 #[cfg(test)]
 mod tests {
   use fox_engine::kernel::SurfaceKind;
+  use fox_engine::kernel::glam::DVec3;
   use serde_json::{Value, json};
 
   use super::*;
@@ -656,6 +943,209 @@ mod tests {
   fn set(d: &mut Dialog, f: &Form, k: &str, v: Value) {
     let i = f.inputs.iter().position(|x| x.key() == k).unwrap();
     d.form.values[i] = v;
+  }
+
+  /// The last feature's dialog, opened from the timeline.
+  fn edit_last(s: Session) -> (crate::App, Dialog) {
+    let app = crate::App::with_session(s);
+    let id = app.s.design.features.last().unwrap().id;
+    let d = Dialog::edit(&app, id).unwrap();
+    (app, d)
+  }
+
+  #[test]
+  fn revolve_type_full_and_axis_picked_in_the_canvas() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [12, 0], "corner2": [14, 5]}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [30, 10]]}));
+    let sk = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = Dialog::blank(Kind::Revolve);
+    d.sketch = Some(sk);
+    d.op = "new_body";
+    // Type Full is a whole turn whatever the angle field says
+    d.angle = "90 deg".into();
+    d.solid.rev_full = true;
+    assert_eq!(d.command().unwrap().1["angle"], json!("360 deg"));
+    d.solid.rev_full = false;
+    assert_eq!(d.command().unwrap().1["angle"], json!("90 deg"));
+    d.solid.rev_full = true;
+
+    // a straight body edge picked in the canvas becomes the axis
+    let b = &s.model.bodies[0];
+    let edge = b
+      .edges()
+      .iter()
+      .find(|e| e.kind == fox_engine::kernel::CurveKind::Line && (e.mid - DVec3::new(10.0, 10.0, 10.0)).length() < 1e-6)
+      .unwrap()
+      .id;
+    s.selection = vec![Sel::Edge { body: b.id, edge }];
+    d.sync_selection(&s);
+    assert_eq!(d.axis, "edge");
+    assert_eq!(d.command().unwrap().1["axis"], json!({"body": b.id.0, "edge": edge}));
+    let v0 = volume(&s);
+    apply(&mut s, &mut d);
+    // the rectangle (x 12..14 at y = 0) sweeps a 5 mm high ring about the vertical edge at
+    // (10, 10): from √(2² + 10²) out to √(4² + 10²)
+    let want = std::f64::consts::PI * (116.0 - 104.0) * 5.0;
+    assert!((volume(&s) - v0 - want).abs() < 0.5, "{} vs {want}", volume(&s) - v0);
+    // the dropdown may choose another axis while the edge stays selected
+    d.axis = "z".into();
+    d.sync_selection(&s);
+    assert_eq!(d.axis, "z");
+
+    // a line of the revolve's sketch (the one beside the rectangle), picked in the canvas
+    let line = s
+      .design
+      .sketch(sk)
+      .unwrap()
+      .curves
+      .iter()
+      .rev()
+      .find(|c| matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. }))
+      .map(|c| c.id)
+      .unwrap();
+    s.selection = vec![Sel::SketchCurve { sketch: sk, curve: line }];
+    d.sync_selection(&s);
+    assert_eq!(d.axis, format!("line:{}", line.0));
+    assert_eq!(d.command().unwrap().1["axis"], json!({"line": line.0}));
+    // a line of another sketch is not this revolve's axis
+    s.selection = vec![Sel::SketchCurve { sketch: FeatureId(sk.0 + 100), curve: line }];
+    d.sync_selection(&s);
+    assert_eq!(d.axis, format!("line:{}", line.0));
+
+    // a full revolve reopens as Type Full; its edit keeps the whole turn
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [5, 0], "corner2": [10, 10]}));
+    let sk = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = Dialog::blank(Kind::Revolve);
+    d.sketch = Some(sk);
+    d.solid.rev_full = true;
+    apply(&mut s, &mut d);
+    let ring = std::f64::consts::PI * 75.0 * 10.0;
+    assert!((volume(&s) - ring).abs() < 0.5, "{}", volume(&s));
+    let (mut app, mut e) = edit_last(s);
+    assert!(e.solid.rev_full);
+    e.editing = Some(app.s.design.features.last().unwrap().id);
+    e.solid.rev_full = false;
+    e.angle = "180 deg".into();
+    apply(&mut app.s, &mut e);
+    assert!((volume(&app.s) - ring / 2.0).abs() < 0.5, "{}", volume(&app.s));
+  }
+
+  /// A 20 mm cube and the edge along its top at +x (a 20 mm edge between two flat faces).
+  fn cube_edge() -> (Session, Value) {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    let b = &s.model.bodies[0];
+    let e = b.edges().iter().find(|e| (e.mid - DVec3::new(10.0, 0.0, 20.0)).length() < 1e-6).unwrap().id;
+    let edge = json!({"body": b.id.0, "edge": e});
+    (s, edge)
+  }
+
+  #[test]
+  fn chamfer_types_and_their_timeline_edit() {
+    for (ty, second, cut) in [("equal", "", 10.0), ("two", "2 mm", 20.0), ("angle", "45 deg", 10.0)] {
+      let (mut s, edge) = cube_edge();
+      let mut d = Dialog::blank(Kind::Chamfer);
+      d.edges = vec![edge];
+      d.radius = "1 mm".into();
+      d.solid.chamfer_type = ty;
+      match ty {
+        "two" => d.solid.distance2 = second.into(),
+        "angle" => d.solid.chamfer_angle = second.into(),
+        _ => {}
+      }
+      let (_, p) = d.command().unwrap();
+      assert_eq!(p.get("distance2").cloned(), (ty == "two").then(|| json!(second)), "{ty}: {p}");
+      assert_eq!(p.get("angle").cloned(), (ty == "angle").then(|| json!(second)), "{ty}: {p}");
+      apply(&mut s, &mut d);
+      assert!((8000.0 - volume(&s) - cut).abs() < 1e-6, "{ty}: {}", 8000.0 - volume(&s));
+      // reopened from the timeline with its type; switching to equal distance clears the rest
+      let (mut app, mut e) = edit_last(s);
+      assert_eq!(e.solid.chamfer_type, ty);
+      e.editing = Some(app.s.design.features.last().unwrap().id);
+      e.solid.chamfer_type = "equal";
+      e.radius = "2 mm".into();
+      apply(&mut app.s, &mut e);
+      assert!((8000.0 - volume(&app.s) - 40.0).abs() < 1e-6, "{ty}: {}", 8000.0 - volume(&app.s));
+      let f = app.s.design.features.last().unwrap();
+      assert!(matches!(&f.kind, FeatureKind::Chamfer { distance2: None, angle: None, .. }), "{:?}", f.kind);
+    }
+  }
+
+  #[test]
+  fn variable_radius_fillet() {
+    let (mut s, edge) = cube_edge();
+    let mut d = Dialog::blank(Kind::Fillet);
+    d.edges = vec![edge];
+    d.radius = "2 mm".into();
+    d.solid.variable = true;
+    d.solid.radius2 = "5 mm".into();
+    assert_eq!(d.command().unwrap().1["radius2"], json!("5 mm"));
+    apply(&mut s, &mut d);
+    let cut = 8000.0 - volume(&s);
+    let round = |r: f64| (1.0 - std::f64::consts::FRAC_PI_4) * r * r * 20.0;
+    assert!(cut > round(2.0) + 1.0 && cut < round(5.0) - 1.0, "{cut}");
+    let (mut app, mut e) = edit_last(s);
+    assert!(e.solid.variable && e.solid.radius2 == "5 mm");
+    e.editing = Some(app.s.design.features.last().unwrap().id);
+    e.solid.variable = false;
+    apply(&mut app.s, &mut e);
+    assert!((8000.0 - volume(&app.s) - round(2.0)).abs() < 1e-3, "{}", 8000.0 - volume(&app.s));
+    assert!(matches!(&app.s.design.features.last().unwrap().kind, FeatureKind::Fillet { radius2: None, .. }));
+    // constant dialogs send no end radius
+    let mut d = Dialog::blank(Kind::Fillet);
+    d.edges = vec![json!({"body": 1, "edge": 1})];
+    assert!(d.command().unwrap().1.get("radius2").is_none());
+  }
+
+  #[test]
+  fn shell_direction_body_pick_and_timeline_edit() {
+    // a face picked: walls outside the cube
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    let b = &s.model.bodies[0];
+    let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let sel = vec![Sel::Face { body: b.id, face: top }];
+    let mut d = Dialog::blank(Kind::Shell);
+    s.selection = sel;
+    d.sync_selection(&s);
+    d.solid.shell_dir = "outside";
+    let (_, p) = d.command().unwrap();
+    assert_eq!((p["direction"].clone(), p["tangent_chain"].clone()), (json!("outside"), json!(true)), "{p}");
+    assert!(p.get("outside_thickness").is_none());
+    apply(&mut s, &mut d);
+    assert!((volume(&s) - (24.0 * 24.0 * 22.0 - 8000.0)).abs() < 1e-3, "{}", volume(&s));
+
+    // the whole body picked: hollow and closed, 2 mm inside and 1 mm outside
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    let mut d = Dialog::blank(Kind::Shell);
+    s.selection = vec![Sel::Body { body: s.model.bodies[0].id }];
+    d.sync_selection(&s);
+    assert!(d.ready() && d.faces.is_empty());
+    d.solid.shell_dir = "both";
+    d.solid.thickness_out = "1 mm".into();
+    assert_eq!(d.command().unwrap().1["outside_thickness"], json!("1 mm"));
+    apply(&mut s, &mut d);
+    assert!((volume(&s) - (22f64.powi(3) - 16f64.powi(3))).abs() < 1e-3, "{}", volume(&s));
+    // reopened: both directions, the body; a thicker outside wall
+    let (mut app, mut e) = edit_last(s);
+    assert_eq!((e.solid.shell_dir, e.solid.thickness_out.as_str(), e.bodies.len()), ("both", "1 mm", 1));
+    e.editing = Some(app.s.design.features.last().unwrap().id);
+    e.solid.thickness_out = "2 mm".into();
+    apply(&mut app.s, &mut e);
+    assert!((volume(&app.s) - (24f64.powi(3) - 16f64.powi(3))).abs() < 1e-3, "{}", volume(&app.s));
+    // and back to inside only
+    e.solid.shell_dir = "inside";
+    e.dirty = true;
+    apply(&mut app.s, &mut e);
+    assert!((volume(&app.s) - (8000.0 - 16f64.powi(3))).abs() < 1e-3, "{}", volume(&app.s));
   }
 
   #[test]

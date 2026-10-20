@@ -1,0 +1,5 @@
+# 456-sphere-join-dome-xz-offset: added by the parity loop from a Fusion probe
+# sphere-join-dome-xz-offset: 30x30x10 plate X/Y 0..30, Z 0..10; sphere primitive r=10 on a plane at Y=15 (normal +Y, x=+X, y=-Z) at (15,-10) = world (15,15,10), join: dome on the plate (lower half buried).
+# hand-written; Fusion side is the equivalent semicircle revolved 360 deg about its diameter
+{"cmd": "box", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [15, 15], "width": 30, "depth": 30, "height": 10}
+{"cmd": "sphere", "plane": {"origin": [0, 15, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}, "at": [15, -10], "radius": 10, "operation": "join"}

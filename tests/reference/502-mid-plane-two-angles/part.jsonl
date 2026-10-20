@@ -1,0 +1,10 @@
+# 502-mid-plane-two-angles: added by the parity loop from a Fusion probe
+# mid-plane-two-angles: 40x40x30 box centred in XY; two-angle draft on the 4 side faces about a free plane at z=15: 4 deg on the first side, 8 deg on the second.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "draft", "faces": [{"point": [0.0, 20.0, 22.0]}, {"point": [20.0, 0.0, 22.0]}, {"point": [0.0, -20.0, 22.0]}, {"point": [-20.0, 0.0, 22.0]}], "plane": {"origin": [0.0, 0.0, 15.0], "normal": [0.0, 0.0, 1.0]}, "angle": "4 deg", "angle2": "8 deg"}

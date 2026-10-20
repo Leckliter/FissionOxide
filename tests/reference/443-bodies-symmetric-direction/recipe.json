@@ -1,0 +1,174 @@
+{
+ "id": "bodies-symmetric-direction",
+ "name": "bodies symmetric direction",
+ "description": "Block 8x6x4 at x 0..8, y 0..6; body rect-patterned symmetric along X, 3 @12 mm, x 2 along +Y @10 mm (one-sided).",
+ "exercises": [
+  "extrude",
+  "rectangular_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Block_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       8,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       8,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       8,
+       6
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       8,
+       6
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       6
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       6
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Block",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Block_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 4,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "rectangular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "direction1": {
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "count": 3,
+    "spacing": 12,
+    "symmetric": true
+   },
+   "direction2": {
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "count": 2,
+    "spacing": 10
+   },
+   "distance_type": "spacing (distance between instances)"
+  }
+ ]
+}

@@ -1,0 +1,122 @@
+{
+ "id": "extend-arc-around-to-line",
+ "name": "extend-arc-around-to-line",
+ "description": "Line y=0 (x -30..30) and a quarter arc r20 about the origin from (20,0) through (14.14,14.14) to (0,20); Extend the arc from its (0,20) end, which carries on round its circle to the line at (-20,0); extrude the half disc 10 mm.",
+ "exercises": [
+  "sketch",
+  "extend",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "ln",
+     "start": {
+      "at": [
+       -30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a",
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "mid": {
+      "at": [
+       14.142136,
+       14.142136
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "extend",
+     "curve": "a",
+     "at": {
+      "at": [
+       2,
+       19.899749
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "ln",
+        "a"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

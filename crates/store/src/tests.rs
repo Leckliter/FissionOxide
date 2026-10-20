@@ -1,6 +1,22 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn tests_never_get_the_users_hub() {
+  assert!(is_test_process(), "Cargo runs tests from target/<profile>/deps");
+  let root = Store::default_root();
+  assert!(!is_user_hub(&root), "the default hub in a test is a scratch one, not {}", root.display());
+  let a = Store::scratch_root();
+  assert!(a.starts_with(test_hubs_dir()) && a != Store::scratch_root(), "fresh scratch hubs: {}", a.display());
+}
+
+#[test]
+#[should_panic(expected = "the user's real data hub")]
+fn opening_the_users_hub_in_a_test_panics() {
+  // refused before anything is read or written
+  let _ = Store::open(&platform_dir("FissionOxide", "fissionoxide"));
+}
+
 fn temp_root(name: &str) -> PathBuf {
   let d = std::env::temp_dir().join(format!("fox-store-test-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);

@@ -1,0 +1,29 @@
+# 490-params-changed-compute-all: added by the parity loop from a Fusion probe
+# params-changed-compute-all: parametric plate, change parameters, then Compute All.
+{"cmd": "param.add", "name": "width", "expr": "60 mm"}
+{"cmd": "param.add", "name": "depth", "expr": "40 mm"}
+{"cmd": "param.add", "name": "height", "expr": "15 mm"}
+{"cmd": "param.add", "name": "hole_d", "expr": "10 mm"}
+# sketch Sketch1: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [50, 30]]}
+{"cmd": "sketch.line", "points": [[50, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.circle", "center": [25, 15], "radius": 4}
+# coincident l1.start origin: already the same point
+# horizontal l1: already constrained when drawn
+# vertical l2: already constrained when drawn
+# horizontal l3: already constrained when drawn
+# vertical l4: already constrained when drawn
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": "width"}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 4], "value": "depth"}
+{"cmd": "sketch.dimension", "type": "diameter", "curves": [13], "value": "hole_d"}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 12], "value": "width / 2"}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [0, 12], "value": "depth / 2"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[30, 1], [59, 20], [30, 39], [1, 20]], "distance": "height", "operation": "new_body"}
+{"cmd": "param.set", "name": "width", "expr": "80 mm"}
+{"cmd": "param.set", "name": "height", "expr": "25 mm"}
+{"cmd": "param.set", "name": "hole_d", "expr": "16 mm"}
+{"cmd": "compute_all"}

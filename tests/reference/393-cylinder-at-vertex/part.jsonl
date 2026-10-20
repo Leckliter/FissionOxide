@@ -1,0 +1,15 @@
+# 393-cylinder-at-vertex: added by the parity loop from a Fusion probe
+# cylinder-at-vertex: Cylinder r=10 h=20 at origin and a separate 40x40x5 slab (z -5..0); construction plane tangent to the cylinder toward the slab vertex (20,-20,-5) (normal (1,-1,0)); slab split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "flip": true, "operation": "new_body"}
+{"cmd": "plane", "method": "tangent", "face": {"point": [10, 0, 10]}, "near": [20, -20, -5]}
+{"cmd": "split", "plane": {"feature": 5}, "bodies": [4000]}

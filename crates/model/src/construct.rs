@@ -65,6 +65,10 @@ pub enum AxisDef {
   TwoPoints { a: PointRef, b: PointRef },
   /// Along a straight edge (or a circular edge's axis).
   Edge { edge: EdgeRef },
+  /// Along a line of a sketch (construction or not).
+  SketchLine { sketch: FeatureId, curve: CurveId },
+  /// Along another construction axis.
+  Axis { feature: FeatureId },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,6 +176,8 @@ impl AxisDef {
     match self {
       AxisDef::TwoPlanes { a, b } => plane_dep(a).into_iter().chain(plane_dep(b)).collect(),
       AxisDef::TwoPoints { a, b } => [a, b].iter().filter_map(|p| p.feature()).collect(),
+      AxisDef::SketchLine { sketch, .. } => vec![*sketch],
+      AxisDef::Axis { feature } => vec![*feature],
       _ => vec![],
     }
   }

@@ -282,7 +282,12 @@ impl Regenerator {
         };
         let id = feature.id;
         let mut kind = feature.kind.clone();
-        match ctx.apply(id, &mut kind) {
+        let seeded = ctx.seed_cached(&feature.cached);
+        let result = ctx.apply(id, &mut kind);
+        for s in &seeded {
+          ctx.state.sketches.remove(s);
+        }
+        match result.map(|w| w.or_else(|| (!seeded.is_empty()).then(|| LOST_PROFILE.to_string()))) {
           Ok(w) => st.warning = w,
           Err(e) => st.error = Some(e),
         }
@@ -332,8 +337,14 @@ fn restore_status(mut st: FeatureStatus, state: &State, f: &Feature) -> FeatureS
   {
     st.warning = sketch_warning(r);
   }
+  if !f.suppressed && !f.cached.is_empty() && st.error.is_none() && st.warning.is_none() {
+    st.warning = Some(LOST_PROFILE.into());
+  }
   st
 }
+
+/// The warning on a feature building from a deleted sketch's cached geometry (Fusion's words).
+const LOST_PROFILE: &str = "The profile reference is lost and this feature is using cached geometry";
 
 fn state_error(state: &State, f: &Feature) -> Option<String> {
   match &f.kind {
@@ -400,6 +411,24 @@ impl Ctx<'_> {
       return Err(format!("count must be between 1 and {MAX_INSTANCES}"));
     }
     Ok(n as usize)
+  }
+
+  /// Puts a feature's cached copies of deleted sketches where it looks its sketches up; returns
+  /// the ids seeded, to take out again once the feature is built.
+  fn seed_cached(&mut self, cached: &[crate::CachedSketch]) -> Vec<FeatureId> {
+    let mut seeded = Vec::new();
+    for c in cached {
+      if self.state.sketches.contains_key(&c.sketch) {
+        continue;
+      }
+      let Ok(plane) = self.resolve_plane(&mut c.plane.clone()) else { continue };
+      let mut sketch = c.geometry.clone();
+      let report = sketch.solve();
+      let profiles = find_profiles(&sketch);
+      self.state.sketches.insert(c.sketch, SketchResult { plane, sketch, profiles, report, dim_errors: Vec::new() });
+      seeded.push(c.sketch);
+    }
+    seeded
   }
 
   fn apply(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
@@ -485,21 +514,36 @@ impl Ctx<'_> {
           }
         };
         let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
+        // the far side of a two-sided extent tapers on its own (symmetric: as the first side)
+        let taper2 = match extent.kind {
+          ExtentKind::TwoSides if !extent.taper2.trim().is_empty() => self.angle(&extent.taper2)?,
+          _ => taper,
+        };
         let thin = if extent.thin.trim().is_empty() { 0.0 } else { self.len(&extent.thin)? };
-        if taper.abs() > 1e-12 && start.abs() > 0.0 {
-          return Err("taper works with one-side, through-all and to-face extents".into());
-        }
         if thin < 0.0 {
           return Err("the thin wall thickness must be positive".into());
         }
         let along = n.dot(sk.plane.normal()).signum();
-        let solid = |face: &Shape| -> Result<Shape, String> {
-          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face.clone() };
-          if taper.abs() > 1e-12 {
-            face.extrude_tapered(length * along, taper).map_err(ke)
+        let tapered = taper.abs() > 1e-12 || taper2.abs() > 1e-12;
+        // `height` is signed along `n`
+        let side = |face: &Shape, height: f64, angle: f64| -> Result<Shape, String> {
+          if angle.abs() > 1e-12 {
+            face.extrude_tapered(height * along, angle).map_err(ke)
           } else {
-            face.extrude(n * length).map_err(ke)
+            face.extrude(n * height).map_err(ke)
           }
+        };
+        let solid = |face: &Shape| -> Result<Shape, String> {
+          if tapered && start < 0.0 {
+            // each side drafts away from the profile plane on its own, as in Fusion
+            let mut sides = vec![side(face, start, taper2)?];
+            if length + start > 1e-9 {
+              sides.push(side(face, length + start, taper)?);
+            }
+            return union_all(sides);
+          }
+          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face.clone() };
+          side(&face, length, taper)
         };
         let mut tools = Vec::new();
         for p in &chosen {
@@ -689,14 +733,25 @@ impl Ctx<'_> {
         }
         Ok((!split_any).then(|| "the tool doesn't cross the bodies".to_string()))
       }
-      FeatureKind::Shell { faces, thickness, round } => {
+      FeatureKind::Shell { faces, thickness, round, direction, thickness_out, bodies } => {
         let t = self.len(thickness)?;
+        let (inside, outside) = match direction {
+          crate::ShellDirection::Inside => (t, 0.0),
+          crate::ShellDirection::Outside => (0.0, t),
+          crate::ShellDirection::Both => {
+            (t, if thickness_out.trim().is_empty() { t } else { self.len(thickness_out)? })
+          }
+        };
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
           by_body.entry(f.body).or_default().push(i);
         }
+        // whole bodies: hollow and closed
+        for b in bodies.iter() {
+          by_body.entry(*b).or_default();
+        }
         if by_body.is_empty() {
-          return Err("select faces to remove".into());
+          return Err("select faces to remove or a body".into());
         }
         let mut missing = false;
         for (bid, idxs) in by_body {
@@ -709,7 +764,7 @@ impl Ctx<'_> {
             missing |= found.is_empty();
             ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
-          let shape = body.shape.shell(&ids, t, *round).map_err(ke)?;
+          let shape = body.shape.shell_sides(&ids, inside, outside, *round).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))
@@ -737,7 +792,9 @@ impl Ctx<'_> {
       FeatureKind::ConstructionPlane { base, offset } => {
         let pl = self.resolve_plane(base)?;
         let d = self.len(offset)?;
-        self.state.planes.insert(id, pl.offset(d));
+        // XZ keeps its frame but offsets along +Y, as in Fusion
+        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign() } else { 1.0 };
+        self.state.planes.insert(id, pl.offset(sign * d));
         Ok(None)
       }
       FeatureKind::Mirror { bodies, plane, join } => {
@@ -778,16 +835,30 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::CircularPattern { bodies, axis, count, angle, join } => {
+      FeatureKind::CircularPattern { bodies, axis, count, angle, symmetric, join } => {
         let (o, d) = self.resolve_axis(axis, None)?;
         let n = self.count(count)?;
         let total = self.angle(angle)?;
         let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
         let step = if full || n < 2 { total / n as f64 } else { total / (n - 1) as f64 };
+        // Symmetric (short of a full turn): the instances span -total/2..total/2.
+        let start = if *symmetric && !full && n >= 2 { -total / 2.0 } else { 0.0 };
+        let angles: Vec<f64> = (0..n).map(|k| start + step * k as f64).collect();
+        // The original stays put when an instance lands on it; otherwise (an even symmetric
+        // count) it moves to the first instance.
+        let stay = angles.iter().position(|a| a.abs() < 1e-12);
         for bi in self.select(bodies)? {
           let body = self.state.bodies[bi].clone();
+          let rest: Vec<f64> = match stay {
+            Some(i) => angles.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, a)| *a).collect(),
+            None => {
+              let moved = body.shape.rotated(o, d, angles[0]).map_err(ke)?;
+              self.state.bodies[bi] = body.with_shape(moved, id);
+              angles[1..].to_vec()
+            }
+          };
           let copies: Result<Vec<Shape>, String> =
-            (1..n).map(|k| body.shape.rotated(o, d, step * k as f64).map_err(ke)).collect();
+            rest.iter().map(|a| body.shape.rotated(o, d, *a).map_err(ke)).collect();
           self.add_copies(id, bi, copies?, *join)?;
         }
         Ok(None)
@@ -815,12 +886,32 @@ impl Ctx<'_> {
           Operation::Cut => BoolOp::Subtract,
           Operation::Intersect => BoolOp::Intersect,
         };
-        for t in tools.iter() {
-          if t == target {
-            continue;
+        if op == BoolOp::Intersect {
+          // Fusion keeps the part of the target inside any tool, target ∩ (t1 ∪ t2 ∪ …),
+          // not just the part inside every tool
+          let mut union: Option<Shape> = None;
+          for t in tools.iter() {
+            if t == target {
+              continue;
+            }
+            let s = &self.state.bodies[self.body_index(*t)?].shape;
+            union = Some(match union {
+              None => s.clone(),
+              Some(u) => u.boolean(s, BoolOp::Union).map_err(ke)?,
+            });
           }
-          let i = self.body_index(*t)?;
-          shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
+          if let Some(u) = union {
+            shape = shape.boolean(&u, BoolOp::Intersect).map_err(ke)?;
+          }
+        } else {
+          // cutting or joining the tools one at a time equals doing it with their union
+          for t in tools.iter() {
+            if t == target {
+              continue;
+            }
+            let i = self.body_index(*t)?;
+            shape = shape.boolean(&self.state.bodies[i].shape, op).map_err(ke)?;
+          }
         }
         let new_target = self.state.bodies[ti].with_shape(shape, id);
         self.state.bodies[ti] = new_target;
@@ -967,9 +1058,14 @@ impl Ctx<'_> {
         }
         Ok((!split_any).then(|| "the plane doesn't cross the bodies".to_string()))
       }
-      FeatureKind::Draft { faces, plane, angle, flip } => {
+      FeatureKind::Draft { faces, plane, angle, flip, symmetric, angle2 } => {
         let pl = self.resolve_plane(plane)?;
         let a = self.angle(angle)?;
+        // symmetric and two-angle drafts split the faces at the plane and taper both sides
+        let a2 = match angle2 {
+          Some(e) => Some(self.angle(e)?),
+          None => symmetric.then_some(a),
+        };
         let pull = if *flip { -pl.normal() } else { pl.normal() };
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
@@ -989,7 +1085,11 @@ impl Ctx<'_> {
             missing |= found.is_empty();
             ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
-          let shape = body.shape.draft(&ids, pl.origin, pull, a).map_err(ke)?;
+          let shape = match a2 {
+            Some(a2) => body.shape.draft_two_sided(&ids, pl.origin, pull, a, a2),
+            None => body.shape.draft(&ids, pl.origin, pull, a),
+          }
+          .map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))
@@ -1742,7 +1842,8 @@ impl Ctx<'_> {
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
-        | CurveKind::Conic { .. } => {}
+        | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. } => {}
       }
     }
     lost
@@ -2207,3 +2308,5 @@ mod subasm;
 mod tests_config;
 #[cfg(test)]
 mod tests_subasm;
+
+mod form;
