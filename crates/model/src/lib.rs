@@ -1002,13 +1002,17 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: Vec<BodyId>,
     thickness: String,
-    /// Half the thickness each side.
+    /// The full thickness on each side (twice it in all), as Fusion does.
     #[serde(default)]
     symmetric: bool,
     #[serde(default)]
     flip: bool,
     #[serde(default)]
     operation: Operation,
+    /// Round the corners where the faces of a surface meet at an angle (default: sharp, the
+    /// offset faces extended until they meet).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    round: bool,
   },
   /// A surface extruded from open (or closed) sketch curves.
   SurfaceExtrude {
