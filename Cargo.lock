@@ -950,6 +950,7 @@ dependencies = [
  "fox-desktop",
  "fox-ui",
  "log",
+ "rfd",
  "winresource",
 ]
 

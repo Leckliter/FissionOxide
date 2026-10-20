@@ -11,6 +11,7 @@ fox-desktop.workspace = true
 eframe.workspace = true
 env_logger.workspace = true
 log.workspace = true
+rfd.workspace = true
 
 [build-dependencies]
 winresource = { version = "0.1", default-features = false }
