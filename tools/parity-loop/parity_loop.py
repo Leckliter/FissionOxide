@@ -210,6 +210,7 @@ class Loop:
     self.fixing = set()
     self.halt = None  # set when the subscription's usage limit stops an agent
     self.halt_reset = None  # Unix time it resets, when the agent reported one
+    self.fusion_down = None  # set when FoxBridge stops answering mid-run
     self.started = 0  # probes and fixers this run started
     self.claimed = set()  # cargo target slots this process holds
     os.environ["FOX_CLI"] = fox_cli()
@@ -606,7 +607,7 @@ class Loop:
       # Up to --probes of these run at once. Each claims its entry under the ledger lock, so two
       # probes (in this process or another) never take the same one.
       while (claimed[0] < self.a.max_features and self.budget.ok() and not self.halt and not self.stop_requested()
-             and not self.past_cutoff()):
+             and not self.past_cutoff() and not self.fusion_down):
         e = self.ledger.claim_next(keys, self.probing)
         if e is None:
           return
@@ -615,6 +616,10 @@ class Loop:
         self.probing.add(e["key"])
         try:
           await self.probe(e)
+        except SystemExit as ex:  # client.py exits when FoxBridge is unreachable: Fusion is gone
+          self.fusion_down = str(ex)
+          self.put_back(e["key"], f"Fusion went away mid-probe ({ex})")
+          print(f"[{stamp()}] Fusion is unreachable; no more probes this run, fixers continue", flush=True)
         except Exception as ex:  # one probe's failure mustn't stop the others; the entry resumes
           self.ledger.update(e["key"], note=f"probe error (stays probing): {ex}"[:1500])
           print(f"  probe {e['key']} failed: {ex}", flush=True)
