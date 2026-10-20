@@ -115,6 +115,8 @@ Name: "assoc"; Description: "{cm:AssocFox}"; GroupDescription: "{cm:AssocGroup}"
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#CliExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion
+; the fox in 3D (brand/model.py); the app also adds it to the data hub the first time it starts
+Source: "..\..\brand\model\FissionOxide.fox"; DestDir: "{app}\Samples"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "FissionOxide.FissionOxide"; Comment: "Parametric 3D CAD"

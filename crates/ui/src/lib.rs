@@ -159,10 +159,16 @@ impl App {
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
-    match open {
-      Some(p) => app.open_path(&p),
+    // the first start puts the fox in 3D in the hub, and shows it unless a file was asked for
+    let welcome = fox_engine::hub::add_welcome(&app.hub_root()).unwrap_or_else(|e| {
+      log::warn!("couldn't add the welcome design to the hub: {}", e.0);
+      None
+    });
+    match (open, welcome) {
+      (Some(p), _) => app.open_path(&p),
+      (None, Some(item)) => app.open_hub_item(&item, None),
       // like Fusion, start with the data panel showing
-      None => app.data.toggle(),
+      (None, None) => app.data.toggle(),
     }
     app
   }

@@ -1,0 +1,293 @@
+# The FissionOxide fox in 3D. Written by brand/model.py from brand/logo/fox.json and
+# brand/tokens.json; don't edit it by hand. Every facet is a body in its own colour,
+# extruded both ways from the XZ plane so the fox looks the same from the front and back.
+{"cmd": "new", "name": "FissionOxide"}
+# Left ear 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-50.0, 132.0], [-12.0, 102.0], [-30.0, 100.4]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": "5.2 mm", "taper": "6.582 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "distance": "5.2 mm", "taper": "6.582 deg", "flip": true, "operation": "join", "targets": [2000]}
+{"cmd": "body.appearance", "body": 2000, "color": "#B07FEA"}
+{"cmd": "body.rename", "body": 2000, "name": "Left ear 1"}
+# Right ear 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[30.0, 100.4], [12.0, 102.0], [50.0, 132.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 4, "distance": "5.2 mm", "taper": "6.582 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 4, "distance": "5.2 mm", "taper": "6.582 deg", "flip": true, "operation": "join", "targets": [5000]}
+{"cmd": "body.appearance", "body": 5000, "color": "#DE3832"}
+{"cmd": "body.rename", "body": 5000, "name": "Right ear 1"}
+# Left ear 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-50.0, 132.0], [-30.0, 100.4], [-47.6, 62.4]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 7, "distance": "4.8 mm", "taper": "7.125 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 7, "distance": "4.8 mm", "taper": "7.125 deg", "flip": true, "operation": "join", "targets": [8000]}
+{"cmd": "body.appearance", "body": 8000, "color": "#9660D6"}
+{"cmd": "body.rename", "body": 8000, "name": "Left ear 2"}
+# Right ear 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[47.6, 62.4], [30.0, 100.4], [50.0, 132.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 10, "distance": "4.8 mm", "taper": "7.125 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 10, "distance": "4.8 mm", "taper": "7.125 deg", "flip": true, "operation": "join", "targets": [11000]}
+{"cmd": "body.appearance", "body": 11000, "color": "#BC2A27"}
+{"cmd": "body.rename", "body": 11000, "name": "Right ear 2"}
+# Left ear 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-30.0, 100.4], [-12.0, 102.0], [-47.6, 62.4]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 13, "distance": "4 mm", "taper": "8.531 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 13, "distance": "4 mm", "taper": "8.531 deg", "flip": true, "operation": "join", "targets": [14000]}
+{"cmd": "body.appearance", "body": 14000, "color": "#55289A"}
+{"cmd": "body.rename", "body": 14000, "name": "Left ear 3"}
+# Right ear 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[47.6, 62.4], [12.0, 102.0], [30.0, 100.4]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 16, "distance": "4 mm", "taper": "8.531 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 16, "distance": "4 mm", "taper": "8.531 deg", "flip": true, "operation": "join", "targets": [17000]}
+{"cmd": "body.appearance", "body": 17000, "color": "#93201F"}
+{"cmd": "body.rename", "body": 17000, "name": "Right ear 3"}
+# Left face 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-12.0, 102.0], [-57.0, 53.6], [-25.0, 71.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 19, "distance": "7.2 mm", "taper": "4.764 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 19, "distance": "7.2 mm", "taper": "4.764 deg", "flip": true, "operation": "join", "targets": [20000]}
+{"cmd": "body.appearance", "body": 20000, "color": "#FFCD4A"}
+{"cmd": "body.rename", "body": 20000, "name": "Left face 1"}
+# Right face 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[25.0, 71.6], [57.0, 53.6], [12.0, 102.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 22, "distance": "7.2 mm", "taper": "4.764 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 22, "distance": "7.2 mm", "taper": "4.764 deg", "flip": true, "operation": "join", "targets": [23000]}
+{"cmd": "body.appearance", "body": 23000, "color": "#F5961E"}
+{"cmd": "body.rename", "body": 23000, "name": "Right face 1"}
+# Left face 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-12.0, 102.0], [-25.0, 71.6], [0.0, 44.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 25, "distance": "6.8 mm", "taper": "5.042 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 25, "distance": "6.8 mm", "taper": "5.042 deg", "flip": true, "operation": "join", "targets": [26000]}
+{"cmd": "body.appearance", "body": 26000, "color": "#F7B92E"}
+{"cmd": "body.rename", "body": 26000, "name": "Left face 2"}
+# Right face 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0.0, 44.0], [25.0, 71.6], [12.0, 102.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 28, "distance": "6.8 mm", "taper": "5.042 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 28, "distance": "6.8 mm", "taper": "5.042 deg", "flip": true, "operation": "join", "targets": [29000]}
+{"cmd": "body.appearance", "body": 29000, "color": "#E37A12"}
+{"cmd": "body.rename", "body": 29000, "name": "Right face 2"}
+# Left face 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-57.0, 53.6], [-25.0, 71.6], [-36.4, 59.2]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 31, "distance": "6.4 mm", "taper": "5.356 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 31, "distance": "6.4 mm", "taper": "5.356 deg", "flip": true, "operation": "join", "targets": [32000]}
+{"cmd": "body.appearance", "body": 32000, "color": "#E8A21E"}
+{"cmd": "body.rename", "body": 32000, "name": "Left face 3"}
+# Right face 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[36.4, 59.2], [25.0, 71.6], [57.0, 53.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 34, "distance": "6.4 mm", "taper": "5.356 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 34, "distance": "6.4 mm", "taper": "5.356 deg", "flip": true, "operation": "join", "targets": [35000]}
+{"cmd": "body.appearance", "body": 35000, "color": "#C2600C"}
+{"cmd": "body.rename", "body": 35000, "name": "Right face 3"}
+# Left face 4
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-36.4, 59.2], [-25.0, 71.6], [0.0, 44.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 37, "distance": "6 mm", "taper": "5.711 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 37, "distance": "6 mm", "taper": "5.711 deg", "flip": true, "operation": "join", "targets": [38000]}
+{"cmd": "body.appearance", "body": 38000, "color": "#CC8812"}
+{"cmd": "body.rename", "body": 38000, "name": "Left face 4"}
+# Right face 4
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0.0, 44.0], [25.0, 71.6], [36.4, 59.2]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 40, "distance": "6 mm", "taper": "5.711 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 40, "distance": "6 mm", "taper": "5.711 deg", "flip": true, "operation": "join", "targets": [41000]}
+{"cmd": "body.appearance", "body": 41000, "color": "#C2600C"}
+{"cmd": "body.rename", "body": 41000, "name": "Right face 4"}
+# Left eye 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-36.4, 59.2], [0.0, 44.0], [-19.0, 39.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 43, "distance": "5.8 mm", "taper": "5.906 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 43, "distance": "5.8 mm", "taper": "5.906 deg", "flip": true, "operation": "join", "targets": [44000]}
+{"cmd": "body.appearance", "body": 44000, "color": "#1E88E5"}
+{"cmd": "body.rename", "body": 44000, "name": "Left eye 1"}
+# Right eye 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[19.0, 39.0], [0.0, 44.0], [36.4, 59.2]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 46, "distance": "5.8 mm", "taper": "5.906 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 46, "distance": "5.8 mm", "taper": "5.906 deg", "flip": true, "operation": "join", "targets": [47000]}
+{"cmd": "body.appearance", "body": 47000, "color": "#1268BE"}
+{"cmd": "body.rename", "body": 47000, "name": "Right eye 1"}
+# Left eye 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-19.0, 39.0], [0.0, 44.0], [-8.8, 15.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 49, "distance": "5.4 mm", "taper": "6.340 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 49, "distance": "5.4 mm", "taper": "6.340 deg", "flip": true, "operation": "join", "targets": [50000]}
+{"cmd": "body.appearance", "body": 50000, "color": "#1268BE"}
+{"cmd": "body.rename", "body": 50000, "name": "Left eye 2"}
+# Right eye 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[8.8, 15.0], [0.0, 44.0], [19.0, 39.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 52, "distance": "5.4 mm", "taper": "6.340 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 52, "distance": "5.4 mm", "taper": "6.340 deg", "flip": true, "operation": "join", "targets": [53000]}
+{"cmd": "body.appearance", "body": 53000, "color": "#0F4F9E"}
+{"cmd": "body.rename", "body": 53000, "name": "Right eye 2"}
+# Left muzzle 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-7.6, 51.0], [0.0, 44.0], [0.0, 15.0], [-8.8, 15.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 55, "distance": "8.8 mm", "taper": "3.900 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 55, "distance": "8.8 mm", "taper": "3.900 deg", "flip": true, "operation": "join", "targets": [56000]}
+{"cmd": "body.appearance", "body": 56000, "color": "#F7B92E"}
+{"cmd": "body.rename", "body": 56000, "name": "Left muzzle 1"}
+# Right muzzle 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[8.8, 15.0], [0.0, 15.0], [0.0, 44.0], [7.6, 51.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 58, "distance": "8.8 mm", "taper": "3.900 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 58, "distance": "8.8 mm", "taper": "3.900 deg", "flip": true, "operation": "join", "targets": [59000]}
+{"cmd": "body.appearance", "body": 59000, "color": "#E37A12"}
+{"cmd": "body.rename", "body": 59000, "name": "Right muzzle 1"}
+# Left jaw 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-57.0, 53.6], [-36.4, 59.2], [-19.0, 39.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 61, "distance": "6.2 mm", "taper": "5.528 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 61, "distance": "6.2 mm", "taper": "5.528 deg", "flip": true, "operation": "join", "targets": [62000]}
+{"cmd": "body.appearance", "body": 62000, "color": "#8ED04F"}
+{"cmd": "body.rename", "body": 62000, "name": "Left jaw 1"}
+# Right jaw 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[19.0, 39.0], [36.4, 59.2], [57.0, 53.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 64, "distance": "6.2 mm", "taper": "5.528 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 64, "distance": "6.2 mm", "taper": "5.528 deg", "flip": true, "operation": "join", "targets": [65000]}
+{"cmd": "body.appearance", "body": 65000, "color": "#DE3832"}
+{"cmd": "body.rename", "body": 65000, "name": "Right jaw 1"}
+# Left jaw 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-57.0, 53.6], [-19.0, 39.0], [-14.8, 25.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 67, "distance": "5.8 mm", "taper": "5.906 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 67, "distance": "5.8 mm", "taper": "5.906 deg", "flip": true, "operation": "join", "targets": [68000]}
+{"cmd": "body.appearance", "body": 68000, "color": "#38AC46"}
+{"cmd": "body.rename", "body": 68000, "name": "Left jaw 2"}
+# Right jaw 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[14.8, 25.6], [19.0, 39.0], [57.0, 53.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 70, "distance": "5.8 mm", "taper": "5.906 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 70, "distance": "5.8 mm", "taper": "5.906 deg", "flip": true, "operation": "join", "targets": [71000]}
+{"cmd": "body.appearance", "body": 71000, "color": "#BC2A27"}
+{"cmd": "body.rename", "body": 71000, "name": "Right jaw 2"}
+# Left jaw 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-57.0, 53.6], [-14.8, 25.6], [-9.6, 3.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 73, "distance": "5.4 mm", "taper": "6.340 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 73, "distance": "5.4 mm", "taper": "6.340 deg", "flip": true, "operation": "join", "targets": [74000]}
+{"cmd": "body.appearance", "body": 74000, "color": "#2E9A3E"}
+{"cmd": "body.rename", "body": 74000, "name": "Left jaw 3"}
+# Right jaw 3
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[9.6, 3.6], [14.8, 25.6], [57.0, 53.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 76, "distance": "5.4 mm", "taper": "6.340 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 76, "distance": "5.4 mm", "taper": "6.340 deg", "flip": true, "operation": "join", "targets": [77000]}
+{"cmd": "body.appearance", "body": 77000, "color": "#93201F"}
+{"cmd": "body.rename", "body": 77000, "name": "Right jaw 3"}
+# Left jaw 4
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-19.0, 39.0], [-8.8, 15.0], [-9.6, 3.6], [-14.8, 25.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 79, "distance": "5 mm", "taper": "6.843 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 79, "distance": "5 mm", "taper": "6.843 deg", "flip": true, "operation": "join", "targets": [80000]}
+{"cmd": "body.appearance", "body": 80000, "color": "#25863A"}
+{"cmd": "body.rename", "body": 80000, "name": "Left jaw 4"}
+# Right jaw 4
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[14.8, 25.6], [9.6, 3.6], [8.8, 15.0], [19.0, 39.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 82, "distance": "5 mm", "taper": "6.843 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 82, "distance": "5 mm", "taper": "6.843 deg", "flip": true, "operation": "join", "targets": [83000]}
+{"cmd": "body.appearance", "body": 83000, "color": "#93201F"}
+{"cmd": "body.rename", "body": 83000, "name": "Right jaw 4"}
+# Left chin 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-8.8, 15.0], [0.0, 8.4], [-9.6, 3.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 85, "distance": "7.5 mm", "taper": "4.574 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 85, "distance": "7.5 mm", "taper": "4.574 deg", "flip": true, "operation": "join", "targets": [86000]}
+{"cmd": "body.appearance", "body": 86000, "color": "#0F4F9E"}
+{"cmd": "body.rename", "body": 86000, "name": "Left chin 1"}
+# Right chin 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[9.6, 3.6], [0.0, 8.4], [8.8, 15.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 88, "distance": "7.5 mm", "taper": "4.574 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 88, "distance": "7.5 mm", "taper": "4.574 deg", "flip": true, "operation": "join", "targets": [89000]}
+{"cmd": "body.appearance", "body": 89000, "color": "#0F4F9E"}
+{"cmd": "body.rename", "body": 89000, "name": "Right chin 1"}
+# Left chin 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-9.6, 3.6], [0.0, 8.4], [0.0, 3.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 91, "distance": "7.9 mm", "taper": "4.343 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 91, "distance": "7.9 mm", "taper": "4.343 deg", "flip": true, "operation": "join", "targets": [92000]}
+{"cmd": "body.appearance", "body": 92000, "color": "#1268BE"}
+{"cmd": "body.rename", "body": 92000, "name": "Left chin 2"}
+# Right chin 2
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0.0, 3.6], [0.0, 8.4], [9.6, 3.6]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 94, "distance": "7.9 mm", "taper": "4.343 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 94, "distance": "7.9 mm", "taper": "4.343 deg", "flip": true, "operation": "join", "targets": [95000]}
+{"cmd": "body.appearance", "body": 95000, "color": "#0F4F9E"}
+{"cmd": "body.rename", "body": 95000, "name": "Right chin 2"}
+# Left forehead 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-12.0, 102.0], [0.0, 88.8], [0.0, 44.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 97, "distance": "7.8 mm", "taper": "4.399 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 97, "distance": "7.8 mm", "taper": "4.399 deg", "flip": true, "operation": "join", "targets": [98000]}
+{"cmd": "body.appearance", "body": 98000, "color": "#1E88E5"}
+{"cmd": "body.rename", "body": 98000, "name": "Left forehead 1"}
+# Right forehead 1
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[0.0, 44.0], [0.0, 88.8], [12.0, 102.0]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 100, "distance": "7.8 mm", "taper": "4.399 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 100, "distance": "7.8 mm", "taper": "4.399 deg", "flip": true, "operation": "join", "targets": [101000]}
+{"cmd": "body.appearance", "body": 101000, "color": "#1268BE"}
+{"cmd": "body.rename", "body": 101000, "name": "Right forehead 1"}
+# Forehead centre
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-12.0, 102.0], [12.0, 102.0], [0.0, 88.8]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 103, "distance": "8.7 mm", "taper": "3.945 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 103, "distance": "8.7 mm", "taper": "3.945 deg", "flip": true, "operation": "join", "targets": [104000]}
+{"cmd": "body.appearance", "body": 104000, "color": "#4BA6F2"}
+{"cmd": "body.rename", "body": 104000, "name": "Forehead centre"}
+# Nose
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.line", "points": [[-8.8, 15.0], [8.8, 15.0], [0.0, 8.4]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 106, "distance": "10.2 mm", "taper": "3.366 deg", "operation": "new_body"}
+{"cmd": "extrude", "sketch": 106, "distance": "10.2 mm", "taper": "3.366 deg", "flip": true, "operation": "join", "targets": [107000]}
+{"cmd": "body.appearance", "body": 107000, "color": "#4BA6F2"}
+{"cmd": "body.rename", "body": 107000, "name": "Nose"}
+{"cmd": "info"}

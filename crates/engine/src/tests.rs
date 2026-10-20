@@ -1015,3 +1015,29 @@ fn render_to_a_file() {
   assert!(s.execute("view.render", &json!({"path": path, "view": "sideways"})).is_err());
   assert!(s.execute("view.render", &json!({"path": path, "bodies": [99]})).is_err());
 }
+
+#[test]
+fn the_welcome_fox_is_added_once() {
+  let root = temp_dir("welcome");
+  let item = crate::hub::add_welcome(&root).unwrap().expect("a new hub gets the fox");
+  let mut s = Session { store_root: Some(root.clone()), ..Default::default() };
+  let r = run(&mut s, "hub.open", json!({"item": item}));
+  assert_eq!(s.design.name, "FissionOxide", "{r}");
+  // a body per facet of the logo, each in its colour, and nothing failed
+  let info = run(&mut s, "info", json!({}));
+  let bodies = info["bodies"].as_array().unwrap();
+  assert_eq!(bodies.len(), 36);
+  assert!(bodies.iter().all(|b| b["color"].is_string() && b["volume_mm3"].as_f64().unwrap() > 0.0), "{info}");
+  assert!(s.model.errors().is_empty());
+  // the same from the front and the back: symmetric about the sketch plane
+  for b in bodies {
+    let (lo, hi) = (b["bbox"][0][1].as_f64().unwrap(), b["bbox"][1][1].as_f64().unwrap());
+    assert!((lo + hi).abs() < 1e-6, "{b}");
+  }
+  let list = run(&mut s, "hub.list", json!({"project": "Default Project"}));
+  assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+  // not again, even once it's deleted
+  run(&mut s, "hub.item.delete", json!({"item": item}));
+  assert!(crate::hub::add_welcome(&root).unwrap().is_none());
+  let _ = std::fs::remove_dir_all(root);
+}

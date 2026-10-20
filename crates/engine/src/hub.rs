@@ -558,6 +558,33 @@ fn download(st: &Store, s: &Session, p: &Value) -> CmdResult {
   files::export(&tmp, &q)
 }
 
+/// The design every installation starts with: the FissionOxide fox in 3D, written by
+/// `brand/model.py`.
+pub const WELCOME: &str = include_str!("../../../brand/model/FissionOxide.fox");
+/// Left in the hub once the welcome design has been added, so it comes back neither on the next
+/// start nor after the user deletes it.
+const WELCOME_MARKER: &str = "welcome";
+
+/// Adds [`WELCOME`] to the hub at `root` (in "Default Project") the first time FissionOxide runs
+/// with it; returns the new item, or `None` if the hub already had it.
+pub fn add_welcome(root: &Path) -> Result<Option<String>, CmdError> {
+  let marker = root.join(WELCOME_MARKER);
+  if marker.exists() {
+    return Ok(None);
+  }
+  let mut st = Store::open(root)?;
+  let s = Session::new(Design::from_json(WELCOME)?);
+  let project = match st.find_project("Default Project") {
+    Ok(p) => p.id.clone(),
+    Err(_) => st.create_project("Default Project")?,
+  };
+  let at = NewItem { project: &project, folder: None, name: &s.design.name, kind: ItemKind::Design, ext: "fox" };
+  let m = VersionMeta { description: "Welcome to FissionOxide".into(), ..meta(&s, &json!({})) };
+  let (item, _) = st.create_item(at, WELCOME.as_bytes(), Origin::Saved, m)?;
+  std::fs::write(&marker, format!("{item}\n"))?;
+  Ok(Some(item))
+}
+
 /// Re-exports for the UI.
 pub fn open_store(s: &Session) -> Result<Store, CmdError> {
   Ok(Store::open(&s.hub_root())?)

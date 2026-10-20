@@ -1,0 +1,4738 @@
+{
+  "version": 1,
+  "name": "FissionOxide",
+  "parameters": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Sketch1",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -50.0,
+              "y": 132.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -30.0,
+              "y": 100.4,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 2,
+      "name": "Extrude1",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 1,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.582 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Extrude2",
+      "suppressed": false,
+      "targets": [
+        2000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 1,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.582 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 4,
+      "name": "Sketch2",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 30.0,
+              "y": 100.4,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 50.0,
+              "y": 132.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 5,
+      "name": "Extrude3",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 4,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.582 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 6,
+      "name": "Extrude4",
+      "suppressed": false,
+      "targets": [
+        5000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 4,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.582 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 7,
+      "name": "Sketch3",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -50.0,
+              "y": 132.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -30.0,
+              "y": 100.4,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -47.6,
+              "y": 62.4,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 8,
+      "name": "Extrude5",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 7,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "7.125 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 9,
+      "name": "Extrude6",
+      "suppressed": false,
+      "targets": [
+        8000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 7,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "7.125 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 10,
+      "name": "Sketch4",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 47.6,
+              "y": 62.4,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 30.0,
+              "y": 100.4,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 50.0,
+              "y": 132.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 11,
+      "name": "Extrude7",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 10,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "7.125 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 12,
+      "name": "Extrude8",
+      "suppressed": false,
+      "targets": [
+        11000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 10,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "7.125 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 13,
+      "name": "Sketch5",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -30.0,
+              "y": 100.4,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -47.6,
+              "y": 62.4,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 14,
+      "name": "Extrude9",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 13,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "8.531 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 15,
+      "name": "Extrude10",
+      "suppressed": false,
+      "targets": [
+        14000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 13,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "8.531 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 16,
+      "name": "Sketch6",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 47.6,
+              "y": 62.4,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 30.0,
+              "y": 100.4,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 17,
+      "name": "Extrude11",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 16,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "8.531 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 18,
+      "name": "Extrude12",
+      "suppressed": false,
+      "targets": [
+        17000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 16,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "8.531 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 19,
+      "name": "Sketch7",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -25.0,
+              "y": 71.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 20,
+      "name": "Extrude13",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 19,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.764 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 21,
+      "name": "Extrude14",
+      "suppressed": false,
+      "targets": [
+        20000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 19,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.764 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 22,
+      "name": "Sketch8",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 23,
+      "name": "Extrude15",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 22,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.764 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 24,
+      "name": "Extrude16",
+      "suppressed": false,
+      "targets": [
+        23000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 22,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.764 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 25,
+      "name": "Sketch9",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 26,
+      "name": "Extrude17",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 25,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.042 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 27,
+      "name": "Extrude18",
+      "suppressed": false,
+      "targets": [
+        26000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 25,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.042 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 28,
+      "name": "Sketch10",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 29,
+      "name": "Extrude19",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 28,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.042 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 30,
+      "name": "Extrude20",
+      "suppressed": false,
+      "targets": [
+        29000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 28,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.042 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 31,
+      "name": "Sketch11",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -36.4,
+              "y": 59.2,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 32,
+      "name": "Extrude21",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 31,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.356 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 33,
+      "name": "Extrude22",
+      "suppressed": false,
+      "targets": [
+        32000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 31,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.356 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 34,
+      "name": "Sketch12",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 36.4,
+              "y": 59.2,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 57.0,
+              "y": 53.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 35,
+      "name": "Extrude23",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 34,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.356 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 36,
+      "name": "Extrude24",
+      "suppressed": false,
+      "targets": [
+        35000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 34,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.356 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 37,
+      "name": "Sketch13",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -36.4,
+              "y": 59.2,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 38,
+      "name": "Extrude25",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 37,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.711 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 39,
+      "name": "Extrude26",
+      "suppressed": false,
+      "targets": [
+        38000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 37,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.711 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 40,
+      "name": "Sketch14",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 25.0,
+              "y": 71.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 36.4,
+              "y": 59.2,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 41,
+      "name": "Extrude27",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 40,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.711 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 42,
+      "name": "Extrude28",
+      "suppressed": false,
+      "targets": [
+        41000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 40,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.711 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 43,
+      "name": "Sketch15",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -36.4,
+              "y": 59.2,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -19.0,
+              "y": 39.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 44,
+      "name": "Extrude29",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 43,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 45,
+      "name": "Extrude30",
+      "suppressed": false,
+      "targets": [
+        44000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 43,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 46,
+      "name": "Sketch16",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 36.4,
+              "y": 59.2,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 47,
+      "name": "Extrude31",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 46,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 48,
+      "name": "Extrude32",
+      "suppressed": false,
+      "targets": [
+        47000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 46,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 49,
+      "name": "Sketch17",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -8.8,
+              "y": 15.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 50,
+      "name": "Extrude33",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 49,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 51,
+      "name": "Extrude34",
+      "suppressed": false,
+      "targets": [
+        50000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 49,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 52,
+      "name": "Sketch18",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 19.0,
+              "y": 39.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 53,
+      "name": "Extrude35",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 52,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 54,
+      "name": "Extrude36",
+      "suppressed": false,
+      "targets": [
+        53000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 52,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 55,
+      "name": "Sketch19",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -7.6,
+              "y": 51.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 0.0,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 7,
+              "x": -8.8,
+              "y": 15.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 7
+              },
+              "construction": false
+            },
+            {
+              "id": 10,
+              "kind": {
+                "type": "line",
+                "a": 7,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 6,
+              "kind": {
+                "type": "vertical",
+                "line": 5
+              }
+            },
+            {
+              "id": 9,
+              "kind": {
+                "type": "horizontal",
+                "line": 8
+              }
+            }
+          ],
+          "next_id": 11
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 56,
+      "name": "Extrude37",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 55,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "3.900 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 57,
+      "name": "Extrude38",
+      "suppressed": false,
+      "targets": [
+        56000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 55,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "3.900 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 58,
+      "name": "Sketch20",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 8,
+              "x": 7.6,
+              "y": 51.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 5
+              },
+              "construction": false
+            },
+            {
+              "id": 9,
+              "kind": {
+                "type": "line",
+                "a": 5,
+                "b": 8
+              },
+              "construction": false
+            },
+            {
+              "id": 10,
+              "kind": {
+                "type": "line",
+                "a": 8,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 4,
+              "kind": {
+                "type": "horizontal",
+                "line": 3
+              }
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "vertical",
+                "line": 6
+              }
+            }
+          ],
+          "next_id": 11
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 59,
+      "name": "Extrude39",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 58,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "3.900 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 60,
+      "name": "Extrude40",
+      "suppressed": false,
+      "targets": [
+        59000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 58,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "3.900 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 61,
+      "name": "Sketch21",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -36.4,
+              "y": 59.2,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -19.0,
+              "y": 39.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 62,
+      "name": "Extrude41",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 61,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.528 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 63,
+      "name": "Extrude42",
+      "suppressed": false,
+      "targets": [
+        62000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 61,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.528 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 64,
+      "name": "Sketch22",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 36.4,
+              "y": 59.2,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 57.0,
+              "y": 53.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 65,
+      "name": "Extrude43",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 64,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.528 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 66,
+      "name": "Extrude44",
+      "suppressed": false,
+      "targets": [
+        65000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 64,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "6.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.528 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 67,
+      "name": "Sketch23",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -14.8,
+              "y": 25.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 68,
+      "name": "Extrude45",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 67,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 69,
+      "name": "Extrude46",
+      "suppressed": false,
+      "targets": [
+        68000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 67,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 70,
+      "name": "Sketch24",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 14.8,
+              "y": 25.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 57.0,
+              "y": 53.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 71,
+      "name": "Extrude47",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 70,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 72,
+      "name": "Extrude48",
+      "suppressed": false,
+      "targets": [
+        71000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 70,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "5.906 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 73,
+      "name": "Sketch25",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -57.0,
+              "y": 53.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -14.8,
+              "y": 25.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -9.6,
+              "y": 3.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 74,
+      "name": "Extrude49",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 73,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 75,
+      "name": "Extrude50",
+      "suppressed": false,
+      "targets": [
+        74000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 73,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 76,
+      "name": "Sketch26",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 9.6,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 14.8,
+              "y": 25.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 57.0,
+              "y": 53.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 77,
+      "name": "Extrude51",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 76,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 78,
+      "name": "Extrude52",
+      "suppressed": false,
+      "targets": [
+        77000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 76,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5.4 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.340 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 79,
+      "name": "Sketch27",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -19.0,
+              "y": 39.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -9.6,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 6,
+              "x": -14.8,
+              "y": 25.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 6
+              },
+              "construction": false
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "line",
+                "a": 6,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 9
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 80,
+      "name": "Extrude53",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 79,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.843 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 81,
+      "name": "Extrude54",
+      "suppressed": false,
+      "targets": [
+        80000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 79,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.843 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 82,
+      "name": "Sketch28",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 14.8,
+              "y": 25.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 9.6,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 6,
+              "x": 19.0,
+              "y": 39.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 6
+              },
+              "construction": false
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "line",
+                "a": 6,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 9
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 83,
+      "name": "Extrude55",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 82,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "6.843 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 84,
+      "name": "Extrude56",
+      "suppressed": false,
+      "targets": [
+        83000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 82,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "5 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "6.843 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 85,
+      "name": "Sketch29",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 8.4,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -9.6,
+              "y": 3.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 86,
+      "name": "Extrude57",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 85,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.5 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.574 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 87,
+      "name": "Extrude58",
+      "suppressed": false,
+      "targets": [
+        86000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 85,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.5 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.574 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 88,
+      "name": "Sketch30",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 9.6,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 8.4,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 8.8,
+              "y": 15.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [],
+          "next_id": 7
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 89,
+      "name": "Extrude59",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 88,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.5 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.574 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 90,
+      "name": "Extrude60",
+      "suppressed": false,
+      "targets": [
+        89000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 88,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.5 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.574 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 91,
+      "name": "Sketch31",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -9.6,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 8.4,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 0.0,
+              "y": 3.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 6,
+              "kind": {
+                "type": "vertical",
+                "line": 5
+              }
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "horizontal",
+                "line": 7
+              }
+            }
+          ],
+          "next_id": 9
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 92,
+      "name": "Extrude61",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 91,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.9 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.343 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 93,
+      "name": "Extrude62",
+      "suppressed": false,
+      "targets": [
+        92000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 91,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.9 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.343 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 94,
+      "name": "Sketch32",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 3.6,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 8.4,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 9.6,
+              "y": 3.6,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 5
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 5,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 4,
+              "kind": {
+                "type": "vertical",
+                "line": 3
+              }
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "horizontal",
+                "line": 7
+              }
+            }
+          ],
+          "next_id": 9
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 95,
+      "name": "Extrude63",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 94,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.9 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.343 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 96,
+      "name": "Extrude64",
+      "suppressed": false,
+      "targets": [
+        95000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 94,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.9 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.343 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 97,
+      "name": "Sketch33",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 88.8,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 4
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 4,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 6,
+              "kind": {
+                "type": "vertical",
+                "line": 5
+              }
+            }
+          ],
+          "next_id": 8
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 98,
+      "name": "Extrude65",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 97,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.399 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 99,
+      "name": "Extrude66",
+      "suppressed": false,
+      "targets": [
+        98000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 97,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.399 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 100,
+      "name": "Sketch34",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0.0,
+              "y": 44.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 0.0,
+              "y": 88.8,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 5
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 5,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 4,
+              "kind": {
+                "type": "vertical",
+                "line": 3
+              }
+            }
+          ],
+          "next_id": 8
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 101,
+      "name": "Extrude67",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 100,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.8 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "4.399 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 102,
+      "name": "Extrude68",
+      "suppressed": false,
+      "targets": [
+        101000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 100,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "7.8 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "4.399 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 103,
+      "name": "Sketch35",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 12.0,
+              "y": 102.0,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 0.0,
+              "y": 88.8,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 5
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 5,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 4,
+              "kind": {
+                "type": "horizontal",
+                "line": 3
+              }
+            }
+          ],
+          "next_id": 8
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 104,
+      "name": "Extrude69",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 103,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.7 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "3.945 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 105,
+      "name": "Extrude70",
+      "suppressed": false,
+      "targets": [
+        104000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 103,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "8.7 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "3.945 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    },
+    {
+      "id": 106,
+      "name": "Sketch36",
+      "suppressed": false,
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "type": "origin",
+          "plane": "xz"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0.0,
+              "y": 0.0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 8.8,
+              "y": 15.0,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 0.0,
+              "y": 8.4,
+              "fixed": false
+            }
+          ],
+          "curves": [
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": 1,
+                "b": 2
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": 2,
+                "b": 5
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "line",
+                "a": 5,
+                "b": 1
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 4,
+              "kind": {
+                "type": "horizontal",
+                "line": 3
+              }
+            }
+          ],
+          "next_id": 8
+        },
+        "links": []
+      }
+    },
+    {
+      "id": 107,
+      "name": "Extrude71",
+      "suppressed": false,
+      "kind": {
+        "type": "extrude",
+        "sketch": 106,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "10.2 mm",
+          "distance2": "0",
+          "flip": false,
+          "taper": "3.366 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "new_body"
+      }
+    },
+    {
+      "id": 108,
+      "name": "Extrude72",
+      "suppressed": false,
+      "targets": [
+        107000
+      ],
+      "kind": {
+        "type": "extrude",
+        "sketch": 106,
+        "profiles": [],
+        "extent": {
+          "kind": "one_side",
+          "distance": "10.2 mm",
+          "distance2": "0",
+          "flip": true,
+          "taper": "3.366 deg",
+          "thin": "",
+          "thin_side": "inside",
+          "to": null
+        },
+        "operation": "join"
+      }
+    }
+  ],
+  "marker": null,
+  "bodies": [
+    {
+      "body": 2000,
+      "name": "Left ear 1",
+      "visible": true,
+      "color": [
+        176,
+        127,
+        234
+      ]
+    },
+    {
+      "body": 5000,
+      "name": "Right ear 1",
+      "visible": true,
+      "color": [
+        222,
+        56,
+        50
+      ]
+    },
+    {
+      "body": 8000,
+      "name": "Left ear 2",
+      "visible": true,
+      "color": [
+        150,
+        96,
+        214
+      ]
+    },
+    {
+      "body": 11000,
+      "name": "Right ear 2",
+      "visible": true,
+      "color": [
+        188,
+        42,
+        39
+      ]
+    },
+    {
+      "body": 14000,
+      "name": "Left ear 3",
+      "visible": true,
+      "color": [
+        85,
+        40,
+        154
+      ]
+    },
+    {
+      "body": 17000,
+      "name": "Right ear 3",
+      "visible": true,
+      "color": [
+        147,
+        32,
+        31
+      ]
+    },
+    {
+      "body": 20000,
+      "name": "Left face 1",
+      "visible": true,
+      "color": [
+        255,
+        205,
+        74
+      ]
+    },
+    {
+      "body": 23000,
+      "name": "Right face 1",
+      "visible": true,
+      "color": [
+        245,
+        150,
+        30
+      ]
+    },
+    {
+      "body": 26000,
+      "name": "Left face 2",
+      "visible": true,
+      "color": [
+        247,
+        185,
+        46
+      ]
+    },
+    {
+      "body": 29000,
+      "name": "Right face 2",
+      "visible": true,
+      "color": [
+        227,
+        122,
+        18
+      ]
+    },
+    {
+      "body": 32000,
+      "name": "Left face 3",
+      "visible": true,
+      "color": [
+        232,
+        162,
+        30
+      ]
+    },
+    {
+      "body": 35000,
+      "name": "Right face 3",
+      "visible": true,
+      "color": [
+        194,
+        96,
+        12
+      ]
+    },
+    {
+      "body": 38000,
+      "name": "Left face 4",
+      "visible": true,
+      "color": [
+        204,
+        136,
+        18
+      ]
+    },
+    {
+      "body": 41000,
+      "name": "Right face 4",
+      "visible": true,
+      "color": [
+        194,
+        96,
+        12
+      ]
+    },
+    {
+      "body": 44000,
+      "name": "Left eye 1",
+      "visible": true,
+      "color": [
+        30,
+        136,
+        229
+      ]
+    },
+    {
+      "body": 47000,
+      "name": "Right eye 1",
+      "visible": true,
+      "color": [
+        18,
+        104,
+        190
+      ]
+    },
+    {
+      "body": 50000,
+      "name": "Left eye 2",
+      "visible": true,
+      "color": [
+        18,
+        104,
+        190
+      ]
+    },
+    {
+      "body": 53000,
+      "name": "Right eye 2",
+      "visible": true,
+      "color": [
+        15,
+        79,
+        158
+      ]
+    },
+    {
+      "body": 56000,
+      "name": "Left muzzle 1",
+      "visible": true,
+      "color": [
+        247,
+        185,
+        46
+      ]
+    },
+    {
+      "body": 59000,
+      "name": "Right muzzle 1",
+      "visible": true,
+      "color": [
+        227,
+        122,
+        18
+      ]
+    },
+    {
+      "body": 62000,
+      "name": "Left jaw 1",
+      "visible": true,
+      "color": [
+        142,
+        208,
+        79
+      ]
+    },
+    {
+      "body": 65000,
+      "name": "Right jaw 1",
+      "visible": true,
+      "color": [
+        222,
+        56,
+        50
+      ]
+    },
+    {
+      "body": 68000,
+      "name": "Left jaw 2",
+      "visible": true,
+      "color": [
+        56,
+        172,
+        70
+      ]
+    },
+    {
+      "body": 71000,
+      "name": "Right jaw 2",
+      "visible": true,
+      "color": [
+        188,
+        42,
+        39
+      ]
+    },
+    {
+      "body": 74000,
+      "name": "Left jaw 3",
+      "visible": true,
+      "color": [
+        46,
+        154,
+        62
+      ]
+    },
+    {
+      "body": 77000,
+      "name": "Right jaw 3",
+      "visible": true,
+      "color": [
+        147,
+        32,
+        31
+      ]
+    },
+    {
+      "body": 80000,
+      "name": "Left jaw 4",
+      "visible": true,
+      "color": [
+        37,
+        134,
+        58
+      ]
+    },
+    {
+      "body": 83000,
+      "name": "Right jaw 4",
+      "visible": true,
+      "color": [
+        147,
+        32,
+        31
+      ]
+    },
+    {
+      "body": 86000,
+      "name": "Left chin 1",
+      "visible": true,
+      "color": [
+        15,
+        79,
+        158
+      ]
+    },
+    {
+      "body": 89000,
+      "name": "Right chin 1",
+      "visible": true,
+      "color": [
+        15,
+        79,
+        158
+      ]
+    },
+    {
+      "body": 92000,
+      "name": "Left chin 2",
+      "visible": true,
+      "color": [
+        18,
+        104,
+        190
+      ]
+    },
+    {
+      "body": 95000,
+      "name": "Right chin 2",
+      "visible": true,
+      "color": [
+        15,
+        79,
+        158
+      ]
+    },
+    {
+      "body": 98000,
+      "name": "Left forehead 1",
+      "visible": true,
+      "color": [
+        30,
+        136,
+        229
+      ]
+    },
+    {
+      "body": 101000,
+      "name": "Right forehead 1",
+      "visible": true,
+      "color": [
+        18,
+        104,
+        190
+      ]
+    },
+    {
+      "body": 104000,
+      "name": "Forehead centre",
+      "visible": true,
+      "color": [
+        75,
+        166,
+        242
+      ]
+    },
+    {
+      "body": 107000,
+      "name": "Nose",
+      "visible": true,
+      "color": [
+        75,
+        166,
+        242
+      ]
+    }
+  ],
+  "sheet_metal_rules": [],
+  "components": [],
+  "drawings": [],
+  "next_id": 109
+}

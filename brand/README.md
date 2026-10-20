@@ -93,6 +93,17 @@ for facet in logo::FACETS { /* paint facet.points in facet.color */ }
 The desktop app's theme (`crates/ui/src/theme.rs`) and icon colours read from it, and
 `crates/ui/src/logo.rs` paints the fox from `logo::FACETS`.
 
+**The fox in 3D.** `model/FissionOxide.fox` is the mark as a FissionOxide design: each facet is a
+body in its own colour, extruded both ways from the XZ plane (so it looks right from the front and
+the back), each part of the face standing out by a different amount and every facet bevelled.
+The desktop app adds it to the data hub ("Default Project") and opens it the first time it
+starts, and the Windows installer puts a copy in `Samples\`. It is written by
+`python3 brand/model.py` (after `cargo build -p fissionoxide-cli`) from `logo/fox.json` and
+`tokens.json`, together with the script that models it (`model/FissionOxide.jsonl`) and a render
+(`model/FissionOxide.png`); re-run it whenever the logo or its colours change.
+
+![The fox in 3D](model/FissionOxide.png)
+
 **Anything else** (a mobile app, a design tool, slides): read `web/tokens.js` or the resolved
 values in `index.html`; take logos from `logo/` and `logo/png/`.
 

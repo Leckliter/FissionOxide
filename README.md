@@ -175,6 +175,9 @@ cargo run --release -p fissionoxide                         # the app
 cargo run --release -p fissionoxide -- examples/bracket.fox # open a design
 ```
 
+The first time the app starts it opens **FissionOxide**, the fox logo in 3D, and keeps it in the
+data hub's Default Project (see [brand/README.md](brand/README.md#using-it)).
+
 Set `FOX_OCCT_DIR` to an existing OCCT 7.8 install (`include/` and `lib/`, static libraries)
 to skip the source build.
 
