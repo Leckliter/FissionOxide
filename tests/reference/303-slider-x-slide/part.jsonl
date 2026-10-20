@@ -1,0 +1,15 @@
+# 303-slider-x-slide: added by the parity loop from a Fusion probe
+# As-Built Joint: grounded A 20x20x10, block B 10x10x5 on top at x 0..10, y 0..10, z 10..15; slider along X at (20,0,10) driven 12 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [10, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [2000]}
+{"cmd": "component.create", "name": "B", "bodies": [4000]}
+{"cmd": "component.ground", "component": 1}
+{"cmd": "joint", "moving": 2, "fixed": 1, "as_built": true, "moving_origin": {"at": [20, 0, 10]}, "fixed_origin": {"at": [20, 0, 10], "z": [1, 0, 0]}, "kind": "slider", "slide": 12}
+{"cmd": "info"}
