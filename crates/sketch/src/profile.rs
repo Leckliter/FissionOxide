@@ -62,6 +62,12 @@ pub enum Seg {
     start: f64,
     sweep: f64,
   },
+  /// A conic arc: the rational quadratic Bézier from `p[0]` to `p[2]` with control point `p[1]`
+  /// weighted `w` (the ends weigh 1).
+  Conic {
+    p: [[f64; 2]; 3],
+    w: f64,
+  },
 }
 
 impl Seg {
@@ -72,6 +78,7 @@ impl Seg {
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[0],
       Seg::EllipseArc { center, major, minor, start, .. } => ellipse_point(center, major, minor, start),
+      Seg::Conic { p, .. } => p[0],
     }
   }
 
@@ -82,6 +89,7 @@ impl Seg {
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[3],
       Seg::EllipseArc { center, major, minor, start, sweep } => ellipse_point(center, major, minor, start + sweep),
+      Seg::Conic { p, .. } => p[2],
     }
   }
 
@@ -95,6 +103,7 @@ impl Seg {
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         ellipse_point(center, major, minor, start + sweep / 2.0)
       }
+      Seg::Conic { p, w } => crate::conic_at(&p, w, 0.5),
     }
   }
 
@@ -109,6 +118,7 @@ impl Seg {
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         Seg::EllipseArc { center, major, minor, start: start + sweep, sweep: -sweep }
       }
+      Seg::Conic { p, w } => Seg::Conic { p: [p[2], p[1], p[0]], w },
     }
   }
 
@@ -135,6 +145,13 @@ impl Seg {
           [(-major[0] * s + v[0] * c) * sweep, (-major[1] * s + v[1] * c) * sweep]
         };
         (d(start), d(start + sweep))
+      }
+      Seg::Conic { p, .. } => {
+        // the end tangents run along the control polygon (an apex on the chord makes a line)
+        let chord = [p[2][0] - p[0][0], p[2][1] - p[0][1]];
+        let (a, b) = ([p[1][0] - p[0][0], p[1][1] - p[0][1]], [p[2][0] - p[1][0], p[2][1] - p[1][1]]);
+        let nz = |v: [f64; 2]| if v[0].hypot(v[1]) > 1e-12 { v } else { chord };
+        (nz(a), nz(b))
       }
     }
   }
@@ -165,6 +182,13 @@ impl Seg {
         let n = ((sweep.abs() / TAU) * ARC_STEPS).ceil().max(2.0) as usize;
         for i in 0..n {
           out.push(ellipse_point(center, major, minor, start + sweep * i as f64 / n as f64));
+        }
+      }
+      Seg::Conic { p, w } => {
+        for b in crate::conic_beziers(&p, w) {
+          for i in 0..6 {
+            out.push(crate::bezier_at(&b, i as f64 / 6.0));
+          }
         }
       }
     }
@@ -359,6 +383,11 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
           sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (0, 0, s)),
         );
       }
+      CurveKind::Conic { .. } => {
+        edges.extend(
+          sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (0, 0, s)),
+        );
+      }
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
         for b in sketch.beziers(c.id) {
           if dist(b[0], b[3]) > MERGE_TOL {
@@ -502,8 +531,9 @@ fn whole_ellipse(segs: Vec<Seg>) -> Vec<Seg> {
 /// or more points become arcs; the rest stay circles.
 fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg>, Vec<([f64; 2], f64)>) {
   use crate::edit::{Geo, meet};
-  // spline pieces don't split (yet); they join the graph as they are
-  let (curved, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::Bezier { .. }));
+  // spline pieces and conics don't split (yet); they join the graph as they are
+  let (curved, segs): (Vec<Seg>, Vec<Seg>) =
+    segs.into_iter().partition(|s| matches!(s, Seg::Bezier { .. } | Seg::Conic { .. }));
   // elliptical arcs split where lines, arcs and circles cross them (and split those), not each other
   let (elliptic, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::EllipseArc { .. }));
   let n_segs = segs.len();
@@ -608,6 +638,10 @@ fn departure_angle(s: &Seg) -> f64 {
       let p0 = ellipse_point(center, major, minor, start);
       let p1 = ellipse_point(center, major, minor, start + sweep * 1e-3);
       angle_of(p0, p1)
+    }
+    Seg::Conic { p, .. } => {
+      let q = if dist(p[0], p[1]) > 1e-12 { p[1] } else { p[2] };
+      angle_of(p[0], q)
     }
   }
 }

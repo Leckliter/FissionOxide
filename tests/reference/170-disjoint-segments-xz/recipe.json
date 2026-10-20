@@ -1,0 +1,137 @@
+{
+ "id": "disjoint-segments-xz",
+ "name": "3-Tangent Circle: three short disjoint segments on XZ",
+ "description": "On XZ (sketch y = world -Z): construction segments (20,0)-(35,0), (40,7.5)-(30,15), (6,18)-(3,9) lie on the sides of triangle (0,0),(50,0),(10,30) without touching; hint (16,11) inside, so the circle is that triangle's incircle, r = 750/65.811 = 11.396 at (15.811, 11.396); extruded 6.",
+ "exercises": [
+  "sketch",
+  "circle_three_tangent",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       35,
+       0
+      ]
+     },
+     "id": "la",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       7.5
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       15
+      ]
+     },
+     "id": "lb",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       6,
+       18
+      ]
+     },
+     "end": {
+      "at": [
+       3,
+       9
+      ]
+     },
+     "id": "lc",
+     "construction": true
+    },
+    {
+     "type": "circle_three_tangent",
+     "tangents": [
+      "la",
+      "lb",
+      "lc"
+     ],
+     "near": {
+      "at": [
+       16,
+       11
+      ]
+     },
+     "id": "c"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   }
+  }
+ ]
+}

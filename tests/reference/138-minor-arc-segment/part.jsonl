@@ -1,0 +1,7 @@
+# 138-minor-arc-segment: added by the parity loop from a Fusion probe
+# minor-arc-segment: Chord (-20,0)-(20,0) closed by a 3-point arc from (20,0) through (0,8) to (-20,0): a minor arc of the circle centre (0,-21) R29; segment extruded 10 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-20, 0], [20, 0]]}
+{"cmd": "sketch.arc", "start": [20, 0], "mid": [0, 8], "end": [-20, 0]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

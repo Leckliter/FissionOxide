@@ -1,0 +1,12 @@
+# 111-fix-point-rectangle: added by the parity loop from a Fusion probe
+# fix-point-rectangle: Rectangle drawn (10,5)-(40,25) with its top-right corner fixed; width 50 and height 30 dimensions grow it away from the fixed corner to (-10,-5)-(40,25); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 5], [40, 5]]}
+{"cmd": "sketch.line", "points": [[40, 5], [40, 25]]}
+{"cmd": "sketch.line", "points": [[40, 25], [10, 25]]}
+{"cmd": "sketch.line", "points": [[10, 25], [10, 5]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 50}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [2, 5], "value": 30}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

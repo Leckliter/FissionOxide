@@ -1,0 +1,12 @@
+# 126-symmetric-points-slanted-axis: added by the parity loop from a Fusion probe
+# symmetric-points-slanted-axis: Construction axis from the origin to a fixed point (30,30); a triangle with a corner at the origin, a horizontal 30 long first edge, and its other two corners symmetric about the axis; solves to (0,0),(30,0),(0,30); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 30]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.line", "points": [[0, 0], [28, 3], [3, 26]], "closed": true}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [4]}
+{"cmd": "sketch.constrain", "type": "symmetric", "points": [3, 5], "curves": [2]}
+{"cmd": "sketch.dimension", "type": "horizontal", "value": 30, "points": [0, 3]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

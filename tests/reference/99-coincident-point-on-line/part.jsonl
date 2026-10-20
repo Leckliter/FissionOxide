@@ -1,0 +1,21 @@
+# 99-coincident-point-on-line: added by the parity loop from a Fusion probe
+# coincident-point-on-line: Trapezoid whose top-right corner is coincident onto a construction line from the origin to (50,25); base 40, top 15; solves to (0,0),(40,0),(40,20),(25,20); extruded 10.
+# hand-edited
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[1, 1], [38, -1]]}
+{"cmd": "sketch.line", "points": [[38, -1], [41, 14]]}
+{"cmd": "sketch.line", "points": [[41, 14], [24, 22]]}
+{"cmd": "sketch.line", "points": [[24, 22], [1, 1]]}
+{"cmd": "sketch.line", "points": [[1, 1], [52, 27]]}
+{"cmd": "sketch.construction", "curves": [10]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [5]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [7]}
+{"cmd": "sketch.constrain", "type": "point_on_curve", "points": [4], "curves": [10]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 9], "value": 50}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 9], "value": 25}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [4, 6], "value": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

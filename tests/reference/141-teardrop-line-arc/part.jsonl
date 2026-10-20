@@ -1,0 +1,12 @@
+# 141-teardrop-line-arc: added by the parity loop from a Fusion probe
+# teardrop-line-arc: Arc R10 centred at the origin (ends drawn at +-75 deg) closed by two lines from its ends to a fixed apex (30,0). Each line is tangent to the arc at the shared end, moving the ends to +-70.53 deg: area 473.90, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [2.588190, 9.659258], "mid": [-10, 0], "end": [2.588190, -9.659258]}
+{"cmd": "sketch.line", "points": [[2.588190, -9.659258], [30, 0], [2.588190, 9.659258]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [3, 0]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [6, 4]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [7, 4]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [4], "value": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

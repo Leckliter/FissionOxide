@@ -1,0 +1,327 @@
+{
+ "id": "u-channel-collinear-tops",
+ "name": "u-channel-collinear-tops",
+ "description": "U-channel profile; right leg top drawn at y=26, constrained collinear with left leg top (y=20, dimensioned). Right top has no H constraint: collinear alone sets its angle and offset. Extruded 10 mm.",
+ "exercises": [
+  "sketch_constraints",
+  "collinear",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       26
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       26
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       30,
+       26
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       30,
+       26
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       30,
+       8
+      ]
+     },
+     "id": "l4"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       30,
+       8
+      ],
+      "ref": "l4.end"
+     },
+     "end": {
+      "at": [
+       10,
+       8
+      ]
+     },
+     "id": "l5"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       8
+      ],
+      "ref": "l5.end"
+     },
+     "end": {
+      "at": [
+       10,
+       20
+      ]
+     },
+     "id": "l6"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       20
+      ],
+      "ref": "l6.end"
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     },
+     "id": "l7"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       20
+      ],
+      "ref": "l7.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l8"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l4"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l5"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l6"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l7"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l8"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "collinear",
+     "refs": [
+      "l3",
+      "l7"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 40,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l8.start",
+      "l8.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "vertical"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l7.start",
+      "l7.end"
+     ],
+     "value": 10,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l5.start",
+      "l5.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l6.start",
+      "l6.end"
+     ],
+     "value": 12,
+     "unit": "mm",
+     "orientation": "vertical"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6",
+        "l7",
+        "l8"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

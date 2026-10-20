@@ -1,0 +1,7 @@
+# 251-major-arc-slot: added by the parity loop from a Fusion probe
+# major-arc-slot: Three point arc slot from (10,0) through (0,-15) to (-10,0): the third point lies past the centre, so the centre-line arc (radius 10.833 about (0,-4.167)) spans about 225 deg; width 4; extruded 3.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [10, 0], "mid": [0, -15], "end": [-10, 0], "width": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}

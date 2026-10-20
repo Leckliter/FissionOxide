@@ -248,10 +248,12 @@ mod tests {
       show_grid: true,
       visible: Vec::new(),
       profiles_of: Vec::new(),
+      hidden_profiles: Vec::new(),
       view: serde_json::json!({}),
       vertices: false,
       peek: Vec::new(),
       isolate: None,
+      opacity: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

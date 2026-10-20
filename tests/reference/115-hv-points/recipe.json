@@ -1,0 +1,194 @@
+{
+ "id": "hv-points",
+ "name": "Horizontal/Vertical: hv-points",
+ "description": "Triangle (0.5,0.5)-(25,1.5)-(9,17) with a fixed construction-free sketch point at (10,30). Horizontal/Vertical on the two bottom points makes them horizontal; on the apex and the fixed point makes them vertical (apex x = 10). Base 25 from the origin, apex height 18: area 225, extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "horizontal",
+  "vertical",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.5,
+       0.5
+      ]
+     },
+     "end": {
+      "at": [
+       25,
+       1.5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       25,
+       1.5
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       9,
+       17
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       9,
+       17
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0.5,
+       0.5
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l3"
+    },
+    {
+     "type": "point",
+     "at": [
+      10,
+      30
+     ],
+     "id": "p"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "p"
+     ]
+    },
+    {
+     "type": "horizontal_points",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ]
+    },
+    {
+     "type": "vertical_points",
+     "refs": [
+      "l2.end",
+      "p"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 25,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l2.end"
+     ],
+     "value": 18,
+     "unit": "mm",
+     "orientation": "vertical"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}
