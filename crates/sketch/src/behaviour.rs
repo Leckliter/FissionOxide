@@ -130,6 +130,11 @@ pub const SWEEP_UNIFIED: &str = "sweep_unified";
 /// feature on it (sketches, primitives, construction planes), so this is a design-level flag:
 /// read it from the design's set (`Design::frames`), not a sketch's.
 pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
+/// Offset Face (press-pull on faces) moves the faces and grows or trims their neighbours to meet
+/// them, so a slanted side runs on along its slope, as in Fusion. Without it each flat face is
+/// extruded straight along its normal (each curved face thickened) and added or cut, which leaves
+/// a step beside a neighbour that isn't square to the face.
+pub const OFFSET_FACES_EXTEND: &str = "offset_faces_extend";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -154,6 +159,7 @@ pub const CURRENT: &[&str] = &[
   CHAMFER_FORWARD_FACE,
   SWEEP_UNIFIED,
   FUSION_SKETCH_FRAMES,
+  OFFSET_FACES_EXTEND,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

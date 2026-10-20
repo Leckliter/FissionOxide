@@ -1,11 +1,14 @@
 //! Commands for lofted and miter flanges and flat patterns as sketches.
 
-use fox_model::{CornerMode, CornerRelief, FeatureKind, LoftMethod, LoftProfile, OriginPlane, PlaneRef};
+use fox_model::{
+  CornerMode, CornerRelief, FeatureKind, JoinBendPosition, JoinRelief, LoftMethod, LoftProfile, OriginPlane, PlaneRef,
+};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
 use crate::commands::{
-  add_feature, edge_refs, face_ref, ids, opt_expr, opt_str, rule_name, sheet_body, sketch_for_feature,
+  add_feature, edge_ref_of, edge_refs, face_ref, ids, opt_expr, opt_str, req_expr, rule_name, sheet_body,
+  sketch_for_feature,
 };
 use crate::{CmdError, CmdResult, Session};
 
@@ -41,8 +44,49 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "sheet.flat_sketch" => flat_sketch(s, p),
     "sheet.check_dxf" => check_dxf(s, p),
     "sheet.corner_closure" => corner_closure(s, p),
+    "sheet.join_by_bend" => join_by_bend(s, p),
+    "sheet.fillet" => (|| {
+      let edges = edge_refs(s, p)?;
+      add_feature(s, FeatureKind::SheetFillet { edges, radius: req_expr(p, "radius")? })
+    })(),
+    "sheet.chamfer" => (|| {
+      let edges = edge_refs(s, p)?;
+      let distance = req_expr(p, "distance")?;
+      let distance2 = match opt_str(p, "chamfer_type").unwrap_or("equal") {
+        "equal" => None,
+        "two_distances" => Some(req_expr(p, "distance2")?),
+        o => return Err(CmdError::new(format!("unknown chamfer type '{o}' (equal, two_distances)"))),
+      };
+      let flipped = p.get("flipped").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::SheetChamfer { edges, distance, distance2, flipped })
+    })(),
     _ => return None,
   })
+}
+
+/// Joins two sheet metal bodies with a bend between an edge picked on a flange of each.
+fn join_by_bend(s: &mut Session, p: &Value) -> CmdResult {
+  // forms pass the two picks as `edge1` and `edge2`; `edges: [a, b]` works too
+  let pick = |k: &str, i: usize| p.get(k).or_else(|| p.get("edges").and_then(|e| e.get(i)));
+  let (Some(a), Some(b)) = (pick("edge1", 0), pick("edge2", 1)) else {
+    return Err(CmdError::new("pick an edge on each of the two flanges"));
+  };
+  let (edge1, edge2) = (edge_ref_of(s, a)?, edge_ref_of(s, b)?);
+  let position = match opt_str(p, "position").unwrap_or("tangent") {
+    "tangent" => JoinBendPosition::Tangent,
+    "first" => JoinBendPosition::First,
+    "second" => JoinBendPosition::Second,
+    o => return Err(CmdError::new(format!("unknown bend position '{o}' (tangent, first, second)"))),
+  };
+  let relief = match opt_str(p, "relief").unwrap_or("rule") {
+    "rule" => JoinRelief::Rule,
+    "rectangular" => JoinRelief::Rectangular,
+    "round" => JoinRelief::Round,
+    "none" => JoinRelief::None,
+    o => return Err(CmdError::new(format!("unknown bend relief '{o}' (rule, rectangular, round, none)"))),
+  };
+  let bend_radius = opt_expr(p, "bend_radius").unwrap_or_default();
+  add_feature(s, FeatureKind::JoinByBend { edge1, edge2, bend_radius, position, relief })
 }
 
 /// `corners`: miter (default) | open | closed | overlap | butt.

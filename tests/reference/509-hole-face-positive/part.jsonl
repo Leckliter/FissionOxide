@@ -1,0 +1,11 @@
+# 509-hole-face-positive: added by the parity loop from a Fusion probe
+# hole-face-positive: 60x40x10 plate with a d=16 through hole at its centre; Offset Face on the hole's cylindrical face by +3 mm (along the face normal, into the hole) shrinks the hole to d=10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 40]]}
+{"cmd": "sketch.line", "points": [[60, 40], [0, 40]]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.circle", "center": [30, 20], "radius": 8}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body", "profiles": [[5, 5]]}
+{"cmd": "press_pull", "faces": [{"point": [38.0, 20.0, 5.0]}], "distance": 3}

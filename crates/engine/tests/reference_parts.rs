@@ -63,17 +63,23 @@ fn parse_line(line: &str) -> Result<(String, Value), String> {
   Ok((c, Value::Object(params)))
 }
 
-/// A case's `part.jsonl`, with relative `import` paths made absolute: the files it imports live in
-/// the case's directory, as `fissionoxide-cli run` finds them next to the script.
+/// A case's `part.jsonl`, with relative file paths (`import`'s `path`, `sketch.insert`'s
+/// `from.path`) made absolute: the files it reads live in the case's directory, where the parity
+/// bridge runs `fissionoxide-cli run` from.
 fn read_script(dir: &Path) -> Option<String> {
   let script = std::fs::read_to_string(dir.join("part.jsonl")).ok()?;
   let lines = script.lines().map(|line| {
     let Ok((cmd, mut params)) = parse_line(line.trim()) else {
       return line.to_string();
     };
-    match params["path"].as_str().map(Path::new) {
-      Some(p) if cmd == "import" && p.is_relative() => {
-        params["path"] = json!(dir.join(p));
+    let file = match cmd.as_str() {
+      "import" => params.get_mut("path"),
+      "sketch.insert" => params.get_mut("from").and_then(|f| f.get_mut("path")),
+      _ => None,
+    };
+    match file {
+      Some(v) if v.as_str().is_some_and(|p| Path::new(p).is_relative()) => {
+        *v = json!(dir.join(v.as_str().unwrap_or_default()));
         line_of(&cmd, &params)
       }
       _ => line.to_string(),
@@ -83,9 +89,6 @@ fn read_script(dir: &Path) -> Option<String> {
 }
 
 fn build(script: &str) -> Result<Session, String> {
-  // file paths in a script are relative to the repository root, as `fissionoxide-cli run` reads
-  // them from there (every test here sets the same directory, so parallel tests agree)
-  std::env::set_current_dir(root()).map_err(|e| e.to_string())?;
   let mut s = Session::default();
   for (n, line) in script.lines().enumerate() {
     let line = line.trim();

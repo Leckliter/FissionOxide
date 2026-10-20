@@ -739,13 +739,20 @@ impl Ctx<'_> {
           let bi = self.body_index(bid)?;
           let body = &self.state.bodies[bi];
           let mut shape = body.shape.clone();
+          let mut picked = Vec::new();
           for i in idxs {
             let Some(fr) = faces.get_mut(i) else { continue };
             let found = resolve_face_pieces(fr, body);
             if found.is_empty() {
               return Err("a face could not be found".into());
             }
-            for fid in found {
+            picked.extend(found);
+          }
+          let extended = self.offset_faces_extending(body, &picked, dist);
+          if let Some(s) = extended {
+            shape = s;
+          } else {
+            for fid in picked {
               let info = body.faces().iter().find(|f| f.id == fid).ok_or("a face could not be found")?;
               let face = body.shape.face_shape(fid).map_err(ke)?;
               // flat faces move along their normal; curved ones are offset (a hole grows or shrinks)
@@ -2452,6 +2459,7 @@ pub use extra::iso_pitch;
 mod solid;
 pub use solid::boundary_cells;
 mod sheet2;
+mod sheetmod;
 mod spun;
 pub use spun::outline as spun_outline;
 mod surface;
@@ -2530,3 +2538,7 @@ mod fillet2;
 mod form;
 #[cfg(test)]
 mod tests_fillet2;
+
+mod offset;
+#[cfg(test)]
+mod tests_offset;
