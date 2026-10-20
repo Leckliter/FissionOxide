@@ -1,0 +1,173 @@
+{
+ "id": "sloped-neighbours-positive",
+ "name": "Trapezoid prism (base 40, top 20, height 20 in XY, extruded 10 in Z)",
+ "description": "Trapezoid prism (base 40, top 20, height 20 in XY, extruded 10 in Z); Offset Face on the y=20 face by +5 mm. Its slanted neighbours extend, so the face ends 10 wide at y=25.",
+ "exercises": [
+  "extrude",
+  "offset_faces"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       30,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       10,
+       20
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Extrude1_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "offset_faces",
+   "name": "OffsetFaces1",
+   "faces": [
+    {
+     "type": "plane",
+     "normal_at_point_on_face": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "point": [
+      20.0,
+      20.0,
+      5.0
+     ]
+    }
+   ],
+   "distance": 5
+  }
+ ]
+}

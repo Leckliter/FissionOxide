@@ -1,0 +1,10 @@
+# 510-sloped-neighbours-positive: added by the parity loop from a Fusion probe
+# sloped-neighbours-positive: Trapezoid prism (base 40, top 20, height 20 in XY, extruded 10 in Z); Offset Face on the y=20 face by +5 mm. Its slanted neighbours extend, so the face ends 10 wide at y=25.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [30, 20]]}
+{"cmd": "sketch.line", "points": [[30, 20], [10, 20]]}
+{"cmd": "sketch.line", "points": [[10, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "press_pull", "faces": [{"point": [20.0, 20.0, 5.0]}], "distance": 5}

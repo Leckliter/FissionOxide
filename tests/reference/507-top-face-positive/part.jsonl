@@ -1,0 +1,10 @@
+# 507-top-face-positive: added by the parity loop from a Fusion probe
+# top-face-positive: 40x30x20 box; Offset Face on the top face (z=20) by +5 mm grows it to 25 mm tall.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "press_pull", "faces": [{"point": [20.0, 15.0, 20.0]}], "distance": 5}

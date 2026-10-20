@@ -143,6 +143,10 @@
 504-face-selection
 505-asymmetric-offsets
 506-full-round-rib
+507-top-face-positive
+508-two-sides-negative
+509-hole-face-positive
+510-sloped-neighbours-positive
 511-body-free-move
 512-body-copy-rotate
 52-circular-pattern-fillet
