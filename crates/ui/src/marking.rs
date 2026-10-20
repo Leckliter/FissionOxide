@@ -127,7 +127,7 @@ fn shortcut(c: Cmd) -> Option<&'static str> {
     Cmd::SketchTool(Tool::Rect) => "R",
     Cmd::SketchTool(Tool::Circle) => "C",
     Cmd::SketchTool(Tool::Arc3) => "A",
-    Cmd::SketchTool(Tool::Point) => "P",
+    Cmd::Dialog(Kind::Project) => "P",
     Cmd::SketchTool(Tool::Dimension) => "D",
     Cmd::SketchTool(Tool::Trim) => "T",
     Cmd::Construction => "X",

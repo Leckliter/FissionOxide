@@ -735,7 +735,6 @@ impl App {
         (Key::R, Tool::Rect),
         (Key::C, Tool::Circle),
         (Key::A, Tool::Arc3),
-        (Key::P, Tool::Point),
         (Key::D, Tool::Dimension),
         (Key::T, Tool::Trim),
       ] {
@@ -748,6 +747,10 @@ impl App {
       }
       if pressed(Key::O, Modifiers::NONE) {
         self.launch(Cmd::Dialog(dialogs::Kind::SkOffset));
+      }
+      // P is Project / Include, as in Fusion; Point has no key (it's in the menu and the S box)
+      if pressed(Key::P, Modifiers::NONE) {
+        self.launch(Cmd::Dialog(dialogs::Kind::Project));
       }
     } else {
       if pressed(Key::A, Modifiers::NONE) {
@@ -1451,6 +1454,20 @@ mod tests {
     assert!(app.s.edit_sketch.is_none());
     let d = app.dialog.as_ref().unwrap();
     assert_eq!((d.kind, d.sketch), (dialogs::Kind::Extrude, sketch));
+  }
+
+  #[test]
+  fn p_in_a_sketch_is_project_not_point() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sketch = app.s.edit_sketch;
+    let mid = app.canvas.center();
+    press(&mut app, &ctx, egui::Key::P, mid);
+    assert_ne!(app.tool, Tool::Point);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Project));
+    // Project works inside the sketch: it stays open
+    assert_eq!(app.s.edit_sketch, sketch);
   }
 
   #[test]

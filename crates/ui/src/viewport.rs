@@ -18,6 +18,8 @@ use crate::{App, RenderKey};
 const SNAP_PX: f32 = 9.0;
 /// Lines within this angle of horizontal/vertical snap to it (degrees).
 const HV_SNAP_DEG: f64 = 2.5;
+/// The cursor lines up with a sketch point within this many logical pixels (inference lines).
+const ALIGN_PX: f64 = 6.0;
 /// Max rendered pixels (keeps software rendering interactive on HiDPI screens).
 const MAX_PIXELS: f32 = 3_000_000.0;
 
@@ -494,31 +496,104 @@ fn sketch_plane(app: &App) -> Option<(FeatureId, Plane)> {
 
 /// Cursor position on the sketch plane, snapped to nearby points and H/V alignment.
 fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>)> {
+  sketch_inference(app, view, pos).map(|(p, snapped, _)| (p, snapped))
+}
+
+/// [`sketch_cursor`], plus the points the cursor lines up with in x and in y (the inference
+/// lines' far ends).
+fn sketch_inference(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>, Aligned)> {
   let (sk, plane) = sketch_plane(app)?;
   // snap to the hovered point (exact coordinates)
   if let Some(Pick::SketchPoint { sketch, point }) = app.hover
     && sketch == sk
     && let Some(p) = app.s.design.sketch(sk).ok().and_then(|s| s.pos(point))
   {
-    return Some((p, Some(point)));
+    return Some((p, Some(point), [None, None]));
   }
   let (o, d) = view.ray(&app.cam, pos);
   let hit = ray_plane(o, d, plane.origin, plane.normal())?;
   let mut p = plane.to_local(hit);
   // H/V inference against the previous click
+  let mut locked = [false, false];
   if let Some(prev) = app.tstate.pts.last() {
     let (dx, dy) = (p[0] - prev[0], p[1] - prev[1]);
     let ang = dy.atan2(dx).to_degrees().abs();
     if ang < HV_SNAP_DEG || (180.0 - ang) < HV_SNAP_DEG {
       p[1] = prev[1];
+      locked[1] = true;
     } else if (ang - 90.0).abs() < HV_SNAP_DEG {
       p[0] = prev[0];
+      locked[0] = true;
     }
   }
   // tidy coordinates: round to a precision that matches the zoom (a quarter grid cell with Snap)
   let step = grid_step(app, view) / if app.snap { 4.0 } else { 100.0 };
   p = [round_to(p[0], step), round_to(p[1], step)];
-  Some((p, None))
+  // inference lines: line up exactly with sketch points in line with the cursor
+  let world_per_px = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let (p, aligned) = align_to_points(p, &inference_points(app, sk), ALIGN_PX * world_per_px, locked);
+  Some((p, None, aligned))
+}
+
+/// The sketch points the cursor lines up with in x (a vertical guide) and in y (horizontal).
+type Aligned = [Option<[f64; 2]>; 2];
+
+/// Points the cursor infers alignment from: the sketch's points (ends, centres), line midpoints,
+/// and the clicks of the shape being drawn except the last (H/V against that is the line's own).
+fn inference_points(app: &App, sk: FeatureId) -> Vec<[f64; 2]> {
+  let mut out: Vec<[f64; 2]> = Vec::new();
+  if let Ok(s) = app.s.design.sketch(sk) {
+    out.extend(s.points.iter().map(|q| [q.x, q.y]));
+    for c in &s.curves {
+      if let CurveKind::Line { a, b } = c.kind
+        && let (Some(a), Some(b)) = (s.pos(a), s.pos(b))
+      {
+        out.push([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+      }
+    }
+  }
+  if let [rest @ .., _] = app.tstate.pts.as_slice() {
+    out.extend_from_slice(rest);
+  }
+  if let Some(last) = app.tstate.pts.last() {
+    out.retain(|q| (q[0] - last[0]).hypot(q[1] - last[1]) > 1e-9);
+  }
+  out
+}
+
+/// Snaps `p`'s x (and y) to the nearest point in `pts` whose x (y) is within `tol`, leaving
+/// `locked` axes alone. Of the points that line up, the one nearest the cursor anchors the guide.
+fn align_to_points(mut p: [f64; 2], pts: &[[f64; 2]], tol: f64, locked: [bool; 2]) -> ([f64; 2], Aligned) {
+  let mut aligned: Aligned = [None, None];
+  for axis in 0..2 {
+    if locked[axis] {
+      continue;
+    }
+    let other = 1 - axis;
+    let off = |q: &[f64; 2]| ((q[axis] - p[axis]).abs(), (q[other] - p[other]).abs());
+    let best = pts.iter().filter(|q| off(q).0 <= tol).min_by(|a, b| {
+      let ((da, oa), (db, ob)) = (off(a), off(b));
+      da.total_cmp(&db).then(oa.total_cmp(&ob))
+    });
+    if let Some(q) = best {
+      p[axis] = q[axis];
+      aligned[axis] = Some(*q);
+    }
+  }
+  (p, aligned)
+}
+
+/// Dotted inference lines from the points the cursor lines up with, as Fusion draws them.
+fn paint_inference_lines(app: &App, painter: &egui::Painter, view: &View, pos: Pos2) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some((cur, _, aligned)) = sketch_inference(app, view, pos) else { return };
+  let s = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let col = Color32::from_rgb(110, 110, 120);
+  for q in aligned.into_iter().flatten() {
+    if let (Some(a), Some(b)) = (s(q), s(cur)) {
+      painter.extend(egui::Shape::dotted_line(&[a, b], col, 5.0, 1.0));
+    }
+  }
 }
 
 fn round_to(v: f64, step: f64) -> f64 {
@@ -1704,6 +1779,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     _ => {}
   }
+  paint_inference_lines(app, painter, view, pos);
   // cursor marker, and a coordinate readout where no heads-up dimensions show
   if let Some(p) = s(cur) {
     let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -2471,6 +2547,50 @@ mod tests {
 
   fn typed(app: &mut App, values: [&str; 2]) {
     app.tstate.hud.typed = values.map(String::from);
+  }
+
+  #[test]
+  fn alignment_snaps_free_axes_to_points_in_line() {
+    let pts = [[20.0, 0.0], [0.0, 7.0], [20.3, 50.0]];
+    // x within tolerance of the line end (and of a farther point): the nearer one anchors
+    let (p, a) = align_to_points([20.4, -10.0], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.3, -10.0]);
+    assert_eq!(a, [Some([20.3, 50.0]), None]);
+    let (p, a) = align_to_points([19.8, 7.2], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.0, 7.0]);
+    assert_eq!(a, [Some([20.0, 0.0]), Some([0.0, 7.0])]);
+    // out of tolerance, or an axis the H/V snap holds: untouched
+    assert_eq!(align_to_points([21.0, -10.0], &pts, 0.5, [false, false]), ([21.0, -10.0], [None, None]));
+    assert_eq!(align_to_points([20.1, 3.0], &pts, 0.5, [true, false]), ([20.1, 3.0], [None, None]));
+  }
+
+  #[test]
+  fn inference_points_take_ends_midpoints_and_earlier_clicks() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    let pts = inference_points(&app, sk);
+    assert!(pts.contains(&[0.0, 0.0]) && pts.contains(&[10.0, 0.0]));
+    // the click the line runs from is the line's own H/V, not an inference
+    assert!(!pts.contains(&[20.0, 0.0]), "{pts:?}");
+  }
+
+  #[test]
+  fn line_end_below_another_end_snaps_under_it() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    reset_tool_state(&mut app);
+    app.cam.set_view(fox_engine::render::StandardView::Top);
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    place_point(&mut app, sk, [5.0, -30.0], None);
+    let plane = sketch_plane(&app).unwrap().1;
+    // a cursor 2 px right of the point directly below the first line's end
+    let below = view.to_screen(&app.cam, plane.to_world([20.0, -10.0])).unwrap() + Vec2::new(2.0, 0.0);
+    app.hover = None;
+    let (p, snapped, aligned) = sketch_inference(&app, &view, below).unwrap();
+    assert_eq!((p[0], snapped), (20.0, None), "{p:?}");
+    assert_eq!(aligned[0], Some([20.0, 0.0]));
   }
 
   #[test]
