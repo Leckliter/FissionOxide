@@ -1,0 +1,9 @@
+# 199-open-five-point-wave: added by the parity loop from a Fusion probe
+# open-five-point-wave: Fit point spline through (0,0)-(10,12)-(20,4)-(30,14)-(40,6), closed by lines down to y=-10; extruded 6.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [10, 12], [20, 4], [30, 14], [40, 6]]}
+{"cmd": "sketch.line", "points": [[40, 6], [40, -10]]}
+{"cmd": "sketch.line", "points": [[40, -10], [0, -10]]}
+{"cmd": "sketch.line", "points": [[0, -10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}

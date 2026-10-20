@@ -1,0 +1,16 @@
+# 183-full-turn-off-origin-center: added by the parity loop from a Fusion probe
+# full-turn-off-origin-center: 80x60x5 plate; r4 hole at (48,30) circular-patterned 5x over 360 deg about the point (30,30); cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [80, 0]]}
+{"cmd": "sketch.line", "points": [[80, 0], [80, 60]]}
+{"cmd": "sketch.line", "points": [[80, 60], [0, 60]]}
+{"cmd": "sketch.line", "points": [[0, 60], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [48, 30], "radius": 4}
+{"cmd": "sketch.pattern_circ", "curves": [2], "center": [30, 30], "count": 5, "angle": "360 deg"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}

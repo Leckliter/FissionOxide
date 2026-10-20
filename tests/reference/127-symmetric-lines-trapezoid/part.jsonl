@@ -1,0 +1,15 @@
+# 127-symmetric-lines-trapezoid: added by the parity loop from a Fusion probe
+# symmetric-lines-trapezoid: Construction axis on the Y axis; a trapezoid drawn lopsided with horizontal top and bottom whose two legs are symmetric lines about the axis; bottom 40 at y=5, top 20, height 20; solves to bottom x -20..20, top x -10..10; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 30]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.line", "points": [[-18, 4], [22, 6], [11, 24], [-9, 26]], "closed": true}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [6]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [10]}
+{"cmd": "sketch.constrain", "type": "symmetric", "curves": [8, 11, 2]}
+{"cmd": "sketch.dimension", "type": "horizontal", "value": 40, "points": [4, 5]}
+{"cmd": "sketch.dimension", "type": "horizontal", "value": 20, "points": [7, 9]}
+{"cmd": "sketch.dimension", "type": "vertical", "value": 20, "points": [5, 7]}
+{"cmd": "sketch.dimension", "type": "vertical", "value": 5, "points": [0, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

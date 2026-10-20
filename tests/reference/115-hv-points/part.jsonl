@@ -1,0 +1,15 @@
+# 115-hv-points: added by the parity loop from a Fusion probe
+# hv-points: Triangle (0.5,0.5)-(25,1.5)-(9,17) with a fixed construction-free sketch point at (10,30). Horizontal/Vertical on the two bottom points makes them horizontal; on the apex and the fixed point makes them vertical (apex x = 10). Base 25 from the origin, apex height 18: area 225, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0.5, 0.5], [25, 1.5]]}
+{"cmd": "sketch.line", "points": [[25, 1.5], [9, 17]]}
+{"cmd": "sketch.line", "points": [[9, 17], [0.5, 0.5]]}
+{"cmd": "sketch.point", "at": [10, 30]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [7]}
+{"cmd": "sketch.constrain", "type": "horizontal", "points": [1, 2]}
+{"cmd": "sketch.constrain", "type": "vertical", "points": [4, 7]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 25}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 4], "value": 18}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

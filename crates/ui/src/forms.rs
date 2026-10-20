@@ -489,15 +489,21 @@ pub static COIL: Form = Form {
 pub static PIPE: Form = Form {
   title: "PIPE",
   name: "Pipe",
-  hint: "A round tube along a sketch path of lines and arcs",
+  hint: "A round, square or triangular tube along a sketch path of lines and arcs",
   icon: Icon::Pipe,
   cmd: "pipe",
   fixed: &[],
   inputs: &[
     Input::Sketch { key: "path", label: "Path sketch" },
     Input::Curves { key: "path_curves", label: "Path curves (default all)" },
-    Input::Expr { key: "diameter", label: "Diameter", default: "10 mm" },
+    Input::Choice {
+      key: "section",
+      label: "Section",
+      options: &[("circular", "Circular"), ("square", "Square"), ("triangular", "Triangular")],
+    },
+    Input::Expr { key: "diameter", label: "Size", default: "10 mm" },
     Input::Expr { key: "wall", label: "Wall (empty = solid)", default: "" },
+    Input::Expr { key: "distance", label: "Distance (fraction of the path)", default: "1" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
   ],
   picks_model: false,
@@ -604,6 +610,7 @@ pub static THICKEN: Form = Form {
     Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Check { key: "flip", label: "Flip" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
+    Input::Choice { key: "corners", label: "Thicken type", options: &[("sharp", "Sharp"), ("round", "Rounded")] },
   ],
   picks_model: true,
 };
