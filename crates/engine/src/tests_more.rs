@@ -402,3 +402,63 @@ fn ruled_offset_and_trim_surfaces() {
   let b = s.model.bodies.iter().find(|b| b.id.0 == id).unwrap();
   assert!((b.shape.mass().unwrap().area - 100.0).abs() < 1e-6, "{}", b.shape.mass().unwrap().area);
 }
+
+#[test]
+fn pipe_sections_and_partial_paths() {
+  // a straight 40 mm path up z, in a sketch whose normal is +y
+  let path = |s: &mut Session| {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [0, -40]]}));
+    let path = s.edit_sketch.unwrap().0;
+    run(s, "sketch.finish", json!({}));
+    path
+  };
+  let pipe = |p: Value| {
+    let mut s = Session::default();
+    let id = path(&mut s);
+    let mut p = p;
+    p["path"] = json!(id);
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    s
+  };
+  let near = |s: &Session, want: f64| {
+    let v = volume(s);
+    assert!((v - want).abs() < want * 1e-6, "{v} vs {want}");
+  };
+  near(&pipe(json!({"size": 6, "section": "square"})), 36.0 * 40.0);
+  near(&pipe(json!({"size": 6, "section": "square", "wall": 1})), (36.0 - 16.0) * 40.0);
+  // a triangle of height 6 has side 4√3; half the path
+  let s = pipe(json!({"size": 6, "section": "triangular", "distance": 0.5}));
+  near(&s, 12.0 * 3f64.sqrt() * 20.0);
+  // the base lies 3 below the path along the sketch normal (y), the apex 3 above
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_min.y + 3.0).abs() < 1e-3 && (m.bbox_max.y - 3.0).abs() < 1e-3, "{m:?}");
+  assert!((m.center_of_mass.y + 1.0).abs() < 1e-6 && (m.bbox_max.z - 20.0).abs() < 1e-3, "{m:?}");
+  // hollow: the triangle with inradius 2 - 1, so a quarter of the area is the hole
+  near(&pipe(json!({"size": 6, "section": "triangular", "wall": 1})), 0.75 * 12.0 * 3f64.sqrt() * 40.0);
+
+  // half a spline path holds half the volume of the whole one
+  let spline = |d: Option<f64>| {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, -20], [0, -40], [15, -60]]}));
+    let id = s.edit_sketch.unwrap().0;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"path": id, "diameter": 2});
+    if let Some(d) = d {
+      p["distance"] = json!(d);
+    }
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    volume(&s)
+  };
+  let (half, whole) = (spline(Some(0.5)), spline(None));
+  assert!((half / whole - 0.5).abs() < 2e-3, "{half} / {whole}");
+
+  // keys it doesn't know are refused rather than ignored
+  let mut s = Session::default();
+  let id = path(&mut s);
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "shape": "square"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "section": "hexagon"})).is_err());
+}

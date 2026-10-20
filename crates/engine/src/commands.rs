@@ -136,7 +136,7 @@ cmds! {
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
-  "pipe" => "Round tube along a path sketch (solid, or hollow with a wall)", "{path: sketch, path_curves?, diameter, wall?, operation?}";
+  "pipe" => "Tube along a path sketch: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path", "{path: sketch, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
   "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
