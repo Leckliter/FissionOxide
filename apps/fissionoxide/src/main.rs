@@ -22,9 +22,12 @@ fn main() -> eframe::Result<()> {
   eframe::run_native("FissionOxide", options, Box::new(move |cc| Ok(Box::new(Desktop::new(cc, open)))))
 }
 
-/// The app in its desktop shell: on Windows, with an icon in the notification area while it runs.
+/// The app in its desktop shell: the start-up splash, and on Windows an icon in the notification
+/// area while it runs.
 struct Desktop {
   app: fox_ui::App,
+  /// Until it has faded off the app.
+  splash: Option<fox_ui::Splash>,
   #[cfg(windows)]
   tray: Option<fox_desktop::tray::Tray>,
   /// The tray's tooltip and update entry as last set.
@@ -42,10 +45,10 @@ impl Desktop {
         .map_err(|e| e.to_string())
         .and_then(|i| fox_desktop::tray::Tray::new(i.rgba, i.width, i.height, move || ctx.request_repaint()));
       let tray = tray.map_err(|e| log::warn!("no notification-area icon: {e}")).ok();
-      Desktop { app, tray, tray_text: Default::default() }
+      Desktop { app, splash: Some(Default::default()), tray, tray_text: Default::default() }
     }
     #[cfg(not(windows))]
-    Desktop { app }
+    Desktop { app, splash: Some(Default::default()) }
   }
 
   #[cfg(windows)]
@@ -97,7 +100,23 @@ impl eframe::App for Desktop {
   }
 
   fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
-    self.app.ui(ui, frame);
+    use fox_ui::SplashPhase;
+    let Some(splash) = &mut self.splash else {
+      self.app.ui(ui, frame);
+      return;
+    };
+    let ctx = ui.ctx().clone();
+    let note = self.app.loading();
+    let phase = splash.phase(&ctx, note.is_some());
+    // the app draws beneath the finished logo, so its first frames are ready when it fades
+    if phase != SplashPhase::Playing {
+      self.app.ui(ui, frame);
+    }
+    if phase == SplashPhase::Done {
+      self.splash = None;
+    } else {
+      splash.show(&ctx, phase, note.as_deref());
+    }
   }
 
   fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

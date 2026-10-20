@@ -35,6 +35,7 @@ use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 pub use dialogs::Dialog;
+pub use logo::{Splash, SplashPhase};
 pub use updates::Updates;
 pub use viewport::{NavMode, Tool};
 
@@ -125,6 +126,8 @@ pub struct App {
   pub(crate) ghost: preview::Ghost,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
+  /// A design being opened on another thread (the one the app was started with).
+  opening: Option<(PathBuf, std::thread::JoinHandle<Result<Session, fox_engine::CmdError>>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -160,11 +163,36 @@ impl App {
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
     match open {
+      // read on another thread, so the start-up splash keeps playing while a big design loads
+      Some(p) if !trace::is_image(&p) => app.open_in_background(p),
       Some(p) => app.open_path(&p),
       // like Fusion, start with the data panel showing
       None => app.data.toggle(),
     }
     app
+  }
+
+  /// Opens a design (or importable file) on another thread; [`App::draw`] takes it when it's read.
+  pub fn open_in_background(&mut self, p: PathBuf) {
+    let path = p.clone();
+    self.opening = Some((p, std::thread::spawn(move || Session::open(&path))));
+  }
+
+  /// What the app is still getting ready, while it is: "Opening part.fox…".
+  pub fn loading(&self) -> Option<String> {
+    let (p, _) = self.opening.as_ref()?;
+    Some(format!("Opening {}…", p.file_name().unwrap_or(p.as_os_str()).to_string_lossy()))
+  }
+
+  /// Takes the design opened on another thread once it is read. Returns whether it still runs.
+  fn poll_opening(&mut self) -> bool {
+    if self.opening.as_ref().is_some_and(|(_, job)| job.is_finished())
+      && let Some((p, job)) = self.opening.take()
+    {
+      let opened = job.join().unwrap_or_else(|_| Err(fox_engine::CmdError("the file couldn't be read".into())));
+      self.opened(&p, opened);
+    }
+    self.opening.is_some()
   }
 
   pub fn with_session(s: Session) -> App {
@@ -222,6 +250,7 @@ impl App {
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
       updates: updates::Updates::default(),
+      opening: None,
     }
   }
 
@@ -284,7 +313,11 @@ impl App {
       self.trace_image(p.to_path_buf());
       return;
     }
-    match Session::open(p) {
+    self.opened(p, Session::open(p));
+  }
+
+  fn opened(&mut self, p: &std::path::Path, opened: Result<Session, fox_engine::CmdError>) {
+    match opened {
       Ok(s) => {
         self.replace_session(s);
         let msg = match self.s.path {
@@ -852,6 +885,10 @@ impl App {
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
+    if self.poll_opening() {
+      self.draw_busy(ui, &ctx);
+      return;
+    }
     if self.poll_rebuild() {
       self.draw_busy(ui, &ctx);
       return;
@@ -939,29 +976,27 @@ impl App {
     });
     panels::browser(self, ctx);
     let elapsed = self.rebuild.as_ref().map(|(_, t)| now() - t).unwrap_or(0.0);
+    let text = match self.loading() {
+      Some(l) => l,
+      None => format!("Computing…  {elapsed:.1} s"),
+    };
     let screen = ctx.content_rect();
     egui::Area::new(egui::Id::new("busy-cover")).fixed_pos(screen.min).order(egui::Order::Foreground).show(ctx, |ui| {
       let (r, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
       ui.painter().rect_filled(r, 0.0, egui::Color32::from_black_alpha(16));
-      if elapsed > 0.15 {
+      if elapsed > 0.15 || self.opening.is_some() {
         let c = self.canvas.center();
-        let text = format!("Computing…  {elapsed:.1} s");
         let g = ui.painter().layout_no_wrap(text, egui::FontId::proportional(15.0), theme::TEXT);
-        let b = egui::Rect::from_center_size(c, g.size() + egui::vec2(36.0, 22.0));
+        let fox = egui::vec2(22.0, 26.0);
+        let b = egui::Rect::from_center_size(c, egui::vec2(g.size().x + fox.x + 42.0, fox.y + 18.0));
         ui.painter().rect_filled(b, 6.0, egui::Color32::WHITE);
         ui.painter().rect_stroke(b, 6.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-        let a = (elapsed * 6.0) as f32;
-        let dot = b.left_center() + egui::vec2(14.0, 0.0);
-        ui.painter().circle_stroke(dot, 5.0, egui::Stroke::new(1.0, theme::BORDER));
-        ui.painter().circle_filled(
-          dot + egui::vec2(a.cos(), a.sin()) * 5.0,
-          2.0,
-          egui::Color32::from_rgb(30, 110, 235),
-        );
-        ui.painter().galley(b.min + egui::vec2(26.0, 11.0), g, theme::TEXT);
+        let spot = egui::Rect::from_min_size(b.left_center() + egui::vec2(14.0, -fox.y / 2.0), fox);
+        logo::paint_ripple(ui.painter(), spot, ui.input(|i| i.time) as f32);
+        ui.painter().galley(egui::pos2(spot.right() + 12.0, c.y - g.size().y / 2.0), g, theme::TEXT);
       }
     });
-    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
   }
 }
 
@@ -984,6 +1019,18 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_design_opens_in_the_background() {
+    let mut app = App::with_session(Session::default());
+    app.open_in_background(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/bracket.fox")));
+    assert_eq!(app.loading().as_deref(), Some("Opening bracket.fox…"));
+    while app.poll_opening() {
+      std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(app.loading().is_none());
+    assert!(!app.s.model.bodies.is_empty() && app.status.as_ref().is_some_and(|s| !s.1));
+  }
 
   #[test]
   fn parameter_changes_run_in_the_background() {

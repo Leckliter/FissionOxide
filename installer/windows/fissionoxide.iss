@@ -115,6 +115,8 @@ Name: "assoc"; Description: "{cm:AssocFox}"; GroupDescription: "{cm:AssocGroup}"
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#CliExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion
+; the ripple loader's frames for the progress page (made by brand/build.py; see CreateLoader)
+Source: "{#Brand}\loader\*.bmp"; Flags: dontcopy
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "FissionOxide.FissionOxide"; Comment: "Parametric 3D CAD"
@@ -155,8 +157,22 @@ Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: Relaunch
 Type: filesandordirs; Name: "{localappdata}\FissionOxide\updates"
 
 [Code]
+const
+  LoaderFrames = 20;
+  { ms a frame: the loop takes 1.6 s, like brand/logo/motion/loader-ripple.svg }
+  LoaderTick = 80;
+
 var
   UpdatesPage: TInputOptionWizardPage;
+  Loader: TBitmapImage;
+  LoaderBitmaps: array of TBitmap;
+  LoaderFrame: Integer;
+  LoaderTimer: LongWord;
+
+function SetTimer(hWnd: LongWord; nIDEvent, uElapse: LongWord; lpTimerFunc: LongWord): LongWord;
+  external 'SetTimer@user32.dll stdcall';
+function KillTimer(hWnd: LongWord; uIDEvent: LongWord): BOOL;
+  external 'KillTimer@user32.dll stdcall';
 
 function SettingsFile: String;
 begin
@@ -198,10 +214,75 @@ begin
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES;
 end;
 
+{ The FissionOxide ripple under the progress bar while files are copied: the brand's loading
+  indicator, as still frames because the wizard can only show bitmaps }
+procedure CreateLoader;
+var
+  Scale, I: Integer;
+  Name: String;
+begin
+  { the frames drawn for the screen's scaling: 100, 150 or 200 % }
+  Scale := ScaleX(100);
+  if Scale >= 175 then
+    Scale := 200
+  else if Scale >= 125 then
+    Scale := 150
+  else
+    Scale := 100;
+  SetArrayLength(LoaderBitmaps, LoaderFrames);
+  for I := 0 to LoaderFrames - 1 do
+  begin
+    Name := Format('loader-%d-%.2d.bmp', [Scale, I]);
+    ExtractTemporaryFile(Name);
+    LoaderBitmaps[I] := TBitmap.Create;
+    LoaderBitmaps[I].LoadFromFile(ExpandConstant('{tmp}\') + Name);
+  end;
+  Loader := TBitmapImage.Create(WizardForm);
+  Loader.Parent := WizardForm.InstallingPage;
+  Loader.Width := LoaderBitmaps[0].Width;
+  Loader.Height := LoaderBitmaps[0].Height;
+  Loader.Left := (WizardForm.InstallingPage.ClientWidth - Loader.Width) div 2;
+  Loader.Top := WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(32);
+  Loader.Bitmap := LoaderBitmaps[0];
+end;
+
+procedure LoaderStep(Wnd, Msg, IdEvent, Ticks: LongWord);
+begin
+  LoaderFrame := (LoaderFrame + 1) mod LoaderFrames;
+  Loader.Bitmap := LoaderBitmaps[LoaderFrame];
+end;
+
+procedure StopLoader;
+begin
+  if LoaderTimer <> 0 then
+  begin
+    KillTimer(0, LoaderTimer);
+    LoaderTimer := 0;
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpInstalling) and (LoaderTimer = 0) and (Loader <> nil) then
+    LoaderTimer := SetTimer(0, 0, LoaderTick, CreateCallback(@LoaderStep));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    StopLoader;
+end;
+
+procedure DeinitializeSetup;
+begin
+  StopLoader;
+end;
+
 procedure InitializeWizard;
 var
   Mode: String;
 begin
+  CreateLoader;
   UpdatesPage := CreateInputOptionPage(wpSelectTasks, CustomMessage('UpdatesCaption'),
     CustomMessage('UpdatesTitle'), CustomMessage('UpdatesText'), True, False);
   UpdatesPage.Add(CustomMessage('UpdateAuto'));
