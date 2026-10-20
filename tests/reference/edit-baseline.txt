@@ -58,3 +58,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+348-xz-plane-offset-mirror
+349-top-face-offset-mirror
+350-side-face-negative-offset-mirror-join

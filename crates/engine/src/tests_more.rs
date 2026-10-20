@@ -150,7 +150,7 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "extrude", json!({"distance": 20, "operation": "join"}));
   let v0 = volume(&s);
   // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10)
-  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -10}));
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
   let pl = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
   // a line across the top between the walls; the rib grows down to the floor

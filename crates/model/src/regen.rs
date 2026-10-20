@@ -737,7 +737,9 @@ impl Ctx<'_> {
       FeatureKind::ConstructionPlane { base, offset } => {
         let pl = self.resolve_plane(base)?;
         let d = self.len(offset)?;
-        self.state.planes.insert(id, pl.offset(d));
+        // XZ keeps its frame but offsets along +Y, as in Fusion
+        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign() } else { 1.0 };
+        self.state.planes.insert(id, pl.offset(sign * d));
         Ok(None)
       }
       FeatureKind::Mirror { bodies, plane, join } => {
