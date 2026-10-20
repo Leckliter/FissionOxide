@@ -1,0 +1,171 @@
+{
+ "id": "axis-and-edge",
+ "name": "axis-and-edge",
+ "description": "Box x 10..50, y 0..30, z 0..20; plane through the world Z axis and the vertical edge at (50,30); box split by it (cut line y=0.6x).",
+ "exercises": [
+  "extrude",
+  "construction_plane two_edges",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       10,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       50,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       50,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       50,
+       30
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       10,
+       30
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       10,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "P2E",
+   "method": "two_edges",
+   "a": "Z",
+   "b": {
+    "point": [
+     50,
+     30,
+     10
+    ]
+   }
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "Box",
+   "tool": "P2E",
+   "extend_tool": true,
+   "result_bodies": [
+    "Box",
+    "Box (1)"
+   ]
+  }
+ ]
+}
