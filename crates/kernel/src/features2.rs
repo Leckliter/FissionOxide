@@ -76,6 +76,14 @@ impl Shape {
 
   /// A loft through the outer boundaries of `sections` whose sides follow rail wires.
   pub fn loft_rails(sections: &[Shape], rails: &[Shape]) -> Result<Shape> {
+    Shape::loft_rails_with(sections, rails, true)
+  }
+
+  /// [`Shape::loft_rails`], choosing how two or more rails spread around a polygonal section:
+  /// with `spread`, corner to corner as Fusion does (a side no rail touches stays straight);
+  /// without, smoothly round the loop from one rail to the next (designs made before the
+  /// `loft_rail_spread` behaviour).
+  pub fn loft_rails_with(sections: &[Shape], rails: &[Shape], spread: bool) -> Result<Shape> {
     if sections.len() < 2 {
       return Err(KernelError::Input("a loft needs at least two profiles".into()));
     }
@@ -83,7 +91,7 @@ impl Shape {
       return Err(KernelError::Input("no rails".into()));
     }
     let (c, r) = (Shape::compound(sections)?, Shape::compound(rails)?);
-    Shape::wrap(sys::loft_rails(c.get()?, r.get()?)?)?.solid_or("loft")
+    Shape::wrap(sys::loft_rails(c.get()?, r.get()?, spread)?)?.solid_or("loft")
   }
 
   /// A closed loft through the outer boundaries of `sections` (three or more), in order and back

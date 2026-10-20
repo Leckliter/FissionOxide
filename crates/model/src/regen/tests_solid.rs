@@ -147,6 +147,104 @@ fn loft_with_rails_or_a_centre_line() {
   assert!(close(vol(bodies_of(&m, loft)[0]), PI * 100.0 * 40.0, 0.01));
 }
 
+fn free(origin: [f64; 3], normal: [f64; 3], x: [f64; 3]) -> PlaneRef {
+  PlaneRef::Free { origin, normal, x: Some(x) }
+}
+
+/// Case 436: a closed smooth loft through four d10 circles 20 mm round Z, in a design with the
+/// given behaviours: the loft's body.
+fn closed_ring(behaviours: Behaviours) -> (Model, FeatureId) {
+  let mut d = Design::new("ring");
+  d.behaviours = behaviours;
+  let mut at = |p: PlaneRef, cx: f64| {
+    let mut s = Sketch::new();
+    s.add_circle(PtSpec::At(cx, 0.0), 5.0).unwrap();
+    sketch(&mut d, p, s)
+  };
+  let (xz, yz) = (free([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]), free([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+  let ids = [at(xz.clone(), 20.0), at(yz.clone(), 20.0), at(xz, -20.0), at(yz, -20.0)];
+  let sections = ids.iter().map(|&sketch| LoftSection { sketch, profile: None, end: Default::default() }).collect();
+  let loft = d
+    .add_feature(FeatureKind::Loft {
+      sections,
+      ruled: false,
+      closed: true,
+      operation: Operation::NewBody,
+      rails: Vec::new(),
+      centerline: None,
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  (m, loft)
+}
+
+#[test]
+fn closed_loft_legacy_keeps_the_seamed_open_loft() {
+  // no LOFT_CLOSED_SMOOTH (a file from before it): main's open loft with the first section again
+  let (m, loft) = closed_ring(Behaviours::legacy());
+  let b = bodies_of(&m, loft)[0];
+  let mp = b.shape.mass().unwrap();
+  // main: 24% above Fusion (8587.0), the centre of mass 2.8 mm off towards the first section
+  assert!(close(vol(b), 10638.197, 1e-6), "{}", vol(b));
+  assert!((mp.center_of_mass.x - 2.7945).abs() < 1e-3, "{mp:?}");
+}
+
+#[test]
+fn closed_loft_new_design_is_one_smooth_ring() {
+  let (m, loft) = closed_ring(Behaviours::current());
+  let b = bodies_of(&m, loft)[0];
+  let mp = b.shape.mass().unwrap();
+  assert!(close(vol(b), 8587.02, 0.01), "{}", vol(b));
+  assert!(mp.center_of_mass.length() < 0.05, "{mp:?}");
+  assert_eq!(b.faces().len(), 1);
+}
+
+/// Case 435's loft between two 20 x 20 squares 40 apart with two rails bulging their x = ±10
+/// sides out to ±15, in a design with the given behaviours: the loft's volume.
+fn two_rail_square(behaviours: Behaviours) -> f64 {
+  let mut d = Design::new("rails");
+  d.behaviours = behaviours;
+  let a = sketch(&mut d, XY, rect([-10.0, -10.0], [10.0, 10.0]));
+  let b = sketch(&mut d, free([0.0, 0.0, 40.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), rect([-10.0, -10.0], [10.0, 10.0]));
+  let xz = free([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+  let mut rails = Vec::new();
+  for x in [10.0, -10.0] {
+    let mut s = Sketch::new();
+    let c = s.add_arc_3pt(PtSpec::At(x, 0.0), [x * 1.5, -20.0], PtSpec::At(x, -40.0)).unwrap();
+    rails.push(PathRef { sketch: sketch(&mut d, xz.clone(), s), curves: vec![c] });
+  }
+  let loft = d
+    .add_feature(FeatureKind::Loft {
+      sections: vec![
+        LoftSection { sketch: a, profile: None, end: Default::default() },
+        LoftSection { sketch: b, profile: None, end: Default::default() },
+      ],
+      ruled: false,
+      closed: false,
+      operation: Operation::NewBody,
+      rails,
+      centerline: None,
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  vol(bodies_of(&m, loft)[0])
+}
+
+#[test]
+fn two_rail_loft_legacy_blends_round_the_loop() {
+  // no LOFT_RAIL_SPREAD: main's smooth blend from one rail to the next, 4.7% above Fusion
+  let v = two_rail_square(Behaviours::legacy());
+  assert!(close(v, 20808.824, 1e-6), "{v}");
+}
+
+#[test]
+fn two_rail_loft_new_design_spreads_corner_to_corner() {
+  let v = two_rail_square(Behaviours::current());
+  assert!(close(v, 19878.5, 0.01), "{v}");
+}
+
 #[test]
 fn setback_fillet_at_a_box_corner() {
   let mut d = Design::new("setback");

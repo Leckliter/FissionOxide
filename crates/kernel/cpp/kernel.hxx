@@ -121,7 +121,7 @@ std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<
 std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail);
 std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist);
 std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine);
-std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails);
+std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails, bool spread);
 std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,
                                    rust::Slice<const double> dir, double depth, bool deboss, bool wrap);
 std::unique_ptr<Shape> boundary_cells(const Shape &tools);

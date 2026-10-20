@@ -7,6 +7,7 @@ use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
 use crate::{BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef};
+use fox_sketch::behaviour::{LOFT_CLOSED_SMOOTH, LOFT_RAIL_SPREAD};
 
 /// What an extrude stops at besides a parallel flat face.
 pub(super) enum Trim {
@@ -276,15 +277,18 @@ impl Ctx<'_> {
     centerline: Option<&PathRef>,
   ) -> Result<Shape, String> {
     match (rails.is_empty(), centerline) {
-      // a smooth closed loop: periodic all the way round, with no seam at the first section
-      (true, None) if closed && !ruled => Shape::loft_closed(faces).map_err(ke),
+      // a smooth closed loop: periodic all the way round, with no seam at the first section (older
+      // designs loft open and add the first section again at the end)
+      (true, None) if closed && !ruled && self.behaviours.has(LOFT_CLOSED_SMOOTH) => {
+        Shape::loft_closed(faces).map_err(ke)
+      }
       (true, None) => Shape::loft(faces, ruled, closed).map_err(ke),
       _ if closed => Err("a closed loft can't follow rails or a centre line".into()),
       (false, Some(_)) => Err("a loft follows rails or a centre line, not both".into()),
       (true, Some(c)) => Shape::loft_centerline(faces, &self.path_shape(c)?).map_err(ke),
       (false, None) => {
         let rs = rails.iter().map(|r| self.path_shape(r)).collect::<Result<Vec<_>, _>>()?;
-        Shape::loft_rails(faces, &rs).map_err(ke)
+        Shape::loft_rails_with(faces, &rs, self.behaviours.has(LOFT_RAIL_SPREAD)).map_err(ke)
       }
     }
   }

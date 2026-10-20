@@ -554,8 +554,9 @@ std::vector<gp_Vec> polygon_pulls(const std::vector<gp_Pnt> &pts, size_t k,
 // Lofts through sections guided by rails: between the sections, every point is pulled along with
 // the rails, so the loft's sides follow the rails. One rail pulls its side out, fading away round
 // the loop; with more, around a polygonal section the pulls spread as `polygon_pulls` says, around
-// a smooth one smoothly from one rail to the next.
-std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
+// a smooth one smoothly from one rail to the next. Without `spread` (designs from before it), more
+// than one rail blends smoothly from one rail to the next around a polygonal section too.
+std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails, bool spread) {
   FOX2_TRY
   std::vector<TopoDS_Wire> ws;
   for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
@@ -708,7 +709,7 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
           double u = static_cast<double>(k) / static_cast<double>(np);
           mid[k].Translate(pull[0].second * ((1 + std::cos(2 * M_PI * (u - pull[0].first))) / 2));
         }
-      } else if (per_edge) {
+      } else if (per_edge && spread) {
         // the pulls' common part along the loft moves the whole section; the rest reshapes it
         gp_Vec ax(centroid(a), centroid(b));
         gp_Vec shift(0, 0, 0);
