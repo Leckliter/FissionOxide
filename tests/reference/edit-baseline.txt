@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+325-rigid-face-center-offset
+326-rigid-flip-angle
+327-revolute-rotation-vertex
+328-slider-slide

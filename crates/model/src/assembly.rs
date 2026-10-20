@@ -239,8 +239,9 @@ pub fn joint_transform(
   if as_built {
     return fixed * m * fixed.inverse();
   }
-  // Z axes face each other unless flipped: turn the moving frame half a turn about its X
-  let mate = if flip { DMat4::IDENTITY } else { DMat4::from_rotation_x(std::f64::consts::PI) };
+  // As in Fusion, the moving origin's axes line up with the fixed origin's (Z the same way);
+  // flipping turns the moving frame half a turn about its X so the Z axes face each other
+  let mate = if flip { DMat4::from_rotation_x(std::f64::consts::PI) } else { DMat4::IDENTITY };
   fixed
     * DMat4::from_translation(DVec3::new(0.0, 0.0, offset))
     * DMat4::from_rotation_z(angle)
@@ -354,9 +355,13 @@ mod tests {
     // a pin's bottom (z out = −Z, at (5, 5, 0)) into a hole's top (z out = +Z, at (0, 0, 10))
     let fixed = frame(DVec3::new(0.0, 0.0, 10.0), DVec3::Z, DVec3::X).unwrap();
     let moving = frame(DVec3::new(5.0, 5.0, 0.0), -DVec3::Z, DVec3::X).unwrap();
+    // unflipped, the Z axes line up: the pin's −Z bottom normal turns to +Z, so it hangs down
     let t = joint_transform(fixed, moving, JointKind::Rigid, 0.0, 0.0, false, false, Motion::default());
     assert!(close(t.transform_point3(DVec3::new(5.0, 5.0, 0.0)), DVec3::new(0.0, 0.0, 10.0)));
-    // the pin keeps pointing up
+    assert!(close(t.transform_point3(DVec3::new(5.0, 5.0, 7.0)), DVec3::new(0.0, 0.0, 3.0)));
+    // flipped, the Z axes face each other and the pin keeps pointing up
+    let t = joint_transform(fixed, moving, JointKind::Rigid, 0.0, 0.0, true, false, Motion::default());
+    assert!(close(t.transform_point3(DVec3::new(5.0, 5.0, 0.0)), DVec3::new(0.0, 0.0, 10.0)));
     assert!(close(t.transform_point3(DVec3::new(5.0, 5.0, 7.0)), DVec3::new(0.0, 0.0, 17.0)));
     // revolute motion spins about the joint axis; the offset lifts along it
     let t = joint_transform(
@@ -365,7 +370,7 @@ mod tests {
       JointKind::Revolute,
       0.0,
       2.0,
-      false,
+      true,
       false,
       Motion { rotation: std::f64::consts::FRAC_PI_2, ..Default::default() },
     );
