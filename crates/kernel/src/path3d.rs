@@ -94,6 +94,6 @@ impl Shape {
     if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("the path is empty or not finite".into()));
     }
-    Shape::wrap(sys::make_wire(&data)?)
+    Shape::wrap(sys::make_wire(&data, &[])?)
   }
 }
