@@ -1,0 +1,21 @@
+# 98-coincident-point-point: added by the parity loop from a Fusion probe
+# coincident-point-point: Four lines drawn apart with gaps; coincident end-to-start constraints close them into a 40x25 rectangle, one corner coincident with the origin; extruded 10.
+# hand-edited
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0.5, 0.3], [38, 1]]}
+{"cmd": "sketch.line", "points": [[41, -1], [39, 22]]}
+{"cmd": "sketch.line", "points": [[42, 26], [2, 23]]}
+{"cmd": "sketch.line", "points": [[-2, 21], [1, -2]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [2, 4]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [5, 7]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [8, 10]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [11, 1]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [9]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [6]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [12]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [4, 5], "value": 25}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,11 @@
+# 101-concentric-circle-chain: added by the parity loop from a Fusion probe
+# concentric-circle-chain: R5 at origin, R10 drawn at (3,2), R16 drawn at (-2,4); concentric chain; stepped washer.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
+{"cmd": "sketch.circle", "center": [3, 2], "radius": 10}
+{"cmd": "sketch.circle", "center": [-2, 4], "radius": 16}
+{"cmd": "sketch.constrain", "type": "concentric", "curves": [1, 3]}
+{"cmd": "sketch.constrain", "type": "concentric", "curves": [3, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[13, 0]], "distance": 8, "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[7, 0]], "distance": 4, "operation": "join"}

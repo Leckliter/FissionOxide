@@ -1,0 +1,8 @@
+# 191-degree5-nine-points: added by the parity loop from a Fusion probe
+# degree5-nine-points: Degree-5 control point spline with 9 control points (interior knots) from (0,0) to (80,0), closed by a line along X, extruded 10 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.control_spline", "points": [[0.0, 0.0], [5.0, 30.0], [15.0, 40.0], [25.0, 5.0], [40.0, 45.0], [55.0, 10.0], [65.0, 35.0], [75.0, 25.0], [80.0, 0.0]], "degree": 5}
+{"cmd": "sketch.line", "points": [[80.0, 0.0], [0.0, 0.0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,10 @@
+# 137-semicircle-on-edge: added by the parity loop from a Fusion probe
+# semicircle-on-edge: Triangle (0,0)-(40,0)-(20,-15) with a 2-point circle through the ends of its top edge (shared points, so the edge is a diameter: centre (20,0), r=20); the upper half disc extruded 5.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [20, -15]]}
+{"cmd": "sketch.line", "points": [[20, -15], [0, 0]]}
+{"cmd": "sketch.circle", "through": [[0, 0], [40, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 10]], "distance": 5, "operation": "new_body"}

@@ -6,7 +6,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
-use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef, sheet};
+use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef};
 
 /// What an extrude stops at besides a parallel flat face.
 pub(super) enum Trim {
@@ -211,8 +211,7 @@ impl Ctx<'_> {
 
   fn path_shape(&self, r: &PathRef) -> Result<Shape, String> {
     let ps = self.state.sketches.get(&r.sketch).ok_or("a rail or centre line sketch failed")?;
-    let segs = sheet::open_path(&ps.sketch, &r.curves)?;
-    Shape::path(&ps.plane, &segs).map_err(ke)
+    crate::include::sketch_path(ps, &r.curves)
   }
 
   pub(super) fn sweep_guide(&self, rail: Option<&PathRef>, twist: &str) -> Result<Guide, String> {

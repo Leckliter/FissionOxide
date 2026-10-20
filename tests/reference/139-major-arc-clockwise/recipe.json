@@ -1,0 +1,124 @@
+{
+ "id": "major-arc-clockwise",
+ "name": "3-Point Arc: major-arc-clockwise",
+ "description": "3-point arc picked clockwise from (8,6) through (0,-10) to (-8,6): the 286 deg major arc of the circle R10 at the origin, closed by the chord (-8,6)-(8,6); extruded 5 on XY.",
+ "exercises": [
+  "sketch",
+  "arc_three_point",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       8,
+       6
+      ]
+     },
+     "mid": {
+      "at": [
+       0,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       -8,
+       6
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       -8,
+       6
+      ],
+      "ref": "a1.end"
+     },
+     "end": {
+      "at": [
+       8,
+       6
+      ],
+      "ref": "a1.start"
+     },
+     "id": "l1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "l1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

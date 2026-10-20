@@ -1,0 +1,8 @@
+# 155-quarter-sector-end-off-radius: added by the parity loop from a Fusion probe
+# quarter-sector-end-off-radius: Center point arc: centre (0,0), start (20,0), end picked at (0,35) (off the radius, sets only the angle: 90 deg CCW); closed to the centre by two lines; quarter disc R20 extruded 10 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "end": [0, 35]}
+{"cmd": "sketch.line", "points": [[0.0, 20.0], [0, 0]]}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

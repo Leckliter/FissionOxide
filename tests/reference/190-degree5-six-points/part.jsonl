@@ -1,0 +1,8 @@
+# 190-degree5-six-points: added by the parity loop from a Fusion probe
+# degree5-six-points: Degree-5 control point spline with 6 control points (one Bezier span) from (0,0) to (60,0), closed by a line along X, extruded 10 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.control_spline", "points": [[0.0, 0.0], [10.0, 25.0], [25.0, 35.0], [35.0, 10.0], [50.0, 30.0], [60.0, 0.0]], "degree": 5}
+{"cmd": "sketch.line", "points": [[60.0, 0.0], [0.0, 0.0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -584,6 +584,14 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           Some(e) => e,
           None => continue,
         },
+        // a conic is a rational quadratic: one exact NURBS span
+        CurveKind::Conic { start, end, apex, rho } => Entity::Spline(Spline {
+          degree: 2,
+          knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          control: vec![pos(*start), pos(*apex), pos(*end)],
+          weights: vec![1.0, fox_sketch::conic_weight(*rho), 1.0],
+          fit: Vec::new(),
+        }),
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
       out.push((e, c.construction));
@@ -594,7 +602,8 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         continue;
       }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },

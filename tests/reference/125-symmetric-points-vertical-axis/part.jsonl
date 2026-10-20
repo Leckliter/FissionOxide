@@ -1,0 +1,16 @@
+# 125-symmetric-points-vertical-axis: added by the parity loop from a Fusion probe
+# symmetric-points-vertical-axis: Construction axis on the Y axis from the origin; a 40x20 rectangle drawn off-centre whose bottom edge's ends are symmetric about the axis, bottom 5 above the origin; solves to x -20..20, y 5..25; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 30]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.line", "points": [[-12, 4], [30, 6], [31, 27], [-13, 25]], "closed": true}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [6]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [8]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [10]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [11]}
+{"cmd": "sketch.constrain", "type": "symmetric", "points": [4, 5], "curves": [2]}
+{"cmd": "sketch.dimension", "type": "horizontal", "value": 40, "points": [4, 5]}
+{"cmd": "sketch.dimension", "type": "vertical", "value": 20, "points": [5, 7]}
+{"cmd": "sketch.dimension", "type": "vertical", "value": 5, "points": [0, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,13 @@
+# 128-symmetric-circles: added by the parity loop from a Fusion probe
+# symmetric-circles: Construction axis on the Y axis; circle A radius 5 centred (15,10) by dimensions; circle B drawn radius 3 at (-12,8) and made symmetric to A about the axis, so it solves to radius 5 at (-15,10); both extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 30]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.circle", "center": [15, 10], "radius": 5}
+{"cmd": "sketch.circle", "center": [-12, 8], "radius": 3}
+{"cmd": "sketch.constrain", "type": "symmetric", "curves": [5, 7, 2]}
+{"cmd": "sketch.dimension", "type": "radius", "value": 5, "curves": [5]}
+{"cmd": "sketch.dimension", "type": "horizontal", "value": 15, "points": [0, 4]}
+{"cmd": "sketch.dimension", "type": "vertical", "value": 10, "points": [0, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
