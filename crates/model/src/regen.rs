@@ -829,7 +829,19 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::RectangularPattern { bodies, direction, count, spacing, direction2, count2, spacing2, join } => {
+      FeatureKind::RectangularPattern {
+        bodies,
+        direction,
+        count,
+        spacing,
+        direction2,
+        count2,
+        spacing2,
+        symmetric,
+        symmetric2,
+        extent,
+        join,
+      } => {
         let d1 = DVec3::from(*direction).try_normalize().ok_or("the pattern direction is zero")?;
         let (n1, s1) = (self.count(count)?, self.len(spacing)?);
         let (n2, s2, d2) = match direction2 {
@@ -841,16 +853,17 @@ impl Ctx<'_> {
         if n1 * n2 > MAX_INSTANCES {
           return Err(format!("at most {MAX_INSTANCES} instances"));
         }
+        let (o1, k1) = pattern_offsets(n1, s1, *symmetric, *extent);
+        let (o2, k2) = pattern_offsets(n2, s2, *symmetric2 && direction2.is_some(), *extent);
         for bi in self.select(bodies)? {
           let body = self.state.bodies[bi].clone();
           let mut copies = Vec::new();
-          for i in 0..n1 {
-            for j in 0..n2 {
-              if i == 0 && j == 0 {
+          for (i, &t1) in o1.iter().enumerate() {
+            for (j, &t2) in o2.iter().enumerate() {
+              if i == k1 && j == k2 {
                 continue;
               }
-              let v = d1 * s1 * i as f64 + d2 * s2 * j as f64;
-              copies.push(body.shape.translated(v).map_err(ke)?);
+              copies.push(body.shape.translated(d1 * t1 + d2 * t2).map_err(ke)?);
             }
           }
           self.add_copies(id, bi, copies, *join)?;
@@ -2330,6 +2343,22 @@ mod solid;
 pub use solid::boundary_cells;
 mod sheet2;
 mod surface;
+/// Offsets along one direction of a rectangular pattern, the original's (zero) included, as
+/// Fusion places them: one way from the original, or with `symmetric` the original at index
+/// `(n - 1) / 2` (an even count puts the extra instance on the positive side). With `extent`,
+/// `distance` reaches from the original to the farthest instance on the positive side. Returns
+/// the offsets and the original's index among them.
+fn pattern_offsets(n: usize, distance: f64, symmetric: bool, extent: bool) -> (Vec<f64>, usize) {
+  let back = if symmetric { n.saturating_sub(1) / 2 } else { 0 };
+  let ahead = n.saturating_sub(1) - back;
+  let step = match (extent, ahead) {
+    (false, _) => distance,
+    (true, 0) => 0.0,
+    (true, k) => distance / k as f64,
+  };
+  ((0..n).map(|k| step * (k as f64 - back as f64)).collect(), back)
+}
+
 #[cfg(test)]
 mod tests_solid;
 

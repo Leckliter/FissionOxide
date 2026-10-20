@@ -723,6 +723,18 @@ pub enum FeatureKind {
     count2: String,
     #[serde(default = "zero")]
     spacing2: String,
+    /// Centre direction 1's instances on the original, as Fusion's Symmetric option: `count`
+    /// instances at offsets `k - (count - 1) / 2` (integer division, so an even count puts the
+    /// extra instance on the positive side).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    symmetric: bool,
+    /// The same for direction 2.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    symmetric2: bool,
+    /// Fusion's Extent distance type: `spacing`/`spacing2` are the distance from the original to
+    /// the farthest instance (on the longer side of a symmetric direction), not between neighbours.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    extent: bool,
     #[serde(default = "yes")]
     join: bool,
   },
