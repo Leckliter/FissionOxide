@@ -528,6 +528,8 @@ impl Cmd {
   }
 
   pub(crate) fn run(self, app: &mut App) {
+    // a new command ends the last one's hint
+    app.end_hint();
     app.note_cmd(self);
     match self {
       Cmd::NewSketch => app.new_sketch(),
@@ -562,7 +564,7 @@ impl Cmd {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();
         if bodies.is_empty() {
-          app.status = Some(("Remove: select bodies first".into(), false));
+          app.hint("Remove: select bodies first");
         } else {
           app.run("body.remove", json!({"bodies": bodies}));
           app.s.selection.clear();
@@ -605,8 +607,7 @@ impl Cmd {
         app.nav_mode = None;
         app.sel_mode = crate::select::Mode::Window;
         app.set_tool(Tool::Select);
-        app.status =
-          Some(("Drag a box: left to right selects what's inside, right to left what it touches".into(), false));
+        app.hint("Drag a box: left to right selects what's inside, right to left what it touches");
       }
       Cmd::Priority(p) => app.sel_priority = p,
       Cmd::Filter(f) => app.sel_filter.toggle(f),
@@ -622,7 +623,7 @@ impl Cmd {
         app.nav_mode = None;
         app.sel_mode = m;
         app.set_tool(Tool::Select);
-        app.status = Some((Cmd::SelectMode(m).info().2.into(), false));
+        app.hint(Cmd::SelectMode(m).info().2);
       }
       Cmd::Cut2d => app.open_cut_window(),
     }
@@ -1870,12 +1871,28 @@ fn nav_sep(ui: &mut egui::Ui) {
   );
 }
 
+/// Where the SKETCH PALETTE's top-right corner goes: below an open command dialog that sits over
+/// its place (as Fusion stacks them), else at its usual place.
+pub(crate) fn palette_pos(canvas: Rect, dialog: Option<Rect>) -> egui::Pos2 {
+  let home = canvas.right_top() + vec2(-34.0, 190.0);
+  match dialog {
+    Some(d) if d.max.x > home.x - 270.0 && d.min.x < home.x && d.min.y <= home.y + 40.0 => {
+      egui::pos2(home.x, home.y.max(d.max.y + 8.0))
+    }
+    _ => home,
+  }
+}
+
 /// The SKETCH PALETTE shown on the right of the canvas while a sketch is open.
 pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
   let canvas = app.canvas;
+  let at = palette_pos(
+    canvas,
+    app.dialog.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog")))).flatten(),
+  );
   egui::Area::new(egui::Id::new("sketch-palette"))
-    .fixed_pos(canvas.right_top() + vec2(-34.0, 190.0))
+    .fixed_pos(at)
     .pivot(egui::Align2::RIGHT_TOP)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
@@ -2601,7 +2618,7 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
       }
     }
     if jobs.is_empty() {
-      app.status = Some(("Horizontal/Vertical: select lines or two points".into(), false));
+      app.hint("Horizontal/Vertical: select lines or two points");
       return;
     }
     let mut any = false;
@@ -2635,7 +2652,7 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     if any {
       app.s.selection.clear();
     } else if curves.is_empty() && points.is_empty() {
-      app.status = Some((format!("Select geometry, then apply {kind}"), false));
+      app.hint(format!("Select geometry, then apply {kind}"));
     }
     return;
   }

@@ -487,6 +487,8 @@ pub struct Dialog {
   appearance_faces: bool,
   /// Live preview (see [`live`]).
   live: live::Live,
+  /// Sketch Offset: the distance and side follow the cursor until a click places the offset.
+  follow: bool,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -594,6 +596,7 @@ impl Dialog {
       saved_filter: None,
       appearance_faces: false,
       live: live::Live::default(),
+      follow: false,
     }
   }
 
@@ -805,7 +808,10 @@ impl Dialog {
         d.distance = "2 mm".into();
         d.distance2 = "3 mm".into();
       }
-      Kind::SkOffset => d.distance = "2 mm".into(),
+      Kind::SkOffset => {
+        d.distance = "2 mm".into();
+        d.follow = true;
+      }
       Kind::SkCircPattern => {
         d.count = "6".into();
         d.angle = "360 deg".into();
@@ -2783,7 +2789,12 @@ impl Dialog {
         ui.label("Curves");
         chip(ui, self.curves.len(), "selected");
         ui.end_row();
+        let before = self.distance.clone();
         Self::field(ui, "Offset position", &mut self.distance, dirty);
+        if self.distance != before {
+          // a typed distance holds: the offset stops following the cursor
+          self.follow = false;
+        }
       }
       Kind::SkMirror => {
         ui.label("Objects");
@@ -4792,6 +4803,48 @@ mod tests {
     let r = run(&mut s, "cam.simulate", json!({}));
     assert!(r["removed"].as_array().unwrap().len() == 4);
     assert!(s.simulation.is_some());
+  }
+
+  #[test]
+  fn text_form_places_styled_text_in_a_two_corner_box() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let vals = [
+      ("text", json!("Hi")),
+      ("placement", json!("box")),
+      ("x", json!("10")),
+      ("y", json!("0")),
+      ("x2", json!("50")),
+      ("y2", json!("20")),
+      ("halign", json!("right")),
+      ("valign", json!("bottom")),
+      ("bold", json!(true)),
+      ("underline", json!(true)),
+      ("spacing", json!("10")),
+    ];
+    let mut d = form(&mut s, &SK_TEXT, vec![], &vals);
+    apply(&mut s, &mut d);
+    d.applied = false;
+    let sketch = s.design.sketch(FeatureId(sk)).unwrap();
+    let t = &sketch.texts[0];
+    assert!(t.style.bold && t.style.underline && !t.style.italic && t.style.spacing == 10.0);
+    // right and bottom of the box: the anchor is its lower right corner
+    assert_eq!(sketch.pos(t.anchor), Some([50.0, 0.0]));
+    let (lo, hi) = sketch.bounds().unwrap();
+    assert!(hi[0] <= 50.0 + 1e-6 && lo[0] > 10.0 && lo[1] < 0.0, "{lo:?} {hi:?}");
+    // Edit Text opens with the style and changes it
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: t.curves[0] }];
+    let mut d = form(&mut s, &SK_TEXT_EDIT, sel, &[]);
+    prefill(&SK_TEXT_EDIT, &mut d.form, &s);
+    let at = |k: &str| SK_TEXT_EDIT.inputs.iter().position(|x| x.key() == k).unwrap();
+    assert_eq!(d.form.values[at("bold")], json!(true));
+    assert_eq!(d.form.values[at("halign")], json!("right"));
+    d.form.values[at("italic")] = json!(true);
+    d.form.values[at("bold")] = json!(false);
+    apply(&mut s, &mut d);
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    assert!(t.style.italic && !t.style.bold && t.style.underline);
   }
 
   #[test]

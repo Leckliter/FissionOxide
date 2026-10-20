@@ -34,7 +34,7 @@ pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};
 pub use solve::{SolveReport, SolveStatus};
-pub use text::{SketchText, TextId, text_fonts};
+pub use text::{HAlign, SketchText, TextId, TextStyle, VAlign, text_fonts};
 pub use transform::{TransformReport, Xform2};
 
 /// The sketch origin: always present, always fixed at (0, 0).
