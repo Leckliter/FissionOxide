@@ -63,6 +63,25 @@ fn parse_line(line: &str) -> Result<(String, Value), String> {
   Ok((c, Value::Object(params)))
 }
 
+/// A case's `part.jsonl`, with relative `import` paths made absolute: the files it imports live in
+/// the case's directory, as `fissionoxide-cli run` finds them next to the script.
+fn read_script(dir: &Path) -> Option<String> {
+  let script = std::fs::read_to_string(dir.join("part.jsonl")).ok()?;
+  let lines = script.lines().map(|line| {
+    let Ok((cmd, mut params)) = parse_line(line.trim()) else {
+      return line.to_string();
+    };
+    match params["path"].as_str().map(Path::new) {
+      Some(p) if cmd == "import" && p.is_relative() => {
+        params["path"] = json!(dir.join(p));
+        line_of(&cmd, &params)
+      }
+      _ => line.to_string(),
+    }
+  });
+  Some(lines.map(|l| l + "\n").collect())
+}
+
 fn build(script: &str) -> Result<Session, String> {
   let mut s = Session::default();
   for (n, line) in script.lines().enumerate() {
@@ -279,7 +298,7 @@ fn run_case(dir: &Path, scratch: &Path) -> Case {
   let name = dir.file_name().unwrap().to_string_lossy().into_owned();
   let start = Instant::now();
   let mut case = Case { name, outcome: Outcome::NotPorted, measured: None, seconds: 0.0, edit: None };
-  let Ok(script) = std::fs::read_to_string(dir.join("part.jsonl")) else {
+  let Some(script) = read_script(dir) else {
     return case;
   };
   let expected: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("expected.json")).unwrap()).unwrap();
@@ -482,9 +501,7 @@ fn run_variant(s: &mut Session, base: &Measured, v: &Value) -> (Outcome, Option<
 /// Builds the case once and runs each of its variants on it.
 fn run_variants(dir: &Path) -> Vec<VariantCase> {
   let case = dir.file_name().unwrap().to_string_lossy().into_owned();
-  let (Ok(doc), Ok(script)) =
-    (std::fs::read_to_string(dir.join("variants.json")), std::fs::read_to_string(dir.join("part.jsonl")))
-  else {
+  let (Ok(doc), Ok(script)) = (std::fs::read_to_string(dir.join("variants.json")), read_script(dir).ok_or(())) else {
     return Vec::new();
   };
   let doc: Value = serde_json::from_str(&doc).unwrap_or_else(|e| panic!("{case}/variants.json: {e}"));

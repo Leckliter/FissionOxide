@@ -1,2 +1,2 @@
 # 466-3mf-file: added by the parity loop from a Fusion probe
-{"cmd": "import", "path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/parameshinsertaligncommand/3mf-file/lprism.3mf", "merge_coplanar": false}
+{"cmd": "import", "path": "lprism.3mf", "merge_coplanar": false}

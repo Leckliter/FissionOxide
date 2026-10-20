@@ -8,7 +8,8 @@ CASE_DIR holds the case in the tests/reference layout:
 - `recipe.json`: the neutral recipe, built in Fusion by the bridge's recipe runner, or
 - `fusion.py`: for features the recipe format can't express, Python run inside Fusion. It runs in
   a fresh scratch design with `app`, `ui`, `adsk`, `design` and `root` (the root component) in
-  scope, and only has to build the part; this script measures it.
+  scope, and only has to build the part; this script measures it. `CASE_DIR` (the case folder's
+  absolute path) is in scope too, for scripts that read files kept next to them.
 - `part.jsonl`: the same part as a FissionOxide command script (`fissionoxide-cli run`).
 
 Prints a JSON verdict and writes it to CASE_DIR/verdict.json. With `--write-expected`, writes
@@ -64,7 +65,7 @@ def fusion_side(case_dir, png=None, keep_open=False):
   if os.path.exists(py):
     with open(py, encoding="utf-8") as f:
       code = f.read()
-    head = f"CASE = {name!r}\nCODE = {code!r}\nPNG = {png!r}\nKEEP_OPEN = {keep_open!r}\n"
+    head = f"CASE = {name!r}\nCASE_DIR = {os.path.abspath(case_dir)!r}\nCODE = {code!r}\nPNG = {png!r}\nKEEP_OPEN = {keep_open!r}\n"
     res = client.call("python", code=head + FUSION_PY, hold=keep_open)  # closes its own document
     if not res.get("ok"):
       return {"ok": False, "error": res.get("error")}

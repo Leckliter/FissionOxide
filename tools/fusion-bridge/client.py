@@ -202,9 +202,11 @@ def fox_measure(part_jsonl, png=None):
     script = f.read()
   with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as t:
     t.write(script.rstrip("\n") + '\n{"cmd": "info"}\n{"cmd": "inspect.center_of_mass"}\n')
-  args = [fox_cli(), "run", t.name] + (["--png", png] if png else [])
+  args = [fox_cli(), "run", t.name] + (["--png", os.path.abspath(png)] if png else [])
   try:
-    p = subprocess.run(args, capture_output=True, text=True, timeout=600)
+    # run beside the script, where its relative import paths point
+    p = subprocess.run(args, capture_output=True, text=True, timeout=600,
+                       cwd=os.path.dirname(os.path.abspath(part_jsonl)))
   finally:
     os.unlink(t.name)
   lines = [json.loads(l) for l in p.stdout.splitlines() if l.strip().startswith("{")]

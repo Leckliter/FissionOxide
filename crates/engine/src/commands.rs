@@ -35,7 +35,7 @@ cmds! {
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
   "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool}";
-  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, plane?}";
+  "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
   "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
