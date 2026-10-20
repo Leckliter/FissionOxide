@@ -1,0 +1,275 @@
+{
+ "id": "cut-through",
+ "name": "Box primitive: cut-through",
+ "description": "50x40x20 box at X 0..50, Y 0..40, then a 10x16x20 box cut through it centred at (25,20): square hole X 20..30, Y 12..28.",
+ "exercises": [
+  "box"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       50,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       50,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       40
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Cut_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "m1",
+     "start": {
+      "at": [
+       20,
+       12
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       12
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "m2",
+     "start": {
+      "ref": "m1.end",
+      "at": [
+       30,
+       12
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       28
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "m3",
+     "start": {
+      "ref": "m2.end",
+      "at": [
+       30,
+       28
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       28
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "m4",
+     "start": {
+      "ref": "m3.end",
+      "at": [
+       20,
+       28
+      ]
+     },
+     "end": {
+      "ref": "m1.start",
+      "at": [
+       20,
+       12
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cut",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Cut_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "m1",
+        "m2",
+        "m3",
+        "m4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   }
+  }
+ ]
+}
