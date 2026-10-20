@@ -4440,4 +4440,20 @@ mod tests {
     apply(&mut s, &mut d);
     assert!(s.design.sketch(FeatureId(sk)).unwrap().texts.is_empty());
   }
+
+  #[test]
+  fn text_form_lays_text_along_a_picked_curve() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let arc = run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20]}))["curves"][0]
+      .as_u64()
+      .unwrap() as u32;
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: fox_engine::sketch::CurveId(arc) }];
+    let mut d = form(&mut s, &SK_TEXT, sel, &[("text", json!("LL")), ("align", json!("center"))]);
+    apply(&mut s, &mut d);
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    let path = t.path.expect("the text runs along the arc");
+    assert_eq!((path.curve.0, path.above, path.align), (arc, true, fox_engine::sketch::TextAlign::Center));
+  }
 }

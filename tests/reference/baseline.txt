@@ -119,3 +119,7 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+253-text-single-glyph
+254-text-rotated
+255-text-two-glyphs-hole
+256-text-along-path

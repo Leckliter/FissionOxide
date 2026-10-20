@@ -994,7 +994,7 @@ pub static APPEARANCE: Form = Form {
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Editable text whose outlines you can extrude",
+  hint: "Editable text whose outlines you can extrude, at a point or along a picked curve",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
@@ -1005,6 +1005,13 @@ pub static SK_TEXT: Form = Form {
     Input::Expr { key: "y", label: "Y", default: "0" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
     Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
+    Input::Curves { key: "path", label: "Along path (optional)" },
+    Input::Check { key: "below", label: "Below the path" },
+    Input::Choice {
+      key: "align",
+      label: "Path alignment",
+      options: &[("left", "Left"), ("center", "Center"), ("right", "Right")],
+    },
   ],
   picks_model: false,
 };
@@ -1022,10 +1029,23 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
     ),
     "sketch.text.form" => {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
-      (
-        "sketch.text",
-        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle"), "font": p.get("font").cloned().unwrap_or(json!("sans"))}),
-      )
+      let mut q = json!({"text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "font": p.get("font").cloned().unwrap_or(json!("sans"))});
+      // a picked curve lays the text along it instead of at the point
+      match p.get("path").and_then(Value::as_array).and_then(|a| a.first()) {
+        Some(curve) => {
+          q["path"] = curve.clone();
+          q["above"] = json!(p.get("below") != Some(&json!(true)));
+          q["align"] = p.get("align").cloned().unwrap_or(json!("left"));
+          if let Some(sk) = p.get("sketch") {
+            q["sketch"] = sk.clone();
+          }
+        }
+        None => {
+          q["at"] = json!([num("x"), num("y")]);
+          q["angle"] = json!(num("angle"));
+        }
+      }
+      ("sketch.text", q)
     }
     // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
     c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {

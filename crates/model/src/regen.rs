@@ -854,7 +854,7 @@ impl Ctx<'_> {
         for (i, sec) in sections.iter().enumerate() {
           let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
           let prof = match sec.profile {
-            Some(p) => pick_profiles(&sk, &[p]).0.into_iter().next(),
+            Some(p) => pick_profiles(sk, &[p]).0.into_iter().next(),
             None => sk.profiles.first().cloned(),
           };
           match (prof, lone_point(&sk.sketch)) {

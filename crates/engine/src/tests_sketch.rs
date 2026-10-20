@@ -67,6 +67,39 @@ fn editable_text_regenerates_its_extrusion() {
 }
 
 #[test]
+fn text_along_a_path_and_its_counters_left_out() {
+  let mut s = Session::default();
+  let sid = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+  let fid = fox_model::FeatureId(sid as u32);
+  let a = run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20], "construction": true}));
+  let arc = a["curves"][0].as_u64().unwrap();
+  let t = run(&mut s, "sketch.text", json!({"path": arc, "text": "OO", "height": 5, "align": "center"}));
+  let text = t["text"].as_u64().unwrap();
+  assert_eq!(t["profiles"], 4, "two rings and two counters: {t}");
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["texts"][0]["path"]["curve"], arc);
+  assert_eq!(info["texts"][0]["path"]["align"], "center");
+  // with no profiles picked, the extrusion is the two rings: their counters stay open
+  run(&mut s, "extrude", json!({"distance": 2}));
+  assert_eq!(s.model.bodies.len(), 2);
+  let rings = volume(&s);
+  run(&mut s, "undo", json!({}));
+  run(&mut s, "sketch.edit", json!({"sketch": sid}));
+  run(&mut s, "sketch.text_edit", json!({"text_id": text, "above": false}));
+  let below = s.design.sketch(fid).unwrap();
+  let r: Vec<f64> = below.texts[0].points.iter().map(|p| below.pos(*p).unwrap()).map(|q| q[0].hypot(q[1])).collect();
+  let (lo, hi) = r.iter().fold((f64::MAX, 0.0f64), |(lo, hi), r| (lo.min(*r), hi.max(*r)));
+  assert!(hi < 20.3 && lo < 15.5, "hanging below the arc: {lo} {hi}");
+  // back on a straight baseline at a point
+  run(&mut s, "sketch.text_edit", json!({"text_id": text, "path": null}));
+  assert!(s.design.sketch(fid).unwrap().texts[0].path.is_none());
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": sid, "distance": 2}));
+  assert!((volume(&s) - rings).abs() < 1e-3 * rings, "{} {rings}", volume(&s));
+  assert!(s.execute("sketch.text", &json!({"path": 9999, "text": "x"})).is_err());
+}
+
+#[test]
 fn text_survives_save_and_open() {
   let dir = std::env::temp_dir().join(format!("fox-text-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();

@@ -200,14 +200,17 @@ fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
   Ok(g)
 }
 
-/// Font units that `height` means. Fusion's text height puts the top of a capital H 1.00076
-/// heights up (measured in Arial, Calibri and Courier New), so the scale comes from the H glyph;
-/// fonts without one use the OS/2 capital height.
+/// Font units that `height` means. Fusion puts the top of a capital A 1.00076 heights up
+/// (measured in Arial, Calibri, Courier New and Times New Roman, whose A stands taller than its
+/// H), so the scale comes from the A glyph, then H; fonts with neither use the OS/2 capital
+/// height.
 fn cap_height(face: &ttf_parser::Face) -> f64 {
-  const H_OVER_HEIGHT: f64 = 1.00076;
-  let h = face.glyph_index('H').and_then(|id| face.glyph_bounding_box(id)).map(|b| f64::from(b.y_max));
-  match h.filter(|h| *h > 0.0) {
-    Some(h) => h / H_OVER_HEIGHT,
+  const TOP_OVER_HEIGHT: f64 = 1.00076;
+  let top = |ch: char| {
+    face.glyph_index(ch).and_then(|id| face.glyph_bounding_box(id)).map(|b| f64::from(b.y_max)).filter(|h| *h > 0.0)
+  };
+  match top('A').or_else(|| top('H')) {
+    Some(h) => h / TOP_OVER_HEIGHT,
     None => face.capital_height().filter(|h| *h > 0).map(f64::from).unwrap_or(f64::from(face.ascender()) * 0.7),
   }
 }
@@ -449,7 +452,8 @@ impl Sketch {
     let hit: Vec<TextId> =
       self.texts.iter().filter(|x| x.curves.iter().any(|c| curves.contains(c))).map(|x| x.id).collect();
     for id in hit {
-      let Some((anchor, height, angle, on_path)) = self.text(id).map(|x| (x.anchor, x.height, x.angle, x.path.is_some()))
+      let Some((anchor, height, angle, on_path)) =
+        self.text(id).map(|x| (x.anchor, x.height, x.angle, x.path.is_some()))
       else {
         continue;
       };
@@ -519,7 +523,7 @@ impl Sketch {
           }
         }
       }
-      crossings % 2 == 0
+      crossings.is_multiple_of(2)
     })
   }
 
@@ -699,5 +703,47 @@ mod tests {
     assert_eq!(back.curves.len(), curves.len());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "comic-no-such-font", 5.0, 0.0).is_err());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "sans", 0.0, 0.0).is_err());
+  }
+
+  #[test]
+  fn text_along_an_arc_stands_on_it_from_its_left_end() {
+    let mut s = Sketch::new();
+    // a quarter arc from (20, 0) counter-clockwise to (0, 20): text reads from its left end
+    let arc = s.add_arc_center(PtSpec::At(0.0, 0.0), PtSpec::At(20.0, 0.0), [0.0, 20.0]).unwrap();
+    let path = TextPath { curve: arc, above: true, align: TextAlign::Left };
+    let t = s.add_text_on_path(path, "LL", "sans", 5.0).unwrap();
+    let radii = |s: &Sketch| -> Vec<f64> {
+      s.text(t).unwrap().points.iter().map(|p| s.pos(*p).unwrap()).map(|q| q[0].hypot(q[1])).collect()
+    };
+    let r = radii(&s);
+    assert!(r.iter().all(|r| *r > 20.0 - 1e-6 && *r < 26.0), "{r:?}");
+    let pts: Vec<[f64; 2]> = s.text(t).unwrap().points.iter().map(|p| s.pos(*p).unwrap()).collect();
+    let (min_x, max_y) = pts.iter().fold((f64::MAX, f64::MIN), |(x, y), q| (x.min(q[0]), y.max(q[1])));
+    assert!(min_x > 0.0 && min_x < 1.0 && max_y > 24.0, "it starts at the arc's top end: {min_x} {max_y}");
+    // hanging below the path keeps the glyphs inside it
+    s.set_text_path(t, Some(TextPath { above: false, ..path })).unwrap();
+    assert!(radii(&s).iter().all(|r| *r < 20.0 + 0.1), "{:?}", radii(&s));
+    // centred: the glyphs move along to the middle of the arc
+    s.set_text_path(t, Some(TextPath { align: TextAlign::Center, ..path })).unwrap();
+    let pts: Vec<[f64; 2]> = s.text(t).unwrap().points.iter().map(|p| s.pos(*p).unwrap()).collect();
+    let mid = pts.iter().fold([0.0, 0.0], |a, q| [a[0] + q[0], a[1] + q[1]]);
+    assert!((mid[0] - mid[1]).abs() / (pts.len() as f64) < 1.0, "centred about 45 degrees: {mid:?}");
+    // the profiles are the glyphs; deleting the path deletes the text, not the other way round
+    assert_eq!(find_profiles(&s).len(), 2);
+    let back: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back, s);
+    s.remove_curve(arc).unwrap();
+    assert!(s.texts.is_empty() && s.curves.is_empty());
+  }
+
+  #[test]
+  fn glyph_counters_are_known() {
+    let mut s = Sketch::new();
+    s.add_text(PtSpec::At(0.0, 0.0), "IO", "sans", 10.0, 0.0).unwrap();
+    s.add_circle(PtSpec::At(50.0, 0.0), 3.0).unwrap();
+    let profiles = find_profiles(&s);
+    let counters: Vec<bool> = profiles.iter().map(|p| s.is_text_counter(p)).collect();
+    assert_eq!(profiles.len(), 4, "I, O ring, O counter and the circle");
+    assert_eq!(counters.iter().filter(|c| **c).count(), 1, "{counters:?}");
   }
 }

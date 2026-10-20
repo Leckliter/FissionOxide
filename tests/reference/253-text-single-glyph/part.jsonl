@@ -1,6 +1,6 @@
 # 253-text-single-glyph: added by the parity loop from a Fusion probe
 # Sketch text "L" in Arial, 10 mm capitals, extruded 2 mm. Fusion bottom-left aligns the glyph ink to the frame corner; Fox anchors the pen at `at`, so `at` is shifted left by the glyph's side bearing.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.text", "at": [-1.0225, 0], "text": "L", "height": 10, "font": "arial"}
+{"cmd": "sketch.text", "at": [-1.024, 0], "text": "L", "height": 10, "font": "arial"}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 2, "operation": "new_body"}
