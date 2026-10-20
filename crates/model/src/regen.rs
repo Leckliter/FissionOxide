@@ -1047,9 +1047,14 @@ impl Ctx<'_> {
         }
         Ok((!split_any).then(|| "the plane doesn't cross the bodies".to_string()))
       }
-      FeatureKind::Draft { faces, plane, angle, flip } => {
+      FeatureKind::Draft { faces, plane, angle, flip, symmetric, angle2 } => {
         let pl = self.resolve_plane(plane)?;
         let a = self.angle(angle)?;
+        // symmetric and two-angle drafts split the faces at the plane and taper both sides
+        let a2 = match angle2 {
+          Some(e) => Some(self.angle(e)?),
+          None => symmetric.then_some(a),
+        };
         let pull = if *flip { -pl.normal() } else { pl.normal() };
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
@@ -1069,7 +1074,11 @@ impl Ctx<'_> {
             missing |= found.is_empty();
             ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
-          let shape = body.shape.draft(&ids, pl.origin, pull, a).map_err(ke)?;
+          let shape = match a2 {
+            Some(a2) => body.shape.draft_two_sided(&ids, pl.origin, pull, a, a2),
+            None => body.shape.draft(&ids, pl.origin, pull, a),
+          }
+          .map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))

@@ -120,7 +120,7 @@ cmds! {
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
-  "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
+  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
@@ -735,7 +735,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip })
+      let symmetric = p.get("symmetric").and_then(Value::as_bool).unwrap_or(false);
+      let angle2 = opt_expr(p, "angle2");
+      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip, symmetric, angle2 })
     }
     "fillet" => {
       let (edges, radius, sets) = crate::fillet::selection_sets(s, p)?;

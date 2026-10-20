@@ -81,6 +81,7 @@
 #include <Geom_Surface.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <GProp_GProps.hxx>
+#include <Precision.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
@@ -989,6 +990,103 @@ std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, 
   for (uint32_t i : faces) {
     if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
     mk.Add(TopoDS::Face(map(static_cast<int>(i))), pull, angle, neutral);
+    if (!mk.AddDone()) throw std::runtime_error("a face can't be drafted (is it parallel to the pull direction?)");
+    ++added;
+  }
+  if (added == 0) throw std::runtime_error("no faces to draft");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the draft failed");
+  return wrap(checked(mk.Shape(), "draft"));
+  FOX_CATCH("draft")
+}
+
+// Splits faces (1-based) along the neutral plane (origin(3) normal(3)) and tapers each piece away
+// from it: pieces on the normal side by `angle` pulling along the normal, the others by `angle2`
+// pulling against it, so both sides meet at the parting line. A zero angle leaves its side alone.
+std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_t> faces,
+                                       rust::Slice<const double> plane, double angle, double angle2) {
+  FOX_TRY
+  need(plane, 6, "draft plane");
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_FACE, map);
+  gp_Pnt o = pnt(plane, 0);
+  gp_Dir n = dir(plane, 3);
+  gp_Pln neutral(o, n);
+  Bnd_Box box;
+  BRepBndLib::Add(s.s, box);
+  double size = 10.0;
+  if (!box.IsVoid())
+    size += 4.0 * (std::sqrt(box.SquareExtent()) + box.CornerMin().Distance(o) + box.CornerMax().Distance(o));
+  BRepBuilderAPI_MakeFace mf(neutral, -size, size, -size, size);
+  if (!mf.IsDone()) throw std::runtime_error("could not make the neutral plane");
+  std::vector<TopoDS_Face> chosen;
+  TopTools_IndexedMapOfShape chosen_map;
+  for (uint32_t i : faces) {
+    if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
+    const TopoDS_Face &f = TopoDS::Face(map(static_cast<int>(i)));
+    if (chosen_map.Add(f) > static_cast<int>(chosen.size())) chosen.push_back(f);
+  }
+  if (chosen.empty()) throw std::runtime_error("no faces to draft");
+  // one section of the whole solid, so the cuts on neighbouring faces share their vertices
+  BRepAlgoAPI_Section sec(s.s, mf.Face(), Standard_False);
+  sec.ComputePCurveOn1(Standard_True);
+  sec.Approximation(Standard_True);
+  sec.Build();
+  BRepFeat_SplitShape ss(s.s);
+  int cuts = 0;
+  if (sec.IsDone()) {
+    for (TopExp_Explorer ex(sec.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
+      TopoDS_Shape on;
+      if (!sec.HasAncestorFaceOn1(ex.Current(), on) || !chosen_map.Contains(on)) continue;
+      ss.Add(TopoDS::Edge(ex.Current()), TopoDS::Face(on));
+      ++cuts;
+    }
+  }
+  TopoDS_Shape split = s.s;
+  if (cuts > 0) {
+    ss.Build();
+    if (!ss.IsDone()) throw std::runtime_error("the faces could not be split at the neutral plane");
+    split = ss.Shape();
+  }
+  // the pieces of the chosen faces and the side of the plane each lies on
+  TopTools_IndexedMapOfShape after;
+  index_map(split, TopAbs_FACE, after);
+  TopTools_IndexedMapOfShape pieces;
+  std::vector<bool> above;
+  for (const TopoDS_Face &f : chosen) {
+    TopTools_ListOfShape from;
+    if (cuts > 0) from = ss.Modified(f);
+    if (from.IsEmpty()) from.Append(f);
+    for (TopTools_ListIteratorOfListOfShape it(from); it.More(); it.Next()) {
+      int k = after.FindIndex(it.Value());
+      if (k == 0 || pieces.Contains(after(k))) continue;
+      GProp_GProps g;
+      BRepGProp::SurfaceProperties(after(k), g);
+      double side = gp_Vec(o, g.CentreOfMass()).Dot(gp_Vec(n));
+      if (std::abs(side) < Precision::Confusion()) continue;
+      pieces.Add(after(k));
+      above.push_back(side > 0);
+    }
+  }
+  // The new parting-line edges join coplanar pieces, so they are smooth, and the draft would
+  // carry one side's pull across them: mark them sharp so each side keeps its own.
+  TopTools_IndexedDataMapOfShapeListOfShape ef;
+  TopExp::MapShapesAndAncestors(split, TopAbs_EDGE, TopAbs_FACE, ef);
+  BRep_Builder bb;
+  for (int i = 1; i <= ef.Extent(); ++i) {
+    const TopTools_ListOfShape &fl = ef(i);
+    if (fl.Extent() != 2) continue;
+    int a = pieces.FindIndex(fl.First()), b = pieces.FindIndex(fl.Last());
+    if (a == 0 || b == 0 || above[a - 1] == above[b - 1]) continue;
+    bb.Continuity(TopoDS::Edge(ef.FindKey(i)), TopoDS::Face(fl.First()), TopoDS::Face(fl.Last()), GeomAbs_C0);
+  }
+  BRepOffsetAPI_DraftAngle mk(split);
+  int added = 0;
+  for (int i = 1; i <= pieces.Extent(); ++i) {
+    bool up = above[i - 1];
+    double a = up ? angle : angle2;
+    if (std::abs(a) < 1e-12) continue;
+    mk.Add(TopoDS::Face(pieces(i)), up ? n : n.Reversed(), a, neutral);
     if (!mk.AddDone()) throw std::runtime_error("a face can't be drafted (is it parallel to the pull direction?)");
     ++added;
   }

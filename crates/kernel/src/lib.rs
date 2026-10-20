@@ -508,6 +508,17 @@ impl Shape {
     Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
   }
 
+  /// Splits faces (1-based) along a neutral plane and tapers both sides away from it: the side
+  /// `normal` points to by `angle` radians, the other side by `angle2` (zero leaves a side alone).
+  pub fn draft_two_sided(&self, faces: &[u32], origin: DVec3, normal: DVec3, angle: f64, angle2: f64) -> Result<Shape> {
+    let n = normal.try_normalize().ok_or(KernelError::Input("zero pull direction".into()))?;
+    if [angle, angle2].iter().any(|a| !(a.is_finite() && a.abs() < std::f64::consts::FRAC_PI_2)) {
+      return Err(KernelError::Input("the draft angle must be under 90°".into()));
+    }
+    let plane = [origin.x, origin.y, origin.z, n.x, n.y, n.z];
+    Shape::wrap(sys::draft_two_sided(self.get()?, faces, &plane, angle, angle2)?)
+  }
+
   /// For a sheet that was unfolded onto `face` (see [`Shape::unfold`]): the material to cut from
   /// this folded shape for the solids `removed` from its flat pattern.
   pub fn refold_cuts(&self, face: u32, thickness: f64, k_factor: f64, removed: &Shape) -> Result<Shape> {

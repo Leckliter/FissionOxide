@@ -777,6 +777,13 @@ pub enum FeatureKind {
     angle: String,
     #[serde(default)]
     flip: bool,
+    /// Split the faces at the neutral plane and taper both sides away from it by `angle`.
+    #[serde(default)]
+    symmetric: bool,
+    /// Two-angle draft: split at the neutral plane; `angle` on the side the (flipped) normal
+    /// points to, this on the other side.
+    #[serde(default)]
+    angle2: Option<String>,
   },
   /// Sheet metal flange from closed sketch profiles: a flat sheet of the rule's thickness.
   Flange {
@@ -2162,7 +2169,13 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
-    FeatureKind::Draft { angle, .. } | FeatureKind::Bend { angle, .. } => f(angle),
+    FeatureKind::Draft { angle, angle2, .. } => {
+      f(angle);
+      if let Some(a) = angle2 {
+        f(a);
+      }
+    }
+    FeatureKind::Bend { angle, .. } => f(angle),
     FeatureKind::Joint { angle, offset, rotation, slide, slide2, pitch, limits, lead, .. } => {
       for e in [angle, offset, rotation, slide, slide2, pitch, lead] {
         f(e);

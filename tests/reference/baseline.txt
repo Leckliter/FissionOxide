@@ -203,3 +203,8 @@
 496-delete-second-body
 497-delete-cut-keep-chamfer
 498-delete-consumed-sketch
+# Reference parts that pass; see README.md. One directory name per line.
+499-flipped-two-faces
+500-mid-plane-single
+501-mid-plane-symmetric
+502-mid-plane-two-angles

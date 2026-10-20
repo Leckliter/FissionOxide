@@ -102,3 +102,8 @@
 496-delete-second-body
 497-delete-cut-keep-chamfer
 498-delete-consumed-sketch
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+499-flipped-two-faces
+500-mid-plane-single
+501-mid-plane-symmetric
+502-mid-plane-two-angles
