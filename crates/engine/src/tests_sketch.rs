@@ -199,6 +199,54 @@ fn splines_and_ellipses_in_trim_extend_offset_and_constraints() {
 }
 
 #[test]
+fn sketch_rectangular_pattern_options() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]]}))["curves"][0].as_u64().unwrap();
+  let c = run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 1}))["curves"][0].as_u64().unwrap();
+  let centres = |s: &mut Session, made: &Value| -> Vec<[f64; 2]> {
+    let info = run(s, "sketch.info", json!({}));
+    let curves = info["geometry"].as_array().cloned().unwrap_or_default();
+    ids(&made["curves"])
+      .iter()
+      .map(|id| {
+        let cv = curves.iter().find(|v| v["curve"].as_u64() == Some(*id)).unwrap_or_else(|| panic!("{id}: {info}"));
+        let b = &cv["bbox"];
+        let mid = |k: usize| (b[0][k].as_f64().unwrap() + b[1][k].as_f64().unwrap()) / 2.0;
+        [mid(0), mid(1)]
+      })
+      .collect()
+  };
+  let close = |got: &[[f64; 2]], want: &[[f64; 2]]| {
+    got.len() == want.len() && got.iter().zip(want).all(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() < 1e-6)
+  };
+  // Extent along a picked line (start to end is +Y), symmetric, with the second direction
+  // given as 90° counter-clockwise from it (-X).
+  let made = run(
+    &mut s,
+    "sketch.pattern_rect",
+    json!({"curves": [c], "direction": line, "count": 3, "spacing": 20, "distance_type": "extent",
+           "symmetric": true, "direction2": [-1, 0], "count2": 2, "spacing2": 5}),
+  );
+  let mut got = centres(&mut s, &made);
+  got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+  let want = [[-5.0, -10.0], [-5.0, 0.0], [-5.0, 10.0], [0.0, -10.0], [0.0, 10.0]];
+  assert!(close(&got, &want), "{got:?}");
+  // Without direction2 the second direction stays +Y, even when the first is not along +X.
+  let made = run(
+    &mut s,
+    "sketch.pattern_rect",
+    json!({"curves": [c], "direction": [0, -1], "count": 2, "spacing": 4, "count2": 2, "spacing2": 7}),
+  );
+  let mut got = centres(&mut s, &made);
+  got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+  assert!(close(&got, &[[0.0, -4.0], [0.0, 3.0], [0.0, 7.0]]), "{got:?}");
+  // unknown distance types are errors, not ignored
+  let bad = json!({"curves": [c], "count": 2, "spacing": 5, "distance_type": "total"});
+  assert!(s.execute("sketch.pattern_rect", &bad).is_err());
+}
+
+#[test]
 fn polygon_constraint_keeps_a_square_square_about_its_centre() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));

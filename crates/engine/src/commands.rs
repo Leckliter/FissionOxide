@@ -81,7 +81,7 @@ cmds! {
   "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
-  "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
+  "sketch.line" => "Line or polyline (consecutive points share endpoints), or a midpoint line: mirrored about mid, which is held at its middle", "{points: [[x,y],...], closed?: bool, sketch?} | {mid: [x,y], end: [x,y], sketch?}";
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
   "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end, clockwise?: bool} | {center, start, sweep: angle (negative = clockwise)} | {tangent: curve, start, end}";
@@ -111,7 +111,7 @@ cmds! {
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
-  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
+  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
@@ -318,6 +318,7 @@ cmds! {
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
+  "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1170,6 +1171,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.tangent_circle"
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
+    "sketch.include" => sketch_include::include(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -1901,7 +1903,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Trim(Option<CurveId>, [f64; 2]),
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
-    Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
+    Rect(Box<RectPattern>),
     Circ([f64; 2], usize, f64, bool),
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
@@ -1916,14 +1918,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
     "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
     "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
-    "sketch.pattern_rect" => Op::Rect(
-      opt_pt(p, "direction")?.unwrap_or([1.0, 0.0]),
-      count("count")?,
-      num("spacing", fox_expr::Kind::Length)?,
-      opt_pt(p, "direction2")?.unwrap_or([0.0, 1.0]),
-      p.get("count2").and_then(Value::as_u64).unwrap_or(1) as usize,
-      opt_expr(p, "spacing2").map(|e| fox_expr::eval(&e, fox_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
-    ),
+    "sketch.pattern_rect" => Op::Rect(Box::new(rect_pattern(p, &scope)?)),
     _ => Op::Circ(
       opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
       count("count")?,
@@ -1962,7 +1957,16 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         vec![c]
       }
       Op::Mirror(line) => sketch.mirror(&curves, line)?,
-      Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
+      Op::Rect(r) => {
+        let RectPattern { mut a, mut b, line_a, line_b } = *r;
+        if let Some(l) = line_a {
+          a.direction = sketch.line_direction(l)?;
+        }
+        if let Some(l) = line_b {
+          b.direction = sketch.line_direction(l)?;
+        }
+        sketch.pattern_rect(&curves, a, b)?
+      }
       Op::Circ(c, n, a, sym) => sketch.pattern_circ(&curves, c, n, a, sym)?,
     };
     if !sketch.solve().ok() {
@@ -1972,6 +1976,68 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   })?;
   let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
   Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+}
+
+/// A parsed `sketch.pattern_rect`: its two directions, each either a vector or a sketch line.
+struct RectPattern {
+  a: fox_sketch::PatternDir,
+  b: fox_sketch::PatternDir,
+  line_a: Option<CurveId>,
+  line_b: Option<CurveId>,
+}
+
+/// Parses `sketch.pattern_rect` as Fusion's sketch Rectangular Pattern sets it up: each direction
+/// is an [x, y] vector or a line id (start to end); the first defaults to +X and the second to +Y
+/// (as before these options existed). `distance_type` "extent" makes `spacing`/`spacing2` the
+/// whole pattern's size; `symmetric`/`symmetric2` centre that direction's instances on the original.
+fn rect_pattern(p: &Value, scope: &std::collections::HashMap<String, f64>) -> Result<RectPattern, CmdError> {
+  let extent = match opt_str(p, "distance_type").unwrap_or("spacing") {
+    "spacing" => false,
+    "extent" => true,
+    o => return Err(CmdError::new(format!("unknown distance type '{o}' (spacing or extent)"))),
+  };
+  let dir = |k: &str, default: [f64; 2]| -> Result<([f64; 2], Option<CurveId>), CmdError> {
+    match p.get(k) {
+      Some(v) if v.is_u64() => Ok(([0.0, 0.0], Some(CurveId(req_u32(p, k)?)))),
+      _ => Ok((opt_pt(p, k)?.unwrap_or(default), None)),
+    }
+  };
+  let count = |k: &str, default: Option<u64>| -> Result<usize, CmdError> {
+    match p.get(k) {
+      None => default.map(|d| d as usize).ok_or(CmdError::new(format!("missing '{k}'"))),
+      Some(v) => v.as_u64().map(|v| v as usize).ok_or(CmdError::new(format!("'{k}' must be a whole number"))),
+    }
+  };
+  let length = |k: &str| -> Result<Option<f64>, CmdError> {
+    match p.get(k) {
+      None => Ok(None),
+      Some(v) => Ok(Some(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, scope)?)),
+    }
+  };
+  let flag = |k: &str| -> Result<bool, CmdError> {
+    match p.get(k) {
+      None => Ok(false),
+      Some(v) => v.as_bool().ok_or(CmdError::new(format!("'{k}' must be true or false"))),
+    }
+  };
+  let (d1, line_a) = dir("direction", [1.0, 0.0])?;
+  // Without `direction2` the second direction is +Y, whichever way the first points.
+  let (d2, line_b) = dir("direction2", [0.0, 1.0])?;
+  let a = fox_sketch::PatternDir {
+    direction: d1,
+    count: count("count", None)?,
+    distance: length("spacing")?.ok_or(CmdError::new("missing 'spacing'"))?,
+    extent,
+    symmetric: flag("symmetric")?,
+  };
+  let b = fox_sketch::PatternDir {
+    direction: d2,
+    count: count("count2", Some(1))?,
+    distance: length("spacing2")?.unwrap_or(0.0),
+    extent,
+    symmetric: flag("symmetric2")?,
+  };
+  Ok(RectPattern { a, b, line_a, line_b })
 }
 
 /// Projects body edges onto the sketch plane as fixed geometry. Straight and circular edges stay
@@ -2075,6 +2141,21 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
     };
     match name.as_str() {
+      "sketch.line" if p.get("mid").is_some() => {
+        // Fusion's Midpoint Line: the other end mirrors `end` through `mid`, and the midpoint
+        // (an existing point it lands on, such as the origin, or a new one) stays on the middle
+        let (m, e) = (req_pt(&p, "mid")?, req_pt(&p, "end")?);
+        if (e[0] - m[0]).hypot(e[1] - m[1]) < 1e-9 {
+          return Err(CmdError::new("the end is on the midpoint"));
+        }
+        let mid = snap(sketch, m);
+        let a = [2.0 * m[0] - e[0], 2.0 * m[1] - e[1]];
+        let (a, b) = (snap(sketch, a), snap(sketch, e));
+        let (line, _) = sketch.add_line(a, b)?;
+        let mid = sketch.resolve(mid)?;
+        auto_hv(sketch, line);
+        sketch.add_constraint(ConstraintKind::Midpoint { p: mid, line })?;
+      }
       "sketch.line" => {
         let pts: Vec<[f64; 2]> = p
           .get("points")
@@ -2334,9 +2415,10 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           None => {
             let m = req_pt(&p, "mid")?;
             let c = fox_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
-            // counter-clockwise from start to end when the middle point is on the left of the chord
+            // the arc through the middle point runs counter-clockwise from start to end when that
+            // point is on the right of the chord from start to end
             let cross = (en[0] - st[0]) * (m[1] - st[1]) - (en[1] - st[1]) * (m[0] - st[0]);
-            (c, cross > 0.0)
+            (c, cross < 0.0)
           }
         };
         // the start sets the radius; the end only sets the direction
@@ -2842,3 +2924,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
 mod sketch_tools;
 
 mod sketch_curves;
+
+mod sketch_include;

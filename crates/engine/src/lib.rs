@@ -480,6 +480,8 @@ mod tests_files;
 #[cfg(test)]
 mod tests_fillet;
 #[cfg(test)]
+mod tests_include;
+#[cfg(test)]
 mod tests_more;
 #[cfg(test)]
 mod tests_scene;
