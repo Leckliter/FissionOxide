@@ -130,6 +130,10 @@ pub const SWEEP_UNIFIED: &str = "sweep_unified";
 /// feature on it (sketches, primitives, construction planes), so this is a design-level flag:
 /// read it from the design's set (`Design::frames`), not a sketch's.
 pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
+/// A fillet whose rounded body isn't a valid solid (the radius is too large for the faces next to
+/// the edges, or the edges meet at a corner it can't round) fails, as in Fusion, instead of
+/// leaving the broken body in the design. Without it the broken body is kept.
+pub const FILLET_VALID_RESULT: &str = "fillet_valid_result";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -154,6 +158,7 @@ pub const CURRENT: &[&str] = &[
   CHAMFER_FORWARD_FACE,
   SWEEP_UNIFIED,
   FUSION_SKETCH_FRAMES,
+  FILLET_VALID_RESULT,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

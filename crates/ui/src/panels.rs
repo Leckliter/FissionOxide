@@ -81,7 +81,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         }
         ui.add_space(6.0);
         let file = caret_button(ui, Icon::File, "File", true);
-        egui::Popup::menu(&file).show(|ui| file_menu(app, ui));
+        egui::Popup::menu(&file).show(|ui| crate::file_menu::menu(app, ui));
         ui.add_space(2.0);
         if bar_icon(ui, Icon::Save, "Save (Ctrl+S)", true).clicked() {
           app.save(false);
@@ -199,85 +199,6 @@ fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egu
   }
   icons::chevron(ui.painter(), rect.right_center() - vec2(7.0, 0.0), ink);
   resp.on_hover_text(hint)
-}
-
-fn file_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(240.0);
-  if ui.button("New Design            Ctrl+N").clicked() {
-    app.new_design();
-    ui.close();
-  }
-  if ui
-    .button("Open...                  Ctrl+O")
-    .on_hover_text("Designs, or STEP, IGES, STL, OBJ, 3MF, PLY, DXF … as a new design")
-    .clicked()
-  {
-    ui.close();
-    app.open_dialog();
-  }
-  ui.menu_button("Open Recent", |ui| {
-    let recent =
-      app.s.execute("hub.recent", &json!({"limit": 12})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-    if recent.is_empty() {
-      ui.label(RichText::new("Nothing saved yet").color(theme::MUTED));
-    }
-    for it in recent {
-      let id = it["id"].as_str().unwrap_or_default().to_string();
-      let label =
-        format!("{}  v{}", it["name"].as_str().unwrap_or_default(), it["latest"]["number"].as_u64().unwrap_or(0));
-      if ui.button(label).clicked() {
-        ui.close();
-        app.open_hub_item(&id, None);
-      }
-    }
-  });
-  if ui.button(if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }).clicked() {
-    app.data.toggle();
-    ui.close();
-  }
-  ui.separator();
-  if ui.button("Save                      Ctrl+S").on_hover_text("Save a new version to the data panel").clicked() {
-    ui.close();
-    app.save(false);
-  }
-  if ui.button("Save As...          Ctrl+Shift+S").on_hover_text("Save as a new design in the data panel").clicked() {
-    ui.close();
-    app.save(true);
-  }
-  if ui.button("Save to File...").on_hover_text("Write a .fox or .foxz file on this computer").clicked() {
-    ui.close();
-    app.save_file(true);
-  }
-  if ui.button("New Drawing from Design").on_hover_text("A drawing of this design (the Drawing workspace)").clicked() {
-    ui.close();
-    app.start(Kind::NewDrawing);
-  }
-  ui.separator();
-  if ui.button("Insert into Design...").on_hover_text("Add the bodies (or DXF sketch) from a file").clicked() {
-    ui.close();
-    app.import();
-  }
-  ui.menu_button("Export", |ui| {
-    for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
-      let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
-      if ui.button(label).on_hover_text(f.note).clicked() {
-        ui.close();
-        app.export(f.id);
-      }
-    }
-  });
-  ui.separator();
-  ui.menu_button("View", |ui| {
-    ui.checkbox(&mut app.browser_open, "Show Browser");
-    ui.checkbox(&mut app.show_comments, "Show Comments");
-    ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
-    ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
-  });
-  ui.separator();
-  if ui.button("Preferences...").on_hover_text("Units, navigation, design, sketch and graphics settings").clicked() {
-    ui.close();
-    crate::preferences::open(app);
-  }
 }
 
 /// Fusion's Help (?) menu, less what FissionOxide has no counterpart for (Quick Setup waits for
@@ -2547,16 +2468,7 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(10.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           let g = icons::icon_button(ui, Icon::Gear, 24.0, "Timeline settings", false, None);
-          egui::Popup::menu(&g).show(|ui| {
-            if ui.button("Roll to end").clicked() {
-              ui.close();
-              app.run("timeline.marker", json!({"at": null}));
-            }
-            if ui.button("Roll to beginning").clicked() {
-              ui.close();
-              app.run("timeline.marker", json!({"at": 0}));
-            }
-          });
+          egui::Popup::menu(&g).show(|ui| timeline_gear::menu(app, ui));
           ui.add_space(6.0);
           ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             timeline_items(app, ui, n, active);
@@ -2624,6 +2536,12 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               continue;
             }
           }
+          // Hide all inactive features: another component's feature keeps an empty slot
+          if timeline_gear::hidden(app, id) {
+            let (rect, _) = ui.allocate_exact_size(vec2(0.0, 28.0), egui::Sense::hover());
+            rects.push(rect);
+            continue;
+          }
           let st = app.s.model.status(id).cloned().unwrap_or_default();
           // while the marker is dragged, what would roll back greys out already
           let rolled_back = match drag {
@@ -2680,6 +2598,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               Stroke::new(1.0, theme::ERROR),
             );
           }
+          timeline_gear::paint_swatch(app, p, rect, id);
           if r.drag_started() {
             app.s.selection = vec![Sel::Feature { feature: id }];
             drag = Some(TimelineDrag::Feature { id, from: i, gap: i });
@@ -2823,6 +2742,11 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
     app.run("feature.suppress", json!({"feature": id.0}));
   }
   timeline_groups::feature_menu_items(app, ui, i, id);
+  // a failed (or warned) feature: Review warning opens the Error window for it
+  if crate::errors_ui::reviewable(app, id) && crate::errors_ui::menu_row(ui) {
+    ui.close();
+    app.error_window = crate::errors_ui::ErrorWindow::Feature(id);
+  }
   ui.separator();
   // features without a browser node of their own are found by the bodies they made
   let sel = Sel::Feature { feature: id };
@@ -3143,6 +3067,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
 mod browser_assembly;
 mod browser_config;
 mod browser_edit;
+pub(crate) mod timeline_gear;
 mod timeline_groups;
 
 #[cfg(test)]

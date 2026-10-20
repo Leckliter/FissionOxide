@@ -941,7 +941,7 @@ pub fn save_window(app: &mut App, ctx: &egui::Context) {
 }
 
 /// Inserts a hub design into the open design as a linked component.
-fn insert_component(app: &mut App, item: &str, version: Option<u32>) {
+pub(crate) fn insert_component(app: &mut App, item: &str, version: Option<u32>) {
   if let Some(r) = app.run("component.insert", json!({"item": item, "version": version})) {
     let name = app.s.design.components.iter().find(|c| Some(c.id.0 as u64) == r["component"].as_u64());
     let name = name.map(|c| c.name.clone()).unwrap_or_default();

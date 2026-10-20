@@ -26,6 +26,7 @@ pub mod hub;
 mod inspect;
 mod mates;
 mod params;
+pub mod review;
 pub mod scene;
 mod sheet2;
 mod solid;

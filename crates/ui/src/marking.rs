@@ -83,6 +83,10 @@ enum Action {
   FindInBrowser(Sel),
   FindInWindow,
   Workspace(&'static str),
+  /// Selectable/Unselectable: the canvas stops (or starts again) picking the selected bodies.
+  Unselectable,
+  /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
+  NotYet(&'static str),
   /// A row that only opens its sub-list.
   Open,
 }
@@ -131,6 +135,10 @@ fn with_keys(app: &App, mut it: Item) -> Item {
       }
       _ => None,
     };
+  }
+  // an empty hint marks a row that shows no key
+  if it.hint.as_deref() == Some("") {
+    it.hint = None;
   }
   it.children = std::mem::take(&mut it.children).into_iter().map(|c| with_keys(app, c)).collect();
   it
@@ -488,10 +496,15 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
   let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
   if let Some((body, _)) = cx.face {
+    // Fusion's face list: no navigation, display, workspace or recent commands (those are the
+    // empty canvas's)
+    v.push(Some(Item::new(Action::NotYet("Create Selection Set"), Icon::Select, "Create Selection Set")));
     if cx.planar_face {
       v.push(Some(Item::cmd(Cmd::NewSketch)));
-      // Fusion's Extrude on a face is a press pull of the face
-      v.push(Some(Item::new(Action::Cmd(Cmd::Dialog(Kind::PressPull)), Icon::Extrude, "Extrude")));
+      // Fusion's Extrude on a face is a press pull of the face, under Extrude's key
+      let mut extrude = Item::new(Action::Cmd(Cmd::Dialog(Kind::PressPull)), Icon::Extrude, "Extrude");
+      extrude.hint = Some(app.key_for(Cmd::Dialog(Kind::Extrude)).unwrap_or_default());
+      v.push(Some(extrude));
       v.push(Some(Item::cmd(Cmd::Dialog(Kind::OffsetPlane))));
     }
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Shell))));
@@ -501,13 +514,16 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
       sep(&mut v);
     }
     v.push(Some(Item::cmd(APPEARANCE)));
-    v.push(Some(properties()));
+    v.push(Some(Item::new(Action::NotYet("Texture Map Controls"), Icon::SurfaceTexture, "Texture Map Controls")));
+    // Fusion shows no key on a face's Properties (I is Measure)
+    v.push(Some(Item { hint: Some(String::new()), ..properties() }));
     sep(&mut v);
     v.push(Some(show_hide()));
-    if cx.planar_face {
-      v.push(Some(Item::cmd(Cmd::LookAt)));
-    }
+    sep(&mut v);
+    v.push(Some(Item::new(Action::Unselectable, Icon::Select, "Selectable/Unselectable")));
+    sep(&mut v);
     find(&mut v, Some(Sel::Body { body }));
+    return v;
   } else if cx.edge {
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Fillet))));
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Chamfer))));
@@ -639,7 +655,26 @@ fn run(app: &mut App, action: Action) {
       }
     }
     Action::Workspace(w) => panels::switch_workspace(app, w),
+    Action::Unselectable => {
+      let bodies = selected_bodies(app);
+      toggle_selectable(app, &bodies);
+    }
+    Action::NotYet(what) => app.status = Some((format!("{what} isn't in FissionOxide yet"), false)),
     Action::Open => {}
+  }
+}
+
+/// Selectable/Unselectable: if any of the bodies can't be picked, they all can again; otherwise
+/// the canvas stops picking them (the browser still selects them) and they leave the selection.
+pub(crate) fn toggle_selectable(app: &mut App, bodies: &[BodyId]) {
+  let m = &mut app.ctx_menu;
+  let locked = bodies.iter().any(|b| m.unselectable.contains(b));
+  m.unselectable.retain(|b| !bodies.contains(b));
+  if !locked {
+    m.unselectable.extend(bodies);
+    app.s.selection.retain(
+      |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
+    );
   }
 }
 
@@ -790,17 +825,19 @@ fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[
         if hot == Some(k) {
           painter.rect_filled(row, 0.0, theme::HOVER);
         }
-        icons::draw_color(
-          painter,
-          Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)),
-          it.icon,
-        );
+        let greyed = matches!(it.action, Action::NotYet(_));
+        let ir = Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0));
+        if greyed {
+          icons::draw(painter, ir, it.icon, Color32::from_gray(175));
+        } else {
+          icons::draw_color(painter, ir, it.icon);
+        }
         painter.text(
           row.left_center() + vec2(32.0, 0.0),
           egui::Align2::LEFT_CENTER,
           &it.label,
           font.clone(),
-          theme::TEXT,
+          if greyed { theme::MUTED } else { theme::TEXT },
         );
         let mut right = row.right() - 10.0;
         if !it.children.is_empty() {
@@ -1121,6 +1158,87 @@ mod tests {
     let cx = context(&app);
     let list = labels(&overflow(&app, &cx));
     assert!(list.iter().any(|l| l == "Remove") && list.iter().any(|l| l == "Move/Copy"), "{list:?}");
+  }
+
+  #[test]
+  fn face_list_is_fusions_with_its_keys() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Plane).unwrap().id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    let cx = context(&app);
+    let list = overflow(&app, &cx);
+    let rows: Vec<String> =
+      list.iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_else(|| "-".into())).collect();
+    let edit = rows.iter().find(|l| l.starts_with("Edit Feature")).cloned().unwrap();
+    assert_eq!(
+      rows,
+      [
+        "Create Selection Set",
+        "Create Sketch",
+        "Extrude",
+        "Offset Plane",
+        "Shell",
+        "-",
+        edit.as_str(),
+        "-",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "-",
+        "Show/Hide",
+        "-",
+        "Selectable/Unselectable",
+        "-",
+        "Find in Browser",
+        "Find in Window",
+      ]
+    );
+    let key = |label: &str| list.iter().flatten().find(|i| i.label == label).and_then(|i| i.hint.clone());
+    assert_eq!(key("Extrude").as_deref(), Some("E"), "Extrude's key, not Press Pull's Q");
+    assert_eq!(key("Properties"), None, "Fusion shows no key on Properties (I is Measure)");
+    assert_eq!(key("Appearance").as_deref(), Some("A"));
+    assert_eq!(key("Show/Hide").as_deref(), Some("V"));
+    // no navigation, display, workspace or recent commands on a face
+    app.note_cmd(Cmd::Dialog(Kind::Fillet));
+    app.note_cmd(Cmd::Dialog(Kind::Chamfer));
+    let l = labels(&overflow(&app, &cx));
+    for gone in [
+      "Pan",
+      "Zoom",
+      "Constrained Orbit",
+      "Fit",
+      "Home",
+      "Look At",
+      "Remove",
+      "Show All",
+      "Hide All Bodies",
+      "Workspace",
+    ] {
+      assert!(!l.iter().any(|x| x == gone), "{gone} on a face: {l:?}");
+    }
+    assert!(!l.iter().any(|x| x == "Fillet"), "recent commands stay on the empty canvas: {l:?}");
+    // ... where they still are
+    app.s.selection.clear();
+    let cx = context(&app);
+    let l = labels(&overflow(&app, &cx));
+    for want in ["Pan", "Zoom", "Constrained Orbit", "Show All", "Workspace", "Fillet"] {
+      assert!(l.iter().any(|x| x == want), "{want} missing from the empty canvas: {l:?}");
+    }
+  }
+
+  #[test]
+  fn selectable_unselectable_toggles_the_faces_body() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    run(&mut app, Action::Unselectable);
+    assert_eq!(app.ctx_menu.unselectable, vec![body]);
+    assert!(app.s.selection.is_empty(), "an unselectable body leaves the selection");
+    app.s.selection = vec![Sel::Body { body }];
+    run(&mut app, Action::Unselectable);
+    assert!(app.ctx_menu.unselectable.is_empty(), "and becomes selectable again");
   }
 
   #[test]

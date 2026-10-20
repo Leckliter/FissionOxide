@@ -338,6 +338,20 @@ impl Regenerator {
   }
 }
 
+/// Whether a filleted body is believable: OCCT can "succeed" with a body that passes its checks
+/// but is nonsense when the radius is too large for the faces next to the edges. Rounding only
+/// takes material off convex edges and fills concave ones, so the body stays inside the
+/// original's bounding box, with no more volume than that box holds.
+fn fillet_fits(orig: &Shape, filleted: &Shape) -> bool {
+  let (Ok(a), Ok(b)) = (orig.mass(), filleted.mass()) else { return false };
+  let size = (a.bbox_max - a.bbox_min).max_element().max(1e-9);
+  let tol = 1e-6 * size + 1e-7;
+  let inside = (b.bbox_min - a.bbox_min).min_element() > -tol && (a.bbox_max - b.bbox_max).min_element() > -tol;
+  let d = a.bbox_max - a.bbox_min;
+  let boxed = d.x * d.y * d.z * (1.0 + 1e-6);
+  inside && b.volume > 0.0 && b.volume <= boxed && filleted.is_valid()
+}
+
 fn chain(prev: u64, f: &Feature) -> u64 {
   let mut h = DefaultHasher::new();
   prev.hash(&mut h);
@@ -645,9 +659,19 @@ impl Ctx<'_> {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
           _ => None,
         };
-        let round = |s: &Shape, f: Shape, ids: &[u32]| match sb {
-          Some(sb) => solid::setback(s, &f, ids, sb),
-          None => Ok(f),
+        // designs from before FILLET_VALID_RESULT keep a fillet's body even when it's broken
+        let must_be_valid = self.behaviours.has(fox_sketch::behaviour::FILLET_VALID_RESULT);
+        let round = |s: &Shape, f: Shape, ids: &[u32]| {
+          let f = match sb {
+            Some(sb) => solid::setback(s, &f, ids, sb)?,
+            None => f,
+          };
+          if must_be_valid && !fillet_fits(s, &f) {
+            return Err(fox_kernel::KernelError::Kernel(
+              "the radius is too large for the faces next to the edges".into(),
+            ));
+          }
+          Ok(f)
         };
         if !sets.is_empty() {
           if radius2.is_some() || !radii.is_empty() {

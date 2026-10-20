@@ -13,6 +13,8 @@ mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
+mod errors_ui;
+mod file_menu;
 mod forms;
 mod gpu;
 mod help;
@@ -90,6 +92,19 @@ pub struct App {
   pub show_comments: bool,
   pub show_navbar: bool,
   pub show_viewcube: bool,
+  /// File ▸ View: the toolbar and the timeline.
+  pub show_toolbar: bool,
+  pub show_timeline: bool,
+  /// File ▸ View ▸ Show Text Commands: the panel and what was typed in it.
+  pub(crate) text_commands: file_menu::TextCommands,
+  /// The open Capture Image window.
+  pub(crate) capture: Option<file_menu::Capture>,
+  /// This session's auto-recovery copy (File ▸ Open Recovered Documents).
+  pub(crate) recovery: file_menu::Recovery,
+  /// The Error window (Review warning, or the canvas's error badge).
+  pub(crate) error_window: errors_ui::ErrorWindow,
+  /// The timeline gear's settings and its Change to Direct Modeling confirmation.
+  pub(crate) timeline_view: panels::timeline_gear::TimelineView,
   /// Navigation bar mode (orbit / pan / zoom with the left button).
   pub nav_mode: Option<NavMode>,
   /// Toolbar tab; opening a sketch switches to the contextual SKETCH tab.
@@ -326,6 +341,13 @@ impl App {
       show_comments: true,
       show_navbar: true,
       show_viewcube: true,
+      show_toolbar: true,
+      show_timeline: true,
+      text_commands: Default::default(),
+      capture: None,
+      recovery: Default::default(),
+      error_window: Default::default(),
+      timeline_view: Default::default(),
       nav_mode: None,
       tab: panels::Tab::Solid,
       playing: None,
@@ -1356,11 +1378,15 @@ impl App {
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
     self.dropped_files(&ctx);
+    file_menu::autosave(self, now());
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
-    if self.drawing.is_none() {
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
+    if self.drawing.is_none() && self.show_timeline {
       panels::timeline(self, ui);
     }
+    file_menu::text_commands(self, ui);
     data_panel::show(self, ui);
     if self.step_cam_move(now()) {
       ctx.request_repaint();
@@ -1384,6 +1410,7 @@ impl App {
       }
       panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
+      errors_ui::badge(self, &ctx);
       marking::show(self, &ctx);
     }
     toolbox::show(self, &ctx);
@@ -1411,6 +1438,9 @@ impl App {
     cut_ui::cut_window(self, &ctx);
     canvas_ui::windows(self, &ctx);
     help::window(self, &ctx);
+    errors_ui::window(self, &ctx);
+    file_menu::capture_window(self, &ctx);
+    panels::timeline_gear::confirm_window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
       egui::Popup::close_all(&ctx);
     }
@@ -1428,8 +1458,10 @@ impl App {
   /// viewport image dimmed with a progress note, and a cover that takes all input.
   fn draw_busy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
     panels::app_bar(self, ui);
-    panels::toolbar(self, ui);
-    if self.drawing.is_none() {
+    if self.show_toolbar {
+      panels::toolbar(self, ui);
+    }
+    if self.drawing.is_none() && self.show_timeline {
       panels::timeline(self, ui);
     }
     egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -1527,6 +1559,8 @@ impl eframe::App for App {
 
   fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
     self.updates.on_exit();
+    // a normal close leaves nothing to recover
+    self.recovery.clear();
   }
 }
 
