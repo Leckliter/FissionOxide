@@ -7,6 +7,7 @@ Sources (edit these):
 
 Outputs (never edit by hand; re-run this script):
   brand/logo/           fox, single-colour fox, app icons, wordmarks (SVG) and PNG renders
+  brand/logo/motion/    animated SVGs: start-up splash and two loading indicators
   brand/web/            tokens.css, tokens.js, tailwind.preset.js, favicons, web manifest,
                         social preview image, head.html snippet
   brand/index.html      the brand guide
@@ -229,6 +230,206 @@ def stripe_stops():
     c = COLOR[f]["base"]
     out.append(f'      <stop offset="{a:.4f}" stop-color="{c}"/><stop offset="{b:.4f}" stop-color="{c}"/>')
   return "\n".join(out)
+
+
+# ---------------------------------------------------------------- motion
+
+
+def text_glyphs(text, cap_px, font="InterDisplay-Bold.otf"):
+  """Like text_path, one outline per character: [(char, path, x, advance)], baseline at y=0."""
+  from fontTools.pens.svgPathPen import SVGPathPen
+  from fontTools.pens.transformPen import TransformPen
+
+  text_path(text, cap_px, font)  # loads and caches the font
+  f, cmap, gs, kern = _fonts[font]
+  scale = cap_px / f["OS/2"].sCapHeight
+  names = [cmap[ord(ch)] for ch in text]
+  out, x = [], 0
+  for i, name in enumerate(names):
+    pen = SVGPathPen(gs, ntos=lambda v: f"{v:.2f}".rstrip("0").rstrip("."))
+    gs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, x * scale, 0)))
+    out.append((text[i], pen.getCommands(), x * scale, gs[name].width * scale))
+    x += gs[name].width
+    if i + 1 < len(names):
+      x += kern.get((name, names[i + 1]), 0)
+  return out
+
+
+def x_height_ratio(font="InterDisplay-Bold.otf"):
+  f = _fonts[font][0]
+  return f["OS/2"].sCapHeight / f["OS/2"].sxHeight
+
+
+NUCLEUS = (300, 400)  # where the fox's centre line meets the eye mask; shards burst from here
+REDUCED = "@media (prefers-reduced-motion:reduce){*{animation:none!important}.flash{opacity:0}}"
+
+
+def centroid(pts):
+  return sum(x for x, _ in pts) / len(pts), sum(y for _, y in pts) / len(pts)
+
+
+def shard_paths(cls, style_of):
+  """Each facet as its own path with a CSS class and per-facet custom properties."""
+  rows = []
+  for i, (c, p) in enumerate(facets()):
+    rows.append(
+      f'    <path class="{cls}" style="{style_of(i, p)}" d="{poly(p)}" fill="{c}" stroke="{c}"'
+      ' stroke-width="0.8" stroke-linejoin="round"/>'
+    )
+  return "\n".join(rows)
+
+
+def far():
+  cx, cy = NUCLEUS
+  return max(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 for _, p in facets() for x, y in p)
+
+
+def splash():
+  """Start-up animation (about 3 s, plays once): the fox bursts out of a nucleus, "FOX" pops up
+  beside it from the name's own F, O and x (the x raised to capital height), then the name opens
+  out to FissionOxide. The last frame is wordmark.svg exactly."""
+  cx, cy = NUCLEUS
+  reach = far()
+
+  def burst(i, p):
+    mx, my = centroid(p)
+    d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / reach
+    rot = (-1) ** i * (40 + (i * 37) % 80)
+    return f"--dx:{cx - mx:.0f}px;--dy:{cy - my:.0f}px;--r:{rot}deg;--d:{0.35 + d * 0.45 + (i % 5) * 0.025:.2f}s"
+
+  cap = 168
+  name = T["name"]
+  glyphs = text_glyphs(name, cap)
+  _, adv = text_path(name, cap)
+  text_x = W + 70
+  baseline = H * 0.55 + cap / 2
+  width = text_x + adv + 8
+  o = name.index("O")
+  x = name.index("x", o)
+  shift = glyphs[1][2] - glyphs[o][2]  # O and x slide left to sit where the second letter is
+  fox_w = glyphs[x][2] + glyphs[x][3] + shift
+  centre = (adv - fox_w) / 2  # while it reads FOX, the short word is centred under the name's span
+  open_at, open_for = 1.95, 0.75
+
+  def g(i, cls, style=""):
+    st = f' style="{style}"' if style else ""
+    return f'      <g class="{cls}"{st}><path d="{glyphs[i][1]}"/></g>'
+
+  rows = [g(0, "fox f1")]
+  for i in range(1, o):  # revealed as the O slides past each letter's right edge
+    right = glyphs[i][2] + glyphs[i][3]
+    rows.append(g(i, "hid", f"--h:{open_at + 0.17 + 0.5 * (right - glyphs[1][2]) / -shift:.2f}s"))
+  rows.append(
+    '      <g class="slide">\n'
+    f'        <g class="fox f2"><path d="{glyphs[o][1]}"/></g>\n'
+    f'        <g class="fox f3"><path d="{glyphs[x][1]}"/></g>\n'
+    "      </g>"
+  )
+  for j, i in enumerate(range(x + 1, len(name))):
+    rows.append(g(i, "hid", f"--h:{open_at + 0.5 + j * 0.06:.2f}s"))
+  xs = x_height_ratio()
+  pop = "cubic-bezier(.3,1.6,.5,1)"
+  ease = "cubic-bezier(.65,0,.25,1)"
+  style = (
+    f".ink{{fill:{LIGHT['wordmark']}}}@media (prefers-color-scheme:dark){{.ink{{fill:{DARK['wordmark']}}}}}"
+    ".shard{transform-box:fill-box;transform-origin:center;animation:shard .95s cubic-bezier(.2,1.35,.4,1) var(--d) both}"
+    "@keyframes shard{from{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--r)) scale(.1)}35%{opacity:1}to{opacity:1;transform:none}}"
+    ".flash{transform-box:fill-box;transform-origin:center;animation:flash .9s ease-out both}"
+    "@keyframes flash{0%{opacity:0;transform:scale(.2)}30%{opacity:1;transform:scale(1)}55%{opacity:1;transform:scale(.7)}100%{opacity:0;transform:scale(3.2)}}"
+    ".ring{transform-box:fill-box;transform-origin:center;animation:ring 1s ease-out .35s both}"
+    "@keyframes ring{from{opacity:.8;transform:scale(.1)}to{opacity:0;transform:scale(2.6)}}"
+    f".word{{animation:centre {open_for}s {ease} {open_at}s both}}"
+    f"@keyframes centre{{from{{transform:translateX({centre:.0f}px)}}to{{transform:none}}}}"
+    f".slide{{animation:slide {open_for}s {ease} {open_at}s both}}"
+    f"@keyframes slide{{from{{transform:translateX({shift:.0f}px)}}to{{transform:none}}}}"
+    f".fox{{transform-box:fill-box;transform-origin:50% 100%;animation:pop .45s {pop} both}}"
+    ".f1{animation-delay:1.05s}.f2{animation-delay:1.17s}"
+    f".f3{{animation:popx .45s {pop} 1.29s both,shrink .6s {ease} {open_at + 0.05:.2f}s forwards}}"
+    "@keyframes pop{from{opacity:0;transform:translateY(60px) scale(.6)}to{opacity:1;transform:none}}"
+    f"@keyframes popx{{from{{opacity:0;transform:translateY(60px) scale(.8)}}to{{opacity:1;transform:scale({xs:.3f})}}}}"
+    f"@keyframes shrink{{from{{transform:scale({xs:.3f})}}to{{transform:scale(1)}}}}"
+    ".hid{transform-box:fill-box;transform-origin:50% 100%;animation:unfold .35s cubic-bezier(.3,1.4,.5,1) var(--h) both}"
+    "@keyframes unfold{from{opacity:0;transform:scaleX(.2) translateY(20px)}to{opacity:1;transform:none}}"
+    + REDUCED
+  )
+  amber, orange, red, blue = COLOR["amber"], COLOR["orange"], COLOR["red"], COLOR["blue"]
+  inner = f"""  <defs>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".35" stop-color="{amber['light']}"/>
+      <stop offset=".7" stop-color="{orange['base']}" stop-opacity=".6"/>
+      <stop offset="1" stop-color="{red['base']}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle class="flash" cx="{cx}" cy="{cy}" r="90" fill="url(#glow)"/>
+  <circle class="ring" cx="{cx}" cy="{cy}" r="120" fill="none" stroke="{blue['light']}" stroke-width="6"/>
+  <g>
+{shard_paths("shard", burst)}
+  </g>
+  <g class="ink" transform="translate({text_x:g} {baseline:g})">
+    <g class="word">
+{chr(10).join(rows)}
+    </g>
+  </g>"""
+  return svg(width, H, inner, style=style)
+
+
+def loader(kind):
+  """Looping loading indicators made from the fox, 128 px wide by default.
+
+  explode: the facets drift apart like an exploded assembly view, hold, and snap back (2.4 s).
+  ripple:  a glow pulses from the nucleus and a dimming wave runs out to the ear tips (1.6 s).
+  With reduced motion they slow right down rather than stop, so the app still looks busy."""
+  cx, cy = NUCLEUS
+  reach = far()
+  slow = "@media (prefers-reduced-motion:reduce){*{animation-duration:4s!important}}"
+  if kind == "explode":
+    period = 2.4
+
+    def st(i, p):
+      mx, my = centroid(p)
+      d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / reach
+      rot = (-1) ** i * (8 + (i * 7) % 10)
+      return f"--dx:{(mx - cx) * 0.22:.0f}px;--dy:{(my - cy) * 0.22:.0f}px;--r:{rot}deg;animation-delay:{-period + d * 0.25:.2f}s"
+
+    style = (
+      f".f{{transform-box:fill-box;transform-origin:center;animation:x {period}s cubic-bezier(.65,0,.35,1) infinite}}"
+      "@keyframes x{0%,12%,88%,100%{transform:none}40%,60%{transform:translate(var(--dx),var(--dy)) rotate(var(--r)) scale(.92)}}"
+      + slow
+    )
+    pad = 110  # room for the shards at full spread
+    inner = f"  <g transform=\"translate({pad} {pad})\">\n{shard_paths('f', st)}\n  </g>"
+    w, h = W + 2 * pad, H + 2 * pad
+  else:
+    period = 1.6
+
+    def st(i, p):
+      mx, my = centroid(p)
+      d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / reach
+      return f"animation-delay:{-period + d * 0.9:.2f}s"
+
+    style = (
+      f".f{{transform-box:fill-box;transform-origin:center;animation:w {period}s ease-in-out infinite}}"
+      "@keyframes w{0%,55%,100%{opacity:1;transform:none}20%{opacity:.35;transform:scale(.86)}}"
+      f".n{{transform-box:fill-box;transform-origin:center;animation:n {period}s ease-out infinite}}"
+      "@keyframes n{0%{opacity:.9;transform:scale(.3)}60%,100%{opacity:0;transform:scale(2.4)}}"
+      + slow
+    )
+    pad = 30
+    inner = f"""  <defs>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".4" stop-color="{COLOR['amber']['light']}"/>
+      <stop offset="1" stop-color="{COLOR['orange']['base']}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g transform="translate({pad} {pad})">
+{shard_paths('f', st)}
+    <circle class="n" cx="{cx}" cy="{cy}" r="70" fill="url(#glow)"/>
+  </g>"""
+    w, h = W + 2 * pad, H + 2 * pad
+  out = svg(w, h, inner, title="Loading", style=style)
+  return out.replace(f'width="{w:g}" height="{h:g}"', f'width="128" height="{128 * h / w:.0f}"', 1)
 
 
 # ---------------------------------------------------------------- web files
@@ -479,7 +680,10 @@ def guide():
     ("logo/wordmark-dark.svg", "Fox + name for dark backgrounds."),
     ("logo/icon.svg", "App icon on the dark tile (the default)."),
     ("logo/icon-light.svg", "App icon on the light tile."),
-    ("logo/png/", "PNG renders of all of the above."),
+    ("logo/png/", "PNG renders of the logos above."),
+    ("logo/motion/splash.svg", "Start-up animation: the fox bursts in, \"FOX\" opens out to the name. Plays once, about 3 s."),
+    ("logo/motion/loader-explode.svg", "Loading indicator: the facets drift apart and snap back (2.4 s loop)."),
+    ("logo/motion/loader-ripple.svg", "Loading indicator: a pulse ripples out through the facets (1.6 s loop)."),
     ("web/tokens.css", "CSS custom properties, with light and dark themes."),
     ("web/tokens.js", "The tokens as an ES module."),
     ("web/tailwind.preset.js", "Tailwind preset: fox colours, fonts and radii."),
@@ -643,6 +847,9 @@ def main():
   write("logo/wordmark.svg", wordmark())
   write("logo/wordmark-light.svg", wordmark(LIGHT["wordmark"]))
   write("logo/wordmark-dark.svg", wordmark(DARK["wordmark"]))
+  write("logo/motion/splash.svg", splash())
+  write("logo/motion/loader-explode.svg", loader("explode"))
+  write("logo/motion/loader-ripple.svg", loader("ripple"))
 
   write("web/tokens.css", tokens_css())
   write("web/tokens.js", tokens_js())

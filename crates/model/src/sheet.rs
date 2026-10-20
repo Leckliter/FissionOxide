@@ -604,6 +604,42 @@ pub fn flat_pattern(shape: &Shape, faces: &[FaceInfo], face: u32, sheet: &SheetI
   Ok(FlatPattern { shape: flat, bends, plane })
 }
 
+/// The flat pattern as a cut file sees it: its outline and holes, and its bend lines, in the
+/// coordinates of its DXF (see [`flat_dxf`]: the stationary plane, lower-left corner at the
+/// origin).
+pub fn flat_contours(flat: &FlatPattern) -> Result<(Vec<crate::cutcheck::Contour>, Vec<(P2, P2)>), String> {
+  let pl = &flat.plane;
+  let n = pl.normal();
+  let faces = flat.shape.faces().map_err(|e| e.to_string())?;
+  let mut loops: Vec<Vec<P2>> = Vec::new();
+  for f in faces.iter().filter(|f| f.kind == fox_kernel::SurfaceKind::Plane && f.normal.dot(n).abs() > 1.0 - 1e-6) {
+    if (f.origin - pl.origin).dot(n).abs() > 1e-4 {
+      continue;
+    }
+    let face = flat.shape.face_shape(f.id).map_err(|e| e.to_string())?;
+    for l in face.face_loops(0.01).map_err(|e| e.to_string())? {
+      loops.push(l.into_iter().map(|q| pl.to_local(q)).collect());
+    }
+  }
+  let area = |l: &[P2]| crate::cutcheck::area(l).abs();
+  let outer = (0..loops.len())
+    .max_by(|a, b| area(&loops[*a]).total_cmp(&area(&loops[*b])))
+    .ok_or("the flat pattern has no face in its plane")?;
+  let bends: Vec<(P2, P2)> = flat.bends.iter().map(|b| (pl.to_local(b.start), pl.to_local(b.end))).collect();
+  let o = loops
+    .iter()
+    .flatten()
+    .chain(bends.iter().flat_map(|(a, b)| [a, b]))
+    .fold([f64::INFINITY; 2], |o, p| [o[0].min(p[0]), o[1].min(p[1])]);
+  let shift = |p: P2| [p[0] - o[0], p[1] - o[1]];
+  let contours = loops
+    .into_iter()
+    .enumerate()
+    .map(|(i, points)| crate::cutcheck::Contour { points: points.into_iter().map(shift).collect(), hole: i != outer })
+    .collect();
+  Ok((contours, bends.into_iter().map(|(a, b)| (shift(a), shift(b))).collect()))
+}
+
 /// Flat pattern outline and bend lines as a DXF (R12, millimetres) in the stationary face's
 /// plane, its lower-left corner at the origin. See [`flat_dxf_for`] for the layers.
 pub fn flat_dxf(flat: &FlatPattern) -> Result<String, String> {

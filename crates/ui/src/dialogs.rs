@@ -2570,6 +2570,27 @@ impl Dialog {
           ui.label("Bends");
           ui.label(bends.to_string());
           ui.end_row();
+          if let Some(check) = r.get("check") {
+            ui.label("Ready to cut");
+            let findings = check["findings"].as_array().cloned().unwrap_or_default();
+            if findings.is_empty() {
+              ui.label(RichText::new("✓ passes the shop checks").color(theme::ACCENT));
+            } else {
+              ui.vertical(|ui| {
+                for f in &findings {
+                  let at = &f["at"];
+                  let text = format!(
+                    "⚠ {} (at {:.1}, {:.1})",
+                    f["message"].as_str().unwrap_or(""),
+                    at[0].as_f64().unwrap_or(0.0),
+                    at[1].as_f64().unwrap_or(0.0)
+                  );
+                  ui.label(RichText::new(text).color(theme::WARNING));
+                }
+              });
+            }
+            ui.end_row();
+          }
           ui.label("Export");
           if panels::secondary_button(ui, "DXF…").clicked()
             && let Some(path) =
@@ -2994,7 +3015,13 @@ impl Dialog {
         if let Some(f) = self.faces.first() {
           p["face"] = f.clone();
         }
-        s.execute("sheet.flat_pattern", &p)
+        // with the shop checks of the flat (hole sizes, webs, holes near bends)
+        s.execute("sheet.flat_pattern", &p).map(|mut v| {
+          if let Ok(c) = s.execute("sheet.check", &p) {
+            v["check"] = c;
+          }
+          v
+        })
       }
       Kind::Interference => s.execute("assembly.interference", &json!({})),
       Kind::Bom => s.execute("assembly.bom", &json!({})),

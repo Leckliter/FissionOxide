@@ -13,6 +13,7 @@ pub mod assembly;
 pub mod cam;
 pub mod config;
 pub mod construct;
+pub mod cutcheck;
 pub mod direct;
 pub mod drawing;
 pub mod fillet;

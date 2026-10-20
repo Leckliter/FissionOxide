@@ -76,6 +76,10 @@ recorded Fusion tutorials can be followed step by step.
 
 *Done when* the sheet metal reference parts pass and their DXFs pass the validator.
 
+*Started:* `sheet.check` (and "Ready to cut" in the Flat Pattern dialog) checks a flat pattern
+against common shop rules: hole size, material between holes and edges, holes near bends, sheet
+size. Shop and service presets with their published limits come next.
+
 ## Phase 3: the fabrication suite
 
 First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or machine G-code.**
