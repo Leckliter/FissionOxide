@@ -559,6 +559,30 @@ fn zip_writer() -> (zip::ZipWriter<std::io::Cursor<Vec<u8>>>, zip::write::Simple
 }
 
 #[test]
+fn an_empty_untitled_design_is_saved_to_the_hub_only_when_asked_for_explicitly() {
+  let root = temp_dir("hub-blank");
+  let mut s = Session { store_root: Some(root.clone()), ..Default::default() };
+  let items = |s: &mut Session| run(s, "hub.recent", json!({})).as_array().map(Vec::len).unwrap_or(0);
+  for p in [json!({}), json!({"new": true}), json!({"name": "Untitled"}), json!({"name": "  "})] {
+    let e = s.execute("hub.save", &p).expect_err("a blank Untitled design isn't saved");
+    assert!(e.0.contains("empty"), "{e}");
+  }
+  assert_eq!(s.design.name, "Untitled", "a refused save leaves the design as it was");
+  assert!(s.hub.is_none());
+  assert_eq!(items(&mut s), 0);
+  // named, or asked for explicitly (the Save dialog), it is
+  assert_eq!(run(&mut s, "hub.save", json!({"explicit": true}))["version"], 1);
+  let mut named = Session { store_root: Some(root.clone()), ..Default::default() };
+  assert_eq!(run(&mut named, "hub.save", json!({"name": "Blank plate"}))["version"], 1);
+  // and a design with something in it needs neither
+  let mut work = Session { store_root: Some(root.clone()), ..Default::default() };
+  plate(&mut work);
+  assert_eq!(run(&mut work, "hub.save", json!({}))["version"], 1);
+  assert_eq!(items(&mut s), 3);
+  let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn hub_versions_milestones_and_history() {
   let root = temp_dir("hub");
   let mut s = Session { store_root: Some(root.clone()), ..Default::default() };
