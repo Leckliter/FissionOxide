@@ -107,6 +107,10 @@ pub const REVOLVE_AXIS_UNDIRECTED: &str = "revolve_axis_undirected";
 /// leaves the new face beside the old one), as Fusion does, when the body had none of its own.
 /// Without it, the pieces keep every face the cut made.
 pub const UNIFY_SPLIT_PIECES: &str = "unify_split_pieces";
+/// Plane and point Along Path on a body edge use the exact curve and its tangent at the point.
+/// Without it, they walk the edge's tessellated polyline and take the direction of the segment the
+/// point falls on, so on a curved edge the point sits on a chord.
+pub const EXACT_EDGE_FRAMES: &str = "exact_edge_frames";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -126,6 +130,7 @@ pub const CURRENT: &[&str] = &[
   LOFT_RAIL_SPREAD,
   REVOLVE_AXIS_UNDIRECTED,
   UNIFY_SPLIT_PIECES,
+  EXACT_EDGE_FRAMES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

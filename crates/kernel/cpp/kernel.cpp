@@ -3,6 +3,7 @@
 #include "fox-kernel/src/ffi.rs.h"
 #include "fox-kernel/cpp/threads.hxx"
 
+#include <algorithm>
 #include <cmath>
 #include <array>
 #include <deque>
@@ -25,6 +26,7 @@
 #include <Geom2d_Line.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Lin2d.hxx>
+#include <BRepAdaptor_CompCurve.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -67,6 +69,8 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Precision.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GCE2d_MakeSegment.hxx>
@@ -2194,6 +2198,51 @@ std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge) {
   if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
   return wrap(map(static_cast<int>(edge)));
   FOX_CATCH("edge")
+}
+
+// The point and unit tangent at fraction t of a curve's arc length, measured from whichever end
+// lies nearer `from` (x, y, z; empty: the curve's own start), the tangent pointing away from that
+// end: [point (3), tangent (3)].
+template <typename C> static rust::Vec<double> along_curve(const C &c, double t, rust::Slice<const double> from) {
+  double u0 = c.FirstParameter(), u1 = c.LastParameter();
+  bool rev = false;
+  if (from.size() >= 3) {
+    gp_Pnt f(from[0], from[1], from[2]);
+    rev = c.Value(u1).Distance(f) < c.Value(u0).Distance(f);
+  }
+  double len = GCPnts_AbscissaPoint::Length(c, u0, u1);
+  if (!(len > Precision::Confusion())) throw std::runtime_error("the curve has no length");
+  t = std::min(1.0, std::max(0.0, t));
+  double u = rev ? u1 : u0;
+  if (t > 0.0) {
+    GCPnts_AbscissaPoint ap(c, (rev ? -t : t) * len, u);
+    if (!ap.IsDone()) throw std::runtime_error("the point along the curve could not be found");
+    u = ap.Parameter();
+  }
+  gp_Pnt p;
+  gp_Vec d;
+  c.D1(u, p, d);
+  if (d.Magnitude() < 1e-12) throw std::runtime_error("the curve has no tangent there");
+  if (rev) d.Reverse();
+  d.Normalize();
+  rust::Vec<double> out;
+  for (double v : {p.X(), p.Y(), p.Z(), d.X(), d.Y(), d.Z()}) out.push_back(v);
+  return out;
+}
+
+// curve_along on the first wire of s (followed in its own order), else its first edge.
+rust::Vec<double> curve_along(const Shape &s, double t, rust::Slice<const double> from) {
+  FOX_TRY
+  TopExp_Explorer w(s.s, TopAbs_WIRE);
+  if (w.More()) {
+    BRepAdaptor_CompCurve c(TopoDS::Wire(w.Current()), Standard_True);
+    return along_curve(c, t, from);
+  }
+  TopExp_Explorer e(s.s, TopAbs_EDGE);
+  if (!e.More()) throw std::runtime_error("the shape has no edge");
+  BRepAdaptor_Curve c(TopoDS::Edge(e.Current()));
+  return along_curve(c, t, from);
+  FOX_CATCH("along")
 }
 
 // Minimum distance between two shapes: [distance, point on a (3), point on b (3)].

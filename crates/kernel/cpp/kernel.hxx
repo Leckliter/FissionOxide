@@ -82,6 +82,7 @@ std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_
 
 std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge);
 rust::Vec<double> min_distance(const Shape &a, const Shape &b);
+rust::Vec<double> curve_along(const Shape &s, double t, rust::Slice<const double> from);
 std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
                                    double height, bool left);
 std::unique_ptr<Shape> thicken(const Shape &s, double d);

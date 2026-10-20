@@ -324,3 +324,6 @@
 353-top-face-through-vertex-v-direction
 354-origin-plane-through-vertex
 355-origin-plane-offset
+363-line-edge-quarter-mirror
+364-arc-edge-quarter-mirror
+365-sketch-line-diagonal-mirror

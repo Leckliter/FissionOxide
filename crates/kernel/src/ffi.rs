@@ -115,6 +115,7 @@ pub(crate) mod ffi {
 
     fn edge_at_index(s: &Shape, edge: u32) -> Result<UniquePtr<Shape>>;
     fn min_distance(a: &Shape, b: &Shape) -> Result<Vec<f64>>;
+    fn curve_along(s: &Shape, t: f64, from: &[f64]) -> Result<Vec<f64>>;
     fn helix_sweep(
       profile: &Shape,
       axis: &[f64],

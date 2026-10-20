@@ -4,7 +4,7 @@
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
 use fox_sketch::behaviour::ISO_THREADS;
-use fox_sketch::{CurveKind, Loop, Profile, Seg};
+use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
@@ -667,16 +667,51 @@ impl Ctx<'_> {
     Ok(pts)
   }
 
-  /// The point and unit tangent at fraction `t` of an edge's length, or `distance` along it.
+  /// The point and unit tangent at fraction `t` of an edge's length (from its start), or
+  /// `distance` along it. With [`EXACT_EDGE_FRAMES`] a fraction is taken on the exact curve;
+  /// designs made before it (and distances) walk the edge's tessellated polyline and take the
+  /// direction of the segment the point falls on.
+  ///
+  /// [`EXACT_EDGE_FRAMES`]: fox_sketch::behaviour::EXACT_EDGE_FRAMES
   fn along(&mut self, e: &mut EdgeRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
+    if distance.trim().is_empty() && self.behaviours.has(fox_sketch::behaviour::EXACT_EDGE_FRAMES) {
+      let t = self.factor(t)?.clamp(0.0, 1.0);
+      let (bi, info) = self.edge_info(e)?;
+      let edge = self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?;
+      return edge.along_curve(t, Some(info.start)).map_err(ke);
+    }
     let pts = self.edge_points(e)?;
     self.along_points(&pts, t, distance)
   }
 
-  /// As [`Ctx::along`], along sketch curves.
+  /// As [`Ctx::along`], along sketch curves: with
+  /// [`EXACT_EDGE_FRAMES`](fox_sketch::behaviour::EXACT_EDGE_FRAMES) a fraction of one plane
+  /// curve is taken on the exact curve; anything else follows the sampled path.
   fn along_curve(&self, path: &PathRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
+    if distance.trim().is_empty()
+      && self.behaviours.has(fox_sketch::behaviour::EXACT_EDGE_FRAMES)
+      && let [c] = path.curves[..]
+      && let Some(r) = self.along_sketch(path.sketch, c, t)?
+    {
+      return Ok(r);
+    }
     let pts = self.curve_points(path)?;
     self.along_points(&pts, t, distance)
+  }
+
+  /// The point and unit tangent at fraction `t` of a plane sketch curve's length, from its start
+  /// point, in world coordinates, on the exact curve; `None` for a 3D or included curve.
+  fn along_sketch(&self, sketch: FeatureId, curve: CurveId, t: &str) -> Result<Option<(DVec3, DVec3)>, String> {
+    let t = self.factor(t)?.clamp(0.0, 1.0);
+    let sk = self.state.sketches.get(&sketch).ok_or("its sketch failed")?;
+    if sk.sketch.curve3d(curve).is_some() || crate::include::path_segs(sk, &[curve])?.is_some() {
+      return Ok(None);
+    }
+    let segs = sk.sketch.curve_segs(curve);
+    let first = segs.first().ok_or("the sketch curve no longer exists")?;
+    let start = sk.plane.to_world(first.start());
+    let wire = Shape::path(&sk.plane, &segs).map_err(ke)?;
+    wire.along_curve(t, Some(start)).map(Some).map_err(ke)
   }
 
   /// The point and unit tangent at fraction `t` of a polyline's length, or (when set) at

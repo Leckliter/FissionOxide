@@ -895,3 +895,48 @@ fn split_pieces_merge_coplanar_faces_only_in_new_designs() {
   // a new one merges them into one top face, as Fusion does
   assert_eq!(split_at_step(Behaviours::current()), vec![6, 6]);
 }
+
+/// A plane and a point Along Path at t = 0.3 on the top circle of a radius-10 cylinder: the
+/// point's distance from the axis and how far the plane's normal leans off the circle's tangent
+/// (its dot with the radial direction).
+fn along_top_circle(behaviours: Behaviours) -> (f64, f64) {
+  let mut d = Design::new("cyl");
+  d.behaviours = behaviours;
+  let mut s = Sketch::new();
+  s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: s,
+    profiles: vec![],
+    extent: Extent::distance("10"),
+    operation: Operation::NewBody,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let b = &m.bodies[0];
+  let e = b.edges().iter().find(|e| e.kind == fox_kernel::CurveKind::Circle && (e.mid.z - 10.0).abs() < 1e-6).unwrap();
+  let edge = EdgeRef::from_edge(b.id, e, b.faces());
+  let t = "0.3".to_string();
+  let pl = d
+    .add_feature(FeatureKind::PlaneBy { def: construct::PlaneDef::AlongPath { edge: edge.clone(), t: t.clone(), distance: String::new() } })
+    .unwrap();
+  let pt = d.add_feature(FeatureKind::ConstructionPoint { def: construct::PointDef::AlongPath { edge, t, distance: String::new() } }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let p = m.points[&pt];
+  assert!((p.z - 10.0).abs() < 1e-9);
+  let radial = DVec3::new(p.x, p.y, 0.0).normalize();
+  (p.truncate().length(), m.planes[&pl].normal().dot(radial).abs())
+}
+
+#[test]
+fn along_path_on_a_curved_edge_is_exact_only_in_new_designs() {
+  // a design saved before the flag keeps the tessellated chord: inside the circle, normal off
+  // the tangent
+  let (r, lean) = along_top_circle(Behaviours::legacy());
+  assert!(r < 10.0 - 1e-6 && lean > 1e-6, "r {r}, lean {lean}");
+  // a new one sits on the exact circle with the plane normal along its tangent
+  let (r, lean) = along_top_circle(Behaviours::current());
+  assert!((r - 10.0).abs() < 1e-9 && lean < 1e-9, "r {r}, lean {lean}");
+}
