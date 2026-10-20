@@ -489,6 +489,7 @@ impl Ctx<'_> {
       FeatureKind::Form { .. } => self.apply_form(id, kind),
       FeatureKind::BoundingSolid { .. } => self.apply_bounding(id, kind),
       FeatureKind::ProjectToSurface { .. } => self.apply_project(id, kind),
+      FeatureKind::PathPattern { .. } => self.apply_path_pattern(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

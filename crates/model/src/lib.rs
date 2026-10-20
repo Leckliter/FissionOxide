@@ -22,6 +22,7 @@ pub mod form;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
+pub mod pathpattern;
 pub mod plot;
 pub mod refs;
 pub mod regen;
@@ -1486,6 +1487,36 @@ pub enum FeatureKind {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     along: Option<AxisRef>,
   },
+  /// Copies bodies, or re-applies features, along a sketch path (Fusion's Pattern on Path).
+  PathPattern {
+    #[serde(default)]
+    bodies: BodySel,
+    /// Features whose tools are re-applied at each copy; when empty, the bodies are copied.
+    #[serde(default)]
+    features: Vec<FeatureId>,
+    path_sketch: FeatureId,
+    /// The path's curves, chained end to end (default every line and arc of the sketch).
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    count: String,
+    /// Arc length between neighbours, or the whole pattern's length when `extent` is set.
+    distance: String,
+    #[serde(default)]
+    extent: bool,
+    /// Where the original sits along the path, as a fraction of its length (0 = its start).
+    #[serde(default = "zero")]
+    start: String,
+    /// Run toward the path's start instead of its end.
+    #[serde(default)]
+    flip: bool,
+    /// Centre the copies on the original (`count` in total), both ways along the path.
+    #[serde(default)]
+    symmetric: bool,
+    #[serde(default)]
+    orientation: pathpattern::PathOrientation,
+    #[serde(default = "yes")]
+    join: bool,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1629,6 +1660,7 @@ impl FeatureKind {
       FeatureKind::PlaneConstraint { .. } => "CenterConstraint",
       FeatureKind::BoundingSolid { .. } => "BoundingSolid",
       FeatureKind::ProjectToSurface { .. } => "ProjectToSurface",
+      FeatureKind::PathPattern { .. } => "PathPattern",
     }
   }
 
@@ -1711,6 +1743,9 @@ impl FeatureKind {
       FeatureKind::BoundingSolid { plane: Some(plane), .. } => plane_dep(plane),
       FeatureKind::ProjectToSurface { sketch, along, .. } => {
         std::iter::once(*sketch).chain(along.iter().flat_map(axis_dep)).collect()
+      }
+      FeatureKind::PathPattern { features, path_sketch, .. } => {
+        std::iter::once(*path_sketch).chain(features.iter().copied()).collect()
       }
       _ => vec![],
     }
@@ -2500,6 +2535,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::ProjectToSurface { .. } => {}
+    FeatureKind::PathPattern { count, distance, start, .. } => {
+      f(count);
+      f(distance);
+      f(start);
+    }
   }
 }
 

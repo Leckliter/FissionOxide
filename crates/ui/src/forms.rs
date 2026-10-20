@@ -1917,3 +1917,34 @@ pub static FORM_BOX: Form = Form {
   ],
   picks_model: false,
 };
+
+pub static PATH_PATTERN: Form = Form {
+  title: "PATTERN ON PATH",
+  name: "Pattern on Path",
+  hint: "Copies of bodies spaced by arc length along a sketch path",
+  icon: Icon::Pattern,
+  cmd: "pattern.path",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Bodies", required: true },
+    Input::Sketch { key: "path", label: "Path sketch" },
+    Input::Curves { key: "path_curves", label: "Path curves (default all)" },
+    Input::Expr { key: "count", label: "Quantity", default: "3" },
+    Input::Choice {
+      key: "distance_type",
+      label: "Distance type",
+      options: &[("spacing", "Spacing"), ("extent", "Extent")],
+    },
+    Input::Expr { key: "distance", label: "Distance", default: "10 mm" },
+    Input::Expr { key: "start", label: "Start point (0 to 1)", default: "0" },
+    Input::Check { key: "flip", label: "Flip" },
+    Input::Check { key: "symmetric", label: "Symmetric" },
+    Input::Choice {
+      key: "orientation",
+      label: "Orientation",
+      options: &[("identical", "Identical"), ("along_path", "Path direction")],
+    },
+    Input::Check { key: "join", label: "Join to the original" },
+  ],
+  picks_model: true,
+};

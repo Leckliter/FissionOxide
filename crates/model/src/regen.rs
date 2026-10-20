@@ -148,8 +148,6 @@ struct State {
   axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
-  /// Each feature's tool solid, operation and targets, for mirroring features.
-  tools: BTreeMap<FeatureId, (Shape, Operation, Vec<BodyId>)>,
   body_counter: u32,
   /// Saved joint origins: component and frame (as the component is now).
   joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
@@ -159,6 +157,9 @@ struct State {
   groups: Vec<Vec<crate::ComponentId>>,
   /// 3D curves (Project To Surface), as wires.
   curves3d: BTreeMap<FeatureId, Vec<Shape>>,
+  /// The tool solids each feature applied, with their operation and targets (feature mirrors
+  /// and patterns re-apply them).
+  tools: BTreeMap<FeatureId, Vec<pathpattern::Tool>>,
 }
 
 /// The regenerated design.
@@ -807,12 +808,14 @@ impl Ctx<'_> {
       FeatureKind::Mirror { plane, features, .. } if !features.is_empty() => {
         let pl = self.resolve_plane(plane)?;
         for f in features.iter() {
-          let (tool, op, targets) =
+          let tools =
             self.state.tools.get(f).cloned().ok_or("a mirrored feature failed or has no solid to mirror")?;
-          let copy = tool.mirrored(pl.origin, pl.normal()).map_err(ke)?;
-          // the mirror's own targets, else the bodies the feature itself was limited to
-          let targets = if self.targets.is_empty() { targets } else { self.targets.to_vec() };
-          self.operate_on(id, copy, op, &targets)?;
+          for t in tools {
+            let copy = t.shape.mirrored(pl.origin, pl.normal()).map_err(ke)?;
+            // the mirror's own targets, else the bodies the feature itself was limited to
+            let targets = if self.targets.is_empty() { t.targets } else { self.targets.to_vec() };
+            self.operate_on(id, copy, t.op, &targets)?;
+          }
         }
         Ok(None)
       }
@@ -2083,8 +2086,8 @@ impl Ctx<'_> {
   /// Applies a new/join/cut/intersect operation with a tool solid.
   /// The tool is kept so a later mirror can apply it again.
   fn operate(&mut self, feature: FeatureId, tool: Shape, op: Operation) -> Result<(), String> {
+    self.record_tool(feature, &tool, op);
     let targets = self.targets.to_vec();
-    self.state.tools.insert(feature, (tool.clone(), op, targets.clone()));
     self.operate_on(feature, tool, op, &targets)
   }
 
@@ -2371,6 +2374,7 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 mod bound;
 mod direct;
 mod project;
+mod pathpattern;
 mod subasm;
 #[cfg(test)]
 mod tests_config;

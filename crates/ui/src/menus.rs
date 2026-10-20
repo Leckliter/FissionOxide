@@ -109,7 +109,7 @@ use Cmd::Dialog as D;
 const PATTERN: &[E] = &[
   c("Rectangular Pattern", Icon::Pattern, D(Kind::RectPattern)),
   c("Circular Pattern", Icon::CircPattern, D(Kind::CircPattern)),
-  x("Pattern on Path", Icon::Pattern),
+  c("Pattern on Path", Icon::Pattern, D(Kind::Form(&forms::PATH_PATTERN))),
 ];
 
 const SIMPLIFY: &[E] = &[

@@ -258,3 +258,7 @@
 438-angled-plane-body-combine
 439-angled-plane-body-separate
 440-cut-feature-mirror
+449-hole-extent-arc
+450-body-along-path-arc
+451-body-symmetric-line
+452-body-flip-from-end-chain

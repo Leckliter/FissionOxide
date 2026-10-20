@@ -248,3 +248,49 @@ fn bounding_solid_box_cylinder_and_frame() {
   assert!(s.execute("bounding_solid", &json!({"shape": "sphere"})).is_err());
   assert!(s.execute("bounding_solid", &json!({"sides": [1, 2]})).is_err());
 }
+
+#[test]
+fn pattern_on_path_copies_bodies_and_features_along_a_sketch_path() {
+  // a 6 mm cube at (60, 40), patterned back along the chain (0,0)-(60,0)-(60,40) from its end
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [57, 37], "corner2": [63, 43]}));
+  let cube = s.edit_sketch.unwrap().0;
+  run(&mut s, "extrude", json!({"sketch": cube, "distance": 6}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0]]}));
+  run(&mut s, "sketch.line", json!({"points": [[60, 0], [60, 40]]}));
+  let path = s.edit_sketch.unwrap().0;
+  let p = json!({"path": path, "count": 4, "spacing": 25, "start": 1, "flip": true, "join": false});
+  run(&mut s, "pattern.path", p);
+  let mut centres: Vec<[i64; 2]> = s
+    .model
+    .bodies
+    .iter()
+    .map(|b| b.shape.mass().unwrap().center_of_mass)
+    .map(|c| [c.x.round() as i64, c.y.round() as i64])
+    .collect();
+  centres.sort();
+  assert_eq!(centres, vec![[25, 0], [50, 0], [60, 15], [60, 40]]);
+  let pat = s.design.features.last().unwrap().id.0;
+  run(&mut s, "feature.edit", json!({"feature": pat, "set": {"flip": false, "start": "0", "symmetric": true}}));
+  assert_eq!(s.model.bodies.len(), 4);
+
+  // a hole re-cut every 20 mm along an arc of a plate
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [120, 60]}));
+  let plate = s.edit_sketch.unwrap().0;
+  run(&mut s, "extrude", json!({"sketch": plate, "distance": 5}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let arc = run(&mut s, "sketch.arc", json!({"start": [100, 15], "mid": [60, 45], "end": [20, 15]}));
+  run(&mut s, "sketch.circle", json!({"center": [100, 15], "radius": 3}));
+  let sk = s.edit_sketch.unwrap().0;
+  let hole =
+    run(&mut s, "extrude", json!({"sketch": sk, "profiles": [[100, 15]], "extent": "through_all", "operation": "cut"}));
+  let p = json!({"features": [hole["feature"]], "path": sk, "path_curves": arc["curves"], "count": 5, "distance": 80, "extent": true});
+  run(&mut s, "pattern.path", p);
+  assert!(close(volume(&s), 120.0 * 60.0 * 5.0 - 5.0 * PI * 9.0 * 5.0, 1e-6), "{}", volume(&s));
+  let bad = s.execute("pattern.path", &json!({"path": sk, "count": 2, "spacing": 5, "orientation": "sideways"}));
+  assert!(bad.is_err());
+}

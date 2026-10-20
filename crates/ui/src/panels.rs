@@ -2779,6 +2779,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Mirror { .. } => Icon::Mirror,
     FeatureKind::RectangularPattern { .. } => Icon::Pattern,
     FeatureKind::CircularPattern { .. } => Icon::CircPattern,
+    FeatureKind::PathPattern { .. } => Icon::Pattern,
     FeatureKind::Move { .. } => Icon::Move,
     FeatureKind::Combine { .. } => Icon::Combine,
     FeatureKind::Import { .. } => Icon::Import,
