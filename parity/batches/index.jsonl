@@ -10,6 +10,6 @@
 {"name": "ui-feature-dialogs", "items": 4, "status": "fixing", "pr": null}
 {"name": "ui-hole-and-pattern", "items": 2, "status": "fixing", "pr": null}
 {"name": "ui-inspect-and-views", "items": 4, "status": "fixing", "pr": null}
-{"name": "ui-move-triad", "items": 2, "status": "fixing", "pr": null}
+{"name": "ui-move-triad", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/109"}
 {"name": "ui-preferences-undo", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/108"}
 {"name": "ui-sketch-tools", "items": 5, "status": "fixing", "pr": null}
