@@ -20,7 +20,7 @@ ti = root.features.thickenFeatures.createInput(faces, adsk.core.ValueInput.creat
                                                adsk.fusion.FeatureOperations.NewBodyFeatureOperation, False)
 ti.thickenType = adsk.fusion.ThickenTypes.SharpThickenType
 tf = root.features.thickenFeatures.add(ti)
-# the API doubles a symmetric thickness given to createInput (4 mm in, an 8.00 mm parameter out);
+# the API doubles a symmetric thickness given to createInput (2 mm in, a 4.00 mm parameter out);
 # set the parameter the user types in the dialog: Thickness 2 mm, Direction Symmetric (2 mm each side)
 tf.thickness.expression = "2 mm"
 root.features.removeFeatures.add(surf)

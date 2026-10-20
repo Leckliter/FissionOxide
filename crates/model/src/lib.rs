@@ -40,7 +40,9 @@ pub use refs::{EdgeRef, FaceRef};
 use fox_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// - 2: a symmetric thicken's `thickness` is the thickness on each side (it was the total).
+pub const FORMAT_VERSION: u32 = 2;
 /// Hostile-file guards.
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMETERS: usize = 10_000;
@@ -1913,14 +1915,28 @@ impl Design {
   }
 
   pub fn from_json(s: &str) -> Result<Design, DesignError> {
-    let d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
+    let mut d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
     if d.version > FORMAT_VERSION {
       return Err(DesignError::Version(d.version));
     }
     if d.features.len() > MAX_FEATURES || d.parameters.len() > MAX_PARAMETERS {
       return Err(DesignError::TooMany);
     }
+    d.migrate();
     Ok(d)
+  }
+
+  /// Brings a design read from an older file up to [`FORMAT_VERSION`], so it rebuilds as it did.
+  fn migrate(&mut self) {
+    if self.version < 2 {
+      // a symmetric thicken's thickness was the total, half on each side; now it is per side
+      for f in &mut self.features {
+        if let FeatureKind::Thicken { thickness, symmetric: true, .. } = &mut f.kind {
+          *thickness = format!("({}) / 2", thickness.trim());
+        }
+      }
+    }
+    self.version = FORMAT_VERSION;
   }
 
   pub fn save(&self, path: &std::path::Path) -> Result<(), DesignError> {
