@@ -199,6 +199,10 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // form (T-spline) geometry (cpp/form.cpp)
+    include!("fox-kernel/cpp/form.hxx");
+    fn grid_face(points: &[f64], rows: u32, cols: u32) -> Result<UniquePtr<Shape>>;
   }
 }
 

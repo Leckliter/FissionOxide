@@ -11,6 +11,7 @@ use fox_exchange::archive::{Archive, read_foxz, write_foxz};
 use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
 use fox_exchange::svg::{read_svg, write_svg};
 use fox_exchange::{FormatKind, Mesh, format_for_path};
+use fox_kernel::glam::DVec3;
 use fox_model::{Design, FeatureId, FeatureKind, MeshData};
 use fox_sketch::{CurveKind, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -123,8 +124,51 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "f3d" => import_fusion(s, path, p),
+    "tsm" => import_tsm(s, name, &std::fs::read_to_string(path)?),
     other => Err(CmdError::new(format!("import of '{other}' is not implemented"))),
   }
+}
+
+/// Insert T-Spline: a `.tsm` file (`path`) or its contents (`text`) as one smooth body.
+pub fn insert_tsm(s: &mut Session, p: &Value) -> CmdResult {
+  if let Some(text) = p.get("text").and_then(Value::as_str) {
+    let name = p.get("name").and_then(Value::as_str).unwrap_or("T-Spline.tsm").to_string();
+    return import_tsm(s, name, text);
+  }
+  let path = PathBuf::from(p.get("path").and_then(Value::as_str).ok_or(CmdError::new("pass path or text"))?);
+  if ext_of(&path) != "tsm" {
+    return Err(CmdError::new(format!("{}: Insert T-Spline reads .tsm files", path.display())));
+  }
+  import_tsm(s, file_name(&path), &std::fs::read_to_string(&path)?)
+}
+
+/// Largest T-spline cage (faces) turned into a body.
+const MAX_TSM_FACES: usize = 20_000;
+
+/// A T-spline cage's limit surface, as an Import feature with one body.
+fn import_tsm(s: &mut Session, file_name: String, text: &str) -> CmdResult {
+  let cage = fox_exchange::tsm::read_tsm(text).map_err(ex)?;
+  if cage.faces.len() > MAX_TSM_FACES {
+    return Err(CmdError::new(format!(
+      "{file_name} has {} faces; FissionOxide inserts T-splines of up to {MAX_TSM_FACES}",
+      cage.faces.len()
+    )));
+  }
+  // about 16 sample spans across each cage face, fewer on big cages
+  let levels = (2..=4).rev().find(|k| cage.faces.len() << (2 * k) <= 40_000).unwrap_or(1);
+  let patches = cage.limit_patches(levels).map_err(ex)?;
+  let faces = patches
+    .iter()
+    .map(|p| {
+      let pts: Vec<DVec3> = p.points.iter().map(|&q| DVec3::from_array(q)).collect();
+      fox_kernel::Shape::through_grid(&pts, p.rows, p.cols)
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+  let (lo, hi) = cage.points.iter().fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), &q| {
+    (lo.min(DVec3::from_array(q)), hi.max(DVec3::from_array(q)))
+  });
+  let body = fox_kernel::Shape::compound(&faces)?.sewn((hi - lo).length() * 1e-5)?;
+  add_import(s, FeatureKind::Import { file_name, breps: vec![body.to_brep()?], meshes: Vec::new() })
 }
 
 fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Value) -> CmdResult {

@@ -171,3 +171,30 @@ fn hub_comments_and_visual_diff() {
   assert!(!scene.meshes.iter().any(|m| m.color == crate::diff::ADDED_COLOR));
   let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn insert_tspline_from_a_tsm_file() {
+  let tsm = include_str!("../../exchange/testdata/box-cage.tsm");
+  let dir = temp_dir("tsm");
+  let path = dir.join("box.tsm");
+  std::fs::write(&path, tsm).unwrap();
+  // the file, its contents and a plain import all give the same smooth six-faced body
+  let mut s = Session::default();
+  let r = run(&mut s, "form.insert_tsm", json!({"path": path}));
+  assert_eq!(r["solids"], 1);
+  run(&mut s, "form.insert_tsm", json!({"text": tsm}));
+  run(&mut s, "import", json!({"path": path}));
+  assert_eq!(s.model.bodies.len(), 3);
+  for b in &s.model.bodies {
+    assert!(b.shape.is_valid());
+    assert_eq!(b.faces().len(), 6);
+    let m = b.shape.mass().unwrap();
+    // Catmull-Clark limit of the 80 × 60 × 20 mm cage (Fusion measures 75586.9 mm³)
+    assert!((m.volume - 75538.0).abs() < 5.0, "{}", m.volume);
+    assert!((m.bbox_max.z - 20.0).abs() < 1e-3 && (m.bbox_max.x - 40.0).abs() < 1e-3);
+  }
+  assert!(s.execute("form.insert_tsm", &json!({"text": "not a T-spline"})).is_err());
+  assert!(s.execute("form.insert_tsm", &json!({"path": dir.join("box.step")})).is_err());
+  assert!(s.execute("form.insert_tsm", &json!({})).is_err());
+  let _ = std::fs::remove_dir_all(dir);
+}
