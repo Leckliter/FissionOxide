@@ -1,0 +1,5 @@
+# 454-sphere-cut-box-top: added by the parity loop from a Fusion probe
+# sphere-cut-box-top: 40x30x20 box at X 0..40, Y 0..30; sphere primitive r=8 on a plane at Z=20 centred at (20,15), cut: hemispherical pocket in the top face.
+# hand-written; Fusion side is the equivalent semicircle revolved 360 deg about its diameter
+{"cmd": "box", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [20, 15], "width": 40, "depth": 30, "height": 20}
+{"cmd": "sphere", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [20, 15], "radius": 8, "operation": "cut"}

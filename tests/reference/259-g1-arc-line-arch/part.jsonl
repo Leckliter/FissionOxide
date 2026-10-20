@@ -1,0 +1,10 @@
+# 259-g1-arc-line-arch: added by the parity loop from a Fusion probe
+# g1-arc-line-arch: Blend curve (G1): quarter arc centre (0,20) r10 from (0,10) to (10,20) and a line (40,40)->(40,0) joined by a tangent continuous blend arching from (10,20) to (40,40); closed by (40,0)->(0,0)->(0,10); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [0, 10], "mid": [7.071068, 12.928932], "end": [10, 20]}
+{"cmd": "sketch.line", "points": [[40, 40], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [0, 0]]}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 10]]}
+{"cmd": "sketch.blend", "curves": [4, 7], "near": [[10, 20], [40, 40]], "continuity": "g1"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

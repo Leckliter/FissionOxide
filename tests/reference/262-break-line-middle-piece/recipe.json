@@ -1,0 +1,217 @@
+{
+ "id": "break-line-middle-piece",
+ "name": "break-line-middle-piece",
+ "description": "60x20 rectangle crossed by vertical lines x=20 and x=40 (y -5..25); Break the top edge at (30,20), splitting it into three at both crossings; delete the middle piece; extrude the two closed squares 10 mm (two bodies).",
+ "exercises": [
+  "sketch",
+  "break",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "ref": "b.end",
+      "at": [
+       60,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "ref": "r.end",
+      "at": [
+       60,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "ref": "t.end",
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "ref": "b.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "v1",
+     "start": {
+      "at": [
+       20,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       25
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "v2",
+     "start": {
+      "at": [
+       40,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       25
+      ]
+     }
+    },
+    {
+     "type": "break",
+     "curve": "t",
+     "at": {
+      "at": [
+       30,
+       20
+      ]
+     },
+     "pieces": {
+      "tl": [
+       10,
+       20
+      ],
+      "tm": [
+       30,
+       20
+      ],
+      "tr": [
+       50,
+       20
+      ]
+     },
+     "delete": [
+      "tm"
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "v1",
+        "tl",
+        "l"
+       ]
+      }
+     ]
+    },
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "r",
+        "tr",
+        "v2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

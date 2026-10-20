@@ -1,0 +1,3 @@
+# 417-form-box-smooth: Create Form with Fusion's Form > Box cage, 80 x 60 x 20 mm (centred on the
+# origin in XY, z 0..20) with 2 x 2 x 2 faces, left as built: the smooth limit surface of the cage.
+{"cmd": "form.box", "plane": "xy", "length": 80, "width": 60, "height": 20, "length_faces": 2, "width_faces": 2, "height_faces": 2}

@@ -1,0 +1,154 @@
+{
+ "id": "triangle-two-fillets",
+ "name": "triangle-two-fillets",
+ "description": "Triangle (0,0),(50,0),(10,30); sketch Fillet r=6 at the acute (50,0) vertex and r=3 at the (0,0) vertex; extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_fillet",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "s",
+     "start": {
+      "at": [
+       50,
+       0
+      ],
+      "ref": "b.end"
+     },
+     "end": {
+      "at": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "w",
+     "start": {
+      "at": [
+       10,
+       30
+      ],
+      "ref": "s.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "b.start"
+     }
+    },
+    {
+     "type": "fillet",
+     "id": "f1",
+     "curves": [
+      "b",
+      "s"
+     ],
+     "radius": 6
+    },
+    {
+     "type": "fillet",
+     "id": "f2",
+     "curves": [
+      "w",
+      "b"
+     ],
+     "radius": 3
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "s",
+        "w",
+        "f1",
+        "f2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

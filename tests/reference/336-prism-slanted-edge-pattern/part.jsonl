@@ -1,0 +1,10 @@
+# 336-prism-slanted-edge-pattern: added by the parity loop from a Fusion probe
+# prism-slanted-edge-pattern: Right-triangle prism (legs 20 and 10, 8 tall); axis through its slanted top edge (20,0,8)-(0,10,8); body patterned 4x over 360 deg about it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "axis", "method": "edge", "edge": {"point": [10, 5, 8]}}
+{"cmd": "pattern.circular", "axis": {"axis": 3}, "count": 4, "angle": "360 deg", "join": false}

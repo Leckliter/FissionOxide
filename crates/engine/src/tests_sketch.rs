@@ -112,7 +112,7 @@ fn break_tangent_circles_and_blend_from_commands() {
   // blend two line ends with a curvature-continuous spline
   let l1 = run(&mut s, "sketch.line", json!({"points": [[100, 0], [110, 0]]}))["curves"][0].as_u64().unwrap();
   let l2 = run(&mut s, "sketch.line", json!({"points": [[130, 20], [130, 30]]}))["curves"][0].as_u64().unwrap();
-  let bl = run(&mut s, "sketch.blend", json!({"curves": [l1, l2], "near": [[110, 0], [130, 20]]}));
+  let bl = run(&mut s, "sketch.blend", json!({"curves": [l1, l2], "near": [[110, 0], [130, 20]], "continuity": "g2"}));
   assert!(bl["blend"].as_u64().is_some());
   let info = run(&mut s, "sketch.info", json!({}));
   let curvature = info["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "curvature").count();
@@ -292,4 +292,23 @@ fn fixing_a_circle_locks_it_and_deleting_the_fix_frees_it() {
   run(&mut s, "sketch.delete", json!({"constraints": fixes}));
   run(&mut s, "sketch.dimension", json!({"type": "radius", "curves": [c2], "value": 4}));
   assert!((radius(&s, c1) - 4.0).abs() < 1e-9);
+}
+
+#[test]
+fn sketch_text_takes_fusion_text_options() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let t = run(
+    &mut s,
+    "sketch.text",
+    json!({"at": [0, 0], "text": "L", "height": 10, "italic": true, "underline": true, "halign": "center", "spacing": "25%"}),
+  );
+  assert_eq!(t["profiles"], 2, "the letter and its underline: {t}");
+  let text = t["text"].as_u64().unwrap();
+  let e = run(&mut s, "sketch.text_edit", json!({"text_id": text, "underline": false, "valign": "top"}));
+  assert_eq!(e["profiles"], 1, "{e}");
+  let sk = s.edit_sketch.unwrap();
+  let st = &s.design.sketch(sk).unwrap().texts[0].style;
+  assert!(st.italic && !st.underline && st.spacing == 25.0);
+  assert!(s.execute("sketch.text", &json!({"at": [0, 0], "text": "x", "halign": "sideways"})).is_err());
 }

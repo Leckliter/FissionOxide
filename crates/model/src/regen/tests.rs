@@ -198,6 +198,7 @@ fn patterns_mirror_primitives_and_shell() {
     axis: AxisRef::Z,
     count: "6".into(),
     angle: "360 deg".into(),
+    symmetric: false,
     join: false,
   })
   .unwrap();
@@ -223,6 +224,9 @@ fn patterns_mirror_primitives_and_shell() {
     faces: vec![FaceRef::from_face(b.id, top, top.center)],
     thickness: "1".into(),
     round: false,
+    direction: Default::default(),
+    thickness_out: String::new(),
+    bodies: Vec::new(),
   })
   .unwrap();
   d.add_feature(FeatureKind::RectangularPattern {
@@ -647,6 +651,9 @@ fn shelled_box_rips_converts_and_unfolds() {
     faces: vec![FaceRef::from_face(b.id, top, top.center)],
     thickness: "2".into(),
     round: false,
+    direction: Default::default(),
+    thickness_out: String::new(),
+    bodies: Vec::new(),
   })
   .unwrap();
   let m = regenerate(&mut d);

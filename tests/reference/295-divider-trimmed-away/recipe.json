@@ -1,0 +1,170 @@
+{
+ "id": "divider-trimmed-away",
+ "name": "divider-trimmed-away",
+ "description": "40x30 rectangle split by a line x=20 whose ends sit on the bottom and top edges; Trim it at (20,15): nothing crosses it between its ends, so the whole line goes; extrude the whole rectangle 10 mm.",
+ "exercises": [
+  "sketch",
+  "trim",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "r1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r2",
+     "start": {
+      "ref": "r1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r3",
+     "start": {
+      "ref": "r2.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r4",
+     "start": {
+      "ref": "r3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "r1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "d",
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       30
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "d",
+     "at": {
+      "at": [
+       20,
+       15
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1",
+        "r2",
+        "r3",
+        "r4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

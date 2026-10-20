@@ -471,9 +471,10 @@ impl Sketch {
     match &self.curve(id)?.kind {
       CurveKind::Line { a, b } => Some((*a, *b)),
       CurveKind::Arc { start, end, .. } => Some((*start, *end)),
-      CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
-        Some((*points.first()?, *points.last()?))
-      }
+      CurveKind::Spline { points, .. }
+      | CurveKind::ControlSpline { points }
+      | CurveKind::Bezier { points }
+      | CurveKind::QuinticSpline { points } => Some((*points.first()?, *points.last()?)),
       CurveKind::EllipticalArc { start, end, .. } | CurveKind::Conic { start, end, .. } => Some((*start, *end)),
       CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => None,
     }
@@ -1073,9 +1074,10 @@ impl Sketch {
 
   // ---------------------------------------------------------------- blend
 
-  /// A spline bridging an end of curve `a` to an end of curve `b`, tangent to both (G1) or also
-  /// matching their curvature (G2), held there by tangent / curvature constraints. Each curve's
-  /// end is the one nearest its `near` pick, else the closest pair of ends.
+  /// Fusion's blend curve from an end of curve `a` to an end of curve `b`: a quintic spline
+  /// tangent to both (G1), or also matching their curvature (G2), shaped as Fusion shapes it
+  /// (see `quintic::blend_points`) and held there by tangent / curvature constraints. Each
+  /// curve's end is the one nearest its `near` pick, else the closest pair of ends.
   pub fn blend(&mut self, a: CurveId, b: CurveId, near: Option<[P; 2]>, g2: bool) -> Result<CurveId, SketchError> {
     if a == b {
       return Err(SketchError::WrongGeometry("a blend curve", "two different curves"));
@@ -1106,33 +1108,17 @@ impl Sketch {
     let kb = self.curve(b).map(|c| c.kind.clone()).ok_or(SketchError::NoCurve(b))?;
     let posf = |p: PointId| self.pos(p);
     let (Some(fa), Some(fb)) = (end_frame(&ka, ea, &posf), end_frame(&kb, eb, &posf)) else { return Err(what()) };
-    let l = dist(fa.0, fb.0);
-    if l < 1e-9 {
+    if dist(fa.0, fb.0) < 1e-9 {
       return Err(SketchError::InvalidValue("the ends already meet".into()));
     }
     let (sa, sb) = (if ea { a1 } else { a0 }, if eb { b1 } else { b0 });
-    let mut ctrl = Vec::new();
-    if g2 {
-      // first piece of a 6-point clamped B-spline: B1 = c1, B2 = (c1 + c2) / 2, so curvature κ
-      // at the start needs c2 = P0 + 3h·t + 3κh²·n
-      let h = l / 5.0;
-      let side = |f: &(P, P, f64)| {
-        let (p, t, k) = *f;
-        (add(p, mul(t, h)), add(add(p, mul(t, 3.0 * h)), mul(left(t), 3.0 * k * h * h)))
-      };
-      let (c1, c2) = side(&fa);
-      let (c4, c3) = side(&fb);
-      ctrl.extend([c1, c2, c3, c4]);
-    } else {
-      let h = l / 3.0;
-      ctrl.extend([add(fa.0, mul(fa.1, h)), add(fb.0, mul(fb.1, h))]);
-    }
+    let ctrl = crate::quintic::blend_points(fa, fb, g2).ok_or_else(what)?;
     let mut pts = vec![sa];
-    for c in &ctrl {
+    for c in &ctrl[1..crate::QUINTIC_POINTS - 1] {
       pts.push(self.add_point(c[0], c[1]));
     }
     pts.push(sb);
-    let blend = self.add_curve(CurveKind::ControlSpline { points: pts })?;
+    let blend = self.add_curve(CurveKind::QuinticSpline { points: pts })?;
     for other in [a, b] {
       let kind = if g2 {
         ConstraintKind::Curvature { a: other, b: blend }
@@ -1333,6 +1319,7 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
         }
       }
     }
+    CurveKind::QuinticSpline { points } => crate::quintic::quintic_end(&crate::quintic::ctrl_of(points, pos)?, at_end),
     CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => None,
   }
 }
@@ -1547,8 +1534,12 @@ mod tests {
       assert!(dist(last[3], [30.0, 10.0]) < 1e-9);
       assert!(cross(unit(bz_d1(&last, 1.0)).unwrap(), [1.0, 0.0]).abs() < 1e-6);
       if g2 {
-        assert!(bz_curvature(&first, 0.0).abs() < 1e-6, "flat like the line");
-        assert!((bz_curvature(&last, 1.0) - 0.2).abs() < 1e-6, "{}", bz_curvature(&last, 1.0));
+        // the drawn cubic pieces only approximate the quintic's curvature: take it exactly
+        let kind = s.curve(b).unwrap().kind.clone();
+        let (start, end) =
+          (end_frame(&kind, false, &|p| s.pos(p)).unwrap(), end_frame(&kind, true, &|p| s.pos(p)).unwrap());
+        assert!(start.2.abs() < 1e-6, "flat like the line");
+        assert!((end.2 - 0.2).abs() < 1e-6, "{}", end.2);
       }
       // still smooth after the arc moves
       let centre = s.curve_points(a)[0];

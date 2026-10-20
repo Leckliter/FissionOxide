@@ -283,3 +283,25 @@ fn guide_rail_scale_follows_a_path_of_several_edges() {
   assert!(close(volume(&s), two, 0.01), "{} vs {two}", volume(&s));
   assert!(s.is_valid());
 }
+
+#[test]
+fn shell_inside_outside_and_both() {
+  // a 20 mm cube opened at the top
+  let b = Shape::make_box(DVec3::ZERO, DVec3::splat(20.0)).unwrap();
+  let top = b.faces().unwrap().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  let inside = b.shell_sides(&[top], 2.0, 0.0, false).unwrap();
+  assert!(close(volume(&inside), 8000.0 - 16.0 * 16.0 * 18.0, 1e-6), "{}", volume(&inside));
+  // outside: the cube's volume becomes the cavity, the walls go around it (sharp corners)
+  let outside = b.shell_sides(&[top], 0.0, 2.0, false).unwrap();
+  assert!(close(volume(&outside), 24.0 * 24.0 * 22.0 - 8000.0, 1e-6), "{}", volume(&outside));
+  // both: 1 in, 2 out
+  let both = b.shell_sides(&[top], 1.0, 2.0, false).unwrap();
+  assert_eq!(both.solid_count(), 1);
+  assert!(close(volume(&both), 24.0 * 24.0 * 22.0 - 18.0 * 18.0 * 19.0, 1e-6), "{}", volume(&both));
+  assert!(b.shell_sides(&[top], 0.0, 0.0, false).is_err());
+  // no faces opened: a hollow, closed body
+  let hollow = b.shell_sides(&[], 2.0, 0.0, false).unwrap();
+  assert!(close(volume(&hollow), 8000.0 - 16.0f64.powi(3), 1e-6), "{}", volume(&hollow));
+  let hollow = b.shell_sides(&[], 1.0, 2.0, false).unwrap();
+  assert!(close(volume(&hollow), 24.0f64.powi(3) - 18.0f64.powi(3), 1e-6), "{}", volume(&hollow));
+}

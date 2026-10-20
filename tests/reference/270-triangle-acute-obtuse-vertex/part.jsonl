@@ -1,0 +1,10 @@
+# 270-triangle-acute-obtuse-vertex: added by the parity loop from a Fusion probe
+# triangle-acute-obtuse-vertex: Triangle (0,0)-(50,0)-(10,30) with shared vertices; equal-distance chamfer 8 at the acute (50,0) corner and 4 at the obtuse (10,30) corner; extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 5], "distance": 8}
+{"cmd": "sketch.chamfer", "curves": [5, 6], "distance": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[18, 8]], "distance": 5, "operation": "new_body"}

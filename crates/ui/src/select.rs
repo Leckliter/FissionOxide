@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 
 use egui::{Pos2, RichText};
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
 use fox_engine::model::BodyId;
 use fox_engine::scene::Pick;
 use fox_engine::{Sel, Session};
@@ -119,6 +121,77 @@ pub fn pick(app: &mut App, p: Pick, add: bool) {
       }
     }
   }
+}
+
+/// Double-clicking an edge selects its loop, as in Fusion (with `add`, adds the loop to the
+/// selection). Under the body or component priority a double-click picks as a click does.
+pub fn pick_loop(app: &mut App, body: BodyId, edge: u32, add: bool) {
+  if !matches!(targets(&app.s, Pick::Edge { body, edge }, app.sel_priority).as_slice(), [Sel::Edge { .. }]) {
+    return;
+  }
+  let Some(b) = app.s.model.body(body) else { return };
+  let edges = edge_loop(b.edges(), b.faces(), edge, app.cam.eye_dir());
+  if !add {
+    app.s.selection.clear();
+  }
+  for edge in edges {
+    let s = Sel::Edge { body, edge };
+    if !app.s.selection.contains(&s) {
+      app.s.selection.push(s);
+    }
+  }
+}
+
+/// The edges a double-click on `edge` selects: the loop it lies on, the closed boundary of one
+/// of its faces (planar faces turned towards `eye` first), or its tangent chain when it isn't
+/// on a closed loop.
+pub fn edge_loop(edges: &[EdgeInfo], faces: &[FaceInfo], edge: u32, eye: DVec3) -> Vec<u32> {
+  let Some(e) = edges.iter().find(|x| x.id == edge) else { return Vec::new() };
+  let score = |f: u32| match faces.iter().find(|x| x.id == f) {
+    Some(x) if x.kind == SurfaceKind::Plane => 2.0 + x.normal.dot(eye),
+    _ => 0.0,
+  };
+  let mut by: Vec<u32> = e.faces.iter().copied().filter(|f| *f != 0).collect();
+  by.dedup();
+  by.sort_by(|a, b| score(*b).total_cmp(&score(*a)));
+  if let Some(lp) = by.into_iter().find_map(|f| face_loop(edges, f, edge)) {
+    return lp;
+  }
+  let mut out = vec![edge];
+  let mut i = 0;
+  while i < out.len() {
+    for n in fox_engine::tangent_neighbours(edges, out[i]) {
+      if !out.contains(&n) {
+        out.push(n);
+      }
+    }
+    i += 1;
+  }
+  out
+}
+
+/// The edges of `face` connected end to end with `edge`, if they close into a loop.
+fn face_loop(edges: &[EdgeInfo], face: u32, edge: u32) -> Option<Vec<u32>> {
+  let own: Vec<&EdgeInfo> =
+    edges.iter().filter(|e| e.faces.contains(&face) && e.kind != CurveKind::Degenerate).collect();
+  let tol = |e: &EdgeInfo| 1e-6 * (1.0 + e.length);
+  let meet = |p: DVec3, e: &EdgeInfo| (p - e.start).length() < tol(e) || (p - e.end).length() < tol(e);
+  let mut lp = vec![*own.iter().find(|e| e.id == edge)?];
+  let mut i = 0;
+  while i < lp.len() {
+    let a = lp[i];
+    for o in &own {
+      if !lp.iter().any(|x| x.id == o.id) && (meet(a.start, o) || meet(a.end, o)) {
+        lp.push(o);
+      }
+    }
+    i += 1;
+  }
+  // closed: every vertex is where an even number of edge ends meet
+  let ends: Vec<DVec3> = lp.iter().flat_map(|e| [e.start, e.end]).collect();
+  let tol = lp.iter().map(|e| tol(e)).fold(0.0, f64::max);
+  let closed = ends.iter().all(|p| ends.iter().filter(|q| (**q - *p).length() < tol).count() % 2 == 0);
+  closed.then(|| lp.iter().map(|e| e.id).collect())
 }
 
 /// The Select Other list: what lies under a point of the viewport, front to back.
@@ -365,6 +438,14 @@ pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 /// Selects what the covered pixels (`inside`: pixel count per pick id) pick. With `window` only
 /// what lies wholly inside counts; otherwise anything touched. Priority and filters decide what a
 /// covered pick selects (faces, edges, bodies or components; sketch geometry while sketching).
+/// The body a canvas pick lies on.
+pub(crate) fn pick_body(p: &Pick) -> Option<BodyId> {
+  match *p {
+    Pick::Face { body, .. } | Pick::Edge { body, .. } | Pick::Vertex { body, .. } => Some(body),
+    _ => None,
+  }
+}
+
 pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bool, add: bool) {
   let Some(frame) = &app.frame else { return };
   let mut total: HashMap<u32, usize> = HashMap::new();
@@ -386,6 +467,7 @@ pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bo
       matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. })
     } else {
       filter.allows(&p, priority)
+        && !pick_body(&p).is_some_and(|b| app.ctx_menu.unselectable.contains(&b))
         && !matches!(
           (priority, p),
           (Priority::Face, Pick::Edge { .. } | Pick::Vertex { .. })
@@ -648,6 +730,87 @@ fn joint_axis_len(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn cube() -> App {
+    let mut app = App::with_session(Session::default());
+    app.run("box", serde_json::json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+    assert_eq!(app.s.model.bodies.len(), 1, "no box");
+    app
+  }
+
+  /// The edge with its midpoint at `mid`.
+  fn edge_at(app: &App, mid: [f64; 3]) -> u32 {
+    let b = &app.s.model.bodies[0];
+    b.edges().iter().find(|e| (e.mid - DVec3::from(mid)).length() < 1e-3).expect("no edge there").id
+  }
+
+  /// The midpoints of a body's edges, sorted.
+  fn mids(app: &App, ids: &[u32]) -> Vec<[i64; 3]> {
+    let b = &app.s.model.bodies[0];
+    let mut out: Vec<[i64; 3]> = ids
+      .iter()
+      .map(|id| {
+        let m = b.edges().iter().find(|e| e.id == *id).unwrap().mid;
+        [m.x.round() as i64, m.y.round() as i64, m.z.round() as i64]
+      })
+      .collect();
+    out.sort();
+    out
+  }
+
+  #[test]
+  fn double_click_selects_a_box_edges_loop() {
+    let app = cube();
+    let b = &app.s.model.bodies[0];
+    let front_top = edge_at(&app, [10.0, 0.0, 20.0]);
+    // seen from above: the top face's loop
+    let lp = edge_loop(b.edges(), b.faces(), front_top, DVec3::Z);
+    assert_eq!(mids(&app, &lp), vec![[0, 10, 20], [10, 0, 20], [10, 20, 20], [20, 10, 20]]);
+    // seen from the front: the front face's loop
+    let lp = edge_loop(b.edges(), b.faces(), front_top, -DVec3::Y);
+    assert_eq!(mids(&app, &lp), vec![[0, 0, 10], [10, 0, 0], [10, 0, 20], [20, 0, 10]]);
+  }
+
+  #[test]
+  fn double_click_selects_a_filleted_loop() {
+    let mut app = cube();
+    app.run("fillet", serde_json::json!({"edges": [{"point": [20, 20, 10]}], "radius": 5}));
+    let b = &app.s.model.bodies[0];
+    // the round's arc on the top: the top face's loop, four lines and the arc
+    let arc = b.edges().iter().find(|e| e.kind == CurveKind::Circle && e.mid.z > 19.0).expect("no arc on the top").id;
+    let lp = edge_loop(b.edges(), b.faces(), arc, DVec3::new(1.0, 1.0, 1.0).normalize());
+    assert_eq!(lp.len(), 5, "{:?}", mids(&app, &lp));
+    assert!(lp.contains(&arc));
+    assert!(lp.iter().all(|id| b.edges().iter().any(|e| e.id == *id && (e.mid.z - 20.0).abs() < 1e-6)));
+    // the round's straight side edge on x = 20, seen from +X: the side face's loop
+    let side = edge_at(&app, [20.0, 15.0, 10.0]);
+    let lp = edge_loop(b.edges(), b.faces(), side, DVec3::X);
+    assert_eq!(lp.len(), 4, "{:?}", mids(&app, &lp));
+    assert!(lp.iter().all(|id| b.edges().iter().any(|e| e.id == *id && (e.mid.x - 20.0).abs() < 1e-6)));
+  }
+
+  #[test]
+  fn double_click_replaces_or_adds_to_the_selection() {
+    let mut app = cube();
+    app.cam.pitch = 1.2;
+    let body = app.s.model.bodies[0].id;
+    let bottom = Sel::Edge { body, edge: edge_at(&app, [10.0, 0.0, 0.0]) };
+    let front_top = edge_at(&app, [10.0, 0.0, 20.0]);
+    app.s.selection = vec![bottom];
+    pick_loop(&mut app, body, front_top, false);
+    assert_eq!(app.s.selection.len(), 4);
+    assert!(!app.s.selection.contains(&bottom), "a plain double-click replaces the selection");
+    // shift/ctrl: the first click of the pair toggled the edge out again; the loop comes back whole
+    app.s.selection = vec![bottom];
+    pick_loop(&mut app, body, front_top, true);
+    assert_eq!(app.s.selection.len(), 5);
+    assert_eq!(app.s.selection[0], bottom);
+    // body priority: a double-click picks as a click does
+    app.s.selection = vec![bottom];
+    app.sel_priority = Priority::Body;
+    pick_loop(&mut app, body, front_top, false);
+    assert_eq!(app.s.selection, vec![bottom]);
+  }
 
   fn square(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> {
     vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
