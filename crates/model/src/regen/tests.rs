@@ -177,12 +177,83 @@ fn revolve_around_sketch_line() {
     profiles: vec![],
     axis: AxisRef::SketchLine { curve: axis },
     angle: "360".into(),
+    symmetric: false,
+    angle2: None,
     operation: Operation::NewBody,
   })
   .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert!((volume(&m) - PI * (400.0 - 100.0) * 30.0).abs() < 0.1, "{}", volume(&m));
+}
+
+/// A 90 degree revolve of the rectangle x 5..15, z 0..30 (on a plane facing +Y) about a sketch
+/// line on x = 0 drawn downwards, from z = 30 to z = 0, in a design with the given behaviours.
+fn revolve_about_downward_line(behaviours: Behaviours) -> (Design, Model) {
+  let mut d = Design::new("rev");
+  d.behaviours = behaviours;
+  let mut s = Sketch::new();
+  s.add_rectangle([5.0, 0.0], [15.0, -30.0]).unwrap();
+  let (axis, _) = s.add_line(PtSpec::At(0.0, -30.0), PtSpec::At(0.0, 0.0)).unwrap();
+  s.set_construction(axis, true).unwrap();
+  let plane = PlaneRef::Free { origin: [0.0; 3], normal: [0.0, 1.0, 0.0], x: Some([1.0, 0.0, 0.0]) };
+  let sk = d.add_feature(FeatureKind::Sketch { plane, sketch: s, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Revolve {
+    sketch: sk,
+    profiles: vec![],
+    axis: AxisRef::SketchLine { curve: axis },
+    angle: "90 deg".into(),
+    symmetric: false,
+    angle2: None,
+    operation: Operation::NewBody,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert!((volume(&m) - PI * (225.0 - 25.0) * 30.0 / 4.0).abs() < 0.1, "{}", volume(&m));
+  (d, m)
+}
+
+#[test]
+fn revolve_sketch_line_axis_legacy_follows_the_drawn_direction() {
+  // no REVOLVE_AXIS_UNDIRECTED: right-handed about the line from its start to its end (-Z), as
+  // on main, so the profile at +X turns towards -Y
+  let (_, m) = revolve_about_downward_line(Behaviours::legacy());
+  let mp = m.bodies[0].shape.mass().unwrap();
+  assert!(mp.bbox_min.y < -14.9 && mp.bbox_max.y.abs() < 1e-6, "{mp:?}");
+}
+
+#[test]
+fn revolve_sketch_line_axis_new_design_ignores_the_drawn_direction() {
+  // the profile turns towards the sketch normal (+Y) whichever way the line was drawn
+  let (_, m) = revolve_about_downward_line(Behaviours::current());
+  let mp = m.bodies[0].shape.mass().unwrap();
+  assert!(mp.bbox_max.y > 14.9 && mp.bbox_min.y.abs() < 1e-6, "{mp:?}");
+}
+
+#[test]
+fn revolve_without_symmetric_or_angle2_is_one_sided() {
+  // a revolve saved before the symmetric and two-sided options reads as one side and rebuilds
+  // exactly as an explicit one-sided revolve does
+  let (d, m) = revolve_about_downward_line(Behaviours::legacy());
+  let mut v: serde_json::Value = serde_json::from_str(&d.to_json()).unwrap();
+  let mut stripped = 0;
+  for f in v["features"].as_array_mut().unwrap() {
+    if let Some(k) = f["kind"].as_object_mut().filter(|k| k.contains_key("symmetric")) {
+      k.remove("symmetric");
+      k.remove("angle2");
+      stripped += 1;
+    }
+  }
+  assert_eq!(stripped, 1);
+  let mut old = Design::from_json(&v.to_string()).unwrap();
+  assert_eq!(old, d);
+  let FeatureKind::Revolve { symmetric, angle2, .. } = &old.features[1].kind else { panic!("not a revolve") };
+  assert!(!symmetric && angle2.is_none());
+  let again = regenerate(&mut old);
+  ok(&again);
+  let (a, b) = (m.bodies[0].shape.mass().unwrap(), again.bodies[0].shape.mass().unwrap());
+  assert_eq!((a.volume, a.bbox_min, a.bbox_max), (b.volume, b.bbox_min, b.bbox_max));
 }
 
 #[test]

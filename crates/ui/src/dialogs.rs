@@ -392,6 +392,8 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
+const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
+  [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -420,6 +422,8 @@ pub struct Dialog {
   flip: bool,
   op: &'static str,
   angle: String,
+  /// Revolve, two sides: the angle the other way.
+  angle2: String,
   axis: String,
   radius: String,
   count: String,
@@ -553,6 +557,7 @@ impl Dialog {
       flip: false,
       op: "new_body",
       angle: "360 deg".into(),
+      angle2: "0 deg".into(),
       axis: "z".into(),
       radius: "2 mm".into(),
       count: "3".into(),
@@ -939,10 +944,18 @@ impl Dialog {
         d.op = op_str(*operation);
         d
       }
-      FeatureKind::Revolve { sketch, angle, operation, axis, .. } => {
+      FeatureKind::Revolve { sketch, angle, symmetric, angle2, operation, axis, .. } => {
         let mut d = Dialog::blank(Kind::Revolve);
         d.sketch = Some(*sketch);
         d.angle = angle.clone();
+        d.extent = match (symmetric, angle2) {
+          (true, _) => "symmetric",
+          (_, Some(a2)) => {
+            d.angle2 = a2.clone();
+            "two_sides"
+          }
+          _ => "one_side",
+        };
         d.solid.rev_full = angle.trim() == "360 deg";
         d.op = op_str(*operation);
         d.axis = match axis {
@@ -1330,7 +1343,9 @@ impl Dialog {
         let (axis, angle) = (self.revolve_axis()?, self.revolve_angle());
         (
           "revolve",
-          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": angle, "operation": op}),
+          self.with_revolve_sides(
+            json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": angle, "operation": op}),
+          ),
         )
       }
       Kind::Fillet => ("fillet", self.fillet_params()),
@@ -1397,7 +1412,11 @@ impl Dialog {
         )),
         "operation": self.op,
       }),
-      Kind::Revolve => json!({"angle": self.revolve_angle(), "operation": self.op}),
+      Kind::Revolve => {
+        let two = self.extent == "two_sides";
+        json!({"angle": self.revolve_angle(), "symmetric": self.extent == "symmetric",
+          "angle2": if two { json!(self.angle2) } else { Value::Null }, "operation": self.op})
+      }
       Kind::Fillet => self.fillet_edit_set(),
       Kind::Chamfer => self.chamfer_params(json!({}), true),
       Kind::Shell => self.shell_edit_set(),
@@ -2033,7 +2052,17 @@ impl Dialog {
           .response
           .on_hover_text("Or pick a straight edge, sketch line or construction axis in the canvas");
         ui.end_row();
+        ui.label("Direction");
+        self.combo(ui, "rev_dir", &REVOLVE_DIRECTIONS, true);
+        ui.end_row();
         self.revolve_type_rows(ui);
+        if self.extent == "two_sides" {
+          ui.label("Angle 2");
+          if value_edit(ui, &mut self.angle2).changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+        }
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
@@ -3474,6 +3503,16 @@ impl Dialog {
     if value_edit(ui, f).changed() {
       self.dirty = true;
     }
+  }
+
+  /// Revolve: adds the symmetric flag or the second angle for the chosen direction.
+  fn with_revolve_sides(&self, mut p: Value) -> Value {
+    match self.extent {
+      "symmetric" => p["symmetric"] = json!(true),
+      "two_sides" => p["angle2"] = json!(self.angle2),
+      _ => {}
+    }
+    p
   }
 
   fn combo(&mut self, ui: &mut egui::Ui, id: &str, items: &[(&'static str, &'static str)], extent: bool) {

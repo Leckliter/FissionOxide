@@ -134,6 +134,10 @@
 436-closed-ring-four-circles
 437-point-tangent-dome
 44-shell-l-bracket
+445-partial-revolve-direction
+446-symmetric-revolve
+447-two-side-revolve
+448-intersect-revolve-sketch-line-axis
 45-shell-boss-plate
 46-shell-two-open-faces
 47-draft-curved-pocket

@@ -117,7 +117,7 @@ cmds! {
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
-  "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
+  "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
@@ -661,7 +661,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let profiles = profile_points(s, sk, p)?;
       let axis = axis_ref(s, p.get("axis").ok_or(CmdError::new("missing 'axis'"))?)?;
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into());
-      add_op_feature(s, FeatureKind::Revolve { sketch: sk, profiles, axis, angle, operation: operation(p)? }, p)
+      let symmetric = p.get("symmetric").and_then(Value::as_bool).unwrap_or(false);
+      let angle2 = opt_expr(p, "angle2");
+      if symmetric && angle2.is_some() {
+        return Err(CmdError::new("a revolve is either symmetric or two-sided ('angle2'), not both"));
+      }
+      let kind =
+        FeatureKind::Revolve { sketch: sk, profiles, axis, angle, symmetric, angle2, operation: operation(p)? };
+      add_op_feature(s, kind, p)
     }
     "loft" => {
       let list = p.get("sections").and_then(Value::as_array).ok_or(CmdError::new("missing 'sections'"))?;

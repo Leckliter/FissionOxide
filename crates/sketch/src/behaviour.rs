@@ -99,6 +99,10 @@ pub const LOFT_CLOSED_SMOOTH: &str = "loft_closed_smooth";
 /// does (a side no rail touches stays straight); without it, the pull blends smoothly round the
 /// loop from one rail to the next.
 pub const LOFT_RAIL_SPREAD: &str = "loft_rail_spread";
+/// A revolve about a sketch line ignores which way the line was drawn: the profile turns towards
+/// the sketch normal, as about a world axis in the sketch; without it, the profile turns
+/// right-handed about the line from its start to its end.
+pub const REVOLVE_AXIS_UNDIRECTED: &str = "revolve_axis_undirected";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -116,6 +120,7 @@ pub const CURRENT: &[&str] = &[
   SPLINE_CURVATURE_HANDLES,
   LOFT_CLOSED_SMOOTH,
   LOFT_RAIL_SPREAD,
+  REVOLVE_AXIS_UNDIRECTED,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

@@ -651,6 +651,12 @@ pub enum FeatureKind {
     profiles: Vec<[f64; 2]>,
     axis: AxisRef,
     angle: String,
+    /// Symmetric: `angle` turns each way from the profile (twice `angle` in all).
+    #[serde(default)]
+    symmetric: bool,
+    /// Two sides: the angle turned the other (negative) way, as well as `angle` the positive way.
+    #[serde(default)]
+    angle2: Option<String>,
     #[serde(default)]
     operation: Operation,
   },
@@ -2424,7 +2430,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         }
       }
     }
-    FeatureKind::Revolve { angle, .. } => f(angle),
+    FeatureKind::Revolve { angle, angle2, .. } => {
+      f(angle);
+      if let Some(a) = angle2 {
+        f(a);
+      }
+    }
     FeatureKind::Fillet { radius, radius2, setback, radii, sets, distance2, .. } => {
       f(radius);
       for set in sets {
