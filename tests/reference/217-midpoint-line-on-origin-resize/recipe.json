@@ -1,0 +1,197 @@
+{
+ "id": "midpoint-line-on-origin-resize",
+ "name": "Midpoint Line: centred on origin, one end dimensioned",
+ "description": "Midpoint Line from the sketch origin to (25,0) (other end mirrored to (-25,0), midpoint held on the origin) closed into a rectangle with H/V sides; the right end is dimensioned 20 from the origin so both ends move: x -20..20, y 0..20; extruded 10.",
+ "exercises": [
+  "sketch_midpoint_line",
+  "extrude",
+  "sketch_constraints"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line_midpoint",
+     "mid": {
+      "ref": "origin"
+     },
+     "end": {
+      "at": [
+       25,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       25,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       25,
+       20
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       25,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       -25,
+       20
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       -25,
+       20
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       -25,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l3"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l4"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "origin",
+      "l1.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l2.start",
+      "l2.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "vertical"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

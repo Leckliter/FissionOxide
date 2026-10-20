@@ -70,6 +70,7 @@
 #include <GeomAPI_Interpolate.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
@@ -262,6 +263,20 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     if (!me.IsDone()) throw std::runtime_error("degenerate arc in profile");
     return me.Edge();
   }
+  if (kind == 5) {
+    // a conic: the rational quadratic Bezier p0, p1, p2 weighted 1, p3.x, 1
+    TColgp_Array1OfPnt poles(1, 3);
+    for (int k = 0; k < 3; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
+    TColStd_Array1OfReal weights(1, 3);
+    weights.SetValue(1, 1.0);
+    weights.SetValue(2, segs[o + 10]);
+    weights.SetValue(3, 1.0);
+    if (!(segs[o + 10] > 0.0) || !std::isfinite(segs[o + 10])) throw std::runtime_error("degenerate conic in profile");
+    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles, weights);
+    BRepBuilderAPI_MakeEdge me(bz);
+    if (!me.IsDone()) throw std::runtime_error("degenerate conic in profile");
+    return me.Edge();
+  }
   if (kind == 3) {
     TColgp_Array1OfPnt poles(1, 4);
     for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
@@ -281,6 +296,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
 // segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 //   kind 4, an elliptical arc: see ellipse_edge
+//   kind 5, a conic: rational quadratic Bezier through p0 (start), p1 (apex), p2 (end), apex weight p3.x
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
                                  rust::Slice<const uint32_t> loop_lens) {

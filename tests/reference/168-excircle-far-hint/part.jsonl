@@ -1,0 +1,10 @@
+# 168-excircle-far-hint: added by the parity loop from a Fusion probe
+# excircle-far-hint: Closed construction triangle (0,0)-(40,0)-(0,30); hint (100,100) well beyond the hypotenuse, so the circle is the excircle R60 at (60,60) touching the hypotenuse from outside and the legs' extensions; the disc is extruded 4. (Fusion's API resolves hints near the hypotenuse by solver basin, dependent on the order the lines are given; this far hint gives the excircle for this order.)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.construction", "curves": [2, 5, 6], "on": true}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5, 6], "near": [100, 100]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[60, 60]], "distance": 4, "operation": "new_body"}

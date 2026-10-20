@@ -1,0 +1,18 @@
+# 118-construction-reference-parallel: added by the parity loop from a Fusion probe
+# construction-reference-parallel: Fixed construction line (0,40)-(30,55) (slope 1/2); quad A(10,5) B(50,5) C(50,35) fixed, D drawn (12,22); DA vertical and CD parallel to the construction line put D at (10,15): area 800; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 40], [30, 55]]}
+{"cmd": "sketch.construction", "curves": [3], "on": true}
+{"cmd": "sketch.line", "points": [[10, 5], [50, 5]]}
+{"cmd": "sketch.line", "points": [[50, 5], [50, 35]]}
+{"cmd": "sketch.line", "points": [[50, 35], [12, 22]]}
+{"cmd": "sketch.line", "points": [[12, 22], [10, 5]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [4]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [8]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [13]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [12, 3]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

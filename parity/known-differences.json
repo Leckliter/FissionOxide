@@ -1,0 +1,11 @@
+{
+ "_doc": "Reference cases where Fusion genuinely differs from the analytic answer and FissionOxide should not copy it. `client.py compare` reports these as fusion-differs when every difference is in `keys`. Evidence is from Fusion 2705.1.30, 2026-10-19.",
+ "50-sweep-tight-bend": {
+  "keys": ["area_mm2"],
+  "why": "The bend radius equals the tube radius, so the bend is a horn-torus face. Fusion reports that face's area as 740.22 mm2, three times the analytic 246.74 (2 pi r R theta). Volume, centre of mass, bbox and face count agree with FissionOxide and the analytic answer to 1e-9. This is Fusion's area evaluation on a degenerate face, not a different solid."
+ },
+ "63-hinge-knuckle": {
+  "keys": ["volume_mm3", "area_mm2", "center_of_mass"],
+  "why": "The Gap cut is Through All from the XY plane. Fusion stops that cut at z = 3.3 (1.1 x the 3 mm leaf) and leaves the knuckle above it, so the knuckle is not split. Rebuilding the same cut as a 10 mm distance gives the expected 4436.25 mm3 exactly. The geometry is right; Fusion's Through All extent is shorter than the bodies in its path."
+ }
+}
