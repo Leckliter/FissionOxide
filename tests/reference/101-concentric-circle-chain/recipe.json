@@ -1,0 +1,167 @@
+{
+ "id": "concentric-circle-chain",
+ "name": "Three circles chained concentric",
+ "description": "Circle R5 at the origin; R10 drawn at (3,2) and R16 drawn at (-2,4), made concentric R5~R10 and R10~R16. Ring R16/R10 extruded 8, ring R10/R5 extruded 4 joined: stepped washer centred on the origin.",
+ "exercises": [
+  "sketch",
+  "concentric constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 5,
+     "id": "c1"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       3,
+       2
+      ]
+     },
+     "radius": 10,
+     "id": "c2"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       -2,
+       4
+      ]
+     },
+     "radius": 16,
+     "id": "c3"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "concentric",
+     "refs": [
+      "c1",
+      "c2"
+     ]
+    },
+    {
+     "type": "concentric",
+     "refs": [
+      "c2",
+      "c3"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c3"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "c2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Washer"
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude2",
+   "operation": "join",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c2"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 4,
+    "direction": "positive"
+   }
+  }
+ ]
+}

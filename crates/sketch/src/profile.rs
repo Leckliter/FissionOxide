@@ -463,12 +463,39 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
     }
     if ok {
       let root = find(&mut parent, half(start).0);
-      comp_loops.entry(root).or_default().push(Loop { segs });
+      comp_loops.entry(root).or_default().push(Loop { segs: whole_ellipse(segs) });
     }
   }
   let mut comps: Vec<(usize, Vec<Loop>)> = comp_loops.into_iter().collect();
   comps.sort_by_key(|(k, _)| *k);
   (comps.into_iter().map(|(_, v)| v).collect(), circles)
+}
+
+/// A loop made only of arcs of one ellipse, all running the same way, as the one whole ellipse
+/// (so it becomes a single closed edge, like a circle, and an extrusion has one side face).
+fn whole_ellipse(segs: Vec<Seg>) -> Vec<Seg> {
+  let Some(&Seg::EllipseArc { center, major, minor, start, sweep }) = segs.first() else { return segs };
+  if segs.len() < 2 {
+    return segs;
+  }
+  let mut total = 0.0;
+  for s in &segs {
+    match *s {
+      Seg::EllipseArc { center: c, major: m, minor: b, sweep: sw, .. }
+        if dist(c, center) <= MERGE_TOL
+          && dist(m, major) <= MERGE_TOL
+          && (b - minor).abs() <= MERGE_TOL
+          && sw * sweep > 0.0 =>
+      {
+        total += sw;
+      }
+      _ => return segs,
+    }
+  }
+  if (total.abs() - TAU).abs() > 1e-6 {
+    return segs;
+  }
+  vec![Seg::EllipseArc { center, major, minor, start, sweep: TAU.copysign(sweep) }]
 }
 
 /// Splits segments (and circles) where they cross each other's interiors. Circles crossed at two
