@@ -1424,6 +1424,7 @@ impl Dialog {
     match result {
       Ok(v) => {
         self.applied = true;
+        self.note_preview(&v);
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
       }
       Err(e) => self.error = Some(e.0),
@@ -1545,11 +1546,8 @@ impl Dialog {
         Some(Manipulator { origin: r.plane.to_world(at), dir: r.plane.normal(), value: sign * len(&self.distance)? })
       }
       Kind::OffsetPlane => {
-        let base = plane_of(s, &self.plane)?;
-        // offsets from XZ go along +Y (see `OriginPlane::offset_sign`)
-        let sign =
-          if self.plane.as_str() == Some("xz") { fox_engine::model::OriginPlane::Xz.offset_sign() } else { 1.0 };
-        Some(Manipulator { origin: base.origin, dir: sign * base.normal(), value: len(&self.distance)? })
+        let (base, centre) = self.offset_base(s)?;
+        Some(Manipulator { origin: centre, dir: self.offset_sign() * base.normal(), value: len(&self.distance)? })
       }
       _ => self.more_manipulator(s),
     }
@@ -1601,6 +1599,7 @@ impl Dialog {
       return;
     }
     match self.kind {
+      Kind::OffsetPlane => self.sync_offset_base(s),
       Kind::Form(f) if !self.applied || !self.picks() => {
         if self.form.sync(f, s, last_unconsumed_sketch(s)) {
           self.dirty = !self.picks();
@@ -5004,5 +5003,59 @@ mod tests {
     let json = serde_json::to_string(&app.s.design).unwrap();
     let back: fox_engine::model::Design = serde_json::from_str(&json).unwrap();
     assert_eq!(back.named_views, app.s.design.named_views);
+  }
+
+  #[test]
+  fn offset_plane_takes_a_picked_face_or_plane_as_its_base() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10, "at": [30, 0]}));
+    let b = s.model.bodies[0].id;
+    let top = *s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap();
+    let mut d = Dialog::blank(Kind::OffsetPlane);
+    d.sync_selection(&s);
+    assert_eq!(d.plane, json!("xy"));
+    apply(&mut s, &mut d);
+    assert_eq!(d.manipulator(&s).unwrap().origin, fox_engine::kernel::glam::DVec3::ZERO);
+
+    // clicking the top face makes it the base: the label, the arrow and the preview follow it
+    s.selection = vec![Sel::Face { body: b, face: top.id }];
+    d.sync_selection(&s);
+    assert_eq!(d.plane, json!({"body": b.0, "face": top.id}));
+    assert!(d.plane_label.starts_with("Face of"), "{}", d.plane_label);
+    assert!(d.dirty);
+    d.preview(&mut s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    let m = d.manipulator(&s).unwrap();
+    assert!((m.origin - top.center).length() < 1e-6, "{:?} vs {:?}", m.origin, top.center);
+    assert!((m.dir.z - 1.0).abs() < 1e-9 && (m.value - 10.0).abs() < 1e-9);
+    let made = d.previewed_plane().expect("the preview's plane");
+    assert!((s.model.planes[&made].origin.z - 20.0).abs() < 1e-6);
+    let (pl, centre) = d.offset_plane_preview(&s).unwrap();
+    assert!(
+      (pl.origin.z - 20.0).abs() < 1e-6
+        && (centre - (top.center + fox_engine::kernel::glam::DVec3::Z * 10.0)).length() < 1e-6
+    );
+    // the scene leaves the previewed plane to the UI's filled square
+    let opts = fox_engine::scene::ViewOptions { hide_planes: vec![made], ..Default::default() };
+    let (hidden, _) = fox_engine::scene::SceneBuilder::default().build(&s, &opts);
+    let (shown, _) = fox_engine::scene::SceneBuilder::default().build(&s, &Default::default());
+    assert_eq!(shown.lines.iter().filter(|l| l.dashed).count(), hidden.lines.iter().filter(|l| l.dashed).count() + 1);
+
+    // the dropdown still offers the origin planes, and a face left selected doesn't undo it
+    d.use_origin_plane(&mut s, "xz");
+    d.sync_selection(&s);
+    assert_eq!(d.plane, json!("xz"));
+
+    // a construction plane picked in the browser is a base too
+    d.unpreview(&mut s);
+    let pl =
+      FeatureId(run(&mut s, "plane.offset", json!({"plane": "yz", "offset": 5}))["feature"].as_u64().unwrap() as u32);
+    s.selection = vec![Sel::Feature { feature: pl }];
+    d.sync_selection(&s);
+    assert_eq!(d.plane, json!({"feature": pl.0}));
+    apply(&mut s, &mut d);
+    assert!((d.manipulator(&s).unwrap().origin.x - 5.0).abs() < 1e-9);
+    let ok = d.command().unwrap();
+    assert_eq!(ok.1["plane"], json!({"feature": pl.0}));
   }
 }

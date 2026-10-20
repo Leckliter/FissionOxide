@@ -138,6 +138,9 @@ pub struct ViewOptions {
   pub grid_step: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
+  /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
+  /// itself).
+  pub hide_planes: Vec<FeatureId>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -348,7 +351,7 @@ impl SceneBuilder {
 
     // construction planes
     for (id, pl) in &s.model.planes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id) {
         continue;
       }
       let size = scene_size(s) * 0.35;

@@ -3,11 +3,12 @@
 //! offset arrow and angle ring of Joint (see [`crate::manipulators`]); and picking joints and
 //! saved joint origins in the viewport.
 
-use fox_engine::Session;
+use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
-use fox_engine::model::BodyId;
+use fox_engine::model::{BodyId, FeatureId};
 use fox_engine::scene::JointMark;
 use fox_engine::sketch::{CurveId, Sketch};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
@@ -21,6 +22,11 @@ pub(super) struct Cache {
   anchor: Option<(Value, DVec3, DVec3)>,
   /// Move: the bodies and their centre before the move.
   pivot: Option<(Vec<u32>, DVec3)>,
+  /// Offset Plane: the base last taken from the selection (a planar face or construction
+  /// plane), so a plane chosen from the dropdown afterwards isn't overridden by it.
+  offset_base: Option<Value>,
+  /// Offset Plane: the construction plane its preview added.
+  preview_plane: Option<FeatureId>,
 }
 
 const AXES: [&str; 3] = ["x", "y", "z"];
@@ -42,6 +48,73 @@ impl Dialog {
   /// Is the dialog's command applied to the session as a preview?
   pub fn preview_applied(&self) -> bool {
     self.applied
+  }
+
+  /// Offset Plane: a planar face or construction plane picked in the viewport or browser becomes
+  /// the base plane, as in Fusion (the dropdown keeps the origin planes).
+  pub(super) fn sync_offset_base(&mut self, s: &Session) {
+    let picked = s.selection.iter().find_map(|sel| match *sel {
+      Sel::Face { body, face } if super::is_planar(s, body, face) => {
+        Some((json!({"body": body.0, "face": face}), format!("Face of {}", s.body_name(body))))
+      }
+      Sel::Feature { feature } if s.model.planes.contains_key(&feature) && Some(feature) != self.previewed_plane() => {
+        Some((json!({"feature": feature.0}), s.design.feature(feature).map(|f| f.name.clone()).unwrap_or_default()))
+      }
+      _ => None,
+    });
+    let key = picked.as_ref().map(|(v, _)| v.clone());
+    if key == self.manip.offset_base {
+      return;
+    }
+    self.manip.offset_base = key;
+    if let Some((v, label)) = picked
+      && v != self.plane
+    {
+      self.plane = v;
+      self.plane_label = label;
+      self.dirty = true;
+    }
+  }
+
+  /// Records the construction plane an Offset Plane preview added.
+  pub(super) fn note_preview(&mut self, result: &Value) {
+    self.manip.preview_plane = (self.kind == Kind::OffsetPlane)
+      .then(|| result.get("feature").and_then(Value::as_u64))
+      .flatten()
+      .map(|f| FeatureId(f as u32));
+  }
+
+  /// The construction plane the open Offset Plane is previewing (the viewport fills it instead
+  /// of drawing the dashed outline of a finished plane).
+  pub fn previewed_plane(&self) -> Option<FeatureId> {
+    self.manip.preview_plane.filter(|_| self.applied && self.kind == Kind::OffsetPlane && self.editing.is_none())
+  }
+
+  /// Offset Plane's base plane and the point on it the arrow starts from: a picked face's centre,
+  /// else the plane's origin.
+  pub(super) fn offset_base(&self, s: &Session) -> Option<(Plane, DVec3)> {
+    let base = super::plane_of(s, &self.plane)?;
+    let get = |k: &str| self.plane.get(k).and_then(Value::as_u64).map(|x| x as u32);
+    let centre = get("body")
+      .zip(get("face"))
+      .and_then(|(b, f)| s.model.body(BodyId(b))?.faces().iter().find(|x| x.id == f).map(|x| x.center))
+      .map_or(base.origin, |c| base.to_world(base.to_local(c)));
+    Some((base, centre))
+  }
+
+  /// The plane Offset Plane would make, and the centre of the square the viewport fills for it.
+  pub fn offset_plane_preview(&self, s: &Session) -> Option<(Plane, DVec3)> {
+    if self.kind != Kind::OffsetPlane || self.editing.is_some() {
+      return None;
+    }
+    let (base, centre) = self.offset_base(s)?;
+    let d = self.offset_sign() * self.len(s, &self.distance)?;
+    Some((base.offset(d), centre + base.normal() * d))
+  }
+
+  /// Offsets from XZ go along +Y (see `OriginPlane::offset_sign`).
+  pub(super) fn offset_sign(&self) -> f64 {
+    if self.plane.as_str() == Some("xz") { fox_engine::model::OriginPlane::Xz.offset_sign() } else { 1.0 }
   }
 
   fn len(&self, s: &Session, e: &str) -> Option<f64> {
