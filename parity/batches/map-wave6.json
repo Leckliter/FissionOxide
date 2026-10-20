@@ -1,0 +1,10 @@
+{
+  "ui:sketch:fillet-flow": "ui-sketch-flows",
+  "ui:sketch:mirror-pattern-picks": "ui-sketch-flows",
+  "ui:sketch:profile-fill-color": "ui-sketch-flows",
+  "ui:sketch:profile-shading": "ui-sketch-flows",
+  "ui:timeline:review-warning": "ui-errors",
+  "ui:sketch:project-intersect": "ui-engine-gaps",
+  "ui:construct:ucs": "ui-engine-gaps",
+  "ui:insert:duplicate-with-joints": "ui-engine-gaps"
+}
