@@ -4,7 +4,8 @@ the Claude Agent SDK and returns the agent's structured report plus what it cost
 import json
 import os
 
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
+from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKError, ResultMessage, TextBlock,
+                              ToolUseBlock, query)
 
 MODEL = os.environ.get("PARITY_MODEL", "claude-opus-5-5")
 TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
@@ -210,12 +211,15 @@ async def run_agent(prompt, cwd, schema, budget_usd, max_turns, env=None, mcp_se
     max_turns=max_turns,
     max_budget_usd=budget_usd,
     effort=effort,
-    env=env or {},
+    # Only the MCP servers given here: the user's claude.ai connectors would add a tool list of
+    # hundreds of thousands of tokens to every turn.
+    env={"ENABLE_CLAUDEAI_MCP_SERVERS": "false", **(env or {})},
     mcp_servers=mcp_servers or {},
+    strict_mcp_config=True,
     output_format={"type": "json_schema", "schema": schema},
     setting_sources=["project"],
   )
-  result, texts = None, []
+  result, texts, structured, failure = None, [], None, None
   log = open(log_path, "a", encoding="utf-8") if log_path else None
   try:
     async for msg in query(prompt=prompt, options=opts):
@@ -226,23 +230,33 @@ async def run_agent(prompt, cwd, schema, budget_usd, max_turns, env=None, mcp_se
             if log:
               log.write(b.text.rstrip() + "\n\n")
               log.flush()
-          elif log and hasattr(b, "name"):
-            log.write(f"> {b.name} {json.dumps(getattr(b, 'input', {}), ensure_ascii=False)[:400]}\n")
-            log.flush()
+          elif isinstance(b, ToolUseBlock):
+            if b.name == "StructuredOutput":
+              structured = b.input  # kept in case the run then fails (budget, turns)
+            if log:
+              log.write(f"> {b.name} {json.dumps(b.input, ensure_ascii=False)[:400]}\n")
+              log.flush()
       elif isinstance(msg, ResultMessage):
         result = msg
+  except ClaudeSDKError as ex:
+    failure = str(ex)
+    if log:
+      log.write(f"\n!! agent stopped: {failure}\n")
   finally:
     if log:
       log.close()
   if result is None:
-    return None, {"is_error": True, "errors": ["agent produced no result"], "cost_usd": 0.0, "tokens": 0}
+    # The SDK raises on a budget stop instead of returning the result; the cap was spent.
+    cost = budget_usd if failure and "maximum budget" in failure else 0.0
+    return structured, {"is_error": True, "errors": [failure or "agent produced no result"], "cost_usd": cost,
+                        "tokens": 0, "subtype": "error"}
   usage = result.usage or {}
   tokens = sum(int(usage.get(k) or 0) for k in (
     "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
   meta = {"is_error": result.is_error, "subtype": result.subtype, "cost_usd": result.total_cost_usd or 0.0,
           "tokens": tokens, "turns": result.num_turns, "session_id": result.session_id,
           "errors": result.errors or []}
-  report = result.structured_output
+  report = result.structured_output or structured
   if report is None:
     report = last_json(result.result or "\n".join(texts))
   return report, meta
