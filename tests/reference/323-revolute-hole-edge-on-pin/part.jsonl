@@ -1,6 +1,5 @@
 # 323-revolute-hole-edge-on-pin: added by the parity loop from a Fusion probe
 # Joint (Joint Constraint): grounded pin A, r5 h20 cylinder at the origin; plate B 40x12x4 built at x 30..70, y 0..12 with a r5 hole at (36,6). Revolute joint from the hole's bottom circular edge to the pin's top circular edge, offset -10 mm, turned 180 deg.
-# flip: Fusion keeps the two snap Z axes (the hole edge's -Z and the pin edge's +Z) pointing the same way, so the plate turns over; Fox's joint does the same by default (no flip).
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
 {"cmd": "sketch.finish"}

@@ -436,3 +436,62 @@ fn arrange_lays_copies_flat_in_the_envelope() {
   let err = s.model.status(fox_model::FeatureId(fid)).and_then(|x| x.error.clone());
   assert!(err.as_deref().is_some_and(|e| e.contains("don't fit")), "{r} {err:?}");
 }
+
+/// Grounded block A 20x20x10 at the origin and block B 10x6x4 at x 40..50, y 0..6, B's bottom
+/// face jointed (rigid) to A's top face, flipped or not; returns B's body.
+fn face_on_face(s: &mut Session, flip: bool) -> u32 {
+  let (a, _) = part(s, "A", [20.0, 20.0, 10.0], [10.0, 10.0]);
+  run(s, "component.ground", json!({"component": a}));
+  let (b, b_body) = part(s, "B", [10.0, 6.0, 4.0], [45.0, 3.0]);
+  run(
+    s,
+    "joint",
+    json!({
+      "moving": b, "moving_origin": {"face": {"point": [45, 3, 0]}},
+      "fixed": a, "fixed_origin": {"face": {"point": [10, 10, 10]}},
+      "kind": "rigid", "flip": flip,
+    }),
+  );
+  b_body
+}
+
+#[test]
+fn a_new_design_lines_joint_axes_up_as_fusion_does() {
+  assert!(Session::default().design.behaviours.has(fox_sketch::behaviour::FUSION_JOINT_AXES));
+  // unflipped, the Z axes point the same way: B's bottom normal (−Z) turns to +Z, so B turns over
+  // and hangs below A's top face
+  let mut s = Session::default();
+  let b = face_on_face(&mut s, false);
+  let (lo, hi) = bbox(&s, b);
+  assert!(near(lo, [5.0, 7.0, 6.0], 1e-6) && near(hi, [15.0, 13.0, 10.0], 1e-6), "{lo:?} {hi:?}");
+  // flipped, the Z axes face each other and B sits on A
+  let mut s = Session::default();
+  let b = face_on_face(&mut s, true);
+  let (lo, hi) = bbox(&s, b);
+  assert!(near(lo, [5.0, 7.0, 10.0], 1e-6) && near(hi, [15.0, 13.0, 14.0], 1e-6), "{lo:?} {hi:?}");
+}
+
+#[test]
+fn a_legacy_design_keeps_its_joints_where_they_were() {
+  // a design saved before behaviour flags (no `behaviours` field) faces the Z axes unless flipped,
+  // as before: its unflipped joint rebuilds exactly where a new design's flipped one goes
+  let legacy = |flip: bool| {
+    let mut s = Session::default();
+    let b = face_on_face(&mut s, flip);
+    let mut file: Value = serde_json::from_str(&s.design.to_json()).unwrap();
+    file.as_object_mut().unwrap().remove("behaviours");
+    s.design = fox_model::Design::from_json(&file.to_string()).unwrap();
+    assert!(s.design.behaviours.is_empty());
+    s.rebuild();
+    bbox(&s, b)
+  };
+  let fresh = |flip: bool| {
+    let mut s = Session::default();
+    let b = face_on_face(&mut s, flip);
+    bbox(&s, b)
+  };
+  let (lo, hi) = legacy(false);
+  assert!(near(lo, [5.0, 7.0, 10.0], 1e-6) && near(hi, [15.0, 13.0, 14.0], 1e-6), "{lo:?} {hi:?}");
+  assert_eq!(legacy(false), fresh(true));
+  assert_eq!(legacy(true), fresh(false));
+}

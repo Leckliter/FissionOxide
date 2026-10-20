@@ -65,11 +65,17 @@ pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
 /// face. Without it a thread rebuilds as before. A thread with an ISO designation always gets it:
 /// files saved before this flag have no designation.
 pub const ISO_THREADS: &str = "iso_threads";
+/// Joint axes as in Fusion: an unflipped joint lines the moving origin's axes up with the fixed
+/// origin's (the Z axes the same way), and flipping turns the moving frame half a turn about its X
+/// so the Z axes face each other. Without it (designs saved before), the Z axes face each other
+/// unless the joint is flipped.
+pub const FUSION_JOINT_AXES: &str = "fusion_joint_axes";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
   ISO_THREADS,
+  FUSION_JOINT_AXES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

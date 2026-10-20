@@ -2,8 +2,7 @@
 # Joint origin on a vertex with a Z offset and an angle. Grounded block A 20x20x10 at the origin;
 # block B 10x6x4 at x 40..50, y 0..6. B's joint origin on its corner (40,0,0), offset 3 along Z,
 # angle 30 deg; a rigid joint puts it on A's top corner (20,20,10).
-# Fusion keeps the two joint origins' Z axes pointing the same way, and so does Fox's joint
-# unless flipped, so the joint needs no flip.
+# Fusion keeps the two joint origins' Z axes pointing the same way, as Fox's joint does unflipped.
 {"cmd": "box", "width": 20, "depth": 20, "height": 10, "at": [10, 10]}
 {"cmd": "component.create", "name": "A", "bodies": [1000]}
 {"cmd": "component.ground", "component": 1}

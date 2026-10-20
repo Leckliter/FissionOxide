@@ -4903,6 +4903,8 @@ mod tests {
     let mut d = Dialog::blank(Kind::Joint);
     d.choice = "rigid";
     d.saved[1] = "Top".into();
+    // the arm's bottom onto the base's top: flipped, the Z axes face each other and it sits on top
+    d.flip = true;
     (d.angle, d.distance) = ("0 deg".into(), "0 mm".into());
     // as in Fusion, unflipped Z axes line up; flipped, the arm's bottom faces the base's top
     d.flip = true;

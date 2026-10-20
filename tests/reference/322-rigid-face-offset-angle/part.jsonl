@@ -1,6 +1,5 @@
 # 322-rigid-face-offset-angle: added by the parity loop from a Fusion probe
 # Joint (Joint Constraint): grounded A 20x20x10 at the origin; B 10x20x5 built at x 40..50, y 0..20. Rigid joint from the centre of B's bottom face to the centre of A's top face, offset 3 mm, angle 90 deg.
-# flip: Fusion keeps the two snap Z axes (here the face normals) pointing the same way, so B turns over onto A's top face and the 3 mm offset leaves it at z 8..13; Fox's joint does the same by default (no flip).
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 20]}
 {"cmd": "sketch.finish"}

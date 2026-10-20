@@ -197,17 +197,26 @@
 258-g2-line-u-turn
 259-g1-arc-line-arch
 260-g2-arc-line-arch
-# Reference parts that pass; see README.md. One directory name per line.
+297-hinged-plate-angle
+310-rigid-peg-second-point
+311-revolute-angle-second-point
+312-three-face-flush-offset
+313-concentric-stack-offset
+314-vertex-face-angle
+320-group-follows-joint-translate
+321-group-follows-joint-rotate
+325-rigid-face-center-offset
+326-rigid-flip-angle
+327-revolute-rotation-vertex
+328-slider-slide
 491-cut-two-tools-keep
 492-join-two-tools
 493-intersect-two-tools
 494-cut-splits-target
-# Reference parts that pass; see README.md. One directory name per line.
 495-delete-fillet-feature
 496-delete-second-body
 497-delete-cut-keep-chamfer
 498-delete-consumed-sketch
-# Reference parts that pass; see README.md. One directory name per line.
 499-flipped-two-faces
 500-mid-plane-single
 501-mid-plane-symmetric
@@ -234,10 +243,6 @@
 291-apparent-intersection
 296-flush-face-offset
 301-block-centered-in-channel
-325-rigid-face-center-offset
-326-rigid-flip-angle
-327-revolute-rotation-vertex
-328-slider-slide
 360-parallel-body-edges
 361-axis-and-edge
 362-sketch-line-and-edge

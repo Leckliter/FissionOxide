@@ -563,7 +563,7 @@ mod tests {
     d.choice = "rigid";
     d.angle = "0 deg".into();
     d.distance = "0 mm".into();
-    // as in Fusion, unflipped Z axes line up; flipped, the arm's bottom faces the base's top
+    // the arm's bottom onto the base's top: flipped, the Z axes face each other and it sits on top
     d.flip = true;
     d.origins = vec![face(&s, 1, false), face(&s, 0, true)];
     d.comps = vec![comp(&s, arm), comp(&s, base)];

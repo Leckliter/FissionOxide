@@ -1,6 +1,5 @@
 # 324-cylindrical-hole-face-on-pin: added by the parity loop from a Fusion probe
 # Joint (Joint Constraint): grounded pin A, r5 h20 cylinder at the origin; plate B 40x12x4 built at x 30..70, y 0..12 with a r5 hole at (36,6). Cylindrical joint from the middle of the hole face to the middle of the pin face, slid 5 mm and turned 90 deg.
-# flip: Fusion keeps the two snap Z axes pointing the same way (both cylinder axes +Z, along the extrusions); Fox's joint does the same by default (no flip).
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
 {"cmd": "sketch.finish"}
