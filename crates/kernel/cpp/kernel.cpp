@@ -37,6 +37,10 @@
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Domain.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepGProp_Sinert.hxx>
+#include <BRepGProp_Vinert.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -760,15 +764,83 @@ rust::Vec<EdgeInfo> edge_infos(const Shape &s) {
   FOX_CATCH("edge info")
 }
 
+// Is this an analytic face (plane, cylinder, cone, sphere, torus) trimmed by a free-form edge (a
+// B-spline from a boolean, say)? Gauss integration with its default point counts can be a few mm³
+// off on those, where the trim runs across a wide stretch of the surface's parameters, so they are
+// integrated adaptively. Free-form faces stay with the default, which adaptive integration of
+// swept surfaces can do worse than.
+static bool needs_adaptive(const TopoDS_Face &f) {
+  switch (BRepAdaptor_Surface(f, Standard_False).GetType()) {
+  case GeomAbs_Plane:
+  case GeomAbs_Cylinder:
+  case GeomAbs_Cone:
+  case GeomAbs_Sphere:
+  case GeomAbs_Torus: break;
+  default: return false;
+  }
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge &e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e)) continue;
+    switch (BRepAdaptor_Curve(e).GetType()) {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola: break;
+    default: return true;
+    }
+  }
+  return false;
+}
+
 MassProps mass_props(const Shape &s) {
   FOX_TRY
   MassProps out{};
-  GProp_GProps vol;
-  BRepGProp::VolumeProperties(s.s, vol);
+  bool adaptive = false;
+  for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More() && !adaptive; ex.Next()) {
+    adaptive = needs_adaptive(TopoDS::Face(ex.Current()));
+  }
+  GProp_GProps vol, surf;
+  if (!adaptive) {
+    BRepGProp::VolumeProperties(s.s, vol);
+    BRepGProp::SurfaceProperties(s.s, surf);
+  } else {
+    // face by face as BRepGProp sums them, about one point, adaptively where the face needs it
+    Bnd_Box rough;
+    BRepBndLib::Add(s.s, rough);
+    gp_Pnt at = rough.IsVoid() ? gp_Pnt() : gp_Pnt((rough.CornerMin().XYZ() + rough.CornerMax().XYZ()) / 2);
+    vol = GProp_GProps(at);
+    surf = GProp_GProps(at);
+    for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face &f = TopoDS::Face(ex.Current());
+      const bool fine = needs_adaptive(f);
+      BRepGProp_Face bf(fine);
+      bf.Load(f);
+      BRepGProp_Domain bd;
+      const bool natural = !TopoDS_Iterator(f).More();
+      if (!natural) bd.Init(f);
+      BRepGProp_Sinert a;
+      a.SetLocation(at);
+      if (fine) {
+        natural ? a.Perform(bf, 1e-7) : a.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? a.Perform(bf) : a.Perform(bf, bd);
+      }
+      surf.Add(a);
+      if (f.Orientation() != TopAbs_FORWARD && f.Orientation() != TopAbs_REVERSED) continue;
+      if (!natural) bd.Init(f); // the area pass used up its edges
+      BRepGProp_Vinert v;
+      v.SetLocation(at);
+      if (fine) {
+        natural ? v.Perform(bf, 1e-7) : v.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? v.Perform(bf) : v.Perform(bf, bd);
+      }
+      vol.Add(v);
+    }
+  }
   out.volume = vol.Mass();
   out.cog = arr(vol.CentreOfMass().XYZ());
-  GProp_GProps surf;
-  BRepGProp::SurfaceProperties(s.s, surf);
   out.area = surf.Mass();
   // the tight box: the default one is loose around curved (fillet, B-spline) faces
   Bnd_Box box;

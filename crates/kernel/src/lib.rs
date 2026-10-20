@@ -1022,8 +1022,13 @@ mod tests_features2;
 mod sheet2;
 
 mod refparts;
+
+mod project;
+pub use project::{PathEnds, Projection3d};
 #[cfg(test)]
 mod tests_ellipse;
+#[cfg(test)]
+mod tests_project;
 #[cfg(test)]
 mod tests_refparts;
 

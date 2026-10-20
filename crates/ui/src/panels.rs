@@ -2840,6 +2840,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::AlignConstraint { .. } => Icon::JointOrigin,
     FeatureKind::PlaneConstraint { .. } => Icon::Combine,
     FeatureKind::BoundingSolid { .. } => Icon::Box,
+    FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
   }
 }
 

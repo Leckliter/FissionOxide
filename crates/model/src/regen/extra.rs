@@ -127,6 +127,10 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation, section, distance } => {
+        if self.state.curves3d.contains_key(path_sketch) {
+          let picked: Vec<u32> = path_curves.iter().map(|c| c.0).collect();
+          return self.pipe_along_curves(id, *path_sketch, &picked, diameter, wall, *operation, *section, distance);
+        }
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
         let fraction = if distance.trim().is_empty() {
           None
@@ -484,6 +488,7 @@ impl Ctx<'_> {
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
       FeatureKind::Form { .. } => self.apply_form(id, kind),
       FeatureKind::BoundingSolid { .. } => self.apply_bounding(id, kind),
+      FeatureKind::ProjectToSurface { .. } => self.apply_project(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

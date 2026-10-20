@@ -1473,6 +1473,19 @@ pub enum FeatureKind {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sides: Vec<String>,
   },
+  /// Sketch curves draped onto faces as 3D curves (Fusion's Project To Surface): pushed along a
+  /// direction until they meet the faces, or each point dropped onto the nearest point of the
+  /// faces. A pipe can follow them.
+  ProjectToSurface {
+    sketch: FeatureId,
+    /// The curves to project; empty = every non-construction curve.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    faces: Vec<FaceRef>,
+    /// The direction to project along; none = to the closest point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    along: Option<AxisRef>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1615,6 +1628,7 @@ impl FeatureKind {
       FeatureKind::AlignConstraint { .. } => "Align",
       FeatureKind::PlaneConstraint { .. } => "CenterConstraint",
       FeatureKind::BoundingSolid { .. } => "BoundingSolid",
+      FeatureKind::ProjectToSurface { .. } => "ProjectToSurface",
     }
   }
 
@@ -1695,6 +1709,9 @@ impl FeatureKind {
         moving_planes.iter().chain(fixed_planes).flat_map(plane_dep).collect()
       }
       FeatureKind::BoundingSolid { plane: Some(plane), .. } => plane_dep(plane),
+      FeatureKind::ProjectToSurface { sketch, along, .. } => {
+        std::iter::once(*sketch).chain(along.iter().flat_map(axis_dep)).collect()
+      }
       _ => vec![],
     }
   }
@@ -2482,6 +2499,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
+    FeatureKind::ProjectToSurface { .. } => {}
   }
 }
 

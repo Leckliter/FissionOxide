@@ -213,6 +213,16 @@ pub(crate) mod ffi {
       vknots: &[f64],
       vmults: &[u32],
     ) -> Result<UniquePtr<Shape>>;
+
+
+    // Project To Surface and pipes along the 3D wires it gives (cpp/project.cpp)
+    include!("fox-kernel/cpp/project.hxx");
+    fn project_curves(curves: &Shape, faces: &Shape, dir: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn round_pipe(spine: &Shape, radius: f64, inner: f64) -> Result<UniquePtr<Shape>>;
+    fn wire_ends(wire: &Shape) -> Result<Vec<f64>>;
+    fn split_seams(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn child_count(s: &Shape) -> usize;
+    fn child_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
   }
 }
 

@@ -402,6 +402,23 @@ impl SceneBuilder {
         behind: false,
       });
     }
+    // Project To Surface curves, drawn like sketch geometry on the faces
+    for (id, curves) in &s.model.curves3d {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed || f.visible == Some(false)) {
+        continue;
+      }
+      for line in curves.iter().filter_map(|c| c.edge_lines(0.02).ok()).flatten() {
+        scene.lines.push(Polyline {
+          points: line.points.iter().map(|p| p.as_vec3().to_array()).collect(),
+          color: [200, 140, 40, 255],
+          width: 1.5,
+          id: 0,
+          on_top: true,
+          dashed: false,
+          behind: false,
+        });
+      }
+    }
 
     if !opts.hide_grid {
       grid(&mut scene, s);
