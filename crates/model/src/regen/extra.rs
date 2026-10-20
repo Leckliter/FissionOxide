@@ -7,7 +7,7 @@ use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation};
+use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PlaneRef};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
 const ISO_COARSE: [(f64, f64); 18] = [
@@ -680,9 +680,19 @@ impl Ctx<'_> {
           let mid = pa.origin + na * ((pb.origin - pa.origin).dot(na) / 2.0);
           return Ok(Plane { origin: mid, ..pa });
         }
-        let nb = if na.dot(nb) < 0.0 { -nb } else { nb };
         let (o, _) = plane_line(&pa, &pb).ok_or("the planes don't meet")?;
-        Plane::from_normal(o, na + nb, pa.x).map_err(ke)
+        let nb = if na.dot(nb) < 0.0 { -nb } else { nb };
+        let mut n = na + nb;
+        if let (PlaneRef::Face { face: fa }, PlaneRef::Face { face: fb }) = (a, b) {
+          // two body faces: Fusion takes the bisector that runs between them, with their centroids
+          // on opposite sides (through the body at a convex edge), not the one outside it
+          let (ca, cb) = (self.face_info(fa)?.1.origin, self.face_info(fb)?.1.origin);
+          let side = |n: DVec3| (ca - o).dot(n) * (cb - o).dot(n);
+          if side(na - nb) < side(n) {
+            n = na - nb;
+          }
+        }
+        Plane::from_normal(o, n, pa.x).map_err(ke)
       }
       PlaneDef::ThreePoints { a, b, c } => {
         let (a, b, c) = (self.point_of(a)?, self.point_of(b)?, self.point_of(c)?);

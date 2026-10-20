@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+344-face-and-offset-plane
+345-opposed-face-and-plane
+346-perpendicular-faces
+347-two-origin-planes
