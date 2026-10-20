@@ -843,6 +843,21 @@ impl Sketch {
     angle: f64,
     symmetric: bool,
   ) -> Result<Vec<CurveId>, SketchError> {
+    self.pattern_circ_suppressed(curves, center, n, angle, symmetric, &[])
+  }
+
+  /// [`Sketch::pattern_circ`] without the instances in `suppressed` (Fusion's Suppress). An
+  /// instance is numbered by its slot, 0 to `n - 1` in the direction the pattern turns (with
+  /// Symmetric, 0 is the far negative end); the originals' slot can't be suppressed.
+  pub fn pattern_circ_suppressed(
+    &mut self,
+    curves: &[CurveId],
+    center: P,
+    n: usize,
+    angle: f64,
+    symmetric: bool,
+    suppressed: &[usize],
+  ) -> Result<Vec<CurveId>, SketchError> {
     if !(1..=2000).contains(&n) {
       return Err(SketchError::InvalidValue("pattern count must be 1..2000".into()));
     }
@@ -851,7 +866,7 @@ impl Sketch {
     // slots on the negative side of the originals
     let back = if symmetric && !full { (n - 1) / 2 } else { 0 };
     let mut out = Vec::new();
-    for k in (0..n).filter(|k| *k != back) {
+    for k in (0..n).filter(|k| *k != back && !suppressed.contains(k)) {
       let (s, c) = (step * (k as f64 - back as f64)).sin_cos();
       let rot = move |p: P| {
         let v = sub(p, center);

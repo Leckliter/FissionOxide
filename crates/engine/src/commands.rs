@@ -121,7 +121,7 @@ cmds! {
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
-  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
+  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?, suppress?: [slot] (0..count-1 in the turning direction; Symmetric's 0 is the far negative end)}";
   "sketch.project" => "Project a body's silhouette (or one face's edges, which follow the body) into the sketch", "{body, face?, associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
@@ -2100,7 +2100,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
     Rect(Box<RectPattern>),
-    Circ([f64; 2], usize, f64, bool),
+    Circ([f64; 2], usize, f64, bool, Vec<usize>),
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
   let op = match name {
@@ -2133,6 +2133,10 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         .transpose()?
         .unwrap_or(std::f64::consts::TAU),
       p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
+      p.get("suppress")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_u64).map(|k| k as usize).collect())
+        .unwrap_or_default(),
     ),
   };
   let made = s.edit(move |d| {
@@ -2183,7 +2187,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         }
         sketch.pattern_rect(&curves, a, b)?
       }
-      Op::Circ(c, n, a, sym) => sketch.pattern_circ(&curves, c, n, a, sym)?,
+      Op::Circ(c, n, a, sym, skip) => sketch.pattern_circ_suppressed(&curves, c, n, a, sym, &skip)?,
     };
     if !sketch.solve().ok() {
       return Err(CmdError::new("the result conflicts with the sketch's constraints"));

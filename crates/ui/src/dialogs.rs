@@ -18,6 +18,7 @@ mod hole_pattern;
 mod live;
 mod manip;
 mod move_copy;
+mod sketch_refs;
 mod solid;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
@@ -519,6 +520,8 @@ pub struct Dialog {
   live: live::Live,
   /// Sketch Offset: the distance and side follow the cursor until a click places the offset.
   follow: bool,
+  /// Sketch Mirror / pattern references picked in the canvas (see [`sketch_refs`]).
+  skp: sketch_refs::Refs,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -633,6 +636,7 @@ impl Dialog {
       mv: move_copy::MoveForm::default(),
       live: live::Live::default(),
       follow: false,
+      skp: sketch_refs::Refs::default(),
     }
   }
 
@@ -905,6 +909,9 @@ impl Dialog {
       if kind == Kind::SkMirror {
         d.line = mirror_line(s, &d.curves);
         d.curves.retain(|c| Some(*c) != d.line);
+      }
+      if matches!(kind, Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern) {
+        d.open_sketch_refs(s);
       }
     }
     d.comps = d.bodies.iter().map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
@@ -1313,20 +1320,15 @@ impl Dialog {
       Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
-      Kind::SkCircPattern => (
-        "sketch.pattern_circ",
-        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle,
-          "symmetric": self.flag}),
-      ),
+      Kind::SkCircPattern => ("sketch.pattern_circ", self.circ_params()?),
       Kind::SkRectPattern => {
-        let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
         let mut p = json!({
-          "curves": self.curves, "direction": v(&self.dir), "count": self.count.trim().parse::<u64>().ok()?,
+          "curves": self.curves, "direction": self.rect_dir(0), "count": self.count.trim().parse::<u64>().ok()?,
           "spacing": self.spacing, "symmetric": self.symmetric[0],
           "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
         if self.use_dir2 {
-          p["direction2"] = json!(v(&self.dir2));
+          p["direction2"] = self.rect_dir(1);
           p["count2"] = json!(self.count2.trim().parse::<u64>().ok()?);
           p["spacing2"] = json!(self.spacing2);
           p["symmetric2"] = json!(self.symmetric[1]);
@@ -1876,23 +1878,14 @@ impl Dialog {
           self.origins = o;
         }
       }
-      Kind::SkFillet
-      | Kind::SkChamfer
-      | Kind::SkChamfer2
-      | Kind::SkChamferAngle
-      | Kind::SkOffset
-      | Kind::SkMirror
-      | Kind::SkCircPattern
-      | Kind::SkRectPattern => {
-        let mut c = sel_curves(s);
-        if self.kind == Kind::SkMirror {
-          c.retain(|x| Some(*x) != self.line);
-        }
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle | Kind::SkOffset => {
+        let c = sel_curves(s);
         if !c.is_empty() && c != self.curves {
           self.curves = c;
           self.dirty = true;
         }
       }
+      Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern => self.sync_sketch_refs(s),
       Kind::FlatPattern => {
         let b = sel_bodies(s);
         if b != self.bodies {
@@ -3027,49 +3020,13 @@ impl Dialog {
           self.follow = false;
         }
       }
-      Kind::SkMirror => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        ui.label("Mirror line");
-        let lines = self.sketch_lines_of(app.s.edit_sketch, app);
-        let cur = self.line.map(|l| format!("Sketch line {l}")).unwrap_or("Pick a line".into());
-        egui::ComboBox::from_id_salt("mline").selected_text(cur).width(140.0).show_ui(ui, |ui| {
-          for (id, label) in lines {
-            if ui.selectable_label(self.line == Some(id), label).clicked() {
-              self.line = Some(id);
-              self.curves.retain(|c| *c != id);
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-      }
+      Kind::SkMirror => self.sketch_ref_rows(app, ui, dirty),
       Kind::SkCircPattern => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        ui.label("Center X, Y");
-        ui.horizontal(|ui| {
-          for v in self.at.iter_mut() {
-            if ui.add(egui::TextEdit::singleline(v).desired_width(64.0)).changed() {
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        Self::field(ui, "Quantity", &mut self.count, dirty);
-        Self::field(ui, "Total angle", &mut self.angle, dirty);
-        Self::check(ui, "Symmetric", &mut self.flag, dirty);
+        self.sketch_ref_rows(app, ui, dirty);
+        self.circ_pattern_fields(ui, dirty);
       }
       Kind::SkRectPattern => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        const DIRS: [(&str, &str); 2] = [("x", "Horizontal"), ("y", "Vertical")];
-        let mut d1: &'static str = if self.dir == "y" { "y" } else { "x" };
-        Self::choose(ui, "Direction", "sdir1", &mut d1, &DIRS, dirty);
-        self.dir = d1.into();
+        self.sketch_ref_rows(app, ui, dirty);
         const TYPES: [(&str, &str); 2] = [("spacing", "Spacing"), ("extent", "Extent")];
         let mut ty: &'static str = if self.pattern_extent { "extent" } else { "spacing" };
         Self::choose(ui, "Distance type", "sdtype", &mut ty, &TYPES, dirty);
@@ -3079,9 +3036,7 @@ impl Dialog {
         Self::check(ui, "Symmetric", &mut self.symmetric[0], dirty);
         Self::check(ui, "Second direction", &mut self.use_dir2, dirty);
         if self.use_dir2 {
-          let mut d2: &'static str = if self.dir2 == "x" { "x" } else { "y" };
-          Self::choose(ui, "Direction 2", "sdir2", &mut d2, &DIRS, dirty);
-          self.dir2 = d2.into();
+          self.rect_dir2_row(ui, dirty);
           Self::field(ui, "Quantity 2", &mut self.count2, dirty);
           Self::field(ui, "Distance 2", &mut self.spacing2, dirty);
           Self::check(ui, "Symmetric 2", &mut self.symmetric[1], dirty);

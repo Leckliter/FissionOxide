@@ -198,6 +198,31 @@ fn splines_and_ellipses_in_trim_extend_offset_and_constraints() {
   assert!(spline["kind"]["start_handle"].is_u64() && spline["kind"]["end_handle"].is_u64(), "{spline}");
 }
 
+/// Fusion's Suppress on a sketch Circular Pattern: suppressed slots get no copy; the others keep
+/// their places.
+#[test]
+fn sketch_circular_pattern_suppresses_instances() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c = run(&mut s, "sketch.circle", json!({"center": [10, 0], "radius": 1}))["curves"][0].as_u64().unwrap();
+  let made = run(&mut s, "sketch.pattern_circ", json!({"curves": [c], "count": 4, "suppress": [2]}));
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let mut centres: Vec<[i64; 2]> = ids(&made["curves"])
+    .iter()
+    .map(|id| {
+      let p = sketch.curve_points(fox_sketch::CurveId(*id as u32))[0];
+      let q = sketch.pos(p).unwrap();
+      [q[0].round() as i64, q[1].round() as i64]
+    })
+    .collect();
+  centres.sort();
+  assert_eq!(centres, vec![[0, -10], [0, 10]], "slots 1 and 3; slot 2 (at -X) suppressed");
+  // without suppress every slot is made
+  let made = run(&mut s, "sketch.pattern_circ", json!({"curves": [c], "count": 4}));
+  assert_eq!(ids(&made["curves"]).len(), 3);
+}
+
 #[test]
 fn sketch_rectangular_pattern_options() {
   let mut s = Session::default();

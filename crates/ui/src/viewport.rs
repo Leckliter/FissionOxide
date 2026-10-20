@@ -299,6 +299,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   consumed |= fillet_overlay(app, &resp, &painter, &view, &ctx);
+  consumed |= suppress_overlay(app, &resp, &painter, &view);
   if app.objects.joints {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   }
@@ -2900,6 +2901,36 @@ fn fillet_overlay(
     app.tstate.fillet.cancel(&mut app.s);
   }
   hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// Sketch Circular Pattern with Suppress on: a tick box on each instance, as in Fusion; a click
+/// suppresses the instance (clears its box) or brings it back. True when the pointer is on one.
+fn suppress_overlay(app: &mut App, resp: &egui::Response, painter: &egui::Painter, view: &View) -> bool {
+  let Some((plane, marks)) = app.dialog.as_ref().and_then(|d| d.suppress_marks(&app.s)) else { return false };
+  let pointer = resp.hover_pos();
+  let mut hit = None;
+  for (at, slot, suppressed) in marks {
+    let Some(c) = view.to_screen(&app.cam, plane.to_world(at)) else { continue };
+    let r = Rect::from_center_size(c, Vec2::splat(13.0));
+    let hot = pointer.is_some_and(|p| r.expand(3.0).contains(p));
+    let col = Color32::from_rgb(30, 110, 235);
+    painter.rect(r, 2.0, Color32::WHITE, Stroke::new(if hot { 2.0 } else { 1.2 }, col), egui::StrokeKind::Inside);
+    if !suppressed {
+      let s = Stroke::new(1.8, col);
+      painter.line_segment([r.left_center() + Vec2::new(3.0, 0.0), r.center_bottom() + Vec2::new(-1.0, -3.0)], s);
+      painter.line_segment([r.center_bottom() + Vec2::new(-1.0, -3.0), r.right_top() + Vec2::new(-3.0, 3.0)], s);
+    }
+    if hot {
+      hit = Some(slot);
+    }
+  }
+  if let Some(slot) = hit
+    && resp.clicked()
+    && let Some(d) = app.dialog.as_mut()
+  {
+    d.toggle_suppressed(slot);
+  }
+  hit.is_some()
 }
 
 /// The Measure dialog's result: a line between the closest points with the distance.

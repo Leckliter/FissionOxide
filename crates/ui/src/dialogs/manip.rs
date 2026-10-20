@@ -236,6 +236,7 @@ impl Dialog {
     }
     match self.kind {
       Kind::Move => self.move_triad(s),
+      Kind::SkRectPattern | Kind::SkCircPattern => self.sketch_pattern_triad(s),
       Kind::Joint => {
         let f = self.joint_fixed_frame(s)?;
         let (x, y, z, o) = (f.x_axis.truncate(), f.y_axis.truncate(), f.z_axis.truncate(), f.w_axis.truncate());
@@ -271,6 +272,11 @@ impl Dialog {
         }
         TriadEdit::Rotate(_, a) => self.angle = deg(a),
       },
+      Kind::SkRectPattern | Kind::SkCircPattern => {
+        if !self.set_sketch_pattern_triad(s, edit) {
+          return;
+        }
+      }
       _ => return,
     }
     self.dirty = true;
