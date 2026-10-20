@@ -1145,13 +1145,13 @@ impl Sketch {
   }
 
   /// Gives a fit-point spline a tangent handle at the end where it meets `other` (so tangency and
-  /// curvature constraints can turn the end without dragging the fit points about).
-  pub(crate) fn add_spline_handle(&mut self, spline: CurveId, other: CurveId) {
-    let Some(CurveKind::Spline { points, start_handle, end_handle }) = self.curve(spline).map(|c| c.kind.clone())
-    else {
+  /// curvature constraints can turn the end without dragging the fit points about), and with
+  /// `curvature` a curvature handle there too, which makes that end smooth as Fusion's are.
+  pub(crate) fn add_spline_handle(&mut self, spline: CurveId, other: CurveId, curvature: bool) {
+    let Some(kind) = self.curve(spline).map(|c| c.kind.clone()) else { return };
+    let CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } = kind.clone() else {
       return;
     };
-    let kind = CurveKind::Spline { points: points.clone(), start_handle, end_handle };
     let (Some(first), Some(last), Some((fh, lh))) = (
       points.first().and_then(|p| self.pos(*p)),
       points.last().and_then(|p| self.pos(*p)),
@@ -1166,8 +1166,19 @@ impl Sketch {
     } else {
       (start_handle.or_else(|| Some(self.add_point(fh[0], fh[1]))), end_handle)
     };
+    let (mut sk, mut ek) = (start_curvature, end_curvature);
+    let slot = if at_end { &mut ek } else { &mut sk };
+    if curvature && slot.is_none() {
+      // asking for the end's present curvature, beside the tangent handle
+      let (at, h) = if at_end { (last, lh) } else { (first, fh) };
+      let frame = end_frame(&kind, at_end, &|p| self.pos(p));
+      if let Some((_, dir, k)) = frame {
+        let q = crate::smoothend::place_handle(at, dir, k, dist(at, h).max(1e-3));
+        *slot = Some(self.add_point(q[0], q[1]));
+      }
+    }
     if let Some(c) = self.curve_mut(spline) {
-      c.kind = CurveKind::Spline { points, start_handle: sh, end_handle: eh };
+      c.kind = CurveKind::Spline { points, start_handle: sh, end_handle: eh, start_curvature: sk, end_curvature: ek };
     }
   }
 }
@@ -1311,6 +1322,9 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
       let r = dist(c, p);
       let ccw = left(unit(sub(p, c))?);
       Some(if at_end { (p, ccw, 1.0 / r) } else { (p, mul(ccw, -1.0), -1.0 / r) })
+    }
+    CurveKind::Spline { .. } if crate::spline_end_frame(kind, at_end, pos).is_some() => {
+      crate::spline_end_frame(kind, at_end, pos)
     }
     CurveKind::Spline { .. }
     | CurveKind::ControlSpline { .. }
@@ -1589,10 +1603,14 @@ mod tests {
     s.add_constraint(ConstraintKind::Radius { curve: a, value: Dim::new(5.0) }).unwrap();
     let r = s.solve();
     assert!(r.ok(), "{r:?}");
-    let bz = s.beziers(sp);
-    let last = bz[bz.len() - 1];
-    let k = bz_curvature(&last, 1.0);
+    // the curve's own curvature there (its cubic pieces match its tangents, not its curvature)
+    let kind = s.curve(sp).unwrap().kind.clone();
+    let CurveKind::Spline { end_handle, end_curvature, .. } = &kind else { panic!() };
+    assert!(end_handle.is_some() && end_curvature.is_some(), "tangent and curvature handles at the joint");
+    let (_, _, k) = end_frame(&kind, true, &|p| s.pos(p)).unwrap();
     assert!((k.abs() - 0.2).abs() < 1e-6, "{k}");
+    let bz = s.beziers(sp);
+    assert!((bz_curvature(&bz[bz.len() - 1], 1.0).abs() - 0.2).abs() < 0.05, "the pieces come close");
     // a point held on the spline
     let q = s.add_point(12.0, 3.0);
     s.add_constraint(ConstraintKind::PointOnCurve { p: q, curve: sp }).unwrap();

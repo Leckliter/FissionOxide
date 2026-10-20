@@ -33,6 +33,19 @@ const GAUSS: [(f64, f64); 5] = [
   (0.906_179_845_938_664, 0.236_926_885_056_189_08),
 ];
 
+/// How an end of an open fit-point spline is held.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum End {
+  /// Free: the end does as the minimum-energy curve likes.
+  Free,
+  /// A tangent handle: direction and speed (see [`Quintic::fit`]).
+  Handle(P),
+  /// Fusion's tangent and curvature handles together (a smooth, G2 end): the direction comes from
+  /// the tangent `handle`, the curvature from `curvature`, a point on the end's osculating circle,
+  /// and the speed from Fusion's rule (see `smoothend`).
+  Smooth { handle: P, curvature: P },
+}
+
 /// A fitted quintic: `spans` uniform knot spans over `t` in [0, 1].
 #[derive(Debug, Clone)]
 pub(crate) struct Quintic {
@@ -49,6 +62,13 @@ impl Quintic {
   /// of a cubic Bézier spanning the first (last) gap would be, which fixes the end's tangent.
   /// None for fewer than two points or a singular system.
   pub(crate) fn fit(pts: &[P], closed: bool, handles: (Option<P>, Option<P>)) -> Option<Quintic> {
+    let end = |h: Option<P>| h.map_or(End::Free, End::Handle);
+    Quintic::fit_ends(pts, closed, (end(handles.0), end(handles.1)))
+  }
+
+  /// [`Quintic::fit`] with each end of an open curve free, held by a tangent handle, or smooth
+  /// (a curvature handle as well, see [`End::Smooth`]).
+  pub(crate) fn fit_ends(pts: &[P], closed: bool, ends: (End, End)) -> Option<Quintic> {
     let n = pts.len();
     if n < 2 || pts.iter().flatten().any(|v| !v.is_finite()) {
       return None;
@@ -79,7 +99,7 @@ impl Quintic {
     }
     if !closed {
       let scale = spans as f64;
-      let mut tangent = |at_end: bool, h: P, rows: &mut Vec<Vec<(usize, f64)>>| {
+      let tangent = |at_end: bool, h: P, rows: &mut Vec<Vec<(usize, f64)>>, rhs: &mut Vec<P>| {
         let (q, gap) = if at_end { (pts[n - 1], 1.0 - params[n - 2]) } else { (pts[0], params[1]) };
         let s = if at_end { 3.0 / gap } else { -3.0 / gap };
         // dC/dt at the end = 3 (q - h) / gap at the end, 3 (h - q) / gap at the start
@@ -87,11 +107,28 @@ impl Quintic {
         rows.push((0..=DEG).map(|k| (basis.pole(first + k), d[1][k] * scale)).collect());
         rhs.push([s * (q[0] - h[0]), s * (q[1] - h[1])]);
       };
-      if let Some(h) = handles.0 {
-        tangent(false, h, &mut rows);
-      }
-      if let Some(h) = handles.1 {
-        tangent(true, h, &mut rows);
+      for (at_end, e) in [(false, ends.0), (true, ends.1)] {
+        let smooth = match e {
+          End::Free => continue,
+          End::Handle(h) => {
+            tangent(at_end, h, &mut rows, &mut rhs);
+            continue;
+          }
+          End::Smooth { handle, curvature } => {
+            let (q, next) = if at_end { (pts[n - 1], pts[n - 2]) } else { (pts[0], pts[1]) };
+            let gap = if at_end { 1.0 - params[n - 2] } else { params[1] };
+            crate::smoothend::end_derivatives(q, next, gap, handle, curvature, at_end)
+          }
+        };
+        let Some((d1, d2)) = smooth else {
+          // a handle on its end point gives no direction: leave the end free
+          continue;
+        };
+        let (first, d) = basis.ders(if at_end { spans as f64 } else { 0.0 }, 2);
+        rows.push((0..=DEG).map(|k| (basis.pole(first + k), d[1][k] * scale)).collect());
+        rhs.push(d1);
+        rows.push((0..=DEG).map(|k| (basis.pole(first + k), d[2][k] * scale * scale)).collect());
+        rhs.push(d2);
       }
     }
     let m = rows.len();
@@ -171,6 +208,25 @@ impl Quintic {
       }
     }
     (p, v)
+  }
+
+  /// Position, first and second derivative (by `t`) at the start or the end.
+  pub(crate) fn end_derivs(&self, at_end: bool) -> (P, P, P) {
+    let basis = Basis { spans: self.spans, closed: self.closed };
+    let (first, d) = basis.ders(if at_end { self.spans as f64 } else { 0.0 }, 2);
+    let ns = self.spans as f64;
+    let mut out = [[0.0; 2]; 3];
+    for (o, (dn, sc)) in out.iter_mut().zip(d.iter().zip([1.0, ns, ns * ns])) {
+      for (k, dk) in dn.iter().enumerate() {
+        let q = self.poles[basis.pole(first + k)];
+        o[0] += dk * sc * q[0];
+        o[1] += dk * sc * q[1];
+      }
+    }
+    if at_end && let Some(&(_, q)) = self.fit.last().filter(|_| !self.closed) {
+      out[0] = q;
+    }
+    (out[0], out[1], out[2])
   }
 
   /// The tangent handles (see [`Quintic::fit`]) that give an open curve its present end tangents.
@@ -541,6 +597,45 @@ mod tests {
     for t in [0.1, 0.4, 0.75] {
       assert!(close(free.eval(t).0, same.eval(t).0, 1e-9));
     }
+  }
+
+  /// Poles Fusion 2705 gives fitted splines whose last fit point is held by a curvature
+  /// constraint (all fit points fixed): to a line along +x (c105), and to an arc of radius 10
+  /// turning left, arriving along (0.8, 0.6) (c106).
+  #[test]
+  fn smooth_ends_match_fusion() {
+    let smooth = |at: P, dir: P, k: f64| End::Smooth {
+      handle: [at[0] - 3.0 * dir[0], at[1] - 3.0 * dir[1]],
+      curvature: crate::smoothend::place_handle(at, dir, k, 3.0),
+    };
+    let line = Quintic::fit_ends(
+      &[[0.0, 0.0], [12.0, 6.0], [25.0, 9.0], [40.0, 10.0]],
+      false,
+      (End::Free, smooth([40.0, 10.0], [1.0, 0.0], 0.0)),
+    )
+    .unwrap();
+    for (i, want) in
+      [(1, [0.368_452_632, 0.313_967_112]), (9, [18.163_231_193, 7.576_199_114]), (18, [39.164_281_642, 10.0])]
+    {
+      assert!(close(line.poles[i], want, 1e-5), "{i}: {:?} vs {want:?}", line.poles[i]);
+    }
+    let arc = Quintic::fit_ends(
+      &[[0.0, 0.0], [15.0, -3.0], [30.0, 2.0], [40.0, 10.0]],
+      false,
+      (End::Free, smooth([40.0, 10.0], [0.8, 0.6], 0.1)),
+    )
+    .unwrap();
+    for (i, want) in [
+      (1, [0.627_090_06, -0.174_654_753]),
+      (10, [23.105_762_567, -2.021_828_437]),
+      (17, [39.339_316_536, 9.527_387_727]),
+    ] {
+      assert!(close(arc.poles[i], want, 1e-5), "{i}: {:?} vs {want:?}", arc.poles[i]);
+    }
+    let (_, d1, d2) = arc.end_derivs(true);
+    let speed = d1[0].hypot(d1[1]);
+    assert!((speed - 20.303).abs() < 1e-2, "{speed}");
+    assert!(((d1[0] * d2[1] - d1[1] * d2[0]) / speed.powi(3) - 0.1).abs() < 1e-9);
   }
 
   #[test]

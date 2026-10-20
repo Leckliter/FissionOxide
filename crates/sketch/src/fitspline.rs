@@ -26,7 +26,7 @@ impl Sketch {
   ) -> Result<CurveId, SketchError> {
     let (u0, u1) = u;
     let (a, b) = ends;
-    let CurveKind::Spline { points, start_handle, end_handle } = kind else {
+    let CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } = kind else {
       return self.put_bezier(id, &path_sub(path, u0, u1), a, b, construction);
     };
     // the piece each fit point starts
@@ -67,7 +67,14 @@ impl Sketch {
     } else {
       *end_handle
     };
-    let kind = CurveKind::Spline { points: fit.into_iter().map(|f| f.1).collect(), start_handle: sh, end_handle: eh };
+    // an end that stays keeps its curvature handle, a cut one has none
+    let kind = CurveKind::Spline {
+      points: fit.into_iter().map(|f| f.1).collect(),
+      start_handle: sh,
+      end_handle: eh,
+      start_curvature: if cut_start { None } else { *start_curvature },
+      end_curvature: if cut_end { None } else { *end_curvature },
+    };
     self.put_curve(id, kind, construction)
   }
 
@@ -80,7 +87,9 @@ impl Sketch {
     from_end: bool,
     hit: (P, CurveId),
   ) -> Result<bool, SketchError> {
-    let CurveKind::Spline { points, start_handle, end_handle } = kind else { return Ok(false) };
+    let CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } = kind else {
+      return Ok(false);
+    };
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return Ok(false) };
     if points.len() >= 1000 || crate::spline_closed(points) {
       return Ok(false);
@@ -90,18 +99,20 @@ impl Sketch {
     let np = self.add_point(hit.0[0], hit.0[1]);
     let added = vec![np];
     let mut pts = points.clone();
-    let (sh, eh, dropped) = if from_end {
+    // the extended end loses its handles
+    let (sh, eh, sk, ek, dropped) = if from_end {
       pts.extend(added);
-      (*start_handle, None, *end_handle)
+      (*start_handle, None, *start_curvature, None, [*end_handle, *end_curvature])
     } else {
       pts.splice(0..0, added.into_iter().rev());
-      (None, *end_handle, *start_handle)
+      (None, *end_handle, None, *end_curvature, [*start_handle, *start_curvature])
     };
     self.drop_smooth_at(curve, old_pos);
     if let Some(c) = self.curve_mut(curve) {
-      c.kind = CurveKind::Spline { points: pts, start_handle: sh, end_handle: eh };
+      c.kind =
+        CurveKind::Spline { points: pts, start_handle: sh, end_handle: eh, start_curvature: sk, end_curvature: ek };
     }
-    if let Some(h) = dropped {
+    for h in dropped.into_iter().flatten() {
       self.drop_if_unused(h);
     }
     self.add_constraint(ConstraintKind::PointOnCurve { p: np, curve: hit.1 })?;

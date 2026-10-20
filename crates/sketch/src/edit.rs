@@ -221,8 +221,14 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Spline { points, start_handle, end_handle } => {
-          for q in points.iter_mut().chain(start_handle.iter_mut()).chain(end_handle.iter_mut()) {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => {
+          for q in points
+            .iter_mut()
+            .chain(start_handle.iter_mut())
+            .chain(end_handle.iter_mut())
+            .chain(start_curvature.iter_mut())
+            .chain(end_curvature.iter_mut())
+          {
             if *q == old {
               *q = new;
             }
@@ -512,10 +518,12 @@ impl Sketch {
           let (center, s, e) = (get(self, center)?, get(self, start)?, get(self, end)?);
           if flip { CurveKind::Arc { center, start: e, end: s } } else { CurveKind::Arc { center, start: s, end: e } }
         }
-        CurveKind::Spline { points, start_handle, end_handle } => CurveKind::Spline {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => CurveKind::Spline {
           points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()?,
           start_handle: start_handle.map(|p| get(self, p)).transpose()?,
           end_handle: end_handle.map(|p| get(self, p)).transpose()?,
+          start_curvature: start_curvature.map(|p| get(self, p)).transpose()?,
+          end_curvature: end_curvature.map(|p| get(self, p)).transpose()?,
         },
         CurveKind::ControlSpline { points } => {
           CurveKind::ControlSpline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }

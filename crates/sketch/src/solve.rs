@@ -237,6 +237,11 @@ enum Eqn {
   ArcRadius(usize),
   /// Implicit: an elliptical arc's ends lie on its ellipse (index into `sketch.curves`).
   EllipseEnds(usize),
+  /// Implicit: at a smooth end of a fit-point spline (index into `sketch.curves`, end or start),
+  /// the tangent handle keeps its distance from the end and the curvature handle its distance
+  /// back along the tangent. Only their direction and offset shape the curve, so this holds the
+  /// slides that change nothing (which would otherwise count as freedom).
+  HandleReach(usize, bool),
 }
 
 /// The equation system for one sketch, with variable mapping and per-constraint branch choices
@@ -270,6 +275,8 @@ struct Joint {
   ends: [bool; 2],
   /// Length that makes the curvature residual comparable to the others.
   scale: f64,
+  /// For [`Eqn::HandleReach`]: the handles' distances it holds.
+  reach: [f64; 2],
 }
 
 impl<'a> System<'a> {
@@ -306,6 +313,14 @@ impl<'a> System<'a> {
       }
       if matches!(c.kind, CurveKind::EllipticalArc { .. }) {
         eqns.push(Eqn::EllipseEnds(i));
+      }
+      if let CurveKind::Spline { start_handle, end_handle, start_curvature, end_curvature, .. } = &c.kind {
+        if start_handle.is_some() && start_curvature.is_some() {
+          eqns.push(Eqn::HandleReach(i, false));
+        }
+        if end_handle.is_some() && end_curvature.is_some() {
+          eqns.push(Eqn::HandleReach(i, true));
+        }
       }
     }
     let mut sys = System {
@@ -375,6 +390,10 @@ impl<'a> System<'a> {
         _ => self.eval(*eq, sign, x),
       },
       Eqn::ArcRadius(_) => self.eval(*eq, sign, x),
+      Eqn::HandleReach(i, at_end) => {
+        let joint = self.joint.get(k).copied().unwrap_or_default();
+        self.handle_reach(x, *i, *at_end).map_or(vec![0.0, 0.0], |r| vec![r[0] - joint.reach[0], r[1] - joint.reach[1]])
+      }
       Eqn::EllipseEnds(i) => match self.sketch.curves.get(*i).map(|c| &c.kind) {
         Some(CurveKind::EllipticalArc { start, end, .. }) => match self.sketch.curves.get(*i).map(|c| c.id) {
           Some(id) => match self.ellipse(x, id) {
@@ -515,8 +534,35 @@ impl<'a> System<'a> {
     r
   }
 
+  /// At a smooth spline end (curve index `i`): the tangent handle's distance from the end and the
+  /// curvature handle's distance along the tangent (see [`Eqn::HandleReach`]).
+  fn handle_reach(&self, x: &[f64], i: usize, at_end: bool) -> Option<[f64; 2]> {
+    let CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } =
+      &self.sketch.curves.get(i)?.kind
+    else {
+      return None;
+    };
+    let (p, h, k) = if at_end {
+      (points.last()?, (*end_handle)?, (*end_curvature)?)
+    } else {
+      (points.first()?, (*start_handle)?, (*start_curvature)?)
+    };
+    let (p, h, k) = (self.p(x, *p), self.p(x, h), self.p(x, k));
+    let d = sub(h, p);
+    let r = d[0].hypot(d[1]);
+    if !(r > 1e-12) {
+      return None;
+    }
+    // the way the curve runs at that end
+    let t = if at_end { [-d[0] / r, -d[1] / r] } else { [d[0] / r, d[1] / r] };
+    Some([r, dot(sub(k, p), t)])
+  }
+
   /// Picks the ends that meet for spline tangency / curvature (the closest pair).
   fn joint_of(&self, eq: Eqn, x: &[f64]) -> Joint {
+    if let Eqn::HandleReach(i, at_end) = eq {
+      return Joint { reach: self.handle_reach(x, i, at_end).unwrap_or_default(), ..Joint::default() };
+    }
     let Eqn::User(ci) = eq else { return Joint::default() };
     let (a, b) = match self.sketch.constraints.get(ci).map(|c| &c.kind) {
       Some(ConstraintKind::Tangent { a, b }) if self.is_free(*a) || self.is_free(*b) => (*a, *b),
@@ -556,7 +602,7 @@ impl<'a> System<'a> {
         }
       }
     }
-    Joint { ends: best.1, scale }
+    Joint { ends: best.1, scale, ..Joint::default() }
   }
 
   fn curve_vars(&self, id: CurveId, out: &mut Vec<usize>) {
@@ -590,7 +636,7 @@ impl<'a> System<'a> {
           }
         }
       }
-      Eqn::ArcRadius(i) | Eqn::EllipseEnds(i) => {
+      Eqn::ArcRadius(i) | Eqn::EllipseEnds(i) | Eqn::HandleReach(i, _) => {
         if let Some(c) = self.sketch.curves.get(i) {
           self.curve_vars(c.id, &mut out);
         }
@@ -639,7 +685,7 @@ impl<'a> System<'a> {
         }
         _ => vec![],
       },
-      Eqn::EllipseEnds(_) => vec![],
+      Eqn::EllipseEnds(_) | Eqn::HandleReach(..) => vec![],
       Eqn::User(ci) => match self.sketch.constraints.get(ci) {
         Some(c) => self.eval_user(&c.kind, sign, x),
         None => vec![],

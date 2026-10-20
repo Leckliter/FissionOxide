@@ -519,9 +519,11 @@ fn sketch_lines(
     for c in &sk.curves {
       let mut legs: Vec<(PointId, PointId)> = Vec::new();
       match &c.kind {
-        CurveKind::Spline { points, start_handle, end_handle } => {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => {
           legs.extend(points.first().copied().zip(*start_handle));
           legs.extend(points.last().copied().zip(*end_handle));
+          legs.extend(points.first().copied().zip(*start_curvature));
+          legs.extend(points.last().copied().zip(*end_curvature));
         }
         CurveKind::Bezier { points } => {
           for k in (0..points.len().saturating_sub(1)).step_by(3) {
