@@ -956,13 +956,26 @@ impl Dialog {
         d.distance = offset.clone();
         d
       }
-      FeatureKind::RectangularPattern { count, spacing, count2, spacing2, direction2, join, .. } => {
+      FeatureKind::RectangularPattern {
+        count,
+        spacing,
+        count2,
+        spacing2,
+        direction2,
+        symmetric,
+        symmetric2,
+        extent,
+        join,
+        ..
+      } => {
         let mut d = Dialog::blank(Kind::RectPattern);
         d.count = count.clone();
         d.spacing = spacing.clone();
         d.count2 = count2.clone();
         d.spacing2 = spacing2.clone();
         d.use_dir2 = direction2.is_some();
+        d.symmetric = [*symmetric, *symmetric2];
+        d.pattern_extent = *extent;
         d.join = *join;
         d
       }
@@ -1300,11 +1313,13 @@ impl Dialog {
       Kind::RectPattern => {
         let mut p = json!({
           "bodies": self.bodies, "direction": axis_vec(&self.dir), "count": self.count, "spacing": self.spacing, "join": self.join,
+          "symmetric": self.symmetric[0], "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
         if self.use_dir2 {
           p["direction2"] = json!(axis_vec(&self.dir2));
           p["count2"] = json!(self.count2);
           p["spacing2"] = json!(self.spacing2);
+          p["symmetric2"] = json!(self.symmetric[1]);
         }
         ("pattern.rectangular", p)
       }
@@ -1352,7 +1367,8 @@ impl Dialog {
       }
       Kind::OffsetPlane => json!({"offset": self.distance}),
       Kind::RectPattern => {
-        json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join})
+        json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join,
+          "symmetric": self.symmetric[0], "symmetric2": self.symmetric[1], "extent": self.pattern_extent})
       }
       Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
       Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
@@ -2050,6 +2066,16 @@ impl Dialog {
           }
           ui.end_row();
           ui.label("");
+          if ui.checkbox(&mut self.pattern_extent, "Spacing is the extent").changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+          ui.label("");
+          if ui.checkbox(&mut self.symmetric[0], "Symmetric").changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+          ui.label("");
           if ui.checkbox(&mut self.use_dir2, "Second direction").changed() {
             self.dirty = true;
           }
@@ -2065,6 +2091,11 @@ impl Dialog {
             ui.end_row();
             ui.label("Spacing 2");
             if value_edit(ui, &mut self.spacing2).changed() {
+              self.dirty = true;
+            }
+            ui.end_row();
+            ui.label("");
+            if ui.checkbox(&mut self.symmetric[1], "Symmetric 2").changed() {
               self.dirty = true;
             }
             ui.end_row();

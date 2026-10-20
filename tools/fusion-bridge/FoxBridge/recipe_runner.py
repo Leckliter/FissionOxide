@@ -557,12 +557,19 @@ class Runner:
     pats = self.root.features.rectangularPatternFeatures
     d1 = f["direction1"]
     a1, s1 = self.linear(d1["axis"])
-    spacing = adsk.fusion.PatternDistanceType.SpacingPatternDistanceType
-    inp = pats.createInput(self.pattern_entities(f), a1, V(d1["count"], ""), V(d1["spacing"] * s1), spacing)
+    types = adsk.fusion.PatternDistanceType
+    extent = str(f.get("distance_type", "spacing")).startswith("extent")
+    kind = types.ExtentPatternDistanceType if extent else types.SpacingPatternDistanceType
+    inp = pats.createInput(self.pattern_entities(f), a1, V(d1["count"], ""), V(d1["spacing"] * s1), kind)
+    inp.isSymmetricInDirectionOne = bool(d1.get("symmetric", False))
     if f.get("direction2"):
       d2 = f["direction2"]
       a2, s2 = self.linear(d2["axis"])
       inp.setDirectionTwo(a2, V(d2["count"], ""), V(d2["spacing"] * s2))
+      inp.isSymmetricInDirectionTwo = bool(d2.get("symmetric", False))
+    else:
+      # otherwise Fusion keeps its default second-direction quantity and stacks extra copies
+      inp.quantityTwo = V(1, "")
     return pats.add(inp)
 
   def op_circular_pattern(self, f):

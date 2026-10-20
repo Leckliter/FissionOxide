@@ -233,6 +233,9 @@ fn patterns_mirror_primitives_and_shell() {
     direction2: None,
     count2: "1".into(),
     spacing2: "0".into(),
+    symmetric: false,
+    symmetric2: false,
+    extent: false,
     join: true,
   })
   .unwrap();
@@ -241,6 +244,21 @@ fn patterns_mirror_primitives_and_shell() {
   assert_eq!(m.bodies.len(), 3, "disjoint pattern instances stay separate bodies");
   let cup = 4000.0 - 18.0 * 18.0 * 9.0;
   assert!((volume(&m) - 3.0 * cup).abs() < 1e-2, "{}", volume(&m));
+}
+
+/// Fusion's placements (measured in Fusion 2705): a symmetric count of 4 at 12 mm runs -12..24
+/// (the extra instance goes on the positive side), 2 runs 0..12, and an extent reaches from the
+/// original to the farthest instance on the positive side.
+#[test]
+fn rectangular_pattern_symmetric_and_extent_offsets() {
+  let at = |n, d, sym, ext| pattern_offsets(n, d, sym, ext);
+  assert_eq!(at(3, 12.0, true, false), (vec![-12.0, 0.0, 12.0], 1));
+  assert_eq!(at(4, 12.0, true, false), (vec![-12.0, 0.0, 12.0, 24.0], 1));
+  assert_eq!(at(2, 12.0, true, false), (vec![0.0, 12.0], 0));
+  assert_eq!(at(4, 30.0, false, true), (vec![0.0, 10.0, 20.0, 30.0], 0));
+  assert_eq!(at(4, 12.0, true, true), (vec![-6.0, 0.0, 6.0, 12.0], 1));
+  assert_eq!(at(3, 12.0, true, true), (vec![-12.0, 0.0, 12.0], 1));
+  assert_eq!(at(1, 12.0, true, true), (vec![0.0], 0));
 }
 
 #[test]

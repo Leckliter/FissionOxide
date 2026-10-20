@@ -175,7 +175,7 @@ cmds! {
   "cam.tool.delete" => "Remove a tool from the library", "{number}";
   "cam.posts" => "The post-processors G-code can be written for", "{}";
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
-  "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
+  "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, symmetric?, direction2?, count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the distance to the farthest instance), bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
   "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
@@ -807,6 +807,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "pattern.rectangular" => {
       let direction = req_vec3(p, "direction")?;
       let direction2 = p.get("direction2").map(|_| req_vec3(p, "direction2")).transpose()?;
+      let extent = match opt_str(p, "distance_type").unwrap_or("spacing") {
+        "spacing" => false,
+        "extent" => true,
+        o => return Err(CmdError::new(format!("unknown distance type '{o}' (spacing or extent)"))),
+      };
+      let flag = |k: &str| match p.get(k) {
+        None => Ok(false),
+        Some(v) => v.as_bool().ok_or(CmdError::new(format!("'{k}' must be true or false"))),
+      };
       add_feature(
         s,
         FeatureKind::RectangularPattern {
@@ -817,6 +826,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           direction2,
           count2: opt_expr(p, "count2").unwrap_or_else(|| "1".into()),
           spacing2: opt_expr(p, "spacing2").unwrap_or_else(|| "0".into()),
+          symmetric: flag("symmetric")?,
+          symmetric2: flag("symmetric2")?,
+          extent,
           join: p.get("join").and_then(Value::as_bool).unwrap_or(true),
         },
       )

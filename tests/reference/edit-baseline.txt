@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+441-bodies-two-directions
+442-features-cut-negative-directions
+443-bodies-symmetric-direction
+444-bodies-extent
