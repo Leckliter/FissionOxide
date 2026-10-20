@@ -312,8 +312,8 @@ class Loop:
     fix = dict(entry["fix"])
     env = gh_env(self.a.gh_token_from_git)
     if env is None:
-      self.ledger.update(key, note=f"{fix['branch']} is pushed but gh isn't logged in, so no PR yet "
-                         "(run `gh auth login`, then `parity_loop.py run` again)")
+      self.ledger.update(key, note=f"PR pending: gh not authenticated. {fix['branch']} is pushed; "
+                         "run `gh auth login`, then `parity_loop.py run` again to open the PR")
       print("  gh isn't logged in: branch pushed, PR not opened", flush=True)
       return
     cases = entry.get("cases", [])
