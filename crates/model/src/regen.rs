@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 
 use fox_kernel::glam::{DMat4, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
-use fox_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
+use fox_sketch::{ConstraintId, CurveId, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::ThinSide;
 use crate::assembly;
@@ -1804,23 +1804,28 @@ impl Ctx<'_> {
     }
   }
 
+  /// A sketch line in world space: a point on it and its direction.
+  fn sketch_line(&self, sketch: FeatureId, curve: CurveId) -> Result<(DVec3, DVec3), String> {
+    let sk = self.state.sketches.get(&sketch).ok_or("its sketch failed")?;
+    let Some(CurveKind::Line { a, b }) = sk.sketch.curve(curve).map(|c| &c.kind) else {
+      return Err("the axis line no longer exists".into());
+    };
+    let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
+      return Err("the axis line no longer exists".into());
+    };
+    let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
+    Ok((pa, (pb - pa).try_normalize().ok_or("the axis line has no length")?))
+  }
+
   fn resolve_axis(&mut self, a: &mut AxisRef, sketch: Option<FeatureId>) -> Result<(DVec3, DVec3), String> {
     match a {
       AxisRef::X => Ok((DVec3::ZERO, DVec3::X)),
       AxisRef::Y => Ok((DVec3::ZERO, DVec3::Y)),
       AxisRef::Z => Ok((DVec3::ZERO, DVec3::Z)),
       AxisRef::SketchLine { curve } => {
-        let sid = sketch.ok_or("a sketch line axis only works in a revolve")?;
-        let sk = self.state.sketches.get(&sid).ok_or("its sketch failed")?;
-        let Some(CurveKind::Line { a, b }) = sk.sketch.curve(*curve).map(|c| &c.kind) else {
-          return Err("the axis line no longer exists".into());
-        };
-        let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
-          return Err("the axis line no longer exists".into());
-        };
-        let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
-        Ok((pa, (pb - pa).try_normalize().ok_or("the axis line has no length")?))
+        self.sketch_line(sketch.ok_or("a sketch line axis only works in a revolve")?, *curve)
       }
+      AxisRef::Sketch { sketch, curve } => self.sketch_line(*sketch, *curve),
       AxisRef::Construction { feature } => {
         self.state.axes.get(feature).copied().ok_or_else(|| "its construction axis failed".to_string())
       }

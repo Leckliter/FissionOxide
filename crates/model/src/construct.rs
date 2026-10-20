@@ -72,6 +72,8 @@ pub enum PointDef {
   Center { face: FaceRef },
   /// Where an edge (extended if straight) crosses a plane.
   EdgePlane { edge: EdgeRef, plane: PlaneRef },
+  /// Where a sketch line or an axis (extended) crosses a plane.
+  LinePlane { line: AxisRef, plane: PlaneRef },
   /// At a fraction `t` of an edge's length.
   AlongPath {
     edge: EdgeRef,
@@ -127,7 +129,7 @@ fn plane_dep(p: &PlaneRef) -> Option<FeatureId> {
 
 fn axis_dep(a: &AxisRef) -> Option<FeatureId> {
   match a {
-    AxisRef::Construction { feature } => Some(*feature),
+    AxisRef::Construction { feature } | AxisRef::Sketch { sketch: feature, .. } => Some(*feature),
     _ => None,
   }
 }
@@ -167,6 +169,7 @@ impl PointDef {
       PointDef::Ref { point } => point.feature().into_iter().collect(),
       PointDef::ThreePlanes { a, b, c } => [a, b, c].iter().filter_map(|p| plane_dep(p)).collect(),
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
+      PointDef::LinePlane { line, plane } => axis_dep(line).into_iter().chain(plane_dep(plane)).collect(),
       _ => vec![],
     }
   }

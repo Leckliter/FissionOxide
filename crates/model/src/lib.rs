@@ -341,6 +341,11 @@ pub enum AxisRef {
   Edge {
     edge: EdgeRef,
   },
+  /// A line in any sketch.
+  Sketch {
+    sketch: FeatureId,
+    curve: CurveId,
+  },
   /// A construction axis feature.
   Construction {
     feature: FeatureId,
@@ -1443,7 +1448,7 @@ impl FeatureKind {
       _ => vec![],
     };
     let axis_dep = |a: &AxisRef| match a {
-      AxisRef::Construction { feature } => vec![*feature],
+      AxisRef::Construction { feature } | AxisRef::Sketch { sketch: feature, .. } => vec![*feature],
       _ => vec![],
     };
     match self {
@@ -1473,7 +1478,7 @@ impl FeatureKind {
       FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
       FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
         let mut v = vec![*sketch];
-        if let AxisRef::Construction { feature } = axis {
+        if let AxisRef::Construction { feature } | AxisRef::Sketch { sketch: feature, .. } = axis {
           v.push(*feature);
         }
         v

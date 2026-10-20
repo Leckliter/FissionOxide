@@ -133,7 +133,7 @@ cmds! {
   "plane.offset" => "Construction plane offset from a plane or planar face; a plane can also be {origin: [x,y,z], normal, x?} anywhere a plane is taken", "{plane, offset?}";
   "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
   "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
-  "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
+  "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge (an edge, {sketch, curve} line or axis), plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
   "pipe" => "Tube along a path sketch: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path", "{path: sketch, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
@@ -1821,6 +1821,15 @@ pub(crate) fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
   }
   if let Some(c) = v.get("line").and_then(Value::as_u64) {
     return Ok(AxisRef::SketchLine { curve: CurveId(u32::try_from(c).map_err(|_| CmdError::new("bad curve"))?) });
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let curve = CurveId(req_u32(v, "curve")?);
+    let r = s.model.sketches.get(&sketch).ok_or(CmdError::new(format!("sketch {} failed to build", sketch.0)))?;
+    if !matches!(r.sketch.curve(curve).map(|c| &c.kind), Some(CurveKind::Line { .. })) {
+      return Err(CmdError::new(format!("sketch {} has no line {}", sketch.0, curve.0)));
+    }
+    return Ok(AxisRef::Sketch { sketch, curve });
   }
   if let Some(f) = v.get("axis").and_then(Value::as_u64) {
     let feature = FeatureId(u32::try_from(f).map_err(|_| CmdError::new("bad axis"))?);

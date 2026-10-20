@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+378-body-edge-offset-plane
+379-body-edge-face-beyond-bounds
+380-body-edge-extended-past-end
+381-sketch-line-offset-plane

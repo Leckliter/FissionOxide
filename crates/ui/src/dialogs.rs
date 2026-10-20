@@ -910,7 +910,7 @@ impl Dialog {
           AxisRef::Y => "y".into(),
           AxisRef::Z => "z".into(),
           AxisRef::SketchLine { curve } => format!("line:{}", curve.0),
-          AxisRef::Edge { .. } => "edge".into(),
+          AxisRef::Edge { .. } | AxisRef::Sketch { .. } => "edge".into(),
           AxisRef::Construction { feature } => format!("axis:{}", feature.0),
         };
         d

@@ -102,6 +102,33 @@ fn construction_planes_axes_and_points() {
 }
 
 #[test]
+fn point_where_a_sketch_line_or_axis_crosses_a_plane() {
+  let mut s = Session::default();
+  let pt = |s: &Session, v: &Value| s.model.points[&crate::model::FeatureId(v["feature"].as_u64().unwrap() as u32)];
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, -2], [20, -12]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let x10 = run(&mut s, "plane.offset", json!({"plane": "yz", "offset": 10}))["feature"].as_u64().unwrap();
+  // the sketch line, and the Z axis against an offset XY plane
+  let a = run(
+    &mut s,
+    "point",
+    json!({"method": "edge_plane", "edge": {"sketch": sk, "curve": line}, "plane": {"feature": x10}}),
+  );
+  assert!((pt(&s, &a) - fox_kernel::glam::DVec3::new(10.0, -7.0, 0.0)).length() < 1e-9, "{:?}", pt(&s, &a));
+  let z7 = run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 7}))["feature"].as_u64().unwrap();
+  let b = run(&mut s, "point", json!({"method": "edge_plane", "edge": "z", "plane": {"feature": z7}}));
+  assert!((pt(&s, &b) - fox_kernel::glam::DVec3::new(0.0, 0.0, 7.0)).length() < 1e-9, "{:?}", pt(&s, &b));
+  // a construction axis, and a line parallel to the plane
+  let ax = run(&mut s, "axis", json!({"method": "two_points", "a": {"at": [1, 1, 0]}, "b": {"at": [1, 1, 1]}}));
+  let c =
+    run(&mut s, "point", json!({"method": "edge_plane", "edge": {"axis": ax["feature"]}, "plane": {"feature": z7}}));
+  assert!((pt(&s, &c) - fox_kernel::glam::DVec3::new(1.0, 1.0, 7.0)).length() < 1e-9, "{:?}", pt(&s, &c));
+  let bad = s.execute("point", &json!({"method": "edge_plane", "edge": "x", "plane": {"feature": z7}}));
+  assert!(bad.as_ref().map_or(true, |v| v["error"].is_string()), "{bad:?}");
+}
+
+#[test]
 fn threads_cosmetic_and_modeled() {
   let mut s = Session::default();
   rod(&mut s, 5.0, 20.0);
