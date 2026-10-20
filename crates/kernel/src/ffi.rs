@@ -205,6 +205,7 @@ pub(crate) mod ffi {
     fn project_curves(curves: &Shape, faces: &Shape, dir: &[f64]) -> Result<UniquePtr<Shape>>;
     fn round_pipe(spine: &Shape, radius: f64, inner: f64) -> Result<UniquePtr<Shape>>;
     fn wire_ends(wire: &Shape) -> Result<Vec<f64>>;
+    fn split_seams(s: &Shape) -> Result<UniquePtr<Shape>>;
     fn child_count(s: &Shape) -> usize;
     fn child_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
   }

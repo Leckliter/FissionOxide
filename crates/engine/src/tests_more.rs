@@ -509,3 +509,47 @@ fn pipe_sections_and_partial_paths() {
   let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
   assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
 }
+
+#[test]
+fn project_to_surface_drapes_curves_a_pipe_follows() {
+  // an r5 circle on the plane x = 20 projected onto an r10 h30 cylinder's side
+  let start = || {
+    let mut s = Session::new(fox_model::Design::new("t"));
+    run(&mut s, "cylinder", json!({"radius": 10, "height": 30}));
+    let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+    run(&mut s, "sketch.create", json!({"plane": plane}));
+    run(&mut s, "sketch.circle", json!({"center": [0, 15], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+  };
+  let side = json!([{"point": [-10, 0, 5]}]);
+
+  // along X: a saddle loop front and back, two grooves
+  let mut s = start();
+  let v = run(
+    &mut s,
+    "sketch.project_to_surface",
+    json!({"sketch": 2, "faces": side, "type": "along_vector", "direction": "x"}),
+  );
+  let proj = fox_model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+  assert_eq!(s.model.curves3d[&proj].len(), 2);
+  run(&mut s, "pipe", json!({"path": proj.0, "diameter": 2, "operation": "cut"}));
+  assert!((volume(&s) - 9326.976).abs() < 10.0, "{}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 13);
+
+  // to the closest point: one loop on the front, one groove
+  let mut s = start();
+  run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side}));
+  run(&mut s, "pipe", json!({"path": 3, "diameter": 2, "operation": "cut"}));
+  assert!((volume(&s) - 9388.016).abs() < 10.0, "{}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 6);
+
+  // a direction is needed along a vector; a 3D path takes a round section only
+  let mut s = start();
+  assert!(
+    s.execute("sketch.project_to_surface", &json!({"sketch": 2, "faces": side, "type": "along_vector"})).is_err()
+  );
+  run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side}));
+  let v = s.execute("pipe", &json!({"path": 3, "diameter": 2, "section": "square", "operation": "cut"})).unwrap();
+  assert!(v["error"].is_string(), "{v}");
+}

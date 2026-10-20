@@ -31,7 +31,12 @@ impl Shape {
   /// connected run (a periodic B-spline when it closes), starting where the source's start lands.
   /// Along a direction a run goes the way the swept source crosses the faces, as Fusion's do;
   /// `sketch_normal` is the normal of the sketch the curves come from.
-  pub fn project_to_faces(curves: &[Shape], faces: &[Shape], how: Projection3d, sketch_normal: DVec3) -> Result<Vec<Shape>> {
+  pub fn project_to_faces(
+    curves: &[Shape],
+    faces: &[Shape],
+    how: Projection3d,
+    sketch_normal: DVec3,
+  ) -> Result<Vec<Shape>> {
     if curves.is_empty() {
       return Err(KernelError::Input("there are no curves to project".into()));
     }
@@ -56,6 +61,13 @@ impl Shape {
       return Err(KernelError::Input("the diameter must be positive".into()));
     }
     Shape::wrap(sys::round_pipe(self.get()?, radius, inner.max(0.0))?)
+  }
+
+  /// This shape with its faces on periodic free-form surfaces (a tube's) split where their
+  /// parameters run across the surface's seam (the band a cut leaves of a pipe, say), as a face
+  /// of Fusion's ends at the seam. Unchanged when there are none, or the split doesn't hold.
+  pub fn split_seams(&self) -> Result<Shape> {
+    Shape::wrap(sys::split_seams(self.get()?)?)
   }
 
   /// Where this path wire (or edge) starts and ends.

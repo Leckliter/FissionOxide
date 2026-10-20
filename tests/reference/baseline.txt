@@ -119,3 +119,5 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+229-circle-along-vector-cylinder-groove
+230-circle-closest-point-cylinder-groove

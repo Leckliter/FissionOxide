@@ -10,6 +10,7 @@ namespace fox {
 std::unique_ptr<Shape> project_curves(const Shape &curves, const Shape &faces, rust::Slice<const double> dir);
 std::unique_ptr<Shape> round_pipe(const Shape &spine, double radius, double inner);
 rust::Vec<double> wire_ends(const Shape &wire);
+std::unique_ptr<Shape> split_seams(const Shape &s);
 size_t child_count(const Shape &s);
 std::unique_ptr<Shape> child_at(const Shape &s, size_t i);
 

@@ -6,7 +6,8 @@
 // As in Fusion, each projected run comes back as one curve (a periodic B-spline when it closes),
 // starting where the source curve's start lands. A pipe along a closed curve is built, like
 // Fusion's, from two half tubes (split at the start and halfway round) whose circle seam runs
-// along the side the loop winds around, so the cut it makes has the faces Fusion's has.
+// along the side the loop winds around; after the cut, split_seams ends the faces left of the
+// tube at its seam, so the cut has the faces Fusion's has.
 #include "fox-kernel/cpp/project.hxx"
 #include "fox-kernel/src/ffi.rs.h"
 
@@ -24,6 +25,13 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <ShapeFix_Solid.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -55,6 +63,15 @@
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Lin.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <BRepLib.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom_ElementarySurface.hxx>
+#include <BRepTools.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
+#include <Geom2d_Curve.hxx>
+#include <TopLoc_Location.hxx>
 
 namespace fox {
 
@@ -180,18 +197,26 @@ gp_Pnt closest_on(const TopoDS_Shape &faces, const gp_Pnt &p) {
   return d.PointOnShape2(1);
 }
 
-// The unit normal of the face (with its orientation) nearest `p`.
+// The unit normal (with the face's orientation) of the face nearest `p`, where `p` projects onto
+// it: on an edge or seam of the face as well as inside it.
 gp_Vec face_normal(const TopoDS_Shape &faces, const gp_Pnt &p) {
-  BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(p).Vertex(), faces);
-  if (!d.IsDone() || d.NbSolution() == 0 || d.SupportTypeShape2(1) != BRepExtrema_IsInFace) return gp_Vec();
-  const TopoDS_Face f = TopoDS::Face(d.SupportOnShape2(1));
-  double u, v;
-  d.ParOnFaceS2(1, u, v);
-  BRepAdaptor_Surface s(f);
-  BRepLProp_SLProps props(s, u, v, 1, 1e-9);
-  if (!props.IsNormalDefined()) return gp_Vec();
-  gp_Vec n(props.Normal());
-  if (f.Orientation() == TopAbs_REVERSED) n.Reverse();
+  double best = std::numeric_limits<double>::infinity();
+  gp_Vec n;
+  for (TopExp_Explorer fx(faces, TopAbs_FACE); fx.More(); fx.Next()) {
+    const TopoDS_Face &f = TopoDS::Face(fx.Current());
+    Handle(Geom_Surface) g = BRep_Tool::Surface(f);
+    if (g.IsNull()) continue;
+    GeomAPI_ProjectPointOnSurf pr(p, g);
+    if (!pr.IsDone() || pr.NbPoints() == 0 || pr.LowerDistance() >= best) continue;
+    double u, v;
+    pr.LowerDistanceParameters(u, v);
+    BRepAdaptor_Surface s(f, Standard_False);
+    BRepLProp_SLProps props(s, u, v, 1, 1e-9);
+    if (!props.IsNormalDefined()) continue;
+    best = pr.LowerDistance();
+    n = gp_Vec(props.Normal());
+    if (f.Orientation() == TopAbs_REVERSED) n.Reverse();
+  }
   return n;
 }
 
@@ -335,14 +360,41 @@ std::unique_ptr<Shape> round_pipe(const Shape &spine, double radius, double inne
       BRepOffsetAPI_MakePipeShell ps(w);
       gp_Ax2 ax(p, gp_Dir(t));
       if (seamed) ax = gp_Ax2(p, gp_Dir(t), gp_Dir(binormal - t * binormal.Dot(t)));
-      // a closed loop follows its Frenet frame, which comes back to itself; open paths the
-      // corrected one, which doesn't flip at straight runs
-      ps.SetMode(closed && !std::getenv("FOX_NOFIX") ? Standard_True : Standard_False);
+      // a closed loop keeps the normal it winds around as its binormal, so the seam stays on
+      // that side and the frame comes back to itself; open paths follow the corrected Frenet
+      // frame, which doesn't flip at straight runs
+      if (closed && seamed) {
+        ps.SetMode(gp_Dir(binormal));
+      } else {
+        ps.SetMode(closed ? Standard_True : Standard_False);
+      }
       ps.Add(BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(gp_Circ(ax, r)).Edge()).Wire());
       ps.Build();
       if (!ps.IsDone()) throw std::runtime_error("the pipe could not follow the path");
-      if (!ps.MakeSolid()) throw std::runtime_error("the pipe made no solid");
-      return ps.Shape();
+      if (!closed) {
+        if (!ps.MakeSolid()) throw std::runtime_error("the pipe made no solid");
+        return ps.Shape();
+      }
+      // a closed tube has no caps: sew its ends together and close it into a solid
+      BRepBuilderAPI_Sewing sew(1e-4);
+      sew.Add(ps.Shape());
+      sew.Perform();
+      TopoDS_Shell shell;
+      for (TopExp_Explorer ex(sew.SewedShape(), TopAbs_SHELL); ex.More(); ex.Next()) {
+        if (!shell.IsNull()) throw std::runtime_error("the pipe doesn't close up on itself");
+        shell = TopoDS::Shell(ex.Current());
+      }
+      if (shell.IsNull()) throw std::runtime_error("the pipe made no solid");
+      BRepBuilderAPI_MakeSolid ms(shell);
+      if (!ms.IsDone()) throw std::runtime_error("the pipe made no solid");
+      ShapeFix_Solid fs(ms.Solid());
+      fs.Perform();
+      TopoDS_Shape solid = fs.Solid();
+      // outward faces: a solid of negative volume is turned inside out
+      GProp_GProps g;
+      BRepGProp::VolumeProperties(solid, g);
+      if (g.Mass() < 0) solid.Reverse();
+      return solid;
     };
     TopoDS_Shape s = sweep(radius);
     if (inner > 0) {
@@ -399,6 +451,82 @@ std::unique_ptr<Shape> child_at(const Shape &s, size_t i) {
     if (n == i) return out(it.Value());
   }
   throw std::runtime_error("no such child shape");
+}
+
+
+namespace {
+
+// The surface under any trimming.
+Handle(Geom_Surface) basis_of(Handle(Geom_Surface) g) {
+  while (!g.IsNull() && g->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface))) {
+    g = Handle(Geom_RectangularTrimmedSurface)::DownCast(g)->BasisSurface();
+  }
+  return g;
+}
+
+// The surface of a face on a periodic free-form surface (a tube's), or null.
+Handle(Geom_Surface) tube_surface(const TopoDS_Face &f) {
+  TopLoc_Location loc;
+  Handle(Geom_Surface) g = BRep_Tool::Surface(f, loc);
+  Handle(Geom_Surface) b = basis_of(g);
+  if (b.IsNull() || b->IsKind(STANDARD_TYPE(Geom_ElementarySurface)) || !loc.IsIdentity()) return nullptr;
+  if (!b->IsUPeriodic() && !b->IsVPeriodic()) return nullptr;
+  return g;
+}
+
+// Faces whose parameters OCCT shifted past the surface's seam, split along the seam line.
+TopoDS_Shape split_shifted(const TopoDS_Shape &s) {
+  TopTools_ListOfShape tools;
+  int added = 0;
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Face &f = TopoDS::Face(ex.Current());
+    Handle(Geom_Surface) g = tube_surface(f);
+    if (g.IsNull()) continue;
+    Handle(Geom_Surface) b = basis_of(g);
+    double fu0, fu1, fv0, fv1;
+    BRepTools::UVBounds(f, fu0, fu1, fv0, fv1);
+    double bu0, bu1, bv0, bv1;
+    b->Bounds(bu0, bu1, bv0, bv1);
+    for (int dir = 0; dir < 2; ++dir) {
+      if (!(dir == 0 ? b->IsUPeriodic() : b->IsVPeriodic())) continue;
+      const double per = dir == 0 ? b->UPeriod() : b->VPeriod();
+      const double lo = dir == 0 ? fu0 : fv0, hi = dir == 0 ? fu1 : fv1, origin = dir == 0 ? bu0 : bv0;
+      const double tol = per * 1e-6;
+      for (double at = origin + std::ceil((lo + tol - origin) / per) * per; at < hi - tol; at += per) {
+        Handle(Geom2d_Line) iso = dir == 0 ? new Geom2d_Line(gp_Pnt2d(at, 0), gp_Dir2d(0, 1))
+                                           : new Geom2d_Line(gp_Pnt2d(0, at), gp_Dir2d(1, 0));
+        TopoDS_Edge e = dir == 0 ? BRepBuilderAPI_MakeEdge(iso, g, fv0, fv1).Edge()
+                                 : BRepBuilderAPI_MakeEdge(iso, g, fu0, fu1).Edge();
+        BRepLib::BuildCurves3d(e);
+        tools.Append(e);
+        ++added;
+      }
+    }
+  }
+  if (added == 0) return s;
+  TopTools_ListOfShape args;
+  args.Append(s);
+  BRepAlgoAPI_Splitter split;
+  split.SetArguments(args);
+  split.SetTools(tools);
+  split.Build();
+  if (!split.IsDone() || split.Shape().IsNull() || !BRepCheck_Analyzer(split.Shape()).IsValid()) return s;
+  return split.Shape();
+}
+
+} // namespace
+
+// The faces of `s` on periodic free-form surfaces (a tube's) that run across the surface's seam,
+// split along it: the band a cut leaves of a pipe, say, which OCCT keeps whole by shifting its
+// parameters past the seam. A face of Fusion's ends at the seam.
+std::unique_ptr<Shape> split_seams(const Shape &s) {
+  try {
+    catch_signals();
+    OCC_CATCH_SIGNALS
+    return out(split_shifted(s.s));
+  } catch (...) {
+    fail("split at seams");
+  }
 }
 
 } // namespace fox

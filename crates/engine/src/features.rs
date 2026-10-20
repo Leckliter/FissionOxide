@@ -73,7 +73,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
       }
       let path_sketch = FeatureId(req_u32(p, "path")?);
-      s.design.sketch(path_sketch)?;
+      // a sketch, or the 3D curves of a Project To Surface
+      let curves3d =
+        s.design.feature(path_sketch).is_some_and(|f| matches!(f.kind, FeatureKind::ProjectToSurface { .. }));
+      if !curves3d {
+        s.design.sketch(path_sketch)?;
+      }
       let section = match opt_str(p, "section").unwrap_or("circular") {
         "circular" | "circle" => PipeSection::Circular,
         "square" => PipeSection::Square,
@@ -243,6 +248,22 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "body.appearance" => appearance(s, p),
     "appearances" => Ok(json!(APPEARANCES.iter().map(|(n, c)| json!({"name": n, "color": c})).collect::<Vec<_>>())),
+    "sketch.project_to_surface" => (|| {
+      let sketch = sketch_for_feature(s, p)?;
+      let faces = faces(s, p)?;
+      let along =
+        match opt_str(p, "type").unwrap_or(if p.get("direction").is_some() { "along_vector" } else { "closest_point" })
+        {
+          "closest_point" | "closest" => None,
+          "along_vector" | "along" | "vector" => {
+            let d = p.get("direction").ok_or(CmdError::new("along_vector needs a 'direction' (x, y, z or an axis)"))?;
+            Some(axis_ref(s, d)?)
+          }
+          o => return Err(CmdError::new(format!("unknown type '{o}' (closest_point, along_vector)"))),
+        };
+      let curves = ids(p, "curves").into_iter().map(CurveId).collect();
+      add_feature(s, FeatureKind::ProjectToSurface { sketch, curves, faces, along })
+    })(),
     _ => return None,
   })
 }

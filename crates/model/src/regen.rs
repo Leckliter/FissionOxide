@@ -155,6 +155,8 @@ struct State {
   placed: BTreeMap<crate::ComponentId, DMat4>,
   /// Rigid groups so far.
   groups: Vec<Vec<crate::ComponentId>>,
+  /// 3D curves (Project To Surface), as wires.
+  curves3d: BTreeMap<FeatureId, Vec<Shape>>,
 }
 
 /// The regenerated design.
@@ -177,6 +179,8 @@ pub struct Model {
   pub joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
   /// How far joints have moved each component (identity if they haven't).
   pub placed: BTreeMap<crate::ComponentId, DMat4>,
+  /// 3D curves (Project To Surface), as wires.
+  pub curves3d: BTreeMap<FeatureId, Vec<Shape>>,
 }
 
 impl Model {
@@ -311,6 +315,7 @@ impl Regenerator {
       param_errors,
       joint_origins: state.joint_origins,
       placed: state.placed,
+      curves3d: state.curves3d,
     }
   }
 }
@@ -2196,8 +2201,11 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 }
 
 mod direct;
+mod project;
 mod subasm;
 #[cfg(test)]
 mod tests_config;
+#[cfg(test)]
+mod tests_project;
 #[cfg(test)]
 mod tests_subasm;
