@@ -88,7 +88,7 @@ cmds! {
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]} (fix takes a point or curves; delete its constraints to unfix)";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]} (symmetric: points [a, b] + curves [axis], or curves [a, b, axis] for two lines or circles/arcs; fix takes a point or curves; delete its constraints to unfix)";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -2513,6 +2513,10 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
         need_p(1)?;
         need_c(1)?;
         ConstraintKind::PointOnCurve { p: pts[0], curve: cs[0] }
+      }
+      // two lines or two circles/arcs, then the axis
+      "symmetric" if pts.is_empty() && cs.len() >= 3 => {
+        ConstraintKind::SymmetricCurves { a: cs[0], b: cs[1], line: cs[2] }
       }
       "symmetric" => {
         need_p(2)?;

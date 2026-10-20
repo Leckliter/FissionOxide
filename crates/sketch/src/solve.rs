@@ -744,6 +744,31 @@ impl<'a> System<'a> {
         let m = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0];
         vec![cross(u, sub(m, la)), dot(u, sub(pb, pa))]
       }
+      K::SymmetricCurves { a, b, line } => {
+        let (la, lb) = self.line(x, *line);
+        let u = unit(sub(lb, la));
+        // mirror image across the axis
+        let reflect = |p: [f64; 2]| {
+          let d = sub(p, la);
+          let t = dot(d, u);
+          [la[0] + 2.0 * t * u[0] - d[0], la[1] + 2.0 * t * u[1] - d[1]]
+        };
+        if self.is_line(*a) {
+          // a's mirror image is b's infinite line (the endpoints stay free): parallel to b, and
+          // a's mirrored start on it
+          let (a0, a1) = self.line(x, *a);
+          let (b0, b1) = self.line(x, *b);
+          let (m0, m1) = (reflect(a0), reflect(a1));
+          let vb = unit(sub(b1, b0));
+          vec![cross(unit(sub(m1, m0)), vb), cross(vb, sub(m0, b0))]
+        } else {
+          // mirrored centres, equal radii
+          let (c1, r1) = self.round(x, *a);
+          let (c2, r2) = self.round(x, *b);
+          let m = reflect(c1);
+          vec![m[0] - c2[0], m[1] - c2[1], r1 - r2]
+        }
+      }
       K::Distance { a, b, value } => vec![crate::dist(self.p(x, *a), self.p(x, *b)) - value.value],
       K::HorizontalDistance { a, b, value } => vec![sign * (self.p(x, *b)[0] - self.p(x, *a)[0]) - value.value],
       K::VerticalDistance { a, b, value } => vec![sign * (self.p(x, *b)[1] - self.p(x, *a)[1]) - value.value],
@@ -1002,6 +1027,44 @@ mod tests {
     assert!(((d(&s, l4) - a1) - 0.5).sin().abs() < 1e-6);
     let cc = s.pos(s.curve_points(c)[0]).unwrap();
     assert!((s.distance_to_curve(l2, cc).unwrap() - s.radius(c).unwrap()).abs() < 1e-6);
+  }
+
+  #[test]
+  fn symmetric_lines_and_circles() {
+    // lines about a vertical axis: b lands on a's mirror image, its endpoints still free
+    let mut s = Sketch::new();
+    let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(0.0, 30.0)).unwrap();
+    s.add_constraint(ConstraintKind::Vertical { line: axis }).unwrap();
+    let (a, [a0, a1]) = s.add_line(PtSpec::At(-10.0, 0.0), PtSpec::At(-5.0, 10.0)).unwrap();
+    s.add_constraint(ConstraintKind::Fix { p: a0, x: -10.0, y: 0.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Fix { p: a1, x: -5.0, y: 10.0 }).unwrap();
+    let (b, [b0, b1]) = s.add_line(PtSpec::At(8.0, 1.0), PtSpec::At(4.0, 9.0)).unwrap();
+    s.add_constraint(ConstraintKind::SymmetricCurves { a, b, line: axis }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    assert_eq!(r.dof, 3, "{r:?}"); // the axis length, and b's two endpoints along its line
+    for p in [b0, b1] {
+      let [x, y] = s.pos(p).unwrap();
+      assert!((2.0 * x + y - 20.0).abs() < 1e-6, "{x} {y}"); // on the line through (10,0), (5,10)
+    }
+    // circles about the 45° line: mirrored centres, equal radii
+    let mut s = Sketch::new();
+    let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(20.0, 20.0)).unwrap();
+    let ax = s.curve_points(axis)[1];
+    s.add_constraint(ConstraintKind::Fix { p: ax, x: 20.0, y: 20.0 }).unwrap();
+    let ca = s.add_circle(PtSpec::At(10.0, 2.0), 4.0).unwrap();
+    let pa = s.curve_points(ca)[0];
+    s.add_constraint(ConstraintKind::Fix { p: pa, x: 10.0, y: 2.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Radius { curve: ca, value: Dim::new(4.0) }).unwrap();
+    let cb = s.add_circle(PtSpec::At(1.0, 8.0), 2.0).unwrap();
+    s.add_constraint(ConstraintKind::SymmetricCurves { a: ca, b: cb, line: axis }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    assert_eq!(r.dof, 0, "{r:?}");
+    let c = s.pos(s.curve_points(cb)[0]).unwrap();
+    assert!((c[0] - 2.0).abs() < 1e-6 && (c[1] - 10.0).abs() < 1e-6, "{c:?}");
+    // a line and a circle aren't a symmetric pair
+    assert!(s.add_constraint(ConstraintKind::SymmetricCurves { a: ca, b: axis, line: axis }).is_err());
   }
 
   #[test]
