@@ -84,17 +84,40 @@ class Runner:
 
   # ---- picking --------------------------------------------------------------------------------
 
-  def find(self, point, kind):
+  def find(self, point, kind, hint=None):
+    """The face or edge at a world point. A point on an edge between two faces hits both, so a
+    face pick prefers the hit whose surface type, normal and radius match the recipe's ref."""
     etype = {"face": adsk.fusion.BRepEntityTypes.BRepFaceEntityType,
              "edge": adsk.fusion.BRepEntityTypes.BRepEdgeEntityType}[kind]
     for tol in (1e-4, 1e-3, 1e-2):
       hits = self.root.findBRepUsingPoint(P(point), etype, tol, False)
       if hits and hits.count:
-        return hits.item(0)
+        found = [hits.item(i) for i in range(hits.count)]
+        if kind == "face" and hint and len(found) > 1:
+          found.sort(key=lambda f: -self.face_score(f, point, hint))
+        return found[0]
     raise RuntimeError(f"no {kind} at {point}")
 
+  def face_score(self, face, point, hint):
+    score = 0.0
+    g = face.geometry
+    if hint.get("type") and g.objectType.split("::")[-1].lower() == str(hint["type"]).lower():
+      score += 1
+    if hint.get("radius") is not None and hasattr(g, "radius") and abs(g.radius / MM - hint["radius"]) < 1e-3:
+      score += 1
+    n = hint.get("normal_at_point_on_face") or hint.get("normal")
+    if n:
+      try:
+        ok, fn = face.evaluator.getNormalAtPoint(P(point))
+        if ok:
+          length = math.sqrt(sum(x * x for x in n)) or 1.0
+          score += 2 * abs(fn.x * n[0] + fn.y * n[1] + fn.z * n[2]) / length
+      except Exception:
+        pass
+    return score
+
   def faces(self, refs):
-    return [self.find(r["point"], "face") for r in refs]
+    return [self.find(r["point"], "face", r) for r in refs]
 
   def edges(self, refs):
     return [self.find(r["point"], "edge") for r in refs]
@@ -137,7 +160,7 @@ class Runner:
     if ref in self.planes:
       return self.planes[ref]
     if isinstance(p, dict) and "face" in p:
-      return self.find(p["face"]["point"], "face")
+      return self.find(p["face"]["point"], "face", p["face"])
     if ref.startswith("construction plane "):
       name = ref.split()[2]
       if name in self.planes:
@@ -444,6 +467,9 @@ class Runner:
     edges = collection(self.edges(f["edges"]))
     chain = bool(f.get("tangent_chain", False))
     t = f.get("type", "constant_radius")
+    if f.get("fit") and f["fit"] != "fixed":
+      # Fusion has no fit option: building the plain fillet instead would measure a different part.
+      raise Unsupported(f"fillet fit: {f['fit']} (Fusion has no taper-to-fit fillet)")
     sets = getattr(inp, "edgeSetInputs", None)
     if t == "constant_radius":
       if sets is not None:
@@ -576,7 +602,7 @@ class Runner:
       pts = [e for e in rec["entities"].values() if e.objectType.endswith("SketchPoint")]
       inp.setPositionBySketchPoints(collection(pts))
     else:
-      inp.setPositionByPoint(self.find(f["face"]["point"], "face"), P(f["position"]))
+      inp.setPositionByPoint(self.find(f["face"]["point"], "face", f["face"]), P(f["position"]))
     ext = f.get("extent", "distance")
     if ext == "through_all":
       inp.setAllExtent(adsk.fusion.ExtentDirections.PositiveExtentDirection)
@@ -586,7 +612,7 @@ class Runner:
 
   def op_draft(self, f):
     drafts = self.root.features.draftFeatures
-    inp = drafts.createInput(self.faces(f["faces"]), self.find(f["neutral_plane"]["point"], "face"),
+    inp = drafts.createInput(self.faces(f["faces"]), self.find(f["neutral_plane"]["point"], "face", f["neutral_plane"]),
                              bool(f.get("tangent_chain", False)))
     inp.setSingleAngle(False, V(f["angle"], "deg"))
     if f.get("flipped"):

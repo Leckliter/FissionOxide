@@ -54,6 +54,40 @@ def call(op=None, timeout=900, **req):
     sys.exit(f"can't reach FoxBridge on port {PORT}: {e.reason}")
 
 
+# The runner in this checkout, loaded into Fusion through the `python` op. The add-in's own
+# `recipe` op loads the copy its AddIns link points at, which is one checkout; this lets every
+# worktree (the parity loop's probes and fixers) build recipes with its own runner.
+LOCAL_RUNNER = r"""
+import importlib.util, json, sys
+def _load(name, path):
+  spec = importlib.util.spec_from_file_location(name, path)
+  mod = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(mod)
+  return mod
+_saved = sys.modules.get("measure")
+sys.modules["measure"] = _load("measure", DIR + "/measure.py")
+try:
+  _rr = _load("foxbridge_local_runner", DIR + "/recipe_runner.py")
+finally:
+  if _saved is not None:
+    sys.modules["measure"] = _saved
+result = _rr.run(app, json.loads(RECIPE), keep_open=KEEP_OPEN, screenshot=SCREENSHOT)
+"""
+
+
+def recipe_call(recipe, keep_open=False, screenshot=None):
+  """Builds a recipe in Fusion with this checkout's recipe_runner.py; returns the runner's result."""
+  if os.environ.get("FOXBRIDGE_ADDIN_RUNNER"):
+    return call("recipe", recipe=recipe, keep_open=keep_open, screenshot=screenshot)
+  here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FoxBridge").replace("\\", "/")
+  code = (f"DIR = {here!r}\nRECIPE = {json.dumps(json.dumps(recipe))}\nKEEP_OPEN = {bool(keep_open)!r}\n"
+          f"SCREENSHOT = {screenshot!r}\n" + LOCAL_RUNNER)
+  res = call("python", code=code)
+  if not res.get("ok"):
+    return res
+  return res.get("result") or {"ok": False, "error": "runner returned nothing"}
+
+
 # ---- FissionOxide side ------------------------------------------------------------------------
 
 def fox_cli():
@@ -130,8 +164,18 @@ def diff(a, b):
   return out
 
 
+def known_differences():
+  """Cases where Fusion genuinely differs from the right answer: parity/known-differences.json."""
+  try:
+    with open(os.path.join(ROOT, "parity", "known-differences.json"), encoding="utf-8") as f:
+      return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+  except OSError:
+    return {}
+
+
 def compare(filters, png=False):
   os.makedirs(OUT, exist_ok=True)
+  known = known_differences()
   cases = sorted(d for d in os.listdir(REF) if os.path.isfile(os.path.join(REF, d, "recipe.json")))
   if filters:
     cases = [c for c in cases if any(f in c for f in filters)]
@@ -143,7 +187,7 @@ def compare(filters, png=False):
     shots = os.path.join(OUT, "png")
     if png:
       os.makedirs(shots, exist_ok=True)
-    fusion = call("recipe", recipe=recipe, screenshot=os.path.join(shots, case + "-fusion.png") if png else None)
+    fusion = recipe_call(recipe, screenshot=os.path.join(shots, case + "-fusion.png") if png else None)
     part = os.path.join(d, "part.jsonl")
     fox = fox_measure(part, os.path.join(shots, case + "-fox.png") if png else None) if os.path.exists(part) else {"ok": False, "error": "no part.jsonl"}
     expected = None
@@ -173,6 +217,10 @@ def compare(filters, png=False):
       status = "disputed"  # Fox agrees with expected.json and Fusion doesn't: check the runner first
     else:
       status = "mismatch"
+    if status in ("disputed", "mismatch") and case in known and fox_vs_expected is not None and not [
+        d for d in geometry if d.split()[0].split(".")[0] not in known[case]["keys"]]:
+      status = "fusion-differs"  # Fusion is wrong here; see parity/known-differences.json
+      verdict["known_difference"] = known[case]["why"]
     verdict["status"] = status
     with open(os.path.join(OUT, case + ".json"), "w", encoding="utf-8") as f:
       json.dump({"case": case, "verdict": verdict, "fusion": fusion, "fox": fox, "expected": expected}, f, indent=1)
@@ -197,6 +245,7 @@ def compare(filters, png=False):
             "- **match-geometry**: the same solid, but split into a different number of faces.\n"
             "- **disputed**: FissionOxide agrees with expected.json but Fusion doesn't. Check the Fusion runner before blaming either app.\n"
             "- **mismatch**: FissionOxide differs from Fusion. This is a parity bug.\n"
+            "- **fusion-differs**: Fusion genuinely differs from the right answer, and FissionOxide shouldn't copy it. See parity/known-differences.json.\n"
             "- **fusion-unbuilt**: the bridge couldn't build the recipe in Fusion (an unsupported op, or a runner error).\n\n")
     f.write(", ".join(f"**{n}** {k}" for k, n in sorted(counts.items())) + "\n\n")
     f.write("| Case | Status | Fox vs Fusion | expected.json vs Fusion | Fusion couldn't build |\n|---|---|---|---|---|\n")
@@ -241,8 +290,8 @@ def main():
   elif a.cmd == "recipe":
     with open(a.path, encoding="utf-8") as f:
       recipe = json.load(f)
-    print(json.dumps(call("recipe", recipe=recipe, keep_open=a.keep_open,
-                          screenshot=os.path.abspath(a.png) if a.png else None), indent=1))
+    print(json.dumps(recipe_call(recipe, keep_open=a.keep_open,
+                                 screenshot=os.path.abspath(a.png) if a.png else None), indent=1))
   elif a.cmd == "compare":
     compare(a.filters, a.png)
   elif a.cmd == "python":
