@@ -257,6 +257,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
+  offset_plane_overlay(app, &painter, &view);
   if app.show_viewcube {
     consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
@@ -458,6 +459,8 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     peek: app.ctx_menu.peek.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     opacity: app.ctx_menu.opacity.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
@@ -2127,6 +2130,28 @@ fn sketch_planes_overlay(
     resp.clone().on_hover_text_at_pointer(crate::dialogs::PICK_PLANE_HINT);
   }
   planes.into_iter().nth(hot?).map(|(p, _)| p)
+}
+
+/// The corners of the square drawn for a plane: `half` either side of `centre` along its axes.
+pub(crate) fn plane_square(pl: &Plane, centre: DVec3, half: f64) -> [DVec3; 4] {
+  [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[u, v]| centre + pl.x * (u * half) + pl.y * (v * half))
+}
+
+/// Offset Plane's new plane as a see-through orange square at the offset, centred over its base
+/// (a picked face's centre), as Fusion previews it.
+fn offset_plane_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let Some((pl, centre)) = app.dialog.as_ref().and_then(|d| d.offset_plane_preview(&app.s)) else { return };
+  let Some(pts) = plane_square(&pl, centre, plane_half_size(app))
+    .iter()
+    .map(|p| view.to_screen(&app.cam, *p))
+    .collect::<Option<Vec<Pos2>>>()
+  else {
+    return;
+  };
+  let [r, g, b] = PLANE_RGB;
+  let fill = Color32::from_rgba_unmultiplied(r, g, b, 70);
+  let edge = Color32::from_rgba_unmultiplied(r, g, b, 230);
+  painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(1.5, edge)));
 }
 
 // ---------------------------------------------------------------- window selection, Select Other
