@@ -4780,6 +4780,8 @@ mod tests {
     d.choice = "rigid";
     d.saved[1] = "Top".into();
     (d.angle, d.distance) = ("0 deg".into(), "0 mm".into());
+    // as in Fusion, unflipped Z axes line up; flipped, the arm's bottom faces the base's top
+    d.flip = true;
     d.origins = vec![(arm, json!({"face": face(&s, 1, |f| f.normal.z < -0.9)}))];
     d.comps = vec![s.design.component_of(BodyId(arm)).map(|c| c.id.0)];
     apply(&mut s, &mut d);

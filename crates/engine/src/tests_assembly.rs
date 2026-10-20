@@ -61,7 +61,7 @@ fn joints_mate_saved_joint_origins_that_follow_their_component() {
   let j = run(
     &mut s,
     "joint",
-    json!({"moving_origin": {"origin": "Pivot"}, "fixed_origin": {"origin": "Hole"}, "kind": "revolute"}),
+    json!({"moving_origin": {"origin": "Pivot"}, "fixed_origin": {"origin": "Hole"}, "kind": "revolute", "flip": true}),
   );
   let j = j["feature"].as_u64().unwrap();
   let (lo, hi) = bbox(&s, arm_body);
@@ -71,7 +71,7 @@ fn joints_mate_saved_joint_origins_that_follow_their_component() {
   run(
     &mut s,
     "joint",
-    json!({"moving": cap, "moving_origin": {"at": [0, -100, 0], "z": [0, 0, -1]}, "fixed_origin": {"origin": "Tip"}}),
+    json!({"moving": cap, "moving_origin": {"at": [0, -100, 0], "z": [0, 0, -1]}, "fixed_origin": {"origin": "Tip"}, "flip": true}),
   );
   let (lo, hi) = bbox(&s, cap_body);
   assert!(near((lo + hi) / 2.0, [110.0, 30.0, 17.0], 1e-3), "{lo:?} {hi:?}");
@@ -132,7 +132,7 @@ fn rigid_groups_bring_along_parts_modeled_after_the_joint() {
   let j = run(
     &mut s,
     "joint",
-    json!({"moving": arm, "moving_origin": {"edge": {"point": [15, 200, 0]}}, "fixed_origin": {"edge": {"point": [55, 30, 10]}}, "kind": "revolute"}),
+    json!({"moving": arm, "moving_origin": {"edge": {"point": [15, 200, 0]}}, "fixed_origin": {"edge": {"point": [55, 30, 10]}}, "kind": "revolute", "flip": true}),
   )["feature"]
     .clone();
   // a weight modeled where it should stay relative to the jointed arm, then grouped with it

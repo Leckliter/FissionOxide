@@ -230,3 +230,7 @@
 291-apparent-intersection
 296-flush-face-offset
 301-block-centered-in-channel
+325-rigid-face-center-offset
+326-rigid-flip-angle
+327-revolute-rotation-vertex
+328-slider-slide

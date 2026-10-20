@@ -314,7 +314,7 @@ fn assembly_with_a_revolute_joint() {
     json!({
       "moving": a, "moving_origin": {"edge": {"point": [15, 200, 0]}},
       "fixed": b, "fixed_origin": {"edge": {"point": [55, 30, 10]}},
-      "kind": "revolute",
+      "kind": "revolute", "flip": true,
     }),
   );
   assert!(r["error"].is_null(), "{r}");
