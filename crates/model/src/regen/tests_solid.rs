@@ -490,3 +490,40 @@ fn multi_tool_intersect_follows_the_design_behaviour() {
   assert!(close(new, 22079.37, 1e-3), "new volume {new}");
   assert!(Behaviours::current().has(fox_sketch::behaviour::INTERSECT_ANY_TOOL));
 }
+
+/// An obround drawn as two circles and two lines tangent to them: the lines' ends split each
+/// circle into two arcs.
+fn obround_of_circles(legacy: bool) -> Sketch {
+  let mut s = Sketch::new();
+  if legacy {
+    s.behaviours = Behaviours::legacy();
+  }
+  s.add_circle(PtSpec::At(0.0, 0.0), 5.0).unwrap();
+  s.add_circle(PtSpec::At(20.0, 0.0), 5.0).unwrap();
+  s.add_line(PtSpec::At(0.0, 5.0), PtSpec::At(20.0, 5.0)).unwrap();
+  s.add_line(PtSpec::At(0.0, -5.0), PtSpec::At(20.0, -5.0)).unwrap();
+  s
+}
+
+#[test]
+fn split_circles_keep_their_faces_in_old_files_and_merge_in_new_ones() {
+  let disc_faces = |legacy: bool| {
+    let mut d = Design::new("obround");
+    let sk = sketch(&mut d, XY, obround_of_circles(legacy));
+    d.add_feature(FeatureKind::Extrude {
+      sketch: sk,
+      profiles: vec![[-3.0, 0.0]],
+      extent: Extent::distance("4"),
+      operation: Operation::NewBody,
+    })
+    .unwrap();
+    // as saved and reopened
+    let mut d = Design::from_json(&d.to_json()).unwrap();
+    let m = regenerate(&mut d);
+    ok(&m);
+    assert!(close(vol(&m.bodies[0]), PI * 25.0 * 4.0, 1e-9), "{}", vol(&m.bodies[0]));
+    m.bodies[0].faces().len()
+  };
+  assert_eq!(disc_faces(true), 4, "a legacy design keeps the disc's side in two halves");
+  assert_eq!(disc_faces(false), 3, "a new design gets one side face");
+}

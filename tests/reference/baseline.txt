@@ -138,6 +138,10 @@
 101-concentric-circle-chain
 102-concentric-arc-to-circle
 103-concentric-circle-to-ellipse
+145-perpendicular-corner
+146-acute-wedge
+147-disjoint-lines-xz
+148-acute-wedge-hint-near-vertex
 269-rectangle-vertex-corners
 270-triangle-acute-obtuse-vertex
 271-apparent-intersection-gap

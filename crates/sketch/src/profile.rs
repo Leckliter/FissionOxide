@@ -885,6 +885,28 @@ mod crossing_tests {
     assert_eq!(p.len(), 3, "two discs and the band between them");
     assert!(p.iter().any(|r| r.contains([25.0, 0.0])), "the band is a region");
   }
+
+  #[test]
+  fn circle_touched_by_tangent_lines_merges_back_only_in_new_sketches() {
+    // a circle in a 40° wedge splits where the lines touch it; in a new sketch the disc's two
+    // arcs are flagged to become one edge (the whole circle), in a legacy one they stay two
+    let mut s = Sketch::new();
+    let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let (w, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.642, 25.712)).unwrap();
+    s.add_tangent_circle(&[h, w], Some(crate::Dim::new(5.0)), [30.0, 10.0]).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.segs.len(), 2, "{:?}", disc.outer);
+    assert_eq!(disc.outer.merge_next(), [true, true]);
+    let corner = p.iter().find(|r| r.contains([4.0, 0.5])).unwrap_or_else(|| panic!("{p:?}"));
+    assert_eq!(corner.outer.segs.len(), 3, "{:?}", corner.outer);
+    assert_eq!(corner.outer.merge_next(), [false; 3], "a line's and the circle's pieces never merge");
+    s.behaviours = crate::Behaviours::legacy();
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.merge_next(), [false, false], "legacy sketches keep two arcs");
+  }
 }
 
 #[cfg(test)]
