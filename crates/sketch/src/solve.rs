@@ -721,8 +721,21 @@ impl<'a> System<'a> {
       }
       K::Midpoint { p, line } => {
         let p = self.p(x, *p);
-        let (a, b) = self.line(x, *line);
-        vec![p[0] - (a[0] + b[0]) / 2.0, p[1] - (a[1] + b[1]) / 2.0]
+        let m = match self.curve(*line) {
+          Some((_, CurveKind::Arc { center, start, end })) => {
+            // the middle of the counter-clockwise sweep from start to end (past 180° too)
+            let (c, s, e) = (self.p(x, *center), self.p(x, *start), self.p(x, *end));
+            let a0 = crate::angle_of(c, s);
+            let mid = a0 + crate::ccw_sweep(a0, crate::angle_of(c, e)) / 2.0;
+            let r = crate::dist(c, s);
+            [c[0] + r * mid.cos(), c[1] + r * mid.sin()]
+          }
+          _ => {
+            let (a, b) = self.line(x, *line);
+            [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
+          }
+        };
+        vec![p[0] - m[0], p[1] - m[1]]
       }
       K::Symmetric { a, b, line } => {
         let (pa, pb) = (self.p(x, *a), self.p(x, *b));
@@ -1026,5 +1039,26 @@ mod tests {
     let r1 = super::super::dist(c, s.pos(pts[1]).unwrap());
     let r2 = super::super::dist(c, s.pos(pts[2]).unwrap());
     assert!((r1 - r2).abs() < 1e-6);
+  }
+
+  #[test]
+  fn midpoint_of_an_arc() {
+    // counter-clockwise from (10,0) to (0,-10): a 270° sweep whose middle is at 135°
+    let mut s = Sketch::new();
+    let a = s.add_arc_center(PtSpec::Point(ORIGIN), PtSpec::At(10.0, 0.0), [0.0, -10.0]).unwrap();
+    for p in &s.curve_points(a)[1..] {
+      let [x, y] = s.pos(*p).unwrap();
+      s.add_constraint(ConstraintKind::Fix { p: *p, x, y }).unwrap();
+    }
+    let m = s.add_point(-5.0, 9.0);
+    s.add_constraint(ConstraintKind::Midpoint { p: m, line: a }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    let p = s.pos(m).unwrap();
+    let h = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    assert!((p[0] + h).abs() < 1e-6 && (p[1] - h).abs() < 1e-6, "{p:?}");
+    // circles have no midpoint
+    let c = s.add_circle(PtSpec::At(30.0, 0.0), 5.0).unwrap();
+    assert!(s.add_constraint(ConstraintKind::Midpoint { p: m, line: c }).is_err());
   }
 }

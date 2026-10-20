@@ -86,3 +86,6 @@
 89-box-patch-flip-cut
 90-arc-surface-symmetric
 91-l-surface-sharp-symmetric
+119-midpoint-point-on-line
+120-midpoint-line-on-origin
+121-midpoint-point-on-arc
