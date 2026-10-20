@@ -157,6 +157,7 @@ cmds! {
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
   "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
+  "face.appearance" => "Set the appearance of single faces, over their body's (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{faces: [{body, face} | {point}], appearance? | color?}";
   "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner; post-processor and units for its G-code", "{name?, body?, stock_side?, stock_top?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch}";
   "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool_number? (library) | tool: {diameter, number?, kind?, rpm?, feed?, plunge?, ...} | tool_diameter, stepover?: fraction, stepdown?}";
   "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands); rest: only what earlier operations left", "{setup?, floors: [face], tool_number? | tool | tool_diameter, stepover?, stepdown?, stock_to_leave?, rest?, entry?: plunge|ramp|helix, ramp_angle?, helix_diameter?}";
@@ -194,6 +195,11 @@ cmds! {
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
   "attribute.delete" => "Remove attributes from a target (no name = the whole group)", "{target?, group, name?}";
   "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, background?: \"#rrggbb\"}";
+  "view.named.save" => "Save a camera as a named view (an existing name is replaced)", "{name? (default Named View N), target: [x,y,z], yaw, pitch, distance, fov?, ortho?}";
+  "view.named.list" => "The design's named views", "{}";
+  "view.named.get" => "One named view's camera", "{name}";
+  "view.named.rename" => "Rename a named view", "{name, to}";
+  "view.named.delete" => "Delete a named view", "{name}";
   "select" => "Set the selection", "{items: [Sel]}";
   "selection" => "The current selection", "{}";
   "select.all" => "Select every body (or every face, edge, or curve of the edited sketch)", "{kind?: bodies|faces|edges|sketch}";
@@ -326,6 +332,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::drawings::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::views::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::inspect::run(s, name, p) {

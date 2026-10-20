@@ -176,10 +176,12 @@ impl SceneBuilder {
         continue;
       }
       let Some(m) = body.mesh() else { continue };
-      let base = s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
-      let base = if selected_bodies.contains(&body.id) { mix(base, SELECT_COLOR, 0.45) } else { base };
-      let base = if opts.peek.contains(&body.id) { mix(base, HOVER_COLOR, 0.6) } else { base };
-      let base = if editing { mix(base, [255, 255, 255, 255], 0.35) } else { base };
+      let tint = |c: [u8; 4]| {
+        let c = if selected_bodies.contains(&body.id) { mix(c, SELECT_COLOR, 0.45) } else { c };
+        let c = if opts.peek.contains(&body.id) { mix(c, HOVER_COLOR, 0.6) } else { c };
+        if editing { mix(c, [255, 255, 255, 255], 0.35) } else { c }
+      };
+      let base = tint(s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR));
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
       let hover = match opts.hover {
@@ -193,7 +195,20 @@ impl SceneBuilder {
         })
         .collect();
       let first = scene.meshes.len();
-      if sel_faces.is_empty() {
+      let face_cols = crate::views::body_face_colors(s, body.id);
+      if !face_cols.is_empty() {
+        // faces with an appearance of their own (and selected faces) draw as meshes of their colour
+        let color_of = |t: usize, id: u32| {
+          if sel_faces.contains(&id) {
+            return SELECT_COLOR;
+          }
+          let f = m.tri_face.get(t).copied().unwrap_or(0);
+          face_cols.get(&f).map(|c| tint([c[0], c[1], c[2], 255])).unwrap_or(base)
+        };
+        for (part, ids, color) in split_by_color(m, &tri_ids, color_of) {
+          scene.meshes.push(mesh_of(&part, ids, color, hover));
+        }
+      } else if sel_faces.is_empty() {
         let mut mesh = mesh_of(m, tri_ids, base, hover);
         if opts.curvature {
           mesh.colors = self.curvature.entry(body.id).or_insert_with(|| curvature_colors(m)).clone();
@@ -810,6 +825,31 @@ fn split_mesh(m: &TriMesh, tri_ids: &[u32], ids: &[u32]) -> ((TriMesh, Vec<u32>)
     target.1.push(id);
   }
   (a, b)
+}
+
+/// Splits a mesh into one per colour (`color_of(triangle, pick id)`), keeping every vertex so
+/// the indices stay valid.
+fn split_by_color(
+  m: &TriMesh,
+  tri_ids: &[u32],
+  color_of: impl Fn(usize, u32) -> [u8; 4],
+) -> Vec<(TriMesh, Vec<u32>, [u8; 4])> {
+  let mut out: Vec<(TriMesh, Vec<u32>, [u8; 4])> = Vec::new();
+  for (t, tri) in m.indices.as_chunks::<3>().0.iter().enumerate() {
+    let id = tri_ids.get(t).copied().unwrap_or(0);
+    let c = color_of(t, id);
+    let i = match out.iter().position(|g| g.2 == c) {
+      Some(i) => i,
+      None => {
+        let mesh = TriMesh { positions: m.positions.clone(), normals: m.normals.clone(), ..Default::default() };
+        out.push((mesh, Vec::new(), c));
+        out.len() - 1
+      }
+    };
+    out[i].0.indices.extend_from_slice(tri);
+    out[i].1.push(id);
+  }
+  out
 }
 
 fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {

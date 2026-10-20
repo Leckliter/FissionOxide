@@ -95,8 +95,42 @@ pub struct Design {
   /// "Capture design history" is off: direct edits collect in a base feature.
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub history_off: bool,
+  /// Saved cameras (the browser's Named Views below Top, Front, Right and Home).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub named_views: Vec<NamedView>,
+  /// Appearances applied to single faces (Appearance's Faces mode); they draw over the body's.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub face_appearances: Vec<FaceAppearance>,
   #[serde(default)]
   next_id: u32,
+}
+
+/// A saved camera: one of Fusion's user Named Views.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NamedView {
+  pub name: String,
+  /// The point the camera orbits.
+  pub target: [f64; 3],
+  /// Rotation about +Z and elevation above the XY plane (radians).
+  pub yaw: f64,
+  pub pitch: f64,
+  pub distance: f64,
+  /// Vertical field of view (radians).
+  #[serde(default = "default_fov")]
+  pub fov: f64,
+  #[serde(default)]
+  pub ortho: bool,
+}
+
+fn default_fov() -> f64 {
+  30f64.to_radians()
+}
+
+/// An appearance on one face of a body; the face is found again after edits (see [`FaceRef`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FaceAppearance {
+  pub face: FaceRef,
+  pub color: [u8; 3],
 }
 
 fn format_version() -> u32 {
@@ -1543,6 +1577,8 @@ impl Design {
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,
+      named_views: Vec::new(),
+      face_appearances: Vec::new(),
       next_id: 1,
     }
   }
