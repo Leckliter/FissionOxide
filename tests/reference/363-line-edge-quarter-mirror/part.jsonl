@@ -1,0 +1,11 @@
+# 363-line-edge-quarter-mirror: added by the parity loop from a Fusion probe
+# line-edge-quarter-mirror: 20x10x5 box; construction plane along the bottom front edge (y=0, z=0) at t=0.25 (normal to the edge, x=5 or x=15); body mirrored about it and joined (x -10..20 or 0..30, volume 1500).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "plane", "method": "along_path", "edge": {"point": [8, 0, 0]}, "t": 0.25}
+{"cmd": "mirror", "plane": {"feature": 3}, "bodies": [2000], "join": true}

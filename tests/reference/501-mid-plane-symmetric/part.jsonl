@@ -1,0 +1,10 @@
+# 501-mid-plane-symmetric: added by the parity loop from a Fusion probe
+# mid-plane-symmetric: 40x40x30 box centred in XY; 6 deg symmetric draft on the 4 side faces about a free plane at z=15: faces split at z=15 and both halves drafted by 6 deg.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "draft", "faces": [{"point": [0.0, 20.0, 22.0]}, {"point": [20.0, 0.0, 22.0]}, {"point": [0.0, -20.0, 22.0]}, {"point": [-20.0, 0.0, 22.0]}], "plane": {"origin": [0.0, 0.0, 15.0], "normal": [0.0, 0.0, 1.0]}, "angle": "6 deg", "symmetric": true}

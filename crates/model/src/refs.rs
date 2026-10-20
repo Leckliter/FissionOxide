@@ -127,7 +127,9 @@ impl FaceRef {
         };
         tier * scale + off + 0.01 * reach
       } else {
-        if align.abs() < 0.999 {
+        // Spheres, cones and tori carry no axis (a zero normal): those match among themselves.
+        let (axial, f_axial) = (n0.length_squared() > 0.5, f.normal.length_squared() > 0.5);
+        if axial != f_axial || (axial && align.abs() < 0.999) {
           continue;
         }
         (p - f.center).length()

@@ -7,8 +7,8 @@ use fox_sketch::{Curve3dKind, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PlaneRef};
 use crate::include::sketch_curve3d;
-use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
 const ISO_COARSE: [(f64, f64); 18] = [
@@ -481,6 +481,7 @@ impl Ctx<'_> {
       | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
+      FeatureKind::Form { .. } => self.apply_form(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
@@ -681,9 +682,19 @@ impl Ctx<'_> {
           let mid = pa.origin + na * ((pb.origin - pa.origin).dot(na) / 2.0);
           return Ok(Plane { origin: mid, ..pa });
         }
-        let nb = if na.dot(nb) < 0.0 { -nb } else { nb };
         let (o, _) = plane_line(&pa, &pb).ok_or("the planes don't meet")?;
-        Plane::from_normal(o, na + nb, pa.x).map_err(ke)
+        let nb = if na.dot(nb) < 0.0 { -nb } else { nb };
+        let mut n = na + nb;
+        if let (PlaneRef::Face { face: fa }, PlaneRef::Face { face: fb }) = (a, b) {
+          // two body faces: Fusion takes the bisector that runs between them, with their centroids
+          // on opposite sides (through the body at a convex edge), not the one outside it
+          let (ca, cb) = (self.face_info(fa)?.1.origin, self.face_info(fb)?.1.origin);
+          let side = |n: DVec3| (ca - o).dot(n) * (cb - o).dot(n);
+          if side(na - nb) < side(n) {
+            n = na - nb;
+          }
+        }
+        Plane::from_normal(o, n, pa.x).map_err(ke)
       }
       PlaneDef::ThreePoints { a, b, c } => {
         let (a, b, c) = (self.point_of(a)?, self.point_of(b)?, self.point_of(c)?);
@@ -691,7 +702,12 @@ impl Ctx<'_> {
         if n.length() < 1e-9 {
           return Err("the three points are in a line".into());
         }
-        Plane::from_normal(a, n, b - a).map_err(ke)
+        // Fusion's frame: the world origin dropped onto the plane, x = Z × n (world X when the
+        // normal is along Z), y = n × x
+        let n = n.normalize();
+        let x = DVec3::Z.cross(n);
+        let x = if x.length() < 1e-9 { DVec3::X } else { x };
+        Plane::from_normal(n * n.dot(a), n, x).map_err(ke)
       }
       PlaneDef::TwoEdges { a, b } => {
         let (_, ea) = self.edge_info(a)?;
@@ -748,6 +764,20 @@ impl Ctx<'_> {
           fox_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
           _ => Err("pick a straight or circular edge".into()),
         }
+      }
+      AxisDef::SketchLine { sketch, curve } => {
+        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?;
+        let Some(CurveKind::Line { a, b }) = sk.sketch.curve(*curve).map(|c| &c.kind) else {
+          return Err("the axis line no longer exists".into());
+        };
+        let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
+          return Err("the axis line no longer exists".into());
+        };
+        let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
+        Ok((pa, pb - pa))
+      }
+      AxisDef::Axis { feature } => {
+        self.state.axes.get(feature).copied().ok_or_else(|| "its construction axis failed".to_string())
       }
     }
   }
@@ -934,6 +964,7 @@ fn seg_point(s: &Seg, u: f64) -> [f64; 2] {
       [center[0] + major[0] * c + v[0] * sn, center[1] + major[1] * c + v[1] * sn]
     }
     Seg::Conic { p, w } => fox_sketch::conic_at(&p, w, u),
+    Seg::Quintic { p } => fox_sketch::quintic_at(&p, u),
   }
 }
 
@@ -998,6 +1029,8 @@ fn seg_head(s: &Seg, len: f64) -> Seg {
       let mid = [((1.0 - u) * p[0][0] + u * w * p[1][0]) / w01, ((1.0 - u) * p[0][1] + u * w * p[1][1]) / w01];
       Seg::Conic { p: [p[0], mid, fox_sketch::conic_at(&p, w, u)], w: w01 / w012.sqrt() }
     }
+    // path_head cuts a quintic spline's cubic pieces instead
+    Seg::Quintic { .. } => *s,
   }
 }
 
@@ -1013,7 +1046,14 @@ fn path_head(segs: &[Seg], len: f64) -> Vec<Seg> {
       continue;
     }
     if left > 1e-9 {
-      out.push(seg_head(s, left));
+      match *s {
+        // a piece of a quintic spline is no longer one: take its cubic pieces instead
+        Seg::Quintic { p } => {
+          let pieces: Vec<Seg> = fox_sketch::quintic_beziers(&p).into_iter().map(|p| Seg::Bezier { p }).collect();
+          out.extend(path_head(&pieces, left));
+        }
+        _ => out.push(seg_head(s, left)),
+      }
     }
     break;
   }
@@ -1031,7 +1071,7 @@ fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
     }
     Seg::Circle { center, radius, .. } => ([center[0] + radius, center[1]], [0.0, 1.0]),
     Seg::Bezier { p } => (p[0], [p[1][0] - p[0][0], p[1][1] - p[0][1]]),
-    Seg::EllipseArc { .. } | Seg::Conic { .. } => (s.start(), s.end_tangents().0),
+    Seg::EllipseArc { .. } | Seg::Conic { .. } | Seg::Quintic { .. } => (s.start(), s.end_tangents().0),
   }
 }
 

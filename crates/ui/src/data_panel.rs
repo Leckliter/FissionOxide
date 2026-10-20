@@ -916,12 +916,14 @@ pub fn save_window(app: &mut App, ctx: &egui::Context) {
     app.data.save = None;
     return;
   }
-  if !done {
+  // the click or Enter that brought the window to the front wasn't aimed at this dialog
+  if !done || app.just_activated(ctx) {
     app.data.save = Some(f);
     return;
   }
   app.data.save = None;
-  let mut p = json!({"description": f.description, "new": f.as_new || app.s.hub.is_none()});
+  // the user asked for this save: even an empty "Untitled" design is kept
+  let mut p = json!({"description": f.description, "new": f.as_new || app.s.hub.is_none(), "explicit": true});
   if !f.milestone.trim().is_empty() {
     p["milestone"] = json!(f.milestone);
   }
@@ -944,5 +946,90 @@ fn insert_component(app: &mut App, item: &str, version: Option<u32>) {
     let name = app.s.design.components.iter().find(|c| Some(c.id.0 as u64) == r["component"].as_u64());
     let name = name.map(|c| c.name.clone()).unwrap_or_default();
     app.status = Some((format!("Inserted {name} (v{})", r["version"]), false));
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use egui::{Event, PointerButton, Pos2, RawInput, Rect, vec2};
+  use fox_engine::Session;
+
+  use crate::App;
+
+  /// Frames through a real egui context, with the window in front or not.
+  struct Window {
+    ctx: egui::Context,
+    app: App,
+    time: f64,
+  }
+
+  impl Window {
+    fn frame(&mut self, focused: bool, events: Vec<Event>) {
+      self.time += 1.0 / 60.0;
+      let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+        time: Some(self.time),
+        focused,
+        events,
+        ..Default::default()
+      };
+      let app = &mut self.app;
+      self.ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
+    }
+
+    fn click(&mut self, focused: bool, pos: Pos2) {
+      let button =
+        |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+      self.frame(focused, vec![Event::PointerMoved(pos), button(true), button(false)]);
+      self.frame(true, vec![]);
+    }
+
+    fn hub_items(&mut self) -> usize {
+      self
+        .app
+        .s
+        .execute("hub.recent", &serde_json::json!({}))
+        .ok()
+        .and_then(|v| v.as_array().map(Vec::len))
+        .unwrap_or(0)
+    }
+  }
+
+  #[test]
+  fn the_click_that_brings_the_window_to_the_front_doesnt_save() {
+    let root = std::env::temp_dir().join(format!("fox-ui-save-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut app = App::with_session(Session::default());
+    app.s.store_root = Some(root.clone());
+    let mut w = Window { ctx: egui::Context::default(), app, time: 0.0 };
+    crate::theme::apply(&w.ctx);
+    for _ in 0..3 {
+      w.frame(true, vec![]);
+    }
+    w.app.save(false);
+    w.frame(true, vec![]);
+    w.frame(true, vec![]);
+    let dialog = w.ctx.memory(|m| m.area_rect(egui::Id::new(Some("Save")))).expect("the Save dialog shows");
+    let save = dialog.left_bottom() + vec2(22.0, -16.0);
+
+    // the window goes to the back, then a click on the dialog's Save brings it to the front
+    w.frame(false, vec![]);
+    w.click(true, save);
+    assert!(w.app.data.save.is_some(), "the dialog stays open");
+    assert_eq!(w.hub_items(), 0, "nothing was saved");
+
+    // opening another design closes the dialog that was for the old one
+    w.app.new_design();
+    assert!(w.app.data.save.is_none());
+
+    // a click once the window is in front saves, even a blank design: the user asked for it
+    w.app.save(false);
+    for _ in 0..40 {
+      w.frame(true, vec![]);
+    }
+    w.click(true, save);
+    assert!(w.app.data.save.is_none(), "{:?}", w.app.status);
+    assert_eq!(w.hub_items(), 1);
+    let _ = std::fs::remove_dir_all(root);
   }
 }

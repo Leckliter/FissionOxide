@@ -1,0 +1,13 @@
+# 352-top-face-through-vertex: added by the parity loop from a Fusion probe
+# top-face-through-vertex: L-prism (40x30 L, arms 10 thick, 20 tall); plane perpendicular to the top face through the inner-corner vertex (15,10,20), U direction (the plane x=15); prism split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [15, 10]]}
+{"cmd": "sketch.line", "points": [[15, 10], [15, 30]]}
+{"cmd": "sketch.line", "points": [[15, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane", "method": "perpendicular", "plane": {"point": [5, 5, 20]}, "through": {"at": [15, 10, 20]}}
+{"cmd": "split", "plane": {"feature": 3}}

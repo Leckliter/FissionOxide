@@ -1,0 +1,10 @@
+# 285-open-l-chain-left: added by the parity loop from a Fusion probe
+# open-l-chain-left: open chain (0,0)-(40,0)-(40,30); Offset 5 to the left of travel (inside the corner); end lines close the 5 mm L strip, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.offset", "curves": [2, 5], "distance": 5}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 5]]}
+{"cmd": "sketch.line", "points": [[40, 30], [35, 30]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 2.5]], "distance": 10, "operation": "new_body"}

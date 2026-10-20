@@ -1,0 +1,16 @@
+# 407-base-press-pull-then-cut: added by the parity loop from a Fusion probe
+# base-press-pull-then-cut: 40x30x20 box in a base feature, top face pulled up 5 mm (direct edit), then a parametric 10 mm hole cut through all
+{"cmd": "base.start"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 2, "distance": 20, "operation": "new_body"}
+{"cmd": "direct.press_pull", "faces": [{"point": [20.0, 15.0, 20.0]}], "distance": 5}
+{"cmd": "base.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [20, 15], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 5, "extent": "through_all", "operation": "cut"}

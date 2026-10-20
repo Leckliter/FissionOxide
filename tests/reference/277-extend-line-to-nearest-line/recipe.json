@@ -1,0 +1,166 @@
+{
+ "id": "extend-line-to-nearest-line",
+ "name": "extend-line-to-nearest-line",
+ "description": "Open 40x30 frame: bottom (0,0)-(40,0), right x=40 from y 0 to 35, left x=0, top line (0,30)-(25,30) stopping short, and a farther vertical line x=55 (y -5..35); Extend the top line from its right end, which stops at the nearest line x=40; extrude the closed 40x30 rectangle 10 mm.",
+ "exercises": [
+  "sketch",
+  "extend",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       35
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       25,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "far",
+     "start": {
+      "at": [
+       55,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       55,
+       35
+      ]
+     }
+    },
+    {
+     "type": "extend",
+     "curve": "t",
+     "at": {
+      "at": [
+       24,
+       30
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "r",
+        "l",
+        "t"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

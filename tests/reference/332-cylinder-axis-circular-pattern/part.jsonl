@@ -1,0 +1,15 @@
+# 332-cylinder-axis-circular-pattern: added by the parity loop from a Fusion probe
+# cylinder-axis-circular-pattern: cylinder boss r5 at (40,20) h10; 6x4x10 tab at x 52..58; construction axis through the boss's cylindrical face; circular pattern of the tab x3 over 360 deg about it.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [40, 20], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[52, 18], [58, 18]]}
+{"cmd": "sketch.line", "points": [[58, 18], [58, 22]]}
+{"cmd": "sketch.line", "points": [[58, 22], [52, 22]]}
+{"cmd": "sketch.line", "points": [[52, 22], [52, 18]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "axis", "method": "face", "face": {"point": [45, 20, 5]}}
+{"cmd": "pattern.circular", "axis": {"axis": 5}, "count": 3, "angle": "360 deg", "bodies": [4000], "join": false}

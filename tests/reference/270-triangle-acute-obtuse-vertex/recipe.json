@@ -1,0 +1,157 @@
+{
+ "id": "triangle-acute-obtuse-vertex",
+ "name": "Sketch Equal Distance Chamfer: triangle-acute-obtuse-vertex",
+ "description": "Triangle (0,0)-(50,0)-(10,30) with shared vertices; equal-distance chamfer 8 at the acute (50,0) corner and 4 at the obtuse (10,30) corner; extruded 5.",
+ "exercises": [
+  "sketch_only",
+  "sketch_chamfer"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       50,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       10,
+       30
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       30
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l3"
+    },
+    {
+     "type": "chamfer_distance",
+     "lines": [
+      "l1",
+      "l2"
+     ],
+     "distance": 8,
+     "distance2": 8,
+     "id": "c1"
+    },
+    {
+     "type": "chamfer_distance",
+     "lines": [
+      "l2",
+      "l3"
+     ],
+     "distance": 4,
+     "distance2": 4,
+     "id": "c2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "c1",
+        "l2",
+        "c2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  }
+ ]
+}

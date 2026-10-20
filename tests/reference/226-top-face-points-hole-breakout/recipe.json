@@ -1,0 +1,238 @@
+{
+ "id": "top-face-points-hole-breakout",
+ "name": "Sketch points position holes (with breakouts)",
+ "description": "60x40x10 plate; sketch points on the top face at (20,20), (3,25) and (57,37); one simple d10 through-all hole at every point. The two points near the edges make the holes break out as notches, so the volume depends on where the points are.",
+ "exercises": [
+  "sketch_point",
+  "hole_from_sketch_points"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       60,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       40
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       60,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       40
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       40
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "HolePoints",
+   "plane": {
+    "ref": "face: top of plate (z=10)",
+    "origin": [
+     0,
+     0,
+     10
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "face": {
+     "type": "plane",
+     "normal_at_point_on_face": [
+      0,
+      0,
+      1
+     ],
+     "plane_normal_outward": [
+      0,
+      0,
+      1
+     ],
+     "point": [
+      30,
+      10,
+      10
+     ]
+    }
+   },
+   "entities": [
+    {
+     "type": "point",
+     "at": [
+      20,
+      20
+     ],
+     "fixed": false,
+     "id": "p1"
+    },
+    {
+     "type": "point",
+     "at": [
+      3,
+      25
+     ],
+     "fixed": false,
+     "id": "p2"
+    },
+    {
+     "type": "point",
+     "at": [
+      57,
+      37
+     ],
+     "fixed": false,
+     "id": "p3"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "hole",
+   "name": "Holes",
+   "hole_type": "simple",
+   "positions_from": "sketch HolePoints points p1..p3",
+   "direction": "into the material (-Z)",
+   "diameter": 10,
+   "extent": "through_all"
+  }
+ ]
+}

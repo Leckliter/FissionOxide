@@ -1,0 +1,11 @@
+# 210-single-u-proportional-join: added by the parity loop from a Fusion probe
+# single-u-proportional-join: Fox has no isoparametric-curve command; the U curve at 0.25 (y=5) is drawn by hand.
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.line", "points": [[0, 5], [40, 5]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[20, 2.5]], "distance": 5, "operation": "join"}

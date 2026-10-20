@@ -1,6 +1,6 @@
 //! Sketch commands for editable text, Break, tangent circles and blend curves.
 
-use fox_sketch::{CurveId, Dim, PointId, PtSpec, Sketch, TextId};
+use fox_sketch::{CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextId, TextStyle, VAlign};
 use serde_json::{Value, json};
 
 use super::{ids, opt_expr, opt_str, params_scope, pt_of, req_expr, req_pt, req_str, sketch_id};
@@ -64,6 +64,49 @@ fn angle(s: &Session, p: &Value, k: &str) -> Result<Option<f64>, CmdError> {
   }
 }
 
+/// `style` with the text options `p` gives (bold, italic, underline, halign, valign, spacing).
+fn text_style(mut style: TextStyle, p: &Value) -> Result<TextStyle, CmdError> {
+  let flag = |k: &str| p.get(k).and_then(Value::as_bool);
+  if let Some(b) = flag("bold") {
+    style.bold = b;
+  }
+  if let Some(b) = flag("italic") {
+    style.italic = b;
+  }
+  if let Some(b) = flag("underline") {
+    style.underline = b;
+  }
+  if let Some(h) = opt_str(p, "halign") {
+    style.halign = match h {
+      "left" => HAlign::Left,
+      "center" | "centre" => HAlign::Center,
+      "right" => HAlign::Right,
+      _ => return Err(CmdError::new(format!("halign '{h}': left, center or right"))),
+    };
+  }
+  if let Some(v) = opt_str(p, "valign") {
+    style.valign = match v {
+      "baseline" => VAlign::Baseline,
+      "top" => VAlign::Top,
+      "middle" => VAlign::Middle,
+      "bottom" => VAlign::Bottom,
+      _ => return Err(CmdError::new(format!("valign '{v}': baseline, top, middle or bottom"))),
+    };
+  }
+  match p.get("spacing") {
+    None | Some(Value::Null) => {}
+    Some(v) => {
+      let pct = match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(t) => t.trim().trim_end_matches('%').trim().parse::<f64>().ok(),
+        _ => None,
+      };
+      style.spacing = pct.ok_or(CmdError::new("spacing: a percentage of the text height"))?;
+    }
+  }
+  Ok(style)
+}
+
 fn add_text(s: &mut Session, p: &Value) -> CmdResult {
   let at = match p.get("at").and_then(Value::as_u64) {
     Some(id) => PtSpec::Point(PointId(id as u32)),
@@ -74,8 +117,9 @@ fn add_text(s: &mut Session, p: &Value) -> CmdResult {
   let angle = angle(s, p, "angle")?.unwrap_or(0.0);
   let font = opt_str(p, "font").unwrap_or("sans").to_string();
   let explode = p.get("explode").and_then(Value::as_bool).unwrap_or(false);
+  let style = text_style(TextStyle::default(), p)?;
   let (out, made) = change(s, p, move |sk| {
-    let id = sk.add_text(at, &text, &font, height, angle)?;
+    let id = sk.add_text_styled(at, &text, &font, height, angle, style)?;
     if explode {
       sk.explode_text(id)?;
       return Ok(json!({}));
@@ -113,6 +157,11 @@ fn edit_text(s: &mut Session, p: &Value) -> CmdResult {
   let (out, made) = change(s, p, move |sk| {
     let id = which_text(sk, &q)?;
     sk.edit_text(id, text.as_deref(), font.as_deref(), height, angle)?;
+    let before = sk.text(id).map(|t| t.style.clone()).unwrap_or_default();
+    let style = text_style(before.clone(), &q)?;
+    if style != before {
+      sk.set_text_style(id, style)?;
+    }
     if let (Some(at), Some(anchor)) = (at, sk.text(id).map(|t| t.anchor))
       && !sk.drag(anchor, at).ok()
     {
@@ -181,7 +230,8 @@ fn blend(s: &mut Session, p: &Value) -> CmdResult {
     Some(_) => return Err(CmdError::new("'near' is one [x, y] per curve")),
     None => None,
   };
-  let g2 = match opt_str(p, "continuity").unwrap_or("g2") {
+  // tangent continuous unless asked, as Fusion
+  let g2 = match opt_str(p, "continuity").unwrap_or("g1") {
     "g2" | "G2" | "curvature" => true,
     "g1" | "G1" | "tangent" => false,
     other => return Err(CmdError::new(format!("unknown continuity '{other}' (g1 or g2)"))),

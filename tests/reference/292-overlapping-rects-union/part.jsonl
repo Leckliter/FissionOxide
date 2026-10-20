@@ -1,0 +1,17 @@
+# 292-overlapping-rects-union: added by the parity loop from a Fusion probe
+# overlapping-rects-union: Rectangles (0,0)-(30,20) and (20,10)-(50,30) overlap; Trim the four edge pieces inside the overlap (at (30,15), (25,20), (20,15) and (25,10)), leaving the union outline as one region; extrude it 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 20]]}
+{"cmd": "sketch.line", "points": [[30, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.line", "points": [[20, 10], [50, 10]]}
+{"cmd": "sketch.line", "points": [[50, 10], [50, 30]]}
+{"cmd": "sketch.line", "points": [[50, 30], [20, 30]]}
+{"cmd": "sketch.line", "points": [[20, 30], [20, 10]]}
+{"cmd": "sketch.trim", "at": [30, 15]}
+{"cmd": "sketch.trim", "at": [25, 20]}
+{"cmd": "sketch.trim", "at": [20, 15]}
+{"cmd": "sketch.trim", "at": [25, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[5, 5]], "distance": 10, "operation": "new_body"}

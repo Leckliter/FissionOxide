@@ -1,0 +1,94 @@
+{
+ "id": "yz-negative-offset-sketch-extrude",
+ "name": "yz-negative-offset-sketch-extrude",
+ "description": "Construction plane offset -12 from the YZ origin plane (x=-12); r4 circle at (y=5, z=5) sketched on it, extruded 8 along +X (x -12..-4).",
+ "exercises": [
+  "construction_plane offset negative (YZ origin plane)",
+  "sketch on construction plane",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "construction_plane",
+   "name": "OffYZ",
+   "method": "offset",
+   "base": "YZ",
+   "offset": -12
+  },
+  {
+   "op": "sketch",
+   "name": "Sk",
+   "plane": {
+    "ref": "OffYZ",
+    "origin": [
+     -12,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     1,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       5,
+       5
+      ]
+     },
+     "radius": 4
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sk",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}
