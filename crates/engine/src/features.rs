@@ -1,11 +1,10 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use fox_model::include::sketch_curve3d;
 use fox_kernel::glam::DVec3;
+use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
-use fox_sketch::{Curve3dKind, CurveId};
+use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
 use crate::commands::{
@@ -331,24 +330,20 @@ fn edge(s: &Session, p: &Value, k: &str) -> Result<EdgeRef, CmdError> {
   edge_ref_of(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge)")))?)
 }
 
-/// {"sketch", "curve"} (a sketch line) | {"axis": feature} | an edge, as for [`edge_ref_of`].
+/// A straight line: an axis as `axis_ref` takes it ("x"/"y"/"z" or {axis: id}), a sketch line
+/// {sketch, curve}, or a body edge ({point} or {body, edge}).
 fn line(s: &Session, p: &Value, k: &str) -> Result<LineRef, CmdError> {
-  let v = p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge or line)")))?;
+  let v = p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge, axis or sketch line)")))?;
+  if v.is_string() || v.get("axis").is_some() {
+    return Ok(LineRef::Axis(axis_ref(s, v)?));
+  }
   if v.get("sketch").is_some() {
     let sketch = FeatureId(req_u32(v, "sketch")?);
     let curve = CurveId(req_u32(v, "curve")?);
-    let r = s.model.sketches.get(&sketch).ok_or(CmdError::new(format!("sketch {} failed to build", sketch.0)))?;
-    return match sketch_curve3d(r, curve).map_err(|e| CmdError::new(format!("sketch {}: {e}", sketch.0)))? {
-      Curve3dKind::Line { .. } => Ok(LineRef::Sketch { sketch, curve }),
-      _ => Err(CmdError::new(format!("sketch {} curve {} is not a line", sketch.0, curve.0))),
-    };
-  }
-  if v.get("axis").is_some() {
-    let axis = FeatureId(req_u32(v, "axis")?);
-    if !s.model.axes.contains_key(&axis) {
-      return Err(CmdError::new("that feature is not a construction axis"));
+    match s.design.sketch(sketch)?.curve(curve).map(|c| &c.kind) {
+      Some(CurveKind::Line { .. }) => return Ok(LineRef::Sketch { sketch, curve }),
+      _ => return Err(CmdError::new(format!("curve {} of that sketch is not a line", curve.0))),
     }
-    return Ok(LineRef::Axis { axis });
   }
   Ok(LineRef::Edge(edge_ref_of(s, v)?))
 }
@@ -401,7 +396,7 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
     },
     "midplane" => PlaneDef::Midplane { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "three_points" => PlaneDef::ThreePoints { a: pref(s, p, "a")?, b: pref(s, p, "b")?, c: pref(s, p, "c")? },
-    "two_edges" => PlaneDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PlaneDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "tangent" => PlaneDef::Tangent {
       face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)?,
       near: req_vec3(p, "near")?,

@@ -160,6 +160,9 @@
 357-sketch-points-and-vertex
 358-sketch-on-plane-hole
 359-sketch-on-plane-reversed-order
+360-parallel-body-edges
+361-axis-and-edge
+362-sketch-line-and-edge
 386-edges-meeting-at-vertex
 387-edges-extended-intersection
 388-sketch-line-and-edge

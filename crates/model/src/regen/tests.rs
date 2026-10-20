@@ -766,3 +766,34 @@ fn flanges_from_separate_features_leave_an_open_corner() {
   let flat = m.bodies[0].flat_pattern(None).unwrap();
   assert_eq!(flat.bends.len(), 2);
 }
+
+/// A two-edges point on two skew edges of the 40×20×10 block: the top front edge (y = 0,
+/// z = 10, along X) and the bottom left edge (x = 0, z = 0, along Y).
+fn point_on_skew_edges(behaviours: Behaviours) -> Result<DVec3, Vec<String>> {
+  let (mut d, _, _) = block_design();
+  d.behaviours = behaviours;
+  let m = regenerate(&mut d);
+  ok(&m);
+  let b = &m.bodies[0];
+  let edge = |mid: DVec3| {
+    let e = b.edges().iter().find(|e| (e.mid - mid).length() < 1e-6).unwrap();
+    construct::LineRef::Edge(EdgeRef::from_edge(b.id, e, b.faces()))
+  };
+  let (a, e) = (edge(DVec3::new(20.0, 0.0, 10.0)), edge(DVec3::new(0.0, 10.0, 0.0)));
+  let pt = d.add_feature(FeatureKind::ConstructionPoint { def: construct::PointDef::TwoEdges { a, b: e } }).unwrap();
+  let m = regenerate(&mut d);
+  match m.points.get(&pt) {
+    Some(p) => Ok(*p),
+    None => Err(m.errors()),
+  }
+}
+
+#[test]
+fn two_edges_point_crosses_infinite_lines_only_in_new_designs() {
+  // a design saved before the flag takes the midpoint of the edges' closest approach
+  let p = point_on_skew_edges(Behaviours::legacy()).unwrap();
+  assert!((p - DVec3::new(0.0, 0.0, 5.0)).length() < 1e-6, "{p}");
+  // a new one wants the lines to cross, as Fusion does
+  let errs = point_on_skew_edges(Behaviours::current()).unwrap_err();
+  assert!(errs.iter().any(|e| e.contains("the lines don't meet")), "{errs:?}");
+}
