@@ -684,6 +684,23 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
   let top = 20.0 - 2.0 * 10.0 * (10f64).to_radians().tan();
   let frustum = 10.0 / 3.0 * (400.0 + top * top + 20.0 * top);
   assert!((total_volume(&s) - frustum).abs() < 1e-3, "{} vs {frustum}", total_volume(&s));
+  // two sides, each tapered from the sketch plane: 10 up narrowing 10°, 6 down untapered
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(
+    &mut s,
+    "extrude",
+    json!({"extent": "two_sides", "distance": 10, "distance2": 6, "taper": "10 deg", "taper2": "0 deg"}),
+  );
+  assert!(r["error"].is_null(), "{r}");
+  let want = frustum + 400.0 * 6.0;
+  assert!((total_volume(&s) - want).abs() < 1e-3, "{} vs {want}", total_volume(&s));
+  // symmetric: both halves narrow away from the sketch plane
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(&mut s, "extrude", json!({"extent": "symmetric", "distance": 10, "taper": "10 deg"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - 2.0 * frustum).abs() < 1e-3, "{} vs {}", total_volume(&s), 2.0 * frustum);
   // to a face: a box's top, 30 up
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 30, "at": [50, 50]}));

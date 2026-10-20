@@ -485,21 +485,36 @@ impl Ctx<'_> {
           }
         };
         let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
+        // the far side of a two-sided extent tapers on its own (symmetric: as the first side)
+        let taper2 = match extent.kind {
+          ExtentKind::TwoSides if !extent.taper2.trim().is_empty() => self.angle(&extent.taper2)?,
+          _ => taper,
+        };
         let thin = if extent.thin.trim().is_empty() { 0.0 } else { self.len(&extent.thin)? };
-        if taper.abs() > 1e-12 && start.abs() > 0.0 {
-          return Err("taper works with one-side, through-all and to-face extents".into());
-        }
         if thin < 0.0 {
           return Err("the thin wall thickness must be positive".into());
         }
         let along = n.dot(sk.plane.normal()).signum();
-        let solid = |face: &Shape| -> Result<Shape, String> {
-          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face.clone() };
-          if taper.abs() > 1e-12 {
-            face.extrude_tapered(length * along, taper).map_err(ke)
+        let tapered = taper.abs() > 1e-12 || taper2.abs() > 1e-12;
+        // `height` is signed along `n`
+        let side = |face: &Shape, height: f64, angle: f64| -> Result<Shape, String> {
+          if angle.abs() > 1e-12 {
+            face.extrude_tapered(height * along, angle).map_err(ke)
           } else {
-            face.extrude(n * length).map_err(ke)
+            face.extrude(n * height).map_err(ke)
           }
+        };
+        let solid = |face: &Shape| -> Result<Shape, String> {
+          if tapered && start < 0.0 {
+            // each side drafts away from the profile plane on its own, as in Fusion
+            let mut sides = vec![side(face, start, taper2)?];
+            if length + start > 1e-9 {
+              sides.push(side(face, length + start, taper)?);
+            }
+            return union_all(sides);
+          }
+          let face = if start.abs() > 0.0 { face.translated(n * start).map_err(ke)? } else { face.clone() };
+          side(&face, length, taper)
         };
         let mut tools = Vec::new();
         for p in &chosen {

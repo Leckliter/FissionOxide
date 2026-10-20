@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+419-two-sides-tapered
+420-start-offset-flip-taper
+421-to-curved-face-join
+422-thin-closed-circle-center

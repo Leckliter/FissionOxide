@@ -58,3 +58,4 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+421-to-curved-face-join
