@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+366-world-axis-from-xz
+367-body-edge-from-top-face
+368-sketch-line-from-xy

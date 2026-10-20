@@ -1811,16 +1811,9 @@ impl Ctx<'_> {
       AxisRef::Z => Ok((DVec3::ZERO, DVec3::Z)),
       AxisRef::SketchLine { curve } => {
         let sid = sketch.ok_or("a sketch line axis only works in a revolve")?;
-        let sk = self.state.sketches.get(&sid).ok_or("its sketch failed")?;
-        let Some(CurveKind::Line { a, b }) = sk.sketch.curve(*curve).map(|c| &c.kind) else {
-          return Err("the axis line no longer exists".into());
-        };
-        let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
-          return Err("the axis line no longer exists".into());
-        };
-        let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
-        Ok((pa, (pb - pa).try_normalize().ok_or("the axis line has no length")?))
+        self.sketch_line_axis(sid, *curve)
       }
+      AxisRef::SketchCurve { sketch, curve } => self.sketch_line_axis(*sketch, *curve),
       AxisRef::Construction { feature } => {
         self.state.axes.get(feature).copied().ok_or_else(|| "its construction axis failed".to_string())
       }
@@ -1838,6 +1831,19 @@ impl Ctx<'_> {
         }
       }
     }
+  }
+
+  /// A sketch line as a world-space axis: its start point and unit direction.
+  fn sketch_line_axis(&self, sid: FeatureId, curve: fox_sketch::CurveId) -> Result<(DVec3, DVec3), String> {
+    let sk = self.state.sketches.get(&sid).ok_or("its sketch failed")?;
+    let Some(CurveKind::Line { a, b }) = sk.sketch.curve(curve).map(|c| &c.kind) else {
+      return Err("the axis line no longer exists".into());
+    };
+    let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
+      return Err("the axis line no longer exists".into());
+    };
+    let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
+    Ok((pa, (pb - pa).try_normalize().ok_or("the axis line has no length")?))
   }
 
   fn body_index(&self, id: BodyId) -> Result<usize, String> {
