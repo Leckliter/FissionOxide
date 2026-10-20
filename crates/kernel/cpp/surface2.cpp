@@ -240,8 +240,8 @@ TopoDS_Face ruled_strip(const TopoDS_Face &f, const TopoDS_Edge &e, double d, bo
   GeomAPI_Interpolate interp(arr, closed ? Standard_True : Standard_False, 1e-7);
   interp.Perform();
   if (!interp.IsDone()) throw std::runtime_error("the extended edge could not be built");
-  TopoDS_Edge far = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge();
-  return BRepFill::Face(bare, far);
+  TopoDS_Edge outer = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge();
+  return BRepFill::Face(bare, outer);
 }
 
 } // namespace

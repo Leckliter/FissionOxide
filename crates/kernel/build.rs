@@ -73,6 +73,8 @@ fn main() {
   let target = std::env::var("TARGET").unwrap_or_default();
   if target.contains("windows") {
     println!("cargo:rustc-link-lib=dylib=user32");
+    // OSD_Process (OpenProcessToken, GetUserNameW); newer std no longer links it for us.
+    println!("cargo:rustc-link-lib=dylib=advapi32");
   }
   cxx_build::bridge("src/ffi.rs")
     .file("cpp/kernel.cpp")
