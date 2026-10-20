@@ -1,0 +1,8 @@
+# 245-line-ccw-turn: added by the parity loop from a Fusion probe
+# line-ccw-turn: Line (0,0)-(20,0), then a tangent arc off its end to (30,18): turns left (CCW), centre (20,11.78) R11.78, ~122 deg; closed by lines (30,18)-(0,18)-(0,0); extruded 10 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.arc", "tangent": 2, "start": [20, 0], "end": [30, 18]}
+{"cmd": "sketch.line", "points": [[30, 18], [0, 18], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

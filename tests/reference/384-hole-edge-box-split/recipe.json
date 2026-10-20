@@ -1,0 +1,207 @@
+{
+ "id": "hole-edge-box-split",
+ "name": "hole-edge-box-split",
+ "description": "40x30x20 box with an R6 through hole at (25,12); point at the centre of the hole's top circular edge, (25,12,20); plane through it and the box's bottom-front vertices (0,0,0), (40,0,0); box split by it.",
+ "exercises": [
+  "construction_point center",
+  "construction_plane three_points",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": [
+      25,
+      12
+     ],
+     "radius": 6
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "construction_point",
+   "name": "C",
+   "method": "center",
+   "edge": {
+    "point": [
+     31,
+     12,
+     20
+    ]
+   }
+  },
+  {
+   "op": "construction_plane",
+   "name": "P3",
+   "method": "three_points",
+   "a": {
+    "ref": "C"
+   },
+   "b": {
+    "vertex": [
+     0,
+     0,
+     0
+    ]
+   },
+   "c": {
+    "vertex": [
+     40,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "Box",
+   "tool": "P3",
+   "extend_tool": true,
+   "result_bodies": [
+    "Box",
+    "Box (1)"
+   ]
+  }
+ ]
+}

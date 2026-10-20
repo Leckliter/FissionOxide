@@ -1,0 +1,4 @@
+# 418-form-box-pulled-top: the 417 box cage (80 x 60 x 20 mm, 2 x 2 x 2 faces) with the control
+# vertex at the centre of the top face pulled up from z 20 to z 40, raising a smooth dome.
+{"cmd": "form.box", "plane": "xy", "length": 80, "width": 60, "height": 20, "length_faces": 2, "width_faces": 2, "height_faces": 2}
+{"cmd": "form.move_vertex", "point": [0, 0, 20], "to": [0, 0, 40]}

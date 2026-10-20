@@ -1,0 +1,11 @@
+# 223-circle-triangle-slanted-axis: added by the parity loop from a Fusion probe
+# circle-triangle-slanted-axis: 50x50 square plate on XY from the origin; construction diagonal from (0,0) to (50,50); a radius-5 circle at (38,30) and a triangle (15,5),(35,5),(35,15) below the diagonal, mirrored about it to a circle at (30,38) and a triangle (5,15),(5,35),(15,35); the plate minus the four holes extruded 8.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 0], [50, 50], [0, 50]], "closed": true}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 50]]}
+{"cmd": "sketch.construction", "curves": [12], "on": true}
+{"cmd": "sketch.circle", "center": [38, 30], "radius": 5}
+{"cmd": "sketch.line", "points": [[15, 5], [35, 5], [35, 15]], "closed": true}
+{"cmd": "sketch.mirror", "curves": [14, 17, 20, 22], "line": 12}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[25, 2]], "distance": 8, "operation": "new_body"}

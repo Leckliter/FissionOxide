@@ -1,0 +1,173 @@
+{
+ "id": "sketch-points-slanted-revolve",
+ "name": "sketch-points-slanted-revolve",
+ "description": "Rectangle x 5..10, y 0..8 on XY with sketch points (1,0) and (3,8); axis through the two sketch points; rectangle revolved 360 deg about the slanted axis.",
+ "exercises": [
+  "sketch_point",
+  "construction_axis two_points",
+  "revolve"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Profile",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       10,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       10,
+       8
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       10,
+       8
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       5,
+       8
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       5,
+       8
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       5,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    },
+    {
+     "type": "point",
+     "id": "p1",
+     "at": [
+      1,
+      0
+     ]
+    },
+    {
+     "type": "point",
+     "id": "p2",
+     "at": [
+      3,
+      8
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_axis",
+   "name": "Axis1",
+   "method": "two_points",
+   "a": {
+    "sketch": "Profile",
+    "point": "p1"
+   },
+   "b": {
+    "sketch": "Profile",
+    "point": "p2"
+   }
+  },
+  {
+   "op": "revolve",
+   "name": "Revolve1",
+   "operation": "new",
+   "profile": {
+    "sketch": "Profile",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "ref": "Axis1"
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

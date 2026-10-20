@@ -1,0 +1,6 @@
+# 213-closed-polyline-l-shape: added by the parity loop from a Fusion probe
+# closed-polyline-l-shape: Line tool polyline of six segments closed back on its start: L-shape 40x30 with 10 and 15 thick legs (area 700), extruded 8.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0], [40, 10], [15, 10], [15, 30], [0, 30]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

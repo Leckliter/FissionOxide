@@ -1,0 +1,18 @@
+# 242-parallel-offset-parallelogram: added by the parity loop from a Fusion probe
+# parallel-offset-parallelogram: Parallelogram: base 40 horizontal from the origin, opposite sides parallel, offset dimension between the base and top lines = '2 * 9 mm' (18), 60 deg angle between base and left side; extruded 6.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0.5, 0.5], [40, -1]]}
+{"cmd": "sketch.line", "points": [[40, -1], [49, 18]]}
+{"cmd": "sketch.line", "points": [[49, 18], [8, 19]]}
+{"cmd": "sketch.line", "points": [[8, 19], [0.5, 0.5]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [3, 7]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [5, 8]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [1, 2], "value": 40}
+# Fox has no line-to-line offset dimension; the distance from a point of the top line to the base is the same here
+{"cmd": "sketch.dimension", "type": "point_line", "points": [6], "curves": [3], "value": "2 * 9 mm"}
+{"cmd": "sketch.dimension", "type": "angle", "curves": [3, 8], "value": "60 deg"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}

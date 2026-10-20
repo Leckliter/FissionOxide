@@ -1,0 +1,9 @@
+# 447-two-side-revolve: added by the parity loop from a Fusion probe
+# two-side-revolve: Rectangle x 10..20, z 0..10 on XZ revolved two sides about the world Z axis: 60 deg one way, 30 deg the other.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, -10]]}
+{"cmd": "sketch.line", "points": [[20, -10], [10, -10]]}
+{"cmd": "sketch.line", "points": [[10, -10], [10, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": "z", "angle": "60 deg", "angle2": "30 deg", "operation": "new_body"}

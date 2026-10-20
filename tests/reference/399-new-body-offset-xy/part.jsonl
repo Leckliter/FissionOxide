@@ -1,0 +1,4 @@
+# 399-new-body-offset-xy: added by the parity loop from a Fusion probe
+# new-body-offset-xy: Box 40 (X) x 30 (Y) x 20 (Z) on XY, base centred at (10,5): spans X -10..30, Y -10..20, Z 0..20.
+# hand-written; Fusion side is the equivalent sketch rectangle + extrude
+{"cmd": "box", "plane": "xy", "at": [10, 5], "width": 40, "depth": 30, "height": 20}

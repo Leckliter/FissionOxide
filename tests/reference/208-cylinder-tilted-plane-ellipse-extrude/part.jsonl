@@ -1,0 +1,13 @@
+# 208-cylinder-tilted-plane-ellipse-extrude: added by the parity loop from a Fusion probe
+# r10 cylinder along Z, z=-20..20. Fusion's Intersect puts the cylinder's section by a plane
+# through the origin tilted 30 deg from XY about X (an ellipse, semi-axes 10 and 10/cos30) into a
+# sketch on that plane, extruded 5 mm along the plane's normal as a new body: two bodies.
+# Fox has no Intersect command, so the ellipse is drawn by hand where the section falls.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "extent": "symmetric", "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -0.5, 0.8660254037844386], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.ellipse", "center": [0, 0], "major": [0, 11.547005383792516], "minor": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "operation": "new_body"}

@@ -1,0 +1,7 @@
+# 414-yz-origin-plane: added by the parity loop from a Fusion probe
+# yz-origin-plane: Rectangle (4,6)-(24,16) in the YZ plane's sketch frame (Fusion: x=-Z, y=+Y, normal +X), extruded 7 along the normal: Z -24..-4, Y 6..16, X 0..7.
+# hand-written: the sketch is placed by picking the plane/face (Fox's own sketch frame), sketch coords as in the recipe
+{"cmd": "sketch.create", "plane": "yz"}
+{"cmd": "sketch.rect", "corner1": [4, 6], "corner2": [24, 16]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 7, "operation": "new_body"}

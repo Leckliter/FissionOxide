@@ -1,0 +1,14 @@
+# 376-body-faces-extended: added by the parity loop from a Fusion probe
+# L-shaped prism 5 high (20x4 foot, 8x6 upright); construction point where the planes of the inner face x=8 (spanning only y 4..10), the front face y=0 and the top face z=5 meet, at (8,0,5) off the x=8 face; plane through it and the vertical edge at (0,10); mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 4]]}
+{"cmd": "sketch.line", "points": [[20, 4], [8, 4]]}
+{"cmd": "sketch.line", "points": [[8, 4], [8, 10]]}
+{"cmd": "sketch.line", "points": [[8, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "point", "method": "three_planes", "a": {"point": [8, 7, 2.5], "normal": [1, 0, 0]}, "b": {"point": [10, 0, 2.5], "normal": [0, -1, 0]}, "c": {"point": [4, 5, 5], "normal": [0, 0, 1]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}

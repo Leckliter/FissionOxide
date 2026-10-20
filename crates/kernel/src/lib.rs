@@ -549,6 +549,17 @@ impl Shape {
     Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
   }
 
+  /// Splits faces (1-based) along a neutral plane and tapers both sides away from it: the side
+  /// `normal` points to by `angle` radians, the other side by `angle2` (zero leaves a side alone).
+  pub fn draft_two_sided(&self, faces: &[u32], origin: DVec3, normal: DVec3, angle: f64, angle2: f64) -> Result<Shape> {
+    let n = normal.try_normalize().ok_or(KernelError::Input("zero pull direction".into()))?;
+    if [angle, angle2].iter().any(|a| !(a.is_finite() && a.abs() < std::f64::consts::FRAC_PI_2)) {
+      return Err(KernelError::Input("the draft angle must be under 90°".into()));
+    }
+    let plane = [origin.x, origin.y, origin.z, n.x, n.y, n.z];
+    Shape::wrap(sys::draft_two_sided(self.get()?, faces, &plane, angle, angle2)?)
+  }
+
   /// For a sheet that was unfolded onto `face` (see [`Shape::unfold`]): the material to cut from
   /// this folded shape for the solids `removed` from its flat pattern.
   pub fn refold_cuts(&self, face: u32, thickness: f64, k_factor: f64, removed: &Shape) -> Result<Shape> {
@@ -1027,6 +1038,13 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
     Seg::Conic { p, w } => {
       put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
     }
+    Seg::Quintic { p } => {
+      // ten control points over three records: 4, 4 and 2
+      let w = p.map(|q| plane.to_world(q));
+      put(6.0, [w[0], w[1], w[2], w[3]]);
+      put(6.0, [w[4], w[5], w[6], w[7]]);
+      put(6.0, [w[8], w[9], DVec3::ZERO, DVec3::ZERO]);
+    }
   }
 }
 
@@ -1054,3 +1072,6 @@ mod tests_refparts;
 
 mod path3d;
 pub use path3d::Seg3;
+
+mod form;
+pub use form::BSplineSurface;

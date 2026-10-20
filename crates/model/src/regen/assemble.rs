@@ -241,7 +241,7 @@ impl Ctx<'_> {
   /// Saved joint origins, rigid groups, motion links and inserted designs.
   pub(super) fn apply_assembly(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::JointOrigin { component, geometry, angle, offset, flip } => {
+      FeatureKind::JointOrigin { component, geometry, angle, offset, offset_x, offset_y, flip } => {
         let comp = self.component(*component)?;
         let name = comp.name.clone();
         if comp.bodies.iter().all(|b| self.body_index(*b).is_err()) {
@@ -250,7 +250,7 @@ impl Ctx<'_> {
         let base = self.joint_frame(geometry)?;
         let turn = if *flip { DMat4::from_rotation_x(std::f64::consts::PI) } else { DMat4::IDENTITY };
         let f = base
-          * DMat4::from_translation(DVec3::new(0.0, 0.0, self.len(offset)?))
+          * DMat4::from_translation(DVec3::new(self.len(offset_x)?, self.len(offset_y)?, self.len(offset)?))
           * DMat4::from_rotation_z(self.angle(angle)?)
           * turn;
         self.state.joint_origins.insert(id, (*component, f));

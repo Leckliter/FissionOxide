@@ -1,0 +1,256 @@
+{
+ "id": "overlapping-rects-union",
+ "name": "overlapping-rects-union",
+ "description": "Rectangles (0,0)-(30,20) and (20,10)-(50,30) overlap; Trim the four edge pieces inside the overlap (at (30,15), (25,20), (20,15) and (25,10)), leaving the union outline as one region; extrude it 10 mm.",
+ "exercises": [
+  "sketch",
+  "trim",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "a1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a2",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a3",
+     "start": {
+      "ref": "a2.end",
+      "at": [
+       30,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a4",
+     "start": {
+      "ref": "a3.end",
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b1",
+     "start": {
+      "at": [
+       20,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b2",
+     "start": {
+      "ref": "b1.end",
+      "at": [
+       50,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b3",
+     "start": {
+      "ref": "b2.end",
+      "at": [
+       50,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b4",
+     "start": {
+      "ref": "b3.end",
+      "at": [
+       20,
+       30
+      ]
+     },
+     "end": {
+      "ref": "b1.start",
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "a2",
+     "at": {
+      "at": [
+       30,
+       15
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "a3",
+     "at": {
+      "at": [
+       25,
+       20
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "b4",
+     "at": {
+      "at": [
+       20,
+       15
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "b1",
+     "at": {
+      "at": [
+       25,
+       10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "b1",
+        "b2",
+        "b3",
+        "b4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

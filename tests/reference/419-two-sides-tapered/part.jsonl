@@ -1,0 +1,9 @@
+# 419-two-sides-tapered: added by the parity loop from a Fusion probe
+# two-sides-tapered: 20x20 square centred on XY, extruded two sides: 10 mm up and 6 mm down, each side with a 5 deg inward taper.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-10, -10], [10, -10]]}
+{"cmd": "sketch.line", "points": [[10, -10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [-10, 10]]}
+{"cmd": "sketch.line", "points": [[-10, 10], [-10, -10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "extent": "two_sides", "distance": 10, "distance2": 6, "taper": "-5 deg", "operation": "new_body"}

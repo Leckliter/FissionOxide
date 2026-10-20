@@ -1,0 +1,9 @@
+# 383-torus-center-split: added by the parity loop from a Fusion probe
+# torus-center-split: Torus (R5 circle at (20,0,15) on XZ revolved about Z), centre (0,0,15); point at the toroidal face's centre; plane through it and (100,0,0), (0,100,0); torus split by the tilted plane.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [20, -15], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": "z", "angle": "360 deg", "operation": "new_body"}
+{"cmd": "point", "method": "center", "face": {"point": [0, 25, 15]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [100, 0, 0]}, "c": {"at": [0, 100, 0]}}
+{"cmd": "split", "plane": {"feature": 4}}

@@ -1,0 +1,10 @@
+# 264-break-arc-at-crossing: added by the parity loop from a Fusion probe
+# break-arc-at-crossing: Semicircular arc r20 (from (-20,0) over (0,20) to (20,0)) on a line y=0 (x -30..30), crossed by a vertical line x=0 (y -5..30); Break the arc at (10,17.32), splitting it where x=0 crosses; delete the right piece; extrude the quarter disc 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [-20, 0], "mid": [0, 20], "end": [20, 0]}
+{"cmd": "sketch.line", "points": [[-30, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[0, -5], [0, 30]]}
+{"cmd": "sketch.break", "at": [10, 17.3205]}
+{"cmd": "sketch.delete", "curves": [4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[-5, 5]], "distance": 10, "operation": "new_body"}

@@ -1,0 +1,15 @@
+# 232-wedge-slanted-face-foreshortened: added by the parity loop from a Fusion probe
+# A wedge: the XZ profile (0,0)-(30,0)-(30,5)-(10,15)-(0,15) extruded 20 along +Y; a sketch on a plane
+# at z=30 projects the slanted face (face 3) unlinked: the 20x20 rectangle x 10..30, y 0..20, extruded 5 mm as a new body.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 5]]}
+{"cmd": "sketch.line", "points": [[30, 5], [10, 15]]}
+{"cmd": "sketch.line", "points": [[10, 15], [0, 15]]}
+{"cmd": "sketch.line", "points": [[0, 15], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "flip": true, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 30.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.project", "body": 2000, "face": 3, "associative": false}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[20, 10]], "distance": 5, "operation": "new_body"}

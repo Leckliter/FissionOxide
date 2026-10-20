@@ -1,0 +1,19 @@
+# 493-intersect-two-tools: added by the parity loop from a Fusion probe
+# intersect-two-tools: Box 40x40x20 intersected with two overlapping cylinders r=15 h=30 at (10,20) and (30,20).
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 40]]}
+{"cmd": "sketch.line", "points": [[40, 40], [0, 40]]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [10, 20], "radius": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 30, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [30, 20], "radius": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 5, "distance": 30, "operation": "new_body"}
+{"cmd": "combine", "target": 2000, "tools": [4000, 6000], "operation": "intersect", "keep_tools": false}

@@ -1,0 +1,9 @@
+# 457-twist-square-straight: added by the parity loop from a Fusion probe
+# twist-square-straight: 10x10 square centred on the origin on XY swept 40 up +Z along a straight line drawn on XZ, twisted 90 deg from start to end.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, -40]]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-5, -5], "corner2": [5, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "sweep", "sketch": 2, "path": 1, "twist": "90 deg", "operation": "new_body"}

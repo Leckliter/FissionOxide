@@ -1,0 +1,11 @@
+# 269-rectangle-vertex-corners: added by the parity loop from a Fusion probe
+# rectangle-vertex-corners: 40x30 rectangle (lines meeting at shared vertices); equal-distance chamfer 6 at the (40,30) corner and 3 at the (0,0) corner; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [5, 8], "distance": 6}
+{"cmd": "sketch.chamfer", "curves": [10, 2], "distance": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 15]], "distance": 10, "operation": "new_body"}

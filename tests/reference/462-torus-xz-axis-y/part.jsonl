@@ -1,0 +1,3 @@
+# 462-torus-xz-axis-y: added by the parity loop from a Fusion probe
+# torus-xz-axis-y: Torus primitive on XZ centred at x=10, major radius 15, minor radius 4; its axis is parallel to world Y (Fusion: r4 circle on XY at (25,0) revolved about the Y-parallel axis through (10,0,0)).
+{"cmd": "torus", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}, "at": [10, 0], "major": 15, "minor": 4}
