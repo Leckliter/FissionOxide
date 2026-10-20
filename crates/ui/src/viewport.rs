@@ -6,7 +6,7 @@ use fox_engine::Sel;
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::DVec3;
 use fox_engine::model::FeatureId;
-use fox_engine::render::{self, StandardView, ray_plane};
+use fox_engine::render::{self, ray_plane};
 use fox_engine::scene::{Pick, ViewOptions};
 use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use serde_json::json;
@@ -262,7 +262,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
   if app.show_viewcube {
-    consumed |= viewcube(app, ui, &painter, &view);
+    consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
   if !consumed && let Some(plane) = hot_plane {
     consumed = true;
@@ -2282,186 +2282,6 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     egui::FontId::proportional(12.0),
     Color32::from_gray(90),
   );
-}
-
-/// A clickable orientation cube in the top-right corner. Returns true when it took the click or
-/// is being dragged.
-fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
-  let size = 50.0f32;
-  let center = view.rect.right_top() + Vec2::new(-92.0, 80.0);
-  let (right, up, back) = app.cam.basis();
-  let proj = |v: DVec3| center + Vec2::new(v.dot(right) as f32, -v.dot(up) as f32) * size * 0.62;
-  let faces: [(DVec3, &str, StandardView); 6] = [
-    (DVec3::Z, "TOP", StandardView::Top),
-    (-DVec3::Z, "BOTTOM", StandardView::Bottom),
-    (-DVec3::Y, "FRONT", StandardView::Front),
-    (DVec3::Y, "BACK", StandardView::Back),
-    (DVec3::X, "RIGHT", StandardView::Right),
-    (-DVec3::X, "LEFT", StandardView::Left),
-  ];
-  let mut visible: Vec<(f64, Vec<Pos2>, &str, StandardView)> = Vec::new();
-  for (n, label, v) in faces {
-    let facing = n.dot(back);
-    if facing <= 0.02 {
-      continue;
-    }
-    // face corners
-    let (a, b) = if n.z.abs() > 0.5 {
-      (DVec3::X, DVec3::Y)
-    } else if n.x.abs() > 0.5 {
-      (DVec3::Y, DVec3::Z)
-    } else {
-      (DVec3::X, DVec3::Z)
-    };
-    let corners = [n + a + b, n - a + b, n - a - b, n + a - b].map(proj);
-    visible.push((facing, corners.to_vec(), label, v));
-  }
-  visible.sort_by(|x, y| x.0.total_cmp(&y.0));
-  // the cube with its Home and menu buttons is a widget like any other, so a dialog, menu or panel
-  // drawn over it takes the pointer instead
-  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
-  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
-  let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
-  let resp = ui.interact(cube_area.union(home).union(menu), ui.id().with("viewcube"), Sense::click_and_drag());
-  // dragging the cube orbits, as on Fusion's
-  if resp.dragged_by(egui::PointerButton::Primary) {
-    let d = resp.drag_delta();
-    app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008);
-  }
-  let pointer = if resp.dragged() { None } else { resp.hover_pos() };
-  let clicked = resp.clicked();
-  let mut hit: Option<StandardView> = None;
-  for (facing, pts, _, v) in &visible {
-    if *facing > 0.0 && pointer.is_some_and(|p| point_in_quad(p, pts)) {
-      hit = Some(*v);
-    }
-  }
-  // lettered axis stubs leave the cube from its silhouette, as on Fusion's ViewCube; the ones
-  // pointing away from the viewer go behind the cube
-  let sgn = |bit: usize| if bit != 0 { 1.0 } else { -1.0 };
-  let axes = [
-    (DVec3::X, "X", Color32::from_rgb(222, 40, 36)),
-    (DVec3::Y, "Y", Color32::from_rgb(40, 170, 50)),
-    (DVec3::Z, "Z", Color32::from_rgb(30, 70, 220)),
-  ];
-  let stub = |painter: &egui::Painter, axis: DVec3, label: &str, col: Color32| {
-    // the silhouette corner furthest along the axis's on-screen direction
-    let d = proj(axis) - proj(DVec3::ZERO);
-    let base = (0..8)
-      .map(|i| DVec3::new(sgn(i & 1), sgn(i & 2), sgn(i & 4)))
-      .max_by(|a, b| {
-        ((proj(*a) - center).dot(d) + a.dot(axis) as f32).total_cmp(&((proj(*b) - center).dot(d) + b.dot(axis) as f32))
-      })
-      .unwrap_or(DVec3::ZERO);
-    painter.line_segment([proj(base), proj(base + axis * 0.55)], Stroke::new(2.5, col));
-    painter.text(proj(base + axis * 0.85), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), col);
-  };
-  for (axis, label, col) in axes {
-    if axis.dot(back) < 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // soft shadow under the cube
-  painter.add(egui::Shape::ellipse_filled(
-    center + Vec2::new(4.0, size * 0.95),
-    Vec2::new(size * 0.8, size * 0.16),
-    Color32::from_black_alpha(28),
-  ));
-  for (facing, pts, label, v) in &visible {
-    // grey, lit from above-left like Fusion's cube
-    let n = match v {
-      StandardView::Top => DVec3::Z,
-      StandardView::Bottom => -DVec3::Z,
-      StandardView::Front => -DVec3::Y,
-      StandardView::Back => DVec3::Y,
-      StandardView::Right => DVec3::X,
-      _ => -DVec3::X,
-    };
-    let light = (n.dot(up) * 0.6 - n.dot(right) * 0.25 + 0.55).clamp(0.0, 1.0) as f32;
-    let shade = (196.0 + 48.0 * light) as u8;
-    let fill = if hit == Some(*v) { Color32::from_rgb(170, 208, 240) } else { Color32::from_gray(shade) };
-    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(140))));
-    if *facing > 0.25 {
-      // the label lies in the face: rotate it along the face's horizontal
-      let h = match v {
-        StandardView::Top | StandardView::Bottom | StandardView::Front => DVec3::X,
-        StandardView::Back => -DVec3::X,
-        StandardView::Right => DVec3::Y,
-        _ => -DVec3::Y,
-      };
-      let dir = proj(n + h) - proj(n);
-      let angle = dir.y.atan2(dir.x);
-      let c = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2()) / 4.0;
-      let color = Color32::from_gray(60).gamma_multiply((*facing as f32 * 1.5).min(1.0));
-      let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(10.5), color);
-      let half = galley.size() / 2.0;
-      let rot = egui::emath::Rot2::from_angle(angle);
-      let pos = c.to_pos2() - rot * half;
-      painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(angle));
-    }
-  }
-  for (axis, label, col) in axes {
-    if axis.dot(back) >= 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // the ViewCube menu button under the cube
-  let menu_hover = pointer.is_some_and(|p| menu.contains(p));
-  crate::icons::draw(
-    painter,
-    menu,
-    crate::icons::Icon::Component,
-    if menu_hover { crate::theme::ACCENT } else { Color32::from_gray(70) },
-  );
-  // home button
-  let home_hover = pointer.is_some_and(|p| home.contains(p));
-  let hc = if home_hover { crate::theme::ACCENT } else { Color32::from_gray(90) };
-  let hs = Stroke::new(1.5, hc);
-  let (hx, hy) = (home.center().x, home.center().y);
-  painter.add(egui::Shape::closed_line(
-    vec![
-      Pos2::new(hx - 7.0, hy - 1.0),
-      Pos2::new(hx, hy - 7.0),
-      Pos2::new(hx + 7.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy - 1.0),
-    ],
-    hs,
-  ));
-  if clicked {
-    if menu_hover {
-      app.cam.ortho = !app.cam.ortho;
-      app.status = Some((format!("Camera: {}", if app.cam.ortho { "Orthographic" } else { "Perspective" }), false));
-      return true;
-    }
-    if home_hover {
-      app.cam.set_view(StandardView::Home);
-      app.fit_view();
-      return true;
-    }
-    if let Some(v) = hit {
-      app.cam.set_view(v);
-      return true;
-    }
-  }
-  clicked || resp.dragged()
-}
-
-fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {
-  let mut inside = false;
-  let n = q.len();
-  for i in 0..n {
-    let (a, b) = (q[i], q[(i + 1) % n]);
-    if (a.y > p.y) != (b.y > p.y) {
-      let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
-      if p.x < x {
-        inside = !inside;
-      }
-    }
-  }
-  inside
 }
 
 // ---------------------------------------------------------------- sketch plane picking

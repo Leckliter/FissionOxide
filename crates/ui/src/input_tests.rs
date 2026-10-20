@@ -279,3 +279,27 @@ fn change_keyboard_shortcut_captures_a_key_and_warns_on_a_clash() {
   assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Torus"), "Shift+T");
   assert_eq!(crate::menus::key_of(&h.app.prefs, crate::tips::Scope::Design, "Extrude"), "E");
 }
+
+#[test]
+fn ctrl_s_in_a_test_saves_to_a_scratch_hub() {
+  let mut h = Harness::new();
+  let root = h.app.hub_root();
+  assert!(root.starts_with(std::env::temp_dir()), "a test app's hub is a scratch one: {}", root.display());
+  let ctrl_s = Event::Key {
+    key: egui::Key::S,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: egui::Modifiers::COMMAND,
+  };
+  h.frame(vec![ctrl_s]);
+  h.frame(vec![]);
+  assert!(h.app.data.save.is_some(), "Ctrl+S opens the Save window");
+  // egui ids a window by its title
+  let w = h.ctx.memory(|m| m.area_rect(egui::Id::new(Some("Save")))).expect("the Save window is shown");
+  // Save is the first button on the window's bottom row
+  h.move_then_click(w.left_bottom() + vec2(30.0, -18.0));
+  assert!(h.app.data.save.is_none() && h.app.s.hub.is_some(), "saved: {:?}", h.app.status);
+  let index = std::fs::read_to_string(root.join("hub.json")).expect("the scratch hub has the design");
+  assert!(index.contains("Untitled"), "{index}");
+}

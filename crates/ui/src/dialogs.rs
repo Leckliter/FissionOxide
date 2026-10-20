@@ -4991,6 +4991,7 @@ mod tests {
       distance: 321.0,
       fov: 0.5,
       ortho: true,
+      roll: 0.0,
     };
     let saved = app.cam;
     let name = app.save_named_view().unwrap();

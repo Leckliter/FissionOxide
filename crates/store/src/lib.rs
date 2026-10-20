@@ -301,9 +301,20 @@ impl Store {
   /// (`$XDG_DATA_HOME/fissionoxide`, `~/.local/share/fissionoxide`, `%APPDATA%\FissionOxide`,
   /// `~/Library/Application Support/FissionOxide`). A hub left in the directory of the app's
   /// old name (CLFusion) is moved there the first time.
+  ///
+  /// In a test process (see [`is_test_process`]) it is never the platform directory: it is
+  /// `$FOX_DATA_DIR` if that is set to somewhere else, else a scratch hub for the process in the
+  /// temp directory, so tests can't fill the user's real hub with their designs.
   pub fn default_root() -> PathBuf {
-    if let Some(d) = std::env::var_os("FOX_DATA_DIR") {
-      return PathBuf::from(d);
+    let env = std::env::var_os("FOX_DATA_DIR").map(PathBuf::from);
+    if is_test_process() {
+      return match env {
+        Some(d) if !is_user_hub(&d) => d,
+        _ => test_process_root(),
+      };
+    }
+    if let Some(d) = env {
+      return d;
     }
     let root = platform_dir("FissionOxide", "fissionoxide");
     let legacy = platform_dir("CLFusion", "clfusion");
@@ -314,7 +325,14 @@ impl Store {
   }
 
   /// Opens (or creates) a hub at `root`, merging in any conflict copies of its index.
+  ///
+  /// Panics in a test process if `root` is the user's real hub: tests must use a scratch hub.
   pub fn open(root: &Path) -> Result<Store> {
+    assert!(
+      !(is_test_process() && is_user_hub(root)),
+      "a test opened the user's real data hub at {}; give it a scratch hub (Store::scratch_root)",
+      root.display()
+    );
     std::fs::create_dir_all(root.join("items"))?;
     let index = Self::read_index(root)?.unwrap_or_default();
     let mut st = Store { root: root.to_path_buf(), base: index.clone(), index, tag: sync::writer_tag(), merged: 0 };
@@ -1132,6 +1150,64 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
   f.write_all(bytes)?;
   f.sync_all()?;
   Ok(())
+}
+
+/// Whether this process is a Cargo test executable (unit, integration or bench), from any crate.
+/// Cargo builds those into `target/<profile>/deps/`, where the app is never run from: `cargo
+/// run` and the installer use the binary copied up to `target/<profile>/` or installed.
+/// `cfg(test)` can't tell, as it is only set for the crate under test, not its dependencies.
+pub fn is_test_process() -> bool {
+  static TEST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+  *TEST.get_or_init(|| {
+    std::env::current_exe()
+      .ok()
+      .and_then(|e| e.parent().and_then(Path::file_name).map(|d| d == "deps"))
+      .unwrap_or(false)
+  })
+}
+
+/// Whether `dir` is the user's real hub (the platform data directory, or its old CLFusion one).
+fn is_user_hub(dir: &Path) -> bool {
+  let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+  let dir = canon(dir);
+  [platform_dir("FissionOxide", "fissionoxide"), platform_dir("CLFusion", "clfusion")].iter().any(|real| {
+    let real = canon(real);
+    real == dir || (cfg!(windows) && real.to_string_lossy().eq_ignore_ascii_case(&dir.to_string_lossy()))
+  })
+}
+
+/// Where test processes keep their scratch hubs.
+fn test_hubs_dir() -> PathBuf {
+  std::env::temp_dir().join("fox-test-hubs")
+}
+
+/// The scratch hub a test process falls back to when nothing names a hub: one per process,
+/// in [`test_hubs_dir`]. Scratch hubs left by earlier runs more than a day ago are removed.
+fn test_process_root() -> PathBuf {
+  static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+  ROOT
+    .get_or_init(|| {
+      let dir = test_hubs_dir();
+      let day = std::time::Duration::from_secs(24 * 3600);
+      for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > day);
+        if old {
+          let _ = std::fs::remove_dir_all(e.path());
+        }
+      }
+      dir.join(format!("{}", std::process::id()))
+    })
+    .clone()
+}
+
+impl Store {
+  /// A fresh, empty hub location for a test: a new directory under the temp directory each
+  /// call (not created until the hub is first written).
+  pub fn scratch_root() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    test_process_root().with_extension(n.to_string())
+  }
 }
 
 /// The platform data directory for an app called `name` (`unix` on Linux and other Unixes).
