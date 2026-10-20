@@ -1,0 +1,15 @@
+# 551-base-edit-after-fillet: added by the parity loop from a Fusion probe
+# base-edit-after-fillet: 40x30x20 box in a base feature, parametric 3 mm fillet on the top edges, then the base feature reopened and its top face pulled up 5 mm; the fillet follows onto the 25 mm tall box
+{"cmd": "base.start"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 2, "distance": 20, "operation": "new_body"}
+{"cmd": "base.finish"}
+{"cmd": "fillet", "edges": [{"point": [0.0, 15.0, 20.0]}, {"point": [20.0, 0.0, 20.0]}, {"point": [40.0, 15.0, 20.0]}, {"point": [20.0, 30.0, 20.0]}], "radius": 3}
+{"cmd": "base.edit", "feature": 1}
+{"cmd": "direct.press_pull", "faces": [{"point": [20.0, 15.0, 20.0]}], "distance": 5}
+{"cmd": "base.finish"}
