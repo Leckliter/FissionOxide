@@ -983,6 +983,9 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
       let range = DVec3::new(start, start + sweep, 0.0);
       put(4.0, [plane.to_world(center), plane.to_world(m), plane.to_world(v), range])
     }
+    Seg::Conic { p, w } => {
+      put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
+    }
   }
 }
 

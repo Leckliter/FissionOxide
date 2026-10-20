@@ -1,0 +1,10 @@
+# 167-incircle-right-triangle: added by the parity loop from a Fusion probe
+# incircle-right-triangle: Closed construction triangle (0,0)-(40,0)-(0,30); circle tangent to all three sides with hint (12,9) inside, so it is the incircle R10 at (10,10); the disc is extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.construction", "curves": [2, 5, 6], "on": true}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5, 6], "near": [12, 9]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[10, 10]], "distance": 5, "operation": "new_body"}

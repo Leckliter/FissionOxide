@@ -1,0 +1,16 @@
+# 114-hv-lines: added by the parity loop from a Fusion probe
+# hv-lines: Quadrilateral drawn tilted from the origin: (0.5,0.5)-(30,2)-(28,20)-(14,19). Horizontal/Vertical makes the near-horizontal bottom and top lines horizontal and the near-vertical right line vertical; bottom 30, right 20, top 15 wide, so a trapezoid (0,0)-(30,0)-(30,20)-(15,20) area 450, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0.5, 0.5], [30, 2]]}
+{"cmd": "sketch.line", "points": [[30, 2], [28, 20]]}
+{"cmd": "sketch.line", "points": [[28, 20], [14, 19]]}
+{"cmd": "sketch.line", "points": [[14, 19], [0.5, 0.5]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [5]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [7]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 30}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [2, 4], "value": 20}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [6, 4], "value": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

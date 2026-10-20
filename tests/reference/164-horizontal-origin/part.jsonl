@@ -1,0 +1,7 @@
+# 164-horizontal-origin: added by the parity loop from a Fusion probe
+# horizontal-origin: Center point slot, horizontal at the origin: centre (0, 0), arc centre (15, 0), width 10; extruded 5.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "center": [0, 0], "end": [15, 0], "width": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
