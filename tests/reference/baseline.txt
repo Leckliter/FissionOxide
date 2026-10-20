@@ -162,3 +162,8 @@
 357-sketch-points-and-vertex
 358-sketch-on-plane-hole
 359-sketch-on-plane-reversed-order
+# Reference parts that pass; see README.md. One directory name per line.
+391-cylinder-angle-from-xz
+392-offset-cylinder-angle-from-yz
+393-cylinder-at-vertex
+394-sphere-at-vertex
