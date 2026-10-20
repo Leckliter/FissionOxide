@@ -209,6 +209,7 @@ cmds! {
   "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
   "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
   "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
+  "constraint.center" => "Center constraint: move a component along a plane normal only, so its face (or the midplane between two of its faces) lands on the midplane between two faces of another component", "{moving?, moving_faces: [face|plane] (one or two), fixed?, fixed_faces: [face|plane] (one or two), offset?, name?}";
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
   "assembly.interference" => "Overlapping bodies of different components", "{}";
   "assembly.bom" => "Bill of materials: components, materials, volumes and masses; indented by sub-assembly level, top level only, or parts only", "{view?: indented|top|parts}";
