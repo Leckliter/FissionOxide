@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+431-vertex-offset-angle
+432-face-flip
+433-offset-xy

@@ -1212,6 +1212,12 @@ pub enum FeatureKind {
     /// Offset along the origin's Z axis.
     #[serde(default = "zero")]
     offset: String,
+    /// Offset along the origin's own X axis.
+    #[serde(default = "zero")]
+    offset_x: String,
+    /// Offset along the origin's own Y axis.
+    #[serde(default = "zero")]
+    offset_y: String,
     /// Reverse the Z axis.
     #[serde(default)]
     flip: bool,
@@ -2181,9 +2187,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
     FeatureKind::LoftedFlange { bends, .. } => f(bends),
     FeatureKind::MiterFlange { .. } => {}
-    FeatureKind::JointOrigin { angle, offset, .. } => {
+    FeatureKind::JointOrigin { angle, offset, offset_x, offset_y, .. } => {
       f(angle);
       f(offset);
+      f(offset_x);
+      f(offset_y);
     }
     FeatureKind::MotionLink { leader_value, follower_value, .. } => {
       f(leader_value);
