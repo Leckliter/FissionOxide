@@ -1,0 +1,242 @@
+{
+ "id": "offset-cylinder-angle-from-yz",
+ "name": "offset-cylinder-angle-from-yz",
+ "description": "Cylinder r=8 h=20 centred (5,5) and a separate 40x40x5 slab (z -5..0); construction plane tangent to the cylinder rotated -45 deg from YZ (touches at (10.66, -0.66)); slab split by it.",
+ "exercises": [
+  "extrude",
+  "construction_plane tangent",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Cyl_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       5,
+       5
+      ]
+     },
+     "radius": 8
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cyl",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Cyl_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Cyl"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Slab_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       -20,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       -20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       -20
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       20
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       -20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       -20,
+       20
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       -20,
+       -20
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Slab",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Slab_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "negative"
+   },
+   "result_bodies": [
+    "Slab"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "Tan",
+   "method": "tangent",
+   "face": {
+    "point": [
+     13,
+     5,
+     10
+    ],
+    "type": "Cylinder",
+    "radius": 8
+   },
+   "angle": -45,
+   "reference": "YZ"
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "Slab",
+   "tool": "Tan",
+   "extend_tool": true,
+   "result_bodies": [
+    "Slab",
+    "Slab (1)"
+   ]
+  }
+ ]
+}

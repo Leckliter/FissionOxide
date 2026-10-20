@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+391-cylinder-angle-from-xz
+392-offset-cylinder-angle-from-yz
+393-cylinder-at-vertex
+394-sphere-at-vertex
