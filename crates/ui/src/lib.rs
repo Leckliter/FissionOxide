@@ -86,6 +86,14 @@ pub struct App {
   tstate: viewport::ToolState,
   fitted_once: bool,
   last_sketch: Option<fox_engine::model::FeatureId>,
+  /// A camera move in progress: (from, to, start time), eased over [`CAM_MOVE_SECS`].
+  cam_move: Option<(Camera, Camera, f64)>,
+  /// The 3D view before the open sketch turned the camera to its plane; finishing the sketch
+  /// goes back to it, as in Fusion.
+  pre_sketch_cam: Option<Camera>,
+  /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
+  /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
+  pub(crate) picked_plane: Option<Value>,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
@@ -242,6 +250,9 @@ impl App {
       tstate: viewport::ToolState::default(),
       fitted_once: false,
       last_sketch: None,
+      cam_move: None,
+      pre_sketch_cam: None,
+      picked_plane: None,
       data: data_panel::DataPanel::default(),
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
@@ -373,6 +384,7 @@ impl App {
       .bounds()
       .unwrap_or((fox_engine::kernel::glam::DVec3::splat(-50.0), fox_engine::kernel::glam::DVec3::splat(50.0)));
     let aspect = self.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
+    self.cam_move = None;
     self.cam.fit(lo, hi, aspect);
   }
 
@@ -753,41 +765,66 @@ impl App {
     }
   }
 
-  /// Starts a sketch on the selected planar face, or asks for a plane.
+  /// Starts a sketch on the selected plane or planar face, or asks for one: the origin planes
+  /// show in the viewport to click, as in Fusion.
   pub fn new_sketch(&mut self) {
     self.cancel_dialog();
-    let face = self.s.selection.iter().find_map(|s| match s {
-      Sel::Face { body, face } => Some((*body, *face)),
-      _ => None,
-    });
-    if let Some((body, face)) = face {
-      let planar = self
-        .s
-        .model
-        .body(body)
-        .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.kind == fox_engine::kernel::SurfaceKind::Plane))
-        .unwrap_or(false);
-      if planar {
-        self.create_sketch(json!({"body": body.0, "face": face}));
+    if let Some(plane) = self.preselected_plane() {
+      self.create_sketch(plane);
+      if self.s.edit_sketch.is_some() {
         return;
       }
     }
+    self.s.selection.clear();
+    self.picked_plane = None;
     self.dialog = Some(Dialog::open(self, dialogs::Kind::PickPlane));
   }
 
+  /// The plane Create Sketch can start on straight away: an origin or construction plane picked
+  /// in the browser, or a selected construction plane or planar face.
+  pub(crate) fn preselected_plane(&self) -> Option<Value> {
+    if let Some(p) = &self.picked_plane {
+      return Some(p.clone());
+    }
+    self.s.selection.iter().find_map(|s| match *s {
+      Sel::Face { body, face } => {
+        let b = self.s.model.body(body)?;
+        let f = b.faces().iter().find(|f| f.id == face)?;
+        (f.kind == fox_engine::kernel::SurfaceKind::Plane).then(|| json!({"body": body.0, "face": face}))
+      }
+      Sel::Feature { feature } if self.s.model.planes.contains_key(&feature) => Some(json!({"feature": feature.0})),
+      _ => None,
+    })
+  }
+
   pub fn create_sketch(&mut self, plane: Value) {
+    if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
+      self.cancel_dialog();
+    }
+    let before = self.view_now();
+    let was_sketching = self.s.edit_sketch.is_some();
     if self.run("sketch.create", json!({"plane": plane})).is_some() {
+      if !was_sketching {
+        self.pre_sketch_cam = Some(before);
+      }
       self.s.selection.clear();
+      self.picked_plane = None;
       self.look_at_sketch();
       self.tab = panels::Tab::Sketch;
-      self.tool = Tool::Line;
-      self.status = Some(("Sketching — draw with the Create tools; Finish Sketch when done".into(), false));
+      // as in Fusion, no tool is active until one is picked
+      self.set_tool(Tool::Select);
+      self.status = Some((SKETCHING.into(), false));
     }
   }
 
   pub fn edit_sketch(&mut self, id: fox_engine::model::FeatureId) {
     self.cancel_dialog();
+    let before = self.view_now();
+    let was_sketching = self.s.edit_sketch.is_some();
     if self.run("sketch.edit", json!({"sketch": id.0})).is_some() {
+      if !was_sketching {
+        self.pre_sketch_cam = Some(before);
+      }
       self.look_at_sketch();
       self.tab = panels::Tab::Sketch;
       self.tool = Tool::Select;
@@ -796,19 +833,60 @@ impl App {
 
   pub fn finish_sketch(&mut self) {
     self.last_sketch = self.s.edit_sketch;
+    self.left_sketch();
     self.run("sketch.finish", json!({}));
     self.tool = Tool::Select;
     self.s.selection.clear();
+  }
+
+  /// When the open sketch is finished: back to the 3D view from before it, without the
+  /// "Sketching" hint.
+  pub(crate) fn left_sketch(&mut self) {
+    if self.status.as_ref().is_some_and(|(t, _)| t == SKETCHING) {
+      self.status = None;
+    }
+    if let Some(c) = self.pre_sketch_cam.take() {
+      self.fly_to(c);
+    }
+  }
+
+  /// Where the camera is headed: the end of the move in progress, else where it is.
+  fn view_now(&self) -> Camera {
+    self.cam_move.map_or(self.cam, |m| m.1)
+  }
+
+  /// Moves the camera smoothly to `to`.
+  pub(crate) fn fly_to(&mut self, to: Camera) {
+    if to != self.cam {
+      self.cam_move = Some((self.cam, to, now()));
+    }
+  }
+
+  /// Stops a camera move where it is (the user took the camera).
+  pub(crate) fn stop_cam_move(&mut self) {
+    self.cam_move = None;
+  }
+
+  /// Advances the camera move to time `t`. Returns whether it still runs.
+  fn step_cam_move(&mut self, t: f64) -> bool {
+    let Some((from, to, start)) = self.cam_move else { return false };
+    let k = ((t - start) / CAM_MOVE_SECS).clamp(0.0, 1.0);
+    self.cam = lerp_camera(&from, &to, k * k * (3.0 - 2.0 * k));
+    if k >= 1.0 {
+      self.cam_move = None;
+    }
+    self.cam_move.is_some()
   }
 
   fn look_at_sketch(&mut self) {
     let Some(r) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)) else { return };
     let n = r.plane.normal();
     let o = r.plane.origin;
-    self.look_along(n);
+    let mut to = self.looking_along(n);
     if self.s.model.bodies.is_empty() {
-      self.cam.target = o.to_array();
+      to.target = o.to_array();
     }
+    self.fly_to(to);
   }
 
   /// Navigation bar Look At: the open sketch's plane, else the selected planar face.
@@ -827,20 +905,25 @@ impl App {
       (f.kind == fox_engine::kernel::SurfaceKind::Plane).then_some(f.normal)
     });
     match normal {
-      Some(n) => self.look_along(n),
+      Some(n) => {
+        let to = self.looking_along(n);
+        self.fly_to(to);
+      }
       None => self.status = Some(("Look At: select a planar face".into(), false)),
     }
   }
 
-  /// Turns the camera to look straight at a plane with normal `n`.
-  fn look_along(&mut self, n: fox_engine::kernel::glam::DVec3) {
-    self.cam.pitch =
+  /// The camera turned to look straight at a plane with normal `n`.
+  fn looking_along(&self, n: fox_engine::kernel::glam::DVec3) -> Camera {
+    let mut cam = self.view_now();
+    cam.pitch =
       n.z.clamp(-1.0, 1.0).asin().clamp(-std::f64::consts::FRAC_PI_2 + 1e-6, std::f64::consts::FRAC_PI_2 - 1e-6);
     if n.z.abs() < 0.999 {
-      self.cam.yaw = n.x.atan2(-n.y);
+      cam.yaw = n.x.atan2(-n.y);
     } else {
-      self.cam.yaw = 0.0;
+      cam.yaw = 0.0;
     }
+    cam
   }
 
   pub fn toggle_construction(&mut self) {
@@ -918,6 +1001,9 @@ impl App {
       panels::timeline(self, ui);
     }
     data_panel::show(self, ui);
+    if self.step_cam_move(now()) {
+      ctx.request_repaint();
+    }
     if self.drawing.is_some() {
       egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
         sheet::show(self, ui);
@@ -1011,6 +1097,36 @@ impl App {
   }
 }
 
+/// The status hint while a new sketch is open.
+const SKETCHING: &str = "Sketching — draw with the Create tools; Finish Sketch when done";
+
+/// How long the camera takes to turn to a sketch plane and back.
+const CAM_MOVE_SECS: f64 = 0.45;
+
+/// The camera a fraction `k` of the way from `a` to `b`: the shorter way round in yaw, and the
+/// distance changing by a steady factor.
+fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
+  if k >= 1.0 {
+    return *b;
+  }
+  let lerp = |x: f64, y: f64| x + (y - x) * k;
+  let pi = std::f64::consts::PI;
+  let dyaw = (b.yaw - a.yaw + pi).rem_euclid(std::f64::consts::TAU) - pi;
+  let distance = if a.distance > 0.0 && b.distance > 0.0 {
+    (a.distance.ln() + (b.distance.ln() - a.distance.ln()) * k).exp()
+  } else {
+    lerp(a.distance, b.distance)
+  };
+  Camera {
+    target: [lerp(a.target[0], b.target[0]), lerp(a.target[1], b.target[1]), lerp(a.target[2], b.target[2])],
+    yaw: a.yaw + dyaw * k,
+    pitch: lerp(a.pitch, b.pitch),
+    distance,
+    fov: lerp(a.fov, b.fov),
+    ortho: b.ortho,
+  }
+}
+
 /// Seconds since the app started (for timing background work).
 fn now() -> f64 {
   static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -1041,6 +1157,59 @@ mod tests {
     }
     assert!(app.loading().is_none());
     assert!(!app.s.model.bodies.is_empty() && app.status.as_ref().is_some_and(|s| !s.1));
+  }
+
+  fn settle_camera(app: &mut App) {
+    while app.step_cam_move(f64::INFINITY) {}
+  }
+
+  #[test]
+  fn create_sketch_starts_on_a_preselected_plane() {
+    // an origin plane picked in the browser
+    let mut app = App::with_session(Session::default());
+    app.picked_plane = Some(json!("xz"));
+    app.new_sketch();
+    assert!(app.s.edit_sketch.is_some() && app.dialog.is_none());
+    assert_eq!(app.tool, Tool::Select, "no sketch tool is active at first, as in Fusion");
+    assert!(app.picked_plane.is_none());
+    // a construction plane selected
+    let mut app = App::with_session(Session::default());
+    let id = app.run("plane.offset", json!({"plane": "xy", "offset": 10})).and_then(|v| v["feature"].as_u64()).unwrap();
+    app.s.selection = vec![Sel::Feature { feature: fox_engine::model::FeatureId(id as u32) }];
+    app.new_sketch();
+    let sk = app.s.edit_sketch.and_then(|e| app.s.model.sketches.get(&e)).unwrap();
+    assert!((sk.plane.origin.z - 10.0).abs() < 1e-9);
+    // nothing selected: the planes are offered in the viewport
+    let mut app = App::with_session(Session::default());
+    app.new_sketch();
+    assert!(app.s.edit_sketch.is_none());
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane));
+  }
+
+  #[test]
+  fn finishing_a_sketch_goes_back_to_the_view_before_it() {
+    let mut app = App::with_session(Session::default());
+    app.cam.yaw = 0.3;
+    app.cam.pitch = 0.4;
+    let before = app.cam;
+    app.create_sketch(json!("xz"));
+    settle_camera(&mut app);
+    assert!(app.cam.pitch.abs() < 1e-6, "looks at the XZ plane: {:?}", app.cam);
+    assert!(app.status.is_some());
+    app.finish_sketch();
+    settle_camera(&mut app);
+    assert_eq!(app.cam, before);
+    assert!(app.status.is_none(), "no stale Sketching hint: {:?}", app.status);
+  }
+
+  #[test]
+  fn camera_moves_turn_the_short_way_round() {
+    let a = Camera { yaw: 3.0, ..Camera::default() };
+    let b = Camera { yaw: -3.0, distance: 800.0, ..Camera::default() };
+    let mid = lerp_camera(&a, &b, 0.5);
+    assert!((mid.yaw - std::f64::consts::PI).abs() < 1e-9, "{}", mid.yaw);
+    assert!((mid.distance - 400.0).abs() < 1e-9);
+    assert_eq!(lerp_camera(&a, &b, 1.0), b);
   }
 
   #[test]
