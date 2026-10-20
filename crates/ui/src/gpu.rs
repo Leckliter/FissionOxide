@@ -250,6 +250,8 @@ mod tests {
       profiles_of: Vec::new(),
       view: serde_json::json!({}),
       vertices: false,
+      peek: Vec::new(),
+      isolate: None,
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

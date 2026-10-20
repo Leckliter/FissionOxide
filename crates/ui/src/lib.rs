@@ -83,6 +83,8 @@ pub struct App {
   toolbox: Option<toolbox::Toolbox>,
   /// The open right-click marking menu.
   marking: Option<marking::MarkingMenu>,
+  /// Context-menu state: browser/timeline hover highlight, Find in Browser.
+  pub(crate) ctx_menu: marking::MenuState,
   /// The canvas (viewport) rectangle, for panels floating over it.
   pub(crate) canvas: egui::Rect,
   /// Inline dimension value editor: (constraint id, text, screen position).
@@ -172,6 +174,9 @@ struct RenderKey {
   view: Value,
   /// Body vertices drawn (the Vertices selection filter).
   vertices: bool,
+  /// Bodies highlighted from the browser or timeline, and the isolated bodies.
+  peek: Vec<u32>,
+  isolate: Option<Vec<u32>>,
 }
 
 impl App {
@@ -259,6 +264,7 @@ impl App {
       recent: Vec::new(),
       toolbox: None,
       marking: None,
+      ctx_menu: marking::MenuState::default(),
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
       dim_edit: None,
       rename: None,
@@ -581,6 +587,15 @@ impl App {
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
     if ctx.egui_wants_keyboard_input() {
+      // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
+      if self.dialog.is_some()
+        && self.rename.is_none()
+        && self.dim_edit.is_none()
+        && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+      {
+        self.cancel_dialog();
+        self.s.selection.clear();
+      }
       return;
     }
     use egui::{Key, Modifiers};
@@ -627,6 +642,7 @@ impl App {
         self.tool = Tool::Select;
       } else if self.dialog.is_some() {
         self.cancel_dialog();
+        self.s.selection.clear();
       } else {
         self.s.selection.clear();
       }
@@ -1104,6 +1120,7 @@ impl App {
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
     panels::selection_info(self, &ctx);
+    marking::end_frame(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {

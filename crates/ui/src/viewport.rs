@@ -401,6 +401,8 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     profiles_of: profiles_of.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
+    peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
+    isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -421,6 +423,8 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
     show_vertices: key.vertices,
+    peek: app.ctx_menu.peek.clone(),
+    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);

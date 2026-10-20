@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};
 use crate::logo;
+use crate::marking;
 use crate::theme;
 use crate::viewport::NavMode;
 use crate::{App, RenameTarget, Tool};
@@ -750,33 +751,39 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
           ui.add_enabled(matches!(*w, "Design" | "Drawing" | "Manufacture"), egui::Button::selectable(current, *w));
         if r.clicked() {
           ui.close();
-          match *w {
-            "Drawing" if !drawing => {
-              app.manufacture = false;
-              app.open_drawing_workspace();
-            }
-            "Design" => {
-              app.manufacture = false;
-              if drawing {
-                app.close_drawing();
-              }
-            }
-            "Manufacture" => {
-              if drawing {
-                app.close_drawing();
-              }
-              app.cancel_dialog();
-              if app.s.edit_sketch.is_some() {
-                app.finish_sketch();
-              }
-              app.manufacture = true;
-            }
-            _ => {}
-          }
+          switch_workspace(app, w);
         }
       }
     });
   });
+}
+
+/// Switches to the Design, Manufacture or Drawing workspace.
+pub(crate) fn switch_workspace(app: &mut App, w: &str) {
+  let drawing = app.drawing.is_some();
+  match w {
+    "Drawing" if !drawing => {
+      app.manufacture = false;
+      app.open_drawing_workspace();
+    }
+    "Design" => {
+      app.manufacture = false;
+      if drawing {
+        app.close_drawing();
+      }
+    }
+    "Manufacture" => {
+      if drawing {
+        app.close_drawing();
+      }
+      app.cancel_dialog();
+      if app.s.edit_sketch.is_some() {
+        app.finish_sketch();
+      }
+      app.manufacture = true;
+    }
+    _ => {}
+  }
 }
 
 fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
@@ -989,6 +996,7 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
       egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
         ui.add_space(4.0);
         browser_tree(app, ui);
+        app.ctx_menu.reveal = None;
         ui.add_space(4.0);
       });
     },
@@ -997,6 +1005,25 @@ pub fn browser(app: &mut App, ctx: &egui::Context) {
 
 fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   let root = egui::Id::new("tree-root");
+  // Find in Browser: open the folders down to the node (its row scrolls to itself)
+  if let Some(sel) = app.ctx_menu.reveal {
+    let folder = match sel {
+      Sel::Body { .. } => Some("tree-bodies"),
+      Sel::Feature { feature } => app.s.design.feature(feature).and_then(|f| match f.kind {
+        FeatureKind::Sketch { .. } => Some("tree-sketches"),
+        FeatureKind::ConstructionPlane { .. } => Some("tree-construction"),
+        FeatureKind::Joint { .. } => Some("tree-joints"),
+        _ => None,
+      }),
+      _ => None,
+    };
+    ui.data_mut(|d| {
+      d.insert_temp(root.with("open"), true);
+      if let Some(f) = folder {
+        d.insert_temp(egui::Id::new(f).with("open"), true);
+      }
+    });
+  }
   let name = app
     .s
     .path
@@ -1108,6 +1135,9 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
     }
     if let Some(r) = ev.response {
+      if r.hovered() {
+        marking::peek(app, bodies.clone(), name.clone());
+      }
       r.context_menu(|ui| {
         if ui.button("Rename").clicked() {
           ui.close();
@@ -1190,6 +1220,7 @@ fn joints_section(app: &mut App, ui: &mut egui::Ui) {
       drive(app, Kind::DriveJoint);
     }
     if let Some(r) = ev.response {
+      reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to drive").context_menu(|ui| {
         if ui.button("Drive Joint").clicked() {
           ui.close();
@@ -1272,27 +1303,89 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       toggle_sel(&mut app.s, Sel::Body { body: bid }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
     }
     if let Some(r) = ev.response {
-      r.context_menu(|ui| {
-        if ui.button("Rename").clicked() {
-          ui.close();
-          app.rename = Some((RenameTarget::Body(bid.0), name.clone()));
-        }
-        if ui.button("Properties").clicked() {
-          ui.close();
-          app.s.selection = vec![Sel::Body { body: bid }];
-          app.start(Kind::Inspect);
-        }
-        if ui.button(if visible { "Hide" } else { "Show" }).clicked() {
-          ui.close();
-          app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
-        }
-        ui.separator();
-        if ui.button("Remove").clicked() {
-          ui.close();
-          app.run("body.remove", json!({"bodies": [bid.0]}));
-        }
-      });
+      reveal_row(app, Sel::Body { body: bid }, &r);
+      if r.hovered() {
+        marking::peek(app, vec![bid], name.clone());
+      }
+      r.context_menu(|ui| body_menu(app, ui, bid, &name, visible));
     }
+  }
+}
+
+/// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet).
+fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible: bool) {
+  let only = vec![Sel::Body { body: bid }];
+  let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
+    ui.close();
+    app.s.selection = only.clone();
+    app.start(kind);
+  };
+  if menu_item(ui, Icon::Move, "Move/Copy", Some("M")).clicked() {
+    start(app, ui, Kind::Move);
+  }
+  ui.separator();
+  if app.s.design.component_of(bid).is_some() && menu_item(ui, Icon::PhysMaterial, "Physical Material", None).clicked()
+  {
+    start(app, ui, Kind::Material);
+  }
+  if menu_item(ui, Icon::Appearance, "Appearance", Some("A")).clicked() {
+    start(app, ui, Kind::Form(&crate::forms::APPEARANCE));
+  }
+  if menu_item(ui, Icon::Measure, "Properties", None).clicked() {
+    start(app, ui, Kind::Inspect);
+  }
+  ui.separator();
+  if menu_item(ui, Icon::ConvertMesh, "Save As Mesh", None).on_hover_text("Export this body as STL, OBJ or 3MF").clicked()
+  {
+    ui.close();
+    marking::save_as_mesh(app, bid);
+  }
+  ui.separator();
+  if menu_item(ui, Icon::Remove, "Delete", Some("Del")).clicked() {
+    ui.close();
+    app.s.selection = vec![Sel::Body { body: bid }];
+    app.delete_selection();
+  }
+  if menu_item(ui, Icon::RemoveBody, "Remove", None).on_hover_text("Remove the body (kept in the timeline)").clicked() {
+    ui.close();
+    app.run("body.remove", json!({"bodies": [bid.0]}));
+  }
+  if menu_item(ui, Icon::Params, "Rename", None).clicked() {
+    ui.close();
+    app.rename = Some((RenameTarget::Body(bid.0), name.to_string()));
+  }
+  ui.separator();
+  if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
+    ui.close();
+    marking::show_hide(app, &[bid]);
+  }
+  let isolated = app.ctx_menu.isolate.is_some();
+  if menu_item(ui, Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, None).clicked() {
+    ui.close();
+    app.ctx_menu.isolate = if isolated { None } else { Some(vec![bid]) };
+  }
+  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
+    ui.close();
+    marking::find_in_window(app, &[bid], None);
+  }
+}
+
+/// A context-menu row with an icon on the left and its shortcut key on the right.
+pub(crate) fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str, key: Option<&str>) -> egui::Response {
+  // the leading spaces leave room for the icon
+  let mut b = egui::Button::new(format!("       {label}")).min_size(vec2(170.0, 0.0));
+  if let Some(k) = key {
+    b = b.shortcut_text(k);
+  }
+  let r = ui.add(b);
+  icons::draw_color(ui.painter(), Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(15.0)), icon);
+  r
+}
+
+/// Find in Browser: the node's row scrolls into view.
+fn reveal_row(app: &App, sel: Sel, r: &egui::Response) {
+  if app.ctx_menu.reveal == Some(sel) {
+    r.scroll_to_me(Some(egui::Align::Center));
   }
 }
 
@@ -1333,6 +1426,10 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
       app.s.selection = vec![Sel::Feature { feature: fid }];
     }
     if let Some(r) = ev.response {
+      reveal_row(app, Sel::Feature { feature: fid }, &r);
+      if r.hovered() {
+        marking::peek(app, Vec::new(), name.clone());
+      }
       r.on_hover_text("Double-click to edit").context_menu(|ui| {
         if ui.button("Edit Sketch").clicked() {
           ui.close();
@@ -1382,6 +1479,7 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
       pick_plane(app, plane);
     }
     if let Some(r) = ev.response {
+      reveal_row(app, Sel::Feature { feature: fid }, &r);
       r.on_hover_text("Double-click to sketch on this plane");
     }
   }
@@ -1728,34 +1826,7 @@ pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
 
 /// What is selected (or hovered), at the canvas's bottom-right corner, as Fusion shows it.
 pub fn selection_info(app: &mut App, ctx: &egui::Context) {
-  let name = |s: &Sel| -> &'static str {
-    match s {
-      Sel::Face { .. } => "Face",
-      Sel::Edge { .. } => "Edge",
-      Sel::Body { .. } => "Body",
-      Sel::Profile { .. } => "Profile",
-      Sel::Feature { .. } => "Feature",
-      Sel::SketchCurve { .. } => "Sketch Curve",
-      Sel::SketchPoint { .. } => "Sketch Point",
-      Sel::SketchConstraint { .. } => "Constraint",
-      Sel::Vertex { .. } => "Vertex",
-    }
-  };
-  let text = match app.s.selection.as_slice() {
-    [] => match app.hover {
-      Some(h) => name(&h.to_sel()).to_string(),
-      None => return,
-    },
-    [one] => name(one).to_string(),
-    many => {
-      let first = name(&many[0]);
-      if many.iter().all(|s| name(s) == first) {
-        format!("{} {first}s", many.len())
-      } else {
-        format!("{} objects", many.len())
-      }
-    }
-  };
+  let Some(text) = selection_text(app) else { return };
   let canvas = app.canvas;
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
   painter.text(
@@ -1765,6 +1836,67 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
     egui::FontId::proportional(12.5),
     Color32::from_gray(50),
   );
+}
+
+/// The selection readout: `1 Face | Area: 100.00 mm^2`, `2 Edges | Length: 20.00 mm`, a body's
+/// or feature's name; the browser or timeline row under the pointer names itself instead.
+pub(crate) fn selection_text(app: &App) -> Option<String> {
+  if let Some(l) = &app.ctx_menu.peek_label {
+    return Some(l.clone());
+  }
+  let hovered;
+  let sel = match app.s.selection.as_slice() {
+    [] => {
+      hovered = [app.hover?.to_sel()];
+      &hovered[..]
+    }
+    s => s,
+  };
+  let noun = |s: &Sel| -> (&'static str, &'static str) {
+    match s {
+      Sel::Face { .. } => ("Face", "Faces"),
+      Sel::Edge { .. } => ("Edge", "Edges"),
+      Sel::Body { .. } => ("Body", "Bodies"),
+      Sel::Profile { .. } => ("Profile", "Profiles"),
+      Sel::Feature { .. } => ("Feature", "Features"),
+      Sel::SketchCurve { .. } => ("Sketch Curve", "Sketch Curves"),
+      Sel::SketchPoint { .. } => ("Sketch Point", "Sketch Points"),
+      Sel::SketchConstraint { .. } => ("Constraint", "Constraints"),
+      Sel::Vertex { .. } => ("Vertex", "Vertices"),
+    }
+  };
+  let first = noun(&sel[0]);
+  if !sel.iter().all(|s| noun(s) == first) {
+    return Some(format!("{} objects", sel.len()));
+  }
+  let n = sel.len();
+  let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
+  let model = &app.s.model;
+  let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
+  let readout = match sel[0] {
+    Sel::Face { .. } => sum(&|s| match s {
+      Sel::Face { body, face } => model.body(*body)?.faces().iter().find(|f| f.id == *face).map(|f| f.area),
+      _ => None,
+    })
+    .map(|a| format!("Area: {a:.2} mm^2")),
+    Sel::Edge { .. } => sum(&|s| match s {
+      Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
+      _ => None,
+    })
+    .map(|l| format!("Length: {l:.2} mm")),
+    Sel::Profile { .. } => sum(&|s| match s {
+      Sel::Profile { sketch, index } => model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.area().abs()),
+      _ => None,
+    })
+    .map(|a| format!("Area: {a:.2} mm^2")),
+    Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
+    Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
+    _ => None,
+  };
+  Some(match readout {
+    Some(r) => format!("{count} | {r}"),
+    None => count,
+  })
 }
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
@@ -1928,35 +2060,64 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if r.double_clicked() {
             edit_feature(app, id);
           }
-          r.context_menu(|ui| {
-            if ui.button("Edit Feature").clicked() {
-              ui.close();
-              edit_feature(app, id);
-            }
-            if ui.button("Rename").clicked() {
-              ui.close();
-              app.rename = Some((RenameTarget::Feature(id.0), name.clone()));
-            }
-            if ui.button(if suppressed { "Unsuppress Features" } else { "Suppress Features" }).clicked() {
-              ui.close();
-              app.run("feature.suppress", json!({"feature": id.0}));
-            }
-            if ui.button("Roll History Marker Here").clicked() {
-              ui.close();
-              app.run("timeline.marker", json!({"at": i + 1}));
-            }
-            ui.separator();
-            if ui.button(RichText::new("Delete").color(theme::ERROR)).clicked() {
-              ui.close();
-              app.run("feature.delete", json!({"feature": id.0}));
-            }
-          });
+          // hovering an item highlights what it made and names it in the status bar
+          if r.hovered() {
+            marking::peek(app, marking::feature_bodies(app, id), name.clone());
+          }
+          r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
         }
         if active >= n {
           marker(ui);
         }
       });
     });
+}
+
+/// A timeline item's right-click menu, as in Fusion (less what FissionOxide can't do yet).
+fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name: &str, icon: Icon, suppressed: bool) {
+  if menu_item(ui, icon, "Edit Feature", None).clicked() {
+    ui.close();
+    edit_feature(app, id);
+  }
+  // Configure: the feature's suppression becomes a column of the configuration table
+  if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone())
+    && menu_item(ui, Icon::ConfigTable, "Configure", None)
+      .on_hover_text("Add this feature's suppression to the configuration table")
+      .clicked()
+  {
+    ui.close();
+    app.run("config.set", json!({"configuration": first, "feature": id.0, "suppressed": suppressed}));
+    crate::config_ui::open_table();
+  }
+  ui.separator();
+  if menu_item(ui, Icon::Remove, "Delete", Some("Del")).clicked() {
+    ui.close();
+    app.run("feature.delete", json!({"feature": id.0}));
+  }
+  if menu_item(ui, Icon::Params, "Rename", None).clicked() {
+    ui.close();
+    app.rename = Some((RenameTarget::Feature(id.0), name.to_string()));
+  }
+  if menu_item(ui, Icon::History, "Roll Timeline Marker Here", None).clicked() {
+    ui.close();
+    app.run("timeline.marker", json!({"at": i + 1}));
+  }
+  let label = if suppressed { "Unsuppress Features" } else { "Suppress Features" };
+  if menu_item(ui, Icon::EyeOff, label, None).clicked() {
+    ui.close();
+    app.run("feature.suppress", json!({"feature": id.0}));
+  }
+  ui.separator();
+  let sel = Sel::Feature { feature: id };
+  if marking::in_browser(app, &sel) && menu_item(ui, Icon::Folder, "Find in Browser", None).clicked() {
+    ui.close();
+    marking::find_in_browser(app, sel);
+  }
+  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
+    ui.close();
+    let bodies = marking::feature_bodies(app, id);
+    marking::find_in_window(app, &bodies, Some(id));
+  }
 }
 
 /// The history marker: a dark bar with a grab handle, as in Fusion's timeline.

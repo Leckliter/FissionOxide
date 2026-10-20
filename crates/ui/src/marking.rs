@@ -1,15 +1,22 @@
 //! The right-click marking menu, as in Fusion: eight commands arranged around the cursor (pick
 //! one by clicking it, or by clicking anywhere in its direction) and an overflow list of
-//! commands for the current selection underneath.
+//! commands for the current selection directly underneath. The ring changes with what is
+//! selected (faces, edges, bodies, sketches), and items marked ▾ / ▸ open a sub-list.
+//!
+//! Also here: the context-menu helpers the browser and timeline share with the menu (Find in
+//! Browser / Window, Show/Hide, the hover highlight they put on the viewport).
 
 use egui::{Color32, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use fox_engine::Sel;
 use fox_engine::kernel::SurfaceKind;
-use fox_engine::model::FeatureId;
+use fox_engine::kernel::glam::DVec3;
+use fox_engine::model::{BodyId, FeatureId, FeatureKind};
+use serde_json::json;
 
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};
 use crate::panels::{self, Cmd};
+use crate::viewport::NavMode;
 use crate::{App, Tool, theme};
 
 /// Where the item ring sits from the centre (the vertical spacing is squeezed, as in Fusion).
@@ -18,38 +25,124 @@ const RADIUS: f32 = 112.0;
 const DEAD_ZONE: f32 = 22.0;
 /// Directional picks reach this far; clicks further out dismiss the menu.
 const REACH: f32 = 260.0;
+/// Rows in the overflow list and sub-lists.
+const ROW_H: f32 = 24.0;
+const SEP_H: f32 = 7.0;
+/// Recent commands listed at the bottom of the overflow list.
+const RECENT: usize = 4;
 
 pub struct MarkingMenu {
   center: Pos2,
+  /// The open sub-list: a ring slot's (opened by clicking it) or an overflow row's (by hovering).
+  sub: Option<Sub>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
+enum Sub {
+  Ring(usize),
+  Row(usize),
+}
+
+/// Context-menu state kept between frames.
+#[derive(Default)]
+pub(crate) struct MenuState {
+  /// Bodies drawn highlighted (the browser or timeline row under the pointer) and the name the
+  /// status bar shows for it.
+  pub(crate) peek: Vec<BodyId>,
+  pub(crate) peek_label: Option<String>,
+  next_peek: Vec<BodyId>,
+  next_label: Option<String>,
+  /// The browser node Find in Browser scrolls to and selects.
+  pub(crate) reveal: Option<Sel>,
+  /// Isolate: only these bodies are drawn (a view state; nothing in the design changes).
+  pub(crate) isolate: Option<Vec<BodyId>>,
+}
+
+#[derive(Clone)]
 enum Action {
   Cmd(Cmd),
   Repeat(Cmd),
   EditFeature(FeatureId),
+  EditSketch(FeatureId),
+  /// Create a sketch on the selected planar face and start a sketch tool in it.
+  SketchOnFace(Tool),
+  Nav(NavMode),
+  Ok,
+  Cancel,
+  ShowHide,
+  ShowAll,
+  Isolate,
+  Unisolate,
+  FindInBrowser(Sel),
+  FindInWindow,
+  Workspace(&'static str),
+  /// A row that only opens its sub-list.
+  Open,
 }
 
+#[derive(Clone)]
 struct Item {
   action: Action,
   icon: Icon,
   label: String,
+  /// Shortcut key, drawn on the right of overflow rows.
+  hint: Option<&'static str>,
+  children: Vec<Item>,
 }
 
 impl Item {
+  fn new(action: Action, icon: Icon, label: &str) -> Item {
+    Item { action, icon, label: label.into(), hint: None, children: Vec::new() }
+  }
+
   fn cmd(c: Cmd) -> Item {
     let (icon, label, _) = c.info();
-    Item { action: Action::Cmd(c), icon, label: label.into() }
+    Item { hint: shortcut(c), ..Item::new(Action::Cmd(c), icon, label) }
   }
 
   fn with_label(c: Cmd, label: &str) -> Item {
-    let (icon, _, _) = c.info();
-    Item { action: Action::Cmd(c), icon, label: label.into() }
+    Item { label: label.into(), ..Item::cmd(c) }
+  }
+
+  fn hint(mut self, h: &'static str) -> Item {
+    self.hint = Some(h);
+    self
   }
 }
 
+/// The key that runs a command, as the app binds it (see `App::shortcuts`).
+fn shortcut(c: Cmd) -> Option<&'static str> {
+  Some(match c {
+    Cmd::Dialog(Kind::Extrude) => "E",
+    Cmd::Dialog(Kind::Fillet) => "F",
+    Cmd::Dialog(Kind::Move) => "M",
+    Cmd::Dialog(Kind::Inspect) => "I",
+    Cmd::Dialog(Kind::Hole) => "H",
+    Cmd::Dialog(Kind::PressPull) => "Q",
+    Cmd::Dialog(Kind::Joint) => "J",
+    Cmd::Dialog(Kind::SkOffset) => "O",
+    Cmd::Dialog(Kind::Form(f)) if std::ptr::eq(f, &crate::forms::APPEARANCE) => "A",
+    Cmd::SketchTool(Tool::Line) => "L",
+    Cmd::SketchTool(Tool::Rect) => "R",
+    Cmd::SketchTool(Tool::Circle) => "C",
+    Cmd::SketchTool(Tool::Arc3) => "A",
+    Cmd::SketchTool(Tool::Point) => "P",
+    Cmd::SketchTool(Tool::Dimension) => "D",
+    Cmd::SketchTool(Tool::Trim) => "T",
+    Cmd::Construction => "X",
+    Cmd::Delete => "Del",
+    Cmd::Undo => "Ctrl+Z",
+    Cmd::Redo => "Ctrl+Y",
+    Cmd::Fit => "F6",
+    Cmd::ToggleVisibility => "V",
+    _ => return None,
+  })
+}
+
+const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
+
 /// Opens the menu at `pos`. A right-click on unselected geometry selects it first, so the
-/// overflow list offers commands for what was clicked.
+/// menu offers commands for what was clicked.
 pub fn open(app: &mut App, pos: Pos2) {
   if let Some(h) = app.hover {
     let sel = h.to_sel();
@@ -58,17 +151,220 @@ pub fn open(app: &mut App, pos: Pos2) {
     }
   }
   app.nav_mode = None;
-  app.marking = Some(MarkingMenu { center: pos });
+  app.marking = Some(MarkingMenu { center: pos, sub: None });
+}
+
+// ---------------------------------------------------------------- what is selected
+
+/// What the selection is, for the context-aware ring and list.
+struct Context {
+  face: Option<(BodyId, u32)>,
+  planar_face: bool,
+  edge: bool,
+  /// Bodies of the selected faces, edges and bodies.
+  bodies: Vec<BodyId>,
+  /// Whole bodies selected.
+  body_sel: bool,
+  feature: Option<FeatureId>,
+  sketch: Option<FeatureId>,
+  profile: bool,
+}
+
+fn context(app: &App) -> Context {
+  let sel = &app.s.selection;
+  let face = sel.iter().find_map(|s| if let Sel::Face { body, face } = s { Some((*body, *face)) } else { None });
+  let planar_face = sel.iter().any(|s| match s {
+    Sel::Face { body, face } => face_kind(app, *body, *face) == Some(SurfaceKind::Plane),
+    _ => false,
+  });
+  let feature = sel.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
+  let sketch = feature.filter(|f| app.s.design.feature(*f).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })));
+  Context {
+    face,
+    planar_face,
+    edge: sel.iter().any(|s| matches!(s, Sel::Edge { .. })),
+    bodies: selected_bodies(app),
+    body_sel: sel.iter().any(|s| matches!(s, Sel::Body { .. })),
+    feature,
+    sketch,
+    profile: sel.iter().any(|s| matches!(s, Sel::Profile { .. })),
+  }
+}
+
+fn face_kind(app: &App, body: BodyId, face: u32) -> Option<SurfaceKind> {
+  app.s.model.body(body)?.faces().iter().find(|f| f.id == face).map(|f| f.kind)
+}
+
+/// The bodies of everything selected (faces and edges count for their body).
+pub(crate) fn selected_bodies(app: &App) -> Vec<BodyId> {
+  let mut v: Vec<BodyId> = Vec::new();
+  for s in &app.s.selection {
+    let b = match s {
+      Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => *body,
+      _ => continue,
+    };
+    if !v.contains(&b) {
+      v.push(b);
+    }
+  }
+  v
+}
+
+/// The feature that last changed a body (FissionOxide doesn't track which feature made each
+/// face, so a face's "feature" is its body's).
+pub(crate) fn body_feature(app: &App, body: BodyId) -> Option<FeatureId> {
+  app.s.model.body(body).map(|b| b.feature)
+}
+
+/// The bodies a feature produced or last changed.
+pub(crate) fn feature_bodies(app: &App, f: FeatureId) -> Vec<BodyId> {
+  app.s.model.bodies.iter().filter(|b| b.feature == f).map(|b| b.id).collect()
+}
+
+/// The sketch a feature's profiles come from.
+pub(crate) fn profile_sketch(app: &App, f: FeatureId) -> Option<FeatureId> {
+  let d = &app.s.design;
+  d.feature(f)?
+    .kind
+    .depends_on()
+    .into_iter()
+    .find(|s| d.feature(*s).is_some_and(|s| matches!(s.kind, FeatureKind::Sketch { .. })))
+}
+
+fn feature_name(app: &App, f: FeatureId) -> String {
+  app.s.design.feature(f).map(|f| f.name.clone()).unwrap_or_default()
+}
+
+/// Whether a thing has a node in the browser (bodies, sketches, construction planes, joints).
+pub(crate) fn in_browser(app: &App, sel: &Sel) -> bool {
+  match sel {
+    Sel::Body { .. } => true,
+    Sel::Feature { feature } => app.s.design.feature(*feature).is_some_and(|f| {
+      matches!(f.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. } | FeatureKind::Joint { .. })
+    }),
+    _ => false,
+  }
+}
+
+// ---------------------------------------------------------------- shared actions
+
+/// Opens the browser at a node and selects it (the browser scrolls to it when it draws).
+pub(crate) fn find_in_browser(app: &mut App, sel: Sel) {
+  app.browser_open = true;
+  app.s.selection = vec![sel];
+  app.ctx_menu.reveal = Some(sel);
+}
+
+/// Fits the view to bodies, or to a sketch when there are none.
+pub(crate) fn find_in_window(app: &mut App, bodies: &[BodyId], sketch: Option<FeatureId>) {
+  let mut lo = DVec3::splat(f64::INFINITY);
+  let mut hi = DVec3::splat(f64::NEG_INFINITY);
+  for b in bodies {
+    if let Some(m) = app.s.model.body(*b).and_then(|b| b.shape.mass().ok()) {
+      lo = lo.min(m.bbox_min);
+      hi = hi.max(m.bbox_max);
+    }
+  }
+  if bodies.is_empty()
+    && let Some(r) = sketch.and_then(|s| app.s.model.sketches.get(&s))
+  {
+    for p in &r.sketch.points {
+      let w = r.plane.to_world([p.x, p.y]);
+      lo = lo.min(w);
+      hi = hi.max(w);
+    }
+  }
+  if !lo.is_finite() || !hi.is_finite() {
+    app.status = Some(("Nothing to show in the window".into(), false));
+    return;
+  }
+  let aspect = app.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
+  app.cam.fit(lo, hi, aspect);
+}
+
+/// Shows the bodies if any is hidden, else hides them.
+pub(crate) fn show_hide(app: &mut App, bodies: &[BodyId]) {
+  if bodies.is_empty() {
+    app.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+    return;
+  }
+  let show = bodies.iter().any(|b| !app.s.body_visible(*b));
+  for b in bodies {
+    app.run("body.visible", json!({"body": b.0, "visible": show}));
+  }
+  if !show {
+    app.s.selection.retain(|s| !matches!(s, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }));
+  }
+}
+
+/// Save As Mesh: one body to an STL, OBJ or 3MF file.
+pub(crate) fn save_as_mesh(app: &mut App, body: BodyId) {
+  let name = app.s.body_name(body);
+  let Some(p) = rfd::FileDialog::new()
+    .add_filter("STL", &["stl"])
+    .add_filter("OBJ", &["obj"])
+    .add_filter("3MF", &["3mf"])
+    .set_file_name(format!("{name}.stl"))
+    .save_file()
+  else {
+    return;
+  };
+  if app.run("export", json!({"path": p, "bodies": [body.0]})).is_some() {
+    app.status = Some((format!("Saved {name} as {}", p.display()), false));
+  }
+}
+
+fn show_all(app: &mut App) {
+  let hidden: Vec<BodyId> = app.s.model.bodies.iter().map(|b| b.id).filter(|b| !app.s.body_visible(*b)).collect();
+  for b in hidden {
+    app.run("body.visible", json!({"body": b.0, "visible": true}));
+  }
+}
+
+/// Highlights bodies in the viewport, and names them in the status bar, while the pointer is
+/// over a browser or timeline row (call it every frame the row is hovered).
+pub(crate) fn peek(app: &mut App, bodies: Vec<BodyId>, label: String) {
+  app.ctx_menu.next_peek = bodies;
+  app.ctx_menu.next_label = Some(label);
+}
+
+/// After the panels: takes this frame's hover highlight and notes the last command run.
+pub fn end_frame(app: &mut App, ctx: &egui::Context) {
+  let m = &mut app.ctx_menu;
+  let bodies = std::mem::take(&mut m.next_peek);
+  let label = m.next_label.take();
+  if m.peek != bodies || m.peek_label != label {
+    m.peek = bodies;
+    m.peek_label = label;
+    ctx.request_repaint();
+  }
+}
+
+// ---------------------------------------------------------------- contents
+
+/// Sketch ▾: a sketch, or (on a planar face) a sketch with a drawing tool already running.
+fn sketch_item(cx: &Context) -> Item {
+  let mut it = Item::new(Action::Open, Icon::Sketch, "Sketch");
+  it.children.push(Item::cmd(Cmd::NewSketch));
+  if cx.planar_face {
+    for t in [Tool::Line, Tool::Rect, Tool::Circle, Tool::Arc3, Tool::Point] {
+      let (icon, label, _) = Cmd::SketchTool(t).info();
+      let mut c = Item::new(Action::SketchOnFace(t), icon, label);
+      c.hint = shortcut(Cmd::SketchTool(t));
+      it.children.push(c);
+    }
+  }
+  it
 }
 
 /// The eight ring items, clockwise from north. `None` leaves a direction empty.
-fn ring(app: &App) -> [Option<Item>; 8] {
+fn ring(app: &App, cx: &Context) -> [Option<Item>; 8] {
   let repeat = app.last_cmd.map(|c| {
     let (icon, name, _) = c.info();
-    Item { action: Action::Repeat(c), icon, label: format!("Repeat {name}") }
+    Item::new(Action::Repeat(c), icon, &format!("Repeat {name}"))
   });
   if app.s.edit_sketch.is_some() {
-    [
+    return [
       repeat,
       Some(Item::cmd(Cmd::Delete)),
       Some(Item::cmd(Cmd::Redo)),
@@ -77,78 +373,223 @@ fn ring(app: &App) -> [Option<Item>; 8] {
       Some(Item::with_label(Cmd::SketchTool(Tool::Rect), "Rectangle")),
       Some(Item::cmd(Cmd::Undo)),
       Some(Item::cmd(Cmd::SketchTool(Tool::Line))),
-    ]
-  } else {
-    [
-      repeat,
-      Some(Item::cmd(Cmd::Delete)),
-      Some(Item::cmd(Cmd::Redo)),
-      Some(Item::cmd(Cmd::Dialog(Kind::Fillet))),
-      Some(Item::cmd(Cmd::NewSketch)),
-      Some(Item::cmd(Cmd::Dialog(Kind::Extrude))),
-      Some(Item::cmd(Cmd::Undo)),
-      Some(Item::cmd(Cmd::Dialog(Kind::Move))),
-    ]
+    ];
   }
+  // Fusion's ring: Repeat, Delete, Press Pull, Redo, Hole, Sketch ▾, Move/Copy, Undo; the east
+  // and south slots follow the selection
+  let (east, south) = if cx.edge {
+    (Item::cmd(Cmd::Dialog(Kind::Fillet)), Item::cmd(Cmd::Dialog(Kind::Chamfer)))
+  } else if cx.body_sel {
+    (Item::cmd(Cmd::Dialog(Kind::Combine)), Item::cmd(APPEARANCE))
+  } else if cx.sketch.is_some() || cx.profile {
+    (Item::cmd(Cmd::Dialog(Kind::Extrude)), Item::cmd(Cmd::Dialog(Kind::Revolve)))
+  } else {
+    (Item::cmd(Cmd::Dialog(Kind::PressPull)), Item::cmd(Cmd::Dialog(Kind::Hole)))
+  };
+  let south_west = match cx.sketch {
+    Some(f) => Item::new(Action::EditSketch(f), Icon::Sketch, "Edit Sketch"),
+    None => sketch_item(cx),
+  };
+  [
+    repeat,
+    Some(Item::cmd(Cmd::Delete)),
+    Some(east),
+    Some(Item::cmd(Cmd::Redo)),
+    Some(south),
+    Some(south_west),
+    Some(Item::cmd(Cmd::Dialog(Kind::Move))),
+    Some(Item::cmd(Cmd::Undo)),
+  ]
 }
 
-/// The overflow list: commands for the selection, then general ones (`None` is a separator).
-fn overflow(app: &App) -> Vec<Option<Item>> {
+/// The overflow list: OK/Cancel, commands for the selection, navigation, display, workspaces
+/// and recent commands (`None` is a separator).
+fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   let mut v: Vec<Option<Item>> = Vec::new();
+  let sep = |v: &mut Vec<Option<Item>>| {
+    if v.last().is_some_and(Option::is_some) {
+      v.push(None);
+    }
+  };
+  if let Some(d) = &app.dialog {
+    if d.kind != Kind::PickPlane && !d.kind.reports() {
+      v.push(Some(Item::new(Action::Ok, Icon::Finish, "OK")));
+    }
+    v.push(Some(Item::new(Action::Cancel, Icon::Close, "Cancel")));
+    sep(&mut v);
+  }
   if app.s.edit_sketch.is_some() {
     v.push(Some(Item::cmd(Cmd::FinishSketch)));
-    v.push(None);
+    sep(&mut v);
     if app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. })) {
       v.push(Some(Item::with_label(Cmd::Construction, "Normal/Construction")));
     }
     v.push(Some(Item::cmd(Cmd::LookAt)));
     v.push(Some(Item::cmd(Cmd::Fit)));
-    v.push(None);
+    sep(&mut v);
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Inspect))));
     return v;
   }
-  let sel = &app.s.selection;
-  let planar_face = sel.iter().any(|s| match s {
-    Sel::Face { body, face } => app
-      .s
-      .model
-      .body(*body)
-      .and_then(|b| b.faces().iter().find(|f| f.id == *face).map(|f| f.kind == SurfaceKind::Plane))
-      .unwrap_or(false),
-    _ => false,
-  });
-  let any_edge = sel.iter().any(|s| matches!(s, Sel::Edge { .. }));
-  let any_body = sel.iter().any(|s| matches!(s, Sel::Body { .. }));
-  let feature = sel.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
-  let before = v.len();
-  if let Some(f) = feature {
-    let name = app.s.design.feature(f).map(|f| f.name.clone()).unwrap_or_default();
-    v.push(Some(Item { action: Action::EditFeature(f), icon: Icon::Gear, label: format!("Edit {name}") }));
-  }
-  if planar_face {
-    v.push(Some(Item::cmd(Cmd::NewSketch)));
-    v.push(Some(Item::cmd(Cmd::LookAt)));
+  // the selection's commands
+  let edit_feature = |v: &mut Vec<Option<Item>>, f: FeatureId| {
+    v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit Feature ({})", feature_name(app, f)))));
+    if let Some(sk) = profile_sketch(app, f) {
+      v.push(Some(Item::new(Action::EditSketch(sk), Icon::Sketch, "Edit Profile Sketch")));
+    }
+  };
+  let find = |v: &mut Vec<Option<Item>>, sel: Option<Sel>| {
+    if let Some(s) = sel {
+      v.push(Some(Item::new(Action::FindInBrowser(s), Icon::Folder, "Find in Browser")));
+    }
+    v.push(Some(Item::new(Action::FindInWindow, Icon::Fit, "Find in Window")));
+  };
+  let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
+  let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide").hint("V");
+  if let Some((body, _)) = cx.face {
+    if cx.planar_face {
+      v.push(Some(Item::cmd(Cmd::NewSketch)));
+      // Fusion's Extrude on a face is a press pull of the face
+      v.push(Some(Item::new(Action::Cmd(Cmd::Dialog(Kind::PressPull)), Icon::Extrude, "Extrude")));
+      v.push(Some(Item::cmd(Cmd::Dialog(Kind::OffsetPlane))));
+    }
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Shell))));
-  }
-  if any_edge {
+    sep(&mut v);
+    if let Some(f) = body_feature(app, body) {
+      edit_feature(&mut v, f);
+      sep(&mut v);
+    }
+    v.push(Some(Item::cmd(APPEARANCE)));
+    v.push(Some(properties()));
+    sep(&mut v);
+    v.push(Some(show_hide()));
+    if cx.planar_face {
+      v.push(Some(Item::cmd(Cmd::LookAt)));
+    }
+    find(&mut v, Some(Sel::Body { body }));
+  } else if cx.edge {
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Fillet))));
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Chamfer))));
-  }
-  if any_body {
-    v.push(Some(Item::cmd(Cmd::ToggleVisibility)));
+    sep(&mut v);
+    if let Some(f) = cx.bodies.first().and_then(|b| body_feature(app, *b)) {
+      edit_feature(&mut v, f);
+      sep(&mut v);
+    }
+    v.push(Some(properties()));
+    v.push(Some(show_hide()));
+    find(&mut v, cx.bodies.first().map(|b| Sel::Body { body: *b }));
+  } else if cx.body_sel {
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Move))));
-    v.push(Some(Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties")));
+    sep(&mut v);
+    v.push(Some(Item::cmd(APPEARANCE)));
+    if cx.bodies.iter().any(|b| app.s.design.component_of(*b).is_some()) {
+      v.push(Some(Item::cmd(Cmd::Dialog(Kind::Material))));
+    }
+    v.push(Some(properties()));
+    sep(&mut v);
+    // whole bodies: Show/Hide toggles each one
+    v.push(Some(Item::cmd(Cmd::ToggleVisibility)));
+    v.push(Some(Item::cmd(Cmd::RemoveBodies)));
+    v.push(Some(Item::new(Action::Isolate, Icon::Body, "Isolate")));
+    find(&mut v, (cx.bodies.len() == 1).then(|| Sel::Body { body: cx.bodies[0] }));
+  } else if let Some(f) = cx.feature {
+    if cx.sketch.is_some() {
+      v.push(Some(Item::cmd(Cmd::Dialog(Kind::Extrude))));
+      v.push(Some(Item::cmd(Cmd::Dialog(Kind::Revolve))));
+      sep(&mut v);
+    }
+    v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    let sel = Sel::Feature { feature: f };
+    find(&mut v, in_browser(app, &sel).then_some(sel));
+  } else if cx.profile {
+    v.push(Some(Item::cmd(Cmd::Dialog(Kind::Extrude))));
+    v.push(Some(Item::cmd(Cmd::Dialog(Kind::Revolve))));
   }
-  if v.len() > before {
-    v.push(None);
-  }
-  v.push(Some(Item::cmd(Cmd::Dialog(Kind::Inspect))));
-  v.push(Some(Item::cmd(Cmd::Params)));
-  v.push(None);
+  sep(&mut v);
+  // navigation
+  v.push(Some(Item::new(Action::Nav(NavMode::Pan), Icon::Pan, "Pan")));
+  v.push(Some(Item::new(Action::Nav(NavMode::Zoom), Icon::Zoom, "Zoom")));
+  v.push(Some(Item::new(Action::Nav(NavMode::Orbit), Icon::Orbit, "Constrained Orbit")));
   v.push(Some(Item::cmd(Cmd::Fit)));
   v.push(Some(Item::cmd(Cmd::Home)));
+  v.push(None);
+  // display
+  if !cx.body_sel && !cx.bodies.is_empty() {
+    v.push(Some(Item::cmd(Cmd::RemoveBodies)));
+  }
+  if app.s.model.bodies.iter().any(|b| !app.s.body_visible(b.id)) {
+    v.push(Some(Item::new(Action::ShowAll, Icon::Eye, "Show All")));
+  }
+  if app.ctx_menu.isolate.is_some() {
+    v.push(Some(Item::new(Action::Unisolate, Icon::Body, "Unisolate")));
+  }
+  v.push(Some(Item::cmd(Cmd::Dialog(Kind::Inspect))));
+  let mut ws = Item::new(Action::Open, Icon::Component, "Workspace");
+  for (w, icon) in [("Design", Icon::Component), ("Manufacture", Icon::MotionStudy), ("Drawing", Icon::NewDrawing)] {
+    let current = if w == "Manufacture" { app.manufacture } else { w == "Design" && !app.manufacture };
+    let label = if current { format!("{w}  ✔") } else { w.to_string() };
+    ws.children.push(Item::new(Action::Workspace(w), icon, &label));
+  }
+  v.push(Some(ws));
+  // recent commands (the newest is the ring's Repeat)
+  let recent: Vec<Cmd> =
+    app.recent.iter().copied().filter(|c| Some(*c) != app.last_cmd).take(RECENT).collect();
+  if !recent.is_empty() {
+    v.push(None);
+    for c in recent {
+      v.push(Some(Item::cmd(c)));
+    }
+  }
   v
 }
+
+fn run(app: &mut App, action: Action) {
+  match action {
+    Action::Cmd(c) => c.run(app),
+    // repeating a modelling command from inside a sketch finishes the sketch first
+    Action::Repeat(c) => app.launch(c),
+    Action::EditFeature(f) => panels::edit_feature(app, f),
+    Action::EditSketch(f) => app.edit_sketch(f),
+    Action::SketchOnFace(t) => {
+      app.new_sketch();
+      if app.s.edit_sketch.is_some() {
+        Cmd::SketchTool(t).run(app);
+      }
+    }
+    Action::Nav(m) => app.nav_mode = Some(m),
+    Action::Ok => {
+      if let Some(d) = app.dialog.as_mut() {
+        d.ok_requested = true;
+      }
+    }
+    Action::Cancel => {
+      app.cancel_dialog();
+      app.s.selection.clear();
+    }
+    Action::ShowHide => {
+      let bodies = selected_bodies(app);
+      show_hide(app, &bodies);
+    }
+    Action::ShowAll => show_all(app),
+    Action::Isolate => app.ctx_menu.isolate = Some(selected_bodies(app)),
+    Action::Unisolate => app.ctx_menu.isolate = None,
+    Action::FindInBrowser(s) => find_in_browser(app, s),
+    Action::FindInWindow => {
+      let bodies = selected_bodies(app);
+      let feature = app.s.selection.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
+      match feature {
+        Some(f) if bodies.is_empty() => {
+          let bodies = feature_bodies(app, f);
+          find_in_window(app, &bodies, Some(f));
+        }
+        _ => find_in_window(app, &bodies, None),
+      }
+    }
+    Action::Workspace(w) => panels::switch_workspace(app, w),
+    Action::Open => {}
+  }
+}
+
+// ---------------------------------------------------------------- layout and drawing
 
 /// Unit direction of ring slot `i` (0 = north, clockwise).
 fn dir(i: usize) -> Vec2 {
@@ -182,58 +623,163 @@ fn slot_at(center: Pos2, p: Pos2) -> Option<usize> {
   Some(((a / std::f32::consts::FRAC_PI_4).round() as usize) % 8)
 }
 
+fn list_width(painter: &egui::Painter, font: &egui::FontId, items: &[Option<Item>]) -> f32 {
+  items
+    .iter()
+    .flatten()
+    .map(|it| {
+      let w = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
+      let hint = it.hint.map(|h| painter.layout_no_wrap(h.into(), font.clone(), theme::MUTED).size().x + 18.0);
+      let more = if it.children.is_empty() { 0.0 } else { 16.0 };
+      w + 48.0 + hint.unwrap_or(0.0) + more
+    })
+    .fold(180.0f32, f32::max)
+}
+
+fn list_height(items: &[Option<Item>]) -> f32 {
+  items.iter().map(|it| if it.is_some() { ROW_H } else { SEP_H }).sum::<f32>() + 6.0
+}
+
+/// The row of a list under `p`.
+fn row_at(rect: Rect, items: &[Option<Item>], p: Pos2) -> Option<usize> {
+  if !rect.contains(p) {
+    return None;
+  }
+  let mut y = rect.top() + 3.0;
+  for (k, it) in items.iter().enumerate() {
+    let h = if it.is_some() { ROW_H } else { SEP_H };
+    if it.is_some() && p.y >= y && p.y < y + h {
+      return Some(k);
+    }
+    y += h;
+  }
+  None
+}
+
+fn row_top(rect: Rect, items: &[Option<Item>], k: usize) -> f32 {
+  rect.top() + 3.0 + items[..k].iter().map(|it| if it.is_some() { ROW_H } else { SEP_H }).sum::<f32>()
+}
+
+/// Keeps a list's box inside the canvas.
+fn clamp(canvas: Rect, min: Pos2, size: Vec2) -> Rect {
+  let x = min.x.clamp(canvas.left() + 4.0, (canvas.right() - size.x - 4.0).max(canvas.left() + 4.0));
+  let y = min.y.clamp(canvas.top() + 4.0, (canvas.bottom() - size.y - 4.0).max(canvas.top() + 4.0));
+  Rect::from_min_size(pos2(x, y), size)
+}
+
+fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[Option<Item>], hot: Option<usize>) {
+  painter.rect(
+    rect.translate(vec2(0.0, 2.0)).expand(1.0),
+    2.0,
+    Color32::from_black_alpha(25),
+    Stroke::NONE,
+    egui::StrokeKind::Outside,
+  );
+  painter.rect(rect, 2.0, Color32::WHITE, Stroke::new(1.0, Color32::from_gray(165)), egui::StrokeKind::Inside);
+  let mut y = rect.top() + 3.0;
+  for (k, it) in items.iter().enumerate() {
+    match it {
+      Some(it) => {
+        let row = Rect::from_min_size(pos2(rect.left() + 1.0, y), vec2(rect.width() - 2.0, ROW_H));
+        if hot == Some(k) {
+          painter.rect_filled(row, 0.0, theme::HOVER);
+        }
+        icons::draw_color(painter, Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)), it.icon);
+        painter.text(row.left_center() + vec2(32.0, 0.0), egui::Align2::LEFT_CENTER, &it.label, font.clone(), theme::TEXT);
+        let mut right = row.right() - 10.0;
+        if !it.children.is_empty() {
+          let c = pos2(right - 3.0, row.center().y);
+          painter.add(egui::Shape::convex_polygon(
+            vec![c + vec2(-3.0, -4.0), c + vec2(2.0, 0.0), c + vec2(-3.0, 4.0)],
+            theme::GROUP_LABEL,
+            Stroke::NONE,
+          ));
+          right -= 14.0;
+        }
+        if let Some(h) = it.hint {
+          painter.text(pos2(right, row.center().y), egui::Align2::RIGHT_CENTER, h, font.clone(), theme::MUTED);
+        }
+        y += ROW_H;
+      }
+      None => {
+        painter.line_segment(
+          [pos2(rect.left() + 8.0, y + 3.5), pos2(rect.right() - 8.0, y + 3.5)],
+          Stroke::new(1.0, theme::SEPARATOR),
+        );
+        y += SEP_H;
+      }
+    }
+  }
+}
+
 pub fn show(app: &mut App, ctx: &egui::Context) {
-  let Some(center) = app.marking.as_ref().map(|m| m.center) else { return };
-  let ring = ring(app);
-  let overflow = overflow(app);
+  let Some((center, mut sub)) = app.marking.as_ref().map(|m| (m.center, m.sub)) else { return };
+  let cx = context(app);
+  let ring = ring(app, &cx);
+  let overflow = overflow(app, &cx);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("marking-menu")));
   let font = egui::FontId::proportional(12.5);
   let (pointer, clicked, secondary) =
     ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked(), i.pointer.secondary_clicked()));
+  let canvas = app.canvas;
 
-  // layout
+  // layout: the ring, the overflow list directly under it
   let ring_rects: Vec<Option<Rect>> = ring
     .iter()
     .enumerate()
     .map(|(i, it)| {
       it.as_ref().map(|it| {
         let tw = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
-        item_rect(center, i, vec2(tw + 40.0, 26.0))
+        let more = if it.children.is_empty() { 0.0 } else { 14.0 };
+        item_rect(center, i, vec2(tw + 40.0 + more, 26.0))
       })
     })
     .collect();
-  let list_w = overflow
-    .iter()
-    .flatten()
-    .map(|it| painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x + 48.0)
-    .fold(180.0f32, f32::max);
-  let list_h: f32 = overflow.iter().map(|it| if it.is_some() { 24.0 } else { 7.0 }).sum::<f32>() + 6.0;
-  let mut list_min = center + vec2(-list_w / 2.0, RADIUS * 0.72 + 24.0);
-  let canvas = app.canvas;
-  if list_min.y + list_h > canvas.bottom() - 4.0 {
-    // no room below: put the list to the right of the ring
-    list_min = pos2(center.x + RADIUS + 70.0, center.y - list_h / 2.0);
-  }
-  list_min.x = list_min.x.clamp(canvas.left() + 4.0, (canvas.right() - list_w - 4.0).max(canvas.left() + 4.0));
-  list_min.y = list_min.y.clamp(canvas.top() + 4.0, (canvas.bottom() - list_h - 4.0).max(canvas.top() + 4.0));
-  let list_rect = Rect::from_min_size(list_min, vec2(list_w, list_h));
+  let list_w = list_width(&painter, &font, &overflow);
+  let list_h = list_height(&overflow);
+  let ring_bottom = ring_rects.iter().flatten().map(|r| r.bottom()).fold(center.y, f32::max);
+  let list_rect = clamp(canvas, pos2(center.x - list_w / 2.0, ring_bottom + 8.0), vec2(list_w, list_h));
 
-  // what the pointer points at: an item box first, then the list, then a direction
+  // an overflow row with children opens its sub-list on hover
+  if let Some(p) = pointer
+    && let Some(k) = row_at(list_rect, &overflow, p)
+  {
+    sub = overflow[k].as_ref().filter(|it| !it.children.is_empty()).map(|_| Sub::Row(k)).or(match sub {
+      Some(Sub::Ring(i)) => Some(Sub::Ring(i)),
+      _ => None,
+    });
+  }
+  let sub_items: Vec<Option<Item>> = match sub {
+    Some(Sub::Ring(i)) => ring[i].as_ref().map(|it| it.children.iter().cloned().map(Some).collect()),
+    Some(Sub::Row(k)) => overflow[k].as_ref().map(|it| it.children.iter().cloned().map(Some).collect()),
+    None => None,
+  }
+  .unwrap_or_default();
+  let sub_rect = (!sub_items.is_empty()).then(|| {
+    let size = vec2(list_width(&painter, &font, &sub_items), list_height(&sub_items));
+    let at = match sub {
+      Some(Sub::Ring(i)) => ring_rects[i].map(|r| r.left_bottom() + vec2(0.0, 2.0)).unwrap_or(center),
+      Some(Sub::Row(k)) => pos2(list_rect.right() - 2.0, row_top(list_rect, &overflow, k) - 3.0),
+      None => center,
+    };
+    clamp(canvas, at, size)
+  });
+
+  // what the pointer points at: a sub-list row, an item box, a list row, then a direction
   let mut hot_slot: Option<usize> = None;
   let mut hot_row: Option<usize> = None;
+  let mut hot_sub: Option<usize> = None;
   if let Some(p) = pointer {
-    hot_slot = ring_rects.iter().position(|r| r.is_some_and(|r| r.contains(p)));
-    if hot_slot.is_none() && list_rect.contains(p) {
-      let mut y = list_rect.top() + 3.0;
-      for (k, it) in overflow.iter().enumerate() {
-        let h = if it.is_some() { 24.0 } else { 7.0 };
-        if it.is_some() && p.y >= y && p.y < y + h {
-          hot_row = Some(k);
+    hot_sub = sub_rect.and_then(|r| row_at(r, &sub_items, p));
+    let in_sub = sub_rect.is_some_and(|r| r.contains(p));
+    if !in_sub {
+      hot_slot = ring_rects.iter().position(|r| r.is_some_and(|r| r.contains(p)));
+      if hot_slot.is_none() {
+        hot_row = row_at(list_rect, &overflow, p);
+        if hot_row.is_none() && !list_rect.contains(p) {
+          hot_slot = slot_at(center, p).filter(|s| ring[*s].is_some());
         }
-        y += h;
       }
-    } else if hot_slot.is_none() {
-      hot_slot = slot_at(center, p).filter(|s| ring[*s].is_some());
     }
   }
 
@@ -267,7 +813,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   // ring items
   for (i, it) in ring.iter().enumerate() {
     let (Some(it), Some(r)) = (it, ring_rects[i]) else { continue };
-    let hot = hot_slot == Some(i);
+    let hot = hot_slot == Some(i) || sub == Some(Sub::Ring(i));
     let (fill, stroke, text) = if hot {
       (theme::ACCENT, theme::ACCENT_DARK, Color32::WHITE)
     } else {
@@ -287,47 +833,27 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     icons::draw_color(&painter, ir, it.icon);
     painter.text(r.left_center() + vec2(30.0, 0.0), egui::Align2::LEFT_CENTER, &it.label, font.clone(), text);
+    if !it.children.is_empty() {
+      // ▾: the item opens a list
+      let c = pos2(r.right() - 10.0, r.center().y);
+      painter.add(egui::Shape::convex_polygon(
+        vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)],
+        text,
+        Stroke::NONE,
+      ));
+    }
   }
 
-  // overflow list
-  painter.rect(
-    list_rect.translate(vec2(0.0, 2.0)).expand(1.0),
-    2.0,
-    Color32::from_black_alpha(25),
-    Stroke::NONE,
-    egui::StrokeKind::Outside,
-  );
-  painter.rect(list_rect, 2.0, Color32::WHITE, Stroke::new(1.0, Color32::from_gray(165)), egui::StrokeKind::Inside);
-  let mut y = list_rect.top() + 3.0;
-  for (k, it) in overflow.iter().enumerate() {
-    match it {
-      Some(it) => {
-        let row = Rect::from_min_size(pos2(list_rect.left() + 1.0, y), vec2(list_w - 2.0, 24.0));
-        if hot_row == Some(k) {
-          painter.rect_filled(row, 0.0, theme::HOVER);
-        }
-        icons::draw_color(
-          &painter,
-          Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)),
-          it.icon,
-        );
-        painter.text(
-          row.left_center() + vec2(32.0, 0.0),
-          egui::Align2::LEFT_CENTER,
-          &it.label,
-          font.clone(),
-          theme::TEXT,
-        );
-        y += 24.0;
-      }
-      None => {
-        painter.line_segment(
-          [pos2(list_rect.left() + 8.0, y + 3.5), pos2(list_rect.right() - 8.0, y + 3.5)],
-          Stroke::new(1.0, theme::SEPARATOR),
-        );
-        y += 7.0;
-      }
-    }
+  draw_list(&painter, &font, list_rect, &overflow, hot_row.or(match sub {
+    Some(Sub::Row(k)) => Some(k),
+    _ => None,
+  }));
+  if let Some(r) = sub_rect {
+    draw_list(&painter, &font, r, &sub_items, hot_sub);
+  }
+
+  if let Some(m) = app.marking.as_mut() {
+    m.sub = sub;
   }
 
   // input
@@ -341,19 +867,149 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   if !clicked {
     return;
   }
-  let picked = if !pointer.is_some_and(|p| canvas.contains(p)) {
+  let picked: Option<&Item> = if !pointer.is_some_and(|p| canvas.contains(p)) {
     None
+  } else if let Some(k) = hot_sub {
+    sub_items[k].as_ref()
+  } else if pointer.is_some_and(|p| sub_rect.is_some_and(|r| r.contains(p))) {
+    // a click between a sub-list's rows keeps the menu open
+    return;
   } else if let Some(k) = hot_row {
-    overflow[k].as_ref().map(|it| it.action)
+    overflow[k].as_ref()
   } else {
-    hot_slot.and_then(|i| ring[i].as_ref().map(|it| it.action))
+    hot_slot.and_then(|i| ring[i].as_ref())
   };
+  if let Some(it) = picked
+    && !it.children.is_empty()
+  {
+    // an item with a list opens it (clicking it again closes it)
+    let slot = hot_slot.filter(|_| hot_row.is_none() && hot_sub.is_none());
+    if let (Some(m), Some(i)) = (app.marking.as_mut(), slot) {
+      m.sub = if m.sub == Some(Sub::Ring(i)) { None } else { Some(Sub::Ring(i)) };
+    }
+    return;
+  }
+  let action = picked.map(|it| it.action.clone());
   app.marking = None;
-  match picked {
-    Some(Action::Cmd(c)) => c.run(app),
-    // repeating a modelling command from inside a sketch finishes the sketch first
-    Some(Action::Repeat(c)) => app.launch(c),
-    Some(Action::EditFeature(f)) => panels::edit_feature(app, f),
-    None => {}
+  if let Some(a) = action {
+    run(app, a);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use fox_engine::Session;
+
+  fn labels(items: &[Option<Item>]) -> Vec<String> {
+    items.iter().flatten().map(|i| i.label.clone()).collect()
+  }
+
+  fn boxed() -> App {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+    assert_eq!(app.s.model.bodies.len(), 1, "no box");
+    app
+  }
+
+  fn ring_labels(app: &App) -> Vec<String> {
+    let cx = context(app);
+    ring(app, &cx).iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_default()).collect()
+  }
+
+  #[test]
+  fn empty_space_ring_is_fusions() {
+    let app = App::with_session(Session::default());
+    let r = ring_labels(&app);
+    assert_eq!(r[1..], ["Delete", "Press Pull", "Redo", "Hole", "Sketch", "Move/Copy", "Undo"]);
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    for want in ["Pan", "Zoom", "Constrained Orbit", "Workspace"] {
+      assert!(list.iter().any(|l| l == want), "{want} missing from {list:?}");
+    }
+  }
+
+  #[test]
+  fn ring_and_list_follow_the_selection() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Plane).unwrap().id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    for want in ["Create Sketch", "Extrude", "Offset Plane", "Shell", "Appearance", "Properties", "Show/Hide"] {
+      assert!(list.iter().any(|l| l == want), "{want} missing from {list:?}");
+    }
+    assert!(list.iter().any(|l| l.starts_with("Edit Feature")), "{list:?}");
+    assert!(list.iter().any(|l| l == "Find in Browser") && list.iter().any(|l| l == "Find in Window"));
+
+    let edge = app.s.model.bodies[0].edges()[0].id;
+    app.s.selection = vec![Sel::Edge { body, edge }];
+    let r = ring_labels(&app);
+    assert_eq!((r[2].as_str(), r[4].as_str()), ("Fillet", "Chamfer"));
+
+    app.s.selection = vec![Sel::Body { body }];
+    let r = ring_labels(&app);
+    assert_eq!(r[2], "Combine");
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    assert!(list.iter().any(|l| l == "Remove") && list.iter().any(|l| l == "Move/Copy"), "{list:?}");
+  }
+
+  #[test]
+  fn dialog_adds_ok_and_cancel() {
+    let mut app = boxed();
+    app.start(Kind::Fillet);
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    assert_eq!(list[..2], ["OK", "Cancel"]);
+    run(&mut app, Action::Cancel);
+    assert!(app.dialog.is_none() && app.s.selection.is_empty());
+  }
+
+  #[test]
+  fn status_bar_reads_out_area_and_length() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area: 100.00 mm^2"));
+    let edges: Vec<u32> = app.s.model.bodies[0].edges().iter().take(2).map(|e| e.id).collect();
+    app.s.selection = edges.iter().map(|e| Sel::Edge { body, edge: *e }).collect();
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length: 20.00 mm"));
+    app.s.selection = vec![Sel::Body { body }];
+    assert_eq!(panels::selection_text(&app), Some(app.s.body_name(body)));
+    // a hovered timeline or browser row names itself
+    peek(&mut app, vec![body], "Box1".into());
+    end_frame(&mut app, &egui::Context::default());
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Box1"));
+    assert_eq!(app.ctx_menu.peek, vec![body]);
+    end_frame(&mut app, &egui::Context::default());
+    assert!(app.ctx_menu.peek.is_empty(), "the highlight goes when the pointer leaves");
+  }
+
+  #[test]
+  fn show_hide_and_show_all() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    app.s.selection = vec![Sel::Body { body }];
+    run(&mut app, Action::ShowHide);
+    assert!(!app.s.body_visible(body));
+    let cx = context(&app);
+    assert!(labels(&overflow(&app, &cx)).iter().any(|l| l == "Show All"));
+    run(&mut app, Action::ShowAll);
+    assert!(app.s.body_visible(body));
+  }
+
+  #[test]
+  fn recent_commands_are_listed_with_their_keys() {
+    let mut app = App::with_session(Session::default());
+    for c in [Cmd::Dialog(Kind::Fillet), Cmd::Dialog(Kind::Extrude)] {
+      app.note_cmd(c);
+    }
+    let cx = context(&app);
+    let list = overflow(&app, &cx);
+    let fillet = list.iter().flatten().find(|i| i.label == "Fillet").expect("recent Fillet");
+    assert_eq!(fillet.hint, Some("F"));
   }
 }
