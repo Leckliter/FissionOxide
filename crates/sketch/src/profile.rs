@@ -890,10 +890,11 @@ mod crossing_tests {
 #[cfg(test)]
 mod merge_tests {
   use super::*;
-  use crate::behaviour::{ONE_EDGE_ELLIPSE, PENDING};
+  use crate::behaviour::{Behaviours, ONE_EDGE_ELLIPSE, PENDING};
 
   fn ellipse_sketch() -> (Sketch, CurveId) {
     let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
     let (c, m) = (s.add_point(0.0, 0.0), s.add_point(8.0, 0.0));
     let id = s.add_curve(CurveKind::Ellipse { center: c, major: m, minor: 4.0 }).unwrap();
     (s, id)
@@ -904,8 +905,8 @@ mod merge_tests {
     let (mut s, id) = ellipse_sketch();
     let p = find_profiles(&s);
     assert_eq!(p[0].outer.src.iter().map(|x| x.curve).collect::<Vec<_>>(), [id, id]);
-    assert_eq!(p[0].outer.merge_next(), [false, false], "pending behaviours are off for new sketches");
-    s.behaviours.enable_pending_for_tests(ONE_EDGE_ELLIPSE);
+    assert_eq!(p[0].outer.merge_next(), [false, false], "off for a legacy sketch");
+    s.behaviours.insert(ONE_EDGE_ELLIPSE);
     let p = find_profiles(&s);
     assert_eq!(p[0].outer.merge_next(), [true, true]);
     assert_eq!(p[0].outer.reversed().merge_next(), [true, true]);

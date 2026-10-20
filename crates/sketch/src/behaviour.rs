@@ -85,12 +85,13 @@ pub const CURRENT: &[&str] = &[
   FUSION_JOINT_AXES,
   XZ_OFFSET_PLUS_Y,
   INTERSECT_ANY_TOOL,
+  ONE_EDGE_ELLIPSE,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
 /// moving its name from here to [`CURRENT`]. Tests turn them on with
 /// [`Behaviours::enable_pending_for_tests`].
-pub const PENDING: &[&str] = &[ONE_EDGE_ELLIPSE, ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS];
+pub const PENDING: &[&str] = &[ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS];
 
 /// A flag only this crate's own unit tests register, to exercise [`Behaviours::has`].
 const TEST_ONLY: &str = "test_only_dummy";

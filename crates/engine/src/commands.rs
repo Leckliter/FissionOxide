@@ -105,7 +105,7 @@ cmds! {
   "sketch.chamfer" => "Bevel the corner of two lines (meeting at an end, crossing, or apparently crossing): equal distance, two distances, or distance along the first line and angle from it", "{curves: [line, line], distance, distance2? | angle?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
-  "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
+  "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius or a point on it", "{center, major: [x,y], minor | point: [x,y]}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude (their counters left out), regenerated when the text changes (explode: plain curves); along a curve with path", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?, path?: curve id, above?: bool (default true), align?: left|center|right}";
   "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left); arcs the offset swallows drop out unless topology_matched", "{curves: [id], distance, both_sides?, topology_matched?}";
@@ -2681,7 +2681,13 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       "sketch.ellipse" => {
         let c = req_pt(&p, "center")?;
         let m = req_pt(&p, "major")?;
-        let minor = p.get("minor").and_then(Value::as_f64).ok_or(CmdError::new("missing 'minor'"))?;
+        let minor = match (p.get("minor").and_then(Value::as_f64), p.get("point")) {
+          (Some(minor), _) => minor,
+          // the ellipse passes through the point (Fusion's third pick)
+          (None, Some(_)) => fox_sketch::Ellipse2::minor_through(c, m, req_pt(&p, "point")?)
+            .ok_or(CmdError::new("no ellipse with this major axis passes through 'point'"))?,
+          (None, None) => return Err(CmdError::new("missing 'minor' or 'point'")),
+        };
         let cs = snap(sketch, c);
         let center = sketch.resolve(cs)?;
         let major = sketch.add_point(m[0], m[1]);
