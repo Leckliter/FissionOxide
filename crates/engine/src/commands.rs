@@ -184,7 +184,7 @@ cmds! {
   "body.visible" => "Show or hide a body", "{body, visible}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature)", "{feature, set: {...}}";
-  "feature.delete" => "Delete a feature and the features that depend on it", "{feature}";
+  "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
   "feature.suppress" => "Suppress or unsuppress a feature", "{feature, suppressed?: bool}";
   "feature.rename" => "Rename a feature", "{feature, name}";
   "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
@@ -903,11 +903,29 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "feature.delete" => {
       let id = FeatureId(req_u32(p, "feature")?);
-      let removed = s.edit(|d| Ok(d.remove_feature(id)?))?;
+      let cascade = p.get("cascade").and_then(Value::as_bool).unwrap_or(false);
+      // Fusion's Delete on a sketch keeps the features that use it, on cached geometry
+      let solved = match s.design.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch { .. }) if !cascade => s.model.sketches.get(&id).map(|r| {
+          let pl = r.plane;
+          (
+            PlaneRef::Free { origin: pl.origin.into(), normal: pl.normal().into(), x: Some(pl.x.into()) },
+            r.sketch.clone(),
+          )
+        }),
+        _ => None,
+      };
+      let (removed, kept) = match solved {
+        Some((plane, sketch)) => (vec![id], s.edit(|d| Ok(d.remove_sketch_keep_dependents(id, plane, &sketch)?))?),
+        None => (s.edit(|d| Ok(d.remove_feature(id)?))?, Vec::new()),
+      };
       if s.edit_sketch.is_some_and(|e| removed.contains(&e)) {
         s.edit_sketch = None;
       }
-      Ok(json!({"removed": removed.iter().map(|f| f.0).collect::<Vec<_>>()}))
+      Ok(json!({
+        "removed": removed.iter().map(|f| f.0).collect::<Vec<_>>(),
+        "cached": kept.iter().map(|f| f.0).collect::<Vec<_>>(),
+      }))
     }
     "feature.suppress" => {
       let id = FeatureId(req_u32(p, "feature")?);

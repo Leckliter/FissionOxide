@@ -278,7 +278,20 @@ pub struct Feature {
   /// Join/cut/intersect features: the bodies they may change (empty = any they touch).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub targets: Vec<BodyId>,
+  /// Deleted sketches this feature still builds from (Fusion's "cached geometry").
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub cached: Vec<CachedSketch>,
   pub kind: FeatureKind,
+}
+
+/// A frozen copy of a deleted sketch that a feature kept using: its solved curves, without
+/// constraints, on the plane it was on when it was deleted. The feature finds it under the
+/// deleted sketch's id and warns that its profile reference is lost.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CachedSketch {
+  pub sketch: FeatureId,
+  pub plane: PlaneRef,
+  pub geometry: Sketch,
 }
 
 /// The world origin planes.
@@ -1594,7 +1607,10 @@ impl Design {
     let id = FeatureId(self.alloc());
     let name = self.unique_name(kind.base_name());
     let at = self.active_len();
-    self.features.insert(at, Feature { id, name, suppressed: false, visible: None, targets: Vec::new(), kind });
+    self.features.insert(
+      at,
+      Feature { id, name, suppressed: false, visible: None, targets: Vec::new(), cached: Vec::new(), kind },
+    );
     if let Some(m) = self.marker.as_mut() {
       *m += 1;
     }
@@ -1654,6 +1670,37 @@ impl Design {
       *m = m.saturating_sub(before_marker);
     }
     Ok(doomed)
+  }
+
+  /// Deletes a sketch but keeps the features that use it, as Fusion's Delete does: each gets a
+  /// frozen copy of the sketch (`solved`, on `plane`) to rebuild from, so its bodies stay.
+  /// Returns the features kept on the cached geometry.
+  pub fn remove_sketch_keep_dependents(
+    &mut self,
+    id: FeatureId,
+    plane: PlaneRef,
+    solved: &Sketch,
+  ) -> Result<Vec<FeatureId>, DesignError> {
+    let f = self.feature(id).ok_or(DesignError::NoFeature(id))?;
+    if !matches!(f.kind, FeatureKind::Sketch { .. }) {
+      return Err(DesignError::NoFeature(id));
+    }
+    let mut geometry = solved.clone();
+    geometry.constraints.clear();
+    let cache = CachedSketch { sketch: id, plane, geometry };
+    let mut kept = Vec::new();
+    for f in self.features.iter_mut().filter(|f| f.id != id && f.kind.depends_on().contains(&id)) {
+      f.cached.retain(|c| c.sketch != id);
+      f.cached.push(cache.clone());
+      kept.push(f.id);
+    }
+    let before_marker = self.features.iter().take(self.active_len()).filter(|f| f.id == id).count();
+    self.features.retain(|f| f.id != id);
+    self.attributes.retain(|a| a.target.feature() != Some(id));
+    if let Some(m) = self.marker.as_mut() {
+      *m = m.saturating_sub(before_marker);
+    }
+    Ok(kept)
   }
 
   /// Moves a feature to a new timeline index, refusing moves that would put it before a feature

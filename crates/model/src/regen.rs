@@ -282,7 +282,12 @@ impl Regenerator {
         };
         let id = feature.id;
         let mut kind = feature.kind.clone();
-        match ctx.apply(id, &mut kind) {
+        let seeded = ctx.seed_cached(&feature.cached);
+        let result = ctx.apply(id, &mut kind);
+        for s in &seeded {
+          ctx.state.sketches.remove(s);
+        }
+        match result.map(|w| w.or_else(|| (!seeded.is_empty()).then(|| LOST_PROFILE.to_string()))) {
           Ok(w) => st.warning = w,
           Err(e) => st.error = Some(e),
         }
@@ -332,8 +337,14 @@ fn restore_status(mut st: FeatureStatus, state: &State, f: &Feature) -> FeatureS
   {
     st.warning = sketch_warning(r);
   }
+  if !f.suppressed && !f.cached.is_empty() && st.error.is_none() && st.warning.is_none() {
+    st.warning = Some(LOST_PROFILE.into());
+  }
   st
 }
+
+/// The warning on a feature building from a deleted sketch's cached geometry (Fusion's words).
+const LOST_PROFILE: &str = "The profile reference is lost and this feature is using cached geometry";
 
 fn state_error(state: &State, f: &Feature) -> Option<String> {
   match &f.kind {
@@ -400,6 +411,24 @@ impl Ctx<'_> {
       return Err(format!("count must be between 1 and {MAX_INSTANCES}"));
     }
     Ok(n as usize)
+  }
+
+  /// Puts a feature's cached copies of deleted sketches where it looks its sketches up; returns
+  /// the ids seeded, to take out again once the feature is built.
+  fn seed_cached(&mut self, cached: &[crate::CachedSketch]) -> Vec<FeatureId> {
+    let mut seeded = Vec::new();
+    for c in cached {
+      if self.state.sketches.contains_key(&c.sketch) {
+        continue;
+      }
+      let Ok(plane) = self.resolve_plane(&mut c.plane.clone()) else { continue };
+      let mut sketch = c.geometry.clone();
+      let report = sketch.solve();
+      let profiles = find_profiles(&sketch);
+      self.state.sketches.insert(c.sketch, SketchResult { plane, sketch, profiles, report, dim_errors: Vec::new() });
+      seeded.push(c.sketch);
+    }
+    seeded
   }
 
   fn apply(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {

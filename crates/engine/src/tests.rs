@@ -872,7 +872,7 @@ fn attributes_follow_their_targets() {
   let d: Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
   assert_eq!(d.attributes.len(), 4);
   // deleting the sketch deletes the extrude and the attributes on both
-  run(&mut s, "feature.delete", json!({"feature": sk}));
+  run(&mut s, "feature.delete", json!({"feature": sk, "cascade": true}));
   assert_eq!(run(&mut s, "attribute.find", json!({"group": g})).as_array().unwrap().len(), 1);
   assert_eq!(s.design.attributes.len(), 2, "the body's attribute stays stored, but its body is gone");
   assert!(s.undo());

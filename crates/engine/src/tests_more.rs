@@ -509,3 +509,30 @@ fn pipe_sections_and_partial_paths() {
   let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
   assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
 }
+
+#[test]
+fn deleting_a_used_sketch_keeps_its_extrude_on_cached_geometry() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]}}))["sketch"].clone();
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ex = run(&mut s, "extrude", json!({"distance": 20}))["feature"].clone();
+  let r = run(&mut s, "feature.delete", json!({"feature": sk}));
+  assert_eq!(r["removed"], json!([sk]));
+  assert_eq!(r["cached"], json!([ex]));
+  assert_eq!(s.design.features.len(), 1);
+  assert!(s.model.sketches.is_empty(), "the cached sketch isn't shown");
+  assert!((volume(&s) - 24000.0).abs() < 1e-6, "{}", volume(&s));
+  let st = &s.model.status[0];
+  assert!(st.error.is_none() && st.warning.as_deref().is_some_and(|w| w.contains("cached geometry")), "{st:?}");
+  assert_eq!(s.model.bounds().unwrap().0.z, 5.0);
+  // the extrude stays editable, and the cache survives a save
+  run(&mut s, "feature.edit", json!({"feature": ex, "set": {"extent": {"kind": "one_side", "distance": "10"}}}));
+  assert!((volume(&s) - 12000.0).abs() < 1e-6, "{}", volume(&s));
+  let d: fox_model::Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
+  assert_eq!(d, s.design);
+  // cascade deletes the extrude too, as before
+  assert!(s.undo() && s.undo());
+  assert_eq!(run(&mut s, "feature.delete", json!({"feature": sk, "cascade": true}))["removed"], json!([sk, ex]));
+  assert!(s.model.bodies.is_empty());
+}

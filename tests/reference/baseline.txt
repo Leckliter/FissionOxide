@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+495-delete-fillet-feature
+496-delete-second-body
+497-delete-cut-keep-chamfer
+498-delete-consumed-sketch
