@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 
 use fox_kernel::glam::{DMat4, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, KernelError, Plane, Shape, TriMesh};
+use fox_sketch::behaviour::REVOLVE_AXIS_UNDIRECTED;
 use fox_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::ThinSide;
@@ -397,7 +398,6 @@ struct Ctx<'a> {
   /// The design's behaviour flags: gate a feature-level geometry change on
   /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
   /// [`fox_sketch::behaviour`].
-  #[allow(dead_code)] // read by the first regen-level gate
   behaviours: &'a crate::Behaviours,
 }
 
@@ -584,9 +584,10 @@ impl Ctx<'_> {
           return Err("no profiles to revolve".into());
         }
         let (o, mut d) = self.resolve_axis(axis, Some(*sketch))?;
-        if matches!(axis, AxisRef::SketchLine { .. }) {
+        if matches!(axis, AxisRef::SketchLine { .. }) && self.behaviours.has(REVOLVE_AXIS_UNDIRECTED) {
           // as in Fusion, the way the axis line was drawn doesn't matter: the profile turns
-          // towards the sketch normal, as it does about a world axis lying in the sketch
+          // towards the sketch normal, as it does about a world axis lying in the sketch (older
+          // designs turn right-handed about the line from its start to its end)
           let p = sk.plane.to_world(chosen[0].interior_point());
           if d.cross(p - o).dot(sk.plane.normal()) < 0.0 {
             d = -d;
