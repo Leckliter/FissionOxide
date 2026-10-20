@@ -302,7 +302,7 @@ impl Kind {
   }
 
   /// Dialogs that only show information (no OK, nothing applied).
-  fn reports(self) -> bool {
+  pub(crate) fn reports(self) -> bool {
     matches!(
       self,
       Kind::Inspect
@@ -392,6 +392,8 @@ pub struct Dialog {
   dirty: bool,
   /// Set by a field that finished the dialog itself (e.g. picking a sketch plane).
   closed: bool,
+  /// OK picked from outside the dialog (the marking menu); handled on its next frame.
+  pub(crate) ok_requested: bool,
   // captured inputs
   pub sketch: Option<FeatureId>,
   profiles: Vec<[f64; 2]>,
@@ -512,6 +514,7 @@ impl Dialog {
       error: None,
       dirty: false,
       closed: false,
+      ok_requested: false,
       sketch: None,
       profiles: Vec::new(),
       edges: Vec::new(),
@@ -1718,7 +1721,7 @@ impl Dialog {
       app.s.selection.clear();
     }
     let mut keep = true;
-    let mut ok = false;
+    let mut ok = std::mem::take(&mut self.ok_requested);
     let mut cancel = false;
     let title =
       if self.editing.is_some() { format!("EDIT {}", self.kind.title()) } else { self.kind.title().to_string() };

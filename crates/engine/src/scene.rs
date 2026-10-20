@@ -108,6 +108,8 @@ impl PickTable {
 #[derive(Debug, Clone, Default)]
 pub struct ViewOptions {
   pub hover: Option<Pick>,
+  /// Bodies drawn in the hover colour: what the pointer is over in the browser or timeline.
+  pub peek: Vec<BodyId>,
   pub hide_edges: bool,
   pub hide_grid: bool,
   /// Draw no sketches (renders of the finished part).
@@ -176,6 +178,7 @@ impl SceneBuilder {
       let Some(m) = body.mesh() else { continue };
       let base = s.design.body_color(body.id).map(|c| [c[0], c[1], c[2], 255]).unwrap_or(BODY_COLOR);
       let base = if selected_bodies.contains(&body.id) { mix(base, SELECT_COLOR, 0.45) } else { base };
+      let base = if opts.peek.contains(&body.id) { mix(base, HOVER_COLOR, 0.6) } else { base };
       let base = if editing { mix(base, [255, 255, 255, 255], 0.35) } else { base };
       let tri_ids: Vec<u32> = m.tri_face.iter().map(|f| picks.id(Pick::Face { body: body.id, face: *f })).collect();
       // per-face highlight: hover one face; selected faces get their own meshes' colour via split
