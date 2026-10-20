@@ -128,19 +128,35 @@ impl Ctx<'_> {
       }
       FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation, section, distance } => {
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
-        let mut segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
-        if !distance.trim().is_empty() {
+        let fraction = if distance.trim().is_empty() {
+          None
+        } else {
           let f = self.factor(distance)?;
           if !(f > 0.0 && f <= 1.0) {
             return Err("the distance is a fraction of the path, above 0 and at most 1".into());
           }
-          let total: f64 = segs.iter().map(seg_length).sum();
-          segs = path_head(&segs, total * f);
-        }
-        let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
-        let first = segs.first().ok_or("the path is empty")?;
-        let (start, tangent) = seg_start(first);
-        let (start, tangent) = (ps.plane.to_world(start), ps.plane.x * tangent[0] + ps.plane.y * tangent[1]);
+          (f < 1.0).then_some(f)
+        };
+        let (path, start, tangent) = match crate::include::path_segs(&ps, path_curves)? {
+          Some(_) if fraction.is_some() => {
+            return Err("a pipe along included 3D geometry runs the whole path for now".into());
+          }
+          Some(segs) => {
+            let first = segs.first().ok_or("the path is empty")?;
+            (Shape::path3d(&segs).map_err(ke)?, first.start(), first.start_tangent())
+          }
+          None => {
+            let mut segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
+            if let Some(f) = fraction {
+              let total: f64 = segs.iter().map(seg_length).sum();
+              segs = path_head(&segs, total * f);
+            }
+            let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
+            let first = segs.first().ok_or("the path is empty")?;
+            let (start, tangent) = seg_start(first);
+            (path, ps.plane.to_world(start), ps.plane.x * tangent[0] + ps.plane.y * tangent[1])
+          }
+        };
         let size = self.len(diameter)?;
         if size <= 0.0 {
           return Err("the size must be positive".into());

@@ -81,7 +81,7 @@ cmds! {
   "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
-  "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
+  "sketch.line" => "Line or polyline (consecutive points share endpoints), or a midpoint line: mirrored about mid, which is held at its middle", "{points: [[x,y],...], closed?: bool, sketch?} | {mid: [x,y], end: [x,y], sketch?}";
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
   "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end, clockwise?: bool} | {center, start, sweep: angle (negative = clockwise)} | {tangent: curve, start, end}";
@@ -318,6 +318,7 @@ cmds! {
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
+  "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1170,6 +1171,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.tangent_circle"
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
+    "sketch.include" => sketch_include::include(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -2139,6 +2141,21 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
     };
     match name.as_str() {
+      "sketch.line" if p.get("mid").is_some() => {
+        // Fusion's Midpoint Line: the other end mirrors `end` through `mid`, and the midpoint
+        // (an existing point it lands on, such as the origin, or a new one) stays on the middle
+        let (m, e) = (req_pt(&p, "mid")?, req_pt(&p, "end")?);
+        if (e[0] - m[0]).hypot(e[1] - m[1]) < 1e-9 {
+          return Err(CmdError::new("the end is on the midpoint"));
+        }
+        let mid = snap(sketch, m);
+        let a = [2.0 * m[0] - e[0], 2.0 * m[1] - e[1]];
+        let (a, b) = (snap(sketch, a), snap(sketch, e));
+        let (line, _) = sketch.add_line(a, b)?;
+        let mid = sketch.resolve(mid)?;
+        auto_hv(sketch, line);
+        sketch.add_constraint(ConstraintKind::Midpoint { p: mid, line })?;
+      }
       "sketch.line" => {
         let pts: Vec<[f64; 2]> = p
           .get("points")
@@ -2905,3 +2922,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
 mod sketch_tools;
 
 mod sketch_curves;
+
+mod sketch_include;

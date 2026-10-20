@@ -1008,3 +1008,6 @@ mod refparts;
 mod tests_ellipse;
 #[cfg(test)]
 mod tests_refparts;
+
+mod path3d;
+pub use path3d::Seg3;

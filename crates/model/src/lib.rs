@@ -17,6 +17,7 @@ pub mod cutcheck;
 pub mod direct;
 pub mod drawing;
 pub mod fillet;
+pub mod include;
 pub mod mechanism;
 pub mod meshops;
 pub mod plot;

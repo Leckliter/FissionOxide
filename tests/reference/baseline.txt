@@ -119,6 +119,10 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+205-vertical-edge-sweep-path
+206-sketch-line-sweep-path
+217-midpoint-line-on-origin-resize
+218-midpoint-line-slanted-triangle
 235-grid-spacing
 236-line-direction
 237-extent-distance
