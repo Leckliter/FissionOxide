@@ -69,6 +69,23 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         },
       )
     })(),
+    "sketch.intersection_curve" => (|| {
+      let sketch = sketch_for_feature(s, p)?;
+      s.design.sketch(sketch)?;
+      let curves = PathRef { sketch, curves: ids(p, "curves").into_iter().map(CurveId).collect() };
+      let faces = match p.get("faces") {
+        Some(_) => faces(s, p)?,
+        None => Vec::new(),
+      };
+      let mut with = Vec::new();
+      for w in p.get("with").and_then(Value::as_array).into_iter().flatten() {
+        with.push(crate::solid::path_ref(s, w)?);
+      }
+      if faces.is_empty() && with.is_empty() {
+        return Err(CmdError::new("give 'faces' or 'with' (sketch curves) to intersect with"));
+      }
+      add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
+    })(),
     "pipe" => (|| {
       const KEYS: [&str; 10] =
         ["cmd", "path", "path_curves", "diameter", "size", "wall", "section", "distance", "distance_one", "operation"];
@@ -76,9 +93,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
       }
       let path_sketch = FeatureId(req_u32(p, "path")?);
-      // a sketch, or the 3D curves of a Project To Surface
+      // a sketch, or the 3D curves of a Project To Surface or an intersection curve
       let curves3d =
-        s.design.feature(path_sketch).is_some_and(|f| matches!(f.kind, FeatureKind::ProjectToSurface { .. }));
+        s.design.feature(path_sketch).is_some_and(|f| matches!(f.kind, FeatureKind::ProjectToSurface { .. } | FeatureKind::IntersectionCurve { .. }));
       if !curves3d {
         s.design.sketch(path_sketch)?;
       }

@@ -1076,7 +1076,10 @@ mod tests_refparts;
 
 mod threads;
 
+mod curves3d;
 mod path3d;
+#[cfg(test)]
+mod tests_curves3d;
 pub use path3d::Seg3;
 
 mod form;

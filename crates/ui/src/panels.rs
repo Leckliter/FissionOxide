@@ -2844,6 +2844,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
     FeatureKind::Arrange { .. } => Icon::Component,
     FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
+    FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
   }
 }
 

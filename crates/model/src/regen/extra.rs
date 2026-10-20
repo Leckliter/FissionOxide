@@ -137,6 +137,17 @@ impl Ctx<'_> {
           let picked: Vec<u32> = path_curves.iter().map(|c| c.0).collect();
           return self.pipe_along_curves(id, *path_sketch, &picked, diameter, wall, *operation, *section, distance);
         }
+        if let Some(wires) = self.state.intersections.get(path_sketch).cloned() {
+          if *section != PipeSection::Circular || !distance.trim().is_empty() {
+            return Err("a pipe along an intersection curve is round and runs the whole curve".into());
+          }
+          let r = self.len(diameter)? / 2.0;
+          let w = if wall.trim().is_empty() { None } else { Some(self.len(wall)?) };
+          if r <= 0.0 || w.is_some_and(|w| w <= 0.0 || w >= r) {
+            return Err("the diameter must be positive and the wall thinner than the radius".into());
+          }
+          return self.pipe_along(id, &wires, r, w, *operation);
+        }
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
         let fraction = if distance.trim().is_empty() {
           None
@@ -501,6 +512,7 @@ impl Ctx<'_> {
       FeatureKind::PathPattern { .. } => self.apply_path_pattern(id, kind),
       FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
       FeatureKind::FullRoundFillet { sets } => self.full_round(id, sets),
+      FeatureKind::IntersectionCurve { .. } => self.apply_curves3d(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

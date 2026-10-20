@@ -160,6 +160,8 @@ struct State {
   /// The tool solids each feature applied, with their operation and targets (feature mirrors
   /// and patterns re-apply them).
   tools: BTreeMap<FeatureId, Vec<pathpattern::Tool>>,
+  /// Intersection curves: their wires (drawn with the 3D curves; pipes follow them).
+  intersections: BTreeMap<FeatureId, Vec<Shape>>,
 }
 
 /// The regenerated design.
@@ -326,7 +328,7 @@ impl Regenerator {
       param_errors,
       joint_origins: state.joint_origins,
       placed: state.placed,
-      curves3d: state.curves3d,
+      curves3d: state.curves3d.into_iter().chain(state.intersections).collect(),
     }
   }
 }
@@ -2436,3 +2438,4 @@ mod form;
 mod fillet2;
 #[cfg(test)]
 mod tests_fillet2;
+mod curves3d;

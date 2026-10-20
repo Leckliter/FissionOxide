@@ -479,6 +479,8 @@ mod tests_cam3d;
 #[cfg(test)]
 mod tests_config;
 #[cfg(test)]
+mod tests_curves3d;
+#[cfg(test)]
 mod tests_cut;
 #[cfg(test)]
 mod tests_files;

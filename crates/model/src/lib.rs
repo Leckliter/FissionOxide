@@ -1576,6 +1576,19 @@ pub enum FeatureKind {
   FullRoundFillet {
     sets: Vec<FullRoundSet>,
   },
+  /// 3D curves where sketch curves, pushed along their sketch's normal, cross body faces or
+  /// other sketch curves pushed along theirs (Fusion's Intersection Curve). Pipes follow them as
+  /// a path (see `regen/curves3d.rs`).
+  IntersectionCurve {
+    /// The curves pushed along their sketch's normal (no curves: every non-construction curve).
+    curves: PathRef,
+    /// Faces they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    faces: Vec<FaceRef>,
+    /// Other sketches' curves, each pushed along its own sketch's normal, that they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    with: Vec<PathRef>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1722,6 +1735,7 @@ impl FeatureKind {
       FeatureKind::PathPattern { .. } => "PathPattern",
       FeatureKind::Arrange { .. } => "Arrange",
       FeatureKind::FullRoundFillet { .. } => "Fillet",
+      FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
     }
   }
 
@@ -1809,6 +1823,9 @@ impl FeatureKind {
         std::iter::once(*path_sketch).chain(features.iter().copied()).collect()
       }
       FeatureKind::Arrange { plane, .. } => plane_dep(plane),
+      FeatureKind::IntersectionCurve { curves, with, .. } => {
+        std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
+      }
       _ => vec![],
     }
   }
@@ -2609,6 +2626,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::FullRoundFillet { .. } => {}
+    FeatureKind::IntersectionCurve { .. } => {}
   }
 }
 
