@@ -1,0 +1,10 @@
+# 426-cylinder-emboss-wrap: added by the parity loop from a Fusion probe
+# cylinder-emboss-wrap: r20 cylinder along X (x 0..40, axis at z=-20, top line at z=0); a 20x16 rectangle (10,-8)-(30,8) on XY wrapped onto the curved face and embossed 2 mm (wrapped: 0.8 rad sector).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, -20], "radius": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 40, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [10, -8], "corner2": [30, 8]}
+{"cmd": "sketch.finish"}
+{"cmd": "emboss", "sketch": 3, "face": {"point": [20.0, 0.0, 0.0]}, "depth": 2, "wrap": true}

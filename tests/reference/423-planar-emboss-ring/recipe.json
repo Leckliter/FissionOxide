@@ -1,0 +1,298 @@
+{
+ "id": "planar-emboss-ring",
+ "name": "planar-emboss-ring",
+ "description": "40x30x10 plate (top face z=0); a 16x10 rectangle with a r3 hole, sketched on XY, embossed 2 mm up on the top face.",
+ "exercises": [
+  "extrude",
+  "emboss"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "p1",
+     "start": {
+      "at": [
+       -20,
+       -15
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       -15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "p2",
+     "start": {
+      "ref": "p1.end",
+      "at": [
+       20,
+       -15
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "p3",
+     "start": {
+      "ref": "p2.end",
+      "at": [
+       20,
+       15
+      ]
+     },
+     "end": {
+      "at": [
+       -20,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "p4",
+     "start": {
+      "ref": "p3.end",
+      "at": [
+       -20,
+       15
+      ]
+     },
+     "end": {
+      "ref": "p1.start",
+      "at": [
+       -20,
+       -15
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "negative"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Emboss_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "e1",
+     "start": {
+      "at": [
+       -8,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       8,
+       -5
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "e2",
+     "start": {
+      "ref": "e1.end",
+      "at": [
+       8,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       8,
+       5
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "e3",
+     "start": {
+      "ref": "e2.end",
+      "at": [
+       8,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       -8,
+       5
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "e4",
+     "start": {
+      "ref": "e3.end",
+      "at": [
+       -8,
+       5
+      ]
+     },
+     "end": {
+      "ref": "e1.start",
+      "at": [
+       -8,
+       -5
+      ]
+     }
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 3,
+     "id": "h"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "emboss",
+   "name": "Emboss1",
+   "depth": 2,
+   "profiles": [
+    {
+     "sketch": "Emboss_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "h"
+       ]
+      }
+     ]
+    }
+   ],
+   "faces": [
+    {
+     "point": [
+      15.0,
+      10.0,
+      0.0
+     ],
+     "type": "plane",
+     "normal": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   ]
+  }
+ ]
+}
