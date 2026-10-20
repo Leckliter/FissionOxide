@@ -77,6 +77,8 @@ std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed)
 std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> plane, double size);
 std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, rust::Slice<const double> plane,
                              double angle);
+std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_t> faces,
+                                       rust::Slice<const double> plane, double angle, double angle2);
 
 std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge);
 rust::Vec<double> min_distance(const Shape &a, const Shape &b);

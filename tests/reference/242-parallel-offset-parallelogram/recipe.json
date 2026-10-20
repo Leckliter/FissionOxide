@@ -1,0 +1,215 @@
+{
+ "id": "parallel-offset-parallelogram",
+ "name": "parallel-offset-parallelogram",
+ "description": "Parallelogram: base 40 horizontal from the origin, opposite sides parallel, offset dimension between the base and top lines = '2 * 9 mm' (18), 60 deg angle between base and left side; extruded 6.",
+ "exercises": [
+  "sketch",
+  "sketch_dimension",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.5,
+       0.5
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       -1
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       -1
+      ]
+     },
+     "end": {
+      "at": [
+       49,
+       18
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       49,
+       18
+      ]
+     },
+     "end": {
+      "at": [
+       8,
+       19
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       8,
+       19
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0.5,
+       0.5
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "parallel",
+     "refs": [
+      "l1",
+      "l3"
+     ]
+    },
+    {
+     "type": "parallel",
+     "refs": [
+      "l2",
+      "l4"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 40,
+     "unit": "mm"
+    },
+    {
+     "type": "offset",
+     "refs": [
+      "l1",
+      "l3"
+     ],
+     "value": "2 * 9 mm",
+     "text_at": [
+      20,
+      9
+     ]
+    },
+    {
+     "type": "angle",
+     "refs": [
+      "l1",
+      "l4"
+     ],
+     "value": "60 deg",
+     "text_at": [
+      6,
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

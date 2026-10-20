@@ -1,0 +1,15 @@
+# 440-cut-feature-mirror: added by the parity loop from a Fusion probe
+# cut-feature-mirror: Block x -30..30, y 0..30, z 0..10; d8 through hole cut at (15,15); the cut feature mirrored across YZ so a second hole appears at (-15,15).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-30, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 30]]}
+{"cmd": "sketch.line", "points": [[30, 30], [-30, 30]]}
+{"cmd": "sketch.line", "points": [[-30, 30], [-30, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [15, 15], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}
+# Fox mirror takes bodies only; mirroring the cut feature isn't expressible. Closest: mirror the body and join.
+{"cmd": "mirror", "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}, "bodies": [2000], "join": true}

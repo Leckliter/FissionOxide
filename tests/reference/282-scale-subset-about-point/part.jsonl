@@ -1,0 +1,11 @@
+# 282-scale-subset-about-point: added by the parity loop from a Fusion probe
+# scale-subset-about-point: plate 40x20 with a square (2,4)-(10,16) and a r6 circle at (30,10);
+# only the square and circle are scaled by 0.5 about (20,10), then the plate region extruded 5.
+# Expected holes: square (11,7)-(15,13) and r3 circle at (25,10).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.rect", "corner1": [2, 4], "corner2": [10, 16]}
+{"cmd": "sketch.circle", "center": [30, 10], "radius": 6}
+{"cmd": "sketch.transform", "curves": [18, 19, 20, 21, 27], "scale": 0.5, "center": [20, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 2]], "distance": 5, "operation": "new_body"}

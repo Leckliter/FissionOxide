@@ -47,6 +47,8 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/xcaf.hxx");
   println!("cargo:rerun-if-changed=cpp/refparts.cpp");
   println!("cargo:rerun-if-changed=cpp/refparts.hxx");
+  println!("cargo:rerun-if-changed=cpp/form.cpp");
+  println!("cargo:rerun-if-changed=cpp/form.hxx");
   let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
@@ -83,6 +85,7 @@ fn main() {
     .file("cpp/sheet2.cpp")
     .file("cpp/xcaf.cpp")
     .file("cpp/refparts.cpp")
+    .file("cpp/form.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

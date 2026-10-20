@@ -17,7 +17,9 @@ pub static JOINT_ORIGIN: Form = Form {
   inputs: &[
     Input::Face { key: "face", label: "Face", near: None },
     Input::Expr { key: "angle", label: "Angle", default: "0 deg" },
-    Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
+    Input::Expr { key: "offset_x", label: "Offset X", default: "0 mm" },
+    Input::Expr { key: "offset_y", label: "Offset Y", default: "0 mm" },
+    Input::Expr { key: "offset", label: "Offset Z", default: "0 mm" },
     Input::Check { key: "flip", label: "Flip" },
     Input::Text { key: "name", label: "Name", default: "" },
   ],

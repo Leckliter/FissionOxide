@@ -1,0 +1,21 @@
+# 435-rails-square-bulge: added by the parity loop from a Fusion probe
+# rails-square-bulge: Loft between two 20x20 squares (z=0, z=40) guided by two arcs on XZ bulging out to x=+-15 at z=20, touching the x=+-10 sides.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-10, -10], [10, -10]]}
+{"cmd": "sketch.line", "points": [[10, -10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [-10, 10]]}
+{"cmd": "sketch.line", "points": [[-10, 10], [-10, -10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 40], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-10, -10], [10, -10]]}
+{"cmd": "sketch.line", "points": [[10, -10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [-10, 10]]}
+{"cmd": "sketch.line", "points": [[-10, 10], [-10, -10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [10, 0], "mid": [15, -20], "end": [10, -40]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [-10, 0], "mid": [-15, -20], "end": [-10, -40]}
+{"cmd": "sketch.finish"}
+{"cmd": "loft", "sections": [1, 2], "rails": [3, 4], "operation": "new_body"}

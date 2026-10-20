@@ -1,0 +1,18 @@
+# 483-plane-envelope-rectangular: added by the parity loop from a Fusion probe
+# arrange: Fox has no Arrange command, so this builds only the two source boxes where they start
+# (A 40x30x10 at x 100..140, B 20x20x10 at x 200..220, y 50..70); Fusion's result has them packed
+# into the 200x100 envelope at the origin.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[100, 0], [140, 0]]}
+{"cmd": "sketch.line", "points": [[140, 0], [140, 30]]}
+{"cmd": "sketch.line", "points": [[140, 30], [100, 30]]}
+{"cmd": "sketch.line", "points": [[100, 30], [100, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[200, 50], [220, 50]]}
+{"cmd": "sketch.line", "points": [[220, 50], [220, 70]]}
+{"cmd": "sketch.line", "points": [[220, 70], [200, 70]]}
+{"cmd": "sketch.line", "points": [[200, 70], [200, 50]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}

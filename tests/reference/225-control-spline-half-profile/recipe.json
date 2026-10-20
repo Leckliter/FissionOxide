@@ -1,0 +1,150 @@
+{
+ "id": "control-spline-half-profile",
+ "name": "Control point spline half outline mirrored about a vertical construction line",
+ "description": "Construction line on the Y axis; a line along X from the origin to (25,0) and a cubic control point spline (one Bezier span) with control points (25,0),(10,10),(30,25),(0,30) form the right half of an outline; both are mirrored about the axis into a closed, symmetric outline; extruded 10.",
+ "exercises": [
+  "sketch mirror",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it.",
+  "sketch_mirror": "a 'mirror' sketch entity copies 'curves' about the sketch line 'line' with symmetry constraints (Fusion's Sketch Mirror); its copies are '<id>.0', '<id>.1', ... in input order."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       40
+      ]
+     },
+     "id": "ax",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "ax.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       25,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "control_spline",
+     "control_points": [
+      [
+       25,
+       0
+      ],
+      [
+       10,
+       10
+      ],
+      [
+       30,
+       25
+      ],
+      [
+       0,
+       30
+      ]
+     ],
+     "degree": 3,
+     "id": "s1"
+    },
+    {
+     "type": "mirror",
+     "curves": [
+      "l1",
+      "s1"
+     ],
+     "line": "ax",
+     "id": "m"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "s1",
+        "m.0",
+        "m.1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}
