@@ -1,0 +1,16 @@
+# 333-cone-axis-revolve: added by the parity loop from a Fusion probe
+# cone-axis-revolve: right triangle (30,0,0),(40,0,0),(30,0,15) on XZ revolved about its vertical edge into a cone; construction axis through the conical face; 5x5 square x 45..50, z 0..5 on XZ revolved 360 deg about that axis.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[30, 0], [30, -15]]}
+{"cmd": "sketch.line", "points": [[30, -15], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [30, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": {"line": 3}, "angle": "360 deg", "operation": "new_body"}
+{"cmd": "axis", "method": "face", "face": {"point": [35, 0, 7.5]}}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[45, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [50, -5]]}
+{"cmd": "sketch.line", "points": [[50, -5], [45, -5]]}
+{"cmd": "sketch.line", "points": [[45, -5], [45, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 4, "axis": {"axis": 3}, "angle": "360 deg", "operation": "new_body"}

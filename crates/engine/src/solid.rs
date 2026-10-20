@@ -3,11 +3,13 @@
 
 use fox_kernel::Shape;
 use fox_kernel::glam::DVec3;
-use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, LoftEnd, PathRef, PlaneRef};
+use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, LoftEnd, PathRef, PlaneRef, ShellDirection};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
-use crate::commands::{add_feature, face_ref, ids, operation, plane_ref, profile_points, req_expr, sketch_for_feature};
+use crate::commands::{
+  add_feature, face_ref, ids, operation, opt_expr, plane_ref, profile_points, req_expr, sketch_for_feature,
+};
 use crate::{CmdError, CmdResult, Session};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -27,6 +29,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           depth: req_expr(p, "depth")?,
           deboss: name == "deboss" || flag("deboss"),
           wrap: flag("wrap"),
+          horizontal: opt_expr(p, "horizontal").unwrap_or_else(|| "0".into()),
+          vertical: opt_expr(p, "vertical").unwrap_or_else(|| "0".into()),
+          rotation: opt_expr(p, "rotation").unwrap_or_else(|| "0".into()),
         },
       )
     })(),
@@ -175,4 +180,87 @@ fn inner_point(s: &Shape, com: DVec3, lo: DVec3, hi: DVec3) -> DVec3 {
     }
   }
   com
+}
+
+/// `shell`: faces to open (with `tangent_chain`, the faces that continue them smoothly too) and
+/// whole bodies hollowed closed; walls inside, outside or on both sides of the surface.
+pub(crate) fn shell(s: &mut Session, p: &Value) -> CmdResult {
+  let mut picked: Vec<Value> = p.get("faces").and_then(Value::as_array).cloned().unwrap_or_default();
+  let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+  if picked.is_empty() && bodies.is_empty() {
+    return Err(CmdError::new("missing 'faces' (or 'bodies' to hollow whole)"));
+  }
+  for b in &bodies {
+    s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0)))?;
+  }
+  if p.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false) {
+    picked = tangent_faces(s, picked);
+  }
+  let mut faces = Vec::new();
+  for f in &picked {
+    faces.push(face_ref(s, f)?);
+  }
+  let round = match p.get("corners").and_then(Value::as_str) {
+    None | Some("sharp") => false,
+    Some("round") => true,
+    Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
+  };
+  let direction = match p.get("direction").and_then(Value::as_str) {
+    None | Some("inside") => ShellDirection::Inside,
+    Some("outside") => ShellDirection::Outside,
+    Some("both") => ShellDirection::Both,
+    Some(o) => return Err(CmdError::new(format!("unknown direction '{o}' (inside, outside or both)"))),
+  };
+  let thickness_out = match direction {
+    ShellDirection::Both if p.get("outside_thickness").is_some() => req_expr(p, "outside_thickness")?,
+    _ => String::new(),
+  };
+  let thickness = req_expr(p, "thickness")?;
+  add_feature(s, FeatureKind::Shell { faces, thickness, round, direction, thickness_out, bodies })
+}
+
+/// The picked `{body, face}` faces and every face joined to them across a smooth edge (Fusion's
+/// tangent chain), e.g. a box's side faces and the rounds between them. Other picks pass through.
+fn tangent_faces(s: &Session, picked: Vec<Value>) -> Vec<Value> {
+  let mut out = picked.clone();
+  for v in &picked {
+    let (Some(b), Some(f)) = (v.get("body").and_then(Value::as_u64), v.get("face").and_then(Value::as_u64)) else {
+      continue;
+    };
+    let Some(body) = s.model.body(BodyId(b as u32)) else { continue };
+    let (faces, edges) = (body.faces(), body.edges());
+    let mut todo = vec![f as u32];
+    while let Some(cur) = todo.pop() {
+      for e in edges.iter().filter(|e| e.faces.contains(&cur)) {
+        let other = if e.faces[0] == cur { e.faces[1] } else { e.faces[0] };
+        let next = json!({"body": b, "face": other});
+        if other == 0 || out.contains(&next) {
+          continue;
+        }
+        let normal = |id: u32| faces.iter().find(|x| x.id == id).and_then(|x| normal_at(x, e.mid));
+        if let (Some(n1), Some(n2)) = (normal(cur), normal(other))
+          && n1.dot(n2).abs() > 1.0f64.to_radians().cos()
+        {
+          out.push(next);
+          todo.push(other);
+        }
+      }
+    }
+  }
+  out
+}
+
+/// A face's normal direction (either sense) at a point on it: planes, cylinders and spheres.
+fn normal_at(f: &fox_kernel::FaceInfo, p: DVec3) -> Option<DVec3> {
+  use fox_kernel::SurfaceKind as K;
+  let n = match f.kind {
+    K::Plane => f.normal,
+    K::Cylinder => {
+      let r = p - f.origin;
+      r - f.normal * r.dot(f.normal)
+    }
+    K::Sphere => p - f.center,
+    _ => return None,
+  };
+  n.try_normalize()
 }

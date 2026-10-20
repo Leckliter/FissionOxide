@@ -1,0 +1,18 @@
+# 494-cut-splits-target: added by the parity loop from a Fusion probe
+# cut-splits-target: Bar 60x10x10 cut by a 10x30 block at x=25..35 that crosses it, leaving two bodies.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 10]]}
+{"cmd": "sketch.line", "points": [[60, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[25, -10], [35, -10]]}
+{"cmd": "sketch.line", "points": [[35, -10], [35, 20]]}
+{"cmd": "sketch.line", "points": [[35, 20], [25, 20]]}
+{"cmd": "sketch.line", "points": [[25, 20], [25, -10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 20, "operation": "new_body"}
+{"cmd": "combine", "target": 2000, "tools": [4000], "operation": "cut", "keep_tools": false}

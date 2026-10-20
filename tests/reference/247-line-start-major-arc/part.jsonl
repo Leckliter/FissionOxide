@@ -1,0 +1,8 @@
+# 247-line-start-major-arc: added by the parity loop from a Fusion probe
+# line-start-major-arc: Line (10,0)-(30,0); tangent arc off its START (10,0), carrying on in -X, to (14,14): turns right (CW) round the circle centre (10,7.57) R7.57, a ~212 deg major arc; closed by lines (14,14)-(30,14)-(30,0); extruded 5 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [30, 0]]}
+{"cmd": "sketch.arc", "tangent": 3, "start": [10, 0], "end": [14, 14]}
+{"cmd": "sketch.line", "points": [[14, 14], [30, 14], [30, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

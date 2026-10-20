@@ -1,0 +1,10 @@
+# 271-apparent-intersection-gap: added by the parity loop from a Fusion probe
+# apparent-intersection-gap: 40x30 plate outline whose right line ends at (40,20) and top line starts at (30,30), leaving a gap at the (40,30) corner; equal-distance chamfer 5 at their apparent intersection extends both and closes the outline; extruded 8.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[30, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [5, 9], "distance": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 15]], "distance": 8, "operation": "new_body"}

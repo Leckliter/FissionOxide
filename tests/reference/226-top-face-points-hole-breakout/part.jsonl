@@ -1,0 +1,15 @@
+# 226-top-face-points-hole-breakout: added by the parity loop from a Fusion probe
+# top-face-points-hole-breakout: 60x40x10 plate; sketch points on the top face at (20,20), (3,25) and (57,37); one simple d10 through-all hole at every point. The two points near the edges make the holes break out as notches, so the volume depends on where the points are.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 40]]}
+{"cmd": "sketch.line", "points": [[60, 40], [0, 40]]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.point", "at": [20, 20]}
+{"cmd": "sketch.point", "at": [3, 25]}
+{"cmd": "sketch.point", "at": [57, 37]}
+{"cmd": "sketch.finish"}
+{"cmd": "hole", "sketch": 3, "diameter": 10, "through_all": true}

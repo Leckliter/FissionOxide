@@ -1,0 +1,14 @@
+# 450-body-along-path-arc: added by the parity loop from a Fusion probe
+# body-along-path-arc: Block 10x4x5 centred on (50,0), long radially; body patterned 4x along the quarter arc R50 (50,0)->(0,50), extent 78.539816 mm (the whole arc, 30 deg apart), oriented along the path so each copy stays radial; separate bodies.
+# pattern.path is the command Fox would need (it has none yet): pattern along a sketch path
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[45, -2], [55, -2]]}
+{"cmd": "sketch.line", "points": [[55, -2], [55, 2]]}
+{"cmd": "sketch.line", "points": [[55, 2], [45, 2]]}
+{"cmd": "sketch.line", "points": [[45, 2], [45, -2]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [50, 0], "mid": [35.35533905932738, 35.35533905932738], "end": [0, 50]}
+{"cmd": "sketch.finish"}
+{"cmd": "pattern.path", "bodies": [2000], "path": 3, "count": 4, "distance": 78.53981633974483, "extent": true, "orientation": "along_path", "join": false}

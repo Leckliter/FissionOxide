@@ -1,0 +1,15 @@
+# 391-cylinder-angle-from-xz: added by the parity loop from a Fusion probe
+# cylinder-angle-from-xz: Cylinder r=10 h=20 at origin and a separate 40x40x5 slab under it (z -5..0); construction plane tangent to the cylinder, rotated 30 deg about its axis from XZ (touches at (-5, 8.66)); slab split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "flip": true, "operation": "new_body"}
+{"cmd": "plane", "method": "tangent", "face": {"point": [10, 0, 10]}, "near": [-5, 8.660254037844386, 10]}
+{"cmd": "split", "plane": {"feature": 5}, "bodies": [4000]}

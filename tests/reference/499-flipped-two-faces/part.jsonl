@@ -1,0 +1,10 @@
+# 499-flipped-two-faces: added by the parity loop from a Fusion probe
+# flipped-two-faces: 40x40x30 box centred in XY; 7 deg draft on the +X and -X side faces only, neutral plane = bottom face, direction flipped.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "draft", "faces": [{"point": [20.0, 0.0, 15.0]}, {"point": [-20.0, 0.0, 15.0]}], "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, -1.0]}, "angle": "7 deg", "flip": true}

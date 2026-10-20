@@ -106,19 +106,37 @@ pub(super) fn setback(orig: &Shape, filleted: &Shape, ids: &[u32], d: f64) -> fo
 impl Ctx<'_> {
   pub(super) fn apply_solid(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::Emboss { sketch, profiles, face, depth, deboss, wrap } => {
+      FeatureKind::Emboss { sketch, profiles, face, depth, deboss, wrap, horizontal, vertical, rotation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
         if chosen.is_empty() {
           return Err("no profiles to emboss".into());
         }
         let d = self.len(depth)?;
+        let (h, v, turn) = (self.len(horizontal)?, self.len(vertical)?, self.angle(rotation)?);
         let (bi, info) = self.face_info(face)?;
-        let faces = chosen.iter().map(|p| Shape::face(&sk.plane, p)).collect::<Result<Vec<_>, _>>().map_err(ke)?;
-        // project from the sketch towards the face
+        let mut faces = chosen.iter().map(|p| Shape::face(&sk.plane, p)).collect::<Result<Vec<_>, _>>().map_err(ke)?;
+        // project from the sketch towards the face: onto a flat face always against its outward
+        // normal, which also covers a sketch lying in the face's own plane
         let mut dir = sk.plane.normal();
-        if (info.center - sk.plane.origin).dot(dir) < 0.0 {
+        let away = match info.plane() {
+          Some(pl) => dir.dot(pl.normal()) > 0.0,
+          None => (info.center - sk.plane.origin).dot(dir) < 0.0,
+        };
+        if away {
           dir = -dir;
+        }
+        if h != 0.0 || v != 0.0 || turn != 0.0 {
+          // in the face's frame as seen from outside it: x along the sketch's, up = out × x
+          let (x, out) = (sk.plane.x, -dir);
+          let up = out.cross(x);
+          let m = Shape::compound(&faces).and_then(|c| c.mass()).map_err(ke)?;
+          let c = (m.bbox_min + m.bbox_max) * 0.5;
+          faces = faces
+            .iter()
+            .map(|f| f.rotated(c, out, turn).and_then(|f| f.translated(x * h + up * v)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ke)?;
         }
         let body = &self.state.bodies[bi];
         let tool = body.shape.emboss_tool(info.id, &faces, dir, d, *deboss, *wrap).map_err(ke)?;

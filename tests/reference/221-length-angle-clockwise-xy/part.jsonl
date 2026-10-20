@@ -1,0 +1,7 @@
+# 221-length-angle-clockwise-xy: added by the parity loop from a Fusion probe
+# length-angle-clockwise-xy: Overall slot with explicit overall length and clockwise angle on XY: slot ends (2, -4) -> (10, -15), width 8, length 24, angle 35 deg clockwise (end point only sets direction); extruded 3.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [2, -4], "end": [21.659649063, -17.765834472], "width": 8, "kind": "overall"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}

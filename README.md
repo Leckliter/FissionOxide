@@ -239,7 +239,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Open / insert files    | Ctrl+O / File → Insert, or drop files on the window         |
 | Fit view               | F6                                                          |
 | Tangent circles        | 2-Tangent Circle: click two curves, then where the circle goes (the cursor sets its size); 3-Tangent: click three curves near where it should touch |
-| Blend curve            | Click near the ends of two curves (G2); Shift+click the second for G1 |
+| Blend curve            | Click near the ends of two curves (G1); Shift+click the second for G2 |
 | Break                  | Click a curve: it splits at the crossings either side of the click, or at the click |
 | Edit text              | Double-click a letter (or Modify → Edit Text); Explode Text makes plain curves |
 

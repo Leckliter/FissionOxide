@@ -1,0 +1,15 @@
+# 301-block-centered-in-channel: added by the parity loop from a Fusion probe
+# block-centered-in-channel: Center (midplane) assembly constraint. Grounded U-channel A (outer x 0..50,
+# y 0..20, inner faces x=10 and x=40, 10 tall); 10x10x10 block B at x 60..70, y 10..20, centred
+# between A's inner faces (Fusion moves it to x 20..30 only).
+# Fox has no center/midplane constraint; the closest is a planar joint whose origins sit on the two
+# midplanes (normal +x): B's centre to the slot centre. A planar joint also snaps the in-plane position.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [50, 0], [50, 20], [40, 20], [40, 5], [10, 5], [10, 20], [0, 20]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [2000]}
+{"cmd": "component.ground", "component": 1}
+{"cmd": "box", "width": 10, "depth": 10, "height": 10, "at": [65, 15]}
+{"cmd": "component.create", "name": "B", "bodies": [3000]}
+{"cmd": "joint", "moving": 2, "moving_origin": {"at": [65, 15, 5], "z": [1, 0, 0]}, "fixed": 1, "fixed_origin": {"at": [25, 12.5, 5], "z": [1, 0, 0]}, "kind": "planar"}

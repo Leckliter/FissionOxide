@@ -1,0 +1,3 @@
+# 410-cylinder-xz-negative-height: added by the parity loop from a Fusion probe
+# cylinder-xz-negative-height: Cylinder primitive on XZ (sketch y = -Z, normal +Y): centre (10,5) in sketch coords (world (10,0,-5)), radius 8, height -20 (extends along -Y).
+{"cmd": "cylinder", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}, "at": [10, 5], "radius": 8, "height": -20}

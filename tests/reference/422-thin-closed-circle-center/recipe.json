@@ -1,0 +1,89 @@
+{
+ "id": "thin-closed-circle-center",
+ "name": "thin-closed-circle-center",
+ "description": "Circle r=10 at origin on XY, thin extrude with a 2 mm wall centred on the circle (r 9..11), 15 mm tall.",
+ "exercises": [
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 10,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "thin": {
+    "side": "center",
+    "thickness": 2
+   },
+   "extent": {
+    "type": "distance",
+    "distance": 15,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Tube"
+   ]
+  }
+ ]
+}

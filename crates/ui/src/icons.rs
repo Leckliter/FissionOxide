@@ -345,6 +345,8 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 const SLATE: Color32 = theme::ICON_INK;
+/// Outlines of grey bodies: a mid grey, so solids read as light shapes, not ink drawings.
+const GREY_EDGE: Color32 = Color32::from_rgb(122, 132, 146);
 
 struct Pen<'a> {
   p: &'a Painter,
@@ -421,9 +423,21 @@ impl Pen<'_> {
     self.p.add(Shape::line(pts, Stroke::new(self.w * (k - 1.6), self.fc(Tone::Blue))));
   }
 
-  /// Outline colour: slate everywhere, so every icon reads as one line drawing.
-  fn edge(&self, _t: Tone) -> Color32 {
-    self.mono.unwrap_or(SLATE)
+  /// Outline colour: a darker shade of the face it bounds (Fusion's tonal edges), so solids
+  /// read as light shapes rather than ink drawings. Slate stays for lines and details.
+  fn edge(&self, t: Tone) -> Color32 {
+    if let Some(c) = self.mono {
+      return c;
+    }
+    let dark = |c: Color32| mix(c, SLATE, 0.3);
+    match t {
+      Tone::Fill | Tone::Light | Tone::White | Tone::Dark => GREY_EDGE,
+      Tone::Blue | Tone::BlueLight | Tone::BlueDark | Tone::PurpleLight => dark(self.tint.accent()),
+      Tone::Orange | Tone::Green | Tone::Purple | Tone::Amber | Tone::Red | Tone::Teal | Tone::Coral | Tone::Violet => {
+        dark(self.col(t))
+      }
+      Tone::Ink | Tone::Slate => SLATE,
+    }
   }
 
   fn pts(&self, pts: &[(f32, f32)]) -> Vec<Pos2> {
@@ -585,7 +599,7 @@ pub fn draw_color(p: &Painter, r: Rect, icon: Icon) {
 fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
   use Tone::*;
   use std::f32::consts::{FRAC_PI_2, PI, TAU};
-  let w = (r.width() / 16.0).clamp(1.0, 1.8);
+  let w = (r.width() / 24.0).clamp(0.9, 1.25);
   let k = Pen { p, r, mono, tint, literal: literal(icon), w };
   match icon {
     Icon::Sketch => {
@@ -1929,15 +1943,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
 }
 
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip),
-/// its solids in the `tint` family.
-pub fn tool_button_tinted(
-  ui: &mut egui::Ui,
-  icon: Icon,
-  tint: Tint,
-  label: &str,
-  hint: &str,
-  active: bool,
-) -> egui::Response {
+/// its solids in the `tint` family. The caller adds the tooltip.
+pub fn tool_button_bare(ui: &mut egui::Ui, icon: Icon, tint: Tint, active: bool) -> egui::Response {
   let size = vec2(35.0, 38.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
   let ic = Rect::from_center_size(rect.center(), Vec2::splat(27.0));
@@ -1951,12 +1958,7 @@ pub fn tool_button_tinted(
     }
     draw_tinted(ui.painter(), ic, icon, tint);
   }
-  resp.on_hover_ui(|ui| {
-    ui.label(egui::RichText::new(label).strong());
-    if !hint.is_empty() {
-      ui.label(egui::RichText::new(hint).color(theme::MUTED));
-    }
-  })
+  resp
 }
 
 /// A small square icon-only button (constraints, timeline, chrome). `color` None draws the
@@ -1990,3 +1992,6 @@ pub fn chevron(p: &Painter, c: Pos2, color: Color32) {
     Stroke::NONE,
   ));
 }
+
+#[cfg(test)]
+mod sheet;

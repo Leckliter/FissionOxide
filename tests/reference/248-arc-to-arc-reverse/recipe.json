@@ -1,0 +1,192 @@
+{
+ "id": "arc-to-arc-reverse",
+ "name": "Tangent Arc: arc-to-arc-reverse",
+ "description": "Line (0,0)-(20,0); tangent arc off it to (30,10) (CCW, centre (20,10) R10); a second tangent arc off that arc's end to (42,16) (CW, centre (37.5,10) R7.5, ~127 deg); closed by lines (42,16)-(42,-5)-(0,-5)-(0,0); extruded 8 on XY.",
+ "exercises": [
+  "sketch",
+  "arc_tangent",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "arc_tangent",
+     "tangent": "l1",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       30,
+       10
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "arc_tangent",
+     "tangent": "a1",
+     "start": {
+      "at": [
+       30,
+       10
+      ],
+      "ref": "a1.end"
+     },
+     "end": {
+      "at": [
+       42,
+       16
+      ]
+     },
+     "id": "a2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       42,
+       16
+      ],
+      "ref": "a2.end"
+     },
+     "end": {
+      "at": [
+       42,
+       -5
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       42,
+       -5
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       -5
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       -5
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "a1",
+        "a2",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+# 422-thin-closed-circle-center: added by the parity loop from a Fusion probe
+# thin-closed-circle-center: Circle r=10 at origin on XY, thin extrude with a 2 mm wall centred on the circle (r 9..11), 15 mm tall.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 15, "thin": 2, "thin_side": "center", "operation": "new_body"}
