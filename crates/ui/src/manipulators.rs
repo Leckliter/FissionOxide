@@ -1,9 +1,10 @@
-//! Drag manipulators in the viewport beyond the single arrow (see `viewport::manipulator`): the
-//! move/rotate triad, as in Fusion's Move and Joint commands. Three arrows move along X, Y and Z,
-//! three rings rotate about them and three square handles move in the plane across each axis.
-//! The open dialog says where the triad sits and which handles it has
-//! ([`crate::Dialog::triad`]) and takes the dragged result back into its fields
-//! ([`crate::Dialog::set_triad`]), so a typed value and a drag always agree.
+//! Drag manipulators in the viewport: the feature dialogs' arrows, rotators and points
+//! ([`dialog_handles`]) and the move/rotate triad, as in Fusion's Move and Joint commands. Three
+//! arrows move along X, Y and Z, three rings rotate about them and three square handles move in
+//! the plane across each axis. The open dialog says where its handles sit
+//! ([`crate::Dialog::handles`], [`crate::Dialog::triad`]) and takes the dragged result back into
+//! its fields ([`crate::Dialog::set_handle`], [`crate::Dialog::set_triad`]), so a typed value and
+//! a drag always agree.
 //!
 //! Everything is drawn with the egui painter over the rendered image, so it works with any
 //! renderer.
@@ -13,6 +14,7 @@ use fox_engine::kernel::glam::DVec3;
 use fox_engine::render::ray_plane;
 
 use crate::App;
+use crate::dialogs::{Handle as DialogHandle, Shape, Slot};
 use crate::viewport::Drag;
 
 /// Arrow length on screen (points); rings and planar handles scale with it.
@@ -145,12 +147,60 @@ impl TriadDrag {
   }
 }
 
-/// The triad drag the viewport is running, if any, and the value box the last drag left.
+/// The triad drag the viewport is running, if any, and the value box the last drag left; the
+/// same for the dialog's own handles.
 #[derive(Default)]
 pub struct State {
   pub drag: Option<TriadDrag>,
   /// After a drag, as in Fusion: the dragged handle's value in a box that takes typing.
   pub typed: Option<Typed>,
+  /// A dialog handle being dragged.
+  pub handle_drag: Option<HandleDrag>,
+  /// After a dialog handle drag: its value box (the slot and the text being typed).
+  pub handle_typed: Option<(Slot, String)>,
+}
+
+/// A drag of one of the dialog's handles.
+#[derive(Debug, Clone)]
+pub struct HandleDrag {
+  start: DialogHandle,
+  /// Rotators: the pointer's angle at the last update and the total turned since the grab.
+  last: f64,
+  turned: f64,
+}
+
+impl HandleDrag {
+  /// Grabs a handle where the pointer ray `ro + rd·s` meets it.
+  pub fn begin(h: DialogHandle, ro: DVec3, rd: DVec3) -> Option<HandleDrag> {
+    let last = match h.shape {
+      Shape::Rotator { centre, axis, from, .. } => ring_angle(centre, axis, from, ro, rd)?,
+      _ => 0.0,
+    };
+    Some(HandleDrag { start: h, last, turned: 0.0 })
+  }
+
+  /// What the pointer ray now asks of the handle: an arrow's length or a rotator's angle (the
+  /// value it started at plus the turn, so a drag can go round more than half a turn), or where
+  /// a point goes.
+  pub fn update(&mut self, ro: DVec3, rd: DVec3) -> Option<HandleEdit> {
+    match self.start.shape {
+      Shape::Arrow { origin, dir } => Some(HandleEdit::Value(axis_param(origin, dir, ro, rd)?)),
+      Shape::Rotator { centre, axis, from, .. } => {
+        let a = ring_angle(centre, axis, from, ro, rd)?;
+        self.turned += wrap(a - self.last);
+        self.last = a;
+        Some(HandleEdit::Value(self.start.value + self.turned))
+      }
+      Shape::Point { at, normal } => Some(HandleEdit::Point(ray_plane(ro, rd, at, normal)?)),
+    }
+  }
+}
+
+/// What a dialog handle drag asks for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HandleEdit {
+  Value(f64),
+  Point(DVec3),
 }
 
 /// The value box of a handle: its text while it is being typed.
@@ -433,6 +483,245 @@ pub(crate) fn triad(
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
 }
 
+/// The blue of Fusion's command manipulators.
+const HANDLE: Color32 = Color32::from_rgb(30, 110, 235);
+
+/// A dialog handle on screen: an arrow from its base to its tip; a rotator's arc (from its start
+/// to the ball), the spoke to where it starts and the ball; a point.
+#[derive(Debug, Clone, PartialEq)]
+enum Drawn {
+  Arrow { base: Pos2, tip: Pos2 },
+  Ring { arc: Vec<Pos2>, spoke: [Pos2; 2], ball: Pos2 },
+  Point(Pos2),
+}
+
+impl Drawn {
+  /// Where its value box goes.
+  fn label_at(&self) -> Pos2 {
+    match self {
+      Drawn::Arrow { tip, .. } => *tip,
+      Drawn::Ring { ball, .. } => *ball,
+      Drawn::Point(p) => *p,
+    }
+  }
+
+  /// How far `p` is from grabbing it (points), when within reach.
+  fn reach(&self, p: Pos2) -> Option<f32> {
+    let d = match self {
+      Drawn::Arrow { base, tip } => (seg_dist(p, *base, *tip) + 3.0).min((p - *tip).length() - 6.0),
+      Drawn::Ring { arc, ball, .. } => {
+        let on_arc = arc.windows(2).map(|w| seg_dist(p, w[0], w[1]) + 3.0).fold(f32::INFINITY, f32::min);
+        on_arc.min((p - *ball).length() - 6.0)
+      }
+      Drawn::Point(c) => (p - *c).length() - 6.0,
+    };
+    (d <= CATCH_PX).then_some(d)
+  }
+}
+
+/// Lays a dialog handle out on screen; rotators without a radius of their own get `ring_px`.
+fn drawn(h: &DialogHandle, project: &dyn Fn(DVec3) -> Option<Pos2>, right: DVec3, ring_px: f64) -> Option<Drawn> {
+  Some(match h.shape {
+    Shape::Arrow { origin, dir } => Drawn::Arrow { base: project(origin)?, tip: project(origin + dir * h.value)? },
+    Shape::Rotator { centre, .. } => {
+      let r = world_size(project, right, centre, ring_px)?;
+      let n = ((h.value.abs() / (std::f64::consts::PI / 48.0)).ceil() as usize).clamp(2, 200);
+      let arc: Vec<Pos2> = (0..=n).filter_map(|k| project(h.on_ring(h.value * k as f64 / n as f64, r)?)).collect();
+      let ball = project(h.on_ring(h.value, r)?)?;
+      Drawn::Ring { arc, spoke: [project(centre)?, project(h.on_ring(0.0, r)?)?], ball }
+    }
+    Shape::Point { at, .. } => Drawn::Point(project(at)?),
+  })
+}
+
+fn draw_handle(painter: &egui::Painter, d: &Drawn, lit: bool) {
+  let c = if lit { ACTIVE } else { HANDLE };
+  let w = if lit { 3.0 } else { 2.0 };
+  match d {
+    Drawn::Arrow { base, tip } => {
+      painter.line_segment([*base, *tip], Stroke::new(w, c));
+      let dir = (*tip - *base).normalized();
+      let dir = if dir.is_finite() && (*tip - *base).length() > 1.0 { dir } else { Vec2::new(0.0, -1.0) };
+      let side = Vec2::new(-dir.y, dir.x);
+      painter.add(egui::Shape::convex_polygon(
+        vec![*tip + dir * 12.0, *tip + side * 6.0, *tip - side * 6.0],
+        c,
+        Stroke::NONE,
+      ));
+    }
+    Drawn::Ring { arc, spoke, ball } => {
+      painter.line_segment(*spoke, Stroke::new(1.0, c.gamma_multiply(0.6)));
+      if arc.len() > 1 {
+        painter.add(egui::Shape::line(arc.clone(), Stroke::new(w, c)));
+      }
+      painter.circle_filled(*ball, if lit { 7.0 } else { 6.0 }, c);
+      painter.circle_stroke(*ball, 6.0, Stroke::new(1.0, Color32::WHITE));
+    }
+    Drawn::Point(p) => {
+      painter.circle_filled(*p, if lit { 6.5 } else { 5.5 }, c);
+      painter.circle_stroke(*p, 8.5, Stroke::new(1.5, c));
+    }
+  }
+}
+
+/// A handle's value next to it: Fusion's filled box while it is dragged, else plain text.
+fn handle_label(painter: &egui::Painter, h: &DialogHandle, d: &Drawn, lit: bool) {
+  if h.text.is_empty() {
+    return;
+  }
+  let at = d.label_at() + Vec2::new(14.0, -24.0);
+  if lit {
+    let galley = painter.layout_no_wrap(h.text.clone(), egui::FontId::proportional(12.0), Color32::WHITE);
+    let r = egui::Rect::from_min_size(at, galley.size() + Vec2::new(10.0, 4.0));
+    painter.rect_filled(r, 3.0, ACTIVE);
+    painter.galley(r.min + Vec2::new(5.0, 2.0), galley, Color32::WHITE);
+  } else {
+    painter.text(at, egui::Align2::LEFT_TOP, &h.text, egui::FontId::proportional(12.0), Color32::from_gray(40));
+  }
+}
+
+/// The handle nearest a screen point, within reach.
+fn hit_handle(drawn: &[Option<Drawn>], p: Pos2) -> Option<usize> {
+  drawn
+    .iter()
+    .enumerate()
+    .filter_map(|(i, d)| Some((i, d.as_ref()?.reach(p)?)))
+    .min_by(|a, b| a.1.total_cmp(&b.1))
+    .map(|(i, _)| i)
+}
+
+/// Reads a dialog handle's value box: an angle for a rotator, a plain number for a factor
+/// (Scale), else a length (a bare number in the design's unit); in the handle's own units.
+fn parse_handle(s: &fox_engine::Session, h: &DialogHandle, text: &str) -> Option<f64> {
+  use fox_engine::expr::{Kind, eval};
+  let v = if h.is_angle() {
+    eval(text.trim(), Kind::Angle, &s.model.params).ok()?
+  } else if h.per != 1.0 {
+    eval(text.trim(), Kind::Unitless, &s.model.params).ok()? * h.per
+  } else {
+    eval(&s.design.units.typed(text.trim()), Kind::Length, &s.model.params).ok()?
+  };
+  v.is_finite().then_some(v)
+}
+
+/// Shows the open dialog's arrows, rotators and points (see [`crate::Dialog::handles`]) and runs
+/// their drags: lengths snap to `step`, angles to the angular increment. After a drag the value
+/// stays in a box that takes typing, as in Fusion. Returns true while a handle has the pointer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dialog_handles(
+  app: &mut App,
+  resp: &egui::Response,
+  painter: &egui::Painter,
+  ctx: &egui::Context,
+  project: &dyn Fn(DVec3) -> Option<Pos2>,
+  ray: &dyn Fn(Pos2) -> (DVec3, DVec3),
+  step: f64,
+) -> bool {
+  let dragging = matches!(app.drag, Some(Drag::Manip));
+  if !dragging && let Some(done) = app.manip.handle_drag.take() {
+    // the drag let go: its value stays in a box that takes typing
+    if !matches!(done.start.shape, Shape::Point { .. }) {
+      app.manip.handle_typed = Some((done.start.slot, String::new()));
+    }
+  }
+  let handles = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
+  if handles.is_empty() {
+    app.manip.handle_typed = None;
+    return false;
+  }
+  let (right, _, _) = app.cam.basis();
+  let ring_px = SIZE_PX * RING;
+  let turn = app.increments.angular_step(ANGLE_STEP);
+  if dragging && let Some(drag) = app.manip.handle_drag.as_mut() {
+    let slot = drag.start.slot;
+    if let Some(p) = resp.interact_pointer_pos() {
+      let (o, d) = ray(p);
+      if let (Some(edit), Some(dlg)) = (drag.update(o, d), app.dialog.as_mut()) {
+        match edit {
+          HandleEdit::Value(v) => dlg.set_handle(&app.s, slot, v, step, turn),
+          HandleEdit::Point(q) => dlg.move_handle(&app.s, slot, q, step),
+        }
+      }
+    }
+    let now = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
+    for h in &now {
+      if let Some(d) = drawn(h, project, right, ring_px) {
+        draw_handle(painter, &d, h.slot == slot);
+        handle_label(painter, h, &d, h.slot == slot);
+      }
+    }
+    ctx.request_repaint();
+    return true;
+  }
+  let laid: Vec<Option<Drawn>> = handles.iter().map(|h| drawn(h, project, right, ring_px)).collect();
+  let hot = resp.hover_pos().and_then(|p| hit_handle(&laid, p));
+  let press = ctx.input(|i| i.pointer.press_origin());
+  let pressed = press.and_then(|p| hit_handle(&laid, p));
+  if let (Some(i), Some(p)) = (pressed, press)
+    && resp.drag_started_by(egui::PointerButton::Primary)
+    && app.drag.is_none()
+  {
+    let (o, d) = ray(p);
+    if let Some(dr) = HandleDrag::begin(handles[i].clone(), o, d) {
+      app.manip.handle_drag = Some(dr);
+      app.manip.handle_typed = None;
+      app.drag = Some(Drag::Manip);
+    }
+  }
+  let boxed = app.manip.handle_typed.as_ref().map(|b| b.0);
+  for (i, (h, d)) in handles.iter().zip(&laid).enumerate() {
+    let Some(d) = d else { continue };
+    let lit = hot == Some(i) || boxed == Some(h.slot);
+    draw_handle(painter, d, lit);
+    if boxed != Some(h.slot) {
+      handle_label(painter, h, d, false);
+    }
+  }
+  handle_value_box(app, ctx, &handles, &laid);
+  hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// The box a finished handle drag leaves by the handle: it shows the value and takes a typed one
+/// (a length, angle or factor expression). Enter applies it, Esc closes it.
+fn handle_value_box(app: &mut App, ctx: &egui::Context, handles: &[DialogHandle], laid: &[Option<Drawn>]) {
+  let Some((slot, mut text)) = app.manip.handle_typed.take() else { return };
+  let Some(i) = handles.iter().position(|h| h.slot == slot) else { return };
+  let (h, Some(d)) = (&handles[i], &laid[i]) else { return };
+  let fresh = text.is_empty();
+  if fresh {
+    text = h.text.clone();
+  }
+  let (mut commit, mut cancel) = (false, false);
+  egui::Area::new(egui::Id::new("dialog-handle-value"))
+    .fixed_pos(d.label_at() + Vec2::new(14.0, -26.0))
+    .order(egui::Order::Foreground)
+    .show(ctx, |ui| {
+      egui::Frame::popup(ui.style()).inner_margin(3.0).stroke(Stroke::new(1.0, ACTIVE)).show(ui, |ui| {
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(110.0));
+        if fresh {
+          crate::viewport::focus_text(ctx, &r, &text, true);
+        }
+        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        cancel = esc && (r.has_focus() || r.lost_focus());
+        commit = enter && !esc && (r.has_focus() || r.lost_focus());
+      });
+    });
+  if commit {
+    // the Enter is this box's, not the dialog's OK
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if let Some(v) = parse_handle(&app.s, h, &text)
+      && let Some(dlg) = app.dialog.as_mut()
+    {
+      dlg.set_handle(&app.s, slot, v, 0.0, 0.0);
+    }
+    // show the value as applied
+    text.clear();
+  }
+  if !cancel {
+    app.manip.handle_typed = Some((slot, text));
+  }
+}
+
 /// Where a handle's value shows: past the arrow's tip, by the planar handle's outer corner, at
 /// the centre for a ring.
 fn value_at(t: &Triad, h: Handle, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Option<Pos2> {
@@ -620,6 +909,58 @@ mod tests {
     let a = parse_typed(&s, Handle::Ring(0), "90").unwrap();
     assert!((a[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
     assert_eq!(parse_typed(&s, Handle::Arrow(0), "nope"), None);
+  }
+
+  #[test]
+  fn dialog_handles_drag_and_are_hit_on_screen() {
+    let h = |slot, shape, value| DialogHandle { slot, shape, value, per: 1.0, text: String::new() };
+    // a rotator about Z from X, already at 30°: dragging from 90° round to 250° adds 160°
+    let ring = h(
+      Slot::Angle,
+      Shape::Rotator { centre: DVec3::ZERO, axis: DVec3::Z, from: DVec3::X, radius: 10.0 },
+      30f64.to_radians(),
+    );
+    let at = |deg: f64| {
+      let a = deg.to_radians();
+      (DVec3::new(10.0 * a.cos(), 10.0 * a.sin(), 50.0), DVec3::NEG_Z)
+    };
+    let (o, d) = at(90.0);
+    let mut drag = HandleDrag::begin(ring.clone(), o, d).unwrap();
+    let mut last = None;
+    for deg in (110..=250).step_by(20) {
+      let (o, d) = at(deg as f64);
+      last = drag.update(o, d);
+    }
+    let Some(HandleEdit::Value(a)) = last else { panic!("{last:?}") };
+    assert!((a.to_degrees() - 190.0).abs() < 1e-6, "{}", a.to_degrees());
+    // an arrow takes the pointer's place along it; a point follows it across its plane
+    let arrow = h(Slot::Main, Shape::Arrow { origin: DVec3::ZERO, dir: DVec3::X }, 5.0);
+    let mut drag = HandleDrag::begin(arrow.clone(), DVec3::new(5.0, 0.0, 9.0), DVec3::NEG_Z).unwrap();
+    assert_eq!(drag.update(DVec3::new(7.5, 3.0, 9.0), DVec3::NEG_Z), Some(HandleEdit::Value(7.5)));
+    let point = h(Slot::Centre, Shape::Point { at: DVec3::new(0.0, 0.0, 2.0), normal: DVec3::Z }, 0.0);
+    let mut drag = HandleDrag::begin(point.clone(), DVec3::new(0.0, 0.0, 9.0), DVec3::NEG_Z).unwrap();
+    assert_eq!(
+      drag.update(DVec3::new(3.0, -1.0, 9.0), DVec3::NEG_Z),
+      Some(HandleEdit::Point(DVec3::new(3.0, -1.0, 2.0)))
+    );
+    // on screen (looking down Z): the arrow's head, the rotator's ball, the point
+    let laid: Vec<Option<Drawn>> = [&arrow, &ring, &point].iter().map(|x| drawn(x, &top, DVec3::X, 50.0)).collect();
+    let Some(Drawn::Ring { ball, .. }) = &laid[1] else { panic!("{:?}", laid[1]) };
+    assert!(
+      (*ball - Pos2::new(100.0 + 10.0 * 30f32.to_radians().cos(), 100.0 - 10.0 * 30f32.to_radians().sin())).length()
+        < 1e-3
+    );
+    assert_eq!(hit_handle(&laid, Pos2::new(105.0, 101.0)), Some(0));
+    assert_eq!(hit_handle(&laid, *ball + Vec2::new(1.0, 0.0)), Some(1));
+    assert_eq!(hit_handle(&laid, Pos2::new(100.0, 98.0)), Some(2));
+    assert_eq!(hit_handle(&laid, Pos2::new(160.0, 160.0)), None);
+    // a typed value: an angle for a rotator, a length in the design's unit, a factor
+    let s = fox_engine::Session::default();
+    assert!((parse_handle(&s, &ring, "90").unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    assert_eq!(parse_handle(&s, &arrow, "2 cm"), Some(20.0));
+    let factor = DialogHandle { per: 8.0, ..arrow.clone() };
+    assert_eq!(parse_handle(&s, &factor, "1.5"), Some(12.0));
+    assert_eq!(parse_handle(&s, &arrow, "nope"), None);
   }
 
   #[test]

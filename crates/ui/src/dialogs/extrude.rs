@@ -17,7 +17,7 @@ pub(crate) struct Rows {
   /// Wall location: "inside" (side 1), "outside" (side 2) or "center".
   thin_side: &'static str,
   thickness: String,
-  taper: String,
+  pub(super) taper: String,
   /// Side 2 taper of a two-sided extrude; empty = the same as `taper`.
   taper2: String,
   /// Start: "" (profile plane), "offset" or "object".

@@ -94,7 +94,7 @@ pub enum Drag {
     now: Pos2,
     since: f64,
   },
-  /// Dragging a command dialog's arrow (extrude distance, plane offset).
+  /// Dragging one of the command dialog's handles (see [`crate::manipulators::dialog_handles`]).
   Manip,
   /// Freeform (lasso) selection; the loop is in `App::region`.
   Lasso,
@@ -291,7 +291,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
-  consumed |= manipulator(app, &resp, &painter, &view, &ctx);
+  consumed |= crate::manipulators::dialog_handles(app, &resp, &painter, &ctx, &project, &ray, step);
   if app.objects.joints {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   }
@@ -2729,62 +2729,6 @@ pub(crate) fn select_other_at_last_click(app: &mut App) {
 }
 
 // ---------------------------------------------------------------- manipulators, measure line
-
-/// The open dialog's drag arrow: drawn from its base along its direction to the current value;
-/// dragging the head changes the value (snapped to a tenth of the grid). Returns true while the
-/// arrow has the pointer.
-fn manipulator(
-  app: &mut App,
-  resp: &egui::Response,
-  painter: &egui::Painter,
-  view: &View,
-  ctx: &egui::Context,
-) -> bool {
-  let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else { return false };
-  let tip = m.origin + m.dir * m.value;
-  let (Some(a), Some(b)) = (view.to_screen(&app.cam, m.origin), view.to_screen(&app.cam, tip)) else { return false };
-  let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
-  let active = matches!(app.drag, Some(Drag::Manip));
-  let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
-  painter.line_segment([a, b], Stroke::new(2.0, col));
-  let dir2 = (b - a).normalized();
-  let dir2 = if dir2.is_finite() && (b - a).length() > 1.0 { dir2 } else { Vec2::new(0.0, -1.0) };
-  let side = Vec2::new(-dir2.y, dir2.x);
-  let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
-  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
-  painter.text(
-    b + side * 14.0 + dir2 * 4.0,
-    egui::Align2::LEFT_CENTER,
-    app.s.design.units.format(m.value),
-    egui::FontId::proportional(12.0),
-    Color32::from_gray(40),
-  );
-  // a drag starts only once the pointer has moved: test where the press began
-  let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - b).length() < 14.0);
-  if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
-    app.drag = Some(Drag::Manip);
-  }
-  if matches!(app.drag, Some(Drag::Manip)) {
-    if let Some(p) = resp.interact_pointer_pos() {
-      let (o, d) = view.ray(&app.cam, p);
-      // closest point on the arrow's axis to the pointer ray
-      let w0 = m.origin - o;
-      let (aa, bb, cc) = (m.dir.dot(m.dir), m.dir.dot(d), d.dot(d));
-      let (dd, ee) = (m.dir.dot(w0), d.dot(w0));
-      let den = aa * cc - bb * bb;
-      if den.abs() > 1e-12 {
-        let t = (bb * ee - cc * dd) / den;
-        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
-        if let Some(dlg) = app.dialog.as_mut() {
-          dlg.set_manipulator(t, step);
-        }
-      }
-    }
-    ctx.request_repaint();
-    return true;
-  }
-  hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
-}
 
 /// The Measure dialog's result: a line between the closest points with the distance.
 fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
