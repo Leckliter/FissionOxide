@@ -1,0 +1,153 @@
+{
+ "id": "yz-origin-plane",
+ "name": "Sketch on the YZ origin plane",
+ "description": "Rectangle (4,6)-(24,16) in the YZ plane's sketch frame (Fusion: x=-Z, y=+Y, normal +X), extruded 7 along the normal: Z -24..-4, Y 6..16, X 0..7.",
+ "exercises": [
+  "sketch_create",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "YZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     0,
+     -1
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       4,
+       6
+      ]
+     },
+     "end": {
+      "at": [
+       24,
+       6
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       24,
+       6
+      ]
+     },
+     "end": {
+      "at": [
+       24,
+       16
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       24,
+       16
+      ]
+     },
+     "end": {
+      "at": [
+       4,
+       16
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       4,
+       16
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       4,
+       6
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 7,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Block"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,239 @@
+{
+ "id": "bottom-face-sketch",
+ "name": "Sketch on a box's bottom face",
+ "description": "40x30x10 box; sketch on its bottom face (Fusion frame: x=-X, y=+Y, origin at the world origin); circle r4 at sketch (-30,10) = world (30,10,0), extruded 5 along the face normal (-Z) as a new body.",
+ "exercises": [
+  "sketch_create",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "bl1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "bl2",
+     "start": {
+      "ref": "bl1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "bl3",
+     "start": {
+      "ref": "bl2.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "bl4",
+     "start": {
+      "ref": "bl3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "bl1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "bl1",
+        "bl2",
+        "bl3",
+        "bl4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Sketch2",
+   "plane": {
+    "ref": "face: bottom planar face of Box (z=0, normal -Z)",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     -1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     -1
+    ],
+    "face": {
+     "type": "plane",
+     "normal_at_point_on_face": [
+      0,
+      0,
+      -1
+     ],
+     "plane_normal_outward": [
+      0,
+      0,
+      -1
+     ],
+     "point": [
+      20,
+      15,
+      0
+     ]
+    }
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       -30,
+       10
+      ]
+     },
+     "radius": 4
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude2",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch2",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Peg"
+   ]
+  }
+ ]
+}

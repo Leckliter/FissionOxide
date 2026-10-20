@@ -1,0 +1,11 @@
+# 348-xz-plane-offset-mirror: added by the parity loop from a Fusion probe
+# xz-plane-offset-mirror: 10x10x6 box at the origin; construction plane offset 15 from the XZ origin plane; box mirrored across it as a second body.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [10, 0]]}
+{"cmd": "sketch.line", "points": [[10, 0], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "xz", "offset": 15}
+{"cmd": "mirror", "plane": {"feature": 3}, "bodies": [2000], "join": false}

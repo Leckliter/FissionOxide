@@ -1,0 +1,7 @@
+# 351-yz-negative-offset-sketch-extrude: added by the parity loop from a Fusion probe
+# yz-negative-offset-sketch-extrude: Construction plane offset -12 from the YZ origin plane (x=-12); r4 circle at (y=5, z=5) sketched on it, extruded 8 along +X (x -12..-4).
+{"cmd": "plane.offset", "plane": "yz", "offset": -12}
+{"cmd": "sketch.create", "plane": {"feature": 1}}
+{"cmd": "sketch.circle", "center": [5, 5], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 2, "distance": 8, "operation": "new_body"}

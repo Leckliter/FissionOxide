@@ -1,0 +1,10 @@
+# 437-point-tangent-dome: added by the parity loop from a Fusion probe
+# point-tangent-dome: Loft from a d40 circle (XY) to a point at (0,0,20) with a point-tangent end condition (weight 1): a dome, flat at the top.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.point", "at": [0, 0]}
+{"cmd": "sketch.finish"}
+# Fox's loft has no end conditions; this is a plain (point-sharp) loft to the apex
+{"cmd": "loft", "sections": [1, 2], "operation": "new_body"}

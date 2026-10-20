@@ -1,0 +1,12 @@
+# 293-circle-bump-on-rect: added by the parity loop from a Fusion probe
+# circle-bump-on-rect: 40x30 rectangle with a circle r8 centred on its top edge at (20,30); Trim the circle's lower half (at (20,22)), leaving the upper arc, then Trim the top edge between x=12 and 28 (at (20,30)); extrude the rectangle with its semicircular bump 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.circle", "center": [20, 30], "radius": 8}
+{"cmd": "sketch.trim", "at": [20, 22]}
+{"cmd": "sketch.trim", "at": [20, 30]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[5, 5]], "distance": 10, "operation": "new_body"}

@@ -1,0 +1,14 @@
+# 430-hole-to-plane-extent: added by the parity loop from a Fusion probe
+# hole-to-plane-extent: 40x30x20 plate; construction plane offset 8 above XY; on the top face at (20,15) a simple d6 hole with a 'To' extent ending on that plane (12 below the top face), 118 deg tip.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "XY", "offset": 8}
+{"cmd": "sketch.create", "plane": {"origin": [20, 15, 20], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.point", "at": [0, 0]}
+{"cmd": "sketch.finish"}
+{"cmd": "hole", "sketch": 4, "diameter": 6, "tip_angle": "118 deg", "to": {"plane": 3}}

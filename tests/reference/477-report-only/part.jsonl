@@ -1,0 +1,8 @@
+# 477-report-only: added by the parity loop from a Fusion probe
+# Two 20 mm cubes overlapping by 10 mm in X, each in its own component; Interference only
+# reports the 10x20x20 = 4000 mm3 overlap (Fusion asserts it) and adds no body.
+{"cmd": "box", "at": [10, 10], "width": 20, "depth": 20, "height": 20, "operation": "new_body"}
+{"cmd": "box", "at": [20, 10], "width": 20, "depth": 20, "height": 20, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [1000]}
+{"cmd": "component.create", "name": "B", "bodies": [2000]}
+{"cmd": "assembly.interference"}

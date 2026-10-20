@@ -1,0 +1,4 @@
+# 453-sphere-xy-offset-center: added by the parity loop from a Fusion probe
+# sphere-xy-offset-center: Sphere primitive on XY, centre (10,5) in plane coords, diameter 30, new body: spans X -5..25, Y -10..20, Z -15..15.
+# hand-written; Fusion side is the equivalent semicircle revolved 360 deg about its diameter
+{"cmd": "sphere", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [10, 5], "diameter": 30}

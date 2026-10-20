@@ -1,0 +1,12 @@
+# 243-offset-box-revolve-join: added by the parity loop from a Fusion probe
+# offset-box-revolve-join: box x 10..20, y -5..5, z 0..10; spun profile of it around Z onto an XZ
+# sketch (rectangle r 10..sqrt(425), z 0..10), revolved 360 about Z with join -> annulus 10210.2 mm3.
+# Fox has no spun-profile command; sketch.spun_profile below is the missing feature.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [10, -5], "corner2": [20, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spun_profile", "bodies": ["Body1"], "axis": "z"}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 3, "axis": "z", "angle": 360, "operation": "join"}

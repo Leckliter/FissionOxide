@@ -1,0 +1,9 @@
+# 209-slanted-line-cylinder-face: added by the parity loop from a Fusion probe
+# r10 h30 cylinder on XY; a sketch on XZ holds a slanted line (-10,5)-(10,25). Fusion turns it into
+# a 3D Intersection Curve with the cylinder's side face (a slanted ellipse) and runs a d2 pipe along
+# it. Fox has no intersection-curve command, so the closest script pipes along the flat line itself.
+{"cmd": "cylinder", "radius": 10, "height": 30}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-10, 5], [10, 25]]}
+{"cmd": "sketch.finish"}
+{"cmd": "pipe", "path": 2, "diameter": 2, "operation": "new_body"}

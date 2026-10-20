@@ -1,0 +1,179 @@
+{
+ "id": "torus-center-split",
+ "name": "torus-center-split",
+ "description": "Torus (R5 circle at (20,0,15) on XZ revolved about Z), centre (0,0,15); point at the toroidal face's centre; plane through it and (100,0,0), (0,100,0); torus split by the tilted plane.",
+ "exercises": [
+  "construction_point center",
+  "construction_plane three_points",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Profile",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": [
+      20,
+      -15
+     ],
+     "radius": 5
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Revolve1",
+   "operation": "new",
+   "profile": {
+    "sketch": "Profile",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "c1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "ref": "world Z axis",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Ring"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Pts",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "point",
+     "id": "pA",
+     "at": [
+      100,
+      0
+     ]
+    },
+    {
+     "type": "point",
+     "id": "pB",
+     "at": [
+      0,
+      100
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_point",
+   "name": "C",
+   "method": "center",
+   "face": {
+    "point": [
+     0,
+     25,
+     15
+    ],
+    "type": "Torus"
+   }
+  },
+  {
+   "op": "construction_plane",
+   "name": "P3",
+   "method": "three_points",
+   "a": {
+    "ref": "C"
+   },
+   "b": {
+    "sketch": "Pts",
+    "point": "pA"
+   },
+   "c": {
+    "sketch": "Pts",
+    "point": "pB"
+   }
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "Ring",
+   "tool": "P3",
+   "extend_tool": true,
+   "result_bodies": [
+    "Ring",
+    "Ring (1)"
+   ]
+  }
+ ]
+}

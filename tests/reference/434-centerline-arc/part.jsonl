@@ -1,0 +1,12 @@
+# 434-centerline-arc: added by the parity loop from a Fusion probe
+# centerline-arc: Loft from a d20 circle (z=0) to a d10 circle (z=40), both centred on Z, along a centre-line arc on XZ through (8,0,20).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 40], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [0, 0], "mid": [8, -20], "end": [0, -40]}
+{"cmd": "sketch.finish"}
+{"cmd": "loft", "sections": [1, 2], "centerline": 3, "operation": "new_body"}
