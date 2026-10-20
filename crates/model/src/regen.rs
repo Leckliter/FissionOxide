@@ -386,7 +386,6 @@ struct Ctx<'a> {
   /// The design's behaviour flags: gate a feature-level geometry change on
   /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
   /// [`fox_sketch::behaviour`].
-  #[allow(dead_code)] // read by the first regen-level gate
   behaviours: &'a crate::Behaviours,
 }
 

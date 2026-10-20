@@ -3,6 +3,7 @@
 
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
+use fox_sketch::behaviour::ISO_THREADS;
 use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
@@ -38,25 +39,33 @@ impl Ctx<'_> {
         if faces.is_empty() {
           return Err("select cylindrical faces to thread".into());
         }
+        // a designation is new data no file from before ISO_THREADS has, so it always gets the
+        // ISO behaviour; a plain thread in an older design rebuilds the legacy way
+        let iso = self.behaviours.has(ISO_THREADS) || !designation.trim().is_empty();
         let mut labels = Vec::new();
         for fr in faces.iter_mut() {
-          let (bi, info) = self.face_info(fr)?;
+          let (bi, info) = if iso { self.thread_face_info(fr)? } else { self.face_info(fr)? };
           if info.kind != SurfaceKind::Cylinder {
             return Err("threads go on cylindrical faces".into());
+          }
+          if !iso {
+            labels.push(self.legacy_thread(id, bi, &info, pitch, length, offset, *modeled, *left, *flip)?);
+            continue;
           }
           let (o, d, r) = (info.origin, canonical_axis(info.normal.normalize()), info.radius);
           let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
           let (t0, t1) = self.exact_extent(bi, info.id, o, d, (t0, t1));
-          let dims = if designation.trim().is_empty() {
+          let (dims, label) = if designation.trim().is_empty() {
             let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
             if p <= 0.0 {
               return Err("the pitch must be positive".into());
             }
-            crate::thread::basic_dims(2.0 * r, p, !external)
+            (crate::thread::basic_dims(2.0 * r, p, !external), format!("M{}x{}", trim(2.0 * r), trim(p)))
           } else {
             let (nominal, p) = crate::thread::parse_designation(designation)
               .ok_or_else(|| format!("unknown thread size '{designation}' (ISO metric, as M10x1.5)"))?;
-            crate::thread::iso_dims(nominal, p, class, !external)?
+            crate::thread::check_drawn_size(nominal, p, 2.0 * r, !external)?;
+            (crate::thread::iso_dims(nominal, p, class, !external)?, format!("M{}x{}", trim(nominal), trim(p)))
           };
           let p = dims.pitch;
           let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
@@ -71,13 +80,17 @@ impl Ctx<'_> {
           if (rc - r).abs() > 1e-7 {
             self.resize_cylinder(id, bi, (o, d), (t0, t1), (r, rc), external)?;
           }
-          labels.push(format!("M{}x{}", trim(2.0 * r), trim(p)));
+          labels.push(label);
           if *modeled {
             let groove = thread_groove(o, d, (a, b), &dims, external, *left).map_err(ke)?;
             let body = &self.state.bodies[bi];
-            // one crest face, not a strip per turn
-            let shape =
-              body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?.merge_cylinder_strips().map_err(ke)?;
+            // one crest face, not a strip per turn: only the threaded face's strips merge
+            let shape = body
+              .shape
+              .boolean(&groove, BoolOp::Subtract)
+              .map_err(ke)?
+              .merge_cylinder_strips(o, d, rc, (t0, t1))
+              .map_err(ke)?;
             let bid = body.id;
             self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
             self.split_multi(id, bid);
@@ -517,6 +530,31 @@ impl Ctx<'_> {
     Ok((bi, info))
   }
 
+  /// Resolves a thread's face reference like [`Ctx::face_info`], but among cylinders scores how
+  /// far the picked point is off each one's surface too: a tube's bore and outside share a
+  /// centroid, and the plain score can't tell them apart. Only threads with [`ISO_THREADS`] use
+  /// it, so other features (and older threads) resolve as they did.
+  fn thread_face_info(&mut self, fr: &mut FaceRef) -> Result<(usize, FaceInfo), String> {
+    let bi = self.body_index(fr.body)?;
+    let body = &self.state.bodies[bi];
+    let (p, n0) = (DVec3::from(fr.point), DVec3::from(fr.normal));
+    let score = |f: &FaceInfo| {
+      let v = p - f.origin;
+      let off = ((v - f.normal * v.dot(f.normal)).length() - f.radius).abs();
+      (p - f.center).length() + off
+    };
+    let fid = body
+      .faces()
+      .iter()
+      .filter(|f| f.kind == SurfaceKind::Cylinder && f.normal.dot(n0).abs() >= 0.999)
+      .min_by(|a, b| score(a).total_cmp(&score(b)))
+      .map(|f| f.id);
+    let Some(fid) = fid else { return self.face_info(fr) };
+    refresh_face(fr, body, fid);
+    let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("a face could not be found")?;
+    Ok((bi, info))
+  }
+
   /// Resolves an edge reference to its body index and current edge (refreshing the reference).
   pub(super) fn edge_info(&mut self, e: &mut EdgeRef) -> Result<(usize, EdgeInfo), String> {
     let bi = self.body_index(e.body)?;
@@ -652,6 +690,49 @@ impl Ctx<'_> {
       }
     }
     lo.is_finite().then_some((lo, hi, votes >= 0.0))
+  }
+
+  /// A thread on one face as designs without [`ISO_THREADS`] build it: a sharp V groove from the
+  /// face's end along its own axis direction, swept the thread's length; returns its label.
+  #[allow(clippy::too_many_arguments)]
+  fn legacy_thread(
+    &mut self,
+    id: FeatureId,
+    bi: usize,
+    info: &FaceInfo,
+    pitch: &str,
+    length: &str,
+    offset: &str,
+    modeled: bool,
+    left: bool,
+    flip: bool,
+  ) -> Result<String, String> {
+    let (o, d, r) = (info.origin, info.normal.normalize(), info.radius);
+    let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
+    let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
+    if p <= 0.0 {
+      return Err("the pitch must be positive".into());
+    }
+    let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
+    let full = t1 - t0 - off;
+    let l = if length.trim().is_empty() { full } else { self.len(length)?.min(full) };
+    if l <= p * 0.5 {
+      return Err("the thread is shorter than half a pitch".into());
+    }
+    // the helix runs from the chosen end along the axis
+    let (start, dir) = if flip { (o + d * (t1 - off), -d) } else { (o + d * (t0 + off), d) };
+    let x = perpendicular(dir);
+    if modeled {
+      let groove = legacy_thread_groove(start, dir, x, r, p, l, external, left).map_err(ke)?;
+      let body = &self.state.bodies[bi];
+      let shape = body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?;
+      let bid = body.id;
+      self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+      self.split_multi(id, bid);
+    } else {
+      self.state.threads.push((id, helix_points(start, dir, x, r, p, l, left)));
+    }
+    Ok(format!("M{}x{}", trim(2.0 * r), trim(p)))
   }
 
   /// A cylindrical face's extent along its axis from its edges (exact, where the mesh's extent
@@ -1070,6 +1151,36 @@ fn thread_groove(
   let sweep = face.helix_sweep(start, d, x, rp, p, span.1 - span.0 + 2.0 * p, left)?;
   let slab = Shape::cylinder(o + d * span.0, d, rc.max(rb) + p, span.1 - span.0)?;
   sweep.boolean(&slab, BoolOp::Intersect)
+}
+
+/// A thread's helical V groove as designs without [`ISO_THREADS`] build it: ISO 60° flanks, cut
+/// into the material from the cylinder of radius `r` (inwards on a boss, outwards in a hole).
+#[allow(clippy::too_many_arguments)]
+fn legacy_thread_groove(
+  start: DVec3,
+  dir: DVec3,
+  x: DVec3,
+  r: f64,
+  pitch: f64,
+  length: f64,
+  external: bool,
+  left: bool,
+) -> fox_kernel::Result<Shape> {
+  let h = if external { 0.6134 * pitch } else { 0.5413 * pitch };
+  // a little past the surface on the open side so the cut is clean
+  let base = 0.25 * h;
+  let half = (h + base) * (30f64).to_radians().tan();
+  let (apex, back) = if external { (-h, base) } else { (h, -base) };
+  let sec = Plane { origin: start + x * r, x, y: dir };
+  let outer = Loop {
+    segs: vec![
+      Seg::Line { a: [back, -half], b: [apex, 0.0] },
+      Seg::Line { a: [apex, 0.0], b: [back, half] },
+      Seg::Line { a: [back, half], b: [back, -half] },
+    ],
+  };
+  let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
+  face.helix_sweep(start, dir, x, r, pitch, length, left)
 }
 
 /// The axis direction a thread's low end is measured along: its largest component positive.

@@ -202,7 +202,7 @@ pub(crate) mod ffi {
 
     // merging the strips a helical cut leaves on a cylinder (cpp/threads.cpp)
     include!("fox-kernel/cpp/threads.hxx");
-    fn merge_cylinder_strips(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn merge_cylinder_strips(s: &Shape, axis: &[f64], radius: f64, lo: f64, hi: f64) -> Result<UniquePtr<Shape>>;
   }
 }
 

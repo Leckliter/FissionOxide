@@ -226,6 +226,27 @@ pub fn iso_dims(d: f64, p: f64, class: &str, internal: bool) -> Result<ThreadDim
   }
 }
 
+/// Checks that a cylinder drawn at diameter `drawn` suits nominal size `d` and pitch `p`: an
+/// external thread's rod near the nominal (major) diameter, an internal thread's bore near the
+/// basic minor diameter. Allows half a pitch or 3% of the nominal size, whichever is larger, so
+/// a designation never silently resizes the face to a different size of thread.
+pub fn check_drawn_size(d: f64, p: f64, drawn: f64, internal: bool) -> Result<(), String> {
+  let (want, what) = if internal { (d - 1.25 * h(p), "minor") } else { (d, "major") };
+  let tol = (0.5 * p).max(0.03 * d);
+  if (drawn - want).abs() > tol {
+    let fmt = |v: f64| format!("{:.3}", v).trim_end_matches('0').trim_end_matches('.').to_string();
+    return Err(format!(
+      "an M{}x{} thread needs a {} near Ø{} ({what} diameter), not Ø{}",
+      fmt(d),
+      fmt(p),
+      if internal { "hole" } else { "cylinder" },
+      fmt(want),
+      fmt(drawn)
+    ));
+  }
+  Ok(())
+}
+
 /// A thread on a cylinder of diameter `dia` with no designation: the basic profile (no
 /// allowances or tolerances), the cylinder being the major diameter outside, the minor inside.
 pub fn basic_dims(dia: f64, p: f64, internal: bool) -> ThreadDims {
@@ -263,5 +284,18 @@ mod tests {
     assert_eq!(parse_designation("m12"), Some((12.0, 1.75)));
     assert_eq!(parse_designation("10x1.5"), None);
     assert!((r40(174.0) - 170.0).abs() < 1e-9 && (r40(233.3) - 236.0).abs() < 1e-9);
+  }
+
+  #[test]
+  fn drawn_size_must_match_the_designation() {
+    // a Ø10 rod, or a Ø8.5 tap-drill bore, takes M10x1.5
+    assert!(check_drawn_size(10.0, 1.5, 10.0, false).is_ok());
+    assert!(check_drawn_size(10.0, 1.5, 9.85, false).is_ok());
+    assert!(check_drawn_size(10.0, 1.5, 8.5, true).is_ok());
+    // a Ø20 rod or a Ø10 bore does not
+    let e = check_drawn_size(10.0, 1.5, 20.0, false).unwrap_err();
+    assert!(e.contains("Ø10") && e.contains("Ø20"), "{e}");
+    assert!(check_drawn_size(10.0, 1.5, 10.0, true).is_err());
+    assert!(check_drawn_size(10.0, 1.5, 8.5, false).is_err());
   }
 }

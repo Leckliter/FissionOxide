@@ -29,7 +29,12 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Ax3.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Vec2d.hxx>
@@ -206,10 +211,24 @@ bool wrapping_axis(const TopoDS_Shape &s, gp_Ax1 &axis) {
   return found;
 }
 
-std::unique_ptr<Shape> merge_cylinder_strips(const Shape &s) {
+std::unique_ptr<Shape> merge_cylinder_strips(const Shape &s, rust::Slice<const double> axis, double radius, double lo,
+                                             double hi) {
   auto out = std::make_unique<Shape>();
   out->s = s.s;
   try {
+    if (axis.size() < 6) return out;
+    gp_Pnt ao(axis[0], axis[1], axis[2]);
+    gp_Dir ad(axis[3], axis[4], axis[5]);
+    gp_Cylinder target(gp_Ax3(ao, ad), radius);
+    double span_tol = 1e-6 * std::max(1.0, std::abs(hi - lo));
+    // whether every vertex of a face lies within lo..hi along the axis
+    auto within = [&](const TopoDS_Face &f) {
+      for (TopExp_Explorer x(f, TopAbs_VERTEX); x.More(); x.Next()) {
+        double t = gp_Vec(ao, BRep_Tool::Pnt(TopoDS::Vertex(x.Current()))).Dot(gp_Vec(ad));
+        if (t < lo - span_tol || t > hi + span_tol) return false;
+      }
+      return true;
+    };
     // work on a copy of the topology: the merge rewrites edges' curves on the faces
     TopoDS_Shape c = BRepBuilderAPI_Copy(s.s, Standard_False).Shape();
     TopTools_IndexedMapOfShape fmap;
@@ -218,8 +237,9 @@ std::unique_ptr<Shape> merge_cylinder_strips(const Shape &s) {
     std::vector<bool> is_cyl(n + 1, false);
     std::vector<gp_Cylinder> cyl(n + 1);
     for (int i = 1; i <= n; ++i) {
-      BRepAdaptor_Surface a(TopoDS::Face(fmap(i)), Standard_False);
-      if (a.GetType() == GeomAbs_Cylinder) {
+      const TopoDS_Face &f = TopoDS::Face(fmap(i));
+      BRepAdaptor_Surface a(f, Standard_False);
+      if (a.GetType() == GeomAbs_Cylinder && same_cylinder(a.Cylinder(), target) && within(f)) {
         is_cyl[i] = true;
         cyl[i] = a.Cylinder();
       }
