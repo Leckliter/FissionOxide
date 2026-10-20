@@ -1076,9 +1076,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
       if let Some(r) = ev.response {
         r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
-          if ui.button("Create Sketch").clicked() {
-            ui.close();
-            app.create_sketch(json!(plane));
+          let items = origin_plane_menu(app, plane);
+          if let Some(cmd) = row_menu(ui, &items) {
+            run_origin_plane_cmd(app, plane, cmd);
           }
         });
       }
@@ -1397,6 +1397,161 @@ fn reveal_row(app: &App, sel: Sel, r: &egui::Response) {
   }
 }
 
+/// A command on a browser row's context menu (sketch and origin-plane rows).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum RowCmd {
+  EditSketch,
+  ProfileVisibility,
+  DimensionVisibility,
+  LookAt,
+  SaveAsDxf,
+  FindInWindow,
+  ShowHide,
+  Rename,
+  Delete,
+  CreateSketch,
+  OffsetPlane,
+  /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
+  NotYet,
+}
+
+/// One row of a browser context menu.
+pub(crate) struct RowItem {
+  pub icon: Icon,
+  pub label: String,
+  pub cmd: RowCmd,
+}
+
+fn row_item(icon: Icon, label: &str, cmd: RowCmd) -> Option<RowItem> {
+  Some(RowItem { icon, label: label.into(), cmd })
+}
+
+/// A sketch row's menu, as Fusion's (`None` is a separator).
+pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
+  let profiles = !app.hidden_profiles.contains(&fid);
+  let dims = app.shown_dims.contains(&fid);
+  let visible = fox_engine::scene::sketch_visible(&app.s, fid);
+  vec![
+    row_item(Icon::Sketch, "Edit Sketch", RowCmd::EditSketch),
+    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::NotYet),
+    row_item(Icon::Section, "Slice Sketch", RowCmd::NotYet),
+    None,
+    row_item(Icon::SketchSmall, if profiles { "Hide Profile" } else { "Show Profile" }, RowCmd::ProfileVisibility),
+    row_item(Icon::Dimension, if dims { "Hide Dimensions" } else { "Show Dimensions" }, RowCmd::DimensionVisibility),
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_item(Icon::ExportDxf, "Save As DXF", RowCmd::SaveAsDxf),
+    None,
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    row_item(Icon::Remove, "Delete", RowCmd::Delete),
+    None,
+    row_item(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
+
+/// An origin plane row's menu ("xy", "xz" or "yz"), as Fusion's.
+pub(crate) fn origin_plane_menu(app: &App, plane: &str) -> Vec<Option<RowItem>> {
+  let shown = app.shown_planes.contains(&json!(plane));
+  vec![
+    row_item(Icon::Sketch, "Create Sketch", RowCmd::CreateSketch),
+    row_item(Icon::Plane, "Offset Plane", RowCmd::OffsetPlane),
+    None,
+    row_item(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
+
+/// Draws a row menu; returns the command clicked.
+fn row_menu(ui: &mut egui::Ui, items: &[Option<RowItem>]) -> Option<RowCmd> {
+  let mut picked = None;
+  for it in items {
+    let Some(it) = it else {
+      ui.separator();
+      continue;
+    };
+    if it.cmd == RowCmd::NotYet {
+      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, None))
+        .inner
+        .on_disabled_hover_text("Not in FissionOxide yet");
+    } else if menu_item(ui, it.icon, &it.label, None).clicked() {
+      ui.close();
+      picked = Some(it.cmd);
+    }
+  }
+  picked
+}
+
+/// Runs a sketch row's menu command.
+pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: RowCmd) {
+  let toggle = |v: &mut Vec<FeatureId>| {
+    if let Some(i) = v.iter().position(|f| *f == fid) {
+      v.remove(i);
+    } else {
+      v.push(fid);
+    }
+  };
+  match cmd {
+    RowCmd::EditSketch => app.edit_sketch(fid),
+    RowCmd::ProfileVisibility => toggle(&mut app.hidden_profiles),
+    RowCmd::DimensionVisibility => toggle(&mut app.shown_dims),
+    RowCmd::LookAt => {
+      if let Some(plane) = app.s.model.sketches.get(&fid).map(|r| r.plane) {
+        app.look_at_plane(&plane);
+      }
+    }
+    RowCmd::SaveAsDxf => {
+      let Some(p) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name(format!("{name}.dxf")).save_file()
+      else {
+        return;
+      };
+      if app.run("export", json!({"path": p, "sketch": fid.0})).is_some() {
+        app.status = Some((format!("Saved {name} as {}", p.display()), false));
+      }
+    }
+    RowCmd::FindInWindow => marking::find_in_window(app, &[], Some(fid)),
+    RowCmd::ShowHide => {
+      let visible = fox_engine::scene::sketch_visible(&app.s, fid);
+      app.run("sketch.visible", json!({"sketch": fid.0, "visible": !visible}));
+    }
+    RowCmd::Rename => app.rename = Some((RenameTarget::Feature(fid.0), name.to_string())),
+    RowCmd::Delete => {
+      app.run("feature.delete", json!({"feature": fid.0}));
+    }
+    RowCmd::CreateSketch | RowCmd::OffsetPlane | RowCmd::NotYet => {}
+  }
+}
+
+/// Runs an origin plane row's menu command.
+pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
+  let pl = match plane {
+    "xz" => fox_engine::kernel::Plane::XZ,
+    "yz" => fox_engine::kernel::Plane::YZ,
+    _ => fox_engine::kernel::Plane::XY,
+  };
+  match cmd {
+    RowCmd::CreateSketch => app.create_sketch(json!(plane)),
+    RowCmd::OffsetPlane => {
+      app.s.selection.clear();
+      app.start(Kind::OffsetPlane);
+      if let Some(d) = app.dialog.as_mut() {
+        d.use_origin_plane(&mut app.s, plane);
+      }
+    }
+    RowCmd::ShowHide => {
+      let v = json!(plane);
+      if let Some(i) = app.shown_planes.iter().position(|p| *p == v) {
+        app.shown_planes.remove(i);
+      } else {
+        app.shown_planes.push(v);
+      }
+    }
+    RowCmd::LookAt => app.look_at_plane(&pl),
+    RowCmd::FindInWindow => marking::find_plane_in_window(app, &pl),
+    _ => {}
+  }
+}
+
 fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
   let sketches: Vec<(FeatureId, String)> = app
     .s
@@ -1439,18 +1594,9 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
         marking::peek(app, Vec::new(), name.clone());
       }
       r.on_hover_text("Double-click to edit").context_menu(|ui| {
-        if ui.button("Edit Sketch").clicked() {
-          ui.close();
-          app.edit_sketch(fid);
-        }
-        if ui.button("Rename").clicked() {
-          ui.close();
-          app.rename = Some((RenameTarget::Feature(fid.0), name.clone()));
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": fid.0}));
+        let items = sketch_menu(app, fid);
+        if let Some(cmd) = row_menu(ui, &items) {
+          run_sketch_cmd(app, fid, &name, cmd);
         }
       });
     }
@@ -2156,6 +2302,39 @@ fn marker(ui: &mut egui::Ui) {
 }
 
 /// Applies a constraint to the current sketch selection.
+/// UnFix: when every selected point, and every point of each selected curve, is fixed, deletes
+/// those Fix constraints (and a selected circle's fixed radius). Returns whether it did.
+fn unfix(app: &mut App, sk: FeatureId, points: &[u32], curves: &[u32]) -> bool {
+  use fox_engine::sketch::{ConstraintKind, CurveId, PointId};
+  let Ok(sketch) = app.s.design.sketch(sk) else { return false };
+  let mut pts: Vec<PointId> = points.iter().map(|p| PointId(*p)).collect();
+  for c in curves {
+    pts.extend(sketch.curve_points(CurveId(*c)));
+  }
+  if pts.is_empty() {
+    return false;
+  }
+  let fix_of = |p: PointId| {
+    sketch.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Fix { p: q, .. } if q == p)).map(|c| c.id.0)
+  };
+  // points pinned by the sketch itself (its origin) count as fixed but have nothing to delete
+  let pinned = |p: PointId| sketch.point(p).is_some_and(|pt| pt.fixed);
+  if !pts.iter().all(|p| fix_of(*p).is_some() || pinned(*p)) {
+    return false;
+  }
+  let mut cons: Vec<u32> = pts.iter().filter_map(|p| fix_of(*p)).collect();
+  if cons.is_empty() {
+    return false;
+  }
+  cons.extend(sketch.constraints.iter().filter_map(|c| match c.kind {
+    ConstraintKind::FixRadius { curve, .. } if curves.contains(&curve.0) => Some(c.id.0),
+    _ => None,
+  }));
+  cons.sort_unstable();
+  cons.dedup();
+  app.run("sketch.delete", json!({"sketch": sk.0, "constraints": cons})).is_some()
+}
+
 pub fn apply_constraint(app: &mut App, kind: &str) {
   let Some(sk) = app.s.edit_sketch else { return };
   let mut points = Vec::new();
@@ -2201,6 +2380,10 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     if any {
       app.s.selection.clear();
     }
+    return;
+  }
+  // Fix/UnFix: geometry that's already fixed is unfixed
+  if kind == "fix" && unfix(app, sk, &points, &curves) {
     return;
   }
   // H/V on several lines: one constraint each
@@ -2450,3 +2633,79 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
 
 mod browser_assembly;
 mod browser_config;
+
+#[cfg(test)]
+mod row_menu_tests {
+  use super::*;
+
+  fn labels(items: &[Option<RowItem>]) -> Vec<String> {
+    items.iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_else(|| "-".into())).collect()
+  }
+
+  fn sketched() -> (App, FeatureId) {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+    app.finish_sketch();
+    (app, sk)
+  }
+
+  #[test]
+  fn sketch_row_menu_is_fusions() {
+    let (mut app, sk) = sketched();
+    let l = labels(&sketch_menu(&app, sk));
+    assert_eq!(
+      l,
+      [
+        "Edit Sketch",
+        "Redefine Sketch Plane",
+        "Slice Sketch",
+        "-",
+        "Hide Profile",
+        "Show Dimensions",
+        "Look At",
+        "Save As DXF",
+        "-",
+        "Rename",
+        "Delete",
+        "-",
+        "Show/Hide",
+        "Find in Window",
+      ]
+    );
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ProfileVisibility);
+    assert_eq!(app.hidden_profiles, vec![sk]);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::DimensionVisibility);
+    assert_eq!(app.shown_dims, vec![sk]);
+    let l = labels(&sketch_menu(&app, sk));
+    assert!(l.contains(&"Show Profile".into()) && l.contains(&"Hide Dimensions".into()), "{l:?}");
+    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
+    assert!(!fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
+    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::FindInWindow);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::LookAt);
+    assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::EditSketch);
+    assert_eq!(app.s.edit_sketch, Some(sk));
+  }
+
+  #[test]
+  fn origin_plane_menu_is_fusions() {
+    let mut app = App::with_session(Session::default());
+    let l = labels(&origin_plane_menu(&app, "xz"));
+    assert_eq!(l, ["Create Sketch", "Offset Plane", "-", "Show/Hide", "Look At", "Find in Window"]);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
+    assert_eq!(app.shown_planes, vec![json!("xz")]);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
+    assert!(app.shown_planes.is_empty());
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::LookAt);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::FindInWindow);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::OffsetPlane);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::OffsetPlane));
+    run_origin_plane_cmd(&mut app, "yz", RowCmd::CreateSketch);
+    assert!(app.s.edit_sketch.is_some());
+  }
+}
