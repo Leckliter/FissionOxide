@@ -1,0 +1,14 @@
+# 284-rounded-rect-outward-ring: added by the parity loop from a Fusion probe
+# rounded-rect-outward-ring: 40x30 rectangle with r5 sketch fillets on all corners; Offset of the whole chain 3 outward; the ring between them extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.fillet", "curves": [2, 5], "radius": 5}
+{"cmd": "sketch.fillet", "curves": [5, 8], "radius": 5}
+{"cmd": "sketch.fillet", "curves": [8, 10], "radius": 5}
+{"cmd": "sketch.fillet", "curves": [10, 2], "radius": 5}
+{"cmd": "sketch.offset", "curves": [2, 15, 5, 22, 8, 29, 10, 36], "distance": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, -1.5]], "distance": 10, "operation": "new_body"}
