@@ -291,3 +291,36 @@ fn inserted_hub_designs_update_and_unlink() {
   assert!(s.execute("component.insert", &json!({"item": item, "version": 9})).is_err());
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn arrange_lays_copies_flat_in_the_envelope() {
+  let mut s = Session::default();
+  // a plate standing on edge: its largest faces look along X
+  let (c, src) = part(&mut s, "Plate", [10.0, 50.0, 30.0], [200.0, 0.0]);
+  let r = run(
+    &mut s,
+    "arrange",
+    json!({"components": [{"component": c, "quantity": 3}], "length": 100, "width": 60, "spacing": 2, "frame": 1}),
+  );
+  let fid = r["feature"].as_u64().unwrap() as u32;
+  let placed: Vec<u64> = r["components"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+  assert_eq!(placed.len(), 3);
+  let envelope = r["envelope"].as_u64().unwrap() as u32;
+  let comps = &s.design.components;
+  assert!(comps.iter().any(|k| k.id.0 == envelope && k.name == "Envelope1" && k.parent.is_some()));
+  let copies: Vec<u32> = s.model.bodies.iter().filter(|b| b.id.0 / 1000 == fid).map(|b| b.id.0).collect();
+  assert_eq!(copies.len(), 3);
+  for b in &copies {
+    assert!(comps.iter().any(|k| placed.contains(&(k.id.0 as u64)) && k.bodies.iter().any(|x| x.0 == *b)));
+    let (lo, hi) = bbox(&s, *b);
+    assert!((hi.z - lo.z - 10.0).abs() < 1e-6 && lo.z.abs() < 1e-6, "{lo} {hi}");
+    assert!(lo.x > 1.0 - 1e-6 && lo.y > 1.0 - 1e-6 && hi.x < 99.0 + 1e-6 && hi.y < 59.0 + 1e-6, "{lo} {hi}");
+  }
+  // the source stays where it was
+  let (lo, _) = bbox(&s, src);
+  assert!((lo.x - 195.0).abs() < 1e-6);
+  // a smaller envelope can't take all three
+  let r = s.execute("feature.edit", &json!({"feature": fid, "set": {"length": "70"}})).unwrap();
+  let err = s.model.status(fox_model::FeatureId(fid)).and_then(|x| x.error.clone());
+  assert!(err.as_deref().is_some_and(|e| e.contains("don't fit")), "{r} {err:?}");
+}

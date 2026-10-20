@@ -2201,6 +2201,7 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
   }
 }
 
+mod arrange;
 mod direct;
 mod subasm;
 #[cfg(test)]

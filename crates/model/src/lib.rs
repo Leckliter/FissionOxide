@@ -9,6 +9,7 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod arrange;
 pub mod assembly;
 pub mod cam;
 pub mod config;
@@ -1284,6 +1285,24 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     clearance: String,
   },
+  /// Copies of components laid flat on their largest planar face and packed on a rectangular
+  /// envelope (`length` along the plane's X, `width` along its Y, from its origin) for
+  /// manufacturing; the sources stay where they are. See [`arrange`].
+  Arrange {
+    #[serde(default)]
+    items: Vec<arrange::ArrangeItem>,
+    plane: PlaneRef,
+    length: String,
+    width: String,
+    #[serde(default)]
+    solver: arrange::ArrangeSolver,
+    /// Smallest gap between parts.
+    #[serde(default = "zero")]
+    spacing: String,
+    /// Margin kept clear along the envelope's edges.
+    #[serde(default = "zero")]
+    frame: String,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1422,6 +1441,7 @@ impl FeatureKind {
       FeatureKind::InsertDesign { .. } => "Insert",
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
+      FeatureKind::Arrange { .. } => "Arrange",
     }
   }
 
@@ -1493,6 +1513,7 @@ impl FeatureKind {
       FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
+      FeatureKind::Arrange { plane, .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -2197,6 +2218,11 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::RigidGroup { .. } => {}
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
+    FeatureKind::Arrange { length, width, spacing, frame, .. } => {
+      for e in [length, width, spacing, frame] {
+        f(e);
+      }
+    }
   }
 }
 

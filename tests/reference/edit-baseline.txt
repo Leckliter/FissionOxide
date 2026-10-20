@@ -58,3 +58,5 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+483-plane-envelope-rectangular
+484-true-shape-rotation-frame

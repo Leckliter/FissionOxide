@@ -480,6 +480,7 @@ impl Ctx<'_> {
       | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
+      FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
