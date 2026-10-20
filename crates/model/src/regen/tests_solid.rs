@@ -427,3 +427,64 @@ fn old_files_open_without_the_new_fields() {
   let k: FeatureKind = serde_json::from_str(json).unwrap();
   assert!(matches!(k, FeatureKind::Loft { ref rails, centerline: None, .. } if rails.is_empty()));
 }
+
+/// A design with a 15 mm construction plane offset from XZ and a cube built on it, with the
+/// given behaviours: where the plane and the cube end up along Y.
+fn xz_offset_plane_y(behaviours: Behaviours) -> (f64, f64) {
+  let mut d = Design::new("xz offset");
+  d.behaviours = behaviours;
+  let pl = offset_plane(&mut d, XZ, "15");
+  let f =
+    primitive(&mut d, Primitive::Box { width: "4".into(), depth: "4".into(), height: "2".into() }, pl, [0.0, 0.0]);
+  let m = regenerate(&mut d);
+  ok(&m);
+  let plane = m.planes.values().next().unwrap();
+  let b = bodies_of(&m, f)[0];
+  (plane.origin.y, b.shape.mass().unwrap().center_of_mass.y)
+}
+
+#[test]
+fn xz_offset_plane_follows_the_design_behaviour() {
+  // a design saved before XZ_OFFSET_PLUS_Y offsets along the XZ frame's normal, -Y, as before #62
+  let (plane, body) = xz_offset_plane_y(Behaviours::legacy());
+  assert!((plane + 15.0).abs() < 1e-9, "legacy plane at y = {plane}");
+  // the cube sits on the plane, 2 mm high along its normal (-Y): centre 1 mm below it
+  assert!((body + 16.0).abs() < 1e-6, "legacy body at y = {body}");
+  // a new design offsets along +Y, as in Fusion
+  let (plane, body) = xz_offset_plane_y(Design::new("n").behaviours);
+  assert!((plane - 15.0).abs() < 1e-9, "new plane at y = {plane}");
+  assert!((body - 14.0).abs() < 1e-6, "new body at y = {body}");
+  assert!(Behaviours::current().has(fox_sketch::behaviour::XZ_OFFSET_PLUS_Y));
+}
+
+/// Box 40x40x20 intersected with two overlapping cylinders r=15 h=30 at (10,20) and (30,20)
+/// (reference case 493), with the given behaviours: the result's volume.
+fn intersect_two_tools_volume(behaviours: Behaviours) -> f64 {
+  let mut d = Design::new("intersect");
+  d.behaviours = behaviours;
+  let target =
+    primitive(&mut d, Primitive::Box { width: "40".into(), depth: "40".into(), height: "20".into() }, XY, [20.0, 20.0]);
+  let cyl = || Primitive::Cylinder { radius: "15".into(), height: "30".into() };
+  let t1 = primitive(&mut d, cyl(), XY, [10.0, 20.0]);
+  let t2 = primitive(&mut d, cyl(), XY, [30.0, 20.0]);
+  let m = regenerate(&mut d);
+  ok(&m);
+  let id = |f| bodies_of(&m, f)[0].id;
+  let (target, tools) = (id(target), vec![id(t1), id(t2)]);
+  d.add_feature(FeatureKind::Combine { target, tools, operation: Operation::Intersect, keep_tools: false }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 1);
+  vol(&m.bodies[0])
+}
+
+#[test]
+fn multi_tool_intersect_follows_the_design_behaviour() {
+  // a design saved before INTERSECT_ANY_TOOL keeps target ∩ t1 ∩ t2, as before #92
+  let old = intersect_two_tools_volume(Behaviours::legacy());
+  assert!(close(old, 3097.0, 0.01), "legacy volume {old}");
+  // a new design keeps target ∩ (t1 ∪ t2), as in Fusion
+  let new = intersect_two_tools_volume(Design::new("n").behaviours);
+  assert!(close(new, 22079.37, 1e-3), "new volume {new}");
+  assert!(Behaviours::current().has(fox_sketch::behaviour::INTERSECT_ANY_TOOL));
+}

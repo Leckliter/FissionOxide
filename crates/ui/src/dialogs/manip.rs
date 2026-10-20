@@ -643,4 +643,21 @@ mod tests {
     assert!((offset_at(&sketch, &rect, [35.0, 5.0]).unwrap() - 5.0).abs() < 1e-9);
     assert!((offset_at(&sketch, &rect, [25.0, 8.0]).unwrap() + 2.0).abs() < 1e-9);
   }
+
+  #[test]
+  fn offset_plane_arrow_follows_the_design_behaviour() {
+    let arrow = |legacy: bool| {
+      let mut s = Session::default();
+      if legacy {
+        s.design.behaviours = fox_engine::model::Behaviours::legacy();
+      }
+      let mut d = Dialog::blank(Kind::OffsetPlane);
+      d.plane = json!("xz");
+      d.distance = "10 mm".into();
+      d.manipulator(&s).unwrap()
+    };
+    // a new design offsets from XZ along +Y; one from before XZ_OFFSET_PLUS_Y along -Y
+    assert!(close(arrow(false).dir, DVec3::Y), "{:?}", arrow(false));
+    assert!(close(arrow(true).dir, -DVec3::Y), "{:?}", arrow(true));
+  }
 }

@@ -354,10 +354,12 @@ impl OriginPlane {
     }
   }
 
-  /// Which way a positive offset from this plane moves along `plane().normal()`: Fusion offsets
-  /// from XZ along +Y, the opposite of the XZ frame's normal (X right, Z up).
-  pub fn offset_sign(self) -> f64 {
-    if self == OriginPlane::Xz { -1.0 } else { 1.0 }
+  /// Which way a positive offset from this plane moves along `plane().normal()` in a design made
+  /// with `behaviours`: Fusion offsets from XZ along +Y, the opposite of the XZ frame's normal
+  /// (X right, Z up). Designs from before [`sketch::behaviour::XZ_OFFSET_PLUS_Y`] offset along
+  /// the normal.
+  pub fn offset_sign(self, behaviours: &Behaviours) -> f64 {
+    if self == OriginPlane::Xz && behaviours.has(sketch::behaviour::XZ_OFFSET_PLUS_Y) { -1.0 } else { 1.0 }
   }
 }
 

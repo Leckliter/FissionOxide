@@ -59,10 +59,19 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// A construction plane offset from the XZ origin plane moves along +Y for a positive offset, as
+/// in Fusion (#62). Without it a positive offset moves along the XZ frame's normal, -Y.
+pub const XZ_OFFSET_PLUS_Y: &str = "xz_offset_plus_y";
+/// Combine Intersect with several tools keeps the part of the target inside any tool,
+/// target ∩ (t1 ∪ t2 ∪ …), as in Fusion (#92). Without it the target is intersected with each
+/// tool in turn, target ∩ t1 ∩ t2 ∩ ….
+pub const INTERSECT_ANY_TOOL: &str = "intersect_any_tool";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  XZ_OFFSET_PLUS_Y,
+  INTERSECT_ANY_TOOL,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
