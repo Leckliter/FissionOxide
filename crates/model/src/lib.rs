@@ -810,11 +810,14 @@ pub enum FeatureKind {
     #[serde(default)]
     kind: HoleKind,
     diameter: String,
-    /// Depth of the full-diameter part; ignored when `through_all`.
+    /// Depth of the full-diameter part; ignored when `through_all` or `to` is set.
     #[serde(default = "zero")]
     depth: String,
     #[serde(default)]
     through_all: bool,
+    /// 'To' extent: each hole's full-diameter part ends on this plane (the tip goes past it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<PlaneRef>,
     /// Drill point angle (0 = flat bottom).
     #[serde(default = "drill_point")]
     tip_angle: String,
@@ -1637,8 +1640,8 @@ impl FeatureKind {
       FeatureKind::Extrude { sketch, .. }
       | FeatureKind::Flange { sketch, .. }
       | FeatureKind::ContourFlange { sketch, .. }
-      | FeatureKind::Hole { sketch, .. }
       | FeatureKind::Bend { sketch, .. } => vec![*sketch],
+      FeatureKind::Hole { sketch, to, .. } => std::iter::once(*sketch).chain(to.iter().flat_map(plane_dep)).collect(),
       FeatureKind::Loft { sections, rails, centerline, .. } => {
         sections.iter().map(|s| s.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
       }
