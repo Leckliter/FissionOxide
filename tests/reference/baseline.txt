@@ -123,6 +123,8 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+243-offset-box-revolve-join
+244-sphere-flip-extrude
 205-vertical-edge-sweep-path
 206-sketch-line-sweep-path
 217-midpoint-line-on-origin-resize

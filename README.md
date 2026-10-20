@@ -122,7 +122,8 @@ change a parameter and watch the whole history rebuild.
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
-  follows the body when it changes). Trim, break, extend and offset work on splines and
+  follows the body when it changes), and Spun Profile (the outline bodies sweep through as
+  they turn about an axis, drawn on one side of it; it also follows the bodies). Trim, break, extend and offset work on splines and
   ellipses too; what is left of an ellipse is an elliptical arc, of a fit-point spline a
   fit-point spline, and of other splines an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on

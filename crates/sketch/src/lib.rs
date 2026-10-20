@@ -18,6 +18,7 @@ mod freeform;
 mod profile;
 mod quintic;
 mod solve;
+mod spun;
 mod tangent;
 mod text;
 mod transform;
@@ -34,6 +35,7 @@ pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use quintic::{QUINTIC_POINTS, quintic_at, quintic_beziers, quintic_spans};
 pub use solve::{SolveReport, SolveStatus};
+pub use spun::{SketchSpun, SpunAxis, SpunId, SpunSeg};
 pub use text::{HAlign, SketchText, TextAlign, TextId, TextPath, TextStyle, VAlign, text_fonts};
 pub use transform::{TransformReport, Xform2};
 
@@ -59,6 +61,9 @@ pub struct Sketch {
   /// generates (sketches from before text was editable have none, only exploded curves).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub texts: Vec<SketchText>,
+  /// Spun profiles: outlines of bodies turned about an axis, kept up to date by the model.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub spuns: Vec<SketchSpun>,
   /// Included 3D geometry (Include 3D Geometry): curves kept at their world positions, off the
   /// sketch plane, usable as sweep paths and rails but never part of a profile.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -473,6 +478,7 @@ impl Sketch {
       constraints: Vec::new(),
       next_id: 1,
       texts: Vec::new(),
+      spuns: Vec::new(),
       curves3d: Vec::new(),
     }
   }
@@ -618,6 +624,9 @@ impl Sketch {
     if let Some(t) = self.text_of(id) {
       return self.remove_text(t);
     }
+    if let Some(sp) = self.spun_of(id) {
+      return self.remove_spun(sp);
+    }
     if self.curve3d(id).is_some() {
       self.curves3d.retain(|c| c.id != id);
       return Ok(());
@@ -651,6 +660,9 @@ impl Sketch {
     }
     if let Some(t) = self.texts.iter().find(|t| t.anchor == id || t.points.contains(&id)).map(|t| t.id) {
       return self.remove_text(t);
+    }
+    if let Some(sp) = self.spuns.iter().find(|s| s.points.contains(&id)).map(|s| s.id) {
+      return self.remove_spun(sp);
     }
     let users: Vec<CurveId> =
       self.curves.iter().filter(|c| curve_points(&c.kind).contains(&id)).map(|c| c.id).collect();

@@ -1037,3 +1037,7 @@ pub use path3d::Seg3;
 
 mod form;
 pub use form::BSplineSurface;
+mod spun;
+pub use spun::AxialEvents;
+#[cfg(test)]
+mod tests_spun;

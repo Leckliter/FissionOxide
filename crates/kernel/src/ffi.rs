@@ -224,6 +224,11 @@ pub(crate) mod ffi {
     fn split_seams(s: &Shape) -> Result<UniquePtr<Shape>>;
     fn child_count(s: &Shape) -> usize;
     fn child_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
+
+    // spun profiles: a body's reach from an axis along it (cpp/spun.cpp)
+    include!("fox-kernel/cpp/spun.hxx");
+    fn axial_events(s: &Shape, axis: &[f64]) -> Result<Vec<f64>>;
+    fn radial_slices(s: &Shape, axis: &[f64], ts: &[f64]) -> Result<Vec<f64>>;
   }
 }
 
