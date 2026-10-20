@@ -100,7 +100,7 @@ cmds! {
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
-  "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
+  "sketch.fillet" => "Round the corner where two lines or arcs meet at an end with a tangent arc", "{curves: [line|arc, line|arc], radius}";
   "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
@@ -1939,7 +1939,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     };
     let made = match op {
       Op::Fillet(r) => {
-        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a fillet needs two lines")) };
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a fillet needs two lines or arcs")) };
         vec![sketch.fillet(*a, *b, r)?]
       }
       Op::Chamfer(d1, d2) => {

@@ -2,7 +2,7 @@
 //! extend, mirror, and rectangular / circular patterns.
 
 use std::collections::HashMap;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::TAU;
 
 use crate::{
   ConstraintKind, CurveId, CurveKind, Dim, PointId, Sketch, SketchError, angle_of, ccw_sweep, curve_points, dist,
@@ -213,6 +213,51 @@ pub(crate) fn meet(g: &Geo, h: &Geo) -> Vec<P> {
   }
 }
 
+/// The unit direction a line or arc leaves its first end (`at_start`) or its last end in, into
+/// the curve.
+fn leaving(g: &Geo, at_start: bool) -> Option<P> {
+  match *g {
+    Geo::Line { a, b } => unit(if at_start { sub(b, a) } else { sub(a, b) }),
+    Geo::Arc { c, sweep, .. } => {
+      let q = g.at(if at_start { 0.0 } else { sweep });
+      let t = unit([c[1] - q[1], q[0] - c[0]])?;
+      Some(if at_start { t } else { mul(t, -1.0) })
+    }
+  }
+}
+
+/// The curve offset by `d` to the side of its normal `n` at `p` (a point of the curve), as an
+/// infinite line or full circle; `None` when an arc is too tight to offset inwards that far.
+fn offset_towards(g: &Geo, p: P, n: P, d: f64) -> Option<Geo> {
+  Some(match *g {
+    Geo::Line { a, b } => Geo::Line { a: add(a, mul(n, d)), b: add(b, mul(n, d)) },
+    Geo::Arc { c, r, .. } => {
+      let r = if dot(n, sub(p, c)) > 0.0 { r + d } else { r - d };
+      if r <= EPS {
+        return None;
+      }
+      Geo::Arc { c, r, a0: 0.0, sweep: TAU }
+    }
+  })
+}
+
+/// Where a fillet centred at `c` touches curve `g`, if that is strictly inside the curve, so the
+/// curve keeps a piece once it is trimmed back from its first (`at_start`) or last end.
+fn trim_point(g: &Geo, at_start: bool, c: P) -> Option<P> {
+  let (t, len) = match *g {
+    Geo::Line { a, b } => {
+      let d = unit(sub(b, a))?;
+      let t = add(a, mul(d, dot(sub(c, a), d)));
+      (t, dist(a, b))
+    }
+    Geo::Arc { c: o, r, sweep, .. } => (add(o, mul(unit(sub(c, o))?, r)), sweep),
+  };
+  let s = g.param(t) * if matches!(g, Geo::Line { .. }) { len } else { 1.0 };
+  let s = if at_start { s } else { len - s };
+  let tol = 1e-9 * len.max(1.0);
+  (s > tol && s < len - tol).then_some(t)
+}
+
 impl Sketch {
   pub(crate) fn geo(&self, id: CurveId) -> Option<Geo> {
     Some(match self.curve(id)?.kind {
@@ -312,8 +357,9 @@ impl Sketch {
 
   // ---------------------------------------------------------------- fillet
 
-  /// Rounds the corner where two lines meet with an arc of `radius`, tangent to both (the lines
-  /// are trimmed back). The radius becomes a driving dimension.
+  /// Rounds the corner where two lines or arcs meet at an end with an arc of `radius`, tangent
+  /// to both (the curves are trimmed back to the tangent points). The radius becomes a driving
+  /// dimension.
   pub fn fillet(&mut self, l1: CurveId, l2: CurveId, radius: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
@@ -322,37 +368,45 @@ impl Sketch {
     }
     let ends = |s: &Sketch, id: CurveId| match s.curve(id).map(|c| &c.kind) {
       Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
-      _ => Err(SketchError::WrongGeometry("a sketch fillet", "two lines")),
+      Some(CurveKind::Arc { start, end, .. }) => Ok((*start, *end)),
+      _ => Err(SketchError::WrongGeometry("a sketch fillet", "two lines or arcs")),
     };
     let (a1, b1) = ends(self, l1)?;
     let (a2, b2) = ends(self, l2)?;
-    // the shared corner (by id, else by position)
+    // the shared corner (by id, else by position), and whether it is each curve's first end
     let near =
       |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
-    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
+    let (c1, s1, c2, s2) = [(a1, true, a2, true), (a1, true, b2, false), (b1, false, a2, true), (b1, false, b2, false)]
       .into_iter()
       .find(|(p, _, q, _)| near(self, *p, *q))
-      .ok_or(SketchError::WrongGeometry("a sketch fillet", "two lines that meet at an end"))?;
-    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
-    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
-    let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
-      return Err(SketchError::InvalidValue("zero-length line".into()));
+      .ok_or(SketchError::WrongGeometry("a sketch fillet", "two lines or arcs that meet at an end"))?;
+    let p = self.pos(c1).ok_or(SketchError::NoPoint(c1))?;
+    let g1 = self.geo(l1).ok_or(SketchError::NoCurve(l1))?;
+    let g2 = self.geo(l2).ok_or(SketchError::NoCurve(l2))?;
+    let (Some(u), Some(v)) = (leaving(&g1, s1), leaving(&g2, s2)) else {
+      return Err(SketchError::InvalidValue("zero-length curve".into()));
     };
-    let theta = dot(u, v).clamp(-1.0, 1.0).acos();
-    if !(theta > 1e-6 && theta < PI - 1e-6) {
-      return Err(SketchError::InvalidValue("the lines are parallel".into()));
+    let turn = cross(u, v);
+    if turn.abs() < 1e-6 {
+      return Err(SketchError::InvalidValue("the curves are tangent at the corner".into()));
     }
-    let d = radius / (theta / 2.0).tan();
-    if d >= dist(p, q1) - 1e-9 || d >= dist(p, q2) - 1e-9 {
-      return Err(SketchError::InvalidValue(format!("a {radius} fillet doesn't fit on these lines")));
-    }
-    let (t1, t2) = (add(p, mul(u, d)), add(p, mul(v, d)));
-    let w = unit(add(u, v)).ok_or(SketchError::InvalidValue("bad corner".into()))?;
-    let c = add(p, mul(w, radius / (theta / 2.0).sin()));
+    // each curve offset by the radius towards the other; the fillet's centre is where they meet
+    let side = turn.signum();
+    let fit = || SketchError::InvalidValue(format!("a {radius} fillet doesn't fit on these curves"));
+    let off1 = offset_towards(&g1, p, mul([-u[1], u[0]], side), radius).ok_or_else(fit)?;
+    let off2 = offset_towards(&g2, p, mul([v[1], -v[0]], side), radius).ok_or_else(fit)?;
+    let (c, t1, t2) = meet(&off1, &off2)
+      .into_iter()
+      .filter_map(|c| Some((c, trim_point(&g1, s1, c)?, trim_point(&g2, s2, c)?)))
+      .min_by(|x, y| dist(x.0, p).total_cmp(&dist(y.0, p)))
+      .ok_or_else(fit)?;
     let (n1, n2, nc) = (self.add_point(t1[0], t1[1]), self.add_point(t2[0], t2[1]), self.add_point(c[0], c[1]));
     self.swap_point(l1, c1, n1);
     self.swap_point(l2, c2, n2);
-    let kind = if cross(sub(t1, c), sub(t2, c)) > 0.0 {
+    // arcs run counter-clockwise: take the way round from t1 to t2 that faces the corner
+    let (e1, e2) = (angle_of(c, t1), angle_of(c, t2));
+    let mid = polar(c, radius, e1 + ccw_sweep(e1, e2) / 2.0);
+    let kind = if dot(sub(mid, c), sub(p, c)) > 0.0 {
       CurveKind::Arc { center: nc, start: n1, end: n2 }
     } else {
       CurveKind::Arc { center: nc, start: n2, end: n1 }
@@ -851,6 +905,7 @@ impl Sketch {
 mod tests {
   use super::*;
   use crate::{PtSpec, find_profiles};
+  use std::f64::consts::PI;
 
   #[test]
   fn fillet_rounds_a_rectangle_corner() {
@@ -863,6 +918,36 @@ mod tests {
     assert_eq!(p.len(), 1);
     let expect = 800.0 - (25.0 - std::f64::consts::PI * 25.0 / 4.0);
     assert!((p[0].area() - expect).abs() < 0.05, "{}", p[0].area());
+  }
+
+  #[test]
+  fn fillet_rounds_a_line_into_an_arc() {
+    // quarter disc of radius 40; round the corner between the bottom line and the arc
+    let mut s = Sketch::new();
+    let (b, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let a = s.add_arc_center(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0), [0.0, 40.0]).unwrap();
+    s.add_line(PtSpec::At(0.0, 40.0), PtSpec::At(0.0, 0.0)).unwrap();
+    let f = s.fillet(b, a, 5.0).unwrap();
+    assert!(s.solve().ok());
+    let Some(Geo::Arc { c, r, sweep, .. }) = s.geo(f) else { panic!() };
+    assert!((r - 5.0).abs() < 1e-9 && sweep < PI);
+    assert!(dist(c, [1200f64.sqrt(), 5.0]) < 1e-6, "{c:?}");
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+  }
+
+  #[test]
+  fn fillet_rounds_two_arcs() {
+    // a quarter arc about (10, 10) leaving (0, 10) downwards, one about the origin leaving it left
+    let mut s = Sketch::new();
+    let a = s.add_arc_center(PtSpec::At(10.0, 10.0), PtSpec::At(0.0, 10.0), [10.0, 0.0]).unwrap();
+    let b = s.add_arc_center(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 10.0), [-10.0, 0.0]).unwrap();
+    let f = s.fillet(a, b, 2.0).unwrap();
+    assert!(s.solve().ok());
+    let Some(Geo::Arc { c, r, sweep, .. }) = s.geo(f) else { panic!() };
+    assert!((r - 2.0).abs() < 1e-9 && sweep < PI);
+    assert!((dist(c, [10.0, 10.0]) - 12.0).abs() < 1e-6, "{c:?}");
+    assert!((dist(c, [0.0, 0.0]) - 8.0).abs() < 1e-6, "{c:?}");
   }
 
   #[test]

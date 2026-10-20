@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+273-rect-corner-fillet
+274-triangle-two-fillets
+275-l-shape-inner-fillet
+276-line-arc-fillet
