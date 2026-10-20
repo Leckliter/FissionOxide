@@ -21,3 +21,10 @@ where the behaviour is testable, and run `cargo test` and `cargo clippy` before 
 - Fusion: UTILITIES > UTILITY: Manage Materials opens the material browser (libraries, In This Design, edit properties); Manage Threads Library lists thread tables; ADD-INS > Scripts and Add-Ins (Shift+S) lists scripts/add-ins with Run, Stop, Run on Startup.
 - FissionOxide: Manage Materials, Manage Threads Library and Scripts and Add-Ins are inert (menus.rs ADD_INS and UTILITY).
 - Start here: `crates/ui/src/menus.rs`
+
+## Fusion's analysis dialogs, read on screen (Fusion 2705)
+- **ISOCURVE ANALYSIS:** Bodies/Faces. Type (three icons: U and V / U only / V only), Isocurves 5 (slider), Curvature Combs checkbox.
+- **MINIMUM RADIUS ANALYSIS:** Body. Maximum Tool Radius 25.00 mm, Minimum Radius 0.000 mm (slider), Opacity 100 (slider), Sharp Edges checkbox.
+- **ENVIRONMENT MAP ANALYSIS:** Bodies. Environment (Sharp Highlights / ...), Rotate 0.0 deg (slider), Apply Mirror checkbox.
+- **CURVATURE COMB ANALYSIS:** a paid feature on Fusion Personal; starting it opens a subscription offer, so its dialog couldn't be read. Build it from Fusion's documentation: Curves/Edges selection, Density, Scale and Comb Color.
+- Each analysis, once OK'd, appears under an Analysis folder in the browser with an eye toggle and can be edited again.
