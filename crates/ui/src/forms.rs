@@ -62,6 +62,19 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// Selected sketch curves that lie on the sketch the `sketch` input names (optional: empty =
+  /// all its curves).
+  CurvesOf {
+    key: &'static str,
+    label: &'static str,
+    sketch: &'static str,
+  },
+  /// Loft sections: each sketch with picked curves or profiles, in pick order, as
+  /// `{sketch, curves}` (no curves = all of the sketch's curves); at least two.
+  Sections {
+    key: &'static str,
+    label: &'static str,
+  },
   /// A sketch: the selected curves' or profiles', the one being edited, or the last one.
   Sketch {
     key: &'static str,
@@ -147,6 +160,8 @@ impl Input {
       | Input::Edge { key, .. }
       | Input::Bodies { key, .. }
       | Input::Curves { key, .. }
+      | Input::CurvesOf { key, .. }
+      | Input::Sections { key, .. }
       | Input::Sketch { key, .. }
       | Input::Plane { key, .. }
       | Input::Axis { key, .. }
@@ -196,6 +211,8 @@ impl State {
         | Input::Edges { .. }
         | Input::Bodies { .. }
         | Input::Curves { .. }
+        | Input::CurvesOf { .. }
+        | Input::Sections { .. }
         | Input::Profiles { .. }
         | Input::Cells { .. } => {
           json!([])
@@ -293,6 +310,23 @@ impl State {
         true
       }
     });
+    // loft sections: the picked curves and profiles, grouped by sketch in pick order
+    let mut sections: Vec<(FeatureId, Vec<u32>)> = Vec::new();
+    for x in &s.selection {
+      let (sketch, curve) = match x {
+        Sel::SketchCurve { sketch, curve } => (*sketch, Some(curve.0)),
+        Sel::Profile { sketch, .. } => (*sketch, None),
+        _ => continue,
+      };
+      let at = match sections.iter().position(|(f, _)| *f == sketch) {
+        Some(at) => at,
+        None => {
+          sections.push((sketch, Vec::new()));
+          sections.len() - 1
+        }
+      };
+      sections[at].1.extend(curve);
+    }
     let mut ns = 0;
     let (mut nf, mut ne, mut np, mut na) = (0, 0, 0, 0);
     for (i, input) in form.inputs.iter().enumerate() {
@@ -313,6 +347,9 @@ impl State {
         }
         Input::Bodies { .. } => json!(bodies),
         Input::Curves { .. } => json!(curves.iter().map(|c| c.1).collect::<Vec<_>>()),
+        Input::Sections { .. } => {
+          json!(sections.iter().map(|(f, cs)| json!({"sketch": f.0, "curves": cs})).collect::<Vec<_>>())
+        }
         Input::Sketch { .. } => {
           let chosen = self.chosen[i].as_ref().and_then(Value::as_u64).map(|f| FeatureId(f as u32));
           ns += 1;
@@ -335,6 +372,14 @@ impl State {
       };
       self.values[i] = v;
     }
+    // curves of a named sketch input, now that the sketches are known
+    for (i, input) in form.inputs.iter().enumerate() {
+      if let Input::CurvesOf { sketch, .. } = input {
+        let on = form.inputs.iter().position(|x| x.key() == *sketch).and_then(|k| self.values[k].as_u64());
+        let picked: Vec<u32> = curves.iter().filter(|c| Some(c.0.0 as u64) == on).map(|c| c.1).collect();
+        self.values[i] = json!(picked);
+      }
+    }
     self.values != before
   }
 
@@ -353,6 +398,7 @@ impl State {
         }
         Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
         Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
+        Input::Sections { label, .. } if v.as_array().is_none_or(|a| a.len() < 2) => return Some(label),
         _ => {}
       }
     }
@@ -373,7 +419,11 @@ impl State {
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
       match input {
-        Input::Curves { .. } | Input::FacesOpt { .. } | Input::Profiles { .. } | Input::Cells { .. }
+        Input::Curves { .. }
+        | Input::CurvesOf { .. }
+        | Input::FacesOpt { .. }
+        | Input::Profiles { .. }
+        | Input::Cells { .. }
           if v.as_array().is_some_and(Vec::is_empty) =>
         {
           continue;
@@ -857,6 +907,43 @@ pub static SURFACE_REVOLVE: Form = Form {
     Input::Curves { key: "curves", label: "Curves (default all)" },
     Input::Axis { key: "axis", label: "Axis" },
     Input::Expr { key: "angle", label: "Angle", default: "360 deg" },
+  ],
+  picks_model: false,
+};
+
+pub static SURFACE_SWEEP: Form = Form {
+  title: "SWEEP",
+  name: "Sweep",
+  hint: "A surface swept from sketch curves (open or closed) along a path: pick the profile, then the path",
+  icon: Icon::Sweep,
+  cmd: "surface.sweep",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "sketch", label: "Profile sketch" },
+    Input::CurvesOf { key: "curves", label: "Profile curves (default all)", sketch: "sketch" },
+    Input::Sketch { key: "path", label: "Path sketch" },
+    Input::CurvesOf { key: "path_curves", label: "Path curves (default all)", sketch: "path" },
+    Input::Choice {
+      key: "orientation",
+      label: "Orientation",
+      options: &[("perpendicular", "Perpendicular"), ("parallel", "Parallel")],
+    },
+    Input::Expr { key: "twist", label: "Twist angle", default: "0 deg" },
+  ],
+  picks_model: false,
+};
+
+pub static SURFACE_LOFT: Form = Form {
+  title: "LOFT",
+  name: "Loft",
+  hint: "A surface lofted through sketch curves (open or closed) on two or more sketches, in pick order",
+  icon: Icon::Loft,
+  cmd: "surface.loft",
+  fixed: &[],
+  inputs: &[
+    Input::Sections { key: "sections", label: "Sections" },
+    Input::Check { key: "ruled", label: "Ruled (straight between sections)" },
+    Input::Check { key: "closed", label: "Closed" },
   ],
   picks_model: false,
 };

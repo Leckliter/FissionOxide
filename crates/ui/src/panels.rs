@@ -2995,6 +2995,8 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Thicken { .. } => Icon::Thicken,
     FeatureKind::SurfaceExtrude { .. } => Icon::Extrude,
     FeatureKind::SurfaceRevolve { .. } => Icon::Revolve,
+    FeatureKind::SurfaceSweep { .. } => Icon::Sweep,
+    FeatureKind::SurfaceLoft { .. } => Icon::Loft,
     FeatureKind::Patch { .. } => Icon::Patch,
     FeatureKind::Stitch { .. } => Icon::Stitch,
     FeatureKind::Unstitch { .. } => Icon::Unstitch,

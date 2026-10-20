@@ -8,7 +8,9 @@ use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, OriginPlane, PathRef, PlaneRef};
+use crate::{
+  AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, OriginPlane, PathRef, PlaneRef, SweepOrientation,
+};
 
 /// The ISO coarse pitch for a thread of this major diameter (nearest size).
 pub fn iso_pitch(diameter: f64) -> f64 {
@@ -381,6 +383,29 @@ impl Ctx<'_> {
           faces.push(w.revolve(o, d, a).map_err(ke)?);
         }
         self.new_surface(id, faces)?;
+        Ok(None)
+      }
+      FeatureKind::SurfaceSweep { sketch, curves, path_sketch, path_curves, twist, orientation } => {
+        let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
+        let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
+        let path = crate::include::sketch_path(ps, path_curves)?;
+        let twist = if twist.trim().is_empty() { 0.0 } else { self.angle(twist)? };
+        let parallel = *orientation == SweepOrientation::Parallel;
+        let mut faces = Vec::new();
+        for w in sketch_wires(&sk.plane, &sk.sketch, curves)? {
+          faces.push(w.sweep_surface(&path, twist, parallel).map_err(ke)?);
+        }
+        self.new_surface(id, faces)?;
+        Ok(None)
+      }
+      FeatureKind::SurfaceLoft { sections, ruled, closed } => {
+        let mut wires = Vec::new();
+        for (i, sec) in sections.iter().enumerate() {
+          let sk = self.state.sketches.get(&sec.sketch).ok_or(format!("the sketch of section {} failed", i + 1))?;
+          wires.push(crate::include::sketch_path(sk, &sec.curves).map_err(|e| format!("section {}: {e}", i + 1))?);
+        }
+        let skin = Shape::loft_surface(&wires, *ruled, *closed).map_err(ke)?;
+        self.new_surface(id, vec![skin])?;
         Ok(None)
       }
       FeatureKind::Patch { edges, sketch } => {
