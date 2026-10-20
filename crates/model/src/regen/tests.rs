@@ -68,8 +68,9 @@ fn hole_on_top_face_follows_height_changes() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(20.0, 10.0), 3.0).unwrap();
-  let hs =
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole, links: Vec::new() }).unwrap();
+  let hs = d
+    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face, x: None }, sketch: hole, links: Vec::new() })
+    .unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
     profiles: vec![],
@@ -310,6 +311,9 @@ fn sketch_plane_on_faces_is_world_aligned() {
   let top = sketch_plane_on(DVec3::Z, DVec3::new(5.0, 5.0, 10.0)).unwrap();
   assert_eq!(top.x, DVec3::X);
   assert!((top.origin - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-12);
+  // a downward face keeps Y up, so X points left (as in Fusion)
+  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0)).unwrap();
+  assert!((bottom.x + DVec3::X).length() < 1e-12 && (bottom.y - DVec3::Y).length() < 1e-12);
   let front = sketch_plane_on(-DVec3::Y, DVec3::new(5.0, 0.0, 3.0)).unwrap();
   assert!((front.x - DVec3::X).length() < 1e-12 && (front.y - DVec3::Z).length() < 1e-12);
   let back = sketch_plane_on(DVec3::Y, DVec3::new(5.0, 20.0, 3.0)).unwrap();
@@ -556,7 +560,9 @@ fn bend_along_a_sketch_line() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut sk = Sketch::new();
   let (line, _) = sk.add_line(PtSpec::At(70.0, -10.0), PtSpec::At(70.0, 60.0)).unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: sk, links: Vec::new() }).unwrap();
+  let s = d
+    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face, x: None }, sketch: sk, links: Vec::new() })
+    .unwrap();
   d.add_feature(FeatureKind::Bend { sketch: s, line, angle: "90 deg".into(), flip: false, flip_side: true }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);

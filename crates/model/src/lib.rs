@@ -43,7 +43,8 @@ use fox_sketch::{CurveId, PointId, Sketch};
 /// Current file format version.
 ///
 /// - 2: a symmetric thicken's `thickness` is the thickness on each side (it was the total).
-pub const FORMAT_VERSION: u32 = 2;
+/// - 3: the XZ and YZ origin planes and downward faces are framed as Fusion frames them.
+pub const FORMAT_VERSION: u32 = 3;
 /// Hostile-file guards.
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMETERS: usize = 10_000;
@@ -311,9 +312,12 @@ pub enum PlaneRef {
   Construction {
     feature: FeatureId,
   },
-  /// A planar face of a body (follows the face as the model changes).
+  /// A planar face of a body (follows the face as the model changes). `x` hints the in-plane
+  /// X axis; without it the frame is [`regen::sketch_plane_on`]'s.
   Face {
     face: FaceRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    x: Option<[f64; 3]>,
   },
   /// A fixed plane through a point (the sketch origin) with a normal; `x` hints the in-plane
   /// X axis.
@@ -1929,6 +1933,12 @@ impl Design {
     if d.features.len() > MAX_FEATURES || d.parameters.len() > MAX_PARAMETERS {
       return Err(DesignError::TooMany);
     }
+    if d.version < 3 {
+      // plane references sit in many kinds of feature: pin their old frames on the raw JSON
+      let mut v: serde_json::Value = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
+      pin_v2_plane_frames(&mut v);
+      d = serde_json::from_value(v).map_err(|e| DesignError::File(e.to_string()))?;
+    }
     // a hand-edited rho outside the range would give the conic an infinite or negative weight
     for f in &d.features {
       if let FeatureKind::Sketch { sketch, .. } = &f.kind {
@@ -1969,6 +1979,48 @@ impl Design {
     }
     let s = std::fs::read_to_string(path).map_err(|e| DesignError::File(e.to_string()))?;
     Design::from_json(&s)
+  }
+}
+
+/// Format 3 frames the XZ and YZ origin planes and downward faces as Fusion does. A file from
+/// before keeps its sketches where they were: its XZ/YZ plane references become free planes with
+/// the old frames, and face or free planes facing down get the old X axis (+X) as their hint.
+fn pin_v2_plane_frames(v: &mut serde_json::Value) {
+  use serde_json::{Value, json};
+  let faces_down = |n: Option<&Value>| {
+    let n: Option<[f64; 3]> = n.and_then(|n| serde_json::from_value(n.clone()).ok());
+    n.and_then(|n| kernel::glam::DVec3::from(n).try_normalize()).is_some_and(|n| n.z < -0.9)
+  };
+  match v {
+    Value::Array(a) => a.iter_mut().for_each(pin_v2_plane_frames),
+    Value::Object(o) => {
+      match o.get("type").and_then(Value::as_str) {
+        Some("origin") => {
+          let old = match o.get("plane").and_then(Value::as_str) {
+            Some("xz") => {
+              Some(json!({"type": "free", "origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}))
+            }
+            Some("yz") => {
+              Some(json!({"type": "free", "origin": [0.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}))
+            }
+            _ => None,
+          };
+          if let Some(Value::Object(old)) = old {
+            *o = old;
+            return;
+          }
+        }
+        Some("face") if !o.contains_key("x") && faces_down(o.get("face").and_then(|f| f.get("normal"))) => {
+          o.insert("x".into(), json!([1.0, 0.0, 0.0]));
+        }
+        Some("free") if o.get("x").is_none_or(Value::is_null) && faces_down(o.get("normal")) => {
+          o.insert("x".into(), json!([1.0, 0.0, 0.0]));
+        }
+        _ => {}
+      }
+      o.values_mut().for_each(pin_v2_plane_frames);
+    }
+    _ => {}
   }
 }
 
@@ -2317,6 +2369,54 @@ mod tests {
     assert!(Design::from_json("{").is_err());
     assert!(Design::from_json("{\"version\": 99, \"name\": \"x\"}").is_err());
     assert!(Design::from_json("[]").is_err());
+  }
+
+  #[test]
+  fn format_2_files_keep_their_plane_frames() {
+    let sketch_on = |d: &mut Design, plane: PlaneRef| {
+      d.add_feature(FeatureKind::Sketch { plane, sketch: Sketch::new(), links: Vec::new() }).unwrap();
+    };
+    let face =
+      |normal: [f64; 3]| FaceRef { body: BodyId(1), point: [0.0; 3], normal, planar: true, lo: [0.0; 3], hi: [0.0; 3] };
+    let free = |normal: [f64; 3], x: Option<[f64; 3]>| PlaneRef::Free { origin: [1.0, 2.0, 3.0], normal, x };
+    let mut d = Design::new("old");
+    sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Xz });
+    sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Yz });
+    sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Xy });
+    sketch_on(&mut d, PlaneRef::Face { face: face([0.0, 0.0, -1.0]), x: None });
+    sketch_on(&mut d, PlaneRef::Face { face: face([0.0, 0.0, 1.0]), x: None });
+    sketch_on(&mut d, free([0.0, 0.0, -2.0], None));
+    sketch_on(&mut d, free([0.0, 0.0, -1.0], Some([0.0, 1.0, 0.0])));
+    d.add_feature(FeatureKind::ConstructionPlane {
+      base: PlaneRef::Origin { plane: OriginPlane::Xz },
+      offset: "5".into(),
+    })
+    .unwrap();
+    let mut old = d.clone();
+    old.version = 2;
+    let back = Design::from_json(&old.to_json()).unwrap();
+    assert_eq!(back.version, FORMAT_VERSION);
+    let planes: Vec<PlaneRef> = back
+      .features
+      .iter()
+      .filter_map(|f| match &f.kind {
+        FeatureKind::Sketch { plane, .. } => Some(plane.clone()),
+        FeatureKind::ConstructionPlane { base, .. } => Some(base.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(planes.len(), 8);
+    let xz = PlaneRef::Free { origin: [0.0; 3], normal: [0.0, -1.0, 0.0], x: Some([1.0, 0.0, 0.0]) };
+    assert_eq!(planes[0], xz);
+    assert_eq!(planes[1], PlaneRef::Free { origin: [0.0; 3], normal: [1.0, 0.0, 0.0], x: Some([0.0, 1.0, 0.0]) });
+    assert_eq!(planes[2], PlaneRef::Origin { plane: OriginPlane::Xy });
+    assert_eq!(planes[3], PlaneRef::Face { face: face([0.0, 0.0, -1.0]), x: Some([1.0, 0.0, 0.0]) });
+    assert_eq!(planes[4], PlaneRef::Face { face: face([0.0, 0.0, 1.0]), x: None });
+    assert_eq!(planes[5], free([0.0, 0.0, -2.0], Some([1.0, 0.0, 0.0])));
+    assert_eq!(planes[6], free([0.0, 0.0, -1.0], Some([0.0, 1.0, 0.0])));
+    assert_eq!(planes[7], xz);
+    // a current file is read as it was written
+    assert_eq!(Design::from_json(&d.to_json()).unwrap(), d);
   }
 
   #[test]

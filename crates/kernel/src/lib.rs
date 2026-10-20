@@ -49,10 +49,10 @@ pub struct Plane {
 
 impl Plane {
   pub const XY: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::Y };
-  /// Front plane: X right, Z up (normal −Y, towards the viewer of the front view).
-  pub const XZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::Z };
-  /// Right plane: Y right, Z up (normal +X).
-  pub const YZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::Y, y: DVec3::Z };
+  /// The XZ origin plane as Fusion frames it in a Z-up design: X right, −Z up (normal +Y).
+  pub const XZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
+  /// The YZ origin plane as Fusion frames it in a Z-up design: −Z right, Y up (normal +X).
+  pub const YZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::NEG_Z, y: DVec3::Y };
 
   /// Builds a plane from an origin, a normal and a preferred X direction (re-orthogonalised).
   pub fn from_normal(origin: DVec3, normal: DVec3, xhint: DVec3) -> Result<Plane> {

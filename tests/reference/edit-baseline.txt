@@ -58,3 +58,5 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+415-bottom-face-sketch
+416-side-face-sketch

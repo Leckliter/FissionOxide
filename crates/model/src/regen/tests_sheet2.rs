@@ -141,10 +141,10 @@ fn bends_running_into_bends_unfold() {
 fn miter_flange_along_two_edges() {
   let mut d = sheet_design();
   plate(&mut d);
-  // up 20 from the top edge (y = 50, z = 2), then 10 outwards, drawn on YZ (across the edge)
+  // up 20 from the top edge (y = 50, z = 2), then 10 outwards, drawn on YZ (across the edge; sketch x = −Z, y = Y)
   let mut s = Sketch::new();
-  s.add_line(PtSpec::At(50.0, 2.0), PtSpec::At(50.0, 22.0)).unwrap();
-  s.add_line(PtSpec::At(50.0, 22.0), PtSpec::At(60.0, 22.0)).unwrap();
+  s.add_line(PtSpec::At(-2.0, 50.0), PtSpec::At(-22.0, 50.0)).unwrap();
+  s.add_line(PtSpec::At(-22.0, 50.0), PtSpec::At(-22.0, 60.0)).unwrap();
   let s = d.add_feature(FeatureKind::Sketch { plane: YZ, sketch: s, links: Vec::new() }).unwrap();
   let m = regenerate(&mut d);
   let edges = vec![edge_near(&m, [50.0, 50.0, 2.0]), edge_near(&m, [100.0, 25.0, 2.0])];

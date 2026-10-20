@@ -149,12 +149,12 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "sketch.rect", json!({"corner1": [36, 0], "corner2": [40, 20]}));
   run(&mut s, "extrude", json!({"distance": 20, "operation": "join"}));
   let v0 = volume(&s);
-  // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10)
-  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -10}));
+  // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10; sketch y = −Z)
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
   let pl = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
   // a line across the top between the walls; the rib grows down to the floor
-  run(&mut s, "sketch.line", json!({"points": [[4, 20], [36, 20]]}));
+  run(&mut s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
   run(&mut s, "rib", json!({"thickness": 2}));
   let added = volume(&s) - v0;
   assert!((added - 32.0 * 16.0 * 2.0).abs() < 1.0, "rib added {added}");
@@ -288,7 +288,7 @@ fn sketch_tools_make_profiles() {
 fn section_view_is_capped() {
   let mut s = Session::default();
   block(&mut s, 40.0, 20.0, 10.0);
-  let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": -10}})).unwrap();
+  let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": 10, "flip": true}})).unwrap();
   let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
   // the body mesh, clipped, and the cap
   let caps: Vec<_> = scene.meshes.iter().filter(|m| !m.analyze && !m.indices.is_empty()).collect();

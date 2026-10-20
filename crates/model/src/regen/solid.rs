@@ -43,7 +43,7 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
     pls.push(match p {
       PlaneRef::Origin { plane } => plane.plane(),
       PlaneRef::Construction { feature } => *model.planes.get(feature).ok_or("its construction plane failed")?,
-      PlaneRef::Face { face } => {
+      PlaneRef::Face { face, .. } => {
         let body = model.body(face.body).ok_or("the plane's body no longer exists")?;
         let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
         let info = body.faces().iter().find(|f| f.id == fid).ok_or("the face could not be found")?;

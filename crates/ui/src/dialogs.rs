@@ -861,7 +861,7 @@ impl Dialog {
         Sel::Face { body, face } if is_planar(&app.s, *body, *face) => Some(json!({"body": body.0, "face": face})),
         _ => None,
       });
-      let mid = app.s.model.bounds().map(|(a, b)| -(a.y + b.y) / 2.0).unwrap_or(0.0);
+      let mid = app.s.model.bounds().map(|(a, b)| (a.y + b.y) / 2.0).unwrap_or(0.0);
       app.section = Some(match face {
         Some(f) => json!({"plane": f, "offset": 0.0, "flip": true}),
         None => json!({"plane": "xz", "offset": (mid * 1000.0).round() / 1000.0, "flip": false}),

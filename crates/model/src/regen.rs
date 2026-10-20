@@ -1784,7 +1784,7 @@ impl Ctx<'_> {
       PlaneRef::Construction { feature } => {
         self.state.planes.get(feature).copied().ok_or_else(|| "its construction plane failed".to_string())
       }
-      PlaneRef::Face { face } => {
+      PlaneRef::Face { face, x } => {
         let bi = self.body_index(face.body)?;
         let body = &self.state.bodies[bi];
         let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
@@ -1793,7 +1793,11 @@ impl Ctx<'_> {
         if info.kind != fox_kernel::SurfaceKind::Plane {
           return Err("the face is not planar".into());
         }
-        sketch_plane_on(info.normal, info.origin)
+        let pl = sketch_plane_on(info.normal, info.origin)?;
+        match x.map(DVec3::from).filter(|x| x.cross(info.normal).length() > 1e-9) {
+          Some(x) => Plane::from_normal(pl.origin, info.normal, x).map_err(|e| e.to_string()),
+          None => Ok(pl),
+        }
       }
       PlaneRef::Free { origin, normal, x } => {
         let (o, n) = (DVec3::from(*origin), DVec3::from(*normal));
@@ -2095,12 +2099,13 @@ fn resolve_face_pieces(fr: &mut FaceRef, body: &Body) -> Vec<u32> {
 }
 
 /// The sketch plane Fusion would put on a planar face: origin = the world origin projected onto
-/// the face, axes aligned with the world (X right; up = Z for vertical faces).
+/// the face, axes aligned with the world (X right; up = Z for vertical faces; Y up on horizontal
+/// faces, so a downward face has X pointing left).
 pub fn sketch_plane_on(normal: DVec3, point: DVec3) -> Result<Plane, String> {
   let n = normal.try_normalize().ok_or("zero normal")?;
   let origin = n * point.dot(n);
   let (x, _y) = if n.z.abs() > 0.9 {
-    (DVec3::X, DVec3::Y)
+    (if n.z > 0.0 { DVec3::X } else { DVec3::NEG_X }, DVec3::Y)
   } else {
     let up = (DVec3::Z - n * DVec3::Z.dot(n)).normalize_or_zero();
     (up.cross(n), up)

@@ -1618,7 +1618,7 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
 
 // ---------------------------------------------------------------- references
 
-/// "xy" | "xz" | "yz" | {"feature": id} | {"body": id, "face": n}
+/// "xy" | "xz" | "yz" | {"feature": id} | {"origin", "normal", "x"?} | {"body": id, "face": n, "x"?}
 pub(crate) fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
   if let Some(name) = v.as_str() {
     let plane = match name.to_ascii_lowercase().as_str() {
@@ -1650,7 +1650,8 @@ pub(crate) fn plane_ref(s: &Session, v: &Value) -> Result<PlaneRef, CmdError> {
   if !face.planar {
     return Err(CmdError::new("that face is not planar"));
   }
-  Ok(PlaneRef::Face { face })
+  let x = v.get("x").map(|_| req_vec3(v, "x")).transpose()?;
+  Ok(PlaneRef::Face { face, x })
 }
 
 /// {"body", "face"} by index, or {"point": [x,y,z], "normal"?: [x,y,z]} — the face at a point.

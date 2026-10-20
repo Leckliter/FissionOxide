@@ -662,10 +662,10 @@ mod tests {
   fn emboss_form_and_its_timeline_edit() {
     let mut s = Session::default();
     run(&mut s, "cylinder", json!({"radius": 20, "height": 40}));
-    run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 30}));
+    run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -30}));
     let front = s.design.features.last().unwrap().id.0;
     run(&mut s, "sketch.create", json!({"plane": {"feature": front}}));
-    run(&mut s, "sketch.rect", json!({"corner1": [-5, 15], "corner2": [5, 25]}));
+    run(&mut s, "sketch.rect", json!({"corner1": [-5, -25], "corner2": [5, -15]}));
     let sk = s.edit_sketch.unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let b = s.model.bodies[0].id;
@@ -743,7 +743,7 @@ mod tests {
 
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "xz"}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -30]]}));
     let path = s.edit_sketch.unwrap();
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
     run(&mut s, "sketch.rect", json!({"corner1": [-4, -2], "corner2": [4, 2]}));
@@ -765,7 +765,7 @@ mod tests {
     run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
     let b = s.edit_sketch.unwrap();
     run(&mut s, "sketch.create", json!({"plane": "xz"}));
-    run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, 20], "end": [10, 40]}));
+    run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, -20], "end": [10, -40]}));
     let rail = s.edit_sketch.unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Loft);

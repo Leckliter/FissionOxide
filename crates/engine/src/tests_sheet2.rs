@@ -57,7 +57,7 @@ fn miter_flange_and_corner_closure_from_commands() {
   let mut s = Session::default();
   plate(&mut s);
   run(&mut s, "sketch.create", json!({"plane": "yz"}));
-  run(&mut s, "sketch.line", json!({"points": [[50, 2], [50, 22], [60, 22]]}));
+  run(&mut s, "sketch.line", json!({"points": [[-2, 50], [-22, 50], [-22, 60]]}));
   let r = run(
     &mut s,
     "sheet.miter_flange",

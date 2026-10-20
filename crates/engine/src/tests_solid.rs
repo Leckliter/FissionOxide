@@ -29,8 +29,8 @@ fn close(a: f64, b: f64, rel: f64) -> bool {
 fn sweep_rail_twist_and_loft_rails_by_command() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xz"}));
-  let path = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 50]]}));
-  let rail = run(&mut s, "sketch.line", json!({"points": [[5, 0], [10, 50]]}));
+  let path = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -50]]}));
+  let rail = run(&mut s, "sketch.line", json!({"points": [[5, 0], [10, -50]]}));
   let paths = s.edit_sketch.unwrap().0;
   let (pc, rc) = (path["curves"][0].as_u64().unwrap(), rail["curves"][0].as_u64().unwrap());
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
@@ -54,10 +54,10 @@ fn sweep_rail_twist_and_loft_rails_by_command() {
   run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
   let b = s.edit_sketch.unwrap().0;
   run(&mut s, "sketch.create", json!({"plane": "xz"}));
-  run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, 20], "end": [10, 40]}));
+  run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [15, -20], "end": [10, -40]}));
   let r1 = s.edit_sketch.unwrap().0;
   run(&mut s, "sketch.create", json!({"plane": "xz"}));
-  run(&mut s, "sketch.arc", json!({"start": [-10, 0], "mid": [-15, 20], "end": [-10, 40]}));
+  run(&mut s, "sketch.arc", json!({"start": [-10, 0], "mid": [-15, -20], "end": [-10, -40]}));
   let r2 = s.edit_sketch.unwrap().0;
   run(&mut s, "loft", json!({"sections": [a, b], "rails": [r1, r2]}));
   let m = s.model.bodies[0].shape.mass().unwrap();
@@ -103,10 +103,10 @@ fn emboss_text_and_deboss_on_a_cylinder() {
   let mut s = Session::default();
   run(&mut s, "cylinder", json!({"radius": 20, "height": 40}));
   let v0 = volume(&s);
-  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 30}));
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -30}));
   let front = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": front}}));
-  run(&mut s, "sketch.text", json!({"at": [-12, 15], "text": "CL", "height": 10}));
+  run(&mut s, "sketch.text", json!({"at": [-12, -25], "text": "CL", "height": 10}));
   run(&mut s, "emboss", json!({"face": {"point": [0, -20, 20]}, "depth": "1 mm", "wrap": true}));
   assert_eq!(s.model.bodies.len(), 1);
   let up = volume(&s) - v0;
