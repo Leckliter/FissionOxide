@@ -91,6 +91,22 @@ def tests_passed(p):
           and "could not compile" not in out and "panicked" not in out)
 
 
+def foreign_commits(wt, base, branch):
+  """Commits on this fixer branch that are also on another parity/* branch: a fixer must branch
+  from main alone, never from (or copy) another fixer's work."""
+  mine = sh(["git", "rev-list", f"{base}..HEAD"], cwd=wt).stdout.split()
+  others = [r for r in sh(["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/parity/"], cwd=wt
+                          ).stdout.split() if r != branch]
+  found = []
+  for o in others:
+    theirs = set(sh(["git", "rev-list", f"{base}..{o}"], cwd=wt).stdout.split())
+    # Shared commits make this branch the copier unless all of its commits are in theirs (then
+    # the other branch was built on this one, and this one is the original).
+    if theirs & set(mine) and not set(mine) <= theirs:
+      found.append(o)
+  return found
+
+
 def touched_packages(wt, base):
   """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
   crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
@@ -277,6 +293,25 @@ class Loop:
     print(f"  STOP: {self.halt}", flush=True)
     return True
 
+  def fresh_base(self):
+    """origin/<base> just fetched: fixers start from, and are tested against, current main."""
+    sh(["git", "fetch", "origin", self.a.base], cwd=COMMON)
+    return f"origin/{self.a.base}"
+
+  def merge_base_into(self, wt, base):
+    """Merges current main into a fixer branch (committing interrupted work first). Returns '' or,
+    when it conflicts, a note for the agent; the merge is aborted so the agent starts clean."""
+    if sh(["git", "status", "--porcelain"], cwd=wt).stdout.strip():
+      sh(["git", "add", "-A"], cwd=wt)
+      sh(["git", "commit", "-m", "WIP from an interrupted parity fixer\n\nCo-Authored-By: Claude Opus 5.5 "
+          "<noreply@anthropic.com>"], cwd=wt)
+    m = sh(["git", "merge", "--no-edit", base], cwd=wt, check=False)
+    if m.returncode == 0:
+      return ""
+    sh(["git", "merge", "--abort"], cwd=wt, check=False)
+    return (f"\nThis branch conflicts with {base}, which has moved on. First run `git merge {base}`, resolve "
+            "the conflicts keeping main's changes and yours, and commit the merge.\n")
+
   def claim_slot(self):
     """A cargo target directory no other fixer (in any driver process) is using."""
     n = 1
@@ -396,9 +431,11 @@ class Loop:
     s = slug(key)
     branch = fix.get("branch") or f"parity/{s}"
     wt = fix.get("worktree") or os.path.join(COMMON, ".claude", "worktrees", f"parity-{s}")
+    base = self.fresh_base()
     if not os.path.isdir(wt):
       exists = sh(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], check=False).returncode == 0
-      sh(["git", "worktree", "add"] + ([wt, branch] if exists else ["-b", branch, wt, self.a.base]), cwd=COMMON)
+      sh(["git", "worktree", "add"] + ([wt, branch] if exists else ["-b", branch, wt, base]), cwd=COMMON)
+    merge_note = self.merge_base_into(wt, base)
     cases = entry.get("cases", [])
     for c in cases:
       dst = os.path.join(wt, "tests", "reference", c)
@@ -413,7 +450,7 @@ class Loop:
     env = cargo_env(slot)
     verdicts = (entry.get("probe") or {}).get("verdicts") or {}
     report, meta = await agents.run_agent(
-      agents.fix_prompt(entry, wt, cases, verdicts, entry.get("probe") or {}), wt, agents.FIX_SCHEMA,
+      agents.fix_prompt(entry, wt, cases, verdicts, entry.get("probe") or {}) + merge_note, wt, agents.FIX_SCHEMA,
       self.budget.agent_cap(self.a.fix_usd), self.a.fix_turns, env={k: env[k] for k in (
         "CARGO_TARGET_DIR", "FOX_OCCT_DIR") if k in env}, log_path=self.log("fix", key))
     self.budget.record("fix", key, meta)
@@ -427,12 +464,19 @@ class Loop:
       sh(["git", "add", "-A"], cwd=wt)
       sh(["git", "commit", "-m", (report.get("title") or f"Parity fix: {entry['name']}")
           + "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"], cwd=wt)
+    base = self.fresh_base()
+    conflict = self.merge_base_into(wt, base)
+    foreign = foreign_commits(wt, base, branch)
     # Check the agent's work the way CI will, before anything leaves this machine: the reference
     # test, plus the unit tests of every crate the branch touches.
     checks = [["cargo", "test", "-p", "fox-engine", "--test", "reference_parts"]]
     checks += [["cargo", "test", "-p", pkg, "--lib", "--", "--skip", "fuzz_found_bugs"]
-               for pkg in touched_packages(wt, self.a.base)]
+               for pkg in touched_packages(wt, base)]
     failed = None
+    if conflict:
+      failed, checks = f"merging {base} (conflicts)", []
+    elif foreign:
+      failed, checks = f"own-branch check: it carries other fixers' commits ({', '.join(foreign)})", []
     for cmd in checks:
       label = " ".join(cmd[:5] if "--lib" in cmd else cmd)
       print(f"  checking {branch}: {label}", flush=True)
@@ -444,7 +488,7 @@ class Loop:
         break
     baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
     unlisted = [c for c in cases if c not in baseline]
-    ahead = int(sh(["git", "rev-list", "--count", f"{self.a.base}..HEAD"], cwd=wt).stdout.strip() or 0)
+    ahead = int(sh(["git", "rev-list", "--count", f"{base}..HEAD"], cwd=wt).stdout.strip() or 0)
     passed = not failed and not unlisted and ahead > 0
     fix.update(done=bool(report.get("done")), test_passed=not failed, failed_check=failed, cases_unlisted=unlisted,
                summary=report.get("summary", ""), title=report.get("title", ""), blocker=report.get("blocker", ""),
