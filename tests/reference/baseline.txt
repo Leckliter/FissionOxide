@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+269-rectangle-vertex-corners
+270-triangle-acute-obtuse-vertex
+271-apparent-intersection-gap
+272-crossing-lines-overshoot
