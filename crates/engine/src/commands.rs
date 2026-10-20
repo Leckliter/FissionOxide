@@ -319,6 +319,9 @@ cmds! {
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
   "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
+  "form.box" => "Create Form with a box: a T-spline body, the smooth limit surface of a box control cage (centred on 'at', standing on the plane) with the given faces per side", "{plane?, at?: [x, y], length, width, height, length_faces?, width_faces?, height_faces? (default 2), operation?}";
+  "form.cage" => "Create Form from a control cage: vertices (plane coordinates) and closed quad faces, counter-clockwise seen from outside; the body is the cage's smooth limit surface", "{plane?, vertices: [[x, y, z]], faces: [[a, b, c, d]], operation?}";
+  "form.move_vertex" => "Pull a form's control vertex (by index, or the one nearest a point) to a position or by an offset, in the form's plane coordinates", "{feature? (default the last form), vertex? | point?: [x, y, z], to?: [x, y, z] | by?: [dx, dy, dz]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -351,6 +354,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cut::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::form::run(s, name, p) {
     return r;
   }
   match name {

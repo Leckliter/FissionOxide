@@ -1011,3 +1011,6 @@ mod tests_refparts;
 
 mod path3d;
 pub use path3d::Seg3;
+
+mod form;
+pub use form::BSplineSurface;

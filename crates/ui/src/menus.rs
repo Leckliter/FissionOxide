@@ -120,7 +120,7 @@ const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Creat
 
 const SOLID_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  x("Create Form", Icon::CreateForm),
+  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
@@ -328,7 +328,7 @@ const SELECT: &[E] = &[
 
 const SURFACE_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  x("Create Form", Icon::CreateForm),
+  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),

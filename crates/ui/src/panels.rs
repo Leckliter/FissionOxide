@@ -2495,6 +2495,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
     FeatureKind::BaseFeature { .. } => Icon::Box,
     FeatureKind::CamFollower { .. } => Icon::DriveJoint,
+    FeatureKind::Form { .. } => Icon::CreateForm,
   }
 }
 

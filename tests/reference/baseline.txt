@@ -181,3 +181,6 @@
 420-start-offset-flip-taper
 421-to-curved-face-join
 422-thin-closed-circle-center
+# Reference parts that pass; see README.md. One directory name per line.
+417-form-box-smooth
+418-form-box-pulled-top
