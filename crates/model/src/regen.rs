@@ -148,6 +148,7 @@ struct State {
   axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
+  canvases: BTreeMap<FeatureId, Plane>,
   body_counter: u32,
   /// Saved joint origins: component and frame (as the component is now).
   joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
@@ -168,6 +169,8 @@ pub struct Model {
   pub points: BTreeMap<FeatureId, DVec3>,
   /// Cosmetic threads, as helix polylines to draw on their faces.
   pub threads: Vec<(FeatureId, Vec<DVec3>)>,
+  /// Canvases (reference images): the plane each one lies on.
+  pub canvases: BTreeMap<FeatureId, Plane>,
   /// Status per feature, in timeline order.
   pub status: Vec<FeatureStatus>,
   /// Evaluated parameter values (mm / rad).
@@ -311,6 +314,7 @@ impl Regenerator {
       axes: state.axes,
       points: state.points,
       threads: state.threads,
+      canvases: state.canvases,
       status,
       params,
       param_errors,

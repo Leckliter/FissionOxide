@@ -103,6 +103,9 @@ cmds! {
   "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
   "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
+  "canvas.insert" => "Insert > Canvas: a reference image on a plane (adds no geometry); height follows the image aspect", "{image: path, plane?: (default xy), width?: mm (default 100) | height?, at?: [x,y] (image centre), angle?: deg, opacity?: 0-1, name?}";
+  "canvas.edit" => "Edit a canvas: opacity, size (keeps the aspect unless both given), centre, angle, plane", "{feature, opacity?, width?, height?, at?, angle?, plane?}";
+  "canvas.calibrate" => "Calibrate a canvas: scale it about 'from' so the two picked points (plane coordinates) are 'distance' apart", "{feature, from: [x,y], to: [x,y], distance: mm}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
@@ -1247,6 +1250,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     "sketch.include" => sketch_include::include(s, p),
+    "canvas.insert" | "canvas.edit" | "canvas.calibrate" => crate::canvas::run(s, name, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }

@@ -1421,6 +1421,29 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
+  /// A reference image placed on a plane (Insert > Canvas). It adds no geometry: the viewport
+  /// draws it, see-through, for tracing over. Calibrate rescales it from a known distance.
+  Canvas {
+    plane: PlaneRef,
+    /// The image file.
+    image: String,
+    /// The image's centre on the plane (plane coordinates, mm).
+    #[serde(default)]
+    at: [f64; 2],
+    /// Size on the plane (mm); the height keeps the image's aspect.
+    width: f64,
+    height: f64,
+    /// Rotation about the centre (degrees).
+    #[serde(default)]
+    angle: f64,
+    /// 0 (invisible) to 1 (opaque).
+    #[serde(default = "full_opacity")]
+    opacity: f64,
+  },
+}
+
+fn full_opacity() -> f64 {
+  1.0
 }
 
 fn lofted_bends() -> String {
@@ -1560,6 +1583,7 @@ impl FeatureKind {
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
       FeatureKind::Form { .. } => "Form",
+      FeatureKind::Canvas { .. } => "Canvas",
     }
   }
 
@@ -1632,6 +1656,7 @@ impl FeatureKind {
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
       FeatureKind::Form { plane, .. } => plane_dep(plane),
+      FeatureKind::Canvas { plane, .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -2414,6 +2439,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
     FeatureKind::Form { .. } => {}
+    FeatureKind::Canvas { .. } => {}
   }
 }
 

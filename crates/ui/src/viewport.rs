@@ -265,12 +265,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
 
   let cam = app.cam;
+  crate::canvas_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::preview::overlay(app, &painter, &|p| view.to_screen(&cam, p));
 
   // overlays that take clicks come first
   let mut consumed = false;
   shown_dims_overlay(app, &painter, &view);
+  consumed |= crate::canvas_ui::calibrate_clicks(app, &resp, &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
@@ -318,6 +320,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if resp.secondary_clicked()
     && let Some(p) = resp.interact_pointer_pos()
   {
+    // a right-click on a canvas (with nothing nearer under the pointer) is for the canvas
+    if app.hover.is_none() {
+      let (o, d) = view.ray(&cam, p);
+      if let Some((canvas, _)) = crate::canvas_ui::canvas_at(app, o, d) {
+        app.s.selection = vec![Sel::Feature { feature: canvas }];
+      }
+    }
     crate::marking::open(app, p);
   } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp)
   {

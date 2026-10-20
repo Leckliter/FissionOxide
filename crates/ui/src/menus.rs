@@ -258,7 +258,7 @@ const INSPECT: &[E] = &[
 
 const INSERT: &[E] = &[
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
@@ -642,7 +642,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),

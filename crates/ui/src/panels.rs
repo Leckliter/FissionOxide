@@ -280,8 +280,27 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   }
 }
 
+/// Fusion's Help (?) menu, less what FissionOxide has no counterpart for (Quick Setup waits for
+/// the Preferences dialog).
 fn help_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(300.0);
+  ui.set_min_width(260.0);
+  if ui.button("Learning and Documentation").on_hover_text(crate::help::DOCS).clicked() {
+    ui.close();
+    crate::help::open(app, crate::help::DOCS);
+  }
+  if ui.button("Keyboard Shortcuts").on_hover_text("Every key FissionOxide binds").clicked() {
+    ui.close();
+    app.help.shortcuts = true;
+  }
+  if ui.button("What's New").on_hover_text("This version's release notes").clicked() {
+    ui.close();
+    crate::help::whats_new(app);
+  }
+  ui.separator();
+  if ui.button("Diagnostic Log").on_hover_text("Open the folder with FissionOxide's log").clicked() {
+    ui.close();
+    crate::help::diagnostic_log(app);
+  }
   if ui.button(app.updates.menu_label()).clicked() {
     ui.close();
     app.updates.check_now();
@@ -293,10 +312,6 @@ fn help_menu(app: &mut App, ui: &mut egui::Ui) {
     use crate::preferences::NavAction::*;
     ui.label(format!("Orbit: {} · Pan: {} · Zoom: {}", nav.describe(Orbit), nav.describe(Pan), nav.describe(Zoom)));
   }
-  ui.add_space(4.0);
-  ui.label(RichText::new("Shortcuts").strong());
-  ui.label("Sketch: L line · R rectangle · C circle · A arc · P project · D dimension · X construction");
-  ui.label("Model: E extrude · F fillet · Esc cancel · Del delete · F6 fit · Home view");
   ui.separator();
   ui.horizontal(|ui| {
     let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), egui::Sense::hover());
@@ -414,6 +429,8 @@ pub(crate) enum Cmd {
   SelectMode(crate::select::Mode),
   /// Fabrication: the 2D cut window (laser, plasma, waterjet G-code).
   Cut2d,
+  /// INSERT > Canvas: a reference image on a plane.
+  Canvas,
 }
 
 impl Cmd {
@@ -567,6 +584,9 @@ impl Cmd {
         "2D Cut",
         "Laser, plasma or waterjet G-code (or DXF) for a flat pattern or sketch: kerf, leads, micro-joints",
       ),
+      Cmd::Canvas => {
+        (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
+      }
     }
   }
 
@@ -689,6 +709,7 @@ impl Cmd {
         app.hint(Cmd::SelectMode(m).info().2);
       }
       Cmd::Cut2d => app.open_cut_window(),
+      Cmd::Canvas => crate::canvas_ui::start_insert(app),
     }
   }
 }
@@ -2998,6 +3019,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::BaseFeature { .. } => Icon::Box,
     FeatureKind::CamFollower { .. } => Icon::DriveJoint,
     FeatureKind::Form { .. } => Icon::CreateForm,
+    FeatureKind::Canvas { .. } => Icon::Canvas,
   }
 }
 
@@ -3006,6 +3028,7 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
   let Some(f) = app.s.design.feature(id) else { return };
   match &f.kind {
     FeatureKind::Sketch { .. } => app.edit_sketch(id),
+    FeatureKind::Canvas { .. } => crate::canvas_ui::start_edit(app, id),
     _ => {
       app.cancel_dialog();
       app.dialog = crate::dialogs::Dialog::edit(app, id);

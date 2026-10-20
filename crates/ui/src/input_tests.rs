@@ -414,3 +414,32 @@ fn tab_moves_between_the_heads_up_boxes() {
     }
   }
 }
+
+/// The File button (after the logo and the data panel button) and the Help (?) button (left of
+/// the avatar at the right end) of the application bar.
+const FILE: Pos2 = Pos2::new(88.0, 19.0);
+const HELP: Pos2 = Pos2::new(1386.0, 19.0);
+
+#[test]
+fn app_bar_menus_close_on_escape() {
+  for at in [FILE, HELP] {
+    let mut h = Harness::new();
+    h.move_then_click(at);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the menu at {at:?} opens");
+    h.frame(vec![key(egui::Key::Escape)]);
+    h.frame(vec![]);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "Esc closes the menu at {at:?}");
+  }
+}
+
+#[test]
+fn a_command_starting_closes_the_help_menu() {
+  let mut h = Harness::new();
+  h.move_then_click(HELP);
+  assert!(egui::Popup::is_any_open(&h.ctx));
+  // a shortcut starts a command over the open menu
+  h.frame(vec![key(egui::Key::E), Event::Text("e".into())]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_some(), "E started Extrude");
+  assert!(!egui::Popup::is_any_open(&h.ctx), "the Help menu closed");
+}

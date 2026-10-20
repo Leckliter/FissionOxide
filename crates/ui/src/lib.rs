@@ -7,6 +7,7 @@
 
 mod assembly_forms;
 mod cam_ui;
+mod canvas_ui;
 mod config_ui;
 mod customize;
 mod cut_ui;
@@ -14,6 +15,7 @@ mod data_panel;
 mod dialogs;
 mod forms;
 mod gpu;
+mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
@@ -186,6 +188,12 @@ pub struct App {
   /// Whether the window had the keyboard focus last frame, and when it last gained it (egui time).
   window_focused: bool,
   activated_at: f64,
+  /// Insert > Canvas, Edit Canvas and Calibrate.
+  pub(crate) canvas_ui: canvas_ui::CanvasUi,
+  /// The Help menu's windows.
+  pub(crate) help: help::Help,
+  /// A command started: the app bar's menus close at the end of the frame, as in Fusion.
+  close_menus: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -363,6 +371,9 @@ impl App {
       opening: None,
       window_focused: true,
       activated_at: f64::NEG_INFINITY,
+      canvas_ui: canvas_ui::CanvasUi::default(),
+      help: help::Help::default(),
+      close_menus: false,
     }
   }
 
@@ -758,6 +769,12 @@ impl App {
       // Change Keyboard Shortcut takes the keys
       return;
     }
+    // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
+    // does anything else, as in Fusion
+    if egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+      egui::Popup::close_all(ctx);
+      return;
+    }
     if ctx.egui_wants_keyboard_input() {
       // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
       if self.dialog.is_some()
@@ -796,7 +813,8 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.marking.is_some() {
+      if self.canvas_ui.cancel() {
+      } else if self.marking.is_some() {
         self.marking = None;
       } else if self.dim_edit.is_some() {
         self.dim_edit = None;
@@ -855,6 +873,45 @@ impl App {
     }
   }
 
+  /// The toolbar commands' keyboard shortcuts where the app is now: the user's keys over the
+  /// menus' defaults, the open sketch's toolbar first, then the tab's, then the rest of the
+  /// workspace's; a key goes to the first command that has it.
+  fn command_key_table(&self) -> Vec<(egui::Modifiers, egui::Key, panels::Cmd)> {
+    let tabs = if self.manufacture && self.drawing.is_none() {
+      vec![panels::Tab::Milling, panels::Tab::Utilities]
+    } else {
+      toolbox::workspace_tabs(self)
+    };
+    let mut keys: Vec<(egui::Modifiers, egui::Key, panels::Cmd)> = Vec::new();
+    for e in menus::commands(&tabs) {
+      let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
+      if let Some((m, k)) = customize::parse_combo(key)
+        && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
+      {
+        keys.push((m, k, e.cmd));
+      }
+    }
+    keys
+  }
+
+  /// The key that runs `c` where the app is now, as the marking menu shows it: its toolbar
+  /// command's key (the user's or the menus' default), else the app's own (Ctrl+Z, F6, …).
+  pub(crate) fn key_for(&self, c: panels::Cmd) -> Option<String> {
+    use panels::Cmd;
+    if let Some((m, k, _)) = self.command_key_table().into_iter().find(|(.., c2)| *c2 == c) {
+      return Some(customize::format_combo(m, k));
+    }
+    let what = match c {
+      Cmd::Undo => "Undo",
+      Cmd::Redo => "Redo",
+      Cmd::Fit => "Fit",
+      Cmd::ToggleVisibility => "Show/Hide",
+      Cmd::Construction if self.s.edit_sketch.is_some() => "Construction",
+      _ => return None,
+    };
+    customize::reserved_key(what).map(str::to_string)
+  }
+
   /// Runs the toolbar command whose keyboard shortcut was pressed: the user's keys over the
   /// menus' defaults, looked up on the open sketch's toolbar first, then the tab's, then the rest
   /// of the workspace's (so in a sketch A is Arc, elsewhere Appearance). `specific` looks only at
@@ -866,21 +923,8 @@ impl App {
       return false;
     }
     let count = |m: Modifiers| m.command as u8 + m.shift as u8 + m.alt as u8;
-    let tabs = if self.manufacture && self.drawing.is_none() {
-      vec![panels::Tab::Milling, panels::Tab::Utilities]
-    } else {
-      toolbox::workspace_tabs(self)
-    };
-    let mut keys: Vec<(Modifiers, Key, Cmd)> = Vec::new();
-    for e in menus::commands(&tabs) {
-      let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
-      if let Some((m, k)) = customize::parse_combo(key)
-        && (!specific || count(m) >= 2)
-        && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
-      {
-        keys.push((m, k, e.cmd));
-      }
-    }
+    let mut keys: Vec<(Modifiers, Key, Cmd)> =
+      self.command_key_table().into_iter().filter(|(m, ..)| !specific || count(*m) >= 2).collect();
     // a key matches with Shift or Alt held too, so Shift+E is looked for before E
     keys.sort_by_key(|(m, ..)| std::cmp::Reverse(count(*m)));
     for (m, k, c) in keys {
@@ -945,6 +989,8 @@ impl App {
   /// recent row. Every way of starting one (shortcut, toolbox, toolbar, menus) comes through
   /// here, via [`panels::Cmd::run`] or [`App::start`].
   pub(crate) fn note_cmd(&mut self, c: panels::Cmd) {
+    // a command starting closes the File and Help menus (and any other drop-down), as in Fusion
+    self.close_menus = true;
     if !c.repeatable() {
       return;
     }
@@ -1361,6 +1407,11 @@ impl App {
     config_ui::table_window(self, &ctx);
     preferences::window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
+    canvas_ui::windows(self, &ctx);
+    help::window(self, &ctx);
+    if std::mem::take(&mut self.close_menus) {
+      egui::Popup::close_all(&ctx);
+    }
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

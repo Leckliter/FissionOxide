@@ -481,6 +481,11 @@ impl Ctx<'_> {
       FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
       FeatureKind::Form { .. } => self.apply_form(id, kind),
+      FeatureKind::Canvas { plane, .. } => {
+        let pl = self.resolve_plane(plane)?;
+        self.state.canvases.insert(id, pl);
+        Ok(None)
+      }
       _ => Err("this feature type isn't supported".into()),
     }
   }

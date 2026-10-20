@@ -67,6 +67,8 @@ enum Action {
   Cmd(Cmd),
   Repeat(Cmd),
   EditFeature(FeatureId),
+  /// Calibrate a canvas: pick two points on it, type their real distance.
+  Calibrate(FeatureId),
   EditSketch(FeatureId),
   /// Create a sketch on the selected planar face and start a sketch tool in it.
   SketchOnFace(Tool),
@@ -91,7 +93,7 @@ struct Item {
   icon: Icon,
   label: String,
   /// Shortcut key, drawn on the right of overflow rows.
-  hint: Option<&'static str>,
+  hint: Option<String>,
   children: Vec<Item>,
 }
 
@@ -102,47 +104,36 @@ impl Item {
 
   fn cmd(c: Cmd) -> Item {
     let (icon, label, _) = c.info();
-    Item { hint: shortcut(c), ..Item::new(Action::Cmd(c), icon, label) }
+    Item::new(Action::Cmd(c), icon, label)
   }
 
   fn with_label(c: Cmd, label: &str) -> Item {
     Item { label: label.into(), ..Item::cmd(c) }
   }
-
-  fn hint(mut self, h: &'static str) -> Item {
-    self.hint = Some(h);
-    self
-  }
 }
 
-/// The key that runs a command, as the app binds it (see `App::shortcuts`).
-fn shortcut(c: Cmd) -> Option<&'static str> {
-  Some(match c {
-    Cmd::Dialog(Kind::Extrude) => "E",
-    Cmd::Dialog(Kind::Fillet) => "F",
-    Cmd::Dialog(Kind::Move) => "M",
-    Cmd::Dialog(Kind::Inspect) => "I",
-    Cmd::Dialog(Kind::Hole) => "H",
-    Cmd::Dialog(Kind::PressPull) => "Q",
-    Cmd::Dialog(Kind::Joint) => "J",
-    Cmd::Dialog(Kind::AsBuiltJoint) => "Shift+J",
-    Cmd::Dialog(Kind::SkOffset) => "O",
-    Cmd::Dialog(Kind::Form(f)) if std::ptr::eq(f, &crate::forms::APPEARANCE) => "A",
-    Cmd::SketchTool(Tool::Line) => "L",
-    Cmd::SketchTool(Tool::Rect) => "R",
-    Cmd::SketchTool(Tool::Circle) => "C",
-    Cmd::SketchTool(Tool::Arc3) => "A",
-    Cmd::Dialog(Kind::Project) => "P",
-    Cmd::SketchTool(Tool::Dimension) => "D",
-    Cmd::SketchTool(Tool::Trim) => "T",
-    Cmd::Construction => "X",
-    Cmd::Delete => "Del",
-    Cmd::Undo => "Ctrl+Z",
-    Cmd::Redo => "Ctrl+Y",
-    Cmd::Fit => "F6",
-    Cmd::ToggleVisibility => "V",
-    _ => return None,
-  })
+/// Puts the key that runs each item (and each of its children) on it, as the app binds it now:
+/// the user's keys over the menus' defaults (see [`App::key_for`]).
+fn with_keys(app: &App, mut it: Item) -> Item {
+  if it.hint.is_none() {
+    it.hint = match it.action {
+      Action::Cmd(c) => app.key_for(c),
+      Action::ShowHide => app.key_for(Cmd::ToggleVisibility),
+      // a sketch tool started on a face: its key inside the sketch
+      Action::SketchOnFace(t) => {
+        let c = Cmd::SketchTool(t);
+        crate::menus::commands(&[crate::panels::Tab::Sketch])
+          .into_iter()
+          .find(|e| e.cmd == c)
+          .map(|e| crate::menus::key_of(&app.prefs, crate::tips::Scope::Sketch, e.label))
+          .filter(|k| !k.is_empty())
+          .map(str::to_string)
+      }
+      _ => None,
+    };
+  }
+  it.children = std::mem::take(&mut it.children).into_iter().map(|c| with_keys(app, c)).collect();
+  it
 }
 
 const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
@@ -383,16 +374,18 @@ fn sketch_item(cx: &Context) -> Item {
   if cx.planar_face {
     for t in [Tool::Line, Tool::Rect, Tool::Circle, Tool::Arc3, Tool::Point] {
       let (icon, label, _) = Cmd::SketchTool(t).info();
-      let mut c = Item::new(Action::SketchOnFace(t), icon, label);
-      c.hint = shortcut(Cmd::SketchTool(t));
-      it.children.push(c);
+      it.children.push(Item::new(Action::SketchOnFace(t), icon, label));
     }
   }
   it
 }
 
-/// The eight ring items, clockwise from north. `None` leaves a direction empty.
+/// The eight ring items, clockwise from north, with their keys. `None` leaves a direction empty.
 fn ring(app: &App, cx: &Context) -> [Option<Item>; 8] {
+  ring_items(app, cx).map(|i| i.map(|i| with_keys(app, i)))
+}
+
+fn ring_items(app: &App, cx: &Context) -> [Option<Item>; 8] {
   let repeat = app.last_cmd.map(|c| {
     let (icon, name, _) = c.info();
     Item::new(Action::Repeat(c), icon, &format!("Repeat {name}"))
@@ -439,6 +432,10 @@ fn ring(app: &App, cx: &Context) -> [Option<Item>; 8] {
 /// The overflow list: OK/Cancel, commands for the selection, navigation, display, workspaces
 /// and recent commands (`None` is a separator).
 fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
+  overflow_items(app, cx).into_iter().map(|i| i.map(|i| with_keys(app, i))).collect()
+}
+
+fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   let mut v: Vec<Option<Item>> = Vec::new();
   let sep = |v: &mut Vec<Option<Item>>| {
     if v.last().is_some_and(Option::is_some) {
@@ -489,7 +486,7 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
     v.push(Some(Item::new(Action::FindInWindow, Icon::Fit, "Find in Window")));
   };
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
-  let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide").hint("V");
+  let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
   if let Some((body, _)) = cx.face {
     if cx.planar_face {
       v.push(Some(Item::cmd(Cmd::NewSketch)));
@@ -542,7 +539,13 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
       v.push(Some(Item::cmd(Cmd::Dialog(Kind::Revolve))));
       sep(&mut v);
     }
-    v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    if app.s.design.feature(f).is_some_and(|x| matches!(x.kind, FeatureKind::Canvas { .. })) {
+      // Fusion's canvas menu: Edit Canvas (opacity, size, position) and Calibrate
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Canvas, "Edit Canvas")));
+      v.push(Some(Item::new(Action::Calibrate(f), Icon::Measure, "Calibrate")));
+    } else {
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    }
     let sel = Sel::Feature { feature: f };
     find(&mut v, in_browser(app, &sel).then_some(sel));
   } else if cx.profile {
@@ -596,6 +599,7 @@ fn run(app: &mut App, action: Action) {
     // repeating a modelling command from inside a sketch finishes the sketch first
     Action::Repeat(c) => app.launch(c),
     Action::EditFeature(f) => panels::edit_feature(app, f),
+    Action::Calibrate(f) => crate::canvas_ui::start_calibrate(app, f),
     Action::EditSketch(f) => app.edit_sketch(f),
     Action::SketchOnFace(t) => {
       app.new_sketch();
@@ -679,7 +683,8 @@ fn list_width(painter: &egui::Painter, font: &egui::FontId, items: &[Option<Item
     .flatten()
     .map(|it| {
       let w = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
-      let hint = it.hint.map(|h| painter.layout_no_wrap(h.into(), font.clone(), theme::MUTED).size().x + 18.0);
+      let hint =
+        it.hint.as_ref().map(|h| painter.layout_no_wrap(h.clone(), font.clone(), theme::MUTED).size().x + 18.0);
       let more = if it.children.is_empty() { 0.0 } else { 16.0 };
       w + 48.0 + hint.unwrap_or(0.0) + more
     })
@@ -807,7 +812,7 @@ fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[
           ));
           right -= 14.0;
         }
-        if let Some(h) = it.hint {
+        if let Some(h) = &it.hint {
           painter.text(pos2(right, row.center().y), egui::Align2::RIGHT_CENTER, h, font.clone(), theme::MUTED);
         }
         y += ROW_H;
@@ -1224,6 +1229,20 @@ mod tests {
     let cx = context(&app);
     let list = overflow(&app, &cx);
     let fillet = list.iter().flatten().find(|i| i.label == "Fillet").expect("recent Fillet");
-    assert_eq!(fillet.hint, Some("F"));
+    assert_eq!(fillet.hint.as_deref(), Some("F"));
+    // the user's key shows instead of the menus' default
+    app.prefs.keys.set("design.Fillet", "G", "F");
+    let list = overflow(&app, &cx);
+    let fillet = list.iter().flatten().find(|i| i.label == "Fillet").expect("recent Fillet");
+    assert_eq!(fillet.hint.as_deref(), Some("G"));
+    // keys the app keeps for itself, and keys by workspace: A is Appearance outside a sketch
+    let ring = ring(&app, &cx);
+    let undo = ring.iter().flatten().find(|i| matches!(i.action, Action::Cmd(Cmd::Undo))).expect("Undo");
+    assert_eq!(undo.hint.as_deref(), Some("Ctrl+Z"));
+    assert_eq!(app.key_for(APPEARANCE).as_deref(), Some("A"));
+    app.run("sketch.create", serde_json::json!({"plane": "xy"})).expect("a sketch");
+    assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)).as_deref(), Some("A"));
+    assert_eq!(app.key_for(Cmd::Dialog(Kind::Project)).as_deref(), Some("P"));
+    assert_eq!(app.key_for(Cmd::Construction).as_deref(), Some("X"));
   }
 }
