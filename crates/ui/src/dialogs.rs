@@ -416,6 +416,10 @@ pub struct Dialog {
   count2: String,
   spacing2: String,
   dir2: String,
+  /// Sketch rectangular pattern: the distances are the whole pattern's size (Fusion's Extent).
+  pattern_extent: bool,
+  /// Sketch rectangular pattern: centre each direction's instances on the original.
+  symmetric: [bool; 2],
   join: bool,
   a: String,
   b: String,
@@ -537,6 +541,8 @@ impl Dialog {
       count2: "2".into(),
       spacing2: "20 mm".into(),
       dir2: "y".into(),
+      pattern_extent: false,
+      symmetric: [false; 2],
       join: true,
       a: "20 mm".into(),
       b: "20 mm".into(),
@@ -1150,18 +1156,21 @@ impl Dialog {
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
       Kind::SkCircPattern => (
         "sketch.pattern_circ",
-        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle}),
+        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle,
+          "symmetric": self.flag}),
       ),
       Kind::SkRectPattern => {
         let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
         let mut p = json!({
           "curves": self.curves, "direction": v(&self.dir), "count": self.count.trim().parse::<u64>().ok()?,
-          "spacing": self.spacing,
+          "spacing": self.spacing, "symmetric": self.symmetric[0],
+          "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
         if self.use_dir2 {
           p["direction2"] = json!(v(&self.dir2));
           p["count2"] = json!(self.count2.trim().parse::<u64>().ok()?);
           p["spacing2"] = json!(self.spacing2);
+          p["symmetric2"] = json!(self.symmetric[1]);
         }
         ("sketch.pattern_rect", p)
       }
@@ -1355,6 +1364,15 @@ impl Dialog {
   fn at_pt(&self) -> Option<[f64; 2]> {
     let v = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0);
     Some([v(&self.at[0]), v(&self.at[1])])
+  }
+
+  /// Puts the dialog on an origin plane ("xy", "xz" or "yz"), as its plane chooser would, and
+  /// re-previews (the browser's Offset Plane on an origin plane).
+  pub(crate) fn use_origin_plane(&mut self, s: &mut Session, plane: &str) {
+    self.plane = json!(plane);
+    self.plane_label = format!("{} plane", plane.to_uppercase());
+    self.refresh_manip(s);
+    self.preview(s);
   }
 
   /// Withdraws the current preview (if any) and applies the dialog's command.
@@ -2773,6 +2791,7 @@ impl Dialog {
         ui.end_row();
         Self::field(ui, "Quantity", &mut self.count, dirty);
         Self::field(ui, "Total angle", &mut self.angle, dirty);
+        Self::check(ui, "Symmetric", &mut self.flag, dirty);
       }
       Kind::SkRectPattern => {
         ui.label("Objects");
@@ -2782,8 +2801,13 @@ impl Dialog {
         let mut d1: &'static str = if self.dir == "y" { "y" } else { "x" };
         Self::choose(ui, "Direction", "sdir1", &mut d1, &DIRS, dirty);
         self.dir = d1.into();
+        const TYPES: [(&str, &str); 2] = [("spacing", "Spacing"), ("extent", "Extent")];
+        let mut ty: &'static str = if self.pattern_extent { "extent" } else { "spacing" };
+        Self::choose(ui, "Distance type", "sdtype", &mut ty, &TYPES, dirty);
+        self.pattern_extent = ty == "extent";
         Self::field(ui, "Quantity", &mut self.count, dirty);
         Self::field(ui, "Distance", &mut self.spacing, dirty);
+        Self::check(ui, "Symmetric", &mut self.symmetric[0], dirty);
         Self::check(ui, "Second direction", &mut self.use_dir2, dirty);
         if self.use_dir2 {
           let mut d2: &'static str = if self.dir2 == "x" { "x" } else { "y" };
@@ -2791,6 +2815,7 @@ impl Dialog {
           self.dir2 = d2.into();
           Self::field(ui, "Quantity 2", &mut self.count2, dirty);
           Self::field(ui, "Distance 2", &mut self.spacing2, dirty);
+          Self::check(ui, "Symmetric 2", &mut self.symmetric[1], dirty);
         }
       }
       Kind::Refold => {
@@ -4026,6 +4051,8 @@ mod tests {
     d.curves = vec![circle];
     d.count = "2".into();
     d.use_dir2 = true;
+    d.pattern_extent = true;
+    d.symmetric = [true, false];
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::Project);

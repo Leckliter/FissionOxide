@@ -1,0 +1,106 @@
+{
+ "id": "offset-shallow-arc-slot",
+ "name": "Three point arc slot off the origin from (5,5) to (35,5) with the third point (10,9.2524) off the arc's apex (centre (20,-7.571), radius 19.571), width 5; extruded 2.",
+ "description": "Three point arc slot off the origin from (5,5) to (35,5) with the third point (10,9.2524) off the arc's apex (centre (20,-7.571), radius 19.571), width 5; extruded 2.",
+ "exercises": [
+  "sketch_arc_slot_three_point",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "SlotSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_slot_three_point",
+     "id": "slot",
+     "start": {
+      "at": [
+       5,
+       5
+      ]
+     },
+     "mid": {
+      "at": [
+       10,
+       9.252388
+      ]
+     },
+     "end": {
+      "at": [
+       35,
+       5
+      ]
+     },
+     "width": 5
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "SlotSketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "slot.e0",
+        "slot.e1",
+        "slot.s0",
+        "slot.s1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 2,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Slot"
+   ]
+  }
+ ]
+}

@@ -287,8 +287,10 @@ fn loft_sweep_hole_split_draft() {
 
 #[test]
 fn every_listed_command_is_handled() {
+  // hub.save, cam.library ... write to the hub: a scratch one, not the user's
+  let root = store::Store::scratch_root();
   for c in COMMANDS {
-    let mut s = Session::default();
+    let mut s = Session { store_root: Some(root.clone()), ..Session::default() };
     if let Err(e) = s.execute(c.id, &json!({})) {
       assert!(!e.0.starts_with("unknown command"), "{}: {e}", c.id);
     }
@@ -554,6 +556,30 @@ fn fusion_archives_are_explained_not_faked() {
 
 fn zip_writer() -> (zip::ZipWriter<std::io::Cursor<Vec<u8>>>, zip::write::SimpleFileOptions) {
   (zip::ZipWriter::new(std::io::Cursor::new(Vec::new())), Default::default())
+}
+
+#[test]
+fn an_empty_untitled_design_is_saved_to_the_hub_only_when_asked_for_explicitly() {
+  let root = temp_dir("hub-blank");
+  let mut s = Session { store_root: Some(root.clone()), ..Default::default() };
+  let items = |s: &mut Session| run(s, "hub.recent", json!({})).as_array().map(Vec::len).unwrap_or(0);
+  for p in [json!({}), json!({"new": true}), json!({"name": "Untitled"}), json!({"name": "  "})] {
+    let e = s.execute("hub.save", &p).expect_err("a blank Untitled design isn't saved");
+    assert!(e.0.contains("empty"), "{e}");
+  }
+  assert_eq!(s.design.name, "Untitled", "a refused save leaves the design as it was");
+  assert!(s.hub.is_none());
+  assert_eq!(items(&mut s), 0);
+  // named, or asked for explicitly (the Save dialog), it is
+  assert_eq!(run(&mut s, "hub.save", json!({"explicit": true}))["version"], 1);
+  let mut named = Session { store_root: Some(root.clone()), ..Default::default() };
+  assert_eq!(run(&mut named, "hub.save", json!({"name": "Blank plate"}))["version"], 1);
+  // and a design with something in it needs neither
+  let mut work = Session { store_root: Some(root.clone()), ..Default::default() };
+  plate(&mut work);
+  assert_eq!(run(&mut work, "hub.save", json!({}))["version"], 1);
+  assert_eq!(items(&mut s), 3);
+  let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1044,4 +1070,56 @@ fn the_welcome_fox_is_added_once() {
   run(&mut s, "hub.item.delete", json!({"item": item}));
   assert!(crate::hub::add_welcome(&root).unwrap().is_none());
   let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn timeline_moves_keep_references_in_order() {
+  let ids = |s: &Session| s.design.features.iter().map(|f| f.id.0).collect::<Vec<_>>();
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10, "at": [0, 0]}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [30, 0], "corner2": [40, 10]}));
+  run(&mut s, "extrude", json!({"distance": 5}));
+  let [boxed, sketch, extrude] = ids(&s)[..] else { panic!("{:?}", ids(&s)) };
+  let volume = total_volume(&s);
+
+  // a feature that references nothing before it can go anywhere
+  let r = run(&mut s, "feature.move", json!({"feature": boxed, "to": 2}));
+  assert_eq!(r["index"], 2);
+  assert_eq!(ids(&s), [sketch, extrude, boxed]);
+  assert!((total_volume(&s) - volume).abs() < 1e-6, "the move regenerates the same bodies");
+  // and a sketch with its extrude can move back in front of it, one at a time
+  run(&mut s, "feature.move", json!({"feature": boxed, "to": 0}));
+  assert_eq!(ids(&s), [boxed, sketch, extrude]);
+  s.undo();
+  assert_eq!(ids(&s), [sketch, extrude, boxed], "each move is one undo step");
+  s.redo();
+
+  // an extrude can't come before its sketch, nor the sketch after its extrude
+  let undo = s.undo.len();
+  let e = s.execute("feature.move", &json!({"feature": extrude, "to": 0})).unwrap_err();
+  assert!(e.to_string().contains("Sketch1"), "{e}");
+  assert!(s.execute("feature.move", &json!({"feature": sketch, "to": 2})).is_err());
+  assert_eq!(ids(&s), [boxed, sketch, extrude], "refused moves leave the timeline alone");
+  assert_eq!(s.undo.len(), undo, "refused moves leave no undo step");
+  assert!(s.design.check_move(FeatureId(sketch), 0).is_ok());
+  assert!(s.design.check_move(FeatureId(extrude), 0).is_err());
+}
+
+#[test]
+fn timeline_move_refuses_breaking_body_references() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 50]}));
+  run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 2}));
+  let ids = |s: &Session| s.design.features.iter().map(|f| f.id.0).collect::<Vec<_>>();
+  let [first, second, fillet] = ids(&s)[..] else { panic!("{:?}", ids(&s)) };
+  // the fillet's edge belongs to the first box: it can pass the second box but not the first
+  run(&mut s, "feature.move", json!({"feature": fillet, "to": 1}));
+  assert_eq!(ids(&s), [first, fillet, second]);
+  let e = s.execute("feature.move", &json!({"feature": fillet, "to": 0})).unwrap_err();
+  assert!(e.to_string().contains("Fillet"), "{e}");
+  assert_eq!(ids(&s), [first, fillet, second]);
+  assert!(s.design.features.iter().all(|f| s.model.status(f.id).is_none_or(|st| st.error.is_none())));
+  assert!(s.redo.is_empty(), "the refused move isn't left to redo");
 }

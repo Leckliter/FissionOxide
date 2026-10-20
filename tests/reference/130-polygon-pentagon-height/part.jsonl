@@ -1,0 +1,9 @@
+# 130-polygon-pentagon-height: added by the parity loop from a Fusion probe
+# polygon-pentagon-height: Regular pentagon drawn with side 10 (first side on the X axis from the origin) and polygon-constrained; the vertical distance from the origin corner to the apex is dimensioned to 30, so it becomes a regular pentagon of side 19.4956 (height 30); extruded 10.
+# The first corner snaps to the origin and the first side gets an automatic horizontal constraint; point 6 is the apex.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0.0, 0.0], [10.0, 0.0], [13.090169944, 9.510565163], [5.0, 15.388417686], [-3.090169944, 9.510565163]], "closed": true}
+{"cmd": "sketch.constrain", "type": "polygon", "curves": [2, 5, 7, 9, 10]}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [0, 6], "value": 30}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

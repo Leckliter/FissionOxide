@@ -31,7 +31,7 @@ fn sheet(s: &mut Session) {
 
 #[test]
 fn flat_pattern_to_gcode() {
-  let mut s = Session::default();
+  let mut s = Session { store_root: Some(hub("flat")), ..Default::default() };
   sheet(&mut s);
   let c = run(&mut s, "cut.contours", json!({}));
   let cs = c["contours"].as_array().unwrap();
@@ -80,7 +80,7 @@ fn flat_pattern_to_gcode() {
 
 #[test]
 fn sketch_and_faces() {
-  let mut s = Session::default();
+  let mut s = Session { store_root: Some(hub("faces")), ..Default::default() };
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [60, 40]}));
   run(&mut s, "sketch.circle", json!({"center": [20, 20], "radius": 5}));

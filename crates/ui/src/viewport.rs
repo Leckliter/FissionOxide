@@ -6,7 +6,7 @@ use fox_engine::Sel;
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::DVec3;
 use fox_engine::model::FeatureId;
-use fox_engine::render::{self, StandardView, ray_plane};
+use fox_engine::render::{self, ray_plane};
 use fox_engine::scene::{Pick, ViewOptions};
 use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use serde_json::json;
@@ -113,6 +113,9 @@ pub struct ToolState {
   curves: Vec<(u32, [f64; 2])>,
   /// Heads-up value boxes of the shape being drawn.
   hud: HeadsUp,
+  /// Center Point Arc: the cursor's last angle around the centre and the signed sweep it has
+  /// wound from the start, so the arc runs the way the cursor went (negative = clockwise).
+  arc_wind: Option<(f64, f64)>,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -163,6 +166,29 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.dim_first = None;
   app.tstate.curves.clear();
   app.tstate.hud = HeadsUp::default();
+  app.tstate.arc_wind = None;
+}
+
+/// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
+/// sweeps the way the cursor went, as in Fusion.
+fn track_arc_wind(app: &mut App, resp: &egui::Response, view: &View) {
+  let wind = match (app.tool, app.tstate.pts.as_slice()) {
+    (Tool::CenterArc, [c, a]) => {
+      let (c, a) = (*c, *a);
+      resp.hover_pos().and_then(|pos| sketch_cursor(app, view, pos)).map(|(cur, _)| {
+        let cur = hud_apply(app, cur);
+        let ang = (cur[1] - c[1]).atan2(cur[0] - c[0]);
+        let (last, sweep) = app.tstate.arc_wind.unwrap_or(((a[1] - c[1]).atan2(a[0] - c[0]), 0.0));
+        let step = (ang - last + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        // past a full turn either way the direction stays as it was
+        (ang, (sweep + step).clamp(-std::f64::consts::TAU, std::f64::consts::TAU))
+      })
+    }
+    _ => None,
+  };
+  if wind.is_some() || app.tstate.pts.len() != 2 || app.tool != Tool::CenterArc {
+    app.tstate.arc_wind = wind;
+  }
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -226,12 +252,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   // overlays that take clicks come first
   let mut consumed = false;
+  shown_dims_overlay(app, &painter, &view);
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
   if app.show_viewcube {
-    consumed |= viewcube(app, ui, &painter, &view);
+    consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
   if !consumed && let Some(plane) = hot_plane {
     consumed = true;
@@ -246,6 +273,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   dim_editor(app, &ctx);
+  track_arc_wind(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
@@ -378,7 +406,8 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   } else if !sketching {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
-    let ok = |p: &Pick| filter.allows(p, priority);
+    let locked = &app.ctx_menu.unselectable;
+    let ok = |p: &Pick| filter.allows(p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
     if !app.hover.as_ref().is_some_and(ok) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
@@ -399,10 +428,12 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_grid: app.show_grid,
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
+    hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
+    opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -422,9 +453,11 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    hide_profiles_of: app.hidden_profiles.clone(),
     show_vertices: key.vertices,
     peek: app.ctx_menu.peek.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    opacity: app.ctx_menu.opacity.clone(),
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
@@ -555,6 +588,12 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if !sketching || app.tool == Tool::Select {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
     select_click(app, add || app.dialog.is_some());
+    // double-clicking an edge selects its loop
+    if resp.double_clicked()
+      && let Some(Pick::Edge { body, edge }) = app.hover
+    {
+      crate::select::pick_loop(app, body, edge, add || app.dialog.is_some());
+    }
     // double-clicking a letter of a text edits the text
     if resp.double_clicked()
       && app.dialog.is_none()
@@ -635,7 +674,9 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     },
     Tool::Arc3 if n == 3 => Some(("sketch.arc", json!({"sketch": sid, "start": first, "end": pts[1], "mid": p}))),
     Tool::CenterArc if n == 3 => {
-      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p})))
+      // the arc runs the way the cursor wound around the centre
+      let clockwise = app.tstate.arc_wind.take().is_some_and(|(_, sweep)| sweep < 0.0);
+      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p, "clockwise": clockwise})))
     }
     Tool::Polygon if n == 2 => {
       Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6})))
@@ -689,8 +730,8 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
     }
     Tool::MidpointLine if n == 2 => {
-      let a = [2.0 * first[0] - p[0], 2.0 * first[1] - p[1]];
-      Some(("sketch.line", json!({"sketch": sid, "points": [a, p]})))
+      // the engine mirrors the end through the midpoint and keeps the midpoint on the line's middle
+      Some(("sketch.line", json!({"sketch": sid, "mid": first, "end": p})))
     }
     Tool::TangentArc if n == 2 => match tangent_curve(app, sk, first) {
       Some(curve) => Some(("sketch.arc", json!({"sketch": sid, "tangent": curve, "start": first, "end": p}))),
@@ -1004,7 +1045,8 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
         | CurveKind::ControlSpline { .. }
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. },
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. },
       )
       | None => return,
     },
@@ -1123,6 +1165,40 @@ pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, se
 }
 
 // ---------------------------------------------------------------- overlays
+
+/// The dimensions of sketches the browser's Show Dimensions turned on, drawn (not editable)
+/// while they're not being edited.
+fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let font = egui::FontId::proportional(12.0);
+  for sk in &app.shown_dims {
+    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+      continue;
+    }
+    let Some(r) = app.s.model.sketches.get(sk) else { continue };
+    let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
+    for c in &r.sketch.constraints {
+      let Some(dim) = c.kind.dim() else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim) else { continue };
+      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
+      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
+      let at = match &shape {
+        Some(s) => s.label,
+        None => match to_screen(anchor) {
+          Some(p) => p,
+          None => continue,
+        },
+      };
+      if let Some(s) = &shape {
+        paint_dim(painter, s, DIM_INK);
+      }
+      let rect = Rect::from_center_size(at, size);
+      painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+      painter.galley(rect.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+    }
+  }
+}
 
 /// Dimension labels and constraint glyphs of the sketch being edited. Returns true when a click
 /// was consumed.
@@ -1488,8 +1564,9 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Tangent { .. } => Icon::Tangent,
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
+    ConstraintKind::Polygon { .. } => Icon::Equal,
     _ => Icon::Fix,
   }
 }
@@ -1570,7 +1647,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc | Tool::MidpointLine, [a]) => line(*a, cur),
+    (Tool::MidpointLine, [a]) => line([2.0 * a[0] - cur[0], 2.0 * a[1] - cur[1]], cur),
+    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
@@ -1604,7 +1682,23 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CenterArc, [c, a]) => circle(*c, (a[0] - c[0]).hypot(a[1] - c[1])),
+    (Tool::CenterArc, [c, a]) => {
+      // the arc so far, the way the cursor wound; a full circle until it moves
+      let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+      match app.tstate.arc_wind {
+        Some((_, sweep)) if sweep.abs() > 1e-9 => {
+          let a0 = (a[1] - c[1]).atan2(a[0] - c[0]);
+          let pts: Vec<[f64; 2]> = (0..=64)
+            .map(|i| {
+              let t = a0 + sweep * i as f64 / 64.0;
+              [c[0] + r * t.cos(), c[1] + r * t.sin()]
+            })
+            .collect();
+          poly(&pts, false);
+        }
+        _ => circle(*c, r),
+      }
+    }
     (Tool::Slot, [a, b]) => {
       let w = point_line_dist(cur, *a, *b);
       circle(*a, w);
@@ -1931,186 +2025,6 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
   );
 }
 
-/// A clickable orientation cube in the top-right corner. Returns true when it took the click or
-/// is being dragged.
-fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
-  let size = 50.0f32;
-  let center = view.rect.right_top() + Vec2::new(-92.0, 80.0);
-  let (right, up, back) = app.cam.basis();
-  let proj = |v: DVec3| center + Vec2::new(v.dot(right) as f32, -v.dot(up) as f32) * size * 0.62;
-  let faces: [(DVec3, &str, StandardView); 6] = [
-    (DVec3::Z, "TOP", StandardView::Top),
-    (-DVec3::Z, "BOTTOM", StandardView::Bottom),
-    (-DVec3::Y, "FRONT", StandardView::Front),
-    (DVec3::Y, "BACK", StandardView::Back),
-    (DVec3::X, "RIGHT", StandardView::Right),
-    (-DVec3::X, "LEFT", StandardView::Left),
-  ];
-  let mut visible: Vec<(f64, Vec<Pos2>, &str, StandardView)> = Vec::new();
-  for (n, label, v) in faces {
-    let facing = n.dot(back);
-    if facing <= 0.02 {
-      continue;
-    }
-    // face corners
-    let (a, b) = if n.z.abs() > 0.5 {
-      (DVec3::X, DVec3::Y)
-    } else if n.x.abs() > 0.5 {
-      (DVec3::Y, DVec3::Z)
-    } else {
-      (DVec3::X, DVec3::Z)
-    };
-    let corners = [n + a + b, n - a + b, n - a - b, n + a - b].map(proj);
-    visible.push((facing, corners.to_vec(), label, v));
-  }
-  visible.sort_by(|x, y| x.0.total_cmp(&y.0));
-  // the cube with its Home and menu buttons is a widget like any other, so a dialog, menu or panel
-  // drawn over it takes the pointer instead
-  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
-  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
-  let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
-  let resp = ui.interact(cube_area.union(home).union(menu), ui.id().with("viewcube"), Sense::click_and_drag());
-  // dragging the cube orbits, as on Fusion's
-  if resp.dragged_by(egui::PointerButton::Primary) {
-    let d = resp.drag_delta();
-    app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008);
-  }
-  let pointer = if resp.dragged() { None } else { resp.hover_pos() };
-  let clicked = resp.clicked();
-  let mut hit: Option<StandardView> = None;
-  for (facing, pts, _, v) in &visible {
-    if *facing > 0.0 && pointer.is_some_and(|p| point_in_quad(p, pts)) {
-      hit = Some(*v);
-    }
-  }
-  // lettered axis stubs leave the cube from its silhouette, as on Fusion's ViewCube; the ones
-  // pointing away from the viewer go behind the cube
-  let sgn = |bit: usize| if bit != 0 { 1.0 } else { -1.0 };
-  let axes = [
-    (DVec3::X, "X", Color32::from_rgb(222, 40, 36)),
-    (DVec3::Y, "Y", Color32::from_rgb(40, 170, 50)),
-    (DVec3::Z, "Z", Color32::from_rgb(30, 70, 220)),
-  ];
-  let stub = |painter: &egui::Painter, axis: DVec3, label: &str, col: Color32| {
-    // the silhouette corner furthest along the axis's on-screen direction
-    let d = proj(axis) - proj(DVec3::ZERO);
-    let base = (0..8)
-      .map(|i| DVec3::new(sgn(i & 1), sgn(i & 2), sgn(i & 4)))
-      .max_by(|a, b| {
-        ((proj(*a) - center).dot(d) + a.dot(axis) as f32).total_cmp(&((proj(*b) - center).dot(d) + b.dot(axis) as f32))
-      })
-      .unwrap_or(DVec3::ZERO);
-    painter.line_segment([proj(base), proj(base + axis * 0.55)], Stroke::new(2.5, col));
-    painter.text(proj(base + axis * 0.85), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), col);
-  };
-  for (axis, label, col) in axes {
-    if axis.dot(back) < 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // soft shadow under the cube
-  painter.add(egui::Shape::ellipse_filled(
-    center + Vec2::new(4.0, size * 0.95),
-    Vec2::new(size * 0.8, size * 0.16),
-    Color32::from_black_alpha(28),
-  ));
-  for (facing, pts, label, v) in &visible {
-    // grey, lit from above-left like Fusion's cube
-    let n = match v {
-      StandardView::Top => DVec3::Z,
-      StandardView::Bottom => -DVec3::Z,
-      StandardView::Front => -DVec3::Y,
-      StandardView::Back => DVec3::Y,
-      StandardView::Right => DVec3::X,
-      _ => -DVec3::X,
-    };
-    let light = (n.dot(up) * 0.6 - n.dot(right) * 0.25 + 0.55).clamp(0.0, 1.0) as f32;
-    let shade = (196.0 + 48.0 * light) as u8;
-    let fill = if hit == Some(*v) { Color32::from_rgb(170, 208, 240) } else { Color32::from_gray(shade) };
-    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(140))));
-    if *facing > 0.25 {
-      // the label lies in the face: rotate it along the face's horizontal
-      let h = match v {
-        StandardView::Top | StandardView::Bottom | StandardView::Front => DVec3::X,
-        StandardView::Back => -DVec3::X,
-        StandardView::Right => DVec3::Y,
-        _ => -DVec3::Y,
-      };
-      let dir = proj(n + h) - proj(n);
-      let angle = dir.y.atan2(dir.x);
-      let c = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2()) / 4.0;
-      let color = Color32::from_gray(60).gamma_multiply((*facing as f32 * 1.5).min(1.0));
-      let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(10.5), color);
-      let half = galley.size() / 2.0;
-      let rot = egui::emath::Rot2::from_angle(angle);
-      let pos = c.to_pos2() - rot * half;
-      painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(angle));
-    }
-  }
-  for (axis, label, col) in axes {
-    if axis.dot(back) >= 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // the ViewCube menu button under the cube
-  let menu_hover = pointer.is_some_and(|p| menu.contains(p));
-  crate::icons::draw(
-    painter,
-    menu,
-    crate::icons::Icon::Component,
-    if menu_hover { crate::theme::ACCENT } else { Color32::from_gray(70) },
-  );
-  // home button
-  let home_hover = pointer.is_some_and(|p| home.contains(p));
-  let hc = if home_hover { crate::theme::ACCENT } else { Color32::from_gray(90) };
-  let hs = Stroke::new(1.5, hc);
-  let (hx, hy) = (home.center().x, home.center().y);
-  painter.add(egui::Shape::closed_line(
-    vec![
-      Pos2::new(hx - 7.0, hy - 1.0),
-      Pos2::new(hx, hy - 7.0),
-      Pos2::new(hx + 7.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy - 1.0),
-    ],
-    hs,
-  ));
-  if clicked {
-    if menu_hover {
-      app.cam.ortho = !app.cam.ortho;
-      app.status = Some((format!("Camera: {}", if app.cam.ortho { "Orthographic" } else { "Perspective" }), false));
-      return true;
-    }
-    if home_hover {
-      app.cam.set_view(StandardView::Home);
-      app.fit_view();
-      return true;
-    }
-    if let Some(v) = hit {
-      app.cam.set_view(v);
-      return true;
-    }
-  }
-  clicked || resp.dragged()
-}
-
-fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {
-  let mut inside = false;
-  let n = q.len();
-  for i in 0..n {
-    let (a, b) = (q[i], q[(i + 1) % n]);
-    if (a.y > p.y) != (b.y > p.y) {
-      let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
-      if p.x < x {
-        inside = !inside;
-      }
-    }
-  }
-  inside
-}
-
 // ---------------------------------------------------------------- sketch plane picking
 
 /// Fusion's orange for the origin planes offered by Create Sketch.
@@ -2129,7 +2043,7 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
 }
 
 /// Half the side of a plane's square: the size the scene draws construction planes at.
-fn plane_half_size(app: &App) -> f64 {
+pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
@@ -2166,12 +2080,14 @@ struct PlanePick {
 /// browser, if any.
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
-  if !picking && (app.picked_plane.is_none() || app.s.edit_sketch.is_some()) {
+  let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
+  if !picking && picked.is_none() && app.shown_planes.is_empty() {
     return None;
   }
   let mut planes = sketch_planes(app);
   if !picking {
-    planes.retain(|(p, _)| Some(p) == app.picked_plane.as_ref());
+    // the plane picked in the browser, and the origin planes Show/Hide turned on
+    planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));
   }
   let half = plane_half_size(app);
   let hot = if picking && app.drag.is_none() {
@@ -2197,12 +2113,12 @@ fn sketch_planes_overlay(
   let PlanePick { planes, half, picking, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
   let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-  for (i, (_, pl)) in planes.iter().enumerate() {
+  for (i, (p, pl)) in planes.iter().enumerate() {
     let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
     };
-    let lit = hot == Some(i) || !picking;
+    let lit = hot == Some(i) || (!picking && app.picked_plane.as_ref() == Some(p));
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));

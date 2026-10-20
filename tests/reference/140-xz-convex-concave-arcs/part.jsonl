@@ -1,0 +1,8 @@
+# 140-xz-convex-concave-arcs: added by the parity loop from a Fusion probe
+# xz-convex-concave-arcs: On XZ (sketch y = -Z): lines (0,0)-(40,0)-(40,20), an off-centre 3-point arc bulging out from (40,20) through (25,30) to (0,20), and a concave 3-point arc back from (0,20) through (6,10) to (0,0); extruded 8 along +Y.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0], [40, 20]]}
+{"cmd": "sketch.arc", "start": [40, 20], "mid": [25, 30], "end": [0, 20]}
+{"cmd": "sketch.arc", "start": [0, 20], "mid": [6, 10], "end": [0, 0]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

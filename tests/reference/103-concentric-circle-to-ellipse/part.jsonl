@@ -1,0 +1,8 @@
+# 103-concentric-circle-to-ellipse: added by the parity loop from a Fusion probe
+# concentric-circle-to-ellipse: ellipse at the origin (major end (20,0), minor 10); circle R4 drawn at (5,3) made concentric; plate with centred hole.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.ellipse", "center": [0, 0], "major": [20, 0], "minor": 10}
+{"cmd": "sketch.circle", "center": [5, 3], "radius": 4}
+{"cmd": "sketch.constrain", "type": "concentric", "curves": [2, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[12, 0]], "distance": 6, "operation": "new_body"}

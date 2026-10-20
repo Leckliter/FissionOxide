@@ -1,0 +1,10 @@
+# 131-polygon-square-center: added by the parity loop from a Fusion probe
+# polygon-square-center: Square drawn centred on the origin with circumradius 10 and polygon-constrained; the constraint's centre point is made coincident with the origin, the first side horizontal, and the centre-to-corner distance dimensioned to 20, giving a 28.284 square centred on the origin; extruded 10.
+# The first side gets an automatic horizontal constraint; the polygon constraint's centre is point 13, the first corner point 1.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-7.071067812, -7.071067812], [7.071067812, -7.071067812], [7.071067812, 7.071067812], [-7.071067812, 7.071067812]], "closed": true}
+{"cmd": "sketch.constrain", "type": "polygon", "curves": [3, 6, 9, 11]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [13, 0]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [13, 1], "value": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

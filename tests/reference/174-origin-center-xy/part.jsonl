@@ -1,0 +1,7 @@
+# 174-origin-center-xy: added by the parity loop from a Fusion probe
+# origin-center-xy: Center rectangle on XY with centre at the origin and corner (20,10): a 40x20 rectangle, extruded 10 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "center": [0, 0], "corner": [20, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

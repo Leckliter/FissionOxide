@@ -1,0 +1,140 @@
+{
+ "id": "excircle-far-hint",
+ "name": "3-Tangent Circle: excircle beyond the hypotenuse, hint far out along it",
+ "description": "Closed construction triangle (0,0)-(40,0)-(0,30); hint (100,100) well beyond the hypotenuse, so the circle is the excircle R60 at (60,60) touching the hypotenuse from outside and the legs' extensions; the disc is extruded 4. (Fusion's API resolves hints near the hypotenuse by solver basin, dependent on the order the lines are given; this far hint gives the excircle for this order.)",
+ "exercises": [
+  "sketch",
+  "circle_three_tangent",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "la",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "la.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "lb",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "lb.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "la.start"
+     },
+     "id": "lc",
+     "construction": true
+    },
+    {
+     "type": "circle_three_tangent",
+     "tangents": [
+      "la",
+      "lb",
+      "lc"
+     ],
+     "near": {
+      "at": [
+       100,
+       100
+      ]
+     },
+     "id": "c"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 4,
+    "direction": "positive"
+   }
+  }
+ ]
+}
