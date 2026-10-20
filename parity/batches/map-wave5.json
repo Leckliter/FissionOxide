@@ -1,0 +1,15 @@
+{
+  "ui:canvas:wheel-zoom-direction": "ui-canvas-input",
+  "ui:canvas:double-middle-fit": "ui-canvas-input",
+  "ui:shortcuts:space-repeat": "ui-canvas-input",
+  "ui:shortcuts:copy-paste": "ui-canvas-input",
+  "ui:assemble:joint-glyphs": "ui-assembly-browser",
+  "ui:assemble:joint-context-menu": "ui-assembly-browser",
+  "ui:browser:assembly-structure": "ui-assembly-browser",
+  "ui:chrome:open-file-new-tab": "ui-assembly-browser",
+  "ui:dialogs:manipulator-coverage": "ui-manipulators",
+  "ui:chrome:preferences-detail": "ui-prefs-and-select",
+  "ui:canvas:selection-tools": "ui-prefs-and-select",
+  "ui:manufacture:milling-toolbar": "ui-manufacture",
+  "ui:manufacture:workspace-tabs": "ui-manufacture"
+}
