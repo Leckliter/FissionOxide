@@ -107,7 +107,7 @@ cmds! {
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude (their counters left out), regenerated when the text changes (explode: plain curves); along a curve with path", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?, path?: curve id, above?: bool (default true), align?: left|center|right}";
   "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
-  "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
+  "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left); arcs the offset swallows drop out unless topology_matched", "{curves: [id], distance, both_sides?, topology_matched?}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
@@ -1967,7 +1967,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Fillet(f64),
     Chamfer(f64, f64),
     ChamferAngle(f64, f64),
-    Offset(f64),
+    Offset(f64, bool, bool),
     Trim(Option<CurveId>, [f64; 2]),
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
@@ -1988,7 +1988,11 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         (d2, None) => Op::Chamfer(d, d2.unwrap_or(d)),
       }
     }
-    "sketch.offset" => Op::Offset(num("distance", fox_expr::Kind::Length)?),
+    "sketch.offset" => Op::Offset(
+      num("distance", fox_expr::Kind::Length)?,
+      p.get("both_sides").and_then(Value::as_bool).unwrap_or(false),
+      p.get("topology_matched").and_then(Value::as_bool).unwrap_or(false),
+    ),
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
     "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
     "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
@@ -2024,7 +2028,13 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let [a, b] = curves.as_slice() else { return Err(CmdError::new("a chamfer needs two lines")) };
         vec![sketch.chamfer_angle(*a, *b, d, angle)?]
       }
-      Op::Offset(dist) => sketch.offset(&curves, dist)?,
+      Op::Offset(dist, both, matched) => {
+        let mut made = sketch.offset_matched(&curves, dist, matched)?;
+        if both {
+          made.extend(sketch.offset_matched(&curves, -dist, matched)?);
+        }
+        made
+      }
       Op::Trim(c, at) => {
         let c = pick(sketch, c, at)?;
         sketch.trim(c, at)?

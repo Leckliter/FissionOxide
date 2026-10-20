@@ -819,8 +819,21 @@ impl Sketch {
 
   /// Offsets a chain of lines, arcs and splines (or circles and ellipses) by `distance`: positive
   /// is outward for a closed chain, to the left for an open one. Corners are re-met sharply; arcs
-  /// stay concentric with the originals (sharing their centres) and lines parallel.
+  /// stay concentric with the originals (sharing their centres) and lines parallel. An arc the
+  /// offset swallows (and a piece its neighbours then cross over) drops out and its neighbours
+  /// meet directly, as Fusion's Offset with Topology Match off; see [`Sketch::offset_matched`].
   pub fn offset(&mut self, curves: &[CurveId], distance: f64) -> Result<Vec<CurveId>, SketchError> {
+    self.offset_matched(curves, distance, false)
+  }
+
+  /// [`Sketch::offset`]; with `topology_matched` every original curve keeps an offset copy, so an
+  /// arc the offset swallows is an error instead of dropping out.
+  pub fn offset_matched(
+    &mut self,
+    curves: &[CurveId],
+    distance: f64,
+    topology_matched: bool,
+  ) -> Result<Vec<CurveId>, SketchError> {
     if !(distance.is_finite() && distance.abs() > EPS) {
       return Err(SketchError::InvalidValue("offset distance must not be zero".into()));
     }
@@ -884,7 +897,7 @@ impl Sketch {
       return Err(SketchError::InvalidValue("the curves don't form one chain".into()));
     }
     // side: + left of travel; outward for closed chains
-    let mut side = 1.0;
+    let (mut side, mut area0) = (1.0, 0.0);
     if closed {
       let mut pts = Vec::new();
       for (id, rev) in &chain {
@@ -896,6 +909,7 @@ impl Sketch {
       }
       let area: f64 = (0..pts.len()).map(|i| cross(pts[i], pts[(i + 1) % pts.len()])).sum::<f64>() / 2.0;
       side = if area > 0.0 { -1.0 } else { 1.0 };
+      area0 = area;
     }
     let off = side * distance;
     // offset pieces in travel order, as extended geometry plus their travel ends
@@ -915,7 +929,10 @@ impl Sketch {
           let ccw = if *rev { -1.0 } else { 1.0 };
           let r2 = r - ccw * off;
           if r2 <= EPS {
-            return Err(SketchError::InvalidValue("the offset swallows an arc".into()));
+            if topology_matched {
+              return Err(SketchError::InvalidValue("the offset swallows an arc".into()));
+            }
+            continue;
           }
           let k = r2 / r;
           let (s2, e2) = (add(c, mul(sub(s, c), k)), add(c, mul(sub(e, c), k)));
@@ -923,21 +940,87 @@ impl Sketch {
         }
       }
     }
-    // meet neighbours at corners
-    let n = pieces.len();
-    let joints = if closed { n } else { n.saturating_sub(1) };
-    let mut corner: Vec<P> = Vec::new();
-    for k in 0..joints {
-      let (g1, _, e1, _, _) = pieces[k];
-      let (g2, s2, _, _, _) = pieces[(k + 1) % n];
-      let guess = mul(add(e1, s2), 0.5);
-      let p = if near(e1, s2) {
-        e1
-      } else {
-        meet(&g1, &g2).into_iter().min_by(|a, b| dist(*a, guess).total_cmp(&dist(*b, guess))).unwrap_or(guess)
+    // meet neighbours at corners; without topology matching, a piece its neighbours cross over
+    // (it would run backwards between its corners) drops out and they meet again
+    let corners = |pieces: &[(Geo, P, P, CurveId, bool)]| -> Vec<P> {
+      let n = pieces.len();
+      let joints = if closed { n } else { n.saturating_sub(1) };
+      (0..joints)
+        .map(|k| {
+          let (g1, _, e1, _, _) = pieces[k];
+          let (g2, s2, _, _, _) = pieces[(k + 1) % n];
+          let guess = mul(add(e1, s2), 0.5);
+          if near(e1, s2) {
+            e1
+          } else {
+            meet(&g1, &g2).into_iter().min_by(|a, b| dist(*a, guess).total_cmp(&dist(*b, guess))).unwrap_or(guess)
+          }
+        })
+        .collect()
+    };
+    let mut corner = corners(&pieces);
+    loop {
+      if topology_matched {
+        break;
+      }
+      let n = pieces.len();
+      if n == 0 || (closed && n < 2) {
+        return Err(SketchError::InvalidValue("the offset swallows the whole chain".into()));
+      }
+      // each piece's travel ends between its corners, and (for arcs) its sweep along travel
+      let span = |k: usize| -> (P, P) {
+        let s = match (k, closed) {
+          (0, true) => corner[n - 1],
+          (0, false) => pieces[0].1,
+          _ => corner[k - 1],
+        };
+        (s, if k < corner.len() { corner[k] } else { pieces[k].2 })
       };
-      corner.push(p);
+      let sweep = |k: usize, a: P, b: P| -> f64 {
+        let (g, .., rev) = pieces[k];
+        let Geo::Arc { c, .. } = g else { return 0.0 };
+        if rev { ccw_sweep(angle_of(c, b), angle_of(c, a)) } else { ccw_sweep(angle_of(c, a), angle_of(c, b)) }
+      };
+      let bad = (0..n).find(|&k| {
+        let (g, s0, e0, _, _) = pieces[k];
+        let (s, e) = span(k);
+        match g {
+          Geo::Line { .. } => dot(sub(e, s), sub(e0, s0)) <= EPS * dist(s0, e0),
+          Geo::Arc { .. } => {
+            let was = sweep(k, s0, e0);
+            sweep(k, s, e) > was + (TAU - was) / 2.0
+          }
+        }
+      });
+      if let Some(k) = bad {
+        pieces.remove(k);
+        corner = corners(&pieces);
+        continue;
+      }
+      // a closed chain shrunk past itself turns inside out
+      if closed {
+        let mut pts = Vec::new();
+        for (k, &(g, .., rev)) in pieces.iter().enumerate() {
+          let (s, e) = span(k);
+          match g {
+            Geo::Line { .. } => pts.push(s),
+            Geo::Arc { c, r, .. } => {
+              let (a0, sw) = (angle_of(c, s), sweep(k, s, e) * if rev { -1.0 } else { 1.0 });
+              pts.extend((0..16).map(|i| {
+                let t = a0 + sw * i as f64 / 16.0;
+                add(c, [r * t.cos(), r * t.sin()])
+              }));
+            }
+          }
+        }
+        let area: f64 = (0..pts.len()).map(|i| cross(pts[i], pts[(i + 1) % pts.len()])).sum::<f64>() / 2.0;
+        if area * area0 <= EPS * area0.abs() {
+          return Err(SketchError::InvalidValue("the offset swallows the whole chain".into()));
+        }
+      }
+      break;
     }
+    let n = pieces.len();
     // the new chain's points
     let mut pts: Vec<PointId> = Vec::new();
     let first = if closed { corner[n - 1] } else { pieces[0].1 };
@@ -1149,6 +1232,30 @@ mod tests {
     let out = s.offset(&[l1, l2], 1.0).unwrap();
     let Some(Geo::Line { b, .. }) = s.geo(out[0]) else { panic!() };
     assert!(dist(b, [9.0, 1.0]) < 1e-9, "inner corner {b:?}");
+  }
+
+  #[test]
+  fn offset_past_a_fillet_radius_drops_the_arcs() {
+    let rounded = || {
+      let mut s = Sketch::new();
+      let r = s.add_rectangle([0.0, 0.0], [60.0, 40.0]).unwrap();
+      let mut chain = Vec::new();
+      for k in 0..4 {
+        chain.push(r[k]);
+        chain.push(s.fillet(r[k], r[(k + 1) % 4], 4.0).unwrap());
+      }
+      (s, chain)
+    };
+    let (mut s, chain) = rounded();
+    let out = s.offset(&chain, -6.0).unwrap();
+    assert_eq!(out.len(), 4, "the corner arcs drop out");
+    assert!(s.solve().ok());
+    let areas: Vec<f64> = find_profiles(&s).iter().map(|p| p.area()).collect();
+    assert!(areas.iter().any(|a| (a - 48.0 * 28.0).abs() < 1e-6), "{areas:?}");
+    let (mut s, chain) = rounded();
+    assert!(s.offset_matched(&chain, -6.0, true).is_err(), "topology matched keeps every curve");
+    let (mut s, chain) = rounded();
+    assert!(s.offset(&chain, -25.0).is_err(), "the whole chain collapses");
   }
 
   #[test]
