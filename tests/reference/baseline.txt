@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+369-line-edge-proportional-mirror
+370-arc-edge-proportional-mirror
+371-line-edge-physical-distance-mirror
+372-sketch-line-path-mirror

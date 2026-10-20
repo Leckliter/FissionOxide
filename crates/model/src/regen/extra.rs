@@ -7,7 +7,7 @@ use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation};
+use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PathRef};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
 const ISO_COARSE: [(f64, f64); 18] = [
@@ -547,12 +547,68 @@ impl Ctx<'_> {
     Ok(pts)
   }
 
-  /// The point and unit tangent at fraction `t` of an edge's length.
-  fn along(&mut self, e: &mut EdgeRef, t: &str) -> Result<(DVec3, DVec3), String> {
-    let t = self.factor(t)?.clamp(0.0, 1.0);
+  /// Points along sketch curves in world space, start to end (one chain when there are several).
+  fn curve_points(&self, path: &PathRef) -> Result<Vec<DVec3>, String> {
+    let sk = self.state.sketches.get(&path.sketch).ok_or("the path's sketch failed")?;
+    const STEPS: usize = 256;
+    if let [c] = path.curves[..]
+      && let Some(c3) = sk.sketch.curve3d(c)
+    {
+      return Ok(c3.kind.polyline(STEPS).into_iter().map(DVec3::from).collect());
+    }
+    if let Some(segs) = crate::include::path_segs(sk, &path.curves)? {
+      // through included 3D geometry: sample the wire
+      let wire = Shape::path3d(&segs).map_err(ke)?;
+      let mut pts: Vec<DVec3> = Vec::new();
+      for l in wire.edge_lines(0.001).map_err(ke)? {
+        let mut q = l.points;
+        if let (Some(last), Some(first), Some(end)) = (pts.last(), q.first(), q.last())
+          && (*last - *first).length() > (*last - *end).length()
+        {
+          q.reverse();
+        }
+        pts.extend(q);
+      }
+      return Ok(pts);
+    }
+    let segs = match path.curves[..] {
+      // a lone curve keeps its own direction (and may be closed)
+      [c] => sk.sketch.curve_segs(c),
+      _ => crate::sheet::open_path(&sk.sketch, &path.curves)?,
+    };
+    let mut pts: Vec<DVec3> = Vec::new();
+    for s in &segs {
+      let n = if matches!(s, Seg::Line { .. }) { 1 } else { STEPS };
+      let from = usize::from(!pts.is_empty());
+      pts.extend((from..=n).map(|i| sk.plane.to_world(seg_point(s, i as f64 / n as f64))));
+    }
+    if pts.len() < 2 {
+      return Err("the path has no curves".into());
+    }
+    Ok(pts)
+  }
+
+  /// The point and unit tangent at fraction `t` of an edge's length, or `distance` along it.
+  fn along(&mut self, e: &mut EdgeRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
     let pts = self.edge_points(e)?;
+    self.along_points(&pts, t, distance)
+  }
+
+  /// As [`Ctx::along`], along sketch curves.
+  fn along_curve(&self, path: &PathRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
+    let pts = self.curve_points(path)?;
+    self.along_points(&pts, t, distance)
+  }
+
+  /// The point and unit tangent at fraction `t` of a polyline's length, or (when set) at
+  /// `distance` from its start, clamped to its length.
+  fn along_points(&self, pts: &[DVec3], t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
     let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).length()).sum();
-    let mut left = t * total;
+    let mut left = if distance.trim().is_empty() {
+      self.factor(t)?.clamp(0.0, 1.0) * total
+    } else {
+      self.len(distance)?.clamp(0.0, total)
+    };
     for w in pts.windows(2) {
       let l = (w[1] - w[0]).length();
       if left <= l || std::ptr::eq(w, pts.windows(2).last().unwrap_or(w)) {
@@ -715,8 +771,12 @@ impl Ctx<'_> {
         let (p, n) = self.face_point(face, DVec3::from(*near))?;
         Plane::from_normal(p, n, perpendicular(n)).map_err(ke)
       }
-      PlaneDef::AlongPath { edge, t } => {
-        let (p, d) = self.along(edge, t)?;
+      PlaneDef::AlongPath { edge, t, distance } => {
+        let (p, d) = self.along(edge, t, distance)?;
+        Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
+      }
+      PlaneDef::AlongCurve { path, t, distance } => {
+        let (p, d) = self.along_curve(path, t, distance)?;
         Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
       }
     }
@@ -804,7 +864,8 @@ impl Ctx<'_> {
         }
         Err("the edge doesn't cross the plane".into())
       }
-      PointDef::AlongPath { edge, t } => Ok(self.along(edge, t)?.0),
+      PointDef::AlongPath { edge, t, distance } => Ok(self.along(edge, t, distance)?.0),
+      PointDef::AlongCurve { path, t, distance } => Ok(self.along_curve(path, t, distance)?.0),
     }
   }
 }
