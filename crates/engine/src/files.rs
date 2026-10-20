@@ -494,7 +494,8 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId
     }
     Ok(ids)
   };
-  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::spline_beziers(&sp.fit), &pieces)) {
+  let closed = sp.fit.len() >= 3 && sp.fit.first().zip(sp.fit.last()).is_some_and(|(a, b)| dist(*a, *b) < DXF_SNAP);
+  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::fit_point_beziers(&sp.fit, closed), &pieces)) {
     if sp.fit.iter().all(|p| dist(*p, sp.fit[0]) < DXF_SNAP) {
       return Ok(None);
     }

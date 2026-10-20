@@ -51,6 +51,10 @@ pub enum Seg {
   /// A cubic Bézier piece of a spline (control points, start to end).
   Bezier {
     p: [[f64; 2]; 4],
+    /// Nonzero on the pieces of one fit-point spline, which become one edge: the kernel joins
+    /// neighbouring pieces with the same `chain`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    chain: u32,
   },
   /// An arc of an ellipse: `major` is the semi-major axis (the point at parameter 0 relative to
   /// the centre), `minor` the radius along `major` turned a quarter left; from parameter `start`
@@ -70,7 +74,7 @@ impl Seg {
       Seg::Line { a, .. } => a,
       Seg::Arc { center, radius, start_angle, .. } => polar(center, radius, start_angle),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
-      Seg::Bezier { p } => p[0],
+      Seg::Bezier { p, .. } => p[0],
       Seg::EllipseArc { center, major, minor, start, .. } => ellipse_point(center, major, minor, start),
     }
   }
@@ -80,7 +84,7 @@ impl Seg {
       Seg::Line { b, .. } => b,
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep),
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
-      Seg::Bezier { p } => p[3],
+      Seg::Bezier { p, .. } => p[3],
       Seg::EllipseArc { center, major, minor, start, sweep } => ellipse_point(center, major, minor, start + sweep),
     }
   }
@@ -91,7 +95,7 @@ impl Seg {
       Seg::Line { a, b } => [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
       Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep / 2.0),
       Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { TAU / 2.0 } else { -TAU / 2.0 }),
-      Seg::Bezier { p } => crate::bezier_at(&p, 0.5),
+      Seg::Bezier { p, .. } => crate::bezier_at(&p, 0.5),
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         ellipse_point(center, major, minor, start + sweep / 2.0)
       }
@@ -105,7 +109,7 @@ impl Seg {
         Seg::Arc { center, radius, start_angle: start_angle + sweep, sweep: -sweep }
       }
       Seg::Circle { center, radius, ccw } => Seg::Circle { center, radius, ccw: !ccw },
-      Seg::Bezier { p } => Seg::Bezier { p: [p[3], p[2], p[1], p[0]] },
+      Seg::Bezier { p, chain } => Seg::Bezier { p: [p[3], p[2], p[1], p[0]], chain },
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         Seg::EllipseArc { center, major, minor, start: start + sweep, sweep: -sweep }
       }
@@ -122,7 +126,7 @@ impl Seg {
         (t(start_angle), t(start_angle + sweep))
       }
       Seg::Circle { .. } => ([0.0, 0.0], [0.0, 0.0]),
-      Seg::Bezier { p } => {
+      Seg::Bezier { p, .. } => {
         let (a, b) =
           (if dist(p[0], p[1]) > 1e-12 { p[1] } else { p[2] }, if dist(p[3], p[2]) > 1e-12 { p[2] } else { p[1] });
         ([a[0] - p[0][0], a[1] - p[0][1]], [p[3][0] - b[0], p[3][1] - b[1]])
@@ -156,7 +160,7 @@ impl Seg {
           out.push(polar(center, radius, s * TAU * i as f64 / n as f64));
         }
       }
-      Seg::Bezier { p } => {
+      Seg::Bezier { p, .. } => {
         for i in 0..16 {
           out.push(crate::bezier_at(&p, i as f64 / 16.0));
         }
@@ -169,6 +173,15 @@ impl Seg {
       }
     }
   }
+}
+
+fn is_zero(v: &u32) -> bool {
+  *v == 0
+}
+
+/// The [`Seg::Bezier`] `chain` of a curve's pieces: nonzero (and its own) for a fit-point spline.
+pub(crate) fn spline_chain(id: crate::CurveId, kind: &CurveKind) -> u32 {
+  if matches!(kind, CurveKind::Spline { .. }) { id.0.wrapping_add(1).max(1) } else { 0 }
 }
 
 /// A closed chain of segments.
@@ -360,9 +373,10 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         );
       }
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
+        let chain = spline_chain(c.id, &c.kind);
         for b in sketch.beziers(c.id) {
           if dist(b[0], b[3]) > MERGE_TOL {
-            edges.push((0, 0, Seg::Bezier { p: b }));
+            edges.push((0, 0, Seg::Bezier { p: b, chain }));
           }
         }
       }
@@ -567,7 +581,7 @@ fn departure_angle(s: &Seg) -> f64 {
       angle_of(p0, p1)
     }
     Seg::Circle { .. } => 0.0,
-    Seg::Bezier { p } => {
+    Seg::Bezier { p, .. } => {
       let q = if dist(p[0], p[1]) > 1e-12 {
         p[1]
       } else if dist(p[0], p[2]) > 1e-12 {

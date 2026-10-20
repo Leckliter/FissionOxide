@@ -1,6 +1,6 @@
 //! Tests for elliptical arcs (trim, the command, extrude to exact ellipse faces, DXF ELLIPSE
-//! round trips), fit-point splines through Trim and Extend, and text fonts from disk, driven
-//! through commands.
+//! round trips), fit-point splines (Fusion's curve, one face each, closed ones, Trim and Extend),
+//! and text fonts from disk, driven through commands.
 
 use serde_json::{Value, json};
 
@@ -90,6 +90,42 @@ fn elliptical_arc_command_and_dxf_round_trip() {
 }
 
 #[test]
+fn a_fit_point_spline_extrudes_to_one_side_face() {
+  // Fusion's three-point arch: 3630.17 mm³ (tests/reference/198-open-three-point-arch)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.spline", json!({"points": [[0, 0], [20, 20], [40, 0]]}));
+  run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, -5], [0, -5], [0, 0]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5}));
+  let v = volume(&s);
+  assert!((v - 3_630.170_487_570_409).abs() < 1e-3 * v, "{v}");
+  assert_eq!(s.model.bodies[0].faces().len(), 6, "one face for the spline, as in Fusion");
+}
+
+#[test]
+fn closed_fit_point_splines_have_no_corner() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.spline", json!({"points": [[0, 0], [30, -5], [35, 20], [5, 25]], "closed": true}));
+  assert_eq!(r["profiles"], 1, "{r}");
+  let sk = sketch(&s);
+  let CurveKind::Spline { points, .. } = &sk.curves[0].kind else { panic!("a fit-point spline") };
+  assert_eq!(points.first(), points.last(), "closed on its first point");
+  // smooth through the start: the pieces meeting there leave and arrive the same way
+  let bz = sk.beziers(sk.curves[0].id);
+  let (a, b) = (bz.last().unwrap(), bz.first().unwrap());
+  let (t1, t0) = ([a[3][0] - a[2][0], a[3][1] - a[2][1]], [b[1][0] - b[0][0], b[1][1] - b[0][1]]);
+  assert!((t1[0] * t0[1] - t1[1] * t0[0]).abs() < 1e-9 * t1[0].hypot(t1[1]) * t0[0].hypot(t0[1]));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5}));
+  // Fusion: 6079.60 mm³, top, bottom and one side (tests/reference/201-closed-four-point)
+  let v = volume(&s);
+  assert!((v - 6_079.604_296_233_5).abs() < 1e-3 * v, "{v}");
+  assert_eq!(s.model.bodies[0].faces().len(), 3);
+}
+
+#[test]
 fn fit_point_splines_stay_fit_point_through_trim_and_extend() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
@@ -97,7 +133,8 @@ fn fit_point_splines_stay_fit_point_through_trim_and_extend() {
     run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 5]]}))["curves"][0].as_u64().unwrap();
   run(&mut s, "sketch.line", json!({"points": [[25, -10], [25, 20]]}));
   run(&mut s, "sketch.trim", json!({"curve": sp, "at": [29, 4]}));
-  run(&mut s, "sketch.line", json!({"points": [[-10, -20], [-10, 20]]}));
+  // the curve leaves (0, 0) steeply (about 2.2 up for 1 across), so reaches x = -10 near y = -22
+  run(&mut s, "sketch.line", json!({"points": [[-10, -40], [-10, 20]]}));
   run(&mut s, "sketch.extend", json!({"curve": sp, "at": [0, 0]}));
   let sk = sketch(&s);
   let c = sk.curves.iter().find(|c| c.id.0 as u64 == sp).unwrap();

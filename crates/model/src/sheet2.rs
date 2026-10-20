@@ -52,7 +52,7 @@ fn seg_len(s: &Seg) -> f64 {
     Seg::Line { a, b } => len2(sub(b, a)),
     Seg::Arc { radius, sweep, .. } => radius * sweep.abs(),
     Seg::Circle { radius, .. } => 2.0 * PI * radius,
-    Seg::Bezier { p } => {
+    Seg::Bezier { p, .. } => {
       let pts: Vec<P2> =
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
@@ -72,7 +72,7 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
     Seg::Line { a, b } => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f],
     Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep * f),
     Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { 2.0 * PI * f } else { -2.0 * PI * f }),
-    Seg::Bezier { p } => {
+    Seg::Bezier { p, .. } => {
       let pts: Vec<P2> =
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       let cum: Vec<f64> = std::iter::once(0.0)
@@ -336,7 +336,7 @@ fn tangent_elements(segs: &[Seg]) -> Option<Vec<El>> {
       Seg::Circle { center, radius, ccw: true } => {
         items.push(El::Curve { phi0: PI / 2.0, phi1: PI / 2.0 + 2.0 * PI, c: center, r: radius })
       }
-      Seg::Bezier { p } => {
+      Seg::Bezier { p, .. } => {
         let pts: Vec<P2> = (0..=16).map(|i| fox_sketch::bezier_at(&p, i as f64 / 16.0)).collect();
         for w in pts.windows(2) {
           if len2(sub(w[1], w[0])) > 1e-9 {
@@ -927,7 +927,7 @@ pub fn map_seg(s: &Seg, f: &impl Fn(P2) -> P2, mirror: bool) -> Seg {
       Seg::Arc { center: c, radius, start_angle: d[1].atan2(d[0]), sweep: sweep * sg }
     }
     Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius, ccw: ccw != mirror },
-    Seg::Bezier { p } => Seg::Bezier { p: p.map(f) },
+    Seg::Bezier { p, chain } => Seg::Bezier { p: p.map(f), chain },
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       let c = f(center);
       let m = sub(f([center[0] + major[0], center[1] + major[1]]), c);

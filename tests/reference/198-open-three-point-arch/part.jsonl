@@ -1,0 +1,9 @@
+# 198-open-three-point-arch: added by the parity loop from a Fusion probe
+# open-three-point-arch: Fit point spline through (0,0)-(20,20)-(40,0), closed by lines down to y=-5 and across; extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [20, 20], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, -5]]}
+{"cmd": "sketch.line", "points": [[40, -5], [0, -5]]}
+{"cmd": "sketch.line", "points": [[0, -5], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

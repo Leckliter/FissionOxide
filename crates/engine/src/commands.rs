@@ -102,7 +102,7 @@ cmds! {
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
   "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
-  "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
+  "sketch.spline" => "Fit point spline: Fusion's smoothest curve through the points; closed (no corner at the start) when closed or the last point is the first", "{points: [[x,y], ...], closed?: bool}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
@@ -2303,6 +2303,9 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         for q in pts {
           let spec = snap(sketch, q);
           ids.push(sketch.resolve(spec)?);
+        }
+        if p.get("closed").and_then(Value::as_bool).unwrap_or(false) && ids.first() != ids.last() {
+          ids.push(ids[0]);
         }
         sketch.add_curve(CurveKind::spline(ids))?;
       }

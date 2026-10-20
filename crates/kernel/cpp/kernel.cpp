@@ -69,6 +69,7 @@
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
@@ -262,7 +263,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     if (!me.IsDone()) throw std::runtime_error("degenerate arc in profile");
     return me.Edge();
   }
-  if (kind == 3) {
+  if (kind == 3 || kind == 5) {
     TColgp_Array1OfPnt poles(1, 4);
     for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
     Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles);
@@ -275,12 +276,39 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
   if (!me.IsDone()) throw std::runtime_error("degenerate circle in profile");
   return me.Edge();
 }
+
+// Segments `first` .. `first + count` (cubic Beziers, kinds 3 and 5) as one B-spline edge.
+TopoDS_Edge chain_edge(rust::Slice<const double> segs, size_t first, size_t count) {
+  GeomConvert_CompCurveToBSplineCurve cc;
+  for (size_t i = 0; i < count; ++i) {
+    size_t o = (first + i) * 13;
+    need(segs, o + 13, "segments");
+    TColgp_Array1OfPnt poles(1, 4);
+    for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
+    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles);
+    if (!cc.Add(bz, 1e-5, Standard_True)) throw std::runtime_error("spline pieces do not meet");
+  }
+  BRepBuilderAPI_MakeEdge me(cc.BSplineCurve());
+  if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
+  return me.Edge();
+}
+
+// The edge starting at segment `seg` (a run of joined Bezier pieces makes one); `used` is how
+// many segments it took (at most `avail`).
+TopoDS_Edge next_edge(rust::Slice<const double> segs, size_t seg, size_t avail, size_t &used) {
+  used = 1;
+  while (used < avail && (seg + used + 1) * 13 <= segs.size() && static_cast<int>(segs[(seg + used) * 13]) == 5) {
+    ++used;
+  }
+  return used > 1 ? chain_edge(segs, seg, used) : seg_edge(segs, seg);
+}
 } // namespace
 
 // plane: origin(3) normal(3) xdir(3)
 // segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 //   kind 4, an elliptical arc: see ellipse_edge
+//   kind 5, a cubic Bezier continuing the previous one's edge (the pieces of one spline)
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
                                  rust::Slice<const uint32_t> loop_lens) {
@@ -291,8 +319,11 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
   std::vector<TopoDS_Wire> wires;
   for (uint32_t n : loop_lens) {
     BRepBuilderAPI_MakeWire mw;
-    for (uint32_t k = 0; k < n; ++k, ++seg) {
-      TopoDS_Edge e = seg_edge(segs, seg);
+    for (uint32_t k = 0; k < n;) {
+      size_t used = 1;
+      TopoDS_Edge e = next_edge(segs, seg, n - k, used);
+      seg += used;
+      k += static_cast<uint32_t>(used);
       mw.Add(e);
       if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
     }
@@ -784,8 +815,10 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
   FOX_TRY
   BRepBuilderAPI_MakeWire mw;
-  for (size_t i = 0; i * 13 < segs.size(); ++i) {
-    mw.Add(seg_edge(segs, i));
+  for (size_t i = 0; i * 13 < segs.size();) {
+    size_t used = 1;
+    mw.Add(next_edge(segs, i, segs.size() / 13 - i, used));
+    i += used;
     if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
   }
   if (!mw.IsDone()) throw std::runtime_error("empty path");

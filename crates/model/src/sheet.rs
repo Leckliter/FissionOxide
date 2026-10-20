@@ -172,7 +172,7 @@ fn tangents(s: &Seg) -> Option<(P2, P2)> {
       Some((t(start_angle), t(start_angle + sweep)))
     }
     Seg::Circle { .. } => None,
-    Seg::Bezier { p } => {
+    Seg::Bezier { p, .. } => {
       let a = unit(sub(if len2(sub(p[1], p[0])) > 1e-12 { p[1] } else { p[2] }, p[0]))?;
       let b = unit(sub(p[3], if len2(sub(p[3], p[2])) > 1e-12 { p[2] } else { p[1] }))?;
       Some((a, b))
@@ -212,7 +212,7 @@ pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String
         segs.push(Seg::Arc { center: c, radius: len2(sub(s, c)), start_angle: a0, sweep });
       }
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
-        segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p }));
+        segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p, chain: 0 }));
       }
       CurveKind::EllipticalArc { .. } => segs.extend(sketch.curve_segs(c.id)),
       CurveKind::Ellipse { .. } => {

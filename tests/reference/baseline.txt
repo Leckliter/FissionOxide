@@ -82,3 +82,7 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+198-open-three-point-arch
+199-open-five-point-wave
+200-uneven-spacing
+201-closed-four-point
