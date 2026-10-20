@@ -31,11 +31,21 @@ pub struct Filters {
   pub profiles: bool,
   /// Body vertices: off by default, since they are drawn (as dots) only while it is on.
   pub vertices: bool,
+  /// Construction planes, axes and points.
+  pub construction: bool,
 }
 
 impl Default for Filters {
   fn default() -> Self {
-    Filters { bodies: true, faces: true, edges: true, sketches: true, profiles: true, vertices: false }
+    Filters {
+      bodies: true,
+      faces: true,
+      edges: true,
+      sketches: true,
+      profiles: true,
+      vertices: false,
+      construction: true,
+    }
   }
 }
 
@@ -47,6 +57,7 @@ impl Filters {
       "edges" => self.edges,
       "sketches" => self.sketches,
       "vertices" => self.vertices,
+      "construction" => self.construction,
       _ => self.profiles,
     }
   }
@@ -58,6 +69,7 @@ impl Filters {
       "edges" => &mut self.edges,
       "sketches" => &mut self.sketches,
       "vertices" => &mut self.vertices,
+      "construction" => &mut self.construction,
       _ => &mut self.profiles,
     };
     *slot = !*slot;
