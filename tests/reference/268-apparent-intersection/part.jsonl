@@ -1,0 +1,11 @@
+# 268-apparent-intersection: added by the parity loop from a Fusion probe
+# apparent-intersection: 40x30 rectangle whose bottom line stops at x=30 and right line starts at y=10; Distance and Angle sketch chamfer at their apparent intersection (40,0): 15 along the bottom at 45 deg, which trims both lines and closes the profile; extruded 10.
+# Distance and Angle chamfer: the distance and the angle are both from the first line, as Fusion's tool takes them.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[40, 10], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 6], "distance": 15, "angle": 45}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

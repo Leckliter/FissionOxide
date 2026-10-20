@@ -56,6 +56,10 @@ pub(crate) struct MenuState {
   pub(crate) reveal: Option<Sel>,
   /// Isolate: only these bodies are drawn (a view state; nothing in the design changes).
   pub(crate) isolate: Option<Vec<BodyId>>,
+  /// Bodies drawn see-through, (body, alpha) (Opacity Control; a view state).
+  pub(crate) opacity: Vec<(BodyId, u8)>,
+  /// Bodies the canvas can't pick (Selectable/Unselectable); the browser still selects them.
+  pub(crate) unselectable: Vec<BodyId>,
 }
 
 #[derive(Clone)]
@@ -63,6 +67,8 @@ enum Action {
   Cmd(Cmd),
   Repeat(Cmd),
   EditFeature(FeatureId),
+  /// Calibrate a canvas: pick two points on it, type their real distance.
+  Calibrate(FeatureId),
   EditSketch(FeatureId),
   /// Create a sketch on the selected planar face and start a sketch tool in it.
   SketchOnFace(Tool),
@@ -71,6 +77,7 @@ enum Action {
   Cancel,
   ShowHide,
   ShowAll,
+  HideAll,
   Isolate,
   Unisolate,
   FindInBrowser(Sel),
@@ -86,7 +93,7 @@ struct Item {
   icon: Icon,
   label: String,
   /// Shortcut key, drawn on the right of overflow rows.
-  hint: Option<&'static str>,
+  hint: Option<String>,
   children: Vec<Item>,
 }
 
@@ -97,46 +104,36 @@ impl Item {
 
   fn cmd(c: Cmd) -> Item {
     let (icon, label, _) = c.info();
-    Item { hint: shortcut(c), ..Item::new(Action::Cmd(c), icon, label) }
+    Item::new(Action::Cmd(c), icon, label)
   }
 
   fn with_label(c: Cmd, label: &str) -> Item {
     Item { label: label.into(), ..Item::cmd(c) }
   }
-
-  fn hint(mut self, h: &'static str) -> Item {
-    self.hint = Some(h);
-    self
-  }
 }
 
-/// The key that runs a command, as the app binds it (see `App::shortcuts`).
-fn shortcut(c: Cmd) -> Option<&'static str> {
-  Some(match c {
-    Cmd::Dialog(Kind::Extrude) => "E",
-    Cmd::Dialog(Kind::Fillet) => "F",
-    Cmd::Dialog(Kind::Move) => "M",
-    Cmd::Dialog(Kind::Inspect) => "I",
-    Cmd::Dialog(Kind::Hole) => "H",
-    Cmd::Dialog(Kind::PressPull) => "Q",
-    Cmd::Dialog(Kind::Joint) => "J",
-    Cmd::Dialog(Kind::SkOffset) => "O",
-    Cmd::Dialog(Kind::Form(f)) if std::ptr::eq(f, &crate::forms::APPEARANCE) => "A",
-    Cmd::SketchTool(Tool::Line) => "L",
-    Cmd::SketchTool(Tool::Rect) => "R",
-    Cmd::SketchTool(Tool::Circle) => "C",
-    Cmd::SketchTool(Tool::Arc3) => "A",
-    Cmd::SketchTool(Tool::Point) => "P",
-    Cmd::SketchTool(Tool::Dimension) => "D",
-    Cmd::SketchTool(Tool::Trim) => "T",
-    Cmd::Construction => "X",
-    Cmd::Delete => "Del",
-    Cmd::Undo => "Ctrl+Z",
-    Cmd::Redo => "Ctrl+Y",
-    Cmd::Fit => "F6",
-    Cmd::ToggleVisibility => "V",
-    _ => return None,
-  })
+/// Puts the key that runs each item (and each of its children) on it, as the app binds it now:
+/// the user's keys over the menus' defaults (see [`App::key_for`]).
+fn with_keys(app: &App, mut it: Item) -> Item {
+  if it.hint.is_none() {
+    it.hint = match it.action {
+      Action::Cmd(c) => app.key_for(c),
+      Action::ShowHide => app.key_for(Cmd::ToggleVisibility),
+      // a sketch tool started on a face: its key inside the sketch
+      Action::SketchOnFace(t) => {
+        let c = Cmd::SketchTool(t);
+        crate::menus::commands(&[crate::panels::Tab::Sketch])
+          .into_iter()
+          .find(|e| e.cmd == c)
+          .map(|e| crate::menus::key_of(&app.prefs, crate::tips::Scope::Sketch, e.label))
+          .filter(|k| !k.is_empty())
+          .map(str::to_string)
+      }
+      _ => None,
+    };
+  }
+  it.children = std::mem::take(&mut it.children).into_iter().map(|c| with_keys(app, c)).collect();
+  it
 }
 
 const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
@@ -275,6 +272,24 @@ pub(crate) fn find_in_window(app: &mut App, bodies: &[BodyId], sketch: Option<Fe
       hi = hi.max(w);
     }
   }
+  fit_box(app, lo, hi);
+}
+
+/// Find in Window for a plane: fits the view to the square the viewport draws it as.
+pub(crate) fn find_plane_in_window(app: &mut App, plane: &fox_engine::kernel::Plane) {
+  let h = crate::viewport::plane_half_size(app);
+  let mut lo = DVec3::splat(f64::INFINITY);
+  let mut hi = DVec3::splat(f64::NEG_INFINITY);
+  for c in [[-h, -h], [h, -h], [h, h], [-h, h]] {
+    let w = plane.to_world(c);
+    lo = lo.min(w);
+    hi = hi.max(w);
+  }
+  fit_box(app, lo, hi);
+}
+
+/// Fits the view to a world box.
+fn fit_box(app: &mut App, lo: DVec3, hi: DVec3) {
   if !lo.is_finite() || !hi.is_finite() {
     app.status = Some(("Nothing to show in the window".into(), false));
     return;
@@ -286,7 +301,7 @@ pub(crate) fn find_in_window(app: &mut App, bodies: &[BodyId], sketch: Option<Fe
 /// Shows the bodies if any is hidden, else hides them.
 pub(crate) fn show_hide(app: &mut App, bodies: &[BodyId]) {
   if bodies.is_empty() {
-    app.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+    app.hint("Show/Hide: select bodies, faces or edges first");
     return;
   }
   let show = bodies.iter().any(|b| !app.s.body_visible(*b));
@@ -316,9 +331,18 @@ pub(crate) fn save_as_mesh(app: &mut App, body: BodyId) {
 }
 
 fn show_all(app: &mut App) {
-  let hidden: Vec<BodyId> = app.s.model.bodies.iter().map(|b| b.id).filter(|b| !app.s.body_visible(*b)).collect();
-  for b in hidden {
-    app.run("body.visible", json!({"body": b.0, "visible": true}));
+  set_all_visible(app, true);
+}
+
+/// Shows or hides every body.
+fn set_all_visible(app: &mut App, visible: bool) {
+  let change: Vec<BodyId> =
+    app.s.model.bodies.iter().map(|b| b.id).filter(|b| app.s.body_visible(*b) != visible).collect();
+  for b in change {
+    app.run("body.visible", json!({"body": b.0, "visible": visible}));
+  }
+  if !visible {
+    app.s.selection.retain(|s| !matches!(s, Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. }));
   }
 }
 
@@ -350,16 +374,18 @@ fn sketch_item(cx: &Context) -> Item {
   if cx.planar_face {
     for t in [Tool::Line, Tool::Rect, Tool::Circle, Tool::Arc3, Tool::Point] {
       let (icon, label, _) = Cmd::SketchTool(t).info();
-      let mut c = Item::new(Action::SketchOnFace(t), icon, label);
-      c.hint = shortcut(Cmd::SketchTool(t));
-      it.children.push(c);
+      it.children.push(Item::new(Action::SketchOnFace(t), icon, label));
     }
   }
   it
 }
 
-/// The eight ring items, clockwise from north. `None` leaves a direction empty.
+/// The eight ring items, clockwise from north, with their keys. `None` leaves a direction empty.
 fn ring(app: &App, cx: &Context) -> [Option<Item>; 8] {
+  ring_items(app, cx).map(|i| i.map(|i| with_keys(app, i)))
+}
+
+fn ring_items(app: &App, cx: &Context) -> [Option<Item>; 8] {
   let repeat = app.last_cmd.map(|c| {
     let (icon, name, _) = c.info();
     Item::new(Action::Repeat(c), icon, &format!("Repeat {name}"))
@@ -406,6 +432,10 @@ fn ring(app: &App, cx: &Context) -> [Option<Item>; 8] {
 /// The overflow list: OK/Cancel, commands for the selection, navigation, display, workspaces
 /// and recent commands (`None` is a separator).
 fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
+  overflow_items(app, cx).into_iter().map(|i| i.map(|i| with_keys(app, i))).collect()
+}
+
+fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   let mut v: Vec<Option<Item>> = Vec::new();
   let sep = |v: &mut Vec<Option<Item>>| {
     if v.last().is_some_and(Option::is_some) {
@@ -422,8 +452,19 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   if app.s.edit_sketch.is_some() {
     v.push(Some(Item::cmd(Cmd::FinishSketch)));
     sep(&mut v);
-    if app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. })) {
+    // Fusion's commands for picked sketch geometry
+    let curve = app.s.selection.iter().any(|s| matches!(s, Sel::SketchCurve { .. }));
+    let point = app.s.selection.iter().any(|s| matches!(s, Sel::SketchPoint { .. }));
+    if curve {
       v.push(Some(Item::with_label(Cmd::Construction, "Normal/Construction")));
+    }
+    if curve || point {
+      v.push(Some(Item::cmd(Cmd::Constraint("fix"))));
+    }
+    if curve {
+      v.push(Some(Item::with_label(Cmd::SketchTool(Tool::Dimension), "Dimension")));
+      v.push(Some(Item::cmd(Cmd::SketchTool(Tool::Trim))));
+      sep(&mut v);
     }
     v.push(Some(Item::cmd(Cmd::LookAt)));
     v.push(Some(Item::cmd(Cmd::Fit)));
@@ -445,7 +486,7 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
     v.push(Some(Item::new(Action::FindInWindow, Icon::Fit, "Find in Window")));
   };
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
-  let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide").hint("V");
+  let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
   if let Some((body, _)) = cx.face {
     if cx.planar_face {
       v.push(Some(Item::cmd(Cmd::NewSketch)));
@@ -498,7 +539,13 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
       v.push(Some(Item::cmd(Cmd::Dialog(Kind::Revolve))));
       sep(&mut v);
     }
-    v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    if app.s.design.feature(f).is_some_and(|x| matches!(x.kind, FeatureKind::Canvas { .. })) {
+      // Fusion's canvas menu: Edit Canvas (opacity, size, position) and Calibrate
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Canvas, "Edit Canvas")));
+      v.push(Some(Item::new(Action::Calibrate(f), Icon::Measure, "Calibrate")));
+    } else {
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    }
     let sel = Sel::Feature { feature: f };
     find(&mut v, in_browser(app, &sel).then_some(sel));
   } else if cx.profile {
@@ -517,8 +564,12 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   if !cx.body_sel && !cx.bodies.is_empty() {
     v.push(Some(Item::cmd(Cmd::RemoveBodies)));
   }
-  if app.s.model.bodies.iter().any(|b| !app.s.body_visible(b.id)) {
+  // Fusion always lists Show All; Hide All Bodies is its Show/Hide for every body
+  if !app.s.model.bodies.is_empty() {
     v.push(Some(Item::new(Action::ShowAll, Icon::Eye, "Show All")));
+  }
+  if app.s.model.bodies.iter().any(|b| app.s.body_visible(b.id)) {
+    v.push(Some(Item::new(Action::HideAll, Icon::EyeOff, "Hide All Bodies")));
   }
   if app.ctx_menu.isolate.is_some() {
     v.push(Some(Item::new(Action::Unisolate, Icon::Body, "Unisolate")));
@@ -548,6 +599,7 @@ fn run(app: &mut App, action: Action) {
     // repeating a modelling command from inside a sketch finishes the sketch first
     Action::Repeat(c) => app.launch(c),
     Action::EditFeature(f) => panels::edit_feature(app, f),
+    Action::Calibrate(f) => crate::canvas_ui::start_calibrate(app, f),
     Action::EditSketch(f) => app.edit_sketch(f),
     Action::SketchOnFace(t) => {
       app.new_sketch();
@@ -570,6 +622,7 @@ fn run(app: &mut App, action: Action) {
       show_hide(app, &bodies);
     }
     Action::ShowAll => show_all(app),
+    Action::HideAll => set_all_visible(app, false),
     Action::Isolate => app.ctx_menu.isolate = Some(selected_bodies(app)),
     Action::Unisolate => app.ctx_menu.isolate = None,
     Action::FindInBrowser(s) => find_in_browser(app, s),
@@ -630,7 +683,8 @@ fn list_width(painter: &egui::Painter, font: &egui::FontId, items: &[Option<Item
     .flatten()
     .map(|it| {
       let w = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
-      let hint = it.hint.map(|h| painter.layout_no_wrap(h.into(), font.clone(), theme::MUTED).size().x + 18.0);
+      let hint =
+        it.hint.as_ref().map(|h| painter.layout_no_wrap(h.clone(), font.clone(), theme::MUTED).size().x + 18.0);
       let more = if it.children.is_empty() { 0.0 } else { 16.0 };
       w + 48.0 + hint.unwrap_or(0.0) + more
     })
@@ -659,6 +713,57 @@ fn row_at(rect: Rect, items: &[Option<Item>], p: Pos2) -> Option<usize> {
 
 fn row_top(rect: Rect, items: &[Option<Item>], k: usize) -> f32 {
   rect.top() + 3.0 + items[..k].iter().map(|it| if it.is_some() { ROW_H } else { SEP_H }).sum::<f32>()
+}
+
+/// Where the menu goes for a right-click at `center`: the ring centre and the overflow list's
+/// box. Like Fusion, the ring is never covered. The ring is kept inside the canvas and the list
+/// sits under it; when the list won't fit below, the whole menu moves up, and when it can't move
+/// far enough the list opens beside the ring instead.
+fn layout(canvas: Rect, center: Pos2, ring: &[Option<Vec2>; 8], list: Vec2) -> (Pos2, Rect) {
+  const GAP: f32 = 8.0;
+  let inner = canvas.shrink(4.0);
+  let bounds = |c: Pos2| {
+    ring
+      .iter()
+      .enumerate()
+      .filter_map(|(i, s)| s.map(|s| item_rect(c, i, s)))
+      .fold(Rect::from_center_size(c, Vec2::splat(2.0 * DEAD_ZONE)), |a, r| a.union(r))
+  };
+  // the ring itself inside the canvas, where it fits
+  let b = bounds(center);
+  let shift = |lo: f32, hi: f32, min: f32, max: f32| {
+    if hi - lo > max - min {
+      0.0
+    } else if lo < min {
+      min - lo
+    } else if hi > max {
+      max - hi
+    } else {
+      0.0
+    }
+  };
+  let mut center = center + vec2(shift(b.left(), b.right(), inner.left(), inner.right()), 0.0);
+  center.y += shift(b.top(), b.bottom(), inner.top(), inner.bottom());
+  let b = bounds(center);
+
+  // under the ring, moving the menu up as far as it needs and can
+  let over = b.bottom() + GAP + list.y - inner.bottom();
+  let room = (b.top() - inner.top()).max(0.0);
+  if over <= room {
+    let lift = over.max(0.0);
+    let c = center - vec2(0.0, lift);
+    return (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - lift + GAP), list));
+  }
+  // beside the ring, right then left, its top level with the ring's
+  if b.right() + GAP + list.x <= inner.right() {
+    return (center, clamp(canvas, pos2(b.right() + GAP, b.top()), list));
+  }
+  if b.left() - GAP - list.x >= inner.left() {
+    return (center, clamp(canvas, pos2(b.left() - GAP - list.x, b.top()), list));
+  }
+  // no room anywhere: as high as it goes, the list under it
+  let c = center - vec2(0.0, room);
+  (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - room + GAP), list))
 }
 
 /// Keeps a list's box inside the canvas.
@@ -707,7 +812,7 @@ fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[
           ));
           right -= 14.0;
         }
-        if let Some(h) = it.hint {
+        if let Some(h) = &it.hint {
           painter.text(pos2(right, row.center().y), egui::Align2::RIGHT_CENTER, h, font.clone(), theme::MUTED);
         }
         y += ROW_H;
@@ -734,22 +839,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked(), i.pointer.secondary_clicked()));
   let canvas = app.canvas;
 
-  // layout: the ring, the overflow list directly under it
-  let ring_rects: Vec<Option<Rect>> = ring
-    .iter()
-    .enumerate()
-    .map(|(i, it)| {
-      it.as_ref().map(|it| {
-        let tw = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
-        let more = if it.children.is_empty() { 0.0 } else { 14.0 };
-        item_rect(center, i, vec2(tw + 40.0 + more, 26.0))
-      })
+  // layout: the ring, the overflow list under it (or beside it) without covering it
+  let ring_sizes: [Option<Vec2>; 8] = std::array::from_fn(|i| {
+    ring[i].as_ref().map(|it| {
+      let tw = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
+      let more = if it.children.is_empty() { 0.0 } else { 14.0 };
+      vec2(tw + 40.0 + more, 26.0)
     })
-    .collect();
-  let list_w = list_width(&painter, &font, &overflow);
-  let list_h = list_height(&overflow);
-  let ring_bottom = ring_rects.iter().flatten().map(|r| r.bottom()).fold(center.y, f32::max);
-  let list_rect = clamp(canvas, pos2(center.x - list_w / 2.0, ring_bottom + 8.0), vec2(list_w, list_h));
+  });
+  let list_size = vec2(list_width(&painter, &font, &overflow), list_height(&overflow));
+  let (center, list_rect) = layout(canvas, center, &ring_sizes, list_size);
+  let ring_rects: Vec<Option<Rect>> =
+    ring_sizes.iter().enumerate().map(|(i, s)| s.map(|s| item_rect(center, i, s))).collect();
 
   // an overflow row with children opens its sub-list on hover
   if let Some(p) = pointer
@@ -870,6 +971,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   }
 
   if let Some(m) = app.marking.as_mut() {
+    // the menu stays where the layout moved it
+    m.center = center;
     m.sub = sub;
   }
 
@@ -934,6 +1037,53 @@ mod tests {
     ring(app, &cx).iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_default()).collect()
   }
 
+  /// The ring's boxes for a layout, with every slot filled.
+  fn full_ring() -> [Option<Vec2>; 8] {
+    std::array::from_fn(|i| Some(vec2(if i % 4 == 0 { 110.0 } else { 140.0 }, 26.0)))
+  }
+
+  fn ring_clear(canvas: Rect, center: Pos2, sizes: &[Option<Vec2>; 8], list: Rect) {
+    for (i, s) in sizes.iter().enumerate() {
+      let r = item_rect(center, i, s.unwrap());
+      assert!(!r.intersects(list), "list {list:?} covers ring slot {i} {r:?}");
+      assert!(canvas.contains_rect(r), "ring slot {i} {r:?} is off the canvas {canvas:?}");
+    }
+    assert!(!Rect::from_center_size(center, Vec2::splat(2.0 * DEAD_ZONE)).intersects(list), "list covers the hub");
+    assert!(canvas.contains_rect(list), "list {list:?} is off the canvas");
+  }
+
+  #[test]
+  fn list_goes_under_the_ring_when_it_fits() {
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 1000.0));
+    let at = pos2(700.0, 300.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    assert_eq!(c, at, "the menu opens where it was clicked");
+    assert!((list.center().x - at.x).abs() < 0.5 && list.top() > at.y, "{list:?}");
+    ring_clear(canvas, c, &full_ring(), list);
+  }
+
+  #[test]
+  fn menu_moves_up_when_the_list_wont_fit_below() {
+    // a face in the middle of the canvas: the ~460 px list doesn't fit under the ring
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 800.0));
+    let at = pos2(700.0, 400.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    assert!(c.y < at.y && (c.x - at.x).abs() < 0.5, "the whole menu moves up: {c:?}");
+    assert!(list.top() > c.y, "the list stays under the ring");
+    ring_clear(canvas, c, &full_ring(), list);
+  }
+
+  #[test]
+  fn list_opens_beside_the_ring_near_the_bottom_of_a_short_canvas() {
+    let canvas = Rect::from_min_size(pos2(40.0, 90.0), vec2(1200.0, 520.0));
+    for x in [200.0, 640.0, 1100.0] {
+      let at = pos2(x, 590.0);
+      let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+      assert!(c.y < at.y, "the ring is lifted inside the canvas");
+      ring_clear(canvas, c, &full_ring(), list);
+    }
+  }
+
   #[test]
   fn empty_space_ring_is_fusions() {
     let app = App::with_session(Session::default());
@@ -994,6 +1144,12 @@ mod tests {
     let edges: Vec<u32> = app.s.model.bodies[0].edges().iter().take(2).map(|e| e.id).collect();
     app.s.selection = edges.iter().map(|e| Sel::Edge { body, edge: *e }).collect();
     assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length: 20.00 mm"));
+    // in the design's unit
+    app.s.design.units = fox_engine::model::LengthUnit::Cm;
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length: 2.00 cm"));
+    app.s.selection = vec![Sel::Face { body, face }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area: 1.00 cm^2"));
+    app.s.design.units = fox_engine::model::LengthUnit::Mm;
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(panels::selection_text(&app), Some(app.s.body_name(body)));
     // a hovered timeline or browser row names itself
@@ -1019,6 +1175,52 @@ mod tests {
   }
 
   #[test]
+  fn empty_canvas_lists_show_all_hide_all_and_unisolate() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let list = |app: &App| {
+      let cx = context(app);
+      labels(&overflow(app, &cx))
+    };
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Show All") && l.iter().any(|l| l == "Hide All Bodies"), "{l:?}");
+    assert!(!l.iter().any(|l| l == "Unisolate"), "{l:?}");
+    run(&mut app, Action::HideAll);
+    assert!(!app.s.body_visible(body));
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Show All") && !l.iter().any(|l| l == "Hide All Bodies"), "{l:?}");
+    run(&mut app, Action::ShowAll);
+    assert!(app.s.body_visible(body));
+    app.ctx_menu.isolate = Some(vec![body]);
+    let l = list(&app);
+    assert!(l.iter().any(|l| l == "Unisolate"), "{l:?}");
+  }
+
+  #[test]
+  fn sketch_curve_lists_fix_unfix_dimension_and_trim() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("sketch.line", json!({"points": [[5, 5], [15, 5]]}));
+    let curve = app.s.design.sketch(sk).unwrap().curves[0].id;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    let cx = context(&app);
+    let list = labels(&overflow(&app, &cx));
+    for want in ["Normal/Construction", "Fix/UnFix", "Dimension", "Trim"] {
+      assert!(list.iter().any(|l| l == want), "{want} missing from {list:?}");
+    }
+    let fixes = |app: &App| {
+      let s = app.s.design.sketch(sk).unwrap();
+      s.constraints.iter().filter(|c| matches!(c.kind, fox_engine::sketch::ConstraintKind::Fix { .. })).count()
+    };
+    run(&mut app, Action::Cmd(Cmd::Constraint("fix")));
+    assert_eq!(fixes(&app), 2, "both ends fixed");
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    run(&mut app, Action::Cmd(Cmd::Constraint("fix")));
+    assert_eq!(fixes(&app), 0, "a fixed line is unfixed");
+  }
+
+  #[test]
   fn recent_commands_are_listed_with_their_keys() {
     let mut app = App::with_session(Session::default());
     for c in [Cmd::Dialog(Kind::Fillet), Cmd::Dialog(Kind::Extrude)] {
@@ -1027,6 +1229,20 @@ mod tests {
     let cx = context(&app);
     let list = overflow(&app, &cx);
     let fillet = list.iter().flatten().find(|i| i.label == "Fillet").expect("recent Fillet");
-    assert_eq!(fillet.hint, Some("F"));
+    assert_eq!(fillet.hint.as_deref(), Some("F"));
+    // the user's key shows instead of the menus' default
+    app.prefs.keys.set("design.Fillet", "G", "F");
+    let list = overflow(&app, &cx);
+    let fillet = list.iter().flatten().find(|i| i.label == "Fillet").expect("recent Fillet");
+    assert_eq!(fillet.hint.as_deref(), Some("G"));
+    // keys the app keeps for itself, and keys by workspace: A is Appearance outside a sketch
+    let ring = ring(&app, &cx);
+    let undo = ring.iter().flatten().find(|i| matches!(i.action, Action::Cmd(Cmd::Undo))).expect("Undo");
+    assert_eq!(undo.hint.as_deref(), Some("Ctrl+Z"));
+    assert_eq!(app.key_for(APPEARANCE).as_deref(), Some("A"));
+    app.run("sketch.create", serde_json::json!({"plane": "xy"})).expect("a sketch");
+    assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)).as_deref(), Some("A"));
+    assert_eq!(app.key_for(Cmd::Dialog(Kind::Project)).as_deref(), Some("P"));
+    assert_eq!(app.key_for(Cmd::Construction).as_deref(), Some("X"));
   }
 }

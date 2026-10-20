@@ -68,8 +68,9 @@ fn hole_on_top_face_follows_height_changes() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(20.0, 10.0), 3.0).unwrap();
-  let hs =
-    d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: hole, links: Vec::new() }).unwrap();
+  let hs = d
+    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face, x: None }, sketch: hole, links: Vec::new() })
+    .unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
     profiles: vec![],
@@ -108,6 +109,8 @@ fn fillet_survives_parameter_change() {
     chord: false,
     radii: vec![],
     sets: vec![],
+    distance2: None,
+    flipped: false,
   })
   .unwrap();
   let m = regenerate(&mut d);
@@ -175,12 +178,83 @@ fn revolve_around_sketch_line() {
     profiles: vec![],
     axis: AxisRef::SketchLine { curve: axis },
     angle: "360".into(),
+    symmetric: false,
+    angle2: None,
     operation: Operation::NewBody,
   })
   .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert!((volume(&m) - PI * (400.0 - 100.0) * 30.0).abs() < 0.1, "{}", volume(&m));
+}
+
+/// A 90 degree revolve of the rectangle x 5..15, z 0..30 (on a plane facing +Y) about a sketch
+/// line on x = 0 drawn downwards, from z = 30 to z = 0, in a design with the given behaviours.
+fn revolve_about_downward_line(behaviours: Behaviours) -> (Design, Model) {
+  let mut d = Design::new("rev");
+  d.behaviours = behaviours;
+  let mut s = Sketch::new();
+  s.add_rectangle([5.0, 0.0], [15.0, -30.0]).unwrap();
+  let (axis, _) = s.add_line(PtSpec::At(0.0, -30.0), PtSpec::At(0.0, 0.0)).unwrap();
+  s.set_construction(axis, true).unwrap();
+  let plane = PlaneRef::Free { origin: [0.0; 3], normal: [0.0, 1.0, 0.0], x: Some([1.0, 0.0, 0.0]) };
+  let sk = d.add_feature(FeatureKind::Sketch { plane, sketch: s, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Revolve {
+    sketch: sk,
+    profiles: vec![],
+    axis: AxisRef::SketchLine { curve: axis },
+    angle: "90 deg".into(),
+    symmetric: false,
+    angle2: None,
+    operation: Operation::NewBody,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert!((volume(&m) - PI * (225.0 - 25.0) * 30.0 / 4.0).abs() < 0.1, "{}", volume(&m));
+  (d, m)
+}
+
+#[test]
+fn revolve_sketch_line_axis_legacy_follows_the_drawn_direction() {
+  // no REVOLVE_AXIS_UNDIRECTED: right-handed about the line from its start to its end (-Z), as
+  // on main, so the profile at +X turns towards -Y
+  let (_, m) = revolve_about_downward_line(Behaviours::legacy());
+  let mp = m.bodies[0].shape.mass().unwrap();
+  assert!(mp.bbox_min.y < -14.9 && mp.bbox_max.y.abs() < 1e-6, "{mp:?}");
+}
+
+#[test]
+fn revolve_sketch_line_axis_new_design_ignores_the_drawn_direction() {
+  // the profile turns towards the sketch normal (+Y) whichever way the line was drawn
+  let (_, m) = revolve_about_downward_line(Behaviours::current());
+  let mp = m.bodies[0].shape.mass().unwrap();
+  assert!(mp.bbox_max.y > 14.9 && mp.bbox_min.y.abs() < 1e-6, "{mp:?}");
+}
+
+#[test]
+fn revolve_without_symmetric_or_angle2_is_one_sided() {
+  // a revolve saved before the symmetric and two-sided options reads as one side and rebuilds
+  // exactly as an explicit one-sided revolve does
+  let (d, m) = revolve_about_downward_line(Behaviours::legacy());
+  let mut v: serde_json::Value = serde_json::from_str(&d.to_json()).unwrap();
+  let mut stripped = 0;
+  for f in v["features"].as_array_mut().unwrap() {
+    if let Some(k) = f["kind"].as_object_mut().filter(|k| k.contains_key("symmetric")) {
+      k.remove("symmetric");
+      k.remove("angle2");
+      stripped += 1;
+    }
+  }
+  assert_eq!(stripped, 1);
+  let mut old = Design::from_json(&v.to_string()).unwrap();
+  assert_eq!(old, d);
+  let FeatureKind::Revolve { symmetric, angle2, .. } = &old.features[1].kind else { panic!("not a revolve") };
+  assert!(!symmetric && angle2.is_none());
+  let again = regenerate(&mut old);
+  ok(&again);
+  let (a, b) = (m.bodies[0].shape.mass().unwrap(), again.bodies[0].shape.mass().unwrap());
+  assert_eq!((a.volume, a.bbox_min, a.bbox_max), (b.volume, b.bbox_min, b.bbox_max));
 }
 
 #[test]
@@ -198,13 +272,14 @@ fn patterns_mirror_primitives_and_shell() {
     axis: AxisRef::Z,
     count: "6".into(),
     angle: "360 deg".into(),
+    symmetric: false,
     join: false,
   })
   .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert_eq!(m.bodies.len(), 6);
-  d.add_feature(FeatureKind::Mirror { bodies: BodySel::All, plane: XY, join: false }).unwrap();
+  d.add_feature(FeatureKind::Mirror { bodies: BodySel::All, plane: XY, features: vec![], join: false }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert_eq!(m.bodies.len(), 12);
@@ -223,6 +298,9 @@ fn patterns_mirror_primitives_and_shell() {
     faces: vec![FaceRef::from_face(b.id, top, top.center)],
     thickness: "1".into(),
     round: false,
+    direction: Default::default(),
+    thickness_out: String::new(),
+    bodies: Vec::new(),
   })
   .unwrap();
   d.add_feature(FeatureKind::RectangularPattern {
@@ -233,6 +311,9 @@ fn patterns_mirror_primitives_and_shell() {
     direction2: None,
     count2: "1".into(),
     spacing2: "0".into(),
+    symmetric: false,
+    symmetric2: false,
+    extent: false,
     join: true,
   })
   .unwrap();
@@ -241,6 +322,21 @@ fn patterns_mirror_primitives_and_shell() {
   assert_eq!(m.bodies.len(), 3, "disjoint pattern instances stay separate bodies");
   let cup = 4000.0 - 18.0 * 18.0 * 9.0;
   assert!((volume(&m) - 3.0 * cup).abs() < 1e-2, "{}", volume(&m));
+}
+
+/// Fusion's placements (measured in Fusion 2705): a symmetric count of 4 at 12 mm runs -12..24
+/// (the extra instance goes on the positive side), 2 runs 0..12, and an extent reaches from the
+/// original to the farthest instance on the positive side.
+#[test]
+fn rectangular_pattern_symmetric_and_extent_offsets() {
+  let at = |n, d, sym, ext| pattern_offsets(n, d, sym, ext);
+  assert_eq!(at(3, 12.0, true, false), (vec![-12.0, 0.0, 12.0], 1));
+  assert_eq!(at(4, 12.0, true, false), (vec![-12.0, 0.0, 12.0, 24.0], 1));
+  assert_eq!(at(2, 12.0, true, false), (vec![0.0, 12.0], 0));
+  assert_eq!(at(4, 30.0, false, true), (vec![0.0, 10.0, 20.0, 30.0], 0));
+  assert_eq!(at(4, 12.0, true, true), (vec![-6.0, 0.0, 6.0, 12.0], 1));
+  assert_eq!(at(3, 12.0, true, true), (vec![-12.0, 0.0, 12.0], 1));
+  assert_eq!(at(1, 12.0, true, true), (vec![0.0], 0));
 }
 
 #[test]
@@ -255,6 +351,8 @@ fn failing_feature_does_not_stop_the_timeline() {
       chord: false,
       radii: vec![],
       sets: vec![],
+      distance2: None,
+      flipped: false,
     })
     .unwrap();
   let bad2 = d
@@ -307,13 +405,20 @@ fn cache_reuses_unchanged_prefix() {
 
 #[test]
 fn sketch_plane_on_faces_is_world_aligned() {
-  let top = sketch_plane_on(DVec3::Z, DVec3::new(5.0, 5.0, 10.0)).unwrap();
-  assert_eq!(top.x, DVec3::X);
-  assert!((top.origin - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-12);
-  let front = sketch_plane_on(-DVec3::Y, DVec3::new(5.0, 0.0, 3.0)).unwrap();
-  assert!((front.x - DVec3::X).length() < 1e-12 && (front.y - DVec3::Z).length() < 1e-12);
-  let back = sketch_plane_on(DVec3::Y, DVec3::new(5.0, 20.0, 3.0)).unwrap();
-  assert!((back.x + DVec3::X).length() < 1e-12 && (back.y - DVec3::Z).length() < 1e-12);
+  for frames in [Frames::Legacy, Frames::Fusion] {
+    let top = sketch_plane_on(DVec3::Z, DVec3::new(5.0, 5.0, 10.0), frames).unwrap();
+    assert_eq!(top.x, DVec3::X);
+    assert!((top.origin - DVec3::new(0.0, 0.0, 10.0)).length() < 1e-12);
+    let front = sketch_plane_on(-DVec3::Y, DVec3::new(5.0, 0.0, 3.0), frames).unwrap();
+    assert!((front.x - DVec3::X).length() < 1e-12 && (front.y - DVec3::Z).length() < 1e-12);
+    let back = sketch_plane_on(DVec3::Y, DVec3::new(5.0, 20.0, 3.0), frames).unwrap();
+    assert!((back.x + DVec3::X).length() < 1e-12 && (back.y - DVec3::Z).length() < 1e-12);
+  }
+  // a downward face: legacy keeps X = +X (so Y = −Y); Fusion keeps Y up, so X points left
+  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0), Frames::Legacy).unwrap();
+  assert!((bottom.x - DVec3::X).length() < 1e-12 && (bottom.y + DVec3::Y).length() < 1e-12);
+  let bottom = sketch_plane_on(-DVec3::Z, DVec3::new(5.0, 5.0, 0.0), Frames::Fusion).unwrap();
+  assert!((bottom.x + DVec3::X).length() < 1e-12 && (bottom.y - DVec3::Y).length() < 1e-12);
 }
 
 #[test]
@@ -556,7 +661,9 @@ fn bend_along_a_sketch_line() {
   let face = FaceRef::from_face(body.id, top, top.center);
   let mut sk = Sketch::new();
   let (line, _) = sk.add_line(PtSpec::At(70.0, -10.0), PtSpec::At(70.0, 60.0)).unwrap();
-  let s = d.add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face }, sketch: sk, links: Vec::new() }).unwrap();
+  let s = d
+    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face, x: None }, sketch: sk, links: Vec::new() })
+    .unwrap();
   d.add_feature(FeatureKind::Bend { sketch: s, line, angle: "90 deg".into(), flip: false, flip_side: true }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);
@@ -647,6 +754,9 @@ fn shelled_box_rips_converts_and_unfolds() {
     faces: vec![FaceRef::from_face(b.id, top, top.center)],
     thickness: "2".into(),
     round: false,
+    direction: Default::default(),
+    thickness_out: String::new(),
+    bodies: Vec::new(),
   })
   .unwrap();
   let m = regenerate(&mut d);
@@ -758,4 +868,243 @@ fn flanges_from_separate_features_leave_an_open_corner() {
   assert_eq!(m.bodies.len(), 1);
   let flat = m.bodies[0].flat_pattern(None).unwrap();
   assert_eq!(flat.bends.len(), 2);
+}
+
+/// An L-shaped block (40×20×10 with a 20×20×20 tower) split at the step's height, z = 10: the cut
+/// face lies beside the step's top face. Returns the face count of each piece, lowest first.
+fn split_at_step(behaviours: Behaviours) -> Vec<usize> {
+  let (mut d, _, _) = block_design();
+  d.behaviours = behaviours;
+  let mut s2 = Sketch::new();
+  s2.add_rectangle([0.0, 0.0], [20.0, 20.0]).unwrap();
+  let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: s2,
+    profiles: vec![],
+    extent: Extent::distance("20"),
+    operation: Operation::Join,
+  })
+  .unwrap();
+  d.add_feature(FeatureKind::SplitBody {
+    bodies: BodySel::default(),
+    plane: PlaneRef::Free { origin: [0.0, 0.0, 10.0], normal: [0.0, 0.0, 1.0], x: None },
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 2);
+  let mut bodies: Vec<_> = m.bodies.iter().collect();
+  bodies.sort_by(|a, b| a.shape.mass().unwrap().center_of_mass.z.total_cmp(&b.shape.mass().unwrap().center_of_mass.z));
+  bodies.iter().map(|b| b.faces().len()).collect()
+}
+
+#[test]
+fn split_pieces_merge_coplanar_faces_only_in_new_designs() {
+  // a design saved before the flag keeps the cut face and the step's top face apart
+  assert_eq!(split_at_step(Behaviours::legacy()), vec![7, 6]);
+  // a new one merges them into one top face, as Fusion does
+  assert_eq!(split_at_step(Behaviours::current()), vec![6, 6]);
+}
+
+/// A plane and a point Along Path at t = 0.3 on the top circle of a radius-10 cylinder: the
+/// point's distance from the axis and how far the plane's normal leans off the circle's tangent
+/// (its dot with the radial direction).
+fn along_top_circle(behaviours: Behaviours) -> (f64, f64) {
+  let mut d = Design::new("cyl");
+  d.behaviours = behaviours;
+  let mut s = Sketch::new();
+  s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
+  let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: s,
+    profiles: vec![],
+    extent: Extent::distance("10"),
+    operation: Operation::NewBody,
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let b = &m.bodies[0];
+  let e = b.edges().iter().find(|e| e.kind == fox_kernel::CurveKind::Circle && (e.mid.z - 10.0).abs() < 1e-6).unwrap();
+  let edge = EdgeRef::from_edge(b.id, e, b.faces());
+  let t = "0.3".to_string();
+  let pl = d
+    .add_feature(FeatureKind::PlaneBy {
+      def: construct::PlaneDef::AlongPath { edge: edge.clone(), t: t.clone(), distance: String::new() },
+    })
+    .unwrap();
+  let pt = d
+    .add_feature(FeatureKind::ConstructionPoint {
+      def: construct::PointDef::AlongPath { edge, t, distance: String::new() },
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let p = m.points[&pt];
+  assert!((p.z - 10.0).abs() < 1e-9);
+  let radial = DVec3::new(p.x, p.y, 0.0).normalize();
+  (p.truncate().length(), m.planes[&pl].normal().dot(radial).abs())
+}
+
+#[test]
+fn along_path_on_a_curved_edge_is_exact_only_in_new_designs() {
+  // a design saved before the flag keeps the tessellated chord: inside the circle, normal off
+  // the tangent
+  let (r, lean) = along_top_circle(Behaviours::legacy());
+  assert!(r < 10.0 - 1e-6 && lean > 1e-6, "r {r}, lean {lean}");
+  // a new one sits on the exact circle with the plane normal along its tangent
+  let (r, lean) = along_top_circle(Behaviours::current());
+  assert!((r - 10.0).abs() < 1e-9 && lean < 1e-9, "r {r}, lean {lean}");
+}
+
+/// A two-edges point on two skew edges of the 40×20×10 block: the top front edge (y = 0,
+/// z = 10, along X) and the bottom left edge (x = 0, z = 0, along Y).
+fn point_on_skew_edges(behaviours: Behaviours) -> Result<DVec3, Vec<String>> {
+  let (mut d, _, _) = block_design();
+  d.behaviours = behaviours;
+  let m = regenerate(&mut d);
+  ok(&m);
+  let b = &m.bodies[0];
+  let edge = |mid: DVec3| {
+    let e = b.edges().iter().find(|e| (e.mid - mid).length() < 1e-6).unwrap();
+    construct::LineRef::Edge(EdgeRef::from_edge(b.id, e, b.faces()))
+  };
+  let (a, e) = (edge(DVec3::new(20.0, 0.0, 10.0)), edge(DVec3::new(0.0, 10.0, 0.0)));
+  let pt = d.add_feature(FeatureKind::ConstructionPoint { def: construct::PointDef::TwoEdges { a, b: e } }).unwrap();
+  let m = regenerate(&mut d);
+  match m.points.get(&pt) {
+    Some(p) => Ok(*p),
+    None => Err(m.errors()),
+  }
+}
+
+#[test]
+fn two_edges_point_crosses_infinite_lines_only_in_new_designs() {
+  // a design saved before the flag takes the midpoint of the edges' closest approach
+  let p = point_on_skew_edges(Behaviours::legacy()).unwrap();
+  assert!((p - DVec3::new(0.0, 0.0, 5.0)).length() < 1e-6, "{p}");
+  // a new one wants the lines to cross, as Fusion does
+  let errs = point_on_skew_edges(Behaviours::current()).unwrap_err();
+  assert!(errs.iter().any(|e| e.contains("the lines don't meet")), "{errs:?}");
+}
+
+/// The block (x 0..40, y 0..20, z 0..10) with a 3 mm extruded rectangle sketched on XZ, on YZ,
+/// on a plane offset 5 from XZ and on the block's bottom face, each a new body. `legacy` makes it
+/// as a build before Fusion's frames saved it: no behaviour flags in the design or its sketches,
+/// written to JSON and read back.
+fn frames_design(legacy: bool) -> (Design, Model, [FeatureId; 4]) {
+  let (mut d, _, _) = block_design();
+  let corners = [[1.0, 2.0], [4.0, 7.0]];
+  let rect = || {
+    let mut s = Sketch::new();
+    s.add_rectangle(corners[0], corners[1]).unwrap();
+    s
+  };
+  let sketch_on = |d: &mut Design, plane: PlaneRef, sketch: Sketch| {
+    let s = d.add_feature(FeatureKind::Sketch { plane, sketch, links: Vec::new() }).unwrap();
+    let e = FeatureKind::Extrude {
+      sketch: s,
+      profiles: vec![],
+      extent: Extent::distance("3"),
+      operation: Operation::NewBody,
+    };
+    (s, d.add_feature(e).unwrap())
+  };
+  let xz = sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Xz }, rect());
+  let yz = sketch_on(&mut d, PlaneRef::Origin { plane: OriginPlane::Yz }, rect());
+  let base = PlaneRef::Origin { plane: OriginPlane::Xz };
+  let off = d.add_feature(FeatureKind::ConstructionPlane { base, offset: "5".into() }).unwrap();
+  let off = sketch_on(&mut d, PlaneRef::Construction { feature: off }, rect());
+  let m = regenerate(&mut d);
+  let body = &m.bodies[0];
+  let bottom = body.faces().iter().find(|f| f.normal.z < -0.9).unwrap();
+  let face = FaceRef::from_face(body.id, bottom, bottom.center);
+  let down = sketch_on(&mut d, PlaneRef::Face { face, x: None }, rect());
+  if legacy {
+    d.behaviours = Behaviours::legacy();
+    for f in &mut d.features {
+      if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+        sketch.behaviours = Behaviours::legacy();
+      }
+    }
+    let json = d.to_json();
+    assert!(!json.contains("behaviours"), "a file without flags");
+    d = Design::from_json(&json).unwrap();
+    assert!(d.behaviours.is_empty() && d.version == 2);
+  }
+  let m = regenerate(&mut d);
+  ok(&m);
+  (d, m, [xz.0, yz.0, off.0, down.0])
+}
+
+/// Every sketch point's world position, and each extruded body's bounding box, volume and faces.
+fn check_frames(
+  m: &Model,
+  d: &Design,
+  sketches: [FeatureId; 4],
+  world: [fn([f64; 2]) -> DVec3; 4],
+  boxes: [[[f64; 3]; 2]; 4],
+) {
+  for (k, s) in sketches.iter().enumerate() {
+    let r = &m.sketches[s];
+    assert!(r.sketch.points.len() >= 5, "sketch {k}: the origin and four corners");
+    for p in &r.sketch.points {
+      let at = [p.x, p.y];
+      let (got, want) = (r.plane.to_world(at), world[k](at));
+      assert!((got - want).length() < 1e-9, "sketch {k}: {at:?} at {got} (expected {want})");
+    }
+    let ext = d.features.iter().position(|f| f.id == *s).map(|i| d.features[i + 1].id).unwrap();
+    let bodies: Vec<_> = m.bodies.iter().filter(|b| b.feature == ext).collect();
+    assert_eq!(bodies.len(), 1, "sketch {k}");
+    let mass = bodies[0].shape.mass().unwrap();
+    assert!((mass.volume - 3.0 * 5.0 * 3.0).abs() < 1e-6, "sketch {k}: volume {}", mass.volume);
+    assert_eq!(bodies[0].faces().len(), 6, "sketch {k}");
+    let [lo, hi] = boxes[k].map(DVec3::from);
+    assert!((mass.bbox_min - lo).length() < 1e-6 && (mass.bbox_max - hi).length() < 1e-6, "sketch {k}: {mass:?}");
+  }
+}
+
+#[test]
+fn designs_saved_before_fusion_frames_keep_their_geometry() {
+  // the frames main always had: XZ x = X, y = Z (normal −Y); YZ x = Y, y = Z (normal +X); a
+  // downward face x = X, y = −Y. An offset from XZ goes along that normal, to y = −5, as before
+  // #62 (no XZ_OFFSET_PLUS_Y either), and keeps the legacy XZ frame: x = X, y = Z
+  let (d, m, sketches) = frames_design(true);
+  assert_eq!(d.frames(), Frames::Legacy);
+  assert!(!d.behaviours.has(fox_sketch::behaviour::XZ_OFFSET_PLUS_Y));
+  let world: [fn([f64; 2]) -> DVec3; 4] = [
+    |p| DVec3::new(p[0], 0.0, p[1]),
+    |p| DVec3::new(0.0, p[0], p[1]),
+    |p| DVec3::new(p[0], -5.0, p[1]),
+    |p| DVec3::new(p[0], -p[1], 0.0),
+  ];
+  let boxes = [
+    [[1.0, -3.0, 2.0], [4.0, 0.0, 7.0]],
+    [[0.0, 1.0, 2.0], [3.0, 4.0, 7.0]],
+    [[1.0, -8.0, 2.0], [4.0, -5.0, 7.0]],
+    [[1.0, -7.0, -3.0], [4.0, -2.0, 0.0]],
+  ];
+  check_frames(&m, &d, sketches, world, boxes);
+  // and it saves as it was read: still no flags
+  assert!(!d.to_json().contains("behaviours"));
+}
+
+#[test]
+fn new_designs_get_fusion_frames() {
+  // XZ x = X, y = −Z (normal +Y); YZ x = −Z, y = Y (normal +X); a downward face x = −X, y = Y
+  let (d, m, sketches) = frames_design(false);
+  assert_eq!(d.frames(), Frames::Fusion);
+  let world: [fn([f64; 2]) -> DVec3; 4] = [
+    |p| DVec3::new(p[0], 0.0, -p[1]),
+    |p| DVec3::new(0.0, p[1], -p[0]),
+    |p| DVec3::new(p[0], 5.0, -p[1]),
+    |p| DVec3::new(-p[0], p[1], 0.0),
+  ];
+  let boxes = [
+    [[1.0, 0.0, -7.0], [4.0, 3.0, -2.0]],
+    [[0.0, 2.0, -4.0], [3.0, 7.0, -1.0]],
+    [[1.0, 5.0, -7.0], [4.0, 8.0, -2.0]],
+    [[-4.0, 2.0, -3.0], [-1.0, 7.0, 0.0]],
+  ];
+  check_frames(&m, &d, sketches, world, boxes);
 }

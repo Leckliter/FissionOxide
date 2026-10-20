@@ -1,8 +1,11 @@
 // C++ side of the FissionOxide kernel bridge. See kernel.hxx.
 #include "fox-kernel/cpp/kernel.hxx"
 #include "fox-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/threads.hxx"
 
+#include <algorithm>
 #include <cmath>
+#include <array>
 #include <deque>
 #include <map>
 #include <sstream>
@@ -23,6 +26,7 @@
 #include <Geom2d_Line.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Lin2d.hxx>
+#include <BRepAdaptor_CompCurve.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -37,6 +41,10 @@
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Domain.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepGProp_Sinert.hxx>
+#include <BRepGProp_Vinert.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -61,6 +69,8 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Precision.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GCE2d_MakeSegment.hxx>
@@ -68,11 +78,11 @@
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
-#include <Geom_BezierCurve.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <Geom_CylindricalSurface.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
-#include <Geom_CylindricalSurface.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
@@ -81,6 +91,7 @@
 #include <Geom_Surface.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <GProp_GProps.hxx>
+#include <Precision.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
@@ -117,13 +128,20 @@
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Torus.hxx>
 #include <gp_Trsf.hxx>
 #include <Geom_Ellipse.hxx>
 #include <gp_Elips.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <GeomConvert.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_Circle.hxx>
+#include <ElCLib.hxx>
 
 namespace fox {
 
@@ -247,11 +265,36 @@ TopoDS_Edge ellipse_edge(rust::Slice<const double> segs, size_t o) {
   return me.Edge();
 }
 
-// Edge `seg` of a segment list (13 doubles each, see make_face).
-TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
-  size_t o = seg * 13;
+// A quintic spline (kind 6): ten control points in the p0..p3 of three records (4, 4, 2), the
+// clamped degree-5 B-spline with knots 0 x6, 0.2, 0.4, 0.6, 0.8, 1 x6.
+TopoDS_Edge quintic_edge(rust::Slice<const double> segs, size_t o) {
+  need(segs, o + 3 * 13, "segments");
+  TColgp_Array1OfPnt poles(1, 10);
+  for (int k = 0; k < 10; ++k) poles.SetValue(k + 1, pnt(segs, o + 13 * (k / 4) + 1 + 3 * (k % 4)));
+  TColStd_Array1OfReal knots(1, 6);
+  TColStd_Array1OfInteger mults(1, 6);
+  for (int k = 0; k < 6; ++k) {
+    knots.SetValue(k + 1, k / 5.0);
+    mults.SetValue(k + 1, k == 0 || k == 5 ? 6 : 1);
+  }
+  if (poles(1).Distance(poles(10)) < 1e-9) throw std::runtime_error("degenerate spline in profile");
+  Handle(Geom_BSplineCurve) bs = new Geom_BSplineCurve(poles, knots, mults, 5);
+  BRepBuilderAPI_MakeEdge me(bs);
+  if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
+  return me.Edge();
+}
+
+// The edge starting at record `rec` of a segment list (13 doubles each, see make_face); moves
+// `rec` past it (a quintic spline takes three records, the rest one).
+TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t &rec) {
+  size_t o = rec * 13;
   need(segs, o + 13, "segments");
   int kind = static_cast<int>(segs[o]);
+  if (kind == 6) {
+    rec += 3;
+    return quintic_edge(segs, o);
+  }
+  rec += 1;
   if (kind == 4) return ellipse_edge(segs, o);
   if (kind == 0) {
     BRepBuilderAPI_MakeEdge me(pnt(segs, o + 1), pnt(segs, o + 4));
@@ -263,6 +306,20 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     if (!arc.IsDone()) throw std::runtime_error("degenerate arc in profile");
     BRepBuilderAPI_MakeEdge me(arc.Value());
     if (!me.IsDone()) throw std::runtime_error("degenerate arc in profile");
+    return me.Edge();
+  }
+  if (kind == 5) {
+    // a conic: the rational quadratic Bezier p0, p1, p2 weighted 1, p3.x, 1
+    TColgp_Array1OfPnt poles(1, 3);
+    for (int k = 0; k < 3; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
+    TColStd_Array1OfReal weights(1, 3);
+    weights.SetValue(1, 1.0);
+    weights.SetValue(2, segs[o + 10]);
+    weights.SetValue(3, 1.0);
+    if (!(segs[o + 10] > 0.0) || !std::isfinite(segs[o + 10])) throw std::runtime_error("degenerate conic in profile");
+    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles, weights);
+    BRepBuilderAPI_MakeEdge me(bz);
+    if (!me.IsDone()) throw std::runtime_error("degenerate conic in profile");
     return me.Edge();
   }
   if (kind == 3) {
@@ -279,63 +336,206 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
   return me.Edge();
 }
 
-// Does Bezier segment `b` carry on from Bezier segment `a` with the same first derivative? The
-// pieces of one spline do: they become one B-spline edge, so the spline is one face, as in Fusion.
-bool smooth_join(rust::Slice<const double> segs, size_t a, size_t b) {
-  size_t oa = a * 13, ob = b * 13;
-  if (static_cast<int>(segs[oa]) != 3 || static_cast<int>(segs[ob]) != 3) return false;
-  if (pnt(segs, oa + 10).Distance(pnt(segs, ob + 1)) > 1e-9) return false;
-  gp_Vec da(pnt(segs, oa + 7), pnt(segs, oa + 10)), db(pnt(segs, ob + 1), pnt(segs, ob + 4));
-  double m = std::max(da.Magnitude(), db.Magnitude());
-  return m > 1e-9 && (da - db).Magnitude() <= 1e-9 * std::max(m, 1.0);
-}
+// ---- one edge per sketch curve ----
+//
+// A segment list may carry merge flags, one per segment: nonzero lets the segment become one edge
+// with the next in its chain. The sketch sets them only between pieces of one curve (see
+// fox_sketch::behaviour), so a run of flagged segments is one curve cut into pieces.
 
-// Bezier segments `run`, each carrying on from the last, as one cubic B-spline edge (knots as
-// smooth as the pieces allow).
-TopoDS_Edge bezier_run_edge(rust::Slice<const double> segs, const std::vector<size_t> &run) {
-  size_t n = run.size();
-  if (n == 1) return seg_edge(segs, run[0]);
-  TColgp_Array1OfPnt poles(1, static_cast<int>(3 * n + 1));
-  poles.SetValue(1, pnt(segs, run[0] * 13 + 1));
-  for (size_t i = 0; i < n; ++i) {
-    for (int k = 1; k <= 3; ++k) poles.SetValue(static_cast<int>(3 * i + k + 1), pnt(segs, run[i] * 13 + 1 + 3 * k));
-  }
-  TColStd_Array1OfReal knots(1, static_cast<int>(n + 1));
-  TColStd_Array1OfInteger mults(1, static_cast<int>(n + 1));
-  for (int i = 1; i <= static_cast<int>(n + 1); ++i) {
-    knots.SetValue(i, i - 1);
-    mults.SetValue(i, i == 1 || i == static_cast<int>(n + 1) ? 4 : 3);
-  }
-  Handle(Geom_BSplineCurve) bs = new Geom_BSplineCurve(poles, knots, mults, 3);
-  for (int i = 2; i <= static_cast<int>(n); ++i) {
-    if (bs->RemoveKnot(i, 2, 1e-9)) bs->RemoveKnot(i, 1, 1e-9);
-  }
-  BRepBuilderAPI_MakeEdge me(bs);
-  if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
-  return me.Edge();
-}
+// Points closer than this join (as the sketch's profile graph).
+const double JOIN_TOL = 1e-6;
 
-// The edges of segments first .. first + n - 1 in order, a spline's Bezier pieces joined into one
-// edge. A closed loop that starts partway along a spline starts at the spline's end instead.
-std::vector<TopoDS_Edge> chain_edges(rust::Slice<const double> segs, size_t first, size_t n, bool closed) {
-  need(segs, (first + n) * 13, "segments");
+// Segments [first, first + count) of a chain, indices taken round the chain.
+struct Run {
+  size_t first, count;
+};
+
+// Splits a chain of n segments into runs, each to become one edge: flag k joins segment k to
+// k + 1. In a cyclic chain the last joins the first and a run may wrap; `whole` is set when every
+// join holds, so the one run is the whole closed chain.
+std::vector<Run> merge_runs(const uint8_t *flags, size_t n, bool cyclic, bool &whole) {
+  std::vector<Run> runs;
+  whole = false;
+  if (n == 0) return runs;
+  auto joined = [&](size_t k) { return flags[k % n] != 0 && (cyclic || k + 1 < n); };
   size_t start = 0;
-  if (closed && n > 1) {
-    while (start < n && smooth_join(segs, first + (start + n - 1) % n, first + start)) ++start;
-    if (start == n) start = 0;
-  }
-  std::vector<TopoDS_Edge> out;
-  std::vector<size_t> run;
-  for (size_t i = 0; i < n; ++i) {
-    size_t s = first + (start + i) % n;
-    if (!run.empty() && !smooth_join(segs, run.back(), s)) {
-      out.push_back(bezier_run_edge(segs, run));
-      run.clear();
+  if (cyclic) {
+    size_t k = 0;
+    while (k < n && joined(k)) ++k;
+    if (k == n) {
+      whole = true;
+      runs.push_back({0, n});
+      return runs;
     }
-    run.push_back(s);
+    start = k + 1; // a run starts just after a break
   }
-  if (!run.empty()) out.push_back(bezier_run_edge(segs, run));
+  for (size_t done = 0, at = start; done < n;) {
+    size_t len = 1;
+    while (done + len < n && joined(at + len - 1)) ++len;
+    runs.push_back({at % n, len});
+    at += len;
+    done += len;
+  }
+  return runs;
+}
+
+// The first record of each segment of a segment list (a quintic spline takes three records, the
+// rest one). Merge flags count segments; these map them to records.
+std::vector<size_t> record_starts(rust::Slice<const double> segs) {
+  std::vector<size_t> out;
+  for (size_t rec = 0; rec * 13 < segs.size();) {
+    need(segs, rec * 13 + 13, "segments");
+    out.push_back(rec);
+    rec += static_cast<int>(segs[rec * 13]) == 6 ? 3 : 1;
+  }
   return out;
+}
+
+// The edge of the segment starting at record `rec`.
+TopoDS_Edge rec_edge(rust::Slice<const double> segs, size_t rec) { return seg_edge(segs, rec); }
+
+int seg_kind(rust::Slice<const double> segs, size_t rec) {
+  need(segs, rec * 13 + 13, "segments");
+  return static_cast<int>(segs[rec * 13]);
+}
+
+// Elliptical arcs (kind 4) of one ellipse, run end to start, as one exact arc, or the whole
+// ellipse when `closed`.
+bool merged_ellipse(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed,
+                    TopoDS_Edge &out) {
+  size_t o0 = idx[0] * 13;
+  double dir0 = segs[o0 + 11] - segs[o0 + 10], total = 0;
+  for (size_t i : idx) {
+    size_t o = i * 13;
+    for (int k = 1; k <= 9; ++k)
+      if (std::abs(segs[o + k] - segs[o0 + k]) > JOIN_TOL) return false;
+    double sweep = segs[o + 11] - segs[o + 10];
+    if (sweep * dir0 <= 0) return false;
+    total += sweep;
+  }
+  if (closed) {
+    if (std::abs(std::abs(total) - 2 * M_PI) > 1e-6) return false;
+    total = total > 0 ? 2 * M_PI : -2 * M_PI;
+  } else if (std::abs(total) >= 2 * M_PI - 1e-9) {
+    return false;
+  }
+  std::array<double, 13> rec;
+  for (size_t k = 0; k < 13; ++k) rec[k] = segs[o0 + k];
+  rec[11] = rec[10] + total;
+  out = ellipse_edge(rust::Slice<const double>(rec.data(), rec.size()), 0);
+  return true;
+}
+
+// Circular arcs (kind 1) of one circle, run end to start, as one arc, or the whole circle when
+// `closed`.
+bool merged_arc(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
+  auto arc = [&](size_t i) -> Handle(Geom_TrimmedCurve) {
+    size_t o = i * 13;
+    GC_MakeArcOfCircle a(pnt(segs, o + 1), pnt(segs, o + 4), pnt(segs, o + 7));
+    return a.IsDone() ? a.Value() : Handle(Geom_TrimmedCurve)();
+  };
+  Handle(Geom_TrimmedCurve) a0 = arc(idx[0]);
+  if (a0.IsNull()) return false;
+  Handle(Geom_Circle) circle = Handle(Geom_Circle)::DownCast(a0->BasisCurve());
+  if (circle.IsNull()) return false;
+  gp_Circ c0 = circle->Circ();
+  double total = 0;
+  for (size_t i : idx) {
+    Handle(Geom_TrimmedCurve) a = arc(i);
+    if (a.IsNull()) return false;
+    Handle(Geom_Circle) ci = Handle(Geom_Circle)::DownCast(a->BasisCurve());
+    if (ci.IsNull()) return false;
+    gp_Circ c = ci->Circ();
+    if (c.Location().Distance(c0.Location()) > JOIN_TOL || std::abs(c.Radius() - c0.Radius()) > JOIN_TOL ||
+        c.Axis().Direction().Dot(c0.Axis().Direction()) < 1 - 1e-9)
+      return false;
+    total += a->LastParameter() - a->FirstParameter();
+  }
+  if (closed) {
+    if (std::abs(total - 2 * M_PI) > 1e-6) return false;
+    double u0 = a0->FirstParameter();
+    BRepBuilderAPI_MakeEdge me(circle, u0, u0 + 2 * M_PI);
+    if (!me.IsDone()) return false;
+    out = me.Edge();
+    return true;
+  }
+  if (total >= 2 * M_PI - 1e-9) return false;
+  // through the first piece's end, which lies inside the merged arc
+  size_t o0 = idx[0] * 13, o1 = idx.back() * 13;
+  GC_MakeArcOfCircle a(pnt(segs, o0 + 1), pnt(segs, o0 + 7), pnt(segs, o1 + 7));
+  if (!a.IsDone()) return false;
+  BRepBuilderAPI_MakeEdge me(a.Value());
+  if (!me.IsDone()) return false;
+  out = me.Edge();
+  return true;
+}
+
+// Edges run end to start as one B-spline edge (C0 joins smoothed where the shape allows).
+bool merged_bspline(const std::vector<TopoDS_Edge> &edges, TopoDS_Edge &out) {
+  GeomConvert_CompCurveToBSplineCurve cc;
+  for (const TopoDS_Edge &e : edges) {
+    double f, l;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, f, l);
+    if (c.IsNull()) return false;
+    Handle(Geom_BSplineCurve) b = GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(c, f, l));
+    if (b.IsNull() || !cc.Add(b, JOIN_TOL, Standard_True)) return false;
+  }
+  Handle(Geom_BSplineCurve) r = cc.BSplineCurve();
+  if (r.IsNull()) return false;
+  for (int i = r->NbKnots() - 1; i >= 2; --i) {
+    int m = r->Multiplicity(i);
+    for (int target = 0; target < m; ++target)
+      if (r->RemoveKnot(i, target, 1e-7)) break;
+  }
+  BRepBuilderAPI_MakeEdge me(r);
+  if (!me.IsDone()) return false;
+  out = me.Edge();
+  return true;
+}
+
+// One edge for the segments starting at records `idx` (one curve's pieces, run end to start; `closed`: they are the
+// whole closed chain): exact for an ellipse's or a circle's arcs, else a B-spline. False to keep
+// them separate edges.
+bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
+  try {
+    int kind = seg_kind(segs, idx[0]);
+    bool same = true;
+    for (size_t i : idx) same = same && seg_kind(segs, i) == kind;
+    if (same && kind == 4 && merged_ellipse(segs, idx, closed, out)) return true;
+    if (same && kind == 1 && merged_arc(segs, idx, closed, out)) return true;
+    if (same && kind == 2) return false;
+    std::vector<TopoDS_Edge> edges;
+    for (size_t i : idx) edges.push_back(rec_edge(segs, i));
+    return merged_bspline(edges, out);
+  } catch (...) {
+    return false;
+  }
+}
+
+// Edges for the chain of n segments from segment `base` (`starts`: see record_starts) with merge
+// `flags` (some set): each run of joined segments one edge.
+std::vector<TopoDS_Edge> merged_chain(rust::Slice<const double> segs, const std::vector<size_t> &starts, size_t base,
+                                      size_t n, const uint8_t *flags, bool cyclic) {
+  if (starts.size() < base + n) throw std::runtime_error("too few segments");
+  std::vector<TopoDS_Edge> out;
+  bool whole = false;
+  for (Run r : merge_runs(flags, n, cyclic, whole)) {
+    std::vector<size_t> idx;
+    for (size_t j = 0; j < r.count; ++j) idx.push_back(starts[base + (r.first + j) % n]);
+    TopoDS_Edge e;
+    if (idx.size() > 1 && merged_edge(segs, idx, whole, e)) {
+      out.push_back(e);
+    } else {
+      for (size_t i : idx) out.push_back(rec_edge(segs, i));
+    }
+  }
+  return out;
+}
+
+bool any_set(const uint8_t *flags, size_t n) {
+  for (size_t k = 0; flags && k < n; ++k)
+    if (flags[k]) return true;
+  return false;
 }
 } // namespace
 
@@ -343,21 +543,42 @@ std::vector<TopoDS_Edge> chain_edges(rust::Slice<const double> segs, size_t firs
 // segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 //   kind 4, an elliptical arc: see ellipse_edge
+//   kind 5, a conic: rational quadratic Bezier through p0 (start), p1 (apex), p2 (end), apex weight p3.x
+//   kind 6, a quintic spline: three records, see quintic_edge
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
+// merge: empty, or one flag per segment: nonzero lets it become one edge with the next in its loop
+//   (the first, after the last); see "one edge per sketch curve". No flag set: built as before.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
-                                 rust::Slice<const uint32_t> loop_lens) {
+                                 rust::Slice<const uint32_t> loop_lens, rust::Slice<const uint8_t> merge) {
   FOX_TRY
   need(plane, 9, "make_face plane");
   gp_Pln pln(gp_Ax3(pnt(plane, 0), dir(plane, 3), dir(plane, 6)));
-  size_t seg = 0;
+  // rec: the next record; seg: the next segment (merge flags count segments, see record_starts)
+  size_t rec = 0, seg = 0;
+  std::vector<size_t> starts;
+  if (!merge.empty()) starts = record_starts(segs);
   std::vector<TopoDS_Wire> wires;
   for (uint32_t n : loop_lens) {
     BRepBuilderAPI_MakeWire mw;
-    for (const TopoDS_Edge &e : chain_edges(segs, seg, n, true)) {
-      mw.Add(e);
-      if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+    const uint8_t *flags = nullptr;
+    if (!merge.empty()) {
+      if (merge.size() < seg + n) throw std::runtime_error("too few merge flags");
+      flags = merge.data() + seg;
     }
-    seg += n;
+    if (any_set(flags, n)) {
+      for (const TopoDS_Edge &e : merged_chain(segs, starts, seg, n, flags, true)) {
+        mw.Add(e);
+        if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+      }
+      seg += n;
+      rec = seg < starts.size() ? starts[seg] : segs.size() / 13;
+    } else {
+      for (uint32_t k = 0; k < n; ++k, ++seg) {
+        TopoDS_Edge e = seg_edge(segs, rec);
+        mw.Add(e);
+        if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+      }
+    }
     if (!mw.IsDone()) throw std::runtime_error("empty profile loop");
     wires.push_back(mw.Wire());
   }
@@ -686,14 +907,30 @@ rust::Vec<FaceInfo> face_infos(const Shape &s) {
       info.radius = c.Radius();
       break;
     }
-    case GeomAbs_Cone: info.kind = 2; break;
+    case GeomAbs_Cone: {
+      // origin and axis like a cylinder; the radius is the one at the origin
+      gp_Cone c = surf.Cone();
+      info.kind = 2;
+      info.origin = arr(c.Location().XYZ());
+      info.normal = arr(c.Axis().Direction().XYZ());
+      info.radius = c.RefRadius();
+      break;
+    }
     case GeomAbs_Sphere: {
       info.kind = 3;
       info.origin = arr(surf.Sphere().Location().XYZ());
       info.radius = surf.Sphere().Radius();
       break;
     }
-    case GeomAbs_Torus: info.kind = 4; break;
+    case GeomAbs_Torus: {
+      // the axis it sweeps around; the radius is the major one
+      gp_Torus t = surf.Torus();
+      info.kind = 4;
+      info.origin = arr(t.Location().XYZ());
+      info.normal = arr(t.Axis().Direction().XYZ());
+      info.radius = t.MajorRadius();
+      break;
+    }
     default: info.kind = 5; break;
     }
     out.push_back(info);
@@ -759,15 +996,90 @@ rust::Vec<EdgeInfo> edge_infos(const Shape &s) {
   FOX_CATCH("edge info")
 }
 
+// Is this an analytic face (plane, cylinder, cone, sphere, torus) trimmed by a free-form edge (a
+// B-spline from a boolean, say)? Gauss integration with its default point counts can be a few mm³
+// off on those, where the trim runs across a wide stretch of the surface's parameters, so they are
+// integrated adaptively. Free-form faces stay with the default, which adaptive integration of
+// swept surfaces can do worse than.
+static bool needs_adaptive(const TopoDS_Face &f) {
+  switch (BRepAdaptor_Surface(f, Standard_False).GetType()) {
+  case GeomAbs_Plane:
+  case GeomAbs_Cylinder:
+  case GeomAbs_Cone:
+  case GeomAbs_Sphere:
+  case GeomAbs_Torus: break;
+  default: return false;
+  }
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge &e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e)) continue;
+    switch (BRepAdaptor_Curve(e).GetType()) {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola: break;
+    default: return true;
+    }
+  }
+  return false;
+}
+
 MassProps mass_props(const Shape &s) {
   FOX_TRY
   MassProps out{};
-  GProp_GProps vol;
-  BRepGProp::VolumeProperties(s.s, vol);
+  bool adaptive = false;
+  for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More() && !adaptive; ex.Next()) {
+    adaptive = needs_adaptive(TopoDS::Face(ex.Current()));
+  }
+  GProp_GProps vol, surf;
+  gp_Ax1 axis;
+  if (wrapping_axis(s.s, axis)) {
+    // A cylinder face running on past its seam (a thread's crest) integrates poorly over its long
+    // u range; against a plane across its axis it adds nothing (its normals lie in the plane).
+    BRepGProp::VolumePropertiesGK(s.s, vol, gp_Pln(axis.Location(), axis.Direction()), 1e-9, Standard_False,
+                                  Standard_True, Standard_True);
+    BRepGProp::SurfaceProperties(s.s, surf);
+  } else if (!adaptive) {
+    BRepGProp::VolumeProperties(s.s, vol);
+    BRepGProp::SurfaceProperties(s.s, surf);
+  } else {
+    // face by face as BRepGProp sums them, about one point, adaptively where the face needs it
+    Bnd_Box rough;
+    BRepBndLib::Add(s.s, rough);
+    gp_Pnt at = rough.IsVoid() ? gp_Pnt() : gp_Pnt((rough.CornerMin().XYZ() + rough.CornerMax().XYZ()) / 2);
+    vol = GProp_GProps(at);
+    surf = GProp_GProps(at);
+    for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face &f = TopoDS::Face(ex.Current());
+      const bool fine = needs_adaptive(f);
+      BRepGProp_Face bf(fine);
+      bf.Load(f);
+      BRepGProp_Domain bd;
+      const bool natural = !TopoDS_Iterator(f).More();
+      if (!natural) bd.Init(f);
+      BRepGProp_Sinert a;
+      a.SetLocation(at);
+      if (fine) {
+        natural ? a.Perform(bf, 1e-7) : a.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? a.Perform(bf) : a.Perform(bf, bd);
+      }
+      surf.Add(a);
+      if (f.Orientation() != TopAbs_FORWARD && f.Orientation() != TopAbs_REVERSED) continue;
+      if (!natural) bd.Init(f); // the area pass used up its edges
+      BRepGProp_Vinert v;
+      v.SetLocation(at);
+      if (fine) {
+        natural ? v.Perform(bf, 1e-7) : v.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? v.Perform(bf) : v.Perform(bf, bd);
+      }
+      vol.Add(v);
+    }
+  }
   out.volume = vol.Mass();
   out.cog = arr(vol.CentreOfMass().XYZ());
-  GProp_GProps surf;
-  BRepGProp::SurfaceProperties(s.s, surf);
   out.area = surf.Mass();
   // the tight box: the default one is loose around curved (fillet, B-spline) faces
   Bnd_Box box;
@@ -842,13 +1154,33 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
   FOX_CATCH("face")
 }
 
-// An open or closed chain of segments (see make_face) as a wire.
-std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
+// An open or closed chain of segments (see make_face) as a wire. merge as for make_face; the last
+// segment joins the first only when the chain closes.
+std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs, rust::Slice<const uint8_t> merge) {
   FOX_TRY
   BRepBuilderAPI_MakeWire mw;
-  for (const TopoDS_Edge &e : chain_edges(segs, 0, segs.size() / 13, false)) {
-    mw.Add(e);
-    if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+  // merge flags count segments, not records (see record_starts)
+  std::vector<size_t> starts;
+  if (!merge.empty()) starts = record_starts(segs);
+  size_t n = starts.size();
+  const uint8_t *flags = nullptr;
+  if (!merge.empty()) {
+    if (merge.size() < n) throw std::runtime_error("too few merge flags");
+    flags = merge.data();
+  }
+  if (any_set(flags, n)) {
+    TopoDS_Edge first = rec_edge(segs, starts[0]), last = rec_edge(segs, starts[n - 1]);
+    bool closed = BRep_Tool::Pnt(TopExp::FirstVertex(first))
+                      .Distance(BRep_Tool::Pnt(TopExp::LastVertex(last))) <= JOIN_TOL;
+    for (const TopoDS_Edge &e : merged_chain(segs, starts, 0, n, flags, closed)) {
+      mw.Add(e);
+      if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+    }
+  } else {
+    for (size_t rec = 0; rec * 13 < segs.size();) {
+      mw.Add(seg_edge(segs, rec));
+      if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+    }
   }
   if (!mw.IsDone()) throw std::runtime_error("empty path");
   return wrap(mw.Wire());
@@ -989,6 +1321,103 @@ std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, 
   for (uint32_t i : faces) {
     if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
     mk.Add(TopoDS::Face(map(static_cast<int>(i))), pull, angle, neutral);
+    if (!mk.AddDone()) throw std::runtime_error("a face can't be drafted (is it parallel to the pull direction?)");
+    ++added;
+  }
+  if (added == 0) throw std::runtime_error("no faces to draft");
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the draft failed");
+  return wrap(checked(mk.Shape(), "draft"));
+  FOX_CATCH("draft")
+}
+
+// Splits faces (1-based) along the neutral plane (origin(3) normal(3)) and tapers each piece away
+// from it: pieces on the normal side by `angle` pulling along the normal, the others by `angle2`
+// pulling against it, so both sides meet at the parting line. A zero angle leaves its side alone.
+std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_t> faces,
+                                       rust::Slice<const double> plane, double angle, double angle2) {
+  FOX_TRY
+  need(plane, 6, "draft plane");
+  TopTools_IndexedMapOfShape map;
+  index_map(s.s, TopAbs_FACE, map);
+  gp_Pnt o = pnt(plane, 0);
+  gp_Dir n = dir(plane, 3);
+  gp_Pln neutral(o, n);
+  Bnd_Box box;
+  BRepBndLib::Add(s.s, box);
+  double size = 10.0;
+  if (!box.IsVoid())
+    size += 4.0 * (std::sqrt(box.SquareExtent()) + box.CornerMin().Distance(o) + box.CornerMax().Distance(o));
+  BRepBuilderAPI_MakeFace mf(neutral, -size, size, -size, size);
+  if (!mf.IsDone()) throw std::runtime_error("could not make the neutral plane");
+  std::vector<TopoDS_Face> chosen;
+  TopTools_IndexedMapOfShape chosen_map;
+  for (uint32_t i : faces) {
+    if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
+    const TopoDS_Face &f = TopoDS::Face(map(static_cast<int>(i)));
+    if (chosen_map.Add(f) > static_cast<int>(chosen.size())) chosen.push_back(f);
+  }
+  if (chosen.empty()) throw std::runtime_error("no faces to draft");
+  // one section of the whole solid, so the cuts on neighbouring faces share their vertices
+  BRepAlgoAPI_Section sec(s.s, mf.Face(), Standard_False);
+  sec.ComputePCurveOn1(Standard_True);
+  sec.Approximation(Standard_True);
+  sec.Build();
+  BRepFeat_SplitShape ss(s.s);
+  int cuts = 0;
+  if (sec.IsDone()) {
+    for (TopExp_Explorer ex(sec.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
+      TopoDS_Shape on;
+      if (!sec.HasAncestorFaceOn1(ex.Current(), on) || !chosen_map.Contains(on)) continue;
+      ss.Add(TopoDS::Edge(ex.Current()), TopoDS::Face(on));
+      ++cuts;
+    }
+  }
+  TopoDS_Shape split = s.s;
+  if (cuts > 0) {
+    ss.Build();
+    if (!ss.IsDone()) throw std::runtime_error("the faces could not be split at the neutral plane");
+    split = ss.Shape();
+  }
+  // the pieces of the chosen faces and the side of the plane each lies on
+  TopTools_IndexedMapOfShape after;
+  index_map(split, TopAbs_FACE, after);
+  TopTools_IndexedMapOfShape pieces;
+  std::vector<bool> above;
+  for (const TopoDS_Face &f : chosen) {
+    TopTools_ListOfShape from;
+    if (cuts > 0) from = ss.Modified(f);
+    if (from.IsEmpty()) from.Append(f);
+    for (TopTools_ListIteratorOfListOfShape it(from); it.More(); it.Next()) {
+      int k = after.FindIndex(it.Value());
+      if (k == 0 || pieces.Contains(after(k))) continue;
+      GProp_GProps g;
+      BRepGProp::SurfaceProperties(after(k), g);
+      double side = gp_Vec(o, g.CentreOfMass()).Dot(gp_Vec(n));
+      if (std::abs(side) < Precision::Confusion()) continue;
+      pieces.Add(after(k));
+      above.push_back(side > 0);
+    }
+  }
+  // The new parting-line edges join coplanar pieces, so they are smooth, and the draft would
+  // carry one side's pull across them: mark them sharp so each side keeps its own.
+  TopTools_IndexedDataMapOfShapeListOfShape ef;
+  TopExp::MapShapesAndAncestors(split, TopAbs_EDGE, TopAbs_FACE, ef);
+  BRep_Builder bb;
+  for (int i = 1; i <= ef.Extent(); ++i) {
+    const TopTools_ListOfShape &fl = ef(i);
+    if (fl.Extent() != 2) continue;
+    int a = pieces.FindIndex(fl.First()), b = pieces.FindIndex(fl.Last());
+    if (a == 0 || b == 0 || above[a - 1] == above[b - 1]) continue;
+    bb.Continuity(TopoDS::Edge(ef.FindKey(i)), TopoDS::Face(fl.First()), TopoDS::Face(fl.Last()), GeomAbs_C0);
+  }
+  BRepOffsetAPI_DraftAngle mk(split);
+  int added = 0;
+  for (int i = 1; i <= pieces.Extent(); ++i) {
+    bool up = above[i - 1];
+    double a = up ? angle : angle2;
+    if (std::abs(a) < 1e-12) continue;
+    mk.Add(TopoDS::Face(pieces(i)), up ? n : n.Reversed(), a, neutral);
     if (!mk.AddDone()) throw std::runtime_error("a face can't be drafted (is it parallel to the pull direction?)");
     ++added;
   }
@@ -1700,20 +2129,46 @@ std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
   FOX_CATCH("offset profile")
 }
 
-// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad).
-std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle) {
+// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad). With
+// `forward_face`, d1 and the angle are measured on the face the edge runs forward in, as Fusion
+// does (on an extrusion's cap edges, the cap); without it (designs from before the
+// chamfer_forward_face behaviour), on the edge's first adjacent face. `flip` measures them on the
+// other face.
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle,
+                                bool flip, bool forward_face) {
   FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   TopTools_IndexedDataMapOfShapeListOfShape ef;
   TopExp::MapShapesAndAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
   BRepFilletAPI_MakeChamfer mk(s.s);
+  const TopAbs_Orientation want = flip ? TopAbs_REVERSED : TopAbs_FORWARD;
   int added = 0;
   for (uint32_t i : edges) {
     if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
     const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
     if (!ef.Contains(e) || ef.FindFromKey(e).IsEmpty()) continue;
-    const TopoDS_Face &f = TopoDS::Face(ef.FindFromKey(e).First());
+    const TopTools_ListOfShape &faces = ef.FindFromKey(e);
+    TopoDS_Face f = TopoDS::Face(faces.First());
+    if (!forward_face && flip) {
+      // legacy: the first adjacent face, or with `flip` the other one
+      for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+        if (!it.Value().IsSame(faces.First())) {
+          f = TopoDS::Face(it.Value());
+          break;
+        }
+      }
+    }
+    bool found = !forward_face;
+    for (TopTools_ListIteratorOfListOfShape it(faces); it.More() && !found; it.Next()) {
+      for (TopExp_Explorer x(it.Value(), TopAbs_EDGE); x.More(); x.Next()) {
+        if (x.Current().IsSame(e) && x.Current().Orientation() == want) {
+          f = TopoDS::Face(it.Value());
+          found = true;
+          break;
+        }
+      }
+    }
     if (angle) mk.AddDA(d1, d2, e, f);
     else mk.Add(d1, d2, e, f);
     ++added;
@@ -1769,6 +2224,51 @@ std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge) {
   if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
   return wrap(map(static_cast<int>(edge)));
   FOX_CATCH("edge")
+}
+
+// The point and unit tangent at fraction t of a curve's arc length, measured from whichever end
+// lies nearer `from` (x, y, z; empty: the curve's own start), the tangent pointing away from that
+// end: [point (3), tangent (3)].
+template <typename C> static rust::Vec<double> along_curve(const C &c, double t, rust::Slice<const double> from) {
+  double u0 = c.FirstParameter(), u1 = c.LastParameter();
+  bool rev = false;
+  if (from.size() >= 3) {
+    gp_Pnt f(from[0], from[1], from[2]);
+    rev = c.Value(u1).Distance(f) < c.Value(u0).Distance(f);
+  }
+  double len = GCPnts_AbscissaPoint::Length(c, u0, u1);
+  if (!(len > Precision::Confusion())) throw std::runtime_error("the curve has no length");
+  t = std::min(1.0, std::max(0.0, t));
+  double u = rev ? u1 : u0;
+  if (t > 0.0) {
+    GCPnts_AbscissaPoint ap(c, (rev ? -t : t) * len, u);
+    if (!ap.IsDone()) throw std::runtime_error("the point along the curve could not be found");
+    u = ap.Parameter();
+  }
+  gp_Pnt p;
+  gp_Vec d;
+  c.D1(u, p, d);
+  if (d.Magnitude() < 1e-12) throw std::runtime_error("the curve has no tangent there");
+  if (rev) d.Reverse();
+  d.Normalize();
+  rust::Vec<double> out;
+  for (double v : {p.X(), p.Y(), p.Z(), d.X(), d.Y(), d.Z()}) out.push_back(v);
+  return out;
+}
+
+// curve_along on the first wire of s (followed in its own order), else its first edge.
+rust::Vec<double> curve_along(const Shape &s, double t, rust::Slice<const double> from) {
+  FOX_TRY
+  TopExp_Explorer w(s.s, TopAbs_WIRE);
+  if (w.More()) {
+    BRepAdaptor_CompCurve c(TopoDS::Wire(w.Current()), Standard_True);
+    return along_curve(c, t, from);
+  }
+  TopExp_Explorer e(s.s, TopAbs_EDGE);
+  if (!e.More()) throw std::runtime_error("the shape has no edge");
+  BRepAdaptor_Curve c(TopoDS::Edge(e.Current()));
+  return along_curve(c, t, from);
+  FOX_CATCH("along")
 }
 
 // Minimum distance between two shapes: [distance, point on a (3), point on b (3)].

@@ -1,0 +1,6 @@
+# 254-text-rotated: added by the parity loop from a Fusion probe
+# Sketch text "L" in Arial, 10 mm capitals, turned 30 degrees, extruded 2 mm. Fusion turns the 50x20 mm text frame about its centre (25, 10); `at` is the pen origin (side bearing -1.024, 0) turned 30 degrees about that centre.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.text", "at": [7.4626, -11.6722], "text": "L", "height": 10, "angle": 30, "font": "arial"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 2, "operation": "new_body"}

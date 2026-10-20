@@ -1,0 +1,12 @@
+# 275-l-shape-inner-fillet: added by the parity loop from a Fusion probe
+# l-shape-inner-fillet: L outline (0,0),(40,0),(40,10),(10,10),(10,30),(0,30); sketch Fillet r=5 at the concave (10,10) vertex; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.fillet", "curves": [8, 11], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,14 +1,15 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use fox_model::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
-use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
-use fox_sketch::CurveId;
+use fox_kernel::glam::DVec3;
+use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
+use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
 use crate::commands::{
   add_feature, axis_ref, body_sel, edge_ref_of, expr_of, face_ref, ids, operation, opt_expr, opt_str, plane_ref,
-  req_expr, req_u32, req_vec3, sketch_for_feature,
+  req_expr, req_u32, req_vec3, sketch_for_feature, sketch_line_at,
 };
 use crate::{CmdError, CmdResult, Session};
 
@@ -28,8 +29,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           length: opt_expr(p, "length").unwrap_or_default(),
           offset: opt_expr(p, "offset").unwrap_or_else(|| "0".into()),
           modeled: flag("modeled"),
-          left: flag("left"),
-          flip: flag("flip"),
+          left: flag("left") || p.get("right_handed").and_then(Value::as_bool) == Some(false),
+          flip: flag("flip") || opt_str(p, "location") == Some("high_end"),
+          designation: opt_str(p, "designation").unwrap_or_default().to_string(),
+          class: opt_str(p, "class").unwrap_or_default().to_string(),
         },
       )
     })(),
@@ -66,17 +69,60 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         },
       )
     })(),
+    "sketch.intersection_curve" => (|| {
+      let sketch = sketch_for_feature(s, p)?;
+      s.design.sketch(sketch)?;
+      let curves = PathRef { sketch, curves: ids(p, "curves").into_iter().map(CurveId).collect() };
+      let faces = match p.get("faces") {
+        Some(_) => faces(s, p)?,
+        None => Vec::new(),
+      };
+      let mut with = Vec::new();
+      for w in p.get("with").and_then(Value::as_array).into_iter().flatten() {
+        with.push(crate::solid::path_ref(s, w)?);
+      }
+      if faces.is_empty() && with.is_empty() {
+        return Err(CmdError::new("give 'faces' or 'with' (sketch curves) to intersect with"));
+      }
+      add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
+    })(),
     "pipe" => (|| {
+      const KEYS: [&str; 10] =
+        ["cmd", "path", "path_curves", "diameter", "size", "wall", "section", "distance", "distance_one", "operation"];
+      if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
+        return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
+      }
       let path_sketch = FeatureId(req_u32(p, "path")?);
-      s.design.sketch(path_sketch)?;
+      // a sketch, or the 3D curves of a Project To Surface or an intersection curve
+      let curves3d = s.design.feature(path_sketch).is_some_and(|f| {
+        matches!(f.kind, FeatureKind::ProjectToSurface { .. } | FeatureKind::IntersectionCurve { .. })
+      });
+      if !curves3d {
+        s.design.sketch(path_sketch)?;
+      }
+      let section = match opt_str(p, "section").unwrap_or("circular") {
+        "circular" | "circle" => PipeSection::Circular,
+        "square" => PipeSection::Square,
+        "triangular" | "triangle" => PipeSection::Triangular,
+        o => return Err(CmdError::new(format!("unknown section '{o}' (circular, square, triangular)"))),
+      };
+      let diameter = match opt_expr(p, "size") {
+        Some(_) if p.get("diameter").is_some() => {
+          return Err(CmdError::new("pipe takes 'diameter' or 'size', not both"));
+        }
+        Some(size) => size,
+        None => req_expr(p, "diameter").map_err(|_| CmdError::new("missing 'diameter' (or 'size')"))?,
+      };
       add_feature(
         s,
         FeatureKind::Pipe {
           path_sketch,
           path_curves: ids(p, "path_curves").into_iter().map(CurveId).collect(),
-          diameter: req_expr(p, "diameter")?,
+          diameter,
           wall: opt_expr(p, "wall").unwrap_or_default(),
           operation: operation(p)?,
+          section,
+          distance: opt_expr(p, "distance").or_else(|| opt_expr(p, "distance_one")).unwrap_or_default(),
         },
       )
     })(),
@@ -120,6 +166,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       };
       let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
       let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      let round = match p.get("corners").and_then(Value::as_str) {
+        None | Some("sharp") => false,
+        Some("round") => true,
+        Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
+      };
       add_feature(
         s,
         FeatureKind::Thicken {
@@ -129,6 +180,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           symmetric: flag("symmetric"),
           flip: flag("flip"),
           operation: operation(p)?,
+          round,
         },
       )
     })(),
@@ -217,6 +269,22 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "body.appearance" => appearance(s, p),
     "appearances" => Ok(json!(APPEARANCES.iter().map(|(n, c)| json!({"name": n, "color": c})).collect::<Vec<_>>())),
+    "sketch.project_to_surface" => (|| {
+      let sketch = sketch_for_feature(s, p)?;
+      let faces = faces(s, p)?;
+      let along =
+        match opt_str(p, "type").unwrap_or(if p.get("direction").is_some() { "along_vector" } else { "closest_point" })
+        {
+          "closest_point" | "closest" => None,
+          "along_vector" | "along" | "vector" => {
+            let d = p.get("direction").ok_or(CmdError::new("along_vector needs a 'direction' (x, y, z or an axis)"))?;
+            Some(axis_ref(s, d)?)
+          }
+          o => return Err(CmdError::new(format!("unknown type '{o}' (closest_point, along_vector)"))),
+        };
+      let curves = ids(p, "curves").into_iter().map(CurveId).collect();
+      add_feature(s, FeatureKind::ProjectToSurface { sketch, curves, faces, along })
+    })(),
     _ => return None,
   })
 }
@@ -303,6 +371,24 @@ fn edge(s: &Session, p: &Value, k: &str) -> Result<EdgeRef, CmdError> {
   edge_ref_of(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge)")))?)
 }
 
+/// A straight line: an axis as `axis_ref` takes it ("x"/"y"/"z" or {axis: id}), a sketch line
+/// {sketch, curve}, or a body edge ({point} or {body, edge}).
+fn line(s: &Session, p: &Value, k: &str) -> Result<LineRef, CmdError> {
+  let v = p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge, axis or sketch line)")))?;
+  if v.is_string() || v.get("axis").is_some() {
+    return Ok(LineRef::Axis(axis_ref(s, v)?));
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let curve = CurveId(req_u32(v, "curve")?);
+    match s.design.sketch(sketch)?.curve(curve).map(|c| &c.kind) {
+      Some(CurveKind::Line { .. }) => return Ok(LineRef::Sketch { sketch, curve }),
+      _ => return Err(CmdError::new(format!("curve {} of that sketch is not a line", curve.0))),
+    }
+  }
+  Ok(LineRef::Edge(edge_ref_of(s, v)?))
+}
+
 fn plane_of(s: &Session, p: &Value, k: &str) -> Result<PlaneRef, CmdError> {
   plane_ref(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (a plane)")))?)
 }
@@ -342,6 +428,36 @@ fn t_of(p: &Value) -> String {
   opt_expr(p, "t").unwrap_or_else(|| "0.5".into())
 }
 
+/// A physical distance along the path (empty = use `t`).
+fn distance_of(p: &Value) -> String {
+  opt_expr(p, "distance").unwrap_or_default()
+}
+
+/// What a point or plane along a path runs along.
+enum AlongPath {
+  Edge(EdgeRef),
+  Curve(PathRef),
+}
+
+/// The path of `along_path`: `edge` (or `path`) is a body edge, or {sketch, curve} / {sketch,
+/// curves: [id]} for sketch curves.
+fn along_path(s: &Session, p: &Value) -> Result<AlongPath, CmdError> {
+  let v = p.get("edge").or(p.get("path")).ok_or(CmdError::new("missing 'edge' (the path)"))?;
+  if v.get("sketch").is_none() {
+    return Ok(AlongPath::Edge(edge_ref_of(s, v)?));
+  }
+  let sketch = FeatureId(req_u32(v, "sketch")?);
+  let sk = s.design.sketch(sketch)?;
+  let curves: Vec<CurveId> = match v.get("curve") {
+    Some(_) => vec![CurveId(req_u32(v, "curve")?)],
+    None => ids(v, "curves").into_iter().map(CurveId).collect(),
+  };
+  if let Some(c) = curves.iter().find(|c| sk.curve(**c).is_none() && sk.curve3d(**c).is_none()) {
+    return Err(CmdError::new(format!("the sketch has no curve {}", c.0)));
+  }
+  Ok(AlongPath::Curve(PathRef { sketch, curves }))
+}
+
 fn plane(s: &mut Session, p: &Value) -> CmdResult {
   let def = match opt_str(p, "method").unwrap_or("") {
     "angle" => PlaneDef::Angle {
@@ -351,19 +467,61 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
     },
     "midplane" => PlaneDef::Midplane { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "three_points" => PlaneDef::ThreePoints { a: pref(s, p, "a")?, b: pref(s, p, "b")?, c: pref(s, p, "c")? },
-    "two_edges" => PlaneDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PlaneDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "tangent" => PlaneDef::Tangent {
       face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)?,
       near: req_vec3(p, "near")?,
     },
-    "along_path" => PlaneDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "along_path" => match along_path(s, p)? {
+      AlongPath::Edge(edge) => PlaneDef::AlongPath { edge, t: t_of(p), distance: distance_of(p) },
+      AlongPath::Curve(path) => PlaneDef::AlongCurve { path, t: t_of(p), distance: distance_of(p) },
+    },
+    "perpendicular" => PlaneDef::Perpendicular {
+      base: plane_of(s, p, "plane")?,
+      through: p.get("through").map(|v| point_ref(s, v)).transpose()?,
+      distance: opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+      v: match opt_str(p, "direction").unwrap_or("u") {
+        "u" | "U" => false,
+        "v" | "V" => true,
+        o => return Err(CmdError::new(format!("unknown direction '{o}' (u, v)"))),
+      },
+    },
     o => {
       return Err(CmdError::new(format!(
-        "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path; plane.offset for offsets)"
+        "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path, perpendicular; plane.offset for offsets)"
       )));
     }
   };
   add_feature(s, FeatureKind::PlaneBy { def })
+}
+
+/// What an axis through an edge runs along: a body edge ({body, edge} or {point}), a sketch line
+/// ({sketch, line}, or {point} on it when no body edge is there) or another axis ({axis}).
+fn axis_along(s: &Session, v: &Value) -> Result<AxisDef, CmdError> {
+  if let Some(f) = v.get("axis") {
+    let feature = FeatureId(req_u32(&json!({"axis": f}), "axis")?);
+    if !s.model.axes.contains_key(&feature) {
+      return Err(CmdError::new("that feature is not a construction axis"));
+    }
+    return Ok(AxisDef::Axis { feature });
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let sk = s.model.sketches.get(&sketch).ok_or(CmdError::new(format!("no sketch {}", sketch.0)))?;
+    let curve = CurveId(req_u32(v, if v.get("line").is_some() { "line" } else { "curve" })?);
+    if !matches!(sk.sketch.curve(curve).map(|c| &c.kind), Some(fox_sketch::CurveKind::Line { .. })) {
+      return Err(CmdError::new(format!("sketch {} has no line {}", sketch.0, curve.0)));
+    }
+    return Ok(AxisDef::SketchLine { sketch, curve });
+  }
+  match edge_ref_of(s, v) {
+    Ok(edge) => Ok(AxisDef::Edge { edge }),
+    Err(e) if v.get("point").is_some() => match sketch_line_at(s, DVec3::from(req_vec3(v, "point")?)) {
+      Ok((sketch, curve)) => Ok(AxisDef::SketchLine { sketch, curve }),
+      Err(_) => Err(e),
+    },
+    Err(e) => Err(e),
+  }
 }
 
 fn axis(s: &mut Session, p: &Value) -> CmdResult {
@@ -373,7 +531,7 @@ fn axis(s: &mut Session, p: &Value) -> CmdResult {
     "normal" => AxisDef::Normal { face: face(s)?, near: req_vec3(p, "near")? },
     "two_planes" => AxisDef::TwoPlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "two_points" => AxisDef::TwoPoints { a: pref(s, p, "a")?, b: pref(s, p, "b")? },
-    "edge" => AxisDef::Edge { edge: edge(s, p, "edge")? },
+    "edge" => axis_along(s, p.get("edge").ok_or(CmdError::new("missing 'edge' (an edge, sketch line or axis)"))?)?,
     o => {
       return Err(CmdError::new(format!("unknown axis method '{o}' (face, normal, two_planes, two_points, edge)")));
     }
@@ -384,13 +542,24 @@ fn axis(s: &mut Session, p: &Value) -> CmdResult {
 fn point(s: &mut Session, p: &Value) -> CmdResult {
   let def = match opt_str(p, "method").unwrap_or("") {
     "vertex" | "at" | "center_of_edge" => PointDef::Ref { point: pref(s, p, "point")? },
-    "two_edges" => PointDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PointDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "three_planes" => {
       PointDef::ThreePlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")?, c: plane_of(s, p, "c")? }
     }
     "center" => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
-    "edge_plane" => PointDef::EdgePlane { edge: edge(s, p, "edge")?, plane: plane_of(s, p, "plane")? },
-    "along_path" => PointDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "edge_plane" => {
+      let e = p.get("edge").ok_or(CmdError::new("missing 'edge' (an edge, sketch line or axis)"))?;
+      let plane = plane_of(s, p, "plane")?;
+      if e.is_string() || e.get("sketch").is_some() || e.get("axis").is_some() {
+        PointDef::LinePlane { line: axis_ref(s, e)?, plane }
+      } else {
+        PointDef::EdgePlane { edge: edge_ref_of(s, e)?, plane }
+      }
+    }
+    "along_path" => match along_path(s, p)? {
+      AlongPath::Edge(edge) => PointDef::AlongPath { edge, t: t_of(p), distance: distance_of(p) },
+      AlongPath::Curve(path) => PointDef::AlongCurve { path, t: t_of(p), distance: distance_of(p) },
+    },
     o => {
       return Err(CmdError::new(format!(
         "unknown point method '{o}' (vertex, two_edges, three_planes, center, edge_plane, along_path)"

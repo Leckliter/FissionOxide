@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use fox_kernel::Shape;
-use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::glam::{DMat4, DQuat, DVec3};
 
 use super::{Ctx, FResult, ke};
 use crate::assembly::{self, MotionAxis};
@@ -241,7 +241,7 @@ impl Ctx<'_> {
   /// Saved joint origins, rigid groups, motion links and inserted designs.
   pub(super) fn apply_assembly(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::JointOrigin { component, geometry, angle, offset, flip } => {
+      FeatureKind::JointOrigin { component, geometry, angle, offset, offset_x, offset_y, flip } => {
         let comp = self.component(*component)?;
         let name = comp.name.clone();
         if comp.bodies.iter().all(|b| self.body_index(*b).is_err()) {
@@ -250,7 +250,7 @@ impl Ctx<'_> {
         let base = self.joint_frame(geometry)?;
         let turn = if *flip { DMat4::from_rotation_x(std::f64::consts::PI) } else { DMat4::IDENTITY };
         let f = base
-          * DMat4::from_translation(DVec3::new(0.0, 0.0, self.len(offset)?))
+          * DMat4::from_translation(DVec3::new(self.len(offset_x)?, self.len(offset_y)?, self.len(offset)?))
           * DMat4::from_rotation_z(self.angle(angle)?)
           * turn;
         self.state.joint_origins.insert(id, (*component, f));
@@ -281,6 +281,29 @@ impl Ctx<'_> {
         self.transform_components(id, &lagging, lead)?;
         Ok(None)
       }
+      FeatureKind::PlaneConstraint { moving, moving_planes, fixed, fixed_planes, offset } => {
+        let comp = self.component(*moving)?;
+        if comp.grounded {
+          return Err(format!("{} is grounded", comp.name));
+        }
+        if let Some(f) = fixed {
+          self.component(*f)?;
+          if f == moving {
+            return Err("a component can't be constrained to itself".into());
+          }
+        }
+        let off = self.len(offset)?;
+        let (pm, nm) = self.midplane(moving_planes, "moving")?;
+        let (pf, nf) = self.midplane(fixed_planes, "fixed")?;
+        // the least rotation that makes the planes parallel (none when they already are), about
+        // the moving plane's point, then the move along the fixed normal
+        let to = if nm.dot(nf) < 0.0 { -nf } else { nf };
+        let turn = DMat4::from_translation(pm)
+          * DMat4::from_quat(DQuat::from_rotation_arc(nm, to))
+          * DMat4::from_translation(-pm);
+        let m = DMat4::from_translation(nf * ((pf - pm).dot(nf) + off)) * turn;
+        self.move_component(id, *moving, *fixed, m)
+      }
       FeatureKind::MotionLink { .. } | FeatureKind::CamFollower { .. } => match self.mates.errors.get(&id) {
         Some(e) => Err(e.clone()),
         None => Ok(None),
@@ -301,12 +324,66 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::AlignConstraint { moving, moving_geometry, fixed, fixed_geometry, relation, offset, flip } => {
+        let comp = self.component(*moving).map_err(|_| "the moving component no longer exists".to_string())?;
+        if comp.grounded {
+          return Err(format!("{} is grounded", comp.name));
+        }
+        if let Some(f) = fixed {
+          self.component(*f).map_err(|_| "the fixed component no longer exists".to_string())?;
+        }
+        let fixed_frame = self.joint_frame(fixed_geometry)?;
+        let moving_frame = self.joint_frame(moving_geometry)?;
+        let rel = relation.resolve(self.align_shape(moving_geometry)?, self.align_shape(fixed_geometry)?);
+        let m = assembly::align_transform(fixed_frame, moving_frame, rel, self.len(offset)?, *flip)?;
+        self.move_component(id, *moving, *fixed, m)
+      }
       _ => Err("this feature type isn't supported".into()),
     }
   }
 
   fn component(&self, id: ComponentId) -> Result<&crate::Component, String> {
     self.components.iter().find(|c| c.id == id).ok_or(format!("component {} no longer exists", id.0))
+  }
+
+  /// What an align constraint's geometry is: a flat face's plane, an axis (a cylinder, cone or
+  /// edge) or a point. Call after [`Ctx::joint_frame`] has refreshed its reference.
+  fn align_shape(&self, g: &assembly::JointGeometry) -> Result<assembly::AlignShape, String> {
+    use assembly::{AlignShape, JointGeometry};
+    use fox_kernel::SurfaceKind;
+    Ok(match g {
+      JointGeometry::Face { face } => {
+        let body = &self.state.bodies[self.body_index(face.body)?];
+        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("an align face could not be found")?;
+        match body.faces().iter().find(|f| f.id == fid).map(|f| f.kind) {
+          Some(SurfaceKind::Plane) => AlignShape::Plane,
+          Some(SurfaceKind::Cylinder | SurfaceKind::Cone) => AlignShape::Axis,
+          _ => AlignShape::Point,
+        }
+      }
+      JointGeometry::Edge { .. } => AlignShape::Axis,
+      JointGeometry::Point { .. } | JointGeometry::Origin { .. } => AlignShape::Point,
+    })
+  }
+
+  /// A point and unit normal of one plane, or of the midplane between two parallel planes (the
+  /// normal is the first plane's).
+  fn midplane(&mut self, planes: &mut [crate::PlaneRef], side: &str) -> Result<(DVec3, DVec3), String> {
+    let mut resolved = Vec::new();
+    for p in planes.iter_mut() {
+      let pl = self.resolve_plane(p).map_err(|e| format!("a {side} plane: {e}"))?;
+      resolved.push((pl.origin, pl.normal().normalize()));
+    }
+    match resolved[..] {
+      [one] => Ok(one),
+      [(a, n), (b, m)] => {
+        if n.cross(m).length() > 1e-6 {
+          return Err(format!("the two {side} planes aren't parallel"));
+        }
+        Ok((a + n * ((b - a).dot(n) / 2.0), n))
+      }
+      _ => Err(format!("the {side} side needs one plane or two")),
+    }
   }
 
   /// A saved joint origin's frame where its component is now.

@@ -1,0 +1,9 @@
+# 460-parallel-orientation-arc: added by the parity loop from a Fusion probe
+# parallel-orientation-arc: 6x6 square centred on the origin on XY swept along a R20 quarter arc on XZ from (0,0,0) up and over to (20,0,20) (centre (20,0,0)), orientation 'parallel': the section keeps its XY orientation and only translates.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [0, 0], "mid": [5.857864376, -14.142135624], "end": [20, -20]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-3, -3], "corner2": [3, 3]}
+{"cmd": "sketch.finish"}
+{"cmd": "sweep", "sketch": 2, "path": 1, "orientation": "parallel", "operation": "new_body"}

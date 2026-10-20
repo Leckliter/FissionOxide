@@ -25,3 +25,12 @@ impl RadiusPoint {
     RadiusPoint { at, radius: radius.into() }
   }
 }
+
+/// One full round of a full round fillet: the centre face is rounded away by a blend tangent to
+/// it and to the side faces on either side of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FullRoundSet {
+  pub center: crate::FaceRef,
+  pub side_one: Vec<crate::FaceRef>,
+  pub side_two: Vec<crate::FaceRef>,
+}

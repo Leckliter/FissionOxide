@@ -61,7 +61,7 @@ fn joints_mate_saved_joint_origins_that_follow_their_component() {
   let j = run(
     &mut s,
     "joint",
-    json!({"moving_origin": {"origin": "Pivot"}, "fixed_origin": {"origin": "Hole"}, "kind": "revolute"}),
+    json!({"moving_origin": {"origin": "Pivot"}, "fixed_origin": {"origin": "Hole"}, "kind": "revolute", "flip": true}),
   );
   let j = j["feature"].as_u64().unwrap();
   let (lo, hi) = bbox(&s, arm_body);
@@ -71,7 +71,7 @@ fn joints_mate_saved_joint_origins_that_follow_their_component() {
   run(
     &mut s,
     "joint",
-    json!({"moving": cap, "moving_origin": {"at": [0, -100, 0], "z": [0, 0, -1]}, "fixed_origin": {"origin": "Tip"}}),
+    json!({"moving": cap, "moving_origin": {"at": [0, -100, 0], "z": [0, 0, -1]}, "fixed_origin": {"origin": "Tip"}, "flip": true}),
   );
   let (lo, hi) = bbox(&s, cap_body);
   assert!(near((lo + hi) / 2.0, [110.0, 30.0, 17.0], 1e-3), "{lo:?} {hi:?}");
@@ -132,7 +132,7 @@ fn rigid_groups_bring_along_parts_modeled_after_the_joint() {
   let j = run(
     &mut s,
     "joint",
-    json!({"moving": arm, "moving_origin": {"edge": {"point": [15, 200, 0]}}, "fixed_origin": {"edge": {"point": [55, 30, 10]}}, "kind": "revolute"}),
+    json!({"moving": arm, "moving_origin": {"edge": {"point": [15, 200, 0]}}, "fixed_origin": {"edge": {"point": [55, 30, 10]}}, "kind": "revolute", "flip": true}),
   )["feature"]
     .clone();
   // a weight modeled where it should stay relative to the jointed arm, then grouped with it
@@ -290,4 +290,268 @@ fn inserted_hub_designs_update_and_unlink() {
   assert_eq!(r["linked"], false);
   assert!(s.execute("component.insert", &json!({"item": item, "version": 9})).is_err());
   let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn align_moves_a_component_only_as_far_as_the_relation_needs() {
+  let mut s = Session::default();
+  let (plate, _) = part(&mut s, "Plate", [40.0, 30.0, 10.0], [20.0, 15.0]);
+  run(&mut s, "component.ground", json!({"component": plate}));
+  let (_, block) = part(&mut s, "Block", [10.0, 10.0, 10.0], [55.0, 5.0]);
+  // flush: the block's bottom 5 mm above the plate's top; it keeps its x and y
+  let r = run(
+    &mut s,
+    "align",
+    json!({"moving_geometry": {"face": {"point": [55, 5, 0]}}, "fixed_geometry": {"face": {"point": [20, 15, 10]}}, "offset": "5"}),
+  );
+  assert_eq!(r["name"], "Align1");
+  let (lo, hi) = bbox(&s, block);
+  assert!(near(lo, [50.0, 0.0, 15.0], 1e-6) && near(hi, [60.0, 10.0, 25.0], 1e-6), "{lo} {hi}");
+  // the offset is an expression: editing it moves the block along the normal again
+  let f = r["feature"].as_u64().unwrap();
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"offset": "0"}}));
+  assert!(near(bbox(&s, block).0, [50.0, 0.0, 10.0], 1e-6));
+  // a pin made concentric with a hole slides across onto its axis and keeps its height
+  run(&mut s, "cylinder", json!({"radius": 3, "height": 10, "at": [10, 10], "operation": "cut"}));
+  run(&mut s, "cylinder", json!({"radius": 2, "height": 8, "at": [100, 100], "operation": "new_body"}));
+  let pin_body = s.model.bodies.last().unwrap().id.0;
+  let pin_comp = run(&mut s, "component.create", json!({"name": "Pin", "bodies": [pin_body]}))["component"].clone();
+  run(
+    &mut s,
+    "align",
+    json!({"moving": pin_comp, "moving_geometry": {"face": {"point": [102, 100, 4]}}, "fixed_geometry": {"face": {"point": [13, 10, 5]}}}),
+  );
+  let (lo, hi) = bbox(&s, pin_body);
+  assert!(near(lo, [8.0, 8.0, 0.0], 1e-6) && near(hi, [12.0, 12.0, 8.0], 1e-6), "{lo} {hi}");
+  // a component can't be aligned to itself
+  assert!(
+    s.execute(
+      "align",
+      &json!({"moving_geometry": {"face": {"point": [55, 5, 10]}}, "fixed_geometry": {"face": {"point": [55, 5, 10]}}})
+    )
+    .is_err()
+  );
+}
+
+#[test]
+fn center_constraint_moves_a_component_only_along_the_plane_normal() {
+  let mut s = Session::default();
+  run(&mut s, "param.add", json!({"name": "wall", "expr": "10 mm"}));
+  // a channel of two walls, inner faces at x = 10 and x = 40
+  run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 10, "at": [5, 10]}));
+  run(&mut s, "box", json!({"width": "wall", "depth": 20, "height": 10, "at": [45, 10]}));
+  let walls: Vec<u32> = s.model.bodies.iter().map(|b| b.id.0).collect();
+  let channel = run(&mut s, "component.create", json!({"name": "Channel", "bodies": walls}))["component"].clone();
+  run(&mut s, "component.ground", json!({"component": channel}));
+  let (_, block) = part(&mut s, "Block", [10.0, 10.0, 10.0], [65.0, 15.0]);
+  let c = run(
+    &mut s,
+    "constraint.center",
+    json!({
+      "moving_faces": [{"point": [60, 15, 5]}, {"point": [70, 15, 5]}],
+      "fixed_faces": [{"point": [10, 10, 5]}, {"point": [40, 10, 5]}],
+    }),
+  );
+  // centred in x; y and z stay where they were
+  let (lo, hi) = bbox(&s, block);
+  assert!(near(lo, [20.0, 10.0, 0.0], 1e-6) && near(hi, [30.0, 20.0, 10.0], 1e-6), "{lo} {hi}");
+  // it re-solves when the channel changes: a 20 mm wall puts the inner face at x = 35
+  run(&mut s, "param.set", json!({"name": "wall", "expr": "20 mm"}));
+  let (lo, _) = bbox(&s, block);
+  assert!(near(lo, [17.5, 10.0, 0.0], 1e-6), "{lo}");
+  // an offset moves it along the fixed midplane's normal (+x, the first fixed face's)
+  run(&mut s, "feature.edit", json!({"feature": c["feature"], "set": {"offset": "2 mm"}}));
+  let (lo, _) = bbox(&s, block);
+  assert!(near(lo, [19.5, 10.0, 0.0], 1e-6), "{lo}");
+  // the grounded channel can't be the one that moves
+  let bad = s.execute(
+    "constraint.center",
+    &json!({"moving_faces": [{"point": [10, 10, 5]}], "fixed_faces": [{"point": [0, 10, 5]}], "fixed": null}),
+  );
+  assert!(bad.unwrap()["error"].as_str().is_some_and(|e| e.contains("grounded")));
+}
+
+#[test]
+fn interference_creates_bodies() {
+  let mut s = Session::default();
+  let cube = |s: &mut Session, at: [f64; 2], w: f64| {
+    run(s, "box", json!({"at": at, "width": w, "depth": 20, "height": 20, "operation": "new_body"}));
+    s.model.bodies.last().unwrap().id.0
+  };
+  let (a, b) = (cube(&mut s, [10.0, 10.0], 20.0), cube(&mut s, [20.0, 10.0], 20.0));
+  // a third body in A's component overlaps A (and touches B): only checked when selected
+  let c = cube(&mut s, [5.0, 10.0], 10.0);
+  run(&mut s, "component.create", json!({"name": "A", "bodies": [a, c]}));
+  run(&mut s, "component.create", json!({"name": "B", "bodies": [b]}));
+  let all = run(&mut s, "assembly.interference", json!({}));
+  assert_eq!(all.as_array().unwrap().len(), 1, "{all}");
+  let picked = run(&mut s, "assembly.interference", json!({"bodies": [a, c]}));
+  assert_eq!(picked.as_array().unwrap().len(), 1, "{picked}");
+  assert!((picked[0]["volume_mm3"].as_f64().unwrap() - 4000.0).abs() < 1e-3, "{picked}");
+  // the overlap of A and B becomes a body in a new component
+  let n = s.model.bodies.len();
+  let r = run(&mut s, "assembly.interference", json!({"bodies": [a, b], "create_bodies": true}));
+  let body = r[0]["body"].as_u64().unwrap() as u32;
+  assert_eq!(s.model.bodies.len(), n + 1);
+  let (lo, hi) = bbox(&s, body);
+  assert!(near(lo, [10.0, 0.0, 0.0], 1e-6) && near(hi, [20.0, 20.0, 20.0], 1e-6), "{lo:?} {hi:?}");
+  assert_eq!(s.design.component_of(fox_model::BodyId(body)).unwrap().name, "Interference1");
+  // without components it stays in the root
+  s.undo();
+  assert_eq!(s.model.bodies.len(), n);
+  let r = run(&mut s, "assembly.interference", json!({"bodies": [a, b], "create_bodies": true, "components": false}));
+  assert!(r[0]["component"].is_null(), "{r}");
+  assert!(s.design.component_of(fox_model::BodyId(r[0]["body"].as_u64().unwrap() as u32)).is_none());
+}
+
+#[test]
+fn arrange_lays_copies_flat_in_the_envelope() {
+  let mut s = Session::default();
+  // a plate standing on edge: its largest faces look along X
+  let (c, src) = part(&mut s, "Plate", [10.0, 50.0, 30.0], [200.0, 0.0]);
+  let r = run(
+    &mut s,
+    "arrange",
+    json!({"components": [{"component": c, "quantity": 3}], "length": 100, "width": 60, "spacing": 2, "frame": 1}),
+  );
+  let fid = r["feature"].as_u64().unwrap() as u32;
+  let placed: Vec<u64> = r["components"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+  assert_eq!(placed.len(), 3);
+  let envelope = r["envelope"].as_u64().unwrap() as u32;
+  let comps = &s.design.components;
+  assert!(comps.iter().any(|k| k.id.0 == envelope && k.name == "Envelope1" && k.parent.is_some()));
+  let copies: Vec<u32> = s.model.bodies.iter().filter(|b| b.id.0 / 1000 == fid).map(|b| b.id.0).collect();
+  assert_eq!(copies.len(), 3);
+  for b in &copies {
+    assert!(comps.iter().any(|k| placed.contains(&(k.id.0 as u64)) && k.bodies.iter().any(|x| x.0 == *b)));
+    let (lo, hi) = bbox(&s, *b);
+    assert!((hi.z - lo.z - 10.0).abs() < 1e-6 && lo.z.abs() < 1e-6, "{lo} {hi}");
+    assert!(lo.x > 1.0 - 1e-6 && lo.y > 1.0 - 1e-6 && hi.x < 99.0 + 1e-6 && hi.y < 59.0 + 1e-6, "{lo} {hi}");
+  }
+  // the source stays where it was
+  let (lo, _) = bbox(&s, src);
+  assert!((lo.x - 195.0).abs() < 1e-6);
+  // a smaller envelope can't take all three
+  let r = s.execute("feature.edit", &json!({"feature": fid, "set": {"length": "70"}})).unwrap();
+  let err = s.model.status(fox_model::FeatureId(fid)).and_then(|x| x.error.clone());
+  assert!(err.as_deref().is_some_and(|e| e.contains("don't fit")), "{r} {err:?}");
+}
+
+/// Grounded block A 20x20x10 at the origin and block B 10x6x4 at x 40..50, y 0..6, B's bottom
+/// face jointed (rigid) to A's top face, flipped or not; returns B's body.
+fn face_on_face(s: &mut Session, flip: bool) -> u32 {
+  let (a, _) = part(s, "A", [20.0, 20.0, 10.0], [10.0, 10.0]);
+  run(s, "component.ground", json!({"component": a}));
+  let (b, b_body) = part(s, "B", [10.0, 6.0, 4.0], [45.0, 3.0]);
+  run(
+    s,
+    "joint",
+    json!({
+      "moving": b, "moving_origin": {"face": {"point": [45, 3, 0]}},
+      "fixed": a, "fixed_origin": {"face": {"point": [10, 10, 10]}},
+      "kind": "rigid", "flip": flip,
+    }),
+  );
+  b_body
+}
+
+#[test]
+fn a_new_design_lines_joint_axes_up_as_fusion_does() {
+  assert!(Session::default().design.behaviours.has(fox_sketch::behaviour::FUSION_JOINT_AXES));
+  // unflipped, the Z axes point the same way: B's bottom normal (−Z) turns to +Z, so B turns over
+  // and hangs below A's top face
+  let mut s = Session::default();
+  let b = face_on_face(&mut s, false);
+  let (lo, hi) = bbox(&s, b);
+  assert!(near(lo, [5.0, 7.0, 6.0], 1e-6) && near(hi, [15.0, 13.0, 10.0], 1e-6), "{lo:?} {hi:?}");
+  // flipped, the Z axes face each other and B sits on A
+  let mut s = Session::default();
+  let b = face_on_face(&mut s, true);
+  let (lo, hi) = bbox(&s, b);
+  assert!(near(lo, [5.0, 7.0, 10.0], 1e-6) && near(hi, [15.0, 13.0, 14.0], 1e-6), "{lo:?} {hi:?}");
+}
+
+#[test]
+fn a_legacy_design_keeps_its_joints_where_they_were() {
+  // a design saved before behaviour flags (no `behaviours` field) faces the Z axes unless flipped,
+  // as before: its unflipped joint rebuilds exactly where a new design's flipped one goes
+  let legacy = |flip: bool| {
+    let mut s = Session::default();
+    let b = face_on_face(&mut s, flip);
+    let mut file: Value = serde_json::from_str(&s.design.to_json()).unwrap();
+    file.as_object_mut().unwrap().remove("behaviours");
+    s.design = fox_model::Design::from_json(&file.to_string()).unwrap();
+    assert!(s.design.behaviours.is_empty());
+    s.rebuild();
+    bbox(&s, b)
+  };
+  let fresh = |flip: bool| {
+    let mut s = Session::default();
+    let b = face_on_face(&mut s, flip);
+    bbox(&s, b)
+  };
+  let (lo, hi) = legacy(false);
+  assert!(near(lo, [5.0, 7.0, 10.0], 1e-6) && near(hi, [15.0, 13.0, 14.0], 1e-6), "{lo:?} {hi:?}");
+  assert_eq!(legacy(false), fresh(true));
+  assert_eq!(legacy(true), fresh(false));
+}
+
+#[test]
+fn as_built_joints_keep_components_where_they_sit() {
+  let mut s = Session::default();
+  let (base, base_body) = part(&mut s, "Base", [100.0, 60.0, 10.0], [50.0, 120.0]);
+  run(&mut s, "component.ground", json!({"component": base}));
+  let (arm, arm_body) = part(&mut s, "Arm", [40.0, 10.0, 5.0], [20.0, 30.0]);
+  let (lo, hi) = bbox(&s, arm_body);
+  // jointed at the arm's left end, about Z: nothing moves when the joint is made
+  let at = json!({"at": [0, 30, 0], "z": [0, 0, 1]});
+  let j = run(
+    &mut s,
+    "joint",
+    json!({"moving": arm, "fixed": base, "moving_origin": at, "fixed_origin": at, "kind": "revolute", "as_built": true}),
+  );
+  assert!(near(bbox(&s, arm_body).0, lo.to_array(), 1e-6) && near(bbox(&s, arm_body).1, hi.to_array(), 1e-6));
+  assert!(near(bbox(&s, base_body).0, [0.0, 90.0, 0.0], 1e-6));
+  // and it turns about the picked position
+  run(&mut s, "joint.drive", json!({"joint": j["feature"], "rotation": "90 deg"}));
+  let (lo, hi) = bbox(&s, arm_body);
+  assert!(near(lo, [-5.0, 30.0, 0.0], 1e-6) && near(hi, [5.0, 70.0, 5.0], 1e-6), "{lo} {hi}");
+}
+
+#[test]
+fn new_component_options_and_activation() {
+  let mut s = Session::default();
+  let (top, _) = part(&mut s, "Frame", [10.0, 10.0, 10.0], [0.0, 0.0]);
+  // an empty sheet metal component inside Frame, with its part number and description
+  let c = run(
+    &mut s,
+    "component.create",
+    json!({"name": "Bracket", "type": "sheet_metal", "part_number": "BR-01", "description": "Mount", "parent": top}),
+  )["component"]
+    .as_u64()
+    .unwrap();
+  let p = run(&mut s, "component.properties", json!({"component": c}));
+  assert_eq!(p["part_number"], "BR-01");
+  assert_eq!(p["description"], "Mount");
+  assert_eq!(p["type"], "sheet_metal");
+  assert_eq!(p["parent"], top);
+  assert_eq!(p["bodies"], 0);
+  let p = run(&mut s, "component.properties", json!({"component": c, "part_number": "BR-02", "type": "standard"}));
+  assert_eq!((p["part_number"].as_str(), p["type"].as_str()), (Some("BR-02"), Some("standard")));
+  assert!(s.execute("component.create", &json!({"type": "wooden"})).is_err());
+  // while Bracket is active, new bodies go into it (and undo takes them out with the feature)
+  run(&mut s, "component.activate", json!({"component": c}));
+  assert_eq!(run(&mut s, "component.properties", json!({"component": c}))["active"], true);
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 0]}));
+  let b = s.model.bodies.last().unwrap().id;
+  assert_eq!(s.design.component_of(b).map(|x| x.id.0 as u64), Some(c));
+  s.undo();
+  assert!(s.design.component(fox_model::ComponentId(c as u32)).unwrap().bodies.is_empty());
+  // back at the top level, new bodies stay in the root
+  run(&mut s, "component.activate", json!({}));
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 0]}));
+  assert!(s.design.component_of(s.model.bodies.last().unwrap().id).is_none());
+  // "activate" on create
+  let d = run(&mut s, "component.create", json!({"name": "Lid", "activate": true}))["component"].as_u64().unwrap();
+  assert_eq!(s.active_component.map(|x| x.0 as u64), Some(d));
 }

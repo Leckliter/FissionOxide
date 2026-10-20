@@ -87,13 +87,24 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           app.save(false);
         }
         ui.add_space(6.0);
-        if caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo()).clicked() && app.s.can_undo() {
+        // the icon undoes one step; the caret lists the steps to jump back (or forward) to
+        let undo = caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo());
+        let undo_list = caret_hit(&undo);
+        if undo.clicked() && !undo_list && app.s.can_undo() {
           app.cancel_dialog();
           app.s.undo();
         }
-        if caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo()).clicked() && app.s.can_redo() {
+        egui::Popup::menu(&undo)
+          .open_memory(undo_list.then_some(egui::SetOpenCommand::Toggle))
+          .show(|ui| history_menu(app, ui, true));
+        let redo = caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo());
+        let redo_list = caret_hit(&redo);
+        if redo.clicked() && !redo_list && app.s.can_redo() {
           app.s.redo();
         }
+        egui::Popup::menu(&redo)
+          .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
+          .show(|ui| history_menu(app, ui, false));
         ui.add_space(10.0);
         // the document tab fills the middle of the bar, its title centred, as in Fusion
         let right_w = 250.0;
@@ -112,7 +123,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
-          avatar(ui);
+          avatar(app, ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
           egui::Popup::menu(&help).show(|ui| help_menu(app, ui));
           let news = app.updates.tooltip_line().map(|l| format!("FissionOxide {l}"));
@@ -135,6 +146,42 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         });
       });
     });
+}
+
+/// Whether a click on a [`caret_button`] landed on its caret (the drop-down) rather than its icon.
+fn caret_hit(resp: &egui::Response) -> bool {
+  resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| p.x >= resp.rect.right() - 14.0)
+}
+
+/// Most steps the Undo and Redo lists show.
+const HISTORY_ROWS: usize = 25;
+
+/// The Undo (or Redo) drop-down: the steps by name, newest first; picking one undoes (redoes)
+/// back to before (after) it.
+fn history_menu(app: &mut App, ui: &mut egui::Ui, undo: bool) {
+  ui.set_min_width(230.0);
+  let names = if undo { app.s.undo_history() } else { app.s.redo_history() };
+  ui.label(RichText::new(if undo { "Undo" } else { "Redo" }).small().color(theme::MUTED));
+  if names.is_empty() {
+    ui.label(RichText::new(if undo { "Nothing to undo" } else { "Nothing to redo" }).color(theme::MUTED));
+    return;
+  }
+  for (i, name) in names.iter().enumerate().take(HISTORY_ROWS) {
+    let steps = i + 1;
+    let hint = format!("{} {steps} step{}", if undo { "Undo" } else { "Redo" }, if steps == 1 { "" } else { "s" });
+    if ui.button(name).on_hover_text(hint).clicked() {
+      if undo {
+        app.cancel_dialog();
+        app.s.undo_steps(steps);
+      } else {
+        app.s.redo_steps(steps);
+      }
+      ui.close();
+    }
+  }
+  if names.len() > HISTORY_ROWS {
+    ui.label(RichText::new(format!("… {} more", names.len() - HISTORY_ROWS)).small().color(theme::MUTED));
+  }
 }
 
 /// An application bar icon with a drop-down caret (File, Undo, Redo).
@@ -226,21 +273,45 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
     ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
   });
+  ui.separator();
+  if ui.button("Preferences...").on_hover_text("Units, navigation, design, sketch and graphics settings").clicked() {
+    ui.close();
+    crate::preferences::open(app);
+  }
 }
 
+/// Fusion's Help (?) menu, less what FissionOxide has no counterpart for (Quick Setup waits for
+/// the Preferences dialog).
 fn help_menu(app: &mut App, ui: &mut egui::Ui) {
-  ui.set_min_width(300.0);
+  ui.set_min_width(260.0);
+  if ui.button("Learning and Documentation").on_hover_text(crate::help::DOCS).clicked() {
+    ui.close();
+    crate::help::open(app, crate::help::DOCS);
+  }
+  if ui.button("Keyboard Shortcuts").on_hover_text("Every key FissionOxide binds").clicked() {
+    ui.close();
+    app.help.shortcuts = true;
+  }
+  if ui.button("What's New").on_hover_text("This version's release notes").clicked() {
+    ui.close();
+    crate::help::whats_new(app);
+  }
+  ui.separator();
+  if ui.button("Diagnostic Log").on_hover_text("Open the folder with FissionOxide's log").clicked() {
+    ui.close();
+    crate::help::diagnostic_log(app);
+  }
   if ui.button(app.updates.menu_label()).clicked() {
     ui.close();
     app.updates.check_now();
   }
   ui.separator();
   ui.label(RichText::new("Navigation").strong());
-  ui.label("Middle-drag pan · Shift+middle-drag or right-drag orbit · wheel zoom");
-  ui.add_space(4.0);
-  ui.label(RichText::new("Shortcuts").strong());
-  ui.label("Sketch: L line · R rectangle · C circle · A arc · P point · D dimension · X construction");
-  ui.label("Model: E extrude · F fillet · Esc cancel · Del delete · F6 fit · Home view");
+  let nav = app.preferences.values.nav;
+  {
+    use crate::preferences::NavAction::*;
+    ui.label(format!("Orbit: {} · Pan: {} · Zoom: {}", nav.describe(Orbit), nav.describe(Pan), nav.describe(Zoom)));
+  }
   ui.separator();
   ui.horizontal(|ui| {
     let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), egui::Sense::hover());
@@ -250,11 +321,21 @@ fn help_menu(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-fn avatar(ui: &mut egui::Ui) {
+/// The profile button; its menu has Preferences, as in Fusion.
+fn avatar(app: &mut App, ui: &mut egui::Ui) {
   let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
   ui.painter().circle_filled(rect.center(), 12.0, Color32::from_rgb(92, 84, 196));
   ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "CL", egui::FontId::proportional(11.0), Color32::WHITE);
-  resp.on_hover_text("Local user");
+  let resp = resp.on_hover_text("Local user");
+  egui::Popup::menu(&resp).show(|ui| {
+    ui.set_min_width(180.0);
+    ui.label(RichText::new("Local user").strong());
+    ui.separator();
+    if ui.button("Preferences").clicked() {
+      ui.close();
+      crate::preferences::open(app);
+    }
+  });
 }
 
 fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
@@ -348,6 +429,8 @@ pub(crate) enum Cmd {
   SelectMode(crate::select::Mode),
   /// Fabrication: the 2D cut window (laser, plasma, waterjet G-code).
   Cut2d,
+  /// INSERT > Canvas: a reference image on a plane.
+  Canvas,
 }
 
 impl Cmd {
@@ -363,7 +446,7 @@ impl Cmd {
         Kind::Torus => (Icon::Torus, "Torus", "Create a solid torus"),
         Kind::RectPattern => (Icon::Pattern, "Rectangular Pattern", "Copy bodies in rows and columns"),
         Kind::CircPattern => (Icon::CircPattern, "Circular Pattern", "Copy bodies around an axis"),
-        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies across a plane"),
+        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies or features across a plane"),
         Kind::Fillet => (Icon::Fillet, "Fillet", "Round selected edges (F)"),
         Kind::Chamfer => (Icon::Chamfer, "Chamfer", "Bevel selected edges"),
         Kind::Shell => (Icon::Shell, "Shell", "Hollow a body, removing selected faces"),
@@ -386,7 +469,7 @@ impl Cmd {
         Tool::CenterArc => (Icon::CenterArc, "Center Point Arc", "Arc from centre, start and end"),
         Tool::Polygon => (Icon::Polygon, "Inscribed Polygon", "Hexagon from centre and vertex"),
         Tool::Slot => (Icon::Slot, "Center to Center Slot", "Slot from two centres and a width"),
-        Tool::Point => (Icon::Point, "Point", "Sketch point (P)"),
+        Tool::Point => (Icon::Point, "Point", "Sketch point"),
         Tool::Dimension => (Icon::Dimension, "Sketch Dimension", "Dimension geometry (D)"),
         Tool::Spline => (Icon::SplineFit, "Fit Point Spline", "Smooth curve through clicked points"),
         Tool::Trim => (Icon::SkTrim, "Trim", "Remove the piece of a curve you click (T)"),
@@ -409,7 +492,9 @@ impl Cmd {
         Tool::Break => (Icon::SkBreak, "Break", "Split a curve at its crossings, keeping every piece"),
         Tool::Circle2T => (Icon::Circle2T, "2-Tangent Circle", "Circle tangent to two curves"),
         Tool::Circle3T => (Icon::Circle3T, "3-Tangent Circle", "Circle tangent to three curves"),
-        Tool::Blend => (Icon::BlendCurve, "Blend Curve", "Curvature-continuous spline joining two curve ends"),
+        Tool::Blend => {
+          (Icon::BlendCurve, "Blend Curve", "Tangent (or curvature) continuous spline joining two curve ends")
+        }
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {
@@ -499,6 +584,9 @@ impl Cmd {
         "2D Cut",
         "Laser, plasma or waterjet G-code (or DXF) for a flat pattern or sketch: kerf, leads, micro-joints",
       ),
+      Cmd::Canvas => {
+        (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
+      }
     }
   }
 
@@ -526,6 +614,8 @@ impl Cmd {
   }
 
   pub(crate) fn run(self, app: &mut App) {
+    // a new command ends the last one's hint
+    app.end_hint();
     app.note_cmd(self);
     match self {
       Cmd::NewSketch => app.new_sketch(),
@@ -560,7 +650,7 @@ impl Cmd {
         let bodies: Vec<u32> =
           app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(body.0) } else { None }).collect();
         if bodies.is_empty() {
-          app.status = Some(("Remove: select bodies first".into(), false));
+          app.hint("Remove: select bodies first");
         } else {
           app.run("body.remove", json!({"bodies": bodies}));
           app.s.selection.clear();
@@ -603,16 +693,12 @@ impl Cmd {
         app.nav_mode = None;
         app.sel_mode = crate::select::Mode::Window;
         app.set_tool(Tool::Select);
-        app.status =
-          Some(("Drag a box: left to right selects what's inside, right to left what it touches".into(), false));
+        app.hint("Drag a box: left to right selects what's inside, right to left what it touches");
       }
       Cmd::Priority(p) => app.sel_priority = p,
       Cmd::Filter(f) => app.sel_filter.toggle(f),
       Cmd::Fit => app.fit_view(),
-      Cmd::Home => {
-        app.cam.set_view(StandardView::Home);
-        app.fit_view();
-      }
+      Cmd::Home => app.go_home(),
       Cmd::ToggleVisibility => app.toggle_visibility(),
       Cmd::ConfigTable => crate::config_ui::toggle_table(),
       Cmd::CaptureHistory => crate::config_ui::toggle_history(app),
@@ -620,9 +706,10 @@ impl Cmd {
         app.nav_mode = None;
         app.sel_mode = m;
         app.set_tool(Tool::Select);
-        app.status = Some((Cmd::SelectMode(m).info().2.into(), false));
+        app.hint(Cmd::SelectMode(m).info().2);
       }
       Cmd::Cut2d => app.open_cut_window(),
+      Cmd::Canvas => crate::canvas_ui::start_insert(app),
     }
   }
 }
@@ -901,7 +988,6 @@ struct RowEvents {
   response: Option<egui::Response>,
 }
 
-/// One browser row: expander, visibility eye, icon and name.
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
 /// and the name on a grey pill (a dark pill with an activation radio for the root component).
 fn tree_row(
@@ -917,7 +1003,8 @@ fn tree_row(
   label_color: Color32,
 ) -> RowEvents {
   let width = ui.available_width();
-  let (rect, resp) = ui.allocate_exact_size(vec2(width, 25.0), egui::Sense::click());
+  // dragged rows move bodies and components (see browser_edit)
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, 25.0), egui::Sense::click_and_drag());
   let open_id = id.with("open");
   let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).or(expand).unwrap_or(false);
   let p = ui.painter().clone();
@@ -1039,11 +1126,25 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   let ds = egui::Id::new("tree-docsettings");
   tree_row(ui, ds, 1, Some(false), None, Icon::Gear, "Document Settings", false, theme::TEXT);
   if is_open(ui, ds, false) {
-    tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, "Units: mm", false, theme::TEXT);
+    let label = format!("Units: {}", app.s.design.units.symbol());
+    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
+    if let Some(r) = &ev.response {
+      crate::units::settings_row(app, ui, r, 2);
+    }
   }
   // Named Views
   let nv = egui::Id::new("tree-views");
-  tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
+  let ev = tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
+  if let Some(r) = ev.response {
+    r.context_menu(|ui| {
+      if menu_item(ui, Icon::Views, "New Named View", None).clicked() {
+        ui.close();
+        if app.save_named_view().is_some() {
+          ui.data_mut(|d| d.insert_temp(nv.with("open"), true));
+        }
+      }
+    });
+  }
   if is_open(ui, nv, false) {
     for (label, v) in [
       ("TOP", StandardView::Top),
@@ -1053,10 +1154,18 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     ] {
       let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::Views, label, false, theme::TEXT);
       if ev.clicked || ev.double_clicked {
-        app.cam.set_view(v);
-        if v == StandardView::Home {
-          app.fit_view();
-        }
+        app.fly_standard_view(v);
+      }
+    }
+    // the user's views, saved in the design
+    let names: Vec<String> = app.s.design.named_views.iter().map(|v| v.name.clone()).collect();
+    for name in names {
+      let ev = tree_row(ui, nv.with(("user", &name)), 2, None, None, Icon::Views, &name, false, theme::TEXT);
+      if ev.double_clicked {
+        app.restore_named_view(&name);
+      }
+      if let Some(r) = ev.response {
+        r.on_hover_text("Double-click to restore this view").context_menu(|ui| named_view_menu(app, ui, &name));
       }
     }
   }
@@ -1082,9 +1191,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
       if let Some(r) = ev.response {
         r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
-          if ui.button("Create Sketch").clicked() {
-            ui.close();
-            app.create_sketch(json!(plane));
+          let items = origin_plane_menu(app, plane);
+          if let Some(cmd) = row_menu(ui, &items) {
+            run_origin_plane_cmd(app, plane, cmd);
           }
         });
       }
@@ -1100,6 +1209,84 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   browser_config::section(app, ui);
 }
 
+/// The tag on an isolated body's browser row.
+fn isolate_badge(ui: &egui::Ui, row: Rect) {
+  let p = ui.painter();
+  let galley = p.layout_no_wrap("ISOLATED".into(), egui::FontId::proportional(9.5), Color32::WHITE);
+  let size = galley.size() + vec2(10.0, 4.0);
+  let r = Rect::from_min_size(pos2(row.right() - size.x - 6.0, row.center().y - size.y / 2.0), size);
+  p.rect_filled(r, 3.0, theme::ACCENT);
+  p.galley(r.min + vec2(5.0, 2.0), galley, Color32::WHITE);
+}
+
+/// While bodies are isolated: a banner at the top of the canvas saying so, with Unisolate (as
+/// Fusion shows isolate mode).
+pub fn isolate_banner(app: &mut App, ctx: &egui::Context) {
+  let Some(only) = &app.ctx_menu.isolate else { return };
+  let label = match only.as_slice() {
+    [b] => format!("Isolated: {}", app.s.body_name(*b)),
+    v => format!("Isolated: {} bodies", v.len()),
+  };
+  let mut unisolate = false;
+  egui::Area::new(egui::Id::new("isolate-banner"))
+    .fixed_pos(pos2(app.canvas.center().x, app.canvas.min.y + 8.0))
+    .pivot(egui::Align2::CENTER_TOP)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(Stroke::new(1.0, theme::ACCENT))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+            ui.label(RichText::new(label).color(theme::TEXT).strong());
+            if ui.button("Unisolate").on_hover_text("Show every body again").clicked() {
+              unisolate = true;
+            }
+          });
+        });
+    });
+  if unisolate {
+    app.ctx_menu.isolate = None;
+  }
+}
+
+/// A user named view's right-click menu: restore, update to the current camera, rename, delete.
+fn named_view_menu(app: &mut App, ui: &mut egui::Ui, name: &str) {
+  if menu_item(ui, Icon::Views, "Restore", None).clicked() {
+    ui.close();
+    app.restore_named_view(name);
+  }
+  if menu_item(ui, Icon::Views, "Update to Current View", None).clicked() {
+    ui.close();
+    let c = app.cam;
+    app.run(
+      "view.named.save",
+      json!({"name": name, "target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+    );
+  }
+  ui.separator();
+  // rename in place: type the new name, Enter
+  let key = egui::Id::new(("rename-named-view", name));
+  let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| name.to_string());
+  ui.horizontal(|ui| {
+    ui.label("Rename");
+    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(110.0));
+    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && text.trim() != name {
+      app.run("view.named.rename", json!({"name": name, "to": text.trim()}));
+      ui.close();
+    }
+  });
+  ui.data_mut(|d| d.insert_temp(key, text));
+  ui.separator();
+  if menu_item(ui, Icon::Remove, "Delete", None).clicked() {
+    ui.close();
+    app.run("view.named.delete", json!({"name": name}));
+  }
+}
+
 /// Components with their bodies; right-click to rename, ground, duplicate or delete.
 fn components_section(app: &mut App, ui: &mut egui::Ui) {
   // sub-components follow their parent, one level deeper
@@ -1112,7 +1299,8 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-components");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
+  let ev = tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
+  browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::TopLevel);
   if !is_open(ui, id, true) {
     return;
   }
@@ -1124,6 +1312,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     closed_at = None;
     let flexible = browser_assembly::flexible_of(app, cid);
     let label = if grounded { format!("{name}  (grounded)") } else { name.clone() };
+    let label = if app.s.active_component.is_some_and(|a| a.0 == cid) { format!("{label}  (active)") } else { label };
     let label = match flexible {
       Some(true) => format!("{label}  (flexible)"),
       _ => label,
@@ -1131,17 +1320,28 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
     let row = id.with(cid);
     let ev = tree_row(ui, row, 2 + depth, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
-    if ev.clicked || ev.double_clicked {
+    let target = RenameTarget::Component(cid);
+    browser_edit::slow_click(ui, &ev, row, target, &name, selected);
+    if ev.double_clicked {
+      browser_edit::begin(ui, row, target, &name);
+    } else if ev.clicked {
       app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
     }
+    let now = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    browser_edit::slow_click_due(ui, row, now);
+    browser_edit::drag_source(ui, &ev, browser_edit::Dragged::Component(cid), &name);
+    browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
+    browser_edit::edit_box(app, ui, &ev, row, 2 + depth);
     if let Some(r) = ev.response {
       if r.hovered() {
         marking::peek(app, bodies.clone(), name.clone());
       }
       r.context_menu(|ui| {
+        component_menu(app, ui, cid, &name);
+        ui.separator();
         if ui.button("Rename").clicked() {
           ui.close();
-          app.rename = Some((RenameTarget::Component(cid), name.clone()));
+          browser_edit::begin(ui, row, target, &name);
         }
         if ui.button(if grounded { "Unground" } else { "Ground" }).clicked() {
           ui.close();
@@ -1181,12 +1381,105 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       for b in bodies {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
-        let ev = tree_row(ui, row.with(b.0), 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let brow = row.with(b.0);
+        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
         }
+        browser_edit::slow_click_due(ui, brow, app.s.selection.contains(&Sel::Body { body: b }));
+        browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
       }
     }
+  }
+}
+
+/// The Fusion part of a browser component's right-click menu: Activate, New Component,
+/// Show/Hide, Isolate, Save Copy As, Properties and Find in Window. (Fusion's Open, Insert and
+/// Create Selection Set need engine work FissionOxide doesn't have yet.)
+fn component_menu(app: &mut App, ui: &mut egui::Ui, cid: u32, name: &str) {
+  let active = app.s.active_component.is_some_and(|a| a.0 == cid);
+  let (text, param) =
+    if active { ("Activate Top Level", json!({})) } else { ("Activate Component", json!({"component": cid})) };
+  if menu_item(ui, Icon::Component, text, None).on_hover_text("New bodies go into the active component").clicked() {
+    ui.close();
+    app.run("component.activate", param);
+  }
+  if menu_item(ui, Icon::Component, "New Component", None).on_hover_text("An empty component inside this one").clicked()
+  {
+    ui.close();
+    app.s.selection.clear();
+    app.start(Kind::NewComponent);
+    if let Some(d) = app.dialog.as_mut() {
+      d.for_component(&app.s, cid);
+    }
+  }
+  ui.separator();
+  let bodies = component_bodies(app, cid);
+  let visible = bodies.iter().any(|b| app.s.body_visible(*b));
+  if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
+    ui.close();
+    marking::show_hide(app, &bodies);
+  }
+  let isolated = app.ctx_menu.isolate.is_some();
+  if menu_item(ui, Icon::Body, if isolated { "Unisolate" } else { "Isolate" }, None).clicked() {
+    ui.close();
+    app.ctx_menu.isolate = if isolated { None } else { Some(bodies.clone()) };
+  }
+  if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
+    ui.close();
+    marking::find_in_window(app, &bodies, None);
+  }
+  ui.separator();
+  if menu_item(ui, Icon::Save, "Save Copy As", None)
+    .on_hover_text("Save the component's bodies to a STEP, IGES or BRep file")
+    .clicked()
+  {
+    ui.close();
+    save_component_copy(app, name, &bodies);
+  }
+  if menu_item(ui, Icon::Measure, "Properties", None).clicked() {
+    ui.close();
+    app.start(Kind::ComponentProps);
+    if let Some(d) = app.dialog.as_mut() {
+      d.for_component(&app.s, cid);
+    }
+  }
+}
+
+/// A component's bodies and those of every component below it.
+fn component_bodies(app: &App, cid: u32) -> Vec<BodyId> {
+  let d = &app.s.design;
+  let mut comps = vec![fox_engine::model::ComponentId(cid)];
+  let mut k = 0;
+  while k < comps.len() && comps.len() < 4096 {
+    let p = comps[k];
+    comps.extend(
+      d.components.iter().filter(|c| c.parent == Some(p) && !comps.contains(&c.id)).map(|c| c.id).collect::<Vec<_>>(),
+    );
+    k += 1;
+  }
+  comps.iter().filter_map(|c| d.component(*c)).flat_map(|c| c.bodies.iter().copied()).collect()
+}
+
+/// Save Copy As: the component's bodies to an exact (STEP, IGES or BRep) file.
+fn save_component_copy(app: &mut App, name: &str, bodies: &[BodyId]) {
+  if bodies.is_empty() {
+    app.status = Some((format!("{name} has no bodies to save"), true));
+    return;
+  }
+  let Some(p) = rfd::FileDialog::new()
+    .add_filter("STEP", &["step", "stp"])
+    .add_filter("IGES", &["iges", "igs"])
+    .add_filter("BRep", &["brep"])
+    .set_file_name(format!("{name}.step"))
+    .save_file()
+  else {
+    return;
+  };
+  let ids: Vec<u32> = bodies.iter().map(|b| b.0).collect();
+  if app.run("export", json!({"path": p, "bodies": ids})).is_some() {
+    app.status = Some((format!("Saved a copy of {name} as {}", p.display()), false));
   }
 }
 
@@ -1303,25 +1596,58 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   }
   for (bid, name, visible) in bodies {
     let selected = app.s.selection.contains(&Sel::Body { body: bid });
-    let color = if visible { theme::TEXT } else { theme::MUTED };
-    let ev = tree_row(ui, id.with(bid.0), 2, None, Some(visible), Icon::Body, &name, selected, color);
+    // while isolated, the bodies left out are hidden from the canvas: grey them, as Fusion does
+    let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
+    let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
+    let row = id.with(bid.0);
+    let ev = tree_row(ui, row, 2, None, Some(visible), Icon::Body, &name, selected, color);
+    if isolated == Some(true)
+      && let Some(r) = &ev.response
+    {
+      isolate_badge(ui, r.rect);
+    }
     if ev.eye {
       app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
-    } else if ev.clicked || ev.double_clicked {
-      toggle_sel(&mut app.s, Sel::Body { body: bid }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+    } else {
+      body_row_edits(app, ui, &ev, row, 2, bid, &name, selected);
+      if ev.clicked {
+        toggle_sel(&mut app.s, Sel::Body { body: bid }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+      }
+      browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Body { body: bid }));
     }
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Body { body: bid }, &r);
       if r.hovered() {
         marking::peek(app, vec![bid], name.clone());
       }
-      r.context_menu(|ui| body_menu(app, ui, bid, &name, visible));
+      r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
     }
   }
 }
 
+/// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
+#[allow(clippy::too_many_arguments)]
+fn body_row_edits(
+  app: &mut App,
+  ui: &mut egui::Ui,
+  ev: &RowEvents,
+  row: egui::Id,
+  depth: usize,
+  bid: BodyId,
+  name: &str,
+  selected: bool,
+) {
+  let target = RenameTarget::Body(bid.0);
+  browser_edit::slow_click(ui, ev, row, target, name, selected);
+  if ev.double_clicked {
+    browser_edit::begin(ui, row, target, name);
+  }
+  browser_edit::drag_source(ui, ev, browser_edit::dragged_bodies(app, bid), name);
+  browser_edit::edit_box(app, ui, ev, row, depth);
+}
+
 /// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet).
-fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible: bool) {
+fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str, visible: bool) {
   let only = vec![Sel::Body { body: bid }];
   let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
     ui.close();
@@ -1332,7 +1658,26 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
     start(app, ui, Kind::Move);
   }
   ui.separator();
-  if app.s.design.component_of(bid).is_some() && menu_item(ui, Icon::PhysMaterial, "Physical Material", None).clicked()
+  // like Fusion's, these act on every selected body when the row is one of them
+  let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
+  if menu_item(ui, Icon::Component, "Create Components from Bodies", None)
+    .on_hover_text("Each body becomes a component of its own, named after it")
+    .clicked()
+  {
+    ui.close();
+    for b in &bodies {
+      let name = app.s.body_name(*b);
+      app.run("component.create", json!({"name": name, "bodies": [b.0]}));
+    }
+  }
+  ui.separator();
+  // physical materials belong to components in FissionOxide
+  let in_component = app.s.design.component_of(bid).is_some();
+  if ui
+    .add_enabled_ui(in_component, |ui| menu_item(ui, Icon::PhysMaterial, "Physical Material", None))
+    .inner
+    .on_disabled_hover_text("Create a component from the body to give it a physical material")
+    .clicked()
   {
     start(app, ui, Kind::Material);
   }
@@ -1362,7 +1707,7 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
   }
   if menu_item(ui, Icon::Params, "Rename", None).clicked() {
     ui.close();
-    app.rename = Some((RenameTarget::Body(bid.0), name.to_string()));
+    browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name);
   }
   ui.separator();
   if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
@@ -1378,6 +1723,23 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
     ui.close();
     marking::find_in_window(app, &[bid], None);
   }
+  ui.separator();
+  let locked = app.ctx_menu.unselectable.contains(&bid);
+  if menu_item(ui, Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, None)
+    .on_hover_text(if locked { "Let the canvas pick the body again" } else { "Stop the canvas picking the body" })
+    .clicked()
+  {
+    ui.close();
+    let m = &mut app.ctx_menu;
+    m.unselectable.retain(|b| !bodies.contains(b));
+    if !locked {
+      m.unselectable.extend(&bodies);
+      app.s.selection.retain(
+        |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
+      );
+    }
+  }
+  browser_edit::opacity_menu(app, ui, &bodies);
 }
 
 /// A context-menu row with an icon on the left and its shortcut key on the right.
@@ -1400,6 +1762,163 @@ pub(crate) fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str, key: Option<
 fn reveal_row(app: &App, sel: Sel, r: &egui::Response) {
   if app.ctx_menu.reveal == Some(sel) {
     r.scroll_to_me(Some(egui::Align::Center));
+  }
+}
+
+/// A command on a browser row's context menu (sketch and origin-plane rows).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum RowCmd {
+  EditSketch,
+  ProfileVisibility,
+  DimensionVisibility,
+  LookAt,
+  SaveAsDxf,
+  FindInWindow,
+  ShowHide,
+  Rename,
+  Delete,
+  CreateSketch,
+  OffsetPlane,
+  /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
+  NotYet,
+}
+
+/// One row of a browser context menu.
+pub(crate) struct RowItem {
+  pub icon: Icon,
+  pub label: String,
+  pub cmd: RowCmd,
+}
+
+fn row_item(icon: Icon, label: &str, cmd: RowCmd) -> Option<RowItem> {
+  Some(RowItem { icon, label: label.into(), cmd })
+}
+
+/// A sketch row's menu, as Fusion's (`None` is a separator).
+pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
+  let profiles = !app.hidden_profiles.contains(&fid);
+  let dims = app.shown_dims.contains(&fid);
+  let visible = fox_engine::scene::sketch_visible(&app.s, fid);
+  vec![
+    row_item(Icon::Sketch, "Edit Sketch", RowCmd::EditSketch),
+    row_item(Icon::Plane, "Redefine Sketch Plane", RowCmd::NotYet),
+    row_item(Icon::Section, "Slice Sketch", RowCmd::NotYet),
+    None,
+    row_item(Icon::SketchSmall, if profiles { "Hide Profile" } else { "Show Profile" }, RowCmd::ProfileVisibility),
+    row_item(Icon::Dimension, if dims { "Hide Dimensions" } else { "Show Dimensions" }, RowCmd::DimensionVisibility),
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_item(Icon::ExportDxf, "Save As DXF", RowCmd::SaveAsDxf),
+    None,
+    row_item(Icon::Params, "Rename", RowCmd::Rename),
+    row_item(Icon::Remove, "Delete", RowCmd::Delete),
+    None,
+    row_item(if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
+
+/// An origin plane row's menu ("xy", "xz" or "yz"), as Fusion's.
+pub(crate) fn origin_plane_menu(app: &App, plane: &str) -> Vec<Option<RowItem>> {
+  let shown = app.shown_planes.contains(&json!(plane));
+  vec![
+    row_item(Icon::Sketch, "Create Sketch", RowCmd::CreateSketch),
+    row_item(Icon::Plane, "Offset Plane", RowCmd::OffsetPlane),
+    None,
+    row_item(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide),
+    row_item(Icon::LookAt, "Look At", RowCmd::LookAt),
+    row_item(Icon::Fit, "Find in Window", RowCmd::FindInWindow),
+  ]
+}
+
+/// Draws a row menu; returns the command clicked.
+fn row_menu(ui: &mut egui::Ui, items: &[Option<RowItem>]) -> Option<RowCmd> {
+  let mut picked = None;
+  for it in items {
+    let Some(it) = it else {
+      ui.separator();
+      continue;
+    };
+    if it.cmd == RowCmd::NotYet {
+      ui.add_enabled_ui(false, |ui| menu_item(ui, it.icon, &it.label, None))
+        .inner
+        .on_disabled_hover_text("Not in FissionOxide yet");
+    } else if menu_item(ui, it.icon, &it.label, None).clicked() {
+      ui.close();
+      picked = Some(it.cmd);
+    }
+  }
+  picked
+}
+
+/// Runs a sketch row's menu command.
+pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: RowCmd) {
+  let toggle = |v: &mut Vec<FeatureId>| {
+    if let Some(i) = v.iter().position(|f| *f == fid) {
+      v.remove(i);
+    } else {
+      v.push(fid);
+    }
+  };
+  match cmd {
+    RowCmd::EditSketch => app.edit_sketch(fid),
+    RowCmd::ProfileVisibility => toggle(&mut app.hidden_profiles),
+    RowCmd::DimensionVisibility => toggle(&mut app.shown_dims),
+    RowCmd::LookAt => {
+      if let Some(plane) = app.s.model.sketches.get(&fid).map(|r| r.plane) {
+        app.look_at_plane(&plane);
+      }
+    }
+    RowCmd::SaveAsDxf => {
+      let Some(p) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).set_file_name(format!("{name}.dxf")).save_file()
+      else {
+        return;
+      };
+      if app.run("export", json!({"path": p, "sketch": fid.0})).is_some() {
+        app.status = Some((format!("Saved {name} as {}", p.display()), false));
+      }
+    }
+    RowCmd::FindInWindow => marking::find_in_window(app, &[], Some(fid)),
+    RowCmd::ShowHide => {
+      let visible = fox_engine::scene::sketch_visible(&app.s, fid);
+      app.run("sketch.visible", json!({"sketch": fid.0, "visible": !visible}));
+    }
+    RowCmd::Rename => app.rename = Some((RenameTarget::Feature(fid.0), name.to_string())),
+    RowCmd::Delete => {
+      app.run("feature.delete", json!({"feature": fid.0}));
+    }
+    RowCmd::CreateSketch | RowCmd::OffsetPlane | RowCmd::NotYet => {}
+  }
+}
+
+/// Runs an origin plane row's menu command.
+pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
+  use fox_engine::model::OriginPlane;
+  let origin = match plane {
+    "xz" => OriginPlane::Xz,
+    "yz" => OriginPlane::Yz,
+    _ => OriginPlane::Xy,
+  };
+  let pl = origin.plane(app.s.design.frames());
+  match cmd {
+    RowCmd::CreateSketch => app.create_sketch(json!(plane)),
+    RowCmd::OffsetPlane => {
+      app.s.selection.clear();
+      app.start(Kind::OffsetPlane);
+      if let Some(d) = app.dialog.as_mut() {
+        d.use_origin_plane(&mut app.s, plane);
+      }
+    }
+    RowCmd::ShowHide => {
+      let v = json!(plane);
+      if let Some(i) = app.shown_planes.iter().position(|p| *p == v) {
+        app.shown_planes.remove(i);
+      } else {
+        app.shown_planes.push(v);
+      }
+    }
+    RowCmd::LookAt => app.look_at_plane(&pl),
+    RowCmd::FindInWindow => marking::find_plane_in_window(app, &pl),
+    _ => {}
   }
 }
 
@@ -1433,30 +1952,30 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
     } else {
       theme::TEXT
     };
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::SketchSmall, &name, selected, color);
+    let row = id.with(fid.0);
+    let ev = tree_row(ui, row, 2, None, None, Icon::SketchSmall, &name, selected, color);
+    // double-click edits the sketch, as in Fusion; a slow click renames it
+    let target = RenameTarget::Feature(fid.0);
+    browser_edit::slow_click(ui, &ev, row, target, &name, selected && !editing);
     if ev.double_clicked {
       app.edit_sketch(fid);
     } else if ev.clicked {
       app.s.selection = vec![Sel::Feature { feature: fid }];
     }
+    browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Feature { feature: fid }));
+    browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       if r.hovered() {
         marking::peek(app, Vec::new(), name.clone());
       }
       r.on_hover_text("Double-click to edit").context_menu(|ui| {
-        if ui.button("Edit Sketch").clicked() {
-          ui.close();
-          app.edit_sketch(fid);
-        }
-        if ui.button("Rename").clicked() {
-          ui.close();
-          app.rename = Some((RenameTarget::Feature(fid.0), name.clone()));
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": fid.0}));
+        let items = sketch_menu(app, fid);
+        match row_menu(ui, &items) {
+          // renamed in place in the browser row
+          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
+          Some(cmd) => run_sketch_cmd(app, fid, &name, cmd),
+          None => {}
         }
       });
     }
@@ -1483,18 +2002,38 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
   for (fid, name) in planes {
     let plane = json!({"feature": fid.0});
     let picked = app.picked_plane.as_ref() == Some(&plane);
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    let row = id.with(fid.0);
+    let ev = tree_row(ui, row, 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    // double-click sketches on the plane, as on the origin planes; a slow click renames it
+    let target = RenameTarget::Feature(fid.0);
+    browser_edit::slow_click(ui, &ev, row, target, &name, picked);
     if ev.double_clicked {
       // the first click already started it if Create Sketch was waiting for a plane
       if app.s.edit_sketch.is_none() {
-        app.create_sketch(plane);
+        app.create_sketch(plane.clone());
       }
-    } else if ev.clicked {
-      pick_plane(app, plane);
+    } else if ev.clicked && !picked {
+      pick_plane(app, plane.clone());
     }
+    browser_edit::slow_click_due(ui, row, app.picked_plane.as_ref() == Some(&plane));
+    browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Feature { feature: fid }, &r);
-      r.on_hover_text("Double-click to sketch on this plane");
+      r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
+        if ui.button("Create Sketch").clicked() {
+          ui.close();
+          app.create_sketch(plane.clone());
+        }
+        if ui.button("Rename").clicked() {
+          ui.close();
+          browser_edit::begin(ui, row, target, &name);
+        }
+        ui.separator();
+        if ui.button("Delete").clicked() {
+          ui.close();
+          app.run("feature.delete", json!({"feature": fid.0}));
+        }
+      });
     }
   }
 }
@@ -1541,8 +2080,14 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
             app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
           }
         };
-        mode_btn(ui, app, Icon::Orbit, "Orbit: left-drag to orbit (Esc to stop)", NavMode::Orbit);
-        nav_caret(ui);
+        let orbit_hint = if app.free_orbit {
+          "Free Orbit: left-drag to orbit and roll (Esc to stop)"
+        } else {
+          "Constrained Orbit: left-drag to orbit (Esc to stop)"
+        };
+        mode_btn(ui, app, Icon::Orbit, orbit_hint, NavMode::Orbit);
+        let c = nav_caret(ui, "Orbit type");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::orbit_menu(app, ui));
         if icons::icon_button(
           ui,
           Icon::LookAt,
@@ -1557,55 +2102,47 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
         }
         mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
         mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
-        if icons::icon_button(ui, Icon::Fit, 28.0, "Fit (F6)", false, None).clicked() {
-          app.fit_view();
+        let window = app.nav_mode == Some(NavMode::ZoomWindow);
+        let hint = if window { "Zoom Window: drag a box to zoom into (Esc to stop)" } else { "Fit (F6)" };
+        if icons::icon_button(ui, Icon::Fit, 28.0, hint, window, None).clicked() {
+          if window {
+            app.nav_mode = None;
+          } else {
+            app.fit_view();
+          }
         }
-        nav_caret(ui);
+        let c = nav_caret(ui, "Fit and Zoom Window");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::fit_menu(app, ui));
         nav_sep(ui);
         let d = icons::icon_button(ui, Icon::Display, 28.0, "Display Settings", false, None);
-        nav_caret(ui);
-        egui::Popup::menu(&d).show(|ui| {
-          ui.set_min_width(220.0);
-          ui.label(RichText::new("Visual Style").strong());
-          if ui.radio(app.show_edges, "Shaded with Visible Edges Only").clicked() {
-            app.show_edges = true;
-          }
-          if ui.radio(!app.show_edges, "Shaded").clicked() {
-            app.show_edges = false;
-          }
-          ui.separator();
-          ui.label(RichText::new("Camera").strong());
-          if ui.radio(app.cam.ortho, "Orthographic").clicked() {
-            app.cam.ortho = true;
-          }
-          if ui.radio(!app.cam.ortho, "Perspective").clicked() {
-            app.cam.ortho = false;
-          }
-          ui.separator();
-          ui.checkbox(&mut app.show_viewcube, "ViewCube");
-          ui.separator();
-          crate::gpu::settings(app, ui);
-        });
+        let c = nav_caret(ui, "Display Settings");
+        egui::Popup::menu(&d).show(|ui| crate::navbar::display_menu(app, ui));
+        egui::Popup::menu(&c).show(|ui| crate::navbar::display_menu(app, ui));
         let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
-        nav_caret(ui);
-        egui::Popup::menu(&g).show(|ui| {
-          ui.set_min_width(160.0);
-          ui.checkbox(&mut app.show_grid, "Layout Grid");
-          ui.checkbox(&mut app.snap, "Snap to Grid");
-        });
+        let c = nav_caret(ui, "Grid and Snaps");
+        let adaptive = fox_engine::scene::grid_step(&app.s);
+        egui::Popup::menu(&g).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
+        egui::Popup::menu(&c).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
         let v = icons::icon_button(ui, Icon::Viewports, 28.0, "Viewports", false, None);
-        nav_caret(ui);
+        let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| {
+          let _ = ui.selectable_label(true, "Single View");
+        });
+        egui::Popup::menu(&c).show(|ui| {
           let _ = ui.selectable_label(true, "Single View");
         });
       });
     });
 }
 
-/// The small drop-down caret after a navigation bar icon.
-fn nav_caret(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::hover());
+/// The small drop-down caret after a navigation bar icon: clicking it opens the icon's fly-out.
+fn nav_caret(ui: &mut egui::Ui, hint: &str) -> egui::Response {
+  let (r, resp) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::click());
+  if resp.hovered() {
+    ui.painter().rect_filled(r, 2.0, theme::HOVER);
+  }
   icons::chevron(ui.painter(), r.center(), theme::GROUP_LABEL);
+  resp.on_hover_text(hint)
 }
 
 fn nav_sep(ui: &mut egui::Ui) {
@@ -1616,12 +2153,28 @@ fn nav_sep(ui: &mut egui::Ui) {
   );
 }
 
+/// Where the SKETCH PALETTE's top-right corner goes: below an open command dialog that sits over
+/// its place (as Fusion stacks them), else at its usual place.
+pub(crate) fn palette_pos(canvas: Rect, dialog: Option<Rect>) -> egui::Pos2 {
+  let home = canvas.right_top() + vec2(-34.0, 190.0);
+  match dialog {
+    Some(d) if d.max.x > home.x - 270.0 && d.min.x < home.x && d.min.y <= home.y + 40.0 => {
+      egui::pos2(home.x, home.y.max(d.max.y + 8.0))
+    }
+    _ => home,
+  }
+}
+
 /// The SKETCH PALETTE shown on the right of the canvas while a sketch is open.
 pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
   let canvas = app.canvas;
+  let at = palette_pos(
+    canvas,
+    app.dialog.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog")))).flatten(),
+  );
   egui::Area::new(egui::Id::new("sketch-palette"))
-    .fixed_pos(canvas.right_top() + vec2(-34.0, 190.0))
+    .fixed_pos(at)
     .pivot(egui::Align2::RIGHT_TOP)
     .order(egui::Order::Middle)
     .show(ctx, |ui| {
@@ -1894,22 +2447,23 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
   let model = &app.s.model;
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
+  let u = app.s.design.units;
   let readout = match sel[0] {
     Sel::Face { .. } => sum(&|s| match s {
       Sel::Face { body, face } => model.body(*body)?.faces().iter().find(|f| f.id == *face).map(|f| f.area),
       _ => None,
     })
-    .map(|a| format!("Area: {a:.2} mm^2")),
+    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
     })
-    .map(|l| format!("Length: {l:.2} mm")),
+    .map(|l| format!("Length: {}", u.fixed(l, 2))),
     Sel::Profile { .. } => sum(&|s| match s {
       Sel::Profile { sketch, index } => model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.area().abs()),
       _ => None,
     })
-    .map(|a| format!("Area: {a:.2} mm^2")),
+    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
     _ => None,
@@ -2011,7 +2565,17 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
   rename_popup(app, ui.ctx());
 }
 
+/// A drag in progress on the timeline; `gap` is the slot under the pointer (0 = before the
+/// first item, n = after the last).
+#[derive(Clone, Copy, Debug)]
+enum TimelineDrag {
+  Marker { gap: usize },
+  Feature { id: FeatureId, from: usize, gap: usize },
+}
+
 fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
+  let key = egui::Id::new("timeline_drag");
+  let mut drag: Option<TimelineDrag> = ui.data(|d| d.get_temp(key));
   egui::ScrollArea::horizontal()
     .auto_shrink([false, false])
     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -2021,12 +2585,20 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
         ui.spacing_mut().item_spacing.x = 1.0;
         let features: Vec<(FeatureId, String, Icon, bool)> =
           app.s.design.features.iter().map(|f| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed)).collect();
+        let mut rects = Vec::with_capacity(features.len());
+        let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
         for (i, (id, name, icon, suppressed)) in features.into_iter().enumerate() {
-          if i == active {
-            marker(ui);
+          if i == active && marker(ui, marker_dragged).drag_started() {
+            drag = Some(TimelineDrag::Marker { gap: active });
           }
           let st = app.s.model.status(id).cloned().unwrap_or_default();
-          let dim = st.rolled_back || suppressed;
+          // while the marker is dragged, what would roll back greys out already
+          let rolled_back = match drag {
+            Some(TimelineDrag::Marker { gap }) => i >= gap,
+            _ => st.rolled_back,
+          };
+          let dim = rolled_back || suppressed;
+          let moving = matches!(drag, Some(TimelineDrag::Feature { from, .. }) if from == i);
           let selected = app.s.selection.contains(&Sel::Feature { feature: id });
           let editing = app.s.edit_sketch == Some(id);
           let mut hover = name.clone();
@@ -2038,7 +2610,8 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if suppressed {
             hover.push_str("\n(suppressed)");
           }
-          let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::click());
+          let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::click_and_drag());
+          rects.push(rect);
           let p = ui.painter();
           if st.error.is_some() {
             p.rect(
@@ -2057,9 +2630,9 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               egui::StrokeKind::Inside,
             );
           }
-          if selected || editing {
+          if selected || editing || moving {
             p.rect(rect, 2.0, theme::SELECTED, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
-          } else if r.hovered() {
+          } else if r.hovered() && drag.is_none() {
             p.rect(rect, 2.0, theme::HOVER, Stroke::new(1.0, theme::SELECTED), egui::StrokeKind::Inside);
           }
           let ir = Rect::from_center_size(rect.center(), Vec2::splat(20.0));
@@ -2074,7 +2647,11 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
               Stroke::new(1.0, theme::ERROR),
             );
           }
-          let r = r.on_hover_text(hover);
+          if r.drag_started() {
+            app.s.selection = vec![Sel::Feature { feature: id }];
+            drag = Some(TimelineDrag::Feature { id, from: i, gap: i });
+          }
+          let r = if drag.is_none() { r.on_hover_text(hover) } else { r };
           if r.clicked() {
             app.s.selection = vec![Sel::Feature { feature: id }];
           }
@@ -2082,16 +2659,88 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
             edit_feature(app, id);
           }
           // hovering an item highlights what it made and names it in the status bar
-          if r.hovered() {
+          if r.hovered() && drag.is_none() {
             marking::peek(app, marking::feature_bodies(app, id), name.clone());
           }
           r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
         }
-        if active >= n {
-          marker(ui);
+        if active >= n && marker(ui, marker_dragged).drag_started() {
+          drag = Some(TimelineDrag::Marker { gap: active });
+        }
+        if let Some(d) = drag.as_mut() {
+          timeline_drag(app, ui, d, &rects, active);
+          if !ui.input(|i| i.pointer.primary_down()) {
+            timeline_drop(app, *d, n, active);
+            drag = None;
+          }
         }
       });
     });
+  ui.data_mut(|d| match drag {
+    Some(v) => _ = d.insert_temp(key, v),
+    None => d.remove::<TimelineDrag>(key),
+  });
+}
+
+/// Where a feature dragged from `from` and dropped in slot `gap` ends up.
+fn moved_to(from: usize, gap: usize) -> usize {
+  if gap > from { gap - 1 } else { gap }
+}
+
+/// Follows the pointer during a timeline drag: snaps to the slot between icons and draws the
+/// marker there, or the insertion line (red where the feature can't go).
+fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize) {
+  let (Some(first), Some(last)) = (rects.first(), rects.last()) else { return };
+  if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+    let gap = rects.iter().filter(|r| r.center().x < pos.x).count();
+    match d {
+      TimelineDrag::Marker { gap: g } | TimelineDrag::Feature { gap: g, .. } => *g = gap,
+    }
+  }
+  ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+  let x = |gap: usize| match gap {
+    0 => first.left() - 1.0,
+    g if g >= rects.len() => last.right() + 1.0,
+    g => (rects[g - 1].right() + rects[g].left()) / 2.0,
+  };
+  let (top, bottom) = (first.center().y - 16.0, first.center().y + 16.0);
+  let p = ui.painter();
+  match *d {
+    TimelineDrag::Marker { gap } if gap != active => paint_marker(p, x(gap), top, bottom, Color32::from_gray(55)),
+    TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
+      let ok = app.s.design.check_move(id, moved_to(from, gap)).is_ok();
+      let c = if ok { theme::ACCENT } else { theme::ERROR };
+      let x = x(gap);
+      p.line_segment([pos2(x, top + 2.0), pos2(x, bottom - 2.0)], Stroke::new(2.0, c));
+      for y in [top + 2.0, bottom - 2.0] {
+        p.line_segment([pos2(x - 3.0, y), pos2(x + 3.0, y)], Stroke::new(2.0, c));
+      }
+      if !ok {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::NotAllowed);
+      }
+    }
+    _ => {}
+  }
+}
+
+/// Finishes a timeline drag: rolls the marker or moves the feature.
+fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize) {
+  match d {
+    TimelineDrag::Marker { gap } if gap != active => {
+      let at = if gap >= n { Value::Null } else { json!(gap) };
+      app.run("timeline.marker", json!({ "at": at }));
+    }
+    TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
+      let to = moved_to(from, gap);
+      match app.s.design.check_move(id, to) {
+        Ok(()) => {
+          app.run("feature.move", json!({"feature": id.0, "to": to}));
+        }
+        Err(e) => app.status = Some((format!("Can't move there: {e}"), true)),
+      }
+    }
+    _ => {}
+  }
 }
 
 /// A timeline item's right-click menu, as in Fusion (less what FissionOxide can't do yet).
@@ -2099,6 +2748,12 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
   if menu_item(ui, icon, "Edit Feature", None).clicked() {
     ui.close();
     edit_feature(app, id);
+  }
+  if let Some(sk) = marking::profile_sketch(app, id)
+    && menu_item(ui, Icon::Sketch, "Edit Profile Sketch", None).clicked()
+  {
+    ui.close();
+    app.edit_sketch(sk);
   }
   // Configure: the feature's suppression becomes a column of the configuration table
   if let Some(first) = app.s.design.configurations.list.first().map(|c| c.name.clone())
@@ -2129,10 +2784,18 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
     app.run("feature.suppress", json!({"feature": id.0}));
   }
   ui.separator();
+  // features without a browser node of their own are found by the bodies they made
   let sel = Sel::Feature { feature: id };
-  if marking::in_browser(app, &sel) && menu_item(ui, Icon::Folder, "Find in Browser", None).clicked() {
+  let node = if marking::in_browser(app, &sel) {
+    Some(sel)
+  } else {
+    marking::feature_bodies(app, id).first().map(|b| Sel::Body { body: *b })
+  };
+  if ui.add_enabled_ui(node.is_some(), |ui| menu_item(ui, Icon::Folder, "Find in Browser", None)).inner.clicked()
+    && let Some(node) = node
+  {
     ui.close();
-    marking::find_in_browser(app, sel);
+    marking::find_in_browser(app, node);
   }
   if menu_item(ui, Icon::Fit, "Find in Window", None).clicked() {
     ui.close();
@@ -2141,20 +2804,28 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
   }
 }
 
-/// The history marker: a dark bar with a grab handle, as in Fusion's timeline.
-fn marker(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(12.0, 32.0), egui::Sense::hover());
-  let x = r.center().x;
-  let c = Color32::from_gray(55);
-  ui.painter().line_segment([pos2(x, r.top() + 4.0), pos2(x, r.bottom())], Stroke::new(2.0, c));
+/// The history marker: a dark bar with a grab handle, as in Fusion's timeline. Drag it to roll
+/// the timeline back or forward; while it's dragged it stays faded where it was.
+fn marker(ui: &mut egui::Ui, dragged: bool) -> egui::Response {
+  let (r, resp) = ui.allocate_exact_size(vec2(12.0, 32.0), egui::Sense::drag());
+  let c = if dragged { Color32::from_gray(175) } else { Color32::from_gray(55) };
+  paint_marker(ui.painter(), r.center().x, r.top(), r.bottom(), c);
+  if resp.hovered() && !dragged {
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+  }
+  resp.on_hover_text("Drag to roll the timeline back or forward")
+}
+
+fn paint_marker(p: &egui::Painter, x: f32, top: f32, bottom: f32, c: Color32) {
+  p.line_segment([pos2(x, top + 4.0), pos2(x, bottom)], Stroke::new(2.0, c));
   // the grab handle sits on top, as in Fusion
-  ui.painter().add(egui::Shape::convex_polygon(
+  p.add(egui::Shape::convex_polygon(
     vec![
-      pos2(x - 5.0, r.top()),
-      pos2(x + 5.0, r.top()),
-      pos2(x + 5.0, r.top() + 7.0),
-      pos2(x, r.top() + 11.0),
-      pos2(x - 5.0, r.top() + 7.0),
+      pos2(x - 5.0, top),
+      pos2(x + 5.0, top),
+      pos2(x + 5.0, top + 7.0),
+      pos2(x, top + 11.0),
+      pos2(x - 5.0, top + 7.0),
     ],
     c,
     Stroke::NONE,
@@ -2162,6 +2833,39 @@ fn marker(ui: &mut egui::Ui) {
 }
 
 /// Applies a constraint to the current sketch selection.
+/// UnFix: when every selected point, and every point of each selected curve, is fixed, deletes
+/// those Fix constraints (and a selected circle's fixed radius). Returns whether it did.
+fn unfix(app: &mut App, sk: FeatureId, points: &[u32], curves: &[u32]) -> bool {
+  use fox_engine::sketch::{ConstraintKind, CurveId, PointId};
+  let Ok(sketch) = app.s.design.sketch(sk) else { return false };
+  let mut pts: Vec<PointId> = points.iter().map(|p| PointId(*p)).collect();
+  for c in curves {
+    pts.extend(sketch.curve_points(CurveId(*c)));
+  }
+  if pts.is_empty() {
+    return false;
+  }
+  let fix_of = |p: PointId| {
+    sketch.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Fix { p: q, .. } if q == p)).map(|c| c.id.0)
+  };
+  // points pinned by the sketch itself (its origin) count as fixed but have nothing to delete
+  let pinned = |p: PointId| sketch.point(p).is_some_and(|pt| pt.fixed);
+  if !pts.iter().all(|p| fix_of(*p).is_some() || pinned(*p)) {
+    return false;
+  }
+  let mut cons: Vec<u32> = pts.iter().filter_map(|p| fix_of(*p)).collect();
+  if cons.is_empty() {
+    return false;
+  }
+  cons.extend(sketch.constraints.iter().filter_map(|c| match c.kind {
+    ConstraintKind::FixRadius { curve, .. } if curves.contains(&curve.0) => Some(c.id.0),
+    _ => None,
+  }));
+  cons.sort_unstable();
+  cons.dedup();
+  app.run("sketch.delete", json!({"sketch": sk.0, "constraints": cons})).is_some()
+}
+
 pub fn apply_constraint(app: &mut App, kind: &str) {
   let Some(sk) = app.s.edit_sketch else { return };
   let mut points = Vec::new();
@@ -2197,7 +2901,7 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
       }
     }
     if jobs.is_empty() {
-      app.status = Some(("Horizontal/Vertical: select lines or two points".into(), false));
+      app.hint("Horizontal/Vertical: select lines or two points");
       return;
     }
     let mut any = false;
@@ -2209,12 +2913,19 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     }
     return;
   }
+  // Fix/UnFix: geometry that's already fixed is unfixed
+  if kind == "fix" && unfix(app, sk, &points, &curves) {
+    return;
+  }
   // H/V on several lines: one constraint each
-  if matches!(kind, "horizontal" | "vertical" | "fix") && points.len() != 2 {
+  if kind == "fix" || (matches!(kind, "horizontal" | "vertical") && points.len() != 2) {
     let mut any = false;
     if kind == "fix" {
       for p in &points {
         any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "points": [p]})).is_some();
+      }
+      if !curves.is_empty() {
+        any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "curves": curves})).is_some();
       }
     } else {
       for c in &curves {
@@ -2224,7 +2935,7 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     if any {
       app.s.selection.clear();
     } else if curves.is_empty() && points.is_empty() {
-      app.status = Some((format!("Select geometry, then apply {kind}"), false));
+      app.hint(format!("Select geometry, then apply {kind}"));
     }
     return;
   }
@@ -2252,6 +2963,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Mirror { .. } => Icon::Mirror,
     FeatureKind::RectangularPattern { .. } => Icon::Pattern,
     FeatureKind::CircularPattern { .. } => Icon::CircPattern,
+    FeatureKind::PathPattern { .. } => Icon::Pattern,
     FeatureKind::Move { .. } => Icon::Move,
     FeatureKind::Combine { .. } => Icon::Combine,
     FeatureKind::Import { .. } => Icon::Import,
@@ -2309,6 +3021,15 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::InsertDesign { .. } => Icon::InsertComponent,
     FeatureKind::BaseFeature { .. } => Icon::Box,
     FeatureKind::CamFollower { .. } => Icon::DriveJoint,
+    FeatureKind::Form { .. } => Icon::CreateForm,
+    FeatureKind::AlignConstraint { .. } => Icon::JointOrigin,
+    FeatureKind::PlaneConstraint { .. } => Icon::Combine,
+    FeatureKind::BoundingSolid { .. } => Icon::Box,
+    FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
+    FeatureKind::Arrange { .. } => Icon::Component,
+    FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
+    FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
+    FeatureKind::Canvas { .. } => Icon::Canvas,
   }
 }
 
@@ -2317,6 +3038,7 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
   let Some(f) = app.s.design.feature(id) else { return };
   match &f.kind {
     FeatureKind::Sketch { .. } => app.edit_sketch(id),
+    FeatureKind::Canvas { .. } => crate::canvas_ui::start_edit(app, id),
     _ => {
       app.cancel_dialog();
       app.dialog = crate::dialogs::Dialog::edit(app, id);
@@ -2375,81 +3097,82 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
   }
 }
 
-pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
-  let mut open = true;
-  egui::Window::new("ƒx Parameters").open(&mut open).default_width(460.0).show(ctx, |ui| {
-    ui.label(
-      RichText::new("User parameters drive dimensions and features: type a name anywhere a value is expected.")
-        .small()
-        .color(theme::MUTED),
-    );
-    ui.add_space(4.0);
-    let params = app.s.design.parameters.clone();
-    egui::Grid::new("params").striped(true).num_columns(5).show(ui, |ui| {
-      ui.label(RichText::new("Name").strong());
-      ui.label(RichText::new("Expression").strong());
-      ui.label(RichText::new("Value").strong());
-      ui.label(RichText::new("Comment").strong());
-      ui.label("");
-      ui.end_row();
-      for p in params {
-        ui.label(&p.name);
-        let id = egui::Id::new(("param-expr", &p.name));
-        let mut text = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| p.expr.clone());
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
-        if r.changed() {
-          ui.data_mut(|d| d.insert_temp(id, text.clone()));
-        }
-        if r.lost_focus() {
-          if text != p.expr {
-            app.run_background("param.set", json!({"name": p.name, "expr": text}));
-          }
-          ui.data_mut(|d| d.remove::<String>(id));
-        }
-        let value = app.s.model.params.get(&p.name).copied();
-        let shown = match (value, p.kind) {
-          (Some(v), fox_engine::model::ParamKind::Angle) => {
-            fox_engine::model::sketch::Dim::new(v.to_degrees()).expr + "°"
-          }
-          (Some(v), fox_engine::model::ParamKind::Length) => {
-            format!("{} mm", fox_engine::model::sketch::Dim::new(v).expr)
-          }
-          (Some(v), _) => fox_engine::model::sketch::Dim::new(v).expr,
-          (None, _) => "error".into(),
-        };
-        let err = app.s.model.param_errors.get(&p.name).cloned();
-        let l = ui.label(RichText::new(shown).color(if err.is_some() { theme::ERROR } else { theme::MUTED }));
-        if let Some(e) = err {
-          l.on_hover_text(e);
-        }
-        ui.label(RichText::new(&p.comment).small());
-        if ui.small_button("🗑").on_hover_text("Delete (only if unused)").clicked() {
-          app.run("param.remove", json!({"name": p.name}));
-        }
-        ui.end_row();
-      }
-    });
-    ui.separator();
-    let id = egui::Id::new("new-param");
-    let (mut name, mut expr) = ui.data_mut(|d| d.get_temp::<(String, String)>(id)).unwrap_or_default();
-    ui.horizontal(|ui| {
-      ui.label("New:");
-      ui.add(egui::TextEdit::singleline(&mut name).hint_text("name").desired_width(90.0));
-      ui.add(egui::TextEdit::singleline(&mut expr).hint_text("40 mm").desired_width(120.0));
-      if ui.button("＋ Add").clicked() && !name.is_empty() && !expr.is_empty() {
-        let kind = if expr.contains("deg") || expr.contains('°') { "angle" } else { "length" };
-        if app.run("param.add", json!({"name": name, "expr": expr, "kind": kind})).is_some() {
-          name.clear();
-          expr.clear();
-        }
-      }
-    });
-    ui.data_mut(|d| d.insert_temp(id, (name, expr)));
-  });
-  if !open {
-    app.show_params = false;
-  }
-}
-
 mod browser_assembly;
 mod browser_config;
+mod browser_edit;
+
+#[cfg(test)]
+mod row_menu_tests {
+  use super::*;
+
+  fn labels(items: &[Option<RowItem>]) -> Vec<String> {
+    items.iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_else(|| "-".into())).collect()
+  }
+
+  fn sketched() -> (App, FeatureId) {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+    app.finish_sketch();
+    (app, sk)
+  }
+
+  #[test]
+  fn sketch_row_menu_is_fusions() {
+    let (mut app, sk) = sketched();
+    let l = labels(&sketch_menu(&app, sk));
+    assert_eq!(
+      l,
+      [
+        "Edit Sketch",
+        "Redefine Sketch Plane",
+        "Slice Sketch",
+        "-",
+        "Hide Profile",
+        "Show Dimensions",
+        "Look At",
+        "Save As DXF",
+        "-",
+        "Rename",
+        "Delete",
+        "-",
+        "Show/Hide",
+        "Find in Window",
+      ]
+    );
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ProfileVisibility);
+    assert_eq!(app.hidden_profiles, vec![sk]);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::DimensionVisibility);
+    assert_eq!(app.shown_dims, vec![sk]);
+    let l = labels(&sketch_menu(&app, sk));
+    assert!(l.contains(&"Show Profile".into()) && l.contains(&"Hide Dimensions".into()), "{l:?}");
+    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
+    assert!(!fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::ShowHide);
+    assert!(fox_engine::scene::sketch_visible(&app.s, sk));
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::FindInWindow);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::LookAt);
+    assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
+    run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::EditSketch);
+    assert_eq!(app.s.edit_sketch, Some(sk));
+  }
+
+  #[test]
+  fn origin_plane_menu_is_fusions() {
+    let mut app = App::with_session(Session::default());
+    let l = labels(&origin_plane_menu(&app, "xz"));
+    assert_eq!(l, ["Create Sketch", "Offset Plane", "-", "Show/Hide", "Look At", "Find in Window"]);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
+    assert_eq!(app.shown_planes, vec![json!("xz")]);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
+    assert!(app.shown_planes.is_empty());
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::LookAt);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::FindInWindow);
+    run_origin_plane_cmd(&mut app, "xz", RowCmd::OffsetPlane);
+    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::OffsetPlane));
+    run_origin_plane_cmd(&mut app, "yz", RowCmd::CreateSketch);
+    assert!(app.s.edit_sketch.is_some());
+  }
+}

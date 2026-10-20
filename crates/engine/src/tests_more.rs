@@ -77,6 +77,20 @@ fn construction_planes_axes_and_points() {
     json!({"method": "three_points", "a": {"at": [0, 0, 3]}, "b": {"at": [1, 0, 3]}, "c": {"at": [0, 1, 3]}}),
   );
   let f3 = three["feature"].as_u64().unwrap();
+  // Fusion's sketch frame: the world origin dropped onto the plane, x = Z × n (world X for +Z)
+  let pl = s.model.planes[&crate::model::FeatureId(f3 as u32)];
+  assert!(
+    (pl.origin - fox_kernel::glam::DVec3::new(0.0, 0.0, 3.0)).length() < 1e-9
+      && (pl.x - fox_kernel::glam::DVec3::X).length() < 1e-9
+  );
+  let tilted = run(
+    &mut s,
+    "plane",
+    json!({"method": "three_points", "a": {"at": [40, 0, 0]}, "b": {"at": [0, 30, 0]}, "c": {"at": [0, 0, 20]}}),
+  );
+  let pl = s.model.planes[&crate::model::FeatureId(tilted["feature"].as_u64().unwrap() as u32)];
+  assert!((pl.x - fox_kernel::glam::DVec3::new(-0.8, 0.6, 0.0)).length() < 1e-9, "{pl:?}");
+  assert!((pl.origin - fox_kernel::glam::DVec3::new(5.9016, 7.8689, 11.8033)).length() < 1e-3, "{pl:?}");
   run(&mut s, "split", json!({"plane": {"feature": f3}}));
   assert_eq!(s.model.bodies.len(), 2);
   // axis along an edge, plane at 45° about it
@@ -99,6 +113,56 @@ fn construction_planes_axes_and_points() {
   let sk = s.design.features.iter().rev().find(|f| f.kind.base_name() == "Sketch").unwrap().id.0;
   run(&mut s, "revolve", json!({"sketch": sk, "axis": {"axis": z["feature"]}}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+}
+
+#[test]
+fn axis_through_sketch_line_or_axis() {
+  let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].as_u64().unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let axis = |s: &mut Session, edge: Value| {
+    let f = run(s, "axis", json!({"method": "edge", "edge": edge}))["feature"].as_u64().unwrap();
+    s.model.axes[&crate::model::FeatureId(f as u32)]
+  };
+  let want = fox_kernel::glam::DVec3::new(1.0, 0.0, 1.0).normalize();
+  // by sketch and line, by a point on the line (no body there), and along that axis
+  let (o, d) = axis(&mut s, json!({"sketch": sk, "line": line}));
+  assert!(o.length() < 1e-9 && (d - want).length() < 1e-9, "{o} {d}");
+  let (_, d) = axis(&mut s, json!({"point": [5, 0, 5]}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  let f = s.design.features.last().unwrap().id.0;
+  let (_, d) = axis(&mut s, json!({"axis": f}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  assert!(s.execute("axis", &json!({"method": "edge", "edge": {"point": [50, 50, 50]}})).is_err());
+}
+
+#[test]
+fn point_where_a_sketch_line_or_axis_crosses_a_plane() {
+  let mut s = Session::default();
+  let pt = |s: &Session, v: &Value| s.model.points[&crate::model::FeatureId(v["feature"].as_u64().unwrap() as u32)];
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, -2], [20, -12]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let x10 = run(&mut s, "plane.offset", json!({"plane": "yz", "offset": 10}))["feature"].as_u64().unwrap();
+  // the sketch line, and the Z axis against an offset XY plane
+  let a = run(
+    &mut s,
+    "point",
+    json!({"method": "edge_plane", "edge": {"sketch": sk, "curve": line}, "plane": {"feature": x10}}),
+  );
+  assert!((pt(&s, &a) - fox_kernel::glam::DVec3::new(10.0, -7.0, 0.0)).length() < 1e-9, "{:?}", pt(&s, &a));
+  let z7 = run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 7}))["feature"].as_u64().unwrap();
+  let b = run(&mut s, "point", json!({"method": "edge_plane", "edge": "z", "plane": {"feature": z7}}));
+  assert!((pt(&s, &b) - fox_kernel::glam::DVec3::new(0.0, 0.0, 7.0)).length() < 1e-9, "{:?}", pt(&s, &b));
+  // a construction axis, and a line parallel to the plane
+  let ax = run(&mut s, "axis", json!({"method": "two_points", "a": {"at": [1, 1, 0]}, "b": {"at": [1, 1, 1]}}));
+  let c =
+    run(&mut s, "point", json!({"method": "edge_plane", "edge": {"axis": ax["feature"]}, "plane": {"feature": z7}}));
+  assert!((pt(&s, &c) - fox_kernel::glam::DVec3::new(1.0, 1.0, 7.0)).length() < 1e-9, "{:?}", pt(&s, &c));
+  let bad = s.execute("point", &json!({"method": "edge_plane", "edge": "x", "plane": {"feature": z7}}));
+  assert!(bad.as_ref().map_or(true, |v| v["error"].is_string()), "{bad:?}");
 }
 
 #[test]
@@ -149,12 +213,13 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "sketch.rect", json!({"corner1": [36, 0], "corner2": [40, 20]}));
   run(&mut s, "extrude", json!({"distance": 20, "operation": "join"}));
   let v0 = volume(&s);
-  // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10)
-  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -10}));
+  // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10, along +Y in a new
+  // design; Fusion's XZ frame has sketch y = −Z)
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
   let pl = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
   // a line across the top between the walls; the rib grows down to the floor
-  run(&mut s, "sketch.line", json!({"points": [[4, 20], [36, 20]]}));
+  run(&mut s, "sketch.line", json!({"points": [[4, -20], [36, -20]]}));
   run(&mut s, "rib", json!({"thickness": 2}));
   let added = volume(&s) - v0;
   assert!((added - 32.0 * 16.0 * 2.0).abs() < 1.0, "rib added {added}");
@@ -241,6 +306,37 @@ fn mesh_tools_and_appearance() {
   assert_eq!(s.design.body_settings(fox_model::BodyId(b)).unwrap().color, None);
 }
 
+/// Extrudes an ellipse drawn through a point on it; with `legacy` its sketch has no behaviour
+/// flags, as one from a file saved before them. The body's (face count, volume).
+fn extruded_ellipse(legacy: bool) -> (usize, f64) {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "point": [15, 5]}));
+  if legacy {
+    for f in &mut s.design.features {
+      if let fox_model::FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+        sketch.behaviours = fox_sketch::Behaviours::legacy();
+      }
+    }
+  }
+  run(&mut s, "extrude", json!({"distance": 1}));
+  assert_eq!(s.model.bodies.len(), 1);
+  (s.model.bodies[0].faces().len(), volume(&s))
+}
+
+#[test]
+fn a_new_ellipse_extrudes_to_one_side_face_and_a_legacy_one_to_two() {
+  let want = std::f64::consts::PI * 20.0 * 5.0 / (1.0f64 - 0.5625).sqrt();
+  // a new design: one elliptical side face, top and bottom, as in Fusion
+  let (faces, v) = extruded_ellipse(false);
+  assert_eq!(faces, 3);
+  assert!((v - want).abs() < 0.05, "{v} vs {want}");
+  // a legacy sketch keeps main's two half-ellipse sides
+  let (faces, v) = extruded_ellipse(true);
+  assert_eq!(faces, 4);
+  assert!((v - want).abs() < 0.05, "{v} vs {want}");
+}
+
 #[test]
 fn sketch_tools_make_profiles() {
   let mut s = Session::default();
@@ -250,6 +346,16 @@ fn sketch_tools_make_profiles() {
   run(&mut s, "extrude", json!({"distance": 1}));
   let area = volume(&s);
   assert!((area - std::f64::consts::PI * 200.0).abs() < 0.05, "{area}");
+  // or through a point on it (Fusion's third pick): minor = 5 / sqrt(1 - (15/20)^2)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "point": [15, 5]}));
+  run(&mut s, "extrude", json!({"distance": 1}));
+  let want = std::f64::consts::PI * 20.0 * 5.0 / (1.0f64 - 0.5625).sqrt();
+  assert!((volume(&s) - want).abs() < 0.05, "{} vs {want}", volume(&s));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let bad = json!({"center": [0, 0], "major": [20, 0], "point": [25, 5]});
+  assert!(s.execute("sketch.ellipse", &bad).is_err(), "beyond the end of the axis");
   // 3-point circle, 2-point circle, 3-point rectangle, polygons, slots
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
@@ -287,6 +393,7 @@ fn sketch_tools_make_profiles() {
 #[test]
 fn section_view_is_capped() {
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   block(&mut s, 40.0, 20.0, 10.0);
   let opts = crate::scene::view_options(&s, &json!({"section": {"plane": "xz", "offset": -10}})).unwrap();
   let (scene, _) = crate::scene::SceneBuilder::default().build(&s, &opts);
@@ -401,4 +508,317 @@ fn ruled_offset_and_trim_surfaces() {
   run(&mut s, "surface.trim", json!({"bodies": [id], "tool": "yz"}));
   let b = s.model.bodies.iter().find(|b| b.id.0 == id).unwrap();
   assert!((b.shape.mass().unwrap().area - 100.0).abs() < 1e-6, "{}", b.shape.mass().unwrap().area);
+}
+
+#[test]
+fn threads_iso_size_and_class() {
+  use std::f64::consts::PI;
+  // cosmetic M8x1.25 6g: the rod is sized to the class-mean major diameter, 7.866
+  let mut s = Session::default();
+  rod(&mut s, 4.0, 16.0);
+  run(&mut s, "thread", json!({"faces": [{"point": [4, 0, 8]}], "designation": "M8x1.25"}));
+  let want = PI * 3.933f64.powi(2) * 16.0;
+  assert!((volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s));
+  assert_eq!(s.model.threads.len(), 1);
+  // modeled M10x1.5 6g, 10 long from 5 above the low end: one crest face, flanks, root and the
+  // two ends of the groove, square to the axis
+  let mut s = Session::default();
+  rod(&mut s, 5.0, 30.0);
+  let t = run(
+    &mut s,
+    "thread",
+    json!({"faces": [{"point": [5, 0, 15]}], "designation": "M10x1.5", "modeled": true, "length": 10, "offset": 5}),
+  );
+  assert!(s.model.errors().is_empty(), "{:?} {t}", s.model.errors());
+  let b = &s.model.bodies[0];
+  assert_eq!(b.faces().len(), 8);
+  let m = b.shape.mass().unwrap();
+  assert!((m.center_of_mass.z - 15.0).abs() > 0.05 && m.center_of_mass.z > 15.0, "groove low: {m:?}");
+  assert!((m.bbox_max.x - 4.925).abs() < 1e-4, "{m:?}");
+  assert!(m.center_of_mass.truncate().length() < 0.05, "{m:?}");
+  // an internal thread sizes the bore to the class-mean minor diameter (8.526 for 6H)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 4.25}));
+  run(&mut s, "extrude", json!({"distance": 15, "profiles": [[7, 0]]}));
+  run(&mut s, "thread", json!({"faces": [{"point": [4.25, 0, 7.5]}], "designation": "M10x1.5", "class": "6H"}));
+  let want = PI * (100.0 - 4.263f64.powi(2)) * 15.0;
+  assert!((volume(&s) - want).abs() < 1e-4 * want, "{} vs {want}", volume(&s));
+  let f = s.design.features.last().unwrap().id.0;
+  let _ = s.execute("feature.edit", &json!({"feature": f, "set": {"class": "6x"}}));
+  assert!(!s.model.errors().is_empty(), "a bad class is an error");
+}
+
+#[test]
+fn threads_in_designs_without_iso_threads_rebuild_as_before() {
+  use fox_model::Behaviours;
+  let rod_h = |s: &mut Session, h: f64| {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+    run(s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+    run(s, "extrude", json!({"distance": h}));
+  };
+  // a design saved before the ISO_THREADS flag keeps the sharp V groove, measured from the face's
+  // own axis end: faces, volume and centre of mass as main built them
+  let cases = [
+    (
+      30.0,
+      json!({"faces": [{"point": [5, 0, 15]}], "modeled": true, "length": 10, "offset": 5}),
+      13,
+      2260.104747716,
+      14.787423409,
+    ),
+    (
+      30.0,
+      json!({"faces": [{"point": [5, 0, 15]}], "modeled": true, "length": 10, "offset": 5, "flip": true}),
+      13,
+      2260.104266635,
+      15.212579535,
+    ),
+    (
+      -30.0,
+      json!({"faces": [{"point": [5, 0, -15]}], "modeled": true, "length": 10, "offset": 5}),
+      13,
+      2260.107454316,
+      -14.787431974,
+    ),
+    // Measured with #81's adaptive mass properties: same 27-face solid as main built, but the
+    // helical face integrates more accurately (z was 14.99937 before; the thread is centred at 15).
+    (30.0, json!({"faces": [{"point": [5, 0, 15]}], "modeled": true}), 27, 2069.648853055, 15.000006770),
+  ];
+  for (i, (h, t, faces, vol, z)) in cases.into_iter().enumerate() {
+    let mut s = Session::default();
+    s.design.behaviours = Behaviours::legacy();
+    rod_h(&mut s, h);
+    run(&mut s, "thread", t);
+    assert!(s.model.errors().is_empty(), "{i}: {:?}", s.model.errors());
+    let b = &s.model.bodies[0];
+    let m = b.shape.mass().unwrap();
+    assert_eq!(b.faces().len(), faces, "{i}");
+    // Volume to 1e-4 relative and centre of mass to 1e-4 mm: a different groove profile or a
+    // moved or flipped thread changes these by far more (tens of mm³, millimetres), while the
+    // mass-property integration's own accuracy on helical faces moves them by less.
+    assert!((m.volume - vol).abs() < 1e-4 * vol, "{i}: {} vs {vol}", m.volume);
+    assert!((m.center_of_mass.z - z).abs() < 1e-4, "{i}: {m:?}");
+    if i == 0 {
+      // the same thread in a new design is the ISO profile: crest, flanks, root, square ends
+      s.design.behaviours = Behaviours::current();
+      s.rebuild();
+      assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+      let b = &s.model.bodies[0];
+      assert_eq!(b.faces().len(), 8);
+      let m = b.shape.mass().unwrap();
+      assert!((m.volume - vol).abs() > 1.0, "{m:?}");
+      assert!(m.center_of_mass.z > 15.0, "groove from the low end: {m:?}");
+    }
+  }
+  // a cosmetic thread in an old design starts from the face's own axis end (here the top) ...
+  let cosmetic = json!({"faces": [{"point": [5, 0, 15]}], "length": 10, "offset": 5});
+  let mut s = Session::default();
+  s.design.behaviours = Behaviours::legacy();
+  rod_h(&mut s, 30.0);
+  run(&mut s, "thread", cosmetic.clone());
+  assert!(s.model.threads[0].1[0].distance(fox_model::kernel::glam::DVec3::new(5.0, 0.0, 25.0)) < 1e-9);
+  // ... and in a new design from the low end
+  let mut s = Session::default();
+  rod_h(&mut s, 30.0);
+  run(&mut s, "thread", cosmetic);
+  assert!((s.model.threads[0].1[0].z - 5.0).abs() < 1e-6, "{:?}", s.model.threads[0].1[0]);
+}
+
+#[test]
+fn thread_designation_must_suit_the_drawn_diameter() {
+  // an M10 thread on a Ø20 rod is an error, not a rod silently shrunk to Ø9.85
+  let mut s = Session::default();
+  rod(&mut s, 10.0, 20.0);
+  let _ = s.execute("thread", &json!({"faces": [{"point": [10, 0, 10]}], "designation": "M10x1.5"}));
+  let e = s.model.errors();
+  assert!(e.iter().any(|e| e.contains("Ø10") && e.contains("Ø20")), "{e:?}");
+  assert!((volume(&s) - std::f64::consts::PI * 100.0 * 20.0).abs() < 1e-6, "the rod is left as drawn");
+  // an M10 inside a Ø10 bore too: the bore is drawn at the tap-drill (minor) size
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  run(&mut s, "extrude", json!({"distance": 15, "profiles": [[7, 0]]}));
+  let _ = s.execute("thread", &json!({"faces": [{"point": [5, 0, 7.5]}], "designation": "M10x1.5", "class": "6H"}));
+  assert!(s.model.errors().iter().any(|e| e.contains("hole")), "{:?}", s.model.errors());
+}
+
+#[test]
+fn center_arc_slot_takes_the_shorter_arc_unless_told() {
+  let pi = std::f64::consts::PI;
+  // the area of a width-4 slot along `sweep` radians of an R20 arc, extruded 1
+  let slot = |sweep: f64| sweep * 20.0 * 4.0 + pi * 4.0;
+  for (ccw, sweep) in [(None, pi / 2.0), (Some(true), 1.5 * pi), (Some(false), pi / 2.0)] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let mut p = json!({"arc_center": [0, 0], "start": [0, 20], "end": [20, 0], "width": 4});
+    if let Some(ccw) = ccw {
+      p["ccw"] = json!(ccw);
+    }
+    run(&mut s, "sketch.slot", p);
+    run(&mut s, "extrude", json!({"distance": 1}));
+    let v = volume(&s);
+    assert!((v - slot(sweep)).abs() < 1e-3 * slot(sweep), "{ccw:?}: {v} vs {}", slot(sweep));
+  }
+}
+
+#[test]
+fn pipe_sections_and_partial_paths() {
+  // a straight 40 mm path up z, in a sketch whose normal is +y
+  let path = |s: &mut Session| {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [0, -40]]}));
+    let path = s.edit_sketch.unwrap().0;
+    run(s, "sketch.finish", json!({}));
+    path
+  };
+  let pipe = |p: Value| {
+    let mut s = Session::default();
+    let id = path(&mut s);
+    let mut p = p;
+    p["path"] = json!(id);
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    s
+  };
+  let near = |s: &Session, want: f64| {
+    let v = volume(s);
+    assert!((v - want).abs() < want * 1e-6, "{v} vs {want}");
+  };
+  near(&pipe(json!({"size": 6, "section": "square"})), 36.0 * 40.0);
+  near(&pipe(json!({"size": 6, "section": "square", "wall": 1})), (36.0 - 16.0) * 40.0);
+  // a triangle of height 6 has side 4√3; half the path
+  let s = pipe(json!({"size": 6, "section": "triangular", "distance": 0.5}));
+  near(&s, 12.0 * 3f64.sqrt() * 20.0);
+  // the base lies 3 below the path along the sketch normal (y), the apex 3 above
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_min.y + 3.0).abs() < 1e-3 && (m.bbox_max.y - 3.0).abs() < 1e-3, "{m:?}");
+  assert!((m.center_of_mass.y + 1.0).abs() < 1e-6 && (m.bbox_max.z - 20.0).abs() < 1e-3, "{m:?}");
+  // hollow: the triangle with inradius 2 - 1, so a quarter of the area is the hole
+  near(&pipe(json!({"size": 6, "section": "triangular", "wall": 1})), 0.75 * 12.0 * 3f64.sqrt() * 40.0);
+
+  // half a spline path holds half the volume of the whole one
+  let spline = |d: Option<f64>| {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, -20], [0, -40], [15, -60]]}));
+    let id = s.edit_sketch.unwrap().0;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"path": id, "diameter": 2});
+    if let Some(d) = d {
+      p["distance"] = json!(d);
+    }
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    volume(&s)
+  };
+  let (half, whole) = (spline(Some(0.5)), spline(None));
+  assert!((half / whole - 0.5).abs() < 2e-3, "{half} / {whole}");
+
+  // keys it doesn't know are refused rather than ignored
+  let mut s = Session::default();
+  let id = path(&mut s);
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "shape": "square"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "section": "hexagon"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "size": 4})).is_err());
+
+  // a round pipe rebuilds exactly as older files did: the same edges (its seam, the side face's
+  // one straight edge, included) as the old construction, a circle on
+  // Plane::from_normal(start, tangent, sketch normal) swept along the path
+  use fox_kernel::glam::DVec3;
+  use fox_kernel::{Plane, Shape};
+  use fox_sketch::{Loop, Profile, Seg};
+  let s = pipe(json!({"diameter": 6}));
+  let new = s.model.bodies[0].shape.edges().unwrap();
+  let sketch = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
+  let line = [Seg::Line { a: [0.0, 0.0], b: [0.0, -40.0] }];
+  let sec = Plane::from_normal(DVec3::ZERO, DVec3::Z, sketch.normal()).unwrap();
+  let circle = Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: 3.0, ccw: true }]);
+  let old = Shape::face(&sec, &Profile { outer: circle, holes: vec![] })
+    .unwrap()
+    .sweep(&Shape::path(&sketch, &line).unwrap())
+    .unwrap()
+    .edges()
+    .unwrap();
+  assert_eq!(new.len(), old.len(), "{new:?} vs {old:?}");
+  for (a, b) in new.iter().zip(&old) {
+    let same = a.kind == b.kind
+      && [(a.start, b.start), (a.mid, b.mid), (a.end, b.end)].iter().all(|(p, q)| p.distance(*q) < 1e-6);
+    assert!(same, "{a:?} vs {b:?}");
+  }
+  let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
+  assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
+}
+
+#[test]
+fn deleting_a_used_sketch_keeps_its_extrude_on_cached_geometry() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]}}))["sketch"].clone();
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ex = run(&mut s, "extrude", json!({"distance": 20}))["feature"].clone();
+  let r = run(&mut s, "feature.delete", json!({"feature": sk}));
+  assert_eq!(r["removed"], json!([sk]));
+  assert_eq!(r["cached"], json!([ex]));
+  assert_eq!(s.design.features.len(), 1);
+  assert!(s.model.sketches.is_empty(), "the cached sketch isn't shown");
+  assert!((volume(&s) - 24000.0).abs() < 1e-6, "{}", volume(&s));
+  let st = &s.model.status[0];
+  assert!(st.error.is_none() && st.warning.as_deref().is_some_and(|w| w.contains("cached geometry")), "{st:?}");
+  assert_eq!(s.model.bounds().unwrap().0.z, 5.0);
+  // the extrude stays editable, and the cache survives a save
+  run(&mut s, "feature.edit", json!({"feature": ex, "set": {"extent": {"kind": "one_side", "distance": "10"}}}));
+  assert!((volume(&s) - 12000.0).abs() < 1e-6, "{}", volume(&s));
+  let d: fox_model::Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
+  assert_eq!(d, s.design);
+  // cascade deletes the extrude too, as before
+  assert!(s.undo() && s.undo());
+  assert_eq!(run(&mut s, "feature.delete", json!({"feature": sk, "cascade": true}))["removed"], json!([sk, ex]));
+  assert!(s.model.bodies.is_empty());
+}
+
+#[test]
+fn project_to_surface_drapes_curves_a_pipe_follows() {
+  // an r5 circle on the plane x = 20 projected onto an r10 h30 cylinder's side
+  let start = || {
+    let mut s = Session::new(fox_model::Design::new("t"));
+    run(&mut s, "cylinder", json!({"radius": 10, "height": 30}));
+    let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+    run(&mut s, "sketch.create", json!({"plane": plane}));
+    run(&mut s, "sketch.circle", json!({"center": [0, 15], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+  };
+  let side = json!([{"point": [-10, 0, 5]}]);
+
+  // along X: a saddle loop front and back, two grooves
+  let mut s = start();
+  let v = run(
+    &mut s,
+    "sketch.project_to_surface",
+    json!({"sketch": 2, "faces": side, "type": "along_vector", "direction": "x"}),
+  );
+  let proj = fox_model::FeatureId(v["feature"].as_u64().unwrap() as u32);
+  assert_eq!(s.model.curves3d[&proj].len(), 2);
+  run(&mut s, "pipe", json!({"path": proj.0, "diameter": 2, "operation": "cut"}));
+  assert!((volume(&s) - 9326.976).abs() < 10.0, "{}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 13);
+
+  // to the closest point: one loop on the front, one groove
+  let mut s = start();
+  run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side}));
+  run(&mut s, "pipe", json!({"path": 3, "diameter": 2, "operation": "cut"}));
+  assert!((volume(&s) - 9388.016).abs() < 10.0, "{}", volume(&s));
+  assert_eq!(s.model.bodies[0].faces().len(), 6);
+
+  // a direction is needed along a vector; a 3D path takes a round section only
+  let mut s = start();
+  assert!(
+    s.execute("sketch.project_to_surface", &json!({"sketch": 2, "faces": side, "type": "along_vector"})).is_err()
+  );
+  run(&mut s, "sketch.project_to_surface", json!({"sketch": 2, "faces": side}));
+  let v = s.execute("pipe", &json!({"path": 3, "diameter": 2, "section": "square", "operation": "cut"})).unwrap();
+  assert!(v["error"].is_string(), "{v}");
 }

@@ -1,0 +1,155 @@
+{
+ "id": "apparent-intersection",
+ "name": "apparent-intersection",
+ "description": "40x30 rectangle whose bottom line stops at x=30 and right line starts at y=10; Distance and Angle sketch chamfer at their apparent intersection (40,0): 15 along the bottom at 45 deg, which trims both lines and closes the profile; extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_chamfer_distance_angle",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "at": [
+       40,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "ref": "r.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "ref": "t.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "b.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "chamfer_distance_angle",
+     "id": "ch",
+     "lines": [
+      "b",
+      "r"
+     ],
+     "distance": 15,
+     "angle_deg": 45
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "r",
+        "t",
+        "l",
+        "ch"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

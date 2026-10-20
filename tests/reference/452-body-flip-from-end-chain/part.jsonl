@@ -1,0 +1,15 @@
+# 452-body-flip-from-end-chain: added by the parity loop from a Fusion probe
+# body-flip-from-end-chain: Cube 6x6x6 centred on (60,40); body patterned along the chained path (0,0)->(60,0)->(60,40) starting at its end (start point 1), flipped to run back toward the start, 4 instances 25 mm apart (turns the corner); separate bodies.
+# pattern.path: Pattern on Path
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[57, 37], [63, 37]]}
+{"cmd": "sketch.line", "points": [[63, 37], [63, 43]]}
+{"cmd": "sketch.line", "points": [[63, 43], [57, 43]]}
+{"cmd": "sketch.line", "points": [[57, 43], [57, 37]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 40]]}
+{"cmd": "sketch.finish"}
+{"cmd": "pattern.path", "bodies": [2000], "path": 3, "count": 4, "spacing": 25, "start": 1.0, "flip": true, "join": false}

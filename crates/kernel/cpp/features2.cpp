@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <BOPAlgo_MakerVolume.hxx>
@@ -28,6 +29,7 @@
 #include <BRepFill_Filling.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -38,32 +40,44 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <GCPnts_UniformAbscissa.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom2dAPI_Interpolate.hxx>
 #include <Geom2d_BSplineCurve.hxx>
+#include <Geom2d_BezierCurve.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <GeomConvert.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <GeomLib.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Geom_BoundedSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_OffsetSurface.hxx>
 #include <Geom_Plane.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_SphericalSurface.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <Geom_Surface.hxx>
+#include <Law_Interpol.hxx>
+#include <Law_Linear.hxx>
 #include <Precision.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <Standard_Failure.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
+#include <TColgp_Array1OfPnt2d.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt2d.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -73,9 +87,17 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_Shell.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Pln.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <TColStd_Array2OfReal.hxx>
+#include <TColStd_HArray1OfReal.hxx>
+#include <TColgp_Array2OfPnt.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Quaternion.hxx>
 
 namespace fox {
 
@@ -163,31 +185,6 @@ std::vector<TopoDS_Wire> loops(const TopoDS_Shape &s, bool &holes) {
 const TopoDS_Wire &as_wire(const Shape &s, const char *what) {
   if (s.s.IsNull() || s.s.ShapeType() != TopAbs_WIRE) throw std::runtime_error(std::string(what) + " must be a wire");
   return TopoDS::Wire(s.s);
-}
-
-// Sweeps each loop of a profile with the same pipe settings; holes are cut from the outer solid.
-template <typename Setup> TopoDS_Shape sweep_loops(const TopoDS_Wire &spine, const TopoDS_Shape &profile, Setup setup) {
-  bool holes = false;
-  std::vector<TopoDS_Wire> ws = loops(profile, holes);
-  TopoDS_Shape result;
-  for (size_t i = 0; i < ws.size(); ++i) {
-    BRepOffsetAPI_MakePipeShell ps(spine);
-    setup(ps);
-    ps.Add(ws[i], Standard_False, Standard_False);
-    ps.Build();
-    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
-    ps.MakeSolid();
-    TopoDS_Shape s = ps.Shape();
-    if (volume(s) < 0) s.Reverse();
-    if (i == 0) {
-      result = s;
-    } else {
-      BRepAlgoAPI_Cut cut(result, s);
-      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
-      result = cut.Shape();
-    }
-  }
-  return result;
 }
 
 // Points along a wire at equal arc lengths, with unit tangents.
@@ -283,35 +280,11 @@ bool surface_normal(const TopoDS_Face &f, const gp_Pnt &p, gp_Pnt &at, gp_Vec &n
 
 } // namespace
 
-// Sweeps a profile along a path, oriented and scaled so that it keeps touching a guide rail.
-std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail) {
-  FOX2_TRY
-  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
-  const TopoDS_Wire &guide = as_wire(rail, "the guide rail");
-  bool holes = false;
-  loops(profile.s, holes);
-  if (holes) throw std::runtime_error("a guide rail sweep needs a profile without holes");
-  // the rail is matched to the path by relative arc length; each section is scaled about the path
-  // until its outline touches the rail
-  TopoDS_Shape s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
-    ps.SetMode(guide, Standard_True, BRepFill_ContactOnBorder);
-  });
-  return out(valid(s, "guided sweep"));
-  FOX2_CATCH("guided sweep")
-}
-
-// Sweeps a profile along a path, turning it by `twist` radians about the path from start to end.
-std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist) {
-  FOX2_TRY
-  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
-  std::vector<gp_Pnt> pts;
-  std::vector<gp_Vec> tans;
-  sample_wire(path, 120, pts, tans);
-  double length = 0;
-  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
-  if (length < 1e-9) throw std::runtime_error("the path has no length");
-  // rotation-minimizing frames (double reflection), the twist turned on top of them; the
-  // auxiliary spine runs beside the path in the turning direction
+namespace {
+// Rotation-minimizing frames along sampled points (double reflection), with `twist` radians
+// turned on top of them from start to end: an auxiliary spine running beside the path in the
+// turning direction.
+TopoDS_Wire twist_spine(const std::vector<gp_Pnt> &pts, const std::vector<gp_Vec> &tans, double length, double twist) {
   double d = 0.05 * length + 0.5;
   std::vector<gp_Pnt> aux;
   gp_Vec r = perp(tans[0]);
@@ -334,12 +307,248 @@ std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, dou
     gp_Vec b = tans[i].Crossed(r);
     aux.push_back(pts[i].Translated((r * std::cos(a) + b * std::sin(a)) * d));
   }
-  TopoDS_Wire auxw = BRepBuilderAPI_MakeWire(interp_edge(aux, false));
+  return BRepBuilderAPI_MakeWire(interp_edge(aux, false));
+}
+
+// Sweeps each loop of a profile with the same pipe settings; holes are cut from the outer solid.
+// (The pre-sweep_unified rail and twist sweeps.)
+template <typename Setup> TopoDS_Shape sweep_loops(const TopoDS_Wire &spine, const TopoDS_Shape &profile, Setup setup) {
+  bool holes = false;
+  std::vector<TopoDS_Wire> ws = loops(profile, holes);
+  TopoDS_Shape result;
+  for (size_t i = 0; i < ws.size(); ++i) {
+    BRepOffsetAPI_MakePipeShell ps(spine);
+    setup(ps);
+    ps.Add(ws[i], Standard_False, Standard_False);
+    ps.Build();
+    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
+    ps.MakeSolid();
+    TopoDS_Shape s = ps.Shape();
+    if (volume(s) < 0) s.Reverse();
+    if (i == 0) {
+      result = s;
+    } else {
+      BRepAlgoAPI_Cut cut(result, s);
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      result = cut.Shape();
+    }
+  }
+  return result;
+}
+
+// A path of several edges as one B-spline edge, so that a law along it has a single parameter.
+TopoDS_Wire one_edge(const TopoDS_Wire &w) {
+  int n = 0;
+  for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next()) n += BRep_Tool::Degenerated(ex.Current()) ? 0 : 1;
+  if (n < 2) return w;
+  GeomConvert_CompCurveToBSplineCurve cc;
+  for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next()) {
+    const TopoDS_Edge &e = ex.Current();
+    if (BRep_Tool::Degenerated(e)) continue;
+    double f, l;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, f, l);
+    if (c.IsNull()) throw std::runtime_error("the path has an edge without a curve");
+    Handle(Geom_TrimmedCurve) t = new Geom_TrimmedCurve(c, f, l);
+    if (e.Orientation() == TopAbs_REVERSED) t->Reverse();
+    if (!cc.Add(GeomConvert::CurveToBSplineCurve(t), 1e-6)) {
+      throw std::runtime_error("the path could not be joined into one curve");
+    }
+  }
+  BRepBuilderAPI_MakeEdge me(cc.BSplineCurve());
+  if (!me.IsDone()) throw std::runtime_error("the path could not be joined into one curve");
+  return BRepBuilderAPI_MakeWire(me.Edge());
+}
+
+// The point a fraction t (0..1) of the way along a wire, by arc length.
+gp_Pnt at_fraction(const BRepAdaptor_CompCurve &c, double length, double t) {
+  GCPnts_AbscissaPoint ap(c, std::clamp(t, 0.0, 1.0) * length, c.FirstParameter());
+  if (!ap.IsDone()) throw std::runtime_error("the guide rail could not be measured");
+  return c.Value(ap.Parameter());
+}
+
+// A planar closed wire grown (d > 0) or shrunk (d < 0) by d all round, corners kept sharp.
+TopoDS_Wire offset_wire(const TopoDS_Shape &section, double d) {
+  TopoDS_Wire w;
+  for (TopExp_Explorer ex(section, TopAbs_WIRE); ex.More() && w.IsNull(); ex.Next()) w = TopoDS::Wire(ex.Current());
+  if (w.IsNull()) throw std::runtime_error("the sweep's end section is not a wire");
+  BRepBuilderAPI_MakeFace mf(w, Standard_True);
+  if (!mf.IsDone()) throw std::runtime_error("the sweep's end section is not planar");
+  BRepOffsetAPI_MakeOffset mo(mf.Face(), GeomAbs_Intersection);
+  mo.Perform(d);
+  if (!mo.IsDone()) throw std::runtime_error("the taper is too steep for the profile");
+  for (TopExp_Explorer ex(mo.Shape(), TopAbs_WIRE); ex.More(); ex.Next()) return TopoDS::Wire(ex.Current());
+  throw std::runtime_error("the tapered section vanished");
+}
+
+// A scaling law through (spine parameter, factor) samples: a straight line when they lie on one.
+Handle(Law_Function) scale_law(const std::vector<double> &par, const std::vector<double> &k) {
+  size_t n = par.size();
+  bool linear = true;
+  for (size_t i = 1; i + 1 < n && linear; ++i) {
+    double t = (par[i] - par[0]) / (par[n - 1] - par[0]);
+    linear = std::abs(k[0] + t * (k[n - 1] - k[0]) - k[i]) < 1e-9;
+  }
+  if (linear) {
+    Handle(Law_Linear) l = new Law_Linear();
+    l->Set(par[0], k[0], par[n - 1], k[n - 1]);
+    return l;
+  }
+  // every few samples are enough for a smooth law
+  std::vector<size_t> keep;
+  size_t step = std::max<size_t>(1, n / 30);
+  for (size_t i = 0; i < n; i += step) keep.push_back(i);
+  if (keep.back() != n - 1) keep.push_back(n - 1);
+  TColgp_Array1OfPnt2d pk(1, static_cast<int>(keep.size()));
+  for (size_t i = 0; i < keep.size(); ++i) pk.SetValue(static_cast<int>(i) + 1, gp_Pnt2d(par[keep[i]], k[keep[i]]));
+  Handle(Law_Interpol) l = new Law_Interpol();
+  l->Set(pk);
+  return l;
+}
+} // namespace
+
+// Designs from before the sweep_unified behaviour: sweeps a profile along a path, oriented and
+// scaled so that it keeps touching a guide rail (BRepFill contact on border).
+std::unique_ptr<Shape> sweep_rail_legacy(const Shape &profile, const Shape &spine, const Shape &rail) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  const TopoDS_Wire &guide = as_wire(rail, "the guide rail");
+  bool holes = false;
+  loops(profile.s, holes);
+  if (holes) throw std::runtime_error("a guide rail sweep needs a profile without holes");
+  // the rail is matched to the path by relative arc length; each section is scaled about the path
+  // until its outline touches the rail
+  TopoDS_Shape s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
+    ps.SetMode(guide, Standard_True, BRepFill_ContactOnBorder);
+  });
+  return out(valid(s, "guided sweep"));
+  FOX2_CATCH("guided sweep")
+}
+
+// Designs from before the sweep_unified behaviour: sweeps a profile along a path, turning it by
+// `twist` radians about the path from start to end (120 samples along the path).
+std::unique_ptr<Shape> sweep_twist_legacy(const Shape &profile, const Shape &spine, double twist) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  sample_wire(path, 120, pts, tans);
+  double length = 0;
+  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+  TopoDS_Wire auxw = twist_spine(pts, tans, length, twist);
   TopoDS_Shape out_s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
     ps.SetMode(auxw, Standard_True, BRepFill_NoContact);
   });
   return out(valid(out_s, "twisted sweep"));
   FOX2_CATCH("twisted sweep")
+}
+
+// Sweeps a profile along a path. `twist` turns it by that many radians about the path from start
+// to end; `taper` (radians) grows it all round by tan(taper) per unit of path length (holes
+// shrink); `parallel` keeps its orientation, so it only moves along the path. With a guide rail
+// the section turns to face the rail and, with `scale`, scales about the path in proportion to
+// the rail's distance from it (the rail is matched to the path by relative arc length).
+std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, const Shape &rail, bool has_rail,
+                                    bool scale, double twist, double taper, bool parallel) {
+  FOX2_TRY
+  // a scale law follows the parameter of each path edge in turn: give it a single edge
+  const TopoDS_Wire path = has_rail && scale ? one_edge(as_wire(spine, "the sweep path"))
+                                             : as_wire(spine, "the sweep path");
+  BRepAdaptor_CompCurve c(path);
+  GCPnts_UniformAbscissa ua(c, 121);
+  if (!ua.IsDone() || ua.NbPoints() < 2) throw std::runtime_error("the path could not be sampled");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  std::vector<double> par, arc;
+  for (int i = 1; i <= ua.NbPoints(); ++i) {
+    gp_Pnt p;
+    gp_Vec d;
+    c.D1(ua.Parameter(i), p, d);
+    if (d.Magnitude() < 1e-12) throw std::runtime_error("the path has a cusp");
+    arc.push_back(pts.empty() ? 0.0 : arc.back() + p.Distance(pts.back()));
+    pts.push_back(p);
+    tans.push_back(d.Normalized());
+    par.push_back(ua.Parameter(i));
+  }
+  double length = arc.back();
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+
+  TopoDS_Wire aux;
+  Handle(Law_Function) law;
+  if (has_rail) {
+    aux = as_wire(rail, "the guide rail");
+    if (scale) {
+      BRepAdaptor_CompCurve rc(aux);
+      double rlen = GCPnts_AbscissaPoint::Length(rc);
+      std::vector<double> k;
+      double d0 = 0;
+      for (size_t i = 0; i < pts.size(); ++i) {
+        gp_Vec v(pts[i], at_fraction(rc, rlen, arc[i] / length));
+        double d = (v - tans[i] * v.Dot(tans[i])).Magnitude();
+        if (i == 0) {
+          if (d < 1e-6) throw std::runtime_error("the guide rail must start away from the path");
+          d0 = d;
+        }
+        k.push_back(d / d0);
+      }
+      law = scale_law(par, k);
+    }
+  } else if (std::abs(twist) > 1e-12) {
+    aux = twist_spine(pts, tans, length, twist);
+  }
+  auto setup = [&](BRepOffsetAPI_MakePipeShell &ps) {
+    if (parallel) {
+      ps.SetMode(gp_Ax2(pts[0], gp_Dir(tans[0])));
+    } else if (!aux.IsNull()) {
+      ps.SetMode(aux, Standard_True, BRepFill_NoContact);
+    } else {
+      ps.SetMode(Standard_False);
+    }
+  };
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(path, v0, v1);
+  double grow = std::tan(taper) * length;
+
+  bool holes = false;
+  std::vector<TopoDS_Wire> ws = loops(profile.s, holes);
+  TopoDS_Shape result;
+  for (size_t i = 0; i < ws.size(); ++i) {
+    BRepOffsetAPI_MakePipeShell ps(path);
+    setup(ps);
+    if (law.IsNull()) {
+      ps.Add(ws[i], Standard_False, Standard_False);
+    } else {
+      ps.SetLaw(ws[i], law, Standard_False, Standard_False);
+    }
+    ps.Build();
+    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
+    TopoDS_Shape s;
+    if (std::abs(grow) > 1e-12) {
+      // tapered: the untapered sweep's last section, offset, is the end section
+      TopoDS_Wire end = offset_wire(ps.LastShape(), i == 0 ? grow : -grow);
+      BRepOffsetAPI_MakePipeShell pt(path);
+      setup(pt);
+      pt.Add(ws[i], v0, Standard_False, Standard_False);
+      pt.Add(end, v1, Standard_False, Standard_False);
+      pt.Build();
+      if (!pt.IsDone()) throw std::runtime_error("the tapered sweep failed");
+      pt.MakeSolid();
+      s = pt.Shape();
+    } else {
+      ps.MakeSolid();
+      s = ps.Shape();
+    }
+    if (volume(s) < 0) s.Reverse();
+    if (i == 0) {
+      result = s;
+    } else {
+      BRepAlgoAPI_Cut cut(result, s);
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      result = cut.Shape();
+    }
+  }
+  return out(valid(result, "sweep"));
+  FOX2_CATCH("sweep")
 }
 
 // Lofts through sections (faces or wires of a compound, in order) placed along a centre line.
@@ -445,11 +654,111 @@ struct Rail {
 };
 
 double smooth(double t) { return t * t * (3.0 - 2.0 * t); }
+
+// How steeply a rail's bulge leaves a corner of a polygonal section, as the slope of a Hermite
+// cubic over the corner-to-rail stretch, in thirds (Fusion's, measured on a square: pi/10).
+const double corner_pull = M_PI / 10.0;
+
+// The rails' pulls spread around a polygonal section: `pts` (closed, `k` points per edge) with
+// rail pulls at point indices. As Fusion's loft with rails: a corner is pulled by the rails on
+// either side, in proportion to the distance around the section to the far end of each rail's
+// edge; an edge no rail touches stays straight (its pull runs linearly between its corners); an
+// edge a rail touches bends from its corners to the rail as a cubic, flat where the rail is.
+std::vector<gp_Vec> polygon_pulls(const std::vector<gp_Pnt> &pts, size_t k,
+                                  const std::vector<std::pair<size_t, gp_Vec>> &pulls) {
+  size_t np = pts.size(), ne = np / k;
+  std::vector<double> s(np + 1, 0.0);
+  for (size_t i = 1; i <= np; ++i) s[i] = s[i - 1] + pts[i - 1].Distance(pts[i % np]);
+  double total = s[np];
+  auto ahead = [&](size_t from, size_t to) { // distance around from vertex `from` on to vertex `to`
+    double d = s[to * k] - s[from * k];
+    return d <= 1e-12 ? d + total : d;
+  };
+  std::vector<std::vector<std::pair<size_t, gp_Vec>>> on_edge(ne);
+  std::vector<int> at_vertex(ne, -1);
+  for (size_t j = 0; j < pulls.size(); ++j) {
+    size_t i = pulls[j].first % np;
+    if (i % k == 0) {
+      at_vertex[i / k] = static_cast<int>(j);
+    } else {
+      on_edge[i / k].push_back({i, pulls[j].second});
+    }
+  }
+  for (auto &e : on_edge) std::sort(e.begin(), e.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+  std::vector<gp_Vec> corner(ne);
+  for (size_t v = 0; v < ne; ++v) {
+    if (at_vertex[v] >= 0) {
+      corner[v] = pulls[static_cast<size_t>(at_vertex[v])].second;
+      continue;
+    }
+    gp_Vec fwd, back;
+    double df = 0, db = 0;
+    for (size_t step = 0; step < ne; ++step) {
+      size_t w = (v + step) % ne;
+      if (step > 0 && at_vertex[w] >= 0) {
+        fwd = pulls[static_cast<size_t>(at_vertex[w])].second;
+        df = ahead(v, w);
+        break;
+      }
+      if (!on_edge[w].empty()) {
+        fwd = on_edge[w].front().second;
+        df = ahead(v, (w + 1) % ne);
+        break;
+      }
+    }
+    for (size_t step = 0; step < ne; ++step) {
+      size_t w = (v + ne - step) % ne, e = (v + 2 * ne - 1 - step) % ne;
+      if (step > 0 && at_vertex[w] >= 0) {
+        back = pulls[static_cast<size_t>(at_vertex[w])].second;
+        db = ahead(w, v);
+        break;
+      }
+      if (!on_edge[e].empty()) {
+        back = on_edge[e].back().second;
+        db = ahead(e, v);
+        break;
+      }
+    }
+    corner[v] = df + db > 1e-12 ? (back * df + fwd * db) / (df + db) : fwd;
+  }
+  // a cubic from a corner (t = 0, leaving at corner_pull) to a rail (t = 1, flat)
+  auto rise = [](double t) { return t * t * (3 - 2 * t) + 3 * corner_pull * t * (1 - t) * (1 - t); };
+  std::vector<gp_Vec> d(np);
+  for (size_t e = 0; e < ne; ++e) {
+    // the edge's nodes: its corners and the rails on it, with whether each is a corner
+    std::vector<std::tuple<size_t, gp_Vec, bool>> nodes{{e * k, corner[e], true}};
+    for (const auto &c : on_edge[e]) nodes.push_back({c.first, c.second, false});
+    nodes.push_back({(e + 1) * k, corner[(e + 1) % ne], true});
+    for (size_t n = 0; n + 1 < nodes.size(); ++n) {
+      auto [i0, p0, c0] = nodes[n];
+      auto [i1, p1, c1] = nodes[n + 1];
+      double len = s[i1] - s[i0];
+      for (size_t i = i0; i < i1; ++i) {
+        double t = len > 1e-12 ? (s[i] - s[i0]) / len : 0.0;
+        double h;
+        if (on_edge[e].empty()) {
+          h = t;
+        } else if (c0 && !c1) {
+          h = rise(t);
+        } else if (!c0 && c1) {
+          h = 1 - rise(1 - t);
+        } else {
+          h = t * t * (3 - 2 * t);
+        }
+        d[i % np] = p0 * (1 - h) + p1 * h;
+      }
+    }
+  }
+  return d;
+}
 } // namespace
 
 // Lofts through sections guided by rails: between the sections, every point is pulled along with
-// the rails (smoothly between them around the loop), so the loft's sides follow the rails.
-std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
+// the rails, so the loft's sides follow the rails. One rail pulls its side out, fading away round
+// the loop; with more, around a polygonal section the pulls spread as `polygon_pulls` says, around
+// a smooth one smoothly from one rail to the next. Without `spread` (designs from before it), more
+// than one rail blends smoothly from one rail to the next around a polygonal section too.
+std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails, bool spread) {
   FOX2_TRY
   std::vector<TopoDS_Wire> ws;
   for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
@@ -583,6 +892,7 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
       double t = static_cast<double>(m) / steps;
       // the rails' pull at their contact positions
       std::vector<std::pair<double, gp_Vec>> pull;
+      std::vector<std::pair<size_t, gp_Vec>> at;
       for (size_t j = 0; j < rs.size(); ++j) {
         auto [ua, sa] = hit[i][j];
         auto [ub, sb] = hit[i + 1][j];
@@ -590,15 +900,33 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
         gp_Pnt blended(a[ka].XYZ() * (1 - t) + b[kb].XYZ() * t);
         gp_Pnt target = rs[j].at(sa + (sb - sa) * t);
         pull.push_back({ua + (ub - ua) * t, gp_Vec(blended, target)});
+        at.push_back({static_cast<size_t>(std::lround((ua + (ub - ua) * t) * np)) % np, gp_Vec(blended, target)});
       }
       std::sort(pull.begin(), pull.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
       std::vector<gp_Pnt> mid;
-      for (size_t k = 0; k < np; ++k) {
-        double u = static_cast<double>(k) / static_cast<double>(np);
-        gp_Vec d(0, 0, 0);
-        if (pull.size() == 1) {
-          d = pull[0].second * ((1 + std::cos(2 * M_PI * (u - pull[0].first))) / 2);
-        } else {
+      for (size_t k = 0; k < np; ++k) mid.push_back(gp_Pnt(a[k].XYZ() * (1 - t) + b[k].XYZ() * t));
+      if (pull.size() == 1) {
+        // one rail pulls its side out, fading away round the loop
+        for (size_t k = 0; k < np; ++k) {
+          double u = static_cast<double>(k) / static_cast<double>(np);
+          mid[k].Translate(pull[0].second * ((1 + std::cos(2 * M_PI * (u - pull[0].first))) / 2));
+        }
+      } else if (per_edge && spread) {
+        // the pulls' common part along the loft moves the whole section; the rest reshapes it
+        gp_Vec ax(centroid(a), centroid(b));
+        gp_Vec shift(0, 0, 0);
+        if (ax.Magnitude() > 1e-9) {
+          ax.Normalize();
+          double along = 0;
+          for (const auto &p : at) along += p.second.Dot(ax);
+          shift = ax * (along / static_cast<double>(at.size()));
+        }
+        for (auto &p : at) p.second -= shift;
+        std::vector<gp_Vec> d = polygon_pulls(mid, secs[0].runs[0].size() - 1, at);
+        for (size_t k = 0; k < np; ++k) mid[k].Translate(d[k] + shift);
+      } else {
+        for (size_t k = 0; k < np; ++k) {
+          double u = static_cast<double>(k) / static_cast<double>(np);
           // the contacts on either side of u, around the loop
           size_t hi = 0;
           while (hi < pull.size() && pull[hi].first <= u) ++hi;
@@ -609,9 +937,8 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
           if (span <= 0) span += 1;
           if (off < 0) off += 1;
           double h = smooth(std::clamp(off / span, 0.0, 1.0));
-          d = pull[lo].second * (1 - h) + pull[hi].second * h;
+          mid[k].Translate(pull[lo].second * (1 - h) + pull[hi].second * h);
         }
-        mid.push_back(gp_Pnt(a[k].XYZ() * (1 - t) + b[k].XYZ() * t).Translated(d));
       }
       add(mid);
     }
@@ -622,6 +949,255 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
   TopoDS_Shape s = mk.Shape();
   if (volume(s) < 0) s.Reverse();
   return out(valid(s, "loft"));
+  FOX2_CATCH("loft")
+}
+
+namespace {
+// A cubic B-spline through points at equal parameter steps over 0..1 (periodic: closing back to the
+// first point), so curves through equally many points share their knots and their poles blend.
+Handle(Geom_BSplineCurve) interp_uniform(const std::vector<gp_Pnt> &pts, bool periodic) {
+  int n = static_cast<int>(pts.size());
+  Handle(TColgp_HArray1OfPnt) arr = new TColgp_HArray1OfPnt(1, n);
+  for (int i = 0; i < n; ++i) arr->SetValue(i + 1, pts[static_cast<size_t>(i)]);
+  int np = periodic ? n + 1 : n;
+  Handle(TColStd_HArray1OfReal) par = new TColStd_HArray1OfReal(1, np);
+  for (int i = 0; i < np; ++i) par->SetValue(i + 1, static_cast<double>(i) / static_cast<double>(np - 1));
+  GeomAPI_Interpolate in(arr, par, periodic ? Standard_True : Standard_False, 1e-9);
+  in.Perform();
+  if (!in.IsDone()) throw std::runtime_error("a loft section could not be interpolated");
+  return in.Curve();
+}
+
+// A solid bounded by faces: sewn into one closed shell, oriented outward.
+TopoDS_Shape solid_of(const std::vector<TopoDS_Face> &faces, const char *what) {
+  BRepBuilderAPI_Sewing sew(1e-4);
+  for (const auto &f : faces) sew.Add(f);
+  sew.Perform();
+  TopoDS_Shape sewn = sew.SewedShape();
+  TopoDS_Shell shell;
+  int shells = 0;
+  for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next(), ++shells) shell = TopoDS::Shell(ex.Current());
+  if (shells == 0) {
+    // a single face closed on itself (a ring) sews to the bare face
+    BRep_Builder bb;
+    bb.MakeShell(shell);
+    for (TopExp_Explorer ex(sewn, TopAbs_FACE); ex.More(); ex.Next(), ++shells) bb.Add(shell, ex.Current());
+    if (shells != 1) throw std::runtime_error(std::string(what) + " is not closed");
+    shell.Closed(Standard_True);
+  } else if (shells != 1) {
+    throw std::runtime_error(std::string(what) + " is not closed");
+  }
+  BRepBuilderAPI_MakeSolid ms(shell);
+  if (!ms.IsDone()) throw std::runtime_error(std::string(what) + " is not closed");
+  ShapeFix_Solid fs(ms.Solid());
+  fs.Perform();
+  TopoDS_Shape solid = fs.Solid();
+  if (volume(solid) < 0) solid.Reverse();
+  return valid(solid, what);
+}
+
+// A B-spline surface face from rows of poles (one row per v pole, each as long as `curve`'s
+// poles): u takes `curve`'s knots, degree and periodicity, v the given ones.
+TopoDS_Face grid_face(const Handle(Geom_BSplineCurve) &curve, const std::vector<std::vector<gp_Pnt>> &rows,
+                      const std::vector<std::vector<double>> &weights, int vdeg, const std::vector<double> &vknots,
+                      const std::vector<int> &vmults, bool vperiodic) {
+  int nu = curve->NbPoles(), nv = static_cast<int>(rows.size());
+  TColgp_Array2OfPnt poles(1, nu, 1, nv);
+  TColStd_Array2OfReal w(1, nu, 1, nv);
+  for (int j = 0; j < nv; ++j) {
+    for (int i = 0; i < nu; ++i) {
+      poles.SetValue(i + 1, j + 1, rows[static_cast<size_t>(j)][static_cast<size_t>(i)]);
+      w.SetValue(i + 1, j + 1, weights[static_cast<size_t>(j)][static_cast<size_t>(i)]);
+    }
+  }
+  TColStd_Array1OfReal vk(1, static_cast<int>(vknots.size()));
+  TColStd_Array1OfInteger vm(1, static_cast<int>(vmults.size()));
+  for (size_t i = 0; i < vknots.size(); ++i) {
+    vk.SetValue(static_cast<int>(i) + 1, vknots[i]);
+    vm.SetValue(static_cast<int>(i) + 1, vmults[i]);
+  }
+  Handle(Geom_BSplineSurface) s = new Geom_BSplineSurface(poles, w, curve->Knots(), vk, curve->Multiplicities(), vm,
+                                                          curve->Degree(), vdeg, curve->IsPeriodic(), vperiodic);
+  BRepBuilderAPI_MakeFace mf(s, Precision::Confusion());
+  if (!mf.IsDone()) throw std::runtime_error("a loft face could not be built");
+  return mf.Face();
+}
+
+std::vector<gp_Pnt> poles_of(const Handle(Geom_BSplineCurve) &c) {
+  std::vector<gp_Pnt> p;
+  for (int i = 1; i <= c->NbPoles(); ++i) p.push_back(c->Pole(i));
+  return p;
+}
+
+std::vector<double> weights_of(const Handle(Geom_BSplineCurve) &c) {
+  std::vector<double> w;
+  for (int i = 1; i <= c->NbPoles(); ++i) w.push_back(c->Weight(i));
+  return w;
+}
+} // namespace
+
+// A closed loft through sections (faces or wires of a compound, in order): one surface that runs
+// smoothly through every section and back to the first, with no seam. Corresponding points of the
+// sections are joined by a periodic Catmull-Rom spline (each point's tangent is half the step
+// from the section before to the one after), as Fusion's closed loft is.
+std::unique_ptr<Shape> loft_closed(const Shape &sections) {
+  FOX2_TRY
+  std::vector<TopoDS_Wire> ws;
+  for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
+    if (it.Value().ShapeType() == TopAbs_VERTEX) throw std::runtime_error("a closed loft can't pass through a point");
+    bool holes = false;
+    std::vector<TopoDS_Wire> l = loops(it.Value(), holes);
+    if (holes) throw std::runtime_error("loft sections can't have holes");
+    ws.push_back(l[0]);
+  }
+  if (ws.size() < 3) throw std::runtime_error("a closed loft needs at least three profiles");
+  const size_t n = ws.size();
+  const int total = 96;
+  // one face per edge when every section has as many edges (corners stay sharp), else one around
+  size_t ne = ordered_edges(ws[0]).size();
+  bool per_edge = ne > 1;
+  for (const auto &w : ws) per_edge = per_edge && ordered_edges(w).size() == ne;
+  int k = per_edge ? std::max(6, total / static_cast<int>(ne)) : total;
+  std::vector<std::vector<gp_Pnt>> flat(n);
+  for (size_t i = 0; i < n; ++i) {
+    if (per_edge) {
+      for (const auto &e : ordered_edges(ws[i])) {
+        std::vector<gp_Pnt> r = sample_edge(e, k + 1);
+        flat[i].insert(flat[i].end(), r.begin(), r.end() - 1);
+      }
+    } else {
+      std::vector<gp_Pnt> p;
+      std::vector<gp_Vec> t;
+      sample_wire(ws[i], total + 1, p, t);
+      p.pop_back();
+      flat[i] = p;
+    }
+  }
+  size_t np = flat[0].size();
+  for (const auto &f : flat) {
+    if (f.size() != np) throw std::runtime_error("the sections could not be matched up");
+  }
+  // every section wound the same way along the loop, and started where the one before starts once
+  // it is turned to face the same way (so a ring of circles doesn't twist)
+  std::vector<gp_Pnt> cen;
+  for (const auto &f : flat) cen.push_back(centroid(f));
+  std::vector<gp_Vec> nrm(n);
+  for (size_t i = 0; i < n; ++i) {
+    gp_Vec along(cen[(i + n - 1) % n], cen[(i + 1) % n]);
+    gp_Vec nv = loop_normal(flat[i]);
+    if (along.Magnitude() > 1e-9 && nv.Dot(along) < 0) {
+      // reversed, still starting at the same point (and so at a corner)
+      std::reverse(flat[i].begin(), flat[i].end());
+      std::rotate(flat[i].begin(), flat[i].end() - 1, flat[i].end());
+      nv.Reverse();
+    }
+    if (nv.Magnitude() < 1e-12) throw std::runtime_error("a loft section has no area");
+    nrm[i] = nv.Normalized();
+  }
+  for (size_t i = 1; i < n; ++i) {
+    gp_Quaternion q(nrm[i], nrm[i - 1]);
+    size_t step = per_edge ? static_cast<size_t>(k) : 1, best = 0;
+    double bd = 1e300;
+    for (size_t off = 0; off < np; off += step) {
+      double d = 0;
+      for (size_t j = 0; j < np; ++j) {
+        gp_Vec a = q.Multiply(gp_Vec(cen[i], flat[i][(j + off) % np]));
+        d += (a - gp_Vec(cen[i - 1], flat[i - 1][j])).SquareMagnitude();
+      }
+      if (d < bd) {
+        bd = d;
+        best = off;
+      }
+    }
+    std::rotate(flat[i].begin(), flat[i].begin() + static_cast<long>(best), flat[i].end());
+  }
+  // v: section i at knot i, Bezier poles P, P + T/3, P' - T'/3 to the next section (periodic)
+  std::vector<double> vknots;
+  std::vector<int> vmults;
+  for (size_t i = 0; i <= n; ++i) {
+    vknots.push_back(static_cast<double>(i));
+    vmults.push_back(3);
+  }
+  std::vector<TopoDS_Face> faces;
+  size_t runs = per_edge ? ne : 1;
+  for (size_t r = 0; r < runs; ++r) {
+    std::vector<Handle(Geom_BSplineCurve)> cs;
+    for (size_t i = 0; i < n; ++i) {
+      std::vector<gp_Pnt> run;
+      if (per_edge) {
+        for (int m = 0; m <= k; ++m) run.push_back(flat[i][(r * static_cast<size_t>(k) + static_cast<size_t>(m)) % np]);
+      } else {
+        run = flat[i];
+      }
+      cs.push_back(interp_uniform(run, !per_edge));
+    }
+    std::vector<std::vector<gp_Pnt>> rows;
+    std::vector<std::vector<double>> wts;
+    for (size_t i = 0; i < n; ++i) {
+      std::vector<gp_Pnt> p = poles_of(cs[i]), pn = poles_of(cs[(i + 1) % n]), pp = poles_of(cs[(i + n - 1) % n]),
+                          pnn = poles_of(cs[(i + 2) % n]);
+      std::vector<gp_Pnt> a, b;
+      for (size_t j = 0; j < p.size(); ++j) {
+        gp_XYZ t0 = (pn[j].XYZ() - pp[j].XYZ()) / 2.0, t1 = (pnn[j].XYZ() - p[j].XYZ()) / 2.0;
+        a.push_back(gp_Pnt(p[j].XYZ() + t0 / 3.0));
+        b.push_back(gp_Pnt(pn[j].XYZ() - t1 / 3.0));
+      }
+      rows.push_back(p);
+      rows.push_back(a);
+      rows.push_back(b);
+      for (int m = 0; m < 3; ++m) wts.push_back(std::vector<double>(p.size(), 1.0));
+    }
+    faces.push_back(grid_face(cs[0], rows, wts, 3, vknots, vmults, true));
+  }
+  return out(solid_of(faces, "closed loft"));
+  FOX2_CATCH("closed loft")
+}
+
+// A loft from a profile to a point (`apex`) that arrives tangent to the plane through the point
+// across `axis`, as Fusion's point tangent end condition: each point P of the profile runs to the
+// apex along a parabola whose middle pole is A + weight/2 * (P - A) with the axis part removed,
+// so a circle under its centre gives a paraboloid.
+std::unique_ptr<Shape> loft_point_tangent(const Shape &profile, const Shape &apex, rust::Slice<const double> axis,
+                                          double weight) {
+  FOX2_TRY
+  need3(axis, 3, "axis");
+  if (apex.s.IsNull() || apex.s.ShapeType() != TopAbs_VERTEX) throw std::runtime_error("the end must be a point");
+  if (!(weight > 0)) throw std::runtime_error("the weight must be above zero");
+  gp_Vec n(axis[0], axis[1], axis[2]);
+  if (n.Magnitude() < 1e-12) throw std::runtime_error("zero axis");
+  n.Normalize();
+  gp_Pnt a = BRep_Tool::Pnt(TopoDS::Vertex(apex.s));
+  bool holes = false;
+  std::vector<TopoDS_Wire> l = loops(profile.s, holes);
+  if (holes) throw std::runtime_error("loft sections can't have holes");
+  TopoDS_Face cap;
+  if (profile.s.ShapeType() == TopAbs_FACE) {
+    cap = TopoDS::Face(profile.s);
+  } else {
+    BRepBuilderAPI_MakeFace mf(l[0], Standard_True);
+    if (!mf.IsDone()) throw std::runtime_error("the profile is not flat");
+    cap = mf.Face();
+  }
+  std::vector<TopoDS_Face> faces{cap};
+  // each edge as a curve through points along it (a lone closed edge, periodic)
+  std::vector<TopoDS_Edge> es = ordered_edges(l[0]);
+  bool loop = es.size() == 1;
+  int k = loop ? 96 : std::max(8, 96 / static_cast<int>(es.size()));
+  for (const auto &e : es) {
+    std::vector<gp_Pnt> pts = sample_edge(e, k + 1);
+    if (loop) pts.pop_back();
+    Handle(Geom_BSplineCurve) bs = interp_uniform(pts, loop);
+    std::vector<gp_Pnt> p = poles_of(bs), mid, top;
+    for (const auto &q : p) {
+      gp_Vec d(a, q);
+      d -= n * d.Dot(n);
+      mid.push_back(a.Translated(d * (weight / 2.0)));
+      top.push_back(a);
+    }
+    std::vector<double> w(p.size(), 1.0);
+    faces.push_back(grid_face(bs, {p, mid, top}, {w, w, w}, 2, {0.0, 1.0}, {3, 3}, false));
+  }
+  return out(solid_of(faces, "loft"));
   FOX2_CATCH("loft")
 }
 
@@ -712,6 +1288,45 @@ std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape
           if (p0.Distance(p1) < 1e-12) continue;
           Handle(Geom2d_Line) ln = new Geom2d_Line(p0, gp_Dir2d(gp_Vec2d(p0, p1)));
           c2 = new Geom2d_TrimmedCurve(ln, 0.0, p0.Distance(p1));
+        } else if (c.GetType() == GeomAbs_BSplineCurve || c.GetType() == GeomAbs_BezierCurve) {
+          // uv is linear in the point, so a spline maps exactly through its poles (a sketch
+          // spline is one edge however many spans it has: sampling it would lose its shape)
+          double u0 = c.FirstParameter(), u1 = c.LastParameter();
+          if (c.GetType() == GeomAbs_BSplineCurve) {
+            Handle(Geom_BSplineCurve) b = c.BSpline();
+            TColgp_Array1OfPnt2d poles(1, b->NbPoles());
+            for (int i = 1; i <= b->NbPoles(); ++i) poles.SetValue(i, uv(b->Pole(i)));
+            TColStd_Array1OfReal knots(1, b->NbKnots());
+            TColStd_Array1OfInteger mults(1, b->NbKnots());
+            b->Knots(knots);
+            b->Multiplicities(mults);
+            Handle(Geom2d_BSplineCurve) b2;
+            if (b->IsRational()) {
+              TColStd_Array1OfReal w(1, b->NbPoles());
+              b->Weights(w);
+              b2 = new Geom2d_BSplineCurve(poles, w, knots, mults, b->Degree(), b->IsPeriodic());
+            } else {
+              b2 = new Geom2d_BSplineCurve(poles, knots, mults, b->Degree(), b->IsPeriodic());
+            }
+            if (u0 > b2->FirstParameter() + 1e-12 || u1 < b2->LastParameter() - 1e-12) b2->Segment(u0, u1);
+            if (rev) b2->Reverse();
+            c2 = b2;
+          } else {
+            Handle(Geom_BezierCurve) b = c.Bezier();
+            TColgp_Array1OfPnt2d poles(1, b->NbPoles());
+            for (int i = 1; i <= b->NbPoles(); ++i) poles.SetValue(i, uv(b->Pole(i)));
+            Handle(Geom2d_BezierCurve) b2;
+            if (b->IsRational()) {
+              TColStd_Array1OfReal w(1, b->NbPoles());
+              b->Weights(w);
+              b2 = new Geom2d_BezierCurve(poles, w);
+            } else {
+              b2 = new Geom2d_BezierCurve(poles);
+            }
+            if (u0 > 1e-12 || u1 < 1.0 - 1e-12) b2->Segment(u0, u1);
+            if (rev) b2->Reverse();
+            c2 = b2;
+          }
         } else {
           GCPnts_UniformAbscissa ua(c, 33);
           if (!ua.IsDone()) throw std::runtime_error("a profile curve could not be sampled");

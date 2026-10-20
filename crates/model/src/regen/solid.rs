@@ -3,10 +3,13 @@
 //! body, emboss/deboss, boundary fill and replace face.
 
 use fox_kernel::glam::DVec3;
-use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
+use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind, SweepOptions};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
-use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef, sheet};
+use crate::{
+  BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef, ProfileScaling, SweepOrientation,
+};
+use fox_sketch::behaviour::{LOFT_CLOSED_SMOOTH, LOFT_RAIL_SPREAD};
 
 /// What an extrude stops at besides a parallel flat face.
 pub(super) enum Trim {
@@ -16,18 +19,33 @@ pub(super) enum Trim {
   Body { body: usize },
 }
 
-/// How a sweep's profile is steered along the path.
+/// How a sweep's profile is steered and shaped along the path.
 pub(super) enum Guide {
   Plain,
-  Rail(Shape),
-  Twist(f64),
+  /// Designs without `SWEEP_UNIFIED`: a guide rail the section scales to touch (BRepFill
+  /// contact on border), as before the unified sweep.
+  LegacyRail(Shape),
+  /// Designs without `SWEEP_UNIFIED`: twisted (radians), sampled as before the unified sweep.
+  LegacyTwist(f64),
+  /// Along a guide rail, or twisted, tapered or kept parallel (radians).
+  Shaped {
+    rail: Option<Shape>,
+    scale: bool,
+    twist: f64,
+    taper: f64,
+    parallel: bool,
+  },
 }
 
 pub(super) fn sweep(face: &Shape, path: &Shape, guide: &Guide) -> Result<Shape, String> {
   match guide {
     Guide::Plain => face.sweep(path),
-    Guide::Rail(rail) => face.sweep_rail(path, rail),
-    Guide::Twist(a) => face.sweep_twisted(path, *a),
+    Guide::LegacyRail(rail) => face.sweep_rail_legacy(path, rail),
+    Guide::LegacyTwist(a) => face.sweep_twisted_legacy(path, *a),
+    Guide::Shaped { rail, scale, twist, taper, parallel } => face.sweep_guided(
+      path,
+      &SweepOptions { rail: rail.as_ref(), scale: *scale, twist: *twist, taper: *taper, parallel: *parallel },
+    ),
   }
   .map_err(ke)
 }
@@ -39,18 +57,19 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
     shapes.push(model.body(*b).map(|b| b.shape.clone()).ok_or(format!("body {} no longer exists", b.0))?);
   }
   let mut pls = Vec::new();
+  // only where each plane is matters here, so the frames are left as they always were
   for p in planes {
     pls.push(match p {
-      PlaneRef::Origin { plane } => plane.plane(),
+      PlaneRef::Origin { plane } => plane.plane(crate::Frames::Legacy),
       PlaneRef::Construction { feature } => *model.planes.get(feature).ok_or("its construction plane failed")?,
-      PlaneRef::Face { face } => {
+      PlaneRef::Face { face, .. } => {
         let body = model.body(face.body).ok_or("the plane's body no longer exists")?;
         let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
         let info = body.faces().iter().find(|f| f.id == fid).ok_or("the face could not be found")?;
         if info.kind != SurfaceKind::Plane {
           return Err("the face is not planar".into());
         }
-        super::sketch_plane_on(info.normal, info.origin)?
+        super::sketch_plane_on(info.normal, info.origin, crate::Frames::Legacy)?
       }
       // only where the plane is and which way it faces matter here
       PlaneRef::Free { origin, normal, .. } => {
@@ -106,19 +125,37 @@ pub(super) fn setback(orig: &Shape, filleted: &Shape, ids: &[u32], d: f64) -> fo
 impl Ctx<'_> {
   pub(super) fn apply_solid(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::Emboss { sketch, profiles, face, depth, deboss, wrap } => {
+      FeatureKind::Emboss { sketch, profiles, face, depth, deboss, wrap, horizontal, vertical, rotation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
-        let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
+        let (chosen, missing) = pick_profiles(&sk, profiles);
         if chosen.is_empty() {
           return Err("no profiles to emboss".into());
         }
         let d = self.len(depth)?;
+        let (h, v, turn) = (self.len(horizontal)?, self.len(vertical)?, self.angle(rotation)?);
         let (bi, info) = self.face_info(face)?;
-        let faces = chosen.iter().map(|p| Shape::face(&sk.plane, p)).collect::<Result<Vec<_>, _>>().map_err(ke)?;
-        // project from the sketch towards the face
+        let mut faces = chosen.iter().map(|p| Shape::face(&sk.plane, p)).collect::<Result<Vec<_>, _>>().map_err(ke)?;
+        // project from the sketch towards the face: onto a flat face always against its outward
+        // normal, which also covers a sketch lying in the face's own plane
         let mut dir = sk.plane.normal();
-        if (info.center - sk.plane.origin).dot(dir) < 0.0 {
+        let away = match info.plane() {
+          Some(pl) => dir.dot(pl.normal()) > 0.0,
+          None => (info.center - sk.plane.origin).dot(dir) < 0.0,
+        };
+        if away {
           dir = -dir;
+        }
+        if h != 0.0 || v != 0.0 || turn != 0.0 {
+          // in the face's frame as seen from outside it: x along the sketch's, up = out × x
+          let (x, out) = (sk.plane.x, -dir);
+          let up = out.cross(x);
+          let m = Shape::compound(&faces).and_then(|c| c.mass()).map_err(ke)?;
+          let c = (m.bbox_min + m.bbox_max) * 0.5;
+          faces = faces
+            .iter()
+            .map(|f| f.rotated(c, out, turn).and_then(|f| f.translated(x * h + up * v)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ke)?;
         }
         let body = &self.state.bodies[bi];
         let tool = body.shape.emboss_tool(info.id, &faces, dir, d, *deboss, *wrap).map_err(ke)?;
@@ -211,18 +248,73 @@ impl Ctx<'_> {
 
   fn path_shape(&self, r: &PathRef) -> Result<Shape, String> {
     let ps = self.state.sketches.get(&r.sketch).ok_or("a rail or centre line sketch failed")?;
-    let segs = sheet::open_path(&ps.sketch, &r.curves)?;
-    Shape::path(&ps.plane, &segs).map_err(ke)
+    crate::include::sketch_path(ps, &r.curves)
   }
 
-  pub(super) fn sweep_guide(&self, rail: Option<&PathRef>, twist: &str) -> Result<Guide, String> {
-    let a = if twist.trim().is_empty() { 0.0 } else { self.angle(twist)? };
-    match rail {
-      Some(_) if a.abs() > 1e-12 => Err("a sweep along a guide rail can't twist".into()),
-      Some(r) => Ok(Guide::Rail(self.path_shape(r)?)),
-      None if a.abs() > 1e-12 => Ok(Guide::Twist(a)),
-      None => Ok(Guide::Plain),
+  pub(super) fn sweep_guide(
+    &self,
+    rail: Option<&PathRef>,
+    twist: &str,
+    taper: &str,
+    orientation: SweepOrientation,
+    scaling: ProfileScaling,
+  ) -> Result<Guide, String> {
+    let angle = |e: &str| if e.trim().is_empty() { Ok(0.0) } else { self.angle(e) };
+    let (twist, taper) = (angle(twist)?, angle(taper)?);
+    let parallel = orientation == SweepOrientation::Parallel;
+    if taper.abs() >= std::f64::consts::FRAC_PI_2 {
+      return Err("the taper angle must be under 90 degrees".into());
     }
+    let (twisted, tapered) = (twist.abs() > 1e-12, taper.abs() > 1e-12);
+    // designs from before SWEEP_UNIFIED build the rail and twist sweeps they could express with
+    // the old kernel code (the new options have no old form and always take the new path)
+    if !self.behaviours.has(fox_sketch::behaviour::SWEEP_UNIFIED) && !tapered && !parallel {
+      match rail {
+        Some(_) if twisted => return Err("a sweep along a guide rail can't twist".into()),
+        Some(r) if scaling == ProfileScaling::Scale => return Ok(Guide::LegacyRail(self.path_shape(r)?)),
+        None if twisted => return Ok(Guide::LegacyTwist(twist)),
+        _ => {}
+      }
+    }
+    match rail {
+      Some(_) if twisted => Err("a sweep along a guide rail can't twist".into()),
+      Some(_) if tapered => Err("a sweep along a guide rail can't taper".into()),
+      Some(_) if parallel => Err("a sweep along a guide rail follows the rail, not a parallel orientation".into()),
+      None if twisted && parallel => Err("a parallel sweep can't twist".into()),
+      None if !twisted && !tapered && !parallel => Ok(Guide::Plain),
+      r => Ok(Guide::Shaped {
+        rail: r.map(|r| self.path_shape(r)).transpose()?,
+        scale: scaling == ProfileScaling::Scale,
+        twist,
+        taper,
+        parallel,
+      }),
+    }
+  }
+
+  /// A loft with its sections' end conditions: a point tangent end makes a dome from the other
+  /// (profile) section to the point; the rest loft as [`Self::loft_guided`] does.
+  pub(super) fn loft_ends(
+    &self,
+    sections: &[LoftSection],
+    faces: &[Shape],
+    ruled: bool,
+    closed: bool,
+    rails: &[PathRef],
+    centerline: Option<&PathRef>,
+  ) -> Result<Shape, String> {
+    let tangent = sections.iter().enumerate().find_map(|(i, s)| match s.end {
+      LoftEnd::PointTangent { weight } => Some((i, weight)),
+      _ => None,
+    });
+    let Some((at, weight)) = tangent else { return self.loft_guided(faces, ruled, closed, rails, centerline) };
+    if sections.len() != 2 || closed || ruled || !rails.is_empty() || centerline.is_some() {
+      return Err("a point tangent end needs a loft of one profile and one point, without rails".into());
+    }
+    let (apex, profile) = (&faces[at], &faces[1 - at]);
+    let sk = self.state.sketches.get(&sections[at].sketch).ok_or("the point's sketch failed")?;
+    let axis = sk.plane.x.cross(sk.plane.y);
+    Shape::loft_point_tangent(profile, apex, axis, weight).map_err(ke)
   }
 
   pub(super) fn loft_guided(
@@ -234,13 +326,18 @@ impl Ctx<'_> {
     centerline: Option<&PathRef>,
   ) -> Result<Shape, String> {
     match (rails.is_empty(), centerline) {
+      // a smooth closed loop: periodic all the way round, with no seam at the first section (older
+      // designs loft open and add the first section again at the end)
+      (true, None) if closed && !ruled && self.behaviours.has(LOFT_CLOSED_SMOOTH) => {
+        Shape::loft_closed(faces).map_err(ke)
+      }
       (true, None) => Shape::loft(faces, ruled, closed).map_err(ke),
       _ if closed => Err("a closed loft can't follow rails or a centre line".into()),
       (false, Some(_)) => Err("a loft follows rails or a centre line, not both".into()),
       (true, Some(c)) => Shape::loft_centerline(faces, &self.path_shape(c)?).map_err(ke),
       (false, None) => {
         let rs = rails.iter().map(|r| self.path_shape(r)).collect::<Result<Vec<_>, _>>()?;
-        Shape::loft_rails(faces, &rs).map_err(ke)
+        Shape::loft_rails_with(faces, &rs, self.behaviours.has(LOFT_RAIL_SPREAD)).map_err(ke)
       }
     }
   }

@@ -6,18 +6,21 @@ use fox_engine::Sel;
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::DVec3;
 use fox_engine::model::FeatureId;
-use fox_engine::render::{self, StandardView, ray_plane};
+use fox_engine::render::{self, ray_plane};
 use fox_engine::scene::{Pick, ViewOptions};
-use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+use fox_engine::sketch::{ConstraintKind, CurveKind, Ellipse2, PointId, Sketch};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
+use crate::preferences::NavAction;
 use crate::{App, RenderKey};
 
 /// Screen-space snap radius for sketch points (points, logical pixels).
 const SNAP_PX: f32 = 9.0;
 /// Lines within this angle of horizontal/vertical snap to it (degrees).
 const HV_SNAP_DEG: f64 = 2.5;
+/// The cursor lines up with a sketch point within this many logical pixels (inference lines).
+const ALIGN_PX: f64 = 6.0;
 /// Max rendered pixels (keeps software rendering interactive on HiDPI screens).
 const MAX_PIXELS: f32 = 3_000_000.0;
 
@@ -27,6 +30,8 @@ pub enum NavMode {
   Orbit,
   Pan,
   Zoom,
+  /// Drag a box to zoom into it (once).
+  ZoomWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +102,11 @@ pub enum Drag {
   Paint,
   /// Dragging a handle of the dialog's move/rotate triad (see [`crate::manipulators`]).
   Triad,
+  /// Zoom Window: the box being dragged.
+  ZoomWindow {
+    start: Pos2,
+    now: Pos2,
+  },
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -113,6 +123,11 @@ pub struct ToolState {
   curves: Vec<(u32, [f64; 2])>,
   /// Heads-up value boxes of the shape being drawn.
   hud: HeadsUp,
+  /// Center Point Arc: the cursor's last angle around the centre and the signed sweep it has
+  /// wound from the start, so the arc runs the way the cursor went (negative = clockwise).
+  arc_wind: Option<(f64, f64)>,
+  /// Line: a press on the end of the last segment is being dragged; it draws a tangent arc.
+  line_arc: bool,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -128,6 +143,8 @@ struct HeadsUp {
   buf: Option<String>,
   /// Give the active box the keyboard this frame (selecting its text when true).
   focus: Option<bool>,
+  /// Tab (false) or Shift+Tab (true) was pressed for the boxes this frame.
+  tab: Option<bool>,
   /// The last cursor position on the sketch plane, and the point it snapped to.
   cursor: Option<([f64; 2], Option<PointId>)>,
 }
@@ -163,6 +180,30 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.dim_first = None;
   app.tstate.curves.clear();
   app.tstate.hud = HeadsUp::default();
+  app.tstate.arc_wind = None;
+  app.tstate.line_arc = false;
+}
+
+/// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
+/// sweeps the way the cursor went, as in Fusion.
+fn track_arc_wind(app: &mut App, resp: &egui::Response, view: &View) {
+  let wind = match (app.tool, app.tstate.pts.as_slice()) {
+    (Tool::CenterArc, [c, a]) => {
+      let (c, a) = (*c, *a);
+      resp.hover_pos().and_then(|pos| sketch_cursor(app, view, pos)).map(|(cur, _)| {
+        let cur = hud_apply(app, cur);
+        let ang = (cur[1] - c[1]).atan2(cur[0] - c[0]);
+        let (last, sweep) = app.tstate.arc_wind.unwrap_or(((a[1] - c[1]).atan2(a[0] - c[0]), 0.0));
+        let step = (ang - last + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        // past a full turn either way the direction stays as it was
+        (ang, (sweep + step).clamp(-std::f64::consts::TAU, std::f64::consts::TAU))
+      })
+    }
+    _ => None,
+  };
+  if wind.is_some() || app.tstate.pts.len() != 2 || app.tool != Tool::CenterArc {
+    app.tstate.arc_wind = wind;
+  }
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -209,8 +250,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     h: ((rect.height() * ppp).round() as u32).max(1),
   };
 
+  // a navigation drag that ends this frame (Zoom Window turns its mode off) isn't a click
+  let navigating = app.nav_mode.is_some();
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
+  appearance_drop(app, &resp, &view, &ctx);
   let planes = plane_pick(app, &resp, &view);
   render_if_needed(app, &view, &ctx);
 
@@ -221,17 +265,21 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
 
   let cam = app.cam;
+  crate::canvas_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::preview::overlay(app, &painter, &|p| view.to_screen(&cam, p));
 
   // overlays that take clicks come first
   let mut consumed = false;
+  shown_dims_overlay(app, &painter, &view);
+  consumed |= crate::canvas_ui::calibrate_clicks(app, &resp, &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
+  offset_plane_overlay(app, &painter, &view);
   if app.show_viewcube {
-    consumed |= viewcube(app, ui, &painter, &view);
+    consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
   if !consumed && let Some(plane) = hot_plane {
     consumed = true;
@@ -240,13 +288,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       app.create_sketch(plane);
     }
   }
-  let step = grid_step(app, &view) / 10.0;
+  let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  if app.objects.joints {
+    consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  }
   dim_editor(app, &ctx);
+  track_arc_wind(app, &resp, &view);
+  offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
+  trim_preview(app, &painter, &resp, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
   hud(app, &painter, &resp, &view);
@@ -256,6 +309,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
     painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
+  if let Some(Drag::ZoomWindow { start, now }) = app.drag {
+    let col = Color32::from_rgb(40, 120, 230);
+    painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
+  }
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
 
@@ -263,28 +320,45 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if resp.secondary_clicked()
     && let Some(p) = resp.interact_pointer_pos()
   {
+    // a right-click on a canvas (with nothing nearer under the pointer) is for the canvas
+    if app.hover.is_none() {
+      let (o, d) = view.ray(&cam, p);
+      if let Some((canvas, _)) = crate::canvas_ui::canvas_at(app, o, d) {
+        app.s.selection = vec![Sel::Feature { feature: canvas }];
+      }
+    }
     crate::marking::open(app, p);
-  } else if !consumed && app.nav_mode.is_none() && app.marking.is_none() {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp)
+  {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
 
 // ---------------------------------------------------------------- camera
 
+/// A left drag moving the camera (the Alias preset's Shift+Alt+left orbit): it selects nothing.
+fn left_navigating(app: &App, resp: &egui::Response) -> bool {
+  matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom))
+    && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped_by(egui::PointerButton::Primary))
+}
+
 fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
-  let (shift, scroll, zoom) = ctx.input(|i| (i.modifiers.shift, i.smooth_scroll_delta(), i.zoom_delta()));
+  let (mods, scroll, zoom) = ctx.input(|i| (i.modifiers, i.smooth_scroll_delta(), i.zoom_delta()));
+  // Preferences → Navigation: the preset's buttons, the zoom direction, zooming to the cursor
+  let prefs = &app.preferences.values;
+  let (preset, zoom_sign, to_cursor) = (prefs.nav, if prefs.reverse_zoom { -1.0 } else { 1.0 }, prefs.zoom_to_cursor);
   // the canvas still zooms with the pointer over its own overlays (the ViewCube), not over
   // panels and dialogs drawn above it
   if ctx.rect_contains_pointer(resp.layer_id, resp.rect) {
     let mut factor = 1.0;
     if scroll.y.abs() > 0.0 {
-      factor *= (-scroll.y as f64 * 0.0015).exp();
+      factor *= (-scroll.y as f64 * 0.0015 * zoom_sign).exp();
     }
     if (zoom - 1.0).abs() > 1e-4 {
       factor /= zoom as f64;
     }
     if (factor - 1.0f64).abs() > 1e-6 {
-      let toward = ctx.pointer_latest_pos().and_then(|p| {
+      let toward = ctx.pointer_latest_pos().filter(|_| to_cursor).and_then(|p| {
         let (o, d) = view.ray(&app.cam, p);
         let (_, _, back) = app.cam.basis();
         ray_plane(o, d, DVec3::from(app.cam.target), back)
@@ -293,29 +367,42 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       app.cam.zoom(factor, toward);
     }
   }
-  if resp.drag_started_by(egui::PointerButton::Secondary) {
-    app.drag = Some(if shift { Drag::Pan } else { Drag::Orbit });
-  }
-  if resp.drag_started_by(egui::PointerButton::Middle) {
-    app.drag = Some(if shift { Drag::Orbit } else { Drag::Pan });
+  for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+    if resp.drag_started_by(button)
+      && let Some(action) = preset.action(button, mods)
+    {
+      app.drag = Some(match action {
+        NavAction::Orbit => Drag::Orbit,
+        NavAction::Pan => Drag::Pan,
+        NavAction::Zoom => Drag::Zoom,
+      });
+    }
   }
   if let Some(mode) = app.nav_mode
     && resp.drag_started_by(egui::PointerButton::Primary)
   {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
     app.drag = Some(match mode {
       NavMode::Orbit => Drag::Orbit,
       NavMode::Pan => Drag::Pan,
       NavMode::Zoom => Drag::Zoom,
+      NavMode::ZoomWindow => Drag::ZoomWindow { start, now: start },
     });
+  }
+  if let Some(Drag::ZoomWindow { now, .. }) = &mut app.drag
+    && let Some(p) = resp.interact_pointer_pos()
+  {
+    *now = p;
   }
   let d = resp.drag_delta();
   if d != Vec2::ZERO && matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom)) {
     app.stop_cam_move();
   }
   match app.drag {
+    Some(Drag::Orbit) if app.free_orbit => app.cam.free_orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
-    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006).exp(), None),
+    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006 * zoom_sign).exp(), None),
     _ => {}
   }
   if resp.drag_stopped()
@@ -336,12 +423,40 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
       }
+      Drag::ZoomWindow { start, now } => {
+        let bx = Rect::from_two_pos(start, now);
+        let (o, d) = view.ray(&app.cam, bx.center());
+        let hit = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|(t, _)| o + d * *t);
+        if let Some(to) = zoom_window(&app.cam, view, bx, hit) {
+          app.fly_to(to);
+        }
+        // one box, as in Fusion
+        app.nav_mode = None;
+      }
       _ => {}
     }
   }
 }
 
 // ---------------------------------------------------------------- picking
+
+/// A swatch from the Appearance panel over the canvas: the face under it lights up, and letting
+/// go applies the appearance to that face or its body.
+fn appearance_drop(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let Some(drag) = egui::DragAndDrop::payload::<crate::dialogs::SwatchDrag>(ctx) else { return };
+  let Some(pos) = ctx.pointer_latest_pos().filter(|p| resp.rect.contains(*p)) else { return };
+  let Some(frame) = &app.frame else { return };
+  let (x, y) = view.to_px(pos);
+  let under = app.picks.get(frame.pick(x, y, 0, |_| true)).filter(|p| matches!(p, Pick::Face { .. }));
+  app.hover = under;
+  if ctx.input(|i| i.pointer.any_released()) {
+    egui::DragAndDrop::clear_payload(ctx);
+    if let Some(Pick::Face { body, face }) = under {
+      let target = if drag.faces { Sel::Face { body, face } } else { Sel::Body { body } };
+      crate::dialogs::apply_appearance(app, &drag.name, drag.color, drag.faces, &[target]);
+    }
+  }
+}
 
 fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   if app.drag.is_some() {
@@ -378,7 +493,8 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   } else if !sketching {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
-    let ok = |p: &Pick| filter.allows(p, priority);
+    let locked = &app.ctx_menu.unselectable;
+    let ok = |p: &Pick| filter.allows(p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
     if !app.hover.as_ref().is_some_and(ok) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
@@ -395,14 +511,19 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hover: app.hover,
     selection: app.s.selection.clone(),
     edit_sketch: app.s.edit_sketch,
-    show_edges: app.show_edges,
+    style: app.visual_style,
+    objects: app.objects,
+    effects: app.effects,
     show_grid: app.show_grid,
+    grid_step: app.grid.step(),
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
+    hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
+    opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -417,17 +538,32 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       ViewOptions::default()
     }
   };
+  let vis = app.objects;
   let opts = ViewOptions {
     hover: app.hover,
-    hide_edges: !app.show_edges,
+    hide_edges: !app.visual_style.edges(),
     hide_grid: !app.show_grid,
+    hide_origin: !vis.origins,
+    hide_sketches: !vis.sketches || analysis.hide_sketches,
+    hide_construction: !vis.construction,
+    grid_step: key.grid_step,
     show_profiles_of: profiles_of,
-    show_vertices: key.vertices,
+    hide_profiles_of: app.hidden_profiles.clone(),
+    show_vertices: key.vertices && vis.bodies,
     peek: app.ctx_menu.peek.clone(),
-    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    only_bodies: if vis.bodies {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    } else {
+      Some(Vec::new())
+    },
+    opacity: app.ctx_menu.opacity.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
     ..analysis
   };
-  let (scene, picks) = app.scene.build(&app.s, &opts);
+  let (mut scene, picks) = app.scene.build(&app.s, &opts);
+  scene.style = app.visual_style;
+  app.effects.apply(&mut scene);
   if crate::gpu::active(app) {
     crate::gpu::set_scene(app, scene, picks, key);
     return;
@@ -464,31 +600,131 @@ fn sketch_plane(app: &App) -> Option<(FeatureId, Plane)> {
 
 /// Cursor position on the sketch plane, snapped to nearby points and H/V alignment.
 fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>)> {
+  sketch_inference(app, view, pos).map(|(p, snapped, _)| (p, snapped))
+}
+
+/// [`sketch_cursor`], plus the points the cursor lines up with in x and in y (the inference
+/// lines' far ends).
+fn sketch_inference(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>, Aligned)> {
   let (sk, plane) = sketch_plane(app)?;
   // snap to the hovered point (exact coordinates)
   if let Some(Pick::SketchPoint { sketch, point }) = app.hover
     && sketch == sk
     && let Some(p) = app.s.design.sketch(sk).ok().and_then(|s| s.pos(point))
   {
-    return Some((p, Some(point)));
+    return Some((p, Some(point), [None, None]));
   }
   let (o, d) = view.ray(&app.cam, pos);
   let hit = ray_plane(o, d, plane.origin, plane.normal())?;
   let mut p = plane.to_local(hit);
   // H/V inference against the previous click
+  let mut locked = [false, false];
   if let Some(prev) = app.tstate.pts.last() {
     let (dx, dy) = (p[0] - prev[0], p[1] - prev[1]);
     let ang = dy.atan2(dx).to_degrees().abs();
     if ang < HV_SNAP_DEG || (180.0 - ang) < HV_SNAP_DEG {
       p[1] = prev[1];
+      locked[1] = true;
     } else if (ang - 90.0).abs() < HV_SNAP_DEG {
       p[0] = prev[0];
+      locked[0] = true;
     }
   }
-  // tidy coordinates: round to a precision that matches the zoom (a quarter grid cell with Snap)
-  let step = grid_step(app, view) / if app.snap { 4.0 } else { 100.0 };
+  // tidy coordinates: round to a precision that matches the zoom; Snap goes to the grid (a
+  // quarter cell of the adaptive one, or the set spacing)
+  let step = match (app.snap, app.grid.step()) {
+    (true, Some(fixed)) => fixed,
+    (true, None) => grid_step(app, view) / 4.0,
+    (false, _) => grid_step(app, view) / 100.0,
+  };
   p = [round_to(p[0], step), round_to(p[1], step)];
-  Some((p, None))
+  // inference lines: line up exactly with sketch points in line with the cursor
+  let world_per_px = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let (p, aligned) = align_to_points(p, &inference_points(app, sk), ALIGN_PX * world_per_px, locked);
+  Some((p, None, aligned))
+}
+
+/// The sketch points the cursor lines up with in x (a vertical guide) and in y (horizontal).
+type Aligned = [Option<[f64; 2]>; 2];
+
+/// Points the cursor infers alignment from: the sketch's points (ends, centres), line midpoints,
+/// and the clicks of the shape being drawn except the last (H/V against that is the line's own).
+fn inference_points(app: &App, sk: FeatureId) -> Vec<[f64; 2]> {
+  let mut out: Vec<[f64; 2]> = Vec::new();
+  if let Ok(s) = app.s.design.sketch(sk) {
+    out.extend(s.points.iter().map(|q| [q.x, q.y]));
+    for c in &s.curves {
+      if let CurveKind::Line { a, b } = c.kind
+        && let (Some(a), Some(b)) = (s.pos(a), s.pos(b))
+      {
+        out.push([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+      }
+    }
+  }
+  if let [rest @ .., _] = app.tstate.pts.as_slice() {
+    out.extend_from_slice(rest);
+  }
+  if let Some(last) = app.tstate.pts.last() {
+    out.retain(|q| (q[0] - last[0]).hypot(q[1] - last[1]) > 1e-9);
+  }
+  out
+}
+
+/// Snaps `p`'s x (and y) to the nearest point in `pts` whose x (y) is within `tol`, leaving
+/// `locked` axes alone. Of the points that line up, the one nearest the cursor anchors the guide.
+fn align_to_points(mut p: [f64; 2], pts: &[[f64; 2]], tol: f64, locked: [bool; 2]) -> ([f64; 2], Aligned) {
+  let mut aligned: Aligned = [None, None];
+  for axis in 0..2 {
+    if locked[axis] {
+      continue;
+    }
+    let other = 1 - axis;
+    let off = |q: &[f64; 2]| ((q[axis] - p[axis]).abs(), (q[other] - p[other]).abs());
+    let best = pts.iter().filter(|q| off(q).0 <= tol).min_by(|a, b| {
+      let ((da, oa), (db, ob)) = (off(a), off(b));
+      da.total_cmp(&db).then(oa.total_cmp(&ob))
+    });
+    if let Some(q) = best {
+      p[axis] = q[axis];
+      aligned[axis] = Some(*q);
+    }
+  }
+  (p, aligned)
+}
+
+/// Dotted inference lines from the points the cursor lines up with, as Fusion draws them.
+fn paint_inference_lines(app: &App, painter: &egui::Painter, view: &View, pos: Pos2) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some((cur, _, aligned)) = sketch_inference(app, view, pos) else { return };
+  let s = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let col = Color32::from_rgb(110, 110, 120);
+  for q in aligned.into_iter().flatten() {
+    if let (Some(a), Some(b)) = (s(q), s(cur)) {
+      painter.extend(egui::Shape::dotted_line(&[a, b], col, 5.0, 1.0));
+    }
+  }
+}
+
+/// Zoom Window: the camera that fills the view with `bx` (screen points), centred on it: on `hit`
+/// (the model under the box's centre) when given, else on the target's depth. None for a box too
+/// small to mean anything.
+fn zoom_window(cam: &render::Camera, view: &View, bx: Rect, hit: Option<DVec3>) -> Option<render::Camera> {
+  if bx.width() < 4.0 || bx.height() < 4.0 || view.rect.width() < 1.0 || view.rect.height() < 1.0 {
+    return None;
+  }
+  let (o, d) = view.ray(cam, bx.center());
+  let (_, _, back) = cam.basis();
+  let centre = match hit {
+    Some(h) => h,
+    None => ray_plane(o, d, DVec3::from(cam.target), back)?,
+  };
+  // the box spans this much of the view at the centre's depth
+  let depth = (cam.eye() - centre).dot(back).max(1e-3);
+  let k = (bx.width() / view.rect.width()).max(bx.height() / view.rect.height()) as f64;
+  let mut to = *cam;
+  to.target = centre.to_array();
+  to.distance = if cam.ortho { cam.distance * k } else { depth * k }.clamp(1e-3, 1e7);
+  Some(to)
 }
 
 fn round_to(v: f64, step: f64) -> f64 {
@@ -533,6 +769,9 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     *now = pos;
     return;
   }
+  if line_arc_drag(app, resp, view, ctx, pos) || trim_drag(app, resp, view) {
+    return;
+  }
 
   if !resp.clicked() {
     return;
@@ -552,9 +791,24 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     }
   }
   let sketching = app.s.edit_sketch.is_some();
+  // Sketch Offset follows the cursor until a click places it (a click on another curve still
+  // adds it to the offset)
+  if let Some(d) = app.dialog.as_mut()
+    && d.follows_cursor()
+    && !matches!(app.hover, Some(Pick::SketchCurve { .. }))
+  {
+    d.stop_following();
+    return;
+  }
   if !sketching || app.tool == Tool::Select {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
     select_click(app, add || app.dialog.is_some());
+    // double-clicking an edge selects its loop
+    if resp.double_clicked()
+      && let Some(Pick::Edge { body, edge }) = app.hover
+    {
+      crate::select::pick_loop(app, body, edge, add || app.dialog.is_some());
+    }
     // double-clicking a letter of a text edits the text
     if resp.double_clicked()
       && app.dialog.is_none()
@@ -635,7 +889,9 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     },
     Tool::Arc3 if n == 3 => Some(("sketch.arc", json!({"sketch": sid, "start": first, "end": pts[1], "mid": p}))),
     Tool::CenterArc if n == 3 => {
-      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p})))
+      // the arc runs the way the cursor wound around the centre
+      let clockwise = app.tstate.arc_wind.take().is_some_and(|(_, sweep)| sweep < 0.0);
+      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p, "clockwise": clockwise})))
     }
     Tool::Polygon if n == 2 => {
       Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6})))
@@ -681,16 +937,21 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       };
       Some(("sketch.slot", q))
     }
-    Tool::Ellipse if n == 3 => {
-      let minor = point_line_dist(p, first, pts[1]);
-      Some(("sketch.ellipse", json!({"sketch": sid, "center": first, "major": pts[1], "minor": minor.max(0.01)})))
-    }
+    Tool::Ellipse if n == 3 => match Ellipse2::minor_through(first, pts[1], p) {
+      // the ellipse passes through the third pick, as in Fusion
+      Some(_) => Some(("sketch.ellipse", json!({"sketch": sid, "center": first, "major": pts[1], "point": p}))),
+      None => {
+        app.status = Some(("Ellipse: the third point must lie off the axis and within its length".into(), true));
+        app.tstate.pts.pop();
+        None
+      }
+    },
     Tool::Conic if n == 3 => {
       Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
     }
     Tool::MidpointLine if n == 2 => {
-      let a = [2.0 * first[0] - p[0], 2.0 * first[1] - p[1]];
-      Some(("sketch.line", json!({"sketch": sid, "points": [a, p]})))
+      // the engine mirrors the end through the midpoint and keeps the midpoint on the line's middle
+      Some(("sketch.line", json!({"sketch": sid, "mid": first, "end": p})))
     }
     Tool::TangentArc if n == 2 => match tangent_curve(app, sk, first) {
       Some(curve) => Some(("sketch.arc", json!({"sketch": sid, "tangent": curve, "start": first, "end": p}))),
@@ -730,8 +991,14 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
     .iter()
     .enumerate()
     .filter(|(i, _)| hud_value(app, *i).is_some())
-    .map(|(i, f)| (*f, app.tstate.hud.typed[i].trim().to_string()))
+    .map(|(i, f)| (*f, hud_text(app, *f, &app.tstate.hud.typed[i])))
     .collect()
+}
+
+/// Heads-up box text as an expression: a bare length means the design's unit.
+fn hud_text(app: &App, field: Field, text: &str) -> String {
+  let t = text.trim();
+  if field == Field::Angle { t.to_string() } else { app.s.design.units.typed(t) }
 }
 
 /// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
@@ -742,7 +1009,7 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
     return None;
   }
   let kind = if field == Field::Angle { fox_engine::expr::Kind::Angle } else { fox_engine::expr::Kind::Length };
-  let v = fox_engine::expr::eval(text, kind, &app.s.model.params).ok()?;
+  let v = fox_engine::expr::eval(&hud_text(app, field, text), kind, &app.s.model.params).ok()?;
   (field == Field::Angle || v > 1e-9).then_some(v)
 }
 
@@ -872,6 +1139,222 @@ fn tangent_curve(app: &App, sk: FeatureId, at: [f64; 2]) -> Option<u32> {
   })
 }
 
+/// Line: pressing on the end of the last segment and dragging draws a tangent arc to where the
+/// drag ends, as in Fusion; the chain then carries on with lines from the arc's end. Returns true
+/// while such a drag has the pointer.
+fn line_arc_drag(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context, pos: Pos2) -> bool {
+  if app.tool != Tool::Line {
+    return false;
+  }
+  let Some((sk, plane)) = sketch_plane(app) else { return false };
+  if resp.drag_started_by(egui::PointerButton::Primary)
+    && let Some(&last) = app.tstate.pts.last()
+    && tangent_curve(app, sk, last).is_some()
+    && let Some(at) = view.to_screen(&app.cam, plane.to_world(last))
+    && ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - at).length() <= SNAP_PX)
+  {
+    app.tstate.line_arc = true;
+  }
+  if !app.tstate.line_arc {
+    return false;
+  }
+  if resp.drag_stopped() {
+    app.tstate.line_arc = false;
+    if let Some((end, _)) = sketch_cursor(app, view, pos) {
+      line_tangent_arc(app, sk, end);
+    }
+  }
+  true
+}
+
+/// Draws the Line tool's tangent arc from the chain's last point to `end`; the chain continues
+/// from `end`.
+fn line_tangent_arc(app: &mut App, sk: FeatureId, end: [f64; 2]) {
+  let Some(&start) = app.tstate.pts.last() else { return };
+  if (end[0] - start[0]).hypot(end[1] - start[1]) < 1e-9 {
+    return;
+  }
+  let Some(curve) = tangent_curve(app, sk, start) else { return };
+  app.tstate.hud = HeadsUp::default();
+  if app.run("sketch.arc", json!({"sketch": sk.0, "tangent": curve, "start": start, "end": end})).is_some() {
+    app.tstate.pts.push(end);
+  }
+}
+
+/// The tangent arc from `start` (the end of a line or arc) to `end`, as the engine's
+/// `sketch.arc {tangent}` draws it: points along it, or None when nothing ends at `start` or the
+/// end lies straight ahead.
+fn tangent_arc_points(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<Vec<[f64; 2]>> {
+  let sk = app.s.edit_sketch?;
+  let curve = fox_engine::sketch::CurveId(tangent_curve(app, sk, start)?);
+  let sketch = app.s.design.sketch(sk).ok()?;
+  let dir = match sketch.curve(curve)?.kind {
+    CurveKind::Line { a, b } => {
+      let (pa, pb) = (sketch.pos(a)?, sketch.pos(b)?);
+      let at_b = (pb[0] - start[0]).hypot(pb[1] - start[1]) <= (pa[0] - start[0]).hypot(pa[1] - start[1]);
+      if at_b { [pb[0] - pa[0], pb[1] - pa[1]] } else { [pa[0] - pb[0], pa[1] - pb[1]] }
+    }
+    CurveKind::Arc { center, end: e, .. } => {
+      let c = sketch.pos(center)?;
+      let r = [start[0] - c[0], start[1] - c[1]];
+      let ccw = [-r[1], r[0]];
+      let at_end = sketch.pos(e).is_some_and(|e| (e[0] - start[0]).hypot(e[1] - start[1]) < 1e-6);
+      if at_end { ccw } else { [-ccw[0], -ccw[1]] }
+    }
+    _ => return None,
+  };
+  let l = dir[0].hypot(dir[1]);
+  if l < 1e-12 {
+    return None;
+  }
+  let n = [-dir[1] / l, dir[0] / l];
+  let chord = [end[0] - start[0], end[1] - start[1]];
+  let den = 2.0 * (chord[0] * n[0] + chord[1] * n[1]);
+  if den.abs() < 1e-12 {
+    return None;
+  }
+  let t = (chord[0] * chord[0] + chord[1] * chord[1]) / den;
+  let c = [start[0] + n[0] * t, start[1] + n[1] * t];
+  let r = t.abs();
+  let (a0, a1) = ((start[1] - c[1]).atan2(start[0] - c[0]), (end[1] - c[1]).atan2(end[0] - c[0]));
+  let tau = std::f64::consts::TAU;
+  // counter-clockwise when the centre is on the left of the way the curve runs
+  let sweep = if t > 0.0 { (a1 - a0).rem_euclid(tau) } else { -(a0 - a1).rem_euclid(tau) };
+  Some(
+    (0..=64)
+      .map(|i| {
+        let a = a0 + sweep * i as f64 / 64.0;
+        [c[0] + r * a.cos(), c[1] + r * a.sin()]
+      })
+      .collect(),
+  )
+}
+
+/// Trim: dragging across curves trims each one the pointer crosses (once per drag), as in
+/// Fusion. Returns true while such a drag is going on.
+fn trim_drag(app: &mut App, resp: &egui::Response, view: &View) -> bool {
+  if app.tool != Tool::Trim {
+    return false;
+  }
+  if resp.drag_started_by(egui::PointerButton::Primary) {
+    app.tstate.curves.clear();
+  }
+  if resp.drag_stopped() {
+    app.tstate.curves.clear();
+    return true;
+  }
+  if !resp.dragged_by(egui::PointerButton::Primary) {
+    return false;
+  }
+  let Some((sk, plane)) = sketch_plane(app) else { return true };
+  if let Some(Pick::SketchCurve { sketch, curve }) = app.hover
+    && sketch == sk
+    && !app.tstate.curves.iter().any(|c| c.0 == curve.0)
+    && let Some(pos) = resp.interact_pointer_pos()
+  {
+    let (o, d) = view.ray(&app.cam, pos);
+    let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return true };
+    let at = plane.to_local(hit);
+    app.tstate.curves.push((curve.0, at));
+    if let Some(r) = app.run("sketch.trim", json!({"sketch": sk.0, "curve": curve.0, "at": at})) {
+      // the pieces left are done for this drag too (the frame under the pointer is a step behind)
+      for c in r["curves"].as_array().into_iter().flatten().filter_map(|v| v.as_u64()) {
+        app.tstate.curves.push((c as u32, at));
+      }
+    }
+  }
+  true
+}
+
+/// The piece of `curve` that Trim at `at` removes (between the nearest crossings, or the whole
+/// curve), as polylines in sketch coordinates.
+pub(crate) fn trim_piece(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at: [f64; 2]) -> Vec<Vec<[f64; 2]>> {
+  let Some(c) = sketch.curve(curve) else { return Vec::new() };
+  let line = fox_engine::scene::curve_polyline(sketch, &c.kind);
+  let mut after = sketch.clone();
+  let Ok(kept) = after.trim(curve, at) else { return Vec::new() };
+  let size = line.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum::<f64>();
+  let tol = (size * 1e-4).max(1e-9);
+  const SPLIT: usize = 8;
+  let mut samples: Vec<[f64; 2]> = Vec::new();
+  for w in line.windows(2) {
+    for i in 0..SPLIT {
+      let k = i as f64 / SPLIT as f64;
+      samples.push([w[0][0] + (w[1][0] - w[0][0]) * k, w[0][1] + (w[1][1] - w[0][1]) * k]);
+    }
+  }
+  samples.extend(line.last().copied());
+  let removed = |p: [f64; 2]| !kept.iter().any(|k| after.distance_to_curve(*k, p).is_some_and(|d| d <= tol));
+  let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
+  let mut cur: Vec<[f64; 2]> = Vec::new();
+  // where the cut is between a kept sample and a removed one (the chord near the curve)
+  let cut = |kept: [f64; 2], gone: [f64; 2]| -> [f64; 2] {
+    let (mut a, mut b) = (kept, gone);
+    for _ in 0..40 {
+      let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+      if removed(m) {
+        b = m;
+      } else {
+        a = m;
+      }
+    }
+    b
+  };
+  let mut prev: Option<[f64; 2]> = None;
+  for p in samples {
+    if removed(p) {
+      if cur.is_empty()
+        && let Some(q) = prev
+      {
+        cur.push(cut(q, p));
+      }
+      cur.push(p);
+    } else if let Some(&last) = cur.last() {
+      cur.push(cut(p, last));
+      runs.push(std::mem::take(&mut cur));
+    }
+    prev = Some(p);
+  }
+  runs.push(cur);
+  runs.retain(|r| r.len() >= 2);
+  runs
+}
+
+/// Trim: the piece the click would remove, in red under the pointer, as in Fusion.
+fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
+  if app.tool != Tool::Trim {
+    return;
+  }
+  let Some((sk, plane)) = sketch_plane(app) else { return };
+  let (Some(Pick::SketchCurve { sketch, curve }), Some(pos)) = (app.hover, resp.hover_pos()) else { return };
+  if sketch != sk {
+    return;
+  }
+  let (o, d) = view.ray(&app.cam, pos);
+  let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
+  let Ok(s) = app.s.design.sketch(sk) else { return };
+  let stroke = Stroke::new(3.0, Color32::from_rgb(225, 40, 40));
+  for run in trim_piece(s, curve, plane.to_local(hit)) {
+    let pts: Vec<Pos2> = run.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
+    painter.add(egui::Shape::line(pts, stroke));
+  }
+}
+
+/// Sketch Offset: until a click places it, the offset's distance and side follow the cursor.
+fn offset_follow(app: &mut App, resp: &egui::Response, view: &View) {
+  if app.drag.is_some() || !app.dialog.as_ref().is_some_and(|d| d.follows_cursor()) {
+    return;
+  }
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some(pos) = resp.hover_pos() else { return };
+  let (o, d) = view.ray(&app.cam, pos);
+  let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
+  let step = grid_step(app, view) / 10.0;
+  if let Some(dlg) = app.dialog.as_mut() {
+    dlg.follow_cursor(&app.s, plane.to_local(hit), step);
+  }
+}
+
 /// Break, 2/3-tangent circle and blend: clicks pick curves (a 2-tangent circle's last click sets
 /// its size and place).
 fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
@@ -919,7 +1402,7 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
     }
     (Tool::Blend, [a, b]) => {
       app.tstate.curves.clear();
-      let continuity = if shift { "g1" } else { "g2" };
+      let continuity = if shift { "g2" } else { "g1" };
       app.run("sketch.blend", json!({"sketch": sk.0, "curves": curves, "near": [a.1, b.1], "continuity": continuity}));
     }
     _ => {}
@@ -992,7 +1475,7 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       Some(CurveKind::Line { a, b }) => {
         if shift {
           app.tstate.dim_first = hover;
-          app.status = Some(("Pick a second line for an angle".into(), false));
+          app.hint("Pick a second line for an angle");
           return;
         }
         (json!({"type": "distance", "points": [a.0, b.0]}), dist(&sketch, a, b))
@@ -1004,13 +1487,15 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
         | CurveKind::ControlSpline { .. }
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. },
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. },
       )
       | None => return,
     },
     (None, Some(Pick::SketchPoint { .. })) => {
       app.tstate.dim_first = hover;
-      app.status = Some(("Pick a second point or a line".into(), false));
+      app.hint("Pick a second point or a line");
       return;
     }
     (Some(Pick::SketchPoint { point: a, .. }), Some(Pick::SketchPoint { point: b, .. })) if a != b => {
@@ -1035,7 +1520,11 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       return;
     }
   };
-  let text = current.map(|v| fox_engine::sketch::Dim::new(v).expr).unwrap_or_default();
+  // the measured value, in the design's unit (degrees for an angle)
+  let angle = cmd["type"] == "angle";
+  let unit = app.s.design.units;
+  let text =
+    current.map(|v| if angle { fox_engine::sketch::Dim::new(v).expr } else { unit.number(v) }).unwrap_or_default();
   // stash the pending dimension in the editor (constraint id 0 = new)
   app.dim_edit = Some((0, text, pos));
   app.tstate.pending_dim = Some(cmd);
@@ -1090,14 +1579,25 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
     // the Enter is this box's, not the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     if let Some(sk) = app.s.edit_sketch {
+      // a bare length means the design's unit
+      let unit = app.s.design.units;
       if cid == 0 {
         if let Some(mut cmd) = app.tstate.pending_dim.take() {
+          let value = if cmd["type"] == "angle" { text.clone() } else { unit.typed(&text) };
           cmd["sketch"] = json!(sk.0);
-          cmd["value"] = json!(text);
+          cmd["value"] = json!(value);
           app.run("sketch.dimension", cmd);
         }
       } else {
-        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": text}));
+        let angle = app
+          .s
+          .design
+          .sketch(sk)
+          .ok()
+          .and_then(|s| s.constraint(fox_engine::sketch::ConstraintId(cid)))
+          .is_some_and(|c| c.kind.is_angle());
+        let value = if angle { text.clone() } else { unit.typed(&text) };
+        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": value}));
       }
     }
   }
@@ -1124,6 +1624,40 @@ pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, se
 
 // ---------------------------------------------------------------- overlays
 
+/// The dimensions of sketches the browser's Show Dimensions turned on, drawn (not editable)
+/// while they're not being edited.
+fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let font = egui::FontId::proportional(12.0);
+  for sk in &app.shown_dims {
+    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+      continue;
+    }
+    let Some(r) = app.s.model.sketches.get(sk) else { continue };
+    let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
+    for c in &r.sketch.constraints {
+      let Some(dim) = c.kind.dim() else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim, app.s.design.units) else { continue };
+      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
+      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
+      let at = match &shape {
+        Some(s) => s.label,
+        None => match to_screen(anchor) {
+          Some(p) => p,
+          None => continue,
+        },
+      };
+      if let Some(s) = &shape {
+        paint_dim(painter, s, DIM_INK);
+      }
+      let rect = Rect::from_center_size(at, size);
+      painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+      painter.galley(rect.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+    }
+  }
+}
+
 /// Dimension labels and constraint glyphs of the sketch being edited. Returns true when a click
 /// was consumed.
 fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
@@ -1140,7 +1674,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     }
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
-      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim) else { continue };
+      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim, app.s.design.units) else { continue };
       let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
       let size = galley.size() + Vec2::new(8.0, 4.0);
       // extension lines, dimension line and arrows, offset from the geometry as in Fusion
@@ -1171,7 +1705,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       painter.galley(r.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
-        app.dim_edit = Some((c.id.0, dim.expr.clone(), at));
+        // a stored bare length is mm: shown with its unit in a design in another unit
+        let text = if c.kind.is_angle() { dim.expr.clone() } else { app.s.design.units.shown(&dim.expr) };
+        app.dim_edit = Some((c.id.0, text, at));
         consumed = true;
       } else if resp.clicked() {
         let add = ui.input(|i| i.modifiers.shift);
@@ -1433,12 +1969,19 @@ fn dim_shape(
   }
 }
 
-fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> Option<([f64; 2], String)> {
-  let numeric = dim.expr.trim().parse::<f64>().is_ok();
+fn dim_label(
+  s: &Sketch,
+  k: &ConstraintKind,
+  dim: &fox_engine::sketch::Dim,
+  unit: fox_engine::model::LengthUnit,
+) -> Option<([f64; 2], String)> {
+  // a plain value ("10", "1 in") shows as the number; an expression with parameters as "w = 10"
+  let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
     format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
   } else {
-    fox_engine::sketch::Dim::new(dim.value).expr
+    // in the design's unit, without the unit (as Fusion labels sketch dimensions)
+    fox_engine::expr::trim_number(unit.from_mm(dim.value))
   };
   let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
@@ -1488,8 +2031,9 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Tangent { .. } => Icon::Tangent,
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
+    ConstraintKind::Polygon { .. } => Icon::Equal,
     _ => Icon::Fix,
   }
 }
@@ -1547,7 +2091,14 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   };
   let pts = &app.tstate.pts;
   match (app.tool, pts.as_slice()) {
+    (Tool::Line, [.., last]) if app.tstate.line_arc => match tangent_arc_points(app, *last, cur) {
+      Some(arc) => poly(&arc, false),
+      None => line(*last, cur),
+    },
     (Tool::Line, [.., last]) => line(*last, cur),
+    (Tool::TangentArc, [a]) if tangent_arc_points(app, *a, cur).is_some() => {
+      poly(&tangent_arc_points(app, *a, cur).unwrap_or_default(), false)
+    }
     (Tool::Spline | Tool::ControlSpline | Tool::Conic | Tool::ArcSlot3 | Tool::ArcSlotCenter, [_, ..]) => {
       let mut all = pts.clone();
       all.push(cur);
@@ -1570,12 +2121,15 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc | Tool::MidpointLine, [a]) => line(*a, cur),
+    (Tool::MidpointLine, [a]) => line([2.0 * a[0] - cur[0], 2.0 * a[1] - cur[1]], cur),
+    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
       let w = point_line_dist(cur, *a, *b);
       if app.tool == Tool::Ellipse {
+        // through the cursor; off the ends of the axis, as far from it as the cursor
+        let w = Ellipse2::minor_through(*a, *b, cur).unwrap_or(w);
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let r = dx.hypot(dy).max(1e-12);
         let (c, s) = (dx / r, dy / r);
@@ -1604,7 +2158,23 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CenterArc, [c, a]) => circle(*c, (a[0] - c[0]).hypot(a[1] - c[1])),
+    (Tool::CenterArc, [c, a]) => {
+      // the arc so far, the way the cursor wound; a full circle until it moves
+      let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+      match app.tstate.arc_wind {
+        Some((_, sweep)) if sweep.abs() > 1e-9 => {
+          let a0 = (a[1] - c[1]).atan2(a[0] - c[0]);
+          let pts: Vec<[f64; 2]> = (0..=64)
+            .map(|i| {
+              let t = a0 + sweep * i as f64 / 64.0;
+              [c[0] + r * t.cos(), c[1] + r * t.sin()]
+            })
+            .collect();
+          poly(&pts, false);
+        }
+        _ => circle(*c, r),
+      }
+    }
     (Tool::Slot, [a, b]) => {
       let w = point_line_dist(cur, *a, *b);
       circle(*a, w);
@@ -1613,6 +2183,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     _ => {}
   }
+  paint_inference_lines(app, painter, view, pos);
   // cursor marker, and a coordinate readout where no heads-up dimensions show
   if let Some(p) = s(cur) {
     let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -1620,7 +2191,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     if !hud_fields(app.tool, pts.len()).is_empty() {
       return;
     }
-    let txt = format!("{}, {}", fox_engine::sketch::Dim::new(cur[0]).expr, fox_engine::sketch::Dim::new(cur[1]).expr);
+    let u = app.s.design.units;
+    let txt = format!("{}, {}", u.number(cur[0]), u.number(cur[1]));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -1635,6 +2207,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
 /// open dialog's primary value, as in Fusion. Runs before the shortcuts, so a digit can't also
 /// switch the selection mode.
 pub fn route_typing(app: &mut App, ctx: &egui::Context) {
+  take_hud_tab(app, ctx);
   if ctx.egui_wants_keyboard_input() || app.drawing.is_some() || app.dim_edit.is_some() || app.marking.is_some() {
     return;
   }
@@ -1673,9 +2246,34 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
   });
 }
 
+/// Tab belongs to the heads-up boxes while a shape with more than one is drawn (and no other
+/// text box has the keyboard). It's taken before any widget runs, so egui's focus traversal
+/// can't also move the keyboard (to a panel's field, or back to the box it came from).
+fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
+  let hud = &mut app.tstate.hud;
+  hud.tab = None;
+  if app.s.edit_sketch.is_none()
+    || hud_fields(app.tool, app.tstate.pts.len()).len() < 2
+    || app.drawing.is_some()
+    || app.dim_edit.is_some()
+    || app.marking.is_some()
+    || (hud.buf.is_none() && ctx.egui_wants_keyboard_input())
+  {
+    return;
+  }
+  let (tab, shift_tab) = ctx.input_mut(|i| {
+    (i.consume_key(egui::Modifiers::NONE, egui::Key::Tab), i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab))
+  });
+  if tab || shift_tab {
+    ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    hud.tab = Some(shift_tab);
+  }
+}
+
 /// The heads-up dimensions of the shape being drawn: each value's dimension follows the cursor
 /// with its box. Typing sets the active box, Tab moves to the next, Enter places the point.
 fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let tab = app.tstate.hud.tab.take();
   let fields = hud_fields(app.tool, app.tstate.pts.len());
   let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
     if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
@@ -1729,20 +2327,25 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     at.push(shape.map(|s| s.label));
   }
+  // lengths in the design's unit (a bare number typed back means that unit, see [`hud_text`])
+  let unit = app.s.design.units;
   let fmt = |i: usize| {
-    let v = fox_engine::sketch::Dim::new(live[i]).expr;
-    if fields[i] == Field::Angle { format!("{v}°") } else { v }
+    if fields[i] == Field::Angle {
+      format!("{}°", fox_engine::sketch::Dim::new(live[i]).expr)
+    } else {
+      unit.number(live[i])
+    }
   };
   let n = fields.len();
   let hud = &mut app.tstate.hud;
   hud.active = hud.active.min(n - 1);
-  let (tab, shift_tab) = ctx.input(|i| {
-    (i.key_pressed(egui::Key::Tab) && !i.modifiers.shift, i.key_pressed(egui::Key::Tab) && i.modifiers.shift)
-  });
   let mut commit = false;
-  // Tab with no box focused starts typing in the next box, with its value selected
-  if hud.buf.is_none() && (tab || shift_tab) && !ctx.egui_wants_keyboard_input() && n > 1 {
-    hud.active = (hud.active + 1) % n;
+  // Tab keeps what was typed and moves on to the next box (Shift+Tab: the previous one), or with
+  // no box focused starts typing in the next box; either way the box's value is selected
+  if let Some(back) = tab
+    && n > 1
+  {
+    hud.active = if back { (hud.active + n - 1) % n } else { (hud.active + 1) % n };
     let t = if hud.typed[hud.active].is_empty() { fmt(hud.active) } else { hud.typed[hud.active].clone() };
     hud.buf = Some(t);
     hud.focus = Some(true);
@@ -1773,13 +2376,7 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
             hud.typed[i] = buf.clone();
           }
           let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-          if r.has_focus() && (tab || shift_tab) && n > 1 {
-            // Tab keeps what was typed and moves on
-            let next = (i + 1) % n;
-            hud.active = next;
-            buf = if hud.typed[next].is_empty() { fmt(next) } else { hud.typed[next].clone() };
-            hud.focus = Some(true);
-          } else if enter && (r.has_focus() || r.lost_focus()) {
+          if enter && (r.has_focus() || r.lost_focus()) {
             commit = true;
             keep = false;
           } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
@@ -1866,7 +2463,7 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
     painter.line_segment([w[0], w[1]], stroke);
   }
   if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
-    let txt = format!("R {}", fox_engine::sketch::Dim::new(r).expr);
+    let txt = format!("R {}", app.s.design.units.number(r));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -1880,7 +2477,9 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
 /// Hints in the corner of the viewport.
 fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) {
   let hint = match (app.s.edit_sketch.is_some(), app.tool) {
-    (true, Tool::Line) => "Line: click points · click the first point to close · Esc to end",
+    (true, Tool::Line) => {
+      "Line: click points · drag from the last point for a tangent arc · click the first point to close · Esc to end"
+    }
     (true, Tool::Rect) => "Rectangle: click two corners",
     (true, Tool::CenterRect) => "Centre rectangle: click the centre, then a corner",
     (true, Tool::Circle) => "Circle: click the centre, then a point on the circle",
@@ -1890,7 +2489,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Slot) => "Slot: first centre, second centre, then the width",
     (true, Tool::Point) => "Point: click to place",
     (true, Tool::Spline) => "Spline: click fit points · click the last point again or Enter to finish",
-    (true, Tool::Trim) => "Trim: click the piece of a curve to remove",
+    (true, Tool::Trim) => "Trim: click the piece shown in red to remove it · drag across curves to trim each one",
     (true, Tool::Extend) => "Extend: click near the end of a line to extend it to the next curve",
     (true, Tool::Rect3) => "3-point rectangle: two corners along one side, then the height",
     (true, Tool::Circle2P) => "2-point circle: the two ends of a diameter",
@@ -1905,7 +2504,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::ControlSpline) => {
       "Control point spline: click control points · click the last again or Enter to finish"
     }
-    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the minor axis",
+    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the ellipse",
     (true, Tool::Conic) => "Conic: start, end, then the apex it bends towards",
     (true, Tool::MidpointLine) => "Midpoint line: the midpoint, then one end",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
@@ -1916,7 +2515,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
       _ => "2-tangent circle: click to place it (the size follows the cursor)",
     },
     (true, Tool::Circle3T) => "3-tangent circle: click three lines, circles or arcs near where it should touch",
-    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G1 (tangent only)",
+    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G2 (curvature continuous)",
     (false, _) => return,
   };
   if app.status.is_some() {
@@ -1931,186 +2530,6 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
   );
 }
 
-/// A clickable orientation cube in the top-right corner. Returns true when it took the click or
-/// is being dragged.
-fn viewcube(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
-  let size = 50.0f32;
-  let center = view.rect.right_top() + Vec2::new(-92.0, 80.0);
-  let (right, up, back) = app.cam.basis();
-  let proj = |v: DVec3| center + Vec2::new(v.dot(right) as f32, -v.dot(up) as f32) * size * 0.62;
-  let faces: [(DVec3, &str, StandardView); 6] = [
-    (DVec3::Z, "TOP", StandardView::Top),
-    (-DVec3::Z, "BOTTOM", StandardView::Bottom),
-    (-DVec3::Y, "FRONT", StandardView::Front),
-    (DVec3::Y, "BACK", StandardView::Back),
-    (DVec3::X, "RIGHT", StandardView::Right),
-    (-DVec3::X, "LEFT", StandardView::Left),
-  ];
-  let mut visible: Vec<(f64, Vec<Pos2>, &str, StandardView)> = Vec::new();
-  for (n, label, v) in faces {
-    let facing = n.dot(back);
-    if facing <= 0.02 {
-      continue;
-    }
-    // face corners
-    let (a, b) = if n.z.abs() > 0.5 {
-      (DVec3::X, DVec3::Y)
-    } else if n.x.abs() > 0.5 {
-      (DVec3::Y, DVec3::Z)
-    } else {
-      (DVec3::X, DVec3::Z)
-    };
-    let corners = [n + a + b, n - a + b, n - a - b, n + a - b].map(proj);
-    visible.push((facing, corners.to_vec(), label, v));
-  }
-  visible.sort_by(|x, y| x.0.total_cmp(&y.0));
-  // the cube with its Home and menu buttons is a widget like any other, so a dialog, menu or panel
-  // drawn over it takes the pointer instead
-  let menu = Rect::from_center_size(center + Vec2::new(size * 0.55, size * 1.15), Vec2::splat(16.0));
-  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
-  let cube_area = Rect::from_center_size(center, Vec2::splat(size * 2.2));
-  let resp = ui.interact(cube_area.union(home).union(menu), ui.id().with("viewcube"), Sense::click_and_drag());
-  // dragging the cube orbits, as on Fusion's
-  if resp.dragged_by(egui::PointerButton::Primary) {
-    let d = resp.drag_delta();
-    app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008);
-  }
-  let pointer = if resp.dragged() { None } else { resp.hover_pos() };
-  let clicked = resp.clicked();
-  let mut hit: Option<StandardView> = None;
-  for (facing, pts, _, v) in &visible {
-    if *facing > 0.0 && pointer.is_some_and(|p| point_in_quad(p, pts)) {
-      hit = Some(*v);
-    }
-  }
-  // lettered axis stubs leave the cube from its silhouette, as on Fusion's ViewCube; the ones
-  // pointing away from the viewer go behind the cube
-  let sgn = |bit: usize| if bit != 0 { 1.0 } else { -1.0 };
-  let axes = [
-    (DVec3::X, "X", Color32::from_rgb(222, 40, 36)),
-    (DVec3::Y, "Y", Color32::from_rgb(40, 170, 50)),
-    (DVec3::Z, "Z", Color32::from_rgb(30, 70, 220)),
-  ];
-  let stub = |painter: &egui::Painter, axis: DVec3, label: &str, col: Color32| {
-    // the silhouette corner furthest along the axis's on-screen direction
-    let d = proj(axis) - proj(DVec3::ZERO);
-    let base = (0..8)
-      .map(|i| DVec3::new(sgn(i & 1), sgn(i & 2), sgn(i & 4)))
-      .max_by(|a, b| {
-        ((proj(*a) - center).dot(d) + a.dot(axis) as f32).total_cmp(&((proj(*b) - center).dot(d) + b.dot(axis) as f32))
-      })
-      .unwrap_or(DVec3::ZERO);
-    painter.line_segment([proj(base), proj(base + axis * 0.55)], Stroke::new(2.5, col));
-    painter.text(proj(base + axis * 0.85), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), col);
-  };
-  for (axis, label, col) in axes {
-    if axis.dot(back) < 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // soft shadow under the cube
-  painter.add(egui::Shape::ellipse_filled(
-    center + Vec2::new(4.0, size * 0.95),
-    Vec2::new(size * 0.8, size * 0.16),
-    Color32::from_black_alpha(28),
-  ));
-  for (facing, pts, label, v) in &visible {
-    // grey, lit from above-left like Fusion's cube
-    let n = match v {
-      StandardView::Top => DVec3::Z,
-      StandardView::Bottom => -DVec3::Z,
-      StandardView::Front => -DVec3::Y,
-      StandardView::Back => DVec3::Y,
-      StandardView::Right => DVec3::X,
-      _ => -DVec3::X,
-    };
-    let light = (n.dot(up) * 0.6 - n.dot(right) * 0.25 + 0.55).clamp(0.0, 1.0) as f32;
-    let shade = (196.0 + 48.0 * light) as u8;
-    let fill = if hit == Some(*v) { Color32::from_rgb(170, 208, 240) } else { Color32::from_gray(shade) };
-    painter.add(egui::Shape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, Color32::from_gray(140))));
-    if *facing > 0.25 {
-      // the label lies in the face: rotate it along the face's horizontal
-      let h = match v {
-        StandardView::Top | StandardView::Bottom | StandardView::Front => DVec3::X,
-        StandardView::Back => -DVec3::X,
-        StandardView::Right => DVec3::Y,
-        _ => -DVec3::Y,
-      };
-      let dir = proj(n + h) - proj(n);
-      let angle = dir.y.atan2(dir.x);
-      let c = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2()) / 4.0;
-      let color = Color32::from_gray(60).gamma_multiply((*facing as f32 * 1.5).min(1.0));
-      let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(10.5), color);
-      let half = galley.size() / 2.0;
-      let rot = egui::emath::Rot2::from_angle(angle);
-      let pos = c.to_pos2() - rot * half;
-      painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(angle));
-    }
-  }
-  for (axis, label, col) in axes {
-    if axis.dot(back) >= 0.0 {
-      stub(painter, axis, label, col);
-    }
-  }
-  // the ViewCube menu button under the cube
-  let menu_hover = pointer.is_some_and(|p| menu.contains(p));
-  crate::icons::draw(
-    painter,
-    menu,
-    crate::icons::Icon::Component,
-    if menu_hover { crate::theme::ACCENT } else { Color32::from_gray(70) },
-  );
-  // home button
-  let home_hover = pointer.is_some_and(|p| home.contains(p));
-  let hc = if home_hover { crate::theme::ACCENT } else { Color32::from_gray(90) };
-  let hs = Stroke::new(1.5, hc);
-  let (hx, hy) = (home.center().x, home.center().y);
-  painter.add(egui::Shape::closed_line(
-    vec![
-      Pos2::new(hx - 7.0, hy - 1.0),
-      Pos2::new(hx, hy - 7.0),
-      Pos2::new(hx + 7.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy - 1.0),
-      Pos2::new(hx + 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy + 6.0),
-      Pos2::new(hx - 5.0, hy - 1.0),
-    ],
-    hs,
-  ));
-  if clicked {
-    if menu_hover {
-      app.cam.ortho = !app.cam.ortho;
-      app.status = Some((format!("Camera: {}", if app.cam.ortho { "Orthographic" } else { "Perspective" }), false));
-      return true;
-    }
-    if home_hover {
-      app.cam.set_view(StandardView::Home);
-      app.fit_view();
-      return true;
-    }
-    if let Some(v) = hit {
-      app.cam.set_view(v);
-      return true;
-    }
-  }
-  clicked || resp.dragged()
-}
-
-fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {
-  let mut inside = false;
-  let n = q.len();
-  for i in 0..n {
-    let (a, b) = (q[i], q[(i + 1) % n]);
-    if (a.y > p.y) != (b.y > p.y) {
-      let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
-      if p.x < x {
-        inside = !inside;
-      }
-    }
-  }
-  inside
-}
-
 // ---------------------------------------------------------------- sketch plane picking
 
 /// Fusion's orange for the origin planes offered by Create Sketch.
@@ -2119,7 +2538,13 @@ const PLANE_RGB: [u8; 3] = [236, 150, 52];
 /// The planes Create Sketch offers in the viewport, as (`sketch.create` plane, plane): the
 /// origin planes and the construction planes.
 fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
-  let mut out = vec![(json!("xy"), Plane::XY), (json!("xz"), Plane::XZ), (json!("yz"), Plane::YZ)];
+  use fox_engine::model::OriginPlane;
+  let frames = app.s.design.frames();
+  let mut out = vec![
+    (json!("xy"), Plane::XY),
+    (json!("xz"), OriginPlane::Xz.plane(frames)),
+    (json!("yz"), OriginPlane::Yz.plane(frames)),
+  ];
   for (id, pl) in &app.s.model.planes {
     if !app.s.design.feature(*id).is_some_and(|f| f.suppressed) {
       out.push((json!({"feature": id.0}), *pl));
@@ -2129,7 +2554,7 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
 }
 
 /// Half the side of a plane's square: the size the scene draws construction planes at.
-fn plane_half_size(app: &App) -> f64 {
+pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
@@ -2166,12 +2591,14 @@ struct PlanePick {
 /// browser, if any.
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
-  if !picking && (app.picked_plane.is_none() || app.s.edit_sketch.is_some()) {
+  let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
+  if !picking && picked.is_none() && app.shown_planes.is_empty() {
     return None;
   }
   let mut planes = sketch_planes(app);
   if !picking {
-    planes.retain(|(p, _)| Some(p) == app.picked_plane.as_ref());
+    // the plane picked in the browser, and the origin planes Show/Hide turned on
+    planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));
   }
   let half = plane_half_size(app);
   let hot = if picking && app.drag.is_none() {
@@ -2197,12 +2624,12 @@ fn sketch_planes_overlay(
   let PlanePick { planes, half, picking, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
   let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-  for (i, (_, pl)) in planes.iter().enumerate() {
+  for (i, (p, pl)) in planes.iter().enumerate() {
     let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
     };
-    let lit = hot == Some(i) || !picking;
+    let lit = hot == Some(i) || (!picking && app.picked_plane.as_ref() == Some(p));
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));
@@ -2211,6 +2638,28 @@ fn sketch_planes_overlay(
     resp.clone().on_hover_text_at_pointer(crate::dialogs::PICK_PLANE_HINT);
   }
   planes.into_iter().nth(hot?).map(|(p, _)| p)
+}
+
+/// The corners of the square drawn for a plane: `half` either side of `centre` along its axes.
+pub(crate) fn plane_square(pl: &Plane, centre: DVec3, half: f64) -> [DVec3; 4] {
+  [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[u, v]| centre + pl.x * (u * half) + pl.y * (v * half))
+}
+
+/// Offset Plane's new plane as a see-through orange square at the offset, centred over its base
+/// (a picked face's centre), as Fusion previews it.
+fn offset_plane_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let Some((pl, centre)) = app.dialog.as_ref().and_then(|d| d.offset_plane_preview(&app.s)) else { return };
+  let Some(pts) = plane_square(&pl, centre, plane_half_size(app))
+    .iter()
+    .map(|p| view.to_screen(&app.cam, *p))
+    .collect::<Option<Vec<Pos2>>>()
+  else {
+    return;
+  };
+  let [r, g, b] = PLANE_RGB;
+  let fill = Color32::from_rgba_unmultiplied(r, g, b, 70);
+  let edge = Color32::from_rgba_unmultiplied(r, g, b, 230);
+  painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(1.5, edge)));
 }
 
 // ---------------------------------------------------------------- window selection, Select Other
@@ -2286,7 +2735,7 @@ fn manipulator(
   painter.text(
     b + side * 14.0 + dir2 * 4.0,
     egui::Align2::LEFT_CENTER,
-    format!("{} mm", fox_engine::sketch::Dim::new(m.value).expr),
+    app.s.design.units.format(m.value),
     egui::FontId::proportional(12.0),
     Color32::from_gray(40),
   );
@@ -2305,7 +2754,7 @@ fn manipulator(
       let den = aa * cc - bb * bb;
       if den.abs() > 1e-12 {
         let t = (bb * ee - cc * dd) / den;
-        let step = grid_step(app, view) / 10.0;
+        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
         }
@@ -2358,6 +2807,29 @@ mod tests {
   use super::*;
   use fox_engine::Session;
 
+  #[test]
+  fn zoom_window_fills_the_view_with_the_box() {
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0)), ppp: 1.0, w: 400, h: 200 };
+    let mut cam = render::Camera { distance: 100.0, ..render::Camera::default() };
+    cam.set_view(render::StandardView::Top);
+    // a box a quarter of the width, right of centre
+    let bx = Rect::from_center_size(Pos2::new(300.0, 100.0), Vec2::new(100.0, 20.0));
+    let to = zoom_window(&cam, &view, bx, None).unwrap();
+    assert!((to.distance - 25.0).abs() < 1e-9, "{}", to.distance);
+    // the box's centre is now the view's centre
+    let (o, d) = view.ray(&cam, bx.center());
+    let hit = ray_plane(o, d, DVec3::ZERO, DVec3::Z).unwrap();
+    let (x, y, _) = to.project(hit, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6, "{x} {y}");
+    assert!(zoom_window(&cam, &view, Rect::from_center_size(Pos2::new(50.0, 50.0), Vec2::splat(2.0)), None).is_none());
+    // onto the model under the box: its point comes to the centre at the box's scale
+    let near = DVec3::new(10.0, 0.0, 60.0);
+    let to = zoom_window(&cam, &view, bx, Some(near)).unwrap();
+    assert!((to.distance - 10.0).abs() < 1e-9, "{}", to.distance);
+    let (x, y, _) = to.project(near, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+  }
+
   /// An app editing a new sketch on XY with `tool` active.
   fn sketching(tool: Tool) -> (App, FeatureId) {
     let mut app = App::with_session(Session::default());
@@ -2381,6 +2853,50 @@ mod tests {
   }
 
   #[test]
+  fn alignment_snaps_free_axes_to_points_in_line() {
+    let pts = [[20.0, 0.0], [0.0, 7.0], [20.3, 50.0]];
+    // x within tolerance of the line end (and of a farther point): the nearer one anchors
+    let (p, a) = align_to_points([20.4, -10.0], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.3, -10.0]);
+    assert_eq!(a, [Some([20.3, 50.0]), None]);
+    let (p, a) = align_to_points([19.8, 7.2], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.0, 7.0]);
+    assert_eq!(a, [Some([20.0, 0.0]), Some([0.0, 7.0])]);
+    // out of tolerance, or an axis the H/V snap holds: untouched
+    assert_eq!(align_to_points([21.0, -10.0], &pts, 0.5, [false, false]), ([21.0, -10.0], [None, None]));
+    assert_eq!(align_to_points([20.1, 3.0], &pts, 0.5, [true, false]), ([20.1, 3.0], [None, None]));
+  }
+
+  #[test]
+  fn inference_points_take_ends_midpoints_and_earlier_clicks() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    let pts = inference_points(&app, sk);
+    assert!(pts.contains(&[0.0, 0.0]) && pts.contains(&[10.0, 0.0]));
+    // the click the line runs from is the line's own H/V, not an inference
+    assert!(!pts.contains(&[20.0, 0.0]), "{pts:?}");
+  }
+
+  #[test]
+  fn line_end_below_another_end_snaps_under_it() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    reset_tool_state(&mut app);
+    app.cam.set_view(fox_engine::render::StandardView::Top);
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    place_point(&mut app, sk, [5.0, -30.0], None);
+    let plane = sketch_plane(&app).unwrap().1;
+    // a cursor 2 px right of the point directly below the first line's end
+    let below = view.to_screen(&app.cam, plane.to_world([20.0, -10.0])).unwrap() + Vec2::new(2.0, 0.0);
+    app.hover = None;
+    let (p, snapped, aligned) = sketch_inference(&app, &view, below).unwrap();
+    assert_eq!((p[0], snapped), (20.0, None), "{p:?}");
+    assert_eq!(aligned[0], Some([20.0, 0.0]));
+  }
+
+  #[test]
   fn typed_rectangle_sizes_become_driving_dimensions() {
     let (mut app, sk) = sketching(Tool::Rect);
     place_point(&mut app, sk, [0.0, 0.0], None);
@@ -2393,6 +2909,45 @@ mod tests {
     // the rectangle and its dimensions are one undo step
     app.s.undo();
     assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+  }
+
+  #[test]
+  fn typed_sizes_take_the_design_unit() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["2", "10 mm"]);
+    place_point(&mut app, sk, [3.0, 7.0], None);
+    assert_eq!(dims(&app, sk), vec![50.8, 10.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let exprs: Vec<String> = s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.expr.clone())).collect();
+    assert_eq!(exprs, ["2 in", "10 mm"], "a bare number is pinned to inches; an explicit unit stays");
+    // the labels show inches
+    let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
+    let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "2");
+  }
+
+  #[test]
+  fn a_sized_rectangle_from_the_origin_draws_black() {
+    use fox_engine::scene::{Pick, SKETCH_FIXED, SKETCH_FREE, SceneBuilder, ViewOptions};
+    let (mut app, sk) = sketching(Tool::Rect);
+    let colours = |app: &App| {
+      let (scene, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
+      let curve = |id| matches!(picks.get(id), Some(Pick::SketchCurve { .. }));
+      scene.lines.iter().filter(|l| curve(l.id)).map(|l| l.color).collect::<Vec<_>>()
+    };
+    // sized but loose: it can still move
+    place_point(&mut app, sk, [5.0, 5.0], None);
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    assert_eq!(colours(&app), [SKETCH_FREE; 4]);
+    // started on the origin, the same rectangle is fully constrained
+    place_point(&mut app, sk, [0.0, 0.0], Some(fox_engine::sketch::ORIGIN));
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    let c = colours(&app);
+    assert_eq!(c[4..], [SKETCH_FIXED; 4], "{c:?}");
   }
 
   #[test]
@@ -2508,5 +3063,56 @@ mod tests {
     // two extension lines and the dimension line
     assert_eq!(s.lines.len(), 3);
     assert!(s.lines[..2].iter().all(|l| l[0].x == l[1].x && l[0].y > l[1].y));
+  }
+
+  #[test]
+  fn line_drag_from_the_last_point_draws_a_tangent_arc() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    // the preview: a quarter circle about (10, 10)
+    let arc = tangent_arc_points(&app, [10.0, 0.0], [20.0, 10.0]).unwrap();
+    assert!(arc.iter().all(|p| ((p[0] - 10.0).hypot(p[1] - 10.0) - 10.0).abs() < 1e-9));
+    assert!((arc[32][0] - (10.0 + 10.0 * std::f64::consts::FRAC_1_SQRT_2)).abs() < 1e-9, "{:?}", arc[32]);
+    line_tangent_arc(&mut app, sk, [20.0, 10.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(s.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Tangent { .. })));
+    assert_eq!(app.tstate.pts.last(), Some(&[20.0, 10.0]), "the chain carries on from the arc's end");
+    // and the next click draws a line from there again
+    place_point(&mut app, sk, [20.0, 30.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 2);
+  }
+
+  #[test]
+  fn trim_shows_the_piece_between_the_nearest_crossings() {
+    let (mut app, sk) = sketching(Tool::Trim);
+    let id =
+      |v: Option<serde_json::Value>| fox_engine::sketch::CurveId(v.unwrap()["curves"][0].as_u64().unwrap() as u32);
+    let long = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [30, 0]]})));
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[10, -5], [10, 5]]}));
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[20, -5], [20, 5]]}));
+    let s = app.s.design.sketch(sk).unwrap();
+    let span = |at: [f64; 2]| -> Vec<[f64; 2]> {
+      trim_piece(s, long, at)
+        .iter()
+        .map(|r| {
+          let xs: Vec<f64> = r.iter().map(|p| p[0]).collect();
+          [xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max)]
+        })
+        .collect()
+    };
+    let near = |a: f64, b: f64| (a - b).abs() < 0.5;
+    let mid = span([15.0, 0.0]);
+    assert!(mid.len() == 1 && near(mid[0][0], 10.0) && near(mid[0][1], 20.0), "{mid:?}");
+    let end = span([3.0, 0.0]);
+    assert!(end.len() == 1 && near(end[0][0], 0.0) && near(end[0][1], 10.0), "{end:?}");
+    // the sketch itself is untouched by the preview
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), 3);
+    // a curve crossing nothing goes whole
+    let lone = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 20], [8, 20]]})));
+    let all = trim_piece(app.s.design.sketch(sk).unwrap(), lone, [4.0, 20.0]);
+    assert!(all.len() == 1 && all[0].first() == Some(&[0.0, 20.0]) && all[0].last() == Some(&[8.0, 20.0]), "{all:?}");
   }
 }

@@ -57,7 +57,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       })?;
       Ok(json!({}))
     })(),
-    _ => return None,
+    _ => return crate::align::run(s, name, p),
   })
 }
 
@@ -92,6 +92,7 @@ impl Source {
             | FeatureKind::RigidGroup { .. }
             | FeatureKind::MotionLink { .. }
             | FeatureKind::CamFollower { .. }
+            | FeatureKind::AlignConstraint { .. }
         ) {
           f.suppressed = true;
         }
@@ -208,9 +209,11 @@ impl Source {
     for f in d.features[..d.active_len()].iter().filter(|f| !f.suppressed) {
       let mut kind = f.kind.clone();
       let ok = match &mut kind {
-        FeatureKind::JointOrigin { component, geometry, angle, offset, .. } => {
+        FeatureKind::JointOrigin { component, geometry, angle, offset, offset_x, offset_y, .. } => {
           self.freeze(angle, true)
             && self.freeze(offset, false)
+            && self.freeze(offset_x, false)
+            && self.freeze(offset_y, false)
             && remap(component, comps)
             && regeo(geometry, host_body, &origins)
         }

@@ -1,0 +1,23 @@
+# 483-plane-envelope-rectangular: added by the parity loop from a Fusion probe
+# arrange: two box components, A 40x30x10 at x 100..140 and B 20x20x10 at x 200..220, y 50..70,
+# arranged by the rectangular solver on a 200x100 envelope on the XY plane, 5 mm spacing, no
+# frame. The sources stay; like fusion.py, they're hidden so only the placed copies are measured.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[100, 0], [140, 0]]}
+{"cmd": "sketch.line", "points": [[140, 0], [140, 30]]}
+{"cmd": "sketch.line", "points": [[140, 30], [100, 30]]}
+{"cmd": "sketch.line", "points": [[100, 30], [100, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[200, 50], [220, 50]]}
+{"cmd": "sketch.line", "points": [[220, 50], [220, 70]]}
+{"cmd": "sketch.line", "points": [[220, 70], [200, 70]]}
+{"cmd": "sketch.line", "points": [[200, 70], [200, 50]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [2000]}
+{"cmd": "component.create", "name": "B", "bodies": [4000]}
+{"cmd": "arrange", "components": [1, 2], "plane": "xy", "length": 200, "width": 100, "solver": "rectangular", "spacing": 5, "frame": 0}
+{"cmd": "body.visible", "body": 2000, "visible": false}
+{"cmd": "body.visible", "body": 4000, "visible": false}

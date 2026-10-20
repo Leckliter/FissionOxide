@@ -1,0 +1,10 @@
+# 288-rect-corner-two-distances: added by the parity loop from a Fusion probe
+# rect-corner-two-distances: 40x30 rectangle; Two Distance sketch chamfer at the (40,0) vertex with the bottom line first: 12 along the bottom, 6 up the right line; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 5], "distance": 12, "distance2": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

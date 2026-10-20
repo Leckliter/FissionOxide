@@ -1,0 +1,7 @@
+# 154-rotated-height-right-side: added by the parity loop from a Fusion probe
+# rotated-height-right-side: 3-point rectangle (0,0)-(30,10) with third point (20,-20) on the clockwise side; extruded 15 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "points": [[0, 0], [30, 10], [20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 15, "operation": "new_body"}

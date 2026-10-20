@@ -1,0 +1,11 @@
+# 416-side-face-sketch: added by the parity loop from a Fusion probe
+# side-face-sketch: 40x30x10 box; sketch on its +X face (Fusion frame: x=+Y, y=+Z, origin (40,0,0)); circle r3 at sketch (20,6) = world (40,20,6), extruded 5 along the face normal (+X) and joined.
+# hand-written: the sketch is placed by picking the plane/face (Fox's own sketch frame), sketch coords as in the recipe
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 30]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"point": [40, 15, 5], "normal": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [20, 6], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "operation": "join"}

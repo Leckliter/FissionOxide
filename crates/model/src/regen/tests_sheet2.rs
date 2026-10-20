@@ -140,6 +140,7 @@ fn bends_running_into_bends_unfold() {
 #[test]
 fn miter_flange_along_two_edges() {
   let mut d = sheet_design();
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   plate(&mut d);
   // up 20 from the top edge (y = 50, z = 2), then 10 outwards, drawn on YZ (across the edge)
   let mut s = Sketch::new();

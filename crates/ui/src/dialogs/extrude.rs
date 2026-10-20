@@ -18,6 +18,8 @@ pub(crate) struct Rows {
   thin_side: &'static str,
   thickness: String,
   taper: String,
+  /// Side 2 taper of a two-sided extrude; empty = the same as `taper`.
+  taper2: String,
   /// Start: "" (profile plane), "offset" or "object".
   pub(super) start: &'static str,
   start_offset: String,
@@ -85,7 +87,9 @@ impl Dialog {
     dirty |= pick(ui, "Start", "ext-start", &STARTS, &mut ext.start);
     if ext.start == "offset" {
       ui.label("Offset");
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.start_offset).desired_width(140.0)).changed();
+      let mut r = ui.add(egui::TextEdit::singleline(&mut ext.start_offset).desired_width(140.0));
+      crate::units::pin(ui, &mut r, &mut ext.start_offset);
+      dirty |= r.changed();
       ui.end_row();
     } else if ext.start == "object" {
       ui.label("Start object");
@@ -119,7 +123,9 @@ impl Dialog {
         self.text(ui, true);
         ui.end_row();
         ui.label("Distance 2");
-        dirty |= ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0)).changed();
+        let mut r = ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0));
+        crate::units::pin(ui, &mut r, &mut self.distance2);
+        dirty |= r.changed();
         ui.end_row();
       }
       e => {
@@ -132,17 +138,26 @@ impl Dialog {
     dirty |= ui.checkbox(&mut self.flip, "").changed();
     ui.end_row();
 
+    let two_sides = self.extent == "two_sides";
     let ext = &mut self.solid.ext;
-    ui.label("Taper angle");
+    ui.label(if two_sides { "Taper angle 1" } else { "Taper angle" });
     dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text("0 deg").desired_width(140.0)).changed();
     ui.end_row();
+    if two_sides {
+      ui.label("Taper angle 2");
+      let hint = if ext.taper.trim().is_empty() { "0 deg".to_string() } else { ext.taper.trim().to_string() };
+      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(hint).desired_width(140.0)).changed();
+      ui.end_row();
+    }
     if ext.thin {
       if ext.thin_side.is_empty() {
         ext.thin_side = "inside";
       }
       dirty |= pick(ui, "Wall location", "ext-wall", &WALLS, &mut ext.thin_side);
       ui.label("Wall thickness");
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.thickness).hint_text("1 mm").desired_width(140.0)).changed();
+      let mut r = ui.add(egui::TextEdit::singleline(&mut ext.thickness).hint_text("1 mm").desired_width(140.0));
+      crate::units::pin(ui, &mut r, &mut ext.thickness);
+      dirty |= r.changed();
       ui.end_row();
     }
 
@@ -159,6 +174,9 @@ impl Dialog {
     let ext = &self.solid.ext;
     if !ext.taper.trim().is_empty() {
       p["taper"] = json!(ext.taper.trim());
+    }
+    if self.extent == "two_sides" && !ext.taper2.trim().is_empty() {
+      p["taper2"] = json!(ext.taper2.trim());
     }
     if ext.thin {
       p["thin"] = json!(if ext.thickness.trim().is_empty() { "1 mm" } else { ext.thickness.trim() });
@@ -181,6 +199,7 @@ impl Dialog {
   pub(super) fn edit_extrude_rows(&self, mut extent: Value) -> Value {
     let ext = &self.solid.ext;
     extent["taper"] = json!(ext.taper.trim());
+    extent["taper2"] = json!(if self.extent == "two_sides" { ext.taper2.trim() } else { "" });
     extent["thin"] = json!(if ext.thin { ext.thickness.trim() } else { "" });
     extent["thin_side"] = json!(if ext.thin_side.is_empty() { "inside" } else { ext.thin_side });
     extent["start"] = json!(if ext.start == "offset" { ext.start_offset.trim() } else { "" });
@@ -194,6 +213,7 @@ impl Dialog {
   pub(super) fn load_extrude_rows(&mut self, e: &Extent) {
     let ext = &mut self.solid.ext;
     ext.taper = e.taper.clone();
+    ext.taper2 = e.taper2.clone();
     ext.thin = !e.thin.trim().is_empty();
     ext.thickness = e.thin.clone();
     ext.thin_side = match e.thin_side {

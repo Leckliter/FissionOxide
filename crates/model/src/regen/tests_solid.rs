@@ -57,6 +57,7 @@ fn bodies_of(m: &Model, f: FeatureId) -> Vec<&Body> {
 #[test]
 fn sweep_along_a_rail_then_twisted() {
   let mut d = Design::new("sweep");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let prof = sketch(&mut d, XY, circle(5.0));
   // path and rail in one sketch on the front plane (sketch x = X, sketch y = Z)
   let mut ps = Sketch::new();
@@ -72,6 +73,9 @@ fn sweep_along_a_rail_then_twisted() {
       operation: Operation::NewBody,
       rail: Some(PathRef { sketch: path_sketch, curves: vec![rail] }),
       twist: String::new(),
+      taper: String::new(),
+      orientation: Default::default(),
+      profile_scaling: Default::default(),
     })
     .unwrap();
   let m = regenerate(&mut d);
@@ -102,6 +106,7 @@ fn sweep_along_a_rail_then_twisted() {
 #[test]
 fn loft_with_rails_or_a_centre_line() {
   let mut d = Design::new("loft");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let a = sketch(&mut d, XY, circle(10.0));
   let top = offset_plane(&mut d, XY, "40");
   let b = sketch(&mut d, top, circle(10.0));
@@ -111,7 +116,10 @@ fn loft_with_rails_or_a_centre_line() {
   let r2 = rs.add_arc_3pt(PtSpec::At(-10.0, 0.0), [-15.0, 20.0], PtSpec::At(-10.0, 40.0)).unwrap();
   let c = rs.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 40.0)).unwrap().0;
   let rails = sketch(&mut d, XZ, rs);
-  let sections = vec![LoftSection { sketch: a, profile: None }, LoftSection { sketch: b, profile: None }];
+  let sections = vec![
+    LoftSection { sketch: a, profile: None, end: Default::default() },
+    LoftSection { sketch: b, profile: None, end: Default::default() },
+  ];
   let loft = d
     .add_feature(FeatureKind::Loft {
       sections: sections.clone(),
@@ -144,6 +152,104 @@ fn loft_with_rails_or_a_centre_line() {
   assert!(close(vol(bodies_of(&m, loft)[0]), PI * 100.0 * 40.0, 0.01));
 }
 
+fn free(origin: [f64; 3], normal: [f64; 3], x: [f64; 3]) -> PlaneRef {
+  PlaneRef::Free { origin, normal, x: Some(x) }
+}
+
+/// Case 436: a closed smooth loft through four d10 circles 20 mm round Z, in a design with the
+/// given behaviours: the loft's body.
+fn closed_ring(behaviours: Behaviours) -> (Model, FeatureId) {
+  let mut d = Design::new("ring");
+  d.behaviours = behaviours;
+  let mut at = |p: PlaneRef, cx: f64| {
+    let mut s = Sketch::new();
+    s.add_circle(PtSpec::At(cx, 0.0), 5.0).unwrap();
+    sketch(&mut d, p, s)
+  };
+  let (xz, yz) = (free([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]), free([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+  let ids = [at(xz.clone(), 20.0), at(yz.clone(), 20.0), at(xz, -20.0), at(yz, -20.0)];
+  let sections = ids.iter().map(|&sketch| LoftSection { sketch, profile: None, end: Default::default() }).collect();
+  let loft = d
+    .add_feature(FeatureKind::Loft {
+      sections,
+      ruled: false,
+      closed: true,
+      operation: Operation::NewBody,
+      rails: Vec::new(),
+      centerline: None,
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  (m, loft)
+}
+
+#[test]
+fn closed_loft_legacy_keeps_the_seamed_open_loft() {
+  // no LOFT_CLOSED_SMOOTH (a file from before it): main's open loft with the first section again
+  let (m, loft) = closed_ring(Behaviours::legacy());
+  let b = bodies_of(&m, loft)[0];
+  let mp = b.shape.mass().unwrap();
+  // main: 24% above Fusion (8587.0), the centre of mass 2.8 mm off towards the first section
+  assert!(close(vol(b), 10638.197, 1e-6), "{}", vol(b));
+  assert!((mp.center_of_mass.x - 2.7945).abs() < 1e-3, "{mp:?}");
+}
+
+#[test]
+fn closed_loft_new_design_is_one_smooth_ring() {
+  let (m, loft) = closed_ring(Behaviours::current());
+  let b = bodies_of(&m, loft)[0];
+  let mp = b.shape.mass().unwrap();
+  assert!(close(vol(b), 8587.02, 0.01), "{}", vol(b));
+  assert!(mp.center_of_mass.length() < 0.05, "{mp:?}");
+  assert_eq!(b.faces().len(), 1);
+}
+
+/// Case 435's loft between two 20 x 20 squares 40 apart with two rails bulging their x = ±10
+/// sides out to ±15, in a design with the given behaviours: the loft's volume.
+fn two_rail_square(behaviours: Behaviours) -> f64 {
+  let mut d = Design::new("rails");
+  d.behaviours = behaviours;
+  let a = sketch(&mut d, XY, rect([-10.0, -10.0], [10.0, 10.0]));
+  let b = sketch(&mut d, free([0.0, 0.0, 40.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), rect([-10.0, -10.0], [10.0, 10.0]));
+  let xz = free([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+  let mut rails = Vec::new();
+  for x in [10.0, -10.0] {
+    let mut s = Sketch::new();
+    let c = s.add_arc_3pt(PtSpec::At(x, 0.0), [x * 1.5, -20.0], PtSpec::At(x, -40.0)).unwrap();
+    rails.push(PathRef { sketch: sketch(&mut d, xz.clone(), s), curves: vec![c] });
+  }
+  let loft = d
+    .add_feature(FeatureKind::Loft {
+      sections: vec![
+        LoftSection { sketch: a, profile: None, end: Default::default() },
+        LoftSection { sketch: b, profile: None, end: Default::default() },
+      ],
+      ruled: false,
+      closed: false,
+      operation: Operation::NewBody,
+      rails,
+      centerline: None,
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  vol(bodies_of(&m, loft)[0])
+}
+
+#[test]
+fn two_rail_loft_legacy_blends_round_the_loop() {
+  // no LOFT_RAIL_SPREAD: main's smooth blend from one rail to the next, 4.7% above Fusion
+  let v = two_rail_square(Behaviours::legacy());
+  assert!(close(v, 20808.824, 1e-6), "{v}");
+}
+
+#[test]
+fn two_rail_loft_new_design_spreads_corner_to_corner() {
+  let v = two_rail_square(Behaviours::current());
+  assert!(close(v, 19878.5, 0.01), "{v}");
+}
+
 #[test]
 fn setback_fillet_at_a_box_corner() {
   let mut d = Design::new("setback");
@@ -167,6 +273,8 @@ fn setback_fillet_at_a_box_corner() {
       chord: false,
       radii: vec![],
       sets: vec![],
+      distance2: None,
+      flipped: false,
     })
     .unwrap();
   let plain = vol(&regenerate(&mut d).bodies[0]);
@@ -254,8 +362,9 @@ fn extrude_up_to_a_curved_face_or_a_body() {
 /// it (y = −30), and its side face.
 fn cylinder_and_square() -> (Design, FeatureId, FaceRef, f64) {
   let mut d = Design::new("emboss");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   primitive(&mut d, Primitive::Cylinder { radius: "20".into(), height: "40".into() }, XY, [0.0, 0.0]);
-  let front = offset_plane(&mut d, XZ, "30");
+  let front = offset_plane(&mut d, XZ, "-30");
   let sk = sketch(&mut d, front, rect([-5.0, 15.0], [5.0, 25.0]));
   let m = regenerate(&mut d);
   ok(&m);
@@ -275,6 +384,9 @@ fn emboss_and_deboss_on_a_cylinder() {
       depth: "2 mm".into(),
       deboss: false,
       wrap: true,
+      horizontal: "0".into(),
+      vertical: "0".into(),
+      rotation: "0".into(),
     })
     .unwrap();
   let m = regenerate(&mut d);
@@ -379,6 +491,7 @@ fn block() -> (Design, FaceRef) {
 #[test]
 fn replace_face_with_a_plane_or_a_curved_face() {
   let (mut d, top) = block();
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let up = offset_plane(&mut d, XY, "15");
   let r = d
     .add_feature(FeatureKind::ReplaceFace { faces: vec![top.clone()], target: None, plane: Some(up.clone()) })
@@ -398,6 +511,7 @@ fn replace_face_with_a_plane_or_a_curved_face() {
 
   // a big cylinder along X whose top runs at z = 15 over y = 10
   let (mut d, top) = block();
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
   let cyl = primitive(&mut d, Primitive::Cylinder { radius: "50".into(), height: "60".into() }, YZ, [10.0, -35.0]);
   let m = regenerate(&mut d);
   let cb = bodies_of(&m, cyl)[0];
@@ -423,4 +537,116 @@ fn old_files_open_without_the_new_fields() {
   let json = r#"{"type":"loft","sections":[]}"#;
   let k: FeatureKind = serde_json::from_str(json).unwrap();
   assert!(matches!(k, FeatureKind::Loft { ref rails, centerline: None, .. } if rails.is_empty()));
+}
+
+/// A design with a 15 mm construction plane offset from XZ and a cube built on it, with the
+/// given behaviours: where the plane and the cube end up along Y.
+fn xz_offset_plane_y(behaviours: Behaviours) -> (f64, f64) {
+  let mut d = Design::new("xz offset");
+  d.behaviours = behaviours;
+  let pl = offset_plane(&mut d, XZ, "15");
+  let f =
+    primitive(&mut d, Primitive::Box { width: "4".into(), depth: "4".into(), height: "2".into() }, pl, [0.0, 0.0]);
+  let m = regenerate(&mut d);
+  ok(&m);
+  let plane = m.planes.values().next().unwrap();
+  let b = bodies_of(&m, f)[0];
+  (plane.origin.y, b.shape.mass().unwrap().center_of_mass.y)
+}
+
+#[test]
+fn xz_offset_plane_follows_the_design_behaviour() {
+  // a design saved before XZ_OFFSET_PLUS_Y offsets along the XZ frame's normal, -Y, as before #62
+  let (plane, body) = xz_offset_plane_y(Behaviours::legacy());
+  assert!((plane + 15.0).abs() < 1e-9, "legacy plane at y = {plane}");
+  // the cube sits on the plane, 2 mm high along its normal (-Y): centre 1 mm below it
+  assert!((body + 16.0).abs() < 1e-6, "legacy body at y = {body}");
+  // a new design offsets along +Y, as in Fusion (reference cases 348 and 375), and its plane has
+  // Fusion's XZ frame, normal +Y: the cube grows along +Y from it, centre 1 mm above it (as a
+  // sketch on XZ extrudes along +Y in case 413)
+  let (plane, body) = xz_offset_plane_y(Design::new("n").behaviours);
+  assert!((plane - 15.0).abs() < 1e-9, "new plane at y = {plane}");
+  assert!((body - 16.0).abs() < 1e-6, "new body at y = {body}");
+  assert!(Behaviours::current().has(fox_sketch::behaviour::XZ_OFFSET_PLUS_Y));
+  assert!(Behaviours::current().has(fox_sketch::behaviour::FUSION_SKETCH_FRAMES));
+  // the flags never compound: each alone still offsets the way XZ_OFFSET_PLUS_Y says, the cube
+  // growing along the frame's normal
+  let only = |name: &str| {
+    let mut b = Behaviours::legacy();
+    b.insert(name);
+    xz_offset_plane_y(b)
+  };
+  let (plane, body) = only(fox_sketch::behaviour::XZ_OFFSET_PLUS_Y);
+  assert!((plane - 15.0).abs() < 1e-9 && (body - 14.0).abs() < 1e-6, "+Y offset, legacy frame: {plane} {body}");
+  let (plane, body) = only(fox_sketch::behaviour::FUSION_SKETCH_FRAMES);
+  assert!((plane + 15.0).abs() < 1e-9 && (body + 14.0).abs() < 1e-6, "-Y offset, Fusion frame: {plane} {body}");
+}
+
+/// Box 40x40x20 intersected with two overlapping cylinders r=15 h=30 at (10,20) and (30,20)
+/// (reference case 493), with the given behaviours: the result's volume.
+fn intersect_two_tools_volume(behaviours: Behaviours) -> f64 {
+  let mut d = Design::new("intersect");
+  d.behaviours = behaviours;
+  let target =
+    primitive(&mut d, Primitive::Box { width: "40".into(), depth: "40".into(), height: "20".into() }, XY, [20.0, 20.0]);
+  let cyl = || Primitive::Cylinder { radius: "15".into(), height: "30".into() };
+  let t1 = primitive(&mut d, cyl(), XY, [10.0, 20.0]);
+  let t2 = primitive(&mut d, cyl(), XY, [30.0, 20.0]);
+  let m = regenerate(&mut d);
+  ok(&m);
+  let id = |f| bodies_of(&m, f)[0].id;
+  let (target, tools) = (id(target), vec![id(t1), id(t2)]);
+  d.add_feature(FeatureKind::Combine { target, tools, operation: Operation::Intersect, keep_tools: false }).unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 1);
+  vol(&m.bodies[0])
+}
+
+#[test]
+fn multi_tool_intersect_follows_the_design_behaviour() {
+  // a design saved before INTERSECT_ANY_TOOL keeps target ∩ t1 ∩ t2, as before #92
+  let old = intersect_two_tools_volume(Behaviours::legacy());
+  assert!(close(old, 3097.0, 0.01), "legacy volume {old}");
+  // a new design keeps target ∩ (t1 ∪ t2), as in Fusion
+  let new = intersect_two_tools_volume(Design::new("n").behaviours);
+  assert!(close(new, 22079.37, 1e-3), "new volume {new}");
+  assert!(Behaviours::current().has(fox_sketch::behaviour::INTERSECT_ANY_TOOL));
+}
+
+/// An obround drawn as two circles and two lines tangent to them: the lines' ends split each
+/// circle into two arcs.
+fn obround_of_circles(legacy: bool) -> Sketch {
+  let mut s = Sketch::new();
+  if legacy {
+    s.behaviours = Behaviours::legacy();
+  }
+  s.add_circle(PtSpec::At(0.0, 0.0), 5.0).unwrap();
+  s.add_circle(PtSpec::At(20.0, 0.0), 5.0).unwrap();
+  s.add_line(PtSpec::At(0.0, 5.0), PtSpec::At(20.0, 5.0)).unwrap();
+  s.add_line(PtSpec::At(0.0, -5.0), PtSpec::At(20.0, -5.0)).unwrap();
+  s
+}
+
+#[test]
+fn split_circles_keep_their_faces_in_old_files_and_merge_in_new_ones() {
+  let disc_faces = |legacy: bool| {
+    let mut d = Design::new("obround");
+    let sk = sketch(&mut d, XY, obround_of_circles(legacy));
+    d.add_feature(FeatureKind::Extrude {
+      sketch: sk,
+      profiles: vec![[-3.0, 0.0]],
+      extent: Extent::distance("4"),
+      operation: Operation::NewBody,
+    })
+    .unwrap();
+    // as saved and reopened
+    let mut d = Design::from_json(&d.to_json()).unwrap();
+    let m = regenerate(&mut d);
+    ok(&m);
+    assert!(close(vol(&m.bodies[0]), PI * 25.0 * 4.0, 1e-9), "{}", vol(&m.bodies[0]));
+    m.bodies[0].faces().len()
+  };
+  assert_eq!(disc_faces(true), 4, "a legacy design keeps the disc's side in two halves");
+  assert_eq!(disc_faces(false), 3, "a new design gets one side face");
 }

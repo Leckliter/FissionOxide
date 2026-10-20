@@ -55,6 +55,7 @@ fn flat_pattern_sketch_from_commands() {
 #[test]
 fn miter_flange_and_corner_closure_from_commands() {
   let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
   plate(&mut s);
   run(&mut s, "sketch.create", json!({"plane": "yz"}));
   run(&mut s, "sketch.line", json!({"points": [[50, 2], [50, 22], [60, 22]]}));

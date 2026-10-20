@@ -15,7 +15,7 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CurveKind, Sketch, angle_of, ccw_sweep, dist};
+use crate::{CurveId, CurveKind, Sketch, angle_of, ccw_sweep, dist};
 
 /// Points closer than this are the same graph vertex.
 const MERGE_TOL: f64 = 1e-6;
@@ -62,6 +62,17 @@ pub enum Seg {
     start: f64,
     sweep: f64,
   },
+  /// A conic arc: the rational quadratic Bézier from `p[0]` to `p[2]` with control point `p[1]`
+  /// weighted `w` (the ends weigh 1).
+  Conic {
+    p: [[f64; 2]; 3],
+    w: f64,
+  },
+  /// A quintic spline (Fusion's fitted spline through two points): the clamped degree-5
+  /// B-spline with these ten control points and knots 0 ×6, 0.2, 0.4, 0.6, 0.8, 1 ×6.
+  Quintic {
+    p: [[f64; 2]; crate::QUINTIC_POINTS],
+  },
 }
 
 impl Seg {
@@ -72,6 +83,8 @@ impl Seg {
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[0],
       Seg::EllipseArc { center, major, minor, start, .. } => ellipse_point(center, major, minor, start),
+      Seg::Conic { p, .. } => p[0],
+      Seg::Quintic { p } => p[0],
     }
   }
 
@@ -82,6 +95,8 @@ impl Seg {
       Seg::Circle { center, radius, .. } => [center[0] + radius, center[1]],
       Seg::Bezier { p } => p[3],
       Seg::EllipseArc { center, major, minor, start, sweep } => ellipse_point(center, major, minor, start + sweep),
+      Seg::Conic { p, .. } => p[2],
+      Seg::Quintic { p } => p[crate::QUINTIC_POINTS - 1],
     }
   }
 
@@ -95,6 +110,8 @@ impl Seg {
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         ellipse_point(center, major, minor, start + sweep / 2.0)
       }
+      Seg::Conic { p, w } => crate::conic_at(&p, w, 0.5),
+      Seg::Quintic { p } => crate::quintic_at(&p, 0.5),
     }
   }
 
@@ -108,6 +125,12 @@ impl Seg {
       Seg::Bezier { p } => Seg::Bezier { p: [p[3], p[2], p[1], p[0]] },
       Seg::EllipseArc { center, major, minor, start, sweep } => {
         Seg::EllipseArc { center, major, minor, start: start + sweep, sweep: -sweep }
+      }
+      Seg::Conic { p, w } => Seg::Conic { p: [p[2], p[1], p[0]], w },
+      // the knots are symmetric: reversed control points run the same curve backwards
+      Seg::Quintic { mut p } => {
+        p.reverse();
+        Seg::Quintic { p }
       }
     }
   }
@@ -135,6 +158,23 @@ impl Seg {
           [(-major[0] * s + v[0] * c) * sweep, (-major[1] * s + v[1] * c) * sweep]
         };
         (d(start), d(start + sweep))
+      }
+      Seg::Conic { p, .. } => {
+        // the end tangents run along the control polygon (an apex on the chord makes a line)
+        let chord = [p[2][0] - p[0][0], p[2][1] - p[0][1]];
+        let (a, b) = ([p[1][0] - p[0][0], p[1][1] - p[0][1]], [p[2][0] - p[1][0], p[2][1] - p[1][1]]);
+        let nz = |v: [f64; 2]| if v[0].hypot(v[1]) > 1e-12 { v } else { chord };
+        (nz(a), nz(b))
+      }
+      Seg::Quintic { p } => {
+        // along the end legs of the control polygon, or the next leg where one is degenerate
+        let lead = |q: &[[f64; 2]]| {
+          q.windows(2).map(|w| [w[1][0] - w[0][0], w[1][1] - w[0][1]]).find(|v| v[0].hypot(v[1]) > 1e-12)
+        };
+        let mut back = p;
+        back.reverse();
+        let (a, b) = (lead(&p).unwrap_or_default(), lead(&back).unwrap_or_default());
+        (a, [-b[0], -b[1]])
       }
     }
   }
@@ -167,17 +207,62 @@ impl Seg {
           out.push(ellipse_point(center, major, minor, start + sweep * i as f64 / n as f64));
         }
       }
+      Seg::Conic { p, w } => {
+        for b in crate::conic_beziers(&p, w) {
+          for i in 0..6 {
+            out.push(crate::bezier_at(&b, i as f64 / 6.0));
+          }
+        }
+      }
+      Seg::Quintic { p } => {
+        for b in crate::quintic_beziers(&p) {
+          for i in 0..4 {
+            out.push(crate::bezier_at(&b, i as f64 / 4.0));
+          }
+        }
+      }
     }
   }
+}
+
+/// Where a loop segment came from, and whether it may become one edge with the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegSrc {
+  /// The sketch curve the segment was cut from.
+  pub curve: CurveId,
+  /// The segment and the next one in the loop (the first, after the last) may be built as one
+  /// edge: both come from `curve` and its kind's one-edge behaviour is on (see
+  /// [`crate::behaviour`]).
+  pub merge_next: bool,
 }
 
 /// A closed chain of segments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Loop {
   pub segs: Vec<Seg>,
+  /// One entry per segment for loops traced from a sketch ([`find_profiles`]); empty for loops
+  /// made in code, whose segments never merge. Code that edits `segs` of a traced loop should
+  /// clear this (a length mismatch is ignored).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub src: Vec<SegSrc>,
 }
 
 impl Loop {
+  /// A loop of segments with no sketch sources (they stay separate edges).
+  pub fn new(segs: Vec<Seg>) -> Loop {
+    Loop { segs, src: Vec::new() }
+  }
+
+  /// Per segment, whether it may become one edge with the next (the first, after the last): all
+  /// false unless [`Loop::src`] matches the segments.
+  pub fn merge_next(&self) -> Vec<bool> {
+    if self.src.len() == self.segs.len() {
+      self.src.iter().map(|s| s.merge_next).collect()
+    } else {
+      vec![false; self.segs.len()]
+    }
+  }
+
   pub fn polygon(&self) -> Vec<[f64; 2]> {
     let mut pts = Vec::new();
     for s in &self.segs {
@@ -192,7 +277,17 @@ impl Loop {
   }
 
   pub fn reversed(&self) -> Loop {
-    Loop { segs: self.segs.iter().rev().map(|s| s.reversed()).collect() }
+    let segs: Vec<Seg> = self.segs.iter().rev().map(|s| s.reversed()).collect();
+    let n = self.src.len();
+    let src = if n == segs.len() {
+      // reversed segment j is old n-1-j; its join with j+1 is old join (n-2-j) mod n
+      (0..n)
+        .map(|j| SegSrc { curve: self.src[n - 1 - j].curve, merge_next: self.src[(2 * n - 2 - j) % n].merge_next })
+        .collect()
+    } else {
+      Vec::new()
+    };
+    Loop { segs, src }
   }
 
   pub fn contains(&self, p: [f64; 2]) -> bool {
@@ -279,8 +374,9 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
       all.push(Comp { faces, outer, sample });
     }
   }
-  for (center, radius) in circles {
-    let ccw = Loop { segs: vec![Seg::Circle { center, radius, ccw: true }] };
+  for (center, radius, curve) in circles {
+    let ccw =
+      Loop { segs: vec![Seg::Circle { center, radius, ccw: true }], src: vec![SegSrc { curve, merge_next: false }] };
     let sample = [center[0] + radius, center[1]];
     all.push(Comp { faces: vec![ccw.clone()], outer: ccw.reversed(), sample });
   }
@@ -304,8 +400,8 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
 }
 
 /// Half-edge face tracing per connected component. Returns the traced loops of each component and
-/// the full circles (centre, radius).
-fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
+/// the full circles (centre, radius, curve).
+fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64, CurveId)>) {
   let mut verts: Vec<[f64; 2]> = Vec::new();
   let vid = |p: [f64; 2], verts: &mut Vec<[f64; 2]>| -> usize {
     if let Some(i) = verts.iter().position(|q| dist(*q, p) <= MERGE_TOL) {
@@ -315,24 +411,25 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
       verts.len() - 1
     }
   };
-  // Edges as segments oriented u→v
-  let mut edges: Vec<(usize, usize, Seg)> = Vec::new();
-  let mut circles: Vec<([f64; 2], f64)> = Vec::new();
+  // Curve pieces before splitting, with the curve each came from
+  let mut pieces: Vec<(Seg, CurveId)> = Vec::new();
+  let mut circles: Vec<([f64; 2], f64, CurveId)> = Vec::new();
   for c in sketch.curves.iter().filter(|c| !c.construction).take(MAX_EDGES) {
+    let id = c.id;
     match &c.kind {
       CurveKind::Line { a, b } => {
         let (Some(a), Some(b)) = (sketch.pos(*a), sketch.pos(*b)) else { continue };
         if dist(a, b) <= MERGE_TOL {
           continue;
         }
-        let (u, v) = (vid(a, &mut verts), vid(b, &mut verts));
-        edges.push((u, v, Seg::Line { a, b }));
+        let _ = (vid(a, &mut verts), vid(b, &mut verts)); // (vertex order as before)
+        pieces.push((Seg::Line { a, b }, id));
       }
       CurveKind::Circle { center, radius } => {
         if let Some(c) = sketch.pos(*center)
           && *radius > MERGE_TOL
         {
-          circles.push((c, *radius));
+          circles.push((c, *radius, id));
         }
       }
       CurveKind::Arc { center, start, end } => {
@@ -349,34 +446,42 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
         let (u, v) = (vid(seg.start(), &mut verts), vid(seg.end(), &mut verts));
         if u == v {
           // an arc closed on itself is a circle
-          circles.push((c, r));
+          circles.push((c, r, id));
           continue;
         }
-        edges.push((u, v, seg));
+        pieces.push((seg, id));
       }
       CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => {
-        edges.extend(
-          sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (0, 0, s)),
+        pieces.extend(
+          sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (s, id)),
+        );
+      }
+      CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
+        pieces.extend(
+          sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (s, id)),
         );
       }
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
         for b in sketch.beziers(c.id) {
           if dist(b[0], b[3]) > MERGE_TOL {
-            edges.push((0, 0, Seg::Bezier { p: b }));
+            pieces.push((Seg::Bezier { p: b }, id));
           }
         }
       }
     }
   }
   // Curves that cross mid-span split each other there, as in Fusion (no trimming needed).
-  let (split, rest) = split_at_crossings(edges.iter().map(|e| e.2).collect(), circles);
+  let (split, rest) = split_at_crossings(pieces, circles);
   circles = rest;
   verts.clear();
-  edges.clear();
-  for seg in split {
+  // Edges as segments oriented u→v, and the curve each came from
+  let mut edges: Vec<(usize, usize, Seg)> = Vec::new();
+  let mut edge_src: Vec<CurveId> = Vec::new();
+  for (seg, id) in split {
     let (u, v) = (vid(seg.start(), &mut verts), vid(seg.end(), &mut verts));
     if u != v {
       edges.push((u, v, seg));
+      edge_src.push(id);
     }
   }
   // Prune dangling edges repeatedly.
@@ -447,11 +552,13 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
       continue;
     }
     let mut segs = Vec::new();
+    let mut ids = Vec::new();
     let mut h = start;
     let mut ok = false;
     for _ in 0..(edges.len() * 2 + 1) {
       used[h] = true;
       segs.push(half(h).2);
+      ids.push(edge_src[h / 2]);
       match next(h) {
         Some(n) if n == start => {
           ok = true;
@@ -463,7 +570,13 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
     }
     if ok {
       let root = find(&mut parent, half(start).0);
-      comp_loops.entry(root).or_default().push(Loop { segs });
+      let src = sketch
+        .merge_flags(&ids, true)
+        .into_iter()
+        .zip(ids)
+        .map(|(merge_next, curve)| SegSrc { curve, merge_next })
+        .collect();
+      comp_loops.entry(root).or_default().push(Loop { segs, src });
     }
   }
   let mut comps: Vec<(usize, Vec<Loop>)> = comp_loops.into_iter().collect();
@@ -471,20 +584,25 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64)>) {
   (comps.into_iter().map(|(_, v)| v).collect(), circles)
 }
 
+type Circle = ([f64; 2], f64, CurveId);
+
 /// Splits segments (and circles) where they cross each other's interiors. Circles crossed at two
-/// or more points become arcs; the rest stay circles.
-fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg>, Vec<([f64; 2], f64)>) {
+/// or more points become arcs; the rest stay circles. Each piece keeps the curve it came from.
+fn split_at_crossings(segs: Vec<(Seg, CurveId)>, circles: Vec<Circle>) -> (Vec<(Seg, CurveId)>, Vec<Circle>) {
   use crate::edit::{Geo, meet};
-  // spline pieces don't split (yet); they join the graph as they are
-  let (curved, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::Bezier { .. }));
+  // spline pieces and conics don't split (yet); they join the graph as they are
+  let (curved, segs): (Vec<(Seg, CurveId)>, Vec<(Seg, CurveId)>) =
+    segs.into_iter().partition(|s| matches!(s.0, Seg::Bezier { .. } | Seg::Conic { .. } | Seg::Quintic { .. }));
   // elliptical arcs split where lines, arcs and circles cross them (and split those), not each other
-  let (elliptic, segs): (Vec<Seg>, Vec<Seg>) = segs.into_iter().partition(|s| matches!(s, Seg::EllipseArc { .. }));
+  let (elliptic, segs): (Vec<(Seg, CurveId)>, Vec<(Seg, CurveId)>) =
+    segs.into_iter().partition(|s| matches!(s.0, Seg::EllipseArc { .. }));
   let n_segs = segs.len();
-  let mut geos: Vec<Geo> = segs.iter().filter_map(Geo::of_seg).collect();
-  geos.extend(circles.iter().map(|(c, r)| Geo::Arc { c: *c, r: *r, a0: 0.0, sweep: TAU }));
+  let mut geos: Vec<Geo> = segs.iter().filter_map(|s| Geo::of_seg(&s.0)).collect();
+  geos.extend(circles.iter().map(|(c, r, _)| Geo::Arc { c: *c, r: *r, a0: 0.0, sweep: TAU }));
   if geos.len() > 2000 {
     return (segs.into_iter().chain(curved).chain(elliptic).collect(), circles);
   }
+  let src = |i: usize| if i < n_segs { segs[i].1 } else { circles[i - n_segs].2 };
   let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); geos.len()];
   let elliptic = crate::ellipse::split_profile_arcs(elliptic, &geos, n_segs, &mut cuts, MERGE_TOL);
   // ends of segment `k` lying on curve `h`
@@ -537,14 +655,14 @@ fn split_at_crossings(segs: Vec<Seg>, circles: Vec<([f64; 2], f64)>) -> (Vec<Seg
       }
       for k in 0..ts.len() {
         let (t0, t1) = (ts[k], if k + 1 < ts.len() { ts[k + 1] } else { ts[0] + TAU });
-        out.push(to_seg(g, t0, t1));
+        out.push((to_seg(g, t0, t1), src(i)));
       }
       continue;
     }
     let mut prev = 0.0;
     for t in ts.into_iter().chain([end]) {
       if t - prev > tol {
-        out.push(to_seg(g, prev, t));
+        out.push((to_seg(g, prev, t), src(i)));
       }
       prev = t;
     }
@@ -581,6 +699,14 @@ fn departure_angle(s: &Seg) -> f64 {
       let p0 = ellipse_point(center, major, minor, start);
       let p1 = ellipse_point(center, major, minor, start + sweep * 1e-3);
       angle_of(p0, p1)
+    }
+    Seg::Conic { p, .. } => {
+      let q = if dist(p[0], p[1]) > 1e-12 { p[1] } else { p[2] };
+      angle_of(p[0], q)
+    }
+    Seg::Quintic { p } => {
+      let d = s.end_tangents().0;
+      angle_of(p[0], [p[0][0] + d[0], p[0][1] + d[1]])
     }
   }
 }
@@ -758,5 +884,87 @@ mod crossing_tests {
     let p = find_profiles(&s);
     assert_eq!(p.len(), 3, "two discs and the band between them");
     assert!(p.iter().any(|r| r.contains([25.0, 0.0])), "the band is a region");
+  }
+
+  #[test]
+  fn circle_touched_by_tangent_lines_merges_back_only_in_new_sketches() {
+    // a circle in a 40° wedge splits where the lines touch it; in a new sketch the disc's two
+    // arcs are flagged to become one edge (the whole circle), in a legacy one they stay two
+    let mut s = Sketch::new();
+    let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let (w, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.642, 25.712)).unwrap();
+    s.add_tangent_circle(&[h, w], Some(crate::Dim::new(5.0)), [30.0, 10.0]).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.segs.len(), 2, "{:?}", disc.outer);
+    assert_eq!(disc.outer.merge_next(), [true, true]);
+    let corner = p.iter().find(|r| r.contains([4.0, 0.5])).unwrap_or_else(|| panic!("{p:?}"));
+    assert_eq!(corner.outer.segs.len(), 3, "{:?}", corner.outer);
+    assert_eq!(corner.outer.merge_next(), [false; 3], "a line's and the circle's pieces never merge");
+    s.behaviours = crate::Behaviours::legacy();
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.merge_next(), [false, false], "legacy sketches keep two arcs");
+  }
+}
+
+#[cfg(test)]
+mod merge_tests {
+  use super::*;
+  use crate::behaviour::{Behaviours, ONE_EDGE_ELLIPSE, PENDING};
+
+  fn ellipse_sketch() -> (Sketch, CurveId) {
+    let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
+    let (c, m) = (s.add_point(0.0, 0.0), s.add_point(8.0, 0.0));
+    let id = s.add_curve(CurveKind::Ellipse { center: c, major: m, minor: 4.0 }).unwrap();
+    (s, id)
+  }
+
+  #[test]
+  fn loop_segments_know_their_curve_and_merge_only_when_its_behaviour_is_on() {
+    let (mut s, id) = ellipse_sketch();
+    let p = find_profiles(&s);
+    assert_eq!(p[0].outer.src.iter().map(|x| x.curve).collect::<Vec<_>>(), [id, id]);
+    assert_eq!(p[0].outer.merge_next(), [false, false], "off for a legacy sketch");
+    s.behaviours.insert(ONE_EDGE_ELLIPSE);
+    let p = find_profiles(&s);
+    assert_eq!(p[0].outer.merge_next(), [true, true]);
+    assert_eq!(p[0].outer.reversed().merge_next(), [true, true]);
+  }
+
+  #[test]
+  fn pieces_of_different_curves_never_merge() {
+    let mut s = Sketch::new();
+    let c = s.add_point(0.0, 0.0);
+    let (a, b) = (s.add_point(10.0, 0.0), s.add_point(-10.0, 0.0));
+    s.add_curve(CurveKind::Arc { center: c, start: a, end: b }).unwrap();
+    s.add_curve(CurveKind::Arc { center: c, start: b, end: a }).unwrap();
+    for n in PENDING {
+      s.behaviours.enable_pending_for_tests(n);
+    }
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].outer.src.len(), 2);
+    assert_eq!(p[0].outer.merge_next(), [false, false]);
+  }
+
+  #[test]
+  fn reversing_a_loop_keeps_each_join_with_its_segments() {
+    let (s, id) = ellipse_sketch();
+    let other = CurveId(id.0 + 100);
+    let seg = Seg::Line { a: [0.0, 0.0], b: [1.0, 0.0] };
+    let flags = [true, false, false];
+    let l = Loop {
+      segs: vec![seg; 3],
+      src: [id, id, other].iter().zip(flags).map(|(&curve, merge_next)| SegSrc { curve, merge_next }).collect(),
+    };
+    let r = l.reversed();
+    // old joins 0→1 (merge), 1→2, 2→0; reversed order old 2, 1, 0: joins 2→1, 1→0 (merge), 0→2
+    assert_eq!(r.src.iter().map(|x| x.curve).collect::<Vec<_>>(), [other, id, id]);
+    assert_eq!(r.merge_next(), [false, true, false]);
+    assert_eq!(Loop::new(vec![seg]).merge_next(), [false]);
+    assert!(s.merge_flags(&[id], true) == [false], "a lone segment never merges with itself");
   }
 }

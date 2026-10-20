@@ -1,0 +1,10 @@
+# 283-scale-dimensioned-rectangle: added by the parity loop from a Fusion probe
+# scale-dimensioned-rectangle: rectangle (0,0)-(20,10) with 20 horizontal and 10 vertical driving
+# dimensions; every curve scaled by 1.5 about the origin, then extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 10]}
+{"cmd": "sketch.dimension", "type": "horizontal", "curves": [5], "value": "20"}
+{"cmd": "sketch.dimension", "type": "vertical", "curves": [6], "value": "10"}
+{"cmd": "sketch.transform", "scale": 1.5, "center": [0, 0]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

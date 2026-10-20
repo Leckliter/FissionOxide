@@ -37,7 +37,8 @@ change a parameter and watch the whole history rebuild.
   offset from it or a parallel face; taper angle; thin walls inside/outside/centred; new body,
   join, cut, intersect), revolve, fillet (edges or whole faces, tangent chains, several selection
   sets each with its own radius, constant or variable radius, setback corners where three filleted
-  edges meet), chamfer (equal, two distances, or distance and angle),
+  edges meet, asymmetric offsets for an elliptical round, full round across a rib), chamfer (equal,
+  two distances, or distance and angle),
   press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
   rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
 - **Construction geometry.** Planes offset, at an angle, midway, through three points or two
@@ -47,12 +48,13 @@ change a parameter and watch the whole history rebuild.
   can be sketch planes, revolve axes and inputs to each other.
 - **Threads, coils, pipes, ribs and webs.** Cosmetic or modeled (an ISO 60° helical groove)
   threads with ISO metric coarse pitches by default, coils with round, square or triangular
-  wire, solid or hollow pipes along a path, ribs and webs that grow until they meet the body.
+  wire, round, square or triangular pipes, solid or hollow, along all or part of a path, ribs and
+  webs that grow until they meet the body.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
 - **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
-  sweep along a path of lines and arcs (with a guide rail that turns and scales the profile, or a
-  twist angle), holes at sketch points (simple, counterbore, countersink, drill point, through
-  all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
+  sweep along a path of lines and arcs (with a guide rail that turns and optionally scales the
+  profile, a twist or taper angle, and perpendicular or parallel orientation), holes at sketch
+  points (simple, counterbore, countersink, drill point, through all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
   on flat or curved faces (projected, or wrapped around a cylinder), boundary fill (pick the
   closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
   surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
@@ -120,7 +122,8 @@ change a parameter and watch the whole history rebuild.
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
-  follows the body when it changes). Trim, break, extend and offset work on splines and
+  follows the body when it changes), and Spun Profile (the outline bodies sweep through as
+  they turn about an axis, drawn on one side of it; it also follows the bodies). Trim, break, extend and offset work on splines and
   ellipses too; what is left of an ellipse is an elliptical arc, of a fit-point spline a
   fit-point spline, and of other splines an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
@@ -238,7 +241,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Open / insert files    | Ctrl+O / File → Insert, or drop files on the window         |
 | Fit view               | F6                                                          |
 | Tangent circles        | 2-Tangent Circle: click two curves, then where the circle goes (the cursor sets its size); 3-Tangent: click three curves near where it should touch |
-| Blend curve            | Click near the ends of two curves (G2); Shift+click the second for G1 |
+| Blend curve            | Click near the ends of two curves (G1); Shift+click the second for G2 |
 | Break                  | Click a curve: it splits at the crossings either side of the click, or at the click |
 | Edit text              | Double-click a letter (or Modify → Edit Text); Explode Text makes plain curves |
 

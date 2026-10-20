@@ -6,11 +6,13 @@
 //! To wire up a new command, give its entry a `Cmd` (and add the command itself in
 //! `panels::Cmd`).
 
-use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
+use egui::{Color32, Rect, RichText, Stroke, Vec2, pos2, vec2};
 
+use crate::customize::{self, Action, Binding, Prefs};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
+use crate::tips::{self, Scope};
 use crate::{App, Tool, assembly_forms, config_ui, theme};
 
 #[derive(Clone, Copy)]
@@ -107,7 +109,7 @@ use Cmd::Dialog as D;
 const PATTERN: &[E] = &[
   c("Rectangular Pattern", Icon::Pattern, D(Kind::RectPattern)),
   c("Circular Pattern", Icon::CircPattern, D(Kind::CircPattern)),
-  x("Pattern on Path", Icon::Pattern),
+  c("Pattern on Path", Icon::Pattern, D(Kind::Form(&forms::PATH_PATTERN))),
 ];
 
 const SIMPLIFY: &[E] = &[
@@ -120,7 +122,7 @@ const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Creat
 
 const SOLID_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  x("Create Form", Icon::CreateForm),
+  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
@@ -256,7 +258,7 @@ const INSPECT: &[E] = &[
 
 const INSERT: &[E] = &[
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
@@ -278,6 +280,7 @@ const ASSEMBLE: &[E] = &[
   // not in Fusion's menu: FissionOxide's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
@@ -328,7 +331,7 @@ const SELECT: &[E] = &[
 
 const SURFACE_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  x("Create Form", Icon::CreateForm),
+  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),
@@ -567,7 +570,7 @@ const SK_SPLINE: &[E] = &[
 const SK_PROJECT: &[E] = &[
   c("Project", Icon::Project, D(Kind::Project)).k("P"),
   x("Intersect", Icon::Intersect),
-  x("Include 3D Geometry", Icon::Include3D),
+  c("Include 3D Geometry", Icon::Include3D, D(Kind::Form(&forms::SK_INCLUDE))),
   x("Project To Surface", Icon::ProjectSurface),
 ];
 
@@ -598,7 +601,7 @@ const SKETCH_CREATE: &[E] = &[
 const SK_CHAMFER: &[E] = &[
   c("Equal Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer)),
   c("Distance-Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer2)),
-  x("Distance-Angle Chamfer", Icon::SkChamfer),
+  c("Distance and Angle Chamfer", Icon::SkChamfer, D(Kind::SkChamferAngle)),
 ];
 
 const SKETCH_MODIFY: &[E] = &[
@@ -639,7 +642,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
@@ -958,6 +961,103 @@ pub(crate) struct Entry {
   pub tab: Tab,
 }
 
+impl Entry {
+  /// Its id in the key map and the S toolbox's shortcuts.
+  pub(crate) fn id(&self) -> String {
+    customize::cmd_id(Scope::of(self.tab), self.label)
+  }
+}
+
+/// Every tab with a toolbar.
+const ALL_TABS: [Tab; 10] = [
+  Tab::Solid,
+  Tab::Surface,
+  Tab::Mesh,
+  Tab::SheetMetal,
+  Tab::Plastic,
+  Tab::Manage,
+  Tab::Utilities,
+  Tab::Sketch,
+  Tab::Drawing,
+  Tab::Milling,
+];
+
+/// Every command that can have a keyboard shortcut, with the key its menus show (a label that
+/// shows a key on one tab has it on all of its toolbar's tabs).
+pub(crate) fn bindings() -> &'static [Binding] {
+  static ALL: std::sync::LazyLock<Vec<Binding>> = std::sync::LazyLock::new(|| {
+    let mut out: Vec<Binding> = Vec::new();
+    for e in commands(&ALL_TABS) {
+      let id = e.id();
+      match out.iter_mut().find(|b| b.id == id) {
+        Some(b) if b.default.is_empty() => b.default = e.key,
+        Some(_) => {}
+        None => out.push(Binding { id, scope: Scope::of(e.tab), label: e.label, default: e.key }),
+      }
+    }
+    out
+  });
+  &ALL
+}
+
+/// The keyboard shortcut of `label` on toolbar `scope`: the user's, or the menus' default.
+pub(crate) fn key_of<'a>(prefs: &'a Prefs, scope: Scope, label: &str) -> &'a str {
+  let id = customize::cmd_id(scope, label);
+  let default = bindings().iter().find(|b| b.id == id).map_or("", |b| b.default);
+  prefs.keys.key(&id, default)
+}
+
+/// Resting this long on a command expands its tooltip.
+const EXPAND_SECS: f64 = 2.0;
+
+/// A command's tooltip, as in Fusion: its name, a line on what it does and its shortcut; after
+/// resting on it for [`EXPAND_SECS`], a fuller explanation beside a large icon.
+fn rich_tip(resp: egui::Response, scope: Scope, it: &Item, key: &str) -> egui::Response {
+  let tip = tips::tip(scope, it.label);
+  let ctx = resp.ctx.clone();
+  let now = ctx.input(|i| i.time);
+  // (hovered since, last seen hovered): a gap means the pointer left and came back
+  let id = resp.id.with("tip-rest");
+  let since = if resp.hovered() {
+    ctx.data_mut(|d| {
+      let (since, last) = d.get_temp::<(f64, f64)>(id).unwrap_or((now, now));
+      let since = if now - last > 0.25 { now } else { since };
+      d.insert_temp(id, (since, now));
+      since
+    })
+  } else {
+    now
+  };
+  let rested = now - since;
+  resp.on_hover_ui(|ui| {
+    let expanded = tip.is_some() && rested >= EXPAND_SECS;
+    ui.set_max_width(if expanded { 380.0 } else { 300.0 });
+    ui.label(RichText::new(it.label).strong());
+    if let Some(t) = tip {
+      ui.label(t.line);
+    }
+    if it.cmd.is_none() {
+      ui.label(RichText::new("Not in FissionOxide yet").color(theme::MUTED));
+    }
+    if !key.is_empty() {
+      ui.label(RichText::new(format!("Shortcut: {key}")).color(theme::MUTED));
+    }
+    match tip {
+      Some(t) if expanded => {
+        ui.separator();
+        ui.horizontal_top(|ui| {
+          let (r, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
+          ui.painter().rect_filled(r, 3.0, Color32::from_gray(242));
+          icons::draw_tinted(ui.painter(), r.shrink(8.0), it.icon, it.tint);
+          ui.add(egui::Label::new(t.more).wrap());
+        });
+      }
+      Some(_) => ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(EXPAND_SECS - rested)),
+      None => {}
+    }
+  })
+}
+
 /// Every command the toolbar offers on `tabs`, in toolbar order, each label/command pair once.
 pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
   fn walk(menu: &[E], tab: Tab, out: &mut Vec<Entry>) {
@@ -992,8 +1092,9 @@ pub(crate) fn offers(tab: Tab, cmd: Cmd) -> bool {
 pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
   let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
+  let mut act: Option<Action> = None;
   for g in own.iter().chain(shared.iter()) {
-    show_group(app, ui, tab, g, &mut pick);
+    show_group(app, ui, tab, g, &mut pick, &mut act);
   }
   if let Some(it) = pick {
     match it.cmd {
@@ -1001,10 +1102,67 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
       None => app.status = Some((format!("{} isn't in FissionOxide yet", it.label), false)),
     }
   }
+  if let Some(a) = act {
+    customize::apply(app, a);
+  }
   true
 }
 
-fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Option<Item>) {
+/// Where a menu is: what its rows' options and tooltips need.
+struct At<'a> {
+  prefs: &'a Prefs,
+  tab: Tab,
+  group: &'static str,
+  /// The group's default toolbar icons.
+  quick: &'static [&'static str],
+}
+
+impl At<'_> {
+  fn scope(&self) -> Scope {
+    Scope::of(self.tab)
+  }
+
+  fn key(&self, it: &Item) -> &str {
+    if it.cmd.is_some() { key_of(self.prefs, self.scope(), it.label) } else { it.key }
+  }
+
+  /// A command's ⋮ options.
+  fn options(&self, ui: &mut egui::Ui, it: &Item, act: &mut Option<Action>) {
+    let id = customize::cmd_id(self.scope(), it.label);
+    let binding = bindings().iter().find(|b| b.id == id).cloned().unwrap_or(Binding {
+      id,
+      scope: self.scope(),
+      label: it.label,
+      default: "",
+    });
+    let default = self.quick.iter().take(MAX_QUICK).any(|l| *l == it.label);
+    customize::options_menu(ui, self.prefs, (self.tab, self.group, it.label, default), &binding, act);
+  }
+}
+
+/// The icons a group shows on the toolbar: its first [`MAX_QUICK`] commands unless unpinned,
+/// then the ones the user pinned.
+fn quick_items(prefs: &Prefs, tab: Tab, g: &Group) -> Vec<Item> {
+  let mut out: Vec<Item> = g
+    .quick
+    .iter()
+    .take(MAX_QUICK)
+    .filter(|l| prefs.shows(tab, g.label, l, true))
+    .filter_map(|l| find(g.menu, l))
+    .collect();
+  let prefix = customize::pin_id(tab, g.label, "");
+  for id in &prefs.pinned {
+    if let Some(it) = id.strip_prefix(&prefix).and_then(|l| find(g.menu, l))
+      && !out.iter().any(|o| o.label == it.label)
+    {
+      out.push(it);
+    }
+  }
+  out
+}
+
+fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Option<Item>, act: &mut Option<Action>) {
+  let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick };
   let popup_id = egui::Id::new(("toolbar-menu", tab, g.label));
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
@@ -1013,16 +1171,16 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-      // like Fusion, a group shows a handful of its commands; the rest live in its menu
-      for label in g.quick.iter().take(MAX_QUICK) {
-        let Some(it) = find(g.menu, label) else { continue };
-        let hint = match (it.cmd.is_some(), it.key.is_empty()) {
-          (false, _) => "Not in FissionOxide yet".to_string(),
-          (true, true) => String::new(),
-          (true, false) => format!("Shortcut: {}", it.key),
-        };
+      // like Fusion, a group shows a handful of its commands (and the ones pinned to it); the
+      // rest live in its menu
+      for it in quick_items(&app.prefs, tab, g) {
         let active = it.cmd.is_some_and(|c| c.active(app));
-        if icons::tool_button_tinted(ui, it.icon, it.tint, it.label, &hint, active).clicked() {
+        let resp = icons::tool_button_bare(ui, it.icon, it.tint, active);
+        let resp = rich_tip(resp, at.scope(), &it, at.key(&it));
+        if it.cmd.is_some() {
+          resp.context_menu(|ui| at.options(ui, &it, act));
+        }
+        if resp.clicked() {
           *pick = Some(it);
         }
       }
@@ -1034,7 +1192,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
   // toggles (selection priority and filters) show a check mark while on
   let on: Vec<&'static str> =
     toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
-  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, g.menu, pick, &on));
+  egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, g.menu, pick, act, &on));
   if matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING") {
     ui.painter()
       .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
@@ -1055,7 +1213,14 @@ fn toggles(menu: &'static [E]) -> Vec<Item> {
   out
 }
 
-fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>, on: &[&'static str]) {
+fn entries(
+  ui: &mut egui::Ui,
+  at: &At,
+  menu: &'static [E],
+  pick: &mut Option<Item>,
+  act: &mut Option<Action>,
+  on: &[&'static str],
+) {
   ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
   let font = egui::FontId::proportional(12.5);
   let widest = menu
@@ -1067,18 +1232,38 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>, on: &
     })
     .map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::BLACK).size().x)
     .fold(0.0f32, f32::max);
-  let keys = menu.iter().any(|e| matches!(e, E::I(i) if !i.key.is_empty()));
-  let subs = menu.iter().any(|e| matches!(e, E::Sub(..)));
-  let width = widest + 44.0 + if keys { 72.0 } else { 0.0 } + if subs { 24.0 } else { 0.0 };
+  let keys = menu.iter().any(|e| matches!(e, E::I(i) if !at.key(i).is_empty()));
+  // the last column holds a command's ⋮ (or a submenu's arrow)
+  let width = widest + 44.0 + if keys { 72.0 } else { 0.0 } + 24.0;
   ui.set_min_width(width);
   ui.set_max_width(width);
   for e in menu {
     match e {
       E::I(it) => {
-        let r = row(ui, width, Some(it), it.label, false);
+        let r = row(ui, width, Some(it), at.key(it), it.label, false);
+        if it.cmd.is_some() {
+          // Fusion's ⋮ on the hovered row: its options open beside it
+          let dots_rect = Rect::from_min_max(pos2(r.rect.right() - 22.0, r.rect.top()), r.rect.max);
+          let dots = ui.interact(dots_rect, r.id.with("options"), egui::Sense::click());
+          let open = egui::Popup::is_id_open(ui.ctx(), egui::containers::menu::SubMenu::id_from_widget_id(dots.id));
+          if r.hovered() || dots.hovered() || open {
+            if dots.hovered() || open {
+              ui.painter().rect_filled(dots_rect.shrink(2.0), 2.0, Color32::from_gray(205));
+            }
+            ui.painter().text(
+              dots_rect.center(),
+              egui::Align2::CENTER_CENTER,
+              "⋮",
+              egui::FontId::proportional(14.0),
+              theme::TEXT,
+            );
+          }
+          egui::containers::menu::SubMenu::new().show(ui, &dots, |ui| at.options(ui, it, act));
+        }
+        let r = rich_tip(r, at.scope(), it, at.key(it));
         if on.contains(&it.label) {
           ui.painter().text(
-            r.rect.right_center() - vec2(14.0, 0.0),
+            r.rect.right_center() - vec2(30.0, 0.0),
             egui::Align2::CENTER_CENTER,
             "✔",
             egui::FontId::proportional(12.0),
@@ -1098,15 +1283,15 @@ fn entries(ui: &mut egui::Ui, menu: &'static [E], pick: &mut Option<Item>, on: &
         );
       }
       E::Sub(label, sub) => {
-        let resp = row(ui, width, None, label, true);
-        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, sub, pick, on));
+        let resp = row(ui, width, None, "", label, true);
+        egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, at, sub, pick, act, on));
       }
     }
   }
 }
 
 /// One menu row: icon, name, shortcut column, or a submenu arrow.
-fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, label: &str, sub: bool) -> egui::Response {
+fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str, sub: bool) -> egui::Response {
   let disabled = it.is_some_and(|i| i.disabled);
   let (rect, resp) = ui.allocate_exact_size(vec2(width, 22.0), egui::Sense::click());
   let p = ui.painter();
@@ -1120,11 +1305,11 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, label: &str, sub: bool)
     } else {
       icons::draw_tinted(p, ir, i.icon, i.tint);
     }
-    if !i.key.is_empty() {
+    if !key.is_empty() {
       p.text(
-        pos2(rect.right() - 68.0, rect.center().y),
+        pos2(rect.right() - 90.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        i.key,
+        key,
         egui::FontId::proportional(12.0),
         theme::TEXT,
       );
@@ -1147,4 +1332,68 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, label: &str, sub: bool)
     ));
   }
   resp
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn labels(menu: &[E], out: &mut Vec<&'static str>) {
+    for e in menu {
+      match e {
+        E::I(i) => out.push(i.label),
+        E::Sub(_, sub) => labels(sub, out),
+        E::Sep => {}
+      }
+    }
+  }
+
+  #[test]
+  fn every_command_has_a_tooltip() {
+    let mut missing = Vec::new();
+    for tab in ALL_TABS {
+      let (own, shared) = groups(tab);
+      let mut all = Vec::new();
+      for g in own.iter().chain(shared.iter()) {
+        labels(g.menu, &mut all);
+      }
+      for l in all {
+        match tips::tip(Scope::of(tab), l) {
+          Some(t) if !t.line.is_empty() && t.more.len() > t.line.len() => {}
+          _ => missing.push((tab, l)),
+        }
+      }
+    }
+    assert!(missing.is_empty(), "{missing:?}");
+  }
+
+  #[test]
+  fn keys_come_from_the_menus_and_the_user() {
+    let mut prefs = Prefs::default();
+    assert_eq!(key_of(&prefs, Scope::Design, "Extrude"), "E");
+    assert_eq!(key_of(&prefs, Scope::Sketch, "Line"), "L");
+    assert_eq!(key_of(&prefs, Scope::Design, "Shell"), "");
+    // no two commands on a toolbar share a default key
+    let all = bindings();
+    for b in all.iter().filter(|b| customize::parse_combo(b.default).is_some()) {
+      assert_eq!(prefs.keys.conflict(&b.id, b.scope, b.default, all), None, "{}", b.id);
+    }
+    prefs.keys.set("design.Extrude", "Shift+E", "E");
+    assert_eq!(key_of(&prefs, Scope::Design, "Extrude"), "Shift+E");
+  }
+
+  #[test]
+  fn pinned_icons_join_their_group() {
+    let mut prefs = Prefs::default();
+    let create = &SOLID[0];
+    let before: Vec<&str> = quick_items(&prefs, Tab::Solid, create).iter().map(|i| i.label).collect();
+    assert!(before.contains(&"Extrude") && !before.contains(&"Shell"));
+    prefs.pinned.push(customize::pin_id(Tab::Solid, "CREATE", "Torus"));
+    prefs.unpinned.push(customize::pin_id(Tab::Solid, "CREATE", "Extrude"));
+    let after: Vec<&str> = quick_items(&prefs, Tab::Solid, create).iter().map(|i| i.label).collect();
+    assert_eq!(after.last(), Some(&"Torus"));
+    assert!(!after.contains(&"Extrude"));
+    // PLASTIC shares the menu but not the pins
+    assert!(!quick_items(&prefs, Tab::Plastic, &PLASTIC[0]).iter().any(|i| i.label == "Torus"));
+  }
 }

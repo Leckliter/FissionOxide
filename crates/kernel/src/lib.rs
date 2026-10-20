@@ -49,10 +49,15 @@ pub struct Plane {
 
 impl Plane {
   pub const XY: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::Y };
-  /// Front plane: X right, Z up (normal −Y, towards the viewer of the front view).
+  /// Front plane: X right, Z up (normal −Y, towards the viewer of the front view). The XZ origin
+  /// plane of designs saved before Fusion's frames (`fox_sketch::behaviour::FUSION_SKETCH_FRAMES`).
   pub const XZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::Z };
-  /// Right plane: Y right, Z up (normal +X).
+  /// Right plane: Y right, Z up (normal +X). The YZ origin plane of designs saved before Fusion's frames.
   pub const YZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::Y, y: DVec3::Z };
+  /// The XZ origin plane as Fusion frames it in a Z-up design: X right, −Z up (normal +Y).
+  pub const FUSION_XZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
+  /// The YZ origin plane as Fusion frames it in a Z-up design: −Z right, Y up (normal +X).
+  pub const FUSION_YZ: Plane = Plane { origin: DVec3::ZERO, x: DVec3::NEG_Z, y: DVec3::Y };
 
   /// Builds a plane from an origin, a normal and a preferred X direction (re-orthogonalised).
   pub fn from_normal(origin: DVec3, normal: DVec3, xhint: DVec3) -> Result<Plane> {
@@ -272,8 +277,26 @@ fn line_kind(k: u8) -> LineKind {
   }
 }
 
+/// Behaviour-gated choices for building a face from a sketch profile that the profile itself
+/// doesn't carry. The default is the legacy behaviour, so old files rebuild unchanged; callers
+/// fill the fields from the sketch's (or design's) `Behaviours`. See `fox_sketch::behaviour`.
+///
+/// Merging a curve's pieces into one edge is not an option here: each loop segment carries its
+/// own flag ([`fox_sketch::Loop::src`]), set by the sketch from its behaviours, and
+/// [`Shape::face_with`] always honours it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FaceOptions {}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
+
+/// Per-segment merge flags for `make_face` / `make_wire` (1 = becomes one edge with the next), or
+/// empty when nothing merges, so the kernel takes the legacy path.
+fn merge_bytes(flags: impl IntoIterator<Item = bool>) -> Vec<u8> {
+  let v: Vec<u8> = flags.into_iter().map(u8::from).collect();
+  if v.contains(&1) { v } else { Vec::new() }
+}
 
 impl Shape {
   fn wrap(p: UniquePtr<sys::Shape>) -> Result<Shape> {
@@ -287,20 +310,34 @@ impl Shape {
     self.inner.as_ref().ok_or(KernelError::Empty)
   }
 
-  /// A planar face from a sketch profile on `plane`.
+  /// A planar face from a sketch profile on `plane`, built the legacy way
+  /// ([`FaceOptions::default`]).
   pub fn face(plane: &Plane, profile: &Profile) -> Result<Shape> {
+    Shape::face_with(plane, profile, FaceOptions::default())
+  }
+
+  /// A planar face from a sketch profile on `plane`, with behaviour-gated `opts` (see
+  /// [`FaceOptions`]). Each run of loop segments marked to merge ([`fox_sketch::Loop::merge_next`],
+  /// pieces of one sketch curve whose one-edge behaviour is on) becomes one edge; with none
+  /// marked the face is built exactly as before.
+  pub fn face_with(plane: &Plane, profile: &Profile, opts: FaceOptions) -> Result<Shape> {
+    // No options yet. A gated change reads its field here and passes it on to `sys::make_face`
+    // (a new argument in ffi.rs and kernel.cpp).
+    let FaceOptions {} = opts;
     let mut segs = Vec::new();
     let mut lens = Vec::new();
+    let mut merge = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
       lens.push(u32::try_from(lp.segs.len()).map_err(|_| KernelError::Input("too many segments".into()))?);
       for s in &lp.segs {
         push_seg(&mut segs, plane, s);
       }
+      merge.extend(lp.merge_next());
     }
     if segs.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("non-finite profile coordinates".into()));
     }
-    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens)?)
+    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens, &merge_bytes(merge))?)
   }
 
   /// Sweeps a face along a vector into a solid.
@@ -463,6 +500,14 @@ impl Shape {
 
   /// An open chain of sketch segments on `plane` as a wire (sweep paths).
   pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
+    Shape::path_with(plane, segs, &[])
+  }
+
+  /// [`Shape::path`] where `merge_next[k]` lets segment `k` become one edge with segment `k + 1`
+  /// (the first, after the last, when the chain closes), as for a face's loops (flags from
+  /// `Sketch::merge_flags` or [`fox_sketch::Loop::merge_next`]). Empty or all false: the legacy
+  /// wire.
+  pub fn path_with(plane: &Plane, segs: &[Seg], merge_next: &[bool]) -> Result<Shape> {
     let mut data = Vec::new();
     for s in segs {
       push_seg(&mut data, plane, s);
@@ -470,7 +515,8 @@ impl Shape {
     if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("the path is empty or not finite".into()));
     }
-    Shape::wrap(sys::make_wire(&data)?)
+    let merge = if merge_next.len() == segs.len() { merge_bytes(merge_next.iter().copied()) } else { Vec::new() };
+    Shape::wrap(sys::make_wire(&data, &merge)?)
   }
 
   /// Sweeps this face along a path wire.
@@ -506,6 +552,17 @@ impl Shape {
       return Err(KernelError::Input("the draft angle must be under 90°".into()));
     }
     Shape::wrap(sys::draft(self.get()?, faces, &[origin.x, origin.y, origin.z, n.x, n.y, n.z], angle)?)
+  }
+
+  /// Splits faces (1-based) along a neutral plane and tapers both sides away from it: the side
+  /// `normal` points to by `angle` radians, the other side by `angle2` (zero leaves a side alone).
+  pub fn draft_two_sided(&self, faces: &[u32], origin: DVec3, normal: DVec3, angle: f64, angle2: f64) -> Result<Shape> {
+    let n = normal.try_normalize().ok_or(KernelError::Input("zero pull direction".into()))?;
+    if [angle, angle2].iter().any(|a| !(a.is_finite() && a.abs() < std::f64::consts::FRAC_PI_2)) {
+      return Err(KernelError::Input("the draft angle must be under 90°".into()));
+    }
+    let plane = [origin.x, origin.y, origin.z, n.x, n.y, n.z];
+    Shape::wrap(sys::draft_two_sided(self.get()?, faces, &plane, angle, angle2)?)
   }
 
   /// For a sheet that was unfolded onto `face` (see [`Shape::unfold`]): the material to cut from
@@ -581,12 +638,23 @@ impl Shape {
     Shape::wrap(sys::offset_face(self.get()?, d)?)
   }
 
-  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians.
-  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<Shape> {
+  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians. `d1`
+  /// and the angle are on the face each edge runs forward in (Fusion's choice); `flip` swaps.
+  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, true)
+  }
+
+  /// [`Shape::chamfer_two`] as designs from before the `chamfer_forward_face` behaviour build it:
+  /// `d1` and the angle on each edge's first adjacent face (`flip`: the other one).
+  pub fn chamfer_two_legacy(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, false)
+  }
+
+  fn chamfer_two_on(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool, forward: bool) -> Result<Shape> {
     if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
       return Err(KernelError::Input("chamfer sizes must be positive".into()));
     }
-    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)?.outward()
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip, forward)?)?.outward()
   }
 
   /// Fillets edges with the radius running from `r1` to `r2` along each edge.
@@ -615,6 +683,21 @@ impl Shape {
   /// One edge (1-based index, as in [`Shape::edges`]) as a shape of its own.
   pub fn edge_shape(&self, edge: u32) -> Result<Shape> {
     Shape::wrap(sys::edge_at_index(self.get()?, edge)?)
+  }
+
+  /// The point and unit tangent at fraction `t` (0 – 1) of this curve's arc length (its first
+  /// wire, else its first edge), on the exact curve. It is measured from the end nearer `from`
+  /// (else the curve's own start) and the tangent points away from that end.
+  pub fn along_curve(&self, t: f64, from: Option<DVec3>) -> Result<(DVec3, DVec3)> {
+    if !t.is_finite() {
+      return Err(KernelError::Input("the position along the curve is not finite".into()));
+    }
+    let from = from.map(|p| p.to_array().to_vec()).unwrap_or_default();
+    let v = sys::curve_along(self.get()?, t, &from)?;
+    match v.as_slice() {
+      [px, py, pz, tx, ty, tz] => Ok((DVec3::new(*px, *py, *pz), DVec3::new(*tx, *ty, *tz))),
+      _ => Err(KernelError::Kernel("no point along the curve".into())),
+    }
   }
 
   /// Minimum distance to another shape and the closest points on each.
@@ -983,11 +1066,21 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
       let range = DVec3::new(start, start + sweep, 0.0);
       put(4.0, [plane.to_world(center), plane.to_world(m), plane.to_world(v), range])
     }
+    Seg::Conic { p, w } => {
+      put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
+    }
+    Seg::Quintic { p } => {
+      // ten control points over three records: 4, 4 and 2
+      let w = p.map(|q| plane.to_world(q));
+      put(6.0, [w[0], w[1], w[2], w[3]]);
+      put(6.0, [w[4], w[5], w[6], w[7]]);
+      put(6.0, [w[8], w[9], DVec3::ZERO, DVec3::ZERO]);
+    }
   }
 }
 
 mod features2;
-pub use features2::Inside;
+pub use features2::{Inside, SweepOptions};
 mod surface;
 pub use surface::{Extension, Untrim};
 mod xcaf;
@@ -1001,7 +1094,32 @@ mod tests_features2;
 mod sheet2;
 
 mod refparts;
+
+mod project;
+pub use project::{PathEnds, Projection3d};
+mod silhouette;
 #[cfg(test)]
 mod tests_ellipse;
 #[cfg(test)]
+mod tests_merge;
+#[cfg(test)]
+mod tests_project;
+#[cfg(test)]
 mod tests_refparts;
+#[cfg(test)]
+mod tests_silhouette;
+
+mod threads;
+
+mod curves3d;
+mod path3d;
+#[cfg(test)]
+mod tests_curves3d;
+pub use path3d::Seg3;
+
+mod form;
+pub use form::BSplineSurface;
+mod spun;
+pub use spun::AxialEvents;
+#[cfg(test)]
+mod tests_spun;

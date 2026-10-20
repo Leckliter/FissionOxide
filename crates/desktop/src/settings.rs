@@ -1,6 +1,7 @@
 //! `settings.ini` in [`crate::config_dir`]. The Windows installer writes the `[Updates]` choice
 //! the user made in its wizard; the app reads it and writes it back when changed in Help →
-//! Check for Updates. Unknown sections and keys are kept as they are.
+//! Check for Updates. Other parts of the app keep their own sections ([`Settings::section`],
+//! [`Settings::set_section`]). Unknown sections and keys are kept as they are.
 
 use std::path::{Path, PathBuf};
 
@@ -49,6 +50,9 @@ pub struct Settings {
   pub skip_version: Option<String>,
   /// The whole file as read, so writing it back keeps what this struct doesn't know.
   lines: Vec<String>,
+  /// Sections replaced with [`Settings::set_section`]: saving writes them over the file as it is
+  /// then.
+  changed: Vec<String>,
 }
 
 const SECTION: &str = "Updates";
@@ -147,19 +151,168 @@ impl Settings {
     text
   }
 
+  /// The `key=value` lines of section `name` (any case), in file order. Comments and blank lines
+  /// are left out; keys and values are trimmed.
+  pub fn section(&self, name: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in &self.lines {
+      let t = line.trim();
+      if let Some(n) = t.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+        inside = n.trim().eq_ignore_ascii_case(name);
+      } else if inside
+        && !t.starts_with([';', '#'])
+        && let Some((k, v)) = t.split_once('=')
+      {
+        out.push((k.trim().to_string(), v.trim().to_string()));
+      }
+    }
+    out
+  }
+
+  /// Replaces section `name` with `entries` (adding it at the end when missing). Not for
+  /// `[Updates]`, whose keys are this struct's fields.
+  pub fn set_section(&mut self, name: &str, entries: &[(String, String)]) {
+    debug_assert!(!name.eq_ignore_ascii_case(SECTION));
+    if !self.changed.iter().any(|c| c.eq_ignore_ascii_case(name)) {
+      self.changed.push(name.to_string());
+    }
+    let mut out: Vec<String> = Vec::new();
+    // in the section (its lines are replaced), or in a second copy of it (dropped)
+    let (mut inside, mut skip, mut done) = (false, false, false);
+    let body = |out: &mut Vec<String>| {
+      while out.last().is_some_and(|l| l.trim().is_empty()) {
+        out.pop();
+      }
+      out.extend(entries.iter().map(|(k, v)| format!("{k}={v}")));
+    };
+    for line in &self.lines {
+      let t = line.trim();
+      if let Some(n) = t.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+        if inside {
+          body(&mut out);
+          // one blank line before the next section
+          out.push(String::new());
+        }
+        let ours = n.trim().eq_ignore_ascii_case(name);
+        (inside, skip) = (ours && !done, ours && done);
+        done |= ours;
+        if skip {
+          continue;
+        }
+      } else if inside || skip {
+        continue;
+      }
+      out.push(line.clone());
+    }
+    if inside {
+      body(&mut out);
+    }
+    if !done {
+      if out.last().is_some_and(|l| !l.trim().is_empty()) {
+        out.push(String::new());
+      }
+      out.push(format!("[{name}]"));
+      body(&mut out);
+    }
+    self.lines = out;
+  }
+
   pub fn save(&self) -> std::io::Result<()> {
     self.save_to(&Self::path())
   }
 
   pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-    if let Some(d) = path.parent() {
-      std::fs::create_dir_all(d)?;
+    // other sections (the app's Preferences) may have been written since this was read: keep
+    // the file's lines as they are now, with this struct's `[Updates]` keys and the sections set
+    // on it (`set_section`)
+    let mut now = self.clone();
+    if let Ok(text) = std::fs::read_to_string(path) {
+      let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+      now.lines = text.lines().map(str::to_string).collect();
+      for name in &self.changed {
+        now.set_section(name, &self.section(name));
+      }
     }
-    // write then rename, so a crash never leaves half a file
-    let tmp = path.with_extension("ini.tmp");
-    std::fs::write(&tmp, self.to_text())?;
-    std::fs::rename(&tmp, path)
+    write_file(path, &now.to_text())
   }
+}
+
+/// Writes `text` to `path` through a temporary file, so a crash never leaves half a file.
+fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
+  if let Some(d) = path.parent() {
+    std::fs::create_dir_all(d)?;
+  }
+  let tmp = path.with_extension("ini.tmp");
+  std::fs::write(&tmp, text)?;
+  std::fs::rename(&tmp, path)
+}
+
+/// The `key=value` pairs of section `name` in an ini text (keys as written, values trimmed).
+pub fn section(text: &str, name: &str) -> Vec<(String, String)> {
+  let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+  let mut out = Vec::new();
+  let mut current = String::new();
+  for line in text.lines() {
+    let line = line.trim();
+    if let Some(n) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+      current = n.trim().to_string();
+    } else if current.eq_ignore_ascii_case(name)
+      && !line.starts_with(';')
+      && let Some((k, v)) = line.split_once('=')
+    {
+      out.push((k.trim().to_string(), v.trim().to_string()));
+    }
+  }
+  out
+}
+
+/// `text` with section `name` replaced by `values` (appended when it isn't there); every other
+/// line stays as it is.
+pub fn with_section(text: &str, name: &str, values: &[(String, String)]) -> String {
+  let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+  let mut out: Vec<String> = Vec::new();
+  let mut inside = false;
+  let mut written = false;
+  let body = |out: &mut Vec<String>| {
+    out.push(format!("[{name}]"));
+    out.extend(values.iter().map(|(k, v)| format!("{k}={v}")));
+  };
+  for line in text.lines() {
+    let t = line.trim();
+    if let Some(n) = t.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+      let was_inside = inside;
+      inside = n.trim().eq_ignore_ascii_case(name);
+      if inside {
+        if !written {
+          body(&mut out);
+          written = true;
+        }
+        continue;
+      }
+      if was_inside {
+        out.push(String::new());
+      }
+    } else if inside {
+      continue;
+    }
+    out.push(line.to_string());
+  }
+  if !written {
+    if out.last().is_some_and(|l| !l.trim().is_empty()) {
+      out.push(String::new());
+    }
+    body(&mut out);
+  }
+  let mut text = out.join("\n");
+  text.push('\n');
+  text
+}
+
+/// Replaces section `name` of the settings file at `path` (see [`with_section`]).
+pub fn save_section(path: &Path, name: &str, values: &[(String, String)]) -> std::io::Result<()> {
+  let text = std::fs::read_to_string(path).unwrap_or_default();
+  write_file(path, &with_section(&text, name, values))
 }
 
 #[cfg(test)]
@@ -193,6 +346,52 @@ mod tests {
     let path = dir.join("settings.ini");
     s.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path).update_mode, UpdateMode::Off);
+    std::fs::remove_dir_all(dir).unwrap();
+  }
+
+  #[test]
+  fn other_sections_round_trip() {
+    let kv = |k: &str, v: &str| (k.to_string(), v.to_string());
+    let mut s = Settings::parse("[Updates]\nMode=off\n\n[Keys]\n; mine\nExtrude=E\n\n[Window]\nMaximized=1\n");
+    assert_eq!(s.section("keys"), vec![kv("Extrude", "E")]);
+    assert!(s.section("Toolbar").is_empty());
+    s.set_section("Keys", &[kv("design.Extrude", "Shift+E"), kv("sketch.Line", "")]);
+    s.set_section("Toolbar", &[kv("Pinned", "a|b")]);
+    let text = s.to_text();
+    assert_eq!(
+      text,
+      "[Updates]\nMode=off\nLastCheck=0\nSkip=\n\n[Keys]\ndesign.Extrude=Shift+E\nsketch.Line=\n\n[Window]\nMaximized=1\n\n[Toolbar]\nPinned=a|b\n"
+    );
+    let back = Settings::parse(&text);
+    assert_eq!(back.section("Keys"), vec![kv("design.Extrude", "Shift+E"), kv("sketch.Line", "")]);
+    assert_eq!(back.update_mode, UpdateMode::Off);
+    // emptied, and a duplicate section dropped
+    let mut s = Settings::parse("[Keys]\na=1\n[Keys]\nb=2\n");
+    s.set_section("Keys", &[]);
+    assert_eq!(s.to_text(), "[Keys]\n\n[Updates]\nMode=auto\nLastCheck=0\nSkip=\n");
+  }
+
+  #[test]
+  fn sections_are_read_and_replaced_keeping_the_rest() {
+    let text = "[Updates]\nMode=off\n\n[Preferences]\nUnits=mm\nOld=1\n\n[Window]\nMaximized=1\n";
+    assert_eq!(section(text, "preferences"), [("Units".to_string(), "mm".to_string()), ("Old".into(), "1".into())]);
+    let v = [("Units".to_string(), "in".to_string())];
+    let out = with_section(text, "Preferences", &v);
+    assert_eq!(out, "[Updates]\nMode=off\n\n[Preferences]\nUnits=in\n\n[Window]\nMaximized=1\n");
+    assert_eq!(
+      with_section("[Updates]\nMode=off\n", "Preferences", &v),
+      "[Updates]\nMode=off\n\n[Preferences]\nUnits=in\n"
+    );
+    assert_eq!(with_section("", "Preferences", &v), "[Preferences]\nUnits=in\n");
+    // the updater's own save keeps a section written after it read the file
+    let dir = std::env::temp_dir().join(format!("fox-settings-sections-{}", std::process::id()));
+    let path = dir.join("settings.ini");
+    let s = Settings::load_from(&path);
+    save_section(&path, "Preferences", &v).unwrap();
+    s.save_to(&path).unwrap();
+    let back = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(section(&back, "Preferences"), v);
+    assert_eq!(Settings::parse(&back).update_mode, UpdateMode::Auto);
     std::fs::remove_dir_all(dir).unwrap();
   }
 }

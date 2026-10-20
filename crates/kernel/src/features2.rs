@@ -7,6 +7,21 @@ use glam::DVec3;
 use crate::ffi::ffi as sys;
 use crate::{KernelError, Result, Shape};
 
+/// How a sweep steers and shapes its profile along the path.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SweepOptions<'a> {
+  /// A guide rail: the section turns to face it.
+  pub rail: Option<&'a Shape>,
+  /// With a rail: the section scales about the path as the rail's distance from it changes.
+  pub scale: bool,
+  /// Turn about the path from start to end, radians (no rail).
+  pub twist: f64,
+  /// The section grows all round by tan(taper) per unit of path length, radians.
+  pub taper: f64,
+  /// The section keeps its orientation and only moves along the path.
+  pub parallel: bool,
+}
+
 /// Where a point lies relative to a solid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inside {
@@ -20,17 +35,82 @@ impl Shape {
     if self.solid_count() == 0 { Err(KernelError::Kernel(format!("the {what} made no solid"))) } else { Ok(self) }
   }
 
+  /// Fusion's shell directions: walls `inside` the body's surface, `outside` it, or both (either
+  /// may be zero, not both), opening the given faces (none: a closed, hollow body).
+  pub fn shell_sides(&self, faces: &[u32], inside: f64, outside: f64, round: bool) -> Result<Shape> {
+    let ok = |t: f64| t.is_finite() && t >= 0.0;
+    if !(ok(inside) && ok(outside)) || inside + outside <= 1e-9 {
+      return Err(KernelError::Input("shell thickness must be positive".into()));
+    }
+    if faces.is_empty() {
+      // with nothing opened OCCT gives the offset solid: the hollow is what lies between
+      let offset = |t: f64| -> Result<Shape> {
+        if t.abs() <= 1e-9 {
+          return Ok(self.clone());
+        }
+        Shape::wrap(sys::shell(self.get()?, faces, t, round)?)?.outward()?.solid_or("shell")
+      };
+      return offset(outside)?.boolean(&offset(-inside)?, crate::BoolOp::Subtract);
+    }
+    if outside <= 1e-9 {
+      return self.shell(faces, inside, round);
+    }
+    // a positive offset keeps the inside surface: the walls grow outward
+    let out = Shape::wrap(sys::shell(self.get()?, faces, outside, round)?)?.solid_or("shell")?;
+    if out.mass()?.volume <= 1e-9 {
+      return Err(KernelError::Kernel("shell failed (outside walls)".into()));
+    }
+    if inside <= 1e-9 {
+      return Ok(out);
+    }
+    let r = out.boolean(&self.shell(faces, inside, round)?, crate::BoolOp::Union)?;
+    r.unified()
+  }
+
   /// Sweeps this profile along a path wire, oriented and scaled to keep touching a guide rail.
   pub fn sweep_rail(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
-    Shape::wrap(sys::sweep_rail(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")
+    self.sweep_guided(path, &SweepOptions { rail: Some(rail), scale: true, ..Default::default() })
   }
 
   /// Sweeps this profile along a path wire, turning it by `twist` radians from start to end.
   pub fn sweep_twisted(&self, path: &Shape, twist: f64) -> Result<Shape> {
+    self.sweep_guided(path, &SweepOptions { twist, ..Default::default() })
+  }
+
+  /// [`Shape::sweep_rail`] as designs from before the `sweep_unified` behaviour build it: each
+  /// section scaled until its outline touches the rail (BRepFill contact on border).
+  pub fn sweep_rail_legacy(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::sweep_rail_legacy(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")
+  }
+
+  /// [`Shape::sweep_twisted`] as designs from before the `sweep_unified` behaviour build it.
+  pub fn sweep_twisted_legacy(&self, path: &Shape, twist: f64) -> Result<Shape> {
     if !twist.is_finite() {
       return Err(KernelError::Input("the twist angle is not finite".into()));
     }
-    Shape::wrap(sys::sweep_twist(self.get()?, path.get()?, twist)?)?.solid_or("sweep")
+    Shape::wrap(sys::sweep_twist_legacy(self.get()?, path.get()?, twist)?)?.solid_or("sweep")
+  }
+
+  /// Sweeps this profile along a path wire, steered and shaped by `opts`.
+  pub fn sweep_guided(&self, path: &Shape, opts: &SweepOptions) -> Result<Shape> {
+    if !opts.twist.is_finite() || !opts.taper.is_finite() {
+      return Err(KernelError::Input("the twist or taper angle is not finite".into()));
+    }
+    if opts.taper.abs() >= std::f64::consts::FRAC_PI_2 {
+      return Err(KernelError::Input("the taper angle must be under 90 degrees".into()));
+    }
+    let rail = opts.rail.unwrap_or(path);
+    let r = sys::sweep_guided(
+      self.get()?,
+      path.get()?,
+      rail.get()?,
+      opts.rail.is_some(),
+      opts.scale,
+      opts.twist,
+      opts.taper,
+      opts.parallel,
+    )?;
+    Shape::wrap(r)?.solid_or("sweep")
   }
 
   /// A loft through the outer boundaries of `sections`, in order, along a centre line wire.
@@ -44,6 +124,14 @@ impl Shape {
 
   /// A loft through the outer boundaries of `sections` whose sides follow rail wires.
   pub fn loft_rails(sections: &[Shape], rails: &[Shape]) -> Result<Shape> {
+    Shape::loft_rails_with(sections, rails, true)
+  }
+
+  /// [`Shape::loft_rails`], choosing how two or more rails spread around a polygonal section:
+  /// with `spread`, corner to corner as Fusion does (a side no rail touches stays straight);
+  /// without, smoothly round the loop from one rail to the next (designs made before the
+  /// `loft_rail_spread` behaviour).
+  pub fn loft_rails_with(sections: &[Shape], rails: &[Shape], spread: bool) -> Result<Shape> {
     if sections.len() < 2 {
       return Err(KernelError::Input("a loft needs at least two profiles".into()));
     }
@@ -51,7 +139,27 @@ impl Shape {
       return Err(KernelError::Input("no rails".into()));
     }
     let (c, r) = (Shape::compound(sections)?, Shape::compound(rails)?);
-    Shape::wrap(sys::loft_rails(c.get()?, r.get()?)?)?.solid_or("loft")
+    Shape::wrap(sys::loft_rails(c.get()?, r.get()?, spread)?)?.solid_or("loft")
+  }
+
+  /// A closed loft through the outer boundaries of `sections` (three or more), in order and back
+  /// to the first: one surface, smooth through every section including the first.
+  pub fn loft_closed(sections: &[Shape]) -> Result<Shape> {
+    if sections.len() < 3 {
+      return Err(KernelError::Input("a closed loft needs at least three profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    Shape::wrap(sys::loft_closed(c.get()?)?)?.solid_or("loft")
+  }
+
+  /// A loft from `profile` to the point `apex` (a vertex) that arrives tangent to the plane
+  /// across `axis` there, rounded like a dome; `weight` (1 = a paraboloid) sets how far the flat
+  /// top reaches.
+  pub fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: DVec3, weight: f64) -> Result<Shape> {
+    if !(weight > 0.0 && weight.is_finite()) {
+      return Err(KernelError::Input("the weight must be above zero".into()));
+    }
+    Shape::wrap(sys::loft_point_tangent(profile.get()?, apex.get()?, &axis.to_array(), weight)?)?.solid_or("loft")
   }
 
   /// The material an emboss adds to (or a deboss removes from) this body: `profiles` (planar

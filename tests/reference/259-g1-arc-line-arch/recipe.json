@@ -1,0 +1,178 @@
+{
+ "id": "g1-arc-line-arch",
+ "name": "Blend curve (G1)",
+ "description": "Blend curve (G1): quarter arc centre (0,20) r10 from (0,10) to (10,20) and a line (40,40)->(40,0) joined by a tangent continuous blend arching from (10,20) to (40,40); closed by (40,0)->(0,0)->(0,10); extruded 10.",
+ "exercises": [
+  "sketch",
+  "blend_curve",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "at": [
+       0,
+       10
+      ]
+     },
+     "mid": {
+      "at": [
+       7.071068,
+       12.928932
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       40,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "blend",
+     "id": "b1",
+     "curves": [
+      "a1",
+      "l1"
+     ],
+     "near": [
+      [
+       10,
+       20
+      ],
+      [
+       40,
+       40
+      ]
+     ],
+     "continuity": "g1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "b1",
+        "l1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

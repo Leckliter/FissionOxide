@@ -214,3 +214,94 @@ fn setback_corner_replaces_the_blend() {
   assert!(s.faces().unwrap().iter().any(|f| f.kind == SurfaceKind::Other));
   assert!(filleted.setback_corners(&[DVec3::splat(100.0)], 2.0).is_err(), "nothing to cut there");
 }
+
+#[test]
+fn tapered_sweeps_grow_by_offset() {
+  // a circle grows into a cone frustum, r 5 -> 5 + 40 tan 5°
+  let t = 5f64.to_radians();
+  let opts = SweepOptions { taper: t, ..Default::default() };
+  let s = circle(&Plane::XY, 5.0).sweep_guided(&z_path(40.0), &opts).unwrap();
+  let r2 = 5.0 + 40.0 * t.tan();
+  let frustum = PI * 40.0 / 3.0 * (25.0 + 5.0 * r2 + r2 * r2);
+  assert!(close(volume(&s), frustum, 1e-4), "{} vs {frustum}", volume(&s));
+  assert!(s.is_valid());
+  // a square keeps its corners: a pyramid frustum, 10 -> 20 across
+  let t = (5.0f64 / 40.0).atan();
+  let opts = SweepOptions { taper: t, ..Default::default() };
+  let s = rect(&Plane::XY, [-5.0, -5.0], [5.0, 5.0]).sweep_guided(&z_path(40.0), &opts).unwrap();
+  let pyramid = 40.0 / 3.0 * (100.0 + 200.0 + 400.0);
+  assert!(close(volume(&s), pyramid, 1e-4), "{} vs {pyramid}", volume(&s));
+  assert!(s.is_valid());
+}
+
+#[test]
+fn parallel_sweep_only_moves_the_section() {
+  // a quarter arc from the origin up and over to (20, 0, 20): the square stays flat
+  let arc =
+    Shape::path(&Plane::XZ, &[Seg::Arc { center: [20.0, 0.0], radius: 20.0, start_angle: PI, sweep: -FRAC_PI_2 }])
+      .unwrap();
+  let opts = SweepOptions { parallel: true, ..Default::default() };
+  let s = rect(&Plane::XY, [-3.0, -3.0], [3.0, 3.0]).sweep_guided(&arc, &opts).unwrap();
+  assert!(close(volume(&s), 720.0, 1e-4), "{}", volume(&s));
+  assert!(s.is_valid());
+  let m = s.mass().unwrap();
+  assert!((m.bbox_max.x - 23.0).abs() < 1e-3 && (m.bbox_max.z - 20.0).abs() < 1e-3, "{m:?}");
+}
+
+#[test]
+fn guide_rail_scales_a_square() {
+  // the rail touches the middle of the square's side and leans out from 5 to 10
+  let rail = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 40.0] }]).unwrap();
+  let s = rect(&Plane::XY, [-5.0, -5.0], [5.0, 5.0]).sweep_rail(&z_path(40.0), &rail).unwrap();
+  let pyramid = 40.0 / 3.0 * (100.0 + 200.0 + 400.0);
+  assert!(close(volume(&s), pyramid, 1e-4), "{} vs {pyramid}", volume(&s));
+  assert!(s.is_valid());
+  let m = s.mass().unwrap();
+  assert!((m.bbox_max.x - 10.0).abs() < 1e-3 && (m.bbox_max.y - 10.0).abs() < 1e-3, "{m:?}");
+}
+
+#[test]
+fn guide_rail_scale_follows_a_path_of_several_edges() {
+  // the same frustum along a path drawn as two lines, then with a bent rail
+  let path = Shape::path(
+    &Plane::XZ,
+    &[Seg::Line { a: [0.0, 0.0], b: [0.0, 10.0] }, Seg::Line { a: [0.0, 10.0], b: [0.0, 40.0] }],
+  )
+  .unwrap();
+  let rail = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 40.0] }]).unwrap();
+  let s = circle(&Plane::XY, 5.0).sweep_rail(&path, &rail).unwrap();
+  let frustum = PI * 40.0 / 3.0 * (25.0 + 50.0 + 100.0);
+  assert!(close(volume(&s), frustum, 1e-3), "{} vs {frustum}", volume(&s));
+  // a rail out to 10 at half height and back: two frustums
+  let rail = Shape::path(
+    &Plane::XZ,
+    &[Seg::Line { a: [5.0, 0.0], b: [10.0, 20.0] }, Seg::Line { a: [10.0, 20.0], b: [5.0, 40.0] }],
+  )
+  .unwrap();
+  let s = circle(&Plane::XY, 5.0).sweep_rail(&z_path(40.0), &rail).unwrap();
+  let two = 2.0 * PI * 20.0 / 3.0 * (25.0 + 50.0 + 100.0);
+  assert!(close(volume(&s), two, 0.01), "{} vs {two}", volume(&s));
+  assert!(s.is_valid());
+}
+
+#[test]
+fn shell_inside_outside_and_both() {
+  // a 20 mm cube opened at the top
+  let b = Shape::make_box(DVec3::ZERO, DVec3::splat(20.0)).unwrap();
+  let top = b.faces().unwrap().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  let inside = b.shell_sides(&[top], 2.0, 0.0, false).unwrap();
+  assert!(close(volume(&inside), 8000.0 - 16.0 * 16.0 * 18.0, 1e-6), "{}", volume(&inside));
+  // outside: the cube's volume becomes the cavity, the walls go around it (sharp corners)
+  let outside = b.shell_sides(&[top], 0.0, 2.0, false).unwrap();
+  assert!(close(volume(&outside), 24.0 * 24.0 * 22.0 - 8000.0, 1e-6), "{}", volume(&outside));
+  // both: 1 in, 2 out
+  let both = b.shell_sides(&[top], 1.0, 2.0, false).unwrap();
+  assert_eq!(both.solid_count(), 1);
+  assert!(close(volume(&both), 24.0 * 24.0 * 22.0 - 18.0 * 18.0 * 19.0, 1e-6), "{}", volume(&both));
+  assert!(b.shell_sides(&[top], 0.0, 0.0, false).is_err());
+  // no faces opened: a hollow, closed body
+  let hollow = b.shell_sides(&[], 2.0, 0.0, false).unwrap();
+  assert!(close(volume(&hollow), 8000.0 - 16.0f64.powi(3), 1e-6), "{}", volume(&hollow));
+  let hollow = b.shell_sides(&[], 1.0, 2.0, false).unwrap();
+  assert!(close(volume(&hollow), 24.0f64.powi(3) - 18.0f64.powi(3), 1e-6), "{}", volume(&hollow));
+}

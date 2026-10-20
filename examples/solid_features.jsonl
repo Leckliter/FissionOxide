@@ -6,12 +6,15 @@
 {"cmd": "box", "width": 60, "depth": 60, "height": 10}
 {"cmd": "fillet", "edges": [{"point": [0, 30, 10]}, {"point": [30, 0, 10]}, {"point": [30, 30, 5]}], "radius": "3 mm", "setback": "7 mm"}
 {"cmd": "cylinder", "plane": {"point": [0, 0, 10], "normal": [0, 0, 1]}, "radius": 15, "height": 40, "operation": "join"}
-{"cmd": "plane.offset", "plane": "xz", "offset": 40}
+# the text is sketched on a plane at y = 40 facing -Y (towards the knob), with sketch x = X and
+# y = Z, given explicitly so it does not depend on how the XZ origin plane is framed
+{"cmd": "plane.offset", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}, "offset": -40}
 {"cmd": "sketch.create", "plane": {"feature": 4}}
 {"cmd": "sketch.text", "at": [-9, 26], "text": "CL", "height": 8}
 {"cmd": "emboss", "face": {"point": [0, -15, 30]}, "depth": "depth", "wrap": true}
+# the fin's path up the Z axis on the YZ plane (sketch x = -Z, y = Y)
 {"cmd": "sketch.create", "plane": "yz"}
-{"cmd": "sketch.line", "points": [[0, 50], [0, 80]]}
+{"cmd": "sketch.line", "points": [[-50, 0], [-80, 0]]}
 {"cmd": "sketch.create", "plane": {"point": [0, 0, 50], "normal": [0, 0, 1]}}
 {"cmd": "sketch.rect", "corner1": [-8, -2], "corner2": [8, 2]}
 {"cmd": "sweep", "path": 7, "twist": "twist", "operation": "join"}

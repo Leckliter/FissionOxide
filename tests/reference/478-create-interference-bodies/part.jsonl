@@ -1,0 +1,9 @@
+# 478-create-interference-bodies: added by the parity loop from a Fusion probe
+# Two 20 mm cubes overlapping by 10 mm in X, each in its own component; Fusion's Interference
+# with "create components" adds the 10x20x20 overlap as a third body; Fox's
+# assembly.interference with create_bodies adds it as a static body in a new component.
+{"cmd": "box", "at": [10, 10], "width": 20, "depth": 20, "height": 20, "operation": "new_body"}
+{"cmd": "box", "at": [20, 10], "width": 20, "depth": 20, "height": 20, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [1000]}
+{"cmd": "component.create", "name": "B", "bodies": [2000]}
+{"cmd": "assembly.interference", "create_bodies": true, "components": true}

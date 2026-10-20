@@ -1,0 +1,8 @@
+# 148-acute-wedge-hint-near-vertex: added by the parity loop from a Fusion probe
+# acute-wedge-hint-near-vertex: Lines (0,0)-(40,0) and (0,0)-(28.191,10.261) (20 deg); radius 4, hint (3,0.4) inside the narrow wedge close to the vertex: the hint names the quadrant, so the circle is in the wedge (centre 4/sin10 = 23.04 out along the 10-deg bisector), not the nearer obtuse-side solution; extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[0, 0], [28.191, 10.261]]}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5], "radius": 4, "near": [3, 0.4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[22.684, 4.0]], "distance": 5, "operation": "new_body"}

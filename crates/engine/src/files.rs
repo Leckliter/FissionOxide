@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use fox_exchange::archive::{Archive, read_foxz, write_foxz};
 use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
-use fox_exchange::svg::{read_svg, write_svg};
+use fox_exchange::svg::{SvgUnits, read_svg_as, write_svg};
 use fox_exchange::{FormatKind, Mesh, format_for_path};
+use fox_kernel::glam::DVec3;
 use fox_model::{Design, FeatureId, FeatureKind, MeshData};
 use fox_sketch::{CurveKind, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -109,7 +110,14 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "stl" | "obj" | "ply" | "3mf" => {
-      let meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      // 3MF files carry their own unit; the others are unitless: millimetres unless told
+      let scale = if fmt.id == "3mf" { 1.0 } else { mesh_unit_scale(p)? };
+      let mut meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      if scale != 1.0 {
+        for m in &mut meshes {
+          m.positions.iter_mut().flatten().for_each(|c| *c *= scale);
+        }
+      }
       import_meshes(s, name, meshes, p)
     }
     "dxf" | "svg" => import_dxf(s, path, p),
@@ -123,8 +131,63 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "f3d" => import_fusion(s, path, p),
+    "tsm" => import_tsm(s, name, &std::fs::read_to_string(path)?),
     other => Err(CmdError::new(format!("import of '{other}' is not implemented"))),
   }
+}
+
+/// Millimetres per unit of a mesh file's coordinates, from the `units` parameter (default mm).
+fn mesh_unit_scale(p: &Value) -> Result<f32, CmdError> {
+  Ok(match p.get("units").and_then(Value::as_str).unwrap_or("mm") {
+    "mm" => 1.0,
+    "cm" => 10.0,
+    "m" => 1000.0,
+    "in" => 25.4,
+    "ft" => 304.8,
+    other => return Err(CmdError::new(format!("unknown mesh units '{other}': use mm, cm, m, in or ft"))),
+  })
+}
+
+/// Insert T-Spline: a `.tsm` file (`path`) or its contents (`text`) as one smooth body.
+pub fn insert_tsm(s: &mut Session, p: &Value) -> CmdResult {
+  if let Some(text) = p.get("text").and_then(Value::as_str) {
+    let name = p.get("name").and_then(Value::as_str).unwrap_or("T-Spline.tsm").to_string();
+    return import_tsm(s, name, text);
+  }
+  let path = PathBuf::from(p.get("path").and_then(Value::as_str).ok_or(CmdError::new("pass path or text"))?);
+  if ext_of(&path) != "tsm" {
+    return Err(CmdError::new(format!("{}: Insert T-Spline reads .tsm files", path.display())));
+  }
+  import_tsm(s, file_name(&path), &std::fs::read_to_string(&path)?)
+}
+
+/// Largest T-spline cage (faces) turned into a body.
+const MAX_TSM_FACES: usize = 20_000;
+
+/// A T-spline cage's limit surface, as an Import feature with one body.
+fn import_tsm(s: &mut Session, file_name: String, text: &str) -> CmdResult {
+  let cage = fox_exchange::tsm::read_tsm(text).map_err(ex)?;
+  if cage.faces.len() > MAX_TSM_FACES {
+    return Err(CmdError::new(format!(
+      "{file_name} has {} faces; FissionOxide inserts T-splines of up to {MAX_TSM_FACES}",
+      cage.faces.len()
+    )));
+  }
+  // about 16 sample spans across each cage face, fewer on big cages
+  let levels = (2..=4).rev().find(|k| cage.faces.len() << (2 * k) <= 40_000).unwrap_or(1);
+  let patches = cage.limit_patches(levels).map_err(ex)?;
+  let faces = patches
+    .iter()
+    .map(|p| {
+      let pts: Vec<DVec3> = p.points.iter().map(|&q| DVec3::from_array(q)).collect();
+      fox_kernel::Shape::through_grid(&pts, p.rows, p.cols)
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+  let (lo, hi) = cage.points.iter().fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), &q| {
+    (lo.min(DVec3::from_array(q)), hi.max(DVec3::from_array(q)))
+  });
+  let body = fox_kernel::Shape::compound(&faces)?.sewn((hi - lo).length() * 1e-5)?;
+  add_import(s, FeatureKind::Import { file_name, breps: vec![body.to_brep()?], meshes: Vec::new() })
 }
 
 fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Value) -> CmdResult {
@@ -267,11 +330,16 @@ fn import_fusion(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   )
 }
 
-/// A DXF or SVG file's 2D geometry.
+/// A DXF or SVG file's 2D geometry, an SVG sized as the document says.
 fn read_drawing(path: &Path) -> Result<Drawing, CmdError> {
+  read_drawing_as(path, SvgUnits::Document)
+}
+
+/// A DXF or SVG file's 2D geometry, an SVG's user units mapped by `units`.
+fn read_drawing_as(path: &Path, units: SvgUnits) -> Result<Drawing, CmdError> {
   let bytes = std::fs::read(path)?;
   let svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
-  if svg { read_svg(&bytes) } else { read_dxf(&bytes) }.map_err(ex)
+  if svg { read_svg_as(&bytes, units) } else { read_dxf(&bytes) }.map_err(ex)
 }
 
 fn skipped_warning(path: &Path, d: &Drawing) -> Option<String> {
@@ -333,9 +401,9 @@ fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
 }
 
 /// The curves of a DXF or SVG file as a free-standing sketch (endpoints joined), and a warning
-/// about skipped entities.
-pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdError> {
-  let drawing = read_drawing(path)?;
+/// about skipped entities. `units` maps an SVG's user units.
+pub(crate) fn dxf_sketch(path: &Path, units: SvgUnits) -> Result<(Sketch, Option<String>), CmdError> {
+  let drawing = read_drawing_as(path, units)?;
   let mut sk = Sketch::new();
   for (e, construction) in &drawing.entities {
     if let Some(c) = add_entity(&mut sk, e.clone())?
@@ -494,7 +562,11 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId
     }
     Ok(ids)
   };
-  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::spline_beziers(&sp.fit), &pieces)) {
+  let quintic = sk.behaviours.has(fox_sketch::behaviour::QUINTIC_FIT_SPLINE);
+  let closed = sp.fit.len() >= 3 && sp.fit.first().zip(sp.fit.last()).is_some_and(|(a, b)| dist(*a, *b) < DXF_SNAP);
+  if sp.fit.len() >= 2
+    && (sp.control.is_empty() || same(&fox_sketch::fit_point_beziers(&sp.fit, closed, quintic), &pieces))
+  {
     if sp.fit.iter().all(|p| dist(*p, sp.fit[0]) < DXF_SNAP) {
       return Ok(None);
     }
@@ -508,13 +580,13 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId
     && sp.is_uniform()
     && sp.control.len() <= 1000
     && match sp.degree {
-      3..=9 => sp.control.len() > sp.degree,
-      // the sketch's two- and three-point control splines are a line and a quadratic
-      d => sp.control.len() == d + 1 && d <= 2,
+      3 | 5 => sp.control.len() > sp.degree,
+      // two- to five-point control splines are a single Bézier of one degree less
+      d => sp.control.len() == d + 1 && d <= 4,
     };
   if control_spline {
     let pts = ends(sk, &sp.control)?;
-    let degree = sp.degree.max(3) as u8;
+    let degree = if sp.degree <= 3 { 3 } else { 5 };
     return Ok(Some(sk.add_curve(CurveKind::ControlSpline { points: pts, degree })?));
   }
   add_chain(sk, &pieces)
@@ -574,7 +646,7 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           Entity::ellipse(c0, [m[0] - c0[0], m[1] - c0[1]], *minor)
         }
         CurveKind::ControlSpline { points, degree } => {
-          let degree = (*degree as usize).clamp(1, points.len().max(2) - 1);
+          let degree = (*degree as usize).min(points.len().max(2) - 1);
           Entity::Spline(Spline::clamped_uniform(degree, pts(points)))
         }
         CurveKind::Spline { points, .. } => {
@@ -584,6 +656,22 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           Some(e) => e,
           None => continue,
         },
+        // a conic is a rational quadratic: one exact NURBS span
+        CurveKind::Conic { start, end, apex, rho } => Entity::Spline(Spline {
+          degree: 2,
+          knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          control: vec![pos(*start), pos(*apex), pos(*end)],
+          weights: vec![1.0, fox_sketch::conic_weight(*rho), 1.0],
+          fit: Vec::new(),
+        }),
+        // a blend curve is one exact quintic B-spline
+        CurveKind::QuinticSpline { points } => Entity::Spline(Spline {
+          degree: 5,
+          knots: [[0.0; 6].as_slice(), &[0.2, 0.4, 0.6, 0.8], &[1.0; 6]].concat(),
+          control: pts(points),
+          weights: Vec::new(),
+          fit: Vec::new(),
+        }),
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
       out.push((e, c.construction));
@@ -594,7 +682,9 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         continue;
       }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },

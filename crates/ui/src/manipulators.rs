@@ -22,7 +22,7 @@ const RING: f64 = 0.62;
 const PLANE: (f64, f64) = (0.2, 0.36);
 /// Pointer distance that catches a handle (points).
 const CATCH_PX: f32 = 7.0;
-/// Rotation snap (radians): 5°.
+/// Rotation snap (radians) without Incremental Move: 5°.
 const ANGLE_STEP: f64 = std::f64::consts::PI / 36.0;
 
 const AXIS_COLORS: [Color32; 3] =
@@ -49,10 +49,10 @@ pub struct Triad {
   pub arrows: [bool; 3],
   pub rings: [bool; 3],
   pub planes: [bool; 3],
-  /// The current rotation (radians) and the axis it is about: dragging that ring continues it,
-  /// another ring starts from zero.
-  pub angle: f64,
-  pub ring: Option<usize>,
+  /// Where the triad sits with nothing moved: the distances it shows are measured from here.
+  pub home: DVec3,
+  /// The current rotation (radians) about each axis: dragging a ring continues from it.
+  pub angles: [f64; 3],
 }
 
 impl Triad {
@@ -64,9 +64,14 @@ impl Triad {
       arrows: [true; 3],
       rings: [true; 3],
       planes: [true; 3],
-      angle: 0.0,
-      ring: None,
+      home: origin,
+      angles: [0.0; 3],
     }
+  }
+
+  /// How far the triad has moved from home along axis `i`.
+  pub fn moved(&self, i: usize) -> f64 {
+    (self.origin - self.home).dot(self.axes[i])
   }
 
   fn has(&self, h: Handle) -> bool {
@@ -116,8 +121,9 @@ impl TriadDrag {
     Some(d)
   }
 
-  /// The edit for the pointer ray now: moves snap to `step` (world units), turns to 5°.
-  pub fn update(&mut self, ro: DVec3, rd: DVec3, step: f64) -> Option<TriadEdit> {
+  /// The edit for the pointer ray now: moves snap to `step` (world units), turns to `turn`
+  /// (radians).
+  pub fn update(&mut self, ro: DVec3, rd: DVec3, step: f64, turn: f64) -> Option<TriadEdit> {
     let t = &self.start;
     match self.handle {
       Handle::Arrow(i) => {
@@ -133,17 +139,75 @@ impl TriadDrag {
         let a = ring_angle(t.origin, t.axes[i], t.axes[(i + 1) % 3], ro, rd)?;
         self.turned += wrap(a - self.last);
         self.last = a;
-        let base = if t.ring == Some(i) { wrap(t.angle) } else { 0.0 };
-        Some(TriadEdit::Rotate(i, snap(base + self.turned, ANGLE_STEP)))
+        Some(TriadEdit::Rotate(i, snap(t.angles[i] + self.turned, turn)))
       }
     }
   }
 }
 
-/// The triad drag the viewport is running, if any.
+/// The triad drag the viewport is running, if any, and the value box the last drag left.
 #[derive(Default)]
 pub struct State {
   pub drag: Option<TriadDrag>,
+  /// After a drag, as in Fusion: the dragged handle's value in a box that takes typing.
+  pub typed: Option<Typed>,
+}
+
+/// The value box of a handle: its text while it is being typed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Typed {
+  pub handle: Handle,
+  pub text: String,
+}
+
+/// A handle's value as the box shows it: an arrow's distance from home, a ring's angle, a
+/// planar handle's two distances.
+#[cfg(test)]
+pub fn value_text(t: &Triad, h: Handle) -> String {
+  value_text_in(fox_engine::model::LengthUnit::Mm, t, h)
+}
+
+/// [`value_text`] with lengths in the design's unit.
+pub fn value_text_in(unit: fox_engine::model::LengthUnit, t: &Triad, h: Handle) -> String {
+  let mm = |v: f64| unit.format((v * 1e4).round() / 1e4);
+  match h {
+    Handle::Arrow(i) => mm(t.moved(i)),
+    Handle::Ring(i) => {
+      format!("{} deg", fox_engine::sketch::Dim::new((t.angles[i].to_degrees() * 1e4).round() / 1e4).expr)
+    }
+    Handle::Plane(i) => format!("{}, {}", mm(t.moved((i + 1) % 3)), mm(t.moved((i + 2) % 3))),
+  }
+}
+
+/// The edit a typed value asks for: values in model units (mm, radians), two of them for a
+/// planar handle. None when the count is wrong or a value isn't finite.
+pub fn typed_edit(t: &Triad, h: Handle, values: &[f64]) -> Option<TriadEdit> {
+  if values.iter().any(|v| !v.is_finite()) {
+    return None;
+  }
+  let to = |i: usize, v: f64| t.axes[i] * (v - t.moved(i));
+  match (h, values) {
+    (Handle::Arrow(i), [v]) => Some(TriadEdit::Move(t.origin + to(i, *v))),
+    (Handle::Ring(i), [a]) => Some(TriadEdit::Rotate(i, *a)),
+    (Handle::Plane(i), [a, b]) => Some(TriadEdit::Move(t.origin + to((i + 1) % 3, *a) + to((i + 2) % 3, *b))),
+    _ => None,
+  }
+}
+
+/// Reads a value box: comma-separated lengths (angles for a ring), with the design's
+/// parameters; a bare length means the design's unit.
+fn parse_typed(s: &fox_engine::Session, h: Handle, text: &str) -> Option<Vec<f64>> {
+  use fox_engine::expr::{Kind, eval};
+  let ring = matches!(h, Handle::Ring(_));
+  let kind = if ring { Kind::Angle } else { Kind::Length };
+  let unit = s.design.units;
+  text
+    .split(',')
+    .map(|p| {
+      let p = if ring { p.trim().to_string() } else { unit.typed(p.trim()) };
+      eval(&p, kind, &s.model.params).ok()
+    })
+    .collect()
 }
 
 /// Parameter along the axis `o + d·t` of its point closest to the ray `ro + rd·s` (None when
@@ -321,17 +385,22 @@ pub(crate) fn triad(
     d.refresh_manip(&app.s);
   }
   let dragging = matches!(app.drag, Some(Drag::Triad));
-  if !dragging {
-    app.manip.drag = None;
+  if !dragging && let Some(done) = app.manip.drag.take() {
+    // the drag let go: its value stays in a box that takes typing
+    app.manip.typed = Some(Typed { handle: done.handle, text: String::new() });
   }
-  let Some(t) = app.dialog.as_ref().and_then(|d| d.triad(&app.s)) else { return false };
+  let Some(t) = app.dialog.as_ref().and_then(|d| d.triad(&app.s)) else {
+    app.manip.typed = None;
+    return false;
+  };
   let (right, _, _) = app.cam.basis();
   let Some(size) = world_size(project, right, t.origin, SIZE_PX) else { return false };
   if dragging && let Some(drag) = app.manip.drag.as_mut() {
-    let (handle, start) = (drag.handle, drag.start);
+    let handle = drag.handle;
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = ray(p);
-      if let Some(edit) = drag.update(o, d, step)
+      let turn = app.increments.angular_step(ANGLE_STEP);
+      if let Some(edit) = drag.update(o, d, step, turn)
         && let Some(dlg) = app.dialog.as_mut()
       {
         dlg.set_triad(&app.s, edit);
@@ -340,7 +409,7 @@ pub(crate) fn triad(
     let shown = app.dialog.as_ref().and_then(|d| d.triad(&app.s)).unwrap_or(t);
     let l = layout(&shown, size, project);
     draw(painter, &l, Some(handle));
-    readout(painter, &start, &shown, handle, &l, project);
+    readout(painter, &shown, handle, &l, project);
     ctx.request_repaint();
     return true;
   }
@@ -355,33 +424,73 @@ pub(crate) fn triad(
     let (o, d) = ray(p);
     if let Some(dr) = TriadDrag::begin(t, h, o, d) {
       app.manip.drag = Some(dr);
+      app.manip.typed = None;
       app.drag = Some(Drag::Triad);
     }
   }
-  draw(painter, &l, hot);
+  draw(painter, &l, hot.or(app.manip.typed.as_ref().map(|b| b.handle)));
+  value_box(app, ctx, &t, &l, project);
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
 }
 
-/// What a drag has done so far (distance moved or angle), next to the handle.
-fn readout(
-  painter: &egui::Painter,
-  start: &Triad,
-  t: &Triad,
-  h: Handle,
-  l: &Layout,
-  project: &dyn Fn(DVec3) -> Option<Pos2>,
-) {
-  let moved = t.origin - start.origin;
-  let mm = |v: f64| format!("{} mm", fox_engine::sketch::Dim::new(v).expr);
-  let (at, text) = match h {
-    Handle::Ring(_) => (project(t.origin), format!("{:.1}°", t.angle.to_degrees())),
-    Handle::Arrow(i) => (l.arrows[i].map(|a| a.1), mm(moved.dot(t.axes[i]))),
-    Handle::Plane(i) => {
-      let (u, v) = (t.axes[(i + 1) % 3], t.axes[(i + 2) % 3]);
-      (l.planes[i].map(|q| q[2]), format!("{}, {}", mm(moved.dot(u)), mm(moved.dot(v))))
+/// Where a handle's value shows: past the arrow's tip, by the planar handle's outer corner, at
+/// the centre for a ring.
+fn value_at(t: &Triad, h: Handle, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Option<Pos2> {
+  match h {
+    Handle::Ring(_) => project(t.origin),
+    Handle::Arrow(i) => l.arrows[i].map(|a| a.1),
+    Handle::Plane(i) => l.planes[i].map(|q| q[2]),
+  }
+}
+
+/// The box a finished drag leaves next to its handle: it shows the value and takes a typed one
+/// (a length or angle expression; "x, y" for a planar handle). Enter applies it, Esc closes it.
+fn value_box(app: &mut App, ctx: &egui::Context, t: &Triad, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) {
+  let Some(mut b) = app.manip.typed.take() else { return };
+  if !t.has(b.handle) {
+    return;
+  }
+  let Some(at) = value_at(t, b.handle, l, project) else { return };
+  // a new box starts with the value, selected, so typing replaces it
+  let fresh = b.text.is_empty();
+  if fresh {
+    b.text = value_text_in(crate::units::current(ctx), t, b.handle);
+  }
+  let (mut commit, mut cancel) = (false, false);
+  egui::Area::new(egui::Id::new("triad-value"))
+    .fixed_pos(at + Vec2::new(14.0, -26.0))
+    .order(egui::Order::Foreground)
+    .show(ctx, |ui| {
+      egui::Frame::popup(ui.style()).inner_margin(3.0).stroke(Stroke::new(1.0, ACTIVE)).show(ui, |ui| {
+        let r = ui.add(egui::TextEdit::singleline(&mut b.text).desired_width(110.0));
+        if fresh {
+          crate::viewport::focus_text(ctx, &r, &b.text, true);
+        }
+        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        cancel = esc && (r.has_focus() || r.lost_focus());
+        commit = enter && !esc && (r.has_focus() || r.lost_focus());
+      });
+    });
+  if commit {
+    // the Enter is this box's, not the dialog's OK
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if let Some(edit) = parse_typed(&app.s, b.handle, &b.text).and_then(|v| typed_edit(t, b.handle, &v))
+      && let Some(dlg) = app.dialog.as_mut()
+    {
+      dlg.set_triad(&app.s, edit);
     }
-  };
-  let Some(at) = at else { return };
+    // show the value as applied
+    b.text.clear();
+  }
+  if !cancel {
+    app.manip.typed = Some(b);
+  }
+}
+
+/// The dragged handle's value, next to it.
+fn readout(painter: &egui::Painter, t: &Triad, h: Handle, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) {
+  let Some(at) = value_at(t, h, l, project) else { return };
+  let text = value_text_in(crate::units::current(painter.ctx()), t, h);
   let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), Color32::WHITE);
   let r = egui::Rect::from_min_size(at + Vec2::new(14.0, -24.0), galley.size() + Vec2::new(10.0, 4.0));
   painter.rect_filled(r, 3.0, ACTIVE);
@@ -432,11 +541,11 @@ mod tests {
     let t = Triad::world(DVec3::new(10.0, 0.0, 0.0));
     // grab the X arrow at x = 30 and drag to x = 41.3: moves 11.3, snapped to 0.5 → 11.5
     let mut d = TriadDrag::begin(t, Handle::Arrow(0), DVec3::new(30.0, 0.0, 50.0), DVec3::NEG_Z).unwrap();
-    let e = d.update(DVec3::new(41.3, 6.0, 50.0), DVec3::NEG_Z, 0.5).unwrap();
+    let e = d.update(DVec3::new(41.3, 6.0, 50.0), DVec3::NEG_Z, 0.5, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(21.5, 0.0, 0.0)));
     // the XY planar handle (across Z) follows the pointer in both directions
     let mut d = TriadDrag::begin(t, Handle::Plane(2), DVec3::new(12.0, 2.0, 50.0), DVec3::NEG_Z).unwrap();
-    let e = d.update(DVec3::new(15.0, -4.0, 50.0), DVec3::NEG_Z, 1.0).unwrap();
+    let e = d.update(DVec3::new(15.0, -4.0, 50.0), DVec3::NEG_Z, 1.0, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(13.0, -6.0, 0.0)));
   }
 
@@ -453,23 +562,64 @@ mod tests {
     let mut last = None;
     for deg in (20..=200).step_by(20) {
       let (o, d) = at(deg as f64);
-      last = drag.update(o, d, 1.0);
+      last = drag.update(o, d, 1.0, ANGLE_STEP);
     }
     let Some(TriadEdit::Rotate(2, a)) = last else { panic!("{last:?}") };
     assert!((a.to_degrees() - 200.0).abs() < 1e-6);
     // a ring already turned 30° continues from there; snapping to 5°
-    t.angle = 30f64.to_radians();
-    t.ring = Some(2);
+    t.angles[2] = 30f64.to_radians();
     let (o, d) = at(90.0);
     let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d).unwrap();
     let (o, d) = at(101.0);
-    let Some(TriadEdit::Rotate(2, a)) = drag.update(o, d, 1.0) else { panic!() };
+    let Some(TriadEdit::Rotate(2, a)) = drag.update(o, d, 1.0, ANGLE_STEP) else { panic!() };
     assert!((a.to_degrees() - 40.0).abs() < 1e-6, "{}", a.to_degrees());
     // another ring starts from zero
     let (o, d) = (DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X);
     let mut drag = TriadDrag::begin(t, Handle::Ring(0), o, d).unwrap();
-    let e = drag.update(DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X, 1.0);
+    let e = drag.update(DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X, 1.0, ANGLE_STEP);
     assert_eq!(e, Some(TriadEdit::Rotate(0, 0.0)));
+  }
+
+  #[test]
+  fn value_box_shows_and_takes_the_handles_values() {
+    // a triad moved (10, -4, 2) from home and turned 45° about Y
+    let mut t = Triad::world(DVec3::new(10.0, -4.0, 2.0));
+    t.home = DVec3::ZERO;
+    t.angles[1] = 45f64.to_radians();
+    assert_eq!(value_text(&t, Handle::Arrow(0)), "10 mm");
+    assert_eq!(value_text(&t, Handle::Arrow(1)), "-4 mm");
+    assert_eq!(value_text(&t, Handle::Ring(1)), "45 deg");
+    assert_eq!(value_text(&t, Handle::Ring(2)), "0 deg");
+    // the XY planar handle (across Z) shows X and Y
+    assert_eq!(value_text(&t, Handle::Plane(2)), "10 mm, -4 mm");
+    // a typed distance is the total from home: X to 25 keeps Y and Z
+    assert_eq!(typed_edit(&t, Handle::Arrow(0), &[25.0]), Some(TriadEdit::Move(DVec3::new(25.0, -4.0, 2.0))));
+    assert_eq!(
+      typed_edit(&t, Handle::Plane(0), &[1.0, 3.0]),
+      Some(TriadEdit::Move(DVec3::new(10.0, 1.0, 3.0))),
+      "the YZ handle takes Y then Z"
+    );
+    assert_eq!(typed_edit(&t, Handle::Ring(2), &[0.5]), Some(TriadEdit::Rotate(2, 0.5)));
+    // wrong counts and non-numbers are refused
+    assert_eq!(typed_edit(&t, Handle::Plane(2), &[1.0]), None);
+    assert_eq!(typed_edit(&t, Handle::Arrow(2), &[f64::NAN]), None);
+    // a tilted triad measures along its own axes
+    let tilted = Triad {
+      axes: [DVec3::new(1.0, 1.0, 0.0).normalize(), DVec3::new(-1.0, 1.0, 0.0).normalize(), DVec3::Z],
+      ..Triad::world(DVec3::new(3.0, 3.0, 0.0))
+    };
+    let tilted = Triad { home: DVec3::ZERO, ..tilted };
+    assert!((tilted.moved(0) - 18f64.sqrt()).abs() < 1e-9 && tilted.moved(1).abs() < 1e-9);
+    let Some(TriadEdit::Move(p)) = typed_edit(&tilted, Handle::Arrow(0), &[0.0]) else { panic!() };
+    assert!(p.length() < 1e-9);
+    // typed text: expressions with units and parameters, two values for a plane
+    let mut s = fox_engine::Session::default();
+    s.execute("param.add", &serde_json::json!({"name": "w", "expr": "12 mm"})).unwrap();
+    assert_eq!(parse_typed(&s, Handle::Arrow(0), "w / 2"), Some(vec![6.0]));
+    assert_eq!(parse_typed(&s, Handle::Plane(0), "1 cm, -2"), Some(vec![10.0, -2.0]));
+    let a = parse_typed(&s, Handle::Ring(0), "90").unwrap();
+    assert!((a[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    assert_eq!(parse_typed(&s, Handle::Arrow(0), "nope"), None);
   }
 
   #[test]
@@ -495,7 +645,7 @@ mod tests {
     let (o, d) = top_ray(Pos2::new(150.0, 100.0));
     let mut drag = TriadDrag::begin(t, Handle::Arrow(0), o, d).unwrap();
     let (o, d) = top_ray(Pos2::new(162.0, 90.0));
-    assert_eq!(drag.update(o, d, 1.0), Some(TriadEdit::Move(DVec3::new(12.0, 0.0, 0.0))));
+    assert_eq!(drag.update(o, d, 1.0, ANGLE_STEP), Some(TriadEdit::Move(DVec3::new(12.0, 0.0, 0.0))));
     assert!((world_size(&top, DVec3::X, DVec3::ZERO, 95.0).unwrap() - 95.0).abs() < 1e-6);
   }
 }

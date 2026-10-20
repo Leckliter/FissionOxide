@@ -1,0 +1,9 @@
+# 312-three-face-flush-offset: added by the parity loop from a Fusion probe
+# Constrain Components: grounded A 20x20x10, B 10x10x5 built at x 40..50, y 0..10; one set of three face mates (B bottom on A top, B -x face flush with A's -x face offset 5, B -y face flush with A's -y face) puts B at x 5..15, y 0..10, z 10..15.
+# Fox has no assembly constraint (mate set); the closest is a rigid joint from B's corner to the point the set solves to.
+{"cmd": "box", "width": 20, "depth": 20, "height": 10, "at": [10, 10]}
+{"cmd": "component.create", "name": "A", "bodies": [1000]}
+{"cmd": "component.ground", "component": 1}
+{"cmd": "box", "width": 10, "depth": 10, "height": 5, "at": [45, 5]}
+{"cmd": "component.create", "name": "B", "bodies": [2000]}
+{"cmd": "joint", "moving": 2, "moving_origin": {"at": [40, 0, 0]}, "fixed": 1, "fixed_origin": {"at": [5, 0, 10]}, "kind": "rigid", "angle": "0 deg"}

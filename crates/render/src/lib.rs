@@ -28,6 +28,10 @@ pub struct Camera {
   /// Vertical field of view in radians; ignored when `ortho`.
   pub fov: f64,
   pub ortho: bool,
+  /// Turn of the picture about the view axis (radians, counter-clockwise on screen): the
+  /// ViewCube's rotate arrows, Free Orbit, and views whose up isn't world Z.
+  #[serde(default)]
+  pub roll: f64,
 }
 
 impl Default for Camera {
@@ -40,6 +44,7 @@ impl Default for Camera {
       distance: 200.0,
       fov: 30f64.to_radians(),
       ortho: false,
+      roll: 0.0,
     }
   }
 }
@@ -70,6 +75,20 @@ impl StandardView {
       _ => return None,
     })
   }
+
+  /// The view's (eye direction, screen up) in the ViewCube's own axes: Z up, the front face
+  /// facing -Y. Top and bottom keep the front face at the bottom and top of the screen.
+  pub fn direction(self) -> (DVec3, DVec3) {
+    match self {
+      StandardView::Home => (DVec3::new(1.0, -1.0, 1.0).normalize(), DVec3::Z),
+      StandardView::Top => (DVec3::Z, DVec3::Y),
+      StandardView::Bottom => (-DVec3::Z, -DVec3::Y),
+      StandardView::Front => (-DVec3::Y, DVec3::Z),
+      StandardView::Back => (DVec3::Y, DVec3::Z),
+      StandardView::Right => (DVec3::X, DVec3::Z),
+      StandardView::Left => (-DVec3::X, DVec3::Z),
+    }
+  }
 }
 
 impl Camera {
@@ -93,23 +112,68 @@ impl Camera {
     let (sy, cy) = self.yaw.sin_cos();
     let right = DVec3::new(cy, sy, 0.0);
     let up = back.cross(right).normalize();
-    (right, up, back)
+    if self.roll == 0.0 {
+      return (right, up, back);
+    }
+    let (sr, cr) = self.roll.sin_cos();
+    (right * cr + up * sr, up * cr - right * sr, back)
+  }
+
+  /// Turns the camera to look along `-back` with `right` across the screen (both unit length and
+  /// at right angles), as yaw, pitch and roll.
+  pub fn set_basis(&mut self, right: DVec3, back: DVec3) {
+    let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+    if back.z.abs() < lim.sin() {
+      self.yaw = back.x.atan2(-back.y).rem_euclid(std::f64::consts::TAU);
+      self.pitch = back.z.asin();
+      self.roll = 0.0;
+      let (right0, up0, _) = self.basis();
+      self.roll = right.dot(up0).atan2(right.dot(right0));
+    } else {
+      // straight down or up: the yaw alone turns the view
+      self.yaw = right.y.atan2(right.x).rem_euclid(std::f64::consts::TAU);
+      self.pitch = lim.copysign(back.z);
+      self.roll = 0.0;
+    }
+  }
+
+  /// Free orbit by screen-space drag deltas (radians): turns about the screen's vertical and
+  /// horizontal axes, so the view can roll and go over the top.
+  pub fn free_orbit(&mut self, dx: f64, dy: f64) {
+    let (right, up, back) = self.basis();
+    let q = glam::DQuat::from_axis_angle(up, dx) * glam::DQuat::from_axis_angle(right, -dy);
+    self.set_basis((q * right).normalize(), (q * back).normalize());
+  }
+
+  /// Looks from direction `dir` (target towards the eye) with `up` as near the top of the
+  /// screen as it can be. Straight down or up the yaw carries the turn, so orbiting from there
+  /// behaves; elsewhere an up off world Z becomes [`Camera::roll`].
+  pub fn look_from(&mut self, dir: DVec3, up: DVec3) {
+    let d = dir.normalize_or_zero();
+    if d == DVec3::ZERO {
+      return;
+    }
+    let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+    self.pitch = d.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
+    self.yaw = if d.z > 0.999 {
+      (-up.x).atan2(up.y)
+    } else if d.z < -0.999 {
+      up.x.atan2(-up.y)
+    } else {
+      d.x.atan2(-d.y)
+    };
+    self.roll = 0.0;
+    let (right, screen_up, back) = self.basis();
+    let u = up - back * up.dot(back);
+    if u.length_squared() > 1e-12 {
+      let r = (-u.dot(right)).atan2(u.dot(screen_up));
+      self.roll = if r.abs() < 1e-9 { 0.0 } else { r };
+    }
   }
 
   pub fn set_view(&mut self, v: StandardView) {
-    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
-    let top = FRAC_PI_2 - 1e-6;
-    let (yaw, pitch) = match v {
-      StandardView::Home => (FRAC_PI_4, 0.6155),
-      StandardView::Top => (0.0, top),
-      StandardView::Bottom => (0.0, -top),
-      StandardView::Front => (0.0, 0.0),
-      StandardView::Back => (PI, 0.0),
-      StandardView::Right => (FRAC_PI_2, 0.0),
-      StandardView::Left => (-FRAC_PI_2, 0.0),
-    };
-    self.yaw = yaw;
-    self.pitch = pitch;
+    let (dir, up) = v.direction();
+    self.look_from(dir, up);
   }
 
   /// Rotates by screen-space drag deltas (radians).
@@ -273,6 +337,70 @@ pub struct Marker {
   pub on_top: bool,
 }
 
+/// Fusion's visual styles (Display Settings ▸ Visual Style): how body surfaces and their edges
+/// are drawn.
+///
+/// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
+/// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualStyle {
+  Shaded,
+  #[default]
+  ShadedVisibleEdges,
+  ShadedHiddenEdges,
+  /// Every edge, nothing hidden: the surfaces aren't drawn at all.
+  Wireframe,
+  WireframeHiddenEdges,
+  WireframeVisibleEdges,
+}
+
+impl VisualStyle {
+  pub const ALL: [VisualStyle; 6] = [
+    VisualStyle::Shaded,
+    VisualStyle::ShadedVisibleEdges,
+    VisualStyle::ShadedHiddenEdges,
+    VisualStyle::Wireframe,
+    VisualStyle::WireframeHiddenEdges,
+    VisualStyle::WireframeVisibleEdges,
+  ];
+
+  /// The name in Fusion's menu.
+  pub fn label(self) -> &'static str {
+    match self {
+      VisualStyle::Shaded => "Shaded",
+      VisualStyle::ShadedVisibleEdges => "Shaded with Visible Edges Only",
+      VisualStyle::ShadedHiddenEdges => "Shaded with Hidden Edges",
+      VisualStyle::Wireframe => "Wireframe",
+      VisualStyle::WireframeHiddenEdges => "Wireframe with Hidden Edges",
+      VisualStyle::WireframeVisibleEdges => "Wireframe with Visible Edges Only",
+    }
+  }
+
+  /// Body surfaces are shaded (else they only hide what's behind them, or nothing).
+  pub fn shaded(self) -> bool {
+    matches!(self, VisualStyle::Shaded | VisualStyle::ShadedVisibleEdges | VisualStyle::ShadedHiddenEdges)
+  }
+
+  /// Body edges are drawn.
+  pub fn edges(self) -> bool {
+    self != VisualStyle::Shaded
+  }
+
+  /// Edges behind the surfaces show, faint and dashed.
+  pub fn hidden_edges(self) -> bool {
+    matches!(self, VisualStyle::ShadedHiddenEdges | VisualStyle::WireframeHiddenEdges)
+  }
+
+  /// Body surfaces hide what's behind them (all but plain Wireframe).
+  pub fn occludes(self) -> bool {
+    self != VisualStyle::Wireframe
+  }
+}
+
+/// How a hidden edge is drawn: its colour at this opacity, dashed.
+pub const HIDDEN_EDGE_ALPHA: f32 = 0.45;
+
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
   pub meshes: Vec<Mesh>,
@@ -281,6 +409,7 @@ pub struct Scene {
   pub background_top: [u8; 4],
   pub background_bottom: [u8; 4],
   pub analysis: Option<Analysis>,
+  pub style: VisualStyle,
 }
 
 pub struct Frame {
@@ -345,6 +474,106 @@ impl Frame {
   }
 }
 
+/// Display Settings ▸ Effects: a ground under the body surfaces (the meshes marked
+/// [`Mesh::analyze`]) at their lowest point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Effects {
+  /// The bodies' outline cast onto the ground by a light high above, darkened.
+  pub ground_shadow: bool,
+  /// The bodies mirrored under a glossy ground.
+  pub reflections: bool,
+  /// A see-through ground plane.
+  pub ground_plane: bool,
+}
+
+impl Effects {
+  /// Adds the ground, shadow and reflections to a built scene. They have no pick id.
+  pub fn apply(self, scene: &mut Scene) {
+    if self == Effects::default() {
+      return;
+    }
+    let bodies: Vec<&Mesh> = scene.meshes.iter().filter(|m| m.analyze).collect();
+    let pts = || bodies.iter().flat_map(|m| m.positions.iter());
+    let Some(first) = pts().next() else { return };
+    let (mut lo, mut hi) = (Vec3::from(*first), Vec3::from(*first));
+    for p in pts() {
+      lo = lo.min(Vec3::from(*p));
+      hi = hi.max(Vec3::from(*p));
+    }
+    let size = (hi - lo).max_element().max(1.0);
+    let z0 = lo.z;
+    let lift = size * 1e-3;
+    let flat = |positions: Vec<[f32; 3]>, indices: Vec<u32>, color: [u8; 4]| Mesh {
+      normals: vec![[0.0, 0.0, 1.0]; positions.len()],
+      positions,
+      indices,
+      color,
+      ..Default::default()
+    };
+    let mut added = Vec::new();
+    if self.reflections && scene.style.shaded() {
+      for m in &bodies {
+        let mut r = Mesh {
+          positions: m.positions.iter().map(|p| [p[0], p[1], 2.0 * z0 - p[2] - 2.0 * lift]).collect(),
+          normals: m.normals.iter().map(|n| [n[0], n[1], -n[2]]).collect(),
+          tri_ids: Vec::new(),
+          id: NO_ID,
+          highlight: None,
+          colors: Vec::new(),
+          analyze: false,
+          ..(*m).clone()
+        };
+        r.color = [r.color[0], r.color[1], r.color[2], 255];
+        added.push(r);
+      }
+    }
+    if self.ground_plane || self.reflections {
+      let (c, e) = ((lo + hi) / 2.0, size * 1.5);
+      let z = z0 - lift;
+      let corners = vec![[c.x - e, c.y - e, z], [c.x + e, c.y - e, z], [c.x + e, c.y + e, z], [c.x - e, c.y + e, z]];
+      // over the reflections the ground is nearly opaque, so they read as a sheen
+      let color = if self.reflections { [222, 226, 232, 190] } else { [190, 196, 205, 100] };
+      added.push(flat(corners, vec![0, 1, 2, 0, 2, 3], color));
+    }
+    if self.ground_shadow {
+      // the light leans a little, so a body's sides cast some shadow beside its footprint
+      let (sx, sy) = (0.35, 0.25);
+      let hull = convex_hull(pts().map(|p| [p[0] + (p[2] - z0) * sx, p[1] + (p[2] - z0) * sy]).collect());
+      if hull.len() >= 3 {
+        let z = z0 - lift * 0.5;
+        let positions: Vec<[f32; 3]> = hull.iter().map(|p| [p[0], p[1], z]).collect();
+        let indices = (1..hull.len() as u32 - 1).flat_map(|i| [0, i, i + 1]).collect();
+        added.push(flat(positions, indices, [40, 44, 52, 90]));
+      }
+    }
+    scene.meshes.extend(added);
+  }
+}
+
+/// The convex hull of points, counter-clockwise (Andrew's monotone chain).
+fn convex_hull(mut p: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+  p.retain(|q| q[0].is_finite() && q[1].is_finite());
+  p.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+  p.dedup();
+  if p.len() < 3 {
+    return p;
+  }
+  let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  let mut h: Vec<[f32; 2]> = Vec::with_capacity(p.len() * 2);
+  for pass in 0..2 {
+    let start = h.len();
+    let it: Box<dyn Iterator<Item = &[f32; 2]>> = if pass == 0 { Box::new(p.iter()) } else { Box::new(p.iter().rev()) };
+    for &q in it {
+      while h.len() >= start + 2 && cross(h[h.len() - 2], h[h.len() - 1], q) <= 0.0 {
+        h.pop();
+      }
+      h.push(q);
+    }
+    h.pop();
+  }
+  h
+}
+
 /// Renders a scene from a camera into a new frame.
 pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let mut f = Frame::new(width, height);
@@ -368,8 +597,21 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let key = (back * 0.8 + up * 0.5 - right * 0.3).normalize().as_vec3();
   let head = back.as_vec3();
   let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
+  let style = scene.style;
   for m in scene.meshes.iter().filter(|m| !m.transparent()) {
+    if m.analyze && !style.shaded() {
+      if style.occludes() {
+        draw_depth(&mut f, m, &vp);
+      }
+      continue;
+    }
     draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
+  }
+  if style.hidden_edges() {
+    // before any line writes depth, so only the surfaces hide them
+    for l in scene.lines.iter().filter(|l| is_edge(l)) {
+      draw_hidden(&mut f, l, &vp);
+    }
   }
   for l in scene.lines.iter().filter(|l| !l.on_top) {
     draw_polyline(&mut f, l, &vp);
@@ -378,7 +620,7 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
     draw_marker(&mut f, mk, &vp);
   }
   // transparent meshes blend over everything behind them, edges included, and hide nothing
-  for m in scene.meshes.iter().filter(|m| m.transparent()) {
+  for m in scene.meshes.iter().filter(|m| m.transparent() && (style.shaded() || !m.analyze)) {
     draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
   }
   for l in scene.lines.iter().filter(|l| l.on_top) {
@@ -388,6 +630,87 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
     draw_marker(&mut f, mk, &vp);
   }
   f
+}
+
+/// A body edge, for the visual styles: depth-tested and pickable.
+pub fn is_edge(l: &Polyline) -> bool {
+  !l.on_top && l.id != NO_ID
+}
+
+/// A mesh into the depth buffer alone (wireframe surfaces still hide what's behind them).
+fn draw_depth(f: &mut Frame, m: &Mesh, vp: &DMat4) {
+  let (w, h) = (f.width as f64, f.height as f64);
+  for tri in m.indices.chunks_exact(3) {
+    let mut v = [CV { c: DVec4::ZERO, n: Vec3::Z, wpos: Vec3::ZERO, col: Vec3::ZERO }; 3];
+    let mut ok = true;
+    for k in 0..3 {
+      let Some(p) = m.positions.get(tri[k] as usize) else {
+        ok = false;
+        break;
+      };
+      let wp = DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+      v[k].c = *vp * wp.extend(1.0);
+    }
+    if !ok {
+      continue;
+    }
+    let poly = clip_near(&v);
+    for i in 1..poly.len().saturating_sub(1) {
+      let s = [poly[0].c, poly[i].c, poly[i + 1].c].map(|c| {
+        let iw = 1.0 / c.w;
+        ((c.x * iw + 1.0) * 0.5 * w, (1.0 - c.y * iw) * 0.5 * h, c.z * iw)
+      });
+      let area = (s[1].0 - s[0].0) * (s[2].1 - s[0].1) - (s[2].0 - s[0].0) * (s[1].1 - s[0].1);
+      if !area.is_finite() || area.abs() < 1e-12 {
+        continue;
+      }
+      let x0 = s.iter().map(|p| p.0).fold(f64::INFINITY, f64::min).floor().max(0.0) as i64;
+      let x1 = s.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max).ceil().min(w - 1.0) as i64;
+      let y0 = s.iter().map(|p| p.1).fold(f64::INFINITY, f64::min).floor().max(0.0) as i64;
+      let y1 = s.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max).ceil().min(h - 1.0) as i64;
+      for y in y0..=y1 {
+        for x in x0..=x1 {
+          let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+          let e = |a: (f64, f64, f64), b: (f64, f64, f64)| (b.0 - a.0) * (py - a.1) - (px - a.0) * (b.1 - a.1);
+          let (b0, b1, b2) = (e(s[1], s[2]) / area, e(s[2], s[0]) / area, e(s[0], s[1]) / area);
+          if b0 < 0.0 || b1 < 0.0 || b2 < 0.0 {
+            continue;
+          }
+          let z = (b0 * s[0].2 + b1 * s[1].2 + b2 * s[2].2) as f32;
+          if let Some(d) = f.depth.get_mut((y * f.width as i64 + x) as usize)
+            && z < *d
+          {
+            *d = z;
+          }
+        }
+      }
+    }
+  }
+}
+
+/// The parts of an edge behind the surfaces, faint, thin and dashed; depth and ids are left alone.
+fn draw_hidden(f: &mut Frame, l: &Polyline, vp: &DMat4) {
+  let ghost = Polyline { width: 1.0, dashed: true, ..l.clone() };
+  let alpha = (l.color[3] as f32 * HIDDEN_EDGE_ALPHA) as u32;
+  let mut hidden: Vec<usize> = Vec::new();
+  let (w, h) = (f.width as i64, f.height as i64);
+  rasterize_line(&ghost, vp, f.width, f.height, &mut |x, y, z| {
+    if x >= 0 && y >= 0 && x < w && y < h {
+      let i = (y * w + x) as usize;
+      if f.depth.get(i).is_some_and(|d| z > *d) {
+        hidden.push(i);
+      }
+    }
+  });
+  hidden.sort_unstable();
+  hidden.dedup();
+  for i in hidden {
+    if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
+      for (c, ink) in p.iter_mut().zip(l.color).take(3) {
+        *c = ((ink as u32 * alpha + *c as u32 * (255 - alpha)) / 255) as u8;
+      }
+    }
+  }
 }
 
 fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
@@ -616,6 +939,13 @@ fn raster_tri(
 }
 
 fn draw_polyline(f: &mut Frame, l: &Polyline, vp: &DMat4) {
+  let (w, h) = (f.width, f.height);
+  rasterize_line(l, vp, w, h, &mut |x, y, z| plot(f, x, y, z, l.color, l.id, l.on_top));
+}
+
+/// Every pixel a polyline covers (with its depth, biased as [`Polyline::behind`] asks), in
+/// order; dashes are left out.
+fn rasterize_line(l: &Polyline, vp: &DMat4, width: u32, height: u32, put: &mut dyn FnMut(i64, i64, f32)) {
   let mut dash_phase = 0.0f64;
   for seg in l.points.windows(2) {
     let a = DVec3::new(seg[0][0] as f64, seg[0][1] as f64, seg[0][2] as f64);
@@ -635,7 +965,7 @@ fn draw_polyline(f: &mut Frame, l: &Polyline, vp: &DMat4) {
     }
     let to_screen = |c: DVec4| {
       let iw = 1.0 / c.w;
-      ((c.x * iw + 1.0) * 0.5 * f.width as f64, (1.0 - c.y * iw) * 0.5 * f.height as f64, c.z * iw)
+      ((c.x * iw + 1.0) * 0.5 * width as f64, (1.0 - c.y * iw) * 0.5 * height as f64, c.z * iw)
     };
     let (x0, y0, z0) = to_screen(ca);
     let (x1, y1, z1) = to_screen(cb);
@@ -658,7 +988,7 @@ fn draw_polyline(f: &mut Frame, l: &Polyline, vp: &DMat4) {
       let r = half.ceil() as i64;
       for oy in -r..=r {
         for ox in -r..=r {
-          plot(f, x as i64 + ox, y as i64 + oy, z, l.color, l.id, l.on_top);
+          put(x as i64 + ox, y as i64 + oy, z);
         }
       }
     }
@@ -785,6 +1115,150 @@ mod tests {
     assert!(f.rgba[(row * 200 + 100) * 4 + 2] > 60);
   }
 
+  /// A body face at z = 5 over an edge at z = 0, from the top.
+  fn styled(style: VisualStyle) -> Frame {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    let mut face = quad(5.0, [255, 0, 0, 255], 1);
+    face.analyze = true;
+    let edge = Polyline {
+      points: vec![[-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+      color: [0, 0, 0, 255],
+      width: 1.0,
+      id: 3,
+      on_top: false,
+      dashed: false,
+      behind: false,
+    };
+    let scene = Scene {
+      meshes: vec![face],
+      lines: vec![edge],
+      background_top: [255; 4],
+      background_bottom: [255; 4],
+      style,
+      ..Default::default()
+    };
+    render(&scene, &cam, 200, 100)
+  }
+
+  /// The pixels of the edge's row, and one well inside the face away from it.
+  fn row_and_face(f: &Frame) -> (Vec<[u8; 3]>, [u8; 3]) {
+    let px = |x: u32, y: u32| {
+      let i = ((y * f.width + x) * 4) as usize;
+      [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]]
+    };
+    // the rows the edge covers: the one with the most ink
+    let ink = |y: u32| (85..115).map(|x| px(x, y).iter().map(|&c| 255 - c as u32).sum::<u32>()).sum::<u32>();
+    let y = (45..55).max_by_key(|&y| ink(y)).unwrap_or(50);
+    ((85..115).map(|x| px(x, y)).collect(), px(100, 40))
+  }
+
+  #[test]
+  fn visual_styles_shade_and_hide_as_fusion_does() {
+    let red = |c: [u8; 3]| c[0] > 150 && c[1] < 120;
+    let dark = |c: &[u8; 3]| c.iter().all(|&v| v < 60);
+    let faint = |c: &[u8; 3]| !dark(c) && c.iter().map(|&v| v as u32).sum::<u32>() < 3 * 235;
+
+    // shaded with visible edges: the face hides the edge under it
+    let (row, face) = row_and_face(&styled(VisualStyle::ShadedVisibleEdges));
+    assert!(red(face) && row.iter().all(|c| red(*c)), "{row:?}");
+    // shaded, hidden edges: the edge shows through, faint and dashed
+    let (row, face) = row_and_face(&styled(VisualStyle::ShadedHiddenEdges));
+    assert!(red(face));
+    assert!(row.iter().any(|c| !red(*c)) && row.iter().any(|c| red(*c)), "dashed: {row:?}");
+    assert!(row.iter().all(|c| !dark(c)), "faint: {row:?}");
+    // wireframe: no face colour, the edge is drawn whole and in full
+    let f = styled(VisualStyle::Wireframe);
+    let (row, face) = row_and_face(&f);
+    assert_eq!(face, [255, 255, 255]);
+    assert!(row.iter().all(dark), "{row:?}");
+    assert_eq!(f.pick(100.0, 40.0, 0, |_| true), NO_ID, "wireframe faces aren't drawn");
+    // wireframe, visible edges only: the face is unseen but still hides the edge
+    let (row, face) = row_and_face(&styled(VisualStyle::WireframeVisibleEdges));
+    assert_eq!(face, [255, 255, 255]);
+    assert!(row.iter().all(|c| *c == [255, 255, 255]), "{row:?}");
+    // wireframe, hidden edges: the hidden edge is faint and dashed
+    let (row, _) = row_and_face(&styled(VisualStyle::WireframeHiddenEdges));
+    assert!(row.iter().any(faint) && row.contains(&[255, 255, 255]), "{row:?}");
+    assert!(row.iter().all(|c| !dark(c)));
+  }
+
+  #[test]
+  fn the_style_flags_match_the_menu() {
+    for s in VisualStyle::ALL {
+      assert_eq!(s.label().starts_with("Shaded"), s.shaded());
+      assert_eq!(s.label().contains("Hidden"), s.hidden_edges());
+    }
+    assert!(!VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
+    assert_eq!(VisualStyle::default(), VisualStyle::ShadedVisibleEdges);
+  }
+
+  #[test]
+  fn free_orbit_rolls_and_goes_over_the_top() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Front);
+    // straight up the screen past the top: constrained orbit would stop at the pole
+    for _ in 0..40 {
+      cam.free_orbit(0.0, 0.05);
+    }
+    let (right, up, back) = cam.basis();
+    assert!(back.z > 0.4 && up.z < 0.0, "over the top, upside down: {back} {up}");
+    assert!((right.length() - 1.0).abs() < 1e-9 && right.dot(up).abs() < 1e-9 && right.dot(back).abs() < 1e-9);
+    // a diagonal drag leaves the view rolled
+    let mut cam = Camera::default();
+    cam.free_orbit(0.6, 0.6);
+    cam.free_orbit(-0.6, -0.6);
+    assert!(cam.roll.abs() > 1e-3, "rolled: {}", cam.roll);
+    // set_basis takes back what basis gives
+    let (r, _, b) = cam.basis();
+    let mut again = Camera { roll: 0.0, ..cam };
+    again.set_basis(r, b);
+    let (r2, _, b2) = again.basis();
+    assert!((r - r2).length() < 1e-9 && (b - b2).length() < 1e-9);
+    // a standard view takes the roll off
+    cam.set_view(StandardView::Home);
+    assert_eq!(cam.roll, 0.0);
+  }
+
+  #[test]
+  fn effects_put_a_ground_under_the_bodies() {
+    let mut body = quad(5.0, [255, 0, 0, 255], 1);
+    body.analyze = true;
+    body.positions.push([0.0, 0.0, 2.0]);
+    let profile = quad(-50.0, [0, 0, 255, 255], 2);
+    let base = Scene { meshes: vec![body, profile], ..Default::default() };
+    let mut scene = base.clone();
+    Effects::default().apply(&mut scene);
+    assert_eq!(scene.meshes.len(), 2, "no effects, nothing added");
+
+    let mut scene = base.clone();
+    Effects { ground_shadow: true, reflections: true, ground_plane: true }.apply(&mut scene);
+    let added = &scene.meshes[2..];
+    assert_eq!(added.len(), 3, "reflection, ground, shadow");
+    let (refl, ground, shadow) = (&added[0], &added[1], &added[2]);
+    // the lowest body point (z = 2) is the ground: the profile at z = -50 doesn't count
+    assert!(ground.positions.iter().all(|p| (p[2] - 2.0).abs() < 0.1) && ground.transparent());
+    assert!(refl.positions.iter().any(|p| p[2] < 0.0) && !refl.transparent() && refl.id == NO_ID);
+    assert!(shadow.transparent() && shadow.positions.iter().all(|p| p[2] > ground.positions[0][2]));
+    // the shadow is the square's outline: the inner point isn't on it
+    assert_eq!(shadow.positions.len(), 4);
+    assert_eq!(shadow.indices.len(), 6);
+    assert!(added.iter().all(|m| !m.analyze), "the effects aren't body surfaces");
+
+    // the shaded image shows the ground's tint beside the body
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    let mut plain = Scene { background_top: [255; 4], background_bottom: [255; 4], ..base.clone() };
+    plain.meshes.truncate(1);
+    let mut grounded = plain.clone();
+    Effects { ground_plane: true, ..Default::default() }.apply(&mut grounded);
+    let at = |f: &Frame| f.rgba[(50 * 200 + 60) * 4];
+    assert_eq!(at(&render(&plain, &cam, 200, 100)), 255);
+    assert!(at(&render(&grounded, &cam, 200, 100)) < 250);
+  }
+
   #[test]
   fn project_and_ray_round_trip() {
     let cam = Camera::default();
@@ -816,5 +1290,27 @@ mod tests {
     assert!((cam.eye_dir() - DVec3::new(1.0, 0.0, 0.0)).length() < 1e-9);
     cam.set_view(StandardView::Top);
     assert!(cam.eye_dir().z > 0.999);
+  }
+
+  #[test]
+  fn look_from_any_direction_with_any_up() {
+    let mut cam = Camera::default();
+    let corner = DVec3::new(-1.0, 1.0, -1.0).normalize();
+    cam.look_from(corner, DVec3::Z);
+    let (right, up, back) = cam.basis();
+    assert!((back - corner).length() < 1e-9, "{back}");
+    assert!(up.z > 0.0 && right.z.abs() < 1e-9 && cam.roll == 0.0, "Z stays up: {up}");
+    // the front view turned a quarter: +X at the top of the screen
+    cam.look_from(-DVec3::Y, DVec3::X);
+    let (right, up, back) = cam.basis();
+    assert!((back + DVec3::Y).length() < 1e-9 && (up - DVec3::X).length() < 1e-9, "{up}");
+    assert!((right + DVec3::Z).length() < 1e-9, "{right}");
+    // straight down the turn goes into the yaw
+    cam.look_from(DVec3::Z, -DVec3::X);
+    let (_, up, _) = cam.basis();
+    assert!((up + DVec3::X).length() < 1e-6 && cam.roll == 0.0, "{up} {}", cam.roll);
+    let home = Camera::default();
+    cam.set_view(StandardView::Home);
+    assert!((cam.eye_dir() - home.eye_dir()).length() < 1e-3);
   }
 }

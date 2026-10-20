@@ -1,0 +1,192 @@
+{
+ "id": "polyline-arc-off-arc",
+ "name": "polyline-arc-off-arc",
+ "description": "Line tool: line (0,0)-(20,0), tangent arc to (20,20) (CCW R10), then a tangent arc dragged off that arc's end to (10,30) (CW R10 about (20,30)), lines back: area 600+50pi-25pi, extruded 5.",
+ "exercises": [
+  "sketch",
+  "line",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "mid": {
+      "at": [
+       30,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       20,
+       20
+      ],
+      "ref": "a1.end"
+     },
+     "mid": {
+      "at": [
+       12.928932188134524,
+       22.928932188134524
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       30
+      ]
+     },
+     "id": "a2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       30
+      ],
+      "ref": "a2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "tangent",
+     "refs": [
+      "l1",
+      "a1"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "a1",
+      "a2"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "a1",
+        "a2",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

@@ -287,8 +287,10 @@ fn loft_sweep_hole_split_draft() {
 
 #[test]
 fn every_listed_command_is_handled() {
+  // hub.save, cam.library ... write to the hub: a scratch one, not the user's
+  let root = store::Store::scratch_root();
   for c in COMMANDS {
-    let mut s = Session::default();
+    let mut s = Session { store_root: Some(root.clone()), ..Session::default() };
     if let Err(e) = s.execute(c.id, &json!({})) {
       assert!(!e.0.starts_with("unknown command"), "{}: {e}", c.id);
     }
@@ -314,7 +316,7 @@ fn assembly_with_a_revolute_joint() {
     json!({
       "moving": a, "moving_origin": {"edge": {"point": [15, 200, 0]}},
       "fixed": b, "fixed_origin": {"edge": {"point": [55, 30, 10]}},
-      "kind": "revolute",
+      "kind": "revolute", "flip": true,
     }),
   );
   assert!(r["error"].is_null(), "{r}");
@@ -440,6 +442,28 @@ fn sketch_modify_tools_and_project() {
   assert!((total_volume(&s) - 50.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
 }
 
+#[test]
+fn project_body_silhouette() {
+  // a cylinder lying along X projects into a sketch above it as one 20 x 10 rectangle
+  let mut s = Session::default();
+  let yz = json!({"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+  run(&mut s, "sketch.create", json!({"plane": yz}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"distance": 20}));
+  let b = s.model.bodies[0].id.0;
+  let above = json!({"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  run(&mut s, "sketch.create", json!({"plane": above}));
+  let r = run(&mut s, "sketch.project", json!({"body": b, "associative": false}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 4, "{r}");
+  assert_eq!(r["profiles"], 1);
+  run(&mut s, "sketch.finish", json!({}));
+  let before = total_volume(&s);
+  let r = run(&mut s, "extrude", json!({"distance": 3, "operation": "new_body"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - before - 600.0).abs() < 1e-6, "{}", total_volume(&s));
+}
+
 fn temp_dir(name: &str) -> std::path::PathBuf {
   let d = std::env::temp_dir().join(format!("fox-engine-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);
@@ -496,6 +520,15 @@ fn every_format_round_trips() {
   assert_eq!(s.model.bodies.len(), before + 1, "{r}");
   assert!(s.undo());
   assert_eq!(s.model.bodies.len(), before);
+  // a mesh in inches comes in 25.4x larger: volume scales by 25.4^3
+  let v0 = total_volume(&s);
+  run(&mut s, "import", json!({"path": dir.join("plate.stl"), "units": "in"}));
+  let inch = total_volume(&s) - v0;
+  assert_eq!(s.model.bodies.len(), before + 1);
+  assert!((inch / (v * 25.4f64.powi(3)) - 1.0).abs() < 0.01, "{inch} vs {v}");
+  assert!(s.undo());
+  let e = s.execute("import", &json!({"path": dir.join("plate.stl"), "units": "yd"})).unwrap_err();
+  assert!(e.0.contains("units"), "{}", e.0);
   let formats = run(&mut s, "formats", json!({}));
   assert!(formats.as_array().unwrap().iter().any(|f| f["id"] == "f3d" && f["export"] == false));
   let _ = std::fs::remove_dir_all(dir);
@@ -554,6 +587,30 @@ fn fusion_archives_are_explained_not_faked() {
 
 fn zip_writer() -> (zip::ZipWriter<std::io::Cursor<Vec<u8>>>, zip::write::SimpleFileOptions) {
   (zip::ZipWriter::new(std::io::Cursor::new(Vec::new())), Default::default())
+}
+
+#[test]
+fn an_empty_untitled_design_is_saved_to_the_hub_only_when_asked_for_explicitly() {
+  let root = temp_dir("hub-blank");
+  let mut s = Session { store_root: Some(root.clone()), ..Default::default() };
+  let items = |s: &mut Session| run(s, "hub.recent", json!({})).as_array().map(Vec::len).unwrap_or(0);
+  for p in [json!({}), json!({"new": true}), json!({"name": "Untitled"}), json!({"name": "  "})] {
+    let e = s.execute("hub.save", &p).expect_err("a blank Untitled design isn't saved");
+    assert!(e.0.contains("empty"), "{e}");
+  }
+  assert_eq!(s.design.name, "Untitled", "a refused save leaves the design as it was");
+  assert!(s.hub.is_none());
+  assert_eq!(items(&mut s), 0);
+  // named, or asked for explicitly (the Save dialog), it is
+  assert_eq!(run(&mut s, "hub.save", json!({"explicit": true}))["version"], 1);
+  let mut named = Session { store_root: Some(root.clone()), ..Default::default() };
+  assert_eq!(run(&mut named, "hub.save", json!({"name": "Blank plate"}))["version"], 1);
+  // and a design with something in it needs neither
+  let mut work = Session { store_root: Some(root.clone()), ..Default::default() };
+  plate(&mut work);
+  assert_eq!(run(&mut work, "hub.save", json!({}))["version"], 1);
+  assert_eq!(items(&mut s), 3);
+  let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -684,6 +741,23 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
   let top = 20.0 - 2.0 * 10.0 * (10f64).to_radians().tan();
   let frustum = 10.0 / 3.0 * (400.0 + top * top + 20.0 * top);
   assert!((total_volume(&s) - frustum).abs() < 1e-3, "{} vs {frustum}", total_volume(&s));
+  // two sides, each tapered from the sketch plane: 10 up narrowing 10°, 6 down untapered
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(
+    &mut s,
+    "extrude",
+    json!({"extent": "two_sides", "distance": 10, "distance2": 6, "taper": "10 deg", "taper2": "0 deg"}),
+  );
+  assert!(r["error"].is_null(), "{r}");
+  let want = frustum + 400.0 * 6.0;
+  assert!((total_volume(&s) - want).abs() < 1e-3, "{} vs {want}", total_volume(&s));
+  // symmetric: both halves narrow away from the sketch plane
+  let mut s = Session::default();
+  square(&mut s);
+  let r = run(&mut s, "extrude", json!({"extent": "symmetric", "distance": 10, "taper": "10 deg"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - 2.0 * frustum).abs() < 1e-3, "{} vs {}", total_volume(&s), 2.0 * frustum);
   // to a face: a box's top, 30 up
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 30, "at": [50, 50]}));
@@ -711,6 +785,62 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
     assert!(r["error"].is_null(), "{r}");
     let cut = 8000.0 - total_volume(&s);
     assert!((cut - 2.0 * ok / 2.0 * 20.0).abs() < 1e-6, "{cut}");
+  }
+  // round a top loop, Fusion measures the first distance on the top: 2 in, 5 down cuts
+  // 2 × 5 / 2 × 80 − 4 × 2² × 5 / 3 (the mitred corners); flipped, 5 in and 2 down
+  for (flipped, cut) in [(false, 400.0 - 80.0 / 3.0), (true, 400.0 - 200.0 / 3.0)] {
+    let mut s = Session::default();
+    square(&mut s);
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let edges =
+      json!([{"point": [10, 0, 20]}, {"point": [20, 10, 20]}, {"point": [10, 20, 20]}, {"point": [0, 10, 20]}]);
+    let r = run(&mut s, "chamfer", json!({"edges": edges, "distance": 2, "distance2": 5, "flipped": flipped}));
+    assert!(r["error"].is_null(), "{r}");
+    let got = 8000.0 - total_volume(&s);
+    assert!((got - cut).abs() < 1e-6, "flipped {flipped}: {got} vs {cut}");
+  }
+  // a design from before CHAMFER_FORWARD_FACE keeps main's chamfers: d1 on each edge's first
+  // adjacent face (here the sides), so 5 in and 2 down, as before the change
+  for (edges, dist, cut_new, cut_old) in [
+    // 40 × 30 × 20 box, its top loop, 2 and 5 mm
+    (
+      json!([{"point": [0, 15, 20]}, {"point": [20, 0, 20]}, {"point": [40, 15, 20]}, {"point": [20, 30, 20]}]),
+      json!({"distance": 2, "distance2": 5}),
+      24000.0 - 23326.666666666668,
+      24000.0 - 23366.666666666664,
+    ),
+    // r 15 cylinder's top edge, 3 mm at 30°: main gave 13901.73 mm³
+    (
+      json!([{"point": [0, 15, 20]}]),
+      json!({"distance": 3, "angle": 30}),
+      f64::NAN,
+      15.0 * 15.0 * std::f64::consts::PI * 20.0 - 13901.72880494322,
+    ),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    if edges.as_array().unwrap().len() == 1 {
+      run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 15}));
+    } else {
+      run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let before = total_volume(&s);
+    let mut p = dist.clone();
+    p["edges"] = edges;
+    let r = run(&mut s, "chamfer", p);
+    assert!(r["error"].is_null(), "{r}");
+    assert!(s.design.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE));
+    let new = before - total_volume(&s);
+    if cut_new.is_finite() {
+      assert!((new - cut_new).abs() < 1e-6, "new design: {new} vs {cut_new}");
+    }
+    s.design.behaviours = fox_model::Behaviours::legacy();
+    s.rebuild();
+    let old = before - total_volume(&s);
+    assert!((old - cut_old).abs() < 1e-6, "legacy design: {old} vs {cut_old}");
+    assert!((old - new).abs() > 1.0, "the behaviour changes this chamfer: {old} vs {new}");
   }
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
@@ -872,7 +1002,7 @@ fn attributes_follow_their_targets() {
   let d: Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
   assert_eq!(d.attributes.len(), 4);
   // deleting the sketch deletes the extrude and the attributes on both
-  run(&mut s, "feature.delete", json!({"feature": sk}));
+  run(&mut s, "feature.delete", json!({"feature": sk, "cascade": true}));
   assert_eq!(run(&mut s, "attribute.find", json!({"group": g})).as_array().unwrap().len(), 1);
   assert_eq!(s.design.attributes.len(), 2, "the body's attribute stays stored, but its body is gone");
   assert!(s.undo());
@@ -1044,4 +1174,56 @@ fn the_welcome_fox_is_added_once() {
   run(&mut s, "hub.item.delete", json!({"item": item}));
   assert!(crate::hub::add_welcome(&root).unwrap().is_none());
   let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn timeline_moves_keep_references_in_order() {
+  let ids = |s: &Session| s.design.features.iter().map(|f| f.id.0).collect::<Vec<_>>();
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10, "at": [0, 0]}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [30, 0], "corner2": [40, 10]}));
+  run(&mut s, "extrude", json!({"distance": 5}));
+  let [boxed, sketch, extrude] = ids(&s)[..] else { panic!("{:?}", ids(&s)) };
+  let volume = total_volume(&s);
+
+  // a feature that references nothing before it can go anywhere
+  let r = run(&mut s, "feature.move", json!({"feature": boxed, "to": 2}));
+  assert_eq!(r["index"], 2);
+  assert_eq!(ids(&s), [sketch, extrude, boxed]);
+  assert!((total_volume(&s) - volume).abs() < 1e-6, "the move regenerates the same bodies");
+  // and a sketch with its extrude can move back in front of it, one at a time
+  run(&mut s, "feature.move", json!({"feature": boxed, "to": 0}));
+  assert_eq!(ids(&s), [boxed, sketch, extrude]);
+  s.undo();
+  assert_eq!(ids(&s), [sketch, extrude, boxed], "each move is one undo step");
+  s.redo();
+
+  // an extrude can't come before its sketch, nor the sketch after its extrude
+  let undo = s.undo.len();
+  let e = s.execute("feature.move", &json!({"feature": extrude, "to": 0})).unwrap_err();
+  assert!(e.to_string().contains("Sketch1"), "{e}");
+  assert!(s.execute("feature.move", &json!({"feature": sketch, "to": 2})).is_err());
+  assert_eq!(ids(&s), [boxed, sketch, extrude], "refused moves leave the timeline alone");
+  assert_eq!(s.undo.len(), undo, "refused moves leave no undo step");
+  assert!(s.design.check_move(FeatureId(sketch), 0).is_ok());
+  assert!(s.design.check_move(FeatureId(extrude), 0).is_err());
+}
+
+#[test]
+fn timeline_move_refuses_breaking_body_references() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 50]}));
+  run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 2}));
+  let ids = |s: &Session| s.design.features.iter().map(|f| f.id.0).collect::<Vec<_>>();
+  let [first, second, fillet] = ids(&s)[..] else { panic!("{:?}", ids(&s)) };
+  // the fillet's edge belongs to the first box: it can pass the second box but not the first
+  run(&mut s, "feature.move", json!({"feature": fillet, "to": 1}));
+  assert_eq!(ids(&s), [first, fillet, second]);
+  let e = s.execute("feature.move", &json!({"feature": fillet, "to": 0})).unwrap_err();
+  assert!(e.to_string().contains("Fillet"), "{e}");
+  assert_eq!(ids(&s), [first, fillet, second]);
+  assert!(s.design.features.iter().all(|f| s.model.status(f.id).is_none_or(|st| st.error.is_none())));
+  assert!(s.redo.is_empty(), "the refused move isn't left to redo");
 }

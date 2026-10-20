@@ -1,0 +1,12 @@
+# 207-cone-section-circle-join: added by the parity loop from a Fusion probe
+# Cone (base r10 on XY, apex at z=20) revolved from a triangle on XZ; Fusion's Intersect puts the
+# cone's section at z=10 (an r5 circle) into a sketch there, extruded 10 mm up, joined. Fox has no
+# Intersect command, so the r5 circle is drawn by hand where the section falls.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [10, 0], [0, 20]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": "z", "angle": 360, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "join"}

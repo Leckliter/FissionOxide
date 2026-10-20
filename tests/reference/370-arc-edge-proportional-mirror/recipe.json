@@ -1,0 +1,177 @@
+{
+ "id": "arc-edge-proportional-mirror",
+ "name": "arc-edge-proportional-mirror",
+ "description": "Quarter disc R20 extruded 5; construction point along the bottom arc at t=0.25 (22.5 or 67.5 deg); plane through it and the z axis edge; body mirrored about the plane and joined (135 deg sector).",
+ "exercises": [
+  "extrude",
+  "construction_point along_path",
+  "construction_plane three_points",
+  "mirror (join)"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "arc_center_start_sweep",
+     "id": "a1",
+     "center": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "sweep_deg": 90
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       0,
+       20
+      ],
+      "ref": "a1.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "a1",
+        "l2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_point",
+   "name": "Point1",
+   "method": "along_path",
+   "path": {
+    "point": [
+     14.142136,
+     14.142136,
+     0
+    ]
+   },
+   "t": 0.25
+  },
+  {
+   "op": "construction_plane",
+   "name": "Plane1",
+   "method": "three_points",
+   "a": {
+    "ref": "Point1"
+   },
+   "b": {
+    "vertex": [
+     0,
+     0,
+     0
+    ]
+   },
+   "c": {
+    "vertex": [
+     0,
+     0,
+     5
+    ]
+   }
+  },
+  {
+   "op": "mirror",
+   "name": "Mirror1",
+   "mirror_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "plane": "Plane1",
+   "combine": true
+  }
+ ]
+}

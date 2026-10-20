@@ -66,6 +66,16 @@ impl Sketch {
         }
       }
     }
+    // a polygon constraint's centre goes with its lines
+    for con in &self.constraints {
+      if let ConstraintKind::Polygon { center, lines } = &con.kind
+        && lines.iter().all(|l| curves.contains(l))
+        && !moved.contains(center)
+        && self.point(*center).is_some_and(|q| !q.fixed)
+      {
+        moved.push(*center);
+      }
+    }
     for p in self.points.iter_mut().filter(|p| moved.contains(&p.id)) {
       [p.x, p.y] = t.apply([p.x, p.y]);
     }
@@ -114,6 +124,11 @@ impl Sketch {
       {
         [*x, *y] = t.apply([*x, *y]);
       }
+      if let ConstraintKind::FixRadius { curve, radius } = &mut con.kind
+        && curves.contains(curve)
+      {
+        *radius *= t.scale;
+      }
       if (t.scale - 1.0).abs() > 1e-12
         && scaled.contains(&con.id)
         && let Some(d) = con.kind.dim_mut()
@@ -156,10 +171,12 @@ impl Sketch {
         CurveKind::Arc { center, start, end } => {
           CurveKind::Arc { center: pt(self, *center)?, start: pt(self, *start)?, end: pt(self, *end)? }
         }
-        CurveKind::Spline { points, start_handle, end_handle } => CurveKind::Spline {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => CurveKind::Spline {
           points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()?,
           start_handle: start_handle.map(|p| pt(self, p)).transpose()?,
           end_handle: end_handle.map(|p| pt(self, p)).transpose()?,
+          start_curvature: start_curvature.map(|p| pt(self, p)).transpose()?,
+          end_curvature: end_curvature.map(|p| pt(self, p)).transpose()?,
         },
         CurveKind::Bezier { points } => {
           CurveKind::Bezier { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
@@ -178,6 +195,13 @@ impl Sketch {
           start: pt(self, *start)?,
           end: pt(self, *end)?,
         },
+        // a rational curve's weights survive affine maps: rho stays
+        CurveKind::Conic { start, end, apex, rho } => {
+          CurveKind::Conic { start: pt(self, *start)?, end: pt(self, *end)?, apex: pt(self, *apex)?, rho: *rho }
+        }
+        CurveKind::QuinticSpline { points } => {
+          CurveKind::QuinticSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
+        }
       };
       let id = self.add_curve(kind)?;
       if c.construction {

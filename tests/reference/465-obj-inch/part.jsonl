@@ -1,0 +1,2 @@
+# 465-obj-inch: added by the parity loop from a Fusion probe
+{"cmd": "import", "path": "lprism.obj", "units": "in", "merge_coplanar": false}

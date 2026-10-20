@@ -1,0 +1,5 @@
+# 401-join-offset-plane: added by the parity loop from a Fusion probe
+# join-offset-plane: 40x40x20 box at X/Y 0..40, then a 20x10x15 box joined on top, placed on a plane at Z=20 centred at (20,20): X 10..30, Y 15..25, Z 20..35.
+# hand-written; Fusion side is the equivalent sketch rectangle + extrude
+{"cmd": "box", "plane": "xy", "at": [20, 20], "width": 40, "depth": 40, "height": 20}
+{"cmd": "box", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [20, 20], "width": 20, "depth": 10, "height": 15, "operation": "join"}

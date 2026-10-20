@@ -1,0 +1,16 @@
+# 120-midpoint-line-on-origin: added by the parity loop from a Fusion probe
+# midpoint-line-on-origin: Rectangle 40x20 drawn off-centre whose bottom edge's midpoint is constrained to the sketch origin; solves to x -20..20, y 0..20; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-17, 1], [22, -1]]}
+{"cmd": "sketch.line", "points": [[22, -1], [23, 19]]}
+{"cmd": "sketch.line", "points": [[23, 19], [-18, 21]]}
+{"cmd": "sketch.line", "points": [[-18, 21], [-17, 1]]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [5]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [7]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [8]}
+{"cmd": "sketch.constrain", "type": "midpoint", "points": [0], "curves": [3]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [2, 4], "value": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

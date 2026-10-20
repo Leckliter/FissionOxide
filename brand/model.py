@@ -57,6 +57,9 @@ RELIEF = {
 SHADE_STEP = 0.4
 # how far each facet's sides lean in, measured across its face (mm)
 BEVEL = 0.6
+# the XZ plane facing the front (-Y) with sketch x = +X and y = +Z (up), given explicitly: a new
+# design frames the "xz" origin plane as Fusion does (y = -Z), which would stand the fox on its head
+FRONT = {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}
 
 
 def model_facets():
@@ -101,7 +104,7 @@ def script():
     lines.append(f"# {name}")
     sketch = 3 * i + 1
     body = (sketch + 1) * 1000  # a new body is numbered after the feature that made it
-    lines.append(json.dumps({"cmd": "sketch.create", "plane": "xz"}))
+    lines.append(json.dumps({"cmd": "sketch.create", "plane": FRONT}))
     lines.append(json.dumps({"cmd": "sketch.line", "points": mm, "closed": True}))
     lines.append(json.dumps({"cmd": "sketch.finish"}))
     # taper needs a one-sided extent: out of the plane one way, then back the other way, joined

@@ -244,14 +244,19 @@ mod tests {
       hover: None,
       selection: Vec::new(),
       edit_sketch: None,
-      show_edges: true,
+      style: Default::default(),
+      objects: Default::default(),
+      effects: Default::default(),
       show_grid: true,
+      grid_step: None,
       visible: Vec::new(),
       profiles_of: Vec::new(),
+      hidden_profiles: Vec::new(),
       view: serde_json::json!({}),
       vertices: false,
       peek: Vec::new(),
       isolate: None,
+      opacity: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

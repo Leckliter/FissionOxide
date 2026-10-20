@@ -1,0 +1,16 @@
+# 381-sketch-line-offset-plane: added by the parity loop from a Fusion probe
+# 20x10x5 box; construction point where a sketch line on XY from (0,-2) to (20,-12) meets a plane offset 10 from YZ (x=10), at (10,-7,0); plane through it and the vertical edge at (0,10); mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, -2], [20, -12]]}
+{"cmd": "sketch.finish"}
+{"cmd": "plane.offset", "plane": "yz", "offset": 10}
+{"cmd": "point", "method": "edge_plane", "edge": {"sketch": 3, "curve": 3}, "plane": {"feature": 4}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 5}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
+{"cmd": "mirror", "plane": {"feature": 6}, "bodies": [2000], "join": true}

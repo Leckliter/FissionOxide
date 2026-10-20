@@ -1,0 +1,10 @@
+# 230-circle-closest-point-cylinder-groove: added by the parity loop from a Fusion probe
+# r10 h30 cylinder; an r5 circle drawn on the plane x=20 is projected onto the side face to the
+# closest point (Project To Surface): one loop on the front. A d2 pipe cut along it makes one
+# groove.
+{"cmd": "cylinder", "radius": 10, "height": 30}
+{"cmd": "sketch.create", "plane": {"origin": [20.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 15], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.project_to_surface", "sketch": 2, "faces": [{"point": [-10, 0, 5]}], "type": "closest_point"}
+{"cmd": "pipe", "path": 3, "diameter": 2, "operation": "cut"}

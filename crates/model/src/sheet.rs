@@ -177,7 +177,7 @@ fn tangents(s: &Seg) -> Option<(P2, P2)> {
       let b = unit(sub(p[3], if len2(sub(p[3], p[2])) > 1e-12 { p[2] } else { p[1] }))?;
       Some((a, b))
     }
-    Seg::EllipseArc { .. } => {
+    Seg::EllipseArc { .. } | Seg::Conic { .. } | Seg::Quintic { .. } => {
       let (a, b) = s.end_tangents();
       Some((unit(a)?, unit(b)?))
     }
@@ -214,7 +214,9 @@ pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
         segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p }));
       }
-      CurveKind::EllipticalArc { .. } => segs.extend(sketch.curve_segs(c.id)),
+      CurveKind::EllipticalArc { .. } | CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
+        segs.extend(sketch.curve_segs(c.id))
+      }
       CurveKind::Ellipse { .. } => {
         if !curves.is_empty() {
           return Err("a path can't include a full ellipse".into());
@@ -318,8 +320,11 @@ pub fn contour_section(path: &[Seg], t: f64, r: f64, flip: bool) -> Result<Profi
         Seg::Arc { center, radius: r2, start_angle, sweep }
       }
       Seg::Circle { .. } => return Err("bad path segment".into()),
-      Seg::Bezier { .. } => return Err("contour flanges follow lines and arcs, not splines".into()),
+      Seg::Bezier { .. } | Seg::Quintic { .. } => {
+        return Err("contour flanges follow lines and arcs, not splines".into());
+      }
       Seg::EllipseArc { .. } => return Err("contour flanges follow lines and arcs, not ellipses".into()),
+      Seg::Conic { .. } => return Err("contour flanges follow lines and arcs, not conics".into()),
     });
   }
   let (Some(p0), Some(p1), Some(q0), Some(q1)) = (p.first(), p.last(), q.first(), q.last()) else {
@@ -329,7 +334,7 @@ pub fn contour_section(path: &[Seg], t: f64, r: f64, flip: bool) -> Result<Profi
   segs.push(Seg::Line { a: p1.end(), b: q1.end() });
   segs.extend(q.iter().rev().map(|s| s.reversed()));
   segs.push(Seg::Line { a: q0.start(), b: p0.start() });
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }
@@ -364,7 +369,7 @@ pub fn flange_section(r: f64, t: f64, angle: f64, straight: f64) -> Profile {
   }
   segs.push(arc(c, r + t, o1, -angle));
   segs.push(Seg::Line { a: o0, b: i0 });
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }
@@ -375,7 +380,7 @@ pub fn flange_section(r: f64, t: f64, angle: f64, straight: f64) -> Profile {
 pub fn rectangle(lo: P2, hi: P2) -> Profile {
   let (a, b, c, d) = (lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]);
   let segs = vec![Seg::Line { a, b }, Seg::Line { a: b, b: c }, Seg::Line { a: c, b: d }, Seg::Line { a: d, b: a }];
-  Profile { outer: Loop { segs }, holes: Vec::new() }
+  Profile { outer: Loop::new(segs), holes: Vec::new() }
 }
 
 /// A bend relief notch in (along the edge, across it; + = outward) coordinates: `along` is the
@@ -393,7 +398,7 @@ pub fn relief_profile(along: (f64, f64), inner: f64, outer: f64, round: bool) ->
     Seg::Arc { center: c, radius: w / 2.0, start_angle: PI, sweep: PI },
     Seg::Line { a: [a1, c[1]], b: [a1, outer] },
   ];
-  Profile { outer: Loop { segs }, holes: Vec::new() }
+  Profile { outer: Loop::new(segs), holes: Vec::new() }
 }
 
 /// A slab standing in for the half-space in front of a plane (towards `normal`).
@@ -472,7 +477,7 @@ pub fn hole_section(r: f64, depth: f64, tip: f64, head: HoleHead) -> Result<Prof
     pts.push([0.0, depth]);
   }
   let segs = (0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect();
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }

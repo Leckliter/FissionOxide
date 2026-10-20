@@ -1,0 +1,10 @@
+# 272-crossing-lines-overshoot: added by the parity loop from a Fusion probe
+# crossing-lines-overshoot: 40x30 plate outline whose right line runs (40,0)-(40,36) and top line (46,30)-(0,30), crossing past the (40,30) corner; equal-distance chamfer 7 at the crossing trims both overshoots; extruded 6.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 36]]}
+{"cmd": "sketch.line", "points": [[46, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [5, 9], "distance": 7}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, 15]], "distance": 6, "operation": "new_body"}

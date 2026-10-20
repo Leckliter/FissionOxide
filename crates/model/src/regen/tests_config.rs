@@ -267,7 +267,7 @@ fn delete_face_and_base_feature_in_a_parametric_timeline() {
   let mut hole = Sketch::new();
   hole.add_circle(PtSpec::At(20.0, 10.0), 3.0).unwrap();
   let hs = d
-    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face: top }, sketch: hole, links: Vec::new() })
+    .add_feature(FeatureKind::Sketch { plane: PlaneRef::Face { face: top, x: None }, sketch: hole, links: Vec::new() })
     .unwrap();
   d.add_feature(FeatureKind::Extrude {
     sketch: hs,
