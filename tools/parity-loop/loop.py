@@ -39,7 +39,8 @@ def save(path, entries):
   tmp = path + ".tmp"
   with open(tmp, "w", encoding="utf-8", newline="\n") as f:
     for e in entries:
-      f.write(json.dumps(e) + "\n")
+      # ensure_ascii=False keeps ledger.jsonl byte-identical to what ledger.py writes
+      f.write(json.dumps(e, ensure_ascii=False) + "\n")
   os.replace(tmp, path)
 
 
@@ -142,7 +143,8 @@ def cmd_batches(a):
         e["batch"] = name
       made.append((name, len(chunk)))
   for path, entries in ledgers:
-    save(path, entries)
+    if any(e.get("batch") for e in entries):
+      save(path, entries)
   idx = load(os.path.join(BATCHES, "index.jsonl"))
   known = {b["name"] for b in idx}
   idx += [{"name": n, "items": c, "status": "pending", "pr": None} for n, c in made if n not in known]
