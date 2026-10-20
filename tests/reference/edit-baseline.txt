@@ -97,3 +97,8 @@
 492-join-two-tools
 493-intersect-two-tools
 494-cut-splits-target
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+495-delete-fillet-feature
+496-delete-second-body
+497-delete-cut-keep-chamfer
+498-delete-consumed-sketch
