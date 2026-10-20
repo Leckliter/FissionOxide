@@ -2452,6 +2452,7 @@ pub use extra::iso_pitch;
 mod solid;
 pub use solid::boundary_cells;
 mod sheet2;
+mod sheetmod;
 mod spun;
 pub use spun::outline as spun_outline;
 mod surface;

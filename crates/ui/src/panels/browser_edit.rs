@@ -133,6 +133,7 @@ fn commit(app: &mut App, target: RenameTarget, name: &str) {
       app.run("body.rename", json!({"body": b, "name": name}))
     }
     RenameTarget::Component(c) => app.run("component.rename", json!({"component": c, "name": name})),
+    RenameTarget::Group(g) => app.run("timeline.group_rename", json!({"group": g, "name": name})),
   };
 }
 

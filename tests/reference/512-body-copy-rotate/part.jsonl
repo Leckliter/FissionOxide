@@ -1,0 +1,10 @@
+# 512-body-copy-rotate: added by the parity loop from a Fusion probe
+# body-copy-rotate: 20x10x5 box, Create Copy: a copy translated (25, 0, 0) then rotated 90 deg about the world Z axis; the original stays, giving two bodies.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "move", "bodies": [2000], "translate": [25, 0, 0], "axis": "z", "angle": 90, "copy": true}

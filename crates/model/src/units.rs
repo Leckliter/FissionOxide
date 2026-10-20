@@ -101,6 +101,12 @@ impl LengthUnit {
     format!("{:.*} {}", decimals, self.from_mm(mm), self.symbol())
   }
 
+  /// An area (mm²) in this unit squared with a fixed number of decimals, as Fusion's status bar
+  /// reads it out ("1.24 in^2").
+  pub fn area(self, mm2: f64, decimals: usize) -> String {
+    format!("{:.*} {}^2", decimals, mm2 / self.mm().powi(2), self.symbol())
+  }
+
   /// A length typed into a length field: a value without any unit (and without parameters, which
   /// carry their own) means this unit, so it is pinned to it. `"2"` → `"2 in"`,
   /// `"2 * 3"` → `"(2 * 3) in"`. Anything else is kept as typed.

@@ -204,6 +204,8 @@ enum RenameTarget {
   Feature(u32),
   Body(u32),
   Component(u32),
+  /// A timeline group.
+  Group(u32),
 }
 
 /// Everything that changes the rendered image.
