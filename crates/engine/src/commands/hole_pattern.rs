@@ -14,7 +14,7 @@ use super::{expr_of, opt_str, params_scope, req_vec3, run as dispatch};
 use crate::{CmdError, CmdResult, Session};
 
 /// Hole options handled here; the rest go to the base `hole` command.
-const HOLE_KEYS: [&str; 5] = ["face", "at", "offsets", "tap", "drill_point"];
+const HOLE_KEYS: [&str; 6] = ["face", "at", "offsets", "tap", "drill_point", "pitch"];
 
 /// Runs `hole` and `pattern.rectangular` when they use an option of this module.
 pub(super) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -96,7 +96,11 @@ fn hole(s: &mut Session, p: &Value) -> CmdResult {
     if faces.is_empty() {
       return Err(CmdError::new("the hole has no walls to thread"));
     }
-    let t = dispatch(s, "thread", &json!({"faces": faces}))?;
+    let mut t = json!({"faces": faces});
+    if let Some(pitch) = p.get("pitch") {
+      t["pitch"] = pitch.clone();
+    }
+    let t = dispatch(s, "thread", &t)?;
     r["thread"] = t.get("feature").cloned().unwrap_or(t);
   }
   Ok(r)
@@ -228,7 +232,8 @@ fn is_edge(v: Option<&Value>) -> bool {
 
 /// The unit direction of a straight edge `{body, edge, flip?}`.
 fn edge_direction(s: &Session, v: &Value) -> Result<[f64; 3], CmdError> {
-  let body = BodyId(v.get("body").and_then(Value::as_u64).ok_or(CmdError::new("an edge direction needs a body"))? as u32);
+  let body =
+    BodyId(v.get("body").and_then(Value::as_u64).ok_or(CmdError::new("an edge direction needs a body"))? as u32);
   let id = v.get("edge").and_then(Value::as_u64).ok_or(CmdError::new("an edge direction needs an edge"))? as u32;
   let b = s.model.body(body).ok_or(CmdError::new("no such body"))?;
   let e = b.edges().iter().find(|e| e.id == id).copied().ok_or(CmdError::new("no such edge"))?;
@@ -289,7 +294,7 @@ fn component_pattern(s: &mut Session, p: &Value) -> CmdResult {
       None => default,
       Some(v) => fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Unitless, &scope)?,
     };
-    if !(n >= 1.0) || n.fract().abs() > 1e-9 || n > 1000.0 {
+    if n.is_nan() || n < 1.0 || n.fract().abs() > 1e-9 || n > 1000.0 {
       return Err(CmdError::new(format!("'{k}' must be a whole number from 1 to 1000")));
     }
     Ok(n as u64)
@@ -459,9 +464,12 @@ mod tests {
     );
     assert!(r["error"].is_null(), "{r}");
     // the edge runs along Y (one way or the other): the last copy is 120 along it
-    let (lo, hi) = s.model.bodies.iter().map(|b| b.shape.mass().unwrap()).fold((f64::MAX, f64::MIN), |(lo, hi), m| {
-      (lo.min(m.bbox_min.y), hi.max(m.bbox_max.y))
-    });
+    let (lo, hi) = s
+      .model
+      .bodies
+      .iter()
+      .map(|b| b.shape.mass().unwrap())
+      .fold((f64::MAX, f64::MIN), |(lo, hi), m| (lo.min(m.bbox_min.y), hi.max(m.bbox_max.y)));
     assert!((hi - 170.0).abs() < 1e-6 || (lo + 120.0).abs() < 1e-6, "{lo} {hi}");
     let bad = json!({"bodies": [body], "direction": {"body": body, "edge": 999}, "count": 2, "spacing": 5});
     assert!(s.execute("pattern.rectangular", &bad).is_err());

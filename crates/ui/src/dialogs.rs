@@ -14,6 +14,7 @@ use crate::theme;
 use crate::{App, panels};
 
 mod extrude;
+mod hole_pattern;
 mod live;
 mod manip;
 mod solid;
@@ -599,7 +600,7 @@ impl Dialog {
 
   /// Does this dialog preview on demand (see [`Kind::picks_model`])?
   fn picks(&self) -> bool {
-    self.kind.picks_model() || (self.kind == Kind::Flange && self.choice == "edge")
+    self.kind.picks_model() || (self.kind == Kind::Flange && self.choice == "edge") || self.hole_single()
   }
 
   /// Opens a dialog for a new feature, capturing the current selection.
@@ -687,6 +688,7 @@ impl Dialog {
         d.d = "3 mm".into();
         d.e = "90 deg".into();
         d.op = "cut";
+        d.hole_defaults(s);
       }
       Kind::PressPull => d.distance = "2 mm".into(),
       Kind::Draft => {
@@ -1019,28 +1021,7 @@ impl Dialog {
           json!({"sketch": self.sketch?.0, "profiles": self.profiles, "path": self.path?.0, "operation": op}),
         ),
       ),
-      Kind::Hole => {
-        let mut p = json!({
-          "sketch": self.sketch?.0, "kind": self.choice, "diameter": self.a, "flip": self.flip,
-        });
-        if self.flag {
-          p["through_all"] = json!(true);
-        } else {
-          p["depth"] = json!(self.b);
-        }
-        match self.choice {
-          "counterbore" => {
-            p["head_diameter"] = json!(self.c);
-            p["head_depth"] = json!(self.d);
-          }
-          "countersink" => {
-            p["head_diameter"] = json!(self.c);
-            p["head_angle"] = json!(self.e);
-          }
-          _ => {}
-        }
-        ("hole", p)
-      }
+      Kind::Hole => ("hole", self.hole_params()?),
       Kind::PressPull => ("press_pull", json!({"faces": self.faces, "distance": self.distance})),
       Kind::Draft => {
         ("draft", json!({"faces": self.faces, "plane": self.plane, "angle": self.angle, "flip": self.flip}))
@@ -1297,17 +1278,7 @@ impl Dialog {
       }
       Kind::OffsetPlane => ("plane.offset", json!({"plane": self.plane, "offset": self.distance})),
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
-      Kind::RectPattern => {
-        let mut p = json!({
-          "bodies": self.bodies, "direction": axis_vec(&self.dir), "count": self.count, "spacing": self.spacing, "join": self.join,
-        });
-        if self.use_dir2 {
-          p["direction2"] = json!(axis_vec(&self.dir2));
-          p["count2"] = json!(self.count2);
-          p["spacing2"] = json!(self.spacing2);
-        }
-        ("pattern.rectangular", p)
-      }
+      Kind::RectPattern => ("pattern.rectangular", self.pattern_params()?),
       Kind::CircPattern => (
         "pattern.circular",
         json!({"bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle, "join": self.join}),
@@ -1412,7 +1383,9 @@ impl Dialog {
       Kind::Combine => self.bodies.len() >= 2,
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
-      Kind::Hole | Kind::Fold => self.sketch.is_some(),
+      Kind::Hole => self.hole_ready(),
+      Kind::Fold => self.sketch.is_some(),
+      Kind::RectPattern => self.pattern_ready(),
       Kind::PressPull | Kind::Draft => !self.faces.is_empty(),
       Kind::Flange => {
         if self.choice == "edge" {
@@ -1550,6 +1523,7 @@ impl Dialog {
   /// Sketch whose profiles should stay visible/pickable while this dialog is open.
   pub fn profile_sketches(&self) -> Vec<FeatureId> {
     match self.kind {
+      Kind::Hole if self.solid.hp.single => Vec::new(),
       Kind::Extrude | Kind::Revolve | Kind::Flange | Kind::Hole | Kind::Fold => self.sketch.into_iter().collect(),
       Kind::Sweep => self.sketch.into_iter().chain(self.path).collect(),
       Kind::Loft => self.sections.iter().map(|(sk, _)| FeatureId(*sk)).collect(),
@@ -1709,9 +1683,8 @@ impl Dialog {
           self.faces = f;
         }
       }
-      Kind::Combine | Kind::Mirror | Kind::RectPattern | Kind::CircPattern | Kind::Move
-        if !self.applied || !self.picks() =>
-      {
+      Kind::RectPattern => self.pattern_sync(s),
+      Kind::Combine | Kind::Mirror | Kind::CircPattern | Kind::Move if !self.applied || !self.picks() => {
         let mut b: Vec<u32> = Vec::new();
         for x in &s.selection {
           let id = match x {
@@ -1734,6 +1707,7 @@ impl Dialog {
   /// Draws the dialog. Returns false when it closed.
   pub fn show(&mut self, app: &mut App, ctx: &egui::Context) -> bool {
     self.sync_selection(&app.s);
+    self.hole_sync(app);
     if self.kind == Kind::PickPlane
       && let Some(Sel::Face { body, face }) = app.s.selection.iter().find(|x| matches!(x, Sel::Face { .. })).copied()
     {
@@ -1873,7 +1847,9 @@ impl Dialog {
       Kind::Combine => "select a target body and tool bodies",
       Kind::Loft => "select profiles on two or more sketches",
       Kind::Sweep => "select a profile and a path sketch",
+      Kind::Hole if self.solid.hp.single => "click a planar face where the hole goes",
       Kind::Hole => "sketch points to drill (Point tool) are needed",
+      Kind::RectPattern => self.pattern_missing(),
       Kind::Fold => "pick a sketch with a bend line",
       Kind::PressPull | Kind::Draft => "select faces",
       Kind::Flange if self.choice == "edge" => "select sheet edges",
@@ -2031,59 +2007,24 @@ impl Dialog {
           ui.end_row();
         }
       }
-      Kind::RectPattern | Kind::CircPattern => {
+      Kind::RectPattern => self.pattern_fields(app, ui),
+      Kind::CircPattern => {
         ui.label("Bodies");
         sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
         ui.end_row();
-        if self.kind == Kind::RectPattern {
-          ui.label("Direction");
-          self.axis_combo(ui, "dir1", true, &[]);
-          ui.end_row();
-          ui.label("Count");
-          if value_edit(ui, &mut self.count).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-          ui.label("Spacing");
-          if value_edit(ui, &mut self.spacing).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-          ui.label("");
-          if ui.checkbox(&mut self.use_dir2, "Second direction").changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-          if self.use_dir2 {
-            ui.label("Direction 2");
-            self.axis_combo(ui, "dir2", false, &[]);
-            ui.end_row();
-            ui.label("Count 2");
-            if value_edit(ui, &mut self.count2).changed() {
-              self.dirty = true;
-            }
-            ui.end_row();
-            ui.label("Spacing 2");
-            if value_edit(ui, &mut self.spacing2).changed() {
-              self.dirty = true;
-            }
-            ui.end_row();
-          }
-        } else {
-          ui.label("Axis");
-          self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
-          ui.end_row();
-          ui.label("Count");
-          if value_edit(ui, &mut self.count).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-          ui.label("Total angle");
-          if value_edit(ui, &mut self.angle).changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
+        ui.label("Axis");
+        self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
+        ui.end_row();
+        ui.label("Count");
+        if value_edit(ui, &mut self.count).changed() {
+          self.dirty = true;
         }
+        ui.end_row();
+        ui.label("Total angle");
+        if value_edit(ui, &mut self.angle).changed() {
+          self.dirty = true;
+        }
+        ui.end_row();
         ui.label("");
         if ui.checkbox(&mut self.join, "Join instances").changed() {
           self.dirty = true;
@@ -2300,8 +2241,6 @@ impl Dialog {
       let text = if n == 0 { "Select".to_string() } else { format!("{n} {what}") };
       sel_chip(ui, accent, &text, n > 0);
     };
-    const HOLES: [(&str, &str); 3] =
-      [("simple", "Simple"), ("counterbore", "Counterbore"), ("countersink", "Countersink")];
     const FLANGES: [(&str, &str); 3] =
       [("base", "Base (profile)"), ("edge", "Edge"), ("contour", "Contour (open path)")];
     const POSITIONS: [(&str, &str); 3] = [("adjacent", "Adjacent"), ("inside", "Inside"), ("outside", "Outside")];
@@ -2353,29 +2292,7 @@ impl Dialog {
         self.sweep_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
       }
-      Kind::Hole => {
-        ui.label("Sketch");
-        ui.label(self.sketch.and_then(|s| app.s.design.feature(s)).map(|f| f.name.clone()).unwrap_or("none".into()));
-        ui.end_row();
-        ui.label("Placement");
-        ui.label(RichText::new("at the sketch's points").color(theme::MUTED));
-        ui.end_row();
-        Self::choose(ui, "Hole type", "hole", &mut self.choice, &HOLES, dirty);
-        Self::field(ui, "Diameter", &mut self.a, dirty);
-        if self.choice != "simple" {
-          Self::field(ui, "Head diameter", &mut self.c, dirty);
-          if self.choice == "counterbore" {
-            Self::field(ui, "Head depth", &mut self.d, dirty);
-          } else {
-            Self::field(ui, "Head angle", &mut self.e, dirty);
-          }
-        }
-        Self::check(ui, "Through all", &mut self.flag, dirty);
-        if !self.flag {
-          Self::field(ui, "Depth", &mut self.b, dirty);
-        }
-        Self::check(ui, "Flip direction", &mut self.flip, dirty);
-      }
+      Kind::Hole => self.hole_fields(app, ui, dirty),
       Kind::PressPull => {
         ui.label("Faces");
         chip(ui, self.faces.len(), "selected");

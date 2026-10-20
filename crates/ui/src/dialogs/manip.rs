@@ -74,6 +74,10 @@ impl Dialog {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
         }
       }
+      // the pattern's arrow starts at the objects' centre before the preview
+      Kind::RectPattern if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
+        self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
+      }
       Kind::Move if self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
         let Some(now) = centre(s, &self.bodies) else {
           self.manip.pivot = None;
@@ -93,6 +97,10 @@ impl Dialog {
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
   /// along the first face's normal).
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    if self.kind == Kind::RectPattern && self.editing.is_none() {
+      let (bodies, c) = self.manip.pivot.as_ref()?;
+      return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
+    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull) || self.editing.is_some() {
       return None;
     }
@@ -111,6 +119,7 @@ impl Dialog {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
       Kind::Fillet | Kind::Chamfer => self.radius = mm(v.max(step.max(1e-3))),
       Kind::PressPull => self.distance = mm(v),
+      Kind::RectPattern => self.set_pattern_arrow(v, step),
       _ => return false,
     }
     true

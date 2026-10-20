@@ -36,6 +36,8 @@ pub(super) struct Extra {
   edit_sets: Value,
   /// Extrude rows (see [`super::extrude`]).
   pub(super) ext: super::extrude::Rows,
+  /// Hole placement and rectangular pattern options (see [`super::hole_pattern`]).
+  pub(super) hp: super::hole_pattern::State,
 }
 
 /// One fillet selection set: edges, faces (all their edges) and its radius.
