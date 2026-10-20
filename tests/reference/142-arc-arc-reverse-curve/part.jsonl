@@ -1,0 +1,14 @@
+# 142-arc-arc-reverse-curve: added by the parity loop from a Fusion probe
+# arc-arc-reverse-curve: Arc R20 about the origin from fixed (20,0) counter-clockwise (drawn 155 deg) to a free end shared with an R10 arc that ends at fixed (-30,0); lines down to y=-10 and back close it. Tangency at the shared end (a reverse curve) puts the join at 161.2 deg, R10 centre (-28.33,9.86); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "end": [-18.126156, 8.452365]}
+{"cmd": "sketch.arc", "start": [-18.126156, 8.452365], "mid": [-23.5, 2.0], "end": [-30, 0]}
+{"cmd": "sketch.line", "points": [[-30, 0], [-30, -10], [20, -10], [20, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [4]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [7]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [10]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [3, 6]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [6], "value": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

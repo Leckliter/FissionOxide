@@ -1,0 +1,104 @@
+{
+ "id": "pentagon-right-slanted-xy",
+ "name": "Edge pentagon right of a slanted edge on XY",
+ "description": "Edge polygon from (2,3) to (12,8), 5 sides, on the right side of the edge (looking from start to end); side length 11.18; extruded 7.",
+ "exercises": [
+  "polygon",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "polygon_edge",
+     "id": "p1",
+     "start": {
+      "at": [
+       2,
+       3
+      ]
+     },
+     "end": {
+      "at": [
+       12,
+       8
+      ]
+     },
+     "sides": 5,
+     "right": true
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "p1.l0",
+        "p1.l1",
+        "p1.l2",
+        "p1.l3",
+        "p1.l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 7,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body1"
+   ]
+  }
+ ]
+}

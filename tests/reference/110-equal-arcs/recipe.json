@@ -1,0 +1,202 @@
+{
+ "id": "equal-arcs",
+ "name": "Equal: arc radii",
+ "description": "Two half discs (arc closed by a horizontal line): the first centred at the origin with radius dimension 8, the second drawn R5 with its centre fixed at (30,0) and made equal to the first; both extruded 5 as R8 half discs.",
+ "exercises": [
+  "sketch_constraints",
+  "equal",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_center_start_sweep",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "start": {
+      "at": [
+       14,
+       0
+      ]
+     },
+     "sweep_deg": 180,
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       -14,
+       0
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       14,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "arc_center_start_sweep",
+     "center": {
+      "at": [
+       30,
+       0
+      ]
+     },
+     "start": {
+      "at": [
+       35,
+       0
+      ]
+     },
+     "sweep_deg": 180,
+     "id": "a2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a2.end",
+      "at": [
+       25,
+       0
+      ]
+     },
+     "end": {
+      "ref": "a2.start",
+      "at": [
+       35,
+       0
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "a2.center"
+     ]
+    },
+    {
+     "type": "equal",
+     "refs": [
+      "a2",
+      "a1"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "radius",
+     "refs": [
+      "a1"
+     ],
+     "value": 8,
+     "unit": "mm",
+     "text_at": [
+      4,
+      12
+     ]
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "l1"
+       ]
+      },
+      {
+       "outer": true,
+       "curves": [
+        "a2",
+        "l2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "A",
+    "B"
+   ]
+  }
+ ]
+}

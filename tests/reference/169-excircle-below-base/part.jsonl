@@ -1,0 +1,10 @@
+# 169-excircle-below-base: added by the parity loop from a Fusion probe
+# excircle-below-base: Closed construction triangle (0,0)-(40,0)-(0,30); hint (40,-50) below the base, so the circle is the excircle R30 at (30,-30) touching the base from below and the extensions of the other two sides; the disc is extruded 3.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.construction", "curves": [2, 5, 6], "on": true}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5, 6], "near": [40, -50]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[30, -30]], "distance": 3, "operation": "new_body"}

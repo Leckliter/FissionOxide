@@ -1,6 +1,6 @@
 //! Convenience builders for common sketch shapes (what the Create menu draws).
 
-use crate::{ConstraintKind, CurveId, CurveKind, PointId, Sketch, SketchError, angle_of, dist};
+use crate::{ConstraintId, ConstraintKind, CurveId, CurveKind, PointId, Sketch, SketchError, angle_of, dist};
 
 /// Where a new curve's point goes: a fresh point at a position, or an existing point (which makes
 /// the two curves share it, i.e. coincident).
@@ -59,6 +59,19 @@ impl Sketch {
   /// Arc around `center` from `start`, counter-clockwise to the direction of `end` (the end point
   /// is projected onto the circle through `start`).
   pub fn add_arc_center(&mut self, center: PtSpec, start: PtSpec, end: [f64; 2]) -> Result<CurveId, SketchError> {
+    self.add_arc_center_dir(center, start, end, false)
+  }
+
+  /// Arc around `center` from `start` to the direction of `end`, clockwise when `clockwise` is
+  /// set. Arcs are stored counter-clockwise, so a clockwise one runs from the new end point back
+  /// to `start`.
+  pub fn add_arc_center_dir(
+    &mut self,
+    center: PtSpec,
+    start: PtSpec,
+    end: [f64; 2],
+    clockwise: bool,
+  ) -> Result<CurveId, SketchError> {
     let c = self.spec_pos(center)?;
     let s = self.spec_pos(start)?;
     let r = dist(c, s);
@@ -73,7 +86,9 @@ impl Sketch {
     let center = self.resolve(center)?;
     let start = self.resolve(start)?;
     let end = self.add_point(e[0], e[1]);
-    self.add_curve(CurveKind::Arc { center, start, end })
+    let kind =
+      if clockwise { CurveKind::Arc { center, start: end, end: start } } else { CurveKind::Arc { center, start, end } };
+    self.add_curve(kind)
   }
 
   /// Arc through three points (start, a point on the arc, end).
@@ -165,6 +180,69 @@ impl Sketch {
     Ok(lines)
   }
 
+  /// Constrains lines that already form a regular polygon to stay one (Fusion's Polygon
+  /// constraint): adds a centre point and a [`ConstraintKind::Polygon`] on it. Lines that don't
+  /// close into one loop, or whose loop isn't regular, are refused.
+  pub fn add_polygon_constraint(&mut self, lines: &[CurveId]) -> Result<(ConstraintId, PointId), SketchError> {
+    let not_loop = || SketchError::WrongGeometry("Polygon", "three or more lines forming one closed loop");
+    let corners = self.polygon_corners(lines).ok_or_else(not_loop)?;
+    let pts: Vec<[f64; 2]> =
+      corners.iter().map(|p| self.pos(*p).ok_or(SketchError::NoPoint(*p))).collect::<Result<_, _>>()?;
+    let n = pts.len() as f64;
+    let c = pts.iter().fold([0.0, 0.0], |s, p| [s[0] + p[0] / n, s[1] + p[1] / n]);
+    let r = pts.iter().map(|p| dist(c, *p)).sum::<f64>() / n;
+    // regular: every corner as far from the centre, each the same turn round it from the last
+    let step = std::f64::consts::TAU / n;
+    let turn = |i: usize| {
+      let (a, b) = (angle_of(c, pts[i]), angle_of(c, pts[(i + 1) % pts.len()]));
+      (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+    };
+    let dir = turn(0).signum();
+    let regular = r > 1e-9
+      && pts.iter().all(|p| (dist(c, *p) - r).abs() <= 1e-5 * r)
+      && (0..pts.len()).all(|i| (turn(i) - dir * step).abs() <= 1e-5);
+    if !regular {
+      return Err(SketchError::WrongGeometry("Polygon", "lines that already form a regular polygon"));
+    }
+    let center = self.add_point(c[0], c[1]);
+    match self.add_constraint(ConstraintKind::Polygon { center, lines: lines.to_vec() }) {
+      Ok(id) => Ok((id, center)),
+      Err(e) => {
+        self.points.retain(|p| p.id != center);
+        Err(e)
+      }
+    }
+  }
+
+  /// The corners of a closed loop of lines in loop order (one per line), or None when the lines
+  /// aren't three or more distinct lines sharing their ends in one closed loop.
+  pub(crate) fn polygon_corners(&self, lines: &[CurveId]) -> Option<Vec<PointId>> {
+    let mut ends = Vec::with_capacity(lines.len());
+    for (i, l) in lines.iter().enumerate() {
+      match self.curve(*l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) if a != b && !lines[..i].contains(l) => ends.push((*a, *b)),
+        _ => return None,
+      }
+    }
+    if ends.len() < 3 {
+      return None;
+    }
+    let mut used = vec![false; ends.len()];
+    used[0] = true;
+    let (first, mut at) = ends[0];
+    let mut corners = vec![first];
+    while corners.len() < ends.len() {
+      if corners.contains(&at) {
+        return None;
+      }
+      corners.push(at);
+      let k = (0..ends.len()).find(|&k| !used[k] && (ends[k].0 == at || ends[k].1 == at))?;
+      used[k] = true;
+      at = if ends[k].0 == at { ends[k].1 } else { ends[k].0 };
+    }
+    (at == first).then_some(corners)
+  }
+
   /// Centre-to-centre slot of overall `width`: two lines and two tangent end arcs.
   pub fn add_slot(&mut self, c1: [f64; 2], c2: [f64; 2], width: f64) -> Result<Vec<CurveId>, SketchError> {
     let len = dist(c1, c2);
@@ -241,5 +319,56 @@ mod tests {
     assert!(s.add_polygon(PtSpec::At(0.0, 0.0), [1.0, 0.0], 2).is_err());
     assert!(s.add_slot([0.0, 0.0], [0.0, 0.0], 1.0).is_err());
     assert!(s.add_rectangle([0.0, 0.0], [0.0, 5.0]).is_err());
+  }
+
+  /// A closed loop of lines through `pts`, starting at the origin when the first point is (0, 0).
+  fn loop_of(s: &mut Sketch, pts: &[[f64; 2]]) -> Vec<CurveId> {
+    let ids: Vec<PointId> =
+      pts.iter().map(|p| if *p == [0.0, 0.0] { crate::ORIGIN } else { s.add_point(p[0], p[1]) }).collect();
+    (0..ids.len())
+      .map(|i| s.add_line(PtSpec::Point(ids[i]), PtSpec::Point(ids[(i + 1) % ids.len()])).unwrap().0)
+      .collect()
+  }
+
+  #[test]
+  fn polygon_constraint_keeps_a_regular_polygon_regular() {
+    let mut s = Sketch::new();
+    let h = 8.660254037844386;
+    let lines = loop_of(&mut s, &[[0.0, 0.0], [10.0, 0.0], [15.0, h], [10.0, 2.0 * h], [0.0, 2.0 * h], [-5.0, h]]);
+    s.add_constraint(ConstraintKind::Horizontal { line: lines[0] }).unwrap();
+    let (pg, center) = s.add_polygon_constraint(&lines).unwrap();
+    let c = s.pos(center).unwrap();
+    assert!((c[0] - 5.0).abs() < 1e-9 && (c[1] - h).abs() < 1e-9);
+    let CurveKind::Line { b, .. } = s.curve(lines[0]).unwrap().kind else { panic!() };
+    s.add_constraint(ConstraintKind::HorizontalDistance { a: crate::ORIGIN, b, value: crate::Dim::new(20.0) }).unwrap();
+    let r = s.solve();
+    assert!(r.fully_constrained(), "{r:?}");
+    // a regular hexagon of side 20 on the first side
+    let (lo, hi) = s.bounds().unwrap();
+    assert!(
+      (lo[0] + 10.0).abs() < 1e-6 && (hi[0] - 30.0).abs() < 1e-6 && (hi[1] - 4.0 * h).abs() < 1e-6,
+      "{lo:?} {hi:?}"
+    );
+    let c = s.pos(center).unwrap();
+    assert!((c[0] - 10.0).abs() < 1e-6 && (c[1] - 2.0 * h).abs() < 1e-6);
+    // deleting the constraint deletes its centre point too
+    s.remove_constraint(pg).unwrap();
+    assert!(s.point(center).is_none());
+  }
+
+  #[test]
+  fn polygon_constraint_needs_a_closed_regular_loop() {
+    let mut s = Sketch::new();
+    let rect = loop_of(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]);
+    assert!(s.add_polygon_constraint(&rect).is_err());
+    let square = loop_of(&mut s, &[[20.0, 0.0], [30.0, 0.0], [30.0, 10.0], [20.0, 10.0]]);
+    assert!(s.add_polygon_constraint(&square[..3]).is_err());
+    assert!(s.add_polygon_constraint(&[square[0], square[1], square[2], square[2]]).is_err());
+    let points = s.points.len();
+    assert!(s.add_polygon_constraint(&rect).is_err());
+    assert_eq!(s.points.len(), points, "a refused constraint leaves no centre point");
+    // the lines may come in any order and direction
+    let (_, center) = s.add_polygon_constraint(&[square[2], square[0], square[3], square[1]]).unwrap();
+    assert_eq!(s.pos(center).unwrap(), [25.0, 5.0]);
   }
 }

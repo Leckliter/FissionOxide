@@ -1150,7 +1150,8 @@ impl Dialog {
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
       Kind::SkCircPattern => (
         "sketch.pattern_circ",
-        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle}),
+        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle,
+          "symmetric": self.flag}),
       ),
       Kind::SkRectPattern => {
         let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
@@ -2773,6 +2774,7 @@ impl Dialog {
         ui.end_row();
         Self::field(ui, "Quantity", &mut self.count, dirty);
         Self::field(ui, "Total angle", &mut self.angle, dirty);
+        Self::check(ui, "Symmetric", &mut self.flag, dirty);
       }
       Kind::SkRectPattern => {
         ui.label("Objects");

@@ -1735,7 +1735,8 @@ impl Ctx<'_> {
         | CurveKind::ControlSpline { .. }
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. } => {}
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. } => {}
       }
     }
     lost

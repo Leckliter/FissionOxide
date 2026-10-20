@@ -1,0 +1,125 @@
+{
+ "id": "nested-center-rectangles-frame",
+ "name": "Frame from two concentric center rectangles",
+ "description": "Two center rectangles on XY sharing centre (10,5): outer corner (35,20) gives 50x30, inner corner (-5,-3) gives 30x16; the frame between them is extruded 6 mm.",
+ "exercises": [
+  "sketch_rectangle_center_point",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'origin' is the sketch frame origin point (shared).",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "rectangle_center_point",
+     "id": "r1",
+     "center": {
+      "at": [
+       10,
+       5
+      ]
+     },
+     "corner": {
+      "at": [
+       35,
+       20
+      ]
+     }
+    },
+    {
+     "type": "rectangle_center_point",
+     "id": "r2",
+     "center": {
+      "at": [
+       10,
+       5
+      ]
+     },
+     "corner": {
+      "at": [
+       -5,
+       -3
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Extrude1_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1.l0",
+        "r1.l1",
+        "r1.l2",
+        "r1.l3"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "r2.l0",
+        "r2.l1",
+        "r2.l2",
+        "r2.l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body1"
+   ]
+  }
+ ]
+}

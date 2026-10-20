@@ -1,0 +1,15 @@
+# 124-perpendicular-line-circle-center: added by the parity loop from a Fusion probe
+# perpendicular-line-circle-center: Triangle (0,0)-(40,0)-(25,25) with its base corners fixed, and a construction circle R5 (centre fixed) at (20,30). Both slanted sides are made perpendicular to the circle, so they run through its centre and the apex moves to (20,30): area 600, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [20, 30], "radius": 5}
+{"cmd": "sketch.construction", "curves": [2]}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [25, 25]]}
+{"cmd": "sketch.line", "points": [[25, 25], [0, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [3]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [7, 2]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [8, 2]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [2], "value": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

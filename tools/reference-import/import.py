@@ -1057,9 +1057,12 @@ class Converter:
 
   def op_thicken(self, f, T):
     params = {}
+    thickness = f["thickness"]
     if f.get("symmetric"):
+      # the recipe's symmetric thickness is the total; Fox's is on each side
       params["symmetric"] = True
-    fid = self.cmd("thicken", True, bodies=[self.bodies[b] for b in f["bodies"]], thickness=f["thickness"],
+      thickness = thickness / 2
+    fid = self.cmd("thicken", True, bodies=[self.bodies[b] for b in f["bodies"]], thickness=thickness,
                    operation="new_body", **params)
     self.new_bodies(fid, f.get("result_bodies") or [f.get("name", "Thicken")])
 
