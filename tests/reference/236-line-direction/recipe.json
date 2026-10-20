@@ -1,0 +1,254 @@
+{
+ "id": "line-direction",
+ "name": "line-direction",
+ "description": "100x60x5 plate centred on the origin; r3 hole at (-30,-15); a construction line from the hole centre 10 long at 30 deg sets direction one: 3x every 20 along it, then 2x every 15 in the default second direction (90 deg to the line); cut through.",
+ "exercises": [
+  "extrude",
+  "sketch rectangular pattern",
+  "extrude cut"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "r0",
+     "start": {
+      "at": [
+       -50,
+       -30
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       -30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r1",
+     "start": {
+      "at": [
+       50,
+       -30
+      ],
+      "ref": "r0.end"
+     },
+     "end": {
+      "at": [
+       50,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r2",
+     "start": {
+      "at": [
+       50,
+       30
+      ],
+      "ref": "r1.end"
+     },
+     "end": {
+      "at": [
+       -50,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r3",
+     "start": {
+      "at": [
+       -50,
+       30
+      ],
+      "ref": "r2.end"
+     },
+     "end": {
+      "at": [
+       -50,
+       -30
+      ],
+      "ref": "r0.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r0",
+        "r1",
+        "r2",
+        "r3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Holes",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "d",
+     "start": {
+      "at": [
+       -30,
+       -15
+      ]
+     },
+     "end": {
+      "at": [
+       -21.33974596215561,
+       -10.0
+      ]
+     },
+     "construction": true
+    },
+    {
+     "type": "circle",
+     "id": "h",
+     "center": {
+      "at": [
+       -30,
+       -15
+      ]
+     },
+     "radius": 3
+    },
+    {
+     "type": "rectangular_pattern",
+     "id": "p",
+     "curves": [
+      "h"
+     ],
+     "count": 3,
+     "distance": 20,
+     "direction": "d",
+     "count2": 2,
+     "distance2": 15
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cut",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Holes",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "h",
+        "p.0",
+        "p.1",
+        "p.2",
+        "p.3",
+        "p.4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "through_all",
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  }
+ ]
+}
