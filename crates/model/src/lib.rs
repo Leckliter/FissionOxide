@@ -33,6 +33,7 @@ pub mod sheet3;
 pub mod subassembly;
 pub mod surface;
 pub mod thread;
+pub mod units;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,7 @@ pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use fox_sketch::Behaviours;
 pub use refs::{EdgeRef, FaceRef};
+pub use units::{LengthUnit, ModelParam, ModelParamRef};
 
 use fox_sketch::{CurveId, PointId, Sketch};
 
@@ -66,8 +68,15 @@ pub struct Design {
   #[serde(default = "format_version")]
   pub version: u32,
   pub name: String,
+  /// Document Settings > Units: how lengths show and what a bare number typed means. Values and
+  /// stored expressions stay in millimetres (see [`units`]).
+  #[serde(default, skip_serializing_if = "LengthUnit::is_mm")]
+  pub units: LengthUnit,
   #[serde(default)]
   pub parameters: Vec<Parameter>,
+  /// Model parameters starred in Change Parameters (Favorites).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub model_favorites: Vec<ModelParamRef>,
   #[serde(default)]
   pub features: Vec<Feature>,
   /// Timeline marker: only the first `marker` features are computed. `None` = all.
@@ -157,6 +166,9 @@ pub struct Parameter {
   pub kind: ParamKind,
   #[serde(default)]
   pub comment: String,
+  /// Starred in Change Parameters (Favorites).
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub favorite: bool,
 }
 
 /// A sheet metal rule, as in Fusion: the material settings sheet metal features share.
@@ -855,7 +867,9 @@ pub enum FeatureKind {
     #[serde(default = "yes")]
     join: bool,
   },
-  /// Moves bodies: translation then rotation about an axis.
+  /// Moves bodies: turned about `pivot` by `rotate` (about X, then Y, then Z; Fusion's Free
+  /// Move angles), then the translation, then the rotation about `axis`. With `copy` the bodies
+  /// stay and the moved ones are added as new bodies (Fusion's Create Copy).
   Move {
     #[serde(default)]
     bodies: BodySel,
@@ -865,6 +879,13 @@ pub enum FeatureKind {
     axis: Option<AxisRef>,
     #[serde(default = "zero")]
     angle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotate: Option<[String; 3]>,
+    /// The point `rotate` turns about (default the origin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pivot: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    copy: bool,
   },
   /// Boolean between bodies: tools are joined into / cut from / intersected with the target.
   Combine {
@@ -1685,6 +1706,29 @@ pub enum FeatureKind {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     with: Vec<PathRef>,
   },
+  /// A reference image placed on a plane (Insert > Canvas). It adds no geometry: the viewport
+  /// draws it, see-through, for tracing over. Calibrate rescales it from a known distance.
+  Canvas {
+    plane: PlaneRef,
+    /// The image file.
+    image: String,
+    /// The image's centre on the plane (plane coordinates, mm).
+    #[serde(default)]
+    at: [f64; 2],
+    /// Size on the plane (mm); the height keeps the image's aspect.
+    width: f64,
+    height: f64,
+    /// Rotation about the centre (degrees).
+    #[serde(default)]
+    angle: f64,
+    /// 0 (invisible) to 1 (opaque).
+    #[serde(default = "full_opacity")]
+    opacity: f64,
+  },
+}
+
+fn full_opacity() -> f64 {
+  1.0
 }
 
 fn lofted_bends() -> String {
@@ -1832,6 +1876,7 @@ impl FeatureKind {
       FeatureKind::Arrange { .. } => "Arrange",
       FeatureKind::FullRoundFillet { .. } => "Fillet",
       FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
+      FeatureKind::Canvas { .. } => "Canvas",
     }
   }
 
@@ -1922,6 +1967,7 @@ impl FeatureKind {
       FeatureKind::IntersectionCurve { curves, with, .. } => {
         std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
       }
+      FeatureKind::Canvas { plane, .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -1960,7 +2006,9 @@ impl Design {
     Design {
       version: FORMAT_VERSION,
       name: name.into(),
+      units: LengthUnit::Mm,
       parameters: Vec::new(),
+      model_favorites: Vec::new(),
       features: Vec::new(),
       marker: None,
       bodies: Vec::new(),
@@ -2181,6 +2229,7 @@ impl Design {
       expr: expr.to_string(),
       kind,
       comment: comment.to_string(),
+      favorite: false,
     });
     Ok(())
   }
@@ -2300,7 +2349,17 @@ impl Design {
       c.bodies.retain(|b| !bodies.contains(b));
     }
     let name = if name.trim().is_empty() { format!("Component{}", id.0) } else { name.to_string() };
-    self.components.push(Component { id, name, bodies, grounded: false, material: String::new(), parent: None });
+    self.components.push(Component {
+      id,
+      name,
+      bodies,
+      grounded: false,
+      material: String::new(),
+      parent: None,
+      part_number: String::new(),
+      description: String::new(),
+      sheet_metal: false,
+    });
     Ok(id)
   }
 
@@ -2559,8 +2618,8 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       f(count);
       f(angle);
     }
-    FeatureKind::Move { translate, angle, .. } => {
-      for t in translate.iter_mut() {
+    FeatureKind::Move { translate, angle, rotate, .. } => {
+      for t in translate.iter_mut().chain(rotate.iter_mut().flatten()) {
         f(t);
       }
       f(angle);
@@ -2736,6 +2795,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::FullRoundFillet { .. } => {}
     FeatureKind::IntersectionCurve { .. } => {}
+    FeatureKind::Canvas { .. } => {}
   }
 }
 

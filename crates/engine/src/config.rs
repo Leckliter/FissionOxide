@@ -82,7 +82,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "direct.move_face" => (|| {
       let faces = faces(s, p)?;
-      let translate = req_vec3(p, "translate")?;
+      let translate = lengths3(s, p, "translate")?;
       direct(s, DirectEdit::MoveFaces { faces, translate })
     })(),
     "direct.press_pull" => (|| {
@@ -325,6 +325,20 @@ fn faces(s: &Session, p: &Value) -> Result<Vec<FaceRef>, CmdError> {
 fn length(s: &Session, p: &Value, k: &str) -> Result<f64, CmdError> {
   let e = expr_of(p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}'")))?)?;
   Ok(fox_expr::eval(&e, fox_expr::Kind::Length, &s.model.params)?)
+}
+
+/// `[x, y, z]` given as numbers (mm) or length expressions.
+fn lengths3(s: &Session, p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
+  let a = p.get(k).and_then(Value::as_array).filter(|a| a.len() == 3);
+  let a = a.ok_or_else(|| CmdError::new(format!("'{k}' must be [x, y, z]")))?;
+  if !a.iter().any(Value::is_string) {
+    return req_vec3(p, k);
+  }
+  let len = |v: &Value| -> Result<f64, CmdError> {
+    let v = fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &s.model.params)?;
+    if v.is_finite() { Ok(v) } else { Err(CmdError::new(format!("'{k}' must be finite"))) }
+  };
+  Ok([len(&a[0])?, len(&a[1])?, len(&a[2])?])
 }
 
 /// Adds a direct edit to the open base feature (or a new one) and reports its status.

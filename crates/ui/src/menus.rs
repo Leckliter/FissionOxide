@@ -258,7 +258,7 @@ const INSPECT: &[E] = &[
 
 const INSERT: &[E] = &[
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),
@@ -280,6 +280,7 @@ const ASSEMBLE: &[E] = &[
   // not in Fusion's menu: FissionOxide's component and joint commands
   c("New Component", Icon::Component, D(Kind::NewComponent)),
   c("Joint", Icon::JointOrigin, D(Kind::Joint)).k("J"),
+  c("As-built Joint", Icon::JointOrigin, D(Kind::AsBuiltJoint)).k("Shift+J"),
   c("Drive Joints", Icon::DriveJoint, D(Kind::DriveJoint)),
   c("Motion Study", Icon::MotionStudy, D(Kind::MotionStudy)),
   c("Duplicate Component", Icon::Component, D(Kind::CopyComponent)),
@@ -641,7 +642,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
 const SKETCH_INSERT: &[E] = &[
   c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
   x("Decal", Icon::Decal),
-  x("Canvas", Icon::Canvas),
+  c("Canvas", Icon::Canvas, Cmd::Canvas),
   c("Insert SVG", Icon::InsertSvg, Cmd::InsertStep),
   c("Insert DXF", Icon::InsertDxf, Cmd::InsertStep),
   c("Insert Mesh", Icon::InsertMesh, Cmd::InsertStep).g(),

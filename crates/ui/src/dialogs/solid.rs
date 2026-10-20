@@ -57,6 +57,8 @@ pub(super) struct Extra {
   pub(super) shell_dir: &'static str,
   pub(super) thickness_out: String,
   pub(super) shell_no_chain: bool,
+  /// Hole placement and rectangular pattern options (see [`super::hole_pattern`]).
+  pub(super) hp: super::hole_pattern::State,
 }
 
 /// Fusion's Chamfer Type.
@@ -125,7 +127,9 @@ impl Dialog {
         let changed = if active {
           super::value_edit_w(ui, &mut self.radius, 64.0).changed()
         } else {
-          ui.add(egui::TextEdit::singleline(&mut self.solid.rows[i].radius).desired_width(64.0)).changed()
+          let mut r = ui.add(egui::TextEdit::singleline(&mut self.solid.rows[i].radius).desired_width(64.0));
+          crate::units::pin(ui, &mut r, &mut self.solid.rows[i].radius);
+          r.changed()
         };
         if changed {
           self.dirty = !creating || self.applied;
@@ -202,7 +206,9 @@ impl Dialog {
     ui.end_row();
     if self.solid.setback_corner {
       ui.label("Setback");
-      let r = ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("distance").desired_width(140.0));
+      let mut r =
+        ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("distance").desired_width(140.0));
+      crate::units::pin(ui, &mut r, &mut self.solid.setback);
       changed |= r.changed();
       ui.end_row();
     }

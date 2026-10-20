@@ -31,6 +31,14 @@ pub struct Component {
   /// move a component move everything below it.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub parent: Option<ComponentId>,
+  /// Part number (the BOM's; empty = the name, as in Fusion).
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub part_number: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub description: String,
+  /// A sheet metal component (Fusion's New Component type) rather than a standard one.
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub sheet_metal: bool,
 }
 
 /// Physical materials: name and density in g/cm³.

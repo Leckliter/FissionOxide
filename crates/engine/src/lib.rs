@@ -10,6 +10,7 @@ mod align;
 mod arrange;
 mod assembly;
 mod cam;
+pub mod canvas;
 mod commands;
 pub mod config;
 mod cut;
@@ -19,9 +20,11 @@ mod features;
 pub mod files;
 mod fillet;
 mod form;
+pub mod history;
 pub mod hub;
 mod inspect;
 mod mates;
+mod params;
 pub mod scene;
 mod sheet2;
 mod solid;
@@ -167,6 +170,9 @@ pub struct Session {
   /// The drawing sheet being worked on, (drawing, sheet): where new views and notes go when a
   /// command names no sheet. `drawing.add_sheet` moves it to the new sheet.
   pub drawing_sheet: Option<(u32, u32)>,
+  /// The active component (`component.activate`): bodies that later features make go into it,
+  /// as in Fusion. `None` = the top level.
+  pub active_component: Option<fox_model::ComponentId>,
 }
 
 impl Default for Session {
@@ -196,6 +202,7 @@ impl Session {
       simulation: None,
       diff: None,
       drawing_sheet: None,
+      active_component: None,
     };
     s.rebuild();
     s
@@ -237,7 +244,9 @@ impl Session {
         self.trim_undo();
         self.redo.clear();
         self.dirty = true;
+        let had: Vec<fox_model::BodyId> = self.model.bodies.iter().map(|b| b.id).collect();
         self.rebuild();
+        self.adopt_new_bodies(&had);
         Ok(v)
       }
       Err(e) => {
@@ -245,6 +254,33 @@ impl Session {
         Err(e)
       }
     }
+  }
+
+  /// The active component takes the bodies an edit made (those not in `had` and in no
+  /// component), as in Fusion, in the same undo step.
+  fn adopt_new_bodies(&mut self, had: &[fox_model::BodyId]) {
+    let Some(active) = self.active_component else {
+      return;
+    };
+    if self.design.component(active).is_none() {
+      self.active_component = None;
+      return;
+    }
+    let new: Vec<fox_model::BodyId> = self
+      .model
+      .bodies
+      .iter()
+      .map(|b| b.id)
+      .filter(|b| !had.contains(b) && self.design.component_of(*b).is_none())
+      .collect();
+    if new.is_empty() {
+      return;
+    }
+    if let Some(c) = self.design.component_mut(active) {
+      c.bodies.extend(new);
+    }
+    // a joint that moves the component now moves its new bodies too
+    self.rebuild();
   }
 
   fn trim_undo(&mut self) {
@@ -476,6 +512,8 @@ mod tests_assembly;
 mod tests_cam;
 #[cfg(test)]
 mod tests_cam3d;
+#[cfg(test)]
+mod tests_canvas;
 #[cfg(test)]
 mod tests_config;
 #[cfg(test)]

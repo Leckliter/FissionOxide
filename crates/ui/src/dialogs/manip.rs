@@ -3,11 +3,12 @@
 //! offset arrow and angle ring of Joint (see [`crate::manipulators`]); and picking joints and
 //! saved joint origins in the viewport.
 
-use fox_engine::Session;
+use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
-use fox_engine::model::BodyId;
+use fox_engine::model::{BodyId, FeatureId};
 use fox_engine::scene::JointMark;
 use fox_engine::sketch::{CurveId, Sketch};
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
@@ -19,23 +20,22 @@ use crate::manipulators::{Triad, TriadEdit};
 pub(super) struct Cache {
   /// The pick the anchor was found for, and the anchor: a point and a unit direction.
   anchor: Option<(Value, DVec3, DVec3)>,
-  /// Move: the bodies and their centre before the move.
+  /// Rectangular Pattern: the bodies and their centre before the preview.
   pivot: Option<(Vec<u32>, DVec3)>,
+  /// Offset Plane: the base last taken from the selection (a planar face or construction
+  /// plane), so a plane chosen from the dropdown afterwards isn't overridden by it.
+  offset_base: Option<Value>,
+  /// Offset Plane: the construction plane its preview added.
+  preview_plane: Option<FeatureId>,
 }
 
-const AXES: [&str; 3] = ["x", "y", "z"];
-
-fn mm(v: f64) -> String {
-  format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
+/// A dragged length (mm) as a value box shows it, in the design's unit.
+pub(super) fn mm(unit: fox_engine::model::LengthUnit, v: f64) -> String {
+  unit.format((v * 1e4).round() / 1e4)
 }
 
-fn deg(a: f64) -> String {
+pub(super) fn deg(a: f64) -> String {
   format!("{} deg", fox_engine::sketch::Dim::new((a.to_degrees() * 1e4).round() / 1e4).expr)
-}
-
-/// Rotation about world axis `i` (0 = X) by `a` radians.
-fn about(i: usize, a: f64) -> DQuat {
-  DQuat::from_axis_angle([DVec3::X, DVec3::Y, DVec3::Z][i], a)
 }
 
 impl Dialog {
@@ -44,11 +44,83 @@ impl Dialog {
     self.applied
   }
 
-  fn len(&self, s: &Session, e: &str) -> Option<f64> {
+  /// Offset Plane: a planar face or construction plane picked in the viewport or browser becomes
+  /// the base plane, as in Fusion (the dropdown keeps the origin planes).
+  pub(super) fn sync_offset_base(&mut self, s: &Session) {
+    let picked = s.selection.iter().find_map(|sel| match *sel {
+      Sel::Face { body, face } if super::is_planar(s, body, face) => {
+        Some((json!({"body": body.0, "face": face}), format!("Face of {}", s.body_name(body))))
+      }
+      Sel::Feature { feature } if s.model.planes.contains_key(&feature) && Some(feature) != self.previewed_plane() => {
+        Some((json!({"feature": feature.0}), s.design.feature(feature).map(|f| f.name.clone()).unwrap_or_default()))
+      }
+      _ => None,
+    });
+    let key = picked.as_ref().map(|(v, _)| v.clone());
+    if key == self.manip.offset_base {
+      return;
+    }
+    self.manip.offset_base = key;
+    if let Some((v, label)) = picked
+      && v != self.plane
+    {
+      self.plane = v;
+      self.plane_label = label;
+      self.dirty = true;
+    }
+  }
+
+  /// Records the construction plane an Offset Plane preview added.
+  pub(super) fn note_preview(&mut self, result: &Value) {
+    self.manip.preview_plane = (self.kind == Kind::OffsetPlane)
+      .then(|| result.get("feature").and_then(Value::as_u64))
+      .flatten()
+      .map(|f| FeatureId(f as u32));
+  }
+
+  /// The construction plane the open Offset Plane is previewing (the viewport fills it instead
+  /// of drawing the dashed outline of a finished plane).
+  pub fn previewed_plane(&self) -> Option<FeatureId> {
+    self.manip.preview_plane.filter(|_| self.applied && self.kind == Kind::OffsetPlane && self.editing.is_none())
+  }
+
+  /// Offset Plane's base plane and the point on it the arrow starts from: a picked face's centre,
+  /// else the plane's origin.
+  pub(super) fn offset_base(&self, s: &Session) -> Option<(Plane, DVec3)> {
+    let base = super::plane_of(s, &self.plane)?;
+    let get = |k: &str| self.plane.get(k).and_then(Value::as_u64).map(|x| x as u32);
+    let centre = get("body")
+      .zip(get("face"))
+      .and_then(|(b, f)| s.model.body(BodyId(b))?.faces().iter().find(|x| x.id == f).map(|x| x.center))
+      .map_or(base.origin, |c| base.to_world(base.to_local(c)));
+    Some((base, centre))
+  }
+
+  /// The plane Offset Plane would make, and the centre of the square the viewport fills for it.
+  pub fn offset_plane_preview(&self, s: &Session) -> Option<(Plane, DVec3)> {
+    if self.kind != Kind::OffsetPlane || self.editing.is_some() {
+      return None;
+    }
+    let (base, centre) = self.offset_base(s)?;
+    let d = self.offset_sign(s) * self.len(s, &self.distance)?;
+    Some((base.offset(d), centre + base.normal() * d))
+  }
+
+  /// Offsets from XZ go along +Y in designs made with XZ_OFFSET_PLUS_Y (see
+  /// `OriginPlane::offset_sign`).
+  pub(super) fn offset_sign(&self, s: &Session) -> f64 {
+    if self.plane.as_str() == Some("xz") {
+      fox_engine::model::OriginPlane::Xz.offset_sign(&s.design.behaviours)
+    } else {
+      1.0
+    }
+  }
+
+  pub(super) fn len(&self, s: &Session, e: &str) -> Option<f64> {
     fox_engine::expr::eval(e, fox_engine::expr::Kind::Length, &s.model.params).ok()
   }
 
-  fn ang(&self, s: &Session, e: &str) -> Option<f64> {
+  pub(super) fn ang(&self, s: &Session, e: &str) -> Option<f64> {
     if e.trim().is_empty() {
       return Some(0.0);
     }
@@ -84,18 +156,11 @@ impl Dialog {
           self.manip.anchor = offset_anchor(s, &self.curves).map(|(o, d)| (key, o, d));
         }
       }
-      Kind::Move if self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
-        let Some(now) = centre(s, &self.bodies) else {
-          self.manip.pivot = None;
-          return;
-        };
-        // a showing preview has moved the bodies already: take the move back out
-        let before = match self.move_values(s) {
-          Some((t, r)) if self.applied => r.inverse() * now - t,
-          _ => now,
-        };
-        self.manip.pivot = Some((self.bodies.clone(), before));
+      // the pattern's arrow starts at the objects' centre before the preview
+      Kind::RectPattern if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
+        self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
       }
+      Kind::Move => self.refresh_move(s),
       _ => {}
     }
   }
@@ -103,6 +168,10 @@ impl Dialog {
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
   /// along the first face's normal).
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    if self.kind == Kind::RectPattern && self.editing.is_none() {
+      let (bodies, c) = self.manip.pivot.as_ref()?;
+      return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
+    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
       return None;
     }
@@ -119,13 +188,14 @@ impl Dialog {
   pub(super) fn set_more_manipulator(&mut self, v: f64, step: f64) -> bool {
     match self.kind {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
-      Kind::Fillet | Kind::Chamfer => self.radius = mm(v.max(step.max(1e-3))),
-      Kind::PressPull => self.distance = mm(v),
+      Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::PressPull => self.distance = mm(self.unit, v),
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
-        self.distance = mm(nonzero(v, step));
+        self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
       }
+      Kind::RectPattern => self.set_pattern_arrow(v, step),
       _ => return false,
     }
     true
@@ -151,24 +221,11 @@ impl Dialog {
     let curves: Vec<CurveId> = self.curves.iter().map(|c| CurveId(*c)).collect();
     let Some(v) = offset_at(sketch, &curves, at) else { return };
     let v = if step > 0.0 { (v / step).round() * step } else { v };
-    let text = mm(nonzero(v, step));
+    let text = mm(self.unit, nonzero(v, step));
     if text != self.distance {
       self.distance = text;
       self.dirty = true;
     }
-  }
-
-  /// Move's translation and its rotation (about a world axis through the origin, applied after
-  /// the translation); None when it rotates about some other axis.
-  fn move_values(&self, s: &Session) -> Option<(DVec3, DQuat)> {
-    let t =
-      DVec3::new(self.len(s, &self.translate[0])?, self.len(s, &self.translate[1])?, self.len(s, &self.translate[2])?);
-    let a = self.ang(s, &self.angle)?;
-    if a == 0.0 {
-      return Some((t, DQuat::IDENTITY));
-    }
-    let i = AXES.iter().position(|x| *x == self.axis)?;
-    Some((t, about(i, a)))
   }
 
   /// The move/rotate triad this dialog shows: Move's on the moved bodies' centre, Joint's (an
@@ -178,20 +235,7 @@ impl Dialog {
       return None;
     }
     match self.kind {
-      Kind::Move => {
-        let (bodies, c) = self.manip.pivot.as_ref()?;
-        if bodies.is_empty() || *bodies != self.bodies {
-          return None;
-        }
-        let (t, r) = self.move_values(s)?;
-        let mut tr = Triad::world(r * (*c + t));
-        let a = self.ang(s, &self.angle)?;
-        if a != 0.0 {
-          tr.angle = a;
-          tr.ring = AXES.iter().position(|x| *x == self.axis);
-        }
-        Some(tr)
-      }
+      Kind::Move => self.move_triad(s),
       Kind::Joint => {
         let f = self.joint_fixed_frame(s)?;
         let (x, y, z, o) = (f.x_axis.truncate(), f.y_axis.truncate(), f.z_axis.truncate(), f.w_axis.truncate());
@@ -203,8 +247,8 @@ impl Dialog {
           arrows: [false, false, true],
           rings: [false, false, true],
           planes: [false; 3],
-          angle,
-          ring: Some(2),
+          home: o,
+          angles: [0.0, 0.0, angle],
         })
       }
       _ => None,
@@ -216,24 +260,14 @@ impl Dialog {
   pub fn set_triad(&mut self, s: &Session, edit: TriadEdit) {
     match self.kind {
       Kind::Move => {
-        let Some((_, c)) = self.manip.pivot.clone() else { return };
-        let Some((t, r)) = self.move_values(s) else { return };
-        // the regeneration moves by t, then turns about the world axis: centre' = r (c + t)
-        let (to, r) = match edit {
-          TriadEdit::Move(p) => (p, r),
-          TriadEdit::Rotate(i, a) => {
-            self.axis = AXES[i].into();
-            self.angle = deg(a);
-            (r * (c + t), about(i, a))
-          }
-        };
-        let t = r.inverse() * to - c;
-        self.translate = [mm(t.x), mm(t.y), mm(t.z)];
+        if !self.set_move_triad(edit) {
+          return;
+        }
       }
       Kind::Joint => match edit {
         TriadEdit::Move(p) => {
           let Some(f) = self.joint_fixed_frame(s) else { return };
-          self.distance = mm((p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
+          self.distance = mm(self.unit, (p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
         }
         TriadEdit::Rotate(_, a) => self.angle = deg(a),
       },
@@ -279,7 +313,7 @@ impl Dialog {
 
 /// The area-weighted centre of the bodies' surfaces: it turns and moves with them, and finely
 /// tessellated spots (holes, fillets) don't pull it their way.
-fn centre(s: &Session, bodies: &[u32]) -> Option<DVec3> {
+pub(super) fn centre(s: &Session, bodies: &[u32]) -> Option<DVec3> {
   let (mut sum, mut area) = (DVec3::ZERO, 0.0);
   for b in bodies {
     let Some(m) = s.model.body(BodyId(*b)).and_then(|b| b.mesh()) else { continue };
@@ -496,51 +530,6 @@ mod tests {
     // no arrow when editing an existing feature (its picks name the body before it)
     d.editing = Some(fox_engine::model::FeatureId(1));
     assert!(d.manipulator(&s).is_none());
-  }
-
-  #[test]
-  fn move_triad_moves_and_turns_about_the_bodies_centre() {
-    let mut s = Session::default();
-    run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
-    let b = s.model.bodies[0].id.0;
-    let c = centre(&s, &[b]).unwrap();
-    let mut d = Dialog::blank(Kind::Move);
-    d.bodies = vec![b];
-    d.translate = ["0 mm".into(), "0 mm".into(), "0 mm".into()];
-    d.angle = "0 deg".into();
-    d.axis = "z".into();
-    apply(&mut s, &mut d);
-    d.refresh_manip(&s);
-    let t = d.triad(&s).unwrap();
-    assert!(close(t.origin, c) && t.arrows == [true; 3] && t.ring.is_none());
-    d.set_triad(&s, TriadEdit::Move(c + DVec3::new(10.0, 0.0, -4.0)));
-    assert_eq!(d.translate, ["10 mm", "0 mm", "-4 mm"]);
-    apply(&mut s, &mut d);
-    let p = c + DVec3::new(10.0, 0.0, -4.0);
-    assert!(close(centre(&s, &[b]).unwrap(), p));
-    // a quarter turn about Z keeps the bodies where the triad is
-    d.set_triad(&s, TriadEdit::Rotate(2, std::f64::consts::FRAC_PI_2));
-    assert_eq!((d.axis.as_str(), d.angle.as_str()), ("z", "90 deg"));
-    apply(&mut s, &mut d);
-    d.refresh_manip(&s);
-    assert!(close(centre(&s, &[b]).unwrap(), p), "{:?}", centre(&s, &[b]));
-    let t = d.triad(&s).unwrap();
-    assert!(close(t.origin, p) && t.ring == Some(2) && (t.angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
-    let bb = s.model.bodies[0].shape.mass().unwrap();
-    assert!(((bb.bbox_max - bb.bbox_min) - DVec3::new(20.0, 10.0, 30.0)).length() < 1e-6, "{bb:?}");
-    // then moving again goes along world X, still turned
-    d.set_triad(&s, TriadEdit::Move(p + DVec3::X * 5.0));
-    apply(&mut s, &mut d);
-    assert!(close(centre(&s, &[b]).unwrap(), p + DVec3::X * 5.0));
-    // a dialog opened on bodies already moved by its preview finds where they started
-    let mut again = Dialog::blank(Kind::Move);
-    again.bodies = vec![b];
-    again.translate = d.translate.clone();
-    again.angle = d.angle.clone();
-    again.axis = d.axis.clone();
-    again.applied = true;
-    again.refresh_manip(&s);
-    assert!(close(again.manip.pivot.as_ref().unwrap().1, c));
   }
 
   #[test]
