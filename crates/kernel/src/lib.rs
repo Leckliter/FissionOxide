@@ -1013,3 +1013,6 @@ mod tests_ellipse;
 mod tests_project;
 #[cfg(test)]
 mod tests_refparts;
+
+mod path3d;
+pub use path3d::Seg3;

@@ -531,6 +531,28 @@ fn sketch_lines(
       behind: false,
     });
   }
+  // included 3D geometry, at its world position
+  for c in &sk.curves3d {
+    let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
+    let color = if selected.contains(&pick) {
+      SELECT_COLOR
+    } else if hover == Some(pick) {
+      HOVER_COLOR
+    } else if editing {
+      SKETCH_FIXED
+    } else {
+      SKETCH_IDLE
+    };
+    scene.lines.push(Polyline {
+      points: c.kind.polyline(48).into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect(),
+      color,
+      width: if editing { 2.0 } else { 1.0 },
+      id: if editing { picks.id(pick) } else { 0 },
+      on_top: editing,
+      dashed: c.construction,
+      behind: false,
+    });
+  }
   if editing {
     // spline tangent handles and Bézier handles: a thin line from the curve to each handle
     for c in &sk.curves {

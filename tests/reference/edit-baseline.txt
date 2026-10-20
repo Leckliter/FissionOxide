@@ -53,3 +53,8 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+205-vertical-edge-sweep-path
+235-grid-spacing
+236-line-direction
+237-extent-distance
+238-symmetric-direction
