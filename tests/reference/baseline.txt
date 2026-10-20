@@ -112,3 +112,7 @@
 161-quarter-arc-slot
 162-clockwise-start-end-slot
 163-offset-center-end-direction
+183-full-turn-off-origin-center
+184-partial-angle
+185-symmetric-angle
+186-line-loop-partial

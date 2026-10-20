@@ -49,3 +49,7 @@
 82-thin-extrude-frame
 88-box-patch-join
 89-box-patch-flip-cut
+183-full-turn-off-origin-center
+184-partial-angle
+185-symmetric-angle
+186-line-loop-partial
