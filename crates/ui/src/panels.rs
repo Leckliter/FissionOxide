@@ -559,6 +559,7 @@ impl Cmd {
         "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
         "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
         "vertices" => (Icon::Point, "Vertices", "Show body vertices and allow selecting them"),
+        "construction" => (Icon::Plane, "Construction", "Allow selecting construction planes, axes and points"),
         _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
       },
       Cmd::ConfigTable => (
@@ -729,6 +730,7 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
     "concentric" => (Icon::Concentric, "Concentric"),
     "collinear" => (Icon::Collinear, "Collinear"),
     "curvature" => (Icon::Curvature, "Curvature"),
+    "polygon" => (Icon::PolygonCon, "Polygon"),
     _ => (Icon::Symmetric, "Symmetry"),
   }
 }
@@ -2453,7 +2455,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       Sel::Face { body, face } => model.body(*body)?.faces().iter().find(|f| f.id == *face).map(|f| f.area),
       _ => None,
     })
-    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
+    .map(|a| format!("Area: {}", u.area(a, 2))),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
@@ -2463,7 +2465,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       Sel::Profile { sketch, index } => model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.area().abs()),
       _ => None,
     })
-    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
+    .map(|a| format!("Area: {}", u.area(a, 2))),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
     _ => None,
@@ -2587,9 +2589,40 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           app.s.design.features.iter().map(|f| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed)).collect();
         let mut rects = Vec::with_capacity(features.len());
         let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
+        let groups = timeline_groups::shown(app);
+        // a collapsed group's icon stands for each of its features (drag slots skip over it)
+        let mut collapsed: Option<(Rect, usize)> = None;
+        // expanded groups: (open folder, last feature) for the bracket under them
+        let mut brackets: Vec<(Rect, usize)> = Vec::new();
         for (i, (id, name, icon, suppressed)) in features.into_iter().enumerate() {
+          if let Some((rect, last)) = collapsed {
+            if i <= last {
+              rects.push(rect);
+              continue;
+            }
+            collapsed = None;
+          }
           if i == active && marker(ui, marker_dragged).drag_started() {
             drag = Some(TimelineDrag::Marker { gap: active });
+          }
+          if let Some(g) = groups.iter().find(|g| g.first == i) {
+            let open = timeline_groups::is_open(ui, g.id);
+            let rolled_back = match drag {
+              Some(TimelineDrag::Marker { gap }) => i >= gap,
+              _ => i >= active,
+            };
+            let rect = timeline_groups::group_icon(app, ui, g, open, rolled_back);
+            if open {
+              brackets.push((rect, g.last));
+            } else {
+              rects.push(rect);
+              collapsed = Some((rect, g.last));
+              // the marker inside a collapsed group shows just after it
+              if active > i && active <= g.last && marker(ui, marker_dragged).drag_started() {
+                drag = Some(TimelineDrag::Marker { gap: active });
+              }
+              continue;
+            }
           }
           let st = app.s.model.status(id).cloned().unwrap_or_default();
           // while the marker is dragged, what would roll back greys out already
@@ -2653,7 +2686,8 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           }
           let r = if drag.is_none() { r.on_hover_text(hover) } else { r };
           if r.clicked() {
-            app.s.selection = vec![Sel::Feature { feature: id }];
+            let m = ui.input(|i| i.modifiers);
+            timeline_groups::click_feature(app, id, m.shift, m.command || m.ctrl);
           }
           if r.double_clicked() {
             edit_feature(app, id);
@@ -2663,6 +2697,11 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
             marking::peek(app, marking::feature_bodies(app, id), name.clone());
           }
           r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
+        }
+        for (open, last) in brackets {
+          if let Some(end) = rects.get(last) {
+            timeline_groups::bracket(ui, open, *end);
+          }
         }
         if active >= n && marker(ui, marker_dragged).drag_started() {
           drag = Some(TimelineDrag::Marker { gap: active });
@@ -2783,6 +2822,7 @@ fn timeline_menu(app: &mut App, ui: &mut egui::Ui, i: usize, id: FeatureId, name
     ui.close();
     app.run("feature.suppress", json!({"feature": id.0}));
   }
+  timeline_groups::feature_menu_items(app, ui, i, id);
   ui.separator();
   // features without a browser node of their own are found by the bodies they made
   let sel = Sel::Feature { feature: id };
@@ -3015,6 +3055,9 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::TrimWith { .. } => Icon::Trim,
     FeatureKind::LoftedFlange { .. } => Icon::LoftedFlange,
     FeatureKind::MiterFlange { .. } => Icon::Flange,
+    FeatureKind::JoinByBend { .. } => Icon::Fold,
+    FeatureKind::SheetFillet { .. } => Icon::Fillet,
+    FeatureKind::SheetChamfer { .. } => Icon::Chamfer,
     FeatureKind::JointOrigin { .. } => Icon::JointOrigin,
     FeatureKind::RigidGroup { .. } => Icon::Component,
     FeatureKind::MotionLink { .. } => Icon::DriveJoint,
@@ -3072,6 +3115,9 @@ fn rename_popup(app: &mut App, ctx: &egui::Context) {
             RenameTarget::Component(c) => {
               app.run("component.rename", json!({"component": c, "name": text}));
             }
+            RenameTarget::Group(g) => {
+              app.run("timeline.group_rename", json!({"group": g, "name": text}));
+            }
           }
           keep = false;
         }
@@ -3100,6 +3146,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
 mod browser_assembly;
 mod browser_config;
 mod browser_edit;
+mod timeline_groups;
 
 #[cfg(test)]
 mod row_menu_tests {

@@ -296,6 +296,8 @@
 509-hole-face-positive
 51-loft-rect-circle-offset
 510-sloped-neighbours-positive
+511-body-free-move
+512-body-copy-rotate
 52-circular-pattern-fillet
 53-path-pattern
 54-mirror-body-fillets

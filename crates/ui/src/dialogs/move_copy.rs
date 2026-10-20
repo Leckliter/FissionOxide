@@ -30,6 +30,20 @@ const TYPES: [(&str, &str); 5] = [
   ("point_to_position", "Point to Position"),
 ];
 const AXES: [&str; 3] = ["x", "y", "z"];
+
+/// What a Paste (Ctrl+V) placed with this dialog is. Fusion opens Initial Position on a pasted
+/// component and Move/Copy on pasted bodies and sketch curves; Cancel removes the paste.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Paste {
+  /// Another occurrence of a component (Paste): `component.copy`, rebuilt from the original.
+  Occurrence,
+  /// An independent copy of a component (Paste New): its bodies are copied, and OK puts the
+  /// copies in a new component named after it (under the same parent, of the same material).
+  /// `before` are the bodies there were before.
+  New { source: u32, before: Vec<u32> },
+  /// Copies of bodies, or of sketch curves in their sketch.
+  Copy,
+}
 const WORLD: [DVec3; 3] = [DVec3::X, DVec3::Y, DVec3::Z];
 
 /// Move/Copy's own inputs (the distances and the Rotate angle and axis are the dialog's
@@ -50,6 +64,8 @@ pub(super) struct MoveForm {
   /// The picks (as [`Dialog::move_key`]) and their centre before the move: the triad's home and
   /// Free Move's pivot.
   pub(super) pivot: Option<(Value, DVec3)>,
+  /// Opened by Paste: what it placed (Create Copy stays on and what moves can't change).
+  pub(super) paste: Option<Paste>,
 }
 
 impl Default for MoveForm {
@@ -64,6 +80,7 @@ impl Default for MoveForm {
       points: Vec::new(),
       sketch: None,
       pivot: None,
+      paste: None,
     }
   }
 }
@@ -95,6 +112,50 @@ fn point_of(s: &Session, sel: &Sel) -> Option<DVec3> {
 }
 
 impl Dialog {
+  /// Sets the dialog up to place a paste: `object` is Move Object ("components", "bodies" or
+  /// "sketch"), taken from the session's selection (the pasted things).
+  pub(crate) fn set_paste(&mut self, s: &Session, paste: Paste, object: &'static str) {
+    self.mv.object = object;
+    self.mv.mtype = "free";
+    self.mv.copy = true;
+    self.mv.pivot = None;
+    self.mv.paste = Some(paste);
+    self.sync_move(s);
+    self.dirty = true;
+  }
+
+  /// What Paste placed with this dialog, if it did.
+  #[cfg(test)]
+  pub(crate) fn paste(&self) -> Option<&Paste> {
+    self.mv.paste.as_ref()
+  }
+
+  /// The header: Fusion's Initial Position for a pasted component.
+  pub(super) fn move_title(&self) -> Option<&'static str> {
+    match self.mv.paste {
+      Some(Paste::Occurrence | Paste::New { .. }) => Some("INITIAL POSITION"),
+      _ => None,
+    }
+  }
+
+  /// After OK: Paste New's copied bodies become a component of their own.
+  pub(crate) fn finish_paste(&self, app: &mut App) {
+    let Some(Paste::New { source, before }) = &self.mv.paste else { return };
+    let Some(src) = app.s.design.component(ComponentId(*source)).cloned() else { return };
+    let bodies: Vec<u32> = app.s.model.bodies.iter().map(|b| b.id.0).filter(|b| !before.contains(b)).collect();
+    if bodies.is_empty() {
+      return;
+    }
+    let taken = |n: &str| app.s.design.components.iter().any(|c| c.name == n);
+    let name = (1..).map(|k| format!("{} ({k})", src.name)).find(|n| !taken(n)).unwrap_or_default();
+    let made = app.run("component.create", json!({"name": name, "bodies": bodies, "parent": src.parent.map(|p| p.0)}));
+    if let Some(c) = made.and_then(|r| r["component"].as_u64())
+      && !src.material.is_empty()
+    {
+      app.run("component.material", json!({"component": c, "material": src.material}));
+    }
+  }
+
   /// Edit Feature on a Move: its type follows what it stores.
   pub(super) fn load_move(&mut self, kind: &FeatureKind) {
     let FeatureKind::Move { bodies, translate, angle, rotate, copy, axis, .. } = kind else { return };
@@ -510,7 +571,7 @@ impl Dialog {
     let cur = if types { self.mv.mtype } else { self.mv.object };
     let label = items.iter().find(|(k, _)| *k == cur).map_or(cur, |(_, l)| *l);
     let mut pick = None;
-    ui.add_enabled_ui(self.editing.is_none(), |ui| {
+    ui.add_enabled_ui(self.editing.is_none() && (types || self.mv.paste.is_none()), |ui| {
       egui::ComboBox::from_id_salt(id).selected_text(label).width(140.0).show_ui(ui, |ui| {
         for (k, l) in items {
           if ui.selectable_label(cur == *k, *l).clicked() && cur != *k {
@@ -613,7 +674,7 @@ impl Dialog {
         }
       }
     }
-    if self.mv.object != "faces" {
+    if self.mv.object != "faces" && self.mv.paste.is_none() {
       ui.label("");
       if ui.checkbox(&mut self.mv.copy, "Create Copy").changed() {
         // copies leave the picks where they are: the centre is found afresh

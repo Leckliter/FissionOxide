@@ -20,6 +20,7 @@ pub mod direct;
 pub mod drawing;
 pub mod fillet;
 pub mod form;
+pub mod groups;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
@@ -43,6 +44,7 @@ pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use fox_sketch::Behaviours;
+pub use groups::TimelineGroup;
 pub use refs::{EdgeRef, FaceRef};
 pub use units::{LengthUnit, ModelParam, ModelParamRef};
 
@@ -122,6 +124,9 @@ pub struct Design {
   /// Appearances applied to single faces (Appearance's Faces mode); they draw over the body's.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub face_appearances: Vec<FaceAppearance>,
+  /// Timeline groups (Create Group): how the timeline shows its features; never what they build.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub timeline_groups: Vec<TimelineGroup>,
   #[serde(default)]
   next_id: u32,
 }
@@ -663,6 +668,32 @@ pub enum BendPosition {
   Inside,
   /// The flange's inside face lands on the edge.
   Outside,
+}
+
+/// Where Join by Bend puts its bend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinBendPosition {
+  /// The bend is tangent to both flanges, which are extended (or trimmed) to meet it.
+  #[default]
+  Tangent,
+  /// The bend starts at the first edge (that flange stays as it is); its radius is what makes it
+  /// tangent to the second flange, which alone is extended.
+  First,
+  /// The bend starts at the second edge; only the first flange is extended.
+  Second,
+}
+
+/// The bend relief Join by Bend cuts where a flange runs on past the end of the bend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinRelief {
+  /// The rule's relief shape and size.
+  #[default]
+  Rule,
+  Rectangular,
+  Round,
+  None,
 }
 
 /// Which bodies a body-level feature acts on.
@@ -1469,6 +1500,37 @@ pub enum FeatureKind {
     #[serde(default)]
     corners: CornerMode,
   },
+  /// Sheet metal Join by Bend: joins two separate sheet metal bodies, an edge picked on a flange
+  /// of each, with a bend; flanges are extended (or trimmed) to meet it. The first body keeps
+  /// the result.
+  JoinByBend {
+    edge1: EdgeRef,
+    edge2: EdgeRef,
+    /// Inside bend radius; empty = the first body's rule.
+    #[serde(default)]
+    bend_radius: String,
+    #[serde(default)]
+    position: JoinBendPosition,
+    #[serde(default)]
+    relief: JoinRelief,
+  },
+  /// Sheet metal fillet: rounds edges that run through the sheet's thickness (flange corners),
+  /// so the rounding shows in the flat pattern.
+  SheetFillet {
+    edges: Vec<EdgeRef>,
+    radius: String,
+  },
+  /// Sheet metal chamfer: bevels edges that run through the sheet's thickness, by an equal
+  /// distance or two distances (`distance` on the edge's first face, `distance2` on the other;
+  /// `flipped` swaps them).
+  SheetChamfer {
+    edges: Vec<EdgeRef>,
+    distance: String,
+    #[serde(default)]
+    distance2: Option<String>,
+    #[serde(default)]
+    flipped: bool,
+  },
   /// A saved joint origin on a component: a frame (from a face, an edge or a point, then
   /// offset, turned and flipped) that joints can mate to and that moves with the component.
   JointOrigin {
@@ -1861,6 +1923,9 @@ impl FeatureKind {
       FeatureKind::TrimWith { .. } => "Trim",
       FeatureKind::LoftedFlange { .. } => "LoftedFlange",
       FeatureKind::MiterFlange { .. } => "MiterFlange",
+      FeatureKind::JoinByBend { .. } => "JoinByBend",
+      FeatureKind::SheetFillet { .. } => "SheetMetalFillet",
+      FeatureKind::SheetChamfer { .. } => "SheetMetalChamfer",
       FeatureKind::JointOrigin { .. } => "JointOrigin",
       FeatureKind::RigidGroup { .. } => "RigidGroup",
       FeatureKind::MotionLink { .. } => "MotionLink",
@@ -2023,6 +2088,7 @@ impl Design {
       behaviours: Behaviours::current(),
       named_views: Vec::new(),
       face_appearances: Vec::new(),
+      timeline_groups: Vec::new(),
       next_id: 1,
     }
   }
@@ -2755,6 +2821,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
     FeatureKind::LoftedFlange { bends, .. } => f(bends),
     FeatureKind::MiterFlange { .. } => {}
+    FeatureKind::JoinByBend { bend_radius, .. } => {
+      if !bend_radius.is_empty() {
+        f(bend_radius)
+      }
+    }
+    FeatureKind::SheetFillet { radius, .. } => f(radius),
+    FeatureKind::SheetChamfer { distance, distance2, .. } => {
+      f(distance);
+      if let Some(d) = distance2 {
+        f(d);
+      }
+    }
     FeatureKind::JointOrigin { angle, offset, offset_x, offset_y, .. } => {
       f(angle);
       f(offset);
