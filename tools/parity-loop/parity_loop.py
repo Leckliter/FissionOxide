@@ -107,6 +107,13 @@ def foreign_commits(wt, base, branch):
   return found
 
 
+def crashed_without_failures(p):
+  """A test binary that died of a native crash (STATUS_*) before reporting any failing test."""
+  out = p.stdout + p.stderr
+  return ("STATUS_" in out and "test result: FAILED" not in out and "panicked" not in out
+          and "could not compile" not in out)
+
+
 def touched_packages(wt, base):
   """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
   crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
@@ -483,6 +490,14 @@ class Loop:
       test = await asyncio.to_thread(sh, cmd, wt, False, env, 7200)
       with open(self.log("fix", key), "a", encoding="utf-8") as f:
         f.write(f"\n---- driver: {label} (exit {test.returncode}) ----\n" + (test.stdout + test.stderr)[-3000:])
+      if not tests_passed(test) and crashed_without_failures(test) and "--lib" in cmd:
+        # An intermittent native crash (heap corruption) with no failing test: OpenCASCADE isn't
+        # thread-safe and the test harness runs tests in parallel. Retry once on one thread.
+        print(f"  {label}: test binary crashed with no failing test; retrying on one thread", flush=True)
+        test = await asyncio.to_thread(sh, cmd + ["--test-threads=1"], wt, False, env, 7200)
+        with open(self.log("fix", key), "a", encoding="utf-8") as f:
+          f.write(f"\n---- driver: {label} --test-threads=1 (exit {test.returncode}) ----\n"
+                  + (test.stdout + test.stderr)[-3000:])
       if not tests_passed(test):
         failed = label
         break
