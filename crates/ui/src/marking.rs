@@ -1162,6 +1162,20 @@ mod tests {
   }
 
   #[test]
+  fn status_bar_profile_area_in_inches() {
+    let mut app = App::with_session(Session::default());
+    app.run("design.units", json!({"unit": "in"}));
+    let sk = app.run("sketch.create", json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    let sketch = fox_engine::model::FeatureId(sk as u32);
+    app.s.selection = vec![Sel::Profile { sketch, index: 0 }];
+    // 800 mm² in an inch design: Fusion reads "1 Profile | Area: 1.24 in^2"
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area: 1.24 in^2"));
+    app.run("design.units", json!({"unit": "mm"}));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area: 800.00 mm^2"));
+  }
+
+  #[test]
   fn show_hide_and_show_all() {
     let mut app = boxed();
     let body = app.s.model.bodies[0].id;

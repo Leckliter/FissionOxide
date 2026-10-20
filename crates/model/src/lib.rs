@@ -20,6 +20,7 @@ pub mod direct;
 pub mod drawing;
 pub mod fillet;
 pub mod form;
+pub mod groups;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
@@ -43,6 +44,7 @@ pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use fox_sketch::Behaviours;
+pub use groups::TimelineGroup;
 pub use refs::{EdgeRef, FaceRef};
 pub use units::{LengthUnit, ModelParam, ModelParamRef};
 
@@ -122,6 +124,9 @@ pub struct Design {
   /// Appearances applied to single faces (Appearance's Faces mode); they draw over the body's.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub face_appearances: Vec<FaceAppearance>,
+  /// Timeline groups (Create Group): how the timeline shows its features; never what they build.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub timeline_groups: Vec<TimelineGroup>,
   #[serde(default)]
   next_id: u32,
 }
@@ -2023,6 +2028,7 @@ impl Design {
       behaviours: Behaviours::current(),
       named_views: Vec::new(),
       face_appearances: Vec::new(),
+      timeline_groups: Vec::new(),
       next_id: 1,
     }
   }
