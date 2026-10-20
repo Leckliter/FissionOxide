@@ -142,7 +142,7 @@ cmds! {
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
   "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
   "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
-  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?, flip?, operation?}";
+  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?: thickness on each side, flip?, operation?, corners?: \"sharp\"|\"round\"}";
   "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
   "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
   "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";

@@ -235,6 +235,8 @@ pub enum ConstraintKind {
     p: PointId,
     curve: CurveId,
   },
+  /// `p` at the midpoint of `line`: a line, or an arc (the middle of its counter-clockwise
+  /// sweep).
   Midpoint {
     p: PointId,
     line: CurveId,
@@ -800,7 +802,11 @@ impl Sketch {
       ConstraintKind::Perpendicular { a, b } => line(*a, "Perpendicular").and(line(*b, "Perpendicular")),
       ConstraintKind::Collinear { a, b } => line(*a, "Collinear").and(line(*b, "Collinear")),
       ConstraintKind::Angle { a, b, .. } => line(*a, "Angle").and(line(*b, "Angle")),
-      ConstraintKind::Midpoint { line: l, .. } => line(*l, "Midpoint"),
+      ConstraintKind::Midpoint { line: l, .. } => match self.curve(*l).map(|c| &c.kind) {
+        Some(CurveKind::Line { .. } | CurveKind::Arc { .. }) => Ok(()),
+        Some(_) => Err(SketchError::WrongGeometry("Midpoint", "a line or an arc")),
+        None => Err(SketchError::NoCurve(*l)),
+      },
       ConstraintKind::Symmetric { line: l, .. } => line(*l, "Symmetric"),
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
       ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),

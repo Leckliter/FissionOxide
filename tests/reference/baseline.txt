@@ -86,3 +86,10 @@
 85-circular-hollow
 86-square-section
 87-triangular-partial-path
+88-box-patch-join
+89-box-patch-flip-cut
+90-arc-surface-symmetric
+91-l-surface-sharp-symmetric
+119-midpoint-point-on-line
+120-midpoint-line-on-origin
+121-midpoint-point-on-arc

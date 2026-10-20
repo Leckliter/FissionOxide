@@ -610,6 +610,7 @@ pub static THICKEN: Form = Form {
     Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Check { key: "flip", label: "Flip" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
+    Input::Choice { key: "corners", label: "Thicken type", options: &[("sharp", "Sharp"), ("round", "Rounded")] },
   ],
   picks_model: true,
 };

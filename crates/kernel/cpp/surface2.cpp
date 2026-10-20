@@ -13,6 +13,7 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepFill.hxx>
@@ -446,6 +447,33 @@ std::unique_ptr<Shape> offset_variable(const Shape &s, double d, rust::Slice<con
     return out_shape(r.IsNull() ? TopoDS_Shape(c) : r);
   } catch (...) {
     fail("variable offset");
+  }
+}
+
+// A face or connected shell offset by d as one piece: where two faces meet at an angle their
+// offsets are extended until they intersect (or joined by an arc about the edge when `round`), so
+// the corner stays closed. With `thicken` the result is the solid between the skin and its offset,
+// its coplanar (or same-surface) neighbouring faces merged.
+std::unique_ptr<Shape> offset_joined(const Shape &s, double d, bool round, bool thicken) {
+  try {
+    if (std::abs(d) < 1e-9) throw std::runtime_error("the distance must not be zero");
+    BRepOffset_MakeOffset mo;
+    mo.Initialize(s.s, d, 1e-6, BRepOffset_Skin, Standard_False, Standard_False,
+                  round ? GeomAbs_Arc : GeomAbs_Intersection, thicken ? Standard_True : Standard_False);
+    mo.MakeOffsetShape();
+    if (!mo.IsDone() || mo.Shape().IsNull()) throw std::runtime_error("the faces could not be offset together");
+    TopoDS_Shape r = mo.Shape();
+    if (thicken) {
+      // the walls along the skin's boundary come one per skin face; merge those that continue
+      // each other (the end caps of an extruded skin) into one face
+      ShapeUpgrade_UnifySameDomain u(r, Standard_True, Standard_True, Standard_False);
+      u.Build();
+      if (!u.Shape().IsNull() && BRepCheck_Analyzer(u.Shape()).IsValid()) r = u.Shape();
+    }
+    if (!BRepCheck_Analyzer(r).IsValid()) throw std::runtime_error("the joined offset is not valid");
+    return out_shape(r);
+  } catch (...) {
+    fail(thicken ? "thicken" : "offset");
   }
 }
 

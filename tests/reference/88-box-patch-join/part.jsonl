@@ -1,0 +1,18 @@
+# 88-box-patch-join: added by the parity loop from a Fusion probe
+# 40x30x20 box; a 20x20 patch surface on its top (sketch at z=20, x 10..30, y 5..25) thickened
+# 5 mm along +Z and joined to the box (a 20x20x5 boss); the surface then removed.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 20.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 5], [30, 5]]}
+{"cmd": "sketch.line", "points": [[30, 5], [30, 25]]}
+{"cmd": "sketch.line", "points": [[30, 25], [10, 25]]}
+{"cmd": "sketch.line", "points": [[10, 25], [10, 5]]}
+{"cmd": "sketch.finish"}
+{"cmd": "surface.patch", "sketch": 3}
+{"cmd": "thicken", "bodies": [4000], "thickness": 5, "operation": "join"}
