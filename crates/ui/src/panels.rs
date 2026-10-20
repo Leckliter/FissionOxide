@@ -1448,7 +1448,9 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name:
     m.unselectable.retain(|b| !bodies.contains(b));
     if !locked {
       m.unselectable.extend(&bodies);
-      app.s.selection.retain(|s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)));
+      app.s.selection.retain(
+        |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
+      );
     }
   }
   browser_edit::opacity_menu(app, ui, &bodies);

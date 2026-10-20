@@ -92,6 +92,11 @@ pub(super) fn edit_box(app: &mut App, ui: &mut egui::Ui, ev: &RowEvents, row: eg
   let r = Rect::from_min_max(pos2(x, rect.center().y - 10.5), pos2(rect.max.x - 6.0, rect.center().y + 10.5));
   let id = row.with("rename");
   let edit = egui::TextEdit::singleline(&mut e.text).id(id).margin(vec2(3.0, 2.0)).desired_width(r.width());
+  // Escape makes the box give up focus as a click away would; other handlers may have consumed
+  // the key by now, so look at the frame's raw events
+  let escape = ui.input(|i| {
+    i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }))
+  });
   let out = ui.place(r, edit);
   let was_started = e.started;
   if !e.started {
@@ -104,7 +109,7 @@ pub(super) fn edit_box(app: &mut App, ui: &mut egui::Ui, ev: &RowEvents, row: eg
     }
     e.started = true;
   }
-  if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+  if escape {
     ui.data_mut(|d| d.remove::<Editing>(editing_id()));
   } else if out.lost_focus() || (was_started && !out.has_focus()) {
     // Enter, or a click somewhere else
