@@ -118,6 +118,8 @@ pub struct ViewOptions {
   pub only_bodies: Option<Vec<BodyId>>,
   /// Profiles are shown (and pickable) for these sketches even if consumed.
   pub show_profiles_of: Vec<FeatureId>,
+  /// Sketches drawn without their profiles (the browser's Hide Profile).
+  pub hide_profiles_of: Vec<FeatureId>,
   /// Section analysis: bodies are cut away on the side the plane's normal points to, and the
   /// cut is capped.
   pub section: Option<Plane>,
@@ -134,6 +136,8 @@ pub struct ViewOptions {
   pub hide_origin: bool,
   /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
   pub grid_step: Option<f64>,
+  /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
+  pub opacity: Vec<(BodyId, u8)>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -211,8 +215,12 @@ impl SceneBuilder {
         scene.meshes.push(mesh_of(&a.0, a.1, base, hover));
         scene.meshes.push(mesh_of(&b.0, b.1, SELECT_COLOR, hover));
       }
+      let alpha = opts.opacity.iter().find(|o| o.0 == body.id).map(|o| o.1);
       for mesh in &mut scene.meshes[first..] {
         mesh.analyze = true;
+        if let Some(a) = alpha {
+          mesh.color[3] = a;
+        }
         if let Some(pl) = &opts.section {
           clip_mesh(mesh, pl);
         }
@@ -280,23 +288,14 @@ impl SceneBuilder {
       let FeatureKind::Sketch { .. } = &f.kind else { continue };
       let Some(r) = s.model.sketches.get(&f.id) else { continue };
       let is_edit = s.edit_sketch == Some(f.id);
-      let consumed = s.design.features.iter().take(active).any(|g| match &g.kind {
-        FeatureKind::Extrude { sketch, .. }
-        | FeatureKind::Revolve { sketch, .. }
-        | FeatureKind::Flange { sketch, .. }
-        | FeatureKind::ContourFlange { sketch, .. }
-        | FeatureKind::Hole { sketch, .. } => *sketch == f.id,
-        FeatureKind::Sweep { sketch, path_sketch, .. } => *sketch == f.id || *path_sketch == f.id,
-        FeatureKind::Loft { sections, .. } => sections.iter().any(|s| s.sketch == f.id),
-        _ => false,
-      });
-      let auto = !consumed || opts.show_profiles_of.contains(&f.id);
+      let auto = !sketch_consumed(s, f.id) || opts.show_profiles_of.contains(&f.id);
       let show = !f.suppressed && (is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto));
       if !show {
         continue;
       }
       // profiles (shaded regions)
-      for (i, prof) in r.profiles.iter().enumerate() {
+      let profiles = if opts.hide_profiles_of.contains(&f.id) { &[][..] } else { &r.profiles[..] };
+      for (i, prof) in profiles.iter().enumerate() {
         let pick = Pick::Profile { sketch: f.id, index: i };
         let mesh = self
           .profiles
@@ -405,6 +404,28 @@ impl SceneBuilder {
     scene.analysis = opts.analysis;
     (scene, picks)
   }
+}
+
+/// Whether a feature uses the sketch's profiles or curves (a used sketch hides itself unless
+/// shown with `sketch.visible`).
+pub fn sketch_consumed(s: &Session, id: FeatureId) -> bool {
+  s.design.features.iter().take(s.design.active_len()).any(|g| match &g.kind {
+    FeatureKind::Extrude { sketch, .. }
+    | FeatureKind::Revolve { sketch, .. }
+    | FeatureKind::Flange { sketch, .. }
+    | FeatureKind::ContourFlange { sketch, .. }
+    | FeatureKind::Hole { sketch, .. } => *sketch == id,
+    FeatureKind::Sweep { sketch, path_sketch, .. } => *sketch == id || *path_sketch == id,
+    FeatureKind::Loft { sections, .. } => sections.iter().any(|s| s.sketch == id),
+    _ => false,
+  })
+}
+
+/// Whether a sketch is drawn: shown or hidden with `sketch.visible`, else drawn until a feature
+/// uses it, and always while it's being edited.
+pub fn sketch_visible(s: &Session, id: FeatureId) -> bool {
+  let Some(f) = s.design.feature(id) else { return false };
+  !f.suppressed && (s.edit_sketch == Some(id) || f.visible.unwrap_or_else(|| !sketch_consumed(s, id)))
 }
 
 fn scene_size(s: &Session) -> f64 {
