@@ -487,6 +487,8 @@ pub struct Dialog {
   /// Sheet metal rule corner relief (see [`CORNER_RELIEFS`]) and its size.
   corner_relief: &'static str,
   corner_relief_size: String,
+  /// The design's length unit: values the dialog writes (drag arrows) are in it.
+  unit: fox_engine::model::LengthUnit,
   /// Joint: the saved joint origin (by name) used instead of a pick on each side; empty = the pick.
   saved: [String; 2],
   /// Trace Image's settings and last result.
@@ -606,6 +608,7 @@ impl Dialog {
       corners: "miter",
       corner_relief: "none",
       corner_relief_size: String::new(),
+      unit: Default::default(),
       saved: [String::new(), String::new()],
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
@@ -928,8 +931,46 @@ impl Dialog {
     if let Kind::Analysis(a) = kind {
       app.analysis = Some(json!({"analysis": a, "pull": "z", "angle": 1.0}));
     }
+    d.localize(app.s.design.units);
     d.dirty = !d.picks();
     d
+  }
+
+  /// A new dialog's millimetre defaults in the design's unit, as Fusion fills its boxes in the
+  /// document unit (`10 mm` → `0.393701 in`).
+  fn localize(&mut self, unit: fox_engine::model::LengthUnit) {
+    self.unit = unit;
+    if unit.is_mm() {
+      return;
+    }
+    let fields = [
+      &mut self.distance,
+      &mut self.distance2,
+      &mut self.radius,
+      &mut self.spacing,
+      &mut self.spacing2,
+      &mut self.a,
+      &mut self.b,
+      &mut self.c,
+      &mut self.d,
+      &mut self.e,
+    ];
+    for f in fields.into_iter().chain(self.translate.iter_mut()).chain(self.xyz.iter_mut()) {
+      *f = unit.localize(f);
+    }
+    for v in self.form.values.iter_mut() {
+      match v {
+        Value::String(s) => *s = unit.localize(s),
+        Value::Array(a) => {
+          for x in a {
+            if let Value::String(s) = x {
+              *s = unit.localize(s);
+            }
+          }
+        }
+        _ => {}
+      }
+    }
   }
 
   /// Opens the dialog for an existing feature (double-click in the timeline).
@@ -1039,6 +1080,13 @@ impl Dialog {
       _ => return None,
     };
     d.editing = Some(id);
+    d.unit = app.s.design.units;
+    // a stored bare length is mm: in a design in another unit its box says so ("10 mm")
+    let u = d.unit;
+    let fields = [&mut d.distance, &mut d.distance2, &mut d.radius, &mut d.spacing, &mut d.spacing2];
+    for f in fields.into_iter().chain(d.translate.iter_mut()) {
+      *f = u.shown(f);
+    }
     Some(d)
   }
 
@@ -1610,9 +1658,9 @@ impl Dialog {
     match self.kind {
       Kind::Extrude => {
         self.flip = v < 0.0;
-        self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v.abs()).expr);
+        self.distance = manip::mm(self.unit, v.abs());
       }
-      Kind::OffsetPlane => self.distance = format!("{} mm", fox_engine::sketch::Dim::new(v).expr),
+      Kind::OffsetPlane => self.distance = manip::mm(self.unit, v),
       _ => {
         if !self.set_more_manipulator(v, step) {
           return;
@@ -2596,7 +2644,7 @@ impl Dialog {
         if let Some(r) = self.report.clone() {
           if let Some([w, h]) = r.get("size").and_then(|v| serde_json::from_value::<[f64; 2]>(v.clone()).ok()) {
             ui.label("Flat size");
-            ui.label(format!("{w:.2} × {h:.2} mm"));
+            ui.label(format!("{:.2} × {:.2} {}", self.unit.from_mm(w), self.unit.from_mm(h), self.unit.symbol()));
             ui.end_row();
           }
           let bends = r.get("bends").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
@@ -2793,7 +2841,8 @@ impl Dialog {
         ui.end_row();
         if let [x, y, z] = c.as_slice() {
           ui.label(RichText::new("Centre").strong());
-          ui.label(format!("{x:.3}, {y:.3}, {z:.3} mm"));
+          let u = self.unit;
+          ui.label(format!("{:.3}, {:.3}, {:.3} {}", u.from_mm(*x), u.from_mm(*y), u.from_mm(*z), u.symbol()));
           ui.end_row();
         }
         ui.label("Mass");
@@ -3239,7 +3288,9 @@ impl Dialog {
     ui.label(label);
     ui.horizontal(|ui| {
       for x in v.iter_mut() {
-        if ui.add(egui::TextEdit::singleline(x).desired_width(44.0)).changed() {
+        let mut r = ui.add(egui::TextEdit::singleline(x).desired_width(44.0));
+        crate::units::pin(ui, &mut r, x);
+        if r.changed() {
           *dirty = true;
         }
       }
@@ -3251,7 +3302,9 @@ impl Dialog {
     ui.label(label);
     ui.horizontal(|ui| {
       for x in v.iter_mut() {
-        if ui.add(egui::TextEdit::singleline(x).desired_width(64.0)).changed() {
+        let mut r = ui.add(egui::TextEdit::singleline(x).desired_width(64.0));
+        crate::units::pin(ui, &mut r, x);
+        if r.changed() {
           *dirty = true;
         }
       }
@@ -3928,9 +3981,12 @@ fn section_fields(app: &mut App, ui: &mut egui::Ui) {
   });
   ui.end_row();
   ui.label("Offset");
-  let mut off = sec["offset"].as_f64().unwrap_or(0.0);
-  ui.add(egui::DragValue::new(&mut off).speed(0.5).suffix(" mm"));
-  sec["offset"] = json!(off);
+  let u = app.s.design.units;
+  let off = sec["offset"].as_f64().unwrap_or(0.0);
+  let mut shown = u.from_mm(off);
+  if ui.add(egui::DragValue::new(&mut shown).speed(0.5 / u.mm()).suffix(format!(" {}", u.symbol()))).changed() {
+    sec["offset"] = json!(shown * u.mm());
+  }
   ui.end_row();
   ui.label("");
   let mut flip = sec["flip"].as_bool().unwrap_or(false);
@@ -4210,10 +4266,13 @@ fn value_edit(ui: &mut egui::Ui, text: &mut String) -> egui::Response {
 pub(super) fn value_edit_w(ui: &mut egui::Ui, text: &mut String, width: f32) -> egui::Response {
   let mut r = ui.add(egui::TextEdit::singleline(text).desired_width(width));
   if let Some(typed) = ui.data_mut(|d| d.remove_temp::<String>(egui::Id::new(TYPING))) {
+    // what the box held tells whether it takes a length (see [`crate::units::pin`])
+    crate::units::note(ui.ctx(), r.id, text);
     *text = typed;
     crate::viewport::focus_text(ui.ctx(), &r, text, false);
     r.mark_changed();
   }
+  crate::units::pin(ui, &mut r, text);
   r
 }
 
@@ -4760,6 +4819,24 @@ mod tests {
     apply(&mut s, &mut d);
     let sk = s.edit_sketch.unwrap();
     assert!(!s.model.sketches[&sk].profiles.is_empty());
+  }
+
+  #[test]
+  fn dialogs_fill_in_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let mut d = Dialog::blank(Kind::Extrude);
+    d.sketch = s.edit_sketch;
+    run(&mut s, "sketch.finish", json!({}));
+    d.localize(fox_engine::model::LengthUnit::In);
+    assert_eq!(d.distance, "0.393701 in", "the 10 mm default, in inches");
+    assert_eq!(d.angle, Dialog::blank(Kind::Extrude).angle, "angles are left alone");
+    d.set_manipulator(25.4, 0.0);
+    assert_eq!(d.distance, "1 in", "a dragged arrow writes inches");
+    apply(&mut s, &mut d);
+    let bb = s.model.bodies[0].shape.mass().unwrap();
+    assert!((bb.bbox_max.z - 25.4).abs() < 1e-6, "{bb:?}");
   }
 
   #[test]

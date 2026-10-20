@@ -1105,7 +1105,11 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   let ds = egui::Id::new("tree-docsettings");
   tree_row(ui, ds, 1, Some(false), None, Icon::Gear, "Document Settings", false, theme::TEXT);
   if is_open(ui, ds, false) {
-    tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, "Units: mm", false, theme::TEXT);
+    let label = format!("Units: {}", app.s.design.units.symbol());
+    let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
+    if let Some(r) = &ev.response {
+      crate::units::settings_row(app, ui, r, 2);
+    }
   }
   // Named Views
   let nv = egui::Id::new("tree-views");
@@ -2420,22 +2424,23 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
   let model = &app.s.model;
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
+  let u = app.s.design.units;
   let readout = match sel[0] {
     Sel::Face { .. } => sum(&|s| match s {
       Sel::Face { body, face } => model.body(*body)?.faces().iter().find(|f| f.id == *face).map(|f| f.area),
       _ => None,
     })
-    .map(|a| format!("Area: {a:.2} mm^2")),
+    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
     })
-    .map(|l| format!("Length: {l:.2} mm")),
+    .map(|l| format!("Length: {}", u.fixed(l, 2))),
     Sel::Profile { .. } => sum(&|s| match s {
       Sel::Profile { sketch, index } => model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.area().abs()),
       _ => None,
     })
-    .map(|a| format!("Area: {a:.2} mm^2")),
+    .map(|a| format!("Area: {:.2} {}^2", a / u.mm().powi(2), u.symbol())),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
     _ => None,
@@ -3056,82 +3061,6 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
     }
   } else {
     s.selection = vec![item];
-  }
-}
-
-pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
-  let mut open = true;
-  egui::Window::new("ƒx Parameters").open(&mut open).default_width(460.0).show(ctx, |ui| {
-    ui.label(
-      RichText::new("User parameters drive dimensions and features: type a name anywhere a value is expected.")
-        .small()
-        .color(theme::MUTED),
-    );
-    ui.add_space(4.0);
-    let params = app.s.design.parameters.clone();
-    egui::Grid::new("params").striped(true).num_columns(5).show(ui, |ui| {
-      ui.label(RichText::new("Name").strong());
-      ui.label(RichText::new("Expression").strong());
-      ui.label(RichText::new("Value").strong());
-      ui.label(RichText::new("Comment").strong());
-      ui.label("");
-      ui.end_row();
-      for p in params {
-        ui.label(&p.name);
-        let id = egui::Id::new(("param-expr", &p.name));
-        let mut text = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| p.expr.clone());
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
-        if r.changed() {
-          ui.data_mut(|d| d.insert_temp(id, text.clone()));
-        }
-        if r.lost_focus() {
-          if text != p.expr {
-            app.run_background("param.set", json!({"name": p.name, "expr": text}));
-          }
-          ui.data_mut(|d| d.remove::<String>(id));
-        }
-        let value = app.s.model.params.get(&p.name).copied();
-        let shown = match (value, p.kind) {
-          (Some(v), fox_engine::model::ParamKind::Angle) => {
-            fox_engine::model::sketch::Dim::new(v.to_degrees()).expr + "°"
-          }
-          (Some(v), fox_engine::model::ParamKind::Length) => {
-            format!("{} mm", fox_engine::model::sketch::Dim::new(v).expr)
-          }
-          (Some(v), _) => fox_engine::model::sketch::Dim::new(v).expr,
-          (None, _) => "error".into(),
-        };
-        let err = app.s.model.param_errors.get(&p.name).cloned();
-        let l = ui.label(RichText::new(shown).color(if err.is_some() { theme::ERROR } else { theme::MUTED }));
-        if let Some(e) = err {
-          l.on_hover_text(e);
-        }
-        ui.label(RichText::new(&p.comment).small());
-        if ui.small_button("🗑").on_hover_text("Delete (only if unused)").clicked() {
-          app.run("param.remove", json!({"name": p.name}));
-        }
-        ui.end_row();
-      }
-    });
-    ui.separator();
-    let id = egui::Id::new("new-param");
-    let (mut name, mut expr) = ui.data_mut(|d| d.get_temp::<(String, String)>(id)).unwrap_or_default();
-    ui.horizontal(|ui| {
-      ui.label("New:");
-      ui.add(egui::TextEdit::singleline(&mut name).hint_text("name").desired_width(90.0));
-      ui.add(egui::TextEdit::singleline(&mut expr).hint_text("40 mm").desired_width(120.0));
-      if ui.button("＋ Add").clicked() && !name.is_empty() && !expr.is_empty() {
-        let kind = if expr.contains("deg") || expr.contains('°') { "angle" } else { "length" };
-        if app.run("param.add", json!({"name": name, "expr": expr, "kind": kind})).is_some() {
-          name.clear();
-          expr.clear();
-        }
-      }
-    });
-    ui.data_mut(|d| d.insert_temp(id, (name, expr)));
-  });
-  if !open {
-    app.show_params = false;
   }
 }
 

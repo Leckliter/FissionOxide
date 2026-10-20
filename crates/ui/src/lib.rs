@@ -24,6 +24,7 @@ mod menus;
 mod navbar;
 mod panels;
 mod preferences;
+mod params_ui;
 mod preview;
 mod select;
 mod sheet;
@@ -31,6 +32,7 @@ mod theme;
 mod tips;
 mod toolbox;
 mod trace;
+mod units;
 mod updates;
 mod viewcube;
 mod viewport;
@@ -584,9 +586,17 @@ impl App {
     let root = self.s.store_root.clone();
     let revision = self.s.revision;
     self.s = Session::default();
-    // Preferences â Design: new designs without a timeline (a fresh session, so the setting
-    // isn't an undo step)
-    if !self.preferences.values.capture_history && self.s.execute("design.history", &json!({"capture": false})).is_ok() {
+    // Preferences: new designs in the default units (General) and without a timeline (Design),
+    // in a fresh session so the settings aren't undo steps
+    let units = self.preferences.values.units;
+    let mut set = false;
+    if units != preferences::Units::Mm {
+      set |= self.s.execute("design.units", &json!({"unit": units.key()})).is_ok();
+    }
+    if !self.preferences.values.capture_history {
+      set |= self.s.execute("design.history", &json!({"capture": false})).is_ok();
+    }
+    if set {
       self.s = Session::new(self.s.design.clone());
     }
     self.swapped_session(revision);
@@ -1278,6 +1288,7 @@ impl App {
       self.activated_at = time;
     }
     self.window_focused = focused;
+    units::publish(&ctx, self.s.design.units);
     if self.poll_opening() {
       self.draw_busy(ui, &ctx);
       return;
@@ -1341,7 +1352,7 @@ impl App {
       }
     }
     if self.show_params {
-      panels::parameters_window(self, &ctx);
+      params_ui::window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);

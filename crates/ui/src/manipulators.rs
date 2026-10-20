@@ -162,8 +162,14 @@ pub struct Typed {
 
 /// A handle's value as the box shows it: an arrow's distance from home, a ring's angle, a
 /// planar handle's two distances.
+#[cfg(test)]
 pub fn value_text(t: &Triad, h: Handle) -> String {
-  let mm = |v: f64| format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr);
+  value_text_in(fox_engine::model::LengthUnit::Mm, t, h)
+}
+
+/// [`value_text`] with lengths in the design's unit.
+pub fn value_text_in(unit: fox_engine::model::LengthUnit, t: &Triad, h: Handle) -> String {
+  let mm = |v: f64| unit.format((v * 1e4).round() / 1e4);
   match h {
     Handle::Arrow(i) => mm(t.moved(i)),
     Handle::Ring(i) => {
@@ -189,11 +195,19 @@ pub fn typed_edit(t: &Triad, h: Handle, values: &[f64]) -> Option<TriadEdit> {
 }
 
 /// Reads a value box: comma-separated lengths (angles for a ring), with the design's
-/// parameters.
+/// parameters; a bare length means the design's unit.
 fn parse_typed(s: &fox_engine::Session, h: Handle, text: &str) -> Option<Vec<f64>> {
   use fox_engine::expr::{Kind, eval};
-  let kind = if matches!(h, Handle::Ring(_)) { Kind::Angle } else { Kind::Length };
-  text.split(',').map(|p| eval(p.trim(), kind, &s.model.params).ok()).collect()
+  let ring = matches!(h, Handle::Ring(_));
+  let kind = if ring { Kind::Angle } else { Kind::Length };
+  let unit = s.design.units;
+  text
+    .split(',')
+    .map(|p| {
+      let p = if ring { p.trim().to_string() } else { unit.typed(p.trim()) };
+      eval(&p, kind, &s.model.params).ok()
+    })
+    .collect()
 }
 
 /// Parameter along the axis `o + d·t` of its point closest to the ray `ro + rd·s` (None when
@@ -440,7 +454,7 @@ fn value_box(app: &mut App, ctx: &egui::Context, t: &Triad, l: &Layout, project:
   // a new box starts with the value, selected, so typing replaces it
   let fresh = b.text.is_empty();
   if fresh {
-    b.text = value_text(t, b.handle);
+    b.text = value_text_in(crate::units::current(ctx), t, b.handle);
   }
   let (mut commit, mut cancel) = (false, false);
   egui::Area::new(egui::Id::new("triad-value"))
@@ -476,7 +490,7 @@ fn value_box(app: &mut App, ctx: &egui::Context, t: &Triad, l: &Layout, project:
 /// The dragged handle's value, next to it.
 fn readout(painter: &egui::Painter, t: &Triad, h: Handle, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) {
   let Some(at) = value_at(t, h, l, project) else { return };
-  let text = value_text(t, h);
+  let text = value_text_in(crate::units::current(painter.ctx()), t, h);
   let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), Color32::WHITE);
   let r = egui::Rect::from_min_size(at + Vec2::new(14.0, -24.0), galley.size() + Vec2::new(10.0, 4.0));
   painter.rect_filled(r, 3.0, ACTIVE);

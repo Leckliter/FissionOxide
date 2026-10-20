@@ -899,8 +899,14 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
     .iter()
     .enumerate()
     .filter(|(i, _)| hud_value(app, *i).is_some())
-    .map(|(i, f)| (*f, app.tstate.hud.typed[i].trim().to_string()))
+    .map(|(i, f)| (*f, hud_text(app, *f, &app.tstate.hud.typed[i])))
     .collect()
+}
+
+/// Heads-up box text as an expression: a bare length means the design's unit.
+fn hud_text(app: &App, field: Field, text: &str) -> String {
+  let t = text.trim();
+  if field == Field::Angle { t.to_string() } else { app.s.design.units.typed(t) }
 }
 
 /// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
@@ -911,7 +917,7 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
     return None;
   }
   let kind = if field == Field::Angle { fox_engine::expr::Kind::Angle } else { fox_engine::expr::Kind::Length };
-  let v = fox_engine::expr::eval(text, kind, &app.s.model.params).ok()?;
+  let v = fox_engine::expr::eval(&hud_text(app, field, text), kind, &app.s.model.params).ok()?;
   (field == Field::Angle || v > 1e-9).then_some(v)
 }
 
@@ -1422,7 +1428,11 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       return;
     }
   };
-  let text = current.map(|v| fox_engine::sketch::Dim::new(v).expr).unwrap_or_default();
+  // the measured value, in the design's unit (degrees for an angle)
+  let angle = cmd["type"] == "angle";
+  let unit = app.s.design.units;
+  let text =
+    current.map(|v| if angle { fox_engine::sketch::Dim::new(v).expr } else { unit.number(v) }).unwrap_or_default();
   // stash the pending dimension in the editor (constraint id 0 = new)
   app.dim_edit = Some((0, text, pos));
   app.tstate.pending_dim = Some(cmd);
@@ -1477,14 +1487,25 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
     // the Enter is this box's, not the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     if let Some(sk) = app.s.edit_sketch {
+      // a bare length means the design's unit
+      let unit = app.s.design.units;
       if cid == 0 {
         if let Some(mut cmd) = app.tstate.pending_dim.take() {
+          let value = if cmd["type"] == "angle" { text.clone() } else { unit.typed(&text) };
           cmd["sketch"] = json!(sk.0);
-          cmd["value"] = json!(text);
+          cmd["value"] = json!(value);
           app.run("sketch.dimension", cmd);
         }
       } else {
-        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": text}));
+        let angle = app
+          .s
+          .design
+          .sketch(sk)
+          .ok()
+          .and_then(|s| s.constraint(fox_engine::sketch::ConstraintId(cid)))
+          .is_some_and(|c| c.kind.is_angle());
+        let value = if angle { text.clone() } else { unit.typed(&text) };
+        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": value}));
       }
     }
   }
@@ -1524,7 +1545,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
     let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
     for c in &r.sketch.constraints {
       let Some(dim) = c.kind.dim() else { continue };
-      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim) else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim, app.s.design.units) else { continue };
       let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
       let size = galley.size() + Vec2::new(8.0, 4.0);
       let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
@@ -1561,7 +1582,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     }
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
-      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim) else { continue };
+      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim, app.s.design.units) else { continue };
       let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
       let size = galley.size() + Vec2::new(8.0, 4.0);
       // extension lines, dimension line and arrows, offset from the geometry as in Fusion
@@ -1592,7 +1613,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       painter.galley(r.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
-        app.dim_edit = Some((c.id.0, dim.expr.clone(), at));
+        // a stored bare length is mm: shown with its unit in a design in another unit
+        let text = if c.kind.is_angle() { dim.expr.clone() } else { app.s.design.units.shown(&dim.expr) };
+        app.dim_edit = Some((c.id.0, text, at));
         consumed = true;
       } else if resp.clicked() {
         let add = ui.input(|i| i.modifiers.shift);
@@ -1854,12 +1877,19 @@ fn dim_shape(
   }
 }
 
-fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> Option<([f64; 2], String)> {
-  let numeric = dim.expr.trim().parse::<f64>().is_ok();
+fn dim_label(
+  s: &Sketch,
+  k: &ConstraintKind,
+  dim: &fox_engine::sketch::Dim,
+  unit: fox_engine::model::LengthUnit,
+) -> Option<([f64; 2], String)> {
+  // a plain value ("10", "1 in") shows as the number; an expression with parameters as "w = 10"
+  let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
     format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
   } else {
-    fox_engine::sketch::Dim::new(dim.value).expr
+    // in the design's unit, without the unit (as Fusion labels sketch dimensions)
+    fox_engine::expr::trim_number(unit.from_mm(dim.value))
   };
   let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
@@ -2066,7 +2096,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     if !hud_fields(app.tool, pts.len()).is_empty() {
       return;
     }
-    let txt = format!("{}, {}", fox_engine::sketch::Dim::new(cur[0]).expr, fox_engine::sketch::Dim::new(cur[1]).expr);
+    let u = app.s.design.units;
+    let txt = format!("{}, {}", u.number(cur[0]), u.number(cur[1]));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -2175,9 +2206,14 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     at.push(shape.map(|s| s.label));
   }
+  // lengths in the design's unit (a bare number typed back means that unit, see [`hud_text`])
+  let unit = app.s.design.units;
   let fmt = |i: usize| {
-    let v = fox_engine::sketch::Dim::new(live[i]).expr;
-    if fields[i] == Field::Angle { format!("{v}°") } else { v }
+    if fields[i] == Field::Angle {
+      format!("{}°", fox_engine::sketch::Dim::new(live[i]).expr)
+    } else {
+      unit.number(live[i])
+    }
   };
   let n = fields.len();
   let hud = &mut app.tstate.hud;
@@ -2312,7 +2348,7 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
     painter.line_segment([w[0], w[1]], stroke);
   }
   if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
-    let txt = format!("R {}", fox_engine::sketch::Dim::new(r).expr);
+    let txt = format!("R {}", app.s.design.units.number(r));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -2578,7 +2614,7 @@ fn manipulator(
   painter.text(
     b + side * 14.0 + dir2 * 4.0,
     egui::Align2::LEFT_CENTER,
-    format!("{} mm", fox_engine::sketch::Dim::new(m.value).expr),
+    app.s.design.units.format(m.value),
     egui::FontId::proportional(12.0),
     Color32::from_gray(40),
   );
@@ -2708,6 +2744,23 @@ mod tests {
     // the rectangle and its dimensions are one undo step
     app.s.undo();
     assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+  }
+
+  #[test]
+  fn typed_sizes_take_the_design_unit() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["2", "10 mm"]);
+    place_point(&mut app, sk, [3.0, 7.0], None);
+    assert_eq!(dims(&app, sk), vec![50.8, 10.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let exprs: Vec<String> = s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.expr.clone())).collect();
+    assert_eq!(exprs, ["2 in", "10 mm"], "a bare number is pinned to inches; an explicit unit stays");
+    // the labels show inches
+    let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
+    let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "2");
   }
 
   #[test]

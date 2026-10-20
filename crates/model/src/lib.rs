@@ -29,6 +29,7 @@ pub mod sheet2;
 pub mod sheet3;
 pub mod subassembly;
 pub mod surface;
+pub mod units;
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +39,7 @@ pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
 pub use refs::{EdgeRef, FaceRef};
+pub use units::{LengthUnit, ModelParam, ModelParamRef};
 
 use fox_sketch::{CurveId, PointId, Sketch};
 
@@ -61,8 +63,15 @@ pub struct Design {
   #[serde(default = "format_version")]
   pub version: u32,
   pub name: String,
+  /// Document Settings > Units: how lengths show and what a bare number typed means. Values and
+  /// stored expressions stay in millimetres (see [`units`]).
+  #[serde(default, skip_serializing_if = "LengthUnit::is_mm")]
+  pub units: LengthUnit,
   #[serde(default)]
   pub parameters: Vec<Parameter>,
+  /// Model parameters starred in Change Parameters (Favorites).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub model_favorites: Vec<ModelParamRef>,
   #[serde(default)]
   pub features: Vec<Feature>,
   /// Timeline marker: only the first `marker` features are computed. `None` = all.
@@ -146,6 +155,9 @@ pub struct Parameter {
   pub kind: ParamKind,
   #[serde(default)]
   pub comment: String,
+  /// Starred in Change Parameters (Favorites).
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub favorite: bool,
 }
 
 /// A sheet metal rule, as in Fusion: the material settings sheet metal features share.
@@ -1658,7 +1670,9 @@ impl Design {
     Design {
       version: FORMAT_VERSION,
       name: name.into(),
+      units: LengthUnit::Mm,
       parameters: Vec::new(),
+      model_favorites: Vec::new(),
       features: Vec::new(),
       marker: None,
       bodies: Vec::new(),
@@ -1873,6 +1887,7 @@ impl Design {
       expr: expr.to_string(),
       kind,
       comment: comment.to_string(),
+      favorite: false,
     });
     Ok(())
   }

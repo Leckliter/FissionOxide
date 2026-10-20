@@ -226,7 +226,7 @@ impl Dialog {
       if need == 1 {
         // Point to Position starts where the point is
         let p = self.local(p);
-        self.mv.position = [mm(p.x), mm(p.y), mm(p.z)];
+        self.mv.position = [mm(self.unit, p.x), mm(self.unit, p.y), mm(self.unit, p.z)];
       }
       self.dirty = true;
     }
@@ -413,7 +413,7 @@ impl Dialog {
       ("free" | "translate", TriadEdit::Move(p)) => {
         let Some((_, c)) = self.mv.pivot.clone() else { return false };
         let d = self.local(p) - self.local(c);
-        self.translate = [mm(d.x), mm(d.y), if sketch { self.translate[2].clone() } else { mm(d.z) }];
+        self.translate = [mm(self.unit, d.x), mm(self.unit, d.y), if sketch { self.translate[2].clone() } else { mm(self.unit, d.z) }];
       }
       ("free", TriadEdit::Rotate(i, a)) => self.mv.rotate[if sketch { 2 } else { i }] = deg(a),
       ("rotate", TriadEdit::Rotate(i, a)) => {
@@ -435,11 +435,11 @@ impl Dialog {
       "rotate" => ["0 mm".into(), "0 mm".into(), "0 mm".into()],
       "point_to_point" => {
         let d = p(1)? - p(0)?;
-        [mm(d.x), mm(d.y), mm(d.z)]
+        [mm(self.unit, d.x), mm(self.unit, d.y), mm(self.unit, d.z)]
       }
       "point_to_position" => {
         let from = p(0)?.to_array();
-        [0, 1, 2].map(|i| format!("({}) - ({})", self.mv.position[i], mm(from[i])))
+        [0, 1, 2].map(|i| format!("({}) - ({})", self.mv.position[i], mm(self.unit, from[i])))
       }
       _ => self.translate.clone(),
     })
@@ -595,7 +595,7 @@ impl Dialog {
       m => {
         let pick = |i: usize| self.mv.points.get(i).map(|(_, p)| self.local(*p));
         let show = |p: Option<DVec3>| match p {
-          Some(p) => format!("{}, {}, {}", mm(p.x), mm(p.y), mm(p.z)),
+          Some(p) => format!("{}, {}, {}", mm(self.unit, p.x), mm(self.unit, p.y), mm(self.unit, p.z)),
           None => "Select".into(),
         };
         let labels: &[&str] = if m == "point_to_point" { &["Origin Point", "Target Point"] } else { &["Point"] };

@@ -9,6 +9,7 @@ use fox_engine::model::{BodyId, FeatureId};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
+use super::manip::mm;
 use super::{Dialog, Kind, axis_label, axis_vec, is_planar, sel_chip, value_edit_w};
 use crate::{App, theme};
 
@@ -65,10 +66,6 @@ const PATTERN_TYPES: [(&str, &str, bool); 4] = [
 
 /// Most instances the suppress grid shows in a direction.
 const GRID_MAX: u32 = 12;
-
-fn mm(v: f64) -> String {
-  format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
-}
 
 fn ref_of(v: &Value, k: &str) -> Option<u32> {
   v.get(k).and_then(Value::as_u64).map(|x| x as u32)
@@ -187,10 +184,11 @@ impl Dialog {
     if edges != self.edges {
       // a new reference starts at the distance the hole is from it now
       let centre = self.hole_centre(s);
+      let u = self.unit;
       for (i, e) in edges.iter().enumerate() {
         if self.edges.get(i) != Some(e) {
           let now = centre.zip(line_of(s, e)).map(|(c, (a, b))| line_distance(c, a, b));
-          self.solid.hp.offsets[i] = now.map(mm).unwrap_or_else(|| "10 mm".into());
+          self.solid.hp.offsets[i] = now.map(|v| mm(u, v)).unwrap_or_else(|| u.localize("10 mm"));
         }
       }
       self.edges = edges;
@@ -324,14 +322,14 @@ impl Dialog {
       ui.end_row();
       if let Some((name, d)) = picked {
         self.solid.hp.size = name;
-        self.a = mm(d);
+        self.a = mm(self.unit, d);
         *dirty = true;
       }
     }
     if tap != tap_before && !self.solid.hp.size.is_empty() {
       // the size stays; the diameter follows the tap type
       if let Some((_, clear, drill, _)) = SIZES.iter().find(|x| x.0 == self.solid.hp.size) {
-        self.a = mm(if tap == "tapped" { *drill } else { *clear });
+        self.a = mm(self.unit, if tap == "tapped" { *drill } else { *clear });
       }
     }
     let mut extent = if self.flag { "all" } else { "distance" };
@@ -729,7 +727,7 @@ impl Dialog {
   pub(super) fn set_pattern_arrow(&mut self, v: f64, step: f64) {
     let (n1, _) = self.pattern_counts();
     let steps = f64::from(n1.max(2) - 1);
-    self.spacing = mm((v / steps).max(step.max(1e-3)));
+    self.spacing = mm(self.unit, (v / steps).max(step.max(1e-3)));
   }
 }
 

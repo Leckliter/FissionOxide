@@ -447,7 +447,7 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
         ui.end_row();
       });
       ui.add_space(6.0);
-      note(ui, "Default units apply to new designs; FissionOxide designs are in millimetres for now.");
+      note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
       note(ui, "The orientation is saved, but the view stays Z up until the up axis can be changed.");
     }
     Page::Navigation => {
@@ -565,6 +565,18 @@ mod tests {
     app.preferences.values.capture_history = true;
     app.new_design();
     assert!(!app.s.design.history_off);
+  }
+
+  #[test]
+  fn new_designs_take_the_default_units() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.preferences.values.units = Units::In;
+    app.new_design();
+    assert_eq!(app.s.design.units, fox_engine::model::LengthUnit::In);
+    assert!(!app.s.can_undo() && !app.s.dirty, "the setting isn't an undo step");
+    app.preferences.values.units = Units::Mm;
+    app.new_design();
+    assert_eq!(app.s.design.units, fox_engine::model::LengthUnit::Mm);
   }
 
   #[test]

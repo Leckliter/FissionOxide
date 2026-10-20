@@ -29,8 +29,9 @@ pub(super) struct Cache {
   preview_plane: Option<FeatureId>,
 }
 
-pub(super) fn mm(v: f64) -> String {
-  format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
+/// A dragged length (mm) as a value box shows it, in the design's unit.
+pub(super) fn mm(unit: fox_engine::model::LengthUnit, v: f64) -> String {
+  unit.format((v * 1e4).round() / 1e4)
 }
 
 pub(super) fn deg(a: f64) -> String {
@@ -182,11 +183,11 @@ impl Dialog {
   pub(super) fn set_more_manipulator(&mut self, v: f64, step: f64) -> bool {
     match self.kind {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
-      Kind::Fillet | Kind::Chamfer => self.radius = mm(v.max(step.max(1e-3))),
-      Kind::PressPull => self.distance = mm(v),
+      Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::PressPull => self.distance = mm(self.unit, v),
       // an offset is never zero: it keeps to the side it is on
       Kind::SkOffset => {
-        self.distance = mm(nonzero(v, step));
+        self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
       }
       Kind::RectPattern => self.set_pattern_arrow(v, step),
@@ -215,7 +216,7 @@ impl Dialog {
     let curves: Vec<CurveId> = self.curves.iter().map(|c| CurveId(*c)).collect();
     let Some(v) = offset_at(sketch, &curves, at) else { return };
     let v = if step > 0.0 { (v / step).round() * step } else { v };
-    let text = mm(nonzero(v, step));
+    let text = mm(self.unit, nonzero(v, step));
     if text != self.distance {
       self.distance = text;
       self.dirty = true;
@@ -261,7 +262,7 @@ impl Dialog {
       Kind::Joint => match edit {
         TriadEdit::Move(p) => {
           let Some(f) = self.joint_fixed_frame(s) else { return };
-          self.distance = mm((p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
+          self.distance = mm(self.unit, (p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
         }
         TriadEdit::Rotate(_, a) => self.angle = deg(a),
       },
