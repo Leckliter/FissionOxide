@@ -1485,6 +1485,9 @@ pub static EMBOSS: Form = Form {
     Input::Expr { key: "depth", label: "Depth", default: "1 mm" },
     Input::Check { key: "deboss", label: "Deboss (sink into the face)" },
     Input::Check { key: "wrap", label: "Wrap around a cylinder" },
+    Input::Expr { key: "horizontal", label: "Horizontal distance", default: "0 mm" },
+    Input::Expr { key: "vertical", label: "Vertical distance", default: "0 mm" },
+    Input::Expr { key: "rotation", label: "Rotation", default: "0 deg" },
   ],
   picks_model: true,
 };

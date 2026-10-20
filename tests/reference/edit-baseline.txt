@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+423-planar-emboss-ring
+424-planar-deboss
+425-planar-emboss-offset-rotated
+426-cylinder-emboss-wrap
