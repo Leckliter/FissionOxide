@@ -1,0 +1,7 @@
+# 166-short-wide-yz: added by the parity loop from a Fusion probe
+# short-wide-yz: Center point slot, short and wide, pointing -y on YZ: centre (-5, 8), arc centre (-5, 5), width 14; extruded 3.
+# sketch SlotSketch: YZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}}
+{"cmd": "sketch.slot", "center": [-5, 8], "end": [-5, 5], "width": 14}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}

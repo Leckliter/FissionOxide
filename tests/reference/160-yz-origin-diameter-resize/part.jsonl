@@ -1,0 +1,8 @@
+# 160-yz-origin-diameter-resize: added by the parity loop from a Fusion probe
+# yz-origin-diameter-resize: Circle on YZ with its centre on the sketch origin, drawn at diameter 12 then driven to diameter 30 by its diameter dimension; extruded 12 along +X.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 0, 1]}}
+{"cmd": "sketch.circle", "center": [0, 0], "diameter": 12}
+{"cmd": "sketch.dimension", "type": "diameter", "curves": [1], "value": 30}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 12, "operation": "new_body"}

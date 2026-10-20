@@ -1,0 +1,9 @@
+# 90-arc-surface-symmetric: added by the parity loop from a Fusion probe
+# Quarter-circle arc r=20 about the origin on XY, extruded 30 mm as a surface; thickened 2 mm
+# symmetrically (Fusion: 2 mm each side) into a new body (quarter tube r 18..22), the surface then removed.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [20, 0], "mid": [14.142135623730951, 14.142135623730951], "end": [0, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "surface.extrude", "sketch": 1, "distance": 30}
+{"cmd": "thicken", "bodies": [2000], "thickness": 2, "symmetric": true, "operation": "new_body"}
+{"cmd": "body.remove", "bodies": [2000]}

@@ -113,6 +113,9 @@ pub struct ToolState {
   curves: Vec<(u32, [f64; 2])>,
   /// Heads-up value boxes of the shape being drawn.
   hud: HeadsUp,
+  /// Center Point Arc: the cursor's last angle around the centre and the signed sweep it has
+  /// wound from the start, so the arc runs the way the cursor went (negative = clockwise).
+  arc_wind: Option<(f64, f64)>,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -163,6 +166,29 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.dim_first = None;
   app.tstate.curves.clear();
   app.tstate.hud = HeadsUp::default();
+  app.tstate.arc_wind = None;
+}
+
+/// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
+/// sweeps the way the cursor went, as in Fusion.
+fn track_arc_wind(app: &mut App, resp: &egui::Response, view: &View) {
+  let wind = match (app.tool, app.tstate.pts.as_slice()) {
+    (Tool::CenterArc, [c, a]) => {
+      let (c, a) = (*c, *a);
+      resp.hover_pos().and_then(|pos| sketch_cursor(app, view, pos)).map(|(cur, _)| {
+        let cur = hud_apply(app, cur);
+        let ang = (cur[1] - c[1]).atan2(cur[0] - c[0]);
+        let (last, sweep) = app.tstate.arc_wind.unwrap_or(((a[1] - c[1]).atan2(a[0] - c[0]), 0.0));
+        let step = (ang - last + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        // past a full turn either way the direction stays as it was
+        (ang, (sweep + step).clamp(-std::f64::consts::TAU, std::f64::consts::TAU))
+      })
+    }
+    _ => None,
+  };
+  if wind.is_some() || app.tstate.pts.len() != 2 || app.tool != Tool::CenterArc {
+    app.tstate.arc_wind = wind;
+  }
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -246,6 +272,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   dim_editor(app, &ctx);
+  track_arc_wind(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
@@ -635,7 +662,9 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     },
     Tool::Arc3 if n == 3 => Some(("sketch.arc", json!({"sketch": sid, "start": first, "end": pts[1], "mid": p}))),
     Tool::CenterArc if n == 3 => {
-      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p})))
+      // the arc runs the way the cursor wound around the centre
+      let clockwise = app.tstate.arc_wind.take().is_some_and(|(_, sweep)| sweep < 0.0);
+      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p, "clockwise": clockwise})))
     }
     Tool::Polygon if n == 2 => {
       Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6})))
@@ -1489,7 +1518,7 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Tangent { .. } => Icon::Tangent,
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
     _ => Icon::Fix,
   }
@@ -1605,7 +1634,23 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CenterArc, [c, a]) => circle(*c, (a[0] - c[0]).hypot(a[1] - c[1])),
+    (Tool::CenterArc, [c, a]) => {
+      // the arc so far, the way the cursor wound; a full circle until it moves
+      let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+      match app.tstate.arc_wind {
+        Some((_, sweep)) if sweep.abs() > 1e-9 => {
+          let a0 = (a[1] - c[1]).atan2(a[0] - c[0]);
+          let pts: Vec<[f64; 2]> = (0..=64)
+            .map(|i| {
+              let t = a0 + sweep * i as f64 / 64.0;
+              [c[0] + r * t.cos(), c[1] + r * t.sin()]
+            })
+            .collect();
+          poly(&pts, false);
+        }
+        _ => circle(*c, r),
+      }
+    }
     (Tool::Slot, [a, b]) => {
       let w = point_line_dist(cur, *a, *b);
       circle(*a, w);

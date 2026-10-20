@@ -1,0 +1,11 @@
+# 123-perpendicular-line-arc-sector: added by the parity loop from a Fusion probe
+# perpendicular-line-arc-sector: Arc R25 (ends fixed) centred at the origin sweeping 0..120 deg, closed by two lines from its ends meeting at a free point drawn at (3,4). Each line is made perpendicular to the arc, so both run through the centre: a 120 deg sector, area 654.50, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [25, 0], "end": [-12.5, 21.650635]}
+{"cmd": "sketch.line", "points": [[-12.5, 21.650635], [3, 4], [25, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [5, 3]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [6, 3]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
