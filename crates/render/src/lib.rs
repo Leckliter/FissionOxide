@@ -28,6 +28,10 @@ pub struct Camera {
   /// Vertical field of view in radians; ignored when `ortho`.
   pub fov: f64,
   pub ortho: bool,
+  /// Turn of the picture about the view axis (radians, counter-clockwise on screen): the
+  /// ViewCube's rotate arrows, and views whose up isn't world Z.
+  #[serde(default)]
+  pub roll: f64,
 }
 
 impl Default for Camera {
@@ -40,6 +44,7 @@ impl Default for Camera {
       distance: 200.0,
       fov: 30f64.to_radians(),
       ortho: false,
+      roll: 0.0,
     }
   }
 }
@@ -70,6 +75,20 @@ impl StandardView {
       _ => return None,
     })
   }
+
+  /// The view's (eye direction, screen up) in the ViewCube's own axes: Z up, the front face
+  /// facing -Y. Top and bottom keep the front face at the bottom and top of the screen.
+  pub fn direction(self) -> (DVec3, DVec3) {
+    match self {
+      StandardView::Home => (DVec3::new(1.0, -1.0, 1.0).normalize(), DVec3::Z),
+      StandardView::Top => (DVec3::Z, DVec3::Y),
+      StandardView::Bottom => (-DVec3::Z, -DVec3::Y),
+      StandardView::Front => (-DVec3::Y, DVec3::Z),
+      StandardView::Back => (DVec3::Y, DVec3::Z),
+      StandardView::Right => (DVec3::X, DVec3::Z),
+      StandardView::Left => (-DVec3::X, DVec3::Z),
+    }
+  }
 }
 
 impl Camera {
@@ -93,23 +112,42 @@ impl Camera {
     let (sy, cy) = self.yaw.sin_cos();
     let right = DVec3::new(cy, sy, 0.0);
     let up = back.cross(right).normalize();
-    (right, up, back)
+    if self.roll == 0.0 {
+      return (right, up, back);
+    }
+    let (sr, cr) = self.roll.sin_cos();
+    (right * cr + up * sr, up * cr - right * sr, back)
+  }
+
+  /// Looks from direction `dir` (target towards the eye) with `up` as near the top of the
+  /// screen as it can be. Straight down or up the yaw carries the turn, so orbiting from there
+  /// behaves; elsewhere an up off world Z becomes [`Camera::roll`].
+  pub fn look_from(&mut self, dir: DVec3, up: DVec3) {
+    let d = dir.normalize_or_zero();
+    if d == DVec3::ZERO {
+      return;
+    }
+    let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+    self.pitch = d.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
+    self.yaw = if d.z > 0.999 {
+      (-up.x).atan2(up.y)
+    } else if d.z < -0.999 {
+      up.x.atan2(-up.y)
+    } else {
+      d.x.atan2(-d.y)
+    };
+    self.roll = 0.0;
+    let (right, screen_up, back) = self.basis();
+    let u = up - back * up.dot(back);
+    if u.length_squared() > 1e-12 {
+      let r = (-u.dot(right)).atan2(u.dot(screen_up));
+      self.roll = if r.abs() < 1e-9 { 0.0 } else { r };
+    }
   }
 
   pub fn set_view(&mut self, v: StandardView) {
-    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
-    let top = FRAC_PI_2 - 1e-6;
-    let (yaw, pitch) = match v {
-      StandardView::Home => (FRAC_PI_4, 0.6155),
-      StandardView::Top => (0.0, top),
-      StandardView::Bottom => (0.0, -top),
-      StandardView::Front => (0.0, 0.0),
-      StandardView::Back => (PI, 0.0),
-      StandardView::Right => (FRAC_PI_2, 0.0),
-      StandardView::Left => (-FRAC_PI_2, 0.0),
-    };
-    self.yaw = yaw;
-    self.pitch = pitch;
+    let (dir, up) = v.direction();
+    self.look_from(dir, up);
   }
 
   /// Rotates by screen-space drag deltas (radians).
@@ -816,5 +854,27 @@ mod tests {
     assert!((cam.eye_dir() - DVec3::new(1.0, 0.0, 0.0)).length() < 1e-9);
     cam.set_view(StandardView::Top);
     assert!(cam.eye_dir().z > 0.999);
+  }
+
+  #[test]
+  fn look_from_any_direction_with_any_up() {
+    let mut cam = Camera::default();
+    let corner = DVec3::new(-1.0, 1.0, -1.0).normalize();
+    cam.look_from(corner, DVec3::Z);
+    let (right, up, back) = cam.basis();
+    assert!((back - corner).length() < 1e-9, "{back}");
+    assert!(up.z > 0.0 && right.z.abs() < 1e-9 && cam.roll == 0.0, "Z stays up: {up}");
+    // the front view turned a quarter: +X at the top of the screen
+    cam.look_from(-DVec3::Y, DVec3::X);
+    let (right, up, back) = cam.basis();
+    assert!((back + DVec3::Y).length() < 1e-9 && (up - DVec3::X).length() < 1e-9, "{up}");
+    assert!((right - DVec3::Z).length() < 1e-9, "{right}");
+    // straight down the turn goes into the yaw
+    cam.look_from(DVec3::Z, -DVec3::X);
+    let (_, up, _) = cam.basis();
+    assert!((up + DVec3::X).length() < 1e-6 && cam.roll == 0.0, "{up} {}", cam.roll);
+    let home = Camera::default();
+    cam.set_view(StandardView::Home);
+    assert!((cam.eye_dir() - home.eye_dir()).length() < 1e-3);
   }
 }
