@@ -113,10 +113,10 @@ impl Ctx<'_> {
         let sec = Plane { origin: o + x * r, x, y: d };
         let half = s / 2.0;
         let lp = |pts: &[[f64; 2]]| -> Loop {
-          Loop { segs: (0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect() }
+          Loop::new((0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect())
         };
         let outer = match section {
-          CoilSection::Circular => Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: half, ccw: true }] },
+          CoilSection::Circular => Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: half, ccw: true }]),
           CoilSection::Square => lp(&[[-half, -half], [half, -half], [half, half], [-half, half]]),
           CoilSection::TriangleOut => lp(&[[-half, -half], [half, 0.0], [-half, half]]),
           CoilSection::TriangleIn => lp(&[[half, -half], [half, half], [-half, 0.0]]),
@@ -219,6 +219,7 @@ impl Ctx<'_> {
               Seg::Line { a: [len, t / 2.0], b: [0.0, t / 2.0] },
               Seg::Line { a: [0.0, t / 2.0], b: [0.0, -t / 2.0] },
             ],
+            src: Vec::new(),
           };
           let face = Shape::face(&sec, &Profile { outer: rect, holes: vec![] }).map_err(ke)?;
           if let Some(d) = reach {
@@ -281,6 +282,7 @@ impl Ctx<'_> {
             Seg::Line { a: [size, size], b: [-size, size] },
             Seg::Line { a: [-size, size], b: [-size, -size] },
           ],
+          src: Vec::new(),
         };
         let cutter = Shape::face(&pl, &Profile { outer: sq, holes: vec![] }).map_err(ke)?;
         for (bi, fids) in self.faces_by_body(faces)? {
@@ -425,6 +427,7 @@ impl Ctx<'_> {
             Seg::Line { a: [size, size], b: [-size, size] },
             Seg::Line { a: [-size, size], b: [-size, -size] },
           ],
+          src: Vec::new(),
         };
         let cutter = Shape::face(&pl, &Profile { outer: sq, holes: vec![] }).map_err(ke)?;
         for b in bodies.iter() {
@@ -865,7 +868,7 @@ fn trim(v: f64) -> String {
 /// [`PipeSection`]); `wall` makes it hollow by an inward offset.
 fn pipe_section(section: PipeSection, size: f64, wall: Option<f64>) -> Result<(Loop, Vec<Loop>), String> {
   let poly = |pts: &[[f64; 2]]| -> Loop {
-    Loop { segs: (0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect() }
+    Loop::new((0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect())
   };
   // the inradius: a wall this thick leaves no hole
   let inner = match section {
@@ -875,7 +878,7 @@ fn pipe_section(section: PipeSection, size: f64, wall: Option<f64>) -> Result<(L
   // the loop with inradius `r`, counter-clockwise or (for a hole) clockwise
   let shape = |r: f64, ccw: bool| -> Loop {
     let l = match section {
-      PipeSection::Circular => Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: r, ccw: true }] },
+      PipeSection::Circular => Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: r, ccw: true }]),
       PipeSection::Square => poly(&[[-r, -r], [r, -r], [r, r], [-r, r]]),
       PipeSection::Triangular => {
         // base along x at y = -size/2, apex at y = size/2: the centroid is size/6 below the path
@@ -1069,6 +1072,7 @@ fn thread_groove(
       Seg::Line { a: [apex, 0.0], b: [back, half] },
       Seg::Line { a: [back, half], b: [back, -half] },
     ],
+    src: Vec::new(),
   };
   let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
   face.helix_sweep(start, dir, x, r, pitch, length, left)

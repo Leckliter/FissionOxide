@@ -787,6 +787,7 @@ fn section_cap(shape: &Shape, pl: &Plane, size: f64) -> Option<TriMesh> {
       Seg::Line { a: [r, r], b: [-r, r] },
       Seg::Line { a: [-r, r], b: [-r, -r] },
     ],
+    src: Vec::new(),
   };
   let face = Shape::face(pl, &Profile { outer: sq, holes: vec![] }).ok()?;
   let cut = shape.section_inside(&face).ok()?;
