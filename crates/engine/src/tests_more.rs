@@ -241,6 +241,37 @@ fn mesh_tools_and_appearance() {
   assert_eq!(s.design.body_settings(fox_model::BodyId(b)).unwrap().color, None);
 }
 
+/// Extrudes an ellipse drawn through a point on it; with `legacy` its sketch has no behaviour
+/// flags, as one from a file saved before them. The body's (face count, volume).
+fn extruded_ellipse(legacy: bool) -> (usize, f64) {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "point": [15, 5]}));
+  if legacy {
+    for f in &mut s.design.features {
+      if let fox_model::FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+        sketch.behaviours = fox_sketch::Behaviours::legacy();
+      }
+    }
+  }
+  run(&mut s, "extrude", json!({"distance": 1}));
+  assert_eq!(s.model.bodies.len(), 1);
+  (s.model.bodies[0].faces().len(), volume(&s))
+}
+
+#[test]
+fn a_new_ellipse_extrudes_to_one_side_face_and_a_legacy_one_to_two() {
+  let want = std::f64::consts::PI * 20.0 * 5.0 / (1.0f64 - 0.5625).sqrt();
+  // a new design: one elliptical side face, top and bottom, as in Fusion
+  let (faces, v) = extruded_ellipse(false);
+  assert_eq!(faces, 3);
+  assert!((v - want).abs() < 0.05, "{v} vs {want}");
+  // a legacy sketch keeps main's two half-ellipse sides
+  let (faces, v) = extruded_ellipse(true);
+  assert_eq!(faces, 4);
+  assert!((v - want).abs() < 0.05, "{v} vs {want}");
+}
+
 #[test]
 fn sketch_tools_make_profiles() {
   let mut s = Session::default();
@@ -250,6 +281,16 @@ fn sketch_tools_make_profiles() {
   run(&mut s, "extrude", json!({"distance": 1}));
   let area = volume(&s);
   assert!((area - std::f64::consts::PI * 200.0).abs() < 0.05, "{area}");
+  // or through a point on it (Fusion's third pick): minor = 5 / sqrt(1 - (15/20)^2)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "point": [15, 5]}));
+  run(&mut s, "extrude", json!({"distance": 1}));
+  let want = std::f64::consts::PI * 20.0 * 5.0 / (1.0f64 - 0.5625).sqrt();
+  assert!((volume(&s) - want).abs() < 0.05, "{} vs {want}", volume(&s));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let bad = json!({"center": [0, 0], "major": [20, 0], "point": [25, 5]});
+  assert!(s.execute("sketch.ellipse", &bad).is_err(), "beyond the end of the axis");
   // 3-point circle, 2-point circle, 3-point rectangle, polygons, slots
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));

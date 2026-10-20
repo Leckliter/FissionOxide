@@ -8,7 +8,7 @@ use fox_engine::kernel::glam::DVec3;
 use fox_engine::model::FeatureId;
 use fox_engine::render::{self, ray_plane};
 use fox_engine::scene::{Pick, ViewOptions};
-use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+use fox_engine::sketch::{ConstraintKind, CurveKind, Ellipse2, PointId, Sketch};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
@@ -722,10 +722,15 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       };
       Some(("sketch.slot", q))
     }
-    Tool::Ellipse if n == 3 => {
-      let minor = point_line_dist(p, first, pts[1]);
-      Some(("sketch.ellipse", json!({"sketch": sid, "center": first, "major": pts[1], "minor": minor.max(0.01)})))
-    }
+    Tool::Ellipse if n == 3 => match Ellipse2::minor_through(first, pts[1], p) {
+      // the ellipse passes through the third pick, as in Fusion
+      Some(_) => Some(("sketch.ellipse", json!({"sketch": sid, "center": first, "major": pts[1], "point": p}))),
+      None => {
+        app.status = Some(("Ellipse: the third point must lie off the axis and within its length".into(), true));
+        app.tstate.pts.pop();
+        None
+      }
+    },
     Tool::Conic if n == 3 => {
       Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
     }
@@ -1654,6 +1659,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       line(*a, *b);
       let w = point_line_dist(cur, *a, *b);
       if app.tool == Tool::Ellipse {
+        // through the cursor; off the ends of the axis, as far from it as the cursor
+        let w = Ellipse2::minor_through(*a, *b, cur).unwrap_or(w);
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let r = dx.hypot(dy).max(1e-12);
         let (c, s) = (dx / r, dy / r);
@@ -1999,7 +2006,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::ControlSpline) => {
       "Control point spline: click control points · click the last again or Enter to finish"
     }
-    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the minor axis",
+    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the ellipse",
     (true, Tool::Conic) => "Conic: start, end, then the apex it bends towards",
     (true, Tool::MidpointLine) => "Midpoint line: the midpoint, then one end",
     (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",

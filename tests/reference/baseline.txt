@@ -50,6 +50,9 @@
 185-symmetric-angle
 186-line-loop-partial
 19-l-bracket-constrained
+195-rotated-offset-ellipse-xz
+196-third-point-off-minor-axis
+197-minor-longer-than-major
 20-slot-constrained
 205-vertical-edge-sweep-path
 206-sketch-line-sweep-path

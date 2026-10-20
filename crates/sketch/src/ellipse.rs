@@ -37,6 +37,25 @@ impl Ellipse2 {
     (a > 1e-12 && minor.is_finite() && minor > 1e-12).then(|| Ellipse2 { center, dir: [dx / a, dy / a], a, b: minor })
   }
 
+  /// The other radius of the ellipse with this centre and end of the `a` axis that passes
+  /// through `point` (what a third pick sets, as in Fusion). None when the point lies on the
+  /// axis line or at least as far along the axis as its end, where no such ellipse exists.
+  pub fn minor_through(center: P, major: P, point: P) -> Option<f64> {
+    let (dx, dy) = (major[0] - center[0], major[1] - center[1]);
+    let a = dx.hypot(dy);
+    if a <= 1e-12 {
+      return None;
+    }
+    let (px, py) = (point[0] - center[0], point[1] - center[1]);
+    let (x, y) = ((px * dx + py * dy) / a, (py * dx - px * dy) / a);
+    let k = 1.0 - (x / a).powi(2);
+    if k <= 1e-9 {
+      return None;
+    }
+    let b = y.abs() / k.sqrt();
+    (b.is_finite() && b > 1e-12).then_some(b)
+  }
+
   fn v(&self) -> P {
     [-self.dir[1], self.dir[0]]
   }
@@ -475,6 +494,25 @@ mod tests {
     let ts = e.meets(&Geo::Arc { c: [1.0, 2.0], r: 6.0, a0: 0.0, sweep: TAU });
     assert_eq!(ts.len(), 4);
     assert!(ts.iter().all(|t| (dist(e.at(*t), [1.0, 2.0]) - 6.0).abs() < 1e-9));
+  }
+
+  #[test]
+  fn the_third_pick_lies_on_the_ellipse() {
+    // any centre and axis direction: the ellipse through the pick has it on its curve
+    let (c, m) = ([5.0, 3.0], [17.0, 8.0]);
+    for p in [[9.0, 9.0], [5.0, 19.0], [-2.0, 1.0]] {
+      let b = Ellipse2::minor_through(c, m, p).unwrap();
+      assert!(Ellipse2::new(c, m, b).unwrap().residual(p).abs() < 1e-9, "{p:?}");
+    }
+    let b = Ellipse2::minor_through([0.0, 0.0], [20.0, 0.0], [15.0, 5.0]).unwrap();
+    assert!((b - 7.559289460184547).abs() < 1e-12, "{b}");
+    let b = Ellipse2::minor_through([2.0, 1.0], [12.0, 1.0], [2.0, 16.0]).unwrap();
+    assert!((b - 15.0).abs() < 1e-12, "longer than the first axis: {b}");
+    // on the axis line, or as far along it as its end or beyond: no such ellipse
+    for p in [[10.0, 0.0], [20.0, 3.0], [-25.0, 1.0]] {
+      assert_eq!(Ellipse2::minor_through([0.0, 0.0], [20.0, 0.0], p), None, "{p:?}");
+    }
+    assert_eq!(Ellipse2::minor_through([1.0, 1.0], [1.0, 1.0], [3.0, 3.0]), None, "no axis");
   }
 
   #[test]
