@@ -1,0 +1,10 @@
+# 225-control-spline-half-profile: added by the parity loop from a Fusion probe
+# control-spline-half-profile: Construction line on the Y axis; a line along X from the origin to (25,0) and a cubic control point spline (one Bezier span) with control points (25,0),(10,10),(30,25),(0,30) form the right half of an outline; both are mirrored about the axis into a closed, symmetric outline; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 40]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.line", "points": [[0, 0], [25, 0]]}
+{"cmd": "sketch.control_spline", "points": [[25, 0], [10, 10], [30, 25], [0, 30]]}
+{"cmd": "sketch.mirror", "curves": [5, 10], "line": 2}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
