@@ -143,3 +143,8 @@
 322-rigid-face-offset-angle
 323-revolute-hole-edge-on-pin
 324-cylindrical-hole-face-on-pin
+# Reference parts that pass; see README.md. One directory name per line.
+344-face-and-offset-plane
+345-opposed-face-and-plane
+346-perpendicular-faces
+347-two-origin-planes
