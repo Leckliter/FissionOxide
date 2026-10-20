@@ -216,3 +216,7 @@
 266-rect-corner-first-line-swapped
 267-trapezoid-obtuse-corner
 268-apparent-intersection
+273-rect-corner-fillet
+274-triangle-two-fillets
+275-l-shape-inner-fillet
+276-line-arc-fillet

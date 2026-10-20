@@ -263,7 +263,7 @@ impl Kind {
       Kind::Analysis("accessibility") => ("Accessibility Analysis", "Which faces a tool can reach from a direction"),
       Kind::Analysis(_) => ("Curvature Map Analysis", "Colour by how sharply surfaces curve"),
       Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
-      Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
+      Kind::SkFillet => ("Fillet", "Round the corner where two lines or arcs meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
       Kind::SkChamferAngle => {
@@ -1930,7 +1930,7 @@ impl Dialog {
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::Material => "select a body of a component",
-      Kind::SkFillet => "select two lines that meet",
+      Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror => "select curves and a mirror line",
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
