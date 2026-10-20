@@ -1,0 +1,15 @@
+# 365-sketch-line-diagonal-mirror: added by the parity loop from a Fusion probe
+# sketch-line-diagonal-mirror: 20x20x10 box; a second XY sketch holds one line (0,0)-(20,20); construction plane along that sketch line at t=0.25 (through (5,5,0), normal (1,1,0)); body mirrored about it and joined (two overlapping 20x20 squares, volume 7000, bbox -10..20 or 0..30).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 20]]}
+{"cmd": "sketch.finish"}
+# Fox edge refs take body edges only; this sketch-line path is the Fusion feature's other input
+{"cmd": "plane", "method": "along_path", "edge": {"sketch": 3, "curve": 1}, "t": 0.25}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}
