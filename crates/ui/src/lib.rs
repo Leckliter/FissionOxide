@@ -197,6 +197,13 @@ impl App {
     self.opening = Some((p, std::thread::spawn(move || Session::open(&path))));
   }
 
+  /// Opens a file given from outside the app (a later launch's argument): a design on another
+  /// thread, a picture as a new design to trace.
+  pub fn open_file(&mut self, p: PathBuf) {
+    self.cancel_dialog();
+    if trace::is_image(&p) { self.open_path(&p) } else { self.open_in_background(p) }
+  }
+
   /// What the app is still getting ready, while it is: "Opening part.fox…".
   pub fn loading(&self) -> Option<String> {
     let (p, _) = self.opening.as_ref()?;

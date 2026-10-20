@@ -1,13 +1,27 @@
 //! FissionOxide desktop app.
 //!
-//! `fissionoxide [design.fox]`
+//! `fissionoxide [--new-instance] [design.fox]`
+//!
+//! Launched while it's already running, it hands the file to the running app (which comes to
+//! the front) and exits, as Fusion does. `--new-instance` or `$FOX_MULTI_INSTANCE=1` starts
+//! another app instead; a separate `$FOX_CONFIG_DIR` is a separate instance too.
 
 // a release build is a windowed app on Windows: no console window behind it
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() -> eframe::Result<()> {
   env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-  let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+  let (flags, files): (Vec<_>, Vec<_>) = std::env::args_os().skip(1).partition(|a| a == "--new-instance");
+  let open = files.into_iter().next().map(std::path::PathBuf::from);
+  let instance = if flags.is_empty() && !fox_desktop::instance::disabled_by_env() {
+    match fox_desktop::instance::claim(open.as_deref()) {
+      Some(i) => Some(i),
+      // handed to the running app
+      None => return Ok(()),
+    }
+  } else {
+    None
+  };
   let options = eframe::NativeOptions {
     viewport: eframe::egui::ViewportBuilder::default()
       .with_inner_size([1440.0, 900.0])
@@ -19,7 +33,7 @@ fn main() -> eframe::Result<()> {
       ),
     ..Default::default()
   };
-  eframe::run_native("FissionOxide", options, Box::new(move |cc| Ok(Box::new(Desktop::new(cc, open)))))
+  eframe::run_native("FissionOxide", options, Box::new(move |cc| Ok(Box::new(Desktop::new(cc, open, instance)))))
 }
 
 /// The app in its desktop shell: the start-up splash, and on Windows an icon in the notification
@@ -33,11 +47,23 @@ struct Desktop {
   /// The tray's tooltip and update entry as last set.
   #[cfg(windows)]
   tray_text: (String, String),
+  /// Takes later launches' files, unless this is a separate instance.
+  instance: Option<fox_desktop::instance::Instance>,
+  /// A file a later launch handed over, opened once the window is in front.
+  handed: Option<std::path::PathBuf>,
 }
 
 impl Desktop {
-  fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Desktop {
+  fn new(
+    cc: &eframe::CreationContext<'_>,
+    open: Option<std::path::PathBuf>,
+    instance: Option<fox_desktop::instance::Instance>,
+  ) -> Desktop {
     let app = fox_ui::App::new(cc, open);
+    if let Some(i) = &instance {
+      let ctx = cc.egui_ctx.clone();
+      i.set_wake(move || ctx.request_repaint());
+    }
     #[cfg(windows)]
     {
       // a click where the cursor came back without moving would otherwise be dropped
@@ -52,10 +78,46 @@ impl Desktop {
         .map_err(|e| e.to_string())
         .and_then(|i| fox_desktop::tray::Tray::new(i.rgba, i.width, i.height, move || ctx.request_repaint()));
       let tray = tray.map_err(|e| log::warn!("no notification-area icon: {e}")).ok();
-      Desktop { app, splash: Some(Default::default()), tray, tray_text: Default::default() }
+      Desktop { app, splash: Some(Default::default()), tray, tray_text: Default::default(), instance, handed: None }
     }
     #[cfg(not(windows))]
-    Desktop { app, splash: Some(Default::default()) }
+    Desktop { app, splash: Some(Default::default()), instance, handed: None }
+  }
+
+  /// Later launches: brings the window to the front, then (on the next frame, so a prompt shows
+  /// over it) opens the file handed over.
+  fn handed_over(&mut self, ctx: &eframe::egui::Context) {
+    use eframe::egui::ViewportCommand;
+    if let Some(p) = self.handed.take() {
+      self.open_handed(p);
+    }
+    let Some(instance) = &self.instance else { return };
+    for r in instance.poll() {
+      ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+      ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+      ctx.send_viewport_cmd(ViewportCommand::Focus);
+      if r.open.is_some() {
+        self.handed = r.open;
+        ctx.request_repaint();
+      }
+    }
+  }
+
+  /// Opens a handed-over file in place of the design, asking first if that has unsaved changes.
+  fn open_handed(&mut self, p: std::path::PathBuf) {
+    if self.app.s.dirty {
+      let name = p.file_name().unwrap_or(p.as_os_str()).to_string_lossy().to_string();
+      let discard = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("FissionOxide")
+        .set_description(format!("{} has unsaved changes. Discard them and open {name}?", self.app.s.design.name))
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show();
+      if discard != rfd::MessageDialogResult::Ok {
+        return;
+      }
+    }
+    self.app.open_file(p);
   }
 
   #[cfg(windows)]
@@ -101,9 +163,10 @@ impl Desktop {
 }
 
 impl eframe::App for Desktop {
-  fn logic(&mut self, _ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+  fn logic(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    self.handed_over(ctx);
     #[cfg(windows)]
-    self.tray(_ctx);
+    self.tray(ctx);
   }
 
   fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
