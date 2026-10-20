@@ -68,3 +68,38 @@ fn joint_marks_sit_on_saved_origins_and_fixed_sides() {
   assert!((joint.frame.w_axis.truncate() - DVec3::new(50.0, 30.0, 12.0)).length() < 1e-6, "{joint:?}");
   assert!((origin.frame.w_axis.truncate() - DVec3::new(50.0, 30.0, 12.0)).length() < 1e-6, "{origin:?}");
 }
+
+/// While a sketch is edited, its fully constrained curves draw black and the free ones blue,
+/// as in Fusion.
+#[test]
+fn constrained_sketch_curves_draw_black_and_free_ones_blue() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let fixed = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}))["curves"][0].clone();
+  let free = run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 8]]}))["curves"][0].clone();
+  let circle = run(&mut s, "sketch.circle", json!({"center": [20, 0], "radius": 3}))["curves"][0].clone();
+  let open = run(&mut s, "sketch.circle", json!({"center": [30, 0], "radius": 3}))["curves"][0].clone();
+  let pinned = run(&mut s, "sketch.circle", json!({"center": [40, 0], "radius": 3}))["curves"][0].clone();
+  run(&mut s, "sketch.constrain", json!({"type": "fix", "curves": [fixed, pinned]}));
+  // a circle is fixed once its centre and its size are
+  let sk = s.edit_sketch.unwrap();
+  let centre = |s: &Session, c: &Value| {
+    s.design.sketch(sk).unwrap().curve_points(fox_sketch::CurveId(c.as_u64().unwrap() as u32))[0].0
+  };
+  let (cc, oc) = (centre(&s, &circle), centre(&s, &open));
+  run(&mut s, "sketch.constrain", json!({"type": "fix", "points": [cc]}));
+  run(&mut s, "sketch.constrain", json!({"type": "fix", "points": [oc]}));
+  run(&mut s, "sketch.dimension", json!({"type": "diameter", "curves": [circle], "value": "6"}));
+
+  let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  let colour = |c: &Value| {
+    let curve = fox_sketch::CurveId(c.as_u64().unwrap() as u32);
+    let l = scene.lines.iter().find(|l| picks.get(l.id) == Some(Pick::SketchCurve { sketch: sk, curve })).unwrap();
+    l.color
+  };
+  assert_eq!(colour(&fixed), scene::SKETCH_FIXED);
+  assert_eq!(colour(&free), scene::SKETCH_FREE);
+  assert_eq!(colour(&circle), scene::SKETCH_FIXED);
+  assert_eq!(colour(&open), scene::SKETCH_FREE, "its radius is still free");
+  assert_eq!(colour(&pinned), scene::SKETCH_FIXED, "Fix holds a circle's radius too");
+}
