@@ -125,6 +125,7 @@ fn shortcut(c: Cmd) -> Option<&'static str> {
     Cmd::Dialog(Kind::Hole) => "H",
     Cmd::Dialog(Kind::PressPull) => "Q",
     Cmd::Dialog(Kind::Joint) => "J",
+    Cmd::Dialog(Kind::AsBuiltJoint) => "Shift+J",
     Cmd::Dialog(Kind::SkOffset) => "O",
     Cmd::Dialog(Kind::Form(f)) if std::ptr::eq(f, &crate::forms::APPEARANCE) => "A",
     Cmd::SketchTool(Tool::Line) => "L",

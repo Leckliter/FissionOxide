@@ -291,3 +291,63 @@ fn inserted_hub_designs_update_and_unlink() {
   assert!(s.execute("component.insert", &json!({"item": item, "version": 9})).is_err());
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn as_built_joints_keep_components_where_they_sit() {
+  let mut s = Session::default();
+  let (base, base_body) = part(&mut s, "Base", [100.0, 60.0, 10.0], [50.0, 120.0]);
+  run(&mut s, "component.ground", json!({"component": base}));
+  let (arm, arm_body) = part(&mut s, "Arm", [40.0, 10.0, 5.0], [20.0, 30.0]);
+  let (lo, hi) = bbox(&s, arm_body);
+  // jointed at the arm's left end, about Z: nothing moves when the joint is made
+  let at = json!({"at": [0, 30, 0], "z": [0, 0, 1]});
+  let j = run(
+    &mut s,
+    "joint",
+    json!({"moving": arm, "fixed": base, "moving_origin": at, "fixed_origin": at, "kind": "revolute", "as_built": true}),
+  );
+  assert!(near(bbox(&s, arm_body).0, lo.to_array(), 1e-6) && near(bbox(&s, arm_body).1, hi.to_array(), 1e-6));
+  assert!(near(bbox(&s, base_body).0, [0.0, 90.0, 0.0], 1e-6));
+  // and it turns about the picked position
+  run(&mut s, "joint.drive", json!({"joint": j["feature"], "rotation": "90 deg"}));
+  let (lo, hi) = bbox(&s, arm_body);
+  assert!(near(lo, [-5.0, 30.0, 0.0], 1e-6) && near(hi, [5.0, 70.0, 5.0], 1e-6), "{lo} {hi}");
+}
+
+#[test]
+fn new_component_options_and_activation() {
+  let mut s = Session::default();
+  let (top, _) = part(&mut s, "Frame", [10.0, 10.0, 10.0], [0.0, 0.0]);
+  // an empty sheet metal component inside Frame, with its part number and description
+  let c = run(
+    &mut s,
+    "component.create",
+    json!({"name": "Bracket", "type": "sheet_metal", "part_number": "BR-01", "description": "Mount", "parent": top}),
+  )["component"]
+    .as_u64()
+    .unwrap();
+  let p = run(&mut s, "component.properties", json!({"component": c}));
+  assert_eq!(p["part_number"], "BR-01");
+  assert_eq!(p["description"], "Mount");
+  assert_eq!(p["type"], "sheet_metal");
+  assert_eq!(p["parent"], top);
+  assert_eq!(p["bodies"], 0);
+  let p = run(&mut s, "component.properties", json!({"component": c, "part_number": "BR-02", "type": "standard"}));
+  assert_eq!((p["part_number"].as_str(), p["type"].as_str()), (Some("BR-02"), Some("standard")));
+  assert!(s.execute("component.create", &json!({"type": "wooden"})).is_err());
+  // while Bracket is active, new bodies go into it (and undo takes them out with the feature)
+  run(&mut s, "component.activate", json!({"component": c}));
+  assert_eq!(run(&mut s, "component.properties", json!({"component": c}))["active"], true);
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 0]}));
+  let b = s.model.bodies.last().unwrap().id;
+  assert_eq!(s.design.component_of(b).map(|x| x.id.0 as u64), Some(c));
+  s.undo();
+  assert!(s.design.component(fox_model::ComponentId(c as u32)).unwrap().bodies.is_empty());
+  // back at the top level, new bodies stay in the root
+  run(&mut s, "component.activate", json!({}));
+  run(&mut s, "box", json!({"width": 5, "depth": 5, "height": 5, "at": [50, 0]}));
+  assert!(s.design.component_of(s.model.bodies.last().unwrap().id).is_none());
+  // "activate" on create
+  let d = run(&mut s, "component.create", json!({"name": "Lid", "activate": true}))["component"].as_u64().unwrap();
+  assert_eq!(s.active_component.map(|x| x.0 as u64), Some(d));
+}

@@ -953,6 +953,11 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick a point on the component that moves, then one on the other. Choose how they can move, such \
        as rigid, revolute or slider, and check the motion in the preview.",
     ),
+    (_, "As-built Joint") => (
+      "Joins two components where they already sit.",
+      "Pick the two components and where the joint goes; neither of them moves. Choose how they can \
+       move, such as rigid, revolute or slider.",
+    ),
     (_, "Drive Joints") => (
       "Sets a joint's rotation or slide to a value.",
       "Pick a joint and type the angle or distance. Components follow, so you can check positions and \
