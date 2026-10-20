@@ -32,7 +32,7 @@ pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
 pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
-pub use profile::{Loop, Profile, Seg, find_profiles};
+pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
 pub use text::{SketchText, TextId, text_fonts};
 pub use transform::{TransformReport, Xform2};

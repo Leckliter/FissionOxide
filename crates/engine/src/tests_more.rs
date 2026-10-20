@@ -493,7 +493,7 @@ fn pipe_sections_and_partial_paths() {
   let sketch = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
   let line = [Seg::Line { a: [0.0, 0.0], b: [0.0, -40.0] }];
   let sec = Plane::from_normal(DVec3::ZERO, DVec3::Z, sketch.normal()).unwrap();
-  let circle = Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: 3.0, ccw: true }] };
+  let circle = Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: 3.0, ccw: true }]);
   let old = Shape::face(&sec, &Profile { outer: circle, holes: vec![] })
     .unwrap()
     .sweep(&Shape::path(&sketch, &line).unwrap())
