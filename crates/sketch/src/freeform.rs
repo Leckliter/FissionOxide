@@ -471,7 +471,7 @@ impl Sketch {
     match &self.curve(id)?.kind {
       CurveKind::Line { a, b } => Some((*a, *b)),
       CurveKind::Arc { start, end, .. } => Some((*start, *end)),
-      CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
+      CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points, .. } | CurveKind::Bezier { points } => {
         Some((*points.first()?, *points.last()?))
       }
       CurveKind::EllipticalArc { start, end, .. } => Some((*start, *end)),
@@ -1132,7 +1132,7 @@ impl Sketch {
       pts.push(self.add_point(c[0], c[1]));
     }
     pts.push(sb);
-    let blend = self.add_curve(CurveKind::ControlSpline { points: pts })?;
+    let blend = self.add_curve(CurveKind::control_spline(pts))?;
     for other in [a, b] {
       let kind = if g2 {
         ConstraintKind::Curvature { a: other, b: blend }
@@ -1406,7 +1406,7 @@ mod tests {
       assert!(deviation(&before, &s.beziers(*p)) < 1.0, "close to the old shape");
     }
     let ids = [[0.0, 60.0], [10.0, 70.0], [20.0, 60.0], [30.0, 65.0]].map(|p| s.add_point(p[0], p[1]));
-    let cs = s.add_curve(CurveKind::ControlSpline { points: ids.to_vec() }).unwrap();
+    let cs = s.add_curve(CurveKind::control_spline(ids.to_vec())).unwrap();
     let before = s.beziers(cs);
     let parts = s.break_curve(cs, [15.0, 65.0], true, 0.0).unwrap();
     assert_eq!(parts.len(), 2);

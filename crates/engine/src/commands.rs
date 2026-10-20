@@ -103,7 +103,7 @@ cmds! {
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
   "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
-  "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
+  "sketch.control_spline" => "B-spline from control points, cubic (default) or quintic", "{points: [[x,y], ...], degree?: 3 | 5}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
@@ -2358,13 +2358,20 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         if pts.len() < 2 {
           return Err(CmdError::new("a control point spline needs 2 or more points"));
         }
+        let degree = match p.get("degree") {
+          None | Some(Value::Null) => 3,
+          Some(d) => match d.as_u64() {
+            Some(d @ (3 | 5)) => d as u8,
+            _ => return Err(CmdError::new("a control point spline's degree is 3 or 5")),
+          },
+        };
         let mut ids = Vec::new();
         for (i, q) in pts.iter().enumerate() {
           // only the ends snap to existing points: the inner control points float off the curve
           let spec = if i == 0 || i + 1 == pts.len() { snap(sketch, *q) } else { PtSpec::At(q[0], q[1]) };
           ids.push(sketch.resolve(spec)?);
         }
-        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+        sketch.add_curve(CurveKind::ControlSpline { points: ids, degree })?;
       }
       "sketch.conic" => {
         let (st, en, apex) = (req_pt(&p, "start")?, req_pt(&p, "end")?, req_pt(&p, "apex")?);
@@ -2379,7 +2386,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let (a, b) = (snap(sketch, st), snap(sketch, en));
         let ids =
           vec![sketch.resolve(a)?, sketch.add_point(c1[0], c1[1]), sketch.add_point(c2[0], c2[1]), sketch.resolve(b)?];
-        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+        sketch.add_curve(CurveKind::control_spline(ids))?;
       }
       _ => {
         let at = req_pt(&p, "at")?;

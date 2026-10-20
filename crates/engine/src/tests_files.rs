@@ -171,3 +171,38 @@ fn hub_comments_and_visual_diff() {
   assert!(!scene.meshes.iter().any(|m| m.color == crate::diff::ADDED_COLOR));
   let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn quintic_control_splines_extrude_as_one_face_and_keep_their_degree_in_dxf() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let pts = json!([[0, 0], [8, 20], [18, 2], [28, 22], [40, 4], [50, 12]]);
+  assert!(s.execute("sketch.control_spline", &json!({"points": pts, "degree": 4})).is_err(), "degree 3 or 5 only");
+  run(&mut s, "sketch.control_spline", json!({"points": pts, "degree": 5}));
+  run(&mut s, "sketch.line", json!({"points": [[50, 12], [50, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[50, -10], [0, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 0]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5, "operation": "new_body"}));
+  // one span of a quintic, the Bézier with these control points (area exact; Fox follows it with
+  // short cubics, about 1e-5 mm off)
+  let body = &s.model.bodies[0];
+  assert_eq!(body.faces().len(), 6, "the spline is one side face");
+  let v = body.shape.mass().unwrap().volume;
+  assert!((v - 5036.507936507936).abs() < 1e-2, "{v:.9}");
+
+  let dir = temp_dir("dxf-quintic");
+  let path = dir.join("quintic.dxf");
+  run(&mut s, "export", json!({"path": path, "sketch": 1}));
+  let mut t = Session::default();
+  run(&mut t, "import", json!({"path": path}));
+  let sk = &t.model.sketches[&t.design.features[0].id].sketch;
+  assert!(
+    sk.curves
+      .iter()
+      .any(|c| matches!(&c.kind, fox_sketch::CurveKind::ControlSpline { points, degree: 5 } if points.len() == 6)),
+    "{:?}",
+    sk.curves
+  );
+  let _ = std::fs::remove_dir_all(dir);
+}

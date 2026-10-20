@@ -82,3 +82,6 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+187-cubic-four-points
+188-cubic-six-points
+189-quintic-six-points

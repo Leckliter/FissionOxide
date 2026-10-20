@@ -399,7 +399,7 @@ fn add_entity(sk: &mut Sketch, e: Entity) -> Result<Option<fox_sketch::CurveId>,
       let (c1, c2) = (sk.add_point(p[1][0], p[1][1]), sk.add_point(p[2][0], p[2][1]));
       let b = snap(sk, p[3]);
       let b = sk.resolve(b)?;
-      Some(sk.add_curve(CurveKind::ControlSpline { points: vec![a, c1, c2, b] })?)
+      Some(sk.add_curve(CurveKind::control_spline(vec![a, c1, c2, b]))?)
     }
     Entity::Point { at } => {
       if finite(&at) && sk.nearest_point(at, DXF_SNAP, &[]).is_none() {
@@ -508,13 +508,14 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId
     && sp.is_uniform()
     && sp.control.len() <= 1000
     && match sp.degree {
-      3 => sp.control.len() >= 4,
-      // the sketch's two- and three-point control splines are a line and a quadratic
-      d => sp.control.len() == d + 1 && d <= 2,
+      3 | 5 => sp.control.len() > sp.degree,
+      // two- to five-point control splines are a single Bézier of one degree less
+      d => sp.control.len() == d + 1 && d <= 4,
     };
   if control_spline {
     let pts = ends(sk, &sp.control)?;
-    return Ok(Some(sk.add_curve(CurveKind::ControlSpline { points: pts })?));
+    let degree = if sp.degree <= 3 { 3 } else { 5 };
+    return Ok(Some(sk.add_curve(CurveKind::ControlSpline { points: pts, degree })?));
   }
   add_chain(sk, &pieces)
 }
@@ -572,8 +573,8 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           let (c0, m) = (pos(*center), pos(*major));
           Entity::ellipse(c0, [m[0] - c0[0], m[1] - c0[1]], *minor)
         }
-        CurveKind::ControlSpline { points } => {
-          let degree = points.len().clamp(2, 4) - 1;
+        CurveKind::ControlSpline { points, degree } => {
+          let degree = (*degree as usize).min(points.len().max(2) - 1);
           Entity::Spline(Spline::clamped_uniform(degree, pts(points)))
         }
         CurveKind::Spline { points, .. } => {

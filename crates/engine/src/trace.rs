@@ -240,7 +240,7 @@ fn add_contour(sk: &mut Sketch, c: &Contour, place: &Place) -> Result<(), CmdErr
         let (q1, q2) = (place.map(*c1), place.map(*c2));
         let (p1, p2) = (sk.add_point(q1[0], q1[1]), sk.add_point(q2[0], q2[1]));
         let b = end(sk, *b);
-        sk.add_curve(CurveKind::ControlSpline { points: vec![prev, p1, p2, b] }).map_err(err)?;
+        sk.add_curve(CurveKind::control_spline(vec![prev, p1, p2, b])).map_err(err)?;
         prev = b;
       }
       Seg::Circle { .. } => return Err(CmdError::new("the tracer returned a circle inside a contour")),
