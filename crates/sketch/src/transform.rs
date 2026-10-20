@@ -66,6 +66,16 @@ impl Sketch {
         }
       }
     }
+    // a polygon constraint's centre goes with its lines
+    for con in &self.constraints {
+      if let ConstraintKind::Polygon { center, lines } = &con.kind
+        && lines.iter().all(|l| curves.contains(l))
+        && !moved.contains(center)
+        && self.point(*center).is_some_and(|q| !q.fixed)
+      {
+        moved.push(*center);
+      }
+    }
     for p in self.points.iter_mut().filter(|p| moved.contains(&p.id)) {
       [p.x, p.y] = t.apply([p.x, p.y]);
     }

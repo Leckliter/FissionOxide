@@ -82,3 +82,6 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+129-polygon-hexagon-side
+130-polygon-pentagon-height
+131-polygon-square-center

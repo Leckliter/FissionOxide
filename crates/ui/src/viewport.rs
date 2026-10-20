@@ -1490,6 +1490,7 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
     ConstraintKind::Symmetric { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
+    ConstraintKind::Polygon { .. } => Icon::Equal,
     _ => Icon::Fix,
   }
 }

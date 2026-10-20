@@ -88,7 +88,7 @@ cmds! {
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature|polygon, points?: [id], curves?: [id]} (polygon: lines already forming a regular polygon; returns its centre point)";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -2460,6 +2460,13 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
     let need_c = |n: usize| -> Result<(), CmdError> {
       if cs.len() >= n { Ok(()) } else { Err(CmdError::new(format!("'{t}' needs {n} curve(s)"))) }
     };
+    let conflict = || CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)");
+    if t == "polygon" {
+      // lines already forming a regular polygon; the constraint adds their centre point
+      need_c(3)?;
+      let (id, center) = sketch.add_polygon_constraint(&cs)?;
+      return if sketch.solve().ok() { Ok((id, Some(center))) } else { Err(conflict()) };
+    }
     let kind = match t.as_str() {
       "coincident" => {
         need_p(2)?;
@@ -2516,11 +2523,16 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
     let id = sketch.add_constraint(kind)?;
     let r = sketch.solve();
     if !r.ok() {
-      return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
+      return Err(conflict());
     }
-    Ok(id)
+    Ok((id, None))
   })?;
-  Ok(json!({"constraint": id.0, "dof": s.model.sketches.get(&sk).map(|r| r.report.dof)}))
+  let (id, center) = id;
+  let mut out = json!({"constraint": id.0, "dof": s.model.sketches.get(&sk).map(|r| r.report.dof)});
+  if let Some(c) = center {
+    out["center"] = json!(c.0);
+  }
+  Ok(out)
 }
 
 fn dimension(s: &mut Session, p: &Value) -> CmdResult {

@@ -164,3 +164,26 @@ fn splines_and_ellipses_in_trim_extend_offset_and_constraints() {
   let spline = info["curves"].as_array().unwrap().iter().find(|c| c["id"] == sp).unwrap();
   assert!(spline["kind"]["start_handle"].is_u64() && spline["kind"]["end_handle"].is_u64(), "{spline}");
 }
+
+#[test]
+fn polygon_constraint_keeps_a_square_square_about_its_centre() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sq = run(&mut s, "sketch.line", json!({"points": [[-5, -5], [5, -5], [5, 5], [-5, 5]], "closed": true}));
+  let lines = ids(&sq["curves"]);
+  // a rectangle isn't a regular polygon, and three sides aren't a closed loop
+  let rect = run(&mut s, "sketch.line", json!({"points": [[20, 0], [30, 0], [30, 5], [20, 5]], "closed": true}));
+  assert!(s.execute("sketch.constrain", &json!({"type": "polygon", "curves": ids(&rect["curves"])})).is_err());
+  assert!(s.execute("sketch.constrain", &json!({"type": "polygon", "curves": &lines[..3]})).is_err());
+  run(&mut s, "sketch.delete", json!({"curves": ids(&rect["curves"])}));
+  let pg = run(&mut s, "sketch.constrain", json!({"type": "polygon", "curves": lines}));
+  let center = pg["center"].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "coincident", "points": [center, 0]}));
+  // the first corner 10 from the centre: a square of side 10√2 about the origin
+  let info = run(&mut s, "sketch.info", json!({}));
+  let corner = info["curves"].as_array().unwrap().iter().find(|c| c["id"] == lines[0]).unwrap()["kind"]["a"].clone();
+  let d = run(&mut s, "sketch.dimension", json!({"type": "distance", "points": [center, corner], "value": 10}));
+  assert_eq!(d["dof"], 0, "{d}");
+  run(&mut s, "extrude", json!({"distance": 1}));
+  assert!((volume(&s) - 200.0).abs() < 1e-6, "{}", volume(&s));
+}
