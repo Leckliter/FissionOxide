@@ -106,3 +106,6 @@
 155-quarter-sector-end-off-radius
 156-major-arc-pacman
 157-clockwise-sweep-sector
+161-quarter-arc-slot
+162-clockwise-start-end-slot
+163-offset-center-end-direction
