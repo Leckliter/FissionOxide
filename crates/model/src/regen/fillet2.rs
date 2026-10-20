@@ -24,7 +24,7 @@ fn input(msg: &str) -> KernelError {
 
 /// A prism of `segs` (one closed loop on `plane`) running `along` from the plane.
 fn prism(plane: &Plane, segs: Vec<Seg>, along: DVec3) -> fox_kernel::Result<Shape> {
-  Shape::face(plane, &Profile { outer: Loop { segs }, holes: vec![] })?.extrude(along)
+  Shape::face(plane, &Profile { outer: Loop::new(segs), holes: vec![] })?.extrude(along)
 }
 
 /// Rounds straight edges between flat faces with a section tangent to both faces, `a` from the

@@ -247,11 +247,13 @@ impl Regenerator {
       serde_json::to_string(&design.sheet_metal_rules).unwrap_or_default().hash(&mut h);
       serde_json::to_string(&design.components).unwrap_or_default().hash(&mut h);
       mates.key().hash(&mut h);
+      design.behaviours.hash(&mut h);
       h.finish()
     };
     let active = design.active_len();
     let rules = design.clone_rules();
     let components = design.components.clone();
+    let behaviours = design.behaviours.clone();
     let mut state = State::default();
     let mut status = Vec::with_capacity(design.features.len());
     let mut valid_prefix = true;
@@ -286,6 +288,7 @@ impl Regenerator {
           targets: &targets,
           state: &mut state,
           mates: &mates,
+          behaviours: &behaviours,
         };
         let id = feature.id;
         let mut kind = feature.kind.clone();
@@ -399,6 +402,11 @@ struct Ctx<'a> {
   targets: &'a [BodyId],
   state: &'a mut State,
   mates: &'a assemble::Mates,
+  /// The design's behaviour flags: gate a feature-level geometry change on
+  /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
+  /// [`fox_sketch::behaviour`].
+  #[allow(dead_code)] // read by the first regen-level gate
+  behaviours: &'a crate::Behaviours,
 }
 
 type FResult = Result<Option<String>, String>;

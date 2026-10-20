@@ -104,6 +104,7 @@ impl Ctx<'_> {
           targets: &t.targets,
           state: &mut *self.state,
           mates: self.mates,
+          behaviours: self.behaviours,
         };
         match ctx.operate(id, shape, t.op) {
           Ok(()) => placed += 1,
