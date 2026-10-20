@@ -66,7 +66,7 @@ def _mutex():
     try:
       os.close(os.open(mx, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
       break
-    except FileExistsError:
+    except (FileExistsError, PermissionError):  # Windows: the file is being deleted
       try:
         if time.time() - os.path.getmtime(mx) > 30:
           os.unlink(mx)

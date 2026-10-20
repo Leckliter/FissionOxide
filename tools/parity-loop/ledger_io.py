@@ -34,7 +34,7 @@ class Ledger:
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
         break
-      except FileExistsError:
+      except (FileExistsError, PermissionError):  # Windows: the file is being deleted
         # A lock older than two minutes belongs to a process that died mid-write.
         try:
           if time.time() - os.path.getmtime(self.lock_path) > 120:

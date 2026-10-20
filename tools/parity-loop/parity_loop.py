@@ -530,6 +530,9 @@ class Loop:
         self.probing.add(e["key"])
         try:
           await self.probe(e)
+        except Exception as ex:  # one probe's failure mustn't stop the others; the entry resumes
+          self.ledger.update(e["key"], note=f"probe error (stays probing): {ex}"[:1500])
+          print(f"  probe {e['key']} failed: {ex}", flush=True)
         finally:
           self.probing.discard(e["key"])
         e = self.ledger.get(e["key"])
@@ -626,7 +629,16 @@ def run_until_done(a):
     batch += 1
     print(f"[{stamp()}] batch {batch}", flush=True)
     loop = Loop(a)
-    asyncio.run(loop.run())
+    try:
+      asyncio.run(loop.run())
+    except Exception as ex:  # an overnight run outlives a bad batch: the ledger has the progress
+      import traceback
+
+      traceback.print_exc()
+      print(f"[{stamp()}] batch {batch} failed: {ex}; retrying in a minute", flush=True)
+      if not wait_until(time.time() + 60, "after a failed batch"):
+        return
+      continue
     if os.path.exists(STOP_FILE):
       print(f"[{stamp()}] stopped: {STOP_FILE} exists", flush=True)
       return
