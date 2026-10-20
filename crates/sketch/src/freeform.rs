@@ -1105,7 +1105,11 @@ impl Sketch {
     let ka = self.curve(a).map(|c| c.kind.clone()).ok_or(SketchError::NoCurve(a))?;
     let kb = self.curve(b).map(|c| c.kind.clone()).ok_or(SketchError::NoCurve(b))?;
     let posf = |p: PointId| self.pos(p);
-    let (Some(fa), Some(fb)) = (end_frame(&ka, ea, &posf), end_frame(&kb, eb, &posf)) else { return Err(what()) };
+    let (Some(fa), Some(fb)) =
+      (end_frame(&ka, ea, &posf, &self.behaviours), end_frame(&kb, eb, &posf, &self.behaviours))
+    else {
+      return Err(what());
+    };
     let l = dist(fa.0, fb.0);
     if l < 1e-9 {
       return Err(SketchError::InvalidValue("the ends already meet".into()));
@@ -1155,7 +1159,7 @@ impl Sketch {
     let (Some(first), Some(last), Some((fh, lh))) = (
       points.first().and_then(|p| self.pos(*p)),
       points.last().and_then(|p| self.pos(*p)),
-      crate::spline_handles(&kind, &|p| self.pos(p)),
+      crate::spline_handles(&kind, &|p| self.pos(p), self.behaviours.has(crate::behaviour::QUINTIC_FIT_SPLINE)),
     ) else {
       return;
     };
@@ -1298,7 +1302,12 @@ fn offset_bz(b: &Bz, d: f64, depth: u32, out: &mut Vec<Bz>) {
 
 /// A curve's end: (position, direction pointing out of the curve, signed curvature when arriving
 /// there heading that way). `at_end` picks the end over the start. None for curves without ends.
-pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) -> Option<P>) -> Option<(P, P, f64)> {
+pub(crate) fn end_frame(
+  kind: &CurveKind,
+  at_end: bool,
+  pos: &dyn Fn(PointId) -> Option<P>,
+  behaviours: &crate::Behaviours,
+) -> Option<(P, P, f64)> {
   match kind {
     CurveKind::Line { a, b } => {
       let (pa, pb) = (pos(*a)?, pos(*b)?);
@@ -1317,7 +1326,7 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
     | CurveKind::Bezier { .. }
     | CurveKind::EllipticalArc { .. }
     | CurveKind::Conic { .. } => {
-      let bz = crate::kind_beziers(kind, pos);
+      let bz = crate::kind_beziers(kind, pos, behaviours);
       if at_end {
         let b = *bz.last()?;
         let d1 = bz_d1(&b, 1.0);
@@ -1341,7 +1350,14 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{Dim, PtSpec, find_profiles};
+  use crate::{Behaviours, Dim, PtSpec, find_profiles};
+
+  /// A sketch as saved before the quintic fit-point spline: Catmull-Rom splines.
+  fn legacy() -> Sketch {
+    let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
+    s
+  }
 
   fn spline(s: &mut Sketch, pts: &[P]) -> CurveId {
     let ids = pts.iter().map(|p| s.add_point(p[0], p[1])).collect();
@@ -1374,7 +1390,7 @@ mod tests {
 
   #[test]
   fn break_lines_arcs_circles_and_splines() {
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.0, 0.0)).unwrap();
     s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 5.0)).unwrap();
     // between crossings, the line breaks at the crossing; no crossing on the right → the point
@@ -1405,8 +1421,7 @@ mod tests {
     assert_eq!(parts.len(), 2);
     for p in &parts {
       assert!(matches!(s.curve(*p).unwrap().kind, CurveKind::Spline { .. }));
-      let dev = deviation(&before, &s.beziers(*p));
-      assert!(dev < 2.0, "close to the old shape: {dev}");
+      assert!(deviation(&before, &s.beziers(*p)) < 1.0, "close to the old shape");
     }
     let ids = [[0.0, 60.0], [10.0, 70.0], [20.0, 60.0], [30.0, 65.0]].map(|p| s.add_point(p[0], p[1]));
     let cs = s.add_curve(CurveKind::ControlSpline { points: ids.to_vec() }).unwrap();
@@ -1422,7 +1437,7 @@ mod tests {
 
   #[test]
   fn trim_splines_ellipses_and_lines_cut_by_splines() {
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 10.0], [20.0, 0.0], [30.0, 10.0]]);
     let before = s.beziers(sp);
     s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 20.0)).unwrap();
@@ -1430,9 +1445,7 @@ mod tests {
     let parts = s.trim(sp, [15.0, 5.0]).unwrap();
     assert_eq!(parts.len(), 2);
     for p in &parts {
-      let dev = deviation(&before, &s.beziers(*p));
-      // the kept fit points refit a minimum-energy curve, so the shape moves a little
-      assert!(dev < 1.0, "the kept pieces keep close to their shape: {dev}");
+      assert!(deviation(&before, &s.beziers(*p)) < 1e-9, "the kept pieces keep their shape");
     }
     assert!(s.solve().ok());
     let (min, max) = s.bounds().unwrap();
@@ -1472,7 +1485,7 @@ mod tests {
     assert!(dist(b, [22.0, 0.0]) < 1e-6, "{b:?}");
     assert!(s.solve().ok());
     // a spline grows along its end until it meets the line x = 40
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let sp2 = spline(&mut s, &[[0.0, 0.0], [10.0, 2.0], [20.0, 0.0]]);
     s.add_line(PtSpec::At(40.0, -50.0), PtSpec::At(40.0, 50.0)).unwrap();
     let before = s.beziers(sp2);
@@ -1480,8 +1493,7 @@ mod tests {
     let after = s.beziers(sp2);
     assert!(dist(after.last().unwrap()[3], [40.0, after.last().unwrap()[3][1]]) < 1e-6);
     assert!((after.last().unwrap()[3][0] - 40.0).abs() < 1e-6);
-    let dev = deviation(&after, &before);
-    assert!(dev < 0.1, "the old part keeps close to its shape: {dev}");
+    assert!(deviation(&after, &before) < 1e-9, "the old part keeps its shape");
     assert!(s.solve().ok());
     // an arc runs round its circle to the next line
     let mut s = Sketch::new();
@@ -1490,6 +1502,47 @@ mod tests {
     s.extend(a, [0.0, 10.0]).unwrap();
     let Some(Geo::Arc { sweep, .. }) = s.geo(a) else { panic!() };
     assert!(sweep > PI && sweep < 1.5 * PI, "{sweep}");
+    assert!(s.solve().ok());
+  }
+
+  #[test]
+  fn break_trim_and_extend_quintic_splines() {
+    // A quintic fit-point spline (a new sketch) is one minimum-energy curve through all its fit
+    // points, so what is left of it after a break, trim or extend refits through the fit points
+    // it keeps and moves a little, where a Catmull-Rom spline's untouched pieces stay exactly put
+    // (the legacy tests above).
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 40.0], [10.0, 50.0], [20.0, 40.0], [30.0, 45.0]]);
+    let before = s.beziers(sp);
+    let parts = s.break_curve(sp, [15.0, 47.0], true, 0.0).unwrap();
+    assert_eq!(parts.len(), 2);
+    for p in &parts {
+      assert!(matches!(s.curve(*p).unwrap().kind, CurveKind::Spline { .. }));
+      let dev = deviation(&before, &s.beziers(*p));
+      assert!(dev < 2.0, "close to the old shape: {dev}");
+    }
+    assert!(s.solve().ok());
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 10.0], [20.0, 0.0], [30.0, 10.0]]);
+    let before = s.beziers(sp);
+    s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 20.0)).unwrap();
+    s.add_line(PtSpec::At(20.0, -5.0), PtSpec::At(20.0, 20.0)).unwrap();
+    let parts = s.trim(sp, [15.0, 5.0]).unwrap();
+    assert_eq!(parts.len(), 2);
+    for p in &parts {
+      let dev = deviation(&before, &s.beziers(*p));
+      assert!(dev < 1.0, "the kept pieces keep close to their shape: {dev}");
+    }
+    assert!(s.solve().ok());
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 2.0], [20.0, 0.0]]);
+    s.add_line(PtSpec::At(40.0, -50.0), PtSpec::At(40.0, 50.0)).unwrap();
+    let before = s.beziers(sp);
+    s.extend(sp, [20.0, 0.0]).unwrap();
+    let after = s.beziers(sp);
+    assert!((after.last().unwrap()[3][0] - 40.0).abs() < 1e-6);
+    let dev = deviation(&after, &before);
+    assert!(dev < 0.1, "the old part keeps close to its shape: {dev}");
     assert!(s.solve().ok());
   }
 
