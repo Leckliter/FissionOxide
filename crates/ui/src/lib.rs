@@ -8,6 +8,7 @@
 mod assembly_forms;
 mod cam_ui;
 mod config_ui;
+mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
@@ -25,6 +26,7 @@ mod preview;
 mod select;
 mod sheet;
 mod theme;
+mod tips;
 mod toolbox;
 mod trace;
 mod updates;
@@ -81,6 +83,10 @@ pub struct App {
   recent: Vec<panels::Cmd>,
   /// The open S toolbox.
   toolbox: Option<toolbox::Toolbox>,
+  /// Pinned toolbar icons, the S toolbox's shortcuts and the user's keyboard shortcuts.
+  pub(crate) prefs: customize::Prefs,
+  /// The open Change Keyboard Shortcut window.
+  pub(crate) key_capture: Option<customize::KeyCapture>,
   /// The open right-click marking menu.
   marking: Option<marking::MarkingMenu>,
   /// Context-menu state: browser/timeline hover highlight, Find in Browser.
@@ -185,6 +191,7 @@ impl App {
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
+    app.prefs = customize::Prefs::load();
     // the first start puts the fox in 3D in the hub, and shows it unless a file was asked for
     let welcome = fox_engine::hub::add_welcome(&app.hub_root()).unwrap_or_else(|e| {
       log::warn!("couldn't add the welcome design to the hub: {}", e.0);
@@ -263,6 +270,8 @@ impl App {
       last_cmd: None,
       recent: Vec::new(),
       toolbox: None,
+      prefs: customize::Prefs::default(),
+      key_capture: None,
       marking: None,
       ctx_menu: marking::MenuState::default(),
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
@@ -586,6 +595,10 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
+    if self.key_capture.is_some() {
+      // Change Keyboard Shortcut takes the keys
+      return;
+    }
     if ctx.egui_wants_keyboard_input() {
       // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
       if self.dialog.is_some()
@@ -599,6 +612,10 @@ impl App {
       return;
     }
     use egui::{Key, Modifiers};
+    // commands with two or more modifiers first: Ctrl+S would take Ctrl+Alt+S too
+    if self.command_keys(ctx, true) {
+      return;
+    }
     let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
     if pressed(Key::Z, Modifiers::COMMAND) {
       self.cancel_dialog();
@@ -618,15 +635,6 @@ impl App {
     }
     if pressed(Key::N, Modifiers::COMMAND) {
       self.new_design();
-    }
-    if pressed(Key::G, Modifiers::COMMAND) && self.manufacture {
-      self.cam_generate(true);
-    }
-    if pressed(Key::B, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run_background("compute_all", json!({}));
-    }
-    if pressed(Key::A, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run("select.all", json!({}));
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       if self.marking.is_some() {
@@ -659,13 +667,15 @@ impl App {
       return;
     }
     if self.drawing.is_some() {
-      // the model's shortcuts don't apply on a drawing sheet
+      // the model's shortcuts don't apply on a drawing sheet; its own commands' do
+      self.command_keys(ctx, false);
       return;
     }
     if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
       viewport::finish_spline(self);
     }
-    if pressed(Key::Delete, Modifiers::NONE) || pressed(Key::Backspace, Modifiers::NONE) {
+    // Del is Delete's key in the map; Backspace always deletes too
+    if pressed(Key::Backspace, Modifiers::NONE) {
       self.delete_selection();
     }
     if pressed(Key::F6, Modifiers::NONE) {
@@ -678,56 +688,52 @@ impl App {
     if pressed(Key::V, Modifiers::NONE) {
       self.toggle_visibility();
     }
+    // the toolbar commands' keys: E extrude, L line, … (in a sketch, E finishes it first)
+    self.command_keys(ctx, false);
+    if self.s.edit_sketch.is_some() && pressed(Key::X, Modifiers::NONE) {
+      self.toggle_construction();
+    }
+  }
+
+  /// Runs the toolbar command whose keyboard shortcut was pressed: the user's keys over the
+  /// menus' defaults, looked up on the open sketch's toolbar first, then the tab's, then the rest
+  /// of the workspace's (so in a sketch A is Arc, elsewhere Appearance). `specific` looks only at
+  /// keys with two or more modifiers. Returns whether one ran.
+  fn command_keys(&mut self, ctx: &egui::Context, specific: bool) -> bool {
+    use egui::{Key, Modifiers};
     use panels::Cmd;
-    let sketching = self.s.edit_sketch.is_some();
-    // modelling commands; in a sketch they finish it first (E extrudes its profiles), except A,
-    // which is the sketch's Arc
-    for (k, d) in [
-      (Key::E, dialogs::Kind::Extrude),
-      (Key::F, dialogs::Kind::Fillet),
-      (Key::M, dialogs::Kind::Move),
-      (Key::I, dialogs::Kind::Inspect),
-      (Key::H, dialogs::Kind::Hole),
-      (Key::Q, dialogs::Kind::PressPull),
-      (Key::J, dialogs::Kind::Joint),
-    ] {
-      if pressed(k, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(d));
-      }
+    if !ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }))) {
+      return false;
     }
-    if sketching {
-      for (k, t) in [
-        (Key::L, Tool::Line),
-        (Key::R, Tool::Rect),
-        (Key::C, Tool::Circle),
-        (Key::A, Tool::Arc3),
-        (Key::P, Tool::Point),
-        (Key::D, Tool::Dimension),
-        (Key::T, Tool::Trim),
-      ] {
-        if pressed(k, Modifiers::NONE) {
-          self.launch(Cmd::SketchTool(t));
-        }
-      }
-      if pressed(Key::X, Modifiers::NONE) {
-        self.toggle_construction();
-      }
-      if pressed(Key::O, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::SkOffset));
-      }
+    let count = |m: Modifiers| m.command as u8 + m.shift as u8 + m.alt as u8;
+    let tabs = if self.manufacture && self.drawing.is_none() {
+      vec![panels::Tab::Milling, panels::Tab::Utilities]
     } else {
-      if pressed(Key::A, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::Form(&forms::APPEARANCE)));
-      }
-      // window, freeform and paint selection
-      for (k, m) in
-        [(Key::Num1, select::Mode::Window), (Key::Num2, select::Mode::Freeform), (Key::Num3, select::Mode::Paint)]
+      toolbox::workspace_tabs(self)
+    };
+    let mut keys: Vec<(Modifiers, Key, Cmd)> = Vec::new();
+    for e in menus::commands(&tabs) {
+      let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
+      if let Some((m, k)) = customize::parse_combo(key)
+        && (!specific || count(m) >= 2)
+        && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
       {
-        if pressed(k, Modifiers::NONE) {
-          self.sel_mode = m;
-        }
+        keys.push((m, k, e.cmd));
       }
     }
+    // a key matches with Shift or Alt held too, so Shift+E is looked for before E
+    keys.sort_by_key(|(m, ..)| std::cmp::Reverse(count(*m)));
+    for (m, k, c) in keys {
+      if ctx.input_mut(|i| i.consume_key(m, k)) {
+        match c {
+          // these work in a sketch without finishing it
+          Cmd::Delete | Cmd::ComputeAll => c.run(self),
+          _ => self.launch(c),
+        }
+        return true;
+      }
+    }
+    false
   }
 
   /// Switches to the Drawing workspace: the last drawing, or Create Drawing when there is none.
@@ -1132,6 +1138,7 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);
+    customize::key_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
@@ -1364,6 +1371,23 @@ mod tests {
     assert!(app.s.edit_sketch.is_none());
     let d = app.dialog.as_ref().unwrap();
     assert_eq!((d.kind, d.sketch), (dialogs::Kind::Extrude, sketch));
+  }
+
+  #[test]
+  fn changed_keys_run_their_commands() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    app.prefs.keys.set("design.Extrude", "G", "E");
+    press(&mut app, &ctx, egui::Key::E, mid);
+    assert!(app.dialog.is_none());
+    press(&mut app, &ctx, egui::Key::G, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Extrude));
+    // a captured key goes to Change Keyboard Shortcut, not to the commands
+    app.cancel_dialog();
+    app.key_capture = Some(customize::KeyCapture::for_test());
+    press(&mut app, &ctx, egui::Key::G, mid);
+    assert!(app.dialog.is_none());
   }
 
   #[test]

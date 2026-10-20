@@ -1929,15 +1929,8 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
 }
 
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip),
-/// its solids in the `tint` family.
-pub fn tool_button_tinted(
-  ui: &mut egui::Ui,
-  icon: Icon,
-  tint: Tint,
-  label: &str,
-  hint: &str,
-  active: bool,
-) -> egui::Response {
+/// its solids in the `tint` family. The caller adds the tooltip.
+pub fn tool_button_bare(ui: &mut egui::Ui, icon: Icon, tint: Tint, active: bool) -> egui::Response {
   let size = vec2(35.0, 38.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
   let ic = Rect::from_center_size(rect.center(), Vec2::splat(27.0));
@@ -1951,12 +1944,7 @@ pub fn tool_button_tinted(
     }
     draw_tinted(ui.painter(), ic, icon, tint);
   }
-  resp.on_hover_ui(|ui| {
-    ui.label(egui::RichText::new(label).strong());
-    if !hint.is_empty() {
-      ui.label(egui::RichText::new(hint).color(theme::MUTED));
-    }
-  })
+  resp
 }
 
 /// A small square icon-only button (constraints, timeline, chrome). `color` None draws the
