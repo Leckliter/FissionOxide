@@ -2,3 +2,7 @@
 catalog.json
 compare/*.json
 compare/png/
+loop/
+probes/
+*.lock
+*.tmp
