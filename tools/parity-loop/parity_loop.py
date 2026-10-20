@@ -114,6 +114,43 @@ def crashed_without_failures(p):
           and "could not compile" not in out)
 
 
+def workspace_packages(root):
+  """Every FissionOxide crate's Cargo package name."""
+  out = []
+  for top in ("crates", "apps"):
+    d = os.path.join(root, top)
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+      toml = os.path.join(d, name, "Cargo.toml")
+      if os.path.exists(toml):
+        with open(toml, encoding="utf-8") as fh:
+          pkg = next((l.split("=", 1)[1].strip().strip('"') for l in fh if l.startswith("name")), None)
+        if pkg:
+          out.append(pkg)
+  return out
+
+
+def fresh_slot_for(wt, env):
+  """Fixer slots share a cargo target directory across worktrees, and cargo hashes workspace crates
+  the same in every worktree and checks freshness by file times, so a slot can reuse what another
+  branch compiled (a build script listing a file this branch lacks; or worse, another branch's
+  code passing this branch's tests). When the slot changes worktree, clean the workspace crates;
+  third-party crates stay cached."""
+  marker = os.path.join(env["CARGO_TARGET_DIR"], "parity-worktree.txt")
+  try:
+    with open(marker, encoding="utf-8") as f:
+      last = f.read().strip()
+  except OSError:
+    last = None
+  if last == os.path.normcase(wt):
+    return
+  if os.path.isdir(env["CARGO_TARGET_DIR"]):
+    pkgs = workspace_packages(wt)
+    sh(["cargo", "clean"] + [a for p in pkgs for a in ("-p", p)], cwd=wt, check=False, env=env, timeout=1800)
+  os.makedirs(env["CARGO_TARGET_DIR"], exist_ok=True)
+  with open(marker, "w", encoding="utf-8") as f:
+    f.write(os.path.normcase(wt))
+
+
 def touched_packages(wt, base):
   """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
   crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
@@ -455,6 +492,7 @@ class Loop:
     self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} started on {branch} in {wt}")
     print(f"fix {key} on {branch} (slot {slot})", flush=True)
     env = cargo_env(slot)
+    await asyncio.to_thread(fresh_slot_for, wt, env)
     verdicts = (entry.get("probe") or {}).get("verdicts") or {}
     report, meta = await agents.run_agent(
       agents.fix_prompt(entry, wt, cases, verdicts, entry.get("probe") or {}) + merge_note, wt, agents.FIX_SCHEMA,
