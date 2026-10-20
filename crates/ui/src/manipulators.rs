@@ -22,7 +22,7 @@ const RING: f64 = 0.62;
 const PLANE: (f64, f64) = (0.2, 0.36);
 /// Pointer distance that catches a handle (points).
 const CATCH_PX: f32 = 7.0;
-/// Rotation snap (radians): 5°.
+/// Rotation snap (radians) without Incremental Move: 5°.
 const ANGLE_STEP: f64 = std::f64::consts::PI / 36.0;
 
 const AXIS_COLORS: [Color32; 3] =
@@ -116,8 +116,9 @@ impl TriadDrag {
     Some(d)
   }
 
-  /// The edit for the pointer ray now: moves snap to `step` (world units), turns to 5°.
-  pub fn update(&mut self, ro: DVec3, rd: DVec3, step: f64) -> Option<TriadEdit> {
+  /// The edit for the pointer ray now: moves snap to `step` (world units), turns to `turn`
+  /// (radians).
+  pub fn update(&mut self, ro: DVec3, rd: DVec3, step: f64, turn: f64) -> Option<TriadEdit> {
     let t = &self.start;
     match self.handle {
       Handle::Arrow(i) => {
@@ -134,7 +135,7 @@ impl TriadDrag {
         self.turned += wrap(a - self.last);
         self.last = a;
         let base = if t.ring == Some(i) { wrap(t.angle) } else { 0.0 };
-        Some(TriadEdit::Rotate(i, snap(base + self.turned, ANGLE_STEP)))
+        Some(TriadEdit::Rotate(i, snap(base + self.turned, turn)))
       }
     }
   }
@@ -331,7 +332,8 @@ pub(crate) fn triad(
     let (handle, start) = (drag.handle, drag.start);
     if let Some(p) = resp.interact_pointer_pos() {
       let (o, d) = ray(p);
-      if let Some(edit) = drag.update(o, d, step)
+      let turn = app.increments.angular_step(ANGLE_STEP);
+      if let Some(edit) = drag.update(o, d, step, turn)
         && let Some(dlg) = app.dialog.as_mut()
       {
         dlg.set_triad(&app.s, edit);
@@ -453,7 +455,7 @@ mod tests {
     let mut last = None;
     for deg in (20..=200).step_by(20) {
       let (o, d) = at(deg as f64);
-      last = drag.update(o, d, 1.0);
+      last = drag.update(o, d, 1.0, ANGLE_STEP);
     }
     let Some(TriadEdit::Rotate(2, a)) = last else { panic!("{last:?}") };
     assert!((a.to_degrees() - 200.0).abs() < 1e-6);
@@ -463,12 +465,12 @@ mod tests {
     let (o, d) = at(90.0);
     let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d).unwrap();
     let (o, d) = at(101.0);
-    let Some(TriadEdit::Rotate(2, a)) = drag.update(o, d, 1.0) else { panic!() };
+    let Some(TriadEdit::Rotate(2, a)) = drag.update(o, d, 1.0, ANGLE_STEP) else { panic!() };
     assert!((a.to_degrees() - 40.0).abs() < 1e-6, "{}", a.to_degrees());
     // another ring starts from zero
     let (o, d) = (DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X);
     let mut drag = TriadDrag::begin(t, Handle::Ring(0), o, d).unwrap();
-    let e = drag.update(DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X, 1.0);
+    let e = drag.update(DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X, 1.0, ANGLE_STEP);
     assert_eq!(e, Some(TriadEdit::Rotate(0, 0.0)));
   }
 
@@ -495,7 +497,7 @@ mod tests {
     let (o, d) = top_ray(Pos2::new(150.0, 100.0));
     let mut drag = TriadDrag::begin(t, Handle::Arrow(0), o, d).unwrap();
     let (o, d) = top_ray(Pos2::new(162.0, 90.0));
-    assert_eq!(drag.update(o, d, 1.0), Some(TriadEdit::Move(DVec3::new(12.0, 0.0, 0.0))));
+    assert_eq!(drag.update(o, d, 1.0, ANGLE_STEP), Some(TriadEdit::Move(DVec3::new(12.0, 0.0, 0.0))));
     assert!((world_size(&top, DVec3::X, DVec3::ZERO, 95.0).unwrap() - 95.0).abs() < 1e-6);
   }
 }

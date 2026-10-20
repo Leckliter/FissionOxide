@@ -128,6 +128,12 @@ pub struct ViewOptions {
   pub toolpaths: bool,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
+  /// Draw no construction planes, axes or points (Object Visibility).
+  pub hide_construction: bool,
+  /// Draw the grid without the origin axes (Object Visibility ▸ Origins).
+  pub hide_origin: bool,
+  /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
+  pub grid_step: Option<f64>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -285,7 +291,7 @@ impl SceneBuilder {
         _ => false,
       });
       let auto = !consumed || opts.show_profiles_of.contains(&f.id);
-      let show = !f.suppressed && !opts.hide_sketches && (is_edit || f.visible.unwrap_or(auto));
+      let show = !f.suppressed && (is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto));
       if !show {
         continue;
       }
@@ -328,7 +334,7 @@ impl SceneBuilder {
 
     // construction planes
     for (id, pl) in &s.model.planes {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       let size = scene_size(s) * 0.35;
@@ -352,7 +358,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -366,7 +372,7 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       scene.markers.push(Marker {
@@ -390,7 +396,7 @@ impl SceneBuilder {
     }
 
     if !opts.hide_grid {
-      grid(&mut scene, s);
+      grid(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0), !opts.hide_origin);
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
@@ -405,13 +411,18 @@ fn scene_size(s: &Session) -> f64 {
   s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0)
 }
 
-fn grid(scene: &mut Scene, s: &Session) {
+/// The grid's adaptive spacing: a tenth of the model's size, rounded to 1, 2 or 5 × 10^k.
+pub fn grid_step(s: &Session) -> f64 {
+  nice_step(scene_size(s) / 10.0)
+}
+
+fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: bool) {
   let plane = match s.edit_sketch.and_then(|e| s.model.sketches.get(&e)) {
     Some(r) => r.plane,
     None => Plane::XY,
   };
   let size = scene_size(s);
-  let step = nice_step(size / 10.0);
+  let step = fixed.unwrap_or_else(|| grid_step(s));
   let n = ((size / step).ceil() as i64).clamp(2, 60);
   let ext = n as f64 * step;
   for i in -n..=n {
@@ -429,6 +440,9 @@ fn grid(scene: &mut Scene, s: &Session) {
         behind: true,
       });
     }
+  }
+  if !origin {
+    return;
   }
   // origin axes: X and Y run across the whole grid, as in Fusion; Z is a short stub
   let l = ext as f32;

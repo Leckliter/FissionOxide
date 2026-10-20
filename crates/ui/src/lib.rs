@@ -20,6 +20,7 @@ mod logo;
 mod manipulators;
 mod marking;
 mod menus;
+mod navbar;
 mod panels;
 mod preview;
 mod select;
@@ -57,8 +58,17 @@ pub struct App {
   /// Status-bar message: (text, is_error).
   pub status: Option<(String, bool)>,
   pub show_params: bool,
-  pub show_edges: bool,
+  /// Display Settings ▸ Visual Style.
+  pub visual_style: fox_engine::render::VisualStyle,
+  /// Display Settings ▸ Object Visibility and Effects.
+  pub objects: navbar::ObjectVisibility,
+  pub effects: fox_engine::render::Effects,
   pub show_grid: bool,
+  /// Grid and Snaps: the grid's spacing, and manipulator increments.
+  pub grid: navbar::GridSettings,
+  pub increments: navbar::Increments,
+  /// Orbiting lets the view roll (Free Orbit) instead of keeping +Z up.
+  pub free_orbit: bool,
   /// Sketch palette options.
   pub show_dims: bool,
   /// Snap sketch clicks to the grid.
@@ -166,8 +176,11 @@ struct RenderKey {
   hover: Option<Pick>,
   selection: Vec<Sel>,
   edit_sketch: Option<fox_engine::model::FeatureId>,
-  show_edges: bool,
+  style: fox_engine::render::VisualStyle,
+  objects: navbar::ObjectVisibility,
+  effects: fox_engine::render::Effects,
   show_grid: bool,
+  grid_step: Option<f64>,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
   /// Section and analysis settings.
@@ -248,8 +261,13 @@ impl App {
       drawing: None,
       sheet_cache: None,
       sheet_view: (1.0, egui::Vec2::ZERO),
-      show_edges: true,
+      visual_style: Default::default(),
+      objects: Default::default(),
+      effects: Default::default(),
       show_grid: true,
+      grid: Default::default(),
+      increments: Default::default(),
+      free_orbit: false,
       show_dims: true,
       snap: false,
       show_constraints: true,
@@ -1014,6 +1032,7 @@ impl App {
     } else {
       cam.yaw = 0.0;
     }
+    cam.roll = 0.0;
     cam
   }
 
@@ -1207,6 +1226,7 @@ fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
   let lerp = |x: f64, y: f64| x + (y - x) * k;
   let pi = std::f64::consts::PI;
   let dyaw = (b.yaw - a.yaw + pi).rem_euclid(std::f64::consts::TAU) - pi;
+  let droll = (b.roll - a.roll + pi).rem_euclid(std::f64::consts::TAU) - pi;
   let distance = if a.distance > 0.0 && b.distance > 0.0 {
     (a.distance.ln() + (b.distance.ln() - a.distance.ln()) * k).exp()
   } else {
@@ -1219,6 +1239,7 @@ fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
     distance,
     fov: lerp(a.fov, b.fov),
     ortho: b.ortho,
+    roll: a.roll + droll * k,
   }
 }
 
