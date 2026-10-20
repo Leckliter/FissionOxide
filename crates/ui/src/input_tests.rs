@@ -31,7 +31,7 @@ impl Harness {
       ..Default::default()
     };
     let app = &mut self.app;
-    let _ = self.ctx.run_ui(input, |ui| app.draw(ui));
+    self.ctx.run_ui(input, |ui| app.draw(ui)).drop_without_applying_deltas();
   }
 
   fn button(pos: Pos2, pressed: bool) -> Event {

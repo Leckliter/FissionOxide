@@ -178,7 +178,8 @@ fn context(app: &App) -> Context {
     _ => false,
   });
   let feature = sel.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
-  let sketch = feature.filter(|f| app.s.design.feature(*f).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })));
+  let sketch =
+    feature.filter(|f| app.s.design.feature(*f).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })));
   Context {
     face,
     planar_face,
@@ -531,8 +532,7 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
   }
   v.push(Some(ws));
   // recent commands (the newest is the ring's Repeat)
-  let recent: Vec<Cmd> =
-    app.recent.iter().copied().filter(|c| Some(*c) != app.last_cmd).take(RECENT).collect();
+  let recent: Vec<Cmd> = app.recent.iter().copied().filter(|c| Some(*c) != app.last_cmd).take(RECENT).collect();
   if !recent.is_empty() {
     v.push(None);
     for c in recent {
@@ -575,7 +575,8 @@ fn run(app: &mut App, action: Action) {
     Action::FindInBrowser(s) => find_in_browser(app, s),
     Action::FindInWindow => {
       let bodies = selected_bodies(app);
-      let feature = app.s.selection.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
+      let feature =
+        app.s.selection.iter().find_map(|s| if let Sel::Feature { feature } = s { Some(*feature) } else { None });
       match feature {
         Some(f) if bodies.is_empty() => {
           let bodies = feature_bodies(app, f);
@@ -684,8 +685,18 @@ fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[
         if hot == Some(k) {
           painter.rect_filled(row, 0.0, theme::HOVER);
         }
-        icons::draw_color(painter, Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)), it.icon);
-        painter.text(row.left_center() + vec2(32.0, 0.0), egui::Align2::LEFT_CENTER, &it.label, font.clone(), theme::TEXT);
+        icons::draw_color(
+          painter,
+          Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)),
+          it.icon,
+        );
+        painter.text(
+          row.left_center() + vec2(32.0, 0.0),
+          egui::Align2::LEFT_CENTER,
+          &it.label,
+          font.clone(),
+          theme::TEXT,
+        );
         let mut right = row.right() - 10.0;
         if !it.children.is_empty() {
           let c = pos2(right - 3.0, row.center().y);
@@ -844,10 +855,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
   }
 
-  draw_list(&painter, &font, list_rect, &overflow, hot_row.or(match sub {
-    Some(Sub::Row(k)) => Some(k),
-    _ => None,
-  }));
+  draw_list(
+    &painter,
+    &font,
+    list_rect,
+    &overflow,
+    hot_row.or(match sub {
+      Some(Sub::Row(k)) => Some(k),
+      _ => None,
+    }),
+  );
   if let Some(r) = sub_rect {
     draw_list(&painter, &font, r, &sub_items, hot_sub);
   }

@@ -1343,7 +1343,9 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
     start(app, ui, Kind::Inspect);
   }
   ui.separator();
-  if menu_item(ui, Icon::ConvertMesh, "Save As Mesh", None).on_hover_text("Export this body as STL, OBJ or 3MF").clicked()
+  if menu_item(ui, Icon::ConvertMesh, "Save As Mesh", None)
+    .on_hover_text("Export this body as STL, OBJ or 3MF")
+    .clicked()
   {
     ui.close();
     marking::save_as_mesh(app, bid);
@@ -1386,7 +1388,11 @@ pub(crate) fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str, key: Option<
     b = b.shortcut_text(k);
   }
   let r = ui.add(b);
-  icons::draw_color(ui.painter(), Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(15.0)), icon);
+  icons::draw_color(
+    ui.painter(),
+    Rect::from_center_size(r.rect.left_center() + vec2(13.0, 0.0), Vec2::splat(15.0)),
+    icon,
+  );
   r
 }
 
