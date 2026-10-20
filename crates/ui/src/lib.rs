@@ -133,6 +133,8 @@ pub struct App {
   pub(crate) last_click: Option<egui::Pos2>,
   /// The Measure dialog's result line: closest points and the label.
   pub(crate) measure: Option<(fox_engine::kernel::glam::DVec3, fox_engine::kernel::glam::DVec3, String)>,
+  /// Measure's precision and units.
+  pub(crate) measure_fmt: dialogs::MeasureFmt,
   /// Section analysis: `{plane, offset, flip}` (see [`fox_engine::scene::view_options`]).
   pub section: Option<Value>,
   /// Surface analysis: `{analysis, pull?, angle?}`.
@@ -303,6 +305,7 @@ impl App {
       other: None,
       last_click: None,
       measure: None,
+      measure_fmt: dialogs::MeasureFmt::default(),
       section: None,
       analysis: None,
       rebuild: None,
@@ -892,6 +895,7 @@ impl App {
   pub fn cancel_dialog(&mut self) {
     if let Some(mut d) = self.dialog.take() {
       d.cancel(&mut self.s);
+      d.leave(self);
     }
   }
 
@@ -991,6 +995,26 @@ impl App {
     if to != self.cam {
       self.cam_move = Some((self.cam, to, now()));
     }
+  }
+
+  /// Named Views > New Named View: saves where the camera is (or is headed) in the design.
+  /// Returns the new view's name.
+  pub(crate) fn save_named_view(&mut self) -> Option<String> {
+    let c = self.view_now();
+    let r = self.run(
+      "view.named.save",
+      json!({"target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+    )?;
+    let name = r.get("name").and_then(Value::as_str)?.to_string();
+    self.status = Some((format!("Saved the view as '{name}'"), false));
+    Some(name)
+  }
+
+  /// Flies the camera to a named view (a browser double-click).
+  pub(crate) fn restore_named_view(&mut self, name: &str) {
+    let Some(v) = self.s.design.named_views.iter().find(|v| v.name == name) else { return };
+    let to = Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ortho: v.ortho };
+    self.fly_to(to);
   }
 
   /// Stops a camera move where it is (the user took the camera).
@@ -1161,6 +1185,7 @@ impl App {
         panels::comments(self, &ctx);
       }
       panels::browser(self, &ctx);
+      panels::isolate_banner(self, &ctx);
       if self.show_navbar {
         panels::nav_bar(self, &ctx);
       }
@@ -1177,6 +1202,8 @@ impl App {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
         self.dialog = Some(d);
+      } else {
+        d.leave(self);
       }
     }
     if self.show_params {

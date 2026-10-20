@@ -1045,7 +1045,17 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   }
   // Named Views
   let nv = egui::Id::new("tree-views");
-  tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
+  let ev = tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
+  if let Some(r) = ev.response {
+    r.context_menu(|ui| {
+      if menu_item(ui, Icon::Views, "New Named View", None).clicked() {
+        ui.close();
+        if app.save_named_view().is_some() {
+          ui.data_mut(|d| d.insert_temp(nv.with("open"), true));
+        }
+      }
+    });
+  }
   if is_open(ui, nv, false) {
     for (label, v) in [
       ("TOP", StandardView::Top),
@@ -1059,6 +1069,17 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
         if v == StandardView::Home {
           app.fit_view();
         }
+      }
+    }
+    // the user's views, saved in the design
+    let names: Vec<String> = app.s.design.named_views.iter().map(|v| v.name.clone()).collect();
+    for name in names {
+      let ev = tree_row(ui, nv.with(("user", &name)), 2, None, None, Icon::Views, &name, false, theme::TEXT);
+      if ev.double_clicked {
+        app.restore_named_view(&name);
+      }
+      if let Some(r) = ev.response {
+        r.on_hover_text("Double-click to restore this view").context_menu(|ui| named_view_menu(app, ui, &name));
       }
     }
   }
@@ -1100,6 +1121,84 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   browser_assembly::sections(app, ui);
   drawings_section(app, ui);
   browser_config::section(app, ui);
+}
+
+/// The tag on an isolated body's browser row.
+fn isolate_badge(ui: &egui::Ui, row: Rect) {
+  let p = ui.painter();
+  let galley = p.layout_no_wrap("ISOLATED".into(), egui::FontId::proportional(9.5), Color32::WHITE);
+  let size = galley.size() + vec2(10.0, 4.0);
+  let r = Rect::from_min_size(pos2(row.right() - size.x - 6.0, row.center().y - size.y / 2.0), size);
+  p.rect_filled(r, 3.0, theme::ACCENT);
+  p.galley(r.min + vec2(5.0, 2.0), galley, Color32::WHITE);
+}
+
+/// While bodies are isolated: a banner at the top of the canvas saying so, with Unisolate (as
+/// Fusion shows isolate mode).
+pub fn isolate_banner(app: &mut App, ctx: &egui::Context) {
+  let Some(only) = &app.ctx_menu.isolate else { return };
+  let label = match only.as_slice() {
+    [b] => format!("Isolated: {}", app.s.body_name(*b)),
+    v => format!("Isolated: {} bodies", v.len()),
+  };
+  let mut unisolate = false;
+  egui::Area::new(egui::Id::new("isolate-banner"))
+    .fixed_pos(pos2(app.canvas.center().x, app.canvas.min.y + 8.0))
+    .pivot(egui::Align2::CENTER_TOP)
+    .order(egui::Order::Middle)
+    .show(ctx, |ui| {
+      egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(Stroke::new(1.0, theme::ACCENT))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+            ui.label(RichText::new(label).color(theme::TEXT).strong());
+            if ui.button("Unisolate").on_hover_text("Show every body again").clicked() {
+              unisolate = true;
+            }
+          });
+        });
+    });
+  if unisolate {
+    app.ctx_menu.isolate = None;
+  }
+}
+
+/// A user named view's right-click menu: restore, update to the current camera, rename, delete.
+fn named_view_menu(app: &mut App, ui: &mut egui::Ui, name: &str) {
+  if menu_item(ui, Icon::Views, "Restore", None).clicked() {
+    ui.close();
+    app.restore_named_view(name);
+  }
+  if menu_item(ui, Icon::Views, "Update to Current View", None).clicked() {
+    ui.close();
+    let c = app.cam;
+    app.run(
+      "view.named.save",
+      json!({"name": name, "target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+    );
+  }
+  ui.separator();
+  // rename in place: type the new name, Enter
+  let key = egui::Id::new(("rename-named-view", name));
+  let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| name.to_string());
+  ui.horizontal(|ui| {
+    ui.label("Rename");
+    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(110.0));
+    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && text.trim() != name {
+      app.run("view.named.rename", json!({"name": name, "to": text.trim()}));
+      ui.close();
+    }
+  });
+  ui.data_mut(|d| d.insert_temp(key, text));
+  ui.separator();
+  if menu_item(ui, Icon::Remove, "Delete", None).clicked() {
+    ui.close();
+    app.run("view.named.delete", json!({"name": name}));
+  }
 }
 
 /// Components with their bodies; right-click to rename, ground, duplicate or delete.
@@ -1305,8 +1404,15 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   }
   for (bid, name, visible) in bodies {
     let selected = app.s.selection.contains(&Sel::Body { body: bid });
-    let color = if visible { theme::TEXT } else { theme::MUTED };
+    // while isolated, the bodies left out are hidden from the canvas: grey them, as Fusion does
+    let isolated = app.ctx_menu.isolate.as_ref().map(|only| only.contains(&bid));
+    let color = if visible && isolated != Some(false) { theme::TEXT } else { theme::MUTED };
     let ev = tree_row(ui, id.with(bid.0), 2, None, Some(visible), Icon::Body, &name, selected, color);
+    if isolated == Some(true)
+      && let Some(r) = &ev.response
+    {
+      isolate_badge(ui, r.rect);
+    }
     if ev.eye {
       app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
     } else if ev.clicked || ev.double_clicked {

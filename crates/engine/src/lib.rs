@@ -26,6 +26,7 @@ mod solid;
 mod subassembly;
 mod surfaces;
 mod trace;
+mod views;
 
 use std::path::PathBuf;
 

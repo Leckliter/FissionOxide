@@ -237,6 +237,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
+  appearance_drop(app, &resp, &view, &ctx);
   let planes = plane_pick(app, &resp, &view);
   render_if_needed(app, &view, &ctx);
 
@@ -370,6 +371,24 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
 }
 
 // ---------------------------------------------------------------- picking
+
+/// A swatch from the Appearance panel over the canvas: the face under it lights up, and letting
+/// go applies the appearance to that face or its body.
+fn appearance_drop(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let Some(drag) = egui::DragAndDrop::payload::<crate::dialogs::SwatchDrag>(ctx) else { return };
+  let Some(pos) = ctx.pointer_latest_pos().filter(|p| resp.rect.contains(*p)) else { return };
+  let Some(frame) = &app.frame else { return };
+  let (x, y) = view.to_px(pos);
+  let under = app.picks.get(frame.pick(x, y, 0, |_| true)).filter(|p| matches!(p, Pick::Face { .. }));
+  app.hover = under;
+  if ctx.input(|i| i.pointer.any_released()) {
+    egui::DragAndDrop::clear_payload(ctx);
+    if let Some(Pick::Face { body, face }) = under {
+      let target = if drag.faces { Sel::Face { body, face } } else { Sel::Body { body } };
+      crate::dialogs::apply_appearance(app, &drag.name, drag.color, drag.faces, &[target]);
+    }
+  }
+}
 
 fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   if app.drag.is_some() {
