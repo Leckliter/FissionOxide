@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+464-stl-millimeter
+465-obj-inch
+466-3mf-file

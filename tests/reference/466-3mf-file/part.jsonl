@@ -1,0 +1,2 @@
+# 466-3mf-file: added by the parity loop from a Fusion probe
+{"cmd": "import", "path": "lprism.3mf", "merge_coplanar": false}

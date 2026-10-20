@@ -496,6 +496,15 @@ fn every_format_round_trips() {
   assert_eq!(s.model.bodies.len(), before + 1, "{r}");
   assert!(s.undo());
   assert_eq!(s.model.bodies.len(), before);
+  // a mesh in inches comes in 25.4x larger: volume scales by 25.4^3
+  let v0 = total_volume(&s);
+  run(&mut s, "import", json!({"path": dir.join("plate.stl"), "units": "in"}));
+  let inch = total_volume(&s) - v0;
+  assert_eq!(s.model.bodies.len(), before + 1);
+  assert!((inch / (v * 25.4f64.powi(3)) - 1.0).abs() < 0.01, "{inch} vs {v}");
+  assert!(s.undo());
+  let e = s.execute("import", &json!({"path": dir.join("plate.stl"), "units": "yd"})).unwrap_err();
+  assert!(e.0.contains("units"), "{}", e.0);
   let formats = run(&mut s, "formats", json!({}));
   assert!(formats.as_array().unwrap().iter().any(|f| f["id"] == "f3d" && f["export"] == false));
   let _ = std::fs::remove_dir_all(dir);

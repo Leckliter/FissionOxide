@@ -109,7 +109,14 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
       add_import(s, FeatureKind::Import { file_name: name, breps, meshes: Vec::new() })
     }
     "stl" | "obj" | "ply" | "3mf" => {
-      let meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      // 3MF files carry their own unit; the others are unitless: millimetres unless told
+      let scale = if fmt.id == "3mf" { 1.0 } else { mesh_unit_scale(p)? };
+      let mut meshes = fox_exchange::read_mesh(fmt.id, &std::fs::read(path)?).map_err(ex)?;
+      if scale != 1.0 {
+        for m in &mut meshes {
+          m.positions.iter_mut().flatten().for_each(|c| *c *= scale);
+        }
+      }
       import_meshes(s, name, meshes, p)
     }
     "dxf" | "svg" => import_dxf(s, path, p),
@@ -125,6 +132,18 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
     "f3d" => import_fusion(s, path, p),
     other => Err(CmdError::new(format!("import of '{other}' is not implemented"))),
   }
+}
+
+/// Millimetres per unit of a mesh file's coordinates, from the `units` parameter (default mm).
+fn mesh_unit_scale(p: &Value) -> Result<f32, CmdError> {
+  Ok(match p.get("units").and_then(Value::as_str).unwrap_or("mm") {
+    "mm" => 1.0,
+    "cm" => 10.0,
+    "m" => 1000.0,
+    "in" => 25.4,
+    "ft" => 304.8,
+    other => return Err(CmdError::new(format!("unknown mesh units '{other}': use mm, cm, m, in or ft"))),
+  })
 }
 
 fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Value) -> CmdResult {
