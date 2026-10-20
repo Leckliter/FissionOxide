@@ -1685,6 +1685,20 @@ mod tests {
   }
 
   #[test]
+  fn p_in_a_sketch_is_project_not_point() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sketch = app.s.edit_sketch;
+    let mid = app.canvas.center();
+    press(&mut app, &ctx, egui::Key::P, mid);
+    assert_ne!(app.tool, Tool::Point);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Project));
+    // Project works inside the sketch: it stays open
+    assert_eq!(app.s.edit_sketch, sketch);
+  }
+
+  #[test]
   fn v_hides_and_shows_the_selected_face_body() {
     let ctx = egui::Context::default();
     let mut app = with_box();

@@ -452,7 +452,7 @@ impl Cmd {
         Tool::CenterArc => (Icon::CenterArc, "Center Point Arc", "Arc from centre, start and end"),
         Tool::Polygon => (Icon::Polygon, "Inscribed Polygon", "Hexagon from centre and vertex"),
         Tool::Slot => (Icon::Slot, "Center to Center Slot", "Slot from two centres and a width"),
-        Tool::Point => (Icon::Point, "Point", "Sketch point (P)"),
+        Tool::Point => (Icon::Point, "Point", "Sketch point"),
         Tool::Dimension => (Icon::Dimension, "Sketch Dimension", "Dimension geometry (D)"),
         Tool::Spline => (Icon::SplineFit, "Fit Point Spline", "Smooth curve through clicked points"),
         Tool::Trim => (Icon::SkTrim, "Trim", "Remove the piece of a curve you click (T)"),
