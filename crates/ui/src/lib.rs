@@ -1268,7 +1268,6 @@ fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
   }
 }
 
-/// Seconds since the app started (for timing background work).
 impl App {
   /// Whether the window came to the front just now. The click or key that activates it (or one
   /// sent along with a later launch's file) wasn't meant for what happens to be under it.
@@ -1280,6 +1279,7 @@ impl App {
 /// How long after the window comes to the front its input isn't taken as confirming a save.
 const ACTIVATION_GRACE_SECS: f64 = 0.4;
 
+/// Seconds since the app started (for timing background work).
 fn now() -> f64 {
   static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
   START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
