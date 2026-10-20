@@ -700,6 +700,11 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: BodySel,
     plane: PlaneRef,
+    /// Mirror these features instead of bodies (Fusion's "Features" mode): each one's tool solid
+    /// is mirrored and applied again with the feature's own operation, so a mirrored cut cuts.
+    /// Empty = mirror bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    features: Vec<FeatureId>,
     /// Join the mirrored copy to the original (default) or keep it as new bodies.
     #[serde(default = "yes")]
     join: bool,
@@ -1649,7 +1654,10 @@ impl FeatureKind {
         std::iter::once(*sketch).chain(std::iter::once(*path_sketch)).chain(rail.iter().map(|r| r.sketch)).collect()
       }
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
-      FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
+      FeatureKind::Primitive { plane, .. } => plane_dep(plane),
+      FeatureKind::Mirror { plane, features, .. } => {
+        plane_dep(plane).into_iter().chain(features.iter().copied()).collect()
+      }
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
       FeatureKind::PlaneBy { def } => def.depends_on(),
       FeatureKind::ConstructionAxis { def } => def.depends_on(),

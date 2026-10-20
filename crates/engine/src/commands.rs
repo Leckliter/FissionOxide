@@ -175,7 +175,7 @@ cmds! {
   "cam.tool.add" => "Add or change a tool in the library", "{number?, name?, kind?: flat|ball|bull_nose|drill|chamfer, diameter, corner_radius?, angle?, tip_diameter?, flute_length?, flutes?, rpm?, feed?, plunge?}";
   "cam.tool.delete" => "Remove a tool from the library", "{number}";
   "cam.posts" => "The post-processors G-code can be written for", "{}";
-  "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
+  "mirror" => "Mirror bodies, or features (their cut/join applied again), across a plane", "{plane, bodies?, features?: [id], join?, targets?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
   "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
@@ -816,7 +816,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "mirror" => {
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
       let join = p.get("join").and_then(Value::as_bool).unwrap_or(true);
-      add_feature(s, FeatureKind::Mirror { bodies: body_sel(p), plane, join })
+      let features: Vec<FeatureId> = ids(p, "features").into_iter().map(FeatureId).collect();
+      if let Some(f) = features.iter().find(|f| s.design.feature(**f).is_none()) {
+        return Err(CmdError::new(format!("no feature {}", f.0)));
+      }
+      add_op_feature(s, FeatureKind::Mirror { bodies: body_sel(p), plane, features, join }, p)
     }
     "pattern.rectangular" => {
       let direction = req_vec3(p, "direction")?;

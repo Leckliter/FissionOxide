@@ -253,3 +253,6 @@
 428-countersink-blind-flat-bottom
 429-flipped-hole-from-midplane
 430-hole-to-plane-extent
+438-angled-plane-body-combine
+439-angled-plane-body-separate
+440-cut-feature-mirror
