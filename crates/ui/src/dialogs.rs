@@ -16,6 +16,9 @@ use crate::{App, panels};
 mod manip;
 mod solid;
 
+/// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
+pub(crate) const PICK_PLANE_HINT: &str = "Select a plane or planar face";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
   PickPlane,
@@ -830,6 +833,7 @@ impl Dialog {
       && app.s.edit_sketch.is_some()
     {
       app.last_sketch = app.s.edit_sketch;
+      app.left_sketch();
       let _ = app.s.execute("sketch.finish", &json!({}));
     }
     if kind.reports() {
@@ -1864,17 +1868,9 @@ impl Dialog {
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
     let creating = self.editing.is_none();
     match self.kind {
+      // the planes to pick are drawn in the viewport (`viewport::plane_picker`)
       Kind::PickPlane => {
-        ui.label("Plane");
-        ui.vertical(|ui| {
-          for (label, p) in [("XY  (Top)", "xy"), ("XZ  (Front)", "xz"), ("YZ  (Right)", "yz")] {
-            if ui.button(label).clicked() {
-              app.create_sketch(json!(p));
-              self.closed = true;
-            }
-          }
-          ui.label(RichText::new("…or click a planar face").small().color(theme::MUTED));
-        });
+        ui.label(PICK_PLANE_HINT);
         ui.end_row();
       }
       Kind::Extrude | Kind::Revolve => {

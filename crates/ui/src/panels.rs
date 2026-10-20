@@ -6,7 +6,7 @@ use egui::{Color32, Pos2, Rect, RichText, Stroke, Vec2, pos2, vec2};
 use fox_engine::model::{BodyId, FeatureId, FeatureKind};
 use fox_engine::render::StandardView;
 use fox_engine::{Sel, Session};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon};
@@ -1045,13 +1045,23 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   }
   // Origin
   let og = egui::Id::new("tree-origin");
+  // a plane picked here stays picked until something else is selected
+  if !app.s.selection.is_empty() {
+    app.picked_plane = None;
+  }
   tree_row(ui, og, 1, Some(false), None, Icon::Folder, "Origin", false, theme::TEXT);
   if is_open(ui, og, false) {
     tree_row(ui, og.with("o"), 2, None, None, Icon::Origin, "O", false, theme::TEXT);
     for (label, plane) in [("XY", "xy"), ("XZ", "xz"), ("YZ", "yz")] {
-      let ev = tree_row(ui, og.with(label), 2, None, None, Icon::Plane, label, false, theme::TEXT);
+      let picked = app.picked_plane.as_ref().is_some_and(|p| p == plane);
+      let ev = tree_row(ui, og.with(label), 2, None, None, Icon::Plane, label, picked, theme::TEXT);
       if ev.double_clicked {
-        app.create_sketch(json!(plane));
+        // the first click already started it if Create Sketch was waiting for a plane
+        if app.s.edit_sketch.is_none() {
+          app.create_sketch(json!(plane));
+        }
+      } else if ev.clicked {
+        pick_plane(app, json!(plane));
       }
       if let Some(r) = ev.response {
         r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
@@ -1370,13 +1380,32 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   for (fid, name) in planes {
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::Plane, &name, false, theme::TEXT);
+    let plane = json!({"feature": fid.0});
+    let picked = app.picked_plane.as_ref() == Some(&plane);
+    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
     if ev.double_clicked {
-      app.create_sketch(json!({"feature": fid.0}));
+      // the first click already started it if Create Sketch was waiting for a plane
+      if app.s.edit_sketch.is_none() {
+        app.create_sketch(plane);
+      }
+    } else if ev.clicked {
+      pick_plane(app, plane);
     }
     if let Some(r) = ev.response {
       r.on_hover_text("Double-click to sketch on this plane");
     }
+  }
+}
+
+/// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
+/// there, else it selects the plane (Create Sketch then starts on it).
+fn pick_plane(app: &mut App, plane: Value) {
+  if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
+    app.cancel_dialog();
+    app.create_sketch(plane);
+  } else {
+    app.s.selection.clear();
+    app.picked_plane = if app.picked_plane.as_ref() == Some(&plane) { None } else { Some(plane) };
   }
 }
 

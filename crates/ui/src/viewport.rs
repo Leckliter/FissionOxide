@@ -171,6 +171,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
+  let planes = plane_pick(app, &resp, &view);
   render_if_needed(app, &view, &ctx);
 
   let painter = ui.painter_at(rect);
@@ -188,8 +189,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
+  let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
   if app.show_viewcube {
     consumed |= viewcube(app, ui, &painter, &view);
+  }
+  if !consumed && let Some(plane) = hot_plane {
+    consumed = true;
+    if resp.clicked() {
+      app.cancel_dialog();
+      app.create_sketch(plane);
+    }
   }
   let step = grid_step(app, &view) / 10.0;
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
@@ -239,6 +248,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
         let (_, _, back) = app.cam.basis();
         ray_plane(o, d, DVec3::from(app.cam.target), back)
       });
+      app.stop_cam_move();
       app.cam.zoom(factor, toward);
     }
   }
@@ -258,6 +268,9 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
     });
   }
   let d = resp.drag_delta();
+  if d != Vec2::ZERO && matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom)) {
+    app.stop_cam_move();
+  }
   match app.drag {
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
@@ -735,6 +748,7 @@ fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 
 fn select_click(app: &mut App, add: bool) {
+  app.picked_plane = None;
   match app.hover {
     Some(p) if app.s.edit_sketch.is_some() => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
     Some(p) => crate::select::pick(app, p, add),
@@ -1445,6 +1459,108 @@ fn point_in_quad(p: Pos2, q: &[Pos2]) -> bool {
     }
   }
   inside
+}
+
+// ---------------------------------------------------------------- sketch plane picking
+
+/// Fusion's orange for the origin planes offered by Create Sketch.
+const PLANE_RGB: [u8; 3] = [236, 150, 52];
+
+/// The planes Create Sketch offers in the viewport, as (`sketch.create` plane, plane): the
+/// origin planes and the construction planes.
+fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
+  let mut out = vec![(json!("xy"), Plane::XY), (json!("xz"), Plane::XZ), (json!("yz"), Plane::YZ)];
+  for (id, pl) in &app.s.model.planes {
+    if !app.s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      out.push((json!({"feature": id.0}), *pl));
+    }
+  }
+  out
+}
+
+/// Half the side of a plane's square: the size the scene draws construction planes at.
+fn plane_half_size(app: &App) -> f64 {
+  app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
+}
+
+/// Which of `planes` (index) the ray through `pos` hits first, if nothing nearer (a body face)
+/// is in the way.
+fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, Plane)], half: f64) -> Option<usize> {
+  let (o, d) = view.ray(&app.cam, pos);
+  let mut best: Option<(f64, usize)> = None;
+  for (i, (_, pl)) in planes.iter().enumerate() {
+    let Some(hit) = ray_plane(o, d, pl.origin, pl.normal()) else { continue };
+    let t = (hit - o).dot(d);
+    let [u, v] = pl.to_local(hit);
+    if t > 0.0 && u.abs() <= half && v.abs() <= half && best.is_none_or(|(bt, _)| t < bt) {
+      best = Some((t, i));
+    }
+  }
+  let (t, i) = best?;
+  let face = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|h| h.0);
+  face.is_none_or(|f| t <= f).then_some(i)
+}
+
+/// The planes shown for picking a sketch plane this frame.
+struct PlanePick {
+  planes: Vec<(serde_json::Value, Plane)>,
+  half: f64,
+  /// Create Sketch is waiting for a plane (else only the plane picked in the browser shows).
+  picking: bool,
+  /// The plane under the cursor (index).
+  hot: Option<usize>,
+}
+
+/// While Create Sketch waits for a plane: the origin and construction planes, and which one is
+/// under the cursor (that one wins over the face highlight). Otherwise the plane picked in the
+/// browser, if any.
+fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
+  let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
+  if !picking && (app.picked_plane.is_none() || app.s.edit_sketch.is_some()) {
+    return None;
+  }
+  let mut planes = sketch_planes(app);
+  if !picking {
+    planes.retain(|(p, _)| Some(p) == app.picked_plane.as_ref());
+  }
+  let half = plane_half_size(app);
+  let hot = if picking && app.drag.is_none() {
+    resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes, half))
+  } else {
+    None
+  };
+  if hot.is_some() {
+    app.hover = None;
+  }
+  Some(PlanePick { planes, half, picking, hot })
+}
+
+/// Draws the planes as see-through orange squares, as in Fusion, the hovered (or browser-picked)
+/// one brighter. Returns the `sketch.create` plane under the cursor.
+fn sketch_planes_overlay(
+  app: &App,
+  pick: Option<PlanePick>,
+  resp: &egui::Response,
+  painter: &egui::Painter,
+  view: &View,
+) -> Option<serde_json::Value> {
+  let PlanePick { planes, half, picking, hot } = pick?;
+  let [r, g, b] = PLANE_RGB;
+  let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
+  for (i, (_, pl)) in planes.iter().enumerate() {
+    let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
+    else {
+      continue;
+    };
+    let lit = hot == Some(i) || !picking;
+    let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
+    let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
+    painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));
+  }
+  if picking {
+    resp.clone().on_hover_text_at_pointer(crate::dialogs::PICK_PLANE_HINT);
+  }
+  planes.into_iter().nth(hot?).map(|(p, _)| p)
 }
 
 // ---------------------------------------------------------------- window selection, Select Other
