@@ -1159,6 +1159,36 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       ("sketch.text_edit", q)
     }
+    "sketch.scale" => {
+      let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
+      let mut q = json!({"center": [num("x"), num("y")], "scale": p.get("scale").cloned().unwrap_or(json!("1"))});
+      for k in ["sketch", "curves"] {
+        if let Some(v) = p.get(k) {
+          q[k] = v.clone();
+        }
+      }
+      ("sketch.transform", q)
+    }
+    // Closest Point takes no direction
+    "sketch.project_to_surface" => {
+      let mut q = p.clone();
+      if p.get("type") != Some(&json!("along_vector"))
+        && let Some(o) = q.as_object_mut()
+      {
+        o.remove("direction");
+      }
+      (form.cmd, q)
+    }
+    "align.form" => {
+      let face = |k: &str| json!({"face": p.get(k).cloned().unwrap_or(Value::Null)});
+      let mut q = json!({"moving_geometry": face("moving"), "fixed_geometry": face("fixed")});
+      for k in ["relation", "offset", "flip"] {
+        if let Some(v) = p.get(k) {
+          q[k] = v.clone();
+        }
+      }
+      ("align", q)
+    }
     _ => (form.cmd, p),
   }
 }
@@ -2007,6 +2037,76 @@ pub static PATH_PATTERN: Form = Form {
       options: &[("identical", "Identical"), ("along_path", "Path direction")],
     },
     Input::Check { key: "join", label: "Join to the original" },
+  ],
+  picks_model: true,
+};
+
+pub static SK_SCALE: Form = Form {
+  title: "SKETCH SCALE",
+  name: "Sketch Scale",
+  hint: "Scale sketch curves about a point (sketch X, Y); dimensions inside them scale too",
+  icon: Icon::SkScale,
+  cmd: "sketch.scale",
+  fixed: &[],
+  inputs: &[
+    Input::Curves { key: "curves", label: "Entities (default all)" },
+    Input::Expr { key: "x", label: "Point X", default: "0" },
+    Input::Expr { key: "y", label: "Point Y", default: "0" },
+    Input::Expr { key: "scale", label: "Scale factor", default: "1" },
+  ],
+  picks_model: false,
+};
+
+const PROJECTION_TYPES: &[(&str, &str)] = &[("closest_point", "Closest Point"), ("along_vector", "Along Vector")];
+
+pub static SK_PROJECT_SURFACE: Form = Form {
+  title: "PROJECT TO SURFACE",
+  name: "Project To Surface",
+  hint: "Drape sketch curves onto faces: each point to the closest point, or pushed along a direction",
+  icon: Icon::ProjectSurface,
+  cmd: "sketch.project_to_surface",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Faces" },
+    Input::Curves { key: "curves", label: "Curves (default all)" },
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Choice { key: "type", label: "Projection type", options: PROJECTION_TYPES },
+    Input::Axis { key: "direction", label: "Direction (Along Vector)" },
+  ],
+  picks_model: true,
+};
+
+pub static SK_INTERSECTION_CURVE: Form = Form {
+  title: "INTERSECTION CURVE",
+  name: "Intersection Curve",
+  hint: "3D curves where sketch curves, pushed along their sketch's normal, cross faces",
+  icon: Icon::Intersect,
+  cmd: "sketch.intersection_curve",
+  fixed: &[],
+  inputs: &[
+    Input::Curves { key: "curves", label: "Sketch curves (default all)" },
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Faces { key: "faces", label: "Faces" },
+  ],
+  picks_model: true,
+};
+
+const ALIGN_RELATIONS: &[(&str, &str)] =
+  &[("auto", "Automatic"), ("flush", "Flush"), ("coincident", "Coincident"), ("concentric", "Concentric")];
+
+pub static ALIGN: Form = Form {
+  title: "ALIGN",
+  name: "Align",
+  hint: "Move a component so its face lines up with another (on another component, or a root body)",
+  icon: Icon::Align,
+  cmd: "align.form",
+  fixed: &[],
+  inputs: &[
+    Input::Face { key: "moving", label: "Objects to move", near: None },
+    Input::Face { key: "fixed", label: "Align to", near: None },
+    Input::Choice { key: "relation", label: "Relation", options: ALIGN_RELATIONS },
+    Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
+    Input::Check { key: "flip", label: "Flip" },
   ],
   picks_model: true,
 };

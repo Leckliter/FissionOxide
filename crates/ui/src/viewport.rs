@@ -2596,6 +2596,10 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
     return None;
   }
   let mut planes = sketch_planes(app);
+  // the Construction selection filter turned off: construction planes can't be picked
+  if picking && !app.sel_filter.construction {
+    planes.retain(|(p, _)| p.get("feature").is_none());
+  }
   if !picking {
     // the plane picked in the browser, and the origin planes Show/Hide turned on
     planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));

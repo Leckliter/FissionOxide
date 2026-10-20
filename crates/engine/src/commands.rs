@@ -200,6 +200,12 @@ cmds! {
   "feature.rename" => "Rename a feature", "{feature, name}";
   "feature.move" => "Reorder a feature in the timeline (refused when it would come before what it references)", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
+  "timeline.group" => "Create Group: adjacent timeline features (in no group) collapse into one named group; geometry is unchanged", "{features: [id], name? (default GroupN)}";
+  "timeline.ungroup" => "Ungroup: the group goes, its features stay", "{group}";
+  "timeline.group_rename" => "Rename a timeline group", "{group, name}";
+  "timeline.group_add" => "Move to Group: features next to a group join it", "{group, features: [id]}";
+  "timeline.group_suppress" => "Suppress or unsuppress every feature in a group (no 'suppressed': toggle)", "{group, suppressed?: bool}";
+  "timeline.group_delete" => "Delete a group with its features, as one undo step", "{group}";
   "attribute.set" => "Attach a named value to the design, a body, component, feature or sketch curve/point", "{target?: \"design\" | {body} | {component} | {feature} | {sketch} | {sketch, curve} | {sketch, point}, group, name, value}";
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
@@ -397,6 +403,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::params::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::groups::run(s, name, p) {
     return r;
   }
   match name {
