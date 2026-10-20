@@ -141,6 +141,8 @@ struct HeadsUp {
   buf: Option<String>,
   /// Give the active box the keyboard this frame (selecting its text when true).
   focus: Option<bool>,
+  /// Tab (false) or Shift+Tab (true) was pressed for the boxes this frame.
+  tab: Option<bool>,
   /// The last cursor position on the sketch plane, and the point it snapped to.
   cursor: Option<([f64; 2], Option<PointId>)>,
 }
@@ -2112,6 +2114,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
 /// open dialog's primary value, as in Fusion. Runs before the shortcuts, so a digit can't also
 /// switch the selection mode.
 pub fn route_typing(app: &mut App, ctx: &egui::Context) {
+  take_hud_tab(app, ctx);
   if ctx.egui_wants_keyboard_input() || app.drawing.is_some() || app.dim_edit.is_some() || app.marking.is_some() {
     return;
   }
@@ -2150,9 +2153,34 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
   });
 }
 
+/// Tab belongs to the heads-up boxes while a shape with more than one is drawn (and no other
+/// text box has the keyboard). It's taken before any widget runs, so egui's focus traversal
+/// can't also move the keyboard (to a panel's field, or back to the box it came from).
+fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
+  let hud = &mut app.tstate.hud;
+  hud.tab = None;
+  if app.s.edit_sketch.is_none()
+    || hud_fields(app.tool, app.tstate.pts.len()).len() < 2
+    || app.drawing.is_some()
+    || app.dim_edit.is_some()
+    || app.marking.is_some()
+    || (hud.buf.is_none() && ctx.egui_wants_keyboard_input())
+  {
+    return;
+  }
+  let (tab, shift_tab) = ctx.input_mut(|i| {
+    (i.consume_key(egui::Modifiers::NONE, egui::Key::Tab), i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab))
+  });
+  if tab || shift_tab {
+    ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    hud.tab = Some(shift_tab);
+  }
+}
+
 /// The heads-up dimensions of the shape being drawn: each value's dimension follows the cursor
 /// with its box. Typing sets the active box, Tab moves to the next, Enter places the point.
 fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let tab = app.tstate.hud.tab.take();
   let fields = hud_fields(app.tool, app.tstate.pts.len());
   let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
     if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
@@ -2218,13 +2246,13 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
   let n = fields.len();
   let hud = &mut app.tstate.hud;
   hud.active = hud.active.min(n - 1);
-  let (tab, shift_tab) = ctx.input(|i| {
-    (i.key_pressed(egui::Key::Tab) && !i.modifiers.shift, i.key_pressed(egui::Key::Tab) && i.modifiers.shift)
-  });
   let mut commit = false;
-  // Tab with no box focused starts typing in the next box, with its value selected
-  if hud.buf.is_none() && (tab || shift_tab) && !ctx.egui_wants_keyboard_input() && n > 1 {
-    hud.active = (hud.active + 1) % n;
+  // Tab keeps what was typed and moves on to the next box (Shift+Tab: the previous one), or with
+  // no box focused starts typing in the next box; either way the box's value is selected
+  if let Some(back) = tab
+    && n > 1
+  {
+    hud.active = if back { (hud.active + n - 1) % n } else { (hud.active + 1) % n };
     let t = if hud.typed[hud.active].is_empty() { fmt(hud.active) } else { hud.typed[hud.active].clone() };
     hud.buf = Some(t);
     hud.focus = Some(true);
@@ -2255,13 +2283,7 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
             hud.typed[i] = buf.clone();
           }
           let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-          if r.has_focus() && (tab || shift_tab) && n > 1 {
-            // Tab keeps what was typed and moves on
-            let next = (i + 1) % n;
-            hud.active = next;
-            buf = if hud.typed[next].is_empty() { fmt(next) } else { hud.typed[next].clone() };
-            hud.focus = Some(true);
-          } else if enter && (r.has_focus() || r.lost_focus()) {
+          if enter && (r.has_focus() || r.lost_focus()) {
             commit = true;
             keep = false;
           } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
@@ -2761,6 +2783,28 @@ mod tests {
     let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
     let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
     assert_eq!(label, "2");
+  }
+
+  #[test]
+  fn a_sized_rectangle_from_the_origin_draws_black() {
+    use fox_engine::scene::{Pick, SKETCH_FIXED, SKETCH_FREE, SceneBuilder, ViewOptions};
+    let (mut app, sk) = sketching(Tool::Rect);
+    let colours = |app: &App| {
+      let (scene, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
+      let curve = |id| matches!(picks.get(id), Some(Pick::SketchCurve { .. }));
+      scene.lines.iter().filter(|l| curve(l.id)).map(|l| l.color).collect::<Vec<_>>()
+    };
+    // sized but loose: it can still move
+    place_point(&mut app, sk, [5.0, 5.0], None);
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    assert_eq!(colours(&app), [SKETCH_FREE; 4]);
+    // started on the origin, the same rectangle is fully constrained
+    place_point(&mut app, sk, [0.0, 0.0], Some(fox_engine::sketch::ORIGIN));
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    let c = colours(&app);
+    assert_eq!(c[4..], [SKETCH_FIXED; 4], "{c:?}");
   }
 
   #[test]

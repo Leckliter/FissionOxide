@@ -7,7 +7,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{EdgeLine, Plane, Shape, TriMesh};
 use fox_model::{BodyId, FeatureId, FeatureKind};
 use fox_render::{Marker, Mesh, Polyline, Scene};
-use fox_sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+use fox_sketch::{CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
@@ -336,17 +336,7 @@ impl SceneBuilder {
         }
         scene.meshes.push(pm);
       }
-      sketch_lines(
-        &mut scene,
-        &mut picks,
-        f.id,
-        &r.sketch,
-        &r.plane,
-        is_edit,
-        &r.report.free_points,
-        &selected,
-        opts.hover,
-      );
+      sketch_lines(&mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover);
     }
 
     // construction planes
@@ -531,7 +521,7 @@ fn sketch_lines(
   sk: &Sketch,
   plane: &Plane,
   editing: bool,
-  free: &[PointId],
+  report: &fox_sketch::SolveReport,
   selected: &[Pick],
   hover: Option<Pick>,
 ) {
@@ -542,8 +532,7 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let is_free = fox_sketch::curve_points(&c.kind).iter().any(|p| free.contains(p))
-      || matches!(c.kind, CurveKind::Circle { .. }) && !fully_dimensioned_circle(sk, c.id, free);
+    let is_free = report.curve_free(sk, c.id);
     let color = if selected.contains(&pick) {
       SELECT_COLOR
     } else if hover == Some(pick) {
@@ -631,7 +620,7 @@ fn sketch_lines(
         HOVER_COLOR
       } else if p.id == fox_sketch::ORIGIN {
         [200, 60, 40, 255]
-      } else if free.contains(&p.id) {
+      } else if report.free_points.contains(&p.id) {
         SKETCH_FREE
       } else {
         SKETCH_FIXED
@@ -639,20 +628,6 @@ fn sketch_lines(
       scene.markers.push(Marker { at: w([p.x, p.y]), color, size: 3.0, id: picks.id(pick), on_top: true });
     }
   }
-}
-
-/// A circle's radius is "free" when the solver reports it so; we approximate with the presence of
-/// a radius/diameter/equal/tangent constraint once its centre is fixed.
-fn fully_dimensioned_circle(sk: &Sketch, c: fox_sketch::CurveId, free: &[PointId]) -> bool {
-  let centre_fixed = sk.curve_points(c).first().is_some_and(|p| !free.contains(p));
-  centre_fixed
-    && sk.constraints.iter().any(|k| match &k.kind {
-      ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => *curve == c,
-      ConstraintKind::Equal { a, b }
-      | ConstraintKind::Tangent { a, b }
-      | ConstraintKind::SymmetricCurves { a, b, .. } => *a == c || *b == c,
-      _ => false,
-    })
 }
 
 /// Flattened curve in sketch coordinates.

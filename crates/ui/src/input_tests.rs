@@ -356,3 +356,61 @@ fn the_navigation_preset_drives_the_mouse_buttons() {
     assert!(h.app.drag.is_none() && h.app.s.selection.is_empty(), "no selection box");
   }
 }
+
+fn key(key: egui::Key) -> Event {
+  Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }
+}
+
+/// Keys as a keyboard delivers a typed value: each digit's key press and its text.
+fn typing(s: &str) -> Vec<Event> {
+  let mut ev = Vec::new();
+  for c in s.chars() {
+    if let Some(k) = egui::Key::from_name(&c.to_string()) {
+      ev.push(key(k));
+    }
+    ev.push(Event::Text(c.to_string()));
+  }
+  ev
+}
+
+/// The sketch's driving dimension values, in creation order.
+fn dims(app: &App, sk: fox_engine::model::FeatureId) -> Vec<f64> {
+  let s = app.s.design.sketch(sk).unwrap();
+  s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.value)).collect()
+}
+
+/// Tab moves between the heads-up boxes of every tool with more than one, as in Fusion:
+/// `40 Tab 20 Enter` sets both values.
+#[test]
+fn tab_moves_between_the_heads_up_boxes() {
+  use crate::viewport::Tool;
+  for tool in [Tool::Rect, Tool::CenterRect, Tool::Line] {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+    let sk = h.app.s.edit_sketch.unwrap();
+    h.app.set_tool(tool);
+    let c = h.app.canvas.center();
+    h.move_then_click(c);
+    h.frame(vec![Event::PointerMoved(c + vec2(60.0, -40.0))]);
+    h.frame(vec![]);
+    h.frame(typing("40"));
+    h.frame(vec![]);
+    h.frame(vec![key(egui::Key::Tab)]);
+    h.frame(vec![]);
+    h.frame(typing("20"));
+    h.frame(vec![]);
+    h.frame(vec![key(egui::Key::Enter)]);
+    h.frame(vec![]);
+    let d = dims(&h.app, sk);
+    if tool == Tool::Line {
+      // the angle box sets the line's direction
+      let s = h.app.s.design.sketch(sk).unwrap();
+      let c = s.curves.last().unwrap().id;
+      let [a, b] = [0, 1].map(|k| s.pos(s.curve_points(c)[k]).unwrap());
+      let ang = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+      assert!(d == [40.0] && (ang - 20.0).abs() < 1e-6, "{tool:?}: {d:?} at {ang}°");
+    } else {
+      assert_eq!(d, [40.0, 20.0], "{tool:?}");
+    }
+  }
+}
