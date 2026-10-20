@@ -239,7 +239,7 @@ fn help_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.label("Middle-drag pan · Shift+middle-drag or right-drag orbit · wheel zoom");
   ui.add_space(4.0);
   ui.label(RichText::new("Shortcuts").strong());
-  ui.label("Sketch: L line · R rectangle · C circle · A arc · P point · D dimension · X construction");
+  ui.label("Sketch: L line · R rectangle · C circle · A arc · P project · D dimension · X construction");
   ui.label("Model: E extrude · F fillet · Esc cancel · Del delete · F6 fit · Home view");
   ui.separator();
   ui.horizontal(|ui| {
