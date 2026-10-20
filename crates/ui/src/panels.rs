@@ -1895,8 +1895,14 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
             app.nav_mode = if app.nav_mode == Some(mode) { None } else { Some(mode) };
           }
         };
-        mode_btn(ui, app, Icon::Orbit, "Orbit: left-drag to orbit (Esc to stop)", NavMode::Orbit);
-        nav_caret(ui);
+        let orbit_hint = if app.free_orbit {
+          "Free Orbit: left-drag to orbit and roll (Esc to stop)"
+        } else {
+          "Constrained Orbit: left-drag to orbit (Esc to stop)"
+        };
+        mode_btn(ui, app, Icon::Orbit, orbit_hint, NavMode::Orbit);
+        let c = nav_caret(ui, "Orbit type");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::orbit_menu(app, ui));
         if icons::icon_button(
           ui,
           Icon::LookAt,
@@ -1911,55 +1917,47 @@ pub fn nav_bar(app: &mut App, ctx: &egui::Context) {
         }
         mode_btn(ui, app, Icon::Pan, "Pan: left-drag to pan (Esc to stop)", NavMode::Pan);
         mode_btn(ui, app, Icon::Zoom, "Zoom: left-drag to zoom (Esc to stop)", NavMode::Zoom);
-        if icons::icon_button(ui, Icon::Fit, 28.0, "Fit (F6)", false, None).clicked() {
-          app.fit_view();
+        let window = app.nav_mode == Some(NavMode::ZoomWindow);
+        let hint = if window { "Zoom Window: drag a box to zoom into (Esc to stop)" } else { "Fit (F6)" };
+        if icons::icon_button(ui, Icon::Fit, 28.0, hint, window, None).clicked() {
+          if window {
+            app.nav_mode = None;
+          } else {
+            app.fit_view();
+          }
         }
-        nav_caret(ui);
+        let c = nav_caret(ui, "Fit and Zoom Window");
+        egui::Popup::menu(&c).show(|ui| crate::navbar::fit_menu(app, ui));
         nav_sep(ui);
         let d = icons::icon_button(ui, Icon::Display, 28.0, "Display Settings", false, None);
-        nav_caret(ui);
-        egui::Popup::menu(&d).show(|ui| {
-          ui.set_min_width(220.0);
-          ui.label(RichText::new("Visual Style").strong());
-          if ui.radio(app.show_edges, "Shaded with Visible Edges Only").clicked() {
-            app.show_edges = true;
-          }
-          if ui.radio(!app.show_edges, "Shaded").clicked() {
-            app.show_edges = false;
-          }
-          ui.separator();
-          ui.label(RichText::new("Camera").strong());
-          if ui.radio(app.cam.ortho, "Orthographic").clicked() {
-            app.cam.ortho = true;
-          }
-          if ui.radio(!app.cam.ortho, "Perspective").clicked() {
-            app.cam.ortho = false;
-          }
-          ui.separator();
-          ui.checkbox(&mut app.show_viewcube, "ViewCube");
-          ui.separator();
-          crate::gpu::settings(app, ui);
-        });
+        let c = nav_caret(ui, "Display Settings");
+        egui::Popup::menu(&d).show(|ui| crate::navbar::display_menu(app, ui));
+        egui::Popup::menu(&c).show(|ui| crate::navbar::display_menu(app, ui));
         let g = icons::icon_button(ui, Icon::Grid, 28.0, "Grid and Snaps", false, None);
-        nav_caret(ui);
-        egui::Popup::menu(&g).show(|ui| {
-          ui.set_min_width(160.0);
-          ui.checkbox(&mut app.show_grid, "Layout Grid");
-          ui.checkbox(&mut app.snap, "Snap to Grid");
-        });
+        let c = nav_caret(ui, "Grid and Snaps");
+        let adaptive = fox_engine::scene::grid_step(&app.s);
+        egui::Popup::menu(&g).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
+        egui::Popup::menu(&c).show(|ui| crate::navbar::grid_menu(app, ui, adaptive));
         let v = icons::icon_button(ui, Icon::Viewports, 28.0, "Viewports", false, None);
-        nav_caret(ui);
+        let c = nav_caret(ui, "Viewports");
         egui::Popup::menu(&v).show(|ui| {
+          let _ = ui.selectable_label(true, "Single View");
+        });
+        egui::Popup::menu(&c).show(|ui| {
           let _ = ui.selectable_label(true, "Single View");
         });
       });
     });
 }
 
-/// The small drop-down caret after a navigation bar icon.
-fn nav_caret(ui: &mut egui::Ui) {
-  let (r, _) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::hover());
+/// The small drop-down caret after a navigation bar icon: clicking it opens the icon's fly-out.
+fn nav_caret(ui: &mut egui::Ui, hint: &str) -> egui::Response {
+  let (r, resp) = ui.allocate_exact_size(vec2(10.0, 28.0), egui::Sense::click());
+  if resp.hovered() {
+    ui.painter().rect_filled(r, 2.0, theme::HOVER);
+  }
   icons::chevron(ui.painter(), r.center(), theme::GROUP_LABEL);
+  resp.on_hover_text(hint)
 }
 
 fn nav_sep(ui: &mut egui::Ui) {

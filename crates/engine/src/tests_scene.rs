@@ -1,4 +1,4 @@
-//! Tests for the viewport scene: vertex picks and joint glyphs.
+//! Tests for the viewport scene: vertex picks, joint glyphs and object visibility.
 
 use fox_kernel::glam::DVec3;
 use serde_json::{Value, json};
@@ -133,4 +133,39 @@ fn face_appearances_draw_over_the_body_and_clear() {
   run(&mut s, "face.appearance", json!({"faces": one}));
   assert!(s.design.face_appearances.is_empty());
   assert!(s.execute("face.appearance", &json!({"faces": one, "appearance": "Unobtainium"})).is_err());
+}
+
+#[test]
+fn object_visibility_and_grid_spacing() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 30}));
+  let mut b = SceneBuilder::default();
+  let lines = |b: &mut SceneBuilder, o: &ViewOptions| b.build(&s, o).0.lines;
+  let dashed = |l: &[fox_render::Polyline]| l.iter().filter(|l| l.dashed).count();
+  let plain = lines(&mut b, &ViewOptions::default());
+  assert!(dashed(&plain) > 0, "the offset plane is drawn");
+  let no_construction = lines(&mut b, &ViewOptions { hide_construction: true, ..Default::default() });
+  assert_eq!(dashed(&no_construction), 0);
+
+  // the origin axes are the grid's coloured lines
+  let axis = |l: &fox_render::Polyline| l.color == [232, 96, 92, 255];
+  assert_eq!(plain.iter().filter(|l| axis(l)).count(), 1);
+  let no_origin = lines(&mut b, &ViewOptions { hide_origin: true, ..Default::default() });
+  assert_eq!(no_origin.iter().filter(|l| axis(l)).count(), 0);
+  assert_eq!(no_origin.len(), plain.len() - 3);
+
+  // fixed spacing: twice the step, about half the grid lines
+  let grid = |l: &[fox_render::Polyline]| l.iter().filter(|l| l.behind).count();
+  let step = scene::grid_step(&s);
+  let wide = lines(&mut b, &ViewOptions { grid_step: Some(step * 2.0), ..Default::default() });
+  assert!(grid(&wide) < grid(&plain) * 2 / 3, "{} {}", grid(&wide), grid(&plain));
+  let bad = lines(&mut b, &ViewOptions { grid_step: Some(0.0), ..Default::default() });
+  assert_eq!(grid(&bad), grid(&plain), "a zero step adapts");
+
+  // hidden sketches stay shown while one is edited
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
+  let editing = b.build(&s, &ViewOptions { hide_sketches: true, ..Default::default() }).0;
+  assert!(editing.lines.iter().any(|l| l.on_top), "the open sketch is drawn");
 }

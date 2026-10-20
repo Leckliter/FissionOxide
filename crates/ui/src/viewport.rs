@@ -27,6 +27,8 @@ pub enum NavMode {
   Orbit,
   Pan,
   Zoom,
+  /// Drag a box to zoom into it (once).
+  ZoomWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +99,11 @@ pub enum Drag {
   Paint,
   /// Dragging a handle of the dialog's move/rotate triad (see [`crate::manipulators`]).
   Triad,
+  /// Zoom Window: the box being dragged.
+  ZoomWindow {
+    start: Pos2,
+    now: Pos2,
+  },
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -238,6 +245,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     h: ((rect.height() * ppp).round() as u32).max(1),
   };
 
+  // a navigation drag that ends this frame (Zoom Window turns its mode off) isn't a click
+  let navigating = app.nav_mode.is_some();
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
   appearance_drop(app, &resp, &view, &ctx);
@@ -271,11 +280,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       app.create_sketch(plane);
     }
   }
-  let step = grid_step(app, &view) / 10.0;
+  let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  if app.objects.joints {
+    consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  }
   dim_editor(app, &ctx);
   track_arc_wind(app, &resp, &view);
   offset_follow(app, &resp, &view);
@@ -290,6 +301,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
     painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
+  if let Some(Drag::ZoomWindow { start, now }) = app.drag {
+    let col = Color32::from_rgb(40, 120, 230);
+    painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
+  }
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
 
@@ -298,7 +313,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     && let Some(p) = resp.interact_pointer_pos()
   {
     crate::marking::open(app, p);
-  } else if !consumed && app.nav_mode.is_none() && app.marking.is_none() {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
@@ -336,17 +351,25 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
   if let Some(mode) = app.nav_mode
     && resp.drag_started_by(egui::PointerButton::Primary)
   {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
     app.drag = Some(match mode {
       NavMode::Orbit => Drag::Orbit,
       NavMode::Pan => Drag::Pan,
       NavMode::Zoom => Drag::Zoom,
+      NavMode::ZoomWindow => Drag::ZoomWindow { start, now: start },
     });
+  }
+  if let Some(Drag::ZoomWindow { now, .. }) = &mut app.drag
+    && let Some(p) = resp.interact_pointer_pos()
+  {
+    *now = p;
   }
   let d = resp.drag_delta();
   if d != Vec2::ZERO && matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom)) {
     app.stop_cam_move();
   }
   match app.drag {
+    Some(Drag::Orbit) if app.free_orbit => app.cam.free_orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
     Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006).exp(), None),
@@ -369,6 +392,16 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       Drag::Lasso => {
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
+      }
+      Drag::ZoomWindow { start, now } => {
+        let bx = Rect::from_two_pos(start, now);
+        let (o, d) = view.ray(&app.cam, bx.center());
+        let hit = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|(t, _)| o + d * *t);
+        if let Some(to) = zoom_window(&app.cam, view, bx, hit) {
+          app.fly_to(to);
+        }
+        // one box, as in Fusion
+        app.nav_mode = None;
       }
       _ => {}
     }
@@ -448,8 +481,11 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hover: app.hover,
     selection: app.s.selection.clone(),
     edit_sketch: app.s.edit_sketch,
-    show_edges: app.show_edges,
+    style: app.visual_style,
+    objects: app.objects,
+    effects: app.effects,
     show_grid: app.show_grid,
+    grid_step: app.grid.step(),
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
     hidden_profiles: app.hidden_profiles.clone(),
@@ -472,19 +508,30 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       ViewOptions::default()
     }
   };
+  let vis = app.objects;
   let opts = ViewOptions {
     hover: app.hover,
-    hide_edges: !app.show_edges,
+    hide_edges: !app.visual_style.edges(),
     hide_grid: !app.show_grid,
+    hide_origin: !vis.origins,
+    hide_sketches: !vis.sketches || analysis.hide_sketches,
+    hide_construction: !vis.construction,
+    grid_step: key.grid_step,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
-    show_vertices: key.vertices,
+    show_vertices: key.vertices && vis.bodies,
     peek: app.ctx_menu.peek.clone(),
-    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    only_bodies: if vis.bodies {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    } else {
+      Some(Vec::new())
+    },
     opacity: app.ctx_menu.opacity.clone(),
     ..analysis
   };
-  let (scene, picks) = app.scene.build(&app.s, &opts);
+  let (mut scene, picks) = app.scene.build(&app.s, &opts);
+  scene.style = app.visual_style;
+  app.effects.apply(&mut scene);
   if crate::gpu::active(app) {
     crate::gpu::set_scene(app, scene, picks, key);
     return;
@@ -542,10 +589,37 @@ fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<
       p[0] = prev[0];
     }
   }
-  // tidy coordinates: round to a precision that matches the zoom (a quarter grid cell with Snap)
-  let step = grid_step(app, view) / if app.snap { 4.0 } else { 100.0 };
+  // tidy coordinates: round to a precision that matches the zoom; Snap goes to the grid (a
+  // quarter cell of the adaptive one, or the set spacing)
+  let step = match (app.snap, app.grid.step()) {
+    (true, Some(fixed)) => fixed,
+    (true, None) => grid_step(app, view) / 4.0,
+    (false, _) => grid_step(app, view) / 100.0,
+  };
   p = [round_to(p[0], step), round_to(p[1], step)];
   Some((p, None))
+}
+
+/// Zoom Window: the camera that fills the view with `bx` (screen points), centred on it: on `hit`
+/// (the model under the box's centre) when given, else on the target's depth. None for a box too
+/// small to mean anything.
+fn zoom_window(cam: &render::Camera, view: &View, bx: Rect, hit: Option<DVec3>) -> Option<render::Camera> {
+  if bx.width() < 4.0 || bx.height() < 4.0 || view.rect.width() < 1.0 || view.rect.height() < 1.0 {
+    return None;
+  }
+  let (o, d) = view.ray(cam, bx.center());
+  let (_, _, back) = cam.basis();
+  let centre = match hit {
+    Some(h) => h,
+    None => ray_plane(o, d, DVec3::from(cam.target), back)?,
+  };
+  // the box spans this much of the view at the centre's depth
+  let depth = (cam.eye() - centre).dot(back).max(1e-3);
+  let k = (bx.width() / view.rect.width()).max(bx.height() / view.rect.height()) as f64;
+  let mut to = *cam;
+  to.target = centre.to_array();
+  to.distance = if cam.ortho { cam.distance * k } else { depth * k }.clamp(1e-3, 1e7);
+  Some(to)
 }
 
 fn round_to(v: f64, step: f64) -> f64 {
@@ -2483,7 +2557,7 @@ fn manipulator(
       let den = aa * cc - bb * bb;
       if den.abs() > 1e-12 {
         let t = (bb * ee - cc * dd) / den;
-        let step = grid_step(app, view) / 10.0;
+        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
         }
@@ -2535,6 +2609,29 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 mod tests {
   use super::*;
   use fox_engine::Session;
+
+  #[test]
+  fn zoom_window_fills_the_view_with_the_box() {
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0)), ppp: 1.0, w: 400, h: 200 };
+    let mut cam = render::Camera { distance: 100.0, ..render::Camera::default() };
+    cam.set_view(render::StandardView::Top);
+    // a box a quarter of the width, right of centre
+    let bx = Rect::from_center_size(Pos2::new(300.0, 100.0), Vec2::new(100.0, 20.0));
+    let to = zoom_window(&cam, &view, bx, None).unwrap();
+    assert!((to.distance - 25.0).abs() < 1e-9, "{}", to.distance);
+    // the box's centre is now the view's centre
+    let (o, d) = view.ray(&cam, bx.center());
+    let hit = ray_plane(o, d, DVec3::ZERO, DVec3::Z).unwrap();
+    let (x, y, _) = to.project(hit, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6, "{x} {y}");
+    assert!(zoom_window(&cam, &view, Rect::from_center_size(Pos2::new(50.0, 50.0), Vec2::splat(2.0)), None).is_none());
+    // onto the model under the box: its point comes to the centre at the box's scale
+    let near = DVec3::new(10.0, 0.0, 60.0);
+    let to = zoom_window(&cam, &view, bx, Some(near)).unwrap();
+    assert!((to.distance - 10.0).abs() < 1e-9, "{}", to.distance);
+    let (x, y, _) = to.project(near, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+  }
 
   /// An app editing a new sketch on XY with `tool` active.
   fn sketching(tool: Tool) -> (App, FeatureId) {

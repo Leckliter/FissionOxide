@@ -2,7 +2,7 @@
 //! same pick ids, up to rasterization differences along edges. Skipped (with a note) where no
 //! OpenGL context can be created.
 
-use fox_render::{Analysis, Camera, Frame, Marker, Mesh, NO_ID, Polyline, Scene, StandardView};
+use fox_render::{Analysis, Camera, Frame, Marker, Mesh, NO_ID, Polyline, Scene, StandardView, VisualStyle};
 use fox_render_gl::Renderer;
 
 /// A UV sphere with one pick id per latitude band, so faces meet along seams like a B-rep body.
@@ -71,6 +71,7 @@ fn scene() -> Scene {
     background_top: [250, 250, 251, 255],
     background_bottom: [234, 236, 239, 255],
     analysis: None,
+    style: VisualStyle::default(),
   }
 }
 
@@ -142,6 +143,18 @@ fn gpu_matches_cpu() {
       }
       assert!(d.color < 0.03, "{name} {analysis:?}: {:.2}% of pixels differ in colour", d.color * 100.0);
       assert!(d.ids < 0.02, "{name} {analysis:?}: {:.2}% of pixels differ in pick id", d.ids * 100.0);
+    }
+  }
+  // the visual styles: wireframe surfaces, and hidden edges drawn faint and dashed
+  for style in VisualStyle::ALL {
+    let s = Scene { style, ..scene() };
+    for (name, cam) in cams() {
+      let cpu = fox_render::render(&s, &cam, 320, 240);
+      let gpu = r.render(&h.gl, &s, &cam, 320, 240).expect("gpu render");
+      let d = compare(&cpu, &gpu);
+      eprintln!("{name} {style:?}: {:.2}% colour, {:.2}% ids differ", d.color * 100.0, d.ids * 100.0);
+      assert!(d.color < 0.03, "{name} {style:?}: {:.2}% of pixels differ in colour", d.color * 100.0);
+      assert!(d.ids < 0.02, "{name} {style:?}: {:.2}% of pixels differ in pick id", d.ids * 100.0);
     }
   }
   r.destroy(&h.gl);

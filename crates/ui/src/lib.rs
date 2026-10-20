@@ -21,6 +21,7 @@ mod logo;
 mod manipulators;
 mod marking;
 mod menus;
+mod navbar;
 mod panels;
 mod preview;
 mod select;
@@ -63,8 +64,17 @@ pub struct App {
   /// clears when that tool or command ends, as Fusion's canvas hint does.
   hint: Option<String>,
   pub show_params: bool,
-  pub show_edges: bool,
+  /// Display Settings ▸ Visual Style.
+  pub visual_style: fox_engine::render::VisualStyle,
+  /// Display Settings ▸ Object Visibility and Effects.
+  pub objects: navbar::ObjectVisibility,
+  pub effects: fox_engine::render::Effects,
   pub show_grid: bool,
+  /// Grid and Snaps: the grid's spacing, and manipulator increments.
+  pub grid: navbar::GridSettings,
+  pub increments: navbar::Increments,
+  /// Orbiting lets the view roll (Free Orbit) instead of keeping +Z up.
+  pub free_orbit: bool,
   /// Sketch palette options.
   pub show_dims: bool,
   /// Snap sketch clicks to the grid.
@@ -189,8 +199,11 @@ struct RenderKey {
   hover: Option<Pick>,
   selection: Vec<Sel>,
   edit_sketch: Option<fox_engine::model::FeatureId>,
-  show_edges: bool,
+  style: fox_engine::render::VisualStyle,
+  objects: navbar::ObjectVisibility,
+  effects: fox_engine::render::Effects,
   show_grid: bool,
+  grid_step: Option<f64>,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
   hidden_profiles: Vec<fox_engine::model::FeatureId>,
@@ -282,8 +295,13 @@ impl App {
       drawing: None,
       sheet_cache: None,
       sheet_view: (1.0, egui::Vec2::ZERO),
-      show_edges: true,
+      visual_style: Default::default(),
+      objects: Default::default(),
+      effects: Default::default(),
       show_grid: true,
+      grid: Default::default(),
+      increments: Default::default(),
+      free_orbit: false,
       show_dims: true,
       snap: false,
       show_constraints: true,
