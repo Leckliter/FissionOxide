@@ -292,6 +292,12 @@ impl Shape {
     let mut segs = Vec::new();
     let mut lens = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
+      // a whole ellipse is one closed edge, as a circle is
+      if let Some(e) = whole_ellipse(&lp.segs) {
+        lens.push(1);
+        push_seg(&mut segs, plane, &e);
+        continue;
+      }
       lens.push(u32::try_from(lp.segs.len()).map_err(|_| KernelError::Input("too many segments".into()))?);
       for s in &lp.segs {
         push_seg(&mut segs, plane, s);
@@ -957,6 +963,32 @@ pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<(
     base += m.positions.len();
   }
   std::fs::write(path, s)
+}
+
+/// A loop made only of consecutive arcs of one ellipse that go all the way round (the halves a
+/// sketch ellipse becomes in a profile) as a single elliptical arc sweeping a full turn.
+fn whole_ellipse(segs: &[Seg]) -> Option<Seg> {
+  let Some(&Seg::EllipseArc { center, major, minor, start, .. }) = segs.first() else { return None };
+  let tol = 1e-9 * (major[0].hypot(major[1]) + minor);
+  let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) <= tol;
+  let mut at = start;
+  let mut total = 0.0;
+  for s in segs {
+    let Seg::EllipseArc { center: c, major: m, minor: b, start: t, sweep } = *s else { return None };
+    let gap = (t - at + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    if !near(c, center) || !near(m, major) || (b - minor).abs() > tol || gap.abs() > 1e-9 || sweep * total < 0.0 {
+      return None;
+    }
+    at = t + sweep;
+    total += sweep;
+  }
+  ((total.abs() - std::f64::consts::TAU).abs() < 1e-9).then_some(Seg::EllipseArc {
+    center,
+    major,
+    minor,
+    start,
+    sweep: std::f64::consts::TAU.copysign(total),
+  })
 }
 
 fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {

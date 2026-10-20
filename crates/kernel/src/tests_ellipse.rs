@@ -22,7 +22,7 @@ fn whole_ellipses_extrude_exactly_either_way_round() {
       let s = Shape::face(&Plane::XY, &p).unwrap().extrude(DVec3::new(0.0, 0.0, 2.0)).unwrap();
       let want = PI * 8.0 * minor * 2.0;
       assert!((volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s));
-      assert_eq!(s.faces().unwrap().len(), 4, "two half-ellipse sides, top and bottom");
+      assert_eq!(s.faces().unwrap().len(), 3, "one elliptical side, top and bottom");
       assert!(s.is_valid());
     }
   }

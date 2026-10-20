@@ -250,6 +250,16 @@ fn sketch_tools_make_profiles() {
   run(&mut s, "extrude", json!({"distance": 1}));
   let area = volume(&s);
   assert!((area - std::f64::consts::PI * 200.0).abs() < 0.05, "{area}");
+  // or through a point on it (Fusion's third pick): minor = 5 / sqrt(1 - (15/20)^2)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "point": [15, 5]}));
+  run(&mut s, "extrude", json!({"distance": 1}));
+  let want = std::f64::consts::PI * 20.0 * 5.0 / (1.0f64 - 0.5625).sqrt();
+  assert!((volume(&s) - want).abs() < 0.05, "{} vs {want}", volume(&s));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let bad = json!({"center": [0, 0], "major": [20, 0], "point": [25, 5]});
+  assert!(s.execute("sketch.ellipse", &bad).is_err(), "beyond the end of the axis");
   // 3-point circle, 2-point circle, 3-point rectangle, polygons, slots
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
