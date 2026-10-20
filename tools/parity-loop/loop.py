@@ -164,12 +164,13 @@ def cmd_mark_batch(a):
   save(path, idx)
   if a.status in ("fixing", "verified"):
     for p, entries in both():
-      for e in entries:
-        if e.get("batch") == a.name:
-          e["status"] = a.status
-          if a.pr:
-            e.setdefault("prs", []).append(a.pr)
-      save(p, entries)
+      hit = [e for e in entries if e.get("batch") == a.name]
+      for e in hit:
+        e["status"] = a.status
+        if a.pr:
+          e.setdefault("prs", []).append(a.pr)
+      if hit:
+        save(p, entries)
   print(f"{a.name}: {a.status}")
 
 
