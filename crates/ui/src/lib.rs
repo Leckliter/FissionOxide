@@ -245,6 +245,13 @@ impl App {
   }
 
   pub fn with_session(s: Session) -> App {
+    // each test's app gets its own scratch hub, never the user's
+    #[cfg(test)]
+    let s = {
+      let mut s = s;
+      s.store_root.get_or_insert_with(fox_engine::store::Store::scratch_root);
+      s
+    };
     App {
       s,
       cam: Camera::default(),
