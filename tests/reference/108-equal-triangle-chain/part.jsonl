@@ -1,0 +1,9 @@
+# 108-equal-triangle-chain: added by the parity loop from a Fusion probe
+# equal-triangle-chain: Triangle with a horizontal 40 base at the origin and apex drawn at (12,25); the right side equals the base and the left side equals the right side, so it solves to an equilateral triangle (apex (20,34.64)); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0], [12, 25]], "closed": true}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [2, 5]}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [5, 6]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 40}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

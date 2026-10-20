@@ -1,0 +1,7 @@
+# 175-offset-center-lower-left-corner-xz: added by the parity loop from a Fusion probe
+# offset-center-lower-left-corner-xz: Center rectangle on XZ (sketch y = -world Z) with centre (30,20) and corner (15,12) below-left of it: a 30x16 rectangle spanning x 15..45, sketch y 12..28, extruded 8 mm along +Y.
+# sketch Extrude1_sketch: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "center": [30, 20], "corner": [15, 12]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

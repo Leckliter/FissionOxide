@@ -1,0 +1,226 @@
+{
+ "id": "polygon-hexagon-side",
+ "name": "Polygon: hexagon resized by one side",
+ "description": "Regular hexagon drawn with side 10 (first side on the X axis from the origin) and polygon-constrained; the first side is then dimensioned to 20, so the whole hexagon grows to a regular hexagon of side 20 (x -10..30, y 0..34.64); extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "polygon",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.0,
+       0.0
+      ]
+     },
+     "end": {
+      "at": [
+       10.0,
+       0.0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10.0,
+       0.0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       15.0,
+       8.660254038
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       15.0,
+       8.660254038
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       10.0,
+       17.320508076
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10.0,
+       17.320508076
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0.0,
+       17.320508076
+      ]
+     },
+     "id": "l4"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.0,
+       17.320508076
+      ],
+      "ref": "l4.end"
+     },
+     "end": {
+      "at": [
+       -5.0,
+       8.660254038
+      ]
+     },
+     "id": "l5"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       -5.0,
+       8.660254038
+      ],
+      "ref": "l5.end"
+     },
+     "end": {
+      "at": [
+       0.0,
+       0.0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l6"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "polygon",
+     "refs": [
+      "l1",
+      "l2",
+      "l3",
+      "l4",
+      "l5",
+      "l6"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 20,
+     "unit": "mm",
+     "orientation": "horizontal"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

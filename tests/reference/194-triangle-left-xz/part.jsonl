@@ -1,0 +1,7 @@
+# 194-triangle-left-xz: added by the parity loop from a Fusion probe
+# triangle-left-xz: Edge polygon on XZ (sketch y = -world Z) from (5,0) to (15,0), 3 sides, left side: apex at sketch (10,8.66), i.e. world z=-8.66; extruded 5 along +Y.
+# sketch S: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "edge": [[5, 0], [15, 0]], "sides": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
