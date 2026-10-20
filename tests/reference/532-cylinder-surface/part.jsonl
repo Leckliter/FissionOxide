@@ -1,0 +1,15 @@
+# 532-cylinder-surface: added by the parity loop from a Fusion probe
+# cylinder-surface: 40x20x10 block; a cylindrical surface (r=50, axis along Y at x=20, z=-35; arc on XZ from x=-20 to 60, extruded 30 each side) sits above it, and Replace Face swaps the block's top for it: the top bulges to z=15 at x=20 and z=10.83 at the ends. The tool surface is then removed (Remove) so only the solid is measured: 10906.1 mm3.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.arc", "start": [-20, 5], "mid": [20, -15], "end": [60, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "surface.extrude", "sketch": 3, "distance": 30, "symmetric": true}
+{"cmd": "replace_face", "faces": [{"point": [20, 10, 10]}], "target": {"point": [20, 10, 15]}}
+{"cmd": "body.remove", "bodies": [4000]}
