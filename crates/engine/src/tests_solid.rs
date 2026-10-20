@@ -149,3 +149,40 @@ fn boundary_fill_cells_and_replace_face() {
   assert!((volume(&s) - 3200.0).abs() < 1e-3, "{}", volume(&s));
   assert!(s.execute("replace_face", &json!({"faces": [{"point": [20, 10, 4]}]})).is_err());
 }
+
+#[test]
+fn bounding_solid_box_cylinder_and_frame() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let bx = s.design.features.last().unwrap().id.0;
+  let last = |s: &Session| s.model.bodies.last().unwrap().shape.mass().unwrap();
+  run(&mut s, "bounding_solid", json!({"offset": 1}));
+  assert_eq!(s.model.bodies.len(), 2);
+  let m = last(&s);
+  assert!(close(m.volume, 22.0 * 12.0 * 7.0, 1e-9), "{}", m.volume);
+  assert!((m.bbox_min - fox_kernel::glam::DVec3::new(-11.0, -6.0, -1.0)).length() < 1e-6);
+  let bound = s.design.features.last().unwrap().id.0;
+  // it follows the body it encloses
+  run(
+    &mut s,
+    "feature.edit",
+    json!({"feature": bx, "set": {"shape": {"type": "box", "width": "30", "depth": "10", "height": "5"}}}),
+  );
+  assert!(close(last(&s).volume, 32.0 * 12.0 * 7.0, 1e-9), "{}", last(&s).volume);
+  // per-side offsets
+  run(&mut s, "feature.edit", json!({"feature": bound, "set": {"sides": ["0", "1", "0", "0", "2", "0"]}}));
+  assert!(close(last(&s).volume, 31.0 * 10.0 * 7.0, 1e-9), "{}", last(&s).volume);
+
+  // a cylinder about Z around the 20 x 10 x 5 box: radius to its corners
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  run(&mut s, "bounding_solid", json!({"shape": "cylinder", "offset": 1}));
+  let r = 125f64.sqrt() + 1.0;
+  assert!(close(last(&s).volume, PI * r * r * 7.0, 1e-6), "{}", last(&s).volume);
+  // about Y (the XZ plane's normal), only that body
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "bounding_solid", json!({"bodies": [body], "shape": "cylinder", "plane": "xz"}));
+  assert!(close(last(&s).volume, PI * 106.25 * 10.0, 1e-6), "{}", last(&s).volume);
+  assert!(s.execute("bounding_solid", &json!({"shape": "sphere"})).is_err());
+  assert!(s.execute("bounding_solid", &json!({"sides": [1, 2]})).is_err());
+}
