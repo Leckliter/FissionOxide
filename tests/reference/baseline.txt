@@ -82,3 +82,7 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+249-ccw-quarter-arc-slot
+250-cw-quarter-arc-slot
+251-major-arc-slot
+252-offset-shallow-arc-slot

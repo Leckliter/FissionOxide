@@ -2314,9 +2314,10 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           None => {
             let m = req_pt(&p, "mid")?;
             let c = fox_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
-            // counter-clockwise from start to end when the middle point is on the left of the chord
+            // the arc through the middle point runs counter-clockwise from start to end when that
+            // point is on the right of the chord from start to end
             let cross = (en[0] - st[0]) * (m[1] - st[1]) - (en[1] - st[1]) * (m[0] - st[0]);
-            (c, cross > 0.0)
+            (c, cross < 0.0)
           }
         };
         let (a0, a1) = (st, en);
