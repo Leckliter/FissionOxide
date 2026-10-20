@@ -1,0 +1,214 @@
+{
+ "id": "body-along-path-arc",
+ "name": "body-along-path-arc",
+ "description": "Block 10x4x5 centred on (50,0), long radially; body patterned 4x along the quarter arc R50 (50,0)->(0,50), extent 78.539816 mm (the whole arc, 30 deg apart), oriented along the path so each copy stays radial; separate bodies.",
+ "exercises": [
+  "path_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Block_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       45,
+       -2
+      ]
+     },
+     "end": {
+      "at": [
+       55,
+       -2
+      ]
+     },
+     "id": "b1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b1.end",
+      "at": [
+       55,
+       -2
+      ]
+     },
+     "end": {
+      "at": [
+       55,
+       2
+      ]
+     },
+     "id": "b2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b2.end",
+      "at": [
+       55,
+       2
+      ]
+     },
+     "end": {
+      "at": [
+       45,
+       2
+      ]
+     },
+     "id": "b3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b3.end",
+      "at": [
+       45,
+       2
+      ]
+     },
+     "end": {
+      "ref": "b1.start",
+      "at": [
+       45,
+       -2
+      ]
+     },
+     "id": "b4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Block",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Block_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b1",
+        "b2",
+        "b3",
+        "b4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Block"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "PathSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       50,
+       0
+      ]
+     },
+     "mid": [
+      35.35533905932738,
+      35.35533905932738
+     ],
+     "end": {
+      "at": [
+       0,
+       50
+      ]
+     },
+     "id": "a1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "path_pattern",
+   "name": "PathPattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Block"
+   ],
+   "path": {
+    "sketch": "PathSketch",
+    "curves": [
+     "a1"
+    ]
+   },
+   "count": 4,
+   "distance": 78.53981633974483,
+   "distance_type": "extent",
+   "orientation": "along_path"
+  }
+ ]
+}

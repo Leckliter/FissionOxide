@@ -1,0 +1,11 @@
+# 339-box-top-and-side-faces-quarter-turn: added by the parity loop from a Fusion probe
+# box-top-and-side-faces-quarter-turn: 20x10x8 box; axis through its top face and its +X side face (the edge x=20, z=8, along Y); body patterned 2x over 90 deg about it, so the axis direction decides where the copy lands.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "axis", "method": "two_planes", "a": {"point": [10, 5, 8], "normal": [0, 0, 1]}, "b": {"point": [20, 5, 4], "normal": [1, 0, 0]}}
+{"cmd": "pattern.circular", "axis": {"axis": 3}, "count": 2, "angle": "90 deg", "join": false}

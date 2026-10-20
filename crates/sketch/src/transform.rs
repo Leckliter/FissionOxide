@@ -196,6 +196,9 @@ impl Sketch {
         CurveKind::Conic { start, end, apex, rho } => {
           CurveKind::Conic { start: pt(self, *start)?, end: pt(self, *end)?, apex: pt(self, *apex)?, rho: *rho }
         }
+        CurveKind::QuinticSpline { points } => {
+          CurveKind::QuinticSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
+        }
       };
       let id = self.add_curve(kind)?;
       if c.construction {

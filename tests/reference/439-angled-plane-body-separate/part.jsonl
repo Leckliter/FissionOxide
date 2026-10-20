@@ -1,0 +1,11 @@
+# 439-angled-plane-body-separate: added by the parity loop from a Fusion probe
+# angled-plane-body-separate: Box x 10..30, y 0..10, z 0..5; plane at 30 deg about world Z from XZ; box mirrored across it as a separate body (default, no combine).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 10]]}
+{"cmd": "sketch.line", "points": [[30, 10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [10, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "plane", "method": "angle", "axis": "z", "plane": "xz", "angle": "30 deg"}
+{"cmd": "mirror", "plane": {"feature": 3}, "bodies": [2000], "join": false}

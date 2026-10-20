@@ -1,0 +1,14 @@
+# 428-countersink-blind-flat-bottom: added by the parity loop from a Fusion probe
+# countersink-blind-flat-bottom: 60x30x15 plate; sketch points on the top face at (15,15) and (45,15); one countersink hole feature d6 with a d12 82 deg countersink, blind depth 9, flat bottom (180 deg tip), at both points.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 30]]}
+{"cmd": "sketch.line", "points": [[60, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 15, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 15.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.point", "at": [15, 15]}
+{"cmd": "sketch.point", "at": [45, 15]}
+{"cmd": "sketch.finish"}
+{"cmd": "hole", "sketch": 3, "diameter": 6, "kind": "countersink", "head_diameter": 12, "head_angle": "82 deg", "depth": 9, "tip_angle": "180 deg"}

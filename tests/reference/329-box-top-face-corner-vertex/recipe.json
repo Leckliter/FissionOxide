@@ -1,0 +1,185 @@
+{
+ "id": "box-top-face-corner-vertex",
+ "name": "box-top-face-corner-vertex",
+ "description": "20x10x5 box; axis normal to the top face through the corner vertex (20,10,5); body patterned 3x about it.",
+ "exercises": [
+  "extrude",
+  "construction_axis normal_to_face",
+  "circular_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       20,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       20,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       10
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_axis",
+   "name": "Axis1",
+   "method": "normal_to_face",
+   "face": {
+    "type": "plane",
+    "point": [
+     10,
+     5,
+     5
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "point": {
+    "vertex": [
+     20,
+     10,
+     5
+    ]
+   }
+  },
+  {
+   "op": "circular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "axis": {
+    "ref": "Axis1"
+   },
+   "count": 3,
+   "total_angle": 360
+  }
+ ]
+}

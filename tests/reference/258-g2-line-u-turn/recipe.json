@@ -1,0 +1,154 @@
+{
+ "id": "g2-line-u-turn",
+ "name": "Blend curve (G2)",
+ "description": "Blend curve (G2): lines (0,0)->(30,0) and (30,20)->(0,20) joined at their right ends by a curvature continuous blend, closed by (0,20)->(0,0); extruded 10.",
+ "exercises": [
+  "sketch",
+  "blend_curve",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       30,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "blend",
+     "id": "b1",
+     "curves": [
+      "l1",
+      "l2"
+     ],
+     "near": [
+      [
+       30,
+       0
+      ],
+      [
+       30,
+       20
+      ]
+     ],
+     "continuity": "g2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "b1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

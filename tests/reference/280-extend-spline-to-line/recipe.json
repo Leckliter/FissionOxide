@@ -1,0 +1,135 @@
+{
+ "id": "extend-spline-to-line",
+ "name": "extend-spline-to-line",
+ "description": "Fit-point spline through (0,0), (10,8), (20,10), a line y=0 from x 0 to 40 and a vertical line x=30 (y -5..25); Extend the spline from its (20,10) end until it meets x=30; extrude the region under the spline 10 mm.",
+ "exercises": [
+  "sketch",
+  "extend",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "fitted_spline",
+     "id": "s",
+     "fit_points": [
+      [
+       0,
+       0
+      ],
+      [
+       10,
+       8
+      ],
+      [
+       20,
+       10
+      ]
+     ]
+    },
+    {
+     "type": "line",
+     "id": "base",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "v",
+     "start": {
+      "at": [
+       30,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       25
+      ]
+     }
+    },
+    {
+     "type": "extend",
+     "curve": "s",
+     "at": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "s",
+        "base",
+        "v"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

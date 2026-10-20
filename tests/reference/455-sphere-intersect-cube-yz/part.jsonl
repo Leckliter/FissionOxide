@@ -1,0 +1,5 @@
+# 455-sphere-intersect-cube-yz: added by the parity loop from a Fusion probe
+# sphere-intersect-cube-yz: 40x40x40 cube X/Y -20..20, Z 0..40; sphere primitive r=25 on YZ (x=+Y, y=+Z) at (0,20) = world (0,0,20), intersect: cube with corners rounded off by the sphere.
+# hand-written; Fusion side is the equivalent semicircle revolved 360 deg about its diameter
+{"cmd": "box", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "width": 40, "depth": 40, "height": 40}
+{"cmd": "sphere", "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]}, "at": [0, 20], "radius": 25, "operation": "intersect"}
