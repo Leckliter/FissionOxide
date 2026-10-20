@@ -27,7 +27,7 @@ pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
-pub use text::{SketchText, TextId, text_fonts};
+pub use text::{SketchText, TextAlign, TextId, TextPath, text_fonts};
 pub use transform::{TransformReport, Xform2};
 
 /// The sketch origin: always present, always fixed at (0, 0).
@@ -509,12 +509,17 @@ impl Sketch {
   }
 
   /// Deletes a curve, its points that nothing else uses, and constraints that referred to them.
-  /// A text's glyph curve deletes the whole text.
+  /// A text's glyph curve deletes the whole text, as does the curve a text runs along.
   pub fn remove_curve(&mut self, id: CurveId) -> Result<(), SketchError> {
     if let Some(t) = self.text_of(id) {
       return self.remove_text(t);
     }
     let curve = self.curve(id).ok_or(SketchError::NoCurve(id))?.clone();
+    let along: Vec<TextId> =
+      self.texts.iter().filter(|t| t.path.is_some_and(|p| p.curve == id)).map(|t| t.id).collect();
+    for t in along {
+      self.remove_text(t)?;
+    }
     self.curves.retain(|c| c.id != id);
     let still_used: Vec<PointId> = self.curves.iter().flat_map(|c| curve_points(&c.kind)).collect();
     let orphans: Vec<PointId> =

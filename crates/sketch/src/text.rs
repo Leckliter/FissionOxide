@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CurveId, CurveKind, PointId, PtSpec, Sketch, SketchError};
+use std::collections::HashMap;
+
+use crate::{CurveId, CurveKind, PointId, Profile, PtSpec, Seg, Sketch, SketchError};
 
 /// Most characters one text may have.
 const MAX_CHARS: usize = 500;
@@ -33,6 +35,43 @@ pub struct SketchText {
   pub points: Vec<PointId>,
   /// Each glyph point in text coordinates (baseline along +X, before turning by `angle`).
   pub local: Vec<[f64; 2]>,
+  /// The curve the text runs along instead of a straight baseline (`anchor` and `angle` are then
+  /// unused).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub path: Option<TextPath>,
+  /// For each glyph point, the middle of its glyph's advance along the baseline (text
+  /// coordinates): along a path the glyph sits there, turned to the path's direction.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub pivots: Vec<f64>,
+  /// Width of the longest line (mm), for aligning text along a path.
+  #[serde(default)]
+  pub width: f64,
+}
+
+/// Where along its path a text sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAlign {
+  /// Starting at the path's start.
+  #[default]
+  Left,
+  /// Centred on the path's middle.
+  Center,
+  /// Ending at the path's end.
+  Right,
+}
+
+/// Text laid along a sketch curve, as Fusion's "along path" text. The text reads left to right
+/// in the sketch: it runs from whichever end of the curve lies further to -X (lower Y when the
+/// ends are level; a whole circle runs clockwise from angle 0), glyph tops on the left of that
+/// direction, so above a quarter arc's top it stands on the outside.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TextPath {
+  pub curve: CurveId,
+  /// Glyphs stand on the curve (true) or hang below it, their capitals reaching up to it (false).
+  pub above: bool,
+  #[serde(default)]
+  pub align: TextAlign,
 }
 
 /// The built-in fonts: the UI's proportional font and its monospace font. A text can also use a
@@ -47,6 +86,10 @@ struct Glyphs {
   points: Vec<[f64; 2]>,
   /// (is a line, point indices): lines have two, quadratic splines three, cubic ones four.
   curves: Vec<(bool, Vec<usize>)>,
+  /// Per point: the middle of its glyph's advance (x).
+  pivots: Vec<f64>,
+  /// Width of the longest line.
+  width: f64,
 }
 
 struct Outline<'a> {
@@ -135,8 +178,7 @@ fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
   let data = crate::fonts::font_data(font)?;
   let face = ttf_parser::Face::parse(data.bytes(), 0)
     .map_err(|e| SketchError::InvalidValue(format!("the font could not be read: {e}")))?;
-  let cap = face.capital_height().filter(|h| *h > 0).map(f64::from).unwrap_or(f64::from(face.ascender()) * 0.7);
-  let k = height / cap;
+  let k = height / cap_height(&face);
   let line_gap = f64::from(face.height()) * k;
   let mut g = Glyphs::default();
   let mut pen = [0.0f64, 0.0f64];
@@ -150,9 +192,24 @@ fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
     let map = move |x: f32, y: f32| -> [f64; 2] { [origin[0] + f64::from(x) * k, origin[1] + f64::from(y) * k] };
     let mut o = Outline { g: &mut g, map: &map, start: None, last: None };
     face.outline_glyph(id, &mut o);
-    pen[0] += f64::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
+    let advance = f64::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
+    g.pivots.resize(g.points.len(), pen[0] + advance / 2.0);
+    pen[0] += advance;
+    g.width = g.width.max(pen[0]);
   }
   Ok(g)
+}
+
+/// Font units that `height` means. Fusion's text height puts the top of a capital H 1.00076
+/// heights up (measured in Arial, Calibri and Courier New), so the scale comes from the H glyph;
+/// fonts without one use the OS/2 capital height.
+fn cap_height(face: &ttf_parser::Face) -> f64 {
+  const H_OVER_HEIGHT: f64 = 1.00076;
+  let h = face.glyph_index('H').and_then(|id| face.glyph_bounding_box(id)).map(|b| f64::from(b.y_max));
+  match h.filter(|h| *h > 0.0) {
+    Some(h) => h / H_OVER_HEIGHT,
+    None => face.capital_height().filter(|h| *h > 0).map(f64::from).unwrap_or(f64::from(face.ascender()) * 0.7),
+  }
 }
 
 impl Sketch {
@@ -181,6 +238,61 @@ impl Sketch {
     // check everything before adding anything
     outline(text, font, height)?;
     let anchor = self.resolve(at)?;
+    self.push_text(anchor, text, font, height, angle, None)
+  }
+
+  /// Adds editable text laid along a curve (see [`TextPath`]), capitals `height` tall.
+  pub fn add_text_on_path(
+    &mut self,
+    path: TextPath,
+    text: &str,
+    font: &str,
+    height: f64,
+  ) -> Result<TextId, SketchError> {
+    outline(text, font, height)?;
+    let anchor = self.path_anchor(path.curve)?;
+    self.push_text(anchor, text, font, height, 0.0, Some(path))
+  }
+
+  /// Lays a text along a curve, or (None) back on its straight baseline at its anchor.
+  pub fn set_text_path(&mut self, id: TextId, path: Option<TextPath>) -> Result<(), SketchError> {
+    self.text(id).ok_or(SketchError::InvalidValue(format!("no text {}", id.0)))?;
+    let anchor = match path {
+      Some(p) => Some(self.path_anchor(p.curve)?),
+      None => None,
+    };
+    if let Some(t) = self.texts.iter_mut().find(|t| t.id == id) {
+      t.path = path;
+      if let Some(a) = anchor {
+        t.anchor = a;
+      }
+    }
+    self.place_texts();
+    Ok(())
+  }
+
+  /// The point a text along `curve` is anchored to (one of the curve's own, so deleting the text
+  /// leaves it): the curve must be a plain curve of this sketch, not a glyph.
+  fn path_anchor(&self, curve: CurveId) -> Result<PointId, SketchError> {
+    self.curve(curve).ok_or(SketchError::NoCurve(curve))?;
+    if self.text_of(curve).is_some() {
+      return Err(SketchError::WrongGeometry("text along a path", "a plain curve (not another text)"));
+    }
+    if self.curve_segs(curve).is_empty() {
+      return Err(SketchError::InvalidValue("the path curve has no length".into()));
+    }
+    self.curve_points(curve).first().copied().ok_or(SketchError::NoCurve(curve))
+  }
+
+  fn push_text(
+    &mut self,
+    anchor: PointId,
+    text: &str,
+    font: &str,
+    height: f64,
+    angle: f64,
+    path: Option<TextPath>,
+  ) -> Result<TextId, SketchError> {
     let id = TextId(self.alloc());
     let font = if font.is_empty() { "sans" } else { font };
     self.texts.push(SketchText {
@@ -193,6 +305,9 @@ impl Sketch {
       curves: Vec::new(),
       points: Vec::new(),
       local: Vec::new(),
+      path,
+      pivots: Vec::new(),
+      width: 0.0,
     });
     self.regenerate_text(id)?;
     Ok(id)
@@ -288,12 +403,14 @@ impl Sketch {
       t.curves = curves;
       t.points = ids;
       t.local = g.points;
+      t.pivots = g.pivots;
+      t.width = g.width;
     }
     self.place_texts();
     Ok(())
   }
 
-  /// Puts every text's glyph points where its anchor and angle say.
+  /// Puts every text's glyph points where its anchor and angle (or its path) say.
   pub(crate) fn place_texts(&mut self) {
     if self.texts.is_empty() {
       return;
@@ -301,6 +418,10 @@ impl Sketch {
     let index = self.point_index();
     let mut moves = Vec::new();
     for t in &self.texts {
+      if let Some(path) = &t.path {
+        self.place_on_path(t, path, &index, &mut moves);
+        continue;
+      }
       let Some(a) = self.pos(t.anchor) else { continue };
       let (s, c) = t.angle.sin_cos();
       for (p, l) in t.points.iter().zip(&t.local) {
@@ -328,19 +449,78 @@ impl Sketch {
     let hit: Vec<TextId> =
       self.texts.iter().filter(|x| x.curves.iter().any(|c| curves.contains(c))).map(|x| x.id).collect();
     for id in hit {
-      let Some((anchor, height, angle)) = self.text(id).map(|x| (x.anchor, x.height, x.angle)) else { continue };
-      if !moved.contains(&anchor)
+      let Some((anchor, height, angle, on_path)) = self.text(id).map(|x| (x.anchor, x.height, x.angle, x.path.is_some()))
+      else {
+        continue;
+      };
+      // text along a path follows its path; only its size changes here
+      if !on_path
+        && !moved.contains(&anchor)
         && let Some(p) = self.point_mut(anchor).filter(|p| !p.fixed)
       {
         [p.x, p.y] = t.apply([p.x, p.y]);
       }
       if let Some(x) = self.texts.iter_mut().find(|x| x.id == id) {
         x.height = height * t.scale;
-        x.angle = angle + t.angle;
+        if !on_path {
+          x.angle = angle + t.angle;
+        }
       }
       self.regenerate_text(id)?;
     }
     Ok(())
+  }
+
+  /// Queues the glyph points of `t`, laid along `path`, as (point index, position) moves.
+  fn place_on_path(
+    &self,
+    t: &SketchText,
+    path: &TextPath,
+    index: &HashMap<PointId, usize>,
+    moves: &mut Vec<(usize, [f64; 2])>,
+  ) {
+    let Some(walk) = Walk::new(self.curve_segs(path.curve)) else { return };
+    let start = match path.align {
+      TextAlign::Left => 0.0,
+      TextAlign::Center => (walk.total - t.width) / 2.0,
+      TextAlign::Right => walk.total - t.width,
+    };
+    let drop = if path.above { 0.0 } else { t.height };
+    for ((p, l), m) in t.points.iter().zip(&t.local).zip(&t.pivots) {
+      let Some(&i) = index.get(p) else { continue };
+      let (q, d) = walk.at(start + m);
+      let (u, v) = (l[0] - m, l[1] - drop);
+      moves.push((i, [q[0] + u * d[0] - v * d[1], q[1] + u * d[1] + v * d[0]]));
+    }
+  }
+
+  /// Whether a region is a glyph's counter (the inside of an O, A or e): bounded by one text's
+  /// glyph curves and lying inside an even number of them. A text's profile, as in Fusion, is its
+  /// ink only, so features given no regions leave these out.
+  pub fn is_text_counter(&self, region: &Profile) -> bool {
+    let at = region.interior_point();
+    self.texts.iter().any(|t| {
+      let pts: Vec<[f64; 2]> = t.points.iter().filter_map(|p| self.pos(*p)).collect();
+      let on_glyph = |q: [f64; 2]| pts.iter().any(|g| (g[0] - q[0]).hypot(g[1] - q[1]) < 1e-6);
+      if !region.outer.segs.iter().all(|s| on_glyph(s.start())) {
+        return false;
+      }
+      let mut crossings = 0usize;
+      for c in &t.curves {
+        for seg in self.curve_segs(*c) {
+          let mut line = Vec::new();
+          seg.flatten(&mut line);
+          line.push(seg.end());
+          for w in line.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if (a[1] > at[1]) != (b[1] > at[1]) && at[0] < a[0] + (at[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) {
+              crossings += 1;
+            }
+          }
+        }
+      }
+      crossings % 2 == 0
+    })
   }
 
   /// Errors for modify tools that would edit a text's glyphs.
@@ -350,6 +530,110 @@ impl Sketch {
       None => Ok(()),
     }
   }
+}
+
+/// A curve walked by length, in the direction text along it reads (see [`TextPath`]).
+struct Walk {
+  /// Pieces as polylines with their running lengths, or exact lines and arcs.
+  pieces: Vec<(Seg, f64)>,
+  total: f64,
+  reversed: bool,
+}
+
+/// Samples per spline or ellipse piece when measuring its length.
+const WALK_STEPS: usize = 64;
+
+impl Walk {
+  fn new(segs: Vec<Seg>) -> Option<Walk> {
+    let (first, last) = (segs.first()?.start(), segs.last()?.end());
+    let mut pieces = Vec::new();
+    for s in segs {
+      match s {
+        Seg::Line { .. } | Seg::Arc { .. } | Seg::Circle { .. } => pieces.push((s, seg_length(&s))),
+        _ => {
+          // splines and ellipses as short chords
+          let p = sample(&s);
+          for w in p.windows(2) {
+            let l = Seg::Line { a: w[0], b: w[1] };
+            pieces.push((l, seg_length(&l)));
+          }
+        }
+      }
+    }
+    pieces.retain(|(_, l)| *l > 1e-12);
+    let total: f64 = pieces.iter().map(|(_, l)| l).sum();
+    if total <= 1e-9 {
+      return None;
+    }
+    let (dx, dy) = (last[0] - first[0], last[1] - first[1]);
+    let closed = dx.hypot(dy) < 1e-9;
+    let reversed = closed || dx < -1e-9 || (dx.abs() <= 1e-9 && dy < 0.0);
+    Some(Walk { pieces, total, reversed })
+  }
+
+  /// The point `d` along the walk and the unit direction there; beyond the ends the walk carries
+  /// straight on.
+  fn at(&self, d: f64) -> ([f64; 2], [f64; 2]) {
+    let raw = if self.reversed { self.total - d } else { d };
+    let (p, t) = self.raw_at(raw);
+    if self.reversed { (p, [-t[0], -t[1]]) } else { (p, t) }
+  }
+
+  fn raw_at(&self, d: f64) -> ([f64; 2], [f64; 2]) {
+    let mut run = 0.0;
+    for (k, (s, l)) in self.pieces.iter().enumerate() {
+      if d <= run + l || k + 1 == self.pieces.len() {
+        return seg_at(s, *l, d - run);
+      }
+      run += l;
+    }
+    ([0.0, 0.0], [1.0, 0.0])
+  }
+}
+
+fn seg_length(s: &Seg) -> f64 {
+  match *s {
+    Seg::Line { a, b } => (b[0] - a[0]).hypot(b[1] - a[1]),
+    Seg::Arc { radius, sweep, .. } => radius * sweep.abs(),
+    Seg::Circle { radius, .. } => radius * std::f64::consts::TAU,
+    _ => sample(s).windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum(),
+  }
+}
+
+/// Points along a spline or ellipse piece, ends included.
+fn sample(s: &Seg) -> Vec<[f64; 2]> {
+  match *s {
+    Seg::Bezier { p } => (0..=WALK_STEPS).map(|i| crate::bezier_at(&p, i as f64 / WALK_STEPS as f64)).collect(),
+    _ => {
+      let mut out = Vec::new();
+      s.flatten(&mut out);
+      out.push(s.end());
+      out
+    }
+  }
+}
+
+/// The point `d` along a line, arc or circle of length `len` (extended past its ends), and the
+/// unit direction there.
+fn seg_at(s: &Seg, len: f64, d: f64) -> ([f64; 2], [f64; 2]) {
+  let on_circle = |c: [f64; 2], r: f64, a0: f64, sign: f64| {
+    let d = d.clamp(0.0, len);
+    let a = a0 + sign * d / r;
+    let (sn, cs) = a.sin_cos();
+    ([c[0] + r * cs, c[1] + r * sn], [-sn * sign, cs * sign])
+  };
+  let (p, t) = match *s {
+    Seg::Line { a, b } => {
+      let t = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+      return ([a[0] + t[0] * d, a[1] + t[1] * d], t);
+    }
+    Seg::Arc { center, radius, start_angle, sweep } => on_circle(center, radius, start_angle, sweep.signum()),
+    Seg::Circle { center, radius, ccw } => on_circle(center, radius, 0.0, if ccw { 1.0 } else { -1.0 }),
+    _ => (s.start(), [1.0, 0.0]),
+  };
+  // carry straight on past an arc's ends
+  let over = if d < 0.0 { d } else { (d - len).max(0.0) };
+  ([p[0] + t[0] * over, p[1] + t[1] * over], t)
 }
 
 #[cfg(test)]
