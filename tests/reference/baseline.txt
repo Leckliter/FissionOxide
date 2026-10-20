@@ -272,3 +272,5 @@
 477-report-only
 478-create-interference-bodies
 471-insert-tsm-box
+483-plane-envelope-rectangular
+484-true-shape-rotation-frame

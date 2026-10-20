@@ -334,6 +334,7 @@ cmds! {
   "align" => "Align (assembly) constraint: make a moving component's face, axis or point flush, concentric or coincident with one on a fixed component (or the world), moving it only along what the relation fixes; the rest of its position stays", "{moving_geometry: {face}|{edge}|{at, z?, x?}|{origin}, fixed_geometry, moving? (default: the geometry's component), fixed? (default: the geometry's component; null = the world), relation?: auto|flush|coincident|concentric, offset?, flip?, name?}";
   "bounding_solid" => "Bounding Solid: a new box or cylinder body enclosing bodies (default all), lined up with a plane's frame (default world XY; its normal is the cylinder's axis) and grown by an offset; the bodies stay", "{bodies?: [body], component?, shape?: box|cylinder, plane?, offset?, sides?: [-x, +x, -y, +y, -z, +z] (per-side offsets instead of offset; the cylinder takes -z, +z for its ends)}";
   "pattern.path" => "Pattern on Path: copies of bodies, or features (their cut/join tools) re-applied, spaced by arc length along a sketch path; copies past its ends follow its straight extensions", "{path: sketch id, path_curves?: [id] (chained; default every line and arc), count, spacing | distance, extent?: bool (distance is the whole pattern's length) | distance_type?: spacing|extent, start?: 0..1 (where the original sits along the path), flip?, symmetric?, orientation?: identical|along_path, bodies? | features?: [feature id], join?}";
+  "arrange" => "Arrange: copies of components laid flat on their largest planar face and packed on a rectangular envelope on a plane (length along its X, width along its Y) for manufacturing, by bounding rectangle or true shape; the sources stay put and the copies go under a new Arrange<n> > Envelope<n> component", "{components: [id | {component, rotation?, quantity?}], plane?: (default xy), length, width, solver?: rectangular|true_shape, spacing?, frame?, rotation?: none|180|90|all (default all)}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -372,6 +373,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::form::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::arrange::run(s, name, p) {
     return r;
   }
   match name {

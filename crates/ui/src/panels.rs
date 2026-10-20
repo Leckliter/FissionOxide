@@ -2842,6 +2842,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::PlaneConstraint { .. } => Icon::Combine,
     FeatureKind::BoundingSolid { .. } => Icon::Box,
     FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
+    FeatureKind::Arrange { .. } => Icon::Component,
   }
 }
 

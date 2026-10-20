@@ -143,3 +143,5 @@
 442-features-cut-negative-directions
 443-bodies-symmetric-direction
 444-bodies-extent
+483-plane-envelope-rectangular
+484-true-shape-rotation-frame
