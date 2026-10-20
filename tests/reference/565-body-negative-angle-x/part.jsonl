@@ -1,0 +1,10 @@
+# 565-body-negative-angle-x: added by the parity loop from a Fusion probe
+# body-negative-angle-x: Tab x 0..10, y 10..20, h5; body circular pattern x3 over -120 deg about X.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 10], [10, 10]]}
+{"cmd": "sketch.line", "points": [[10, 10], [10, 20]]}
+{"cmd": "sketch.line", "points": [[10, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "pattern.circular", "axis": "x", "count": 3, "angle": "-120 deg", "bodies": [2000], "join": false}

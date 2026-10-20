@@ -1,0 +1,10 @@
+# 566-body-symmetric-odd-z: added by the parity loop from a Fusion probe
+# body-symmetric-odd-z: Tab x 20..30, y 2..8, h5; body circular pattern x5 over 120 deg about Z, symmetric.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[20, 2], [30, 2]]}
+{"cmd": "sketch.line", "points": [[30, 2], [30, 8]]}
+{"cmd": "sketch.line", "points": [[30, 8], [20, 8]]}
+{"cmd": "sketch.line", "points": [[20, 8], [20, 2]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "pattern.circular", "axis": "z", "count": 5, "angle": "120 deg", "bodies": [2000], "join": false, "symmetric": true}
