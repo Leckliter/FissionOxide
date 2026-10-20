@@ -1,0 +1,8 @@
+# Regenerated in seconds from Fusion (tools/fusion-bridge/client.py catalog / compare).
+catalog.json
+compare/*.json
+compare/png/
+loop/
+probes/
+*.lock
+*.tmp

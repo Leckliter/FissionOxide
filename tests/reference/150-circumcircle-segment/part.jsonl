@@ -1,0 +1,10 @@
+# 150-circumcircle-segment: added by the parity loop from a Fusion probe
+# circumcircle-segment: Triangle (0,0)-(40,0)-(10,25) with a 3-point circle through its corners (shared points; centre (20,6.5), r=sqrt(442.25)); the segment below the base edge y=0 extruded 4.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [10, 25]]}
+{"cmd": "sketch.line", "points": [[10, 25], [0, 0]]}
+{"cmd": "sketch.circle", "through": [[0, 0], [40, 0], [10, 25]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[20, -5]], "distance": 4, "operation": "new_body"}

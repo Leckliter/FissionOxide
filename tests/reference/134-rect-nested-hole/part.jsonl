@@ -1,0 +1,8 @@
+# 134-rect-nested-hole: added by the parity loop from a Fusion probe
+# rect-nested-hole: outer 2-point rectangle (-20,-15)-(20,15), inner picked (8,6)-(-4,-2);
+# the frame region between them extruded 5 mm (plate with a 12x8 rectangular hole).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-20, -15], "corner2": [20, 15]}
+{"cmd": "sketch.rect", "corner1": [8, 6], "corner2": [-4, -2]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[-15, 0]], "distance": 5, "operation": "new_body"}

@@ -2210,11 +2210,14 @@ pub fn apply_constraint(app: &mut App, kind: &str) {
     return;
   }
   // H/V on several lines: one constraint each
-  if matches!(kind, "horizontal" | "vertical" | "fix") && points.len() != 2 {
+  if kind == "fix" || (matches!(kind, "horizontal" | "vertical") && points.len() != 2) {
     let mut any = false;
     if kind == "fix" {
       for p in &points {
         any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "points": [p]})).is_some();
+      }
+      if !curves.is_empty() {
+        any |= app.run("sketch.constrain", json!({"sketch": sk.0, "type": kind, "curves": curves})).is_some();
       }
     } else {
       for c in &curves {

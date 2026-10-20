@@ -1,0 +1,9 @@
+# 113-fix-circle-equal: added by the parity loop from a Fusion probe
+# fix-circle-equal: Circle c1 centre (15,15) r10 fixed; circle c2 centre (45,15) drawn r6 made equal to c1, so c2 takes r10; only c2 extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [15, 15], "radius": 10}
+{"cmd": "sketch.circle", "center": [45, 15], "radius": 6}
+{"cmd": "sketch.constrain", "type": "fix", "curves": [2]}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [2, 4]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[45, 15]], "distance": 10, "operation": "new_body"}

@@ -1,0 +1,167 @@
+{
+ "id": "perpendicular-line-arc-sector",
+ "name": "Perpendicular: perpendicular-line-arc-sector",
+ "description": "Arc R25 (ends fixed) centred at the origin sweeping 0..120 deg, closed by two lines from its ends meeting at a free point drawn at (3,4). Each line is made perpendicular to the arc, so both run through the centre: a 120 deg sector, area 654.50, extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "perpendicular",
+  "fix",
+  "arc",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_center_start_sweep",
+     "center": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "origin"
+     },
+     "start": {
+      "at": [
+       25,
+       0
+      ]
+     },
+     "sweep_deg": 120,
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       -12.5,
+       21.650635
+      ],
+      "ref": "a1.end"
+     },
+     "end": {
+      "at": [
+       3,
+       4
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       3,
+       4
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       25,
+       0
+      ],
+      "ref": "a1.start"
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "a1.start"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "a1.end"
+     ]
+    },
+    {
+     "type": "perpendicular",
+     "refs": [
+      "l1",
+      "a1"
+     ]
+    },
+    {
+     "type": "perpendicular",
+     "refs": [
+      "l2",
+      "a1"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "l1",
+        "l2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

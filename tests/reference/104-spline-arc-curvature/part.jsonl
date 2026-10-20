@@ -1,0 +1,18 @@
+# 104-spline-arc-curvature: added by the parity loop from a Fusion probe
+# spline-arc-curvature: Fitted spline (0,0)-(12,8)-(25,4)-(40,10) meets a fixed R10 arc (centre 50,10) over the top; lines close it to y=-10. All points fixed; a curvature (G2) constraint between spline and arc bends the spline's end to leave vertically with curvature 1/10. Extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [12, 8], [25, 4], [40, 10]]}
+{"cmd": "sketch.arc", "start": [40, 10], "mid": [50, 20], "end": [60, 10]}
+{"cmd": "sketch.line", "points": [[60, 10], [60, -10]]}
+{"cmd": "sketch.line", "points": [[60, -10], [0, -10]]}
+{"cmd": "sketch.line", "points": [[0, -10], [0, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [3]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [6]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [8]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [11]}
+{"cmd": "sketch.constrain", "type": "curvature", "curves": [4, 7]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

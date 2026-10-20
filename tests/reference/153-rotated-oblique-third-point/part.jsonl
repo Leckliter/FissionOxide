@@ -1,0 +1,7 @@
+# 153-rotated-oblique-third-point: added by the parity loop from a Fusion probe
+# rotated-oblique-third-point: 3-point rectangle (5,5)-(35,25) with third point (10,40): width along a 30x20 diagonal, height the perpendicular distance of the third point; extruded 10 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "points": [[5, 5], [35, 25], [10, 40]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
