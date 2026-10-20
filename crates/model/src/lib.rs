@@ -1922,7 +1922,7 @@ impl FeatureKind {
       FeatureKind::Form { plane, .. } => plane_dep(plane),
       FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, .. } => {
         [moving_geometry, fixed_geometry].into_iter().filter_map(assembly::JointGeometry::origin).collect()
-        }
+      }
       FeatureKind::PlaneConstraint { moving_planes, fixed_planes, .. } => {
         moving_planes.iter().chain(fixed_planes).flat_map(plane_dep).collect()
       }

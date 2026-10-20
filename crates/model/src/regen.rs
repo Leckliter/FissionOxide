@@ -859,8 +859,7 @@ impl Ctx<'_> {
       FeatureKind::Mirror { plane, features, .. } if !features.is_empty() => {
         let pl = self.resolve_plane(plane)?;
         for f in features.iter() {
-          let tools =
-            self.state.tools.get(f).cloned().ok_or("a mirrored feature failed or has no solid to mirror")?;
+          let tools = self.state.tools.get(f).cloned().ok_or("a mirrored feature failed or has no solid to mirror")?;
           for t in tools {
             let copy = t.shape.mirrored(pl.origin, pl.normal()).map_err(ke)?;
             // the mirror's own targets, else the bodies the feature itself was limited to
@@ -2496,11 +2495,11 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
   }
 }
 
-mod bound;
 mod arrange;
+mod bound;
 mod direct;
-mod project;
 mod pathpattern;
+mod project;
 mod subasm;
 #[cfg(test)]
 mod tests_config;
@@ -2509,8 +2508,8 @@ mod tests_project;
 #[cfg(test)]
 mod tests_subasm;
 
-mod form;
+mod curves3d;
 mod fillet2;
+mod form;
 #[cfg(test)]
 mod tests_fillet2;
-mod curves3d;

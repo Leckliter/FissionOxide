@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 use fox_model::pathpattern::PathOrientation;
 
 use crate::commands::{
-  add_feature, body_sel, expr_of, face_ref, ids, operation, opt_expr, opt_str, plane_ref, profile_points, req_expr, req_u32,
-  sketch_for_feature,
+  add_feature, body_sel, expr_of, face_ref, ids, operation, opt_expr, opt_str, plane_ref, profile_points, req_expr,
+  req_u32, sketch_for_feature,
 };
 use crate::{CmdError, CmdResult, Session};
 

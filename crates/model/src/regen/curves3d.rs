@@ -142,10 +142,8 @@ impl Ctx<'_> {
 fn round_sweep(path: &Shape, radius: f64, inner: Option<f64>) -> Result<Shape, String> {
   let (start, tangent) = path.wire_start().map_err(ke)?;
   let sec = fox_kernel::Plane::from_normal(start, tangent, tangent.any_orthonormal_vector()).map_err(ke)?;
-  let holes = inner
-    .map(|ri| Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: ri, ccw: false }]))
-    .into_iter()
-    .collect();
+  let holes =
+    inner.map(|ri| Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: ri, ccw: false }])).into_iter().collect();
   let outer = Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius, ccw: true }]);
   let face = Shape::face(&sec, &Profile { outer, holes }).map_err(ke)?;
   face.sweep(path).map_err(ke)

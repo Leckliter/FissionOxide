@@ -919,9 +919,15 @@ fn along_top_circle(behaviours: Behaviours) -> (f64, f64) {
   let edge = EdgeRef::from_edge(b.id, e, b.faces());
   let t = "0.3".to_string();
   let pl = d
-    .add_feature(FeatureKind::PlaneBy { def: construct::PlaneDef::AlongPath { edge: edge.clone(), t: t.clone(), distance: String::new() } })
+    .add_feature(FeatureKind::PlaneBy {
+      def: construct::PlaneDef::AlongPath { edge: edge.clone(), t: t.clone(), distance: String::new() },
+    })
     .unwrap();
-  let pt = d.add_feature(FeatureKind::ConstructionPoint { def: construct::PointDef::AlongPath { edge, t, distance: String::new() } }).unwrap();
+  let pt = d
+    .add_feature(FeatureKind::ConstructionPoint {
+      def: construct::PointDef::AlongPath { edge, t, distance: String::new() },
+    })
+    .unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   let p = m.points[&pt];

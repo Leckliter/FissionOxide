@@ -1096,8 +1096,9 @@ mod silhouette;
 #[cfg(test)]
 mod tests_ellipse;
 #[cfg(test)]
-mod tests_project;
 mod tests_merge;
+#[cfg(test)]
+mod tests_project;
 #[cfg(test)]
 mod tests_refparts;
 #[cfg(test)]

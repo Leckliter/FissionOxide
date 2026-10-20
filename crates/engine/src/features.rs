@@ -94,8 +94,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       }
       let path_sketch = FeatureId(req_u32(p, "path")?);
       // a sketch, or the 3D curves of a Project To Surface or an intersection curve
-      let curves3d =
-        s.design.feature(path_sketch).is_some_and(|f| matches!(f.kind, FeatureKind::ProjectToSurface { .. } | FeatureKind::IntersectionCurve { .. }));
+      let curves3d = s.design.feature(path_sketch).is_some_and(|f| {
+        matches!(f.kind, FeatureKind::ProjectToSurface { .. } | FeatureKind::IntersectionCurve { .. })
+      });
       if !curves3d {
         s.design.sketch(path_sketch)?;
       }

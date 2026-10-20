@@ -6,7 +6,9 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind, SweepOptions};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
-use crate::{BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef, ProfileScaling, SweepOrientation};
+use crate::{
+  BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef, ProfileScaling, SweepOrientation,
+};
 use fox_sketch::behaviour::{LOFT_CLOSED_SMOOTH, LOFT_RAIL_SPREAD};
 
 /// What an extrude stops at besides a parallel flat face.
