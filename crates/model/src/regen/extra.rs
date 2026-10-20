@@ -552,9 +552,26 @@ impl Ctx<'_> {
   }
 
   /// The point and unit tangent at fraction `t` of an edge's length, from its start, on the
-  /// exact curve.
+  /// exact curve. Designs made before [`EXACT_EDGE_FRAMES`] walk the edge's tessellated polyline
+  /// and take the direction of the segment the point falls on.
+  ///
+  /// [`EXACT_EDGE_FRAMES`]: fox_sketch::behaviour::EXACT_EDGE_FRAMES
   fn along(&mut self, e: &mut EdgeRef, t: &str) -> Result<(DVec3, DVec3), String> {
     let t = self.factor(t)?.clamp(0.0, 1.0);
+    if !self.behaviours.has(fox_sketch::behaviour::EXACT_EDGE_FRAMES) {
+      let pts = self.edge_points(e)?;
+      let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+      let mut left = t * total;
+      for w in pts.windows(2) {
+        let l = (w[1] - w[0]).length();
+        if left <= l || std::ptr::eq(w, pts.windows(2).last().unwrap_or(w)) {
+          let dir = (w[1] - w[0]).try_normalize().ok_or("the edge has no length")?;
+          return Ok((w[0] + dir * left.min(l), dir));
+        }
+        left -= l;
+      }
+      return Err("the edge has no length".into());
+    }
     let (bi, info) = self.edge_info(e)?;
     let edge = self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?;
     edge.along_curve(t, Some(info.start)).map_err(ke)

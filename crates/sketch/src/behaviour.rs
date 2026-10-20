@@ -59,10 +59,15 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Plane and point Along Path on a body edge use the exact curve and its tangent at the point.
+/// Without it, they walk the edge's tessellated polyline and take the direction of the segment the
+/// point falls on, so on a curved edge the point sits on a chord.
+pub const EXACT_EDGE_FRAMES: &str = "exact_edge_frames";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  EXACT_EDGE_FRAMES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
