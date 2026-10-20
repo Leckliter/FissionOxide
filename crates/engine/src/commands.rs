@@ -187,7 +187,7 @@ cmds! {
   "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
   "feature.suppress" => "Suppress or unsuppress a feature", "{feature, suppressed?: bool}";
   "feature.rename" => "Rename a feature", "{feature, name}";
-  "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
+  "feature.move" => "Reorder a feature in the timeline (refused when it would come before what it references)", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "attribute.set" => "Attach a named value to the design, a body, component, feature or sketch curve/point", "{target?: \"design\" | {body} | {component} | {feature} | {sketch} | {sketch, curve} | {sketch, point}, group, name, value}";
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
@@ -959,8 +959,30 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "feature.move" => {
       let id = FeatureId(req_u32(p, "feature")?);
       let to = req_u32(p, "to")? as usize;
+      // references to bodies, faces and edges only show up when the timeline recomputes: a move
+      // that makes a feature fail that computed before is undone, like Fusion refusing the drop
+      let failing = |s: &Session| -> Vec<FeatureId> {
+        s.design
+          .features
+          .iter()
+          .map(|f| f.id)
+          .filter(|f| s.model.status(*f).is_some_and(|st| st.error.is_some()))
+          .collect()
+      };
+      let before = failing(s);
       s.edit(|d| Ok(d.move_feature(id, to)?))?;
-      Ok(json!({}))
+      let broken: Vec<String> = failing(s)
+        .into_iter()
+        .filter(|f| !before.contains(f))
+        .filter_map(|f| s.design.feature(f).map(|f| f.name.clone()))
+        .collect();
+      if !broken.is_empty() {
+        s.undo();
+        s.redo.pop();
+        let name = s.design.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+        return Err(CmdError::new(format!("moving {name} there would break {}", broken.join(", "))));
+      }
+      Ok(json!({"index": s.design.index_of(id)}))
     }
     "timeline.marker" => {
       let at = p.get("at").and_then(Value::as_u64).map(|v| v as usize);
