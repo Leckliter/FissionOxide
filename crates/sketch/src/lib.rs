@@ -13,6 +13,7 @@ mod conic;
 mod curve3d;
 mod edit;
 mod ellipse;
+mod fitquintic;
 mod fitspline;
 mod fonts;
 mod freeform;
@@ -113,14 +114,18 @@ pub enum CurveKind {
     start: PointId,
     end: PointId,
   },
-  /// A smooth curve through fit points (Catmull-Rom tangents, cubic pieces).
+  /// A smooth curve through fit points, drawn as cubic pieces: in a sketch with
+  /// [`behaviour::QUINTIC_FIT_SPLINE`] Fusion's minimum-energy quintic (see `fitquintic`), closed
+  /// (periodic, no corner at the start) when the last point is the first; in older sketches a
+  /// Catmull-Rom spline, one piece per gap.
   Spline {
     points: Vec<PointId>,
-    /// Tangent handle at the start: the first piece's inner control point. Added when a tangency
-    /// or curvature constraint uses that end, so the fit points stay free.
+    /// Tangent handle at the start: where the inner control point of a cubic Bézier spanning the
+    /// first gap would be (for a Catmull-Rom spline, the first piece's inner control point).
+    /// Added when a tangency or curvature constraint uses that end, so the fit points stay free.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_handle: Option<PointId>,
-    /// Tangent handle at the end: the last piece's inner control point.
+    /// Tangent handle at the end, as the start's for the last gap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end_handle: Option<PointId>,
   },
@@ -747,7 +752,7 @@ impl Sketch {
 
   /// [`Sketch::beziers`] of a curve kind at the current point positions.
   pub fn kind_beziers(&self, kind: &CurveKind) -> Vec<[[f64; 2]; 4]> {
-    kind_beziers(kind, &|p| self.pos(p))
+    kind_beziers(kind, &|p| self.pos(p), &self.behaviours)
   }
 
   /// A spline or ellipse flattened to a polyline (empty for other curves).
@@ -835,17 +840,25 @@ impl Sketch {
             add([p[0] + r, p[1] + r]);
           }
         }
-        CurveKind::Spline { .. }
-        | CurveKind::ControlSpline { .. }
-        | CurveKind::Bezier { .. }
-        | CurveKind::QuinticSpline { .. } => {
+        CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } | CurveKind::QuinticSpline { .. } => {
           for p in curve_points(&c.kind) {
             if let Some(p) = self.pos(p) {
               add(p);
             }
           }
         }
-        CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } | CurveKind::Conic { .. } => {
+        // a Catmull-Rom spline is bounded by its points, as before; a quintic one is sampled
+        CurveKind::Spline { .. } if !self.behaviours.has(behaviour::QUINTIC_FIT_SPLINE) => {
+          for p in curve_points(&c.kind) {
+            if let Some(p) = self.pos(p) {
+              add(p);
+            }
+          }
+        }
+        CurveKind::Spline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. } => {
           for p in self.spline_points(c.id) {
             add(p);
           }
@@ -1112,19 +1125,17 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
   }
 }
 
-/// A curve's Bézier pieces with point positions from `pos` (empty for lines, circles and arcs).
-pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> Vec<[[f64; 2]; 4]> {
+/// A curve's Bézier pieces with point positions from `pos` (empty for lines, circles and arcs),
+/// for a curve of a sketch with `behaviours` (which pick how a fit-point spline is fitted).
+pub fn kind_beziers(
+  kind: &CurveKind,
+  pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  behaviours: &Behaviours,
+) -> Vec<[[f64; 2]; 4]> {
   let pts = |ids: &[PointId]| -> Vec<[f64; 2]> { ids.iter().filter_map(|p| pos(*p)).collect() };
   match kind {
-    CurveKind::Spline { points, start_handle, end_handle } => {
-      let mut bz = spline_beziers(&pts(points));
-      if let (Some(h), Some(first)) = (start_handle.and_then(pos), bz.first_mut()) {
-        first[1] = h;
-      }
-      if let (Some(h), Some(last)) = (end_handle.and_then(pos), bz.last_mut()) {
-        last[2] = h;
-      }
-      bz
+    CurveKind::Spline { .. } => {
+      spline_fit(kind, pos, behaviours.has(behaviour::QUINTIC_FIT_SPLINE)).map(|f| f.0).unwrap_or_default()
     }
     CurveKind::ControlSpline { points, degree } if *degree <= 3 => bspline_beziers(&pts(points)),
     CurveKind::ControlSpline { points, degree } => bspline_degree_beziers(&pts(points), *degree as usize),
@@ -1152,6 +1163,89 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
     }
     _ => Vec::new(),
   }
+}
+
+/// Whether a fit-point spline through `points` is closed: its last point is its first.
+pub fn spline_closed(points: &[PointId]) -> bool {
+  points.len() >= 3 && points.first() == points.last()
+}
+
+/// A fit-point spline's Bézier pieces and the index of the piece each fit point starts (for an
+/// open spline the last fit point's is the piece count; a closed one lists its start once).
+///
+/// `quintic` ([`behaviour::QUINTIC_FIT_SPLINE`]): Fusion's minimum-energy quintic, closed when the
+/// last point is the first, falling back to Catmull-Rom pieces if the fit fails. Otherwise the
+/// Catmull-Rom spline older sketches were drawn with: one piece per gap, the tangent handles
+/// replacing the first and last pieces' inner control points.
+pub(crate) fn spline_fit(
+  kind: &CurveKind,
+  pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  quintic: bool,
+) -> Option<(Vec<[[f64; 2]; 4]>, Vec<usize>)> {
+  let CurveKind::Spline { points, start_handle, end_handle } = kind else { return None };
+  if !quintic {
+    let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| pos(*p)).collect();
+    let mut bz = spline_beziers(&pts);
+    if let (Some(h), Some(first)) = (start_handle.and_then(pos), bz.first_mut()) {
+      first[1] = h;
+    }
+    if let (Some(h), Some(last)) = (end_handle.and_then(pos), bz.last_mut()) {
+      last[2] = h;
+    }
+    let starts = (0..=bz.len()).collect();
+    return Some((bz, starts));
+  }
+  let closed = spline_closed(points);
+  let ids = if closed { &points[..points.len() - 1] } else { &points[..] };
+  let pts: Vec<[f64; 2]> = ids.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
+  let handles = if closed { (None, None) } else { (start_handle.and_then(pos), end_handle.and_then(pos)) };
+  match fitquintic::Quintic::fit(&pts, closed, handles) {
+    Some(q) => Some(q.beziers()),
+    None => {
+      let mut pts = pts;
+      if closed {
+        pts.push(pts[0]);
+      }
+      let bz = spline_beziers(&pts);
+      let starts = (0..pts.len() - usize::from(closed)).collect();
+      (!bz.is_empty()).then_some((bz, starts))
+    }
+  }
+}
+
+/// The Bézier pieces of a fit-point spline (without tangent handles) through `pts`, fitted as a
+/// sketch fits it: the quintic when `quintic` ([`behaviour::QUINTIC_FIT_SPLINE`]; closed when
+/// `closed`, the last point repeating the first), else Catmull-Rom.
+pub fn fit_point_beziers(pts: &[[f64; 2]], closed: bool, quintic: bool) -> Vec<[[f64; 2]; 4]> {
+  if !quintic {
+    return spline_beziers(pts);
+  }
+  let closed = closed && pts.len() >= 3;
+  let inner = if closed { &pts[..pts.len() - 1] } else { pts };
+  match fitquintic::Quintic::fit(inner, closed, (None, None)) {
+    Some(q) => q.beziers().0,
+    None => spline_beziers(pts),
+  }
+}
+
+/// The tangent handles (start, end) that keep an open fit-point spline as it is: for a quintic
+/// one where the inner control points of cubics spanning its first and last gaps would be, for a
+/// Catmull-Rom one its first and last pieces' inner control points.
+pub(crate) fn spline_handles(
+  kind: &CurveKind,
+  pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  quintic: bool,
+) -> Option<([f64; 2], [f64; 2])> {
+  let CurveKind::Spline { points, start_handle, end_handle } = kind else { return None };
+  if !quintic {
+    let bz = spline_fit(kind, pos, false)?.0;
+    return Some((bz.first()?[1], bz.last()?[2]));
+  }
+  if spline_closed(points) {
+    return None;
+  }
+  let pts: Vec<[f64; 2]> = points.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
+  fitquintic::Quintic::fit(&pts, false, (start_handle.and_then(pos), end_handle.and_then(pos)))?.handles()
 }
 
 /// Cubic Bézier pieces of a clamped uniform cubic B-spline with these control points (fewer

@@ -561,7 +561,7 @@ impl<'a> System<'a> {
   /// A freeform curve's Bézier pieces at `x`.
   fn free_path(&self, x: &[f64], id: CurveId) -> Vec<[[f64; 2]; 4]> {
     match self.curve(id) {
-      Some((_, kind)) => crate::kind_beziers(kind, &|p| Some(self.p(x, p))),
+      Some((_, kind)) => crate::kind_beziers(kind, &|p| Some(self.p(x, p)), &self.sketch.behaviours),
       None => Vec::new(),
     }
   }
@@ -584,7 +584,7 @@ impl<'a> System<'a> {
       let p = [c[0] + u[0] * r, c[1] + u[1] * r];
       return Some(if dot(ccw, tq) <= 0.0 { (p, ccw, 1.0 / r) } else { (p, [-ccw[0], -ccw[1]], -1.0 / r) });
     }
-    crate::freeform::end_frame(kind, at_end, &|p| Some(self.p(x, p)))
+    crate::freeform::end_frame(kind, at_end, &|p| Some(self.p(x, p)), &self.sketch.behaviours)
   }
 
   /// Tangency (and with `curvature`, equal curvature) where a spline meets another curve.
@@ -622,7 +622,9 @@ impl<'a> System<'a> {
         Some((_, CurveKind::Circle { .. })) | None => vec![],
         Some((_, kind)) => [false, true]
           .into_iter()
-          .filter_map(|e| crate::freeform::end_frame(kind, e, &|p| Some(self.p(x, p))).map(|f| (e, f.0)))
+          .filter_map(|e| {
+            crate::freeform::end_frame(kind, e, &|p| Some(self.p(x, p)), &self.sketch.behaviours).map(|f| (e, f.0))
+          })
           .collect(),
       }
     };

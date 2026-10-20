@@ -103,7 +103,7 @@ cmds! {
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines or arcs meet at an end with a tangent arc", "{curves: [line|arc, line|arc], radius}";
   "sketch.chamfer" => "Bevel the corner of two lines (meeting at an end, crossing, or apparently crossing): equal distance, two distances, or distance along the first line and angle from it", "{curves: [line, line], distance, distance2? | angle?}";
-  "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
+  "sketch.spline" => "Fit point spline: Fusion's smoothest curve through the points; closed (no corner at the start) when closed or the last point is the first", "{points: [[x,y], ...], closed?: bool}";
   "sketch.control_spline" => "B-spline from control points, cubic (default) or quintic", "{points: [[x,y], ...], degree?: 3 | 5}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius or a point on it", "{center, major: [x,y], minor | point: [x,y]}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude (their counters left out), regenerated when the text changes (explode: plain curves); along a curve with path", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?, path?: curve id, above?: bool (default true), align?: left|center|right}";
@@ -2626,6 +2626,9 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         for q in pts {
           let spec = snap(sketch, q);
           ids.push(sketch.resolve(spec)?);
+        }
+        if p.get("closed").and_then(Value::as_bool).unwrap_or(false) && ids.first() != ids.last() {
+          ids.push(ids[0]);
         }
         sketch.add_curve(CurveKind::spline(ids))?;
       }

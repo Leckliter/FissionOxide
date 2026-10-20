@@ -305,3 +305,7 @@
 94-external-modeled-partial-left
 95-external-cosmetic
 209-slanted-line-cylinder-face
+198-open-three-point-arch
+199-open-five-point-wave
+200-uneven-spacing
+201-closed-four-point
