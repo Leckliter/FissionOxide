@@ -407,6 +407,9 @@ pub struct Extent {
   /// Side taper (angle; positive narrows). Empty = none.
   #[serde(default)]
   pub taper: String,
+  /// Taper of the second side of a two-sided extent (Fusion's Side 2 taper). Empty = `taper`.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub taper2: String,
   /// Wall thickness of a thin extrusion. Empty = solid.
   #[serde(default)]
   pub thin: String,
@@ -436,6 +439,7 @@ impl Extent {
       distance2: zero(),
       flip: false,
       taper: String::new(),
+      taper2: String::new(),
       thin: String::new(),
       thin_side: ThinSide::Inside,
       to: None,
@@ -2021,7 +2025,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Extrude { extent, .. } => {
       f(&mut extent.distance);
       f(&mut extent.distance2);
-      for e in [&mut extent.taper, &mut extent.thin, &mut extent.start] {
+      for e in [&mut extent.taper, &mut extent.taper2, &mut extent.thin, &mut extent.start] {
         if !e.is_empty() {
           f(e);
         }

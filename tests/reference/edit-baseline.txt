@@ -90,3 +90,5 @@
 424-planar-deboss
 425-planar-emboss-offset-rotated
 426-cylinder-emboss-wrap
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+421-to-curved-face-join

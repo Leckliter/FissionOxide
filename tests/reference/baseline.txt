@@ -176,3 +176,8 @@
 424-planar-deboss
 425-planar-emboss-offset-rotated
 426-cylinder-emboss-wrap
+# Reference parts that pass; see README.md. One directory name per line.
+419-two-sides-tapered
+420-start-offset-flip-taper
+421-to-curved-face-join
+422-thin-closed-circle-center
