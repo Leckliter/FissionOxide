@@ -402,3 +402,22 @@ fn ruled_offset_and_trim_surfaces() {
   let b = s.model.bodies.iter().find(|b| b.id.0 == id).unwrap();
   assert!((b.shape.mass().unwrap().area - 100.0).abs() < 1e-6, "{}", b.shape.mass().unwrap().area);
 }
+
+#[test]
+fn center_arc_slot_takes_the_shorter_arc_unless_told() {
+  let pi = std::f64::consts::PI;
+  // the area of a width-4 slot along `sweep` radians of an R20 arc, extruded 1
+  let slot = |sweep: f64| sweep * 20.0 * 4.0 + pi * 4.0;
+  for (ccw, sweep) in [(None, pi / 2.0), (Some(true), 1.5 * pi), (Some(false), pi / 2.0)] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let mut p = json!({"arc_center": [0, 0], "start": [0, 20], "end": [20, 0], "width": 4});
+    if let Some(ccw) = ccw {
+      p["ccw"] = json!(ccw);
+    }
+    run(&mut s, "sketch.slot", p);
+    run(&mut s, "extrude", json!({"distance": 1}));
+    let v = volume(&s);
+    assert!((v - slot(sweep)).abs() < 1e-3 * slot(sweep), "{ccw:?}: {v} vs {}", slot(sweep));
+  }
+}

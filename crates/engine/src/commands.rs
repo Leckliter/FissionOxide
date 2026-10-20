@@ -86,7 +86,7 @@ cmds! {
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
   "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end} | {tangent: curve, start, end}";
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
-  "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
+  "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width, ccw?: bool (default: the shorter arc)} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
   "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
@@ -2310,7 +2310,11 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
         let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
         let (c, ccw) = match opt_pt(&p, "arc_center")? {
-          Some(c) => (c, true),
+          // Fusion takes the shorter arc from start to end; 'ccw' picks the direction outright
+          Some(c) => {
+            let cross = (st[0] - c[0]) * (en[1] - c[1]) - (st[1] - c[1]) * (en[0] - c[0]);
+            (c, p.get("ccw").and_then(Value::as_bool).unwrap_or(cross >= 0.0))
+          }
           None => {
             let m = req_pt(&p, "mid")?;
             let c = fox_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
@@ -2319,7 +2323,13 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
             (c, cross > 0.0)
           }
         };
-        let (a0, a1) = (st, en);
+        // the start sets the radius; the end only sets the direction
+        let r = (st[0] - c[0]).hypot(st[1] - c[1]);
+        let re = (en[0] - c[0]).hypot(en[1] - c[1]);
+        if re < 1e-12 {
+          return Err(CmdError::new("the end is on the slot's centre"));
+        }
+        let (a0, a1) = (st, [c[0] + (en[0] - c[0]) * r / re, c[1] + (en[1] - c[1]) * r / re]);
         let (from, to) = if ccw { (a0, a1) } else { (a1, a0) };
         add_arc_slot(sketch, c, from, to, w)?;
       }
