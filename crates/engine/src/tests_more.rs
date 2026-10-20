@@ -467,6 +467,136 @@ fn ruled_offset_and_trim_surfaces() {
 }
 
 #[test]
+fn threads_iso_size_and_class() {
+  use std::f64::consts::PI;
+  // cosmetic M8x1.25 6g: the rod is sized to the class-mean major diameter, 7.866
+  let mut s = Session::default();
+  rod(&mut s, 4.0, 16.0);
+  run(&mut s, "thread", json!({"faces": [{"point": [4, 0, 8]}], "designation": "M8x1.25"}));
+  let want = PI * 3.933f64.powi(2) * 16.0;
+  assert!((volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s));
+  assert_eq!(s.model.threads.len(), 1);
+  // modeled M10x1.5 6g, 10 long from 5 above the low end: one crest face, flanks, root and the
+  // two ends of the groove, square to the axis
+  let mut s = Session::default();
+  rod(&mut s, 5.0, 30.0);
+  let t = run(
+    &mut s,
+    "thread",
+    json!({"faces": [{"point": [5, 0, 15]}], "designation": "M10x1.5", "modeled": true, "length": 10, "offset": 5}),
+  );
+  assert!(s.model.errors().is_empty(), "{:?} {t}", s.model.errors());
+  let b = &s.model.bodies[0];
+  assert_eq!(b.faces().len(), 8);
+  let m = b.shape.mass().unwrap();
+  assert!((m.center_of_mass.z - 15.0).abs() > 0.05 && m.center_of_mass.z > 15.0, "groove low: {m:?}");
+  assert!((m.bbox_max.x - 4.925).abs() < 1e-4, "{m:?}");
+  assert!(m.center_of_mass.truncate().length() < 0.05, "{m:?}");
+  // an internal thread sizes the bore to the class-mean minor diameter (8.526 for 6H)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 4.25}));
+  run(&mut s, "extrude", json!({"distance": 15, "profiles": [[7, 0]]}));
+  run(&mut s, "thread", json!({"faces": [{"point": [4.25, 0, 7.5]}], "designation": "M10x1.5", "class": "6H"}));
+  let want = PI * (100.0 - 4.263f64.powi(2)) * 15.0;
+  assert!((volume(&s) - want).abs() < 1e-4 * want, "{} vs {want}", volume(&s));
+  let f = s.design.features.last().unwrap().id.0;
+  let _ = s.execute("feature.edit", &json!({"feature": f, "set": {"class": "6x"}}));
+  assert!(!s.model.errors().is_empty(), "a bad class is an error");
+}
+
+#[test]
+fn threads_in_designs_without_iso_threads_rebuild_as_before() {
+  use fox_model::Behaviours;
+  let rod_h = |s: &mut Session, h: f64| {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+    run(s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+    run(s, "extrude", json!({"distance": h}));
+  };
+  // a design saved before the ISO_THREADS flag keeps the sharp V groove, measured from the face's
+  // own axis end: faces, volume and centre of mass as main built them
+  let cases = [
+    (
+      30.0,
+      json!({"faces": [{"point": [5, 0, 15]}], "modeled": true, "length": 10, "offset": 5}),
+      13,
+      2260.104747716,
+      14.787423409,
+    ),
+    (
+      30.0,
+      json!({"faces": [{"point": [5, 0, 15]}], "modeled": true, "length": 10, "offset": 5, "flip": true}),
+      13,
+      2260.104266635,
+      15.212579535,
+    ),
+    (
+      -30.0,
+      json!({"faces": [{"point": [5, 0, -15]}], "modeled": true, "length": 10, "offset": 5}),
+      13,
+      2260.107454316,
+      -14.787431974,
+    ),
+    (30.0, json!({"faces": [{"point": [5, 0, 15]}], "modeled": true}), 27, 2069.770932085, 14.999369028),
+  ];
+  for (i, (h, t, faces, vol, z)) in cases.into_iter().enumerate() {
+    let mut s = Session::default();
+    s.design.behaviours = Behaviours::legacy();
+    rod_h(&mut s, h);
+    run(&mut s, "thread", t);
+    assert!(s.model.errors().is_empty(), "{i}: {:?}", s.model.errors());
+    let b = &s.model.bodies[0];
+    let m = b.shape.mass().unwrap();
+    assert_eq!(b.faces().len(), faces, "{i}");
+    assert!((m.volume - vol).abs() < 1e-6 * vol, "{i}: {} vs {vol}", m.volume);
+    assert!((m.center_of_mass.z - z).abs() < 1e-6, "{i}: {m:?}");
+    if i == 0 {
+      // the same thread in a new design is the ISO profile: crest, flanks, root, square ends
+      s.design.behaviours = Behaviours::current();
+      s.rebuild();
+      assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+      let b = &s.model.bodies[0];
+      assert_eq!(b.faces().len(), 8);
+      let m = b.shape.mass().unwrap();
+      assert!((m.volume - vol).abs() > 1.0, "{m:?}");
+      assert!(m.center_of_mass.z > 15.0, "groove from the low end: {m:?}");
+    }
+  }
+  // a cosmetic thread in an old design starts from the face's own axis end (here the top) ...
+  let cosmetic = json!({"faces": [{"point": [5, 0, 15]}], "length": 10, "offset": 5});
+  let mut s = Session::default();
+  s.design.behaviours = Behaviours::legacy();
+  rod_h(&mut s, 30.0);
+  run(&mut s, "thread", cosmetic.clone());
+  assert!(s.model.threads[0].1[0].distance(fox_model::kernel::glam::DVec3::new(5.0, 0.0, 25.0)) < 1e-9);
+  // ... and in a new design from the low end
+  let mut s = Session::default();
+  rod_h(&mut s, 30.0);
+  run(&mut s, "thread", cosmetic);
+  assert!((s.model.threads[0].1[0].z - 5.0).abs() < 1e-6, "{:?}", s.model.threads[0].1[0]);
+}
+
+#[test]
+fn thread_designation_must_suit_the_drawn_diameter() {
+  // an M10 thread on a Ø20 rod is an error, not a rod silently shrunk to Ø9.85
+  let mut s = Session::default();
+  rod(&mut s, 10.0, 20.0);
+  let _ = s.execute("thread", &json!({"faces": [{"point": [10, 0, 10]}], "designation": "M10x1.5"}));
+  let e = s.model.errors();
+  assert!(e.iter().any(|e| e.contains("Ø10") && e.contains("Ø20")), "{e:?}");
+  assert!((volume(&s) - std::f64::consts::PI * 100.0 * 20.0).abs() < 1e-6, "the rod is left as drawn");
+  // an M10 inside a Ø10 bore too: the bore is drawn at the tap-drill (minor) size
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  run(&mut s, "extrude", json!({"distance": 15, "profiles": [[7, 0]]}));
+  let _ = s.execute("thread", &json!({"faces": [{"point": [5, 0, 7.5]}], "designation": "M10x1.5", "class": "6H"}));
+  assert!(s.model.errors().iter().any(|e| e.contains("hole")), "{:?}", s.model.errors());
+}
+
+#[test]
 fn center_arc_slot_takes_the_shorter_arc_unless_told() {
   let pi = std::f64::consts::PI;
   // the area of a width-4 slot along `sweep` radians of an R20 arc, extruded 1

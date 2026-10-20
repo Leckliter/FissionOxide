@@ -53,6 +53,8 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/project.hxx");
   println!("cargo:rerun-if-changed=cpp/spun.cpp");
   println!("cargo:rerun-if-changed=cpp/spun.hxx");
+  println!("cargo:rerun-if-changed=cpp/threads.cpp");
+  println!("cargo:rerun-if-changed=cpp/threads.hxx");
   let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
@@ -92,6 +94,7 @@ fn main() {
     .file("cpp/form.cpp")
     .file("cpp/project.cpp")
     .file("cpp/spun.cpp")
+    .file("cpp/threads.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

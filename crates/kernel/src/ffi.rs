@@ -232,6 +232,9 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/spun.hxx");
     fn axial_events(s: &Shape, axis: &[f64]) -> Result<Vec<f64>>;
     fn radial_slices(s: &Shape, axis: &[f64], ts: &[f64]) -> Result<Vec<f64>>;
+    // merging the strips a helical cut leaves on a cylinder (cpp/threads.cpp)
+    include!("fox-kernel/cpp/threads.hxx");
+    fn merge_cylinder_strips(s: &Shape, axis: &[f64], radius: f64, lo: f64, hi: f64) -> Result<UniquePtr<Shape>>;
   }
 }
 

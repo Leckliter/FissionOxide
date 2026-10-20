@@ -3,37 +3,16 @@
 
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
+use fox_sketch::behaviour::ISO_THREADS;
 use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PathRef, PlaneRef};
 
-/// ISO metric coarse pitches by nominal diameter (mm).
-const ISO_COARSE: [(f64, f64); 18] = [
-  (1.0, 0.25),
-  (1.6, 0.35),
-  (2.0, 0.4),
-  (2.5, 0.45),
-  (3.0, 0.5),
-  (4.0, 0.7),
-  (5.0, 0.8),
-  (6.0, 1.0),
-  (8.0, 1.25),
-  (10.0, 1.5),
-  (12.0, 1.75),
-  (14.0, 2.0),
-  (16.0, 2.0),
-  (20.0, 2.5),
-  (24.0, 3.0),
-  (30.0, 3.5),
-  (36.0, 4.0),
-  (42.0, 4.5),
-];
-
 /// The ISO coarse pitch for a thread of this major diameter (nearest size).
 pub fn iso_pitch(diameter: f64) -> f64 {
-  ISO_COARSE.iter().min_by(|a, b| (a.0 - diameter).abs().total_cmp(&(b.0 - diameter).abs())).map(|s| s.1).unwrap_or(1.0)
+  crate::thread::coarse_pitch(diameter)
 }
 
 impl Ctx<'_> {
@@ -56,41 +35,68 @@ impl Ctx<'_> {
         self.state.points.insert(id, p);
         Ok(None)
       }
-      FeatureKind::Thread { faces, pitch, length, offset, modeled, left, flip } => {
+      FeatureKind::Thread { faces, pitch, length, offset, modeled, left, flip, designation, class } => {
         if faces.is_empty() {
           return Err("select cylindrical faces to thread".into());
         }
+        // a designation is new data no file from before ISO_THREADS has, so it always gets the
+        // ISO behaviour; a plain thread in an older design rebuilds the legacy way
+        let iso = self.behaviours.has(ISO_THREADS) || !designation.trim().is_empty();
         let mut labels = Vec::new();
         for fr in faces.iter_mut() {
-          let (bi, info) = self.face_info(fr)?;
+          let (bi, info) = if iso { self.thread_face_info(fr)? } else { self.face_info(fr)? };
           if info.kind != SurfaceKind::Cylinder {
             return Err("threads go on cylindrical faces".into());
           }
-          let (o, d, r) = (info.origin, info.normal.normalize(), info.radius);
-          let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
-          let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
-          if p <= 0.0 {
-            return Err("the pitch must be positive".into());
+          if !iso {
+            labels.push(self.legacy_thread(id, bi, &info, pitch, length, offset, *modeled, *left, *flip)?);
+            continue;
           }
+          let (o, d, r) = (info.origin, canonical_axis(info.normal.normalize()), info.radius);
+          let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
+          let (t0, t1) = self.exact_extent(bi, info.id, o, d, (t0, t1));
+          let (dims, label) = if designation.trim().is_empty() {
+            let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
+            if p <= 0.0 {
+              return Err("the pitch must be positive".into());
+            }
+            (crate::thread::basic_dims(2.0 * r, p, !external), format!("M{}x{}", trim(2.0 * r), trim(p)))
+          } else {
+            let (nominal, p) = crate::thread::parse_designation(designation)
+              .ok_or_else(|| format!("unknown thread size '{designation}' (ISO metric, as M10x1.5)"))?;
+            crate::thread::check_drawn_size(nominal, p, 2.0 * r, !external)?;
+            (crate::thread::iso_dims(nominal, p, class, !external)?, format!("M{}x{}", trim(nominal), trim(p)))
+          };
+          let p = dims.pitch;
           let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
           let full = t1 - t0 - off;
           let l = if length.trim().is_empty() { full } else { self.len(length)?.min(full) };
           if l <= p * 0.5 {
             return Err("the thread is shorter than half a pitch".into());
           }
-          // the helix runs from the chosen end along the axis
-          let (start, dir) = if *flip { (o + d * (t1 - off), -d) } else { (o + d * (t0 + off), d) };
-          let x = perpendicular(dir);
-          labels.push(format!("M{}x{}", trim(2.0 * r), trim(p)));
+          // the threaded span along the axis, from the face's low end (or its high end)
+          let (a, b) = if *flip { (t1 - off - l, t1 - off) } else { (t0 + off, t0 + off + l) };
+          let rc = dims.crest / 2.0;
+          if (rc - r).abs() > 1e-7 {
+            self.resize_cylinder(id, bi, (o, d), (t0, t1), (r, rc), external)?;
+          }
+          labels.push(label);
           if *modeled {
-            let groove = thread_groove(start, dir, x, r, p, l, external, *left).map_err(ke)?;
+            let groove = thread_groove(o, d, (a, b), &dims, external, *left).map_err(ke)?;
             let body = &self.state.bodies[bi];
-            let shape = body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?;
+            // one crest face, not a strip per turn: only the threaded face's strips merge
+            let shape = body
+              .shape
+              .boolean(&groove, BoolOp::Subtract)
+              .map_err(ke)?
+              .merge_cylinder_strips(o, d, rc, (t0, t1))
+              .map_err(ke)?;
             let bid = body.id;
             self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
             self.split_multi(id, bid);
           } else {
-            self.state.threads.push((id, helix_points(start, dir, x, r, p, l, *left)));
+            let (start, dir) = if *flip { (o + d * b, -d) } else { (o + d * a, d) };
+            self.state.threads.push((id, helix_points(start, dir, perpendicular(dir), rc, p, l, *left)));
           }
         }
         Ok(None)
@@ -539,6 +545,31 @@ impl Ctx<'_> {
     Ok((bi, info))
   }
 
+  /// Resolves a thread's face reference like [`Ctx::face_info`], but among cylinders scores how
+  /// far the picked point is off each one's surface too: a tube's bore and outside share a
+  /// centroid, and the plain score can't tell them apart. Only threads with [`ISO_THREADS`] use
+  /// it, so other features (and older threads) resolve as they did.
+  fn thread_face_info(&mut self, fr: &mut FaceRef) -> Result<(usize, FaceInfo), String> {
+    let bi = self.body_index(fr.body)?;
+    let body = &self.state.bodies[bi];
+    let (p, n0) = (DVec3::from(fr.point), DVec3::from(fr.normal));
+    let score = |f: &FaceInfo| {
+      let v = p - f.origin;
+      let off = ((v - f.normal * v.dot(f.normal)).length() - f.radius).abs();
+      (p - f.center).length() + off
+    };
+    let fid = body
+      .faces()
+      .iter()
+      .filter(|f| f.kind == SurfaceKind::Cylinder && f.normal.dot(n0).abs() >= 0.999)
+      .min_by(|a, b| score(a).total_cmp(&score(b)))
+      .map(|f| f.id);
+    let Some(fid) = fid else { return self.face_info(fr) };
+    refresh_face(fr, body, fid);
+    let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("a face could not be found")?;
+    Ok((bi, info))
+  }
+
   /// Resolves an edge reference to its body index and current edge (refreshing the reference).
   pub(super) fn edge_info(&mut self, e: &mut EdgeRef) -> Result<(usize, EdgeInfo), String> {
     let bi = self.body_index(e.body)?;
@@ -751,6 +782,88 @@ impl Ctx<'_> {
       }
     }
     lo.is_finite().then_some((lo, hi, votes >= 0.0))
+  }
+
+  /// A thread on one face as designs without [`ISO_THREADS`] build it: a sharp V groove from the
+  /// face's end along its own axis direction, swept the thread's length; returns its label.
+  #[allow(clippy::too_many_arguments)]
+  fn legacy_thread(
+    &mut self,
+    id: FeatureId,
+    bi: usize,
+    info: &FaceInfo,
+    pitch: &str,
+    length: &str,
+    offset: &str,
+    modeled: bool,
+    left: bool,
+    flip: bool,
+  ) -> Result<String, String> {
+    let (o, d, r) = (info.origin, info.normal.normalize(), info.radius);
+    let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
+    let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
+    if p <= 0.0 {
+      return Err("the pitch must be positive".into());
+    }
+    let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
+    let full = t1 - t0 - off;
+    let l = if length.trim().is_empty() { full } else { self.len(length)?.min(full) };
+    if l <= p * 0.5 {
+      return Err("the thread is shorter than half a pitch".into());
+    }
+    // the helix runs from the chosen end along the axis
+    let (start, dir) = if flip { (o + d * (t1 - off), -d) } else { (o + d * (t0 + off), d) };
+    let x = perpendicular(dir);
+    if modeled {
+      let groove = legacy_thread_groove(start, dir, x, r, p, l, external, left).map_err(ke)?;
+      let body = &self.state.bodies[bi];
+      let shape = body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?;
+      let bid = body.id;
+      self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+      self.split_multi(id, bid);
+    } else {
+      self.state.threads.push((id, helix_points(start, dir, x, r, p, l, left)));
+    }
+    Ok(format!("M{}x{}", trim(2.0 * r), trim(p)))
+  }
+
+  /// A cylindrical face's extent along its axis from its edges (exact, where the mesh's extent
+  /// `approx` is only as good as single precision); `approx` when the edges don't bound it.
+  fn exact_extent(&self, bi: usize, face: u32, o: DVec3, d: DVec3, approx: (f64, f64)) -> (f64, f64) {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for e in self.state.bodies[bi].edges().iter().filter(|e| e.faces.contains(&face)) {
+      for p in [e.start, e.mid, e.end] {
+        let s = (p - o).dot(d);
+        lo = lo.min(s);
+        hi = hi.max(s);
+      }
+    }
+    let tol = 1e-4 * (approx.1 - approx.0).abs().max(1.0);
+    if (lo - approx.0).abs() < tol && (hi - approx.1).abs() < tol { (lo, hi) } else { approx }
+  }
+
+  /// Resizes a cylindrical face spanning `span` along the axis from radius `r` to `rc`: cuts away
+  /// or adds the ring between the two (a boss shrinks or grows outside, a hole inside).
+  fn resize_cylinder(
+    &mut self,
+    id: FeatureId,
+    bi: usize,
+    (o, d): (DVec3, DVec3),
+    span: (f64, f64),
+    (r, rc): (f64, f64),
+    external: bool,
+  ) -> Result<(), String> {
+    let (base, h) = (o + d * span.0, span.1 - span.0);
+    let cyl = |radius: f64| Shape::cylinder(base, d, radius, h).map_err(ke);
+    // the ring reaches past the face into the air when removing, into the material when adding
+    let delta = (rc - r).abs();
+    let (inner, outer) = if rc < r { (rc, r + delta) } else { ((r - delta).max(r * 0.5), rc) };
+    let ring = cyl(outer)?.boolean(&cyl(inner)?, BoolOp::Subtract).map_err(ke)?;
+    let op = if external == (rc < r) { BoolOp::Subtract } else { BoolOp::Union };
+    let body = &self.state.bodies[bi];
+    let shape = body.shape.boolean(&ring, op).map_err(ke)?;
+    self.state.bodies[bi] = body.with_shape(shape, id);
+    Ok(())
   }
 
   fn plane_by(&mut self, def: &mut PlaneDef) -> Result<Plane, String> {
@@ -1162,9 +1275,45 @@ pub(super) fn sketch_wires(
   Ok(out)
 }
 
-/// A thread's helical V groove: ISO 60° flanks, cut into the material from the cylinder of
-/// radius `r` (inwards on a boss, outwards in a hole).
+/// A thread's helical groove: the ISO 68-1 profile, 60° flanks half a pitch apart at the pitch
+/// diameter and a flat root, cut in from the crest diameter (inwards on a boss, outwards in a
+/// hole) between `span.0` and `span.1` along the axis, where planes across the axis end it.
 fn thread_groove(
+  o: DVec3,
+  d: DVec3,
+  span: (f64, f64),
+  dims: &crate::thread::ThreadDims,
+  external: bool,
+  left: bool,
+) -> fox_kernel::Result<Shape> {
+  let p = dims.pitch;
+  let (rc, rp, rb) = (dims.crest / 2.0, dims.pitch_diameter / 2.0, dims.root / 2.0);
+  let tan = 30f64.to_radians().tan();
+  let out = if external { 1.0 } else { -1.0 };
+  // half the groove's width at radius r: a quarter pitch at the pitch radius, wider towards the crest
+  let half = |r: f64| p / 4.0 + out * (r - rp) * tan;
+  let land = p - 2.0 * half(rc);
+  if land <= 0.0 || (rb - rc) * out >= 0.0 || half(rb) <= 0.0 {
+    return Err(fox_kernel::KernelError::Input("the thread profile does not fit the pitch".into()));
+  }
+  // the flanks run a little past the crest so the cut is clean, staying clear of the next turn
+  let past = rc + out * 0.25 * land / (2.0 * tan);
+  let x = perpendicular(d);
+  let start = o + d * (span.0 - p);
+  let sec = Plane { origin: start + x * rp, x, y: d };
+  let pts = [[rb - rp, -half(rb)], [past - rp, -half(past)], [past - rp, half(past)], [rb - rp, half(rb)]];
+  let outer = Loop::new((0..4).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % 4] }).collect());
+  let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
+  // a pitch longer at both ends, then cut square at the span's ends
+  let sweep = face.helix_sweep(start, d, x, rp, p, span.1 - span.0 + 2.0 * p, left)?;
+  let slab = Shape::cylinder(o + d * span.0, d, rc.max(rb) + p, span.1 - span.0)?;
+  sweep.boolean(&slab, BoolOp::Intersect)
+}
+
+/// A thread's helical V groove as designs without [`ISO_THREADS`] build it: ISO 60° flanks, cut
+/// into the material from the cylinder of radius `r` (inwards on a boss, outwards in a hole).
+#[allow(clippy::too_many_arguments)]
+fn legacy_thread_groove(
   start: DVec3,
   dir: DVec3,
   x: DVec3,
@@ -1190,6 +1339,19 @@ fn thread_groove(
   };
   let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
   face.helix_sweep(start, dir, x, r, pitch, length, left)
+}
+
+/// The axis direction a thread's low end is measured along: its largest component positive.
+fn canonical_axis(d: DVec3) -> DVec3 {
+  let a = d.abs();
+  let c = if a.x >= a.y && a.x >= a.z {
+    d.x
+  } else if a.y >= a.z {
+    d.y
+  } else {
+    d.z
+  };
+  if c < 0.0 { -d } else { d }
 }
 
 /// A cosmetic thread's helix as points (for display).

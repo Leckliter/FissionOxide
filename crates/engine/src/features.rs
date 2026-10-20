@@ -29,8 +29,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           length: opt_expr(p, "length").unwrap_or_default(),
           offset: opt_expr(p, "offset").unwrap_or_else(|| "0".into()),
           modeled: flag("modeled"),
-          left: flag("left"),
-          flip: flag("flip"),
+          left: flag("left") || p.get("right_handed").and_then(Value::as_bool) == Some(false),
+          flip: flag("flip") || opt_str(p, "location") == Some("high_end"),
+          designation: opt_str(p, "designation").unwrap_or_default().to_string(),
+          class: opt_str(p, "class").unwrap_or_default().to_string(),
         },
       )
     })(),

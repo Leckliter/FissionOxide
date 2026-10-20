@@ -59,10 +59,17 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Threads (feature level): a modeled thread is the ISO 68-1 flat-root groove cut square at its
+/// ends (not a sharp V running out past them), its offset and flip are measured from the axis's
+/// canonical low end over the face's exact extent, and the threaded crest is merged into one
+/// face. Without it a thread rebuilds as before. A thread with an ISO designation always gets it:
+/// files saved before this flag have no designation.
+pub const ISO_THREADS: &str = "iso_threads";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  ISO_THREADS,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
