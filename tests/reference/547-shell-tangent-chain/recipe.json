@@ -1,0 +1,205 @@
+{
+ "id": "shell-tangent-chain",
+ "name": "Shell with tangent chain",
+ "description": "40x30 block (R10 round on the +X+Y vertical corner) extruded 20, shelled 2 mm inward from the back face (y=30) with tangent chain on, so the corner round and the right face (x=40) open too.",
+ "exercises": [
+  "extrude",
+  "shell"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       20
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       40,
+       20
+      ]
+     },
+     "mid": {
+      "at": [
+       37.071067812,
+       27.071067812000003
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       30
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       30,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "a1",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Block"
+   ]
+  },
+  {
+   "op": "shell",
+   "name": "Shell1",
+   "faces_removed": [
+    {
+     "type": "plane",
+     "normal_at_point_on_face": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "plane_normal_outward": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "point": [
+      15.0,
+      30.0,
+      10.0
+     ]
+    }
+   ],
+   "face_selection": "back face (y=30) + tangent chain = back face, R10 corner round and right face (x=40)",
+   "inside_thickness": 2,
+   "outside_thickness": 0,
+   "tangent_chain": true
+  }
+ ]
+}

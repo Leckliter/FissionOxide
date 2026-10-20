@@ -1,0 +1,10 @@
+# 544-shell-outside-open-top: added by the parity loop from a Fusion probe
+# shell-outside-open-top: 40x30x20 box shelled 2 mm outside the original surface with the top face (z=20) removed; sharp corners.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "shell", "faces": [{"point": [20.0, 15.0, 20.0], "normal": [0.0, 0.0, 1.0]}], "thickness": 2, "direction": "outside"}
