@@ -748,6 +748,20 @@ impl Ctx<'_> {
           _ => Err("pick a straight or circular edge".into()),
         }
       }
+      AxisDef::SketchLine { sketch, curve } => {
+        let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?;
+        let Some(CurveKind::Line { a, b }) = sk.sketch.curve(*curve).map(|c| &c.kind) else {
+          return Err("the axis line no longer exists".into());
+        };
+        let (Some(pa), Some(pb)) = (sk.sketch.pos(*a), sk.sketch.pos(*b)) else {
+          return Err("the axis line no longer exists".into());
+        };
+        let (pa, pb) = (sk.plane.to_world(pa), sk.plane.to_world(pb));
+        Ok((pa, pb - pa))
+      }
+      AxisDef::Axis { feature } => {
+        self.state.axes.get(feature).copied().ok_or_else(|| "its construction axis failed".to_string())
+      }
     }
   }
 

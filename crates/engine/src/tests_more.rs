@@ -102,6 +102,28 @@ fn construction_planes_axes_and_points() {
 }
 
 #[test]
+fn axis_through_sketch_line_or_axis() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].as_u64().unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let axis = |s: &mut Session, edge: Value| {
+    let f = run(s, "axis", json!({"method": "edge", "edge": edge}))["feature"].as_u64().unwrap();
+    s.model.axes[&crate::model::FeatureId(f as u32)]
+  };
+  let want = fox_kernel::glam::DVec3::new(1.0, 0.0, 1.0).normalize();
+  // by sketch and line, by a point on the line (no body there), and along that axis
+  let (o, d) = axis(&mut s, json!({"sketch": sk, "line": line}));
+  assert!(o.length() < 1e-9 && (d - want).length() < 1e-9, "{o} {d}");
+  let (_, d) = axis(&mut s, json!({"point": [5, 0, 5]}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  let f = s.design.features.last().unwrap().id.0;
+  let (_, d) = axis(&mut s, json!({"axis": f}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  assert!(s.execute("axis", &json!({"method": "edge", "edge": {"point": [50, 50, 50]}})).is_err());
+}
+
+#[test]
 fn threads_cosmetic_and_modeled() {
   let mut s = Session::default();
   rod(&mut s, 5.0, 20.0);

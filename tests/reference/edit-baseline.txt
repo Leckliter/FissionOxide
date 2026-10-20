@@ -58,3 +58,5 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+335-box-vertical-edge-pattern
+336-prism-slanted-edge-pattern
