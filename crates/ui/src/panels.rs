@@ -2839,6 +2839,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Form { .. } => Icon::CreateForm,
     FeatureKind::AlignConstraint { .. } => Icon::JointOrigin,
     FeatureKind::PlaneConstraint { .. } => Icon::Combine,
+    FeatureKind::BoundingSolid { .. } => Icon::Box,
   }
 }
 

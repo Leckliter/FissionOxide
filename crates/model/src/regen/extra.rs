@@ -483,6 +483,7 @@ impl Ctx<'_> {
       FeatureKind::PlaneConstraint { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
       FeatureKind::Form { .. } => self.apply_form(id, kind),
+      FeatureKind::BoundingSolid { .. } => self.apply_bounding(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

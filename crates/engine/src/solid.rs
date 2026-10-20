@@ -3,12 +3,14 @@
 
 use fox_kernel::Shape;
 use fox_kernel::glam::DVec3;
-use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, ShellDirection};
+use fox_model::bounding::BoundShape;
+use fox_model::{BodyId, BodySel, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, ShellDirection};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
 use crate::commands::{
-  add_feature, face_ref, ids, operation, opt_expr, plane_ref, profile_points, req_expr, sketch_for_feature,
+  add_feature, body_sel, expr_of, face_ref, ids, operation, opt_expr, plane_ref, profile_points, req_expr,
+  sketch_for_feature,
 };
 use crate::{CmdError, CmdResult, Session};
 
@@ -66,6 +68,27 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         return Err(CmdError::new("missing 'target' (a face) or 'plane'"));
       }
       add_feature(s, FeatureKind::ReplaceFace { faces, target, plane })
+    })(),
+    "bounding_solid" => (|| {
+      let bodies = body_sel(p);
+      if let BodySel::Bodies { ids } = &bodies {
+        for b in ids {
+          s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0)))?;
+        }
+      }
+      let shape = match p.get("shape").and_then(Value::as_str).unwrap_or("box") {
+        "box" => BoundShape::Box,
+        "cylinder" => BoundShape::Cylinder,
+        o => return Err(CmdError::new(format!("unknown shape '{o}' (box, cylinder)"))),
+      };
+      let plane = p.get("plane").map(|v| plane_ref(s, v)).transpose()?;
+      let offset = p.get("offset").map(expr_of).transpose()?.unwrap_or_else(|| "0".into());
+      let sides = match p.get("sides") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if a.len() == 6 => a.iter().map(expr_of).collect::<Result<_, _>>()?,
+        Some(_) => return Err(CmdError::new("'sides' is six offsets: [-x, +x, -y, +y, -z, +z]")),
+      };
+      add_feature(s, FeatureKind::BoundingSolid { bodies, shape, plane, offset, sides })
     })(),
     _ => return None,
   })

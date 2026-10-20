@@ -10,6 +10,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod assembly;
+pub mod bounding;
 pub mod cam;
 pub mod config;
 pub mod construct;
@@ -1446,6 +1447,24 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     offset: String,
   },
+  /// Bounding Solid: a new body enclosing the bodies (a box, or a cylinder about the frame's
+  /// normal), in a plane's frame (default world XY), grown by the offsets. The bodies stay.
+  BoundingSolid {
+    #[serde(default)]
+    bodies: BodySel,
+    #[serde(default)]
+    shape: bounding::BoundShape,
+    /// The frame the box or cylinder lines up with (its normal is the cylinder's axis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plane: Option<PlaneRef>,
+    /// Grown on every side (the cylinder: radially and at both ends).
+    #[serde(default = "zero")]
+    offset: String,
+    /// Per side instead of `offset`, in the frame: -x, +x, -y, +y, -z, +z. The cylinder takes
+    /// -z, +z for its ends and grows radially by `offset`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sides: Vec<String>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1587,6 +1606,7 @@ impl FeatureKind {
       FeatureKind::Form { .. } => "Form",
       FeatureKind::AlignConstraint { .. } => "Align",
       FeatureKind::PlaneConstraint { .. } => "CenterConstraint",
+      FeatureKind::BoundingSolid { .. } => "BoundingSolid",
     }
   }
 
@@ -1663,6 +1683,7 @@ impl FeatureKind {
       FeatureKind::PlaneConstraint { moving_planes, fixed_planes, .. } => {
         moving_planes.iter().chain(fixed_planes).flat_map(plane_dep).collect()
       }
+      FeatureKind::BoundingSolid { plane: Some(plane), .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -2444,6 +2465,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Form { .. } => {}
     FeatureKind::AlignConstraint { offset, .. } => f(offset),
     FeatureKind::PlaneConstraint { offset, .. } => f(offset),
+    FeatureKind::BoundingSolid { offset, sides, .. } => {
+      f(offset);
+      for e in sides {
+        f(e);
+      }
+    }
   }
 }
 
