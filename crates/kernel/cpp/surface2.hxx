@@ -11,5 +11,6 @@ std::unique_ptr<Shape> untrim_faces(const Shape &s, rust::Slice<const uint32_t> 
 double classify_point(const Shape &tool, double x, double y, double z);
 std::unique_ptr<Shape> offset_variable(const Shape &s, double d, rust::Slice<const uint32_t> faces,
                                        rust::Slice<const double> dists);
+std::unique_ptr<Shape> offset_joined(const Shape &s, double d, bool round, bool thicken);
 
 } // namespace fox

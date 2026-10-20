@@ -84,11 +84,11 @@ cmds! {
   "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
-  "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end} | {tangent: curve, start, end}";
+  "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end, clockwise?: bool} | {center, start, sweep: angle (negative = clockwise)} | {tangent: curve, start, end}";
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
-  "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
+  "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width, ccw?: bool (default: the shorter arc)} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature|polygon, points?: [id], curves?: [id]} (symmetric: points [a, b] + curves [axis], or curves [a, b, axis] for two lines or circles/arcs; fix takes a point or curves; delete its constraints to unfix) (polygon: lines already forming a regular polygon; returns its centre point)";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -105,14 +105,14 @@ cmds! {
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
-  "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
+  "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
-  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
+  "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -136,13 +136,13 @@ cmds! {
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
-  "pipe" => "Round tube along a path sketch (solid, or hollow with a wall)", "{path: sketch, path_curves?, diameter, wall?, operation?}";
+  "pipe" => "Tube along a path sketch: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path", "{path: sketch, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
   "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
   "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
   "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
-  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?, flip?, operation?}";
+  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?: thickness on each side, flip?, operation?, corners?: \"sharp\"|\"round\"}";
   "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
   "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
   "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
@@ -1902,7 +1902,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
     Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
-    Circ([f64; 2], usize, f64),
+    Circ([f64; 2], usize, f64, bool),
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
   let op = match name {
@@ -1931,6 +1931,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &scope))
         .transpose()?
         .unwrap_or(std::f64::consts::TAU),
+      p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
     ),
   };
   let made = s.edit(move |d| {
@@ -1962,7 +1963,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       Op::Mirror(line) => sketch.mirror(&curves, line)?,
       Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
-      Op::Circ(c, n, a) => sketch.pattern_circ(&curves, c, n, a)?,
+      Op::Circ(c, n, a, sym) => sketch.pattern_circ(&curves, c, n, a, sym)?,
     };
     if !sketch.solve().ok() {
       return Err(CmdError::new("the result conflicts with the sketch's constraints"));
@@ -2252,9 +2253,24 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       "sketch.arc" => {
         if let Some(c) = opt_pt(&p, "center")? {
-          let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
+          let st = req_pt(&p, "start")?;
+          // Fusion's typed sweep angle: signed, negative runs clockwise
+          let (en, clockwise) = match opt_expr(&p, "sweep") {
+            Some(e) => {
+              if p.get("end").is_some() {
+                return Err(CmdError::new("give the arc's 'end' or its 'sweep', not both"));
+              }
+              let sweep = fox_expr::eval(&e, fox_expr::Kind::Angle, &scope)?;
+              if !(sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
+                return Err(CmdError::new("an arc sweeps more than 0 and less than 360 degrees"));
+              }
+              let a = (st[1] - c[1]).atan2(st[0] - c[0]) + sweep;
+              ([c[0] + a.cos(), c[1] + a.sin()], sweep < 0.0)
+            }
+            None => (req_pt(&p, "end")?, p.get("clockwise").and_then(Value::as_bool).unwrap_or(false)),
+          };
           let (cs, ss) = (snap(sketch, c), snap(sketch, st));
-          sketch.add_arc_center(cs, ss, en)?;
+          sketch.add_arc_center_dir(cs, ss, en, clockwise)?;
         } else {
           let (st, mid, en) = (req_pt(&p, "start")?, req_pt(&p, "mid")?, req_pt(&p, "end")?);
           let (ss, es) = (snap(sketch, st), snap(sketch, en));
@@ -2310,7 +2326,11 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let w = p.get("width").and_then(Value::as_f64).ok_or(CmdError::new("missing 'width'"))?;
         let (st, en) = (req_pt(&p, "start")?, req_pt(&p, "end")?);
         let (c, ccw) = match opt_pt(&p, "arc_center")? {
-          Some(c) => (c, true),
+          // Fusion takes the shorter arc from start to end; 'ccw' picks the direction outright
+          Some(c) => {
+            let cross = (st[0] - c[0]) * (en[1] - c[1]) - (st[1] - c[1]) * (en[0] - c[0]);
+            (c, p.get("ccw").and_then(Value::as_bool).unwrap_or(cross >= 0.0))
+          }
           None => {
             let m = req_pt(&p, "mid")?;
             let c = fox_sketch::circumcenter(st, m, en).ok_or(CmdError::new("the three points are in a line"))?;
@@ -2320,7 +2340,13 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
             (c, cross < 0.0)
           }
         };
-        let (a0, a1) = (st, en);
+        // the start sets the radius; the end only sets the direction
+        let r = (st[0] - c[0]).hypot(st[1] - c[1]);
+        let re = (en[0] - c[0]).hypot(en[1] - c[1]);
+        if re < 1e-12 {
+          return Err(CmdError::new("the end is on the slot's centre"));
+        }
+        let (a0, a1) = (st, [c[0] + (en[0] - c[0]) * r / re, c[1] + (en[1] - c[1]) * r / re]);
         let (from, to) = if ccw { (a0, a1) } else { (a1, a0) };
         add_arc_slot(sketch, c, from, to, w)?;
       }
@@ -2370,17 +2396,19 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       "sketch.conic" => {
         let (st, en, apex) = (req_pt(&p, "start")?, req_pt(&p, "end")?, req_pt(&p, "apex")?);
         let rho = p.get("rho").and_then(Value::as_f64).unwrap_or(0.5);
-        if !(0.01..0.99).contains(&rho) {
+        if !fox_sketch::RHO_RANGE.contains(&rho) {
           return Err(CmdError::new("rho must be between 0.01 and 0.99"));
         }
-        // a cubic through start and end pulled towards the apex (rho 0.5 is a parabola)
-        let k = 4.0 * rho / 3.0;
-        let c1 = [st[0] + (apex[0] - st[0]) * k, st[1] + (apex[1] - st[1]) * k];
-        let c2 = [en[0] + (apex[0] - en[0]) * k, en[1] + (apex[1] - en[1]) * k];
+        let cross = (en[0] - st[0]) * (apex[1] - st[1]) - (en[1] - st[1]) * (apex[0] - st[0]);
+        if cross.abs() <= 1e-9 * (en[0] - st[0]).hypot(en[1] - st[1]).powi(2) {
+          return Err(CmdError::new("the apex must lie off the line from start to end"));
+        }
+        // the exact conic: the rational quadratic Bézier start, apex, end (rho 0.5 is a parabola)
         let (a, b) = (snap(sketch, st), snap(sketch, en));
-        let ids =
-          vec![sketch.resolve(a)?, sketch.add_point(c1[0], c1[1]), sketch.add_point(c2[0], c2[1]), sketch.resolve(b)?];
-        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+        let (start, end) = (sketch.resolve(a)?, sketch.resolve(b)?);
+        // the apex floats off the curve, like a control point: it never snaps
+        let apex = sketch.add_point(apex[0], apex[1]);
+        sketch.add_curve(CurveKind::Conic { start, end, apex, rho })?;
       }
       _ => {
         let at = req_pt(&p, "at")?;
@@ -2453,14 +2481,33 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
   let t = req_str(p, "type")?.to_string();
   let pts: Vec<PointId> = ids(p, "points").into_iter().map(PointId).collect();
   let cs: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
-  let id = s.edit(move |d| {
+  let ids = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
+    // fixing curves locks every point that defines them (and a circle's radius)
+    if t == "fix" && pts.is_empty() && !cs.is_empty() {
+      let mut added = Vec::new();
+      for c in &cs {
+        added.extend(sketch.fix_curve(*c)?);
+      }
+      let r = sketch.solve();
+      if !r.ok() {
+        return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
+      }
+      return Ok((added, None));
+    }
     let need_p = |n: usize| -> Result<(), CmdError> {
       if pts.len() >= n { Ok(()) } else { Err(CmdError::new(format!("'{t}' needs {n} point(s)"))) }
     };
     let need_c = |n: usize| -> Result<(), CmdError> {
       if cs.len() >= n { Ok(()) } else { Err(CmdError::new(format!("'{t}' needs {n} curve(s)"))) }
     };
+    let conflict = || CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)");
+    if t == "polygon" {
+      // lines already forming a regular polygon; the constraint adds their centre point
+      need_c(3)?;
+      let (id, center) = sketch.add_polygon_constraint(&cs)?;
+      return if sketch.solve().ok() { Ok((vec![id], Some(center))) } else { Err(conflict()) };
+    }
     let kind = match t.as_str() {
       "coincident" => {
         need_p(2)?;
@@ -2503,6 +2550,10 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
         need_c(1)?;
         ConstraintKind::PointOnCurve { p: pts[0], curve: cs[0] }
       }
+      // two lines or two circles/arcs, then the axis
+      "symmetric" if pts.is_empty() && cs.len() >= 3 => {
+        ConstraintKind::SymmetricCurves { a: cs[0], b: cs[1], line: cs[2] }
+      }
       "symmetric" => {
         need_p(2)?;
         need_c(1)?;
@@ -2517,11 +2568,22 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
     let id = sketch.add_constraint(kind)?;
     let r = sketch.solve();
     if !r.ok() {
-      return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
+      return Err(conflict());
     }
-    Ok(id)
+    Ok((vec![id], None))
   })?;
-  Ok(json!({"constraint": id.0, "dof": s.model.sketches.get(&sk).map(|r| r.report.dof)}))
+  let (ids, center) = ids;
+  // fixing a curve adds several constraints; "constraint" is the first
+  let mut out = json!({
+    "constraint": ids.first().map(|c| c.0),
+    "constraints": ids.iter().map(|c| c.0).collect::<Vec<_>>(),
+    "dof": s.model.sketches.get(&sk).map(|r| r.report.dof),
+  });
+  // a polygon constraint also returns the centre point it added
+  if let Some(c) = center {
+    out["center"] = json!(c.0);
+  }
+  Ok(out)
 }
 
 fn dimension(s: &mut Session, p: &Value) -> CmdResult {

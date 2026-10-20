@@ -1,0 +1,8 @@
+# 158-offset-disc-diameter: added by the parity loop from a Fusion probe
+# offset-disc-diameter: Center Diameter Circle on XY, centre (12,-7), diameter 22 (driving diameter dimension 22), extruded 8.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [12, -7], "diameter": 22}
+{"cmd": "sketch.dimension", "type": "diameter", "curves": [2], "value": 22}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

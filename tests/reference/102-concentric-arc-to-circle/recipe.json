@@ -1,0 +1,162 @@
+{
+ "id": "concentric-arc-to-circle",
+ "name": "Half disc made concentric with a construction circle",
+ "description": "Construction circle R5 at the origin; semicircular arc drawn about (3,2) from (23,2) to (-17,2) closed by a line. Line horizontal, arc centre on the line, arc R20, arc concentric with the circle: half disc R20 on the x axis about the origin, extruded 6.",
+ "exercises": [
+  "sketch",
+  "concentric constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 5,
+     "id": "c1",
+     "construction": true
+    },
+    {
+     "type": "arc_center_start_sweep",
+     "center": {
+      "at": [
+       3,
+       2
+      ]
+     },
+     "start": {
+      "at": [
+       23,
+       2
+      ]
+     },
+     "sweep_deg": 180,
+     "id": "a1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       -17,
+       2
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       23,
+       2
+      ]
+     },
+     "id": "l1"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "a1.center",
+      "l1"
+     ]
+    },
+    {
+     "type": "concentric",
+     "refs": [
+      "c1",
+      "a1"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "radius",
+     "refs": [
+      "a1"
+     ],
+     "value": 20,
+     "unit": "mm"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "l1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "HalfDisc"
+   ]
+  }
+ ]
+}

@@ -40,7 +40,9 @@ pub use refs::{EdgeRef, FaceRef};
 use fox_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// - 2: a symmetric thicken's `thickness` is the thickness on each side (it was the total).
+pub const FORMAT_VERSION: u32 = 2;
 /// Hostile-file guards.
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMETERS: usize = 10_000;
@@ -946,7 +948,7 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
-  /// A round tube swept along a path of lines and arcs, solid or hollow.
+  /// A tube (round, square or triangular) swept along a path of lines and arcs, solid or hollow.
   Pipe {
     path_sketch: FeatureId,
     #[serde(default)]
@@ -957,6 +959,12 @@ pub enum FeatureKind {
     wall: String,
     #[serde(default)]
     operation: Operation,
+    /// Section shape; `diameter` is its size.
+    #[serde(default)]
+    section: construct::PipeSection,
+    /// Fraction of the path (from its start) the pipe follows; empty = all of it.
+    #[serde(default)]
+    distance: String,
   },
   /// A rib (thickness across the sketch plane) or web (thickness in the sketch plane) grown from
   /// open sketch lines until it meets the body, or to a depth.
@@ -1002,13 +1010,17 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: Vec<BodyId>,
     thickness: String,
-    /// Half the thickness each side.
+    /// The full thickness on each side (twice it in all), as Fusion does.
     #[serde(default)]
     symmetric: bool,
     #[serde(default)]
     flip: bool,
     #[serde(default)]
     operation: Operation,
+    /// Round the corners where the faces of a surface meet at an angle (default: sharp, the
+    /// offset faces extended until they meet).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    round: bool,
   },
   /// A surface extruded from open (or closed) sketch curves.
   SurfaceExtrude {
@@ -1909,14 +1921,40 @@ impl Design {
   }
 
   pub fn from_json(s: &str) -> Result<Design, DesignError> {
-    let d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
+    let mut d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
     if d.version > FORMAT_VERSION {
       return Err(DesignError::Version(d.version));
     }
     if d.features.len() > MAX_FEATURES || d.parameters.len() > MAX_PARAMETERS {
       return Err(DesignError::TooMany);
     }
+    // a hand-edited rho outside the range would give the conic an infinite or negative weight
+    for f in &d.features {
+      if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+        for c in &sketch.curves {
+          if let fox_sketch::CurveKind::Conic { rho, .. } = c.kind
+            && !fox_sketch::RHO_RANGE.contains(&rho)
+          {
+            return Err(DesignError::File(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
+          }
+        }
+      }
+    }
+    d.migrate();
     Ok(d)
+  }
+
+  /// Brings a design read from an older file up to [`FORMAT_VERSION`], so it rebuilds as it did.
+  fn migrate(&mut self) {
+    if self.version < 2 {
+      // a symmetric thicken's thickness was the total, half on each side; now it is per side
+      for f in &mut self.features {
+        if let FeatureKind::Thicken { thickness, symmetric: true, .. } = &mut f.kind {
+          *thickness = format!("({}) / 2", thickness.trim());
+        }
+      }
+    }
+    self.version = FORMAT_VERSION;
   }
 
   pub fn save(&self, path: &std::path::Path) -> Result<(), DesignError> {
@@ -2083,10 +2121,13 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
-    FeatureKind::Pipe { diameter, wall, .. } => {
+    FeatureKind::Pipe { diameter, wall, distance, .. } => {
       f(diameter);
       if !wall.is_empty() {
         f(wall);
+      }
+      if !distance.is_empty() {
+        f(distance);
       }
     }
     FeatureKind::Rib { thickness, depth, .. } => {

@@ -73,4 +73,29 @@ impl Shape {
     let dists: Vec<f64> = faces.iter().map(|f| f.1).collect();
     Shape::wrap(sys::offset_variable(self.get()?, distance, &ids, &dists)?)
   }
+
+  /// This face or connected shell offset by `d` as one piece, the offsets of faces meeting at an
+  /// angle extended until they meet (`round`: joined by an arc about the edge instead), so corners
+  /// stay closed.
+  pub fn offset_joined(&self, d: f64, round: bool) -> Result<Shape> {
+    if !d.is_finite() {
+      return Err(KernelError::Input("offset distances must be finite".into()));
+    }
+    Shape::wrap(sys::offset_joined(self.get()?, d, round, false)?)
+  }
+
+  /// This face or connected shell thickened by `d` (positive = along the face normals) as one
+  /// solid, with sharp (or `round`) corners where faces meet at an angle. Fails, rather than
+  /// returning something partial, when OCCT can't build a single valid solid.
+  pub fn thicken_joined(&self, d: f64, round: bool) -> Result<Shape> {
+    if !d.is_finite() {
+      return Err(KernelError::Input("the thickness must be finite".into()));
+    }
+    let s = Shape::wrap(sys::offset_joined(self.get()?, d, round, true)?)?;
+    if s.solid_count() != 1 {
+      return Err(KernelError::Input("thickening the faces together made no single solid".into()));
+    }
+    // offsetting against a face's normal can leave the solid inside out
+    if s.mass().is_ok_and(|m| m.volume < 0.0) { s.reversed() } else { Ok(s) }
+  }
 }

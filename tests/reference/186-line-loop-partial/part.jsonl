@@ -1,0 +1,18 @@
+# 186-line-loop-partial: added by the parity loop from a Fusion probe
+# line-loop-partial: 80x60x5 plate from (-40,-20); triangle hole (15,-4),(27,0),(15,4) circular-patterned 3x over 150 deg about the origin; cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-40, -20], [40, -20]]}
+{"cmd": "sketch.line", "points": [[40, -20], [40, 40]]}
+{"cmd": "sketch.line", "points": [[40, 40], [-40, 40]]}
+{"cmd": "sketch.line", "points": [[-40, 40], [-40, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[15, -4], [27, 0]]}
+{"cmd": "sketch.line", "points": [[27, 0], [15, 4]]}
+{"cmd": "sketch.line", "points": [[15, 4], [15, -4]]}
+{"cmd": "sketch.pattern_circ", "curves": [3, 5, 6], "center": [0, 0], "count": 3, "angle": "150 deg"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}
