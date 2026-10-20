@@ -77,6 +77,20 @@ impl Shape {
     self.sweep_guided(path, &SweepOptions { twist, ..Default::default() })
   }
 
+  /// [`Shape::sweep_rail`] as designs from before the `sweep_unified` behaviour build it: each
+  /// section scaled until its outline touches the rail (BRepFill contact on border).
+  pub fn sweep_rail_legacy(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::sweep_rail_legacy(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")
+  }
+
+  /// [`Shape::sweep_twisted`] as designs from before the `sweep_unified` behaviour build it.
+  pub fn sweep_twisted_legacy(&self, path: &Shape, twist: f64) -> Result<Shape> {
+    if !twist.is_finite() {
+      return Err(KernelError::Input("the twist angle is not finite".into()));
+    }
+    Shape::wrap(sys::sweep_twist_legacy(self.get()?, path.get()?, twist)?)?.solid_or("sweep")
+  }
+
   /// Sweeps this profile along a path wire, steered and shaped by `opts`.
   pub fn sweep_guided(&self, path: &Shape, opts: &SweepOptions) -> Result<Shape> {
     if !opts.twist.is_finite() || !opts.taper.is_finite() {

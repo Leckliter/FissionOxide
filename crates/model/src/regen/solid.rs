@@ -19,6 +19,11 @@ pub(super) enum Trim {
 /// How a sweep's profile is steered and shaped along the path.
 pub(super) enum Guide {
   Plain,
+  /// Designs without `SWEEP_UNIFIED`: a guide rail the section scales to touch (BRepFill
+  /// contact on border), as before the unified sweep.
+  LegacyRail(Shape),
+  /// Designs without `SWEEP_UNIFIED`: twisted (radians), sampled as before the unified sweep.
+  LegacyTwist(f64),
   /// Along a guide rail, or twisted, tapered or kept parallel (radians).
   Shaped {
     rail: Option<Shape>,
@@ -32,6 +37,8 @@ pub(super) enum Guide {
 pub(super) fn sweep(face: &Shape, path: &Shape, guide: &Guide) -> Result<Shape, String> {
   match guide {
     Guide::Plain => face.sweep(path),
+    Guide::LegacyRail(rail) => face.sweep_rail_legacy(path, rail),
+    Guide::LegacyTwist(a) => face.sweep_twisted_legacy(path, *a),
     Guide::Shaped { rail, scale, twist, taper, parallel } => face.sweep_guided(
       path,
       &SweepOptions { rail: rail.as_ref(), scale: *scale, twist: *twist, taper: *taper, parallel: *parallel },
@@ -255,6 +262,16 @@ impl Ctx<'_> {
       return Err("the taper angle must be under 90 degrees".into());
     }
     let (twisted, tapered) = (twist.abs() > 1e-12, taper.abs() > 1e-12);
+    // designs from before SWEEP_UNIFIED build the rail and twist sweeps they could express with
+    // the old kernel code (the new options have no old form and always take the new path)
+    if !self.behaviours.has(fox_sketch::behaviour::SWEEP_UNIFIED) && !tapered && !parallel {
+      match rail {
+        Some(_) if twisted => return Err("a sweep along a guide rail can't twist".into()),
+        Some(r) if scaling == ProfileScaling::Scale => return Ok(Guide::LegacyRail(self.path_shape(r)?)),
+        None if twisted => return Ok(Guide::LegacyTwist(twist)),
+        _ => {}
+      }
+    }
     match rail {
       Some(_) if twisted => Err("a sweep along a guide rail can't twist".into()),
       Some(_) if tapered => Err("a sweep along a guide rail can't taper".into()),

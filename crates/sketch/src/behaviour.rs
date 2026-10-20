@@ -59,10 +59,15 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Rail and twist sweeps are one kernel sweep: a guide rail scales the section by its distance
+/// from the path (a scale law) instead of BRepFill's contact on border, and a twist samples the
+/// path at 121 equal arc lengths.
+pub const SWEEP_UNIFIED: &str = "sweep_unified";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  SWEEP_UNIFIED,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

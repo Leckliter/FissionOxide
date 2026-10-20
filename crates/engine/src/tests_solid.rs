@@ -221,3 +221,63 @@ fn shell_directions_whole_bodies_and_tangent_chain() {
   assert!(matches!(&f.kind, fox_model::FeatureKind::Shell { faces, .. } if faces.len() == 5), "{:?}", f.kind);
   assert!(volume(&s) < v0 * 0.5, "{} of {v0}", volume(&s));
 }
+
+/// A 40 mm sweep up +Z of a section on XY drawn by `section`, along a line on XZ, with a rail
+/// from (5, 0, 0) to (10, 0, 40) or a 90° twist; the swept volume, or the sweep's error.
+fn rail_or_twist_sweep(s: &mut Session, section: (&str, Value), rail: bool) -> Result<f64, String> {
+  let xz = json!({"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]});
+  run(s, "sketch.create", json!({"plane": xz}));
+  let path = run(s, "sketch.line", json!({"points": [[0, 0], [0, -40]]}));
+  let guide = run(s, "sketch.line", json!({"points": [[5, 0], [10, -40]]}));
+  let paths = s.edit_sketch.unwrap().0;
+  run(s, "sketch.finish", json!({}));
+  let (pc, rc) = (path["curves"][0].as_u64().unwrap(), guide["curves"][0].as_u64().unwrap());
+  run(s, "sketch.create", json!({"plane": "xy"}));
+  run(s, section.0, section.1);
+  let prof = s.edit_sketch.unwrap().0;
+  run(s, "sketch.finish", json!({}));
+  let mut p = json!({"sketch": prof, "path": paths, "path_curves": [pc], "operation": "new_body"});
+  if rail {
+    p["rail"] = json!({"sketch": paths, "curves": [rc]});
+  } else {
+    p["twist"] = json!("90 deg");
+  }
+  let r = s.execute("sweep", &p).map_err(|e| e.to_string())?;
+  match r.get("error").and_then(Value::as_str) {
+    Some(e) => Err(e.to_string()),
+    None => Ok(volume(s)),
+  }
+}
+
+#[test]
+fn legacy_designs_keep_the_old_rail_and_twist_sweeps() {
+  let square = ("sketch.rect", json!({"corner1": [-5, -5], "corner2": [5, 5]}));
+  let circle = ("sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  // (section, rail?, the new sweep's volume, main's volume before SWEEP_UNIFIED: None = it failed)
+  let cases = [
+    // 90° twist of a 10 mm square: main sampled the path at 120 points
+    (square.clone(), false, 4000.0, Some(4000.0015588640877)),
+    // a square scaled by a rail: a pyramid frustum, which BRepFill's contact on border can't build
+    (square, true, 40.0 / 3.0 * (100.0 + 200.0 + 400.0), None),
+    // a circle scaled by the rail: a cone frustum both ways, main's off by 0.02 mm³
+    (circle, true, PI * 40.0 / 3.0 * (25.0 + 50.0 + 100.0), Some(7330.400859408512)),
+  ];
+  for (section, rail, new, old) in cases {
+    let mut s = Session::default();
+    assert!(s.design.behaviours.has(fox_sketch::behaviour::SWEEP_UNIFIED));
+    let got = rail_or_twist_sweep(&mut s, section.clone(), rail).unwrap();
+    assert!(close(got, new, 1e-4), "new design, rail {rail}: {got} vs {new}");
+    // the same design without the behaviour, as a file from before it rebuilds
+    s.design.behaviours = fox_model::Behaviours::legacy();
+    s.rebuild();
+    let sweep = s.design.features.last().unwrap().id;
+    let error = s.model.status(sweep).and_then(|st| st.error.clone());
+    match old {
+      Some(v) => {
+        assert!(error.is_none(), "legacy, rail {rail}: {error:?}");
+        assert!((volume(&s) - v).abs() < 1e-6, "legacy, rail {rail}: {} vs main's {v}", volume(&s));
+      }
+      None => assert!(error.is_some_and(|e| e.contains("sweep failed")), "legacy square rail sweep: {:?}", volume(&s)),
+    }
+  }
+}

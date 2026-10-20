@@ -298,6 +298,32 @@ TopoDS_Wire twist_spine(const std::vector<gp_Pnt> &pts, const std::vector<gp_Vec
   return BRepBuilderAPI_MakeWire(interp_edge(aux, false));
 }
 
+// Sweeps each loop of a profile with the same pipe settings; holes are cut from the outer solid.
+// (The pre-sweep_unified rail and twist sweeps.)
+template <typename Setup> TopoDS_Shape sweep_loops(const TopoDS_Wire &spine, const TopoDS_Shape &profile, Setup setup) {
+  bool holes = false;
+  std::vector<TopoDS_Wire> ws = loops(profile, holes);
+  TopoDS_Shape result;
+  for (size_t i = 0; i < ws.size(); ++i) {
+    BRepOffsetAPI_MakePipeShell ps(spine);
+    setup(ps);
+    ps.Add(ws[i], Standard_False, Standard_False);
+    ps.Build();
+    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
+    ps.MakeSolid();
+    TopoDS_Shape s = ps.Shape();
+    if (volume(s) < 0) s.Reverse();
+    if (i == 0) {
+      result = s;
+    } else {
+      BRepAlgoAPI_Cut cut(result, s);
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      result = cut.Shape();
+    }
+  }
+  return result;
+}
+
 // A path of several edges as one B-spline edge, so that a law along it has a single parameter.
 TopoDS_Wire one_edge(const TopoDS_Wire &w) {
   int n = 0;
@@ -367,6 +393,43 @@ Handle(Law_Function) scale_law(const std::vector<double> &par, const std::vector
   return l;
 }
 } // namespace
+
+// Designs from before the sweep_unified behaviour: sweeps a profile along a path, oriented and
+// scaled so that it keeps touching a guide rail (BRepFill contact on border).
+std::unique_ptr<Shape> sweep_rail_legacy(const Shape &profile, const Shape &spine, const Shape &rail) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  const TopoDS_Wire &guide = as_wire(rail, "the guide rail");
+  bool holes = false;
+  loops(profile.s, holes);
+  if (holes) throw std::runtime_error("a guide rail sweep needs a profile without holes");
+  // the rail is matched to the path by relative arc length; each section is scaled about the path
+  // until its outline touches the rail
+  TopoDS_Shape s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
+    ps.SetMode(guide, Standard_True, BRepFill_ContactOnBorder);
+  });
+  return out(valid(s, "guided sweep"));
+  FOX2_CATCH("guided sweep")
+}
+
+// Designs from before the sweep_unified behaviour: sweeps a profile along a path, turning it by
+// `twist` radians about the path from start to end (120 samples along the path).
+std::unique_ptr<Shape> sweep_twist_legacy(const Shape &profile, const Shape &spine, double twist) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  sample_wire(path, 120, pts, tans);
+  double length = 0;
+  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+  TopoDS_Wire auxw = twist_spine(pts, tans, length, twist);
+  TopoDS_Shape out_s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
+    ps.SetMode(auxw, Standard_True, BRepFill_NoContact);
+  });
+  return out(valid(out_s, "twisted sweep"));
+  FOX2_CATCH("twisted sweep")
+}
 
 // Sweeps a profile along a path. `twist` turns it by that many radians about the path from start
 // to end; `taper` (radians) grows it all round by tan(taper) per unit of path length (holes
