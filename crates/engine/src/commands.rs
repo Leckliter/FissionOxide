@@ -247,8 +247,8 @@ cmds! {
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
   "sheet.check" => "Check a sheet metal body's flat pattern against the rules shops cut by: hole sizes, material between holes and edges, holes near bends, and the sheet size; defaults follow the body's thickness and bend radius", "{body?, face?, min_hole?, min_web?, bend_clearance?, sheet?: [width, height]}";
-  "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?}";
-  "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?}";
+  "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?, horizontal?, vertical? (move the profiles along the sketch x / the face's up), rotation?: deg (about the profiles' centre)}";
+  "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?, horizontal?, vertical?, rotation?: deg}";
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
   "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";

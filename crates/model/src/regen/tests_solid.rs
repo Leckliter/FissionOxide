@@ -275,6 +275,9 @@ fn emboss_and_deboss_on_a_cylinder() {
       depth: "2 mm".into(),
       deboss: false,
       wrap: true,
+      horizontal: "0".into(),
+      vertical: "0".into(),
+      rotation: "0".into(),
     })
     .unwrap();
   let m = regenerate(&mut d);

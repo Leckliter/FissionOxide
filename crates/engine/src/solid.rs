@@ -7,7 +7,9 @@ use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
-use crate::commands::{add_feature, face_ref, ids, operation, plane_ref, profile_points, req_expr, sketch_for_feature};
+use crate::commands::{
+  add_feature, face_ref, ids, operation, opt_expr, plane_ref, profile_points, req_expr, sketch_for_feature,
+};
 use crate::{CmdError, CmdResult, Session};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -27,6 +29,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           depth: req_expr(p, "depth")?,
           deboss: name == "deboss" || flag("deboss"),
           wrap: flag("wrap"),
+          horizontal: opt_expr(p, "horizontal").unwrap_or_else(|| "0".into()),
+          vertical: opt_expr(p, "vertical").unwrap_or_else(|| "0".into()),
+          rotation: opt_expr(p, "rotation").unwrap_or_else(|| "0".into()),
         },
       )
     })(),

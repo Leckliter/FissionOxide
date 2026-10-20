@@ -85,3 +85,8 @@
 403-bodies-partial-angle
 404-bodies-symmetric-angle
 405-features-cut-half-turn
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+423-planar-emboss-ring
+424-planar-deboss
+425-planar-emboss-offset-rotated
+426-cylinder-emboss-wrap

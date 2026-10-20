@@ -1126,6 +1126,15 @@ pub enum FeatureKind {
     /// Wrap around a cylindrical face (keeping lengths) instead of projecting.
     #[serde(default)]
     wrap: bool,
+    /// Moves the profiles along the sketch's x axis first (Fusion's horizontal distance).
+    #[serde(default = "zero")]
+    horizontal: String,
+    /// Moves the profiles along the face's vertical: the sketch's y axis as seen from outside.
+    #[serde(default = "zero")]
+    vertical: String,
+    /// Turns the profiles about their centre, counterclockwise seen from outside the face.
+    #[serde(default = "zero")]
+    rotation: String,
   },
   /// Solids from the closed cells that bodies and planes bound.
   BoundaryFill {
@@ -2184,7 +2193,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::ConvertToSheetMetal { .. }
     | FeatureKind::Unfold { .. }
     | FeatureKind::Refold { .. } => {}
-    FeatureKind::Emboss { depth, .. } => f(depth),
+    FeatureKind::Emboss { depth, horizontal, vertical, rotation, .. } => {
+      f(depth);
+      f(horizontal);
+      f(vertical);
+      f(rotation);
+    }
     FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. } => {}
     FeatureKind::SurfaceExtend { distance, .. } => f(distance),
     FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
