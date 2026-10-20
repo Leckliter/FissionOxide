@@ -1,8 +1,11 @@
-//! The undo history by name, for the Undo and Redo drop-downs on the quick-access toolbar: each
-//! step is named from what it changed in the design ("Extrude1", "Edit Sketch1", "Delete Fillet2"),
-//! and several steps can be undone or redone at once.
+//! The undo history by name, for the Undo and Redo drop-downs on the quick-access toolbar. As in
+//! Fusion, a step is named by the command that made it ("Line", "Sketch Dimension", "Fix",
+//! "Change Units", "Extrude"); commands without a name of their own are named from what they
+//! changed in the design ("Delete Fillet2", "Suppress Extrude1"). Several steps can be undone or
+//! redone at once.
 
 use fox_model::Design;
+use serde_json::Value;
 
 use crate::Session;
 
@@ -14,8 +17,8 @@ impl Session {
     (0..stack.len())
       .rev()
       .map(|i| {
-        let after = stack.get(i + 1).unwrap_or(&self.design);
-        step_label(&stack[i], after)
+        let after = stack.get(i + 1).map_or(&self.design, |s| &s.0);
+        stack[i].1.clone().unwrap_or_else(|| step_label(&stack[i].0, after))
       })
       .collect()
   }
@@ -24,8 +27,8 @@ impl Session {
   pub fn redo_history(&self) -> Vec<String> {
     let mut before = &self.design;
     let mut out = Vec::with_capacity(self.redo.len());
-    for d in self.redo.iter().rev() {
-      out.push(step_label(before, d));
+    for (d, name) in self.redo.iter().rev() {
+      out.push(name.clone().unwrap_or_else(|| step_label(before, d)));
       before = d;
     }
     out
@@ -35,8 +38,8 @@ impl Session {
   pub fn undo_steps(&mut self, n: usize) -> usize {
     let mut done = 0;
     while done < n && self.can_undo() {
-      let Some(d) = self.undo.pop() else { break };
-      self.redo.push(std::mem::replace(&mut self.design, d));
+      let Some((d, name)) = self.undo.pop() else { break };
+      self.redo.push((std::mem::replace(&mut self.design, d), name));
       done += 1;
     }
     if done > 0 {
@@ -49,8 +52,8 @@ impl Session {
   pub fn redo_steps(&mut self, n: usize) -> usize {
     let mut done = 0;
     while done < n {
-      let Some(d) = self.redo.pop() else { break };
-      self.undo.push(std::mem::replace(&mut self.design, d));
+      let Some((d, name)) = self.redo.pop() else { break };
+      self.undo.push((std::mem::replace(&mut self.design, d), name));
       done += 1;
     }
     if done > 0 {
@@ -60,16 +63,107 @@ impl Session {
   }
 }
 
+/// The name Fusion gives the undo step a command makes, or `None` to name it from what changed.
+pub fn command_label(name: &str, p: &Value) -> Option<String> {
+  let has = |k: &str| p.get(k).is_some();
+  let ty = p.get("type").and_then(Value::as_str).unwrap_or("");
+  let label = match name {
+    "design.units" if has("unit") => "Change Units",
+    "sketch.line" => "Line",
+    "sketch.rect" if has("center") => "Center Rectangle",
+    "sketch.rect" if has("points") => "3-Point Rectangle",
+    "sketch.rect" => "2-Point Rectangle",
+    "sketch.circle" => match p.get("through").and_then(Value::as_array).map(Vec::len) {
+      Some(3) => "3-Point Circle",
+      Some(_) => "2-Point Circle",
+      None => "Center Diameter Circle",
+    },
+    "sketch.arc" if has("tangent") => "Tangent Arc",
+    "sketch.arc" if has("center") => "Center Point Arc",
+    "sketch.arc" => "3-Point Arc",
+    "sketch.polygon" if has("edge") => "Edge Polygon",
+    "sketch.polygon" if p.get("circumscribed").and_then(Value::as_bool) == Some(true) => "Circumscribed Polygon",
+    "sketch.polygon" => "Inscribed Polygon",
+    "sketch.slot" if has("arc_center") || has("mid") => "Arc Slot",
+    "sketch.slot" if has("center") || p.get("kind").and_then(Value::as_str) == Some("center_point") => {
+      "Center Point Slot"
+    }
+    "sketch.slot" if p.get("kind").and_then(Value::as_str) == Some("overall") => "Overall Slot",
+    "sketch.slot" => "Center to Center Slot",
+    "sketch.point" => "Point",
+    "sketch.constrain" => match ty {
+      "coincident" | "point_on_curve" => "Coincident",
+      "horizontal" | "vertical" => "Horizontal/Vertical",
+      "parallel" => "Parallel",
+      "perpendicular" => "Perpendicular",
+      "collinear" => "Collinear",
+      "equal" => "Equal",
+      "tangent" => "Tangent",
+      "concentric" => "Concentric",
+      "midpoint" => "Midpoint",
+      "symmetric" => "Symmetry",
+      "fix" => "Fix",
+      "curvature" => "Curvature",
+      "polygon" => "Polygon",
+      _ => "Constraint",
+    },
+    "sketch.dimension" => "Sketch Dimension",
+    "sketch.set_dimension" => "Edit Sketch Dimension",
+    "sketch.delete" => "Delete",
+    "sketch.construction" => "Normal/Construction",
+    "sketch.drag" => "Drag",
+    "sketch.transform" => "Move/Copy",
+    "sketch.insert" => "Insert",
+    "sketch.trace" => "Trace Image",
+    "sketch.fillet" => "Fillet",
+    "sketch.chamfer" => "Chamfer",
+    "sketch.spline" => "Fit Point Spline",
+    "sketch.control_spline" => "Control Point Spline",
+    "sketch.ellipse" => "Ellipse",
+    "sketch.elliptical_arc" => "Elliptical Arc",
+    "sketch.text" => "Text",
+    "sketch.text_edit" => "Edit Text",
+    "sketch.text_explode" => "Explode Text",
+    "sketch.conic" => "Conic Curve",
+    "sketch.offset" => "Offset",
+    "sketch.trim" => "Trim",
+    "sketch.extend" => "Extend",
+    "sketch.break" => "Break",
+    "sketch.mirror" => "Mirror",
+    "sketch.pattern_rect" => "Rectangular Pattern",
+    "sketch.pattern_circ" => "Circular Pattern",
+    "sketch.project" => "Project",
+    "sketch.project_to_surface" => "Project To Surface",
+    "sketch.intersection_curve" => "Intersection Curve",
+    "sketch.include" => "Include 3D Geometry",
+    "sketch.spun_profile" => "Spun Profile",
+    "sketch.tangent_circle" => "Tangent Circle",
+    "sketch.blend" => "Blend Curve",
+    "timeline.group" => "Create Group",
+    "timeline.ungroup" => "Ungroup",
+    "timeline.group_add" => "Move to Group",
+    "timeline.group_rename" => "Rename Group",
+    "timeline.group_suppress" => "Suppress Group",
+    "timeline.group_delete" => "Delete Group",
+    _ => return None,
+  };
+  Some(label.to_string())
+}
+
+/// A feature's name without its number: the command that made it ("Extrude1" → "Extrude").
+fn command_of(feature: &str) -> &str {
+  let base = feature.trim_end_matches(|c: char| c.is_ascii_digit());
+  if base.is_empty() { feature } else { base }
+}
+
 /// What a step from `before` to `after` did, as the Undo list names it.
 pub fn step_label(before: &Design, after: &Design) -> String {
   let had = |id| before.features.iter().any(|f| f.id == id);
   let has = |id| after.features.iter().any(|f| f.id == id);
   let added: Vec<&str> = after.features.iter().filter(|f| !had(f.id)).map(|f| f.name.as_str()).collect();
   if let Some(first) = added.first() {
-    return match added.len() {
-      1 => first.to_string(),
-      n => format!("{first} (+{} more)", n - 1),
-    };
+    // named by the command, as in Fusion: "Extrude", not "Extrude3"
+    return command_of(first).to_string();
   }
   if let Some(f) = before.features.iter().find(|f| !has(f.id)) {
     return format!("Delete {}", f.name);
@@ -105,7 +199,9 @@ pub fn step_label(before: &Design, after: &Design) -> String {
       };
     }
   }
-  let parts: [(bool, &str); 8] = [
+  let parts: [(bool, &str); 10] = [
+    (before.units != after.units, "Change Units"),
+    (before.timeline_groups != after.timeline_groups, "Edit Groups"),
     (before.bodies != after.bodies, "Change Body Display"),
     (before.components != after.components, "Edit Components"),
     (before.drawings != after.drawings, "Edit Drawing"),
@@ -159,5 +255,39 @@ mod tests {
     assert_eq!(s.redo_steps(2), 2);
     assert_eq!(s.design, full);
     assert_eq!(s.undo_history(), names);
+  }
+
+  #[test]
+  fn steps_are_named_by_command() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    let line = s.execute("sketch.line", &json!({"points": [[0, 0], [40, 0]]})).unwrap()["curves"][0].clone();
+    s.execute("sketch.dimension", &json!({"type": "distance", "curves": [line], "value": "45"})).unwrap();
+    s.execute("sketch.constrain", &json!({"type": "fix", "curves": [line]})).unwrap();
+    s.execute("sketch.rect", &json!({"corner1": [0, 10], "corner2": [10, 20]})).unwrap();
+    s.execute("design.units", &json!({"unit": "in"})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("extrude", &json!({"distance": 5})).unwrap();
+    assert_eq!(
+      s.undo_history(),
+      ["Extrude", "Change Units", "2-Point Rectangle", "Fix", "Sketch Dimension", "Line", "Sketch"]
+    );
+    // a name travels with its step through undo and redo
+    assert_eq!(s.undo_steps(4), 4);
+    assert_eq!(s.redo_history(), ["Fix", "2-Point Rectangle", "Change Units", "Extrude"]);
+    assert_eq!(s.undo_history(), ["Sketch Dimension", "Line", "Sketch"]);
+    assert_eq!(s.redo_steps(1), 1);
+    assert_eq!(s.undo_history()[0], "Fix");
+  }
+
+  #[test]
+  fn a_transaction_is_named_by_its_first_command() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    s.execute("transaction.begin", &json!({})).unwrap();
+    let line = s.execute("sketch.line", &json!({"points": [[0, 0], [40, 0]]})).unwrap()["curves"][0].clone();
+    s.execute("sketch.dimension", &json!({"type": "distance", "curves": [line], "value": "45"})).unwrap();
+    s.execute("transaction.commit", &json!({})).unwrap();
+    assert_eq!(s.undo_history(), ["Line", "Sketch"]);
   }
 }

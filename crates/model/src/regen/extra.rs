@@ -498,6 +498,9 @@ impl Ctx<'_> {
         self.apply_surface(id, kind)
       }
       FeatureKind::LoftedFlange { .. } | FeatureKind::MiterFlange { .. } => self.apply_sheet2(id, kind),
+      FeatureKind::JoinByBend { .. } | FeatureKind::SheetFillet { .. } | FeatureKind::SheetChamfer { .. } => {
+        self.apply_sheet_modify(id, kind)
+      }
       FeatureKind::JointOrigin { .. }
       | FeatureKind::RigidGroup { .. }
       | FeatureKind::MotionLink { .. }

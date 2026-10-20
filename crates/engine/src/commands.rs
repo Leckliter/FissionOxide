@@ -200,6 +200,12 @@ cmds! {
   "feature.rename" => "Rename a feature", "{feature, name}";
   "feature.move" => "Reorder a feature in the timeline (refused when it would come before what it references)", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
+  "timeline.group" => "Create Group: adjacent timeline features (in no group) collapse into one named group; geometry is unchanged", "{features: [id], name? (default GroupN)}";
+  "timeline.ungroup" => "Ungroup: the group goes, its features stay", "{group}";
+  "timeline.group_rename" => "Rename a timeline group", "{group, name}";
+  "timeline.group_add" => "Move to Group: features next to a group join it", "{group, features: [id]}";
+  "timeline.group_suppress" => "Suppress or unsuppress every feature in a group (no 'suppressed': toggle)", "{group, suppressed?: bool}";
+  "timeline.group_delete" => "Delete a group with its features, as one undo step", "{group}";
   "attribute.set" => "Attach a named value to the design, a body, component, feature or sketch curve/point", "{target?: \"design\" | {body} | {component} | {feature} | {sketch} | {sketch, curve} | {sketch, point}, group, name, value}";
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
@@ -277,6 +283,9 @@ cmds! {
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
   "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
   "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
+  "sheet.join_by_bend" => "Join two separate sheet metal bodies with a bend between an edge picked on a flange of each (flanges are extended or trimmed to meet it)", "{edge1: {body, edge} | {point}, edge2, bend_radius? (default the rule's), position?: tangent|first|second (the bend starts at that edge), relief?: rule|rectangular|round|none}";
+  "sheet.fillet" => "Round edges that run through a sheet metal body's thickness (flange corners); the rounding carries into the flat pattern", "{edges: [{body, edge} | {point}], radius}";
+  "sheet.chamfer" => "Bevel edges that run through a sheet metal body's thickness (flange corners); the bevel carries into the flat pattern", "{edges: [{body, edge} | {point}], chamfer_type?: equal|two_distances, distance, distance2?, flipped?}";
   "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, offset_x?, offset_y?, flip?, name?}";
   "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
   "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
@@ -394,6 +403,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::params::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::groups::run(s, name, p) {
     return r;
   }
   match name {

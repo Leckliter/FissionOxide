@@ -20,6 +20,7 @@ mod features;
 pub mod files;
 mod fillet;
 mod form;
+mod groups;
 pub mod history;
 pub mod hub;
 mod inspect;
@@ -143,8 +144,15 @@ pub struct Session {
   pub design: Design,
   pub model: Model,
   pub(crate) regen: Regenerator,
-  undo: Vec<Design>,
-  redo: Vec<Design>,
+  /// Undo steps: the design before each step, with the step's name from the command that made it
+  /// (`None`: named from what changed, see [`history::step_label`]).
+  undo: Vec<(Design, Option<String>)>,
+  /// Redo steps: the design after each step, with its name.
+  redo: Vec<(Design, Option<String>)>,
+  /// The name the running command gives its undo step, and how deep commands are nested (the
+  /// outermost command names the step).
+  cmd_label: Option<String>,
+  cmd_depth: u32,
   /// Undo depth when the open transaction began: its edits collapse into one undo step.
   txn: Option<usize>,
   /// Where the design was last opened from / saved to.
@@ -189,6 +197,8 @@ impl Session {
       regen: Regenerator::default(),
       undo: Vec::new(),
       redo: Vec::new(),
+      cmd_label: None,
+      cmd_depth: 0,
       txn: None,
       path: None,
       dirty: false,
@@ -222,7 +232,17 @@ impl Session {
   pub fn execute(&mut self, name: &str, params: &Value) -> CmdResult {
     // Last-resort guard: a panic anywhere in a command restores the design and reports an error.
     let before = self.design.clone();
+    // (restored rather than counted down: `new` and `open` replace the whole session)
+    let depth = self.cmd_depth;
+    if depth == 0 {
+      self.cmd_label = history::command_label(name, params);
+    }
+    self.cmd_depth = depth + 1;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| commands::run(self, name, params)));
+    self.cmd_depth = depth;
+    if depth == 0 {
+      self.cmd_label = None;
+    }
     match result {
       Ok(r) => r,
       Err(_) => {
@@ -240,7 +260,8 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
-        self.undo.push(before);
+        self.undo.push((before, self.cmd_label.clone()));
+        self.design.tidy_groups();
         self.trim_undo();
         self.redo.clear();
         self.dirty = true;
@@ -315,7 +336,7 @@ impl Session {
     if self.undo.len() <= start {
       return Ok(false);
     }
-    self.design = self.undo.swap_remove(start);
+    self.design = self.undo.swap_remove(start).0;
     self.undo.truncate(start);
     self.redo.clear();
     self.after_history();
@@ -332,8 +353,8 @@ impl Session {
       return false;
     }
     match self.undo.pop() {
-      Some(d) => {
-        self.redo.push(std::mem::replace(&mut self.design, d));
+      Some((d, name)) => {
+        self.redo.push((std::mem::replace(&mut self.design, d), name));
         self.after_history();
         true
       }
@@ -343,8 +364,8 @@ impl Session {
 
   pub fn redo(&mut self) -> bool {
     match self.redo.pop() {
-      Some(d) => {
-        self.undo.push(std::mem::replace(&mut self.design, d));
+      Some((d, name)) => {
+        self.undo.push((std::mem::replace(&mut self.design, d), name));
         self.after_history();
         true
       }
@@ -423,7 +444,8 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
-        self.undo.push(before);
+        self.undo.push((before, self.cmd_label.clone()));
+        self.design.tidy_groups();
         self.trim_undo();
         self.redo.clear();
         self.dirty = true;
@@ -536,6 +558,8 @@ mod tests_scene;
 mod tests_sheet2;
 #[cfg(test)]
 mod tests_sheet3;
+#[cfg(test)]
+mod tests_sheet4;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
