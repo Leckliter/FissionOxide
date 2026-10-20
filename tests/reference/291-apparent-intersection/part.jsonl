@@ -1,0 +1,10 @@
+# 291-apparent-intersection: added by the parity loop from a Fusion probe
+# apparent-intersection: 40x30 rectangle whose bottom line stops at x=30 and right line starts at y=10; Two Distance sketch chamfer at their apparent intersection (40,0): 15 along the bottom, 20 up the right line, which trims both lines and closes the profile; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[40, 10], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 6], "distance": 15, "distance2": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

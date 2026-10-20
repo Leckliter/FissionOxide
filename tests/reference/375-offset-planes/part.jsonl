@@ -1,0 +1,15 @@
+# 375-offset-planes: added by the parity loop from a Fusion probe
+# 20x10x5 box; construction point where planes offset 6 from YZ, 4 from XZ and 8 from XY meet, at (6,4,8) above the box; plane through it and the y-axis edge (0,0,0)-(0,10,0); body mirrored about the plane and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "yz", "offset": 6}
+{"cmd": "plane.offset", "plane": "xz", "offset": 4}
+{"cmd": "plane.offset", "plane": "xy", "offset": 8}
+{"cmd": "point", "method": "three_planes", "a": {"feature": 3}, "b": {"feature": 4}, "c": {"feature": 5}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 6}, "b": {"at": [0, 0, 0]}, "c": {"at": [0, 10, 0]}}
+{"cmd": "mirror", "plane": {"feature": 7}, "bodies": [2000], "join": true}

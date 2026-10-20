@@ -1,0 +1,7 @@
+# 318-bodies-to-components: added by the parity loop from a Fusion probe
+# bodies-to-components: New Component from bodies. Two root boxes (40x30x10 plate at x 0..40,
+# y 0..30; 10x10x20 block at x 50..60, y 0..10), each made into its own component.
+{"cmd": "box", "width": 40, "depth": 30, "height": 10, "at": [20, 15]}
+{"cmd": "box", "width": 10, "depth": 10, "height": 20, "at": [55, 5]}
+{"cmd": "component.create", "bodies": [1000]}
+{"cmd": "component.create", "bodies": [2000]}

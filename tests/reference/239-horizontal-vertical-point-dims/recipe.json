@@ -1,0 +1,187 @@
+{
+ "id": "horizontal-vertical-point-dims",
+ "name": "horizontal-vertical-point-dims",
+ "description": "Triangle drawn roughly: base on origin, horizontal; aligned length 40 on the base, horizontal 15 and vertical 25 dimensions from the origin corner to the apex; extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_dimension",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.6,
+       -0.5
+      ]
+     },
+     "end": {
+      "at": [
+       38,
+       2
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       38,
+       2
+      ]
+     },
+     "end": {
+      "at": [
+       18,
+       22
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       18,
+       22
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0.6,
+       -0.5
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 40,
+     "unit": "mm"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l2.end"
+     ],
+     "value": 15,
+     "unit": "mm",
+     "orientation": "horizontal",
+     "text_at": [
+      8,
+      30
+     ]
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l2.end"
+     ],
+     "value": 25,
+     "unit": "mm",
+     "orientation": "vertical",
+     "text_at": [
+      -6,
+      12
+     ]
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

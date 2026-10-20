@@ -1,0 +1,208 @@
+{
+ "id": "origin-plane-through-vertex",
+ "name": "origin-plane-through-vertex",
+ "description": "L-prism (40x30 L, arms 10 thick, 20 tall); plane perpendicular to the XY origin plane through the bottom inner-corner vertex (15,10,0), V direction (the plane y=10); prism split by it.",
+ "exercises": [
+  "extrude",
+  "construction_plane perpendicular",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       40,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       15,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       15,
+       10
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       15,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l5",
+     "start": {
+      "at": [
+       15,
+       30
+      ],
+      "ref": "l4.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l6",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "l5.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "L"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "Perp",
+   "method": "perpendicular",
+   "base": "XY",
+   "reference": {
+    "vertex": [
+     15,
+     10,
+     0
+    ]
+   },
+   "u_direction": false
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "L",
+   "tool": "Perp",
+   "extend_tool": true,
+   "result_bodies": [
+    "L",
+    "L (1)"
+   ]
+  }
+ ]
+}

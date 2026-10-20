@@ -1,0 +1,235 @@
+{
+ "id": "edges-extended-intersection",
+ "name": "edges-extended-intersection",
+ "description": "L-shaped prism 5 high (20x4 foot, 8x6 upright); construction point through the top edge y=4 (x 8..20) and the top edge x=0 (y 0..10), which don't touch but extended meet at (0,4,5); plane through it and the vertical edge at (20,0); mirrored and joined.",
+ "exercises": [
+  "extrude",
+  "construction_point two_edges",
+  "construction_plane three_points",
+  "mirror (join)"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       4
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       4
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       8,
+       4
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       8,
+       4
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       8,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l5",
+     "start": {
+      "at": [
+       8,
+       10
+      ],
+      "ref": "l4.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l6",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "l5.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_point",
+   "name": "Point1",
+   "method": "two_edges",
+   "a": {
+    "point": [
+     14,
+     4,
+     5
+    ]
+   },
+   "b": {
+    "point": [
+     0,
+     7,
+     5
+    ]
+   }
+  },
+  {
+   "op": "construction_plane",
+   "name": "Plane1",
+   "method": "three_points",
+   "a": {
+    "ref": "Point1"
+   },
+   "b": {
+    "vertex": [
+     20,
+     0,
+     0
+    ]
+   },
+   "c": {
+    "vertex": [
+     20,
+     0,
+     5
+    ]
+   }
+  },
+  {
+   "op": "mirror",
+   "name": "Mirror1",
+   "mirror_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "plane": "Plane1",
+   "combine": true
+  }
+ ]
+}

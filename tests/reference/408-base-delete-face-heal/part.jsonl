@@ -1,0 +1,19 @@
+# 408-base-delete-face-heal: added by the parity loop from a Fusion probe
+# base-delete-face-heal: 40x30x20 box with a 10x10x5 top pocket, built in a base feature; the pocket's 5 faces deleted (direct edit) to heal the block
+{"cmd": "base.start"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 2, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 20.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[15, 10], [25, 10]]}
+{"cmd": "sketch.line", "points": [[25, 10], [25, 20]]}
+{"cmd": "sketch.line", "points": [[25, 20], [15, 20]]}
+{"cmd": "sketch.line", "points": [[15, 20], [15, 10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 4, "distance": 5, "flip": true, "operation": "cut"}
+{"cmd": "direct.delete_face", "faces": [{"point": [20.0, 15.0, 15.0]}, {"point": [15.0, 15.0, 17.5]}, {"point": [25.0, 15.0, 17.5]}, {"point": [20.0, 10.0, 17.5]}, {"point": [20.0, 20.0, 17.5]}]}
+{"cmd": "base.finish"}

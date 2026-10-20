@@ -1,0 +1,209 @@
+{
+ "id": "sphere-center-split",
+ "name": "sphere-center-split",
+ "description": "R10 sphere centred at (0,0,20) (half disc on XZ revolved about Z); point at the sphere face's centre; plane through it and (25,0,0), (0,25,0); sphere split by the plane (halves).",
+ "exercises": [
+  "construction_point center",
+  "construction_plane three_points",
+  "split_body"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Profile",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       -30
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       0,
+       -30
+      ]
+     },
+     "mid": [
+      10,
+      -20
+     ],
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       -10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Revolve1",
+   "operation": "new",
+   "profile": {
+    "sketch": "Profile",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "l1",
+       "a1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "ref": "world Z axis",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   },
+   "angle": 360,
+   "result_bodies": [
+    "Ball"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Pts",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "point",
+     "id": "pA",
+     "at": [
+      25,
+      0
+     ]
+    },
+    {
+     "type": "point",
+     "id": "pB",
+     "at": [
+      0,
+      25
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_point",
+   "name": "C",
+   "method": "center",
+   "face": {
+    "point": [
+     0,
+     10,
+     20
+    ],
+    "type": "Sphere"
+   }
+  },
+  {
+   "op": "construction_plane",
+   "name": "P3",
+   "method": "three_points",
+   "a": {
+    "ref": "C"
+   },
+   "b": {
+    "sketch": "Pts",
+    "point": "pA"
+   },
+   "c": {
+    "sketch": "Pts",
+    "point": "pB"
+   }
+  },
+  {
+   "op": "split_body",
+   "name": "Split1",
+   "body": "Ball",
+   "tool": "P3",
+   "extend_tool": true,
+   "result_bodies": [
+    "Ball",
+    "Ball (1)"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+# 436-closed-ring-four-circles: added by the parity loop from a Fusion probe
+# closed-ring-four-circles: Closed loft through four d10 circles on XZ/YZ centred 20 mm from Z at 0/90/180/270 deg: a ring about Z.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [20, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]}}
+{"cmd": "sketch.circle", "center": [20, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [-20, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]}}
+{"cmd": "sketch.circle", "center": [-20, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "loft", "sections": [1, 2, 3, 4], "closed": true, "operation": "new_body"}

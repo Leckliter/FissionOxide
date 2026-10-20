@@ -1,6 +1,7 @@
 //! `settings.ini` in [`crate::config_dir`]. The Windows installer writes the `[Updates]` choice
 //! the user made in its wizard; the app reads it and writes it back when changed in Help →
-//! Check for Updates. Unknown sections and keys are kept as they are.
+//! Check for Updates. Other parts of the app keep their own sections ([`Settings::section`],
+//! [`Settings::set_section`]). Unknown sections and keys are kept as they are.
 
 use std::path::{Path, PathBuf};
 
@@ -147,6 +148,70 @@ impl Settings {
     text
   }
 
+  /// The `key=value` lines of section `name` (any case), in file order. Comments and blank lines
+  /// are left out; keys and values are trimmed.
+  pub fn section(&self, name: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in &self.lines {
+      let t = line.trim();
+      if let Some(n) = t.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+        inside = n.trim().eq_ignore_ascii_case(name);
+      } else if inside
+        && !t.starts_with([';', '#'])
+        && let Some((k, v)) = t.split_once('=')
+      {
+        out.push((k.trim().to_string(), v.trim().to_string()));
+      }
+    }
+    out
+  }
+
+  /// Replaces section `name` with `entries` (adding it at the end when missing). Not for
+  /// `[Updates]`, whose keys are this struct's fields.
+  pub fn set_section(&mut self, name: &str, entries: &[(String, String)]) {
+    debug_assert!(!name.eq_ignore_ascii_case(SECTION));
+    let mut out: Vec<String> = Vec::new();
+    // in the section (its lines are replaced), or in a second copy of it (dropped)
+    let (mut inside, mut skip, mut done) = (false, false, false);
+    let body = |out: &mut Vec<String>| {
+      while out.last().is_some_and(|l| l.trim().is_empty()) {
+        out.pop();
+      }
+      out.extend(entries.iter().map(|(k, v)| format!("{k}={v}")));
+    };
+    for line in &self.lines {
+      let t = line.trim();
+      if let Some(n) = t.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+        if inside {
+          body(&mut out);
+          // one blank line before the next section
+          out.push(String::new());
+        }
+        let ours = n.trim().eq_ignore_ascii_case(name);
+        (inside, skip) = (ours && !done, ours && done);
+        done |= ours;
+        if skip {
+          continue;
+        }
+      } else if inside || skip {
+        continue;
+      }
+      out.push(line.clone());
+    }
+    if inside {
+      body(&mut out);
+    }
+    if !done {
+      if out.last().is_some_and(|l| !l.trim().is_empty()) {
+        out.push(String::new());
+      }
+      out.push(format!("[{name}]"));
+      body(&mut out);
+    }
+    self.lines = out;
+  }
+
   pub fn save(&self) -> std::io::Result<()> {
     self.save_to(&Self::path())
   }
@@ -194,5 +259,27 @@ mod tests {
     s.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path).update_mode, UpdateMode::Off);
     std::fs::remove_dir_all(dir).unwrap();
+  }
+
+  #[test]
+  fn other_sections_round_trip() {
+    let kv = |k: &str, v: &str| (k.to_string(), v.to_string());
+    let mut s = Settings::parse("[Updates]\nMode=off\n\n[Keys]\n; mine\nExtrude=E\n\n[Window]\nMaximized=1\n");
+    assert_eq!(s.section("keys"), vec![kv("Extrude", "E")]);
+    assert!(s.section("Toolbar").is_empty());
+    s.set_section("Keys", &[kv("design.Extrude", "Shift+E"), kv("sketch.Line", "")]);
+    s.set_section("Toolbar", &[kv("Pinned", "a|b")]);
+    let text = s.to_text();
+    assert_eq!(
+      text,
+      "[Updates]\nMode=off\nLastCheck=0\nSkip=\n\n[Keys]\ndesign.Extrude=Shift+E\nsketch.Line=\n\n[Window]\nMaximized=1\n\n[Toolbar]\nPinned=a|b\n"
+    );
+    let back = Settings::parse(&text);
+    assert_eq!(back.section("Keys"), vec![kv("design.Extrude", "Shift+E"), kv("sketch.Line", "")]);
+    assert_eq!(back.update_mode, UpdateMode::Off);
+    // emptied, and a duplicate section dropped
+    let mut s = Settings::parse("[Keys]\na=1\n[Keys]\nb=2\n");
+    s.set_section("Keys", &[]);
+    assert_eq!(s.to_text(), "[Keys]\n\n[Updates]\nMode=auto\nLastCheck=0\nSkip=\n");
   }
 }

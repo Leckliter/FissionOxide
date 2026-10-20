@@ -1,0 +1,208 @@
+{
+ "id": "centerline-arc",
+ "name": "centerline-arc",
+ "description": "Loft from a d20 circle (z=0) to a d10 circle (z=40), both centred on Z, along a centre-line arc on XZ through (8,0,20).",
+ "exercises": [
+  "loft",
+  "centerline"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Bottom",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 10,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_plane",
+   "name": "Plane40",
+   "method": "offset",
+   "base": "XY",
+   "offset": 40
+  },
+  {
+   "op": "sketch",
+   "name": "Top",
+   "plane": {
+    "ref": "construction plane Plane40",
+    "origin": [
+     0,
+     0,
+     40
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 5,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "sketch",
+   "name": "Center",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "mid": {
+      "at": [
+       8,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       -40
+      ]
+     },
+     "id": "a1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "loft",
+   "name": "Loft1",
+   "operation": "new",
+   "sections": [
+    {
+     "sketch": "Bottom",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    },
+    {
+     "sketch": "Top",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "solid": true,
+   "result_bodies": [
+    "Loft"
+   ],
+   "centerline": {
+    "sketch": "Center",
+    "curves": [
+     "a1"
+    ]
+   }
+  }
+ ]
+}

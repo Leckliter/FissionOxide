@@ -1,0 +1,14 @@
+# 241-point-line-distance-slanted: added by the parity loop from a Fusion probe
+# point-line-distance-slanted: Triangle O-B-A: base OB horizontal 40 from the origin, side OA length 30, and the distance from B to the slanted line OA dimensioned 20 (so angle O = 30 deg, A = (25.98, 15)); extruded 8.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0.5, -0.5], [40, 1]]}
+{"cmd": "sketch.line", "points": [[40, 1], [22, 18]]}
+{"cmd": "sketch.line", "points": [[22, 18], [0.5, -0.5]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "distance", "points": [4, 1], "value": 30}
+{"cmd": "sketch.dimension", "type": "point_line", "points": [2], "curves": [6], "value": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
