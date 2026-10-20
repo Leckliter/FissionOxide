@@ -8,6 +8,7 @@
 mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
+mod clipboard;
 mod config_ui;
 mod customize;
 mod cut_ui;
@@ -194,6 +195,8 @@ pub struct App {
   pub(crate) help: help::Help,
   /// A command started: the app bar's menus close at the end of the frame, as in Fusion.
   close_menus: bool,
+  /// What Ctrl+C copied, for Ctrl+V.
+  pub(crate) clipboard: Option<clipboard::Clip>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -374,6 +377,7 @@ impl App {
       canvas_ui: canvas_ui::CanvasUi::default(),
       help: help::Help::default(),
       close_menus: false,
+      clipboard: None,
     }
   }
 
@@ -850,8 +854,44 @@ impl App {
       self.command_keys(ctx, false);
       return;
     }
-    if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
+    if self.tool == Tool::Spline && pressed(Key::Enter, Modifiers::NONE) {
       viewport::finish_spline(self);
+    }
+    // Ctrl+C, Ctrl+V and Ctrl+Shift+V (Paste New); the window delivers them as Copy and Paste
+    // events rather than keys
+    let (copy, paste) = ctx.input_mut(|i| {
+      let (mut copy, mut paste) = (false, false);
+      i.events.retain(|e| match e {
+        egui::Event::Copy => {
+          copy = true;
+          false
+        }
+        egui::Event::Paste(_) => {
+          paste = true;
+          false
+        }
+        _ => true,
+      });
+      (copy, paste.then_some(i.modifiers.shift))
+    });
+    let paste = paste
+      .or_else(|| pressed(Key::V, Modifiers::COMMAND | Modifiers::SHIFT).then_some(true))
+      .or_else(|| pressed(Key::V, Modifiers::COMMAND).then_some(false));
+    if copy || pressed(Key::C, Modifiers::COMMAND) {
+      clipboard::copy(self, ctx);
+    }
+    if let Some(new) = paste {
+      clipboard::paste(self, new);
+      return;
+    }
+    // Space (with Preferences → General → Spacebar repeats last command, on by default) and
+    // Enter repeat the last command when none is running, as the marking menu's Repeat does
+    if self.idle()
+      && ((self.preferences.values.space_repeats && pressed(Key::Space, Modifiers::NONE))
+        || pressed(Key::Enter, Modifiers::NONE))
+    {
+      self.repeat_last();
+      return;
     }
     // Del is Delete's key in the map; Backspace always deletes too
     if pressed(Key::Backspace, Modifiers::NONE) {
@@ -983,6 +1023,27 @@ impl App {
     self.tool = t;
     self.drag = None;
     viewport::reset_tool_state(self);
+  }
+
+  /// No command, tool, dialog or pop-up is running: Space and Enter can repeat the last command.
+  fn idle(&self) -> bool {
+    self.dialog.is_none()
+      && self.tool == Tool::Select
+      && self.tstate.is_empty()
+      && self.marking.is_none()
+      && self.toolbox.is_none()
+      && self.dim_edit.is_none()
+      && self.rename.is_none()
+      && self.nav_mode.is_none()
+      && self.drawing.is_none()
+  }
+
+  /// Runs the last repeatable command again, as the marking menu's Repeat does (Space, Enter).
+  pub(crate) fn repeat_last(&mut self) {
+    match self.last_cmd {
+      Some(c) => self.launch(c),
+      None => self.hint("Repeat: no command to repeat yet"),
+    }
   }
 
   /// Remembers a command the user started, for the marking menu's Repeat and the S toolbox's
@@ -1696,6 +1757,72 @@ mod tests {
     assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Fillet));
     assert_eq!(app.last_cmd, Some(panels::Cmd::Dialog(dialogs::Kind::Fillet)));
     assert_eq!(app.recent[..2], [panels::Cmd::Dialog(dialogs::Kind::Fillet), panels::Cmd::NewSketch]);
+  }
+
+  #[test]
+  fn space_and_enter_repeat_the_last_command() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    let fillet = Some(dialogs::Kind::Fillet);
+    // nothing to repeat yet
+    press(&mut app, &ctx, egui::Key::Space, mid);
+    assert!(app.dialog.is_none());
+    press(&mut app, &ctx, egui::Key::F, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), fillet);
+    // while the command runs Space doesn't start it again
+    press(&mut app, &ctx, egui::Key::Space, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), fillet);
+    app.cancel_dialog();
+    assert!(app.preferences.values.space_repeats, "on by default, as in Fusion");
+    press(&mut app, &ctx, egui::Key::Space, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), fillet, "Space repeats Fillet");
+    app.cancel_dialog();
+    press(&mut app, &ctx, egui::Key::Enter, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), fillet, "so does Enter");
+    app.cancel_dialog();
+    // Preferences → General → Spacebar repeats last command off: Space does nothing
+    app.preferences.values.space_repeats = false;
+    press(&mut app, &ctx, egui::Key::Space, mid);
+    assert!(app.dialog.is_none());
+    // a sketch tool running isn't idle either
+    app.preferences.values.space_repeats = true;
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    app.set_tool(Tool::Line);
+    press(&mut app, &ctx, egui::Key::Space, mid);
+    assert!(app.dialog.is_none() && app.tool == Tool::Line);
+  }
+
+  #[test]
+  fn ctrl_c_and_ctrl_v_paste_a_placed_copy() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let body = app.s.model.bodies[0].id;
+    app.s.selection = vec![Sel::Body { body }];
+    let frame = |app: &mut App, mut events: Vec<egui::Event>, modifiers: egui::Modifiers| {
+      events.insert(0, egui::Event::ModifiersChanged(modifiers));
+      let input = egui::RawInput { events, ..Default::default() };
+      ctx.run_ui(input, |ui| app.shortcuts(ui.ctx())).drop_without_applying_deltas();
+    };
+    // as the window delivers them: Copy and Paste events
+    frame(&mut app, vec![egui::Event::Copy], egui::Modifiers::COMMAND);
+    assert!(app.clipboard.is_some());
+    frame(&mut app, vec![egui::Event::Paste("FissionOxide: Body1".into())], egui::Modifiers::COMMAND);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Move));
+    assert_eq!(app.s.model.bodies.len(), 2);
+    app.cancel_dialog();
+    assert_eq!(app.s.model.bodies.len(), 1);
+    // and as keys
+    let key = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+    let ctrl_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+    frame(&mut app, vec![key(egui::Key::V, ctrl_shift)], ctrl_shift);
+    assert!(matches!(app.dialog.as_ref().and_then(|d| d.paste()), Some(dialogs::Paste::Copy)));
+    app.cancel_dialog();
+    frame(&mut app, vec![key(egui::Key::V, egui::Modifiers::COMMAND)], egui::Modifiers::COMMAND);
+    assert_eq!(app.s.model.bodies.len(), 2);
+    app.cancel_dialog();
+    // a paste isn't Repeat's command
+    assert_ne!(app.last_cmd, Some(panels::Cmd::Dialog(dialogs::Kind::Move)));
   }
 
   #[test]

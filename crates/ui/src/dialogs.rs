@@ -18,6 +18,7 @@ mod hole_pattern;
 mod live;
 mod manip;
 mod move_copy;
+pub(crate) use move_copy::Paste;
 mod solid;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
@@ -1958,8 +1959,8 @@ impl Dialog {
           Some(id) => ctx.read_response(id).is_some_and(|r| r.layer_id == dialog_layer),
         };
     let mut cancel = false;
-    let title =
-      if self.editing.is_some() { format!("EDIT {}", self.kind.title()) } else { self.kind.title().to_string() };
+    let base = self.move_title().filter(|_| self.kind == Kind::Move).unwrap_or(self.kind.title());
+    let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
     let width = 300.0;
     egui::Area::new(egui::Id::new("feature-dialog"))
       .default_pos(app.canvas.right_top() + egui::vec2(-34.0, 190.0))
@@ -2041,6 +2042,9 @@ impl Dialog {
             app.s.selection = ink.iter().map(|i| Sel::Profile { sketch, index: *i as usize }).collect();
             app.status = Some((format!("Traced {} shapes, selected: Extrude (E) makes them solid", ink.len()), false));
           }
+        }
+        if self.kind == Kind::Move {
+          self.finish_paste(app);
         }
         if self.kind == Kind::NewDrawing {
           app.drawing = app.s.design.drawings.last().map(|d| d.id);
