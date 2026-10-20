@@ -1,0 +1,9 @@
+# 86-square-section: added by the parity loop from a Fusion probe
+# square-section: 6 mm square-section solid pipe along the same path.
+# sketch Path: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, -30]]}
+{"cmd": "sketch.arc", "start": [0, -30], "mid": [5.857864376, -44.142135624], "end": [20, -50]}
+{"cmd": "sketch.line", "points": [[20, -50], [50, -50]]}
+{"cmd": "sketch.finish"}
+{"cmd": "pipe", "path": 1, "path_curves": [2, 6, 8], "diameter": 6, "section": "square", "operation": "new_body"}

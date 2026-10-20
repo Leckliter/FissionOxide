@@ -6,7 +6,7 @@ use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
 use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
-use crate::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
+use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
@@ -126,29 +126,42 @@ impl Ctx<'_> {
         self.operate(id, coil, *operation)?;
         Ok(None)
       }
-      FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation } => {
+      FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation, section, distance } => {
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
-        let segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
+        let mut segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
+        if !distance.trim().is_empty() {
+          let f = self.factor(distance)?;
+          if !(f > 0.0 && f <= 1.0) {
+            return Err("the distance is a fraction of the path, above 0 and at most 1".into());
+          }
+          let total: f64 = segs.iter().map(seg_length).sum();
+          segs = path_head(&segs, total * f);
+        }
         let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
         let first = segs.first().ok_or("the path is empty")?;
         let (start, tangent) = seg_start(first);
         let (start, tangent) = (ps.plane.to_world(start), ps.plane.x * tangent[0] + ps.plane.y * tangent[1]);
-        let r = self.len(diameter)? / 2.0;
-        if r <= 0.0 {
-          return Err("the diameter must be positive".into());
+        let size = self.len(diameter)?;
+        if size <= 0.0 {
+          return Err("the size must be positive".into());
         }
-        let sec = Plane::from_normal(start, tangent, ps.plane.normal()).map_err(ke)?;
-        let mut holes = Vec::new();
-        if !wall.trim().is_empty() {
-          let w = self.len(wall)?;
-          if w <= 0.0 || w >= r {
-            return Err("the wall must be thinner than the radius".into());
-          }
-          holes.push(Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: r - w, ccw: false }] });
-        }
-        let outer = Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: r, ccw: true }] };
+        let n = ps.plane.normal();
+        let t = tangent.try_normalize().ok_or("the path has no direction at its start")?;
+        let sec = if *section == PipeSection::Circular {
+          // the frame older files were built with: x (so the circle's seam) along the sketch
+          // normal. Changing it would move the seam edge and side face of every saved round pipe.
+          Plane::from_normal(start, t, n).map_err(ke)?
+        } else {
+          // the section's x runs across the path in the sketch plane, its y along the sketch normal
+          Plane { origin: start, x: n.cross(t), y: n }
+        };
+        let w = if wall.trim().is_empty() { None } else { Some(self.len(wall)?) };
+        let (outer, holes) = pipe_section(*section, size, w)?;
         let face = Shape::face(&sec, &Profile { outer, holes }).map_err(ke)?;
-        self.operate(id, face.sweep(&path).map_err(ke)?, *operation)?;
+        let pipe = face.sweep(&path).map_err(ke)?;
+        // a flat side's straight runs make one face, as in Fusion
+        let pipe = if *section == PipeSection::Circular { pipe } else { pipe.unified().map_err(ke)? };
+        self.operate(id, pipe, *operation)?;
         Ok(None)
       }
       FeatureKind::Rib { sketch, curves, thickness, depth, flip, web } => {
@@ -267,7 +280,7 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Thicken { faces, bodies, thickness, symmetric, flip, operation } => {
+      FeatureKind::Thicken { faces, bodies, thickness, symmetric, flip, operation, round } => {
         let t = self.len(thickness)? * if *flip { -1.0 } else { 1.0 };
         let mut skins = Vec::new();
         for (bi, fids) in self.faces_by_body(faces)? {
@@ -284,33 +297,23 @@ impl Ctx<'_> {
         if skins.is_empty() {
           return Err("select faces or surface bodies to thicken".into());
         }
-        // each face is thickened on its own and the slabs are joined: offsetting a whole shell
-        // at once goes wrong where its faces meet at an angle
-        let mut faces = Vec::new();
+        let mut tools = Vec::new();
         for skin in skins {
           let n = skin.faces().map_err(ke)?.len() as u32;
           if n <= 1 {
-            faces.push(skin);
-          } else {
-            for f in 1..=n {
-              faces.push(skin.face_shape(f).map_err(ke)?);
-            }
+            tools.extend(thicken_face(&skin, t, *symmetric)?);
+            continue;
           }
-        }
-        let mut tools = Vec::new();
-        for face in faces {
-          if *symmetric {
-            // one slab from the surface offset back by half: two half slabs would leave every
-            // side wall in two pieces
-            match face.offset_surface(-t / 2.0).and_then(|back| back.thicken(t)) {
-              Ok(slab) => tools.push(slab),
-              Err(_) => {
-                tools.push(face.thicken(t / 2.0).map_err(ke)?);
-                tools.push(face.thicken(-t / 2.0).map_err(ke)?);
-              }
-            }
-          } else {
-            tools.push(face.thicken(t).map_err(ke)?);
+          // a surface of several faces is offset as one, so the corners where its faces meet at
+          // an angle close up (sharp or rounded) as Fusion's do
+          if let Some(slab) = thicken_joined(&skin, t, *symmetric, *round) {
+            tools.push(slab);
+            continue;
+          }
+          // failing that each face is thickened on its own and the slabs are joined, which
+          // leaves a notch at convex corners
+          for f in 1..=n {
+            tools.extend(thicken_face(&skin.face_shape(f).map_err(ke)?, t, *symmetric)?);
           }
         }
         // thickened surface bodies replace the surfaces
@@ -812,6 +815,138 @@ fn trim(v: f64) -> String {
   fox_expr::trim_number((v * 1000.0).round() / 1000.0)
 }
 
+/// The outer loop and hole of a pipe section of this size, centred on the origin (see
+/// [`PipeSection`]); `wall` makes it hollow by an inward offset.
+fn pipe_section(section: PipeSection, size: f64, wall: Option<f64>) -> Result<(Loop, Vec<Loop>), String> {
+  let poly = |pts: &[[f64; 2]]| -> Loop {
+    Loop { segs: (0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect() }
+  };
+  // the inradius: a wall this thick leaves no hole
+  let inner = match section {
+    PipeSection::Circular | PipeSection::Square => size / 2.0,
+    PipeSection::Triangular => size / 3.0,
+  };
+  // the loop with inradius `r`, counter-clockwise or (for a hole) clockwise
+  let shape = |r: f64, ccw: bool| -> Loop {
+    let l = match section {
+      PipeSection::Circular => Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: r, ccw: true }] },
+      PipeSection::Square => poly(&[[-r, -r], [r, -r], [r, r], [-r, r]]),
+      PipeSection::Triangular => {
+        // base along x at y = -size/2, apex at y = size/2: the centroid is size/6 below the path
+        let c = -size / 6.0;
+        let half = r * 3f64.sqrt();
+        poly(&[[-half, c - r], [half, c - r], [0.0, c + 2.0 * r]])
+      }
+    };
+    if ccw { l } else { l.reversed() }
+  };
+  let mut holes = Vec::new();
+  if let Some(w) = wall {
+    if w <= 0.0 || w >= inner {
+      return Err("the wall must be thinner than half the section".into());
+    }
+    holes.push(shape(inner - w, false));
+  }
+  Ok((shape(inner, true), holes))
+}
+
+/// A point along a path segment at `u` (0 = start, 1 = end).
+fn seg_point(s: &Seg, u: f64) -> [f64; 2] {
+  match *s {
+    Seg::Line { a, b } => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u],
+    Seg::Arc { center, radius, start_angle, sweep } => {
+      let a = start_angle + sweep * u;
+      [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+    }
+    Seg::Circle { center, radius, ccw } => {
+      let a = if ccw { u } else { -u } * std::f64::consts::TAU;
+      [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+    }
+    Seg::Bezier { p } => fox_sketch::bezier_at(&p, u),
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      let a = major[0].hypot(major[1]).max(1e-300);
+      let v = [-major[1] / a * minor, major[0] / a * minor];
+      let (sn, c) = (start + sweep * u).sin_cos();
+      [center[0] + major[0] * c + v[0] * sn, center[1] + major[1] * c + v[1] * sn]
+    }
+  }
+}
+
+/// Parameter steps for measuring segments that have no closed-form length.
+const LENGTH_STEPS: usize = 512;
+
+/// Cumulative chord lengths at `LENGTH_STEPS` even parameter steps.
+fn seg_lengths(s: &Seg) -> Vec<f64> {
+  let mut out = vec![0.0];
+  let mut prev = seg_point(s, 0.0);
+  for i in 1..=LENGTH_STEPS {
+    let q = seg_point(s, i as f64 / LENGTH_STEPS as f64);
+    out.push(out[i - 1] + (q[0] - prev[0]).hypot(q[1] - prev[1]));
+    prev = q;
+  }
+  out
+}
+
+fn seg_length(s: &Seg) -> f64 {
+  match *s {
+    Seg::Line { a, b } => (b[0] - a[0]).hypot(b[1] - a[1]),
+    Seg::Arc { radius, sweep, .. } => radius * sweep.abs(),
+    Seg::Circle { radius, .. } => radius * std::f64::consts::TAU,
+    _ => seg_lengths(s).last().copied().unwrap_or(0.0),
+  }
+}
+
+/// The first `len` of a segment.
+fn seg_head(s: &Seg, len: f64) -> Seg {
+  let u = match *s {
+    Seg::Line { .. } | Seg::Arc { .. } | Seg::Circle { .. } => len / seg_length(s).max(1e-300),
+    _ => {
+      let l = seg_lengths(s);
+      let i = l.partition_point(|x| *x < len).clamp(1, LENGTH_STEPS);
+      let f = (len - l[i - 1]) / (l[i] - l[i - 1]).max(1e-300);
+      (i as f64 - 1.0 + f) / LENGTH_STEPS as f64
+    }
+  }
+  .clamp(0.0, 1.0);
+  match *s {
+    Seg::Line { a, .. } => Seg::Line { a, b: seg_point(s, u) },
+    Seg::Arc { center, radius, start_angle, sweep } => Seg::Arc { center, radius, start_angle, sweep: sweep * u },
+    Seg::Circle { center, radius, ccw } => {
+      let sweep = if ccw { u } else { -u } * std::f64::consts::TAU;
+      Seg::Arc { center, radius, start_angle: 0.0, sweep }
+    }
+    Seg::Bezier { p } => {
+      // de Casteljau: the control points of the piece up to `u`
+      let lerp = |a: [f64; 2], b: [f64; 2]| [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+      let (p01, p12, p23) = (lerp(p[0], p[1]), lerp(p[1], p[2]), lerp(p[2], p[3]));
+      let (p012, p123) = (lerp(p01, p12), lerp(p12, p23));
+      Seg::Bezier { p: [p[0], p01, p012, lerp(p012, p123)] }
+    }
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      Seg::EllipseArc { center, major, minor, start, sweep: sweep * u }
+    }
+  }
+}
+
+/// The first `len` of a chained path.
+fn path_head(segs: &[Seg], len: f64) -> Vec<Seg> {
+  let mut out = Vec::new();
+  let mut left = len;
+  for s in segs {
+    let l = seg_length(s);
+    if left >= l - 1e-9 {
+      out.push(*s);
+      left -= l;
+      continue;
+    }
+    if left > 1e-9 {
+      out.push(seg_head(s, left));
+    }
+    break;
+  }
+  out
+}
+
 /// Start point and direction (sketch coordinates) of a path segment.
 fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
   match s {
@@ -886,4 +1021,35 @@ fn helix_points(start: DVec3, dir: DVec3, x: DVec3, r: f64, pitch: f64, length: 
       start + dir * (length * s) + (x * a.cos() + y * a.sin()) * r
     })
     .collect()
+}
+
+/// One face thickened by `t` (`symmetric`: `t` on each side).
+fn thicken_face(face: &Shape, t: f64, symmetric: bool) -> Result<Vec<Shape>, String> {
+  if !symmetric {
+    return Ok(vec![face.thicken(t).map_err(ke)?]);
+  }
+  // one slab from the surface offset back: two slabs would leave every side wall in two pieces
+  match face.offset_surface(-t).and_then(|back| back.thicken(2.0 * t)) {
+    Ok(slab) => Ok(vec![slab]),
+    Err(_) => Ok(vec![face.thicken(t).map_err(ke)?, face.thicken(-t).map_err(ke)?]),
+  }
+}
+
+/// A shell of several faces thickened by `t` (`symmetric`: on each side) as one solid, the
+/// corners where its faces meet sharp or `round`; `None` when OCCT can't do it.
+fn thicken_joined(skin: &Shape, t: f64, symmetric: bool, round: bool) -> Option<Shape> {
+  if !symmetric {
+    return skin.thicken_joined(t, round).ok();
+  }
+  if !round {
+    // offset back by t, then thickened by 2t through the surface: one slab whose side walls are
+    // single faces
+    if let Ok(slab) = skin.offset_joined(-t, false).and_then(|back| back.thicken_joined(2.0 * t, false)) {
+      return Some(slab);
+    }
+  }
+  // rounded corners are arcs about the surface's own edges, so each side is thickened apart
+  let a = skin.thicken_joined(t, round).ok()?;
+  let b = skin.thicken_joined(-t, round).ok()?;
+  a.boolean(&b, BoolOp::Union).ok()
 }

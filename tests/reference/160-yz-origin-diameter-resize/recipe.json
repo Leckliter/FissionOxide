@@ -1,0 +1,103 @@
+{
+ "id": "yz-origin-diameter-resize",
+ "name": "Center-diameter circle: origin-centred, resized by its diameter",
+ "description": "Circle on YZ with its centre on the sketch origin, drawn at diameter 12 then driven to diameter 30 by its diameter dimension; extruded 12 along +X.",
+ "exercises": [
+  "circle",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "YZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     0,
+     0,
+     1
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 6,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": [
+    {
+     "type": "diameter",
+     "refs": [
+      "c1"
+     ],
+     "value": 30,
+     "unit": "mm"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "E",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 12,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "B"
+   ]
+  }
+ ]
+}

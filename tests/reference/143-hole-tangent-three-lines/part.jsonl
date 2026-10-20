@@ -1,0 +1,24 @@
+# 143-hole-tangent-three-lines: added by the parity loop from a Fusion probe
+# hole-tangent-three-lines: Fixed 60x40 plate outline; fixed construction lines x=10, x=30, y=10. A hole circle drawn at (22,24) R8 is made tangent to all three, so it becomes R10 at (20,20): area 2400-100pi, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0], [60, 40], [0, 40]], "closed": true}
+{"cmd": "sketch.line", "points": [[10, 5], [10, 35]]}
+{"cmd": "sketch.line", "points": [[30, 5], [30, 35]]}
+{"cmd": "sketch.line", "points": [[5, 10], [55, 10]]}
+{"cmd": "sketch.construction", "curves": [14, 18, 22], "on": true}
+{"cmd": "sketch.circle", "center": [22, 24], "radius": 8}
+{"cmd": "sketch.constrain", "type": "fix", "points": [0]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [4]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [7]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [12]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [13]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [16]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [17]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [20]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [21]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [25, 14]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [25, 18]}
+{"cmd": "sketch.constrain", "type": "tangent", "curves": [25, 22]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[5, 5]], "distance": 10, "operation": "new_body"}

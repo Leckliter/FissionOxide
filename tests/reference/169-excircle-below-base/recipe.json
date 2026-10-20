@@ -1,0 +1,140 @@
+{
+ "id": "excircle-below-base",
+ "name": "3-Tangent Circle: excircle below the base, hint near its centre",
+ "description": "Closed construction triangle (0,0)-(40,0)-(0,30); hint (40,-50) below the base, so the circle is the excircle R30 at (30,-30) touching the base from below and the extensions of the other two sides; the disc is extruded 3.",
+ "exercises": [
+  "sketch",
+  "circle_three_tangent",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "la",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "la.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "lb",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "lb.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "la.start"
+     },
+     "id": "lc",
+     "construction": true
+    },
+    {
+     "type": "circle_three_tangent",
+     "tangents": [
+      "la",
+      "lb",
+      "lc"
+     ],
+     "near": {
+      "at": [
+       40,
+       -50
+      ]
+     },
+     "id": "c"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 3,
+    "direction": "positive"
+   }
+  }
+ ]
+}

@@ -190,6 +190,11 @@ pub enum ConstraintKind {
     x: f64,
     y: f64,
   },
+  /// Locks a circle's radius: fixing a circle fixes its centre and adds this.
+  FixRadius {
+    curve: CurveId,
+    radius: f64,
+  },
   Horizontal {
     line: CurveId,
   },
@@ -235,6 +240,8 @@ pub enum ConstraintKind {
     p: PointId,
     curve: CurveId,
   },
+  /// `p` at the midpoint of `line`: a line, or an arc (the middle of its counter-clockwise
+  /// sweep).
   Midpoint {
     p: PointId,
     line: CurveId,
@@ -331,7 +338,7 @@ impl ConstraintKind {
   pub fn name(&self) -> &'static str {
     match self {
       ConstraintKind::Coincident { .. } => "Coincident",
-      ConstraintKind::Fix { .. } => "Fix",
+      ConstraintKind::Fix { .. } | ConstraintKind::FixRadius { .. } => "Fix",
       ConstraintKind::Horizontal { .. } | ConstraintKind::HorizontalPoints { .. } => "Horizontal",
       ConstraintKind::Vertical { .. } | ConstraintKind::VerticalPoints { .. } => "Vertical",
       ConstraintKind::Parallel { .. } => "Parallel",
@@ -386,6 +393,7 @@ impl ConstraintKind {
       | ConstraintKind::Angle { a, b, .. } => vec![*a, *b],
       ConstraintKind::SymmetricCurves { a, b, line } => vec![*a, *b, *line],
       ConstraintKind::PointOnCurve { curve, .. }
+      | ConstraintKind::FixRadius { curve, .. }
       | ConstraintKind::Radius { curve, .. }
       | ConstraintKind::Diameter { curve, .. } => vec![*curve],
       ConstraintKind::Midpoint { line, .. }
@@ -508,6 +516,28 @@ impl Sketch {
     let id = ConstraintId(self.alloc());
     self.constraints.push(Constraint { id, kind });
     Ok(id)
+  }
+
+  /// Locks a curve's size and location (Fusion's Fix on a curve): every point that defines it
+  /// gets a `Fix` and a circle's radius a `FixRadius`. Points already fixed are skipped. Returns
+  /// the constraints added; deleting them unfixes the curve.
+  pub fn fix_curve(&mut self, curve: CurveId) -> Result<Vec<ConstraintId>, SketchError> {
+    let kind = self.curve(curve).ok_or(SketchError::NoCurve(curve))?.kind.clone();
+    let mut added = Vec::new();
+    for p in curve_points(&kind) {
+      let Some(pt) = self.point(p).copied() else { continue };
+      let pinned =
+        pt.fixed || self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Fix { p: q, .. } if q == p));
+      if !pinned {
+        added.push(self.add_constraint(ConstraintKind::Fix { p, x: pt.x, y: pt.y })?);
+      }
+    }
+    if let CurveKind::Circle { radius, .. } = kind
+      && !self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::FixRadius { curve: q, .. } if q == curve))
+    {
+      added.push(self.add_constraint(ConstraintKind::FixRadius { curve, radius })?);
+    }
+    Ok(added)
   }
 
   pub fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), SketchError> {
@@ -808,7 +838,11 @@ impl Sketch {
       ConstraintKind::Perpendicular { a, b } => line(*a, "Perpendicular").and(line(*b, "Perpendicular")),
       ConstraintKind::Collinear { a, b } => line(*a, "Collinear").and(line(*b, "Collinear")),
       ConstraintKind::Angle { a, b, .. } => line(*a, "Angle").and(line(*b, "Angle")),
-      ConstraintKind::Midpoint { line: l, .. } => line(*l, "Midpoint"),
+      ConstraintKind::Midpoint { line: l, .. } => match self.curve(*l).map(|c| &c.kind) {
+        Some(CurveKind::Line { .. } | CurveKind::Arc { .. }) => Ok(()),
+        Some(_) => Err(SketchError::WrongGeometry("Midpoint", "a line or an arc")),
+        None => Err(SketchError::NoCurve(*l)),
+      },
       ConstraintKind::Symmetric { line: l, .. } => line(*l, "Symmetric"),
       ConstraintKind::SymmetricCurves { a, b, line: l } => {
         line(*l, "Symmetric")?;
@@ -827,6 +861,14 @@ impl Sketch {
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
       ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
+      ConstraintKind::FixRadius { curve, radius } => {
+        round(*curve, "Fix")?;
+        if radius.is_finite() && *radius > 0.0 {
+          Ok(())
+        } else {
+          Err(SketchError::InvalidValue(format!("radius {radius}")))
+        }
+      }
       ConstraintKind::Diameter { curve, .. } => round(*curve, "Diameter"),
       ConstraintKind::Equal { a, b } => {
         any(*a)?;

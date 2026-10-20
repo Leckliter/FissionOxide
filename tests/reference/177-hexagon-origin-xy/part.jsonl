@@ -1,0 +1,7 @@
+# 177-hexagon-origin-xy: added by the parity loop from a Fusion probe
+# hexagon-origin-xy: Circumscribed hexagon centred on the origin with an edge midpoint at (10,0): apothem 10, flat sides at x=+-10, corners at y=+-11.547; extruded 10.
+# sketch S: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "center": [0, 0], "vertex": [10, 0], "sides": 6, "circumscribed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
