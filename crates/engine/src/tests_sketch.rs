@@ -201,3 +201,24 @@ fn centre_arc_sweeps_clockwise() {
   let v = volume(&s);
   assert!((v - 3.0 * quarter).abs() < 1e-3 * quarter, "{v} vs {}", 3.0 * quarter);
 }
+
+#[test]
+fn fixing_a_circle_locks_it_and_deleting_the_fix_frees_it() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c1 = ids(&run(&mut s, "sketch.circle", json!({"center": [15, 15], "radius": 10}))["curves"])[0];
+  let c2 = ids(&run(&mut s, "sketch.circle", json!({"center": [45, 15], "radius": 6}))["curves"])[0];
+  let fix = run(&mut s, "sketch.constrain", json!({"type": "fix", "curves": [c1]}));
+  // the centre and the radius
+  let fixes = ids(&fix["constraints"]);
+  assert_eq!(fixes.len(), 2, "{fix}");
+  run(&mut s, "sketch.constrain", json!({"type": "equal", "curves": [c1, c2]}));
+  let sk = s.edit_sketch.unwrap();
+  let radius = |s: &Session, c: u64| s.model.sketches[&sk].sketch.radius(fox_sketch::CurveId(c as u32)).unwrap();
+  assert!((radius(&s, c1) - 10.0).abs() < 1e-9);
+  assert!((radius(&s, c2) - 10.0).abs() < 1e-9);
+  // unfixed, a radius dimension on the second circle drives both
+  run(&mut s, "sketch.delete", json!({"constraints": fixes}));
+  run(&mut s, "sketch.dimension", json!({"type": "radius", "curves": [c2], "value": 4}));
+  assert!((radius(&s, c1) - 4.0).abs() < 1e-9);
+}

@@ -1,0 +1,9 @@
+# 189-quintic-six-points: added by the parity loop from a Fusion probe
+# quintic-six-points: Degree 5 control point spline: control points (0,0)-(8,20)-(18,2)-(28,22)-(40,4)-(50,12) (one quintic Bezier span) closed by lines down to y=-10; extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.control_spline", "points": [[0, 0], [8, 20], [18, 2], [28, 22], [40, 4], [50, 12]], "degree": 5}
+{"cmd": "sketch.line", "points": [[50, 12], [50, -10]]}
+{"cmd": "sketch.line", "points": [[50, -10], [0, -10]]}
+{"cmd": "sketch.line", "points": [[0, -10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

@@ -1517,7 +1517,7 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Tangent { .. } => Icon::Tangent,
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
     _ => Icon::Fix,
   }

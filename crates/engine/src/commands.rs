@@ -88,7 +88,7 @@ cmds! {
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]} (symmetric: points [a, b] + curves [axis], or curves [a, b, axis] for two lines or circles/arcs; fix takes a point or curves; delete its constraints to unfix)";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -136,13 +136,13 @@ cmds! {
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
-  "pipe" => "Round tube along a path sketch (solid, or hollow with a wall)", "{path: sketch, path_curves?, diameter, wall?, operation?}";
+  "pipe" => "Tube along a path sketch: round, square or triangular, solid or hollow with a wall, along all or the first fraction of the path", "{path: sketch, path_curves?, diameter | size, section?: circular|square|triangular, wall?, distance?: 0..1, operation?}";
   "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "web" => "Web from sketch lines: thick in the sketch plane, grown along its normal to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";
   "scale" => "Scale bodies about a point, uniformly or per axis", "{bodies?|component?, center?: [x,y,z], factor | factors: [x,y,z]}";
   "split_face" => "Split faces along a plane (the body stays one piece)", "{faces, tool: plane}";
   "remove_faces" => "Remove faces and heal the body (fillets, holes, bosses)", "{faces}";
-  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?, flip?, operation?}";
+  "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?: thickness on each side, flip?, operation?, corners?: \"sharp\"|\"round\"}";
   "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
   "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
   "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
@@ -2467,8 +2467,20 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
   let t = req_str(p, "type")?.to_string();
   let pts: Vec<PointId> = ids(p, "points").into_iter().map(PointId).collect();
   let cs: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
-  let id = s.edit(move |d| {
+  let ids = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
+    // fixing curves locks every point that defines them (and a circle's radius)
+    if t == "fix" && pts.is_empty() && !cs.is_empty() {
+      let mut added = Vec::new();
+      for c in &cs {
+        added.extend(sketch.fix_curve(*c)?);
+      }
+      let r = sketch.solve();
+      if !r.ok() {
+        return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
+      }
+      return Ok(added);
+    }
     let need_p = |n: usize| -> Result<(), CmdError> {
       if pts.len() >= n { Ok(()) } else { Err(CmdError::new(format!("'{t}' needs {n} point(s)"))) }
     };
@@ -2517,6 +2529,10 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
         need_c(1)?;
         ConstraintKind::PointOnCurve { p: pts[0], curve: cs[0] }
       }
+      // two lines or two circles/arcs, then the axis
+      "symmetric" if pts.is_empty() && cs.len() >= 3 => {
+        ConstraintKind::SymmetricCurves { a: cs[0], b: cs[1], line: cs[2] }
+      }
       "symmetric" => {
         need_p(2)?;
         need_c(1)?;
@@ -2533,9 +2549,14 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
     if !r.ok() {
       return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
     }
-    Ok(id)
+    Ok(vec![id])
   })?;
-  Ok(json!({"constraint": id.0, "dof": s.model.sketches.get(&sk).map(|r| r.report.dof)}))
+  // fixing a curve adds several constraints; "constraint" is the first
+  Ok(json!({
+    "constraint": ids.first().map(|c| c.0),
+    "constraints": ids.iter().map(|c| c.0).collect::<Vec<_>>(),
+    "dof": s.model.sketches.get(&sk).map(|r| r.report.dof),
+  }))
 }
 
 fn dimension(s: &mut Session, p: &Value) -> CmdResult {

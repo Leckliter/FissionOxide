@@ -1,0 +1,100 @@
+{
+ "id": "offset-center-lower-left-corner-xz",
+ "name": "Offset center rectangle on XZ, corner below-left of the centre",
+ "description": "Center rectangle on XZ (sketch y = -world Z) with centre (30,20) and corner (15,12) below-left of it: a 30x16 rectangle spanning x 15..45, sketch y 12..28, extruded 8 mm along +Y.",
+ "exercises": [
+  "sketch_rectangle_center_point",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'origin' is the sketch frame origin point (shared).",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     0.0,
+     -1.0
+    ],
+    "normal": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "rectangle_center_point",
+     "id": "r1",
+     "center": {
+      "at": [
+       30,
+       20
+      ]
+     },
+     "corner": {
+      "at": [
+       15,
+       12
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Extrude1_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1.l0",
+        "r1.l1",
+        "r1.l2",
+        "r1.l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body1"
+   ]
+  }
+ ]
+}

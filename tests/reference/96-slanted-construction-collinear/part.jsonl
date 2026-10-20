@@ -1,0 +1,16 @@
+# 96-slanted-construction-collinear: added by the parity loop from a Fusion probe
+# slanted-construction-collinear: quad top edge made collinear with a fixed slanted construction line.
+# Fox ids: c=3 (pts 1,2), l1=5 (0->4, auto H), l2=8 (4->7, auto V), l3=11 (7->10), l4=12 (10->0, auto V)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 10], [50, 30]]}
+{"cmd": "sketch.construction", "curves": [3], "on": true}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 22]]}
+{"cmd": "sketch.line", "points": [[40, 22], [0, 14]]}
+{"cmd": "sketch.line", "points": [[0, 14], [0, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "collinear", "curves": [11, 3]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 4], "value": 40}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

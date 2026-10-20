@@ -1,0 +1,7 @@
+# 135-diagonal-disc: added by the parity loop from a Fusion probe
+# diagonal-disc: 2-point circle on XY through (10,5) and (40,25) (a diagonal diameter: centre (25,15), r=sqrt(1300)/2), extruded 8.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "through": [[10, 5], [40, 25]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

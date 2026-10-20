@@ -1,0 +1,166 @@
+{
+ "id": "xz-convex-concave-arcs",
+ "name": "3-Point Arc: xz-convex-concave-arcs",
+ "description": "On XZ (sketch y = -Z): lines (0,0)-(40,0)-(40,20), an off-centre 3-point arc bulging out from (40,20) through (25,30) to (0,20), and a concave 3-point arc back from (0,20) through (6,10) to (0,0); extruded 8 along +Y.",
+ "exercises": [
+  "sketch",
+  "arc_three_point",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       20
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       40,
+       20
+      ],
+      "ref": "l2.end"
+     },
+     "mid": {
+      "at": [
+       25,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     },
+     "id": "a1"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "at": [
+       0,
+       20
+      ],
+      "ref": "a1.end"
+     },
+     "mid": {
+      "at": [
+       6,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "a2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "a1",
+        "a2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

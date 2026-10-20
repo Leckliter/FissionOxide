@@ -1,0 +1,10 @@
+# 109-equal-circles: added by the parity loop from a Fusion probe
+# equal-circles: Circle R10 at the origin and a circle drawn R6 with its centre fixed at (30,0), made equal to the first; both extruded 5 as two R10 cylinders.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.circle", "center": [30, 0], "radius": 6}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [3, 1]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [1], "value": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body", "profiles": [[0, 0], [30, 0]]}

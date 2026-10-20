@@ -1,0 +1,18 @@
+# 100-coincident-point-on-circle: added by the parity loop from a Fusion probe
+# coincident-point-on-circle: Right triangle from the origin: horizontal leg 18, vertical leg whose top is coincident onto a construction circle d60 centred on the origin, so the apex solves to (18,24); extruded 10.
+# hand-edited
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [1, -1], "radius": 28}
+{"cmd": "sketch.construction", "curves": [2]}
+{"cmd": "sketch.line", "points": [[0.5, 0.5], [17, 1]]}
+{"cmd": "sketch.line", "points": [[17, 1], [19, 20]]}
+{"cmd": "sketch.line", "points": [[19, 20], [0.5, 0.5]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [3, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [5]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [7]}
+{"cmd": "sketch.constrain", "type": "point_on_curve", "points": [6], "curves": [2]}
+{"cmd": "sketch.dimension", "type": "diameter", "curves": [2], "value": 60}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [3, 4], "value": 18}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
