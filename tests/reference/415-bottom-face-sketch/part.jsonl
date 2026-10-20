@@ -1,0 +1,11 @@
+# 415-bottom-face-sketch: added by the parity loop from a Fusion probe
+# bottom-face-sketch: 40x30x10 box; sketch on its bottom face (Fusion frame: x=-X, y=+Y, origin at the world origin); circle r4 at sketch (-30,10) = world (30,10,0), extruded 5 along the face normal (-Z) as a new body.
+# hand-written: the sketch is placed by picking the plane/face (Fox's own sketch frame), sketch coords as in the recipe
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 30]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"point": [20, 15, 0], "normal": [0, 0, -1]}}
+{"cmd": "sketch.circle", "center": [-30, 10], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "operation": "new_body"}
