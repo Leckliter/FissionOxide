@@ -1,0 +1,7 @@
+# 94-external-modeled-partial-left: added by the parity loop from a Fusion probe
+# external-modeled-partial-left: d12 x 30 rod on XY; modeled ISO M12x1.75 6g external left-hand thread, 10 long, offset 5 from the low (z=0) end.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "thread", "faces": [{"point": [6.0, 0.0, 15.0]}], "designation": "M12x1.75", "class": "6g", "length": 10, "offset": 5, "modeled": true, "left": true}

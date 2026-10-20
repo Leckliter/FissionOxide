@@ -441,7 +441,7 @@ const OPS: &[(&str, &str)] = &[("new_body", "New body"), ("join", "Join"), ("cut
 pub static THREAD: Form = Form {
   title: "THREAD",
   name: "Thread",
-  hint: "Thread cylindrical faces (ISO metric coarse unless you give a pitch)",
+  hint: "Thread cylindrical faces (an ISO metric size resizes the face; ISO coarse unless you give a pitch)",
   icon: Icon::Thread,
   cmd: "thread",
   fixed: &[],
@@ -453,6 +453,8 @@ pub static THREAD: Form = Form {
     Input::Expr { key: "offset", label: "Offset", default: "0 mm" },
     Input::Check { key: "left", label: "Left-handed" },
     Input::Check { key: "flip", label: "Start from the other end" },
+    Input::Text { key: "designation", label: "Size (M10x1.5; empty = as drawn)", default: "" },
+    Input::Text { key: "class", label: "Class (empty = 6g / 6H)", default: "" },
   ],
   picks_model: true,
 };

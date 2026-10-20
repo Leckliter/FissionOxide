@@ -198,6 +198,10 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // merging the strips a helical cut leaves on a cylinder (cpp/threads.cpp)
+    include!("fox-kernel/cpp/threads.hxx");
+    fn merge_cylinder_strips(s: &Shape) -> Result<UniquePtr<Shape>>;
   }
 }
 

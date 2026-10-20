@@ -1,0 +1,7 @@
+# 92-external-modeled-full: added by the parity loop from a Fusion probe
+# external-modeled-full: d10 x 20 rod on XY; modeled ISO M10x1.5 6g external thread on the cylindrical face, full length, right hand.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "thread", "faces": [{"point": [5.0, 0.0, 10.0]}], "designation": "M10x1.5", "class": "6g", "modeled": true}

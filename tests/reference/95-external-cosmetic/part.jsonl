@@ -1,0 +1,7 @@
+# 95-external-cosmetic: added by the parity loop from a Fusion probe
+# external-cosmetic: d8 x 16 rod on XY; cosmetic ISO M8x1.25 6g external thread, full length (no change to the solid).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 16, "operation": "new_body"}
+{"cmd": "thread", "faces": [{"point": [4.0, 0.0, 8.0]}], "designation": "M8x1.25", "class": "6g"}

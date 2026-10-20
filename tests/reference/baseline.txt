@@ -82,3 +82,7 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+92-external-modeled-full
+93-internal-modeled-full
+94-external-modeled-partial-left
+95-external-cosmetic

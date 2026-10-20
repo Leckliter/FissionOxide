@@ -402,3 +402,43 @@ fn ruled_offset_and_trim_surfaces() {
   let b = s.model.bodies.iter().find(|b| b.id.0 == id).unwrap();
   assert!((b.shape.mass().unwrap().area - 100.0).abs() < 1e-6, "{}", b.shape.mass().unwrap().area);
 }
+
+#[test]
+fn threads_iso_size_and_class() {
+  use std::f64::consts::PI;
+  // cosmetic M8x1.25 6g: the rod is sized to the class-mean major diameter, 7.866
+  let mut s = Session::default();
+  rod(&mut s, 4.0, 16.0);
+  run(&mut s, "thread", json!({"faces": [{"point": [4, 0, 8]}], "designation": "M8x1.25"}));
+  let want = PI * 3.933f64.powi(2) * 16.0;
+  assert!((volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s));
+  assert_eq!(s.model.threads.len(), 1);
+  // modeled M10x1.5 6g, 10 long from 5 above the low end: one crest face, flanks, root and the
+  // two ends of the groove, square to the axis
+  let mut s = Session::default();
+  rod(&mut s, 5.0, 30.0);
+  let t = run(
+    &mut s,
+    "thread",
+    json!({"faces": [{"point": [5, 0, 15]}], "designation": "M10x1.5", "modeled": true, "length": 10, "offset": 5}),
+  );
+  assert!(s.model.errors().is_empty(), "{:?} {t}", s.model.errors());
+  let b = &s.model.bodies[0];
+  assert_eq!(b.faces().len(), 8);
+  let m = b.shape.mass().unwrap();
+  assert!((m.center_of_mass.z - 15.0).abs() > 0.05 && m.center_of_mass.z > 15.0, "groove low: {m:?}");
+  assert!((m.bbox_max.x - 4.925).abs() < 1e-4, "{m:?}");
+  assert!(m.center_of_mass.truncate().length() < 0.05, "{m:?}");
+  // an internal thread sizes the bore to the class-mean minor diameter (8.526 for 6H)
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 10}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 4.25}));
+  run(&mut s, "extrude", json!({"distance": 15, "profiles": [[7, 0]]}));
+  run(&mut s, "thread", json!({"faces": [{"point": [4.25, 0, 7.5]}], "designation": "M10x1.5", "class": "6H"}));
+  let want = PI * (100.0 - 4.263f64.powi(2)) * 15.0;
+  assert!((volume(&s) - want).abs() < 1e-4 * want, "{} vs {want}", volume(&s));
+  let f = s.design.features.last().unwrap().id.0;
+  let _ = s.execute("feature.edit", &json!({"feature": f, "set": {"class": "6x"}}));
+  assert!(!s.model.errors().is_empty(), "a bad class is an error");
+}

@@ -1,0 +1,8 @@
+# 93-internal-modeled-full: added by the parity loop from a Fusion probe
+# internal-modeled-full: d20 tube with d8.5 bore, 15 long on XY; modeled ISO M10x1.5 6H internal thread on the bore, full length.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 4.25}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[7, 0]], "distance": 15, "operation": "new_body"}
+{"cmd": "thread", "faces": [{"point": [4.25, 0.0, 7.5]}], "designation": "M10x1.5", "class": "6H", "modeled": true}

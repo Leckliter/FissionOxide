@@ -47,3 +47,7 @@
 80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
+92-external-modeled-full
+93-internal-modeled-full
+94-external-modeled-partial-left
+95-external-cosmetic

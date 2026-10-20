@@ -1,6 +1,7 @@
 // C++ side of the FissionOxide kernel bridge. See kernel.hxx.
 #include "fox-kernel/cpp/kernel.hxx"
 #include "fox-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/threads.hxx"
 
 #include <cmath>
 #include <deque>
@@ -701,7 +702,15 @@ MassProps mass_props(const Shape &s) {
   FOX_TRY
   MassProps out{};
   GProp_GProps vol;
-  BRepGProp::VolumeProperties(s.s, vol);
+  gp_Ax1 axis;
+  if (wrapping_axis(s.s, axis)) {
+    // A cylinder face running on past its seam (a thread's crest) integrates poorly over its long
+    // u range; against a plane across its axis it adds nothing (its normals lie in the plane).
+    BRepGProp::VolumePropertiesGK(s.s, vol, gp_Pln(axis.Location(), axis.Direction()), 1e-9, Standard_False,
+                                  Standard_True, Standard_True);
+  } else {
+    BRepGProp::VolumeProperties(s.s, vol);
+  }
   out.volume = vol.Mass();
   out.cog = arr(vol.CentreOfMass().XYZ());
   GProp_GProps surf;

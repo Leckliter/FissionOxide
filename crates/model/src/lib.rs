@@ -27,6 +27,7 @@ pub mod sheet2;
 pub mod sheet3;
 pub mod subassembly;
 pub mod surface;
+pub mod thread;
 
 use serde::{Deserialize, Serialize};
 
@@ -928,6 +929,14 @@ pub enum FeatureKind {
     /// Start from the face's other end.
     #[serde(default)]
     flip: bool,
+    /// ISO metric size (`M10x1.5`, or `M10` for the coarse pitch). The face is resized to the
+    /// class-mean diameter (major outside, minor inside) and its pitch overrides `pitch`. Empty =
+    /// the drawn diameter is the basic size, kept as it is.
+    #[serde(default)]
+    designation: String,
+    /// Tolerance class (`6g` outside, `6H` inside when empty).
+    #[serde(default)]
+    class: String,
   },
   /// A helical coil around an axis normal to a plane, centred at a plane point.
   Coil {

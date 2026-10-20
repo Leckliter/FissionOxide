@@ -134,7 +134,7 @@ cmds! {
   "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
   "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
-  "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
+  "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); an ISO metric designation (M10x1.5) resizes the face to its class-mean diameter; without one, pitch defaults to ISO coarse; length and offset run from the face's low end (high_end or flip: the other end)", "{faces, designation?, class?: 6g|6H|.., pitch?, length?, offset?, modeled?, left? | right_handed?, flip? | location?: low_end|high_end}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
   "pipe" => "Round tube along a path sketch (solid, or hollow with a wall)", "{path: sketch, path_curves?, diameter, wall?, operation?}";
   "rib" => "Rib from sketch lines: thick across the sketch plane, grown to the body (or a depth)", "{sketch?, curves?, thickness, depth?, flip?}";

@@ -130,7 +130,14 @@ impl FaceRef {
         if align.abs() < 0.999 {
           continue;
         }
-        (p - f.center).length()
+        // coaxial cylinders (a tube's bore and outside) share a centroid: their surfaces differ
+        let v = p - f.origin;
+        let off = match f.kind {
+          SurfaceKind::Cylinder => ((v - f.normal * v.dot(f.normal)).length() - f.radius).abs(),
+          SurfaceKind::Sphere => (v.length() - f.radius).abs(),
+          _ => 0.0,
+        };
+        (p - f.center).length() + off
       };
       if best.is_none_or(|(_, s)| score < s) {
         best = Some((f.id, score));
