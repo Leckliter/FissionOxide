@@ -407,6 +407,11 @@ pub enum AxisRef {
   SketchLine {
     curve: CurveId,
   },
+  /// A line in a given sketch, for features outside it (e.g. a plane at an angle).
+  SketchCurve {
+    sketch: FeatureId,
+    curve: CurveId,
+  },
   /// A straight edge of a body.
   Edge {
     edge: EdgeRef,
@@ -1603,7 +1608,7 @@ impl FeatureKind {
       _ => vec![],
     };
     let axis_dep = |a: &AxisRef| match a {
-      AxisRef::Construction { feature } => vec![*feature],
+      AxisRef::Construction { feature } | AxisRef::SketchCurve { sketch: feature, .. } => vec![*feature],
       _ => vec![],
     };
     match self {
@@ -1633,9 +1638,7 @@ impl FeatureKind {
       FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
       FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
         let mut v = vec![*sketch];
-        if let AxisRef::Construction { feature } = axis {
-          v.push(*feature);
-        }
+        v.extend(axis_dep(axis));
         v
       }
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),

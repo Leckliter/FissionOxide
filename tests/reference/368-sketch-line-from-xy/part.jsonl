@@ -10,5 +10,5 @@
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.line", "points": [[10, 0], [40, 30]]}
 {"cmd": "sketch.finish"}
-{"cmd": "plane", "method": "angle", "axis": {"line": 0}, "plane": "xy", "angle": "60 deg"}
+{"cmd": "plane", "method": "angle", "axis": {"sketch": 3, "curve": 3}, "plane": "xy", "angle": "60 deg"}
 {"cmd": "split", "plane": {"feature": 4}, "bodies": [2000]}

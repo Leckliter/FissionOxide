@@ -1888,6 +1888,16 @@ pub(crate) fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
       o => return Err(CmdError::new(format!("unknown axis '{o}'"))),
     });
   }
+  if let Some(sk) = v.get("sketch").and_then(Value::as_u64) {
+    let sketch = FeatureId(u32::try_from(sk).map_err(|_| CmdError::new("bad sketch id"))?);
+    let c = v.get("curve").or_else(|| v.get("line")).and_then(Value::as_u64).ok_or(CmdError::new("missing 'curve'"))?;
+    let curve = CurveId(u32::try_from(c).map_err(|_| CmdError::new("bad curve"))?);
+    let line = s.design.sketch(sketch)?.curve(curve).ok_or(CmdError::new("that sketch has no such curve"))?;
+    if !matches!(line.kind, CurveKind::Line { .. }) {
+      return Err(CmdError::new("the axis curve is not a line"));
+    }
+    return Ok(AxisRef::SketchCurve { sketch, curve });
+  }
   if let Some(c) = v.get("line").and_then(Value::as_u64) {
     return Ok(AxisRef::SketchLine { curve: CurveId(u32::try_from(c).map_err(|_| CmdError::new("bad curve"))?) });
   }

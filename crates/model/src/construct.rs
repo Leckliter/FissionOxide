@@ -155,7 +155,7 @@ fn plane_dep(p: &PlaneRef) -> Option<FeatureId> {
 
 fn axis_dep(a: &AxisRef) -> Option<FeatureId> {
   match a {
-    AxisRef::Construction { feature } => Some(*feature),
+    AxisRef::Construction { feature } | AxisRef::SketchCurve { sketch: feature, .. } => Some(*feature),
     _ => None,
   }
 }
