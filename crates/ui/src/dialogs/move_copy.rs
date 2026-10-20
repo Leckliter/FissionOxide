@@ -841,17 +841,18 @@ mod tests {
     d.sync_move(&s);
     d.refresh_manip(&s);
     let t = d.triad(&s).unwrap();
-    // in the sketch's plane: XZ (normal -Y), the line's middle at (25, 0, 0)
+    // in the sketch's plane: XZ in Fusion's frame (sketch y = -Z, normal +Y), the line's middle at
+    // (25, 0, 0)
     assert!(close(t.origin, DVec3::new(25.0, 0.0, 0.0)) && t.arrows == [true, true, false] && t.rings[2]);
-    // dragging up the plane's Y (world Z) moves the line up 4 in the sketch
+    // dragging up world Z moves the line 4 down the sketch's Y (-Z)
     d.set_triad(&s, TriadEdit::Move(DVec3::new(25.0, 0.0, 4.0)));
-    assert_eq!(&d.translate[..2], ["0 mm", "4 mm"]);
+    assert_eq!(&d.translate[..2], ["0 mm", "-4 mm"]);
     apply(&mut s, &mut d);
     let pts = |s: &Session| {
       let sketch = s.design.sketch(FeatureId(sk)).unwrap();
       sketch.curve_points(fox_engine::sketch::CurveId(line)).iter().map(|p| sketch.pos(*p).unwrap()).collect::<Vec<_>>()
     };
-    assert_eq!(pts(&s), vec![[20.0, 4.0], [30.0, 4.0]]);
+    assert_eq!(pts(&s), vec![[20.0, -4.0], [30.0, -4.0]]);
     d.mv.copy = true;
     d.dirty = true;
     apply(&mut s, &mut d);
