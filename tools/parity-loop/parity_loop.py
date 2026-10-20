@@ -80,6 +80,17 @@ def cargo_env(slot):
 
 # ---- budget ------------------------------------------------------------------------------------
 
+def tests_passed(p):
+  """Whether a cargo test run passed. On Windows, fox-kernel's test binary (on main too) crashes
+  with STATUS_ACCESS_VIOLATION while exiting, after every test has passed; that's not a failure of
+  the branch, so a run counts by its test results when the only problem is that exit crash."""
+  if p.returncode == 0:
+    return True
+  out = p.stdout + p.stderr
+  return ("STATUS_ACCESS_VIOLATION" in out and "test result: ok" in out and "test result: FAILED" not in out
+          and "could not compile" not in out and "panicked" not in out)
+
+
 def touched_packages(wt, base):
   """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
   crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
@@ -424,7 +435,7 @@ class Loop:
       test = await asyncio.to_thread(sh, cmd, wt, False, env, 7200)
       with open(self.log("fix", key), "a", encoding="utf-8") as f:
         f.write(f"\n---- driver: {label} (exit {test.returncode}) ----\n" + (test.stdout + test.stderr)[-3000:])
-      if test.returncode:
+      if not tests_passed(test):
         failed = label
         break
     baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
