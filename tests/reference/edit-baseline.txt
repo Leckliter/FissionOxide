@@ -47,3 +47,4 @@
 80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
+205-vertical-edge-sweep-path

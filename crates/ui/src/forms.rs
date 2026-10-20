@@ -1784,3 +1784,14 @@ pub static CAM_CONTOUR3D: Form = Form {
   ],
   picks_model: false,
 };
+
+pub static SK_INCLUDE: Form = Form {
+  title: "INCLUDE 3D GEOMETRY",
+  name: "Include 3D Geometry",
+  hint: "Bring edges into the sketch at their real 3D positions (sweep paths, rails); they follow the model",
+  icon: Icon::Include3D,
+  cmd: "sketch.include",
+  fixed: &[],
+  inputs: &[Input::Edges { key: "edges", label: "Edges" }],
+  picks_model: true,
+};

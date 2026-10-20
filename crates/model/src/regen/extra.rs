@@ -128,11 +128,19 @@ impl Ctx<'_> {
       }
       FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation } => {
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
-        let segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
-        let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
-        let first = segs.first().ok_or("the path is empty")?;
-        let (start, tangent) = seg_start(first);
-        let (start, tangent) = (ps.plane.to_world(start), ps.plane.x * tangent[0] + ps.plane.y * tangent[1]);
+        let (path, start, tangent) = match crate::include::path_segs(&ps, path_curves)? {
+          Some(segs) => {
+            let first = segs.first().ok_or("the path is empty")?;
+            (Shape::path3d(&segs).map_err(ke)?, first.start(), first.start_tangent().normalize_or_zero())
+          }
+          None => {
+            let segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
+            let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
+            let first = segs.first().ok_or("the path is empty")?;
+            let (start, tangent) = seg_start(first);
+            (path, ps.plane.to_world(start), ps.plane.x * tangent[0] + ps.plane.y * tangent[1])
+          }
+        };
         let r = self.len(diameter)? / 2.0;
         if r <= 0.0 {
           return Err("the diameter must be positive".into());

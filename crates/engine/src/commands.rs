@@ -318,6 +318,7 @@ cmds! {
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
+  "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1170,6 +1171,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.tangent_circle"
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
+    "sketch.include" => sketch_include::include(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -2779,3 +2781,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
 mod sketch_tools;
 
 mod sketch_curves;
+
+mod sketch_include;

@@ -406,7 +406,8 @@ impl Ctx<'_> {
     match kind {
       FeatureKind::Sketch { plane, sketch, links } => {
         let pl = self.resolve_plane(plane)?;
-        let lost = self.refresh_links(&pl, sketch, links);
+        let lost =
+          self.refresh_links(&pl, sketch, links) + crate::include::refresh_sources(&self.state.sketches, sketch);
         let dim_errors: Vec<(ConstraintId, String)> =
           sketch.evaluate_dims(self.params).into_iter().map(|(c, e)| (c, e.to_string())).collect();
         let report = sketch.solve();
@@ -871,8 +872,7 @@ impl Ctx<'_> {
       FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation, rail, twist } => {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
-        let segs = sheet::open_path(&ps.sketch, path_curves)?;
-        let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
+        let path = crate::include::sketch_path(ps, path_curves)?;
         let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
@@ -1689,6 +1689,13 @@ impl Ctx<'_> {
       };
       let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
       link.edge = EdgeRef::from_edge(link.edge.body, &e, body.faces());
+      if let Some(c) = sketch.curve3d_mut(link.curve) {
+        let deflection = (body.diagonal() * 0.001).clamp(0.005, 0.2);
+        if let Some(k) = crate::include::edge_curve3d(&body.shape, &e, deflection) {
+          c.kind = k;
+        }
+        continue;
+      }
       let l = |v: DVec3| plane.to_local(v);
       let Some(kind) = sketch.curve(link.curve).map(|c| c.kind.clone()) else { continue };
       let put = |sketch: &mut fox_sketch::Sketch, p: fox_sketch::PointId, at: [f64; 2]| {

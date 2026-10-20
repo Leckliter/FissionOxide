@@ -82,3 +82,5 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+205-vertical-edge-sweep-path
+206-sketch-line-sweep-path
