@@ -14,6 +14,7 @@ use crate::theme;
 use crate::{App, panels};
 
 mod extrude;
+mod handles;
 mod hole_pattern;
 mod live;
 mod manip;
@@ -375,6 +376,8 @@ impl Kind {
     )
   }
 }
+
+pub use handles::{Handle, Shape, Slot};
 
 /// A drag arrow in the viewport (see [`Dialog::manipulator`]).
 #[derive(Debug, Clone, Copy)]
@@ -1078,9 +1081,11 @@ impl Dialog {
         d.op = op_str(*operation);
         d
       }
-      FeatureKind::ConstructionPlane { offset, .. } => {
+      FeatureKind::ConstructionPlane { offset, base } => {
         let mut d = Dialog::blank(Kind::OffsetPlane);
         d.distance = offset.clone();
+        // the base plane, for the offset arrow
+        (d.plane, d.plane_label) = edited_plane(&app.s, base);
         d
       }
       FeatureKind::RectangularPattern {
@@ -1106,8 +1111,10 @@ impl Dialog {
         d.join = *join;
         d
       }
-      FeatureKind::CircularPattern { count, angle, symmetric, join, .. } => {
+      FeatureKind::CircularPattern { count, angle, symmetric, join, axis, .. } => {
         let mut d = Dialog::blank(Kind::CircPattern);
+        // the axis, for the angle rotator
+        d.axis = axis_key(axis);
         d.count = count.clone();
         d.angle = angle.clone();
         d.symmetric[0] = *symmetric;
@@ -4206,6 +4213,37 @@ fn axis_key(axis: &AxisRef) -> String {
     AxisRef::SketchLine { curve } | AxisRef::SketchCurve { curve, .. } => format!("line:{}", curve.0),
     AxisRef::Edge { .. } => "edge".into(),
     AxisRef::Construction { feature } => format!("axis:{}", feature.0),
+  }
+}
+
+/// An edited offset plane's base as the dialog's plane value and label (null when it can't be
+/// found on the model now).
+fn edited_plane(s: &Session, base: &PlaneRef) -> (Value, String) {
+  use fox_engine::model::OriginPlane;
+  match base {
+    PlaneRef::Origin { plane } => {
+      let n = match plane {
+        OriginPlane::Xy => "xy",
+        OriginPlane::Xz => "xz",
+        OriginPlane::Yz => "yz",
+      };
+      (json!(n), format!("{} plane", n.to_uppercase()))
+    }
+    PlaneRef::Construction { feature } => {
+      let name = s.design.feature(*feature).map(|f| f.name.clone()).unwrap_or_default();
+      (json!({"feature": feature.0}), name)
+    }
+    PlaneRef::Face { face, .. } => {
+      let found = s.model.body(face.body).and_then(|b| {
+        let scale = s.model.bounds().map_or(1.0, |(lo, hi)| (hi - lo).length());
+        Some((b.id, face.resolve(b.faces(), b.mesh(), scale)?))
+      });
+      match found {
+        Some((b, f)) => (json!({"body": b.0, "face": f}), format!("Face of {}", s.body_name(b))),
+        None => (Value::Null, String::new()),
+      }
+    }
+    _ => (Value::Null, String::new()),
   }
 }
 

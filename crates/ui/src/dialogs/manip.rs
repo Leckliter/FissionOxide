@@ -12,6 +12,7 @@ use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
+use crate::forms;
 use crate::manipulators::{Triad, TriadEdit};
 
 /// Geometry a dialog's manipulator hangs on, worked out while its picks are valid (a preview
@@ -27,6 +28,11 @@ pub(super) struct Cache {
   offset_base: Option<Value>,
   /// Offset Plane: the construction plane its preview added.
   preview_plane: Option<FeatureId>,
+  /// Circular Pattern: the bodies and their centre before the preview.
+  circ: Option<(Value, DVec3)>,
+  /// Scale: the bodies and their size (half their bounding box's diagonal) at a factor of one;
+  /// the arrow is the factor times this long.
+  scale_ref: Option<(Value, f64)>,
 }
 
 /// A dragged length (mm) as a value box shows it, in the design's unit.
@@ -127,26 +133,81 @@ impl Dialog {
     fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok()
   }
 
-  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer) or face (Press Pull), or the
-  /// offset curves (Sketch Offset).
+  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer), face (Press Pull, Shell,
+  /// Draft, Hole, Offset Face, Emboss) or surface body (Thicken), or the offset curves (Sketch
+  /// Offset).
   fn anchor_key(&self) -> Value {
+    let first = |k: &str| self.fval(k).and_then(|v| v.get(0)).cloned().unwrap_or(Value::Null);
     match self.kind {
-      Kind::PressPull => json!(self.faces.first()),
+      Kind::PressPull | Kind::Shell | Kind::Draft | Kind::Hole => json!(self.faces.first()),
       Kind::SkOffset => json!({"offset": self.curves}),
+      Kind::Form(f) if std::ptr::eq(f, &forms::OFFSET_FACE) => first("faces"),
+      Kind::Form(f) if std::ptr::eq(f, &forms::EMBOSS) => self.fval("face").cloned().unwrap_or(Value::Null),
+      Kind::Form(f) if std::ptr::eq(f, &forms::THICKEN) => json!({"thicken": first("bodies")}),
       _ => json!(self.edges.first()),
     }
   }
 
+  /// Is the dialog's arrow anchored on a pick of the model (worked out before the preview
+  /// changes it)?
+  fn anchored_on_picks(&self) -> bool {
+    match self.kind {
+      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::Shell | Kind::Draft => true,
+      Kind::Hole => self.solid.hp.single,
+      Kind::Form(f) => [&forms::OFFSET_FACE, &forms::EMBOSS, &forms::THICKEN].iter().any(|g| std::ptr::eq(f, *g)),
+      _ => false,
+    }
+  }
+
+  /// The anchor (a point and unit direction) when it is the one for the current picks.
+  pub(super) fn cached_anchor(&self) -> Option<(DVec3, DVec3)> {
+    let (key, o, d) = self.manip.anchor.as_ref()?;
+    (*key == self.anchor_key()).then_some((*o, *d))
+  }
+
+  /// Where an edited feature's arrow hangs: its picks aren't loaded into the dialog, so from the
+  /// references it stores (an edge's midpoint and the normals beside it, a face's point and
+  /// normal), which follow the model as it changes.
+  fn edit_anchor(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    use fox_engine::model::FeatureKind as F;
+    let f = s.design.feature(self.editing?)?;
+    let face = |p: [f64; 3], n: [f64; 3]| Some((DVec3::from(p), DVec3::from(n).try_normalize()?));
+    match &f.kind {
+      F::Fillet { edges, .. } | F::Chamfer { edges, .. } => {
+        let e = edges.first()?;
+        let p = DVec3::from(e.point);
+        let dir = (DVec3::from(e.n1) + DVec3::from(e.n2))
+          .try_normalize()
+          .or_else(|| (p - centre(s, &[e.body.0])?).try_normalize())
+          .unwrap_or(DVec3::Z);
+        Some((p, dir))
+      }
+      F::Shell { faces, .. } => faces.first().and_then(|r| face(r.point, r.normal)),
+      F::Emboss { face: r, .. } => face(r.point, r.normal),
+      _ => None,
+    }
+  }
+
+  /// The anchor of a pick key (see [`Dialog::anchor_key`]).
+  fn anchor_for(&self, s: &Session, key: &Value) -> Option<(DVec3, DVec3)> {
+    if let Some(b) = key.get("thicken") {
+      // a surface body: its first face
+      let body = s.model.body(BodyId(b.as_u64()? as u32))?;
+      return anchor(s, &json!({"body": body.id.0, "face": body.faces().first()?.id}));
+    }
+    anchor(s, key)
+  }
+
   /// Brings the cached manipulator geometry up to date; the viewport calls it every frame.
   pub fn refresh_manip(&mut self, s: &Session) {
-    if self.editing.is_some() {
-      return;
+    if self.editing.is_some() && self.anchored_on_picks() {
+      self.manip.anchor = self.edit_anchor(s).map(|(o, d)| (self.anchor_key(), o, d));
     }
     match self.kind {
-      Kind::Fillet | Kind::Chamfer | Kind::PressPull if !self.applied => {
+      _ if self.anchored_on_picks() && !self.applied && self.editing.is_none() => {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
-          self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
+          self.manip.anchor = self.anchor_for(s, &key).map(|(o, d)| (key, o, d));
         }
       }
       // the offset curves stay as they are under the preview
@@ -160,27 +221,115 @@ impl Dialog {
       Kind::RectPattern if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
         self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
       }
-      Kind::Move => self.refresh_move(s),
+      // the rotator reaches out to the patterned bodies' centre
+      Kind::CircPattern => {
+        let ids = self.circ_bodies(s);
+        let key = json!(ids);
+        if self.manip.circ.as_ref().is_none_or(|c| c.0 != key) {
+          self.manip.circ = centre(s, &ids).map(|c| (key, c));
+        }
+      }
+      Kind::Form(f) if std::ptr::eq(f, &forms::SCALE) => {
+        let key = self.fval("bodies").cloned().unwrap_or(Value::Null);
+        if self.manip.scale_ref.as_ref().is_none_or(|r| r.0 != key) {
+          self.manip.scale_ref = self.scale_size(s).map(|r| (key, r));
+        }
+      }
+      // an edited move's bodies aren't loaded: its triad stays hidden
+      Kind::Move if self.editing.is_none() => self.refresh_move(s),
       _ => {}
     }
   }
 
-  /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
-  /// along the first face's normal).
+  /// The bodies a circular pattern turns: the picked ones, or an edited pattern's own.
+  fn circ_bodies(&self, s: &Session) -> Vec<u32> {
+    use fox_engine::model::{BodySel, FeatureKind};
+    if !self.bodies.is_empty() || self.editing.is_none() {
+      return self.bodies.clone();
+    }
+    match self.editing.and_then(|id| s.design.feature(id)).map(|f| &f.kind) {
+      Some(FeatureKind::CircularPattern { bodies: BodySel::Bodies { ids }, .. }) => ids.iter().map(|b| b.0).collect(),
+      _ => s.model.bodies.iter().map(|b| b.id.0).collect(),
+    }
+  }
+
+  /// The circular pattern's bodies' centre, as it was before the preview.
+  pub(super) fn circ_centre(&self) -> Option<DVec3> {
+    self.manip.circ.as_ref().map(|c| c.1)
+  }
+
+  /// Scale: half the bounding box diagonal of the bodies it scales (all of them by default), as
+  /// at a factor of one (a showing preview has scaled them already).
+  fn scale_size(&self, s: &Session) -> Option<f64> {
+    let ids: Vec<u32> = self
+      .fval("bodies")
+      .and_then(Value::as_array)
+      .map(|a| a.iter().filter_map(Value::as_u64).map(|b| b as u32).collect())
+      .unwrap_or_default();
+    let mut acc: Option<(DVec3, DVec3)> = None;
+    for b in s.model.bodies.iter().filter(|b| ids.is_empty() || ids.contains(&b.id.0)) {
+      let Some(m) = b.mesh() else { continue };
+      for p in &m.positions {
+        let p = DVec3::from(p.map(f64::from));
+        acc = Some(acc.map_or((p, p), |(a, z)| (a.min(p), z.max(p))));
+      }
+    }
+    let (lo, hi) = acc?;
+    let size = (hi - lo).length() / 2.0;
+    let factor = if self.applied { self.scale_factor(s).filter(|f| f.abs() > 1e-9)? } else { 1.0 };
+    (size > 1e-9).then(|| size / factor.abs())
+  }
+
+  fn scale_factor(&self, s: &Session) -> Option<f64> {
+    fox_engine::expr::eval(self.fstr("factor"), fox_engine::expr::Kind::Unitless, &s.model.params).ok()
+  }
+
+  /// Scale's arrow length for a factor of one.
+  pub(super) fn manip_scale_ref(&self) -> f64 {
+    self.manip.scale_ref.as_ref().map_or(1.0, |r| r.1)
+  }
+
+  /// The arrows of Fillet and Chamfer (radius, out of the first edge), Press Pull and Offset Face
+  /// (distance, along the first face's normal), Shell (thickness, into the opened face), Emboss
+  /// (depth, out of the face or into it), Thicken (thickness, off the surface), Hole (depth, into
+  /// the face), Rib / Web (thickness, half of it either side of the line), Scale (the factor) and
+  /// the patterns.
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
-    if self.kind == Kind::RectPattern && self.editing.is_none() {
-      let (bodies, c) = self.manip.pivot.as_ref()?;
-      return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
+    match self.kind {
+      Kind::RectPattern => {
+        let (bodies, c) = self.manip.pivot.as_ref()?;
+        return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
+      }
+      Kind::Hole => return self.hole_arrow(s),
+      Kind::Form(f) if std::ptr::eq(f, &forms::RIB) || std::ptr::eq(f, &forms::WEB) => {
+        let (origin, dir, _) = self.rib_frame(s)?;
+        return Some(Manipulator { origin, dir, value: self.len(s, self.fstr("thickness"))? / 2.0 });
+      }
+      Kind::Form(f) if std::ptr::eq(f, &forms::SCALE) => {
+        let (_, r) = self.manip.scale_ref.as_ref()?;
+        let c: Vec<f64> = self
+          .fval("center")?
+          .as_array()?
+          .iter()
+          .map(|x| x.as_str().and_then(|t| t.trim().parse().ok()).unwrap_or(0.0))
+          .collect();
+        let origin = DVec3::from_slice(c.get(..3)?);
+        return Some(Manipulator { origin, dir: DVec3::X, value: self.scale_factor(s)? * r });
+      }
+      _ => {}
     }
-    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
-      return None;
-    }
-    let (key, origin, dir) = self.manip.anchor.as_ref()?;
-    if *key != self.anchor_key() {
-      return None;
-    }
-    let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
-    Some(Manipulator { origin: *origin, dir: *dir, value: self.len(s, field)? })
+    let (origin, dir) = self.cached_anchor()?;
+    let flip = |on: bool| if on { -dir } else { dir };
+    let (field, dir) = match self.kind {
+      Kind::Fillet | Kind::Chamfer => (self.radius.as_str(), dir),
+      Kind::PressPull | Kind::SkOffset => (self.distance.as_str(), dir),
+      Kind::Shell => (self.radius.as_str(), flip(self.solid.shell_dir != "outside")),
+      Kind::Form(f) if std::ptr::eq(f, &forms::OFFSET_FACE) => (self.fstr("distance"), dir),
+      Kind::Form(f) if std::ptr::eq(f, &forms::EMBOSS) => (self.fstr("depth"), flip(self.fflag("deboss"))),
+      Kind::Form(f) if std::ptr::eq(f, &forms::THICKEN) => (self.fstr("thickness"), flip(self.fflag("flip"))),
+      _ => return None,
+    };
+    Some(Manipulator { origin, dir, value: self.len(s, field)? })
   }
 
   /// Takes a dragged arrow value (already rounded to `step`) into the field; false for dialogs
@@ -196,6 +345,27 @@ impl Dialog {
         self.follow = false;
       }
       Kind::RectPattern => self.set_pattern_arrow(v, step),
+      Kind::Shell => self.radius = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::Hole => self.b = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::Form(f) => {
+        let positive = mm(self.unit, v.max(step.max(1e-3)));
+        let (key, text) = if std::ptr::eq(f, &forms::OFFSET_FACE) {
+          ("distance", mm(self.unit, v))
+        } else if std::ptr::eq(f, &forms::EMBOSS) {
+          ("depth", positive)
+        } else if std::ptr::eq(f, &forms::THICKEN) {
+          ("thickness", positive)
+        } else if std::ptr::eq(f, &forms::RIB) || std::ptr::eq(f, &forms::WEB) {
+          // the arrow reaches half the thickness
+          ("thickness", mm(self.unit, (2.0 * v).max(step.max(1e-3))))
+        } else if std::ptr::eq(f, &forms::SCALE) {
+          let factor = ((v / self.manip_scale_ref()) * 100.0).round() / 100.0;
+          ("factor", fox_engine::sketch::Dim::new(factor.max(0.01)).expr)
+        } else {
+          return false;
+        };
+        self.set_fval(key, json!(text));
+      }
       _ => return false,
     }
     true
@@ -527,8 +697,12 @@ mod tests {
     apply(&mut s, &mut d);
     let bb = s.model.bodies[0].shape.mass().unwrap();
     assert!((bb.bbox_max.z - 25.0).abs() < 1e-6, "{bb:?}");
-    // no arrow when editing an existing feature (its picks name the body before it)
+    // an edited feature's picks aren't loaded (they name the body before it): its arrow comes
+    // from the feature's stored references instead (see the `handles` tests), and a feature
+    // without any (the box) has none
     d.editing = Some(fox_engine::model::FeatureId(1));
+    d.faces = vec![Value::Null];
+    d.refresh_manip(&s);
     assert!(d.manipulator(&s).is_none());
   }
 

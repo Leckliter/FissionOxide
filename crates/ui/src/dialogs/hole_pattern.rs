@@ -134,6 +134,70 @@ pub(super) fn free_points(s: &Session, sketch: FeatureId) -> usize {
 impl Dialog {
   // ---- hole ----
 
+  /// Where the hole's depth arrow starts and the way it drills: a single hole's centre on its
+  /// face (as found before the preview cut it) or the first sketch point, into the material
+  /// (out of it when flipped).
+  fn hole_base(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    if self.solid.hp.single {
+      let f = self.faces.first()?;
+      let (c, n) = self.cached_anchor()?;
+      let at = match &self.solid.hp.at {
+        Some((g, p)) if g == f => DVec3::from(*p),
+        _ => c,
+      };
+      return Some((at, n));
+    }
+    let r = s.model.sketches.get(&self.sketch?)?;
+    let used: Vec<_> = r.sketch.curves.iter().flat_map(|c| r.sketch.curve_points(c.id)).collect();
+    let p = r.sketch.points.iter().find(|p| p.id != fox_engine::sketch::ORIGIN && !used.contains(&p.id))?;
+    Some((r.plane.to_world([p.x, p.y]), r.plane.normal()))
+  }
+
+  /// Hole's depth arrow (none through all).
+  pub(super) fn hole_arrow(&self, s: &Session) -> Option<super::Manipulator> {
+    if self.flag {
+      return None;
+    }
+    let (origin, n) = self.hole_base(s)?;
+    let dir = if self.flip { n } else { -n };
+    Some(super::Manipulator { origin, dir, value: self.len(s, &self.b)? })
+  }
+
+  /// A single hole's centre: a point that slides across its face.
+  pub(super) fn hole_centre_handle(&self, s: &Session) -> Option<super::Handle> {
+    if !self.solid.hp.single {
+      return None;
+    }
+    let (at, normal) = self.hole_base(s)?;
+    Some(super::Handle {
+      slot: super::Slot::Centre,
+      shape: super::Shape::Point { at, normal },
+      value: 0.0,
+      per: 1.0,
+      text: String::new(),
+    })
+  }
+
+  /// The hole's centre dragged to `p` (onto its face's plane); distances from the reference
+  /// edges follow, rounded to `step`. False when there is no single hole to move.
+  pub(super) fn move_hole_centre(&mut self, s: &Session, p: DVec3, step: f64) -> bool {
+    let (Some(f), Some((c, n))) = (self.faces.first().cloned(), self.cached_anchor()) else { return false };
+    if !self.solid.hp.single {
+      return false;
+    }
+    let p = p - n * (p - c).dot(n);
+    let u = self.unit;
+    for (i, e) in self.edges.iter().enumerate().take(2) {
+      if let Some((a, b)) = line_of(s, e) {
+        let d = line_distance(p, a, b);
+        let d = if step > 0.0 { (d / step).round() * step } else { d };
+        self.solid.hp.offsets[i] = mm(u, d);
+      }
+    }
+    self.solid.hp.at = Some((f, [p.x, p.y, p.z]));
+    true
+  }
+
   /// Fusion's Hole defaults: one hole on a face, unless the sketch in play has points to drill.
   pub(super) fn hole_defaults(&mut self, s: &Session) {
     let face = s.selection.iter().any(|x| matches!(x, Sel::Face { body, face } if is_planar(s, *body, *face)));
