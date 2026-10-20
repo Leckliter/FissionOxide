@@ -11,7 +11,7 @@ from Fusion's own command catalog. For each feature it:
    `mismatch`, `fox-missing` or `blocked`.
 2. **Fixes** it. For each `mismatch` or `fox-missing` entry, a fixer agent works in its own git
    worktree off `main` and changes FissionOxide until the new cases pass. The driver then runs
-   `cargo test -p fox-engine --test reference_parts` itself. If that passes, it pushes the branch and
+   `cargo test -p fox-engine --test reference_parts` itself, plus `cargo test -p <crate> --lib` for every crate the branch changes (fox-sketch and fox-engine together if either changed). If those pass, it pushes the branch and
    opens a PR with `gh`, and the entry becomes `fixing`. Nothing merges automatically.
 3. **Verifies** it. Once a PR has merged, `verify` builds `main` and re-probes the entry's cases. The
    entry becomes `verified`, or goes back to `mismatch`.

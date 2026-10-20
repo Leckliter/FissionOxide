@@ -80,6 +80,27 @@ def cargo_env(slot):
 
 # ---- budget ------------------------------------------------------------------------------------
 
+def touched_packages(wt, base):
+  """The crates a branch changes (by their Cargo package names), for their unit tests. Changes in
+  crates/sketch or crates/engine always bring in both: the engine's tests exercise the sketcher."""
+  files = sh(["git", "diff", "--name-only", f"{base}...HEAD"], cwd=wt).stdout.split()
+  pkgs = []
+  for f in files:
+    parts = f.split("/")
+    if len(parts) < 3 or parts[0] not in ("crates", "apps"):
+      continue
+    crate = os.path.join(wt, parts[0], parts[1])
+    if not os.path.exists(os.path.join(crate, "src", "lib.rs")):
+      continue
+    with open(os.path.join(crate, "Cargo.toml"), encoding="utf-8") as fh:
+      name = next((l.split("=", 1)[1].strip().strip('"') for l in fh if l.startswith("name")), None)
+    if name and name not in pkgs:
+      pkgs.append(name)
+  if any(p in pkgs for p in ("fox-sketch", "fox-engine")):
+    pkgs += [p for p in ("fox-sketch", "fox-engine") if p not in pkgs]
+  return pkgs
+
+
 class Budget:
   """Caps what this run spends on agents; parity/loop/state.json keeps the running totals."""
 
@@ -387,27 +408,35 @@ class Loop:
       return
     report = report or {"done": False, "summary": "", "title": "", "blocker": "; ".join(meta.get("errors") or [])}
 
-    # Check the agent's work the same way CI will, before anything leaves this machine.
-    print(f"  checking {branch}: cargo test -p fox-engine --test reference_parts", flush=True)
-    test = await asyncio.to_thread(
-      sh, ["cargo", "test", "-p", "fox-engine", "--test", "reference_parts"], wt, False, env, 7200)
-    tail = (test.stdout + test.stderr)[-3000:]
-    with open(self.log("fix", key), "a", encoding="utf-8") as f:
-      f.write("\n---- driver: cargo test -p fox-engine --test reference_parts ----\n" + tail)
-    baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
-    unlisted = [c for c in cases if c not in baseline]
     if sh(["git", "status", "--porcelain"], cwd=wt).stdout.strip():
       sh(["git", "add", "-A"], cwd=wt)
       sh(["git", "commit", "-m", (report.get("title") or f"Parity fix: {entry['name']}")
           + "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"], cwd=wt)
+    # Check the agent's work the way CI will, before anything leaves this machine: the reference
+    # test, plus the unit tests of every crate the branch touches.
+    checks = [["cargo", "test", "-p", "fox-engine", "--test", "reference_parts"]]
+    checks += [["cargo", "test", "-p", pkg, "--lib", "--", "--skip", "fuzz_found_bugs"]
+               for pkg in touched_packages(wt, self.a.base)]
+    failed = None
+    for cmd in checks:
+      label = " ".join(cmd[:5] if "--lib" in cmd else cmd)
+      print(f"  checking {branch}: {label}", flush=True)
+      test = await asyncio.to_thread(sh, cmd, wt, False, env, 7200)
+      with open(self.log("fix", key), "a", encoding="utf-8") as f:
+        f.write(f"\n---- driver: {label} (exit {test.returncode}) ----\n" + (test.stdout + test.stderr)[-3000:])
+      if test.returncode:
+        failed = label
+        break
+    baseline = open(os.path.join(wt, "tests", "reference", "baseline.txt"), encoding="utf-8").read().split()
+    unlisted = [c for c in cases if c not in baseline]
     ahead = int(sh(["git", "rev-list", "--count", f"{self.a.base}..HEAD"], cwd=wt).stdout.strip() or 0)
-    passed = test.returncode == 0 and not unlisted and ahead > 0
-    fix.update(done=bool(report.get("done")), test_passed=test.returncode == 0, cases_unlisted=unlisted,
+    passed = not failed and not unlisted and ahead > 0
+    fix.update(done=bool(report.get("done")), test_passed=not failed, failed_check=failed, cases_unlisted=unlisted,
                summary=report.get("summary", ""), title=report.get("title", ""), blocker=report.get("blocker", ""),
                finished=now())
     if not passed:
       fix["state"] = "failed"
-      why = ("the reference test failed" if test.returncode else
+      why = (f"`{failed}` failed" if failed else
              f"cases not passing: {', '.join(unlisted)}" if unlisted else "no commits")
       self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} didn't land: {why}. "
                          f"{report.get('blocker', '')}"[:1500])
@@ -415,7 +444,7 @@ class Loop:
       return
     sh(["git", "push", "-u", "origin", branch], cwd=wt)
     fix["state"] = "pushed"
-    self.ledger.update(key, fix=fix, note=f"fixer passed the reference test; pushed {branch}")
+    self.ledger.update(key, fix=fix, note=f"fixer passed the reference test and unit tests; pushed {branch}")
     await self.open_pr(key)
 
   async def open_pr(self, key):
@@ -433,8 +462,8 @@ class Loop:
             f"**Probe:** {(entry.get('probe') or {}).get('summary', '')}\n\n"
             + (f"**New reference cases** (expected.json measured in Fusion): {', '.join(f'`{c}`' for c in cases)}\n\n"
                if cases else "")
-            + "`cargo test -p fox-engine --test reference_parts` passes on this branch, with the new cases in "
-            "baseline.txt.\n\nOpened by the parity loop (`tools/parity-loop`). Not auto-merged.\n\n"
+            + "`cargo test -p fox-engine --test reference_parts` and the unit tests (`--lib`) of every crate this "
+            "branch changes pass on it, with the new cases in baseline.txt.\n\nOpened by the parity loop (`tools/parity-loop`). Not auto-merged.\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
     title = fix.get("title") or f"Match Fusion's {entry['name']}"
     p = sh([gh_exe(), "pr", "create", "--base", self.a.base, "--head", fix["branch"], "--title", title,
