@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+356-box-corner-three-vertices
+357-sketch-points-and-vertex
+358-sketch-on-plane-hole
+359-sketch-on-plane-reversed-order
