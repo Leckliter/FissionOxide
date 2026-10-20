@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+449-hole-extent-arc
+450-body-along-path-arc
+451-body-symmetric-line
+452-body-flip-from-end-chain

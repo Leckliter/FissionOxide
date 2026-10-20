@@ -7,7 +7,12 @@ use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
-use crate::commands::{add_feature, face_ref, ids, operation, plane_ref, profile_points, req_expr, sketch_for_feature};
+use fox_model::pathpattern::PathOrientation;
+
+use crate::commands::{
+  add_feature, body_sel, face_ref, ids, operation, opt_expr, opt_str, plane_ref, profile_points, req_expr, req_u32,
+  sketch_for_feature,
+};
 use crate::{CmdError, CmdResult, Session};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -62,6 +67,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       }
       add_feature(s, FeatureKind::ReplaceFace { faces, target, plane })
     })(),
+    "pattern.path" => path_pattern(s, p),
     _ => return None,
   })
 }
@@ -156,4 +162,49 @@ fn inner_point(s: &Shape, com: DVec3, lo: DVec3, hi: DVec3) -> DVec3 {
     }
   }
   com
+}
+
+/// `pattern.path`: copies of bodies, or features re-applied, along a sketch path.
+fn path_pattern(s: &mut Session, p: &Value) -> CmdResult {
+  let path_sketch = FeatureId(req_u32(p, "path")?);
+  s.design.sketch(path_sketch)?;
+  let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
+  let features: Vec<FeatureId> = ids(p, "features").into_iter().map(FeatureId).collect();
+  for f in &features {
+    if s.design.feature(*f).is_none() {
+      return Err(CmdError::new(format!("no feature {}", f.0)));
+    }
+  }
+  let distance = opt_expr(p, "distance")
+    .or_else(|| opt_expr(p, "spacing"))
+    .ok_or(CmdError::new("missing 'spacing' (or 'distance' with extent: true)"))?;
+  let extent = match opt_str(p, "distance_type") {
+    None => p.get("extent").and_then(Value::as_bool).unwrap_or(false),
+    Some("extent") => true,
+    Some("spacing") => false,
+    Some(o) => return Err(CmdError::new(format!("unknown distance type '{o}' (spacing, extent)"))),
+  };
+  let orientation = match opt_str(p, "orientation").unwrap_or("identical") {
+    "identical" => PathOrientation::Identical,
+    "along_path" | "path" => PathOrientation::AlongPath,
+    o => return Err(CmdError::new(format!("unknown orientation '{o}' (identical, along_path)"))),
+  };
+  let flag = |k: &str| p.get(k).and_then(Value::as_bool);
+  add_feature(
+    s,
+    FeatureKind::PathPattern {
+      bodies: body_sel(p),
+      features,
+      path_sketch,
+      path_curves,
+      count: req_expr(p, "count")?,
+      distance,
+      extent,
+      start: opt_expr(p, "start").unwrap_or_else(|| "0".into()),
+      flip: flag("flip").unwrap_or(false),
+      symmetric: flag("symmetric").unwrap_or(false),
+      orientation,
+      join: flag("join").unwrap_or(true),
+    },
+  )
 }

@@ -155,6 +155,9 @@ struct State {
   placed: BTreeMap<crate::ComponentId, DMat4>,
   /// Rigid groups so far.
   groups: Vec<Vec<crate::ComponentId>>,
+  /// The tool solids each feature applied, with their operation and targets (feature patterns
+  /// re-apply them).
+  tools: BTreeMap<FeatureId, Vec<pathpattern::Tool>>,
 }
 
 /// The regenerated design.
@@ -1930,6 +1933,7 @@ impl Ctx<'_> {
 
   /// Applies a new/join/cut/intersect operation with a tool solid.
   fn operate(&mut self, feature: FeatureId, tool: Shape, op: Operation) -> Result<(), String> {
+    self.record_tool(feature, &tool, op);
     let tool_box = tool.mass().map(|m| (m.bbox_min, m.bbox_max)).map_err(ke)?;
     let overlapping: Vec<usize> = (0..self.state.bodies.len())
       .filter(|&i| self.targets.is_empty() || self.targets.contains(&self.state.bodies[i].id))
@@ -2202,6 +2206,7 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 }
 
 mod direct;
+mod pathpattern;
 mod subasm;
 #[cfg(test)]
 mod tests_config;
