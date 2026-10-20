@@ -10,6 +10,20 @@ The state lives in two files, both handled through `tools/parity-loop/loop.py`:
   menus and drag gestures. `seed_ui.py` writes the first set, and discovery adds more.
 - `parity/ledger.jsonl` lists Fusion's commands and API features, from `tools/fusion-bridge`.
 
+## Roles
+
+Only one agent can drive the mouse, so the work is split by what each role needs, and nobody
+waits on anyone:
+
+- **Prober** (holds the screen): runs discovery and the probe loop without stopping. When a batch
+  file is ready it starts that batch's fixer as a background cloud agent and keeps probing.
+  Between probes, if fixes have landed on `main` since the last install, it builds them in the
+  background, swaps the new build into `C:\Program Files\FissionOxide`, and re-probes the
+  `fixing` entries.
+- **Fixers** (cloud, one per batch): work from `main` and open a PR titled `UI parity: …`.
+- **Merger** (local session, own worktree, never touches the screen): tests each `parity/ui-*`
+  PR against current `main` and squash-merges the ones that pass.
+
 ## Ground rules
 
 - Control only Autodesk Fusion (`fusion360.exe`) and FissionOxide. If anything else takes focus,

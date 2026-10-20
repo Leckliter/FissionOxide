@@ -6,10 +6,10 @@
 {"name": "ui-timeline", "items": 3, "status": "fixing", "pr": null}
 {"name": "ui-toolbar-customize", "items": 3, "status": "fixing", "pr": null}
 {"name": "ui-viewcube-camera", "items": 10, "status": "fixing", "pr": null}
-{"name": "ui-context-menus", "items": 4, "status": "pending", "pr": null}
-{"name": "ui-feature-dialogs", "items": 4, "status": "pending", "pr": null}
-{"name": "ui-hole-and-pattern", "items": 2, "status": "pending", "pr": null}
-{"name": "ui-inspect-and-views", "items": 4, "status": "pending", "pr": null}
-{"name": "ui-move-triad", "items": 2, "status": "pending", "pr": null}
-{"name": "ui-preferences-undo", "items": 2, "status": "pending", "pr": null}
-{"name": "ui-sketch-tools", "items": 5, "status": "pending", "pr": null}
+{"name": "ui-context-menus", "items": 4, "status": "fixing", "pr": null}
+{"name": "ui-feature-dialogs", "items": 4, "status": "fixing", "pr": null}
+{"name": "ui-hole-and-pattern", "items": 2, "status": "fixing", "pr": null}
+{"name": "ui-inspect-and-views", "items": 4, "status": "fixing", "pr": null}
+{"name": "ui-move-triad", "items": 2, "status": "fixing", "pr": null}
+{"name": "ui-preferences-undo", "items": 2, "status": "fixing", "pr": null}
+{"name": "ui-sketch-tools", "items": 5, "status": "fixing", "pr": null}
