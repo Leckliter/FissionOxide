@@ -718,8 +718,8 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
     }
     Tool::MidpointLine if n == 2 => {
-      let a = [2.0 * first[0] - p[0], 2.0 * first[1] - p[1]];
-      Some(("sketch.line", json!({"sketch": sid, "points": [a, p]})))
+      // the engine mirrors the end through the midpoint and keeps the midpoint on the line's middle
+      Some(("sketch.line", json!({"sketch": sid, "mid": first, "end": p})))
     }
     Tool::TangentArc if n == 2 => match tangent_curve(app, sk, first) {
       Some(curve) => Some(("sketch.arc", json!({"sketch": sid, "tangent": curve, "start": first, "end": p}))),
@@ -1601,7 +1601,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc | Tool::MidpointLine, [a]) => line(*a, cur),
+    (Tool::MidpointLine, [a]) => line([2.0 * a[0] - cur[0], 2.0 * a[1] - cur[1]], cur),
+    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
