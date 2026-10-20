@@ -795,6 +795,25 @@ impl<'a> System<'a> {
         let (s, c) = value.value.sin_cos();
         vec![cross(u, v) * c - dot(u, v) * s]
       }
+      K::Polygon { center, lines } => {
+        // every side as long as the first, every corner as far from the centre as the first
+        let c = self.p(x, *center);
+        let sides: Vec<([f64; 2], [f64; 2])> = lines.iter().map(|l| self.line(x, *l)).collect();
+        let mut corners: Vec<PointId> = Vec::with_capacity(lines.len());
+        for l in lines {
+          if let Some((_, CurveKind::Line { a, b })) = self.curve(*l) {
+            for p in [*a, *b] {
+              if !corners.contains(&p) {
+                corners.push(p);
+              }
+            }
+          }
+        }
+        let side = |s: &([f64; 2], [f64; 2])| crate::dist(s.0, s.1);
+        let radius = |p: &PointId| crate::dist(c, self.p(x, *p));
+        let (s0, r0) = (sides.first().map(side).unwrap_or(0.0), corners.first().map(radius).unwrap_or(0.0));
+        sides.iter().skip(1).map(|s| side(s) - s0).chain(corners.iter().skip(1).map(|p| radius(p) - r0)).collect()
+      }
     }
   }
 
