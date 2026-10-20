@@ -1,0 +1,7 @@
+{
+  "ui:dialogs:surface-dialogs": "ui-surface-sheet-dialogs",
+  "ui:dialogs:sheet-metal-dialogs": "ui-surface-sheet-dialogs",
+  "ui:chrome:file-menu": "ui-chrome-menus",
+  "ui:timeline:settings-menu": "ui-chrome-menus",
+  "ui:context-menus:face": "ui-chrome-menus"
+}

@@ -17,10 +17,10 @@
 {"name": "ui-components", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/117"}
 {"name": "ui-sketch-polish", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/115"}
 {"name": "ui-units-and-parameters", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/119"}
-{"name": "ui-history-leftovers", "items": 1, "status": "fixing", "pr": null}
+{"name": "ui-history-leftovers", "items": 1, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/127"}
 {"name": "ui-inspect-tools", "items": 3, "status": "pending", "pr": null}
-{"name": "ui-mesh-commands", "items": 1, "status": "pending", "pr": null}
-{"name": "ui-sheet-metal-modify", "items": 1, "status": "fixing", "pr": null}
+{"name": "ui-mesh-commands", "items": 1, "status": "fixing", "pr": null}
+{"name": "ui-sheet-metal-modify", "items": 1, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/128"}
 {"name": "ui-surface-sweep-loft", "items": 1, "status": "fixing", "pr": null}
 {"name": "ui-wire-engine-menus", "items": 11, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/125"}
 {"name": "ui-assembly-browser", "items": 4, "status": "fixing", "pr": null}
@@ -31,3 +31,5 @@
 {"name": "ui-engine-gaps", "items": 3, "status": "pending", "pr": null}
 {"name": "ui-errors", "items": 1, "status": "pending", "pr": null}
 {"name": "ui-sketch-flows", "items": 4, "status": "fixing", "pr": null}
+{"name": "ui-chrome-menus", "items": 3, "status": "pending", "pr": null}
+{"name": "ui-surface-sheet-dialogs", "items": 2, "status": "pending", "pr": null}
