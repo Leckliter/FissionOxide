@@ -269,6 +269,9 @@ pub(crate) mod ffi {
     // a body's silhouette on a plane (cpp/silhouette.cpp)
     include!("fox-kernel/cpp/silhouette.hxx");
     fn silhouette(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
+    // offsetting chosen faces of a solid, neighbours extending to meet them (cpp/offsetfaces.cpp)
+    include!("fox-kernel/cpp/offsetfaces.hxx");
+    fn offset_faces(s: &Shape, faces: &[u32], d: f64) -> Result<UniquePtr<Shape>>;
   }
 }
 
