@@ -36,7 +36,7 @@ pub mod surface;
 use serde::{Deserialize, Serialize};
 
 pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
-pub use fillet::{FilletSet, RadiusPoint};
+pub use fillet::{FilletSet, FullRoundSet, RadiusPoint};
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
@@ -643,6 +643,13 @@ pub enum FeatureKind {
     /// `radius` are the first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sets: Vec<FilletSet>,
+    /// Asymmetric fillet (an elliptical round): the offset along each edge's second face, with
+    /// `radius` the offset along its first (the face whose outward normal sorts first by x, y,
+    /// z; the other way round with `flipped`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    distance2: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flipped: bool,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -1548,6 +1555,11 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     frame: String,
   },
+  /// Full round fillet: each set's centre face is replaced by one round tangent to it and to
+  /// the faces on both sides (a half-cylinder across a rib with parallel sides).
+  FullRoundFillet {
+    sets: Vec<FullRoundSet>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1693,6 +1705,7 @@ impl FeatureKind {
       FeatureKind::ProjectToSurface { .. } => "ProjectToSurface",
       FeatureKind::PathPattern { .. } => "PathPattern",
       FeatureKind::Arrange { .. } => "Arrange",
+      FeatureKind::FullRoundFillet { .. } => "Fillet",
     }
   }
 
@@ -2353,12 +2366,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
       }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, setback, radii, sets, .. } => {
+    FeatureKind::Fillet { radius, radius2, setback, radii, sets, distance2, .. } => {
       f(radius);
       for set in sets {
         f(&mut set.radius);
       }
-      for r in [radius2, setback].into_iter().flatten() {
+      for r in [radius2, setback, distance2].into_iter().flatten() {
         f(r);
       }
       for p in radii {
@@ -2578,6 +2591,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
+    FeatureKind::FullRoundFillet { .. } => {}
   }
 }
 

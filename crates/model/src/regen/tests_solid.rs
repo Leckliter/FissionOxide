@@ -167,6 +167,8 @@ fn setback_fillet_at_a_box_corner() {
       chord: false,
       radii: vec![],
       sets: vec![],
+      distance2: None,
+      flipped: false,
     })
     .unwrap();
   let plain = vol(&regenerate(&mut d).bodies[0]);

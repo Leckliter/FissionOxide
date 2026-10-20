@@ -1,6 +1,6 @@
 # 505-asymmetric-offsets: added by the parity loop from a Fusion probe
 # asymmetric-offsets: 40x30x20 box; asymmetric fillet on the top front edge, 2 mm into the top face and 6 mm down the front face.
-# Fox has no asymmetric fillet: closest is the symmetric 2 mm fillet
+# Fox measures `distance` along the edge's first face, the one whose outward normal sorts first (here the front, -y), so flipped puts it on the top as in Fusion
 # sketch Extrude1_sketch: XY
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
@@ -9,4 +9,4 @@
 {"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
-{"cmd": "fillet", "edges": [{"point": [20, 0, 20]}], "radius": 2}
+{"cmd": "fillet", "edges": [{"point": [20, 0, 20]}], "distance": 2, "distance2": 6, "flipped": true}

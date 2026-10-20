@@ -491,6 +491,7 @@ impl Ctx<'_> {
       FeatureKind::ProjectToSurface { .. } => self.apply_project(id, kind),
       FeatureKind::PathPattern { .. } => self.apply_path_pattern(id, kind),
       FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
+      FeatureKind::FullRoundFillet { sets } => self.full_round(id, sets),
       _ => Err("this feature type isn't supported".into()),
     }
   }

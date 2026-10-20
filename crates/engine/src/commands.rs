@@ -122,7 +122,7 @@ cmds! {
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
-  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
+  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius; distance2 makes it asymmetric (radius, or distance, along each edge's first face: the one whose outward normal sorts first by x, y, z; flipped swaps them); full_round replaces each centre face with a round tangent to it and its side faces", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius | distance, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?, distance2?, flipped?: bool} | {full_round: [{center: face, side_one: [face], side_two: [face]}]} (a face is {body, face} or {point, normal?})";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
@@ -764,6 +764,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip, symmetric, angle2 })
     }
     "fillet" => {
+      if p.get("full_round").is_some() {
+        let sets = crate::fillet::full_round_sets(s, p)?;
+        return add_feature(s, FeatureKind::FullRoundFillet { sets });
+      }
       let (edges, radius, sets) = crate::fillet::selection_sets(s, p)?;
       add_feature(
         s,
@@ -775,6 +779,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           chord: p.get("chord").and_then(Value::as_bool).unwrap_or(false),
           radii: crate::fillet::radius_points(p)?,
           sets,
+          distance2: opt_expr(p, "distance2"),
+          flipped: p.get("flipped").and_then(Value::as_bool).unwrap_or(false),
         },
       )
     }
