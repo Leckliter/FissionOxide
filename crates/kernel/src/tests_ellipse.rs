@@ -10,7 +10,7 @@ fn volume(s: &Shape) -> f64 {
 
 fn ellipse_loop(minor: f64) -> Loop {
   let half = |start: f64| Seg::EllipseArc { center: [5.0, 3.0], major: [0.0, 8.0], minor, start, sweep: PI };
-  Loop { segs: vec![half(0.0), half(PI)] }
+  Loop::new(vec![half(0.0), half(PI)])
 }
 
 #[test]
