@@ -88,7 +88,7 @@ cmds! {
   "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
-  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]}";
+  "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature, points?: [id], curves?: [id]} (fix takes a point or curves; delete its constraints to unfix)";
   "sketch.dimension" => "Add a driving dimension", "{type: distance|horizontal|vertical|radius|diameter|angle|point_line, points?, curves?, value: expr}";
   "sketch.set_dimension" => "Change a dimension's value (expression)", "{constraint, value}";
   "sketch.delete" => "Delete sketch geometry or constraints", "{curves?, points?, constraints?}";
@@ -2452,8 +2452,20 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
   let t = req_str(p, "type")?.to_string();
   let pts: Vec<PointId> = ids(p, "points").into_iter().map(PointId).collect();
   let cs: Vec<CurveId> = ids(p, "curves").into_iter().map(CurveId).collect();
-  let id = s.edit(move |d| {
+  let ids = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
+    // fixing curves locks every point that defines them (and a circle's radius)
+    if t == "fix" && pts.is_empty() && !cs.is_empty() {
+      let mut added = Vec::new();
+      for c in &cs {
+        added.extend(sketch.fix_curve(*c)?);
+      }
+      let r = sketch.solve();
+      if !r.ok() {
+        return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
+      }
+      return Ok(added);
+    }
     let need_p = |n: usize| -> Result<(), CmdError> {
       if pts.len() >= n { Ok(()) } else { Err(CmdError::new(format!("'{t}' needs {n} point(s)"))) }
     };
@@ -2518,9 +2530,14 @@ fn constrain(s: &mut Session, p: &Value) -> CmdResult {
     if !r.ok() {
       return Err(CmdError::new("that constraint conflicts with the others (or over-constrains the sketch)"));
     }
-    Ok(id)
+    Ok(vec![id])
   })?;
-  Ok(json!({"constraint": id.0, "dof": s.model.sketches.get(&sk).map(|r| r.report.dof)}))
+  // fixing a curve adds several constraints; "constraint" is the first
+  Ok(json!({
+    "constraint": ids.first().map(|c| c.0),
+    "constraints": ids.iter().map(|c| c.0).collect::<Vec<_>>(),
+    "dof": s.model.sketches.get(&sk).map(|r| r.report.dof),
+  }))
 }
 
 fn dimension(s: &mut Session, p: &Value) -> CmdResult {
