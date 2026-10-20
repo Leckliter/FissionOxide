@@ -1,0 +1,10 @@
+# 540-offset-plane-sides: added by the parity loop from a Fusion probe
+# offset-plane-sides: 40x20x10 block; Split Face cuts its four side faces with the plane z=4, so the body stays one piece with 10 faces
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "split_face", "faces": [{"point": [20, 0, 5]}, {"point": [40, 10, 5]}, {"point": [20, 20, 5]}, {"point": [0, 10, 5]}], "tool": {"origin": [0, 0, 4], "normal": [0, 0, 1]}}

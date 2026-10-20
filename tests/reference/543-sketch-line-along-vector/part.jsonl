@@ -1,0 +1,13 @@
+# 543-sketch-line-along-vector: added by the parity loop from a Fusion probe
+# sketch-line-along-vector: 40x20x10 block; a sketch line on XY from (5,-5) to (30,25) is projected along Z (Split Face, split type along vector) to divide the top face in two, giving 7 faces
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[5, -5], [30, 25]]}
+{"cmd": "sketch.finish"}
+{"cmd": "split_face", "faces": [{"point": [30, 5, 10]}], "tool": {"sketch": 3, "curve": 1}, "split_type": "along_vector", "direction": [0, 0, 1]}
