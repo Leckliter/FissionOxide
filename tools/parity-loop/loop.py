@@ -112,17 +112,21 @@ def cmd_summary(_):
 def cmd_batches(a):
   gaps = {}
   ledgers = both()
+  # --map groups entries by the code they touch ({key: batch}); unmapped gaps wait
+  groups = json.load(open(a.map, encoding="utf-8")) if a.map else None
   for _, entries in ledgers:
     for e in entries:
       if e["status"] in GAPS and not e.get("batch"):
-        gaps.setdefault(area(e), []).append(e)
+        g = groups.get(e["key"]) if groups is not None else area(e)
+        if g:
+          gaps.setdefault(g, []).append(e)
   os.makedirs(BATCHES, exist_ok=True)
   made = []
   for ar, items in sorted(gaps.items()):
     items.sort(key=lambda e: e.get("severity", "P9"))
     for i in range(0, len(items), a.max):
       chunk = items[i : i + a.max]
-      name = f"{ar}-{i // a.max + 1}"
+      name = ar if groups is not None else f"{ar}-{i // a.max + 1}"
       lines = [f"# Parity batch: {name}", "", "Make FissionOxide match Autodesk Fusion for each item below. Each item says what Fusion",
                "does, what FissionOxide does now, and where to start. Keep changes scoped to these items, add tests",
                "where the behaviour is testable, and run `cargo test` and `cargo clippy` before opening the PR.", ""]
@@ -176,7 +180,7 @@ def main():
     r.add_argument("--" + k)
   ad = s.add_parser("add"); ad.add_argument("area"); ad.add_argument("slug"); ad.add_argument("fusion")
   s.add_parser("summary")
-  b = s.add_parser("batches"); b.add_argument("--max", type=int, default=8)
+  b = s.add_parser("batches"); b.add_argument("--max", type=int, default=8); b.add_argument("--map")
   m = s.add_parser("mark-batch"); m.add_argument("name"); m.add_argument("status"); m.add_argument("--pr")
   a = p.parse_args()
   {"next": cmd_next, "record": cmd_record, "add": cmd_add, "summary": cmd_summary, "batches": cmd_batches, "mark-batch": cmd_mark_batch}[a.cmd](a)
