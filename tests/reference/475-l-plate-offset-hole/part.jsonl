@@ -1,0 +1,14 @@
+# 475-l-plate-offset-hole: added by the parity loop from a Fusion probe
+# l-plate-offset-hole: L plate (60x40 outline, legs 20/15) with r=4 hole at (45,7.5), extruded 8 on XY; then Center of Mass.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0]]}
+{"cmd": "sketch.line", "points": [[60, 0], [60, 15]]}
+{"cmd": "sketch.line", "points": [[60, 15], [20, 15]]}
+{"cmd": "sketch.line", "points": [[20, 15], [20, 40]]}
+{"cmd": "sketch.line", "points": [[20, 40], [0, 40]]}
+{"cmd": "sketch.line", "points": [[0, 40], [0, 0]]}
+{"cmd": "sketch.circle", "center": [45, 7.5], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[5, 5]], "distance": 8, "operation": "new_body"}
+{"cmd": "inspect.center_of_mass"}

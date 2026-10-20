@@ -170,6 +170,10 @@ Your job: change FissionOxide so these cases build and match expected.json, the 
 - The first build of a fresh target directory takes several minutes; the OpenCASCADE build is
   shared through FOX_OCCT_DIR, which is already set. Run long cargo commands in the foreground
   with a long timeout.
+- Work only in this worktree. Don't read, copy, cherry-pick, merge or rebase onto other fixers'
+  worktrees or `parity/*` branches, even when your fix builds on theirs: the driver rejects a
+  branch that carries another fixer's commits. If your fix needs a change that isn't in main yet,
+  make the smallest version of it here yourself, or report done false and name it as the blocker.
 - Keep going without asking questions. If you can't make every case pass, commit what helps,
   report done false and say what blocks the rest.
 """

@@ -1,0 +1,4 @@
+# 463-torus-cut-groove: added by the parity loop from a Fusion probe
+# torus-cut-groove: 60x60x10 block centred on the origin; torus primitive (major 20, minor 4) centred on the top face at z=10 cuts a semicircular ring groove.
+{"cmd": "box", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [0, 0], "width": 60, "depth": 60, "height": 10}
+{"cmd": "torus", "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "x": [1, 0, 0]}, "at": [0, 0], "major": 20, "minor": 4, "operation": "cut"}

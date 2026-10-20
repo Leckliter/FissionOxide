@@ -1,0 +1,9 @@
+# 290-triangle-acute-vertex: added by the parity loop from a Fusion probe
+# triangle-acute-vertex: Triangle (0,0),(40,0),(10,30); Two Distance sketch chamfer at the 45 deg (40,0) vertex: 8 along the base, 15 along the slanted side; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 5], "distance": 8, "distance2": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,237 @@
+{
+ "id": "sketch-on-plane-reversed-order",
+ "name": "sketch-on-plane-reversed-order",
+ "description": "40x30x20 box; plane through the vertices (40,0,0), (0,0,20), (0,30,0) (reversed order flips the normal); sketch on it, circle r2 at sketch (2,1), cut 6 mm along the normal (into the box).",
+ "exercises": [
+  "extrude",
+  "construction_plane three_points"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       40,
+       30
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "P3",
+   "method": "three_points",
+   "a": {
+    "vertex": [
+     40,
+     0,
+     0
+    ]
+   },
+   "b": {
+    "vertex": [
+     0,
+     0,
+     20
+    ]
+   },
+   "c": {
+    "vertex": [
+     0,
+     30,
+     0
+    ]
+   }
+  },
+  {
+   "op": "sketch",
+   "name": "Hole_sketch",
+   "plane": {
+    "ref": "construction plane P3",
+    "origin": [
+     5.901639344,
+     7.868852459,
+     11.803278689
+    ],
+    "x_dir": [
+     0.8,
+     -0.6,
+     0.0
+    ],
+    "y_dir": [
+     -0.460932768,
+     -0.614577024,
+     0.6401844
+    ],
+    "normal": [
+     -0.38411064,
+     -0.51214752,
+     -0.76822128
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       2,
+       1
+      ]
+     },
+     "radius": 2
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cut1",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Hole_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   }
+  }
+ ]
+}

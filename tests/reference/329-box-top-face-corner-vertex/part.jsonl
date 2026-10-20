@@ -1,0 +1,11 @@
+# 329-box-top-face-corner-vertex: added by the parity loop from a Fusion probe
+# box-top-face-corner-vertex: 20x10x5 box; axis normal to the top face through the corner vertex (20,10,5); body patterned 3x about it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "axis", "method": "normal", "face": {"point": [10, 5, 5], "normal": [0, 0, 1]}, "near": [20, 10, 5]}
+{"cmd": "pattern.circular", "axis": {"axis": 3}, "count": 3, "angle": "360 deg", "join": false}

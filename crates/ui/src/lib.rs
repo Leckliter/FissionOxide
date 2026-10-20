@@ -8,6 +8,7 @@
 mod assembly_forms;
 mod cam_ui;
 mod config_ui;
+mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
@@ -25,6 +26,7 @@ mod preview;
 mod select;
 mod sheet;
 mod theme;
+mod tips;
 mod toolbox;
 mod trace;
 mod updates;
@@ -57,6 +59,9 @@ pub struct App {
   pub dialog: Option<Dialog>,
   /// Status-bar message: (text, is_error).
   pub status: Option<(String, bool)>,
+  /// The status text when it is a tool's or command's hint ("select lines or two points"): it
+  /// clears when that tool or command ends, as Fusion's canvas hint does.
+  hint: Option<String>,
   pub show_params: bool,
   pub show_edges: bool,
   pub show_grid: bool,
@@ -82,6 +87,10 @@ pub struct App {
   recent: Vec<panels::Cmd>,
   /// The open S toolbox.
   toolbox: Option<toolbox::Toolbox>,
+  /// Pinned toolbar icons, the S toolbox's shortcuts and the user's keyboard shortcuts.
+  pub(crate) prefs: customize::Prefs,
+  /// The open Change Keyboard Shortcut window.
+  pub(crate) key_capture: Option<customize::KeyCapture>,
   /// The open right-click marking menu.
   marking: Option<marking::MarkingMenu>,
   /// Context-menu state: browser/timeline hover highlight, Find in Browser.
@@ -130,6 +139,8 @@ pub struct App {
   pub(crate) last_click: Option<egui::Pos2>,
   /// The Measure dialog's result line: closest points and the label.
   pub(crate) measure: Option<(fox_engine::kernel::glam::DVec3, fox_engine::kernel::glam::DVec3, String)>,
+  /// Measure's precision and units.
+  pub(crate) measure_fmt: dialogs::MeasureFmt,
   /// Section analysis: `{plane, offset, flip}` (see [`fox_engine::scene::view_options`]).
   pub section: Option<Value>,
   /// Surface analysis: `{analysis, pull?, angle?}`.
@@ -199,6 +210,7 @@ impl App {
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
+    app.prefs = customize::Prefs::load();
     // the first start puts the fox in 3D in the hub, and shows it unless a file was asked for
     let welcome = fox_engine::hub::add_welcome(&app.hub_root()).unwrap_or_else(|e| {
       log::warn!("couldn't add the welcome design to the hub: {}", e.0);
@@ -265,6 +277,7 @@ impl App {
       tool: Tool::Select,
       dialog: None,
       status: None,
+      hint: None,
       show_params: false,
       drawing: None,
       sheet_cache: None,
@@ -284,6 +297,8 @@ impl App {
       last_cmd: None,
       recent: Vec::new(),
       toolbox: None,
+      prefs: customize::Prefs::default(),
+      key_capture: None,
       marking: None,
       ctx_menu: marking::MenuState::default(),
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
@@ -306,6 +321,7 @@ impl App {
       other: None,
       last_click: None,
       measure: None,
+      measure_fmt: dialogs::MeasureFmt::default(),
       section: None,
       analysis: None,
       rebuild: None,
@@ -352,6 +368,22 @@ impl App {
       });
     }
     self.rebuild.is_some()
+  }
+
+  /// Shows a tool's or command's hint at the lower left of the canvas until it ends.
+  pub(crate) fn hint(&mut self, msg: impl Into<String>) {
+    let msg = msg.into();
+    self.status = Some((msg.clone(), false));
+    self.hint = Some(msg);
+  }
+
+  /// Clears the hint of the tool or command that ended (other status messages stay).
+  pub(crate) fn end_hint(&mut self) {
+    if let Some(h) = self.hint.take()
+      && self.status.as_ref().is_some_and(|(t, err)| !err && *t == h)
+    {
+      self.status = None;
+    }
   }
 
   /// Runs a command, reporting errors in the status bar. Returns the result on success.
@@ -683,6 +715,10 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
+    if self.key_capture.is_some() {
+      // Change Keyboard Shortcut takes the keys
+      return;
+    }
     if ctx.egui_wants_keyboard_input() {
       // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
       if self.dialog.is_some()
@@ -696,6 +732,10 @@ impl App {
       return;
     }
     use egui::{Key, Modifiers};
+    // commands with two or more modifiers first: Ctrl+S would take Ctrl+Alt+S too
+    if self.command_keys(ctx, true) {
+      return;
+    }
     let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
     if pressed(Key::Z, Modifiers::COMMAND) {
       self.cancel_dialog();
@@ -716,15 +756,6 @@ impl App {
     if pressed(Key::N, Modifiers::COMMAND) {
       self.new_design();
     }
-    if pressed(Key::G, Modifiers::COMMAND) && self.manufacture {
-      self.cam_generate(true);
-    }
-    if pressed(Key::B, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run_background("compute_all", json!({}));
-    }
-    if pressed(Key::A, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run("select.all", json!({}));
-    }
     if pressed(Key::Escape, Modifiers::NONE) {
       if self.marking.is_some() {
         self.marking = None;
@@ -734,8 +765,10 @@ impl App {
         self.nav_mode = None;
       } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
       } else if !self.tstate.is_empty() {
+        self.end_hint();
         viewport::reset_tool_state(self);
       } else if self.tool != Tool::Select {
+        self.end_hint();
         self.tool = Tool::Select;
       } else if self.dialog.is_some() {
         self.cancel_dialog();
@@ -756,13 +789,15 @@ impl App {
       return;
     }
     if self.drawing.is_some() {
-      // the model's shortcuts don't apply on a drawing sheet
+      // the model's shortcuts don't apply on a drawing sheet; its own commands' do
+      self.command_keys(ctx, false);
       return;
     }
     if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
       viewport::finish_spline(self);
     }
-    if pressed(Key::Delete, Modifiers::NONE) || pressed(Key::Backspace, Modifiers::NONE) {
+    // Del is Delete's key in the map; Backspace always deletes too
+    if pressed(Key::Backspace, Modifiers::NONE) {
       self.delete_selection();
     }
     if pressed(Key::F6, Modifiers::NONE) {
@@ -774,56 +809,52 @@ impl App {
     if pressed(Key::V, Modifiers::NONE) {
       self.toggle_visibility();
     }
+    // the toolbar commands' keys: E extrude, L line, … (in a sketch, E finishes it first)
+    self.command_keys(ctx, false);
+    if self.s.edit_sketch.is_some() && pressed(Key::X, Modifiers::NONE) {
+      self.toggle_construction();
+    }
+  }
+
+  /// Runs the toolbar command whose keyboard shortcut was pressed: the user's keys over the
+  /// menus' defaults, looked up on the open sketch's toolbar first, then the tab's, then the rest
+  /// of the workspace's (so in a sketch A is Arc, elsewhere Appearance). `specific` looks only at
+  /// keys with two or more modifiers. Returns whether one ran.
+  fn command_keys(&mut self, ctx: &egui::Context, specific: bool) -> bool {
+    use egui::{Key, Modifiers};
     use panels::Cmd;
-    let sketching = self.s.edit_sketch.is_some();
-    // modelling commands; in a sketch they finish it first (E extrudes its profiles), except A,
-    // which is the sketch's Arc
-    for (k, d) in [
-      (Key::E, dialogs::Kind::Extrude),
-      (Key::F, dialogs::Kind::Fillet),
-      (Key::M, dialogs::Kind::Move),
-      (Key::I, dialogs::Kind::Inspect),
-      (Key::H, dialogs::Kind::Hole),
-      (Key::Q, dialogs::Kind::PressPull),
-      (Key::J, dialogs::Kind::Joint),
-    ] {
-      if pressed(k, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(d));
-      }
+    if !ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }))) {
+      return false;
     }
-    if sketching {
-      for (k, t) in [
-        (Key::L, Tool::Line),
-        (Key::R, Tool::Rect),
-        (Key::C, Tool::Circle),
-        (Key::A, Tool::Arc3),
-        (Key::P, Tool::Point),
-        (Key::D, Tool::Dimension),
-        (Key::T, Tool::Trim),
-      ] {
-        if pressed(k, Modifiers::NONE) {
-          self.launch(Cmd::SketchTool(t));
-        }
-      }
-      if pressed(Key::X, Modifiers::NONE) {
-        self.toggle_construction();
-      }
-      if pressed(Key::O, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::SkOffset));
-      }
+    let count = |m: Modifiers| m.command as u8 + m.shift as u8 + m.alt as u8;
+    let tabs = if self.manufacture && self.drawing.is_none() {
+      vec![panels::Tab::Milling, panels::Tab::Utilities]
     } else {
-      if pressed(Key::A, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::Form(&forms::APPEARANCE)));
-      }
-      // window, freeform and paint selection
-      for (k, m) in
-        [(Key::Num1, select::Mode::Window), (Key::Num2, select::Mode::Freeform), (Key::Num3, select::Mode::Paint)]
+      toolbox::workspace_tabs(self)
+    };
+    let mut keys: Vec<(Modifiers, Key, Cmd)> = Vec::new();
+    for e in menus::commands(&tabs) {
+      let key = menus::key_of(&self.prefs, tips::Scope::of(e.tab), e.label);
+      if let Some((m, k)) = customize::parse_combo(key)
+        && (!specific || count(m) >= 2)
+        && !keys.iter().any(|(m2, k2, _)| (*m2, *k2) == (m, k))
       {
-        if pressed(k, Modifiers::NONE) {
-          self.sel_mode = m;
-        }
+        keys.push((m, k, e.cmd));
       }
     }
+    // a key matches with Shift or Alt held too, so Shift+E is looked for before E
+    keys.sort_by_key(|(m, ..)| std::cmp::Reverse(count(*m)));
+    for (m, k, c) in keys {
+      if ctx.input_mut(|i| i.consume_key(m, k)) {
+        match c {
+          // these work in a sketch without finishing it
+          Cmd::Delete | Cmd::ComputeAll => c.run(self),
+          _ => self.launch(c),
+        }
+        return true;
+      }
+    }
+    false
   }
 
   /// Switches to the Drawing workspace: the last drawing, or Create Drawing when there is none.
@@ -865,6 +896,7 @@ impl App {
   }
 
   pub fn set_tool(&mut self, t: Tool) {
+    self.end_hint();
     self.tool = t;
     self.drag = None;
     viewport::reset_tool_state(self);
@@ -905,7 +937,7 @@ impl App {
       }
     }
     if bodies.is_empty() {
-      self.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+      self.hint("Show/Hide: select bodies, faces or edges first");
       return;
     }
     for b in bodies {
@@ -916,6 +948,7 @@ impl App {
   }
 
   pub fn start(&mut self, kind: dialogs::Kind) {
+    self.end_hint();
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
@@ -948,6 +981,7 @@ impl App {
   pub fn cancel_dialog(&mut self) {
     if let Some(mut d) = self.dialog.take() {
       d.cancel(&mut self.s);
+      d.leave(self);
     }
   }
 
@@ -1000,7 +1034,7 @@ impl App {
       self.tab = panels::Tab::Sketch;
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
-      self.status = Some((SKETCHING.into(), false));
+      self.hint(SKETCHING);
     }
   }
 
@@ -1019,6 +1053,7 @@ impl App {
   }
 
   pub fn finish_sketch(&mut self) {
+    self.end_hint();
     self.last_sketch = self.s.edit_sketch;
     self.left_sketch();
     self.run("sketch.finish", json!({}));
@@ -1047,6 +1082,35 @@ impl App {
     if to != self.cam {
       self.cam_move = Some((self.cam, to, now()));
     }
+  }
+
+  /// Named Views > New Named View: saves where the camera is (or is headed) in the design.
+  /// Returns the new view's name.
+  pub(crate) fn save_named_view(&mut self) -> Option<String> {
+    let c = self.view_now();
+    let r = self.run(
+      "view.named.save",
+      json!({"target": c.target, "yaw": c.yaw, "pitch": c.pitch, "distance": c.distance, "fov": c.fov, "ortho": c.ortho}),
+    )?;
+    let name = r.get("name").and_then(Value::as_str)?.to_string();
+    self.status = Some((format!("Saved the view as '{name}'"), false));
+    Some(name)
+  }
+
+  /// Flies the camera to a named view (a browser double-click).
+  pub(crate) fn restore_named_view(&mut self, name: &str) {
+    let Some(v) = self.s.design.named_views.iter().find(|v| v.name == name) else { return };
+    // a named view doesn't keep the camera's roll: it comes back upright
+    let to = Camera {
+      target: v.target,
+      yaw: v.yaw,
+      pitch: v.pitch,
+      distance: v.distance,
+      fov: v.fov,
+      ortho: v.ortho,
+      roll: 0.0,
+    };
+    self.fly_to(to);
   }
 
   /// Stops a camera move where it is (the user took the camera).
@@ -1103,7 +1167,7 @@ impl App {
         let to = self.looking_along(n);
         self.fly_to(to);
       }
-      None => self.status = Some(("Look At: select a planar face".into(), false)),
+      None => self.hint("Look At: select a planar face"),
     }
   }
 
@@ -1219,6 +1283,7 @@ impl App {
         panels::comments(self, &ctx);
       }
       panels::browser(self, &ctx);
+      panels::isolate_banner(self, &ctx);
       if self.show_navbar {
         panels::nav_bar(self, &ctx);
       }
@@ -1235,6 +1300,8 @@ impl App {
       let keep = d.show(self, &ctx);
       if keep && self.dialog.is_none() {
         self.dialog = Some(d);
+      } else {
+        d.leave(self);
       }
     }
     if self.show_params {
@@ -1242,6 +1309,7 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);
+    customize::key_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
@@ -1552,6 +1620,23 @@ mod tests {
   }
 
   #[test]
+  fn changed_keys_run_their_commands() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    app.prefs.keys.set("design.Extrude", "G", "E");
+    press(&mut app, &ctx, egui::Key::E, mid);
+    assert!(app.dialog.is_none());
+    press(&mut app, &ctx, egui::Key::G, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Extrude));
+    // a captured key goes to Change Keyboard Shortcut, not to the commands
+    app.cancel_dialog();
+    app.key_capture = Some(customize::KeyCapture::for_test());
+    press(&mut app, &ctx, egui::Key::G, mid);
+    assert!(app.dialog.is_none());
+  }
+
+  #[test]
   fn v_hides_and_shows_the_selected_face_body() {
     let ctx = egui::Context::default();
     let mut app = with_box();
@@ -1598,5 +1683,38 @@ mod tests {
     assert!((v - 3000.0).abs() < 1e-6, "{v}");
     app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
     assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
+  }
+
+  #[test]
+  fn the_sketch_palette_stacks_below_a_command_dialog() {
+    let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+    let home = panels::palette_pos(canvas, None);
+    assert_eq!(home, egui::pos2(1166.0, 190.0));
+    // the OFFSET dialog sits where the palette goes: the palette moves below it
+    let dialog = egui::Rect::from_min_max(egui::pos2(866.0, 190.0), egui::pos2(1166.0, 330.0));
+    assert_eq!(panels::palette_pos(canvas, Some(dialog)), egui::pos2(1166.0, 338.0));
+    // a dialog dragged elsewhere leaves it be
+    let moved = dialog.translate(egui::vec2(-600.0, 0.0));
+    assert_eq!(panels::palette_pos(canvas, Some(moved)), home);
+  }
+
+  #[test]
+  fn a_tool_hint_clears_when_the_tool_ends() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    // Horizontal/Vertical with nothing selected asks for lines
+    panels::Cmd::Constraint("hv").run(&mut app);
+    assert!(app.status.as_ref().is_some_and(|s| s.0.starts_with("Horizontal/Vertical")));
+    // picking a tool ends it: the canvas hint describes the tool again
+    app.set_tool(Tool::Trim);
+    assert!(app.status.is_none(), "{:?}", app.status);
+    panels::Cmd::Constraint("hv").run(&mut app);
+    app.finish_sketch();
+    assert!(app.status.is_none(), "no stale hint after Finish Sketch: {:?}", app.status);
+    // other messages stay
+    app.hint("Look At: select a planar face");
+    app.status = Some(("Saved".into(), false));
+    app.end_hint();
+    assert_eq!(app.status, Some(("Saved".into(), false)));
   }
 }
