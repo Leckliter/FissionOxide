@@ -18,6 +18,7 @@ mod ply;
 mod stl;
 pub mod svg;
 mod threemf;
+pub mod tsm;
 mod usdz;
 
 pub use glb::write_glb;
@@ -97,6 +98,7 @@ formats! {
   "obj", "OBJ mesh", ["obj"], Mesh, true, true, "Wavefront OBJ";
   "3mf", "3MF", ["3mf"], Mesh, true, true, "3D Manufacturing Format (3D printing)";
   "ply", "PLY mesh", ["ply"], Mesh, true, true, "ASCII or binary";
+  "tsm", "T-Spline Mesh", ["tsm"], Brep, true, false, "T-spline control cage (Fusion's Insert T-Spline): its smooth limit surface becomes a body";
   "glb", "glTF binary", ["glb"], Mesh, false, true, "Metres, Y-up, for web and AR viewers";
   "usdz", "USDZ", ["usdz"], Mesh, false, true, "Universal Scene Description package (ASCII layer)";
   "dxf", "DXF", ["dxf"], Sketch, true, true, "2D: imports into a new sketch; exports the active or last sketch";

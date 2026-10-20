@@ -37,6 +37,7 @@ cmds! {
   "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool}";
   "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
   "formats" => "Every file format with import/export support", "{}";
+  "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";
   "inspect" => "Describe a file without opening it (Fusion .f3d contents, mesh sizes, DXF entities)", "{path}";
   "hub.info" => "Data hub location and totals; the hub item the design is linked to", "{}";
   "hub.projects" => "List projects", "{}";
@@ -407,6 +408,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       crate::files::import(s, &path, p)
     }
     "formats" => Ok(json!(fox_exchange::FORMATS)),
+    "form.insert_tsm" => crate::files::insert_tsm(s, p),
     "inspect" => crate::files::inspect(&PathBuf::from(req_str(p, "path")?)),
     n if n.starts_with("hub.") => crate::hub::run(s, n, p),
     "compute_all" => {

@@ -1,4 +1,5 @@
-//! B-spline faces for form (T-spline / subdivision) bodies (C++ in `cpp/form.cpp`).
+//! B-spline faces for form (T-spline / subdivision) bodies and for Insert T-Spline (C++ in
+//! `cpp/form.cpp`).
 
 use glam::DVec3;
 
@@ -34,5 +35,21 @@ impl Shape {
       u32::try_from(nv).map_err(|_| KernelError::Input("too many poles".into()))?,
     );
     Shape::wrap(sys::bspline_face(s.degree, nu, nv, &poles, &s.u_knots, &s.u_mults, &s.v_knots, &s.v_mults)?)
+  }
+}
+
+impl Shape {
+  /// A face on the bicubic B-spline surface through a grid of `rows × cols` points (row by row)
+  /// at uniform parameters. A face's edges depend only on its boundary points, so faces whose
+  /// grids share a side sew together exactly.
+  pub fn through_grid(points: &[DVec3], rows: usize, cols: usize) -> Result<Shape> {
+    if rows < 2 || cols < 2 || points.len() != rows * cols {
+      return Err(KernelError::Input("the grid needs at least 2 × 2 points".into()));
+    }
+    let flat: Vec<f64> = points.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+    if flat.iter().any(|v| !v.is_finite()) {
+      return Err(KernelError::Input("non-finite grid points".into()));
+    }
+    Shape::wrap(sys::grid_face(&flat, rows as u32, cols as u32)?)
   }
 }

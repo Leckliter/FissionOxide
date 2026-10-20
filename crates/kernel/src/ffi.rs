@@ -213,7 +213,8 @@ pub(crate) mod ffi {
       vknots: &[f64],
       vmults: &[u32],
     ) -> Result<UniquePtr<Shape>>;
-
+    // Insert T-Spline faces
+    fn grid_face(points: &[f64], rows: u32, cols: u32) -> Result<UniquePtr<Shape>>;
 
     // Project To Surface and pipes along the 3D wires it gives (cpp/project.cpp)
     include!("fox-kernel/cpp/project.hxx");

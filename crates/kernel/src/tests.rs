@@ -346,3 +346,40 @@ fn a_quintic_spline_is_one_exact_edge() {
   let path = Shape::path(&Plane::XY, &segs[..2]).unwrap();
   assert_eq!(path.edges().unwrap().len(), 2);
 }
+
+/// Six grids on the faces of a cube, `n × n` points each, optionally pushed out onto a sphere.
+fn cube_grids(n: usize, sphere: bool) -> Vec<Vec<DVec3>> {
+  let axes = [DVec3::X, DVec3::Y, DVec3::Z];
+  let mut out = Vec::new();
+  for k in 0..3 {
+    for sign in [1.0, -1.0] {
+      let normal = axes[k] * sign;
+      let u = axes[(k + 1) % 3] * sign;
+      let v = normal.cross(u);
+      let mut pts = Vec::new();
+      for j in 0..n {
+        for i in 0..n {
+          let s = |t: usize| 2.0 * t as f64 / (n - 1) as f64 - 1.0;
+          let p = normal + u * s(i) + v * s(j);
+          pts.push(if sphere { p.normalize() * 10.0 } else { p * 5.0 });
+        }
+      }
+      out.push(pts);
+    }
+  }
+  out
+}
+
+#[test]
+fn grid_faces_sew_into_solids() {
+  for (sphere, want) in [(false, 1000.0), (true, 4.0 / 3.0 * std::f64::consts::PI * 1000.0)] {
+    let faces: Vec<Shape> = cube_grids(9, sphere).iter().map(|g| Shape::through_grid(g, 9, 9).unwrap()).collect();
+    let solid = Shape::compound(&faces).unwrap().sewn(1e-4).unwrap();
+    assert_eq!(solid.solid_count(), 1);
+    assert!(solid.is_valid());
+    assert_eq!(solid.faces().unwrap().len(), 6);
+    let v = volume(&solid);
+    assert!((v - want).abs() < want * 2e-3, "{v} vs {want}");
+  }
+  assert!(Shape::through_grid(&[DVec3::ZERO; 3], 1, 3).is_err());
+}
