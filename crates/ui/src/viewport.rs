@@ -12,6 +12,7 @@ use fox_engine::sketch::{ConstraintKind, CurveKind, PointId, Sketch};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
+use crate::preferences::NavAction;
 use crate::{App, RenderKey};
 
 /// Screen-space snap radius for sketch points (points, logical pixels).
@@ -314,27 +315,36 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     && let Some(p) = resp.interact_pointer_pos()
   {
     crate::marking::open(app, p);
-  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp) {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
 
 // ---------------------------------------------------------------- camera
 
+/// A left drag moving the camera (the Alias preset's Shift+Alt+left orbit): it selects nothing.
+fn left_navigating(app: &App, resp: &egui::Response) -> bool {
+  matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom))
+    && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped_by(egui::PointerButton::Primary))
+}
+
 fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
-  let (shift, scroll, zoom) = ctx.input(|i| (i.modifiers.shift, i.smooth_scroll_delta(), i.zoom_delta()));
+  let (mods, scroll, zoom) = ctx.input(|i| (i.modifiers, i.smooth_scroll_delta(), i.zoom_delta()));
+  // Preferences → Navigation: the preset's buttons, the zoom direction, zooming to the cursor
+  let prefs = &app.preferences.values;
+  let (preset, zoom_sign, to_cursor) = (prefs.nav, if prefs.reverse_zoom { -1.0 } else { 1.0 }, prefs.zoom_to_cursor);
   // the canvas still zooms with the pointer over its own overlays (the ViewCube), not over
   // panels and dialogs drawn above it
   if ctx.rect_contains_pointer(resp.layer_id, resp.rect) {
     let mut factor = 1.0;
     if scroll.y.abs() > 0.0 {
-      factor *= (-scroll.y as f64 * 0.0015).exp();
+      factor *= (-scroll.y as f64 * 0.0015 * zoom_sign).exp();
     }
     if (zoom - 1.0).abs() > 1e-4 {
       factor /= zoom as f64;
     }
     if (factor - 1.0f64).abs() > 1e-6 {
-      let toward = ctx.pointer_latest_pos().and_then(|p| {
+      let toward = ctx.pointer_latest_pos().filter(|_| to_cursor).and_then(|p| {
         let (o, d) = view.ray(&app.cam, p);
         let (_, _, back) = app.cam.basis();
         ray_plane(o, d, DVec3::from(app.cam.target), back)
@@ -343,11 +353,16 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       app.cam.zoom(factor, toward);
     }
   }
-  if resp.drag_started_by(egui::PointerButton::Secondary) {
-    app.drag = Some(if shift { Drag::Pan } else { Drag::Orbit });
-  }
-  if resp.drag_started_by(egui::PointerButton::Middle) {
-    app.drag = Some(if shift { Drag::Orbit } else { Drag::Pan });
+  for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+    if resp.drag_started_by(button)
+      && let Some(action) = preset.action(button, mods)
+    {
+      app.drag = Some(match action {
+        NavAction::Orbit => Drag::Orbit,
+        NavAction::Pan => Drag::Pan,
+        NavAction::Zoom => Drag::Zoom,
+      });
+    }
   }
   if let Some(mode) = app.nav_mode
     && resp.drag_started_by(egui::PointerButton::Primary)
@@ -373,7 +388,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
     Some(Drag::Orbit) if app.free_orbit => app.cam.free_orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
-    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006).exp(), None),
+    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006 * zoom_sign).exp(), None),
     _ => {}
   }
   if resp.drag_stopped()

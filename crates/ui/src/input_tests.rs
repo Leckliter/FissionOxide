@@ -303,3 +303,56 @@ fn ctrl_s_in_a_test_saves_to_a_scratch_hub() {
   let index = std::fs::read_to_string(root.join("hub.json")).expect("the scratch hub has the design");
   assert!(index.contains("Untitled"), "{index}");
 }
+
+impl Harness {
+  /// A drag with `button` and `modifiers` held, across the middle of the canvas.
+  fn drag_with(&mut self, button: egui::PointerButton, modifiers: egui::Modifiers) {
+    let a = self.app.canvas.center() + vec2(-80.0, 40.0);
+    let b = a + vec2(90.0, -40.0);
+    let press = |pos, pressed| Event::PointerButton { pos, button, pressed, modifiers };
+    self.frame(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(a)]);
+    self.frame(vec![press(a, true)]);
+    for i in 1..=6 {
+      self.frame(vec![Event::PointerMoved(a + (b - a) * i as f32 / 6.0)]);
+    }
+    self.frame(vec![press(b, false)]);
+    self.frame(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+  }
+}
+
+/// What a drag did to the camera: (turned, panned, zoomed).
+fn camera_change(before: fox_engine::render::Camera, after: fox_engine::render::Camera) -> (bool, bool, bool) {
+  let turned = (before.yaw - after.yaw).abs() > 1e-6 || (before.pitch - after.pitch).abs() > 1e-6;
+  let zoomed = (before.distance - after.distance).abs() > 1e-6;
+  (turned, before.target != after.target && !turned && !zoomed, zoomed)
+}
+
+#[test]
+fn the_navigation_preset_drives_the_mouse_buttons() {
+  use crate::preferences::NavPreset;
+  use egui::{Modifiers, PointerButton::*};
+  let mut h = Harness::new();
+  let orbit = (true, false, false);
+  let pan = (false, true, false);
+  let zoom = (false, false, true);
+  let cases = [
+    (NavPreset::Fusion, Middle, Modifiers::NONE, pan),
+    (NavPreset::Fusion, Middle, Modifiers::SHIFT, orbit),
+    (NavPreset::Fusion, Secondary, Modifiers::NONE, orbit),
+    (NavPreset::SolidWorks, Middle, Modifiers::NONE, orbit),
+    (NavPreset::SolidWorks, Middle, Modifiers::CTRL, pan),
+    (NavPreset::SolidWorks, Middle, Modifiers::SHIFT, zoom),
+    (NavPreset::Inventor, Middle, Modifiers::NONE, pan),
+    (NavPreset::Inventor, Middle, Modifiers::SHIFT, orbit),
+    (NavPreset::Alias, Primary, Modifiers::SHIFT | Modifiers::ALT, orbit),
+    (NavPreset::Alias, Middle, Modifiers::SHIFT | Modifiers::ALT, pan),
+  ];
+  for (preset, button, mods, want) in cases {
+    h.app.preferences.values.nav = preset;
+    h.app.cam = fox_engine::render::Camera::default();
+    let before = h.app.cam;
+    h.drag_with(button, mods);
+    assert_eq!(camera_change(before, h.app.cam), want, "{preset:?} {button:?} {mods:?}");
+    assert!(h.app.drag.is_none() && h.app.s.selection.is_empty(), "no selection box");
+  }
+}

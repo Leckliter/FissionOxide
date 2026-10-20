@@ -17,6 +17,7 @@ mod features;
 pub mod files;
 mod fillet;
 mod form;
+pub mod history;
 pub mod hub;
 mod inspect;
 mod mates;
