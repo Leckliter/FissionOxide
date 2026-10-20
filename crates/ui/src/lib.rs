@@ -103,6 +103,12 @@ pub struct App {
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
   /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
   pub(crate) picked_plane: Option<Value>,
+  /// Origin planes shown in the viewport (the browser's Show/Hide), as `sketch.create` planes.
+  pub(crate) shown_planes: Vec<Value>,
+  /// Sketches whose profiles the browser's Hide Profile turned off.
+  pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
+  /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
+  pub(crate) shown_dims: Vec<fox_engine::model::FeatureId>,
   /// The data panel (projects, designs, versions).
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
@@ -170,6 +176,7 @@ struct RenderKey {
   show_grid: bool,
   visible: Vec<(u32, bool)>,
   profiles_of: Vec<fox_engine::model::FeatureId>,
+  hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Section and analysis settings.
   view: Value,
   /// Body vertices drawn (the Vertices selection filter).
@@ -275,6 +282,9 @@ impl App {
       cam_move: None,
       pre_sketch_cam: None,
       picked_plane: None,
+      shown_planes: Vec::new(),
+      hidden_profiles: Vec::new(),
+      shown_dims: Vec::new(),
       data: data_panel::DataPanel::default(),
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
@@ -970,9 +980,16 @@ impl App {
   }
 
   fn look_at_sketch(&mut self) {
-    let Some(r) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)) else { return };
-    let n = r.plane.normal();
-    let o = r.plane.origin;
+    let Some(plane) = self.s.edit_sketch.and_then(|e| self.s.model.sketches.get(&e)).map(|r| r.plane) else {
+      return;
+    };
+    self.look_at_plane(&plane);
+  }
+
+  /// Turns the camera to look straight at a plane (a sketch's, or an origin plane).
+  pub(crate) fn look_at_plane(&mut self, plane: &fox_engine::kernel::Plane) {
+    let n = plane.normal();
+    let o = plane.origin;
     let mut to = self.looking_along(n);
     if self.s.model.bodies.is_empty() {
       to.target = o.to_array();
