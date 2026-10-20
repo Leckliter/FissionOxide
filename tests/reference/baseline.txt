@@ -96,6 +96,9 @@
 119-midpoint-point-on-line
 120-midpoint-line-on-origin
 121-midpoint-point-on-arc
+122-perpendicular-opposite-lines
+123-perpendicular-line-arc-sector
+124-perpendicular-line-circle-center
 125-symmetric-points-vertical-axis
 126-symmetric-points-slanted-axis
 127-symmetric-lines-trapezoid

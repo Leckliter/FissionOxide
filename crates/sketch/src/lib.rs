@@ -215,6 +215,7 @@ pub enum ConstraintKind {
     a: CurveId,
     b: CurveId,
   },
+  /// Two lines at 90°, or a line normal to a circle/arc (the extended line runs through its centre).
   Perpendicular {
     a: CurveId,
     b: CurveId,
@@ -835,7 +836,22 @@ impl Sketch {
       ConstraintKind::Horizontal { line: l } => line(*l, "Horizontal"),
       ConstraintKind::Vertical { line: l } => line(*l, "Vertical"),
       ConstraintKind::Parallel { a, b } => line(*a, "Parallel").and(line(*b, "Parallel")),
-      ConstraintKind::Perpendicular { a, b } => line(*a, "Perpendicular").and(line(*b, "Perpendicular")),
+      ConstraintKind::Perpendicular { a, b } => {
+        // a line and a circle/arc: the line is normal to the curve, i.e. runs through its centre
+        let is_round =
+          |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        if is_round(*a) || is_round(*b) {
+          let l = if is_round(*a) { *b } else { *a };
+          line(l, "Perpendicular").map_err(|e| match e {
+            SketchError::WrongGeometry(..) => {
+              SketchError::WrongGeometry("Perpendicular", "two lines, or a line and a circle or arc")
+            }
+            e => e,
+          })
+        } else {
+          line(*a, "Perpendicular").and(line(*b, "Perpendicular"))
+        }
+      }
       ConstraintKind::Collinear { a, b } => line(*a, "Collinear").and(line(*b, "Collinear")),
       ConstraintKind::Angle { a, b, .. } => line(*a, "Angle").and(line(*b, "Angle")),
       ConstraintKind::Midpoint { line: l, .. } => match self.curve(*l).map(|c| &c.kind) {
