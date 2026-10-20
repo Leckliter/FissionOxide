@@ -114,6 +114,7 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
+  "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -579,6 +580,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.pattern_rect"
     | "sketch.pattern_circ" => modify(s, name, p),
     "sketch.project" => project(s, p),
+    "sketch.spun_profile" => spun_profile(s, p),
     "extrude" => {
       let sk = sketch_for_feature(s, p)?;
       let profiles = profile_points(s, sk, p)?;
@@ -2058,6 +2060,80 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
   Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
 }
 
+/// Fusion's Spun Profile: the outline bodies sweep through as they turn about an axis, drawn on
+/// one side of the axis (the bodies' side, or the other with `flip`). The curves follow the bodies.
+fn spun_profile(s: &mut Session, p: &Value) -> CmdResult {
+  use fox_sketch::SpunAxis;
+  let sk = sketch_id(s, p)?;
+  let r = s.model.sketches.get(&sk).ok_or(CmdError::new("the sketch failed to build"))?;
+  let plane = r.plane;
+  let list = p.get("bodies").and_then(Value::as_array).ok_or(CmdError::new("missing 'bodies'"))?;
+  let mut bodies = Vec::new();
+  for v in list {
+    let b = match v {
+      Value::String(n) => s.model.bodies.iter().find(|b| b.name == *n),
+      _ => v.as_u64().and_then(|i| u32::try_from(i).ok()).and_then(|i| s.model.body(BodyId(i))),
+    };
+    bodies.push(b.ok_or_else(|| CmdError::new(format!("no body {v}")))?.id.0);
+  }
+  if bodies.is_empty() {
+    return Err(CmdError::new("no bodies to spin"));
+  }
+  let world = |o: DVec3, d: DVec3| SpunAxis::World { origin: o.to_array(), dir: d.to_array() };
+  let av = p.get("axis").ok_or(CmdError::new("missing 'axis'"))?;
+  let axis = match axis_ref(s, av)? {
+    AxisRef::X => world(DVec3::ZERO, DVec3::X),
+    AxisRef::Y => world(DVec3::ZERO, DVec3::Y),
+    AxisRef::Z => world(DVec3::ZERO, DVec3::Z),
+    AxisRef::SketchLine { curve } => match r.sketch.curve(curve).map(|c| &c.kind) {
+      Some(CurveKind::Line { .. }) => SpunAxis::Line { curve },
+      _ => return Err(CmdError::new("the axis must be a line of this sketch")),
+    },
+    AxisRef::Construction { feature } => {
+      let (o, d) = s.model.axes.get(&feature).copied().ok_or(CmdError::new("that construction axis failed"))?;
+      world(o, d)
+    }
+    AxisRef::Edge { edge } => {
+      let b = s.model.body(edge.body).ok_or(CmdError::new("no such body"))?;
+      let eid = req_u32(av, "edge")?;
+      let e = b.edges().iter().find(|e| e.id == eid).ok_or(CmdError::new("no such edge"))?;
+      match e.kind {
+        fox_kernel::CurveKind::Line => world(e.start, e.end - e.start),
+        fox_kernel::CurveKind::Circle => world(e.center, e.axis),
+        _ => return Err(CmdError::new("the axis edge is not straight or circular")),
+      }
+    }
+  };
+  let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+  let centerline = p.get("centerline").and_then(Value::as_bool).unwrap_or(true);
+  // trace it now, so a body that can't be traced is an error rather than an empty sketch
+  let (o, d) = match &axis {
+    SpunAxis::World { origin, dir } => (DVec3::from(*origin), DVec3::from(*dir)),
+    SpunAxis::Line { curve } => {
+      let Some(CurveKind::Line { a, b }) = r.sketch.curve(*curve).map(|c| &c.kind) else {
+        return Err(CmdError::new("the axis must be a line of this sketch"));
+      };
+      let (Some(pa), Some(pb)) = (r.sketch.pos(*a), r.sketch.pos(*b)) else {
+        return Err(CmdError::new("the axis line has no ends"));
+      };
+      (plane.to_world(pa), plane.to_world(pb) - plane.to_world(pa))
+    }
+  };
+  let shapes: Vec<&fox_kernel::Shape> =
+    bodies.iter().filter_map(|b| s.model.body(BodyId(*b))).map(|b| &b.shape).collect();
+  let outline = fox_model::regen::spun_outline(&shapes, o, d, &plane, flip, centerline).map_err(CmdError::new)?;
+  let id = s.edit(move |d| {
+    let sketch = d.sketch_mut(sk)?;
+    let id = sketch.add_spun(bodies, axis, flip, centerline);
+    sketch.set_spun_outline(id, outline)?;
+    Ok(id)
+  })?;
+  let r = s.model.sketches.get(&sk);
+  let curves =
+    r.and_then(|r| r.sketch.spun(id)).map(|x| x.curves.iter().map(|c| c.0).collect::<Vec<_>>()).unwrap_or_default();
+  let profiles = r.map(|r| r.profiles.len()).unwrap_or(0);
+  Ok(json!({"spun": id.0, "curves": curves, "profiles": profiles}))
+}
 // ---------------------------------------------------------------- sketch drawing
 
 fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {

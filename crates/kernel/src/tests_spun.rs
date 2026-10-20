@@ -26,13 +26,3 @@ fn sphere_spans_about_an_offset_axis() {
   assert!((sl[0][0].0 - (15.0 - rho)).abs() < 1e-6 && (sl[0][0].1 - (15.0 + rho)).abs() < 1e-6, "{sl:?}");
   assert!((sl[1][0].0 - 10.0).abs() < 1e-6 && (sl[1][0].1 - 20.0).abs() < 1e-6, "{sl:?}");
 }
-
-#[test]
-fn probe_tmp() {
-  let s = Shape::sphere(DVec3::new(15.0, 0.0, 5.0), 5.0).unwrap();
-  let b = Shape::make_box(DVec3::new(10.0, -5.0, 0.0), DVec3::new(20.0, 5.0, 10.0)).unwrap();
-  let ts = [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-10, 0.0, 10.0 - 1e-6];
-  println!("sphere {:?}", s.radial_slices(DVec3::ZERO, DVec3::Z, &ts).unwrap());
-  println!("box {:?}", b.radial_slices(DVec3::ZERO, DVec3::Z, &ts).unwrap());
-  println!("ev {:?}", s.axial_events(DVec3::ZERO, DVec3::Z).unwrap());
-}

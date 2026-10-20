@@ -34,7 +34,7 @@ impl Shape {
     let bad = || KernelError::Kernel("malformed axial events".into());
     let n = *v.get(2).ok_or_else(bad)? as usize;
     let stations = v.get(3..3 + n).ok_or_else(bad)?.to_vec();
-    let vertices = v[3 + n..].chunks_exact(2).map(|c| (c[0], c[1])).collect();
+    let vertices = v[3 + n..].as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect();
     Ok(AxialEvents { tmin: v[0], tmax: v[1], stations, vertices })
   }
 
@@ -50,7 +50,7 @@ impl Shape {
     for _ in ts {
       let n = *v.get(i).ok_or(KernelError::Kernel("malformed radial slices".into()))? as usize;
       let spans = v.get(i + 1..i + 1 + 2 * n).ok_or(KernelError::Kernel("malformed radial slices".into()))?;
-      out.push(spans.chunks_exact(2).map(|c| (c[0], c[1])).collect());
+      out.push(spans.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect());
       i += 1 + 2 * n;
     }
     Ok(out)

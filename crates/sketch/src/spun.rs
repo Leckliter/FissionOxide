@@ -25,13 +25,28 @@ pub enum SpunAxis {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SpunSeg {
-  Line { a: [f64; 2], b: [f64; 2] },
-  Arc { a: [f64; 2], mid: [f64; 2], b: [f64; 2] },
-  Circle { center: [f64; 2], radius: f64 },
+  Line {
+    a: [f64; 2],
+    b: [f64; 2],
+  },
+  Arc {
+    a: [f64; 2],
+    mid: [f64; 2],
+    b: [f64; 2],
+  },
+  Circle {
+    center: [f64; 2],
+    radius: f64,
+  },
   /// A spline through these points.
-  Spline { points: Vec<[f64; 2]> },
+  Spline {
+    points: Vec<[f64; 2]>,
+  },
   /// The axis, as a construction centre line.
-  Centerline { a: [f64; 2], b: [f64; 2] },
+  Centerline {
+    a: [f64; 2],
+    b: [f64; 2],
+  },
 }
 
 impl SpunSeg {
@@ -162,7 +177,11 @@ impl Sketch {
 
   /// Deletes a spun profile and its curves.
   pub fn remove_spun(&mut self, id: SpunId) -> Result<(), SketchError> {
-    let i = self.spuns.iter().position(|s| s.id == id).ok_or(SketchError::InvalidValue(format!("no spun profile {}", id.0)))?;
+    let i = self
+      .spuns
+      .iter()
+      .position(|s| s.id == id)
+      .ok_or(SketchError::InvalidValue(format!("no spun profile {}", id.0)))?;
     let s = self.spuns.remove(i);
     self.clear_spun(&s);
     Ok(())

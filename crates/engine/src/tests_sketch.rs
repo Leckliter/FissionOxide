@@ -245,3 +245,51 @@ fn fixing_a_circle_locks_it_and_deleting_the_fix_frees_it() {
   run(&mut s, "sketch.dimension", json!({"type": "radius", "curves": [c2], "value": 4}));
   assert!((radius(&s, c1) - 4.0).abs() < 1e-9);
 }
+
+#[test]
+fn spun_profile_follows_the_body_and_steps() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, -5], "corner2": [20, 5]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ext = run(&mut s, "extrude", json!({"sketch": 1, "distance": 10}))["feature"].as_u64().unwrap();
+  // a narrower box on top: the outline steps in at z = 10
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, -5], "corner2": [15, 5]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 3, "start": 10, "distance": 10, "operation": "join"}));
+  let sk = run(&mut s, "sketch.create", xz)["sketch"].as_u64().unwrap();
+  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": ["Body1"], "axis": "z"}));
+  assert_eq!(r["profiles"], 1, "{r}");
+  // six sides and the centre line
+  assert_eq!(ids(&r["curves"]).len(), 7, "{r}");
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "revolve", json!({"sketch": sk, "axis": "z", "angle": 360, "operation": "new_body"}));
+  let pi = std::f64::consts::PI;
+  let boxes = 1000.0 + 500.0;
+  let ring = pi * (325.0 * 10.0 + 150.0 * 10.0);
+  assert!((volume(&s) - boxes - ring).abs() < 1e-3 * ring, "{}", volume(&s));
+  // a taller first box: the outline follows it
+  run(&mut s, "feature.edit", json!({"feature": ext, "set": {"extent": {"kind": "one_side", "distance": "12"}}}));
+  let ring = pi * (325.0 * 12.0 + 150.0 * 8.0);
+  let boxes = 1200.0 + 500.0 - 100.0;
+  assert!((volume(&s) - boxes - ring).abs() < 1e-3 * ring, "{}", volume(&s));
+}
+
+#[test]
+fn spun_profile_flips_to_the_other_side() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [15, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 4}));
+  run(&mut s, "sketch.create", xz);
+  let body = s.model.bodies[0].id.0;
+  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": [body], "axis": "z", "flip": true, "centerline": false}));
+  assert_eq!(ids(&r["curves"]).len(), 4, "{r}");
+  let sk = &s.model.sketches.values().last().unwrap().sketch;
+  let xs: Vec<f64> = sk.points.iter().map(|p| p.x).collect();
+  assert!(xs.iter().all(|x| *x <= 1e-9) && xs.iter().any(|x| (x + 20.0).abs() < 1e-6), "{xs:?}");
+}
