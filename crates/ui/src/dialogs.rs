@@ -1722,7 +1722,15 @@ impl Dialog {
       app.s.selection.clear();
     }
     let mut keep = true;
-    let mut ok = false;
+    // Enter is OK, from one of the dialog's boxes or with nothing focused (as in Fusion)
+    let dialog_layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("feature-dialog"));
+    let mut ok = ctx.input(|i| i.key_pressed(egui::Key::Enter))
+      && !self.kind.reports()
+      && self.kind != Kind::PickPlane
+      && match ctx.memory(|m| m.focused()) {
+        None => true,
+        Some(id) => ctx.read_response(id).is_some_and(|r| r.layer_id == dialog_layer),
+      };
     let mut cancel = false;
     let title =
       if self.editing.is_some() { format!("EDIT {}", self.kind.title()) } else { self.kind.title().to_string() };
@@ -1793,6 +1801,8 @@ impl Dialog {
           });
         });
       });
+    // typing no value box took (a dialog without one) is dropped
+    ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -1898,7 +1908,7 @@ impl Dialog {
           }
           if self.extent == "two_sides" {
             ui.label("Distance 2");
-            if ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0)).changed() {
+            if value_edit(ui, &mut self.distance2).changed() {
               self.dirty = true;
             }
             ui.end_row();
@@ -1929,7 +1939,7 @@ impl Dialog {
           });
           ui.end_row();
           ui.label("Angle");
-          if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.angle).changed() {
             self.dirty = true;
           }
           ui.end_row();
@@ -1953,9 +1963,7 @@ impl Dialog {
           Kind::Chamfer => "Distance",
           _ => "Thickness",
         });
-        if ui.add(egui::TextEdit::singleline(&mut self.radius).desired_width(140.0)).changed()
-          && (!creating || self.applied)
-        {
+        if value_edit(ui, &mut self.radius).changed() && (!creating || self.applied) {
           self.dirty = true;
         }
         ui.end_row();
@@ -1987,7 +1995,7 @@ impl Dialog {
             1 => &mut self.b,
             _ => &mut self.c,
           };
-          if ui.add(egui::TextEdit::singleline(f).desired_width(140.0)).changed() {
+          if value_edit(ui, f).changed() {
             self.dirty = true;
           }
           ui.end_row();
@@ -2037,12 +2045,12 @@ impl Dialog {
           self.axis_combo(ui, "dir1", true, &[]);
           ui.end_row();
           ui.label("Count");
-          if ui.add(egui::TextEdit::singleline(&mut self.count).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.count).changed() {
             self.dirty = true;
           }
           ui.end_row();
           ui.label("Spacing");
-          if ui.add(egui::TextEdit::singleline(&mut self.spacing).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.spacing).changed() {
             self.dirty = true;
           }
           ui.end_row();
@@ -2056,12 +2064,12 @@ impl Dialog {
             self.axis_combo(ui, "dir2", false, &[]);
             ui.end_row();
             ui.label("Count 2");
-            if ui.add(egui::TextEdit::singleline(&mut self.count2).desired_width(140.0)).changed() {
+            if value_edit(ui, &mut self.count2).changed() {
               self.dirty = true;
             }
             ui.end_row();
             ui.label("Spacing 2");
-            if ui.add(egui::TextEdit::singleline(&mut self.spacing2).desired_width(140.0)).changed() {
+            if value_edit(ui, &mut self.spacing2).changed() {
               self.dirty = true;
             }
             ui.end_row();
@@ -2071,12 +2079,12 @@ impl Dialog {
           self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
           ui.end_row();
           ui.label("Count");
-          if ui.add(egui::TextEdit::singleline(&mut self.count).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.count).changed() {
             self.dirty = true;
           }
           ui.end_row();
           ui.label("Total angle");
-          if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.angle).changed() {
             self.dirty = true;
           }
           ui.end_row();
@@ -2110,7 +2118,7 @@ impl Dialog {
         ui.end_row();
         for (i, l) in ["X distance", "Y distance", "Z distance"].iter().enumerate() {
           ui.label(*l);
-          if ui.add(egui::TextEdit::singleline(&mut self.translate[i]).desired_width(140.0)).changed() {
+          if value_edit(ui, &mut self.translate[i]).changed() {
             self.dirty = true;
           }
           ui.end_row();
@@ -2119,7 +2127,7 @@ impl Dialog {
         self.axis_combo(ui, "axis", false, &app.s.model.axes.keys().map(|f| f.0).collect::<Vec<_>>());
         ui.end_row();
         ui.label("Angle");
-        if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
+        if value_edit(ui, &mut self.angle).changed() {
           self.dirty = true;
         }
         ui.end_row();
@@ -3189,7 +3197,7 @@ impl Dialog {
   /// A text field that re-previews when edited.
   fn field(ui: &mut egui::Ui, label: &str, v: &mut String, dirty: &mut bool) {
     ui.label(label);
-    if ui.add(egui::TextEdit::singleline(v).desired_width(140.0)).changed() {
+    if value_edit(ui, v).changed() {
       *dirty = true;
     }
     ui.end_row();
@@ -3276,7 +3284,7 @@ impl Dialog {
 
   fn text(&mut self, ui: &mut egui::Ui, distance: bool) {
     let f = if distance { &mut self.distance } else { &mut self.radius };
-    if ui.add(egui::TextEdit::singleline(f).desired_width(140.0)).changed() {
+    if value_edit(ui, f).changed() {
       self.dirty = true;
     }
   }
@@ -3727,6 +3735,27 @@ fn mirror_line(s: &Session, curves: &[u32]) -> Option<u32> {
 
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
+/// Typing aimed at the open dialog (digits typed with no box focused), held for its first value
+/// box.
+const TYPING: &str = "dialog-typing";
+
+/// Sends typing to the open dialog's primary value box (see [`value_edit`]).
+pub fn type_into(ctx: &egui::Context, text: String) {
+  ctx.data_mut(|d| d.insert_temp(egui::Id::new(TYPING), text));
+}
+
+/// A dialog value box. The first one drawn takes typing aimed at the dialog: its text is replaced
+/// and it gets the keyboard, like Fusion's floating value box next to the manipulator.
+fn value_edit(ui: &mut egui::Ui, text: &mut String) -> egui::Response {
+  let mut r = ui.add(egui::TextEdit::singleline(text).desired_width(140.0));
+  if let Some(typed) = ui.data_mut(|d| d.remove_temp::<String>(egui::Id::new(TYPING))) {
+    *text = typed;
+    crate::viewport::focus_text(ui.ctx(), &r, text, false);
+    r.mark_changed();
+  }
+  r
+}
+
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
   let font = egui::FontId::proportional(12.0);
   let tw = ui.painter().layout_no_wrap(text.to_string(), font.clone(), theme::TEXT).size().x;
@@ -3751,6 +3780,25 @@ fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn typing_goes_to_the_first_value_box() {
+    let ctx = egui::Context::default();
+    let (mut distance, mut other) = (String::from("10 mm"), String::from("2 mm"));
+    let mut changed = false;
+    type_into(&ctx, "25".into());
+    let raw = egui::RawInput {
+      screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+      ..Default::default()
+    };
+    let mut out = ctx.run_ui(raw, |ui| {
+      changed = value_edit(ui, &mut distance).changed();
+      value_edit(ui, &mut other);
+    });
+    out.textures_delta.clear();
+    assert_eq!((distance.as_str(), other.as_str()), ("25", "2 mm"));
+    assert!(changed && ctx.egui_wants_keyboard_input());
+  }
 
   fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd} {p}: {}", e.0))
