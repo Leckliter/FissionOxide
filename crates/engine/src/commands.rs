@@ -111,7 +111,7 @@ cmds! {
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
-  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default 90° from direction), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
+  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
@@ -1984,27 +1984,10 @@ struct RectPattern {
 }
 
 /// Parses `sketch.pattern_rect` as Fusion's sketch Rectangular Pattern sets it up: each direction
-/// is an [x, y] vector or a line id (start to end); the second defaults to 90° counter-clockwise
-/// from the first. `distance_type` "extent" makes `spacing`/`spacing2` the whole pattern's size;
-/// `symmetric`/`symmetric2` centre that direction's instances on the original.
+/// is an [x, y] vector or a line id (start to end); the first defaults to +X and the second to +Y
+/// (as before these options existed). `distance_type` "extent" makes `spacing`/`spacing2` the
+/// whole pattern's size; `symmetric`/`symmetric2` centre that direction's instances on the original.
 fn rect_pattern(p: &Value, scope: &std::collections::HashMap<String, f64>) -> Result<RectPattern, CmdError> {
-  const KEYS: [&str; 12] = [
-    "cmd",
-    "sketch",
-    "curves",
-    "direction",
-    "count",
-    "spacing",
-    "symmetric",
-    "direction2",
-    "count2",
-    "spacing2",
-    "symmetric2",
-    "distance_type",
-  ];
-  if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
-    return Err(CmdError::new(format!("sketch.pattern_rect has no option '{k}' (options: {})", KEYS[1..].join(", "))));
-  }
   let extent = match opt_str(p, "distance_type").unwrap_or("spacing") {
     "spacing" => false,
     "extent" => true,
@@ -2035,8 +2018,8 @@ fn rect_pattern(p: &Value, scope: &std::collections::HashMap<String, f64>) -> Re
     }
   };
   let (d1, line_a) = dir("direction", [1.0, 0.0])?;
-  // A zero second direction is 90° from the first, whichever way the first points.
-  let (d2, line_b) = dir("direction2", [0.0, 0.0])?;
+  // Without `direction2` the second direction is +Y, whichever way the first points.
+  let (d2, line_b) = dir("direction2", [0.0, 1.0])?;
   let a = fox_sketch::PatternDir {
     direction: d1,
     count: count("count", None)?,

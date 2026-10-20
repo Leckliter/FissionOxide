@@ -618,7 +618,8 @@ impl Sketch {
   }
 
   /// Copies of curves on a grid, as Fusion's sketch Rectangular Pattern: `a` sets the first
-  /// direction and `b` the second (a zero `b.direction` is 90° counter-clockwise from `a`'s).
+  /// direction and `b` the second (a zero `b.direction` is 90° counter-clockwise from `a`'s; the
+  /// `sketch.pattern_rect` command passes +Y when its `direction2` is omitted).
   pub fn pattern_rect(
     &mut self,
     curves: &[CurveId],
