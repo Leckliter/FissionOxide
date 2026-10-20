@@ -11,6 +11,6 @@
 {"cmd": "sketch.line", "points": [[0, -2], [20, -12]]}
 {"cmd": "sketch.finish"}
 {"cmd": "plane.offset", "plane": "yz", "offset": 10}
-{"cmd": "point", "method": "edge_plane", "edge": {"sketch": 3, "curve": 1}, "plane": {"feature": 4}}
+{"cmd": "point", "method": "edge_plane", "edge": {"sketch": 3, "curve": 3}, "plane": {"feature": 4}}
 {"cmd": "plane", "method": "three_points", "a": {"point": 5}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
 {"cmd": "mirror", "plane": {"feature": 6}, "bodies": [2000], "join": true}

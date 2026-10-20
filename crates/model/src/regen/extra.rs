@@ -928,6 +928,16 @@ impl Ctx<'_> {
         }
         Err("the edge doesn't cross the plane".into())
       }
+      PointDef::LinePlane { line, plane } => {
+        let pl = self.resolve_plane(plane)?;
+        let n = pl.normal();
+        let (o, d) = self.resolve_axis(line, None)?;
+        let den = d.dot(n);
+        if den.abs() < 1e-12 {
+          return Err("the line is parallel to the plane".into());
+        }
+        Ok(o - d * ((o - pl.origin).dot(n) / den))
+      }
       PointDef::AlongPath { edge, t, distance } => Ok(self.along(edge, t, distance)?.0),
       PointDef::AlongCurve { path, t, distance } => Ok(self.along_curve(path, t, distance)?.0),
     }

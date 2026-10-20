@@ -111,6 +111,8 @@ pub enum PointDef {
   Center { face: FaceRef },
   /// Where an edge (extended if straight) crosses a plane.
   EdgePlane { edge: EdgeRef, plane: PlaneRef },
+  /// Where a sketch line or an axis (extended) crosses a plane.
+  LinePlane { line: AxisRef, plane: PlaneRef },
   /// At a fraction `t` of an edge's length, or at `distance` along it from its start (clamped
   /// to its length) when that is set, as Fusion's physical path distance.
   AlongPath {
@@ -228,6 +230,7 @@ impl PointDef {
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
       PointDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
       PointDef::AlongCurve { path, .. } => vec![path.sketch],
+      PointDef::LinePlane { line, plane } => axis_dep(line).into_iter().chain(plane_dep(plane)).collect(),
       _ => vec![],
     }
   }

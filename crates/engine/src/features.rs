@@ -496,7 +496,15 @@ fn point(s: &mut Session, p: &Value) -> CmdResult {
       PointDef::ThreePlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")?, c: plane_of(s, p, "c")? }
     }
     "center" => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
-    "edge_plane" => PointDef::EdgePlane { edge: edge(s, p, "edge")?, plane: plane_of(s, p, "plane")? },
+    "edge_plane" => {
+      let e = p.get("edge").ok_or(CmdError::new("missing 'edge' (an edge, sketch line or axis)"))?;
+      let plane = plane_of(s, p, "plane")?;
+      if e.is_string() || e.get("sketch").is_some() || e.get("axis").is_some() {
+        PointDef::LinePlane { line: axis_ref(s, e)?, plane }
+      } else {
+        PointDef::EdgePlane { edge: edge_ref_of(s, e)?, plane }
+      }
+    }
     "along_path" => match along_path(s, p)? {
       AlongPath::Edge(edge) => PointDef::AlongPath { edge, t: t_of(p), distance: distance_of(p) },
       AlongPath::Curve(path) => PointDef::AlongCurve { path, t: t_of(p), distance: distance_of(p) },

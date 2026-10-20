@@ -123,3 +123,7 @@
 370-arc-edge-proportional-mirror
 371-line-edge-physical-distance-mirror
 372-sketch-line-path-mirror
+378-body-edge-offset-plane
+379-body-edge-face-beyond-bounds
+380-body-edge-extended-past-end
+381-sketch-line-offset-plane
