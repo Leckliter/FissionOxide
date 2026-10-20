@@ -115,6 +115,10 @@ pub const EXACT_EDGE_FRAMES: &str = "exact_edge_frames";
 /// (skew lines are an error), as in Fusion. Without it, it is the midpoint of the closest
 /// approach: of the bounded edges for two body edges, of the infinite lines otherwise.
 pub const INFINITE_LINE_CROSSING: &str = "infinite_line_crossing";
+/// A two-distance or distance-and-angle chamfer measures its first distance (and the angle) on
+/// the face each edge runs forward in, as Fusion does (an extrusion's cap), instead of on the
+/// edge's first adjacent face.
+pub const CHAMFER_FORWARD_FACE: &str = "chamfer_forward_face";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -136,6 +140,7 @@ pub const CURRENT: &[&str] = &[
   UNIFY_SPLIT_PIECES,
   EXACT_EDGE_FRAMES,
   INFINITE_LINE_CROSSING,
+  CHAMFER_FORWARD_FACE,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
