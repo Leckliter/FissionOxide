@@ -173,7 +173,14 @@ pub struct Prefs {
   /// Stored, not yet applied: which axis is up needs a decision on the camera and the ViewCube.
   pub up_axis: UpAxis,
   pub nav: NavPreset,
-  /// Wheel forward zooms out (and dragging down zooms in).
+  /// Zoom the opposite way to Fusion's default: wheel back (toward you) zooms out, and a zoom
+  /// drag down zooms out. Off, as in Fusion, wheel back zooms in.
+  ///
+  /// Saved as `ZoomReversed`. Before FissionOxide matched Fusion's default the setting was
+  /// `ReverseZoom`, with the opposite meaning: `ReverseZoom=1` gave Fusion's direction and
+  /// `ReverseZoom=0` (the old default, written for everyone who saved any preference) the other.
+  /// A legacy `ReverseZoom=1` reads as `false` here, so it keeps the direction it chose; a legacy
+  /// `0` was the untouched default and takes the new default.
   pub reverse_zoom: bool,
   /// Zoom toward the cursor rather than the middle of the view.
   pub zoom_to_cursor: bool,
@@ -186,6 +193,8 @@ pub struct Prefs {
   pub snap: bool,
   /// Draw the viewport on the GPU.
   pub gpu: bool,
+  /// General → "Spacebar repeats last command", on by default as in Fusion.
+  pub space_repeats: bool,
 }
 
 impl Default for Prefs {
@@ -202,6 +211,7 @@ impl Default for Prefs {
       show_constraints: true,
       snap: false,
       gpu: true,
+      space_repeats: true,
     }
   }
 }
@@ -231,7 +241,7 @@ impl Prefs {
       ("Units", self.units.key().to_string()),
       ("UpAxis", self.up_axis.key().to_string()),
       ("Navigation", self.nav.key().to_string()),
-      ("ReverseZoom", flag(self.reverse_zoom)),
+      ("ZoomReversed", flag(self.reverse_zoom)),
       ("ZoomToCursor", flag(self.zoom_to_cursor)),
       ("CaptureHistory", flag(self.capture_history)),
       ("SketchLookAt", flag(self.auto_look_at)),
@@ -239,6 +249,7 @@ impl Prefs {
       ("SketchConstraints", flag(self.show_constraints)),
       ("SketchSnap", flag(self.snap)),
       ("GpuRenderer", flag(self.gpu)),
+      ("SpaceRepeats", flag(self.space_repeats)),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -248,13 +259,17 @@ impl Prefs {
   /// Reads the pairs of a `[Preferences]` section; missing or unknown values keep the defaults.
   pub fn from_pairs(pairs: &[(String, String)]) -> Prefs {
     let mut p = Prefs::default();
+    // the current key wins over the legacy one wherever they appear
+    let has_new = pairs.iter().any(|(k, _)| k.eq_ignore_ascii_case("zoomreversed"));
     for (k, v) in pairs {
       let b = parse_flag(v);
       match k.to_ascii_lowercase().as_str() {
         "units" => p.units = pick(&Units::ALL, Units::key, v).unwrap_or(p.units),
         "upaxis" => p.up_axis = pick(&UpAxis::ALL, UpAxis::key, v).unwrap_or(p.up_axis),
         "navigation" => p.nav = pick(&NavPreset::ALL, NavPreset::key, v).unwrap_or(p.nav),
-        "reversezoom" => p.reverse_zoom = b.unwrap_or(p.reverse_zoom),
+        "zoomreversed" => p.reverse_zoom = b.unwrap_or(p.reverse_zoom),
+        // legacy: both its values meant wheel back zooms in (=1, chosen) or the old default (=0)
+        "reversezoom" if !has_new => p.reverse_zoom = false,
         "zoomtocursor" => p.zoom_to_cursor = b.unwrap_or(p.zoom_to_cursor),
         "capturehistory" => p.capture_history = b.unwrap_or(p.capture_history),
         "sketchlookat" => p.auto_look_at = b.unwrap_or(p.auto_look_at),
@@ -262,6 +277,7 @@ impl Prefs {
         "sketchconstraints" => p.show_constraints = b.unwrap_or(p.show_constraints),
         "sketchsnap" => p.snap = b.unwrap_or(p.snap),
         "gpurenderer" => p.gpu = b.unwrap_or(p.gpu),
+        "spacerepeats" => p.space_repeats = b.unwrap_or(p.space_repeats),
         _ => {}
       }
     }
@@ -449,6 +465,8 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
       ui.add_space(6.0);
       note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
       note(ui, "The orientation is saved, but the view stays Z up until the up axis can be changed.");
+      ui.add_space(6.0);
+      ui.checkbox(&mut p.space_repeats, "Spacebar repeats last command");
     }
     Page::Navigation => {
       egui::Grid::new("prefs-nav").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -462,7 +480,8 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
         }
       });
       ui.add_space(6.0);
-      ui.checkbox(&mut p.reverse_zoom, "Reverse zoom direction");
+      ui.checkbox(&mut p.reverse_zoom, "Reverse zoom direction")
+        .on_hover_text("Off, as in Fusion: rolling the wheel toward you zooms in");
       ui.checkbox(&mut p.zoom_to_cursor, "Zoom toward the cursor");
     }
     Page::Design => {
@@ -523,6 +542,7 @@ mod tests {
       show_constraints: false,
       snap: true,
       gpu: false,
+      space_repeats: false,
     };
     let ini = "[Updates]\nMode=notify\n\n[Window]\nMaximized=1\n";
     let text = p.write_into(ini);

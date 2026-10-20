@@ -342,17 +342,29 @@ fn left_navigating(app: &App, resp: &egui::Response) -> bool {
     && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped_by(egui::PointerButton::Primary))
 }
 
+/// The sign the wheel and zoom drags scale by. Fusion's default (Reverse zoom direction off):
+/// rolling the wheel back, toward you, zooms in, and so does a zoom drag down.
+pub(crate) fn zoom_sign(reverse: bool) -> f64 {
+  if reverse { 1.0 } else { -1.0 }
+}
+
+/// The camera's zoom factor (below 1 zooms in) for a wheel scroll of `scroll_y` points; egui
+/// reports rolling the wheel back (toward you) as a negative `y`.
+pub(crate) fn wheel_zoom_factor(scroll_y: f32, zoom_sign: f64) -> f64 {
+  (-scroll_y as f64 * 0.0015 * zoom_sign).exp()
+}
+
 fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
   let (mods, scroll, zoom) = ctx.input(|i| (i.modifiers, i.smooth_scroll_delta(), i.zoom_delta()));
   // Preferences → Navigation: the preset's buttons, the zoom direction, zooming to the cursor
   let prefs = &app.preferences.values;
-  let (preset, zoom_sign, to_cursor) = (prefs.nav, if prefs.reverse_zoom { -1.0 } else { 1.0 }, prefs.zoom_to_cursor);
+  let (preset, zoom_sign, to_cursor) = (prefs.nav, zoom_sign(prefs.reverse_zoom), prefs.zoom_to_cursor);
   // the canvas still zooms with the pointer over its own overlays (the ViewCube), not over
   // panels and dialogs drawn above it
   if ctx.rect_contains_pointer(resp.layer_id, resp.rect) {
     let mut factor = 1.0;
     if scroll.y.abs() > 0.0 {
-      factor *= (-scroll.y as f64 * 0.0015 * zoom_sign).exp();
+      factor *= wheel_zoom_factor(scroll.y, zoom_sign);
     }
     if (zoom - 1.0).abs() > 1e-4 {
       factor /= zoom as f64;
@@ -366,6 +378,10 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       app.stop_cam_move();
       app.cam.zoom(factor, toward);
     }
+  }
+  // double-clicking the wheel fits the whole model, gliding there as Fit (F6) does
+  if resp.double_clicked_by(egui::PointerButton::Middle) {
+    app.fit_view();
   }
   for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle] {
     if resp.drag_started_by(button)
@@ -2832,6 +2848,70 @@ mod tests {
     assert!((to.distance - 10.0).abs() < 1e-9, "{}", to.distance);
     let (x, y, _) = to.project(near, 400, 200).unwrap();
     assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+  }
+
+  #[test]
+  fn the_wheel_zooms_as_fusion_does_unless_reversed() {
+    use crate::preferences::Prefs;
+    // egui: rolling the wheel back (toward you) is a negative y; a factor below 1 comes closer
+    let (back, away) = (-120.0f32, 120.0f32);
+    let fusion = zoom_sign(Prefs::default().reverse_zoom);
+    assert!(wheel_zoom_factor(back, fusion) < 1.0, "wheel toward you zooms in");
+    assert!(wheel_zoom_factor(away, fusion) > 1.0, "wheel away zooms out");
+    let reversed = zoom_sign(true);
+    assert!(wheel_zoom_factor(back, reversed) > 1.0);
+    assert!(wheel_zoom_factor(away, reversed) < 1.0);
+    // a saved ReverseZoom=1 chose wheel-toward-you-zooms-in (before the default matched Fusion):
+    // it still does; the new key is what the box says now
+    let legacy = |v: &str| Prefs::parse(&format!("[Preferences]\nReverseZoom={v}\n")).reverse_zoom;
+    assert!(wheel_zoom_factor(back, zoom_sign(legacy("1"))) < 1.0);
+    assert!(!legacy("0"), "the old default takes the new one");
+    assert!(Prefs::parse("[Preferences]\nZoomReversed=1\n").reverse_zoom);
+    assert!(Prefs::parse("[Preferences]\nReverseZoom=1\nZoomReversed=1\n").reverse_zoom, "the new key wins");
+    assert!(Prefs::parse("[Preferences]\nZoomReversed=1\nReverseZoom=1\n").reverse_zoom, "whatever the order");
+    // saving writes only the new key
+    let p = Prefs::parse("[Preferences]\nReverseZoom=1\n");
+    let text = p.write_into("[Preferences]\nReverseZoom=1\n");
+    assert!(text.contains("ZoomReversed=0") && !text.contains("ReverseZoom="), "{text}");
+  }
+
+  #[test]
+  fn double_clicking_the_wheel_fits_the_view_gliding() {
+    let ctx = egui::Context::default();
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let mut far = app.cam;
+    far.distance *= 20.0;
+    let input = |t: f64, events: Vec<egui::Event>| egui::RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+      time: Some(t),
+      events,
+      ..Default::default()
+    };
+    let mid = Pos2::new(600.0, 400.0);
+    let button = |pressed| egui::Event::PointerButton {
+      pos: mid,
+      button: egui::PointerButton::Middle,
+      pressed,
+      modifiers: Default::default(),
+    };
+    let mut t = 0.0;
+    let mut frame = |app: &mut App, events| {
+      t += 0.05;
+      ctx.run_ui(input(t, events), |ui| app.draw(ui)).drop_without_applying_deltas();
+    };
+    frame(&mut app, vec![egui::Event::PointerMoved(mid)]);
+    app.cam_move = None;
+    app.cam = far;
+    // one middle click does nothing
+    frame(&mut app, vec![button(true), button(false)]);
+    assert!(app.cam_move.is_none() && app.cam == far);
+    frame(&mut app, vec![button(true), button(false)]);
+    let (_, to, _) = app.cam_move.expect("the double click glides to the fit");
+    app.cam = far;
+    app.fit_view_now();
+    assert_eq!(to, app.cam, "where F6 goes");
+    assert!(to.distance < far.distance / 2.0);
   }
 
   /// An app editing a new sketch on XY with `tool` active.
