@@ -1366,6 +1366,15 @@ impl Dialog {
     Some([v(&self.at[0]), v(&self.at[1])])
   }
 
+  /// Puts the dialog on an origin plane ("xy", "xz" or "yz"), as its plane chooser would, and
+  /// re-previews (the browser's Offset Plane on an origin plane).
+  pub(crate) fn use_origin_plane(&mut self, s: &mut Session, plane: &str) {
+    self.plane = json!(plane);
+    self.plane_label = format!("{} plane", plane.to_uppercase());
+    self.refresh_manip(s);
+    self.preview(s);
+  }
+
   /// Withdraws the current preview (if any) and applies the dialog's command.
   pub fn preview(&mut self, s: &mut Session) {
     self.dirty = false;
