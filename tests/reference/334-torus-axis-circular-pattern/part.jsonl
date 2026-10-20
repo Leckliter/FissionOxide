@@ -1,0 +1,16 @@
+# 334-torus-axis-circular-pattern: added by the parity loop from a Fusion probe
+# torus-axis-circular-pattern: circle r5 centred (40,0,10) on XZ revolved about the vertical line x=20 into a torus; 6x6x6 box x 50..56, y -3..3; construction axis through the torus face; circular pattern of the box x4 over 360 deg about it.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[20, 0], [20, -20]], "construction": true}
+{"cmd": "sketch.circle", "center": [40, -10], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": {"line": 3}, "angle": "360 deg", "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[50, -3], [56, -3]]}
+{"cmd": "sketch.line", "points": [[56, -3], [56, 3]]}
+{"cmd": "sketch.line", "points": [[56, 3], [50, 3]]}
+{"cmd": "sketch.line", "points": [[50, 3], [50, -3]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 6, "operation": "new_body"}
+{"cmd": "axis", "method": "face", "face": {"point": [45, 0, 10]}}
+{"cmd": "pattern.circular", "axis": {"axis": 5}, "count": 4, "angle": "360 deg", "bodies": [4000], "join": false}
