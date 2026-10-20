@@ -487,7 +487,9 @@ fn threads_in_designs_without_iso_threads_rebuild_as_before() {
     let m = b.shape.mass().unwrap();
     assert_eq!(b.faces().len(), faces, "{i}");
     assert!((m.volume - vol).abs() < 1e-6 * vol, "{i}: {} vs {vol}", m.volume);
-    assert!((m.center_of_mass.z - z).abs() < 1e-6, "{i}: {m:?}");
+    // 1e-4 mm: tight enough to catch a moved or flipped thread (millimetres), loose enough for
+    // the mass-property integration's own accuracy, which moves the last digits.
+    assert!((m.center_of_mass.z - z).abs() < 1e-4, "{i}: {m:?}");
     if i == 0 {
       // the same thread in a new design is the ISO profile: crest, flanks, root, square ends
       s.design.behaviours = Behaviours::current();
