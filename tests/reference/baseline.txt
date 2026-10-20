@@ -82,3 +82,7 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+235-grid-spacing
+236-line-direction
+237-extent-distance
+238-symmetric-direction

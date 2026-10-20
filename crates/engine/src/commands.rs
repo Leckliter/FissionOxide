@@ -111,7 +111,7 @@ cmds! {
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
-  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
+  "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default 90° from direction), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
@@ -1901,7 +1901,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     Trim(Option<CurveId>, [f64; 2]),
     Extend(Option<CurveId>, [f64; 2]),
     Mirror(CurveId),
-    Rect([f64; 2], usize, f64, [f64; 2], usize, f64),
+    Rect(Box<RectPattern>),
     Circ([f64; 2], usize, f64),
   }
   let curve = p.get("curve").and_then(Value::as_u64).map(|c| CurveId(c as u32));
@@ -1916,14 +1916,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
     "sketch.extend" => Op::Extend(curve, req_pt(p, "at")?),
     "sketch.mirror" => Op::Mirror(CurveId(req_u32(p, "line")?)),
-    "sketch.pattern_rect" => Op::Rect(
-      opt_pt(p, "direction")?.unwrap_or([1.0, 0.0]),
-      count("count")?,
-      num("spacing", fox_expr::Kind::Length)?,
-      opt_pt(p, "direction2")?.unwrap_or([0.0, 1.0]),
-      p.get("count2").and_then(Value::as_u64).unwrap_or(1) as usize,
-      opt_expr(p, "spacing2").map(|e| fox_expr::eval(&e, fox_expr::Kind::Length, &scope)).transpose()?.unwrap_or(0.0),
-    ),
+    "sketch.pattern_rect" => Op::Rect(Box::new(rect_pattern(p, &scope)?)),
     _ => Op::Circ(
       opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
       count("count")?,
@@ -1961,7 +1954,16 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         vec![c]
       }
       Op::Mirror(line) => sketch.mirror(&curves, line)?,
-      Op::Rect(d1, n1, s1, d2, n2, s2) => sketch.pattern_rect(&curves, d1, n1, s1, d2, n2, s2)?,
+      Op::Rect(r) => {
+        let RectPattern { mut a, mut b, line_a, line_b } = *r;
+        if let Some(l) = line_a {
+          a.direction = sketch.line_direction(l)?;
+        }
+        if let Some(l) = line_b {
+          b.direction = sketch.line_direction(l)?;
+        }
+        sketch.pattern_rect(&curves, a, b)?
+      }
       Op::Circ(c, n, a) => sketch.pattern_circ(&curves, c, n, a)?,
     };
     if !sketch.solve().ok() {
@@ -1971,6 +1973,85 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   })?;
   let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
   Ok(json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles}))
+}
+
+/// A parsed `sketch.pattern_rect`: its two directions, each either a vector or a sketch line.
+struct RectPattern {
+  a: fox_sketch::PatternDir,
+  b: fox_sketch::PatternDir,
+  line_a: Option<CurveId>,
+  line_b: Option<CurveId>,
+}
+
+/// Parses `sketch.pattern_rect` as Fusion's sketch Rectangular Pattern sets it up: each direction
+/// is an [x, y] vector or a line id (start to end); the second defaults to 90° counter-clockwise
+/// from the first. `distance_type` "extent" makes `spacing`/`spacing2` the whole pattern's size;
+/// `symmetric`/`symmetric2` centre that direction's instances on the original.
+fn rect_pattern(p: &Value, scope: &std::collections::HashMap<String, f64>) -> Result<RectPattern, CmdError> {
+  const KEYS: [&str; 12] = [
+    "cmd",
+    "sketch",
+    "curves",
+    "direction",
+    "count",
+    "spacing",
+    "symmetric",
+    "direction2",
+    "count2",
+    "spacing2",
+    "symmetric2",
+    "distance_type",
+  ];
+  if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
+    return Err(CmdError::new(format!("sketch.pattern_rect has no option '{k}' (options: {})", KEYS[1..].join(", "))));
+  }
+  let extent = match opt_str(p, "distance_type").unwrap_or("spacing") {
+    "spacing" => false,
+    "extent" => true,
+    o => return Err(CmdError::new(format!("unknown distance type '{o}' (spacing or extent)"))),
+  };
+  let dir = |k: &str, default: [f64; 2]| -> Result<([f64; 2], Option<CurveId>), CmdError> {
+    match p.get(k) {
+      Some(v) if v.is_u64() => Ok(([0.0, 0.0], Some(CurveId(req_u32(p, k)?)))),
+      _ => Ok((opt_pt(p, k)?.unwrap_or(default), None)),
+    }
+  };
+  let count = |k: &str, default: Option<u64>| -> Result<usize, CmdError> {
+    match p.get(k) {
+      None => default.map(|d| d as usize).ok_or(CmdError::new(format!("missing '{k}'"))),
+      Some(v) => v.as_u64().map(|v| v as usize).ok_or(CmdError::new(format!("'{k}' must be a whole number"))),
+    }
+  };
+  let length = |k: &str| -> Result<Option<f64>, CmdError> {
+    match p.get(k) {
+      None => Ok(None),
+      Some(v) => Ok(Some(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, scope)?)),
+    }
+  };
+  let flag = |k: &str| -> Result<bool, CmdError> {
+    match p.get(k) {
+      None => Ok(false),
+      Some(v) => v.as_bool().ok_or(CmdError::new(format!("'{k}' must be true or false"))),
+    }
+  };
+  let (d1, line_a) = dir("direction", [1.0, 0.0])?;
+  // A zero second direction is 90° from the first, whichever way the first points.
+  let (d2, line_b) = dir("direction2", [0.0, 0.0])?;
+  let a = fox_sketch::PatternDir {
+    direction: d1,
+    count: count("count", None)?,
+    distance: length("spacing")?.ok_or(CmdError::new("missing 'spacing'"))?,
+    extent,
+    symmetric: flag("symmetric")?,
+  };
+  let b = fox_sketch::PatternDir {
+    direction: d2,
+    count: count("count2", Some(1))?,
+    distance: length("spacing2")?.unwrap_or(0.0),
+    extent,
+    symmetric: flag("symmetric2")?,
+  };
+  Ok(RectPattern { a, b, line_a, line_b })
 }
 
 /// Projects body edges onto the sketch plane as fixed geometry. Straight and circular edges stay

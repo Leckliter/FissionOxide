@@ -47,3 +47,7 @@
 80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
+235-grid-spacing
+236-line-direction
+237-extent-distance
+238-symmetric-direction

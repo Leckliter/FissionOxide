@@ -1,0 +1,15 @@
+# 236-line-direction: added by the parity loop from a Fusion probe
+# line-direction: 100x60x5 plate centred on the origin; r3 hole at (-30,-15); a construction line from the hole centre 10 long at 30 deg sets direction one: 3x every 20 along it, then 2x every 15 in the default second direction (90 deg to the line); cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-50, -30], [50, -30], [50, 30], [-50, 30]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-30, -15], [-21.33974596215561, -10.0]]}
+{"cmd": "sketch.construction", "curves": [3], "on": true}
+{"cmd": "sketch.circle", "center": [-30, -15], "radius": 3}
+{"cmd": "sketch.pattern_rect", "curves": [4], "direction": 3, "count": 3, "spacing": 20, "count2": 2, "spacing2": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}
