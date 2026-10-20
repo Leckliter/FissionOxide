@@ -127,6 +127,14 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation } => {
+        if let Some(wires) = self.state.curves3d.get(path_sketch).cloned() {
+          let r = self.len(diameter)? / 2.0;
+          let w = if wall.trim().is_empty() { None } else { Some(self.len(wall)?) };
+          if r <= 0.0 || w.is_some_and(|w| w <= 0.0 || w >= r) {
+            return Err("the diameter must be positive and the wall thinner than the radius".into());
+          }
+          return self.pipe_along(id, &wires, r, w, *operation);
+        }
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
         let segs = crate::sheet::open_path(&ps.sketch, path_curves)?;
         let path = Shape::path(&ps.plane, &segs).map_err(ke)?;
@@ -461,6 +469,7 @@ impl Ctx<'_> {
       | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
+      FeatureKind::IntersectionCurve { .. } => self.apply_curves3d(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }

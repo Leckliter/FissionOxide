@@ -2,7 +2,7 @@
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
 use fox_model::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
-use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
@@ -66,9 +66,29 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         },
       )
     })(),
+    "sketch.intersection_curve" => (|| {
+      let sketch = sketch_for_feature(s, p)?;
+      s.design.sketch(sketch)?;
+      let curves = PathRef { sketch, curves: ids(p, "curves").into_iter().map(CurveId).collect() };
+      let faces = match p.get("faces") {
+        Some(_) => faces(s, p)?,
+        None => Vec::new(),
+      };
+      let mut with = Vec::new();
+      for w in p.get("with").and_then(Value::as_array).into_iter().flatten() {
+        with.push(crate::solid::path_ref(s, w)?);
+      }
+      if faces.is_empty() && with.is_empty() {
+        return Err(CmdError::new("give 'faces' or 'with' (sketch curves) to intersect with"));
+      }
+      add_feature(s, FeatureKind::IntersectionCurve { curves, faces, with })
+    })(),
     "pipe" => (|| {
       let path_sketch = FeatureId(req_u32(p, "path")?);
-      s.design.sketch(path_sketch)?;
+      // the path is a sketch or an intersection curve (3D curves)
+      if !matches!(s.design.feature(path_sketch).map(|f| &f.kind), Some(FeatureKind::IntersectionCurve { .. })) {
+        s.design.sketch(path_sketch)?;
+      }
       add_feature(
         s,
         FeatureKind::Pipe {

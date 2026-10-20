@@ -1271,6 +1271,19 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     clearance: String,
   },
+  /// 3D curves where sketch curves, pushed along their sketch's normal, cross body faces or
+  /// other sketch curves pushed along theirs (Fusion's Intersection Curve). Pipes follow them as
+  /// a path (see `regen/curves3d.rs`).
+  IntersectionCurve {
+    /// The curves pushed along their sketch's normal (no curves: every non-construction curve).
+    curves: PathRef,
+    /// Faces they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    faces: Vec<FaceRef>,
+    /// Other sketches' curves, each pushed along its own sketch's normal, that they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    with: Vec<PathRef>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1409,6 +1422,7 @@ impl FeatureKind {
       FeatureKind::InsertDesign { .. } => "Insert",
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
+      FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
     }
   }
 
@@ -1480,6 +1494,9 @@ impl FeatureKind {
       FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
+      FeatureKind::IntersectionCurve { curves, with, .. } => {
+        std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
+      }
       _ => vec![],
     }
   }
@@ -2155,6 +2172,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::RigidGroup { .. } => {}
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
+    FeatureKind::IntersectionCurve { .. } => {}
   }
 }
 

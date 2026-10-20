@@ -1005,3 +1005,7 @@ mod refparts;
 mod tests_ellipse;
 #[cfg(test)]
 mod tests_refparts;
+
+mod curves3d;
+#[cfg(test)]
+mod tests_curves3d;

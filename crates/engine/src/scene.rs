@@ -388,6 +388,20 @@ impl SceneBuilder {
         behind: false,
       });
     }
+    for (id, line) in &s.model.curves3d {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+        continue;
+      }
+      scene.lines.push(Polyline {
+        points: line.iter().map(|p| p.as_vec3().to_array()).collect(),
+        color: [200, 140, 40, 255],
+        width: 2.0,
+        id: 0,
+        on_top: true,
+        dashed: false,
+        behind: false,
+      });
+    }
 
     if !opts.hide_grid {
       grid(&mut scene, s);

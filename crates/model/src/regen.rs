@@ -155,6 +155,8 @@ struct State {
   placed: BTreeMap<crate::ComponentId, DMat4>,
   /// Rigid groups so far.
   groups: Vec<Vec<crate::ComponentId>>,
+  /// Intersection curves: their wires.
+  curves3d: BTreeMap<FeatureId, Vec<Shape>>,
 }
 
 /// The regenerated design.
@@ -177,6 +179,8 @@ pub struct Model {
   pub joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
   /// How far joints have moved each component (identity if they haven't).
   pub placed: BTreeMap<crate::ComponentId, DMat4>,
+  /// Intersection curves, as polylines to draw.
+  pub curves3d: Vec<(FeatureId, Vec<DVec3>)>,
 }
 
 impl Model {
@@ -311,6 +315,7 @@ impl Regenerator {
       param_errors,
       joint_origins: state.joint_origins,
       placed: state.placed,
+      curves3d: curves3d_lines(&state.curves3d),
     }
   }
 }
@@ -2200,3 +2205,18 @@ mod subasm;
 mod tests_config;
 #[cfg(test)]
 mod tests_subasm;
+
+mod curves3d;
+
+/// Intersection curves' wires as polylines to draw, one per edge.
+fn curves3d_lines(curves: &BTreeMap<FeatureId, Vec<Shape>>) -> Vec<(FeatureId, Vec<DVec3>)> {
+  let mut out = Vec::new();
+  for (id, wires) in curves {
+    for w in wires {
+      for e in w.edge_lines(0.05).unwrap_or_default() {
+        out.push((*id, e.points));
+      }
+    }
+  }
+  out
+}

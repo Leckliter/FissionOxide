@@ -198,6 +198,14 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // where shapes cross, as wires; where a wire starts (cpp/curves3d.cpp)
+    include!("fox-kernel/cpp/curves3d.hxx");
+    fn section_wires(a: &Shape, b: &Shape, tolerance: f64) -> Result<UniquePtr<Shape>>;
+    fn wire_start(w: &Shape) -> Result<Vec<f64>>;
+    fn wire_count(s: &Shape) -> usize;
+    fn wire_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
+    fn wire_from_middle(w: &Shape) -> Result<UniquePtr<Shape>>;
   }
 }
 
