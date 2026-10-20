@@ -155,6 +155,8 @@ cmds! {
   "thicken" => "Thicken faces or surface bodies into solids", "{faces? | bodies?, thickness, symmetric?: thickness on each side, flip?, operation?, corners?: \"sharp\"|\"round\"}";
   "surface.extrude" => "Surface body extruded from sketch curves", "{sketch?, curves?, distance, symmetric?, flip?}";
   "surface.revolve" => "Surface body revolved from sketch curves", "{sketch?, curves?, axis, angle?}";
+  "surface.sweep" => "Surface body swept from sketch curves (open or closed) along a path sketch", "{sketch?, curves?, path: sketch id, path_curves?, twist?, orientation?: perpendicular|parallel}";
+  "surface.loft" => "Surface body lofted through sketch curves (open or closed) of several sketches, in order", "{sections: [sketch id | {sketch, curves?}], ruled?, closed?}";
   "surface.patch" => "Surface filling a closed boundary of body edges or a sketch", "{edges? | sketch?}";
   "surface.stitch" => "Sew surface bodies together (into a solid when they close)", "{bodies, tolerance?}";
   "surface.unstitch" => "Break bodies into one surface body per face", "{bodies}";

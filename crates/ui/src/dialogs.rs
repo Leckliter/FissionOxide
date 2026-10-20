@@ -2395,7 +2395,9 @@ impl Dialog {
         Input::Faces { label, .. }
         | Input::FacesOpt { label, .. }
         | Input::Edges { label, .. }
-        | Input::Curves { label, .. } => {
+        | Input::Curves { label, .. }
+        | Input::CurvesOf { label, .. }
+        | Input::Sections { label, .. } => {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
           sel_chip(ui, accent, &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
@@ -4988,6 +4990,63 @@ mod tests {
     apply(&mut s, &mut d);
     let sk = s.edit_sketch.unwrap();
     assert!(!s.model.sketches[&sk].profiles.is_empty());
+  }
+
+  #[test]
+  fn surface_sweep_and_loft_forms() {
+    use crate::forms::{SURFACE_LOFT, SURFACE_SWEEP};
+    let area = |s: &Session| s.model.bodies.last().unwrap().shape.mass().unwrap().area;
+    // sweep: the profile's picked curve (one leg of an L), then the path's
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+    let path = s.edit_sketch.unwrap();
+    let pc = s.design.sketch(path).unwrap().curves[0].id;
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.line", json!({"points": [[-5, 0], [5, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [5, 8]]}));
+    let prof = s.edit_sketch.unwrap();
+    let c = s.design.sketch(prof).unwrap().curves[0].id;
+    run(&mut s, "sketch.finish", json!({}));
+    let sel = vec![Sel::SketchCurve { sketch: prof, curve: c }, Sel::SketchCurve { sketch: path, curve: pc }];
+    let mut d = form(&mut s, &SURFACE_SWEEP, sel, &[]);
+    let p = d.form.params(&SURFACE_SWEEP);
+    assert_eq!(p["sketch"], json!(prof.0));
+    assert_eq!(p["curves"], json!([c.0]));
+    assert_eq!(p["path"], json!(path.0));
+    assert_eq!(p["path_curves"], json!([pc.0]));
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+    assert_eq!(s.model.bodies[0].shape.solid_count(), 0);
+    assert!((area(&s) - 300.0).abs() < 1e-3, "{}", area(&s));
+    d.applied = false;
+
+    // loft: a curve on each of two sketches, in pick order
+    let mut s = Session::default();
+    let mut secs = Vec::new();
+    for z in [0, 20] {
+      if z == 0 {
+        run(&mut s, "sketch.create", json!({"plane": "xy"}));
+      } else {
+        run(&mut s, "plane.offset", json!({"plane": "xy", "offset": z}));
+        let plane = s.design.features.last().unwrap().id.0;
+        run(&mut s, "sketch.create", json!({"plane": {"feature": plane}}));
+      }
+      run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [0, 10], "end": [-10, 0]}));
+      let sk = s.edit_sketch.unwrap();
+      secs.push(Sel::SketchCurve { sketch: sk, curve: s.design.sketch(sk).unwrap().curves[0].id });
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let d = form(&mut s, &SURFACE_LOFT, secs[..1].to_vec(), &[]);
+    assert_eq!(d.form.missing(&SURFACE_LOFT), Some("Sections"));
+    let mut d = form(&mut s, &SURFACE_LOFT, secs, &[]);
+    assert_eq!(d.form.missing(&SURFACE_LOFT), None);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 1);
+    assert_eq!(s.model.bodies[0].shape.solid_count(), 0);
+    let want = std::f64::consts::PI * 10.0 * 20.0;
+    assert!((area(&s) - want).abs() < 1e-3, "{}", area(&s));
+    d.applied = false;
   }
 
   #[test]

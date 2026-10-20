@@ -1536,4 +1536,90 @@ std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double>
   FOX2_CATCH("setback fillet")
 }
 
+namespace {
+// A wire's two end points (the same point for a closed wire).
+void wire_ends(const TopoDS_Wire &w, gp_Pnt &a, gp_Pnt &b) {
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(w, v0, v1);
+  if (v0.IsNull() || v1.IsNull()) throw std::runtime_error("a section has no ends");
+  a = BRep_Tool::Pnt(v0);
+  b = BRep_Tool::Pnt(v1);
+}
+
+bool wire_closed(const TopoDS_Wire &w) {
+  gp_Pnt a, b;
+  wire_ends(w, a, b);
+  return a.Distance(b) < 1e-6;
+}
+} // namespace
+
+// A surface (not a solid) lofted through the sections of a compound (wires, or faces' outer
+// wires), in order; `closed` loops back to the first. Sections may be open: each open one is
+// turned to run the same way as the one before it, so the surface doesn't cross itself.
+std::unique_ptr<Shape> loft_surface(const Shape &sections, bool ruled, bool closed) {
+  FOX2_TRY
+  std::vector<TopoDS_Wire> ws;
+  for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
+    bool holes = false;
+    ws.push_back(loops(it.Value(), holes)[0]);
+  }
+  if (ws.size() < 2) throw std::runtime_error("a loft needs at least two sections");
+  size_t open = 0;
+  for (const TopoDS_Wire &w : ws) open += wire_closed(w) ? 0 : 1;
+  if (open != 0 && open != ws.size()) throw std::runtime_error("loft sections must be all open or all closed");
+  if (open) {
+    for (size_t i = 1; i < ws.size(); ++i) {
+      gp_Pnt a0, a1, b0, b1;
+      wire_ends(ws[i - 1], a0, a1);
+      wire_ends(ws[i], b0, b1);
+      if (a0.Distance(b0) + a1.Distance(b1) > a0.Distance(b1) + a1.Distance(b0)) {
+        // the same curves, run the other way
+        BRepBuilderAPI_MakeWire mw;
+        std::vector<TopoDS_Edge> es;
+        for (BRepTools_WireExplorer ex(ws[i]); ex.More(); ex.Next()) es.push_back(TopoDS::Edge(ex.Current()));
+        for (auto e = es.rbegin(); e != es.rend(); ++e) mw.Add(TopoDS::Edge(e->Reversed()));
+        if (!mw.IsDone()) throw std::runtime_error("a loft section could not be turned round");
+        ws[i] = mw.Wire();
+      }
+    }
+  }
+  BRepOffsetAPI_ThruSections mk(Standard_False, ruled ? Standard_True : Standard_False, 1e-6);
+  for (const TopoDS_Wire &w : ws) mk.AddWire(w);
+  if (closed) mk.AddWire(ws[0]);
+  mk.CheckCompatibility(open ? Standard_False : Standard_True);
+  mk.Build();
+  if (!mk.IsDone()) throw std::runtime_error("the loft failed (are the sections compatible?)");
+  return out(valid(mk.Shape(), "surface loft"));
+  FOX2_CATCH("surface loft")
+}
+
+// A surface (not a solid) swept from a profile wire (open or closed) along a path wire, turning
+// by `twist` radians from start to end; `parallel` keeps the profile's orientation.
+std::unique_ptr<Shape> sweep_surface(const Shape &profile, const Shape &spine, double twist, bool parallel) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  const TopoDS_Wire &prof = as_wire(profile, "a surface sweep profile");
+  if (!std::isfinite(twist)) throw std::runtime_error("the twist angle is not finite");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  sample_wire(path, 120, pts, tans);
+  double length = 0;
+  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+  BRepOffsetAPI_MakePipeShell ps(path);
+  if (parallel) {
+    if (std::abs(twist) > 1e-12) throw std::runtime_error("a parallel sweep can't twist");
+    ps.SetMode(gp_Ax2(pts[0], gp_Dir(tans[0])));
+  } else if (std::abs(twist) > 1e-12) {
+    ps.SetMode(twist_spine(pts, tans, length, twist), Standard_True, BRepFill_NoContact);
+  } else {
+    ps.SetMode(Standard_False);
+  }
+  ps.Add(prof, Standard_False, Standard_False);
+  ps.Build();
+  if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
+  return out(valid(ps.Shape(), "surface sweep"));
+  FOX2_CATCH("surface sweep")
+}
+
 } // namespace fox

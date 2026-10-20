@@ -1335,6 +1335,33 @@ pub enum FeatureKind {
     #[serde(default = "full_turn")]
     angle: String,
   },
+  /// A surface swept from sketch curves (open or closed) along a path (Fusion's SURFACE >
+  /// Sweep): a new surface body, never joined or cut.
+  SurfaceSweep {
+    sketch: FeatureId,
+    /// The profile curves; empty = every non-construction curve of the sketch.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    path_sketch: FeatureId,
+    /// The path's curves; empty = every non-construction curve of the path sketch.
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    /// Twist angle from start to end of the path; empty = none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    twist: String,
+    #[serde(default)]
+    orientation: SweepOrientation,
+  },
+  /// A surface lofted through sketch curves (open or closed), in order (Fusion's SURFACE >
+  /// Loft): a new surface body, never joined or cut.
+  SurfaceLoft {
+    /// Each section: a sketch's curves forming one chain (empty = all of them).
+    sections: Vec<PathRef>,
+    #[serde(default)]
+    ruled: bool,
+    #[serde(default)]
+    closed: bool,
+  },
   /// A surface filling a closed boundary: body edges or a sketch's curves.
   Patch {
     #[serde(default)]
@@ -1904,6 +1931,8 @@ impl FeatureKind {
       FeatureKind::Thicken { .. } => "Thicken",
       FeatureKind::SurfaceExtrude { .. } => "SurfaceExtrude",
       FeatureKind::SurfaceRevolve { .. } => "SurfaceRevolve",
+      FeatureKind::SurfaceSweep { .. } => "SurfaceSweep",
+      FeatureKind::SurfaceLoft { .. } => "SurfaceLoft",
       FeatureKind::Patch { .. } => "Patch",
       FeatureKind::Stitch { .. } => "Stitch",
       FeatureKind::Unstitch { .. } => "Unstitch",
@@ -1999,6 +2028,8 @@ impl FeatureKind {
         v.extend(axis_dep(axis));
         v
       }
+      FeatureKind::SurfaceSweep { sketch, path_sketch, .. } => vec![*sketch, *path_sketch],
+      FeatureKind::SurfaceLoft { sections, .. } => sections.iter().map(|r| r.sketch).collect(),
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
       FeatureKind::CircularPattern { axis, .. } => axis_dep(axis),
       FeatureKind::Move { axis: Some(axis), .. } => axis_dep(axis),
@@ -2785,6 +2816,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Ruled { .. } | FeatureKind::Trim { .. } => {}
     FeatureKind::SurfaceExtrude { distance, .. } => f(distance),
     FeatureKind::SurfaceRevolve { angle, .. } => f(angle),
+    FeatureKind::SurfaceSweep { twist, .. } => {
+      if !twist.is_empty() {
+        f(twist);
+      }
+    }
+    FeatureKind::SurfaceLoft { .. } => {}
     FeatureKind::Stitch { tolerance, .. } => f(tolerance),
     FeatureKind::Mesh { amount, .. } => f(amount),
     FeatureKind::ConstructionAxis { .. }

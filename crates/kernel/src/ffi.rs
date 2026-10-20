@@ -196,6 +196,8 @@ pub(crate) mod ffi {
     fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
     fn loft_closed(sections: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_surface(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
+    fn sweep_surface(profile: &Shape, spine: &Shape, twist: f64, parallel: bool) -> Result<UniquePtr<Shape>>;
     fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: &[f64], weight: f64) -> Result<UniquePtr<Shape>>;
     // surface workspace (cpp/surface2.cpp)
     include!("fox-kernel/cpp/surface2.hxx");

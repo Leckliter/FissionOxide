@@ -3,7 +3,7 @@
 
 use fox_kernel::glam::DVec3;
 use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, SweepOrientation};
 use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
@@ -210,6 +210,39 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           angle: opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into()),
         },
       )
+    })(),
+    "surface.sweep" => (|| {
+      let path_sketch = FeatureId(req_u32(p, "path")?);
+      s.design.sketch(path_sketch)?;
+      let sketch = sketch_for_feature(s, p)?;
+      let orientation = match p.get("orientation").and_then(Value::as_str).unwrap_or("perpendicular") {
+        "perpendicular" => SweepOrientation::Perpendicular,
+        "parallel" => SweepOrientation::Parallel,
+        o => return Err(CmdError::new(format!("unknown sweep orientation '{o}' (perpendicular, parallel)"))),
+      };
+      add_feature(
+        s,
+        FeatureKind::SurfaceSweep {
+          sketch,
+          curves: ids(p, "curves").into_iter().map(CurveId).collect(),
+          path_sketch,
+          path_curves: ids(p, "path_curves").into_iter().map(CurveId).collect(),
+          twist: opt_expr(p, "twist").unwrap_or_default(),
+          orientation,
+        },
+      )
+    })(),
+    "surface.loft" => (|| {
+      let mut sections = Vec::new();
+      for v in p.get("sections").and_then(Value::as_array).ok_or(CmdError::new("missing 'sections'"))? {
+        sections.push(crate::solid::path_ref(s, v)?);
+      }
+      if sections.len() < 2 {
+        return Err(CmdError::new("a loft needs at least two sections"));
+      }
+      s.edit_sketch = None;
+      let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::SurfaceLoft { sections, ruled: flag("ruled"), closed: flag("closed") })
     })(),
     "surface.patch" => (|| {
       let mut edges = Vec::new();

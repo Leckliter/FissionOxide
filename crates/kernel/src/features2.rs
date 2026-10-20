@@ -152,6 +152,26 @@ impl Shape {
     Shape::wrap(sys::loft_closed(c.get()?)?)?.solid_or("loft")
   }
 
+  /// A surface (not a solid) lofted through `sections` in order (wires, open or closed, or
+  /// faces' outer boundaries); `closed` loops back to the first. Open sections are turned to run
+  /// the same way as the one before them.
+  pub fn loft_surface(sections: &[Shape], ruled: bool, closed: bool) -> Result<Shape> {
+    if sections.len() < 2 {
+      return Err(KernelError::Input("a loft needs at least two sections".into()));
+    }
+    let c = Shape::compound(sections)?;
+    Shape::wrap(sys::loft_surface(c.get()?, ruled, closed)?)
+  }
+
+  /// A surface (not a solid) swept from this wire (open or closed) along a path wire, turning by
+  /// `twist` radians from start to end; `parallel` keeps the profile's orientation.
+  pub fn sweep_surface(&self, path: &Shape, twist: f64, parallel: bool) -> Result<Shape> {
+    if !twist.is_finite() {
+      return Err(KernelError::Input("the twist angle is not finite".into()));
+    }
+    Shape::wrap(sys::sweep_surface(self.get()?, path.get()?, twist, parallel)?)
+  }
+
   /// A loft from `profile` to the point `apex` (a vertex) that arrives tangent to the plane
   /// across `axis` there, rounded like a dome; `weight` (1 = a paraboloid) sets how far the flat
   /// top reaches.

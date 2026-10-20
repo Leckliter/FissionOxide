@@ -310,3 +310,86 @@ fn thicken_an_l_surface_with_sharp_and_rounded_corners() {
   let (v, _) = thick(json!({"corners": "round", "symmetric": true}));
   assert!(close(v, (196.0 + PI) * 25.0, 1e-3), "{v}");
 }
+
+/// A sketch on the XY plane offset by `z`, holding a half circle of radius 10 over the X axis
+/// drawn from x = `from` to the other end.
+fn half_circle(s: &mut Session, z: f64, from: f64) -> u32 {
+  if z == 0.0 {
+    run(s, "sketch.create", json!({"plane": "xy"}));
+  } else {
+    run(s, "plane.offset", json!({"plane": "xy", "offset": z}));
+    let plane = s.design.features.last().unwrap().id.0;
+    run(s, "sketch.create", json!({"plane": {"feature": plane}}));
+  }
+  run(s, "sketch.arc", json!({"start": [from, 0], "mid": [0, 10], "end": [-from, 0]}));
+  s.edit_sketch.unwrap().0
+}
+
+#[test]
+fn surface_loft_between_open_arcs() {
+  // two half circles 20 apart: half a cylinder's side, π·10·20, whichever way each runs
+  for from in [10.0, -10.0] {
+    let mut s = Session::default();
+    let a = half_circle(&mut s, 0.0, 10.0);
+    let b = half_circle(&mut s, 20.0, from);
+    run(&mut s, "surface.loft", json!({"sections": [a, {"sketch": b}]}));
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    assert_eq!(s.model.bodies.len(), 1);
+    let body = &s.model.bodies[0];
+    assert_eq!(body.shape.solid_count(), 0, "a surface, not a solid");
+    let m = body.shape.mass().unwrap();
+    assert!(close(m.area, PI * 10.0 * 20.0, 1e-3), "{from}: {}", m.area);
+    assert!(close(m.bbox_max.z - m.bbox_min.z, 20.0, 1e-6) && close(m.bbox_max.y, 10.0, 1e-6), "{m:?}");
+    let loft = s.design.features.last().unwrap();
+    assert!(matches!(loft.kind, fox_model::FeatureKind::SurfaceLoft { .. }));
+    assert!(loft.kind.depends_on().contains(&fox_model::FeatureId(b)));
+  }
+  // a loft needs two sections
+  let mut s = Session::default();
+  let a = half_circle(&mut s, 0.0, 10.0);
+  assert!(s.execute("surface.loft", &json!({"sections": [a]})).is_err());
+}
+
+#[test]
+fn surface_sweep_open_profile_along_paths() {
+  // a 10 long line across the start of the path, swept along a straight 30 line and a quarter
+  // circle of radius 20: flat strips of 10 × the path length
+  for (straight, len) in [(true, 30.0), (false, PI / 2.0 * 20.0)] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    if straight {
+      run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+    } else {
+      let h = 20.0 * (0.5f64).sqrt();
+      run(&mut s, "sketch.arc", json!({"start": [0, 0], "mid": [20.0 - h, h], "end": [20, 20]}));
+    }
+    let p = s.edit_sketch.unwrap().0;
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.line", json!({"points": [[-5, 0], [5, 0]]}));
+    let prof = s.edit_sketch.unwrap().0;
+    run(&mut s, "surface.sweep", json!({"sketch": prof, "path": p}));
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    assert_eq!(s.model.bodies.len(), 1);
+    let body = &s.model.bodies[0];
+    assert_eq!(body.shape.solid_count(), 0, "a surface, not a solid");
+    let m = body.shape.mass().unwrap();
+    assert!(close(m.area, 10.0 * len, 1e-3), "{len}: {}", m.area);
+    assert!(close(m.bbox_max.z - m.bbox_min.z, 0.0, 1e-6), "flat in the path's plane: {m:?}");
+  }
+  // an open arc profile along a straight path: half a cylinder's side, either orientation
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]]}));
+  let p = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  run(&mut s, "sketch.arc", json!({"start": [10, 0], "mid": [0, 10], "end": [-10, 0]}));
+  let prof = s.edit_sketch.unwrap().0;
+  for orientation in ["perpendicular", "parallel"] {
+    run(&mut s, "surface.sweep", json!({"sketch": prof, "path": p, "orientation": orientation}));
+    assert!(s.model.errors().is_empty(), "{orientation}: {:?}", s.model.errors());
+    let m = s.model.bodies.last().unwrap().shape.mass().unwrap();
+    assert_eq!(s.model.bodies.last().unwrap().shape.solid_count(), 0);
+    assert!(close(m.area, PI * 10.0 * 30.0, 1e-3), "{orientation}: {}", m.area);
+  }
+  assert!(s.execute("surface.sweep", &json!({"sketch": prof, "path": p, "orientation": "sideways"})).is_err());
+}

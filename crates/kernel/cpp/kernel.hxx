@@ -136,6 +136,8 @@ std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offs
 double side_of(const Shape &face, double x, double y, double z);
 std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double> points, double radius);
 std::unique_ptr<Shape> loft_closed(const Shape &sections);
+std::unique_ptr<Shape> loft_surface(const Shape &sections, bool ruled, bool closed);
+std::unique_ptr<Shape> sweep_surface(const Shape &profile, const Shape &spine, double twist, bool parallel);
 std::unique_ptr<Shape> loft_point_tangent(const Shape &profile, const Shape &apex, rust::Slice<const double> axis,
                                           double weight);
 // sheet2.cpp
