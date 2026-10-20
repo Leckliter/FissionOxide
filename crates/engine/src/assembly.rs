@@ -149,13 +149,66 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           set.insert(k.into(), json!(expr_of(v)?));
         }
       }
-      if !matches!(s.design.feature(id).map(|f| &f.kind), Some(FeatureKind::Joint { .. })) {
+      let Some(f) = s.design.feature(id).filter(|f| matches!(f.kind, FeatureKind::Joint { .. })) else {
         return Err(CmdError::new("that feature is not a joint"));
+      };
+      if matches!(f.kind, FeatureKind::Joint { locked: true, .. }) && !set.is_empty() {
+        return Err(CmdError::new(format!("{} is locked: unlock its motion to drive it", f.name)));
       }
       if mates::has_contacts(&s.design) && !set.is_empty() {
         return drive_to_contact(s, id, set);
       }
       s.execute("feature.edit", &json!({"feature": id.0, "set": set}))
+    })(),
+    "joint.lock" => (|| {
+      let id = joint_id(s, p)?;
+      let on = p.get("locked").and_then(Value::as_bool);
+      s.edit(|d| {
+        if let Some(FeatureKind::Joint { locked, .. }) = d.feature_mut(id).map(|f| &mut f.kind) {
+          *locked = on.unwrap_or(!*locked);
+        }
+        Ok(())
+      })?;
+      let locked = matches!(s.design.feature(id).map(|f| &f.kind), Some(FeatureKind::Joint { locked: true, .. }));
+      Ok(json!({"locked": locked}))
+    })(),
+    "joint.limits" => (|| {
+      let id = joint_id(s, p)?;
+      // a motion given as null clears its limits; one left out keeps them
+      let mut set: Vec<(&str, Option<(String, String)>)> = Vec::new();
+      for k in ["rotation", "slide"] {
+        match p.get(k) {
+          None => {}
+          Some(Value::Null) => set.push((k, None)),
+          Some(_) => set.push((k, limit(p, k)?)),
+        }
+      }
+      s.edit(|d| {
+        if let Some(FeatureKind::Joint { limits, .. }) = d.feature_mut(id).map(|f| &mut f.kind) {
+          for (k, v) in set {
+            if k == "rotation" {
+              limits.rotation = v;
+            } else {
+              limits.slide = v;
+            }
+          }
+        }
+        Ok(())
+      })?;
+      let st = s.model.status(id);
+      Ok(json!({"error": st.and_then(|x| x.error.clone())}))
+    })(),
+    "joint.visible" => (|| {
+      let id = joint_id(s, p)?;
+      let v = p.get("visible").and_then(Value::as_bool).unwrap_or(true);
+      s.edit(|d| {
+        if let Some(f) = d.feature_mut(id) {
+          // shown is the default: only a hidden joint says so in the file
+          f.visible = (!v).then_some(false);
+        }
+        Ok(())
+      })?;
+      Ok(json!({}))
     })(),
     "motion.study" => motion_study(s, p),
     "assembly.interference" => interference(s, p),
@@ -207,6 +260,15 @@ impl Properties {
     if let Some(m) = self.sheet_metal {
       c.sheet_metal = m;
     }
+  }
+}
+
+/// The joint a command names in `joint`.
+fn joint_id(s: &Session, p: &Value) -> Result<FeatureId, CmdError> {
+  let id = FeatureId(req_u32(p, "joint")?);
+  match s.design.feature(id).map(|f| &f.kind) {
+    Some(FeatureKind::Joint { .. }) => Ok(id),
+    _ => Err(CmdError::new("that feature is not a joint")),
   }
 }
 
@@ -299,11 +361,24 @@ fn joint(s: &mut Session, p: &Value) -> CmdResult {
     pitch: e("pitch"),
     limits,
     lead: e("lead"),
+    locked: flag("locked"),
   };
   if kind_is_screw(&kind) && opt_expr(p, "lead").is_none() {
     return Err(CmdError::new("a screw joint needs a 'lead' (its advance per turn)"));
   }
-  let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
+  // new designs name joints by type, as Fusion does ("Revolute 1"); older ones keep "JointN"
+  let typed = match &kind {
+    FeatureKind::Joint { kind, .. } if s.design.behaviours.has(fox_sketch::behaviour::JOINT_TYPE_NAMES) => Some(*kind),
+    _ => None,
+  };
+  let id = s.edit(|d| {
+    let name = typed.map(|k| d.joint_type_name(k));
+    let id = d.add_feature(kind)?;
+    if let (Some(n), Some(f)) = (name, d.feature_mut(id)) {
+      f.name = n;
+    }
+    Ok(id)
+  })?;
   let st = s.model.status(id);
   Ok(json!({
     "feature": id.0,

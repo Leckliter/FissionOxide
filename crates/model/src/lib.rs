@@ -1145,6 +1145,9 @@ pub enum FeatureKind {
     /// Screw joints: the advance along Z per full turn of rotation.
     #[serde(default = "zero")]
     lead: String,
+    /// Lock Motion: the joint keeps its motion values; driving it is refused until unlocked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    locked: bool,
   },
   /// Another instance of a component: copies of its bodies, rebuilt from the source on every
   /// change (edit the original and every copy follows), placed by `translate`. Joints can then
@@ -2087,6 +2090,22 @@ impl Design {
       *m += 1;
     }
     Ok(id)
+  }
+
+  /// The name a new joint of `kind` gets in a design made with
+  /// [`JOINT_TYPE_NAMES`](fox_sketch::behaviour::JOINT_TYPE_NAMES): its type and the next free
+  /// number for that type ("Revolute 1", "Revolute 2", "Rigid 1"), as in Fusion.
+  pub fn joint_type_name(&self, kind: assembly::JointKind) -> String {
+    let base = kind.label();
+    let n = self.features.iter().filter(|f| matches!(&f.kind, FeatureKind::Joint { kind: k, .. } if *k == kind)).count();
+    let mut k = n + 1;
+    loop {
+      let name = format!("{base} {k}");
+      if !self.features.iter().any(|f| f.name == name) {
+        return name;
+      }
+      k += 1;
+    }
   }
 
   fn unique_name(&self, base: &str) -> String {

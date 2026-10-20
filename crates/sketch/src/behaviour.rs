@@ -130,6 +130,10 @@ pub const SWEEP_UNIFIED: &str = "sweep_unified";
 /// feature on it (sketches, primitives, construction planes), so this is a design-level flag:
 /// read it from the design's set (`Design::frames`), not a sketch's.
 pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
+/// New joints are named by their type, as in Fusion ("Revolute 1", "Rigid 2", numbered per type).
+/// Without it (designs saved before), a new joint is named "JointN" like its older siblings.
+/// Names already stored in a file never change either way.
+pub const JOINT_TYPE_NAMES: &str = "joint_type_names";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -154,6 +158,7 @@ pub const CURRENT: &[&str] = &[
   CHAMFER_FORWARD_FACE,
   SWEEP_UNIFIED,
   FUSION_SKETCH_FRAMES,
+  JOINT_TYPE_NAMES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

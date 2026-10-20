@@ -47,6 +47,7 @@ fn joint(moving: ComponentId, kind: JointKind, at: DVec3, z: DVec3) -> FeatureKi
     pitch: "0".into(),
     limits: Default::default(),
     lead: "0".into(),
+    locked: false,
   }
 }
 

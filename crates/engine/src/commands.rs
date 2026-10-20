@@ -225,8 +225,11 @@ cmds! {
   "component.rename" => "Rename a component", "{component, name}";
   "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";
   "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
-  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
-  "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
+  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}, locked?}";
+  "joint.drive" => "Set a joint's motion values (refused while it is locked)", "{joint, rotation?, slide?, slide2?, pitch?}";
+  "joint.lock" => "Lock Motion: lock or unlock a joint's motion (default: toggle)", "{joint, locked?: bool}";
+  "joint.limits" => "Edit Motion Limits: set a joint's rotation and slide limits; null clears one, left out keeps it", "{joint, rotation?: [min, max] | null, slide?: [min, max] | null}";
+  "joint.visible" => "Show or hide a joint's glyph in the canvas", "{joint, visible: bool}";
   "constraint.center" => "Center constraint: move a component along a plane normal only, so its face (or the midplane between two of its faces) lands on the midplane between two faces of another component", "{moving?, moving_faces: [face|plane] (one or two), fixed?, fixed_faces: [face|plane] (one or two), offset?, name?}";
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
   "assembly.interference" => "Overlapping bodies of different components (or of the selected bodies); create_bodies adds each overlap as a static body, in a new component unless components is false", "{bodies?: [id], create_bodies?, components?}";

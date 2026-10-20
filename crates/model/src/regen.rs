@@ -1449,6 +1449,7 @@ impl Ctx<'_> {
         pitch,
         limits,
         lead,
+        locked: _,
       } => {
         let comp = self.components.iter().find(|c| c.id == *moving).ok_or("the moving component no longer exists")?;
         if comp.grounded {

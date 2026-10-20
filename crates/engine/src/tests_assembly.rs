@@ -555,3 +555,112 @@ fn new_component_options_and_activation() {
   let d = run(&mut s, "component.create", json!({"name": "Lid", "activate": true}))["component"].as_u64().unwrap();
   assert_eq!(s.active_component.map(|x| x.0 as u64), Some(d));
 }
+
+/// Three parts jointed to a grounded base: a revolute, a rigid and another revolute; returns the
+/// joints' names.
+fn three_joints(s: &mut Session) -> Vec<String> {
+  let (base, _) = part(s, "Base", [100.0, 100.0, 10.0], [50.0, 50.0]);
+  run(s, "component.ground", json!({"component": base}));
+  let mut names = Vec::new();
+  for (i, kind) in ["revolute", "rigid", "revolute"].into_iter().enumerate() {
+    let x = 20.0 + 30.0 * i as f64;
+    let (c, _) = part(s, &format!("P{i}"), [10.0, 10.0, 5.0], [x, 300.0]);
+    let j = run(
+      s,
+      "joint",
+      json!({"moving": c, "moving_origin": {"at": [x, 300, 0]}, "fixed": base, "fixed_origin": {"at": [x, 50, 10]}, "kind": kind}),
+    );
+    names.push(j["name"].as_str().unwrap().to_string());
+  }
+  names
+}
+
+/// A part jointed to the world at `x` by a joint of `kind`; returns the joint's command result.
+fn world_joint(s: &mut Session, name: &str, x: f64, kind: &str) -> Value {
+  let (c, _) = part(s, name, [10.0, 10.0, 5.0], [x, 300.0]);
+  run(s, "joint", json!({"moving": c, "moving_origin": {"at": [x, 300, 0]}, "fixed_origin": {"at": [0, 0, 0]}, "kind": kind}))
+}
+
+#[test]
+fn new_joints_are_named_by_type_as_in_fusion() {
+  let mut s = Session::default();
+  assert!(s.design.behaviours.has(fox_sketch::behaviour::JOINT_TYPE_NAMES));
+  assert_eq!(three_joints(&mut s), ["Revolute 1", "Rigid 1", "Revolute 2"]);
+  // a name already taken (by a rename) is skipped
+  let mut s = Session::default();
+  let a = world_joint(&mut s, "Q", 20.0, "slider");
+  assert_eq!(a["name"], "Slider 1");
+  run(&mut s, "feature.rename", json!({"feature": a["feature"], "name": "Slider 2"}));
+  assert_eq!(world_joint(&mut s, "R", 60.0, "slider")["name"], "Slider 3");
+  assert_eq!(world_joint(&mut s, "T", 90.0, "pin_slot")["name"], "Pin-Slot 1");
+}
+
+#[test]
+fn a_legacy_design_keeps_its_joint_names_and_names_new_joints_as_before() {
+  // made before JOINT_TYPE_NAMES: joints were named JointN
+  let mut s = Session::default();
+  s.design.behaviours.remove(fox_sketch::behaviour::JOINT_TYPE_NAMES);
+  assert_eq!(three_joints(&mut s), ["Joint1", "Joint2", "Joint3"]);
+  // saved and read back without the flag (a file from before it): the stored names stay
+  let mut file: Value = serde_json::from_str(&s.design.to_json()).unwrap();
+  file.as_object_mut().unwrap().remove("behaviours");
+  s.design = fox_model::Design::from_json(&file.to_string()).unwrap();
+  s.rebuild();
+  let names: Vec<&str> =
+    s.design.features.iter().filter(|f| f.kind.base_name() == "Joint").map(|f| f.name.as_str()).collect();
+  assert_eq!(names, ["Joint1", "Joint2", "Joint3"]);
+  // and a joint added to it is named the old way
+  assert_eq!(world_joint(&mut s, "Late", 200.0, "revolute")["name"], "Joint4");
+}
+
+fn mark(s: &Session, j: &Value) -> Option<crate::scene::JointMark> {
+  crate::scene::joint_marks(s).into_iter().find(|m| m.joint && Some(u64::from(m.feature.0)) == j.as_u64())
+}
+
+#[test]
+fn joints_lock_take_motion_limits_and_hide() {
+  let mut s = Session::default();
+  let (_, arm, _) = base_and_arm(&mut s);
+  let j = run(
+    &mut s,
+    "joint",
+    json!({"moving": arm, "moving_origin": {"at": [10, 200, 0]}, "fixed_origin": {"at": [50, 30, 10]}, "kind": "revolute"}),
+  )["feature"]
+    .clone();
+  assert_eq!(mark(&s, &j).unwrap().kind, Some(fox_model::JointKind::Revolute));
+  // Lock Motion toggles, and a locked joint can't be driven
+  assert_eq!(run(&mut s, "joint.lock", json!({"joint": j}))["locked"], true);
+  let e = s.execute("joint.drive", &json!({"joint": j, "rotation": "30 deg"})).unwrap_err();
+  assert!(e.0.contains("locked"), "{e}");
+  assert!(mark(&s, &j).unwrap().locked);
+  // the lock is saved with the design, and only while on
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert!(matches!(back.feature(s.design.features.last().unwrap().id).unwrap().kind, fox_model::FeatureKind::Joint {
+    locked: true,
+    ..
+  }));
+  assert_eq!(run(&mut s, "joint.lock", json!({"joint": j, "locked": false}))["locked"], false);
+  assert!(!s.design.to_json().contains("\"locked\""));
+  run(&mut s, "joint.drive", json!({"joint": j, "rotation": "30 deg"}));
+  // Edit Motion Limits: set, kept when left out, cleared with null
+  run(&mut s, "joint.limits", json!({"joint": j, "rotation": ["-10 deg", "45 deg"], "slide": [0, 5]}));
+  let limits = |s: &Session| match &s.design.feature(fox_model::FeatureId(j.as_u64().unwrap() as u32)).unwrap().kind {
+    fox_model::FeatureKind::Joint { limits, .. } => limits.clone(),
+    _ => unreachable!(),
+  };
+  assert_eq!(limits(&s).rotation, Some(("-10 deg".into(), "45 deg".into())));
+  run(&mut s, "joint.limits", json!({"joint": j, "slide": null}));
+  assert_eq!(limits(&s).rotation, Some(("-10 deg".into(), "45 deg".into())));
+  assert_eq!(limits(&s).slide, None);
+  // driving past a limit reports it
+  let r = s.execute("joint.drive", &json!({"joint": j, "rotation": "90 deg"})).unwrap();
+  assert!(r["error"].is_string(), "{r}");
+  run(&mut s, "joint.drive", json!({"joint": j, "rotation": "0 deg"}));
+  // Show/Hide: a hidden joint draws no glyph
+  run(&mut s, "joint.visible", json!({"joint": j, "visible": false}));
+  assert!(mark(&s, &j).is_none());
+  run(&mut s, "joint.visible", json!({"joint": j, "visible": true}));
+  assert!(mark(&s, &j).is_some());
+  // only joints
+  assert!(s.execute("joint.lock", &json!({"joint": 1})).is_err());
+}

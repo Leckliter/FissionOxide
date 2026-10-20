@@ -86,6 +86,20 @@ pub enum JointKind {
 }
 
 impl JointKind {
+  /// The type's name as Fusion shows it, and names new joints after it ("Revolute 1").
+  pub fn label(self) -> &'static str {
+    match self {
+      JointKind::Rigid => "Rigid",
+      JointKind::Revolute => "Revolute",
+      JointKind::Slider => "Slider",
+      JointKind::Cylindrical => "Cylindrical",
+      JointKind::PinSlot => "Pin-Slot",
+      JointKind::Planar => "Planar",
+      JointKind::Ball => "Ball",
+      JointKind::Screw => "Screw",
+    }
+  }
+
   /// Which motions the joint allows: (rotation, slide, slide2, pitch).
   pub fn freedoms(self) -> (bool, bool, bool, bool) {
     match self {

@@ -1210,6 +1210,10 @@ pub struct JointMark {
   pub joint: bool,
   /// X, Y, Z axes and origin (world).
   pub frame: fox_kernel::glam::DMat4,
+  /// A joint's type (its glyph shows it); `None` for a saved joint origin.
+  pub kind: Option<fox_model::JointKind>,
+  /// A joint whose motion is locked (Lock Motion).
+  pub locked: bool,
 }
 
 /// The saved joint origins and joints of the active timeline, where they are now.
@@ -1220,17 +1224,19 @@ pub fn joint_marks(s: &Session) -> Vec<JointMark> {
     match &f.kind {
       FeatureKind::JointOrigin { .. } => {
         if let Some((_, m)) = s.model.joint_origins.get(&f.id) {
-          out.push(JointMark { feature: f.id, joint: false, frame: *m });
+          out.push(JointMark { feature: f.id, joint: false, frame: *m, kind: None, locked: false });
         }
       }
-      FeatureKind::Joint { fixed_origin, angle, offset, .. } => {
+      // a hidden joint (Show/Hide) draws no glyph
+      FeatureKind::Joint { .. } if f.visible == Some(false) => {}
+      FeatureKind::Joint { fixed_origin, angle, offset, kind, locked, .. } => {
         let Some(base) = geometry_frame(s, fixed_origin) else { continue };
         let len = |e: &str| fox_expr::eval(e, fox_expr::Kind::Length, &s.model.params).unwrap_or(0.0);
         let ang = fox_expr::eval(angle, fox_expr::Kind::Angle, &s.model.params).unwrap_or(0.0);
         let m = base
           * fox_kernel::glam::DMat4::from_translation(DVec3::new(0.0, 0.0, len(offset)))
           * fox_kernel::glam::DMat4::from_rotation_z(ang);
-        out.push(JointMark { feature: f.id, joint: true, frame: m });
+        out.push(JointMark { feature: f.id, joint: true, frame: m, kind: Some(*kind), locked: *locked });
       }
       _ => {}
     }
