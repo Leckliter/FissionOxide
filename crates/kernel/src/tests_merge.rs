@@ -5,7 +5,7 @@ use super::*;
 use fox_sketch::behaviour::{
   ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_ELLIPSE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS, PENDING,
 };
-use fox_sketch::{CurveKind, PtSpec, Sketch, find_profiles};
+use fox_sketch::{Behaviours, CurveKind, PtSpec, Sketch, find_profiles};
 use std::f64::consts::PI;
 
 /// Extrudes every profile of the sketch 2 mm; (faces, volume) of each, largest profile first.
@@ -35,9 +35,15 @@ fn mesh_volume(p: &fox_sketch::Profile) -> f64 {
     / 6.0
 }
 
+/// The sketch with only these behaviours (pending or current) on.
 fn with(mut s: Sketch, names: &[&str]) -> Sketch {
+  s.behaviours = Behaviours::legacy();
   for n in names {
-    s.behaviours.enable_pending_for_tests(n);
+    if PENDING.contains(n) {
+      s.behaviours.enable_pending_for_tests(n);
+    } else {
+      s.behaviours.insert(*n);
+    }
   }
   s
 }
@@ -116,12 +122,13 @@ fn a_circle_split_where_lines_touch_it_merges_back_with_one_edge_split_arcs() {
 fn spline_pieces_become_one_b_spline_edge() {
   for (kind, flag) in [(0, ONE_EDGE_FIT_SPLINE), (1, ONE_EDGE_CONTROL_SPLINE)] {
     let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
     let pts: Vec<_> =
       [[0.0, 0.0], [5.0, 6.0], [12.0, 4.0], [18.0, 9.0], [24.0, 0.0]].iter().map(|p| s.add_point(p[0], p[1])).collect();
     let curve = if kind == 0 {
       CurveKind::Spline { points: pts.clone(), start_handle: None, end_handle: None }
     } else {
-      CurveKind::ControlSpline { points: pts.clone() }
+      CurveKind::control_spline(pts.clone())
     };
     let id = s.add_curve(curve).unwrap();
     s.add_curve(CurveKind::Line { a: pts[4], b: pts[0] }).unwrap();

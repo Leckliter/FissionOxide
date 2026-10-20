@@ -50,6 +50,8 @@
 188-cubic-six-points
 189-quintic-six-points
 19-l-bracket-constrained
+190-degree5-six-points
+191-degree5-nine-points
 20-slot-constrained
 205-vertical-edge-sweep-path
 206-sketch-line-sweep-path
