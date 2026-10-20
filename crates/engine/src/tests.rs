@@ -1036,6 +1036,10 @@ fn the_welcome_fox_is_added_once() {
   }
   let list = run(&mut s, "hub.list", json!({"project": "Default Project"}));
   assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+  // its own thumbnail, from the front rather than the home view
+  let st = crate::hub::open_store(&s).unwrap();
+  let thumb = st.thumbnail(&item, None).expect("a thumbnail");
+  assert_ne!(Some(thumb), crate::files::thumbnail_png(&s, 256, 256));
   // not again, even once it's deleted
   run(&mut s, "hub.item.delete", json!({"item": item}));
   assert!(crate::hub::add_welcome(&root).unwrap().is_none());

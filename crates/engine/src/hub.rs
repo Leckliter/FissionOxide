@@ -579,7 +579,14 @@ pub fn add_welcome(root: &Path) -> Result<Option<String>, CmdError> {
     Err(_) => st.create_project("Default Project")?,
   };
   let at = NewItem { project: &project, folder: None, name: &s.design.name, kind: ItemKind::Design, ext: "fox" };
-  let m = VersionMeta { description: "Welcome to FissionOxide".into(), ..meta(&s, &json!({})) };
+  // three-quarters from the front, as brand/model/FissionOxide.png: from the home view's
+  // height an upright fox is mostly the tops of its ears
+  let m = VersionMeta {
+    description: "Welcome to FissionOxide".into(),
+    thumbnail_png: files::thumbnail_png_turned(&s, 256, 256, -30.0, 15.0),
+    stats: stats(&s),
+    ..VersionMeta::default()
+  };
   let (item, _) = st.create_item(at, WELCOME.as_bytes(), Origin::Saved, m)?;
   std::fs::write(&marker, format!("{item}\n"))?;
   Ok(Some(item))

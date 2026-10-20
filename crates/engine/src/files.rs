@@ -737,9 +737,18 @@ pub fn inspect(path: &Path) -> CmdResult {
 
 /// A PNG preview of the design from the home view.
 pub fn thumbnail_png(s: &Session, w: u32, h: u32) -> Option<Vec<u8>> {
-  use fox_render::{Camera, StandardView};
-  let mut cam = Camera::default();
-  cam.set_view(StandardView::Home);
+  let mut cam = fox_render::Camera::default();
+  cam.set_view(fox_render::StandardView::Home);
+  thumbnail_from(s, cam, w, h)
+}
+
+/// A PNG preview of the design from `yaw` and `pitch` (degrees, as `view.render` takes them).
+pub fn thumbnail_png_turned(s: &Session, w: u32, h: u32, yaw: f64, pitch: f64) -> Option<Vec<u8>> {
+  let cam = fox_render::Camera { yaw: yaw.to_radians(), pitch: pitch.to_radians(), ..Default::default() };
+  thumbnail_from(s, cam, w, h)
+}
+
+fn thumbnail_from(s: &Session, mut cam: fox_render::Camera, w: u32, h: u32) -> Option<Vec<u8>> {
   let (lo, hi) =
     s.model.bounds().unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
   cam.fit(lo, hi, w as f64 / h.max(1) as f64);
