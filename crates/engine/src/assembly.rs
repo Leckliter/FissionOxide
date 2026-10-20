@@ -1,8 +1,9 @@
 //! Assembly commands: components, joints, motion, interference and the bill of materials (joint
 //! origins, rigid groups, motion links, contact sets and inserted designs are in [`crate::mates`]).
 
-use fox_kernel::BoolOp;
+use fox_kernel::{BoolOp, Shape};
 use fox_model::assembly::{self, JointGeometry, JointKind, JointLimits};
+use fox_model::direct::BaseBody;
 use fox_model::{BodyId, ComponentId, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
@@ -117,7 +118,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       s.execute("feature.edit", &json!({"feature": id.0, "set": set}))
     })(),
     "motion.study" => motion_study(s, p),
-    "assembly.interference" => Ok(json!(interference(&s.model.bodies, s))),
+    "assembly.interference" => interference(s, p),
     "assembly.bom" => crate::subassembly::bom(s, p),
     _ => return mates::run(s, name, p),
   })
@@ -303,9 +304,62 @@ fn drive_to_contact(s: &mut Session, id: FeatureId, set: serde_json::Map<String,
   Ok(out)
 }
 
-/// Pairs of bodies (in different components) that overlap, with the overlap volume.
-fn interference(bodies: &[fox_model::regen::Body], s: &Session) -> Vec<Value> {
-  interference_in(&s.design, bodies)
+/// Pairs of overlapping bodies with the overlap volume: those of different components, or every
+/// pair of the selected `bodies`. With `create_bodies` each overlap is added as a body of a base
+/// feature (static geometry, as Fusion only allows in direct modelling), each in a new component
+/// unless `components` is false.
+fn interference(s: &mut Session, p: &Value) -> CmdResult {
+  let picked: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
+  for b in &picked {
+    if s.model.body(*b).is_none() {
+      return Err(CmdError::new(format!("no body {}", b.0)));
+    }
+  }
+  let flag = |k: &str, d: bool| p.get(k).and_then(Value::as_bool).unwrap_or(d);
+  let found = if picked.is_empty() {
+    let d = &s.design;
+    let comp = |b: BodyId| d.component_of(b).map(|c| c.id);
+    overlap_shapes(&s.model.bodies, &|a, b| comp(a).is_none() || comp(a) != comp(b))
+  } else {
+    overlap_shapes(&s.model.bodies, &|a, b| picked.contains(&a) && picked.contains(&b))
+  };
+  let mut rows: Vec<Value> = found.iter().map(|(a, b, _, v)| json!({"bodies": [a.0, b.0], "volume_mm3": v})).collect();
+  if !flag("create_bodies", false) || found.is_empty() {
+    return Ok(json!(rows));
+  }
+  let mut breps = Vec::new();
+  for (_, _, shape, _) in &found {
+    breps.push(shape.to_brep()?);
+  }
+  let components = flag("components", true);
+  let (fid, made) = s.edit(|d| {
+    let fid = d.add_feature(FeatureKind::BaseFeature { bodies: Vec::new(), edits: Vec::new() })?;
+    let n = d.components.iter().filter(|c| c.name.starts_with("Interference")).count();
+    let bodies: Vec<BaseBody> = breps
+      .into_iter()
+      .enumerate()
+      .map(|(k, brep)| BaseBody {
+        id: BodyId(fid.0 * 1000 + k as u32),
+        name: format!("Interference{}", n + k + 1),
+        brep,
+      })
+      .collect();
+    let mut made = Vec::new();
+    for b in &bodies {
+      let c = if components { Some(d.add_component(&b.name, vec![b.id])?.0) } else { None };
+      made.push((b.id, c));
+    }
+    if let Some(FeatureKind::BaseFeature { bodies: slot, .. }) = d.feature_mut(fid).map(|f| &mut f.kind) {
+      *slot = bodies;
+    }
+    Ok((fid, made))
+  })?;
+  for (row, (body, comp)) in rows.iter_mut().zip(made) {
+    row["body"] = json!(body.0);
+    row["component"] = json!(comp);
+    row["feature"] = json!(fid.0);
+  }
+  Ok(json!(rows))
 }
 
 fn interference_in(d: &fox_model::Design, bodies: &[fox_model::regen::Body]) -> Vec<Value> {
@@ -319,6 +373,14 @@ pub(crate) fn overlaps(
   bodies: &[fox_model::regen::Body],
   check: &dyn Fn(BodyId, BodyId) -> bool,
 ) -> Vec<(BodyId, BodyId, f64)> {
+  overlap_shapes(bodies, check).into_iter().map(|(a, b, _, v)| (a, b, v)).collect()
+}
+
+/// Pairs of bodies that `check` accepts and that overlap, with the overlap and its volume.
+fn overlap_shapes(
+  bodies: &[fox_model::regen::Body],
+  check: &dyn Fn(BodyId, BodyId) -> bool,
+) -> Vec<(BodyId, BodyId, Shape, f64)> {
   let boxes: Vec<_> = bodies.iter().map(|b| b.shape.mass().ok().map(|m| (m.bbox_min, m.bbox_max))).collect();
   let mut out = Vec::new();
   for i in 0..bodies.len() {
@@ -335,7 +397,7 @@ pub(crate) fn overlaps(
         && let Ok(m) = c.mass()
         && m.volume > 1e-6
       {
-        out.push((a.id, b.id, m.volume));
+        out.push((a.id, b.id, c, m.volume));
       }
     }
   }

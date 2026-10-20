@@ -210,7 +210,7 @@ cmds! {
   "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
   "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
-  "assembly.interference" => "Overlapping bodies of different components", "{}";
+  "assembly.interference" => "Overlapping bodies of different components (or of the selected bodies); create_bodies adds each overlap as a static body, in a new component unless components is false", "{bodies?: [id], create_bodies?, components?}";
   "assembly.bom" => "Bill of materials: components, materials, volumes and masses; indented by sub-assembly level, top level only, or parts only", "{view?: indented|top|parts}";
   "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
   "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?, standard?: asme|iso, auto_balloons?}";
