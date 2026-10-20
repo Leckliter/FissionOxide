@@ -10,10 +10,11 @@ Outputs (never edit by hand; re-run this script):
   brand/web/            tokens.css, tokens.js, tailwind.preset.js, favicons, web manifest,
                         social preview image, head.html snippet
   brand/index.html      the brand guide
+  brand/windows/        the Windows app icon (.ico) and the installer's wizard images (.bmp)
   crates/brand/src/tokens.rs, logo.rs   the same tokens and logo for Rust apps (fox-brand)
 
 Needs Python 3.9+, fontTools and resvg-py (pip install fonttools resvg-py), ImageMagick's
-`convert` for favicon.ico, and the Inter font family (OFL, https://rsms.me/inter/). The wordmark
+`convert` for favicon.ico and the Windows icon and bitmaps, and the Inter font family (OFL, https://rsms.me/inter/). The wordmark
 and other text in images are converted to outlines, so no output depends on installed fonts.
 Run from anywhere: python3 brand/build.py
 """
@@ -616,6 +617,66 @@ def guide():
 """
 
 
+# ---------------------------------------------------------------- Windows installer
+
+
+def wizard_banner():
+  """The installer wizard's side panel (164 x 314 at 100%), drawn at 200%: the fox on the dark
+  tile with the name and tagline under it."""
+  w, h = 328, 628
+  top, bottom = T["app"]["icon_tile_dark"]
+  fw = w * 0.62
+  s = fw / W
+  name, name_w = text_path(T["name"], 30)
+  tag, tag_w = text_path(T["tagline"], 17, font="Inter-Medium.otf")
+  y = 150
+  return svg(
+    w,
+    h,
+    f"""  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{top}"/>
+      <stop offset="1" stop-color="{bottom}"/>
+    </linearGradient>
+  </defs>
+  <rect width="{w}" height="{h}" fill="url(#bg)"/>
+{mark(f"translate({(w - fw) / 2:.3f} {y}) scale({s:.5f})")}
+  <path fill="{DARK["wordmark"]}" transform="translate({(w - name_w) / 2:.2f} {y + H * s + 70:.2f})" d="{name}"/>
+  <path fill="{DARK["text-muted"]}" transform="translate({(w - tag_w) / 2:.2f} {y + H * s + 108:.2f})" d="{tag}"/>""",
+  )
+
+
+def windows_assets():
+  """brand/windows/: fissionoxide.ico (16 to 256 px, each size rendered from the SVG so the small
+  ones stay sharp) and the wizard bitmaps Inno Setup picks from by screen scaling."""
+  sizes = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+  tmp = [f"windows/.icon-{size}.png" for size in sizes]
+  for size, out in zip(sizes, tmp):
+    png("logo/icon.svg", out, size)
+  write("windows/wizard.svg", wizard_banner())
+  small = {100: 55, 150: 83, 200: 110}
+  try:
+    subprocess.run(["convert", *[os.path.join(HERE, t) for t in tmp], os.path.join(HERE, "windows/fissionoxide.ico")], check=True)
+    print("wrote brand/windows/fissionoxide.ico")
+    for scale, side in small.items():
+      png("windows/wizard.svg", "windows/.wizard.png", 164 * scale // 100)
+      out = os.path.join(HERE, f"windows/wizard-{scale}.bmp")
+      # Inno Setup reads only uncompressed 24-bit BMP
+      subprocess.run(["convert", os.path.join(HERE, "windows/.wizard.png"), "-alpha", "off", "-type", "TrueColor", f"BMP3:{out}"], check=True)
+      print(f"wrote brand/windows/wizard-{scale}.bmp")
+      png("logo/icon.svg", "windows/.small.png", side)
+      out = os.path.join(HERE, f"windows/wizard-small-{scale}.bmp")
+      # the small image sits in the wizard's white header
+      args = ["-background", LIGHT["background"], "-alpha", "remove", "-type", "TrueColor"]
+      subprocess.run(["convert", os.path.join(HERE, "windows/.small.png"), *args, f"BMP3:{out}"], check=True)
+      print(f"wrote brand/windows/wizard-small-{scale}.bmp")
+  except (OSError, subprocess.CalledProcessError) as e:
+    print(f"Windows icon and bitmaps skipped ({e})", file=sys.stderr)
+  for p in tmp + ["windows/.wizard.png", "windows/.small.png"]:
+    if os.path.exists(os.path.join(HERE, p)):
+      os.remove(os.path.join(HERE, p))
+
+
 # ---------------------------------------------------------------- write everything
 
 
@@ -691,6 +752,7 @@ def main():
     print(f"favicon.ico skipped ({e})", file=sys.stderr)
   for p in ico_src:
     os.remove(p)
+  windows_assets()
 
 
 if __name__ == "__main__":

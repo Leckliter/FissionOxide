@@ -1,0 +1,170 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (matching the workspace version in Cargo.toml) builds the Windows installer
+# and publishes it, with its SHA-256, as GitHub release X.Y.Z. Installed copies find it there and
+# update themselves (crates/desktop/src/update.rs). A tag with a pre-release (v0.3.0-beta.1)
+# makes a pre-release, which installed copies don't pick up.
+#
+# Run it by hand (Actions → Release → Run workflow) to build the installer as an artifact
+# without publishing anything.
+#
+# Code signing (optional, recommended: unsigned installers get a SmartScreen warning): add the
+# repository secrets WINDOWS_CERTIFICATE (a .pfx, base64) and WINDOWS_CERTIFICATE_PASSWORD.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_TOOLCHAIN: 1.97.0
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"$' | Select-Object -First 1).Matches.Groups[1].Value
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+            if ($tag -ne "v$v") { throw "tag $tag doesn't match the version in Cargo.toml ($v); bump [workspace.package] version first" }
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "prerelease=$(if ($v.Contains('-')) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      # OpenCASCADE takes most of an hour to build on Windows: build it once per version (as CI
+      # does on Linux) and keep only its install. A release build, so it links against the same
+      # C runtime as the release executables.
+      - name: OCCT cache key
+        id: occt
+        shell: bash
+        run: |
+          ver=$(grep -A1 '^name = "occt-sys"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          echo "key=occt-${{ runner.os }}-${ver}-${{ hashFiles('crates/kernel/build.rs') }}" >> "$GITHUB_OUTPUT"
+          echo "dir=$RUNNER_TEMP/occt" >> "$GITHUB_OUTPUT"
+      - name: Restore OCCT
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.occt.outputs.dir }}
+          key: ${{ steps.occt.outputs.key }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cargo build --release -p fox-kernel
+          mkdir -p "${{ steps.occt.outputs.dir }}"
+          cp -r target/OCCT/include target/OCCT/lib "${{ steps.occt.outputs.dir }}/"
+          rm -rf target/OCCT
+      - name: Save OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.occt.outputs.dir }}
+          key: ${{ steps.occt.outputs.key }}
+
+      - name: Build
+        shell: bash
+        run: |
+          export FOX_OCCT_DIR="${{ steps.occt.outputs.dir }}"
+          cargo build --release --locked -p fissionoxide -p fissionoxide-cli
+
+      - name: Signing certificate
+        id: cert
+        shell: pwsh
+        env:
+          CERT: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:CERT) { "sign=false" >> $env:GITHUB_OUTPUT; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          "sign=true" >> $env:GITHUB_OUTPUT
+          "signtool=$($signtool.FullName)" >> $env:GITHUB_OUTPUT
+          "pfx=$pfx" >> $env:GITHUB_OUTPUT
+      - name: Sign executables
+        if: steps.cert.outputs.sign == 'true'
+        shell: pwsh
+        env:
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          & "${{ steps.cert.outputs.signtool }}" sign /f "${{ steps.cert.outputs.pfx }}" /p $env:CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d FissionOxide target\release\fissionoxide.exe target\release\fissionoxide-cli.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y; if ($LASTEXITCODE) { exit $LASTEXITCODE } }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+      - name: Installer
+        shell: pwsh
+        env:
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $iscc_args = @("/DAppVersion=${{ steps.version.outputs.version }}")
+          if ("${{ steps.cert.outputs.sign }}" -eq "true") {
+            $iscc_args += "/DSignTool"
+            $iscc_args += "/Ssigntool=`"${{ steps.cert.outputs.signtool }}`" sign /f `"${{ steps.cert.outputs.pfx }}`" /p $env:CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d FissionOxide `$f"
+          }
+          & $env:ISCC @iscc_args installer\windows\fissionoxide.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($f in Get-ChildItem dist\*-setup.exe) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            [IO.File]::WriteAllText("$($f.FullName).sha256", "$hash  $($f.Name)`n")
+          }
+          Get-ChildItem dist
+
+      # Install for the current user, check what got installed, start the CLI, uninstall.
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\*-setup.exe).FullName
+          Start-Process -Wait -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/CURRENTUSER','/LOG=install.log'
+          $app = Join-Path $env:LOCALAPPDATA "Programs\FissionOxide"
+          foreach ($f in "fissionoxide.exe", "fissionoxide-cli.exe", "unins000.exe") {
+            if (-not (Test-Path "$app\$f")) { Get-Content install.log; throw "$f wasn't installed" }
+          }
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F0B8E52-3C1D-4A7E-9B25-F0C5D1A8E7B3}_is1'
+          $entry = Get-ItemProperty $key
+          if ($entry.DisplayVersion -ne "${{ steps.version.outputs.version }}") { throw "Settings > Apps shows version $($entry.DisplayVersion)" }
+          $out = & "$app\fissionoxide-cli.exe" commands
+          if ($LASTEXITCODE) { throw "fissionoxide-cli failed ($LASTEXITCODE)" }
+          $out | Select-Object -First 3
+          Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES'
+          if (Test-Path "$app\fissionoxide.exe") { throw "the uninstaller left fissionoxide.exe" }
+          if (Test-Path $key) { throw "the uninstaller left the Settings > Apps entry" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FissionOxide-${{ steps.version.outputs.version }}-windows
+          path: dist/*
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FissionOxide ${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
+          files: dist/*

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 fox-engine.workspace = true
 fox-brand.workspace = true
+fox-desktop.workspace = true
 egui.workspace = true
 eframe.workspace = true
 rfd.workspace = true
