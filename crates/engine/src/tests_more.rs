@@ -582,7 +582,9 @@ fn threads_in_designs_without_iso_threads_rebuild_as_before() {
       2260.107454316,
       -14.787431974,
     ),
-    (30.0, json!({"faces": [{"point": [5, 0, 15]}], "modeled": true}), 27, 2069.770932085, 14.999369028),
+    // Measured with #81's adaptive mass properties: same 27-face solid as main built, but the
+    // helical face integrates more accurately (z was 14.99937 before; the thread is centred at 15).
+    (30.0, json!({"faces": [{"point": [5, 0, 15]}], "modeled": true}), 27, 2069.648853055, 15.000006770),
   ];
   for (i, (h, t, faces, vol, z)) in cases.into_iter().enumerate() {
     let mut s = Session::default();
