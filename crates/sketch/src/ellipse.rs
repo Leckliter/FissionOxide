@@ -229,16 +229,16 @@ pub(crate) fn kind_segs(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<P>) ->
 /// of them segments with ends) cross them or end on them, recording the matching cuts on those
 /// curves in `cuts` (parameters along each). An arc's end lying on a curve cuts that curve too.
 pub(crate) fn split_profile_arcs(
-  arcs: Vec<Seg>,
+  arcs: Vec<(Seg, CurveId)>,
   geos: &[Geo],
   n_segs: usize,
   cuts: &mut [Vec<f64>],
   tol: f64,
-) -> Vec<Seg> {
+) -> Vec<(Seg, CurveId)> {
   let mut out = Vec::new();
-  for s in arcs {
+  for (s, id) in arcs {
     let Seg::EllipseArc { center, major, minor, start, sweep } = s else {
-      out.push(s);
+      out.push((s, id));
       continue;
     };
     let Some(e) = Ellipse2::new(center, [center[0] + major[0], center[1] + major[1]], minor) else { continue };
@@ -288,20 +288,20 @@ pub(crate) fn split_profile_arcs(
         us.pop();
       }
       if us.len() < 2 {
-        out.push(e.seg(t0, PI));
-        out.push(e.seg(t0 + PI, PI));
+        out.push((e.seg(t0, PI), id));
+        out.push((e.seg(t0 + PI, PI), id));
         continue;
       }
       for k in 0..us.len() {
         let (a, b) = (us[k], if k + 1 < us.len() { us[k + 1] } else { us[0] + TAU });
-        out.push(e.seg(t0 + a, b - a));
+        out.push((e.seg(t0 + a, b - a), id));
       }
       continue;
     }
     let mut prev = 0.0;
     for u in us.into_iter().chain([sw]) {
       if u - prev > ut {
-        out.push(e.seg(t0 + prev, u - prev));
+        out.push((e.seg(t0 + prev, u - prev), id));
       }
       prev = u;
     }

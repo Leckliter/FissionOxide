@@ -331,7 +331,7 @@ fn a_quintic_spline_is_one_exact_edge() {
     Seg::Line { a: [0.0, 10.0], b: [0.0, 0.0] },
     Seg::Line { a: [0.0, 0.0], b: [20.0, 0.0] },
   ];
-  let profile = Profile { outer: fox_sketch::Loop { segs: segs.clone() }, holes: Vec::new() };
+  let profile = Profile { outer: fox_sketch::Loop::new(segs.clone()), holes: Vec::new() };
   let solid = Shape::face(&Plane::XY, &profile).unwrap().extrude(DVec3::Z).unwrap();
   assert!(solid.is_valid());
   assert_eq!(solid.faces().unwrap().len(), 6, "the spline makes one side face");
@@ -345,4 +345,47 @@ fn a_quintic_spline_is_one_exact_edge() {
   // and one edge of a path
   let path = Shape::path(&Plane::XY, &segs[..2]).unwrap();
   assert_eq!(path.edges().unwrap().len(), 2);
+}
+
+/// Merge flags count segments, not the kernel's records: after a quintic spline (three records)
+/// they still land on the segments they name, in a face's loop and in a path.
+#[test]
+fn merge_flags_after_a_quintic_spline_name_segments() {
+  use fox_sketch::{CurveId, SegSrc};
+  let p: [[f64; 2]; 10] = [
+    [20.0, 0.0],
+    [21.6, 0.0],
+    [24.4, 0.4],
+    [27.6, 2.2],
+    [29.8, 3.3],
+    [29.8, 6.7],
+    [27.6, 7.8],
+    [24.4, 9.6],
+    [21.6, 10.0],
+    [20.0, 10.0],
+  ];
+  // the top line cut in two pieces of one curve, the only pieces flagged to merge
+  let segs = vec![
+    Seg::Quintic { p },
+    Seg::Line { a: [20.0, 10.0], b: [10.0, 10.0] },
+    Seg::Line { a: [10.0, 10.0], b: [0.0, 10.0] },
+    Seg::Line { a: [0.0, 10.0], b: [0.0, 0.0] },
+    Seg::Line { a: [0.0, 0.0], b: [20.0, 0.0] },
+  ];
+  let curves = [0, 1, 1, 2, 3];
+  let merge = [false, true, false, false, false];
+  let src = curves.iter().zip(merge).map(|(&c, m)| SegSrc { curve: CurveId(c), merge_next: m }).collect();
+  let faces = |lp: fox_sketch::Loop| {
+    let solid = Shape::face(&Plane::XY, &Profile { outer: lp, holes: Vec::new() }).unwrap().extrude(DVec3::Z).unwrap();
+    assert!(solid.is_valid());
+    (solid.faces().unwrap().len(), volume(&solid))
+  };
+  let (legacy, merged) =
+    (faces(fox_sketch::Loop::new(segs.clone())), faces(fox_sketch::Loop { segs: segs.clone(), src }));
+  assert_eq!(legacy.0, 7, "five sides, top and bottom");
+  assert_eq!(merged.0, 6, "the top line's pieces are one side");
+  assert!((legacy.1 - merged.1).abs() < 1e-6 * legacy.1, "{} vs {}", legacy.1, merged.1);
+  let open = &segs[..3];
+  assert_eq!(Shape::path(&Plane::XY, open).unwrap().edges().unwrap().len(), 3);
+  assert_eq!(Shape::path_with(&Plane::XY, open, &merge[..3]).unwrap().edges().unwrap().len(), 2);
 }
