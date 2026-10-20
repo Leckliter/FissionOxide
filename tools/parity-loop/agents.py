@@ -4,8 +4,8 @@ the Claude Agent SDK and returns the agent's structured report plus what it cost
 import json
 import os
 
-from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKError, ResultMessage, TextBlock,
-                              ToolUseBlock, query)
+from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKError, RateLimitEvent, ResultMessage,
+                              TextBlock, ToolUseBlock, query)
 
 MODEL = os.environ.get("PARITY_MODEL", "claude-opus-5-5")
 TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
@@ -219,7 +219,7 @@ async def run_agent(prompt, cwd, schema, budget_usd, max_turns, env=None, mcp_se
     output_format={"type": "json_schema", "schema": schema},
     setting_sources=["project"],
   )
-  result, texts, structured, failure = None, [], None, None
+  result, texts, structured, failure, limit = None, [], None, None, None
   log = open(log_path, "a", encoding="utf-8") if log_path else None
   try:
     async for msg in query(prompt=prompt, options=opts):
@@ -236,6 +236,10 @@ async def run_agent(prompt, cwd, schema, budget_usd, max_turns, env=None, mcp_se
             if log:
               log.write(f"> {b.name} {json.dumps(b.input, ensure_ascii=False)[:400]}\n")
               log.flush()
+      elif isinstance(msg, RateLimitEvent):
+        i = msg.rate_limit_info
+        limit = {"status": i.status, "resets_at": i.resets_at, "type": i.rate_limit_type,
+                 "utilization": i.utilization}
       elif isinstance(msg, ResultMessage):
         result = msg
   except ClaudeSDKError as ex:
@@ -248,18 +252,49 @@ async def run_agent(prompt, cwd, schema, budget_usd, max_turns, env=None, mcp_se
   if result is None:
     # The SDK raises on a budget stop instead of returning the result; the cap was spent.
     cost = budget_usd if failure and "maximum budget" in failure else 0.0
-    return structured, {"is_error": True, "errors": [failure or "agent produced no result"], "cost_usd": cost,
-                        "tokens": 0, "subtype": "error"}
+    meta = {"is_error": True, "errors": [failure or "agent produced no result"], "cost_usd": cost,
+            "tokens": 0, "subtype": "error", "rate_limit": limit}
+    meta["usage_limited"] = usage_limited(meta, failure)
+    return (None if meta["usage_limited"] else structured), meta
   usage = result.usage or {}
   tokens = sum(int(usage.get(k) or 0) for k in (
     "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
   meta = {"is_error": result.is_error, "subtype": result.subtype, "cost_usd": result.total_cost_usd or 0.0,
           "tokens": tokens, "turns": result.num_turns, "session_id": result.session_id,
-          "errors": result.errors or []}
+          "errors": result.errors or [], "rate_limit": limit}
+  meta["usage_limited"] = usage_limited(meta, result.result if result.is_error else None)
+  if meta["usage_limited"]:
+    return None, meta
   report = result.structured_output or structured
   if report is None:
     report = last_json(result.result or "\n".join(texts))
   return report, meta
+
+
+LIMIT_WORDS = ("usage limit", "hit your limit", "limit reached", "rate limit", "rate_limit", "429")
+
+
+def usage_limited(meta, text):
+  """True when the agent stopped because the subscription's usage limit was hit."""
+  if (meta.get("rate_limit") or {}).get("status") == "rejected":
+    return True
+  blob = " ".join([str(text or "")] + [str(e) for e in meta.get("errors") or []]).lower()
+  return any(w in blob for w in LIMIT_WORDS)
+
+
+def limit_reset(meta):
+  """When the usage limit resets, as local time text, if the agent's run said."""
+  import datetime
+  import re
+
+  at = (meta.get("rate_limit") or {}).get("resets_at")
+  if not at:
+    m = re.search(r"\|(\d{10})", " ".join(str(e) for e in meta.get("errors") or []))
+    at = int(m.group(1)) if m else None
+  if at:
+    return datetime.datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M")
+  m = re.search(r"resets? ([^.\n]+)", " ".join(str(e) for e in meta.get("errors") or []), re.I)
+  return m.group(1).strip() if m else "unknown"
 
 
 def last_json(text):

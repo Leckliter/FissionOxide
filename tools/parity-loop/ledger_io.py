@@ -129,3 +129,31 @@ def slug(key):
   while "--" in out:
     out = out.replace("--", "-")
   return out.strip("-")[:48]
+
+
+def pid_alive(pid):
+  """Whether a process is still running. (On Windows, os.kill(pid, 0) would terminate it.)"""
+  if not pid:
+    return False
+  if os.name == "nt":
+    import ctypes
+
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+      return False
+    code = ctypes.c_ulong()
+    ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+    k.CloseHandle(h)
+    return bool(ok) and code.value == 259  # STILL_ACTIVE
+  try:
+    os.kill(int(pid), 0)
+    return True
+  except OSError:
+    return False
+
+
+def fixer_running_elsewhere(e):
+  """A fixer another driver process is running right now for this entry."""
+  fix = e.get("fix") or {}
+  return fix.get("state") == "agent" and fix.get("pid") not in (None, os.getpid()) and pid_alive(fix.get("pid"))

@@ -17,11 +17,13 @@ its worktree, and a pushed branch without a PR gets its PR. See README.md.
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -162,8 +164,9 @@ class Loop:
     self.budget = Budget(a.budget_usd, a.budget_tokens)
     self.fusion_lock = asyncio.Lock()  # one Fusion: probes, verifies and UI probes take turns
     self.sem = asyncio.Semaphore(a.fixers)
-    self.slots = list(range(1, a.fixers + 1))
     self.fixing = set()
+    self.halt = None  # set when the subscription's usage limit stops an agent
+    self.claimed = set()  # cargo target slots this process holds
     os.environ["FOX_CLI"] = fox_cli()
     os.makedirs(os.path.join(LOOP, "logs"), exist_ok=True)
 
@@ -173,9 +176,52 @@ class Loop:
   def commit(self, paths, message):
     if not self.a.commit:
       return
-    sh(["git", "add", "--"] + paths)
-    if sh(["git", "diff", "--cached", "--quiet"], check=False).returncode:
-      sh(["git", "commit", "-m", message + "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"])
+    # Another driver process may be committing on this branch too; retry past its index.lock.
+    for attempt in range(10):
+      try:
+        sh(["git", "add", "--"] + paths)
+        if sh(["git", "diff", "--cached", "--quiet"], check=False).returncode:
+          sh(["git", "commit", "-m", message + "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"])
+        return
+      except RuntimeError as ex:
+        if "index.lock" not in str(ex) or attempt == 9:
+          print(f"  commit skipped: {ex}"[:400], flush=True)
+          return
+        time.sleep(1 + attempt)
+
+  def usage_stop(self, kind, key, meta):
+    """Stops the batch cleanly when the subscription's usage limit is hit. Returns True if it was."""
+    if not meta.get("usage_limited"):
+      return False
+    resets = agents.limit_reset(meta)
+    self.halt = f"usage limit hit during {kind} {key}; resets {resets}"
+    self.ledger.update(key, note=f"{kind} stopped by the usage limit (resets {resets}); the next run resumes it")
+    print(f"  STOP: {self.halt}", flush=True)
+    return True
+
+  def claim_slot(self):
+    """A cargo target directory no other fixer (in any driver process) is using."""
+    n = 1
+    while True:
+      claim = os.path.join(COMMON, "target", f"parity-{n}.claim")
+      try:
+        with open(claim, encoding="utf-8") as f:
+          owner = int(f.read().strip() or 0)
+      except (OSError, ValueError):
+        owner = 0
+      taken = n in self.claimed or (owner != os.getpid() and L.pid_alive(owner))
+      if not taken:
+        os.makedirs(os.path.dirname(claim), exist_ok=True)
+        with open(claim, "w", encoding="utf-8") as f:
+          f.write(str(os.getpid()))
+        self.claimed.add(n)
+        return n
+      n += 1
+
+  def release_slot(self, n):
+    self.claimed.discard(n)
+    with contextlib.suppress(OSError):
+      os.unlink(os.path.join(COMMON, "target", f"parity-{n}.claim"))
 
   # ---- probe ---------------------------------------------------------------------------------
 
@@ -196,6 +242,9 @@ class Loop:
         prompt, ROOT, agents.PROBE_SCHEMA, self.budget.agent_cap(self.a.probe_usd), self.a.probe_turns,
         log_path=self.log("probe", key))
       self.budget.record("probe", key, meta)
+      if self.usage_stop("probe", key, meta):
+        self.ledger.update(key, probe_attempts=attempts - 1)  # stays probing; resumes next run
+        return
       if not report:
         why = "; ".join(meta.get("errors") or []) or meta.get("subtype") or "no report"
         if attempts >= 2:
@@ -236,21 +285,23 @@ class Loop:
 
   async def fix(self, key):
     async with self.sem:
-      slot = self.slots.pop(0)
+      if self.halt:
+        return
+      slot = self.claim_slot()
       try:
         await self._fix(key, slot)
       except Exception as ex:  # one failed fixer mustn't stop the loop
         self.ledger.update(key, note=f"fixer error: {ex}"[:1500])
         print(f"  fixer {key} failed: {ex}", flush=True)
       finally:
-        self.slots.append(slot)
+        self.release_slot(slot)
 
   async def _fix(self, key, slot):
     entry = self.ledger.get(key)
     fix = dict(entry.get("fix") or {})
     if fix.get("state") == "pushed":
       return await self.open_pr(key)
-    if not L.needs_fix(entry) or not self.budget.ok():
+    if not L.needs_fix(entry) or L.fixer_running_elsewhere(entry) or not self.budget.ok() or self.halt:
       return
     s = slug(key)
     branch = fix.get("branch") or f"parity/{s}"
@@ -263,7 +314,7 @@ class Loop:
       dst = os.path.join(wt, "tests", "reference", c)
       if not os.path.isdir(dst):
         shutil.copytree(os.path.join(REF, c), dst)
-    fix.update(branch=branch, worktree=wt, state="agent", attempts=fix.get("attempts", 0) + 1, slot=slot,
+    fix.update(branch=branch, worktree=wt, state="agent", attempts=fix.get("attempts", 0) + 1, slot=slot, pid=os.getpid(),
                started=now())
     self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} started on {branch} in {wt}")
     print(f"fix {key} on {branch} (slot {slot})", flush=True)
@@ -274,6 +325,10 @@ class Loop:
       self.budget.agent_cap(self.a.fix_usd), self.a.fix_turns, env={k: env[k] for k in (
         "CARGO_TARGET_DIR", "FOX_OCCT_DIR") if k in env}, log_path=self.log("fix", key))
     self.budget.record("fix", key, meta)
+    if self.usage_stop("fixer", key, meta):
+      fix.update(state="interrupted", attempts=fix["attempts"] - 1)  # not the fixer's fault: retry next run
+      self.ledger.update(key, fix=fix)
+      return
     report = report or {"done": False, "summary": "", "title": "", "blocker": "; ".join(meta.get("errors") or [])}
 
     # Check the agent's work the same way CI will, before anything leaves this machine.
@@ -415,6 +470,8 @@ class Loop:
         self.a.ui_turns, mcp_servers={"desktop": desktop.server()}, tools=["Bash", "Read"],
         log_path=self.log("ui", key))
     self.budget.record("ui", key, meta)
+    if self.usage_stop("UI probe", key, meta):
+      return
     if not report:
       self.ledger.update(key, note=f"UI probe ended without a report: {meta.get('errors')}")
       return
@@ -436,27 +493,32 @@ class Loop:
     keys = set(self.a.only) if self.a.only else None
     # Resume fixers first: gaps found earlier, and branches pushed without a PR.
     for e in self.ledger.read():
+      if L.fixer_running_elsewhere(e):
+        print(f"skip {e['key']}: another driver process is fixing it", flush=True)
+        continue
       if (keys is None or e["key"] in keys) and (L.needs_fix(e) or (e.get("fix") or {}).get("state") == "pushed"):
         start_fix(e["key"])
     probed = 0
-    while probed < self.a.max_features and self.budget.ok():
+    while probed < self.a.max_features and self.budget.ok() and not self.halt:
       e = L.next_untested(self.ledger.read(), keys)
       if e is None:
         break
       await self.probe(e)
       probed += 1
       e = self.ledger.get(e["key"])
-      if L.needs_fix(e):
+      if L.needs_fix(e) and not self.halt:
         start_fix(e["key"])
     if self.a.ui:
       ui = [e for e in self.ledger.read() if e.get("needs_ui") and (keys is None or e["key"] in keys)]
       for e in ui[: self.a.max_features]:
-        if not self.budget.ok():
+        if not self.budget.ok() or self.halt:
           break
         await self.ui_probe(e)
     if tasks:
       print(f"waiting for {len(tasks)} fixer(s)", flush=True)
       await asyncio.gather(*tasks)
+    if self.halt:
+      print(f"stopped: {self.halt}. Progress is in the ledger; run the same command again after the reset.")
     if not self.budget.ok():
       print(f"stopped: budget reached (${self.budget.spent_usd:.2f}, {self.budget.spent_tokens:,} tokens)")
 
