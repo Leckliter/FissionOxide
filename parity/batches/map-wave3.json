@@ -1,0 +1,12 @@
+{
+  "ui:sketch:inference-lines": "ui-sketch-polish",
+  "ui:shortcuts:p-is-project": "ui-sketch-polish",
+  "ui:assemble:assemble-menu": "ui-components",
+  "ui:assemble:new-component": "ui-components",
+  "ui:context-menus:component": "ui-components",
+  "ui:chrome:document-units": "ui-units-and-parameters",
+  "ui:manage:parameters-dialog": "ui-units-and-parameters",
+  "ui:chrome:help-menu": "ui-chrome-polish",
+  "ui:chrome:menus-close-on-escape": "ui-chrome-polish",
+  "ui:insert:canvas-calibrate": "ui-chrome-polish"
+}
