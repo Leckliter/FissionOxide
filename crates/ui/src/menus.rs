@@ -149,7 +149,7 @@ const SOLID_CREATE: &[E] = &[
   c("Thicken", Icon::Thicken, D(Kind::Form(&forms::THICKEN))),
   c("Boundary Fill", Icon::BoundaryFill, D(Kind::Form(&forms::BOUNDARY_FILL))),
   E::Sep,
-  x("Create Base Feature", Icon::BaseFeature),
+  c("Create Base Feature", Icon::BaseFeature, D(Kind::Form(&config_ui::BASE_START))),
   E::Sub("Create PCB", CREATE_PCB),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
 ];
@@ -171,7 +171,7 @@ const SOLID_MODIFY: &[E] = &[
   x("Silhouette Split", Icon::SilhouetteSplit),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
-  x("Align", Icon::Align),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
@@ -313,7 +313,7 @@ const SELECTION_FILTERS: &[E] = &[
   c("Vertices", Icon::Point, Cmd::Filter("vertices")),
   c("Sketches", Icon::SketchSmall, Cmd::Filter("sketches")),
   c("Sketch Profiles", Icon::Rect, Cmd::Filter("profiles")),
-  x("Construction", Icon::Plane),
+  c("Construction", Icon::Plane, Cmd::Filter("construction")),
 ];
 
 const SELECT: &[E] = &[
@@ -370,7 +370,7 @@ const SURFACE_MODIFY: &[E] = &[
   c("Split Body", Icon::SplitBody, D(Kind::SplitBody)),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
-  x("Align", Icon::Align),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
@@ -437,7 +437,7 @@ const SHEET_MODIFY: &[E] = &[
   c("Chamfer", Icon::Chamfer, D(Kind::Chamfer)),
   E::Sep,
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
-  x("Align", Icon::Align),
+  c("Align", Icon::Align, D(Kind::Form(&forms::ALIGN))),
   c("Delete", Icon::Remove, Cmd::Delete).k("Del"),
   c("Remove", Icon::RemoveBody, Cmd::RemoveBodies),
   E::Sep,
@@ -479,9 +479,9 @@ const MESH_MODIFY: &[E] = &[
   c("Bill of Materials", Icon::Bom, D(Kind::Bom)),
 ];
 
-/// Groups every Design tab ends with.
+/// Groups every Design tab ends with (and any the tab adds after them).
 macro_rules! shared_groups {
-  () => {
+  ($($extra:expr),*) => {
     [
       Group {
         label: "CONFIGURE",
@@ -493,12 +493,15 @@ macro_rules! shared_groups {
       Group { label: "INSERT", quick: &["Insert Derive", "Canvas", "Insert Mesh"], menu: INSERT },
       Group { label: "ASSEMBLE", quick: &["Add To Assembly"], menu: ASSEMBLE },
       Group { label: "SELECT", quick: &["Select"], menu: SELECT },
-      Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT },
+      $($extra),*
     ]
   };
 }
 
-const SHARED: [Group; 7] = shared_groups!();
+const SHARED: [Group; 6] = shared_groups!();
+
+// as in Fusion, only MESH has an EXPORT panel (elsewhere 3D Print is under UTILITIES > MAKE)
+const MESH_SHARED: [Group; 7] = shared_groups!(Group { label: "EXPORT", quick: &["3D Print"], menu: EXPORT });
 
 const SOLID: [Group; 2] = [
   Group {
@@ -571,7 +574,8 @@ const SK_PROJECT: &[E] = &[
   c("Project", Icon::Project, D(Kind::Project)).k("P"),
   x("Intersect", Icon::Intersect),
   c("Include 3D Geometry", Icon::Include3D, D(Kind::Form(&forms::SK_INCLUDE))),
-  x("Project To Surface", Icon::ProjectSurface),
+  c("Project To Surface", Icon::ProjectSurface, D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
+  c("Intersection Curve", Icon::Intersect, D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),
 ];
 
 const SKETCH_CREATE: &[E] = &[
@@ -613,8 +617,8 @@ const SKETCH_MODIFY: &[E] = &[
   c("Trim", Icon::SkTrim, T(Tool::Trim)).k("T"),
   c("Extend", Icon::SkExtend, T(Tool::Extend)),
   c("Break", Icon::SkBreak, T(Tool::Break)),
-  x("Sketch Scale", Icon::SkScale),
-  x("Move/Copy", Icon::Move).k("M"),
+  c("Sketch Scale", Icon::SkScale, D(Kind::Form(&forms::SK_SCALE))),
+  c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
   E::Sep,
@@ -635,7 +639,7 @@ const SKETCH_CONSTRAINTS: &[E] = &[
   c("Collinear", Icon::Collinear, Cmd::Constraint("collinear")),
   c("Symmetry", Icon::Symmetric, Cmd::Constraint("symmetric")),
   c("Curvature", Icon::Curvature, Cmd::Constraint("curvature")),
-  x("Polygon", Icon::PolygonCon),
+  c("Polygon", Icon::PolygonCon, Cmd::Constraint("polygon")),
 ];
 
 // the sketch tab's INSERT has no Insert Component
@@ -938,7 +942,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
   match tab {
     Tab::Solid => (&SOLID, &SHARED),
     Tab::Surface => (&SURFACE, &SHARED),
-    Tab::Mesh => (&MESH, &SHARED),
+    Tab::Mesh => (&MESH, &MESH_SHARED),
     Tab::SheetMetal => (&SHEET_METAL, &SHARED),
     Tab::Plastic => (&PLASTIC, &SHARED),
     Tab::Manage => (&MANAGE, &[]),
@@ -1380,6 +1384,81 @@ mod tests {
     }
     prefs.keys.set("design.Extrude", "Shift+E", "E");
     assert_eq!(key_of(&prefs, Scope::Design, "Extrude"), "Shift+E");
+  }
+
+  /// The command `label` runs in `group` of `tab`'s toolbar.
+  fn cmd_of(tab: Tab, group: &str, label: &str) -> Option<Cmd> {
+    let (own, shared) = groups(tab);
+    let g = own.iter().chain(shared.iter()).find(|g| g.label == group)?;
+    find(g.menu, label)?.cmd
+  }
+
+  #[test]
+  fn engine_commands_are_wired_to_their_menu_items() {
+    use crate::forms;
+    let wired = [
+      (Tab::Sketch, "MODIFY", "Move/Copy", D(Kind::Move)),
+      (Tab::Sketch, "MODIFY", "Sketch Scale", D(Kind::Form(&forms::SK_SCALE))),
+      (Tab::Sketch, "CREATE", "Project To Surface", D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
+      (Tab::Sketch, "CREATE", "Intersection Curve", D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),
+      (Tab::Sketch, "CONSTRAINTS", "Polygon", Cmd::Constraint("polygon")),
+      (Tab::Solid, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
+      (Tab::Surface, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
+      (Tab::SheetMetal, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
+      (Tab::Solid, "CREATE", "Create Base Feature", D(Kind::Form(&config_ui::BASE_START))),
+      (Tab::Solid, "SELECT", "Construction", Cmd::Filter("construction")),
+    ];
+    for (tab, group, label, cmd) in wired {
+      assert_eq!(cmd_of(tab, group, label), Some(cmd), "{tab:?} {group} > {label}");
+    }
+    // M in a sketch moves sketch objects instead of finishing the sketch
+    assert!(offers(Tab::Sketch, D(Kind::Move)));
+  }
+
+  #[test]
+  fn only_mesh_has_an_export_panel() {
+    for tab in [Tab::Solid, Tab::Surface, Tab::SheetMetal, Tab::Plastic] {
+      let (own, shared) = groups(tab);
+      assert!(!own.iter().chain(shared.iter()).any(|g| g.label == "EXPORT"), "{tab:?}");
+      assert!(!offers(tab, Cmd::Print3d), "{tab:?}");
+    }
+    assert_eq!(cmd_of(Tab::Mesh, "EXPORT", "3D Print"), Some(Cmd::Print3d));
+    assert_eq!(cmd_of(Tab::Utilities, "MAKE", "3D Print"), Some(Cmd::Print3d));
+    // ASSEMBLE keeps its Part Design place, between INSERT and SELECT
+    let (own, shared) = groups(Tab::Solid);
+    let order: Vec<&str> = own.iter().chain(shared.iter()).map(|g| g.label).collect();
+    assert_eq!(order, ["CREATE", "MODIFY", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "ASSEMBLE", "SELECT"]);
+  }
+
+  #[test]
+  fn construction_filter_toggles() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    assert!(app.sel_filter.construction);
+    Cmd::Filter("construction").run(&mut app);
+    assert!(!app.sel_filter.construction && !Cmd::Filter("construction").active(&app));
+    assert!(app.sel_filter.bodies && app.sel_filter.profiles, "only Construction changes");
+  }
+
+  #[test]
+  fn polygon_constraint_runs_on_the_selected_lines() {
+    use fox_engine::Sel;
+    use serde_json::json;
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    app.s.execute("sketch.polygon", &json!({"center": [0, 0], "vertex": [10, 0], "sides": 6})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let sketch = app.s.design.sketch(sk).unwrap();
+    let before = sketch.constraints.len();
+    app.s.selection = sketch
+      .curves
+      .iter()
+      .filter(|c| matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. }))
+      .map(|c| Sel::SketchCurve { sketch: sk, curve: c.id })
+      .collect();
+    Cmd::Constraint("polygon").run(&mut app);
+    let sketch = app.s.design.sketch(sk).unwrap();
+    assert!(sketch.constraints.len() > before, "no polygon constraint added: {:?}", app.status);
+    assert!(app.s.selection.is_empty());
   }
 
   #[test]
