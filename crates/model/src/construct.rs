@@ -4,7 +4,7 @@
 use fox_sketch::CurveId;
 use serde::{Deserialize, Serialize};
 
-use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, PlaneRef};
+use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, PathRef, PlaneRef};
 
 /// A straight line used to build construction geometry: a body edge, an axis or a sketch line.
 /// Untagged so that files from before axes and sketch lines were accepted (a bare edge) load.
@@ -60,11 +60,22 @@ pub enum PlaneDef {
   TwoEdges { a: LineRef, b: LineRef },
   /// Tangent to a cylinder, cone or sphere at the point of it nearest `near`.
   Tangent { face: FaceRef, near: [f64; 3] },
-  /// Perpendicular to an edge at a fraction `t` (0 = start, 1 = end) of its length.
+  /// Perpendicular to an edge at a fraction `t` (0 = start, 1 = end) of its length, or at
+  /// `distance` along it when that is set.
   AlongPath {
     edge: EdgeRef,
     #[serde(default = "half")]
     t: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    distance: String,
+  },
+  /// As [`PlaneDef::AlongPath`], along sketch curves.
+  AlongCurve {
+    path: PathRef,
+    #[serde(default = "half")]
+    t: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    distance: String,
   },
 }
 
@@ -100,16 +111,32 @@ pub enum PointDef {
   Center { face: FaceRef },
   /// Where an edge (extended if straight) crosses a plane.
   EdgePlane { edge: EdgeRef, plane: PlaneRef },
-  /// At a fraction `t` of an edge's length.
+  /// At a fraction `t` of an edge's length, or at `distance` along it from its start (clamped
+  /// to its length) when that is set, as Fusion's physical path distance.
   AlongPath {
     edge: EdgeRef,
     #[serde(default = "half")]
     t: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    distance: String,
+  },
+  /// As [`PointDef::AlongPath`], along sketch curves (a sketch line, arc or chain of curves).
+  AlongCurve {
+    path: PathRef,
+    #[serde(default = "half")]
+    t: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    distance: String,
   },
 }
 
 fn half() -> String {
   "0.5".to_string()
+}
+
+/// The expressions of a point or plane along a path: the fraction, and the distance when set.
+fn along_exprs<'a>(t: &'a mut String, distance: &'a mut String) -> Vec<&'a mut String> {
+  if distance.trim().is_empty() { vec![t] } else { vec![t, distance] }
 }
 
 /// Profile of a coil's wire.
@@ -167,6 +194,7 @@ impl PlaneDef {
       PlaneDef::Midplane { a, b } => plane_dep(a).into_iter().chain(plane_dep(b)).collect(),
       PlaneDef::ThreePoints { a, b, c } => [a, b, c].iter().filter_map(|p| p.feature()).collect(),
       PlaneDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
+      PlaneDef::AlongCurve { path, .. } => vec![path.sketch],
       _ => vec![],
     }
   }
@@ -174,7 +202,7 @@ impl PlaneDef {
   pub(crate) fn exprs(&mut self) -> Vec<&mut String> {
     match self {
       PlaneDef::Angle { angle, .. } => vec![angle],
-      PlaneDef::AlongPath { t, .. } => vec![t],
+      PlaneDef::AlongPath { t, distance, .. } | PlaneDef::AlongCurve { t, distance, .. } => along_exprs(t, distance),
       _ => vec![],
     }
   }
@@ -199,13 +227,14 @@ impl PointDef {
       PointDef::ThreePlanes { a, b, c } => [a, b, c].iter().filter_map(|p| plane_dep(p)).collect(),
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
       PointDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
+      PointDef::AlongCurve { path, .. } => vec![path.sketch],
       _ => vec![],
     }
   }
 
   pub(crate) fn exprs(&mut self) -> Vec<&mut String> {
     match self {
-      PointDef::AlongPath { t, .. } => vec![t],
+      PointDef::AlongPath { t, distance, .. } | PointDef::AlongCurve { t, distance, .. } => along_exprs(t, distance),
       _ => vec![],
     }
   }

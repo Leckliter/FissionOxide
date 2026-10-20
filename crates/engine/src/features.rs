@@ -3,7 +3,7 @@
 
 use fox_kernel::glam::DVec3;
 use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
+use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef};
 use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
@@ -387,6 +387,36 @@ fn t_of(p: &Value) -> String {
   opt_expr(p, "t").unwrap_or_else(|| "0.5".into())
 }
 
+/// A physical distance along the path (empty = use `t`).
+fn distance_of(p: &Value) -> String {
+  opt_expr(p, "distance").unwrap_or_default()
+}
+
+/// What a point or plane along a path runs along.
+enum AlongPath {
+  Edge(EdgeRef),
+  Curve(PathRef),
+}
+
+/// The path of `along_path`: `edge` (or `path`) is a body edge, or {sketch, curve} / {sketch,
+/// curves: [id]} for sketch curves.
+fn along_path(s: &Session, p: &Value) -> Result<AlongPath, CmdError> {
+  let v = p.get("edge").or(p.get("path")).ok_or(CmdError::new("missing 'edge' (the path)"))?;
+  if v.get("sketch").is_none() {
+    return Ok(AlongPath::Edge(edge_ref_of(s, v)?));
+  }
+  let sketch = FeatureId(req_u32(v, "sketch")?);
+  let sk = s.design.sketch(sketch)?;
+  let curves: Vec<CurveId> = match v.get("curve") {
+    Some(_) => vec![CurveId(req_u32(v, "curve")?)],
+    None => ids(v, "curves").into_iter().map(CurveId).collect(),
+  };
+  if let Some(c) = curves.iter().find(|c| sk.curve(**c).is_none() && sk.curve3d(**c).is_none()) {
+    return Err(CmdError::new(format!("the sketch has no curve {}", c.0)));
+  }
+  Ok(AlongPath::Curve(PathRef { sketch, curves }))
+}
+
 fn plane(s: &mut Session, p: &Value) -> CmdResult {
   let def = match opt_str(p, "method").unwrap_or("") {
     "angle" => PlaneDef::Angle {
@@ -401,7 +431,10 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
       face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)?,
       near: req_vec3(p, "near")?,
     },
-    "along_path" => PlaneDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "along_path" => match along_path(s, p)? {
+      AlongPath::Edge(edge) => PlaneDef::AlongPath { edge, t: t_of(p), distance: distance_of(p) },
+      AlongPath::Curve(path) => PlaneDef::AlongCurve { path, t: t_of(p), distance: distance_of(p) },
+    },
     o => {
       return Err(CmdError::new(format!(
         "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path; plane.offset for offsets)"
@@ -464,7 +497,10 @@ fn point(s: &mut Session, p: &Value) -> CmdResult {
     }
     "center" => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
     "edge_plane" => PointDef::EdgePlane { edge: edge(s, p, "edge")?, plane: plane_of(s, p, "plane")? },
-    "along_path" => PointDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "along_path" => match along_path(s, p)? {
+      AlongPath::Edge(edge) => PointDef::AlongPath { edge, t: t_of(p), distance: distance_of(p) },
+      AlongPath::Curve(path) => PointDef::AlongCurve { path, t: t_of(p), distance: distance_of(p) },
+    },
     o => {
       return Err(CmdError::new(format!(
         "unknown point method '{o}' (vertex, two_edges, three_planes, center, edge_plane, along_path)"

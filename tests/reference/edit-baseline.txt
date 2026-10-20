@@ -119,3 +119,7 @@
 366-world-axis-from-xz
 367-body-edge-from-top-face
 368-sketch-line-from-xy
+369-line-edge-proportional-mirror
+370-arc-edge-proportional-mirror
+371-line-edge-physical-distance-mirror
+372-sketch-line-path-mirror
