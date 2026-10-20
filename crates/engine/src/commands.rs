@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use fox_kernel::glam::DVec3;
 use fox_model::{
   AttrTarget, AxisRef, BendPosition, BodyId, BodySel, Design, EdgeRef, Extent, ExtentKind, FaceRef, FeatureId,
-  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ReliefShape,
-  SheetMetalRule, ThinSide,
+  FeatureKind, HoleKind, LoftSection, Operation, OriginPlane, ParamKind, PlaneRef, Primitive, ProfileScaling,
+  ReliefShape, SheetMetalRule, SweepOrientation, ThinSide,
 };
 use fox_sketch::{ConstraintId, ConstraintKind, CurveId, CurveKind, Dim, PointId, PtSpec, Sketch};
 use serde_json::{Value, json};
@@ -117,7 +117,7 @@ cmds! {
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
-  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), profile_scaling?: scale|none (with a rail), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
@@ -677,6 +677,16 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let profiles = profile_points(s, sk, p)?;
       let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
       let rail = p.get("rail").map(|v| crate::solid::path_ref(s, v)).transpose()?;
+      let orientation = match opt_str(p, "orientation").unwrap_or("perpendicular") {
+        "perpendicular" => SweepOrientation::Perpendicular,
+        "parallel" => SweepOrientation::Parallel,
+        o => return Err(CmdError::new(format!("unknown sweep orientation '{o}' (perpendicular, parallel)"))),
+      };
+      let profile_scaling = match opt_str(p, "profile_scaling").unwrap_or("scale") {
+        "scale" => ProfileScaling::Scale,
+        "none" => ProfileScaling::None,
+        o => return Err(CmdError::new(format!("unknown profile scaling '{o}' (scale, none)"))),
+      };
       add_op_feature(
         s,
         FeatureKind::Sweep {
@@ -687,6 +697,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           operation: operation(p)?,
           rail,
           twist: opt_expr(p, "twist").unwrap_or_default(),
+          taper: opt_expr(p, "taper").unwrap_or_default(),
+          orientation,
+          profile_scaling,
         },
         p,
       )

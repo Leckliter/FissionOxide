@@ -28,6 +28,7 @@
 #include <BRepFill_Filling.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -38,6 +39,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <GCPnts_UniformAbscissa.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom2dAPI_Interpolate.hxx>
@@ -45,6 +47,8 @@
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <GeomConvert.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
@@ -56,13 +60,17 @@
 #include <Geom_Plane.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_SphericalSurface.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <Geom_Surface.hxx>
+#include <Law_Interpol.hxx>
+#include <Law_Linear.hxx>
 #include <Precision.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <Standard_Failure.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
+#include <TColgp_Array1OfPnt2d.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -73,7 +81,9 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_Shell.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Pln.hxx>
 
@@ -163,31 +173,6 @@ std::vector<TopoDS_Wire> loops(const TopoDS_Shape &s, bool &holes) {
 const TopoDS_Wire &as_wire(const Shape &s, const char *what) {
   if (s.s.IsNull() || s.s.ShapeType() != TopAbs_WIRE) throw std::runtime_error(std::string(what) + " must be a wire");
   return TopoDS::Wire(s.s);
-}
-
-// Sweeps each loop of a profile with the same pipe settings; holes are cut from the outer solid.
-template <typename Setup> TopoDS_Shape sweep_loops(const TopoDS_Wire &spine, const TopoDS_Shape &profile, Setup setup) {
-  bool holes = false;
-  std::vector<TopoDS_Wire> ws = loops(profile, holes);
-  TopoDS_Shape result;
-  for (size_t i = 0; i < ws.size(); ++i) {
-    BRepOffsetAPI_MakePipeShell ps(spine);
-    setup(ps);
-    ps.Add(ws[i], Standard_False, Standard_False);
-    ps.Build();
-    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
-    ps.MakeSolid();
-    TopoDS_Shape s = ps.Shape();
-    if (volume(s) < 0) s.Reverse();
-    if (i == 0) {
-      result = s;
-    } else {
-      BRepAlgoAPI_Cut cut(result, s);
-      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
-      result = cut.Shape();
-    }
-  }
-  return result;
 }
 
 // Points along a wire at equal arc lengths, with unit tangents.
@@ -283,35 +268,11 @@ bool surface_normal(const TopoDS_Face &f, const gp_Pnt &p, gp_Pnt &at, gp_Vec &n
 
 } // namespace
 
-// Sweeps a profile along a path, oriented and scaled so that it keeps touching a guide rail.
-std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail) {
-  FOX2_TRY
-  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
-  const TopoDS_Wire &guide = as_wire(rail, "the guide rail");
-  bool holes = false;
-  loops(profile.s, holes);
-  if (holes) throw std::runtime_error("a guide rail sweep needs a profile without holes");
-  // the rail is matched to the path by relative arc length; each section is scaled about the path
-  // until its outline touches the rail
-  TopoDS_Shape s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
-    ps.SetMode(guide, Standard_True, BRepFill_ContactOnBorder);
-  });
-  return out(valid(s, "guided sweep"));
-  FOX2_CATCH("guided sweep")
-}
-
-// Sweeps a profile along a path, turning it by `twist` radians about the path from start to end.
-std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist) {
-  FOX2_TRY
-  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
-  std::vector<gp_Pnt> pts;
-  std::vector<gp_Vec> tans;
-  sample_wire(path, 120, pts, tans);
-  double length = 0;
-  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
-  if (length < 1e-9) throw std::runtime_error("the path has no length");
-  // rotation-minimizing frames (double reflection), the twist turned on top of them; the
-  // auxiliary spine runs beside the path in the turning direction
+namespace {
+// Rotation-minimizing frames along sampled points (double reflection), with `twist` radians
+// turned on top of them from start to end: an auxiliary spine running beside the path in the
+// turning direction.
+TopoDS_Wire twist_spine(const std::vector<gp_Pnt> &pts, const std::vector<gp_Vec> &tans, double length, double twist) {
   double d = 0.05 * length + 0.5;
   std::vector<gp_Pnt> aux;
   gp_Vec r = perp(tans[0]);
@@ -334,12 +295,185 @@ std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, dou
     gp_Vec b = tans[i].Crossed(r);
     aux.push_back(pts[i].Translated((r * std::cos(a) + b * std::sin(a)) * d));
   }
-  TopoDS_Wire auxw = BRepBuilderAPI_MakeWire(interp_edge(aux, false));
-  TopoDS_Shape out_s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
-    ps.SetMode(auxw, Standard_True, BRepFill_NoContact);
-  });
-  return out(valid(out_s, "twisted sweep"));
-  FOX2_CATCH("twisted sweep")
+  return BRepBuilderAPI_MakeWire(interp_edge(aux, false));
+}
+
+// A path of several edges as one B-spline edge, so that a law along it has a single parameter.
+TopoDS_Wire one_edge(const TopoDS_Wire &w) {
+  int n = 0;
+  for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next()) n += BRep_Tool::Degenerated(ex.Current()) ? 0 : 1;
+  if (n < 2) return w;
+  GeomConvert_CompCurveToBSplineCurve cc;
+  for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next()) {
+    const TopoDS_Edge &e = ex.Current();
+    if (BRep_Tool::Degenerated(e)) continue;
+    double f, l;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, f, l);
+    if (c.IsNull()) throw std::runtime_error("the path has an edge without a curve");
+    Handle(Geom_TrimmedCurve) t = new Geom_TrimmedCurve(c, f, l);
+    if (e.Orientation() == TopAbs_REVERSED) t->Reverse();
+    if (!cc.Add(GeomConvert::CurveToBSplineCurve(t), 1e-6)) {
+      throw std::runtime_error("the path could not be joined into one curve");
+    }
+  }
+  BRepBuilderAPI_MakeEdge me(cc.BSplineCurve());
+  if (!me.IsDone()) throw std::runtime_error("the path could not be joined into one curve");
+  return BRepBuilderAPI_MakeWire(me.Edge());
+}
+
+// The point a fraction t (0..1) of the way along a wire, by arc length.
+gp_Pnt at_fraction(const BRepAdaptor_CompCurve &c, double length, double t) {
+  GCPnts_AbscissaPoint ap(c, std::clamp(t, 0.0, 1.0) * length, c.FirstParameter());
+  if (!ap.IsDone()) throw std::runtime_error("the guide rail could not be measured");
+  return c.Value(ap.Parameter());
+}
+
+// A planar closed wire grown (d > 0) or shrunk (d < 0) by d all round, corners kept sharp.
+TopoDS_Wire offset_wire(const TopoDS_Shape &section, double d) {
+  TopoDS_Wire w;
+  for (TopExp_Explorer ex(section, TopAbs_WIRE); ex.More() && w.IsNull(); ex.Next()) w = TopoDS::Wire(ex.Current());
+  if (w.IsNull()) throw std::runtime_error("the sweep's end section is not a wire");
+  BRepBuilderAPI_MakeFace mf(w, Standard_True);
+  if (!mf.IsDone()) throw std::runtime_error("the sweep's end section is not planar");
+  BRepOffsetAPI_MakeOffset mo(mf.Face(), GeomAbs_Intersection);
+  mo.Perform(d);
+  if (!mo.IsDone()) throw std::runtime_error("the taper is too steep for the profile");
+  for (TopExp_Explorer ex(mo.Shape(), TopAbs_WIRE); ex.More(); ex.Next()) return TopoDS::Wire(ex.Current());
+  throw std::runtime_error("the tapered section vanished");
+}
+
+// A scaling law through (spine parameter, factor) samples: a straight line when they lie on one.
+Handle(Law_Function) scale_law(const std::vector<double> &par, const std::vector<double> &k) {
+  size_t n = par.size();
+  bool linear = true;
+  for (size_t i = 1; i + 1 < n && linear; ++i) {
+    double t = (par[i] - par[0]) / (par[n - 1] - par[0]);
+    linear = std::abs(k[0] + t * (k[n - 1] - k[0]) - k[i]) < 1e-9;
+  }
+  if (linear) {
+    Handle(Law_Linear) l = new Law_Linear();
+    l->Set(par[0], k[0], par[n - 1], k[n - 1]);
+    return l;
+  }
+  // every few samples are enough for a smooth law
+  std::vector<size_t> keep;
+  size_t step = std::max<size_t>(1, n / 30);
+  for (size_t i = 0; i < n; i += step) keep.push_back(i);
+  if (keep.back() != n - 1) keep.push_back(n - 1);
+  TColgp_Array1OfPnt2d pk(1, static_cast<int>(keep.size()));
+  for (size_t i = 0; i < keep.size(); ++i) pk.SetValue(static_cast<int>(i) + 1, gp_Pnt2d(par[keep[i]], k[keep[i]]));
+  Handle(Law_Interpol) l = new Law_Interpol();
+  l->Set(pk);
+  return l;
+}
+} // namespace
+
+// Sweeps a profile along a path. `twist` turns it by that many radians about the path from start
+// to end; `taper` (radians) grows it all round by tan(taper) per unit of path length (holes
+// shrink); `parallel` keeps its orientation, so it only moves along the path. With a guide rail
+// the section turns to face the rail and, with `scale`, scales about the path in proportion to
+// the rail's distance from it (the rail is matched to the path by relative arc length).
+std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, const Shape &rail, bool has_rail,
+                                    bool scale, double twist, double taper, bool parallel) {
+  FOX2_TRY
+  // a scale law follows the parameter of each path edge in turn: give it a single edge
+  const TopoDS_Wire path = has_rail && scale ? one_edge(as_wire(spine, "the sweep path"))
+                                             : as_wire(spine, "the sweep path");
+  BRepAdaptor_CompCurve c(path);
+  GCPnts_UniformAbscissa ua(c, 121);
+  if (!ua.IsDone() || ua.NbPoints() < 2) throw std::runtime_error("the path could not be sampled");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  std::vector<double> par, arc;
+  for (int i = 1; i <= ua.NbPoints(); ++i) {
+    gp_Pnt p;
+    gp_Vec d;
+    c.D1(ua.Parameter(i), p, d);
+    if (d.Magnitude() < 1e-12) throw std::runtime_error("the path has a cusp");
+    arc.push_back(pts.empty() ? 0.0 : arc.back() + p.Distance(pts.back()));
+    pts.push_back(p);
+    tans.push_back(d.Normalized());
+    par.push_back(ua.Parameter(i));
+  }
+  double length = arc.back();
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+
+  TopoDS_Wire aux;
+  Handle(Law_Function) law;
+  if (has_rail) {
+    aux = as_wire(rail, "the guide rail");
+    if (scale) {
+      BRepAdaptor_CompCurve rc(aux);
+      double rlen = GCPnts_AbscissaPoint::Length(rc);
+      std::vector<double> k;
+      double d0 = 0;
+      for (size_t i = 0; i < pts.size(); ++i) {
+        gp_Vec v(pts[i], at_fraction(rc, rlen, arc[i] / length));
+        double d = (v - tans[i] * v.Dot(tans[i])).Magnitude();
+        if (i == 0) {
+          if (d < 1e-6) throw std::runtime_error("the guide rail must start away from the path");
+          d0 = d;
+        }
+        k.push_back(d / d0);
+      }
+      law = scale_law(par, k);
+    }
+  } else if (std::abs(twist) > 1e-12) {
+    aux = twist_spine(pts, tans, length, twist);
+  }
+  auto setup = [&](BRepOffsetAPI_MakePipeShell &ps) {
+    if (parallel) {
+      ps.SetMode(gp_Ax2(pts[0], gp_Dir(tans[0])));
+    } else if (!aux.IsNull()) {
+      ps.SetMode(aux, Standard_True, BRepFill_NoContact);
+    } else {
+      ps.SetMode(Standard_False);
+    }
+  };
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(path, v0, v1);
+  double grow = std::tan(taper) * length;
+
+  bool holes = false;
+  std::vector<TopoDS_Wire> ws = loops(profile.s, holes);
+  TopoDS_Shape result;
+  for (size_t i = 0; i < ws.size(); ++i) {
+    BRepOffsetAPI_MakePipeShell ps(path);
+    setup(ps);
+    if (law.IsNull()) {
+      ps.Add(ws[i], Standard_False, Standard_False);
+    } else {
+      ps.SetLaw(ws[i], law, Standard_False, Standard_False);
+    }
+    ps.Build();
+    if (!ps.IsDone()) throw std::runtime_error("the sweep failed");
+    TopoDS_Shape s;
+    if (std::abs(grow) > 1e-12) {
+      // tapered: the untapered sweep's last section, offset, is the end section
+      TopoDS_Wire end = offset_wire(ps.LastShape(), i == 0 ? grow : -grow);
+      BRepOffsetAPI_MakePipeShell pt(path);
+      setup(pt);
+      pt.Add(ws[i], v0, Standard_False, Standard_False);
+      pt.Add(end, v1, Standard_False, Standard_False);
+      pt.Build();
+      if (!pt.IsDone()) throw std::runtime_error("the tapered sweep failed");
+      pt.MakeSolid();
+      s = pt.Shape();
+    } else {
+      ps.MakeSolid();
+      s = ps.Shape();
+    }
+    if (volume(s) < 0) s.Reverse();
+    if (i == 0) {
+      result = s;
+    } else {
+      BRepAlgoAPI_Cut cut(result, s);
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      result = cut.Shape();
+    }
+  }
+  return out(valid(result, "sweep"));
+  FOX2_CATCH("sweep")
 }
 
 // Lofts through sections (faces or wires of a compound, in order) placed along a centre line.

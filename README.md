@@ -51,9 +51,9 @@ change a parameter and watch the whole history rebuild.
   webs that grow until they meet the body.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
 - **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
-  sweep along a path of lines and arcs (with a guide rail that turns and scales the profile, or a
-  twist angle), holes at sketch points (simple, counterbore, countersink, drill point, through
-  all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
+  sweep along a path of lines and arcs (with a guide rail that turns and optionally scales the
+  profile, a twist or taper angle, and perpendicular or parallel orientation), holes at sketch
+  points (simple, counterbore, countersink, drill point, through all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
   on flat or curved faces (projected, or wrapped around a cylinder), boundary fill (pick the
   closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
   surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.

@@ -3,10 +3,10 @@
 //! body, emboss/deboss, boundary fill and replace face.
 
 use fox_kernel::glam::DVec3;
-use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
+use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind, SweepOptions};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
-use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef};
+use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef, ProfileScaling, SweepOrientation};
 
 /// What an extrude stops at besides a parallel flat face.
 pub(super) enum Trim {
@@ -16,18 +16,26 @@ pub(super) enum Trim {
   Body { body: usize },
 }
 
-/// How a sweep's profile is steered along the path.
+/// How a sweep's profile is steered and shaped along the path.
 pub(super) enum Guide {
   Plain,
-  Rail(Shape),
-  Twist(f64),
+  /// Along a guide rail, or twisted, tapered or kept parallel (radians).
+  Shaped {
+    rail: Option<Shape>,
+    scale: bool,
+    twist: f64,
+    taper: f64,
+    parallel: bool,
+  },
 }
 
 pub(super) fn sweep(face: &Shape, path: &Shape, guide: &Guide) -> Result<Shape, String> {
   match guide {
     Guide::Plain => face.sweep(path),
-    Guide::Rail(rail) => face.sweep_rail(path, rail),
-    Guide::Twist(a) => face.sweep_twisted(path, *a),
+    Guide::Shaped { rail, scale, twist, taper, parallel } => face.sweep_guided(
+      path,
+      &SweepOptions { rail: rail.as_ref(), scale: *scale, twist: *twist, taper: *taper, parallel: *parallel },
+    ),
   }
   .map_err(ke)
 }
@@ -214,13 +222,34 @@ impl Ctx<'_> {
     crate::include::sketch_path(ps, &r.curves)
   }
 
-  pub(super) fn sweep_guide(&self, rail: Option<&PathRef>, twist: &str) -> Result<Guide, String> {
-    let a = if twist.trim().is_empty() { 0.0 } else { self.angle(twist)? };
+  pub(super) fn sweep_guide(
+    &self,
+    rail: Option<&PathRef>,
+    twist: &str,
+    taper: &str,
+    orientation: SweepOrientation,
+    scaling: ProfileScaling,
+  ) -> Result<Guide, String> {
+    let angle = |e: &str| if e.trim().is_empty() { Ok(0.0) } else { self.angle(e) };
+    let (twist, taper) = (angle(twist)?, angle(taper)?);
+    let parallel = orientation == SweepOrientation::Parallel;
+    if taper.abs() >= std::f64::consts::FRAC_PI_2 {
+      return Err("the taper angle must be under 90 degrees".into());
+    }
+    let (twisted, tapered) = (twist.abs() > 1e-12, taper.abs() > 1e-12);
     match rail {
-      Some(_) if a.abs() > 1e-12 => Err("a sweep along a guide rail can't twist".into()),
-      Some(r) => Ok(Guide::Rail(self.path_shape(r)?)),
-      None if a.abs() > 1e-12 => Ok(Guide::Twist(a)),
-      None => Ok(Guide::Plain),
+      Some(_) if twisted => Err("a sweep along a guide rail can't twist".into()),
+      Some(_) if tapered => Err("a sweep along a guide rail can't taper".into()),
+      Some(_) if parallel => Err("a sweep along a guide rail follows the rail, not a parallel orientation".into()),
+      None if twisted && parallel => Err("a parallel sweep can't twist".into()),
+      None if !twisted && !tapered && !parallel => Ok(Guide::Plain),
+      r => Ok(Guide::Shaped {
+        rail: r.map(|r| self.path_shape(r)).transpose()?,
+        scale: scaling == ProfileScaling::Scale,
+        twist,
+        taper,
+        parallel,
+      }),
     }
   }
 

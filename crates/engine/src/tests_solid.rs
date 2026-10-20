@@ -42,6 +42,16 @@ fn sweep_rail_twist_and_loft_rails_by_command() {
   let sweep = s.design.features.last().unwrap().id.0;
   run(&mut s, "feature.edit", json!({"feature": sweep, "set": {"rail": null, "twist": "180 deg"}}));
   assert!(close(volume(&s), PI * 25.0 * 50.0, 0.01), "{}", volume(&s));
+  // a taper grows the circle by 50 tan(taper): a cone frustum again
+  let taper = (5.0f64 / 50.0).atan().to_degrees();
+  run(&mut s, "feature.edit", json!({"feature": sweep, "set": {"twist": "", "taper": format!("{taper} deg")}}));
+  assert!(close(volume(&s), frustum, 1e-4), "{}", volume(&s));
+  // the rail without scaling only steers the circle: a cylinder
+  let rail = json!({"sketch": paths, "curves": [rc]});
+  run(&mut s, "feature.edit", json!({"feature": sweep, "set": {"taper": "", "rail": rail, "profile_scaling": "none"}}));
+  assert!(close(volume(&s), PI * 25.0 * 50.0, 1e-3), "{}", volume(&s));
+  let bad = s.execute("sweep", &json!({"path": paths, "path_curves": [pc], "orientation": "sideways"}));
+  assert!(bad.is_err());
 
   // a loft between two circles, its sides bowed out by two rails
   let mut s = Session::default();

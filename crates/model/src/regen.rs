@@ -869,7 +869,18 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(None)
       }
-      FeatureKind::Sweep { sketch, profiles, path_sketch, path_curves, operation, rail, twist } => {
+      FeatureKind::Sweep {
+        sketch,
+        profiles,
+        path_sketch,
+        path_curves,
+        operation,
+        rail,
+        twist,
+        taper,
+        orientation,
+        profile_scaling,
+      } => {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
         let path = crate::include::sketch_path(ps, path_curves)?;
@@ -877,7 +888,7 @@ impl Ctx<'_> {
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
         }
-        let guide = self.sweep_guide(rail.as_ref(), twist)?;
+        let guide = self.sweep_guide(rail.as_ref(), twist, taper, *orientation, *profile_scaling)?;
         let mut tools = Vec::new();
         for p in &chosen {
           tools.push(solid::sweep(&Shape::face(&sk.plane, p).map_err(ke)?, &path, &guide)?);

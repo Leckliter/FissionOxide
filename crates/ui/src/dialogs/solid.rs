@@ -18,6 +18,9 @@ pub(super) struct Extra {
   chord: bool,
   rail: Option<FeatureId>,
   twist: String,
+  /// Sweep taper angle, and whether the profile keeps its orientation (parallel).
+  taper: String,
+  parallel: bool,
   rails: Vec<FeatureId>,
   centerline: Option<FeatureId>,
   /// Extrude to object: the picked face or body (`{body, face}` or `{body}`).
@@ -270,7 +273,15 @@ impl Dialog {
     let list = Self::sketches(app, self.sketch);
     sketch_combo(ui, "Guide rail", "sweep-rail", &list, &mut self.solid.rail, dirty);
     if self.solid.rail.is_none() {
-      Self::field(ui, "Twist angle", &mut self.solid.twist, dirty);
+      if !self.solid.parallel {
+        Self::field(ui, "Twist angle", &mut self.solid.twist, dirty);
+      }
+      Self::field(ui, "Taper angle", &mut self.solid.taper, dirty);
+      ui.label("Orientation");
+      if ui.checkbox(&mut self.solid.parallel, "Parallel").changed() {
+        *dirty = true;
+      }
+      ui.end_row();
     }
   }
 
@@ -310,8 +321,15 @@ impl Dialog {
       Kind::Sweep => {
         if let Some(r) = self.solid.rail {
           p["rail"] = json!(r.0);
-        } else if !self.solid.twist.trim().is_empty() {
-          p["twist"] = json!(self.solid.twist.trim());
+        } else {
+          if self.solid.parallel {
+            p["orientation"] = json!("parallel");
+          } else if !self.solid.twist.trim().is_empty() {
+            p["twist"] = json!(self.solid.twist.trim());
+          }
+          if !self.solid.taper.trim().is_empty() {
+            p["taper"] = json!(self.solid.taper.trim());
+          }
         }
       }
       Kind::Loft => {

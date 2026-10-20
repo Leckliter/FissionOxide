@@ -116,8 +116,8 @@ std::unique_ptr<Shape> read_iges(rust::Str path);
 std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
 // Second batch of solid features (features2.cpp).
-std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail);
-std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist);
+std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, const Shape &rail, bool has_rail,
+                                    bool scale, double twist, double taper, bool parallel);
 std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine);
 std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails);
 std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,

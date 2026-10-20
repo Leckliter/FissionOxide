@@ -214,3 +214,72 @@ fn setback_corner_replaces_the_blend() {
   assert!(s.faces().unwrap().iter().any(|f| f.kind == SurfaceKind::Other));
   assert!(filleted.setback_corners(&[DVec3::splat(100.0)], 2.0).is_err(), "nothing to cut there");
 }
+
+#[test]
+fn tapered_sweeps_grow_by_offset() {
+  // a circle grows into a cone frustum, r 5 -> 5 + 40 tan 5°
+  let t = 5f64.to_radians();
+  let opts = SweepOptions { taper: t, ..Default::default() };
+  let s = circle(&Plane::XY, 5.0).sweep_guided(&z_path(40.0), &opts).unwrap();
+  let r2 = 5.0 + 40.0 * t.tan();
+  let frustum = PI * 40.0 / 3.0 * (25.0 + 5.0 * r2 + r2 * r2);
+  assert!(close(volume(&s), frustum, 1e-4), "{} vs {frustum}", volume(&s));
+  assert!(s.is_valid());
+  // a square keeps its corners: a pyramid frustum, 10 -> 20 across
+  let t = (5.0f64 / 40.0).atan();
+  let opts = SweepOptions { taper: t, ..Default::default() };
+  let s = rect(&Plane::XY, [-5.0, -5.0], [5.0, 5.0]).sweep_guided(&z_path(40.0), &opts).unwrap();
+  let pyramid = 40.0 / 3.0 * (100.0 + 200.0 + 400.0);
+  assert!(close(volume(&s), pyramid, 1e-4), "{} vs {pyramid}", volume(&s));
+  assert!(s.is_valid());
+}
+
+#[test]
+fn parallel_sweep_only_moves_the_section() {
+  // a quarter arc from the origin up and over to (20, 0, 20): the square stays flat
+  let arc =
+    Shape::path(&Plane::XZ, &[Seg::Arc { center: [20.0, 0.0], radius: 20.0, start_angle: PI, sweep: -FRAC_PI_2 }])
+      .unwrap();
+  let opts = SweepOptions { parallel: true, ..Default::default() };
+  let s = rect(&Plane::XY, [-3.0, -3.0], [3.0, 3.0]).sweep_guided(&arc, &opts).unwrap();
+  assert!(close(volume(&s), 720.0, 1e-4), "{}", volume(&s));
+  assert!(s.is_valid());
+  let m = s.mass().unwrap();
+  assert!((m.bbox_max.x - 23.0).abs() < 1e-3 && (m.bbox_max.z - 20.0).abs() < 1e-3, "{m:?}");
+}
+
+#[test]
+fn guide_rail_scales_a_square() {
+  // the rail touches the middle of the square's side and leans out from 5 to 10
+  let rail = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 40.0] }]).unwrap();
+  let s = rect(&Plane::XY, [-5.0, -5.0], [5.0, 5.0]).sweep_rail(&z_path(40.0), &rail).unwrap();
+  let pyramid = 40.0 / 3.0 * (100.0 + 200.0 + 400.0);
+  assert!(close(volume(&s), pyramid, 1e-4), "{} vs {pyramid}", volume(&s));
+  assert!(s.is_valid());
+  let m = s.mass().unwrap();
+  assert!((m.bbox_max.x - 10.0).abs() < 1e-3 && (m.bbox_max.y - 10.0).abs() < 1e-3, "{m:?}");
+}
+
+#[test]
+fn guide_rail_scale_follows_a_path_of_several_edges() {
+  // the same frustum along a path drawn as two lines, then with a bent rail
+  let path = Shape::path(
+    &Plane::XZ,
+    &[Seg::Line { a: [0.0, 0.0], b: [0.0, 10.0] }, Seg::Line { a: [0.0, 10.0], b: [0.0, 40.0] }],
+  )
+  .unwrap();
+  let rail = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [10.0, 40.0] }]).unwrap();
+  let s = circle(&Plane::XY, 5.0).sweep_rail(&path, &rail).unwrap();
+  let frustum = PI * 40.0 / 3.0 * (25.0 + 50.0 + 100.0);
+  assert!(close(volume(&s), frustum, 1e-3), "{} vs {frustum}", volume(&s));
+  // a rail out to 10 at half height and back: two frustums
+  let rail = Shape::path(
+    &Plane::XZ,
+    &[Seg::Line { a: [5.0, 0.0], b: [10.0, 20.0] }, Seg::Line { a: [10.0, 20.0], b: [5.0, 40.0] }],
+  )
+  .unwrap();
+  let s = circle(&Plane::XY, 5.0).sweep_rail(&z_path(40.0), &rail).unwrap();
+  let two = 2.0 * PI * 20.0 / 3.0 * (25.0 + 50.0 + 100.0);
+  assert!(close(volume(&s), two, 0.01), "{} vs {two}", volume(&s));
+  assert!(s.is_valid());
+}
