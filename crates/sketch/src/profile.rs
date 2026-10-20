@@ -885,15 +885,38 @@ mod crossing_tests {
     assert_eq!(p.len(), 3, "two discs and the band between them");
     assert!(p.iter().any(|r| r.contains([25.0, 0.0])), "the band is a region");
   }
+
+  #[test]
+  fn circle_touched_by_tangent_lines_merges_back_only_in_new_sketches() {
+    // a circle in a 40° wedge splits where the lines touch it; in a new sketch the disc's two
+    // arcs are flagged to become one edge (the whole circle), in a legacy one they stay two
+    let mut s = Sketch::new();
+    let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let (w, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.642, 25.712)).unwrap();
+    s.add_tangent_circle(&[h, w], Some(crate::Dim::new(5.0)), [30.0, 10.0]).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.segs.len(), 2, "{:?}", disc.outer);
+    assert_eq!(disc.outer.merge_next(), [true, true]);
+    let corner = p.iter().find(|r| r.contains([4.0, 0.5])).unwrap_or_else(|| panic!("{p:?}"));
+    assert_eq!(corner.outer.segs.len(), 3, "{:?}", corner.outer);
+    assert_eq!(corner.outer.merge_next(), [false; 3], "a line's and the circle's pieces never merge");
+    s.behaviours = crate::Behaviours::legacy();
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert_eq!(disc.outer.merge_next(), [false, false], "legacy sketches keep two arcs");
+  }
 }
 
 #[cfg(test)]
 mod merge_tests {
   use super::*;
-  use crate::behaviour::{ONE_EDGE_ELLIPSE, PENDING};
+  use crate::behaviour::{Behaviours, ONE_EDGE_ELLIPSE, PENDING};
 
   fn ellipse_sketch() -> (Sketch, CurveId) {
     let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
     let (c, m) = (s.add_point(0.0, 0.0), s.add_point(8.0, 0.0));
     let id = s.add_curve(CurveKind::Ellipse { center: c, major: m, minor: 4.0 }).unwrap();
     (s, id)
@@ -904,8 +927,8 @@ mod merge_tests {
     let (mut s, id) = ellipse_sketch();
     let p = find_profiles(&s);
     assert_eq!(p[0].outer.src.iter().map(|x| x.curve).collect::<Vec<_>>(), [id, id]);
-    assert_eq!(p[0].outer.merge_next(), [false, false], "pending behaviours are off for new sketches");
-    s.behaviours.enable_pending_for_tests(ONE_EDGE_ELLIPSE);
+    assert_eq!(p[0].outer.merge_next(), [false, false], "off for a legacy sketch");
+    s.behaviours.insert(ONE_EDGE_ELLIPSE);
     let p = find_profiles(&s);
     assert_eq!(p[0].outer.merge_next(), [true, true]);
     assert_eq!(p[0].outer.reversed().merge_next(), [true, true]);

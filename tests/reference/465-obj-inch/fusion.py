@@ -1,6 +1,6 @@
 # Insert Mesh: insert lprism.obj as a mesh body (InchMeshUnit), then convert it to a B-rep (faceted) so it can be measured.
 import os
-path = r"C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/parameshinsertaligncommand/obj-inch/lprism.obj"
+path = os.path.join(CASE_DIR, "lprism.obj")
 base = root.features.baseFeatures.add()
 base.startEdit()
 meshes = root.meshBodies.add(path, adsk.fusion.MeshUnits.InchMeshUnit, base)

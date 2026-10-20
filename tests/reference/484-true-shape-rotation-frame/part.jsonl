@@ -1,7 +1,8 @@
 # 484-true-shape-rotation-frame: added by the parity loop from a Fusion probe
-# arrange: Fox has no Arrange command, so this builds only the two source L-plates where they
-# start (x 300..350, y 0..40 and y 100..140, 6 mm thick); Fusion's result packs them into the
-# 150x120 envelope inside a 5 mm frame.
+# arrange: an L-plate component (50x40 with a 30x25 notch, 6 mm thick, at x 300..350) and a second
+# instance of it 100 mm up in Y, arranged by the true-shape solver on a 150x120 envelope on the XY
+# plane, 3 mm spacing, 5 mm frame, all rotations. The sources stay; like fusion.py, they're
+# hidden so only the placed copies are measured.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[300, 0], [350, 0]]}
 {"cmd": "sketch.line", "points": [[350, 0], [350, 15]]}
@@ -11,12 +12,8 @@
 {"cmd": "sketch.line", "points": [[300, 40], [300, 0]]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}
-{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.line", "points": [[300, 100], [350, 100]]}
-{"cmd": "sketch.line", "points": [[350, 100], [350, 115]]}
-{"cmd": "sketch.line", "points": [[350, 115], [320, 115]]}
-{"cmd": "sketch.line", "points": [[320, 115], [320, 140]]}
-{"cmd": "sketch.line", "points": [[320, 140], [300, 140]]}
-{"cmd": "sketch.line", "points": [[300, 140], [300, 100]]}
-{"cmd": "sketch.finish"}
-{"cmd": "extrude", "sketch": 3, "distance": 6, "operation": "new_body"}
+{"cmd": "component.create", "name": "L", "bodies": [2000]}
+{"cmd": "component.copy", "component": 1, "translate": [0, 100, 0]}
+{"cmd": "arrange", "components": [{"component": 1, "rotation": "all"}, {"component": 2, "rotation": "all"}], "plane": "xy", "length": 150, "width": 120, "solver": "true_shape", "spacing": 3, "frame": 5}
+{"cmd": "body.visible", "body": 2000, "visible": false}
+{"cmd": "body.visible", "body": 3000, "visible": false}

@@ -6,6 +6,8 @@
 //! can also script.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod align;
+mod arrange;
 mod assembly;
 mod cam;
 mod commands;
@@ -476,6 +478,8 @@ mod tests_cam;
 mod tests_cam3d;
 #[cfg(test)]
 mod tests_config;
+#[cfg(test)]
+mod tests_curves3d;
 #[cfg(test)]
 mod tests_cut;
 #[cfg(test)]

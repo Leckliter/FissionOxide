@@ -10,6 +10,6 @@
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [20, 20]]}
 {"cmd": "sketch.finish"}
-# Fox edge refs take body edges only; this sketch-line path is the Fusion feature's other input
-{"cmd": "plane", "method": "along_path", "edge": {"sketch": 3, "curve": 1}, "t": 0.25}
+# the path is the sketch line itself (curve 2: its end points are ids 1 and 3)
+{"cmd": "plane", "method": "along_path", "edge": {"sketch": 3, "curve": 2}, "t": 0.25}
 {"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}

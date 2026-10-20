@@ -11,4 +11,4 @@
 {"cmd": "sketch.create", "plane": {"origin": [20, 15, 20], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.point", "at": [0, 0]}
 {"cmd": "sketch.finish"}
-{"cmd": "hole", "sketch": 4, "diameter": 6, "tip_angle": "118 deg", "to": {"plane": 3}}
+{"cmd": "hole", "sketch": 4, "diameter": 6, "tip_angle": "118 deg", "to": {"feature": 3}}

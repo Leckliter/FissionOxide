@@ -191,7 +191,14 @@ fn run(args: &[String]) -> Result<(), String> {
         if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
           continue;
         }
-        let (cmd, params) = parse_line(line).map_err(|e| format!("line {}: {e}", n + 1))?;
+        let (cmd, mut params) = parse_line(line).map_err(|e| format!("line {}: {e}", n + 1))?;
+        // a script's relative import paths are found next to the script
+        if let (true, Some(rel)) = (cmd == "import" && script != "-", params["path"].as_str().map(PathBuf::from)) {
+          let beside = Path::new(script).parent().map(|d| d.join(&rel));
+          if let Some(beside) = beside.filter(|b| rel.is_relative() && !rel.exists() && b.exists()) {
+            params["path"] = json!(beside);
+          }
+        }
         match s.execute(&cmd, &params) {
           Ok(v) => {
             if let Some(e) = v.get("error").and_then(Value::as_str) {

@@ -59,6 +59,70 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Threads (feature level): a modeled thread is the ISO 68-1 flat-root groove cut square at its
+/// ends (not a sharp V running out past them), its offset and flip are measured from the axis's
+/// canonical low end over the face's exact extent, and the threaded crest is merged into one
+/// face. Without it a thread rebuilds as before. A thread with an ISO designation always gets it:
+/// files saved before this flag have no designation.
+pub const ISO_THREADS: &str = "iso_threads";
+/// Joint axes as in Fusion: an unflipped joint lines the moving origin's axes up with the fixed
+/// origin's (the Z axes the same way), and flipping turns the moving frame half a turn about its X
+/// so the Z axes face each other. Without it (designs saved before), the Z axes face each other
+/// unless the joint is flipped.
+pub const FUSION_JOINT_AXES: &str = "fusion_joint_axes";
+/// A construction plane offset from the XZ origin plane moves along +Y for a positive offset, as
+/// in Fusion (#62). Without it a positive offset moves along the XZ frame's normal, -Y.
+pub const XZ_OFFSET_PLUS_Y: &str = "xz_offset_plus_y";
+/// Combine Intersect with several tools keeps the part of the target inside any tool,
+/// target ∩ (t1 ∪ t2 ∪ …), as in Fusion (#92). Without it the target is intersected with each
+/// tool in turn, target ∩ t1 ∩ t2 ∩ ….
+pub const INTERSECT_ANY_TOOL: &str = "intersect_any_tool";
+/// The solver first tries each ellipse named in a Concentric constraint with its free major-axis
+/// point riding on its centre, so the constraint slides the ellipse rather than turning or
+/// stretching it, as in Fusion. Other ellipses solve as before.
+pub const ELLIPSE_CONCENTRIC_PASS: &str = "ellipse_concentric_pass";
+/// Fit-point splines are Fusion's minimum-energy quintic through the fit points (closed, with no
+/// corner, when the last point is the first), not the Catmull-Rom spline older sketches drew;
+/// trimming and extending one follow it. See `crate::fitquintic`.
+pub const QUINTIC_FIT_SPLINE: &str = "quintic_fit_spline";
+/// A curvature constraint on a fit-point spline end adds a curvature handle beside the tangent
+/// handle, making the end smooth as in Fusion (the quintic takes the other curve's direction and
+/// curvature there; see `crate::smoothend`), and spline end frames come from the curve itself
+/// rather than its cubic pieces. Needs [`QUINTIC_FIT_SPLINE`]; without it a curvature constraint
+/// works on the tangent handle and the pieces, as before.
+pub const SPLINE_CURVATURE_HANDLES: &str = "spline_curvature_handles";
+/// A smooth (not ruled) closed loft is one periodic surface through every section and back to
+/// the first, with no seam (`Shape::loft_closed`); without it, the first section is added again
+/// at the end of an open loft.
+pub const LOFT_CLOSED_SMOOTH: &str = "loft_closed_smooth";
+/// Two or more loft rails on a polygonal section spread their pull corner to corner, as Fusion
+/// does (a side no rail touches stays straight); without it, the pull blends smoothly round the
+/// loop from one rail to the next.
+pub const LOFT_RAIL_SPREAD: &str = "loft_rail_spread";
+/// A revolve about a sketch line ignores which way the line was drawn: the profile turns towards
+/// the sketch normal, as about a world axis in the sketch; without it, the profile turns
+/// right-handed about the line from its start to its end.
+pub const REVOLVE_AXIS_UNDIRECTED: &str = "revolve_axis_undirected";
+/// Split Body merges the coplanar faces a cut leaves in each piece (a cut along an existing face
+/// leaves the new face beside the old one), as Fusion does, when the body had none of its own.
+/// Without it, the pieces keep every face the cut made.
+pub const UNIFY_SPLIT_PIECES: &str = "unify_split_pieces";
+/// Plane and point Along Path on a body edge use the exact curve and its tangent at the point.
+/// Without it, they walk the edge's tessellated polyline and take the direction of the segment the
+/// point falls on, so on a curved edge the point sits on a chord.
+pub const EXACT_EDGE_FRAMES: &str = "exact_edge_frames";
+/// A two-edges point on straight edges, axes or sketch lines is where the infinite lines cross
+/// (skew lines are an error), as in Fusion. Without it, it is the midpoint of the closest
+/// approach: of the bounded edges for two body edges, of the infinite lines otherwise.
+pub const INFINITE_LINE_CROSSING: &str = "infinite_line_crossing";
+/// A two-distance or distance-and-angle chamfer measures its first distance (and the angle) on
+/// the face each edge runs forward in, as Fusion does (an extrusion's cap), instead of on the
+/// edge's first adjacent face.
+pub const CHAMFER_FORWARD_FACE: &str = "chamfer_forward_face";
+/// Rail and twist sweeps are one kernel sweep: a guide rail scales the section by its distance
+/// from the path (a scale law) instead of BRepFill's contact on border, and a twist samples the
+/// path at 121 equal arc lengths.
+pub const SWEEP_UNIFIED: &str = "sweep_unified";
 /// Fusion's sketch frames: the XZ origin plane is x = +X, y = −Z (normal +Y), the YZ plane
 /// x = −Z, y = +Y (normal +X), and a face or free plane facing down (−Z) has x = −X, y = +Y.
 /// Without it the XZ plane is x = +X, y = +Z (normal −Y), YZ is x = +Y, y = +Z, and a downward
@@ -70,13 +134,32 @@ pub const FUSION_SKETCH_FRAMES: &str = "fusion_sketch_frames";
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  ISO_THREADS,
+  FUSION_JOINT_AXES,
+  XZ_OFFSET_PLUS_Y,
+  INTERSECT_ANY_TOOL,
+  ONE_EDGE_ELLIPSE,
+  ELLIPSE_CONCENTRIC_PASS,
+  ONE_EDGE_SPLIT_ARCS,
+  ONE_EDGE_CONTROL_SPLINE,
+  ONE_EDGE_FIT_SPLINE,
+  QUINTIC_FIT_SPLINE,
+  SPLINE_CURVATURE_HANDLES,
+  LOFT_CLOSED_SMOOTH,
+  LOFT_RAIL_SPREAD,
+  REVOLVE_AXIS_UNDIRECTED,
+  UNIFY_SPLIT_PIECES,
+  EXACT_EDGE_FRAMES,
+  INFINITE_LINE_CROSSING,
+  CHAMFER_FORWARD_FACE,
+  SWEEP_UNIFIED,
   FUSION_SKETCH_FRAMES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
 /// moving its name from here to [`CURRENT`]. Tests turn them on with
 /// [`Behaviours::enable_pending_for_tests`].
-pub const PENDING: &[&str] = &[ONE_EDGE_ELLIPSE, ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS];
+pub const PENDING: &[&str] = &[];
 
 /// A flag only this crate's own unit tests register, to exercise [`Behaviours::has`].
 const TEST_ONLY: &str = "test_only_dummy";

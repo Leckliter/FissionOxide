@@ -1,6 +1,6 @@
 //! Sketch commands for editable text, Break, tangent circles and blend curves.
 
-use fox_sketch::{CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextId, TextStyle, VAlign};
+use fox_sketch::{CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextAlign, TextId, TextPath, TextStyle, VAlign};
 use serde_json::{Value, json};
 
 use super::{ids, opt_expr, opt_str, params_scope, pt_of, req_expr, req_pt, req_str, sketch_id};
@@ -108,9 +108,11 @@ fn text_style(mut style: TextStyle, p: &Value) -> Result<TextStyle, CmdError> {
 }
 
 fn add_text(s: &mut Session, p: &Value) -> CmdResult {
-  let at = match p.get("at").and_then(Value::as_u64) {
-    Some(id) => PtSpec::Point(PointId(id as u32)),
-    None => req_pt(p, "at")?.into(),
+  let path = text_path(p, None)?;
+  let at = match (p.get("at").and_then(Value::as_u64), &path) {
+    (_, Some(_)) => None,
+    (Some(id), None) => Some(PtSpec::Point(PointId(id as u32))),
+    (None, None) => Some(req_pt(p, "at")?.into()),
   };
   let text = req_str(p, "text")?.to_string();
   let height = length(s, p, "height")?.unwrap_or(5.0);
@@ -119,7 +121,17 @@ fn add_text(s: &mut Session, p: &Value) -> CmdResult {
   let explode = p.get("explode").and_then(Value::as_bool).unwrap_or(false);
   let style = text_style(TextStyle::default(), p)?;
   let (out, made) = change(s, p, move |sk| {
-    let id = sk.add_text_styled(at, &text, &font, height, angle, style)?;
+    let id = match (path, at) {
+      (Some(path), _) => {
+        let id = sk.add_text_on_path(path, &text, &font, height)?;
+        if !style.is_plain() {
+          sk.set_text_style(id, style)?;
+        }
+        id
+      }
+      (None, Some(at)) => sk.add_text_styled(at, &text, &font, height, angle, style)?,
+      (None, None) => return Err(CmdError::new("pass 'at' or 'path'")),
+    };
     if explode {
       sk.explode_text(id)?;
       return Ok(json!({}));
@@ -127,6 +139,26 @@ fn add_text(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({"text": id.0}))
   })?;
   finish(s, p, out, &made)
+}
+
+/// Text along a path from `path` (a curve id), `above` (default true) and `align` ("left",
+/// "center" or "right"); `old` fills what's missing when editing. None without a `path`.
+fn text_path(p: &Value, old: Option<TextPath>) -> Result<Option<TextPath>, CmdError> {
+  let curve = match p.get("path") {
+    None => old.map(|o| o.curve),
+    Some(Value::Null) => return Ok(None),
+    Some(v) => Some(CurveId(v.as_u64().ok_or(CmdError::new("'path' must be a curve id"))? as u32)),
+  };
+  let Some(curve) = curve else { return Ok(None) };
+  let above = p.get("above").and_then(Value::as_bool).or(old.map(|o| o.above)).unwrap_or(true);
+  let align = match opt_str(p, "align") {
+    None => old.map(|o| o.align).unwrap_or_default(),
+    Some("left") => TextAlign::Left,
+    Some("center" | "centre") => TextAlign::Center,
+    Some("right") => TextAlign::Right,
+    Some(a) => return Err(CmdError::new(format!("unknown align '{a}' (left, center or right)"))),
+  };
+  Ok(Some(TextPath { curve, above, align }))
 }
 
 /// The text a command means: `text_id`, the text owning `curve` (or the first of `curves`), or
@@ -161,6 +193,10 @@ fn edit_text(s: &mut Session, p: &Value) -> CmdResult {
     let style = text_style(before.clone(), &q)?;
     if style != before {
       sk.set_text_style(id, style)?;
+    }
+    if ["path", "above", "align"].iter().any(|k| q.get(*k).is_some()) {
+      let old = sk.text(id).and_then(|t| t.path);
+      sk.set_text_path(id, text_path(&q, old)?)?;
     }
     if let (Some(at), Some(anchor)) = (at, sk.text(id).map(|t| t.anchor))
       && !sk.drag(anchor, at).ok()

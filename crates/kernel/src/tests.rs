@@ -311,6 +311,29 @@ fn step_assembly_round_trip_with_names_and_colours() {
 }
 
 #[test]
+fn along_curve_is_on_the_exact_arc() {
+  // a quarter arc of radius 20 from (20, 0) to (0, 20)
+  let arc = Shape::path(
+    &Plane::XY,
+    &[Seg::Arc { center: [0.0, 0.0], radius: 20.0, start_angle: 0.0, sweep: std::f64::consts::FRAC_PI_2 }],
+  )
+  .unwrap();
+  let a = 22.5_f64.to_radians();
+  let (p, d) = arc.along_curve(0.25, None).unwrap();
+  assert!((p - DVec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0)).length() < 1e-6, "{p}");
+  assert!((d - DVec3::new(-a.sin(), a.cos(), 0.0)).length() < 1e-6, "{d}");
+  // measured from the far end, the tangent points back along the arc
+  let (p, d) = arc.along_curve(0.25, Some(DVec3::new(0.0, 20.0, 0.0))).unwrap();
+  let b = 67.5_f64.to_radians();
+  assert!((p - DVec3::new(20.0 * b.cos(), 20.0 * b.sin(), 0.0)).length() < 1e-6, "{p}");
+  assert!((d - DVec3::new(b.sin(), -b.cos(), 0.0)).length() < 1e-6, "{d}");
+  // a body edge works too
+  let line = block().edge_shape(1).unwrap();
+  let (p, d) = line.along_curve(1.0, None).unwrap();
+  assert!(p.is_finite() && (d.length() - 1.0).abs() < 1e-9);
+}
+
+#[test]
 fn a_quintic_spline_is_one_exact_edge() {
   // a bulge from (20, 0) round to (20, 10), closed by three lines
   let p: [[f64; 2]; 10] = [
@@ -345,6 +368,43 @@ fn a_quintic_spline_is_one_exact_edge() {
   // and one edge of a path
   let path = Shape::path(&Plane::XY, &segs[..2]).unwrap();
   assert_eq!(path.edges().unwrap().len(), 2);
+}
+
+/// Six grids on the faces of a cube, `n × n` points each, optionally pushed out onto a sphere.
+fn cube_grids(n: usize, sphere: bool) -> Vec<Vec<DVec3>> {
+  let axes = [DVec3::X, DVec3::Y, DVec3::Z];
+  let mut out = Vec::new();
+  for k in 0..3 {
+    for sign in [1.0, -1.0] {
+      let normal = axes[k] * sign;
+      let u = axes[(k + 1) % 3] * sign;
+      let v = normal.cross(u);
+      let mut pts = Vec::new();
+      for j in 0..n {
+        for i in 0..n {
+          let s = |t: usize| 2.0 * t as f64 / (n - 1) as f64 - 1.0;
+          let p = normal + u * s(i) + v * s(j);
+          pts.push(if sphere { p.normalize() * 10.0 } else { p * 5.0 });
+        }
+      }
+      out.push(pts);
+    }
+  }
+  out
+}
+
+#[test]
+fn grid_faces_sew_into_solids() {
+  for (sphere, want) in [(false, 1000.0), (true, 4.0 / 3.0 * std::f64::consts::PI * 1000.0)] {
+    let faces: Vec<Shape> = cube_grids(9, sphere).iter().map(|g| Shape::through_grid(g, 9, 9).unwrap()).collect();
+    let solid = Shape::compound(&faces).unwrap().sewn(1e-4).unwrap();
+    assert_eq!(solid.solid_count(), 1);
+    assert!(solid.is_valid());
+    assert_eq!(solid.faces().unwrap().len(), 6);
+    let v = volume(&solid);
+    assert!((v - want).abs() < want * 2e-3, "{v} vs {want}");
+  }
+  assert!(Shape::through_grid(&[DVec3::ZERO; 3], 1, 3).is_err());
 }
 
 /// Merge flags count segments, not the kernel's records: after a quintic spline (three records)

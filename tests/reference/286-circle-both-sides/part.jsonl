@@ -1,8 +1,7 @@
 # 286-circle-both-sides: added by the parity loop from a Fusion probe
-# circle-both-sides: circle r10 at the origin; Offset 3 on both sides (r13 and r7); the rings between r7 and r13 extruded 10. Fox has no both-sides option, so two offsets (+3, -3).
+# circle-both-sides: circle r10 at the origin; Offset 3 on both sides (r13 and r7); the rings between r7 and r13 extruded 10.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
-{"cmd": "sketch.offset", "curves": [1], "distance": 3}
-{"cmd": "sketch.offset", "curves": [1], "distance": -3}
+{"cmd": "sketch.offset", "curves": [1], "distance": 3, "both_sides": true}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "profiles": [[11.5, 0], [8.5, 0]], "distance": 10, "operation": "new_body"}

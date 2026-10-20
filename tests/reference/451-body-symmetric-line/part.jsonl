@@ -1,6 +1,6 @@
 # 451-body-symmetric-line: added by the parity loop from a Fusion probe
 # body-symmetric-line: Cube 6x6x6 at x 47..53, y 10..16; body patterned along the line (0,0)->(100,0), 5 instances 15 mm apart, symmetric (both ways from the path start, so copies at -30..+30 mm along X); separate bodies.
-# pattern.path is the command Fox would need (it has none yet): pattern along a sketch path
+# pattern.path: Pattern on Path
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.line", "points": [[47, 10], [53, 10]]}
 {"cmd": "sketch.line", "points": [[53, 10], [53, 16]]}

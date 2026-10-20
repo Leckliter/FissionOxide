@@ -3,10 +3,10 @@
 
 use fox_kernel::glam::DVec3;
 use fox_kernel::{CurveKind, EdgeInfo};
-use fox_model::{BodyId, EdgeRef, FilletSet, RadiusPoint};
+use fox_model::{BodyId, EdgeRef, FaceRef, FilletSet, FullRoundSet, RadiusPoint};
 use serde_json::Value;
 
-use crate::commands::{edge_ref_of, expr_of, req_expr, req_u32};
+use crate::commands::{edge_ref_of, expr_of, face_ref, req_expr, req_u32};
 use crate::{CmdError, Session};
 
 /// `"radii": [[at, radius], ...]` or `[{"at": .., "radius": ..}, ...]`, `at` running from 0 at
@@ -96,7 +96,9 @@ pub(crate) fn selection_sets(s: &Session, p: &Value) -> Result<(Vec<EdgeRef>, St
     if edges.is_empty() {
       return Err(CmdError::new("no edges given"));
     }
-    return Ok((edges, req_expr(p, "radius")?, Vec::new()));
+    // an asymmetric fillet may name its first offset `distance`
+    let radius = if p.get("radius").is_none() && p.get("distance").is_some() { "distance" } else { "radius" };
+    return Ok((edges, req_expr(p, radius)?, Vec::new()));
   };
   let list = list.as_array().filter(|l| !l.is_empty()).ok_or(CmdError::new("'sets' must be a non-empty list"))?;
   let mut sets: Vec<FilletSet> = Vec::new();
@@ -145,4 +147,31 @@ fn tangent_at(e: &EdgeInfo, p: DVec3) -> Option<DVec3> {
     CurveKind::Circle => e.axis.cross(p - e.center).try_normalize(),
     _ => None,
   }
+}
+
+/// A full round fillet's sets: `full_round: [{center: face, side_one: [faces], side_two: [faces]}]`.
+pub(crate) fn full_round_sets(s: &Session, p: &Value) -> Result<Vec<FullRoundSet>, CmdError> {
+  let list = p
+    .get("full_round")
+    .and_then(Value::as_array)
+    .filter(|l| !l.is_empty())
+    .ok_or(CmdError::new("'full_round' must be a non-empty list of {center, side_one, side_two}"))?;
+  let faces = |v: &Value, key: &str| -> Result<Vec<FaceRef>, CmdError> {
+    let list = match v.get(key) {
+      Some(Value::Array(a)) => a.iter().collect::<Vec<_>>(),
+      Some(one) => vec![one],
+      None => return Err(CmdError::new(format!("a full round needs '{key}'"))),
+    };
+    let out = list.into_iter().map(|f| face_ref(s, f)).collect::<Result<Vec<_>, _>>()?;
+    if out.is_empty() {
+      return Err(CmdError::new(format!("'{key}' has no faces")));
+    }
+    Ok(out)
+  };
+  let mut sets = Vec::new();
+  for v in list {
+    let center = face_ref(s, v.get("center").ok_or(CmdError::new("a full round needs 'center'"))?)?;
+    sets.push(FullRoundSet { center, side_one: faces(v, "side_one")?, side_two: faces(v, "side_two")? });
+  }
+  Ok(sets)
 }

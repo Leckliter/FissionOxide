@@ -101,7 +101,15 @@ pub(crate) mod ffi {
     fn fillet_radii(s: &Shape, edges: &[u32], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn draft_prism(face: &Shape, height: f64, angle: f64) -> Result<UniquePtr<Shape>>;
     fn offset_face(face: &Shape, d: f64) -> Result<UniquePtr<Shape>>;
-    fn chamfer2(s: &Shape, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<UniquePtr<Shape>>;
+    fn chamfer2(
+      s: &Shape,
+      edges: &[u32],
+      d1: f64,
+      d2: f64,
+      angle: bool,
+      flip: bool,
+      forward_face: bool,
+    ) -> Result<UniquePtr<Shape>>;
     fn fillet_var(s: &Shape, edges: &[u32], r1: f64, r2: f64) -> Result<UniquePtr<Shape>>;
     fn split_by_shape(s: &Shape, tool: &Shape) -> Result<UniquePtr<Shape>>;
     fn hlr_project(s: &Shape, view: &[f64], deflection: f64) -> Result<HlrData>;
@@ -115,6 +123,7 @@ pub(crate) mod ffi {
 
     fn edge_at_index(s: &Shape, edge: u32) -> Result<UniquePtr<Shape>>;
     fn min_distance(a: &Shape, b: &Shape) -> Result<Vec<f64>>;
+    fn curve_along(s: &Shape, t: f64, from: &[f64]) -> Result<Vec<f64>>;
     fn helix_sweep(
       profile: &Shape,
       axis: &[f64],
@@ -157,10 +166,20 @@ pub(crate) mod ffi {
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
 
     // second batch of solid features (cpp/features2.cpp)
-    fn sweep_rail(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
-    fn sweep_twist(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
+    fn sweep_rail_legacy(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
+    fn sweep_twist_legacy(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
+    fn sweep_guided(
+      profile: &Shape,
+      spine: &Shape,
+      rail: &Shape,
+      has_rail: bool,
+      scale: bool,
+      twist: f64,
+      taper: f64,
+      parallel: bool,
+    ) -> Result<UniquePtr<Shape>>;
     fn sweep_sections(sections: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
-    fn loft_rails(sections: &Shape, rails: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_rails(sections: &Shape, rails: &Shape, spread: bool) -> Result<UniquePtr<Shape>>;
     fn emboss_tool(
       body: &Shape,
       face: u32,
@@ -176,6 +195,8 @@ pub(crate) mod ffi {
     fn extended_face(face: &Shape, size: f64, offset: f64, at: &[f64], toward: &[f64]) -> Result<UniquePtr<Shape>>;
     fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
+    fn loft_closed(sections: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: &[f64], weight: f64) -> Result<UniquePtr<Shape>>;
     // surface workspace (cpp/surface2.cpp)
     include!("fox-kernel/cpp/surface2.hxx");
     fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
@@ -216,6 +237,38 @@ pub(crate) mod ffi {
       vknots: &[f64],
       vmults: &[u32],
     ) -> Result<UniquePtr<Shape>>;
+    // Insert T-Spline faces
+    fn grid_face(points: &[f64], rows: u32, cols: u32) -> Result<UniquePtr<Shape>>;
+
+    // Project To Surface and pipes along the 3D wires it gives (cpp/project.cpp)
+    include!("fox-kernel/cpp/project.hxx");
+    fn project_curves(curves: &Shape, faces: &Shape, dir: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn round_pipe(spine: &Shape, radius: f64, inner: f64) -> Result<UniquePtr<Shape>>;
+    fn wire_ends(wire: &Shape) -> Result<Vec<f64>>;
+    fn split_seams(s: &Shape) -> Result<UniquePtr<Shape>>;
+    fn child_count(s: &Shape) -> usize;
+    fn child_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
+
+    // spun profiles: a body's reach from an axis along it (cpp/spun.cpp)
+    include!("fox-kernel/cpp/spun.hxx");
+    fn axial_events(s: &Shape, axis: &[f64]) -> Result<Vec<f64>>;
+    fn radial_slices(s: &Shape, axis: &[f64], ts: &[f64]) -> Result<Vec<f64>>;
+    // merging the strips a helical cut leaves on a cylinder (cpp/threads.cpp)
+    include!("fox-kernel/cpp/threads.hxx");
+    fn merge_cylinder_strips(s: &Shape, axis: &[f64], radius: f64, lo: f64, hi: f64) -> Result<UniquePtr<Shape>>;
+    // where shapes cross, as wires; where a wire starts (cpp/curves3d.cpp)
+    include!("fox-kernel/cpp/curves3d.hxx");
+    fn section_wires(a: &Shape, b: &Shape, tolerance: f64) -> Result<UniquePtr<Shape>>;
+    fn chain_wires(s: &Shape, tolerance: f64) -> Result<UniquePtr<Shape>>;
+    fn split_at_corners(w: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
+    fn wire_corners(w: &Shape, angle: f64) -> Result<Vec<f64>>;
+    fn wire_start(w: &Shape) -> Result<Vec<f64>>;
+    fn wire_count(s: &Shape) -> usize;
+    fn wire_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
+    fn wire_from_middle(w: &Shape) -> Result<UniquePtr<Shape>>;
+    // a body's silhouette on a plane (cpp/silhouette.cpp)
+    include!("fox-kernel/cpp/silhouette.hxx");
+    fn silhouette(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

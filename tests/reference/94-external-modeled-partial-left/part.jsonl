@@ -4,4 +4,4 @@
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 6}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
-{"cmd": "thread", "faces": [{"point": [6.0, 0.0, 15.0]}], "pitch": 1.75, "length": 10, "offset": 5, "modeled": true, "left": true}
+{"cmd": "thread", "faces": [{"point": [6.0, 0.0, 15.0]}], "designation": "M12x1.75", "class": "6g", "length": 10, "offset": 5, "modeled": true, "left": true}

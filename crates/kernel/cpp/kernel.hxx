@@ -67,7 +67,8 @@ std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> 
                                     rust::Slice<const double> radii);
 std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angle);
 std::unique_ptr<Shape> offset_face(const Shape &face, double d);
-std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle);
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle,
+                                bool flip, bool forward_face);
 std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2);
 std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool);
 HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection);
@@ -82,6 +83,7 @@ std::unique_ptr<Shape> draft_two_sided(const Shape &s, rust::Slice<const uint32_
 
 std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge);
 rust::Vec<double> min_distance(const Shape &a, const Shape &b);
+rust::Vec<double> curve_along(const Shape &s, double t, rust::Slice<const double> from);
 std::unique_ptr<Shape> helix_sweep(const Shape &profile, rust::Slice<const double> axis, double radius, double pitch,
                                    double height, bool left);
 std::unique_ptr<Shape> thicken(const Shape &s, double d);
@@ -118,10 +120,12 @@ std::unique_ptr<Shape> read_iges(rust::Str path);
 std::unique_ptr<Shape> mesh_to_shape(rust::Slice<const double> pos, rust::Slice<const uint32_t> tris, bool merge);
 
 // Second batch of solid features (features2.cpp).
-std::unique_ptr<Shape> sweep_rail(const Shape &profile, const Shape &spine, const Shape &rail);
-std::unique_ptr<Shape> sweep_twist(const Shape &profile, const Shape &spine, double twist);
+std::unique_ptr<Shape> sweep_rail_legacy(const Shape &profile, const Shape &spine, const Shape &rail);
+std::unique_ptr<Shape> sweep_twist_legacy(const Shape &profile, const Shape &spine, double twist);
+std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, const Shape &rail, bool has_rail,
+                                    bool scale, double twist, double taper, bool parallel);
 std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine);
-std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails);
+std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails, bool spread);
 std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,
                                    rust::Slice<const double> dir, double depth, bool deboss, bool wrap);
 std::unique_ptr<Shape> boundary_cells(const Shape &tools);
@@ -131,6 +135,9 @@ std::unique_ptr<Shape> extended_face(const Shape &face, double size, double offs
                                      rust::Slice<const double> toward);
 double side_of(const Shape &face, double x, double y, double z);
 std::unique_ptr<Shape> setback_corners(const Shape &s, rust::Slice<const double> points, double radius);
+std::unique_ptr<Shape> loft_closed(const Shape &sections);
+std::unique_ptr<Shape> loft_point_tangent(const Shape &profile, const Shape &apex, rust::Slice<const double> axis,
+                                          double weight);
 // sheet2.cpp
 std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<const double> b,
                                      rust::Slice<const double> u);

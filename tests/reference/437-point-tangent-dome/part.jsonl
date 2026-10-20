@@ -6,5 +6,4 @@
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.point", "at": [0, 0]}
 {"cmd": "sketch.finish"}
-# Fox's loft has no end conditions; this is a plain (point-sharp) loft to the apex
-{"cmd": "loft", "sections": [1, 2], "operation": "new_body"}
+{"cmd": "loft", "sections": [1, {"sketch": 2, "end_condition": "point_tangent", "weight": 1}], "operation": "new_body"}

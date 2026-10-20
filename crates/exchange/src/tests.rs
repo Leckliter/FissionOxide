@@ -1,7 +1,7 @@
 use super::*;
 use crate::archive::{Archive, ArchivedVersion, inspect_fusion, read_foxz, write_foxz};
 use crate::dxf::{Drawing, Entity, bulge_arc, read_dxf, write_dxf};
-use crate::svg::{read_svg, write_svg};
+use crate::svg::{SvgUnits, read_svg, read_svg_as, write_svg};
 use std::io::Write as _;
 
 /// A closed unit-ish cube: 8 vertices, 12 outward-facing triangles.
@@ -619,6 +619,23 @@ fn svg_viewbox_and_units() {
   let s = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><line x1="0" y1="96" x2="96" y2="96"/></svg>"#;
   let l = lines(&read_svg(s.as_bytes()).unwrap());
   assert!(near(l[0].1, [25.4, 0.0], 1e-12), "{l:?}");
+}
+
+#[test]
+fn svg_px_units_ignore_the_page_as_fusion_does() {
+  // Fusion's Insert SVG: a user unit is a 96-dpi pixel whatever width/height/viewBox say, and the
+  // SVG's 0,0 is the origin with y negated
+  let s = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 0 40 30">
+    <line x1="0" y1="0" x2="96" y2="48"/><circle cx="10" cy="10" r="5"/></svg>"#;
+  let d = read_svg_as(s.as_bytes(), SvgUnits::Px).unwrap();
+  let l = lines(&d);
+  assert!(near(l[0].0, [0.0, 0.0], 1e-12) && near(l[0].1, [25.4, -12.7], 1e-12), "{l:?}");
+  let px = 25.4 / 96.0;
+  assert!(d.entities.iter().any(|(e, _)| matches!(e, Entity::Circle { center, radius }
+    if near(*center, [10.0 * px, -10.0 * px], 1e-12) && (radius - 5.0 * px).abs() < 1e-12)));
+  // the document reading sizes the same file in millimetres, mirrored about the viewBox's middle
+  let l = lines(&read_svg(s.as_bytes()).unwrap());
+  assert!(near(l[0].0, [0.0, 30.0], 1e-12), "{l:?}");
 }
 
 #[test]

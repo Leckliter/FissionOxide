@@ -66,6 +66,7 @@ pub enum Kind {
   SkFillet,
   SkChamfer,
   SkChamfer2,
+  SkChamferAngle,
   SkOffset,
   SkMirror,
   SkCircPattern,
@@ -138,7 +139,7 @@ impl Kind {
       Kind::Bom => "BILL OF MATERIALS",
       Kind::CenterOfMass => "CENTER OF MASS",
       Kind::SkFillet => "SKETCH FILLET",
-      Kind::SkChamfer | Kind::SkChamfer2 => "SKETCH CHAMFER",
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "SKETCH CHAMFER",
       Kind::SkOffset => "OFFSET",
       Kind::TraceImage => "TRACE IMAGE",
       Kind::SkMirror => "SKETCH MIRROR",
@@ -212,7 +213,7 @@ impl Kind {
       Kind::Analysis(_) => Icon::CurvMap,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
-      Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => Icon::SkChamfer,
       Kind::SkOffset => Icon::SkOffset,
       Kind::TraceImage => Icon::TraceImage,
       Kind::SkMirror => Icon::SkMirror,
@@ -253,7 +254,9 @@ impl Kind {
       Kind::NewComponent => ("New Component", "Make a component from the selected bodies"),
       Kind::Joint => ("Joint", "Join two components at a face or edge of each"),
       Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
-      Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
+      Kind::Interference => {
+        ("Interference", "Find overlapping bodies of different components, or of the selected bodies")
+      }
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
       Kind::Form(f) => (f.name, f.hint),
       Kind::Section => ("Section Analysis", "Cut the view open along a plane"),
@@ -262,9 +265,12 @@ impl Kind {
       Kind::Analysis("accessibility") => ("Accessibility Analysis", "Which faces a tool can reach from a direction"),
       Kind::Analysis(_) => ("Curvature Map Analysis", "Colour by how sharply surfaces curve"),
       Kind::CenterOfMass => ("Center of Mass", "Centre of mass of the selected (or all) bodies"),
-      Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
+      Kind::SkFillet => ("Fillet", "Round the corner where two lines or arcs meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
+      Kind::SkChamferAngle => {
+        ("Distance and Angle Chamfer", "Bevel a corner by a distance along the first line and an angle from it")
+      }
       Kind::SkOffset => ("Offset", "Offset a chain of curves (O)"),
       Kind::TraceImage => ("Trace Image", "Trace a photo, logo or scan into closed sketch curves"),
       Kind::SkMirror => ("Mirror", "Mirror sketch curves across a line"),
@@ -347,6 +353,7 @@ impl Kind {
       Kind::SkFillet
         | Kind::SkChamfer
         | Kind::SkChamfer2
+        | Kind::SkChamferAngle
         | Kind::SkOffset
         | Kind::SkMirror
         | Kind::SkCircPattern
@@ -386,6 +393,8 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
+const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
+  [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -414,6 +423,8 @@ pub struct Dialog {
   flip: bool,
   op: &'static str,
   angle: String,
+  /// Revolve, two sides: the angle the other way.
+  angle2: String,
   axis: String,
   radius: String,
   count: String,
@@ -442,6 +453,8 @@ pub struct Dialog {
   curves: Vec<u32>,
   /// Mirror / fold line.
   line: Option<u32>,
+  /// Mirror in "features" mode: the features whose cut/join is mirrored.
+  mirror_features: Vec<u32>,
   /// Joint origins in pick order: body and `{"face"|"edge": ...}`.
   origins: Vec<(u32, Value)>,
   /// Components of the picked bodies / joint origins (None = a root body).
@@ -545,6 +558,7 @@ impl Dialog {
       flip: false,
       op: "new_body",
       angle: "360 deg".into(),
+      angle2: "0 deg".into(),
       axis: "z".into(),
       radius: "2 mm".into(),
       count: "3".into(),
@@ -567,6 +581,7 @@ impl Dialog {
       path: None,
       curves: Vec::new(),
       line: None,
+      mirror_features: Vec::new(),
       origins: Vec::new(),
       comps: Vec::new(),
       choice: "",
@@ -684,7 +699,10 @@ impl Dialog {
         d.b = "5 mm".into();
       }
       Kind::Revolve => d.axis = "z".into(),
-      Kind::Mirror => d.join = false,
+      Kind::Mirror => {
+        d.join = false;
+        d.choice = "bodies";
+      }
       Kind::RectPattern | Kind::CircPattern => d.join = false,
       Kind::Combine => d.op = "join",
       Kind::Loft => {
@@ -716,6 +734,7 @@ impl Dialog {
         d.plane_label = "XY plane".into();
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::Interference => d.flag = true,
       Kind::DriveJoint | Kind::MotionStudy => {
         d.target = joints(s).first().map(|(id, _)| *id);
         d.position = "rotation";
@@ -805,9 +824,10 @@ impl Dialog {
       }
       Kind::Material => d.name = "Steel".into(),
       Kind::SkFillet => d.radius = "2 mm".into(),
-      Kind::SkChamfer | Kind::SkChamfer2 => {
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         d.distance = "2 mm".into();
         d.distance2 = "3 mm".into();
+        d.angle = "45 deg".into();
       }
       Kind::SkOffset => {
         d.distance = "2 mm".into();
@@ -837,6 +857,7 @@ impl Dialog {
       Kind::SkFillet
         | Kind::SkChamfer
         | Kind::SkChamfer2
+        | Kind::SkChamferAngle
         | Kind::SkOffset
         | Kind::SkMirror
         | Kind::SkCircPattern
@@ -926,17 +947,25 @@ impl Dialog {
         d.op = op_str(*operation);
         d
       }
-      FeatureKind::Revolve { sketch, angle, operation, axis, .. } => {
+      FeatureKind::Revolve { sketch, angle, symmetric, angle2, operation, axis, .. } => {
         let mut d = Dialog::blank(Kind::Revolve);
         d.sketch = Some(*sketch);
         d.angle = angle.clone();
+        d.extent = match (symmetric, angle2) {
+          (true, _) => "symmetric",
+          (_, Some(a2)) => {
+            d.angle2 = a2.clone();
+            "two_sides"
+          }
+          _ => "one_side",
+        };
         d.solid.rev_full = angle.trim() == "360 deg";
         d.op = op_str(*operation);
         d.axis = match axis {
           AxisRef::X => "x".into(),
           AxisRef::Y => "y".into(),
           AxisRef::Z => "z".into(),
-          AxisRef::SketchLine { curve } => format!("line:{}", curve.0),
+          AxisRef::SketchLine { curve } | AxisRef::SketchCurve { curve, .. } => format!("line:{}", curve.0),
           AxisRef::Edge { .. } => "edge".into(),
           AxisRef::Construction { feature } => format!("axis:{}", feature.0),
         };
@@ -985,13 +1014,26 @@ impl Dialog {
         d.distance = offset.clone();
         d
       }
-      FeatureKind::RectangularPattern { count, spacing, count2, spacing2, direction2, join, .. } => {
+      FeatureKind::RectangularPattern {
+        count,
+        spacing,
+        count2,
+        spacing2,
+        direction2,
+        symmetric,
+        symmetric2,
+        extent,
+        join,
+        ..
+      } => {
         let mut d = Dialog::blank(Kind::RectPattern);
         d.count = count.clone();
         d.spacing = spacing.clone();
         d.count2 = count2.clone();
         d.spacing2 = spacing2.clone();
         d.use_dir2 = direction2.is_some();
+        d.symmetric = [*symmetric, *symmetric2];
+        d.pattern_extent = *extent;
         d.join = *join;
         d
       }
@@ -1182,6 +1224,9 @@ impl Dialog {
       Kind::SkChamfer2 => {
         ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "distance2": self.distance2}))
       }
+      Kind::SkChamferAngle => {
+        ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "angle": self.angle}))
+      }
       Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
@@ -1301,7 +1346,9 @@ impl Dialog {
         let (axis, angle) = (self.revolve_axis()?, self.revolve_angle());
         (
           "revolve",
-          json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": angle, "operation": op}),
+          self.with_revolve_sides(
+            json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": angle, "operation": op}),
+          ),
         )
       }
       Kind::Fillet => ("fillet", self.fillet_params()),
@@ -1320,15 +1367,20 @@ impl Dialog {
         ("torus", json!({"plane": self.plane, "at": self.at_pt()?, "major": self.a, "minor": self.b, "operation": op}))
       }
       Kind::OffsetPlane => ("plane.offset", json!({"plane": self.plane, "offset": self.distance})),
+      Kind::Mirror if self.choice == "features" => {
+        ("mirror", json!({"plane": self.plane, "features": self.mirror_features}))
+      }
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => {
         let mut p = json!({
           "bodies": self.bodies, "direction": axis_vec(&self.dir), "count": self.count, "spacing": self.spacing, "join": self.join,
+          "symmetric": self.symmetric[0], "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
         if self.use_dir2 {
           p["direction2"] = json!(axis_vec(&self.dir2));
           p["count2"] = json!(self.count2);
           p["spacing2"] = json!(self.spacing2);
+          p["symmetric2"] = json!(self.symmetric[1]);
         }
         ("pattern.rectangular", p)
       }
@@ -1363,7 +1415,11 @@ impl Dialog {
         )),
         "operation": self.op,
       }),
-      Kind::Revolve => json!({"angle": self.revolve_angle(), "operation": self.op}),
+      Kind::Revolve => {
+        let two = self.extent == "two_sides";
+        json!({"angle": self.revolve_angle(), "symmetric": self.extent == "symmetric",
+          "angle2": if two { json!(self.angle2) } else { Value::Null }, "operation": self.op})
+      }
       Kind::Fillet => self.fillet_edit_set(),
       Kind::Chamfer => self.chamfer_params(json!({}), true),
       Kind::Shell => self.shell_edit_set(),
@@ -1379,7 +1435,8 @@ impl Dialog {
       }
       Kind::OffsetPlane => json!({"offset": self.distance}),
       Kind::RectPattern => {
-        json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join})
+        json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join,
+          "symmetric": self.symmetric[0], "symmetric2": self.symmetric[1], "extent": self.pattern_extent})
       }
       Kind::CircPattern => {
         json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
@@ -1448,6 +1505,7 @@ impl Dialog {
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
+      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty(),
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
       Kind::Hole | Kind::Fold => self.sketch.is_some(),
@@ -1466,7 +1524,7 @@ impl Dialog {
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
       Kind::Material => self.comps.iter().any(Option::is_some),
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
       Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
@@ -1549,9 +1607,10 @@ impl Dialog {
       }
       Kind::OffsetPlane => {
         let base = plane_of(s, &self.plane)?;
-        // offsets from XZ go along +Y (see `OriginPlane::offset_sign`)
+        // offsets from XZ go along +Y in designs made with XZ_OFFSET_PLUS_Y (see
+        // `OriginPlane::offset_sign`)
         let sign = if self.plane.as_str() == Some("xz") {
-          fox_engine::model::OriginPlane::Xz.offset_sign(s.design.frames())
+          fox_engine::model::OriginPlane::Xz.offset_sign(&s.design.behaviours)
         } else {
           1.0
         };
@@ -1723,6 +1782,7 @@ impl Dialog {
       Kind::SkFillet
       | Kind::SkChamfer
       | Kind::SkChamfer2
+      | Kind::SkChamferAngle
       | Kind::SkOffset
       | Kind::SkMirror
       | Kind::SkCircPattern
@@ -1925,7 +1985,8 @@ impl Dialog {
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::Material => "select a body of a component",
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
+      Kind::SkFillet => "select two lines or arcs that meet",
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror => "select curves and a mirror line",
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
       Kind::TraceImage => "pick an image to trace",
@@ -1994,7 +2055,17 @@ impl Dialog {
           .response
           .on_hover_text("Or pick a straight edge, sketch line or construction axis in the canvas");
         ui.end_row();
+        ui.label("Direction");
+        self.combo(ui, "rev_dir", &REVOLVE_DIRECTIONS, true);
+        ui.end_row();
         self.revolve_type_rows(ui);
+        if self.extent == "two_sides" {
+          ui.label("Angle 2");
+          if value_edit(ui, &mut self.angle2).changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+        }
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
@@ -2063,14 +2134,62 @@ impl Dialog {
           self.text(ui, true);
           ui.end_row();
         } else {
-          ui.label("Bodies");
-          sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
+          ui.label("Type");
+          let types = [("bodies", "Bodies"), ("features", "Features")];
+          let label = types.iter().find(|(k, _)| *k == self.choice).map_or("Bodies", |(_, l)| *l);
+          egui::ComboBox::from_id_salt("mirror_type").selected_text(label).width(140.0).show_ui(ui, |ui| {
+            for (k, l) in types {
+              if ui.selectable_label(self.choice == k, l).clicked() {
+                self.choice = k;
+                self.dirty = true;
+              }
+            }
+          });
           ui.end_row();
-          ui.label("");
-          if ui.checkbox(&mut self.join, "Join to original").changed() {
-            self.dirty = true;
+          if self.choice == "features" {
+            // features that add or remove a solid: their tool is what gets mirrored
+            let tools: Vec<(u32, String)> = app
+              .s
+              .design
+              .features
+              .iter()
+              .filter(|f| {
+                matches!(
+                  f.kind,
+                  FeatureKind::Extrude { .. }
+                    | FeatureKind::Revolve { .. }
+                    | FeatureKind::Primitive { .. }
+                    | FeatureKind::Loft { .. }
+                    | FeatureKind::Sweep { .. }
+                    | FeatureKind::Hole { .. }
+                )
+              })
+              .map(|f| (f.id.0, f.name.clone()))
+              .collect();
+            ui.label("Features");
+            ui.vertical(|ui| {
+              for (id, name) in tools {
+                let mut on = self.mirror_features.contains(&id);
+                if ui.checkbox(&mut on, name).changed() {
+                  self.mirror_features.retain(|f| *f != id);
+                  if on {
+                    self.mirror_features.push(id);
+                  }
+                  self.dirty = true;
+                }
+              }
+            });
+            ui.end_row();
+          } else {
+            ui.label("Bodies");
+            sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
+            ui.end_row();
+            ui.label("");
+            if ui.checkbox(&mut self.join, "Join to original").changed() {
+              self.dirty = true;
+            }
+            ui.end_row();
           }
-          ui.end_row();
         }
       }
       Kind::RectPattern | Kind::CircPattern => {
@@ -2092,6 +2211,16 @@ impl Dialog {
           }
           ui.end_row();
           ui.label("");
+          if ui.checkbox(&mut self.pattern_extent, "Spacing is the extent").changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+          ui.label("");
+          if ui.checkbox(&mut self.symmetric[0], "Symmetric").changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+          ui.label("");
           if ui.checkbox(&mut self.use_dir2, "Second direction").changed() {
             self.dirty = true;
           }
@@ -2107,6 +2236,11 @@ impl Dialog {
             ui.end_row();
             ui.label("Spacing 2");
             if value_edit(ui, &mut self.spacing2).changed() {
+              self.dirty = true;
+            }
+            ui.end_row();
+            ui.label("");
+            if ui.checkbox(&mut self.symmetric[1], "Symmetric 2").changed() {
               self.dirty = true;
             }
             ui.end_row();
@@ -2736,6 +2870,16 @@ impl Dialog {
           self.refresh_report(&mut app.s);
         }
         ui.end_row();
+        // adds each overlap as a static body (in a new component when ticked)
+        ui.label("");
+        ui.checkbox(&mut self.flag, "Create components");
+        ui.end_row();
+        ui.label("");
+        let overlap = self.report.as_ref().and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        if ui.add_enabled(overlap, egui::Button::new("Create Bodies")).clicked() {
+          self.create_interference(&mut app.s);
+        }
+        ui.end_row();
       }
       Kind::CenterOfMass => {
         let r = self.report.clone().unwrap_or(Value::Null);
@@ -2773,7 +2917,7 @@ impl Dialog {
           ui.end_row();
         }
       }
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => {
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         ui.label("Lines");
         chip(ui, self.curves.len(), "selected");
         ui.end_row();
@@ -2782,12 +2926,15 @@ impl Dialog {
         } else {
           Self::field(
             ui,
-            if self.kind == Kind::SkChamfer { "Distance" } else { "Distance 1" },
+            if self.kind == Kind::SkChamfer2 { "Distance 1" } else { "Distance" },
             &mut self.distance,
             dirty,
           );
           if self.kind == Kind::SkChamfer2 {
             Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+          }
+          if self.kind == Kind::SkChamferAngle {
+            Self::field(ui, "Angle", &mut self.angle, dirty);
           }
         }
       }
@@ -3082,7 +3229,12 @@ impl Dialog {
           v
         })
       }
-      Kind::Interference => s.execute("assembly.interference", &json!({})),
+      Kind::Interference => {
+        // the selected bodies (two or more), else every pair of components
+        let picked = sel_only_bodies(s);
+        self.bodies = if picked.len() >= 2 { picked } else { Vec::new() };
+        s.execute("assembly.interference", &json!({"bodies": self.bodies}))
+      }
       Kind::Bom => s.execute("assembly.bom", &json!({})),
       Kind::CenterOfMass => {
         let bodies = sel_only_bodies(s);
@@ -3109,6 +3261,18 @@ impl Dialog {
         self.report = None;
         self.error = Some(e.0);
       }
+    }
+  }
+
+  /// Adds the interferences of the bodies last computed as bodies (in components when ticked).
+  fn create_interference(&mut self, s: &mut Session) {
+    let p = json!({"bodies": self.bodies, "create_bodies": true, "components": self.flag});
+    match s.execute("assembly.interference", &p) {
+      Ok(v) => {
+        self.report = Some(v);
+        self.error = None;
+      }
+      Err(e) => self.error = Some(e.0),
     }
   }
 
@@ -3342,6 +3506,16 @@ impl Dialog {
     if value_edit(ui, f).changed() {
       self.dirty = true;
     }
+  }
+
+  /// Revolve: adds the symmetric flag or the second angle for the chosen direction.
+  fn with_revolve_sides(&self, mut p: Value) -> Value {
+    match self.extent {
+      "symmetric" => p["symmetric"] = json!(true),
+      "two_sides" => p["angle2"] = json!(self.angle2),
+      _ => {}
+    }
+    p
   }
 
   fn combo(&mut self, ui: &mut egui::Ui, id: &str, items: &[(&'static str, &'static str)], extent: bool) {
@@ -4388,6 +4562,11 @@ mod tests {
     let mut d = Dialog::blank(Kind::Interference);
     d.refresh_report(&mut s);
     assert!(d.report.is_some(), "{:?}", d.error);
+    let clashes = d.report.as_ref().and_then(Value::as_array).map_or(0, Vec::len);
+    let n = s.model.bodies.len();
+    d.create_interference(&mut s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    assert_eq!(s.model.bodies.len(), n + clashes);
   }
 
   #[test]
@@ -4770,7 +4949,11 @@ mod tests {
     let mut d = Dialog::blank(Kind::Joint);
     d.choice = "rigid";
     d.saved[1] = "Top".into();
+    // the arm's bottom onto the base's top: flipped, the Z axes face each other and it sits on top
+    d.flip = true;
     (d.angle, d.distance) = ("0 deg".into(), "0 mm".into());
+    // as in Fusion, unflipped Z axes line up; flipped, the arm's bottom faces the base's top
+    d.flip = true;
     d.origins = vec![(arm, json!({"face": face(&s, 1, |f| f.normal.z < -0.9)}))];
     d.comps = vec![s.design.component_of(BodyId(arm)).map(|c| c.id.0)];
     apply(&mut s, &mut d);
@@ -5010,5 +5193,21 @@ mod tests {
     let json = serde_json::to_string(&app.s.design).unwrap();
     let back: fox_engine::model::Design = serde_json::from_str(&json).unwrap();
     assert_eq!(back.named_views, app.s.design.named_views);
+  }
+
+  #[test]
+  fn text_form_lays_text_along_a_picked_curve() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+    let arc = run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20]}))["curves"][0]
+      .as_u64()
+      .unwrap() as u32;
+    let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: fox_engine::sketch::CurveId(arc) }];
+    let mut d = form(&mut s, &SK_TEXT, sel, &[("text", json!("LL")), ("align", json!("center"))]);
+    apply(&mut s, &mut d);
+    let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
+    let path = t.path.expect("the text runs along the arc");
+    assert_eq!((path.curve.0, path.above, path.align), (arc, true, fox_engine::sketch::TextAlign::Center));
   }
 }

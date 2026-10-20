@@ -1,7 +1,9 @@
 // C++ side of the FissionOxide kernel bridge. See kernel.hxx.
 #include "fox-kernel/cpp/kernel.hxx"
 #include "fox-kernel/src/ffi.rs.h"
+#include "fox-kernel/cpp/threads.hxx"
 
+#include <algorithm>
 #include <cmath>
 #include <array>
 #include <deque>
@@ -24,6 +26,7 @@
 #include <Geom2d_Line.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Lin2d.hxx>
+#include <BRepAdaptor_CompCurve.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -38,6 +41,10 @@
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Domain.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepGProp_Sinert.hxx>
+#include <BRepGProp_Vinert.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -62,6 +69,8 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Precision.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GCE2d_MakeSegment.hxx>
@@ -987,15 +996,90 @@ rust::Vec<EdgeInfo> edge_infos(const Shape &s) {
   FOX_CATCH("edge info")
 }
 
+// Is this an analytic face (plane, cylinder, cone, sphere, torus) trimmed by a free-form edge (a
+// B-spline from a boolean, say)? Gauss integration with its default point counts can be a few mm³
+// off on those, where the trim runs across a wide stretch of the surface's parameters, so they are
+// integrated adaptively. Free-form faces stay with the default, which adaptive integration of
+// swept surfaces can do worse than.
+static bool needs_adaptive(const TopoDS_Face &f) {
+  switch (BRepAdaptor_Surface(f, Standard_False).GetType()) {
+  case GeomAbs_Plane:
+  case GeomAbs_Cylinder:
+  case GeomAbs_Cone:
+  case GeomAbs_Sphere:
+  case GeomAbs_Torus: break;
+  default: return false;
+  }
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge &e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e)) continue;
+    switch (BRepAdaptor_Curve(e).GetType()) {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola: break;
+    default: return true;
+    }
+  }
+  return false;
+}
+
 MassProps mass_props(const Shape &s) {
   FOX_TRY
   MassProps out{};
-  GProp_GProps vol;
-  BRepGProp::VolumeProperties(s.s, vol);
+  bool adaptive = false;
+  for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More() && !adaptive; ex.Next()) {
+    adaptive = needs_adaptive(TopoDS::Face(ex.Current()));
+  }
+  GProp_GProps vol, surf;
+  gp_Ax1 axis;
+  if (wrapping_axis(s.s, axis)) {
+    // A cylinder face running on past its seam (a thread's crest) integrates poorly over its long
+    // u range; against a plane across its axis it adds nothing (its normals lie in the plane).
+    BRepGProp::VolumePropertiesGK(s.s, vol, gp_Pln(axis.Location(), axis.Direction()), 1e-9, Standard_False,
+                                  Standard_True, Standard_True);
+    BRepGProp::SurfaceProperties(s.s, surf);
+  } else if (!adaptive) {
+    BRepGProp::VolumeProperties(s.s, vol);
+    BRepGProp::SurfaceProperties(s.s, surf);
+  } else {
+    // face by face as BRepGProp sums them, about one point, adaptively where the face needs it
+    Bnd_Box rough;
+    BRepBndLib::Add(s.s, rough);
+    gp_Pnt at = rough.IsVoid() ? gp_Pnt() : gp_Pnt((rough.CornerMin().XYZ() + rough.CornerMax().XYZ()) / 2);
+    vol = GProp_GProps(at);
+    surf = GProp_GProps(at);
+    for (TopExp_Explorer ex(s.s, TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face &f = TopoDS::Face(ex.Current());
+      const bool fine = needs_adaptive(f);
+      BRepGProp_Face bf(fine);
+      bf.Load(f);
+      BRepGProp_Domain bd;
+      const bool natural = !TopoDS_Iterator(f).More();
+      if (!natural) bd.Init(f);
+      BRepGProp_Sinert a;
+      a.SetLocation(at);
+      if (fine) {
+        natural ? a.Perform(bf, 1e-7) : a.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? a.Perform(bf) : a.Perform(bf, bd);
+      }
+      surf.Add(a);
+      if (f.Orientation() != TopAbs_FORWARD && f.Orientation() != TopAbs_REVERSED) continue;
+      if (!natural) bd.Init(f); // the area pass used up its edges
+      BRepGProp_Vinert v;
+      v.SetLocation(at);
+      if (fine) {
+        natural ? v.Perform(bf, 1e-7) : v.Perform(bf, bd, 1e-7);
+      } else {
+        natural ? v.Perform(bf) : v.Perform(bf, bd);
+      }
+      vol.Add(v);
+    }
+  }
   out.volume = vol.Mass();
   out.cog = arr(vol.CentreOfMass().XYZ());
-  GProp_GProps surf;
-  BRepGProp::SurfaceProperties(s.s, surf);
   out.area = surf.Mass();
   // the tight box: the default one is loose around curved (fillet, B-spline) faces
   Bnd_Box box;
@@ -2045,20 +2129,46 @@ std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
   FOX_CATCH("offset profile")
 }
 
-// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad).
-std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle) {
+// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad). With
+// `forward_face`, d1 and the angle are measured on the face the edge runs forward in, as Fusion
+// does (on an extrusion's cap edges, the cap); without it (designs from before the
+// chamfer_forward_face behaviour), on the edge's first adjacent face. `flip` measures them on the
+// other face.
+std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle,
+                                bool flip, bool forward_face) {
   FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
   TopTools_IndexedDataMapOfShapeListOfShape ef;
   TopExp::MapShapesAndAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
   BRepFilletAPI_MakeChamfer mk(s.s);
+  const TopAbs_Orientation want = flip ? TopAbs_REVERSED : TopAbs_FORWARD;
   int added = 0;
   for (uint32_t i : edges) {
     if (i < 1 || static_cast<int>(i) > map.Extent()) continue;
     const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(i)));
     if (!ef.Contains(e) || ef.FindFromKey(e).IsEmpty()) continue;
-    const TopoDS_Face &f = TopoDS::Face(ef.FindFromKey(e).First());
+    const TopTools_ListOfShape &faces = ef.FindFromKey(e);
+    TopoDS_Face f = TopoDS::Face(faces.First());
+    if (!forward_face && flip) {
+      // legacy: the first adjacent face, or with `flip` the other one
+      for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+        if (!it.Value().IsSame(faces.First())) {
+          f = TopoDS::Face(it.Value());
+          break;
+        }
+      }
+    }
+    bool found = !forward_face;
+    for (TopTools_ListIteratorOfListOfShape it(faces); it.More() && !found; it.Next()) {
+      for (TopExp_Explorer x(it.Value(), TopAbs_EDGE); x.More(); x.Next()) {
+        if (x.Current().IsSame(e) && x.Current().Orientation() == want) {
+          f = TopoDS::Face(it.Value());
+          found = true;
+          break;
+        }
+      }
+    }
     if (angle) mk.AddDA(d1, d2, e, f);
     else mk.Add(d1, d2, e, f);
     ++added;
@@ -2114,6 +2224,51 @@ std::unique_ptr<Shape> edge_at_index(const Shape &s, uint32_t edge) {
   if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
   return wrap(map(static_cast<int>(edge)));
   FOX_CATCH("edge")
+}
+
+// The point and unit tangent at fraction t of a curve's arc length, measured from whichever end
+// lies nearer `from` (x, y, z; empty: the curve's own start), the tangent pointing away from that
+// end: [point (3), tangent (3)].
+template <typename C> static rust::Vec<double> along_curve(const C &c, double t, rust::Slice<const double> from) {
+  double u0 = c.FirstParameter(), u1 = c.LastParameter();
+  bool rev = false;
+  if (from.size() >= 3) {
+    gp_Pnt f(from[0], from[1], from[2]);
+    rev = c.Value(u1).Distance(f) < c.Value(u0).Distance(f);
+  }
+  double len = GCPnts_AbscissaPoint::Length(c, u0, u1);
+  if (!(len > Precision::Confusion())) throw std::runtime_error("the curve has no length");
+  t = std::min(1.0, std::max(0.0, t));
+  double u = rev ? u1 : u0;
+  if (t > 0.0) {
+    GCPnts_AbscissaPoint ap(c, (rev ? -t : t) * len, u);
+    if (!ap.IsDone()) throw std::runtime_error("the point along the curve could not be found");
+    u = ap.Parameter();
+  }
+  gp_Pnt p;
+  gp_Vec d;
+  c.D1(u, p, d);
+  if (d.Magnitude() < 1e-12) throw std::runtime_error("the curve has no tangent there");
+  if (rev) d.Reverse();
+  d.Normalize();
+  rust::Vec<double> out;
+  for (double v : {p.X(), p.Y(), p.Z(), d.X(), d.Y(), d.Z()}) out.push_back(v);
+  return out;
+}
+
+// curve_along on the first wire of s (followed in its own order), else its first edge.
+rust::Vec<double> curve_along(const Shape &s, double t, rust::Slice<const double> from) {
+  FOX_TRY
+  TopExp_Explorer w(s.s, TopAbs_WIRE);
+  if (w.More()) {
+    BRepAdaptor_CompCurve c(TopoDS::Wire(w.Current()), Standard_True);
+    return along_curve(c, t, from);
+  }
+  TopExp_Explorer e(s.s, TopAbs_EDGE);
+  if (!e.More()) throw std::runtime_error("the shape has no edge");
+  BRepAdaptor_Curve c(TopoDS::Edge(e.Current()));
+  return along_curve(c, t, from);
+  FOX_CATCH("along")
 }
 
 // Minimum distance between two shapes: [distance, point on a (3), point on b (3)].

@@ -5,4 +5,4 @@
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 4.25}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "profiles": [[7, 0]], "distance": 15, "operation": "new_body"}
-{"cmd": "thread", "faces": [{"point": [4.25, 0.0, 7.5]}], "pitch": 1.5, "modeled": true}
+{"cmd": "thread", "faces": [{"point": [4.25, 0.0, 7.5]}], "designation": "M10x1.5", "class": "6H", "modeled": true}

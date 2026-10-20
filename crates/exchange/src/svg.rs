@@ -5,7 +5,9 @@
 //! `transform`s, and the root `viewBox`/`width`/`height` (px at 96 dpi, mm, cm, in, pt, pc).
 //! User units become millimetres, keeping their place: the y axis is mirrored about the middle
 //! of the viewBox, so a page whose viewBox starts at 0,0 lands with its bottom-left corner on
-//! the origin, y up. Quadratic Béziers become cubics; elliptical arcs become arcs when they are
+//! the origin, y up. [`read_svg_as`] with [`SvgUnits::Px`] reads as Fusion's Insert SVG does
+//! instead: every user unit is a 96-dpi pixel and the SVG's 0,0 lands on the origin, y negated.
+//! Quadratic Béziers become cubics; elliptical arcs become arcs when they are
 //! circular after the transform, cubics otherwise. `<text>`, `<image>`, `<use>` and hidden
 //! elements are counted in [`Drawing::skipped`]; `<defs>`, `<clipPath>`, `<mask>`, `<symbol>`
 //! and other non-drawing content is ignored. Elements in a group whose id, class or label
@@ -611,8 +613,23 @@ fn property(a: &Attrs, name: &str) -> Option<String> {
   from_style.or_else(|| a.get(name).map(|v| v.trim().to_string()))
 }
 
-/// Maps the root's user units to millimetres, y up, mirrored about the viewBox's middle.
-fn root_transform(a: &Attrs) -> Xf {
+/// How [`read_svg_as`] maps the root's user units to millimetres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SvgUnits {
+  /// As the root's `width`/`height`/`viewBox` size them, y mirrored about the viewBox's middle
+  /// (a page lands with its bottom-left corner on the origin); what [`write_svg`] round-trips.
+  #[default]
+  Document,
+  /// Every user unit is a CSS pixel (25.4/96 mm) whatever the root's size says, with the SVG's
+  /// 0,0 on the origin and y negated: how Fusion's Insert SVG places a file.
+  Px,
+}
+
+/// Maps the root's user units to millimetres, y up.
+fn root_transform(a: &Attrs, units: SvgUnits) -> Xf {
+  if units == SvgUnits::Px {
+    return Xf([PX, 0.0, 0.0, -PX, 0.0, 0.0]);
+  }
   let w = a.get("width").and_then(|v| length_mm(v)).filter(|v| *v > 0.0);
   let h = a.get("height").and_then(|v| length_mm(v)).filter(|v| *v > 0.0);
   let vb = a.get("viewBox").map(|v| numbers(v)).filter(|v| v.len() == 4 && v[2] > 0.0 && v[3] > 0.0);
@@ -740,8 +757,14 @@ fn element(d: &mut Drawing, parent: Frame, name: &str, a: &Attrs) -> Frame {
   Frame { xf, construction: cons, skip: false }
 }
 
-/// Reads an SVG's geometry in millimetres, y up. Fails for files that aren't SVG.
+/// Reads an SVG's geometry in millimetres, y up, sized as the document says. Fails for files that
+/// aren't SVG.
 pub fn read_svg(bytes: &[u8]) -> Result<Drawing> {
+  read_svg_as(bytes, SvgUnits::Document)
+}
+
+/// Reads an SVG's geometry in millimetres, y up, with `units` mapping the root's user units.
+pub fn read_svg_as(bytes: &[u8], units: SvgUnits) -> Result<Drawing> {
   if bytes.starts_with(&[0x1f, 0x8b]) {
     return Err(ExchangeError::fmt("SVG: compressed SVG (.svgz) isn't supported; unzip it first"));
   }
@@ -785,7 +808,7 @@ pub fn read_svg(bytes: &[u8]) -> Result<Drawing> {
           return Err(ExchangeError::fmt(format!("not an SVG file (the root element is <{name}>)")));
         }
         seen_root = true;
-        Frame { xf: root_transform(&a), construction: false, skip: false }
+        Frame { xf: root_transform(&a, units), construction: false, skip: false }
       }
     };
     let frame = if stack.is_empty() {

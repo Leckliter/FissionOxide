@@ -67,6 +67,39 @@ fn editable_text_regenerates_its_extrusion() {
 }
 
 #[test]
+fn text_along_a_path_and_its_counters_left_out() {
+  let mut s = Session::default();
+  let sid = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+  let fid = fox_model::FeatureId(sid as u32);
+  let a = run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20], "construction": true}));
+  let arc = a["curves"][0].as_u64().unwrap();
+  let t = run(&mut s, "sketch.text", json!({"path": arc, "text": "OO", "height": 5, "align": "center"}));
+  let text = t["text"].as_u64().unwrap();
+  assert_eq!(t["profiles"], 4, "two rings and two counters: {t}");
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["texts"][0]["path"]["curve"], arc);
+  assert_eq!(info["texts"][0]["path"]["align"], "center");
+  // with no profiles picked, the extrusion is the two rings: their counters stay open
+  run(&mut s, "extrude", json!({"distance": 2}));
+  assert_eq!(s.model.bodies.len(), 2);
+  let rings = volume(&s);
+  run(&mut s, "undo", json!({}));
+  run(&mut s, "sketch.edit", json!({"sketch": sid}));
+  run(&mut s, "sketch.text_edit", json!({"text_id": text, "above": false}));
+  let below = s.design.sketch(fid).unwrap();
+  let r: Vec<f64> = below.texts[0].points.iter().map(|p| below.pos(*p).unwrap()).map(|q| q[0].hypot(q[1])).collect();
+  let (lo, hi) = r.iter().fold((f64::MAX, 0.0f64), |(lo, hi), r| (lo.min(*r), hi.max(*r)));
+  assert!(hi < 20.3 && lo < 15.5, "hanging below the arc: {lo} {hi}");
+  // back on a straight baseline at a point
+  run(&mut s, "sketch.text_edit", json!({"text_id": text, "path": null}));
+  assert!(s.design.sketch(fid).unwrap().texts[0].path.is_none());
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": sid, "distance": 2}));
+  assert!((volume(&s) - rings).abs() < 1e-3 * rings, "{} {rings}", volume(&s));
+  assert!(s.execute("sketch.text", &json!({"path": 9999, "text": "x"})).is_err());
+}
+
+#[test]
 fn text_survives_save_and_open() {
   let dir = std::env::temp_dir().join(format!("fox-text-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
@@ -311,4 +344,52 @@ fn sketch_text_takes_fusion_text_options() {
   let st = &s.design.sketch(sk).unwrap().texts[0].style;
   assert!(st.italic && !st.underline && st.spacing == 25.0);
   assert!(s.execute("sketch.text", &json!({"at": [0, 0], "text": "x", "halign": "sideways"})).is_err());
+}
+
+#[test]
+fn spun_profile_follows_the_body_and_steps() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, -5], "corner2": [20, 5]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ext = run(&mut s, "extrude", json!({"sketch": 1, "distance": 10}))["feature"].as_u64().unwrap();
+  // a narrower box on top: the outline steps in at z = 10
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, -5], "corner2": [15, 5]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 3, "start": 10, "distance": 10, "operation": "join"}));
+  let sk = run(&mut s, "sketch.create", xz)["sketch"].as_u64().unwrap();
+  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": ["Body1"], "axis": "z"}));
+  assert_eq!(r["profiles"], 1, "{r}");
+  // six sides and the centre line
+  assert_eq!(ids(&r["curves"]).len(), 7, "{r}");
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "revolve", json!({"sketch": sk, "axis": "z", "angle": 360, "operation": "new_body"}));
+  let pi = std::f64::consts::PI;
+  let boxes = 1000.0 + 500.0;
+  let ring = pi * (325.0 * 10.0 + 150.0 * 10.0);
+  assert!((volume(&s) - boxes - ring).abs() < 1e-3 * ring, "{}", volume(&s));
+  // a taller first box: the outline follows it
+  run(&mut s, "feature.edit", json!({"feature": ext, "set": {"extent": {"kind": "one_side", "distance": "12"}}}));
+  let ring = pi * (325.0 * 12.0 + 150.0 * 8.0);
+  let boxes = 1200.0 + 500.0 - 100.0;
+  assert!((volume(&s) - boxes - ring).abs() < 1e-3 * ring, "{}", volume(&s));
+}
+
+#[test]
+fn spun_profile_flips_to_the_other_side() {
+  let mut s = Session::default();
+  let xz = json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [15, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 4}));
+  run(&mut s, "sketch.create", xz);
+  let body = s.model.bodies[0].id.0;
+  let r = run(&mut s, "sketch.spun_profile", json!({"bodies": [body], "axis": "z", "flip": true, "centerline": false}));
+  assert_eq!(ids(&r["curves"]).len(), 4, "{r}");
+  let sk = &s.model.sketches.values().last().unwrap().sketch;
+  let xs: Vec<f64> = sk.points.iter().map(|p| p.x).collect();
+  assert!(xs.iter().all(|x| *x <= 1e-9) && xs.iter().any(|x| (x + 20.0).abs() < 1e-6), "{xs:?}");
 }

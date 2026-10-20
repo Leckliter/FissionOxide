@@ -638,12 +638,23 @@ impl Shape {
     Shape::wrap(sys::offset_face(self.get()?, d)?)
   }
 
-  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians.
-  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool) -> Result<Shape> {
+  /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians. `d1`
+  /// and the angle are on the face each edge runs forward in (Fusion's choice); `flip` swaps.
+  pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, true)
+  }
+
+  /// [`Shape::chamfer_two`] as designs from before the `chamfer_forward_face` behaviour build it:
+  /// `d1` and the angle on each edge's first adjacent face (`flip`: the other one).
+  pub fn chamfer_two_legacy(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, false)
+  }
+
+  fn chamfer_two_on(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool, forward: bool) -> Result<Shape> {
     if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
       return Err(KernelError::Input("chamfer sizes must be positive".into()));
     }
-    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle)?)?.outward()
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip, forward)?)?.outward()
   }
 
   /// Fillets edges with the radius running from `r1` to `r2` along each edge.
@@ -672,6 +683,21 @@ impl Shape {
   /// One edge (1-based index, as in [`Shape::edges`]) as a shape of its own.
   pub fn edge_shape(&self, edge: u32) -> Result<Shape> {
     Shape::wrap(sys::edge_at_index(self.get()?, edge)?)
+  }
+
+  /// The point and unit tangent at fraction `t` (0 – 1) of this curve's arc length (its first
+  /// wire, else its first edge), on the exact curve. It is measured from the end nearer `from`
+  /// (else the curve's own start) and the tangent points away from that end.
+  pub fn along_curve(&self, t: f64, from: Option<DVec3>) -> Result<(DVec3, DVec3)> {
+    if !t.is_finite() {
+      return Err(KernelError::Input("the position along the curve is not finite".into()));
+    }
+    let from = from.map(|p| p.to_array().to_vec()).unwrap_or_default();
+    let v = sys::curve_along(self.get()?, t, &from)?;
+    match v.as_slice() {
+      [px, py, pz, tx, ty, tz] => Ok((DVec3::new(*px, *py, *pz), DVec3::new(*tx, *ty, *tz))),
+      _ => Err(KernelError::Kernel("no point along the curve".into())),
+    }
   }
 
   /// Minimum distance to another shape and the closest points on each.
@@ -1054,7 +1080,7 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
 }
 
 mod features2;
-pub use features2::Inside;
+pub use features2::{Inside, SweepOptions};
 mod surface;
 pub use surface::{Extension, Untrim};
 mod xcaf;
@@ -1068,15 +1094,31 @@ mod tests_features2;
 mod sheet2;
 
 mod refparts;
+
+mod project;
+pub use project::{PathEnds, Projection3d};
+mod silhouette;
 #[cfg(test)]
 mod tests_ellipse;
-#[cfg(test)]
 mod tests_merge;
 #[cfg(test)]
+mod tests_project;
+#[cfg(test)]
 mod tests_refparts;
+#[cfg(test)]
+mod tests_silhouette;
 
+mod threads;
+
+mod curves3d;
 mod path3d;
+#[cfg(test)]
+mod tests_curves3d;
 pub use path3d::Seg3;
 
 mod form;
 pub use form::BSplineSurface;
+mod spun;
+pub use spun::AxialEvents;
+#[cfg(test)]
+mod tests_spun;

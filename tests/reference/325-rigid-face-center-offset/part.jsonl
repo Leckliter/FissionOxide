@@ -1,5 +1,5 @@
 # 325-rigid-face-center-offset: added by the parity loop from a Fusion probe
-# Joint (rigid): grounded A 20x20x10 box at the origin; B 10x6x4 box built at x 40..50, y 0..6; B's bottom face centre jointed to A's top face centre (Z axes facing), offset 3 mm: B at x 5..15, y 7..13, z 13..17.
+# Joint (rigid): grounded A 20x20x10 box at the origin; B 10x6x4 box built at x 40..50, y 0..6; B's bottom face centre jointed to A's top face centre, offset 3 mm. Unflipped, Fusion lines the Z axes up the same way, so B turns over below the origin: B at x 5..15, y 7..13, z 9..13.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 20]}
 {"cmd": "sketch.finish"}

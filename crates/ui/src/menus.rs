@@ -109,7 +109,7 @@ use Cmd::Dialog as D;
 const PATTERN: &[E] = &[
   c("Rectangular Pattern", Icon::Pattern, D(Kind::RectPattern)),
   c("Circular Pattern", Icon::CircPattern, D(Kind::CircPattern)),
-  x("Pattern on Path", Icon::Pattern),
+  c("Pattern on Path", Icon::Pattern, D(Kind::Form(&forms::PATH_PATTERN))),
 ];
 
 const SIMPLIFY: &[E] = &[
@@ -600,7 +600,7 @@ const SKETCH_CREATE: &[E] = &[
 const SK_CHAMFER: &[E] = &[
   c("Equal Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer)),
   c("Distance-Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer2)),
-  x("Distance-Angle Chamfer", Icon::SkChamfer),
+  c("Distance and Angle Chamfer", Icon::SkChamfer, D(Kind::SkChamferAngle)),
 ];
 
 const SKETCH_MODIFY: &[E] = &[

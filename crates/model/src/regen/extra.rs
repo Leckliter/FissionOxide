@@ -3,37 +3,16 @@
 
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
-use fox_sketch::{CurveKind, Loop, Profile, Seg};
+use fox_sketch::behaviour::ISO_THREADS;
+use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
-use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PlaneRef};
-
-/// ISO metric coarse pitches by nominal diameter (mm).
-const ISO_COARSE: [(f64, f64); 18] = [
-  (1.0, 0.25),
-  (1.6, 0.35),
-  (2.0, 0.4),
-  (2.5, 0.45),
-  (3.0, 0.5),
-  (4.0, 0.7),
-  (5.0, 0.8),
-  (6.0, 1.0),
-  (8.0, 1.25),
-  (10.0, 1.5),
-  (12.0, 1.75),
-  (14.0, 2.0),
-  (16.0, 2.0),
-  (20.0, 2.5),
-  (24.0, 3.0),
-  (30.0, 3.5),
-  (36.0, 4.0),
-  (42.0, 4.5),
-];
+use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, OriginPlane, PathRef, PlaneRef};
 
 /// The ISO coarse pitch for a thread of this major diameter (nearest size).
 pub fn iso_pitch(diameter: f64) -> f64 {
-  ISO_COARSE.iter().min_by(|a, b| (a.0 - diameter).abs().total_cmp(&(b.0 - diameter).abs())).map(|s| s.1).unwrap_or(1.0)
+  crate::thread::coarse_pitch(diameter)
 }
 
 impl Ctx<'_> {
@@ -56,41 +35,68 @@ impl Ctx<'_> {
         self.state.points.insert(id, p);
         Ok(None)
       }
-      FeatureKind::Thread { faces, pitch, length, offset, modeled, left, flip } => {
+      FeatureKind::Thread { faces, pitch, length, offset, modeled, left, flip, designation, class } => {
         if faces.is_empty() {
           return Err("select cylindrical faces to thread".into());
         }
+        // a designation is new data no file from before ISO_THREADS has, so it always gets the
+        // ISO behaviour; a plain thread in an older design rebuilds the legacy way
+        let iso = self.behaviours.has(ISO_THREADS) || !designation.trim().is_empty();
         let mut labels = Vec::new();
         for fr in faces.iter_mut() {
-          let (bi, info) = self.face_info(fr)?;
+          let (bi, info) = if iso { self.thread_face_info(fr)? } else { self.face_info(fr)? };
           if info.kind != SurfaceKind::Cylinder {
             return Err("threads go on cylindrical faces".into());
           }
-          let (o, d, r) = (info.origin, info.normal.normalize(), info.radius);
-          let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
-          let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
-          if p <= 0.0 {
-            return Err("the pitch must be positive".into());
+          if !iso {
+            labels.push(self.legacy_thread(id, bi, &info, pitch, length, offset, *modeled, *left, *flip)?);
+            continue;
           }
+          let (o, d, r) = (info.origin, canonical_axis(info.normal.normalize()), info.radius);
+          let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
+          let (t0, t1) = self.exact_extent(bi, info.id, o, d, (t0, t1));
+          let (dims, label) = if designation.trim().is_empty() {
+            let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
+            if p <= 0.0 {
+              return Err("the pitch must be positive".into());
+            }
+            (crate::thread::basic_dims(2.0 * r, p, !external), format!("M{}x{}", trim(2.0 * r), trim(p)))
+          } else {
+            let (nominal, p) = crate::thread::parse_designation(designation)
+              .ok_or_else(|| format!("unknown thread size '{designation}' (ISO metric, as M10x1.5)"))?;
+            crate::thread::check_drawn_size(nominal, p, 2.0 * r, !external)?;
+            (crate::thread::iso_dims(nominal, p, class, !external)?, format!("M{}x{}", trim(nominal), trim(p)))
+          };
+          let p = dims.pitch;
           let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
           let full = t1 - t0 - off;
           let l = if length.trim().is_empty() { full } else { self.len(length)?.min(full) };
           if l <= p * 0.5 {
             return Err("the thread is shorter than half a pitch".into());
           }
-          // the helix runs from the chosen end along the axis
-          let (start, dir) = if *flip { (o + d * (t1 - off), -d) } else { (o + d * (t0 + off), d) };
-          let x = perpendicular(dir);
-          labels.push(format!("M{}x{}", trim(2.0 * r), trim(p)));
+          // the threaded span along the axis, from the face's low end (or its high end)
+          let (a, b) = if *flip { (t1 - off - l, t1 - off) } else { (t0 + off, t0 + off + l) };
+          let rc = dims.crest / 2.0;
+          if (rc - r).abs() > 1e-7 {
+            self.resize_cylinder(id, bi, (o, d), (t0, t1), (r, rc), external)?;
+          }
+          labels.push(label);
           if *modeled {
-            let groove = thread_groove(start, dir, x, r, p, l, external, *left).map_err(ke)?;
+            let groove = thread_groove(o, d, (a, b), &dims, external, *left).map_err(ke)?;
             let body = &self.state.bodies[bi];
-            let shape = body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?;
+            // one crest face, not a strip per turn: only the threaded face's strips merge
+            let shape = body
+              .shape
+              .boolean(&groove, BoolOp::Subtract)
+              .map_err(ke)?
+              .merge_cylinder_strips(o, d, rc, (t0, t1))
+              .map_err(ke)?;
             let bid = body.id;
             self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
             self.split_multi(id, bid);
           } else {
-            self.state.threads.push((id, helix_points(start, dir, x, r, p, l, *left)));
+            let (start, dir) = if *flip { (o + d * b, -d) } else { (o + d * a, d) };
+            self.state.threads.push((id, helix_points(start, dir, perpendicular(dir), rc, p, l, *left)));
           }
         }
         Ok(None)
@@ -127,6 +133,21 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::Pipe { path_sketch, path_curves, diameter, wall, operation, section, distance } => {
+        if self.state.curves3d.contains_key(path_sketch) {
+          let picked: Vec<u32> = path_curves.iter().map(|c| c.0).collect();
+          return self.pipe_along_curves(id, *path_sketch, &picked, diameter, wall, *operation, *section, distance);
+        }
+        if let Some(wires) = self.state.intersections.get(path_sketch).cloned() {
+          if *section != PipeSection::Circular || !distance.trim().is_empty() {
+            return Err("a pipe along an intersection curve is round and runs the whole curve".into());
+          }
+          let r = self.len(diameter)? / 2.0;
+          let w = if wall.trim().is_empty() { None } else { Some(self.len(wall)?) };
+          if r <= 0.0 || w.is_some_and(|w| w <= 0.0 || w >= r) {
+            return Err("the diameter must be positive and the wall thinner than the radius".into());
+          }
+          return self.pipe_along(id, &wires, r, w, *operation);
+        }
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?.clone();
         let fraction = if distance.trim().is_empty() {
           None
@@ -482,8 +503,16 @@ impl Ctx<'_> {
       | FeatureKind::MotionLink { .. }
       | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
       FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
+      FeatureKind::AlignConstraint { .. } => self.apply_assembly(id, kind),
+      FeatureKind::PlaneConstraint { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
       FeatureKind::Form { .. } => self.apply_form(id, kind),
+      FeatureKind::BoundingSolid { .. } => self.apply_bounding(id, kind),
+      FeatureKind::ProjectToSurface { .. } => self.apply_project(id, kind),
+      FeatureKind::PathPattern { .. } => self.apply_path_pattern(id, kind),
+      FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
+      FeatureKind::FullRoundFillet { sets } => self.full_round(id, sets),
+      FeatureKind::IntersectionCurve { .. } => self.apply_curves3d(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
   }
@@ -528,6 +557,31 @@ impl Ctx<'_> {
     Ok((bi, info))
   }
 
+  /// Resolves a thread's face reference like [`Ctx::face_info`], but among cylinders scores how
+  /// far the picked point is off each one's surface too: a tube's bore and outside share a
+  /// centroid, and the plain score can't tell them apart. Only threads with [`ISO_THREADS`] use
+  /// it, so other features (and older threads) resolve as they did.
+  fn thread_face_info(&mut self, fr: &mut FaceRef) -> Result<(usize, FaceInfo), String> {
+    let bi = self.body_index(fr.body)?;
+    let body = &self.state.bodies[bi];
+    let (p, n0) = (DVec3::from(fr.point), DVec3::from(fr.normal));
+    let score = |f: &FaceInfo| {
+      let v = p - f.origin;
+      let off = ((v - f.normal * v.dot(f.normal)).length() - f.radius).abs();
+      (p - f.center).length() + off
+    };
+    let fid = body
+      .faces()
+      .iter()
+      .filter(|f| f.kind == SurfaceKind::Cylinder && f.normal.dot(n0).abs() >= 0.999)
+      .min_by(|a, b| score(a).total_cmp(&score(b)))
+      .map(|f| f.id);
+    let Some(fid) = fid else { return self.face_info(fr) };
+    refresh_face(fr, body, fid);
+    let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("a face could not be found")?;
+    Ok((bi, info))
+  }
+
   /// Resolves an edge reference to its body index and current edge (refreshing the reference).
   pub(super) fn edge_info(&mut self, e: &mut EdgeRef) -> Result<(usize, EdgeInfo), String> {
     let bi = self.body_index(e.body)?;
@@ -536,6 +590,27 @@ impl Ctx<'_> {
     let info = body.edges().iter().find(|x| x.id == eid).copied().ok_or("an edge could not be found")?;
     *e = EdgeRef::from_edge(e.body, &info, body.faces());
     Ok((bi, info))
+  }
+
+  /// A straight edge, axis or sketch line as a point on it and its direction (for an edge, the
+  /// start and start-to-end).
+  fn line_of(&mut self, l: &mut LineRef) -> Result<(DVec3, DVec3), String> {
+    match l {
+      LineRef::Edge(e) => {
+        let (_, info) = self.edge_info(e)?;
+        if info.kind != fox_kernel::CurveKind::Line {
+          return Err("pick straight edges, axes or sketch lines".into());
+        }
+        Ok((info.start, info.end - info.start))
+      }
+      LineRef::Sketch { sketch, curve } => self.resolve_axis(&mut AxisRef::SketchLine { curve: *curve }, Some(*sketch)),
+      LineRef::Axis(a) => {
+        if matches!(a, AxisRef::SketchLine { .. }) {
+          return Err("give a sketch line as {sketch, curve}".into());
+        }
+        self.resolve_axis(a, None)
+      }
+    }
   }
 
   /// An edge as a polyline, start to end.
@@ -551,12 +626,103 @@ impl Ctx<'_> {
     Ok(pts)
   }
 
-  /// The point and unit tangent at fraction `t` of an edge's length.
-  fn along(&mut self, e: &mut EdgeRef, t: &str) -> Result<(DVec3, DVec3), String> {
-    let t = self.factor(t)?.clamp(0.0, 1.0);
+  /// Points along sketch curves in world space, start to end (one chain when there are several).
+  fn curve_points(&self, path: &PathRef) -> Result<Vec<DVec3>, String> {
+    let sk = self.state.sketches.get(&path.sketch).ok_or("the path's sketch failed")?;
+    const STEPS: usize = 256;
+    if let [c] = path.curves[..]
+      && let Some(c3) = sk.sketch.curve3d(c)
+    {
+      return Ok(c3.kind.polyline(STEPS).into_iter().map(DVec3::from).collect());
+    }
+    if let Some(segs) = crate::include::path_segs(sk, &path.curves)? {
+      // through included 3D geometry: sample the wire
+      let wire = Shape::path3d(&segs).map_err(ke)?;
+      let mut pts: Vec<DVec3> = Vec::new();
+      for l in wire.edge_lines(0.001).map_err(ke)? {
+        let mut q = l.points;
+        if let (Some(last), Some(first), Some(end)) = (pts.last(), q.first(), q.last())
+          && (*last - *first).length() > (*last - *end).length()
+        {
+          q.reverse();
+        }
+        pts.extend(q);
+      }
+      return Ok(pts);
+    }
+    let segs = match path.curves[..] {
+      // a lone curve keeps its own direction (and may be closed)
+      [c] => sk.sketch.curve_segs(c),
+      _ => crate::sheet::open_path(&sk.sketch, &path.curves)?,
+    };
+    let mut pts: Vec<DVec3> = Vec::new();
+    for s in &segs {
+      let n = if matches!(s, Seg::Line { .. }) { 1 } else { STEPS };
+      let from = usize::from(!pts.is_empty());
+      pts.extend((from..=n).map(|i| sk.plane.to_world(seg_point(s, i as f64 / n as f64))));
+    }
+    if pts.len() < 2 {
+      return Err("the path has no curves".into());
+    }
+    Ok(pts)
+  }
+
+  /// The point and unit tangent at fraction `t` of an edge's length (from its start), or
+  /// `distance` along it. With [`EXACT_EDGE_FRAMES`] a fraction is taken on the exact curve;
+  /// designs made before it (and distances) walk the edge's tessellated polyline and take the
+  /// direction of the segment the point falls on.
+  ///
+  /// [`EXACT_EDGE_FRAMES`]: fox_sketch::behaviour::EXACT_EDGE_FRAMES
+  fn along(&mut self, e: &mut EdgeRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
+    if distance.trim().is_empty() && self.behaviours.has(fox_sketch::behaviour::EXACT_EDGE_FRAMES) {
+      let t = self.factor(t)?.clamp(0.0, 1.0);
+      let (bi, info) = self.edge_info(e)?;
+      let edge = self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?;
+      return edge.along_curve(t, Some(info.start)).map_err(ke);
+    }
     let pts = self.edge_points(e)?;
+    self.along_points(&pts, t, distance)
+  }
+
+  /// As [`Ctx::along`], along sketch curves: with
+  /// [`EXACT_EDGE_FRAMES`](fox_sketch::behaviour::EXACT_EDGE_FRAMES) a fraction of one plane
+  /// curve is taken on the exact curve; anything else follows the sampled path.
+  fn along_curve(&self, path: &PathRef, t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
+    if distance.trim().is_empty()
+      && self.behaviours.has(fox_sketch::behaviour::EXACT_EDGE_FRAMES)
+      && let [c] = path.curves[..]
+      && let Some(r) = self.along_sketch(path.sketch, c, t)?
+    {
+      return Ok(r);
+    }
+    let pts = self.curve_points(path)?;
+    self.along_points(&pts, t, distance)
+  }
+
+  /// The point and unit tangent at fraction `t` of a plane sketch curve's length, from its start
+  /// point, in world coordinates, on the exact curve; `None` for a 3D or included curve.
+  fn along_sketch(&self, sketch: FeatureId, curve: CurveId, t: &str) -> Result<Option<(DVec3, DVec3)>, String> {
+    let t = self.factor(t)?.clamp(0.0, 1.0);
+    let sk = self.state.sketches.get(&sketch).ok_or("its sketch failed")?;
+    if sk.sketch.curve3d(curve).is_some() || crate::include::path_segs(sk, &[curve])?.is_some() {
+      return Ok(None);
+    }
+    let segs = sk.sketch.curve_segs(curve);
+    let first = segs.first().ok_or("the sketch curve no longer exists")?;
+    let start = sk.plane.to_world(first.start());
+    let wire = Shape::path(&sk.plane, &segs).map_err(ke)?;
+    wire.along_curve(t, Some(start)).map(Some).map_err(ke)
+  }
+
+  /// The point and unit tangent at fraction `t` of a polyline's length, or (when set) at
+  /// `distance` from its start, clamped to its length.
+  fn along_points(&self, pts: &[DVec3], t: &str, distance: &str) -> Result<(DVec3, DVec3), String> {
     let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).length()).sum();
-    let mut left = t * total;
+    let mut left = if distance.trim().is_empty() {
+      self.factor(t)?.clamp(0.0, 1.0) * total
+    } else {
+      self.len(distance)?.clamp(0.0, total)
+    };
     for w in pts.windows(2) {
       let l = (w[1] - w[0]).length();
       if left <= l || std::ptr::eq(w, pts.windows(2).last().unwrap_or(w)) {
@@ -665,6 +831,88 @@ impl Ctx<'_> {
     lo.is_finite().then_some((lo, hi, votes >= 0.0))
   }
 
+  /// A thread on one face as designs without [`ISO_THREADS`] build it: a sharp V groove from the
+  /// face's end along its own axis direction, swept the thread's length; returns its label.
+  #[allow(clippy::too_many_arguments)]
+  fn legacy_thread(
+    &mut self,
+    id: FeatureId,
+    bi: usize,
+    info: &FaceInfo,
+    pitch: &str,
+    length: &str,
+    offset: &str,
+    modeled: bool,
+    left: bool,
+    flip: bool,
+  ) -> Result<String, String> {
+    let (o, d, r) = (info.origin, info.normal.normalize(), info.radius);
+    let (t0, t1, external) = self.cylinder_extent(bi, info.id, o, d).ok_or("the face has no mesh")?;
+    let p = if pitch.trim().is_empty() { iso_pitch(2.0 * r) } else { self.len(pitch)? };
+    if p <= 0.0 {
+      return Err("the pitch must be positive".into());
+    }
+    let off = if offset.trim().is_empty() { 0.0 } else { self.len(offset)? };
+    let full = t1 - t0 - off;
+    let l = if length.trim().is_empty() { full } else { self.len(length)?.min(full) };
+    if l <= p * 0.5 {
+      return Err("the thread is shorter than half a pitch".into());
+    }
+    // the helix runs from the chosen end along the axis
+    let (start, dir) = if flip { (o + d * (t1 - off), -d) } else { (o + d * (t0 + off), d) };
+    let x = perpendicular(dir);
+    if modeled {
+      let groove = legacy_thread_groove(start, dir, x, r, p, l, external, left).map_err(ke)?;
+      let body = &self.state.bodies[bi];
+      let shape = body.shape.boolean(&groove, BoolOp::Subtract).map_err(ke)?;
+      let bid = body.id;
+      self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+      self.split_multi(id, bid);
+    } else {
+      self.state.threads.push((id, helix_points(start, dir, x, r, p, l, left)));
+    }
+    Ok(format!("M{}x{}", trim(2.0 * r), trim(p)))
+  }
+
+  /// A cylindrical face's extent along its axis from its edges (exact, where the mesh's extent
+  /// `approx` is only as good as single precision); `approx` when the edges don't bound it.
+  fn exact_extent(&self, bi: usize, face: u32, o: DVec3, d: DVec3, approx: (f64, f64)) -> (f64, f64) {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for e in self.state.bodies[bi].edges().iter().filter(|e| e.faces.contains(&face)) {
+      for p in [e.start, e.mid, e.end] {
+        let s = (p - o).dot(d);
+        lo = lo.min(s);
+        hi = hi.max(s);
+      }
+    }
+    let tol = 1e-4 * (approx.1 - approx.0).abs().max(1.0);
+    if (lo - approx.0).abs() < tol && (hi - approx.1).abs() < tol { (lo, hi) } else { approx }
+  }
+
+  /// Resizes a cylindrical face spanning `span` along the axis from radius `r` to `rc`: cuts away
+  /// or adds the ring between the two (a boss shrinks or grows outside, a hole inside).
+  fn resize_cylinder(
+    &mut self,
+    id: FeatureId,
+    bi: usize,
+    (o, d): (DVec3, DVec3),
+    span: (f64, f64),
+    (r, rc): (f64, f64),
+    external: bool,
+  ) -> Result<(), String> {
+    let (base, h) = (o + d * span.0, span.1 - span.0);
+    let cyl = |radius: f64| Shape::cylinder(base, d, radius, h).map_err(ke);
+    // the ring reaches past the face into the air when removing, into the material when adding
+    let delta = (rc - r).abs();
+    let (inner, outer) = if rc < r { (rc, r + delta) } else { ((r - delta).max(r * 0.5), rc) };
+    let ring = cyl(outer)?.boolean(&cyl(inner)?, BoolOp::Subtract).map_err(ke)?;
+    let op = if external == (rc < r) { BoolOp::Subtract } else { BoolOp::Union };
+    let body = &self.state.bodies[bi];
+    let shape = body.shape.boolean(&ring, op).map_err(ke)?;
+    self.state.bodies[bi] = body.with_shape(shape, id);
+    Ok(())
+  }
+
   fn plane_by(&mut self, def: &mut PlaneDef) -> Result<Plane, String> {
     match def {
       PlaneDef::Angle { axis, base, angle } => {
@@ -715,31 +963,42 @@ impl Ctx<'_> {
         Plane::from_normal(n * n.dot(a), n, x).map_err(ke)
       }
       PlaneDef::TwoEdges { a, b } => {
-        let (_, ea) = self.edge_info(a)?;
-        let (_, eb) = self.edge_info(b)?;
-        if ea.kind != fox_kernel::CurveKind::Line || eb.kind != fox_kernel::CurveKind::Line {
-          return Err("pick two straight edges".into());
-        }
-        let da = ea.end - ea.start;
-        let mut n = da.cross(eb.end - eb.start);
+        let (oa, da) = self.line_of(a)?;
+        let (ob, db) = self.line_of(b)?;
+        let mut n = da.cross(db);
         if n.length() < 1e-9 {
-          n = da.cross(eb.start - ea.start);
+          n = da.cross(ob - oa);
         }
         if n.length() < 1e-9 {
           return Err("the edges are collinear".into());
         }
-        if n.normalize().dot(eb.start - ea.start).abs() > 1e-4 {
+        if n.normalize().dot(ob - oa).abs() > 1e-4 {
           return Err("the edges are not in one plane".into());
         }
-        Plane::from_normal(ea.start, n, da).map_err(ke)
+        Plane::from_normal(oa, n, da).map_err(ke)
       }
       PlaneDef::Tangent { face, near } => {
         let (p, n) = self.face_point(face, DVec3::from(*near))?;
         Plane::from_normal(p, n, perpendicular(n)).map_err(ke)
       }
-      PlaneDef::AlongPath { edge, t } => {
-        let (p, d) = self.along(edge, t)?;
+      PlaneDef::AlongPath { edge, t, distance } => {
+        let (p, d) = self.along(edge, t, distance)?;
         Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
+      }
+      PlaneDef::AlongCurve { path, t, distance } => {
+        let (p, d) = self.along_curve(path, t, distance)?;
+        Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
+      }
+      PlaneDef::Perpendicular { base, through, distance, v } => {
+        let bp = self.resolve_plane(base)?;
+        // Fusion's XZ plane runs its U direction along -X; Fox's XZ runs X along +X.
+        let u = if matches!(base, PlaneRef::Origin { plane: OriginPlane::Xz }) { -bp.x } else { bp.x };
+        let n = if *v { bp.y } else { u };
+        let o = match through {
+          Some(p) => self.point_of(p)?,
+          None => bp.origin + n * self.len(distance)?,
+        };
+        Plane::from_normal(o, n, bp.normal()).map_err(ke)
       }
     }
   }
@@ -787,16 +1046,58 @@ impl Ctx<'_> {
     }
   }
 
+  /// A line as a point on it and its direction, or `None` for a curved body edge.
+  fn straight(&mut self, l: &mut LineRef) -> Result<Option<(DVec3, DVec3)>, String> {
+    match l {
+      LineRef::Edge(e) => {
+        let (_, info) = self.edge_info(e)?;
+        Ok((info.kind == fox_kernel::CurveKind::Line).then_some((info.start, info.end - info.start)))
+      }
+      _ => self.line_of(l).map(Some),
+    }
+  }
+
   fn point_by(&mut self, def: &mut PointDef) -> Result<DVec3, String> {
     match def {
       PointDef::Ref { point } => self.point_of(point),
-      PointDef::TwoEdges { a, b } => {
+      PointDef::TwoEdges { a, b } if self.behaviours.has(fox_sketch::behaviour::INFINITE_LINE_CROSSING) => {
+        if let (Some(la), Some(lb)) = (self.straight(a)?, self.straight(b)?) {
+          return lines_meet(la, lb);
+        }
+        // a curved edge: where the two edges come closest
+        let (LineRef::Edge(a), LineRef::Edge(b)) = (a, b) else {
+          return Err("pick straight edges or lines".into());
+        };
         let (ba, ea) = self.edge_info(a)?;
         let (bb, eb) = self.edge_info(b)?;
         let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
         let sb = self.state.bodies[bb].shape.edge_shape(eb.id).map_err(ke)?;
         let (_, pa, pb) = sa.distance_to(&sb).map_err(ke)?;
         Ok((pa + pb) / 2.0)
+      }
+      // designs made before INFINITE_LINE_CROSSING: the midpoint of the closest approach
+      PointDef::TwoEdges { a, b } => {
+        if let (LineRef::Edge(a), LineRef::Edge(b)) = (&mut *a, &mut *b) {
+          // two body edges: their closest approach as bounded curves (curved edges too)
+          let (ba, ea) = self.edge_info(a)?;
+          let (bb, eb) = self.edge_info(b)?;
+          let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
+          let sb = self.state.bodies[bb].shape.edge_shape(eb.id).map_err(ke)?;
+          let (_, pa, pb) = sa.distance_to(&sb).map_err(ke)?;
+          return Ok((pa + pb) / 2.0);
+        }
+        // an axis or sketch line: the closest approach of the two infinite lines
+        let (oa, da) = self.line_of(a)?;
+        let (ob, db) = self.line_of(b)?;
+        let (da, db) = (da.normalize(), db.normalize());
+        let w = oa - ob;
+        let (k, d, e) = (da.dot(db), da.dot(w), db.dot(w));
+        let den = 1.0 - k * k;
+        if den < 1e-12 {
+          return Err("the lines are parallel".into());
+        }
+        let (s, t) = ((k * e - d) / den, (e - k * d) / den);
+        Ok((oa + da * s + ob + db * t) / 2.0)
       }
       PointDef::ThreePlanes { a, b, c } => {
         let ps = [self.resolve_plane(a)?, self.resolve_plane(b)?, self.resolve_plane(c)?];
@@ -840,7 +1141,18 @@ impl Ctx<'_> {
         }
         Err("the edge doesn't cross the plane".into())
       }
-      PointDef::AlongPath { edge, t } => Ok(self.along(edge, t)?.0),
+      PointDef::LinePlane { line, plane } => {
+        let pl = self.resolve_plane(plane)?;
+        let n = pl.normal();
+        let (o, d) = self.resolve_axis(line, None)?;
+        let den = d.dot(n);
+        if den.abs() < 1e-12 {
+          return Err("the line is parallel to the plane".into());
+        }
+        Ok(o - d * ((o - pl.origin).dot(n) / den))
+      }
+      PointDef::AlongPath { edge, t, distance } => Ok(self.along(edge, t, distance)?.0),
+      PointDef::AlongCurve { path, t, distance } => Ok(self.along_curve(path, t, distance)?.0),
     }
   }
 }
@@ -855,6 +1167,26 @@ fn plane_line(a: &Plane, b: &Plane) -> Option<(DVec3, DVec3)> {
   }
   let (ca, cb) = (na.dot(a.origin), nb.dot(b.origin));
   Some(((nb.cross(l) * ca + l.cross(na) * cb) / l2, l.normalize()))
+}
+
+/// Where two infinite lines (a point and a direction each) cross.
+fn lines_meet((p1, d1): (DVec3, DVec3), (p2, d2): (DVec3, DVec3)) -> Result<DVec3, String> {
+  let (d1, d2) = (
+    d1.try_normalize().ok_or("the first line has no length")?,
+    d2.try_normalize().ok_or("the second line has no length")?,
+  );
+  let n = d1.cross(d2);
+  let n2 = n.length_squared();
+  if n2 < 1e-18 {
+    return Err("the lines are parallel".into());
+  }
+  let w = p2 - p1;
+  let q1 = p1 + d1 * (w.cross(d2).dot(n) / n2);
+  let q2 = p2 + d2 * (w.cross(d1).dot(n) / n2);
+  if (q1 - q2).length() > 1e-4 {
+    return Err("the lines don't meet".into());
+  }
+  Ok((q1 + q2) / 2.0)
 }
 
 /// Any unit vector perpendicular to `d`.
@@ -1051,9 +1383,45 @@ pub(super) fn sketch_wires(
   Ok(out)
 }
 
-/// A thread's helical V groove: ISO 60° flanks, cut into the material from the cylinder of
-/// radius `r` (inwards on a boss, outwards in a hole).
+/// A thread's helical groove: the ISO 68-1 profile, 60° flanks half a pitch apart at the pitch
+/// diameter and a flat root, cut in from the crest diameter (inwards on a boss, outwards in a
+/// hole) between `span.0` and `span.1` along the axis, where planes across the axis end it.
 fn thread_groove(
+  o: DVec3,
+  d: DVec3,
+  span: (f64, f64),
+  dims: &crate::thread::ThreadDims,
+  external: bool,
+  left: bool,
+) -> fox_kernel::Result<Shape> {
+  let p = dims.pitch;
+  let (rc, rp, rb) = (dims.crest / 2.0, dims.pitch_diameter / 2.0, dims.root / 2.0);
+  let tan = 30f64.to_radians().tan();
+  let out = if external { 1.0 } else { -1.0 };
+  // half the groove's width at radius r: a quarter pitch at the pitch radius, wider towards the crest
+  let half = |r: f64| p / 4.0 + out * (r - rp) * tan;
+  let land = p - 2.0 * half(rc);
+  if land <= 0.0 || (rb - rc) * out >= 0.0 || half(rb) <= 0.0 {
+    return Err(fox_kernel::KernelError::Input("the thread profile does not fit the pitch".into()));
+  }
+  // the flanks run a little past the crest so the cut is clean, staying clear of the next turn
+  let past = rc + out * 0.25 * land / (2.0 * tan);
+  let x = perpendicular(d);
+  let start = o + d * (span.0 - p);
+  let sec = Plane { origin: start + x * rp, x, y: d };
+  let pts = [[rb - rp, -half(rb)], [past - rp, -half(past)], [past - rp, half(past)], [rb - rp, half(rb)]];
+  let outer = Loop::new((0..4).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % 4] }).collect());
+  let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
+  // a pitch longer at both ends, then cut square at the span's ends
+  let sweep = face.helix_sweep(start, d, x, rp, p, span.1 - span.0 + 2.0 * p, left)?;
+  let slab = Shape::cylinder(o + d * span.0, d, rc.max(rb) + p, span.1 - span.0)?;
+  sweep.boolean(&slab, BoolOp::Intersect)
+}
+
+/// A thread's helical V groove as designs without [`ISO_THREADS`] build it: ISO 60° flanks, cut
+/// into the material from the cylinder of radius `r` (inwards on a boss, outwards in a hole).
+#[allow(clippy::too_many_arguments)]
+fn legacy_thread_groove(
   start: DVec3,
   dir: DVec3,
   x: DVec3,
@@ -1079,6 +1447,19 @@ fn thread_groove(
   };
   let face = Shape::face(&sec, &Profile { outer, holes: vec![] })?;
   face.helix_sweep(start, dir, x, r, pitch, length, left)
+}
+
+/// The axis direction a thread's low end is measured along: its largest component positive.
+fn canonical_axis(d: DVec3) -> DVec3 {
+  let a = d.abs();
+  let c = if a.x >= a.y && a.x >= a.z {
+    d.x
+  } else if a.y >= a.z {
+    d.y
+  } else {
+    d.z
+  };
+  if c < 0.0 { -d } else { d }
 }
 
 /// A cosmetic thread's helix as points (for display).
@@ -1147,5 +1528,37 @@ mod tests {
       assert!(d < 1e-2, "{q:?} is {d} off");
     }
     assert!((seg_length(&head) - seg_length(&whole) * 0.3).abs() < 1e-3 * seg_length(&whole));
+  }
+
+  #[test]
+  fn lines_meet_where_extended_and_not_when_skew_or_parallel() {
+    // the L-prism's top edges: y = 4 (x 8..20) and x = 0 (y 0..10) meet extended at (0, 4, 5)
+    let a = (DVec3::new(20.0, 4.0, 5.0), DVec3::new(-12.0, 0.0, 0.0));
+    let b = (DVec3::new(0.0, 0.0, 5.0), DVec3::new(0.0, 10.0, 0.0));
+    assert!((lines_meet(a, b).unwrap() - DVec3::new(0.0, 4.0, 5.0)).length() < 1e-9);
+    let skew = (DVec3::new(0.0, 0.0, 6.0), DVec3::Y);
+    assert!(lines_meet(a, skew).is_err());
+    assert!(lines_meet(a, (DVec3::ZERO, DVec3::X)).is_err());
+  }
+
+  #[test]
+  fn an_old_two_edges_point_reads_as_body_edges() {
+    let e = EdgeRef {
+      body: crate::BodyId(2000),
+      point: [10.0, 0.0, 5.0],
+      dir: [1.0, 0.0, 0.0],
+      n1: [0.0, 0.0, 1.0],
+      n2: [0.0, -1.0, 0.0],
+      circular: false,
+      radius: 0.0,
+      start: [0.0; 3],
+      end: [0.0; 3],
+    };
+    let old = serde_json::json!({"type": "two_edges", "a": e, "b": e});
+    let def: PointDef = serde_json::from_value(old).unwrap();
+    assert_eq!(def, PointDef::TwoEdges { a: LineRef::Edge(e.clone()), b: LineRef::Edge(e) });
+    let line = serde_json::json!({"type": "two_edges", "a": {"sketch": 3, "curve": 3}, "b": {"type": "construction", "feature": 5}});
+    let def: PointDef = serde_json::from_value(line).unwrap();
+    assert_eq!(def.depends_on(), vec![FeatureId(3), FeatureId(5)]);
   }
 }

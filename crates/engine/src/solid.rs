@@ -3,12 +3,16 @@
 
 use fox_kernel::Shape;
 use fox_kernel::glam::DVec3;
-use fox_model::{BodyId, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, ShellDirection};
+use fox_model::bounding::BoundShape;
+use fox_model::{BodyId, BodySel, FaceRef, FeatureId, FeatureKind, LoftEnd, PathRef, PlaneRef, ShellDirection};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
+use fox_model::pathpattern::PathOrientation;
+
 use crate::commands::{
-  add_feature, face_ref, ids, operation, opt_expr, plane_ref, profile_points, req_expr, sketch_for_feature,
+  add_feature, body_sel, expr_of, face_ref, ids, operation, opt_expr, opt_str, plane_ref, profile_points, req_expr,
+  req_u32, sketch_for_feature,
 };
 use crate::{CmdError, CmdResult, Session};
 
@@ -67,6 +71,28 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       }
       add_feature(s, FeatureKind::ReplaceFace { faces, target, plane })
     })(),
+    "bounding_solid" => (|| {
+      let bodies = body_sel(p);
+      if let BodySel::Bodies { ids } = &bodies {
+        for b in ids {
+          s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0)))?;
+        }
+      }
+      let shape = match p.get("shape").and_then(Value::as_str).unwrap_or("box") {
+        "box" => BoundShape::Box,
+        "cylinder" => BoundShape::Cylinder,
+        o => return Err(CmdError::new(format!("unknown shape '{o}' (box, cylinder)"))),
+      };
+      let plane = p.get("plane").map(|v| plane_ref(s, v)).transpose()?;
+      let offset = p.get("offset").map(expr_of).transpose()?.unwrap_or_else(|| "0".into());
+      let sides = match p.get("sides") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if a.len() == 6 => a.iter().map(expr_of).collect::<Result<_, _>>()?,
+        Some(_) => return Err(CmdError::new("'sides' is six offsets: [-x, +x, -y, +y, -z, +z]")),
+      };
+      add_feature(s, FeatureKind::BoundingSolid { bodies, shape, plane, offset, sides })
+    })(),
+    "pattern.path" => path_pattern(s, p),
     _ => return None,
   })
 }
@@ -83,6 +109,25 @@ pub(crate) fn path_ref(s: &Session, v: &Value) -> Result<PathRef, CmdError> {
   let sketch = FeatureId(u32::try_from(sketch).map_err(|_| CmdError::new("bad sketch id"))?);
   s.design.sketch(sketch)?;
   Ok(PathRef { sketch, curves })
+}
+
+/// A loft section's end condition: `end_condition` (free, point_sharp or point_tangent, with
+/// `weight`, default 1) on a `{sketch, ...}` section; a bare sketch id is free.
+pub(crate) fn loft_end(v: &Value) -> Result<LoftEnd, CmdError> {
+  let Some(kind) = v.get("end_condition") else { return Ok(LoftEnd::Free) };
+  let weight = v.get("weight").map(|w| w.as_f64().ok_or(CmdError::new("'weight' must be a number"))).transpose()?;
+  match kind.as_str() {
+    Some("free") => Ok(LoftEnd::Free),
+    Some("point_sharp") => Ok(LoftEnd::PointSharp),
+    Some("point_tangent") => {
+      let weight = weight.unwrap_or(1.0);
+      if !(weight > 0.0 && weight.is_finite()) {
+        return Err(CmdError::new("a point tangent weight must be above zero"));
+      }
+      Ok(LoftEnd::PointTangent { weight })
+    }
+    _ => Err(CmdError::new("end_condition is free, point_sharp or point_tangent")),
+  }
 }
 
 /// A face reference standing for a whole body (`extrude` to a body): {body} alone uses its first face.
@@ -244,4 +289,49 @@ fn normal_at(f: &fox_kernel::FaceInfo, p: DVec3) -> Option<DVec3> {
     _ => return None,
   };
   n.try_normalize()
+}
+
+/// `pattern.path`: copies of bodies, or features re-applied, along a sketch path.
+fn path_pattern(s: &mut Session, p: &Value) -> CmdResult {
+  let path_sketch = FeatureId(req_u32(p, "path")?);
+  s.design.sketch(path_sketch)?;
+  let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
+  let features: Vec<FeatureId> = ids(p, "features").into_iter().map(FeatureId).collect();
+  for f in &features {
+    if s.design.feature(*f).is_none() {
+      return Err(CmdError::new(format!("no feature {}", f.0)));
+    }
+  }
+  let distance = opt_expr(p, "distance")
+    .or_else(|| opt_expr(p, "spacing"))
+    .ok_or(CmdError::new("missing 'spacing' (or 'distance' with extent: true)"))?;
+  let extent = match opt_str(p, "distance_type") {
+    None => p.get("extent").and_then(Value::as_bool).unwrap_or(false),
+    Some("extent") => true,
+    Some("spacing") => false,
+    Some(o) => return Err(CmdError::new(format!("unknown distance type '{o}' (spacing, extent)"))),
+  };
+  let orientation = match opt_str(p, "orientation").unwrap_or("identical") {
+    "identical" => PathOrientation::Identical,
+    "along_path" | "path" => PathOrientation::AlongPath,
+    o => return Err(CmdError::new(format!("unknown orientation '{o}' (identical, along_path)"))),
+  };
+  let flag = |k: &str| p.get(k).and_then(Value::as_bool);
+  add_feature(
+    s,
+    FeatureKind::PathPattern {
+      bodies: body_sel(p),
+      features,
+      path_sketch,
+      path_curves,
+      count: req_expr(p, "count")?,
+      distance,
+      extent,
+      start: opt_expr(p, "start").unwrap_or_else(|| "0".into()),
+      flip: flag("flip").unwrap_or(false),
+      symmetric: flag("symmetric").unwrap_or(false),
+      orientation,
+      join: flag("join").unwrap_or(true),
+    },
+  )
 }

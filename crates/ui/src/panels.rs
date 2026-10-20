@@ -363,7 +363,7 @@ impl Cmd {
         Kind::Torus => (Icon::Torus, "Torus", "Create a solid torus"),
         Kind::RectPattern => (Icon::Pattern, "Rectangular Pattern", "Copy bodies in rows and columns"),
         Kind::CircPattern => (Icon::CircPattern, "Circular Pattern", "Copy bodies around an axis"),
-        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies across a plane"),
+        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies or features across a plane"),
         Kind::Fillet => (Icon::Fillet, "Fillet", "Round selected edges (F)"),
         Kind::Chamfer => (Icon::Chamfer, "Chamfer", "Bevel selected edges"),
         Kind::Shell => (Icon::Shell, "Shell", "Hollow a body, removing selected faces"),
@@ -2781,6 +2781,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::Mirror { .. } => Icon::Mirror,
     FeatureKind::RectangularPattern { .. } => Icon::Pattern,
     FeatureKind::CircularPattern { .. } => Icon::CircPattern,
+    FeatureKind::PathPattern { .. } => Icon::Pattern,
     FeatureKind::Move { .. } => Icon::Move,
     FeatureKind::Combine { .. } => Icon::Combine,
     FeatureKind::Import { .. } => Icon::Import,
@@ -2839,6 +2840,13 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::BaseFeature { .. } => Icon::Box,
     FeatureKind::CamFollower { .. } => Icon::DriveJoint,
     FeatureKind::Form { .. } => Icon::CreateForm,
+    FeatureKind::AlignConstraint { .. } => Icon::JointOrigin,
+    FeatureKind::PlaneConstraint { .. } => Icon::Combine,
+    FeatureKind::BoundingSolid { .. } => Icon::Box,
+    FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
+    FeatureKind::Arrange { .. } => Icon::Component,
+    FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
+    FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
   }
 }
 

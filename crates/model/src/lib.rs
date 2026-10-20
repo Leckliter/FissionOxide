@@ -9,7 +9,9 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod arrange;
 pub mod assembly;
+pub mod bounding;
 pub mod cam;
 pub mod config;
 pub mod construct;
@@ -21,6 +23,7 @@ pub mod form;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
+pub mod pathpattern;
 pub mod plot;
 pub mod refs;
 pub mod regen;
@@ -29,11 +32,12 @@ pub mod sheet2;
 pub mod sheet3;
 pub mod subassembly;
 pub mod surface;
+pub mod thread;
 
 use serde::{Deserialize, Serialize};
 
 pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
-pub use fillet::{FilletSet, RadiusPoint};
+pub use fillet::{FilletSet, FullRoundSet, RadiusPoint};
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
@@ -357,11 +361,19 @@ impl OriginPlane {
     }
   }
 
-  /// Which way a positive offset from this plane moves along `plane(frames).normal()`: Fusion
-  /// offsets from XZ along +Y, the opposite of the legacy XZ frame's normal (X right, Z up) and
-  /// the same as Fusion's frame's.
-  pub fn offset_sign(self, frames: Frames) -> f64 {
-    if self == OriginPlane::Xz && frames == Frames::Legacy { -1.0 } else { 1.0 }
+  /// Which way a positive offset from this plane moves along its frame's normal,
+  /// `plane(Frames::of(behaviours)).normal()`, in a design made with `behaviours`. The world
+  /// direction depends only on [`XZ_OFFSET_PLUS_Y`](fox_sketch::behaviour::XZ_OFFSET_PLUS_Y):
+  /// with it an offset from XZ moves along +Y, as in Fusion; without it (designs from before #62)
+  /// along -Y. The frame only decides which of those is its normal: the legacy XZ frame's (X right,
+  /// Z up) is -Y, Fusion's (X right, -Z up) +Y. So the two flags never compound.
+  pub fn offset_sign(self, behaviours: &Behaviours) -> f64 {
+    if self != OriginPlane::Xz {
+      return 1.0;
+    }
+    let plus_y = behaviours.has(fox_sketch::behaviour::XZ_OFFSET_PLUS_Y);
+    let normal_plus_y = Frames::of(behaviours) == Frames::Fusion;
+    if plus_y == normal_plus_y { 1.0 } else { -1.0 }
   }
 }
 
@@ -436,6 +448,11 @@ pub enum AxisRef {
   Z,
   /// A line in the revolve's own sketch (usually construction).
   SketchLine {
+    curve: CurveId,
+  },
+  /// A line in a given sketch, for features outside it (e.g. a plane at an angle).
+  SketchCurve {
+    sketch: FeatureId,
     curve: CurveId,
   },
   /// A straight edge of a body.
@@ -567,6 +584,51 @@ pub struct LoftSection {
   /// A point inside the profile; `None` = the sketch's largest profile.
   #[serde(default)]
   pub profile: Option<[f64; 2]>,
+  /// How the loft meets this section (the first or last).
+  #[serde(default, skip_serializing_if = "LoftEnd::is_free")]
+  pub end: LoftEnd,
+}
+
+/// A loft's end condition at its first or last section.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LoftEnd {
+  /// No condition: the loft leaves the section as the other sections shape it.
+  #[default]
+  Free,
+  /// A point section the loft comes to a sharp tip at (as `Free`).
+  PointSharp,
+  /// A point section the loft arrives at tangent to the point's sketch plane, rounded like a
+  /// dome; `weight` scales how far the flat top reaches (1 = a paraboloid).
+  PointTangent { weight: f64 },
+}
+
+impl LoftEnd {
+  pub fn is_free(&self) -> bool {
+    matches!(self, LoftEnd::Free)
+  }
+}
+
+/// How a sweep's profile is oriented along the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SweepOrientation {
+  /// The profile stays at the same angle to the path as it turns.
+  #[default]
+  Perpendicular,
+  /// The profile keeps its orientation and only moves along the path.
+  Parallel,
+}
+
+/// How a sweep's profile follows a guide rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileScaling {
+  /// The profile scales about the path as the rail moves away from it or closer.
+  #[default]
+  Scale,
+  /// The profile keeps its size and only turns to face the rail.
+  None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -641,6 +703,12 @@ pub enum FeatureKind {
     profiles: Vec<[f64; 2]>,
     axis: AxisRef,
     angle: String,
+    /// Symmetric: `angle` turns each way from the profile (twice `angle` in all).
+    #[serde(default)]
+    symmetric: bool,
+    /// Two sides: the angle turned the other (negative) way, as well as `angle` the positive way.
+    #[serde(default)]
+    angle2: Option<String>,
     #[serde(default)]
     operation: Operation,
   },
@@ -666,6 +734,13 @@ pub enum FeatureKind {
     /// `radius` are the first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sets: Vec<FilletSet>,
+    /// Asymmetric fillet (an elliptical round): the offset along each edge's second face, with
+    /// `radius` the offset along its first (the face whose outward normal sorts first by x, y,
+    /// z; the other way round with `flipped`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    distance2: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flipped: bool,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -676,6 +751,10 @@ pub enum FeatureKind {
     /// Distance-and-angle chamfer.
     #[serde(default)]
     angle: Option<String>,
+    /// Two-distance and distance-and-angle chamfers: swap the faces the distances (and the
+    /// angle) are measured on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flipped: bool,
   },
   /// Press-pull: planar faces pushed out (join) or in (cut) along their normals.
   OffsetFaces {
@@ -725,6 +804,11 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: BodySel,
     plane: PlaneRef,
+    /// Mirror these features instead of bodies (Fusion's "Features" mode): each one's tool solid
+    /// is mirrored and applied again with the feature's own operation, so a mirrored cut cuts.
+    /// Empty = mirror bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    features: Vec<FeatureId>,
     /// Join the mirrored copy to the original (default) or keep it as new bodies.
     #[serde(default = "yes")]
     join: bool,
@@ -742,6 +826,18 @@ pub enum FeatureKind {
     count2: String,
     #[serde(default = "zero")]
     spacing2: String,
+    /// Centre direction 1's instances on the original, as Fusion's Symmetric option: `count`
+    /// instances at offsets `k - (count - 1) / 2` (integer division, so an even count puts the
+    /// extra instance on the positive side).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    symmetric: bool,
+    /// The same for direction 2.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    symmetric2: bool,
+    /// Fusion's Extent distance type: `spacing`/`spacing2` are the distance from the original to
+    /// the farthest instance (on the longer side of a symmetric direction), not between neighbours.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    extent: bool,
     #[serde(default = "yes")]
     join: bool,
   },
@@ -825,6 +921,15 @@ pub enum FeatureKind {
     /// Twist angle from start to end of the path (no rail); empty = none.
     #[serde(default)]
     twist: String,
+    /// Taper angle: the profile grows all round by tan(taper) per unit of path length (negative
+    /// shrinks it); empty = none.
+    #[serde(default)]
+    taper: String,
+    #[serde(default)]
+    orientation: SweepOrientation,
+    /// With a rail: whether the profile scales to keep touching it.
+    #[serde(default)]
+    profile_scaling: ProfileScaling,
   },
   /// Drilled holes at sketch points, into the material (against the sketch normal).
   Hole {
@@ -835,11 +940,14 @@ pub enum FeatureKind {
     #[serde(default)]
     kind: HoleKind,
     diameter: String,
-    /// Depth of the full-diameter part; ignored when `through_all`.
+    /// Depth of the full-diameter part; ignored when `through_all` or `to` is set.
     #[serde(default = "zero")]
     depth: String,
     #[serde(default)]
     through_all: bool,
+    /// 'To' extent: each hole's full-diameter part ends on this plane (the tip goes past it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<PlaneRef>,
     /// Drill point angle (0 = flat bottom).
     #[serde(default = "drill_point")]
     tip_angle: String,
@@ -1055,6 +1163,14 @@ pub enum FeatureKind {
     /// Start from the face's other end.
     #[serde(default)]
     flip: bool,
+    /// ISO metric size (`M10x1.5`, or `M10` for the coarse pitch). The face is resized to the
+    /// class-mean diameter (major outside, minor inside) and its pitch overrides `pitch`. Empty =
+    /// the drawn diameter is the basic size, kept as it is.
+    #[serde(default)]
+    designation: String,
+    /// Tolerance class (`6g` outside, `6H` inside when empty).
+    #[serde(default)]
+    class: String,
   },
   /// A helical coil around an axis normal to a plane, centred at a plane point.
   Coil {
@@ -1431,6 +1547,144 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
+  /// An align (assembly) constraint: makes a moving component's face, axis or point flush,
+  /// concentric or coincident with one on a fixed component (or the world), moving it only as
+  /// far as that takes (see [`assembly::align_transform`]); unlike a joint, the rest of its
+  /// position is kept.
+  AlignConstraint {
+    #[serde(default = "no_component")]
+    moving: ComponentId,
+    #[serde(default = "origin_point")]
+    moving_geometry: JointGeometry,
+    /// `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    #[serde(default = "origin_point")]
+    fixed_geometry: JointGeometry,
+    #[serde(default)]
+    relation: assembly::AlignRelation,
+    /// Gap between flush planes (along the fixed normal) or coincident points (along fixed Z).
+    #[serde(default = "zero")]
+    offset: String,
+    /// Flush: normals point the same way instead of facing. Concentric: reverse the axis.
+    #[serde(default)]
+    flip: bool,
+  },
+  /// Assembly constraint (Center): moves a component the least it can so its plane lands on a
+  /// plane of another component, `offset` apart along the fixed plane's normal. Each side is one
+  /// plane or the midplane between two parallel ones, so centring a part between two faces is a
+  /// pair of faces on each side. Motion along the plane stays where it is.
+  PlaneConstraint {
+    #[serde(default = "no_component")]
+    moving: ComponentId,
+    /// One plane, or two whose midplane is used.
+    #[serde(default)]
+    moving_planes: Vec<PlaneRef>,
+    /// The component it is placed against; `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    #[serde(default)]
+    fixed_planes: Vec<PlaneRef>,
+    #[serde(default = "zero")]
+    offset: String,
+  },
+  /// Bounding Solid: a new body enclosing the bodies (a box, or a cylinder about the frame's
+  /// normal), in a plane's frame (default world XY), grown by the offsets. The bodies stay.
+  BoundingSolid {
+    #[serde(default)]
+    bodies: BodySel,
+    #[serde(default)]
+    shape: bounding::BoundShape,
+    /// The frame the box or cylinder lines up with (its normal is the cylinder's axis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plane: Option<PlaneRef>,
+    /// Grown on every side (the cylinder: radially and at both ends).
+    #[serde(default = "zero")]
+    offset: String,
+    /// Per side instead of `offset`, in the frame: -x, +x, -y, +y, -z, +z. The cylinder takes
+    /// -z, +z for its ends and grows radially by `offset`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sides: Vec<String>,
+  },
+  /// Sketch curves draped onto faces as 3D curves (Fusion's Project To Surface): pushed along a
+  /// direction until they meet the faces, or each point dropped onto the nearest point of the
+  /// faces. A pipe can follow them.
+  ProjectToSurface {
+    sketch: FeatureId,
+    /// The curves to project; empty = every non-construction curve.
+    #[serde(default)]
+    curves: Vec<CurveId>,
+    faces: Vec<FaceRef>,
+    /// The direction to project along; none = to the closest point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    along: Option<AxisRef>,
+  },
+  /// Copies bodies, or re-applies features, along a sketch path (Fusion's Pattern on Path).
+  PathPattern {
+    #[serde(default)]
+    bodies: BodySel,
+    /// Features whose tools are re-applied at each copy; when empty, the bodies are copied.
+    #[serde(default)]
+    features: Vec<FeatureId>,
+    path_sketch: FeatureId,
+    /// The path's curves, chained end to end (default every line and arc of the sketch).
+    #[serde(default)]
+    path_curves: Vec<CurveId>,
+    count: String,
+    /// Arc length between neighbours, or the whole pattern's length when `extent` is set.
+    distance: String,
+    #[serde(default)]
+    extent: bool,
+    /// Where the original sits along the path, as a fraction of its length (0 = its start).
+    #[serde(default = "zero")]
+    start: String,
+    /// Run toward the path's start instead of its end.
+    #[serde(default)]
+    flip: bool,
+    /// Centre the copies on the original (`count` in total), both ways along the path.
+    #[serde(default)]
+    symmetric: bool,
+    #[serde(default)]
+    orientation: pathpattern::PathOrientation,
+    #[serde(default = "yes")]
+    join: bool,
+  },
+  /// Copies of components laid flat on their largest planar face and packed on a rectangular
+  /// envelope (`length` along the plane's X, `width` along its Y, from its origin) for
+  /// manufacturing; the sources stay where they are. See [`arrange`].
+  Arrange {
+    #[serde(default)]
+    items: Vec<arrange::ArrangeItem>,
+    plane: PlaneRef,
+    length: String,
+    width: String,
+    #[serde(default)]
+    solver: arrange::ArrangeSolver,
+    /// Smallest gap between parts.
+    #[serde(default = "zero")]
+    spacing: String,
+    /// Margin kept clear along the envelope's edges.
+    #[serde(default = "zero")]
+    frame: String,
+  },
+  /// Full round fillet: each set's centre face is replaced by one round tangent to it and to
+  /// the faces on both sides (a half-cylinder across a rib with parallel sides).
+  FullRoundFillet {
+    sets: Vec<FullRoundSet>,
+  },
+  /// 3D curves where sketch curves, pushed along their sketch's normal, cross body faces or
+  /// other sketch curves pushed along theirs (Fusion's Intersection Curve). Pipes follow them as
+  /// a path (see `regen/curves3d.rs`).
+  IntersectionCurve {
+    /// The curves pushed along their sketch's normal (no curves: every non-construction curve).
+    curves: PathRef,
+    /// Faces they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    faces: Vec<FaceRef>,
+    /// Other sketches' curves, each pushed along its own sketch's normal, that they cross.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    with: Vec<PathRef>,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1570,6 +1824,14 @@ impl FeatureKind {
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
       FeatureKind::Form { .. } => "Form",
+      FeatureKind::AlignConstraint { .. } => "Align",
+      FeatureKind::PlaneConstraint { .. } => "CenterConstraint",
+      FeatureKind::BoundingSolid { .. } => "BoundingSolid",
+      FeatureKind::ProjectToSurface { .. } => "ProjectToSurface",
+      FeatureKind::PathPattern { .. } => "PathPattern",
+      FeatureKind::Arrange { .. } => "Arrange",
+      FeatureKind::FullRoundFillet { .. } => "Fillet",
+      FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
     }
   }
 
@@ -1591,7 +1853,7 @@ impl FeatureKind {
       _ => vec![],
     };
     let axis_dep = |a: &AxisRef| match a {
-      AxisRef::Construction { feature } => vec![*feature],
+      AxisRef::Construction { feature } | AxisRef::SketchCurve { sketch: feature, .. } => vec![*feature],
       _ => vec![],
     };
     match self {
@@ -1600,8 +1862,8 @@ impl FeatureKind {
       FeatureKind::Extrude { sketch, .. }
       | FeatureKind::Flange { sketch, .. }
       | FeatureKind::ContourFlange { sketch, .. }
-      | FeatureKind::Hole { sketch, .. }
       | FeatureKind::Bend { sketch, .. } => vec![*sketch],
+      FeatureKind::Hole { sketch, to, .. } => std::iter::once(*sketch).chain(to.iter().flat_map(plane_dep)).collect(),
       FeatureKind::Loft { sections, rails, centerline, .. } => {
         sections.iter().map(|s| s.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
       }
@@ -1609,7 +1871,10 @@ impl FeatureKind {
         std::iter::once(*sketch).chain(std::iter::once(*path_sketch)).chain(rail.iter().map(|r| r.sketch)).collect()
       }
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
-      FeatureKind::Primitive { plane, .. } | FeatureKind::Mirror { plane, .. } => plane_dep(plane),
+      FeatureKind::Primitive { plane, .. } => plane_dep(plane),
+      FeatureKind::Mirror { plane, features, .. } => {
+        plane_dep(plane).into_iter().chain(features.iter().copied()).collect()
+      }
       FeatureKind::ConstructionPlane { base, .. } => plane_dep(base),
       FeatureKind::PlaneBy { def } => def.depends_on(),
       FeatureKind::ConstructionAxis { def } => def.depends_on(),
@@ -1621,9 +1886,7 @@ impl FeatureKind {
       FeatureKind::Rib { sketch, .. } | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
       FeatureKind::SurfaceRevolve { sketch, axis, .. } => {
         let mut v = vec![*sketch];
-        if let AxisRef::Construction { feature } = axis {
-          v.push(*feature);
-        }
+        v.extend(axis_dep(axis));
         v
       }
       FeatureKind::Patch { sketch, .. } => sketch.iter().copied().collect(),
@@ -1642,6 +1905,23 @@ impl FeatureKind {
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
       FeatureKind::Form { plane, .. } => plane_dep(plane),
+      FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, .. } => {
+        [moving_geometry, fixed_geometry].into_iter().filter_map(assembly::JointGeometry::origin).collect()
+      }
+      FeatureKind::PlaneConstraint { moving_planes, fixed_planes, .. } => {
+        moving_planes.iter().chain(fixed_planes).flat_map(plane_dep).collect()
+      }
+      FeatureKind::BoundingSolid { plane: Some(plane), .. } => plane_dep(plane),
+      FeatureKind::ProjectToSurface { sketch, along, .. } => {
+        std::iter::once(*sketch).chain(along.iter().flat_map(axis_dep)).collect()
+      }
+      FeatureKind::PathPattern { features, path_sketch, .. } => {
+        std::iter::once(*path_sketch).chain(features.iter().copied()).collect()
+      }
+      FeatureKind::Arrange { plane, .. } => plane_dep(plane),
+      FeatureKind::IntersectionCurve { curves, with, .. } => {
+        std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
+      }
       _ => vec![],
     }
   }
@@ -2043,6 +2323,16 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+      if let FeatureKind::AlignConstraint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
+      if let FeatureKind::PlaneConstraint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
     }
     // its sub-components move up a level
     let up = self.component(id).and_then(|c| c.parent);
@@ -2210,13 +2500,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         }
       }
     }
-    FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, setback, radii, sets, .. } => {
+    FeatureKind::Revolve { angle, angle2, .. } => {
+      f(angle);
+      if let Some(a) = angle2 {
+        f(a);
+      }
+    }
+    FeatureKind::Fillet { radius, radius2, setback, radii, sets, distance2, .. } => {
       f(radius);
       for set in sets {
         f(&mut set.radius);
       }
-      for r in [radius2, setback].into_iter().flatten() {
+      for r in [radius2, setback, distance2].into_iter().flatten() {
         f(r);
       }
       for p in radii {
@@ -2374,9 +2669,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::Unstitch { .. }
     | FeatureKind::ReverseNormal { .. } => {}
     FeatureKind::Loft { .. } | FeatureKind::SplitBody { .. } => {}
-    FeatureKind::Sweep { twist, .. } => {
+    FeatureKind::Sweep { twist, taper, .. } => {
       if !twist.is_empty() {
         f(twist);
+      }
+      if !taper.is_empty() {
+        f(taper);
       }
     }
     FeatureKind::Mirror { .. }
@@ -2417,6 +2715,27 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
     FeatureKind::Form { .. } => {}
+    FeatureKind::AlignConstraint { offset, .. } => f(offset),
+    FeatureKind::PlaneConstraint { offset, .. } => f(offset),
+    FeatureKind::BoundingSolid { offset, sides, .. } => {
+      f(offset);
+      for e in sides {
+        f(e);
+      }
+    }
+    FeatureKind::ProjectToSurface { .. } => {}
+    FeatureKind::PathPattern { count, distance, start, .. } => {
+      f(count);
+      f(distance);
+      f(start);
+    }
+    FeatureKind::Arrange { length, width, spacing, frame, .. } => {
+      for e in [length, width, spacing, frame] {
+        f(e);
+      }
+    }
+    FeatureKind::FullRoundFillet { .. } => {}
+    FeatureKind::IntersectionCurve { .. } => {}
   }
 }
 

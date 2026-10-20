@@ -316,7 +316,7 @@ fn assembly_with_a_revolute_joint() {
     json!({
       "moving": a, "moving_origin": {"edge": {"point": [15, 200, 0]}},
       "fixed": b, "fixed_origin": {"edge": {"point": [55, 30, 10]}},
-      "kind": "revolute",
+      "kind": "revolute", "flip": true,
     }),
   );
   assert!(r["error"].is_null(), "{r}");
@@ -442,6 +442,28 @@ fn sketch_modify_tools_and_project() {
   assert!((total_volume(&s) - 50.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
 }
 
+#[test]
+fn project_body_silhouette() {
+  // a cylinder lying along X projects into a sketch above it as one 20 x 10 rectangle
+  let mut s = Session::default();
+  let yz = json!({"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+  run(&mut s, "sketch.create", json!({"plane": yz}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"distance": 20}));
+  let b = s.model.bodies[0].id.0;
+  let above = json!({"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  run(&mut s, "sketch.create", json!({"plane": above}));
+  let r = run(&mut s, "sketch.project", json!({"body": b, "associative": false}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 4, "{r}");
+  assert_eq!(r["profiles"], 1);
+  run(&mut s, "sketch.finish", json!({}));
+  let before = total_volume(&s);
+  let r = run(&mut s, "extrude", json!({"distance": 3, "operation": "new_body"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - before - 600.0).abs() < 1e-6, "{}", total_volume(&s));
+}
+
 fn temp_dir(name: &str) -> std::path::PathBuf {
   let d = std::env::temp_dir().join(format!("fox-engine-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);
@@ -498,6 +520,15 @@ fn every_format_round_trips() {
   assert_eq!(s.model.bodies.len(), before + 1, "{r}");
   assert!(s.undo());
   assert_eq!(s.model.bodies.len(), before);
+  // a mesh in inches comes in 25.4x larger: volume scales by 25.4^3
+  let v0 = total_volume(&s);
+  run(&mut s, "import", json!({"path": dir.join("plate.stl"), "units": "in"}));
+  let inch = total_volume(&s) - v0;
+  assert_eq!(s.model.bodies.len(), before + 1);
+  assert!((inch / (v * 25.4f64.powi(3)) - 1.0).abs() < 0.01, "{inch} vs {v}");
+  assert!(s.undo());
+  let e = s.execute("import", &json!({"path": dir.join("plate.stl"), "units": "yd"})).unwrap_err();
+  assert!(e.0.contains("units"), "{}", e.0);
   let formats = run(&mut s, "formats", json!({}));
   assert!(formats.as_array().unwrap().iter().any(|f| f["id"] == "f3d" && f["export"] == false));
   let _ = std::fs::remove_dir_all(dir);
@@ -754,6 +785,62 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
     assert!(r["error"].is_null(), "{r}");
     let cut = 8000.0 - total_volume(&s);
     assert!((cut - 2.0 * ok / 2.0 * 20.0).abs() < 1e-6, "{cut}");
+  }
+  // round a top loop, Fusion measures the first distance on the top: 2 in, 5 down cuts
+  // 2 × 5 / 2 × 80 − 4 × 2² × 5 / 3 (the mitred corners); flipped, 5 in and 2 down
+  for (flipped, cut) in [(false, 400.0 - 80.0 / 3.0), (true, 400.0 - 200.0 / 3.0)] {
+    let mut s = Session::default();
+    square(&mut s);
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let edges =
+      json!([{"point": [10, 0, 20]}, {"point": [20, 10, 20]}, {"point": [10, 20, 20]}, {"point": [0, 10, 20]}]);
+    let r = run(&mut s, "chamfer", json!({"edges": edges, "distance": 2, "distance2": 5, "flipped": flipped}));
+    assert!(r["error"].is_null(), "{r}");
+    let got = 8000.0 - total_volume(&s);
+    assert!((got - cut).abs() < 1e-6, "flipped {flipped}: {got} vs {cut}");
+  }
+  // a design from before CHAMFER_FORWARD_FACE keeps main's chamfers: d1 on each edge's first
+  // adjacent face (here the sides), so 5 in and 2 down, as before the change
+  for (edges, dist, cut_new, cut_old) in [
+    // 40 × 30 × 20 box, its top loop, 2 and 5 mm
+    (
+      json!([{"point": [0, 15, 20]}, {"point": [20, 0, 20]}, {"point": [40, 15, 20]}, {"point": [20, 30, 20]}]),
+      json!({"distance": 2, "distance2": 5}),
+      24000.0 - 23326.666666666668,
+      24000.0 - 23366.666666666664,
+    ),
+    // r 15 cylinder's top edge, 3 mm at 30°: main gave 13901.73 mm³
+    (
+      json!([{"point": [0, 15, 20]}]),
+      json!({"distance": 3, "angle": 30}),
+      f64::NAN,
+      15.0 * 15.0 * std::f64::consts::PI * 20.0 - 13901.72880494322,
+    ),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    if edges.as_array().unwrap().len() == 1 {
+      run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 15}));
+    } else {
+      run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let before = total_volume(&s);
+    let mut p = dist.clone();
+    p["edges"] = edges;
+    let r = run(&mut s, "chamfer", p);
+    assert!(r["error"].is_null(), "{r}");
+    assert!(s.design.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE));
+    let new = before - total_volume(&s);
+    if cut_new.is_finite() {
+      assert!((new - cut_new).abs() < 1e-6, "new design: {new} vs {cut_new}");
+    }
+    s.design.behaviours = fox_model::Behaviours::legacy();
+    s.rebuild();
+    let old = before - total_volume(&s);
+    assert!((old - cut_old).abs() < 1e-6, "legacy design: {old} vs {cut_old}");
+    assert!((old - new).abs() > 1.0, "the behaviour changes this chamfer: {old} vs {new}");
   }
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));

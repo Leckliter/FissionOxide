@@ -402,6 +402,23 @@ impl SceneBuilder {
         behind: false,
       });
     }
+    // Project To Surface curves, drawn like sketch geometry on the faces
+    for (id, curves) in &s.model.curves3d {
+      if s.design.feature(*id).is_some_and(|f| f.suppressed || f.visible == Some(false)) {
+        continue;
+      }
+      for line in curves.iter().filter_map(|c| c.edge_lines(0.02).ok()).flatten() {
+        scene.lines.push(Polyline {
+          points: line.points.iter().map(|p| p.as_vec3().to_array()).collect(),
+          color: [200, 140, 40, 255],
+          width: 1.5,
+          id: 0,
+          on_top: true,
+          dashed: false,
+          behind: false,
+        });
+      }
+    }
 
     if !opts.hide_grid {
       grid(&mut scene, s);
@@ -577,9 +594,11 @@ fn sketch_lines(
     for c in &sk.curves {
       let mut legs: Vec<(PointId, PointId)> = Vec::new();
       match &c.kind {
-        CurveKind::Spline { points, start_handle, end_handle } => {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => {
           legs.extend(points.first().copied().zip(*start_handle));
           legs.extend(points.last().copied().zip(*end_handle));
+          legs.extend(points.first().copied().zip(*start_curvature));
+          legs.extend(points.last().copied().zip(*end_curvature));
         }
         CurveKind::Bezier { points } => {
           for k in (0..points.len().saturating_sub(1)).step_by(3) {

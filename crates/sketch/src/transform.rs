@@ -171,17 +171,20 @@ impl Sketch {
         CurveKind::Arc { center, start, end } => {
           CurveKind::Arc { center: pt(self, *center)?, start: pt(self, *start)?, end: pt(self, *end)? }
         }
-        CurveKind::Spline { points, start_handle, end_handle } => CurveKind::Spline {
+        CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => CurveKind::Spline {
           points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()?,
           start_handle: start_handle.map(|p| pt(self, p)).transpose()?,
           end_handle: end_handle.map(|p| pt(self, p)).transpose()?,
+          start_curvature: start_curvature.map(|p| pt(self, p)).transpose()?,
+          end_curvature: end_curvature.map(|p| pt(self, p)).transpose()?,
         },
         CurveKind::Bezier { points } => {
           CurveKind::Bezier { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
         }
-        CurveKind::ControlSpline { points } => {
-          CurveKind::ControlSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
-        }
+        CurveKind::ControlSpline { points, degree } => CurveKind::ControlSpline {
+          points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()?,
+          degree: *degree,
+        },
         CurveKind::Ellipse { center, major, minor } => {
           CurveKind::Ellipse { center: pt(self, *center)?, major: pt(self, *major)?, minor: minor * t.scale }
         }

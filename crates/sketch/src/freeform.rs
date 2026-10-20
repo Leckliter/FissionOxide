@@ -1,4 +1,4 @@
-//! Freeform curves (fit and control-point splines, ellipses, Bézier chains) in the modify tools:
+//! Freeform curves (fit and control-      let frame = end_frame(&kind, at_end, &|p| self.pos(p), &self.behaviours);oint splines, ellipses, Bézier chains) in the modify tools:
 //! Bézier math, intersections between any two curves, Break, and Trim / Extend / Offset of
 //! freeform curves, plus Blend Curve.
 //!
@@ -472,7 +472,7 @@ impl Sketch {
       CurveKind::Line { a, b } => Some((*a, *b)),
       CurveKind::Arc { start, end, .. } => Some((*start, *end)),
       CurveKind::Spline { points, .. }
-      | CurveKind::ControlSpline { points }
+      | CurveKind::ControlSpline { points, .. }
       | CurveKind::Bezier { points }
       | CurveKind::QuinticSpline { points } => Some((*points.first()?, *points.last()?)),
       CurveKind::EllipticalArc { start, end, .. } | CurveKind::Conic { start, end, .. } => Some((*start, *end)),
@@ -1107,7 +1107,11 @@ impl Sketch {
     let ka = self.curve(a).map(|c| c.kind.clone()).ok_or(SketchError::NoCurve(a))?;
     let kb = self.curve(b).map(|c| c.kind.clone()).ok_or(SketchError::NoCurve(b))?;
     let posf = |p: PointId| self.pos(p);
-    let (Some(fa), Some(fb)) = (end_frame(&ka, ea, &posf), end_frame(&kb, eb, &posf)) else { return Err(what()) };
+    let (Some(fa), Some(fb)) =
+      (end_frame(&ka, ea, &posf, &self.behaviours), end_frame(&kb, eb, &posf, &self.behaviours))
+    else {
+      return Err(what());
+    };
     if dist(fa.0, fb.0) < 1e-9 {
       return Err(SketchError::InvalidValue("the ends already meet".into()));
     }
@@ -1131,28 +1135,40 @@ impl Sketch {
   }
 
   /// Gives a fit-point spline a tangent handle at the end where it meets `other` (so tangency and
-  /// curvature constraints can turn the end without dragging the fit points about).
-  pub(crate) fn add_spline_handle(&mut self, spline: CurveId, other: CurveId) {
-    let Some(CurveKind::Spline { points, start_handle, end_handle }) = self.curve(spline).map(|c| c.kind.clone())
-    else {
+  /// curvature constraints can turn the end without dragging the fit points about), and with
+  /// `curvature` a curvature handle there too, which makes that end smooth as Fusion's are.
+  pub(crate) fn add_spline_handle(&mut self, spline: CurveId, other: CurveId, curvature: bool) {
+    let Some(kind) = self.curve(spline).map(|c| c.kind.clone()) else { return };
+    let CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } = kind.clone() else {
       return;
     };
-    let bz = self.beziers(spline);
-    let (Some(first), Some(last), Some(fb), Some(lb)) =
-      (points.first().and_then(|p| self.pos(*p)), points.last().and_then(|p| self.pos(*p)), bz.first(), bz.last())
-    else {
+    let (Some(first), Some(last), Some((fh, lh))) = (
+      points.first().and_then(|p| self.pos(*p)),
+      points.last().and_then(|p| self.pos(*p)),
+      crate::spline_handles(&kind, &|p| self.pos(p), self.behaviours.has(crate::behaviour::QUINTIC_FIT_SPLINE)),
+    ) else {
       return;
     };
     let reach = |p: P| self.distance_to_curve(other, p).unwrap_or(f64::INFINITY);
     let at_end = reach(last) < reach(first);
-    let (lb, fb) = (*lb, *fb);
     let (sh, eh) = if at_end {
-      (start_handle, end_handle.or_else(|| Some(self.add_point(lb[2][0], lb[2][1]))))
+      (start_handle, end_handle.or_else(|| Some(self.add_point(lh[0], lh[1]))))
     } else {
-      (start_handle.or_else(|| Some(self.add_point(fb[1][0], fb[1][1]))), end_handle)
+      (start_handle.or_else(|| Some(self.add_point(fh[0], fh[1]))), end_handle)
     };
+    let (mut sk, mut ek) = (start_curvature, end_curvature);
+    let slot = if at_end { &mut ek } else { &mut sk };
+    if curvature && slot.is_none() {
+      // asking for the end's present curvature, beside the tangent handle
+      let (at, h) = if at_end { (last, lh) } else { (first, fh) };
+      let frame = end_frame(&kind, at_end, &|p| self.pos(p), &self.behaviours);
+      if let Some((_, dir, k)) = frame {
+        let q = crate::smoothend::place_handle(at, dir, k, dist(at, h).max(1e-3));
+        *slot = Some(self.add_point(q[0], q[1]));
+      }
+    }
     if let Some(c) = self.curve_mut(spline) {
-      c.kind = CurveKind::Spline { points, start_handle: sh, end_handle: eh };
+      c.kind = CurveKind::Spline { points, start_handle: sh, end_handle: eh, start_curvature: sk, end_curvature: ek };
     }
   }
 }
@@ -1283,7 +1299,12 @@ fn offset_bz(b: &Bz, d: f64, depth: u32, out: &mut Vec<Bz>) {
 
 /// A curve's end: (position, direction pointing out of the curve, signed curvature when arriving
 /// there heading that way). `at_end` picks the end over the start. None for curves without ends.
-pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) -> Option<P>) -> Option<(P, P, f64)> {
+pub(crate) fn end_frame(
+  kind: &CurveKind,
+  at_end: bool,
+  pos: &dyn Fn(PointId) -> Option<P>,
+  behaviours: &crate::Behaviours,
+) -> Option<(P, P, f64)> {
   match kind {
     CurveKind::Line { a, b } => {
       let (pa, pb) = (pos(*a)?, pos(*b)?);
@@ -1297,12 +1318,21 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
       let ccw = left(unit(sub(p, c))?);
       Some(if at_end { (p, ccw, 1.0 / r) } else { (p, mul(ccw, -1.0), -1.0 / r) })
     }
+    // from the curve itself where curvature handles make spline ends smooth; before that, from
+    // the pieces as below
+    CurveKind::Spline { .. }
+      if behaviours.has(crate::behaviour::SPLINE_CURVATURE_HANDLES)
+        && behaviours.has(crate::behaviour::QUINTIC_FIT_SPLINE)
+        && crate::spline_end_frame(kind, at_end, pos).is_some() =>
+    {
+      crate::spline_end_frame(kind, at_end, pos)
+    }
     CurveKind::Spline { .. }
     | CurveKind::ControlSpline { .. }
     | CurveKind::Bezier { .. }
     | CurveKind::EllipticalArc { .. }
     | CurveKind::Conic { .. } => {
-      let bz = crate::kind_beziers(kind, pos);
+      let bz = crate::kind_beziers(kind, pos, behaviours);
       if at_end {
         let b = *bz.last()?;
         let d1 = bz_d1(&b, 1.0);
@@ -1327,7 +1357,14 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{Dim, PtSpec, find_profiles};
+  use crate::{Behaviours, Dim, PtSpec, find_profiles};
+
+  /// A sketch as saved before the quintic fit-point spline: Catmull-Rom splines.
+  fn legacy() -> Sketch {
+    let mut s = Sketch::new();
+    s.behaviours = Behaviours::legacy();
+    s
+  }
 
   fn spline(s: &mut Sketch, pts: &[P]) -> CurveId {
     let ids = pts.iter().map(|p| s.add_point(p[0], p[1])).collect();
@@ -1360,7 +1397,7 @@ mod tests {
 
   #[test]
   fn break_lines_arcs_circles_and_splines() {
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.0, 0.0)).unwrap();
     s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 5.0)).unwrap();
     // between crossings, the line breaks at the crossing; no crossing on the right → the point
@@ -1394,7 +1431,7 @@ mod tests {
       assert!(deviation(&before, &s.beziers(*p)) < 1.0, "close to the old shape");
     }
     let ids = [[0.0, 60.0], [10.0, 70.0], [20.0, 60.0], [30.0, 65.0]].map(|p| s.add_point(p[0], p[1]));
-    let cs = s.add_curve(CurveKind::ControlSpline { points: ids.to_vec() }).unwrap();
+    let cs = s.add_curve(CurveKind::control_spline(ids.to_vec())).unwrap();
     let before = s.beziers(cs);
     let parts = s.break_curve(cs, [15.0, 65.0], true, 0.0).unwrap();
     assert_eq!(parts.len(), 2);
@@ -1407,7 +1444,7 @@ mod tests {
 
   #[test]
   fn trim_splines_ellipses_and_lines_cut_by_splines() {
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 10.0], [20.0, 0.0], [30.0, 10.0]]);
     let before = s.beziers(sp);
     s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 20.0)).unwrap();
@@ -1455,7 +1492,7 @@ mod tests {
     assert!(dist(b, [22.0, 0.0]) < 1e-6, "{b:?}");
     assert!(s.solve().ok());
     // a spline grows along its end until it meets the line x = 40
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let sp2 = spline(&mut s, &[[0.0, 0.0], [10.0, 2.0], [20.0, 0.0]]);
     s.add_line(PtSpec::At(40.0, -50.0), PtSpec::At(40.0, 50.0)).unwrap();
     let before = s.beziers(sp2);
@@ -1472,6 +1509,47 @@ mod tests {
     s.extend(a, [0.0, 10.0]).unwrap();
     let Some(Geo::Arc { sweep, .. }) = s.geo(a) else { panic!() };
     assert!(sweep > PI && sweep < 1.5 * PI, "{sweep}");
+    assert!(s.solve().ok());
+  }
+
+  #[test]
+  fn break_trim_and_extend_quintic_splines() {
+    // A quintic fit-point spline (a new sketch) is one minimum-energy curve through all its fit
+    // points, so what is left of it after a break, trim or extend refits through the fit points
+    // it keeps and moves a little, where a Catmull-Rom spline's untouched pieces stay exactly put
+    // (the legacy tests above).
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 40.0], [10.0, 50.0], [20.0, 40.0], [30.0, 45.0]]);
+    let before = s.beziers(sp);
+    let parts = s.break_curve(sp, [15.0, 47.0], true, 0.0).unwrap();
+    assert_eq!(parts.len(), 2);
+    for p in &parts {
+      assert!(matches!(s.curve(*p).unwrap().kind, CurveKind::Spline { .. }));
+      let dev = deviation(&before, &s.beziers(*p));
+      assert!(dev < 2.0, "close to the old shape: {dev}");
+    }
+    assert!(s.solve().ok());
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 10.0], [20.0, 0.0], [30.0, 10.0]]);
+    let before = s.beziers(sp);
+    s.add_line(PtSpec::At(10.0, -5.0), PtSpec::At(10.0, 20.0)).unwrap();
+    s.add_line(PtSpec::At(20.0, -5.0), PtSpec::At(20.0, 20.0)).unwrap();
+    let parts = s.trim(sp, [15.0, 5.0]).unwrap();
+    assert_eq!(parts.len(), 2);
+    for p in &parts {
+      let dev = deviation(&before, &s.beziers(*p));
+      assert!(dev < 1.0, "the kept pieces keep close to their shape: {dev}");
+    }
+    assert!(s.solve().ok());
+    let mut s = Sketch::new();
+    let sp = spline(&mut s, &[[0.0, 0.0], [10.0, 2.0], [20.0, 0.0]]);
+    s.add_line(PtSpec::At(40.0, -50.0), PtSpec::At(40.0, 50.0)).unwrap();
+    let before = s.beziers(sp);
+    s.extend(sp, [20.0, 0.0]).unwrap();
+    let after = s.beziers(sp);
+    assert!((after.last().unwrap()[3][0] - 40.0).abs() < 1e-6);
+    let dev = deviation(&after, &before);
+    assert!(dev < 0.1, "the old part keeps close to its shape: {dev}");
     assert!(s.solve().ok());
   }
 
@@ -1536,8 +1614,10 @@ mod tests {
       if g2 {
         // the drawn cubic pieces only approximate the quintic's curvature: take it exactly
         let kind = s.curve(b).unwrap().kind.clone();
-        let (start, end) =
-          (end_frame(&kind, false, &|p| s.pos(p)).unwrap(), end_frame(&kind, true, &|p| s.pos(p)).unwrap());
+        let (start, end) = (
+          end_frame(&kind, false, &|p| s.pos(p), &s.behaviours).unwrap(),
+          end_frame(&kind, true, &|p| s.pos(p), &s.behaviours).unwrap(),
+        );
         assert!(start.2.abs() < 1e-6, "flat like the line");
         assert!((end.2 - 0.2).abs() < 1e-6, "{}", end.2);
       }
@@ -1576,10 +1656,14 @@ mod tests {
     s.add_constraint(ConstraintKind::Radius { curve: a, value: Dim::new(5.0) }).unwrap();
     let r = s.solve();
     assert!(r.ok(), "{r:?}");
-    let bz = s.beziers(sp);
-    let last = bz[bz.len() - 1];
-    let k = bz_curvature(&last, 1.0);
+    // the curve's own curvature there (its cubic pieces match its tangents, not its curvature)
+    let kind = s.curve(sp).unwrap().kind.clone();
+    let CurveKind::Spline { end_handle, end_curvature, .. } = &kind else { panic!() };
+    assert!(end_handle.is_some() && end_curvature.is_some(), "tangent and curvature handles at the joint");
+    let (_, _, k) = end_frame(&kind, true, &|p| s.pos(p), &s.behaviours).unwrap();
     assert!((k.abs() - 0.2).abs() < 1e-6, "{k}");
+    let bz = s.beziers(sp);
+    assert!((bz_curvature(&bz[bz.len() - 1], 1.0).abs() - 0.2).abs() < 0.05, "the pieces come close");
     // a point held on the spline
     let q = s.add_point(12.0, 3.0);
     s.add_constraint(ConstraintKind::PointOnCurve { p: q, curve: sp }).unwrap();
@@ -1596,5 +1680,69 @@ mod tests {
     // a spline with handles survives a save
     let back: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
     assert_eq!(back, s);
+  }
+  #[test]
+  fn legacy_spline_tangent_curvature_and_point_on_curve_constraints() {
+    // a sketch from before curvature handles (and the quintic): main's Catmull-Rom spline, a
+    // tangent handle only, curvature met by the cubic pieces
+    let mut s = legacy();
+    let (l, [_, e]) = s.add_line(PtSpec::At(-10.0, 0.0), PtSpec::At(0.0, 0.0)).unwrap();
+    let p1 = s.add_point(10.0, 10.0);
+    let p2 = s.add_point(20.0, 0.0);
+    let sp = s.add_curve(CurveKind::spline(vec![e, p1, p2])).unwrap();
+    s.add_constraint(ConstraintKind::Tangent { a: l, b: sp }).unwrap();
+    let CurveKind::Spline { start_handle, end_handle, .. } = s.curve(sp).unwrap().kind.clone() else { panic!() };
+    assert!(start_handle.is_some() && end_handle.is_none(), "a handle at the joint end");
+    s.add_constraint(ConstraintKind::Horizontal { line: l }).unwrap();
+    assert!(s.solve().ok());
+    let bz = s.beziers(sp);
+    assert!(cross(unit(bz_d1(&bz[0], 0.0)).unwrap(), [1.0, 0.0]).abs() < 1e-7);
+    assert!(dist(s.pos(p1).unwrap(), [10.0, 10.0]) < 1.0, "the handle turns, the fit points hardly move");
+    // curvature continuity with an arc at the other end
+    let a = s.add_arc_center(PtSpec::At(25.0, 0.0), PtSpec::Point(p2), [30.0, 0.0]).unwrap();
+    s.add_constraint(ConstraintKind::Curvature { a: sp, b: a }).unwrap();
+    let CurveKind::Spline { start_curvature, end_curvature, .. } = s.curve(sp).unwrap().kind.clone() else { panic!() };
+    assert!(start_curvature.is_none() && end_curvature.is_none(), "no curvature handles in an old sketch");
+    s.add_constraint(ConstraintKind::Radius { curve: a, value: Dim::new(5.0) }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    let bz = s.beziers(sp);
+    let last = bz[bz.len() - 1];
+    let k = bz_curvature(&last, 1.0);
+    assert!((k.abs() - 0.2).abs() < 1e-6, "{k}");
+    // a point held on the spline
+    let q = s.add_point(12.0, 3.0);
+    s.add_constraint(ConstraintKind::PointOnCurve { p: q, curve: sp }).unwrap();
+    assert!(s.solve().ok());
+    assert!(s.distance_to_curve(sp, s.pos(q).unwrap()).unwrap() < 1e-5);
+    // a spline with handles survives a save
+    let back: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back, s);
+  }
+
+  #[test]
+  fn curvature_handles_need_their_behaviour() {
+    // a quintic sketch saved before curvature handles: a curvature constraint adds only the
+    // tangent handle, as it did then
+    let mut s = Sketch::new();
+    s.behaviours.remove(crate::behaviour::SPLINE_CURVATURE_HANDLES);
+    let p0 = s.add_point(0.0, 0.0);
+    let p1 = s.add_point(10.0, 10.0);
+    let p2 = s.add_point(20.0, 0.0);
+    let sp = s.add_curve(CurveKind::spline(vec![p0, p1, p2])).unwrap();
+    let a = s.add_arc_center(PtSpec::At(25.0, 0.0), PtSpec::Point(p2), [30.0, 0.0]).unwrap();
+    s.add_constraint(ConstraintKind::Curvature { a: sp, b: a }).unwrap();
+    let CurveKind::Spline { end_handle, end_curvature, .. } = s.curve(sp).unwrap().kind.clone() else { panic!() };
+    assert!(end_handle.is_some() && end_curvature.is_none());
+    // a new sketch gets both
+    let mut s = Sketch::new();
+    let p0 = s.add_point(0.0, 0.0);
+    let p1 = s.add_point(10.0, 10.0);
+    let p2 = s.add_point(20.0, 0.0);
+    let sp = s.add_curve(CurveKind::spline(vec![p0, p1, p2])).unwrap();
+    let a = s.add_arc_center(PtSpec::At(25.0, 0.0), PtSpec::Point(p2), [30.0, 0.0]).unwrap();
+    s.add_constraint(ConstraintKind::Curvature { a: sp, b: a }).unwrap();
+    let CurveKind::Spline { end_handle, end_curvature, .. } = s.curve(sp).unwrap().kind.clone() else { panic!() };
+    assert!(end_handle.is_some() && end_curvature.is_some());
   }
 }

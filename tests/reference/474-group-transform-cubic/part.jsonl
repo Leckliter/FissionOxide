@@ -1,7 +1,7 @@
 # 474-group-transform-cubic: added by the parity loop from a Fusion probe
 # group-transform-cubic: px SVG (width 160 height 100): a group translate(20,10) holding a closed path with a cubic Bezier top edge; imported on XY at the origin, scale 1; extruded 4 mm.
-# hand-written; reads part.svg from the case folder (absolute path)
+# hand-written; reads part.svg from the case folder (path relative to the repository root)
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.insert", "from": {"path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/sketchimportsvg/group-transform-cubic/part.svg"}}
+{"cmd": "sketch.insert", "from": {"path": "tests/reference/474-group-transform-cubic/part.svg"}}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 4.0, "operation": "new_body"}
