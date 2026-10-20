@@ -3,7 +3,7 @@
 
 use fox_kernel::glam::{DMat3, DQuat, DVec3};
 use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
-use fox_sketch::{CurveKind, Loop, Profile, Seg};
+use fox_sketch::{CurveId, CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
@@ -547,21 +547,25 @@ impl Ctx<'_> {
     Ok(pts)
   }
 
-  /// The point and unit tangent at fraction `t` of an edge's length.
+  /// The point and unit tangent at fraction `t` of an edge's length, from its start, on the
+  /// exact curve.
   fn along(&mut self, e: &mut EdgeRef, t: &str) -> Result<(DVec3, DVec3), String> {
     let t = self.factor(t)?.clamp(0.0, 1.0);
-    let pts = self.edge_points(e)?;
-    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).length()).sum();
-    let mut left = t * total;
-    for w in pts.windows(2) {
-      let l = (w[1] - w[0]).length();
-      if left <= l || std::ptr::eq(w, pts.windows(2).last().unwrap_or(w)) {
-        let dir = (w[1] - w[0]).try_normalize().ok_or("the edge has no length")?;
-        return Ok((w[0] + dir * left.min(l), dir));
-      }
-      left -= l;
-    }
-    Err("the edge has no length".into())
+    let (bi, info) = self.edge_info(e)?;
+    let edge = self.state.bodies[bi].shape.edge_shape(info.id).map_err(ke)?;
+    edge.along_curve(t, Some(info.start)).map_err(ke)
+  }
+
+  /// The point and unit tangent at fraction `t` of a sketch curve's length, from its start
+  /// point, in world coordinates.
+  fn along_sketch(&mut self, sketch: FeatureId, curve: CurveId, t: &str) -> Result<(DVec3, DVec3), String> {
+    let t = self.factor(t)?.clamp(0.0, 1.0);
+    let sk = self.state.sketches.get(&sketch).ok_or("its sketch failed")?;
+    let segs = sk.sketch.curve_segs(curve);
+    let first = segs.first().ok_or("the sketch curve no longer exists")?;
+    let start = sk.plane.to_world(first.start());
+    let wire = Shape::path(&sk.plane, &segs).map_err(ke)?;
+    wire.along_curve(t, Some(start)).map_err(ke)
   }
 
   fn point_of(&mut self, p: &mut PointRef) -> Result<DVec3, String> {
@@ -719,6 +723,10 @@ impl Ctx<'_> {
         let (p, d) = self.along(edge, t)?;
         Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
       }
+      PlaneDef::AlongSketch { sketch, curve, t } => {
+        let (p, d) = self.along_sketch(*sketch, *curve, t)?;
+        Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
+      }
     }
   }
 
@@ -805,6 +813,7 @@ impl Ctx<'_> {
         Err("the edge doesn't cross the plane".into())
       }
       PointDef::AlongPath { edge, t } => Ok(self.along(edge, t)?.0),
+      PointDef::AlongSketch { sketch, curve, t } => Ok(self.along_sketch(*sketch, *curve, t)?.0),
     }
   }
 }

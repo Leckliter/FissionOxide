@@ -364,6 +364,16 @@ fn pref(s: &Session, p: &Value, k: &str) -> Result<PointRef, CmdError> {
   point_ref(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (a point)")))?)
 }
 
+/// A sketch curve given as the path, `edge: {sketch, curve}` (else a body edge, so None).
+fn sketch_path(s: &Session, p: &Value) -> Result<Option<(FeatureId, CurveId)>, CmdError> {
+  let Some(e) = p.get("edge").filter(|e| e.get("sketch").is_some()) else { return Ok(None) };
+  let (sketch, curve) = (FeatureId(req_u32(e, "sketch")?), CurveId(req_u32(e, "curve")?));
+  if s.design.sketch(sketch)?.curve(curve).is_none() {
+    return Err(CmdError::new(format!("the sketch has no curve {}", curve.0)));
+  }
+  Ok(Some((sketch, curve)))
+}
+
 fn t_of(p: &Value) -> String {
   opt_expr(p, "t").unwrap_or_else(|| "0.5".into())
 }
@@ -382,7 +392,10 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
       face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)?,
       near: req_vec3(p, "near")?,
     },
-    "along_path" => PlaneDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "along_path" => match sketch_path(s, p)? {
+      Some((sketch, curve)) => PlaneDef::AlongSketch { sketch, curve, t: t_of(p) },
+      None => PlaneDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    },
     o => {
       return Err(CmdError::new(format!(
         "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path; plane.offset for offsets)"
@@ -416,7 +429,10 @@ fn point(s: &mut Session, p: &Value) -> CmdResult {
     }
     "center" => PointDef::Center { face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)? },
     "edge_plane" => PointDef::EdgePlane { edge: edge(s, p, "edge")?, plane: plane_of(s, p, "plane")? },
-    "along_path" => PointDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "along_path" => match sketch_path(s, p)? {
+      Some((sketch, curve)) => PointDef::AlongSketch { sketch, curve, t: t_of(p) },
+      None => PointDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    },
     o => {
       return Err(CmdError::new(format!(
         "unknown point method '{o}' (vertex, two_edges, three_planes, center, edge_plane, along_path)"

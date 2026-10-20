@@ -1,6 +1,7 @@
 //! Construction geometry beyond offset planes: planes, axes and points defined from the model,
 //! as in Fusion's CONSTRUCT menu. They follow the faces and edges they were built on.
 
+use fox_sketch::CurveId;
 use serde::{Deserialize, Serialize};
 
 use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, PlaneRef};
@@ -42,6 +43,13 @@ pub enum PlaneDef {
     #[serde(default = "half")]
     t: String,
   },
+  /// Perpendicular to a sketch curve at a fraction `t` of its length, from its start point.
+  AlongSketch {
+    sketch: FeatureId,
+    curve: CurveId,
+    #[serde(default = "half")]
+    t: String,
+  },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,6 +83,13 @@ pub enum PointDef {
   /// At a fraction `t` of an edge's length.
   AlongPath {
     edge: EdgeRef,
+    #[serde(default = "half")]
+    t: String,
+  },
+  /// At a fraction `t` of a sketch curve's length, from its start point.
+  AlongSketch {
+    sketch: FeatureId,
+    curve: CurveId,
     #[serde(default = "half")]
     t: String,
   },
@@ -138,6 +153,7 @@ impl PlaneDef {
       PlaneDef::Angle { axis, base, .. } => axis_dep(axis).into_iter().chain(plane_dep(base)).collect(),
       PlaneDef::Midplane { a, b } => plane_dep(a).into_iter().chain(plane_dep(b)).collect(),
       PlaneDef::ThreePoints { a, b, c } => [a, b, c].iter().filter_map(|p| p.feature()).collect(),
+      PlaneDef::AlongSketch { sketch, .. } => vec![*sketch],
       _ => vec![],
     }
   }
@@ -145,7 +161,7 @@ impl PlaneDef {
   pub(crate) fn exprs(&mut self) -> Vec<&mut String> {
     match self {
       PlaneDef::Angle { angle, .. } => vec![angle],
-      PlaneDef::AlongPath { t, .. } => vec![t],
+      PlaneDef::AlongPath { t, .. } | PlaneDef::AlongSketch { t, .. } => vec![t],
       _ => vec![],
     }
   }
@@ -167,13 +183,14 @@ impl PointDef {
       PointDef::Ref { point } => point.feature().into_iter().collect(),
       PointDef::ThreePlanes { a, b, c } => [a, b, c].iter().filter_map(|p| plane_dep(p)).collect(),
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
+      PointDef::AlongSketch { sketch, .. } => vec![*sketch],
       _ => vec![],
     }
   }
 
   pub(crate) fn exprs(&mut self) -> Vec<&mut String> {
     match self {
-      PointDef::AlongPath { t, .. } => vec![t],
+      PointDef::AlongPath { t, .. } | PointDef::AlongSketch { t, .. } => vec![t],
       _ => vec![],
     }
   }

@@ -617,6 +617,21 @@ impl Shape {
     Shape::wrap(sys::edge_at_index(self.get()?, edge)?)
   }
 
+  /// The point and unit tangent at fraction `t` (0 – 1) of this curve's arc length (its first
+  /// wire, else its first edge), on the exact curve. It is measured from the end nearer `from`
+  /// (else the curve's own start) and the tangent points away from that end.
+  pub fn along_curve(&self, t: f64, from: Option<DVec3>) -> Result<(DVec3, DVec3)> {
+    if !t.is_finite() {
+      return Err(KernelError::Input("the position along the curve is not finite".into()));
+    }
+    let from = from.map(|p| p.to_array().to_vec()).unwrap_or_default();
+    let v = sys::curve_along(self.get()?, t, &from)?;
+    match v.as_slice() {
+      [px, py, pz, tx, ty, tz] => Ok((DVec3::new(*px, *py, *pz), DVec3::new(*tx, *ty, *tz))),
+      _ => Err(KernelError::Kernel("no point along the curve".into())),
+    }
+  }
+
   /// Minimum distance to another shape and the closest points on each.
   pub fn distance_to(&self, other: &Shape) -> Result<(f64, DVec3, DVec3)> {
     let v = sys::min_distance(self.get()?, other.get()?)?;
