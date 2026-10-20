@@ -606,16 +606,17 @@ impl Ctx<'_> {
           None => self.edge_op(id, edges, |s, ids| round(s, s.fillet(ids, r)?, ids)),
         }
       }
-      FeatureKind::Chamfer { edges, distance, distance2, angle } => {
+      FeatureKind::Chamfer { edges, distance, distance2, angle, flipped } => {
+        let flip = *flipped;
         let d = self.len(distance)?;
         match (distance2, angle) {
           (_, Some(a)) => {
             let a = self.angle(a)?;
-            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, a, true))
+            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, a, true, flip))
           }
           (Some(d2), None) => {
             let d2 = self.len(d2)?;
-            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, d2, false))
+            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, d2, false, flip))
           }
           (None, None) => self.edge_op(id, edges, |s, ids| s.chamfer(ids, d)),
         }

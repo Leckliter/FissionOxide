@@ -712,6 +712,19 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
     let cut = 8000.0 - total_volume(&s);
     assert!((cut - 2.0 * ok / 2.0 * 20.0).abs() < 1e-6, "{cut}");
   }
+  // round a top loop, Fusion measures the first distance on the top: 2 in, 5 down cuts
+  // 2 × 5 / 2 × 80 − 4 × 2² × 5 / 3 (the mitred corners); flipped, 5 in and 2 down
+  for (flipped, cut) in [(false, 400.0 - 80.0 / 3.0), (true, 400.0 - 200.0 / 3.0)] {
+    let mut s = Session::default();
+    square(&mut s);
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let edges =
+      json!([{"point": [10, 0, 20]}, {"point": [20, 10, 20]}, {"point": [10, 20, 20]}, {"point": [0, 10, 20]}]);
+    let r = run(&mut s, "chamfer", json!({"edges": edges, "distance": 2, "distance2": 5, "flipped": flipped}));
+    assert!(r["error"].is_null(), "{r}");
+    let got = 8000.0 - total_volume(&s);
+    assert!((got - cut).abs() < 1e-6, "flipped {flipped}: {got} vs {cut}");
+  }
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
   let r = run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 1, "radius2": 4}));

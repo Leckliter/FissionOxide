@@ -122,7 +122,7 @@ cmds! {
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
-  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
+  "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle (as in Fusion, distance and the angle are measured on an extrusion's cap; flipped swaps the faces); faces chamfer all their edges; tangent_chain adds the edges that continue them smoothly", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], distance, distance2? | angle?, flipped?: bool, tangent_chain?: bool}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
   "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}); walls meet in sharp corners unless corners is round", "{faces: [{body, face} | {point}], thickness, corners?: \"sharp\"|\"round\"}";
@@ -746,7 +746,16 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       )
     }
     "chamfer" => {
-      let edges = edge_refs(s, p)?;
+      let chain = p.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false);
+      let edges = if chain || p.get("faces").is_some() {
+        let edges = crate::fillet::selection_edges(s, p, chain, &mut Vec::new())?;
+        if edges.is_empty() {
+          return Err(CmdError::new("no edges given"));
+        }
+        edges
+      } else {
+        edge_refs(s, p)?
+      };
       add_feature(
         s,
         FeatureKind::Chamfer {
@@ -754,6 +763,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           distance: req_expr(p, "distance")?,
           distance2: opt_expr(p, "distance2"),
           angle: opt_expr(p, "angle"),
+          flipped: p.get("flipped").and_then(Value::as_bool).unwrap_or(false),
         },
       )
     }

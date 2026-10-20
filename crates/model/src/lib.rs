@@ -571,6 +571,10 @@ pub enum FeatureKind {
     /// Distance-and-angle chamfer.
     #[serde(default)]
     angle: Option<String>,
+    /// Two-distance and distance-and-angle chamfers: swap the faces the distances (and the
+    /// angle) are measured on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flipped: bool,
   },
   /// Press-pull: planar faces pushed out (join) or in (cut) along their normals.
   OffsetFaces {

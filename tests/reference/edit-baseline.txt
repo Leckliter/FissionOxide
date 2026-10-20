@@ -58,3 +58,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+485-two-distance-box-top-loop
+486-two-distance-cylinder-top
+487-distance-angle-cylinder-top
+488-tangent-chain-stadium-top
