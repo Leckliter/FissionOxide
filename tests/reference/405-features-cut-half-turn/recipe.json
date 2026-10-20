@@ -1,0 +1,178 @@
+{
+ "id": "features-cut-half-turn",
+ "name": "features-cut-half-turn",
+ "description": "Disc r40 h8; d8 hole at (30,0) cut through; the cut feature circular-patterned 5x over 180 deg about Z (holes at 0/45/90/135/180 deg).",
+ "exercises": [
+  "extrude",
+  "extrude_cut",
+  "circular_pattern features"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Disc_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c_disc",
+     "center": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "radius": 40
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Disc",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Disc_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c_disc"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Disc"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Hole_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c_hole",
+     "center": {
+      "at": [
+       30,
+       0
+      ]
+     },
+     "radius": 4
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Hole1",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Hole_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c_hole"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "through_all",
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Disc"
+   ]
+  },
+  {
+   "op": "circular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "features",
+   "features": [
+    "Hole1"
+   ],
+   "axis": {
+    "ref": "world Z axis",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   },
+   "count": 5,
+   "total_angle": 180,
+   "symmetric": false
+  }
+ ]
+}

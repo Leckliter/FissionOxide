@@ -1,0 +1,13 @@
+# 421-to-curved-face-join: added by the parity loop from a Fusion probe
+# to-curved-face-join: Cylinder r=10, axis along +Y at z=30 (circle on XZ extruded 20 mm, y 0..20); a 10x10 square on XY (x -5..5, y 5..15) extruded up to the cylinder's curved face and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, -30], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-5, 5], [5, 5]]}
+{"cmd": "sketch.line", "points": [[5, 5], [5, 15]]}
+{"cmd": "sketch.line", "points": [[5, 15], [-5, 15]]}
+{"cmd": "sketch.line", "points": [[-5, 15], [-5, 5]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "to_face", "to": {"point": [0, 10, 20]}, "operation": "join"}

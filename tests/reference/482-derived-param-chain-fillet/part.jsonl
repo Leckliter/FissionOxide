@@ -1,0 +1,13 @@
+# 482-derived-param-chain-fillet: added by the parity loop from a Fusion probe
+# derived-param-chain-fillet: 40x30 box extruded wall*5, top 4 edges filleted round_r where round_r = wall*2 (a parameter defined from another). Built with wall=3 mm (h 15, r 6), then Change Parameters sets wall=2 mm: h 10, r 4.
+{"cmd": "param.add", "name": "wall", "expr": "3 mm"}
+{"cmd": "param.add", "name": "round_r", "expr": "wall * 2"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": "wall * 5", "operation": "new_body"}
+{"cmd": "fillet", "edges": [{"point": [0.0, 15.0, 15.0]}, {"point": [20.0, 0.0, 15.0]}, {"point": [40.0, 15.0, 15.0]}, {"point": [20.0, 30.0, 15.0]}], "radius": "round_r"}
+{"cmd": "param.set", "name": "wall", "expr": "2 mm"}

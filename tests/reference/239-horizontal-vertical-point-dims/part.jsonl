@@ -1,0 +1,14 @@
+# 239-horizontal-vertical-point-dims: added by the parity loop from a Fusion probe
+# horizontal-vertical-point-dims: Triangle drawn roughly: base on origin, horizontal; aligned length 40 on the base, horizontal 15 and vertical 25 dimensions from the origin corner to the apex; extruded 10.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0.6, -0.5], [38, 2]]}
+{"cmd": "sketch.line", "points": [[38, 2], [18, 22]]}
+{"cmd": "sketch.line", "points": [[18, 22], [0.6, -0.5]]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [1, 0]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [1, 2], "value": 40}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [1, 4], "value": 15}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 4], "value": 25}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

@@ -1,0 +1,92 @@
+{
+ "id": "cylinder-xz-negative-height",
+ "name": "Cylinder primitive on XZ (sketch y = -Z, normal +Y)",
+ "description": "Cylinder primitive on XZ (sketch y = -Z, normal +Y): centre (10,5) in sketch coords (world (10,0,-5)), radius 8, height -20 (extends along -Y).",
+ "exercises": [
+  "cylinder"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S1",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       10,
+       5
+      ]
+     },
+     "radius": 8,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cyl",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "negative"
+   },
+   "result_bodies": [
+    "Cyl"
+   ]
+  }
+ ]
+}

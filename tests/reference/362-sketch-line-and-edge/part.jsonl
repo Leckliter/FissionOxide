@@ -1,0 +1,14 @@
+# 362-sketch-line-and-edge: added by the parity loop from a Fusion probe
+# sketch-line-and-edge: 40x30x20 box; a second XY sketch with one line (10,0)-(40,30); plane through that sketch line and the vertical edge at (40,30); box split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [40, 30]]}
+{"cmd": "sketch.finish"}
+{"cmd": "plane", "method": "two_edges", "a": {"sketch": 3, "curve": 0}, "b": {"point": [40, 30, 10]}}
+{"cmd": "split", "plane": {"feature": 4}, "bodies": [2000]}

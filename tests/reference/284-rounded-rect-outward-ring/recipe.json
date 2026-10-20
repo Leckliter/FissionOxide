@@ -1,0 +1,223 @@
+{
+ "id": "rounded-rect-outward-ring",
+ "name": "rounded-rect-outward-ring",
+ "description": "40x30 rectangle with r5 sketch fillets on all corners; Offset of the whole chain 3 outward; the ring between them extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_offset",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it.",
+  "sketch_offset": "positive distance = outward for a closed chain, left of travel (first curve to last) for an open one"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "a",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "a.end"
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "c",
+     "start": {
+      "at": [
+       40,
+       30
+      ],
+      "ref": "b.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "d",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "c.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "a.start"
+     }
+    },
+    {
+     "type": "fillet",
+     "id": "f1",
+     "curves": [
+      "a",
+      "b"
+     ],
+     "radius": 5
+    },
+    {
+     "type": "fillet",
+     "id": "f2",
+     "curves": [
+      "b",
+      "c"
+     ],
+     "radius": 5
+    },
+    {
+     "type": "fillet",
+     "id": "f3",
+     "curves": [
+      "c",
+      "d"
+     ],
+     "radius": 5
+    },
+    {
+     "type": "fillet",
+     "id": "f4",
+     "curves": [
+      "d",
+      "a"
+     ],
+     "radius": 5
+    },
+    {
+     "type": "offset",
+     "id": "o",
+     "curves": [
+      "a",
+      "f1",
+      "b",
+      "f2",
+      "c",
+      "f3",
+      "d",
+      "f4"
+     ],
+     "distance": 3
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "o.0",
+        "o.1",
+        "o.2",
+        "o.3",
+        "o.4",
+        "o.5",
+        "o.6",
+        "o.7"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "a",
+        "f1",
+        "b",
+        "f2",
+        "c",
+        "f3",
+        "d",
+        "f4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

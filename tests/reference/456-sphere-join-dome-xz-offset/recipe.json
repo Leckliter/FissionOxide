@@ -1,0 +1,243 @@
+{
+ "id": "sphere-join-dome-xz-offset",
+ "name": "Sphere primitive: sphere-join-dome-xz-offset",
+ "description": "30x30x10 plate X/Y 0..30, Z 0..10; sphere primitive r=10 on a plane at Y=15 (normal +Y, x=+X, y=-Z) at (15,-10) = world (15,15,10), join: dome on the plate (lower half buried).",
+ "exercises": [
+  "sphere"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       30,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Base",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Box"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Sphere1_sketch",
+   "plane": {
+    "ref": "offset XZ",
+    "origin": [
+     0,
+     15,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "d1",
+     "start": {
+      "at": [
+       25,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       -10
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "ref": "d1.end",
+      "at": [
+       5,
+       -10
+      ]
+     },
+     "mid": {
+      "at": [
+       15,
+       0
+      ]
+     },
+     "end": {
+      "ref": "d1.start",
+      "at": [
+       25,
+       -10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "revolve",
+   "name": "Sphere1",
+   "operation": "join",
+   "profile": {
+    "sketch": "Sphere1_sketch",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "d1",
+       "a1"
+      ]
+     }
+    ]
+   },
+   "axis": {
+    "sketch": "Sphere1_sketch",
+    "curve": "d1"
+   },
+   "angle": 360
+  }
+ ]
+}

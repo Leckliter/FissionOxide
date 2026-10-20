@@ -1,0 +1,11 @@
+# 370-arc-edge-proportional-mirror: added by the parity loop from a Fusion probe
+# Quarter disc R20 extruded 5; construction point along the bottom arc at t=0.25 (22.5 or 67.5 deg); plane through it and the z axis edge; body mirrored about the plane and joined (135 deg sector).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.arc", "center": [0, 0], "start": [20, 0], "end": [0, 20]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "point", "method": "along_path", "edge": {"point": [14.142136, 14.142136, 0]}, "t": 0.25}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [0, 0, 0]}, "c": {"at": [0, 0, 5]}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}

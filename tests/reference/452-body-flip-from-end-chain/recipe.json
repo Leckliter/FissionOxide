@@ -1,0 +1,229 @@
+{
+ "id": "body-flip-from-end-chain",
+ "name": "body-flip-from-end-chain",
+ "description": "Cube 6x6x6 centred on (60,40); body patterned along the chained path (0,0)->(60,0)->(60,40) starting at its end (start point 1), flipped to run back toward the start, 4 instances 25 mm apart (turns the corner); separate bodies.",
+ "exercises": [
+  "path_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Block_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       57,
+       37
+      ]
+     },
+     "end": {
+      "at": [
+       63,
+       37
+      ]
+     },
+     "id": "b1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b1.end",
+      "at": [
+       63,
+       37
+      ]
+     },
+     "end": {
+      "at": [
+       63,
+       43
+      ]
+     },
+     "id": "b2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b2.end",
+      "at": [
+       63,
+       43
+      ]
+     },
+     "end": {
+      "at": [
+       57,
+       43
+      ]
+     },
+     "id": "b3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "b3.end",
+      "at": [
+       57,
+       43
+      ]
+     },
+     "end": {
+      "ref": "b1.start",
+      "at": [
+       57,
+       37
+      ]
+     },
+     "id": "b4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Block",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Block_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b1",
+        "b2",
+        "b3",
+        "b4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Block"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "PathSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       0
+      ]
+     },
+     "id": "p1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "p1.end",
+      "at": [
+       60,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       40
+      ]
+     },
+     "id": "p2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "path_pattern",
+   "name": "PathPattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Block"
+   ],
+   "path": {
+    "sketch": "PathSketch",
+    "curves": [
+     "p1",
+     "p2"
+    ]
+   },
+   "count": 4,
+   "spacing": 25,
+   "start_point": 1.0,
+   "flip": true,
+   "orientation": "identical"
+  }
+ ]
+}

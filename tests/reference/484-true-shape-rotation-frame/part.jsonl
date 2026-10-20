@@ -1,0 +1,22 @@
+# 484-true-shape-rotation-frame: added by the parity loop from a Fusion probe
+# arrange: Fox has no Arrange command, so this builds only the two source L-plates where they
+# start (x 300..350, y 0..40 and y 100..140, 6 mm thick); Fusion's result packs them into the
+# 150x120 envelope inside a 5 mm frame.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[300, 0], [350, 0]]}
+{"cmd": "sketch.line", "points": [[350, 0], [350, 15]]}
+{"cmd": "sketch.line", "points": [[350, 15], [320, 15]]}
+{"cmd": "sketch.line", "points": [[320, 15], [320, 40]]}
+{"cmd": "sketch.line", "points": [[320, 40], [300, 40]]}
+{"cmd": "sketch.line", "points": [[300, 40], [300, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[300, 100], [350, 100]]}
+{"cmd": "sketch.line", "points": [[350, 100], [350, 115]]}
+{"cmd": "sketch.line", "points": [[350, 115], [320, 115]]}
+{"cmd": "sketch.line", "points": [[320, 115], [320, 140]]}
+{"cmd": "sketch.line", "points": [[320, 140], [300, 140]]}
+{"cmd": "sketch.line", "points": [[300, 140], [300, 100]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 6, "operation": "new_body"}

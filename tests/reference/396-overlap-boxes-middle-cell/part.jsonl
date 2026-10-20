@@ -1,0 +1,11 @@
+# 396-overlap-boxes-middle-cell: added by the parity loop from a Fusion probe
+# overlap-boxes-middle-cell: two 20 mm cubes overlapping 10 mm in X; boundary fill keeps the middle cell as a new body, tools removed.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [10, 0], "corner2": [30, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 20, "operation": "new_body"}
+{"cmd": "boundary_fill", "tools": [2000, 4000], "cells": [[15, 10, 10]], "operation": "new_body", "remove_tools": true}

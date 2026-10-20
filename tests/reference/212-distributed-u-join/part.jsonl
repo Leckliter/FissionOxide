@@ -1,0 +1,13 @@
+# 212-distributed-u-join: added by the parity loop from a Fusion probe
+# distributed-u-join: Fox has no isoparametric-curve command; the 3 distributed U curves (y=5,10,15) are drawn by hand.
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.line", "points": [[0, 5], [40, 5]]}
+{"cmd": "sketch.line", "points": [[0, 10], [40, 10]]}
+{"cmd": "sketch.line", "points": [[0, 15], [40, 15]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[20, 2.5], [20, 12.5]], "distance": 5, "operation": "join"}

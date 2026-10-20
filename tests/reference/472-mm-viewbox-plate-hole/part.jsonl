@@ -1,0 +1,7 @@
+# 472-mm-viewbox-plate-hole: added by the parity loop from a Fusion probe
+# mm-viewbox-plate-hole: SVG sized 40mm x 30mm with viewBox 0 0 40 30: rect 40x30 user units and r5 circle at (10,10); imported on XY at the origin, scale 1; plate-with-hole region extruded 5 mm.
+# hand-written; reads part.svg from the case folder (absolute path)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.insert", "from": {"path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/sketchimportsvg/mm-viewbox-plate-hole/part.svg"}}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[30, 5]], "distance": 5.0, "operation": "new_body"}

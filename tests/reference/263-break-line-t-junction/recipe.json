@@ -1,0 +1,183 @@
+{
+ "id": "break-line-t-junction",
+ "name": "break-line-t-junction",
+ "description": "40x20 rectangle with a vertical line x=30 whose ends touch the top and bottom edges; Break the bottom edge at (35,0), splitting it at the touch point; delete the 30..40 piece; extrude the closed 30x20 region 10 mm.",
+ "exercises": [
+  "sketch",
+  "break",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "ref": "b.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "ref": "r.end",
+      "at": [
+       40,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "ref": "t.end",
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "ref": "b.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "v",
+     "start": {
+      "at": [
+       30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       20
+      ]
+     }
+    },
+    {
+     "type": "break",
+     "curve": "b",
+     "at": {
+      "at": [
+       35,
+       0
+      ]
+     },
+     "pieces": {
+      "bl": [
+       15,
+       0
+      ],
+      "br": [
+       35,
+       0
+      ]
+     },
+     "delete": [
+      "br"
+     ]
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "bl",
+        "v",
+        "t",
+        "l"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

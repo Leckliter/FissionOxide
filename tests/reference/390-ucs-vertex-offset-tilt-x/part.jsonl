@@ -1,0 +1,20 @@
+# 390-ucs-vertex-offset-tilt-x: added by the parity loop from a Fusion probe
+# User Coordinate System: 40x30x10 box; UCS at origin vertex (0,0,0), +5 mm Y and +8 mm Z offsets, 30 deg about X;
+# 20x8 rectangle on the UCS XY plane extruded 3 mm as a new body.
+# Fox has no UCS command: the UCS XY plane is written out literally (origin [0,5,8], normal tilted 30 deg about X).
+# sketch 1: XY base box 40x30, extruded 10
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+# sketch 3: UCS XY plane
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 5.0, 8.0], "normal": [0.0, -0.5, 0.8660254037844387], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 8]]}
+{"cmd": "sketch.line", "points": [[20, 8], [0, 8]]}
+{"cmd": "sketch.line", "points": [[0, 8], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 3, "operation": "new_body"}
