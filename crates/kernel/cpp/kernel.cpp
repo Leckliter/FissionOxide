@@ -370,9 +370,24 @@ std::vector<Run> merge_runs(const uint8_t *flags, size_t n, bool cyclic, bool &w
   return runs;
 }
 
-int seg_kind(rust::Slice<const double> segs, size_t seg) {
-  need(segs, seg * 13 + 13, "segments");
-  return static_cast<int>(segs[seg * 13]);
+// The first record of each segment of a segment list (a quintic spline takes three records, the
+// rest one). Merge flags count segments; these map them to records.
+std::vector<size_t> record_starts(rust::Slice<const double> segs) {
+  std::vector<size_t> out;
+  for (size_t rec = 0; rec * 13 < segs.size();) {
+    need(segs, rec * 13 + 13, "segments");
+    out.push_back(rec);
+    rec += static_cast<int>(segs[rec * 13]) == 6 ? 3 : 1;
+  }
+  return out;
+}
+
+// The edge of the segment starting at record `rec`.
+TopoDS_Edge rec_edge(rust::Slice<const double> segs, size_t rec) { return seg_edge(segs, rec); }
+
+int seg_kind(rust::Slice<const double> segs, size_t rec) {
+  need(segs, rec * 13 + 13, "segments");
+  return static_cast<int>(segs[rec * 13]);
 }
 
 // Elliptical arcs (kind 4) of one ellipse, run end to start, as one exact arc, or the whole
@@ -469,7 +484,7 @@ bool merged_bspline(const std::vector<TopoDS_Edge> &edges, TopoDS_Edge &out) {
   return true;
 }
 
-// One edge for the segments `idx` (one curve's pieces, run end to start; `closed`: they are the
+// One edge for the segments starting at records `idx` (one curve's pieces, run end to start; `closed`: they are the
 // whole closed chain): exact for an ellipse's or a circle's arcs, else a B-spline. False to keep
 // them separate edges.
 bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
@@ -481,45 +496,28 @@ bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx,
     if (same && kind == 1 && merged_arc(segs, idx, closed, out)) return true;
     if (same && kind == 2) return false;
     std::vector<TopoDS_Edge> edges;
-    for (size_t i : idx) {
-      size_t r = i;
-      edges.push_back(seg_edge(segs, r));
-    }
+    for (size_t i : idx) edges.push_back(rec_edge(segs, i));
     return merged_bspline(edges, out);
   } catch (...) {
     return false;
   }
 }
 
-// The record index of each of the `n` segments from record `rec` (a quintic spline takes three
-// records, the rest one); `rec` moves past them.
-std::vector<size_t> seg_records(rust::Slice<const double> segs, size_t &rec, size_t n) {
-  std::vector<size_t> recs;
-  for (size_t k = 0; k < n; ++k) {
-    recs.push_back(rec);
-    rec += seg_kind(segs, rec) == 6 ? 3 : 1;
-  }
-  return recs;
-}
-
-// Edges for the chain of segments at records `recs` with merge `flags` (one per segment, some
-// set): each run of joined segments one edge.
-std::vector<TopoDS_Edge> merged_chain(rust::Slice<const double> segs, const std::vector<size_t> &recs,
-                                      const uint8_t *flags, bool cyclic) {
+// Edges for the chain of n segments from segment `base` (`starts`: see record_starts) with merge
+// `flags` (some set): each run of joined segments one edge.
+std::vector<TopoDS_Edge> merged_chain(rust::Slice<const double> segs, const std::vector<size_t> &starts, size_t base,
+                                      size_t n, const uint8_t *flags, bool cyclic) {
+  if (starts.size() < base + n) throw std::runtime_error("too few segments");
   std::vector<TopoDS_Edge> out;
-  size_t n = recs.size();
   bool whole = false;
   for (Run r : merge_runs(flags, n, cyclic, whole)) {
     std::vector<size_t> idx;
-    for (size_t j = 0; j < r.count; ++j) idx.push_back(recs[(r.first + j) % n]);
+    for (size_t j = 0; j < r.count; ++j) idx.push_back(starts[base + (r.first + j) % n]);
     TopoDS_Edge e;
     if (idx.size() > 1 && merged_edge(segs, idx, whole, e)) {
       out.push_back(e);
     } else {
-      for (size_t i : idx) {
-        size_t at = i;
-        out.push_back(seg_edge(segs, at));
-      }
+      for (size_t i : idx) out.push_back(rec_edge(segs, i));
     }
   }
   return out;
@@ -546,7 +544,10 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
   FOX_TRY
   need(plane, 9, "make_face plane");
   gp_Pln pln(gp_Ax3(pnt(plane, 0), dir(plane, 3), dir(plane, 6)));
-  size_t rec = 0, seg = 0; // record, and segment (for the merge flags)
+  // rec: the next record; seg: the next segment (merge flags count segments, see record_starts)
+  size_t rec = 0, seg = 0;
+  std::vector<size_t> starts;
+  if (!merge.empty()) starts = record_starts(segs);
   std::vector<TopoDS_Wire> wires;
   for (uint32_t n : loop_lens) {
     BRepBuilderAPI_MakeWire mw;
@@ -555,14 +556,15 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
       if (merge.size() < seg + n) throw std::runtime_error("too few merge flags");
       flags = merge.data() + seg;
     }
-    seg += n;
     if (any_set(flags, n)) {
-      for (const TopoDS_Edge &e : merged_chain(segs, seg_records(segs, rec, n), flags, true)) {
+      for (const TopoDS_Edge &e : merged_chain(segs, starts, seg, n, flags, true)) {
         mw.Add(e);
         if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
       }
+      seg += n;
+      rec = seg < starts.size() ? starts[seg] : segs.size() / 13;
     } else {
-      for (uint32_t k = 0; k < n; ++k) {
+      for (uint32_t k = 0; k < n; ++k, ++seg) {
         TopoDS_Edge e = seg_edge(segs, rec);
         mw.Add(e);
         if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
@@ -1073,24 +1075,20 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs, rust::Slice<const uint8_t> merge) {
   FOX_TRY
   BRepBuilderAPI_MakeWire mw;
-  // the record of each segment
-  std::vector<size_t> recs;
-  for (size_t rec = 0; rec * 13 < segs.size();) {
-    recs.push_back(rec);
-    rec += seg_kind(segs, rec) == 6 ? 3 : 1;
-  }
-  size_t n = recs.size();
+  // merge flags count segments, not records (see record_starts)
+  std::vector<size_t> starts;
+  if (!merge.empty()) starts = record_starts(segs);
+  size_t n = starts.size();
   const uint8_t *flags = nullptr;
   if (!merge.empty()) {
     if (merge.size() < n) throw std::runtime_error("too few merge flags");
     flags = merge.data();
   }
   if (any_set(flags, n)) {
-    size_t r0 = recs[0], r1 = recs[n - 1];
-    TopoDS_Edge first = seg_edge(segs, r0), last = seg_edge(segs, r1);
+    TopoDS_Edge first = rec_edge(segs, starts[0]), last = rec_edge(segs, starts[n - 1]);
     bool closed = BRep_Tool::Pnt(TopExp::FirstVertex(first))
                       .Distance(BRep_Tool::Pnt(TopExp::LastVertex(last))) <= JOIN_TOL;
-    for (const TopoDS_Edge &e : merged_chain(segs, recs, flags, closed)) {
+    for (const TopoDS_Edge &e : merged_chain(segs, starts, 0, n, flags, closed)) {
       mw.Add(e);
       if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
     }

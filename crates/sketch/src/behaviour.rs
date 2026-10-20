@@ -97,6 +97,7 @@ pub fn one_edge_behaviour(kind: &CurveKind) -> Option<&'static str> {
     CurveKind::ControlSpline { .. } => Some(ONE_EDGE_CONTROL_SPLINE),
     CurveKind::Spline { .. } => Some(ONE_EDGE_FIT_SPLINE),
     CurveKind::Arc { .. } | CurveKind::Circle { .. } => Some(ONE_EDGE_SPLIT_ARCS),
+    // a quintic spline (blend curve) reaches a profile as one segment, never split: already one edge
     CurveKind::Line { .. } | CurveKind::Bezier { .. } | CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
       None
     }
