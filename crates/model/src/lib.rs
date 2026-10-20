@@ -325,6 +325,22 @@ pub enum PlaneRef {
   },
 }
 
+/// Which side of a body's surface a shell's walls go (Fusion's Shell Direction).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellDirection {
+  #[default]
+  Inside,
+  Outside,
+  Both,
+}
+
+impl ShellDirection {
+  pub fn is_inside(&self) -> bool {
+    *self == ShellDirection::Inside
+  }
+}
+
 /// An axis for revolves and circular patterns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -592,6 +608,15 @@ pub enum FeatureKind {
     /// Round the corners where walls meet (default: sharp).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     round: bool,
+    /// Fusion's Direction: walls inside the surface (`thickness`), outside it (`thickness`), or
+    /// both (`thickness` inside, `thickness_out` outside).
+    #[serde(default, skip_serializing_if = "ShellDirection::is_inside")]
+    direction: ShellDirection,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    thickness_out: String,
+    /// Whole bodies hollowed with nothing opened (Fusion's body selection).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bodies: Vec<BodyId>,
   },
   /// Box / cylinder / sphere / torus placed on a plane at a point (plane coordinates).
   Primitive {
@@ -2030,7 +2055,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::OffsetFaces { distance, .. } => f(distance),
     FeatureKind::SplitByBody { .. } => {}
-    FeatureKind::Shell { thickness, .. } => f(thickness),
+    FeatureKind::Shell { thickness, thickness_out, .. } => {
+      f(thickness);
+      if !thickness_out.is_empty() {
+        f(thickness_out);
+      }
+    }
     FeatureKind::Primitive { shape, .. } => match shape {
       Primitive::Box { width, depth, height } => {
         f(width);
