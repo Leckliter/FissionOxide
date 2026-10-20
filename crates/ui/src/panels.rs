@@ -113,8 +113,12 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           ui.spacing_mut().item_spacing.x = 4.0;
           avatar(ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
-          egui::Popup::menu(&help).show(help_menu);
-          let bell = bar_icon(ui, Icon::Bell, "Notifications", true);
+          egui::Popup::menu(&help).show(|ui| help_menu(app, ui));
+          let news = app.updates.tooltip_line().map(|l| format!("FissionOxide {l}"));
+          let bell = bar_icon(ui, Icon::Bell, news.as_deref().unwrap_or("Notifications"), true);
+          if bell.clicked() && news.is_some() {
+            app.updates.open = true;
+          }
           // the unread dot
           ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
           let _ = bar_icon(ui, Icon::Clock, "Recent activity", true);
@@ -223,8 +227,13 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-fn help_menu(ui: &mut egui::Ui) {
+fn help_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(300.0);
+  if ui.button(app.updates.menu_label()).clicked() {
+    ui.close();
+    app.updates.check_now();
+  }
+  ui.separator();
   ui.label(RichText::new("Navigation").strong());
   ui.label("Middle-drag pan · Shift+middle-drag or right-drag orbit · wheel zoom");
   ui.add_space(4.0);
@@ -236,7 +245,7 @@ fn help_menu(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), egui::Sense::hover());
     logo::paint(ui.painter(), r);
     ui.label(RichText::new("FissionOxide").strong());
-    ui.label(RichText::new("parametric CAD on OpenCASCADE").color(theme::MUTED));
+    ui.label(RichText::new(format!("{} · parametric CAD on OpenCASCADE", fox_desktop::VERSION)).color(theme::MUTED));
   });
 }
 

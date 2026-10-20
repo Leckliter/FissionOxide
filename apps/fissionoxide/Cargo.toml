@@ -7,9 +7,13 @@ license.workspace = true
 
 [dependencies]
 fox-ui.workspace = true
+fox-desktop.workspace = true
 eframe.workspace = true
 env_logger.workspace = true
 log.workspace = true
+
+[build-dependencies]
+winresource = { version = "0.1", default-features = false }
 
 [lints]
 workspace = true

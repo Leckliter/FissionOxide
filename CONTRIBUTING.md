@@ -51,14 +51,14 @@ cargo test --workspace
 The crates that don't link OpenCASCADE build and test in seconds, so iterate on them alone:
 
 ```sh
-cargo test -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-brand
+cargo test -p fox-expr -p fox-sketch -p fox-exchange -p fox-store -p fox-render -p fox-trace -p fox-brand -p fox-desktop
 ```
 
 CI (`.github/workflows/ci.yml`) uses a pinned Rust (`RUST_TOOLCHAIN`, currently 1.97.0) so a new
 stable's clippy lints don't break `main` unannounced; bump it in its own pull request, fixing the
 new lints there. It runs two jobs on every push and pull request to `main`:
 
-- **fmt + pure crates**: `cargo fmt --check`, then clippy and tests for the five crates above.
+- **fmt + pure crates**: `cargo fmt --check`, then clippy and tests for the crates above.
   Results in a few minutes.
 - **clippy + tests (workspace)**: the full clippy and test run against a cached OCCT install
   (keyed on the `occt-sys` version in `Cargo.lock` and `crates/kernel/build.rs`). A cache miss
@@ -184,6 +184,42 @@ Then make it reachable:
 
 Add a line to "What works today" in `README.md` and remove the item from `ROADMAP.md` if it
 was there.
+
+## Releasing
+
+A release is a tag. Bump `version` under `[workspace.package]` in `Cargo.toml` (every crate and
+the installer take it from there), merge that to `main`, then tag it:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` then builds the release executables on Windows, packs them into
+`FissionOxide-0.2.0-x64-setup.exe` with Inno Setup (`installer/windows/fissionoxide.iss`), writes
+its SHA-256 next to it, installs and uninstalls it once as a smoke test, and publishes both as the
+GitHub release `FissionOxide 0.2.0`. Installed copies find it through the releases API and update
+themselves (`crates/desktop/src/update.rs`). A tag with a pre-release (`v0.3.0-beta.1`) becomes a
+GitHub pre-release, which installed copies don't pick up. Run the workflow by hand (Actions →
+Release → Run workflow) to get the installer as an artifact without publishing.
+
+Rules that keep updates working:
+
+- Never change the `AppId` in `fissionoxide.iss`: it is how Windows and later installers find the
+  installed copy to replace.
+- Keep the asset names (`FissionOxide-<version>-x64-setup.exe` and `….exe.sha256`); the updater
+  looks for them.
+- The release feed must be readable without signing in, so the repository (or at least its
+  releases) has to be public. `FOX_UPDATE_URL` points a build at another feed with the same JSON as
+  `GET /repos/{owner}/{repo}/releases/latest`, for testing or a mirror.
+- Sign the executables and installer so Windows SmartScreen trusts them: add the repository
+  secrets `WINDOWS_CERTIFICATE` (a `.pfx`, base64) and `WINDOWS_CERTIFICATE_PASSWORD` and the
+  workflow signs everything, the uninstaller included.
+
+To build the installer locally on Windows: `cargo build --release -p fissionoxide -p
+fissionoxide-cli`, then `iscc /DAppVersion=0.2.0 installer\windows\fissionoxide.iss` (Inno Setup
+6.4 or later); it lands in `dist\`. The executables' icon, version and manifest come from
+`apps/fissionoxide/build.rs`; the icon and wizard images from `brand/windows/`, which
+`brand/build.py` generates.
 
 ## Pull requests
 

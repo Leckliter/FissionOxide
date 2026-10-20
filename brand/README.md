@@ -10,13 +10,14 @@ website, and any app that comes later. Open [`index.html`](index.html) for the v
 tokens.json  ─┐                       ┌─ logo/        SVG + PNG: fox, one-colour fox, icons, wordmarks
               ├──  python3 build.py  ─┼─ web/         tokens.css, tokens.js, Tailwind preset, favicons, social card
 logo/fox.json ┘                       ├─ index.html   the brand guide
+                                      ├─ windows/     the app icon (.ico) and the installer's wizard images
                                       └─ crates/brand fox-brand: the same tokens and logo for Rust apps
 ```
 
 Edit only the two sources, run `python3 brand/build.py`, and commit what it writes. Nothing in
-`logo/`, `web/`, `index.html` or `crates/brand/src/{tokens,logo}.rs` is edited by hand.
+`logo/`, `web/`, `windows/`, `index.html` or `crates/brand/src/{tokens,logo}.rs` is edited by hand.
 
-The build needs Python 3.9+, `pip install fonttools resvg-py`, ImageMagick (for `favicon.ico`),
+The build needs Python 3.9+, `pip install fonttools resvg-py`, ImageMagick (for `favicon.ico` and `windows/`),
 `rustfmt`, and the Inter font family (set `FOX_FONT_DIR` if it isn't in
 `/usr/share/fonts/opentype/inter`).
 

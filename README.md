@@ -161,6 +161,27 @@ change a parameter and watch the whole history rebuild.
   DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
   machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
 
+## Install
+
+**Windows 10 and 11 (x64):** download `FissionOxide-<version>-x64-setup.exe` from
+[Releases](https://github.com/leckliter/FissionOxide/releases) and run it. The setup wizard asks
+whether to install for you only (no administrator rights needed) or for all users, where to
+install, whether to add a desktop shortcut and open `.fox`/`.foxz` designs with FissionOxide, and
+how to handle updates. You get a Start menu entry, an entry in **Settings → Apps → Installed apps**
+(with its uninstaller), and an icon in the notification area while FissionOxide runs (click it to
+bring the window back; right-click for Check for Updates, Open Data Folder and Quit). Task Manager
+lists it as *FissionOxide*.
+
+**Updates.** FissionOxide looks for a newer release about once a day (Help → Check for Updates
+looks now). Depending on what you chose, it downloads the update in the background and installs it
+when you close the app (or straight away with *Restart and Update*), only tells you, or never
+looks; change it in the Software Update window. Every download is checked against the release's
+SHA-256 before it runs. Running a newer installer by hand also updates in place: same folder, same
+settings, one entry in Installed apps. Uninstalling keeps your designs; it asks before removing
+settings. Settings live in `%LOCALAPPDATA%\FissionOxide` (`FOX_CONFIG_DIR` moves them).
+
+Other platforms: build from source as below.
+
 ## Build and run
 
 You need Rust (stable), CMake and a C++17 compiler. The first build compiles OpenCASCADE 7.8
@@ -646,6 +667,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
 | `fox-ui`            | The egui desktop UI                                                    |
 | `fox-brand`         | Brand colours, fonts and the fox logo (generated from `brand/`)        |
+| `fox-desktop`       | Settings, updates from GitHub releases, the Windows tray icon          |
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |

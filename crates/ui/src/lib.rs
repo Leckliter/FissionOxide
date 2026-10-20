@@ -24,6 +24,7 @@ mod select;
 mod sheet;
 mod theme;
 mod trace;
+mod updates;
 mod viewport;
 
 use std::path::PathBuf;
@@ -35,6 +36,7 @@ use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 pub use dialogs::Dialog;
+pub use updates::Updates;
 pub use viewport::{NavMode, Tool};
 
 pub struct App {
@@ -124,6 +126,8 @@ pub struct App {
   pub(crate) ghost: preview::Ghost,
   /// The 2D cut window (laser, plasma, waterjet), while open.
   pub cut_window: Option<cut_ui::CutWindow>,
+  /// Software updates (Help → Check for Updates).
+  pub updates: updates::Updates,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -157,6 +161,7 @@ impl App {
     theme::apply(&cc.egui_ctx);
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
+    app.updates = updates::Updates::start(&cc.egui_ctx);
     match open {
       Some(p) => app.open_path(&p),
       // like Fusion, start with the data panel showing
@@ -220,6 +225,7 @@ impl App {
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
       cut_window: None,
+      updates: updates::Updates::default(),
     }
   }
 
@@ -331,7 +337,13 @@ impl App {
     self.cam.fit(lo, hi, aspect);
   }
 
-  fn title(&self) -> String {
+  /// The data hub's folder.
+  pub fn hub_root(&self) -> PathBuf {
+    self.s.store_root.clone().unwrap_or_else(fox_engine::store::Store::default_root)
+  }
+
+  /// The window title: the design's name and version, and • when it has unsaved changes.
+  pub fn title(&self) -> String {
     let name = match (&self.s.hub, &self.s.path) {
       (Some(h), _) => format!("{} v{}", self.s.design.name, h.version),
       (None, Some(p)) => {
@@ -895,6 +907,7 @@ impl App {
       panels::parameters_window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
+    updates::window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
@@ -966,6 +979,10 @@ fn now() -> f64 {
 impl eframe::App for App {
   fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
     self.draw(ui);
+  }
+
+  fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    self.updates.on_exit();
   }
 }
 
