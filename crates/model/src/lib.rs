@@ -37,6 +37,7 @@ pub use fillet::{FilletSet, RadiusPoint};
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
+pub use fox_sketch::Behaviours;
 pub use refs::{EdgeRef, FaceRef};
 
 use fox_sketch::{CurveId, PointId, Sketch};
@@ -96,6 +97,12 @@ pub struct Design {
   /// "Capture design history" is off: direct edits collect in a base feature.
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub history_off: bool,
+  /// The feature and regeneration behaviours this design was made with: a new design has all of
+  /// [`sketch::behaviour::CURRENT`], one read from a file what it stored (none if the field is
+  /// missing), so it rebuilds as it did. Each sketch carries its own set for sketch-level
+  /// behaviour. See [`fox_sketch::behaviour`] for how to gate a change.
+  #[serde(default, skip_serializing_if = "Behaviours::is_empty")]
+  pub behaviours: Behaviours,
   /// Saved cameras (the browser's Named Views below Top, Front, Right and Home).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub named_views: Vec<NamedView>,
@@ -1684,6 +1691,7 @@ impl Design {
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,
+      behaviours: Behaviours::current(),
       named_views: Vec::new(),
       face_appearances: Vec::new(),
       next_id: 1,
@@ -2528,5 +2536,55 @@ mod tests {
   #[test]
   fn rename_ident_whole_words_only() {
     assert_eq!(rename_ident("w + width*w2 - w", "w", "x"), "x + width*w2 - x");
+  }
+
+  #[test]
+  fn behaviour_flags_new_legacy_and_unknown() {
+    // a new design and a new sketch get every current behaviour
+    assert_eq!(Design::new("n").behaviours, Behaviours::current());
+    // a file from before behaviour flags has none, in the design and in its sketches
+    let old = r#"{"version": 2, "name": "old", "features": [{"id": 1, "name": "Sketch1",
+      "kind": {"type": "sketch", "plane": {"type": "origin", "plane": "xy"},
+      "sketch": {"points": [], "curves": [], "constraints": [], "next_id": 1}}}]}"#;
+    let d = Design::from_json(old).unwrap();
+    assert!(d.behaviours.is_empty());
+    let FeatureKind::Sketch { sketch, .. } = &d.features[0].kind else { panic!("not a sketch") };
+    assert!(sketch.behaviours.is_empty());
+    // a sketch added to an old design is new geometry: it gets the current set, not the design's
+    let mut d = d;
+    let s = d
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
+      .unwrap();
+    let Some(FeatureKind::Sketch { sketch, .. }) = d.feature(s).map(|f| &f.kind) else { panic!("no sketch") };
+    assert_eq!(sketch.behaviours, Behaviours::current());
+    // names from a newer build survive a load and save, on the design and on a sketch
+    let mut d = Design::new("newer");
+    d.behaviours.insert("future_regen_change");
+    let mut sk = Sketch::new();
+    sk.behaviours.insert("future_profile_change");
+    d.add_feature(FeatureKind::Sketch {
+      plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+      sketch: sk,
+      links: Vec::new(),
+    })
+    .unwrap();
+    let json = d.to_json();
+    let back = Design::from_json(&json).unwrap();
+    assert_eq!(back, d);
+    assert_eq!(Design::from_json(&back.to_json()).unwrap(), d);
+    assert!(back.behaviours.iter().any(|n| n == "future_regen_change"));
+    assert!(json.contains("future_profile_change"));
+    // with no current behaviours, a legacy design saves without the field (files unchanged)
+    if behaviour_current_is_empty() {
+      assert!(!Design::new("plain").to_json().contains("behaviours"));
+    }
+  }
+
+  fn behaviour_current_is_empty() -> bool {
+    fox_sketch::behaviour::CURRENT.is_empty()
   }
 }

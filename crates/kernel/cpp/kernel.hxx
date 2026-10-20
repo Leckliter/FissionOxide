@@ -43,7 +43,7 @@ bool shape_is_null(const Shape &s);
 int32_t shape_type(const Shape &s);
 
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
-                                 rust::Slice<const uint32_t> loop_lens);
+                                 rust::Slice<const uint32_t> loop_lens, rust::Slice<const uint8_t> merge);
 std::unique_ptr<Shape> make_prism(const Shape &face, double dx, double dy, double dz);
 std::unique_ptr<Shape> make_revol(const Shape &face, rust::Slice<const double> axis, double angle);
 std::unique_ptr<Shape> make_box(double x0, double y0, double z0, double x1, double y1, double z1);
@@ -71,7 +71,7 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
 std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> edges, double r1, double r2);
 std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool);
 HlrData hlr_project(const Shape &s, rust::Slice<const double> view, double deflection);
-std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs);
+std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs, rust::Slice<const uint8_t> merge);
 std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine);
 std::unique_ptr<Shape> make_loft(const Shape &sections, bool ruled, bool closed);
 std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> plane, double size);
