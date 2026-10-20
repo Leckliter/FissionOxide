@@ -413,7 +413,8 @@ impl Dialog {
       ("free" | "translate", TriadEdit::Move(p)) => {
         let Some((_, c)) = self.mv.pivot.clone() else { return false };
         let d = self.local(p) - self.local(c);
-        self.translate = [mm(self.unit, d.x), mm(self.unit, d.y), if sketch { self.translate[2].clone() } else { mm(self.unit, d.z) }];
+        self.translate =
+          [mm(self.unit, d.x), mm(self.unit, d.y), if sketch { self.translate[2].clone() } else { mm(self.unit, d.z) }];
       }
       ("free", TriadEdit::Rotate(i, a)) => self.mv.rotate[if sketch { 2 } else { i }] = deg(a),
       ("rotate", TriadEdit::Rotate(i, a)) => {

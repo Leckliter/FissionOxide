@@ -319,7 +319,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     && let Some(p) = resp.interact_pointer_pos()
   {
     crate::marking::open(app, p);
-  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp) {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp)
+  {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }

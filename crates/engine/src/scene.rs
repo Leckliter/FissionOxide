@@ -341,7 +341,8 @@ impl SceneBuilder {
 
     // construction planes
     for (id, pl) in &s.model.planes {
-      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id)
+      {
         continue;
       }
       let size = scene_size(s) * 0.35;
