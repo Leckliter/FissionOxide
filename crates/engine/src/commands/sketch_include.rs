@@ -32,8 +32,7 @@ pub(super) fn include(s: &mut Session, p: &Value) -> CmdResult {
     };
     let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
     let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
-    let deflection = (b.diagonal() * 0.001).clamp(0.005, 0.2);
-    let kind = edge_curve3d(&b.shape, info, deflection).ok_or(CmdError::new(format!("edge {edge} is degenerate")))?;
+    let kind = edge_curve3d(info).map_err(CmdError::new)?;
     let edge = associative.then(|| EdgeRef::from_edge(body, info, b.faces()));
     todo.push(Item { kind, edge, source: None });
   }
@@ -45,7 +44,7 @@ pub(super) fn include(s: &mut Session, p: &Value) -> CmdResult {
       return Err(CmdError::new(format!("sketch {} is not an earlier sketch", from.0)));
     }
     let r = s.model.sketches.get(&from).ok_or(CmdError::new(format!("sketch {} failed to build", from.0)))?;
-    let kind = sketch_curve3d(r, curve).ok_or(CmdError::new(format!("sketch {} has no curve {}", from.0, curve.0)))?;
+    let kind = sketch_curve3d(r, curve).map_err(|e| CmdError::new(format!("sketch {}: {e}", from.0)))?;
     todo.push(Item { kind, edge: None, source: associative.then_some(CurveSource { sketch: from.0, curve }) });
   }
   if todo.is_empty() {

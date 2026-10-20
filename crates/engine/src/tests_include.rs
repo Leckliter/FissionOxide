@@ -99,3 +99,21 @@ fn included_sketch_curve_follows_its_sketch_and_deletes() {
     s.model.sketches.values().all(|r| r.sketch.curve3d(fox_sketch::CurveId(c.as_u64().unwrap() as u32)).is_none())
   );
 }
+
+#[test]
+fn splines_and_freeform_edges_are_refused_for_now() {
+  let mut s = Session::default();
+  let src = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].clone();
+  let spline = run(&mut s, "sketch.spline", json!({"points": [[0, 0], [5, 10], [0, 20]]}))["curves"][0].clone();
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.ellipse", json!({"center": [40, 0], "major": [50, 0], "minor": 4}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"distance": 10, "operation": "new_body"}));
+  run(&mut s, "sketch.create", json!({"plane": "yz"}));
+  let e = s.execute("sketch.include", &json!({"curves": [{"sketch": src, "curve": spline}]})).unwrap_err();
+  assert!(e.to_string().contains("supports lines, arcs and circles for now; this curve is a spline"), "{e}");
+  let e = s.execute("sketch.include", &json!({"edges": [{"point": [50, 0, 10]}]})).unwrap_err();
+  assert!(e.to_string().contains("supports lines, arcs and circles for now; this edge is a spline"), "{e}");
+  assert!(s.model.sketches.values().all(|r| r.sketch.curves3d.is_empty()));
+}

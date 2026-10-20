@@ -1690,8 +1690,7 @@ impl Ctx<'_> {
       let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
       link.edge = EdgeRef::from_edge(link.edge.body, &e, body.faces());
       if let Some(c) = sketch.curve3d_mut(link.curve) {
-        let deflection = (body.diagonal() * 0.001).clamp(0.005, 0.2);
-        if let Some(k) = crate::include::edge_curve3d(&body.shape, &e, deflection) {
+        if let Ok(k) = crate::include::edge_curve3d(&e) {
           c.kind = k;
         }
         continue;

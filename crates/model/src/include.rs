@@ -21,21 +21,23 @@ fn p3(v: DVec3) -> [f64; 3] {
   v.to_array()
 }
 
-/// A body edge as a world-space curve (`None` for a degenerate edge). Free-form edges are
-/// sampled from the shape's edge polylines at `deflection`.
-pub fn edge_curve3d(shape: &Shape, e: &EdgeInfo, deflection: f64) -> Option<Curve3dKind> {
+/// Why an edge or curve can't be included yet: until exact B-splines are carried through, a
+/// freeform curve would come in as a polyline and sweep into many faceted faces.
+fn unsupported(what: &str) -> String {
+  format!("Include 3D Geometry supports lines, arcs and circles for now; this {what}")
+}
+
+/// A body edge as a world-space curve. Degenerate and freeform (spline, ellipse) edges are
+/// refused.
+pub fn edge_curve3d(e: &EdgeInfo) -> Result<Curve3dKind, String> {
   match e.kind {
-    EdgeKind::Line => Some(Curve3dKind::Line { a: p3(e.start), b: p3(e.end) }),
+    EdgeKind::Line => Ok(Curve3dKind::Line { a: p3(e.start), b: p3(e.end) }),
     EdgeKind::Circle if (e.start - e.end).length() < 1e-6 => {
-      Some(Curve3dKind::Circle { center: p3(e.center), normal: p3(e.axis), radius: e.radius })
+      Ok(Curve3dKind::Circle { center: p3(e.center), normal: p3(e.axis), radius: e.radius })
     }
-    EdgeKind::Circle => Some(Curve3dKind::Arc { start: p3(e.start), mid: p3(e.mid), end: p3(e.end) }),
-    EdgeKind::Degenerate => None,
-    _ => {
-      let lines = shape.edge_lines(deflection).ok()?;
-      let pl = lines.into_iter().find(|l| l.id == e.id)?;
-      (pl.points.len() >= 2).then(|| Curve3dKind::Polyline { points: pl.points.into_iter().map(p3).collect() })
-    }
+    EdgeKind::Circle => Ok(Curve3dKind::Arc { start: p3(e.start), mid: p3(e.mid), end: p3(e.end) }),
+    EdgeKind::Degenerate => Err(format!("edge {} is degenerate", e.id)),
+    EdgeKind::Other => Err(unsupported("edge is a spline or other freeform curve")),
   }
 }
 
@@ -51,26 +53,27 @@ pub fn on_plane(kind: &Curve3dKind, plane: &Plane) -> bool {
   }
 }
 
-/// A sketch's curve (2D or included) at its world position.
-pub fn sketch_curve3d(sk: &SketchResult, curve: CurveId) -> Option<Curve3dKind> {
+/// A sketch's curve (2D or included) at its world position. Splines, ellipses and other
+/// freeform curves are refused.
+pub fn sketch_curve3d(sk: &SketchResult, curve: CurveId) -> Result<Curve3dKind, String> {
   if let Some(c) = sk.sketch.curve3d(curve) {
-    return Some(c.kind.clone());
+    return Ok(c.kind.clone());
   }
   let w = |p: [f64; 2]| p3(sk.plane.to_world(p));
-  let c = sk.sketch.curve(curve)?;
+  let missing = || format!("the sketch has no curve {}", curve.0);
+  let pos = |p| sk.sketch.pos(p).ok_or_else(missing);
+  let c = sk.sketch.curve(curve).ok_or_else(missing)?;
   match &c.kind {
-    CurveKind::Line { a, b } => Some(Curve3dKind::Line { a: w(sk.sketch.pos(*a)?), b: w(sk.sketch.pos(*b)?) }),
+    CurveKind::Line { a, b } => Ok(Curve3dKind::Line { a: w(pos(*a)?), b: w(pos(*b)?) }),
     CurveKind::Circle { center, radius } => {
-      Some(Curve3dKind::Circle { center: w(sk.sketch.pos(*center)?), normal: p3(sk.plane.normal()), radius: *radius })
+      Ok(Curve3dKind::Circle { center: w(pos(*center)?), normal: p3(sk.plane.normal()), radius: *radius })
     }
-    CurveKind::Arc { .. } => match sk.sketch.curve_segs(curve).first()? {
-      s @ Seg::Arc { .. } => Some(Curve3dKind::Arc { start: w(s.start()), mid: w(s.mid()), end: w(s.end()) }),
-      _ => None,
+    CurveKind::Arc { .. } => match sk.sketch.curve_segs(curve).first() {
+      Some(s @ Seg::Arc { .. }) => Ok(Curve3dKind::Arc { start: w(s.start()), mid: w(s.mid()), end: w(s.end()) }),
+      _ => Err(missing()),
     },
-    _ => {
-      let pts = sk.sketch.spline_points(curve);
-      (pts.len() >= 2).then(|| Curve3dKind::Polyline { points: pts.into_iter().map(w).collect() })
-    }
+    CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => Err(unsupported("curve is an ellipse")),
+    _ => Err(unsupported("curve is a spline")),
   }
 }
 
@@ -80,9 +83,9 @@ pub fn refresh_sources(sketches: &BTreeMap<FeatureId, SketchResult>, sketch: &mu
   let mut lost = 0;
   for c in &mut sketch.curves3d {
     let Some(src) = c.source else { continue };
-    match sketches.get(&FeatureId(src.sketch)).and_then(|s| sketch_curve3d(s, src.curve)) {
-      Some(k) => c.kind = k,
-      None => lost += 1,
+    match sketches.get(&FeatureId(src.sketch)).map(|s| sketch_curve3d(s, src.curve)) {
+      Some(Ok(k)) => c.kind = k,
+      _ => lost += 1,
     }
   }
   lost
