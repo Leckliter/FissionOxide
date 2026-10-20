@@ -1,7 +1,7 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use fox_model::construct::{AxisDef, CoilSection, MeshOp, PlaneDef, PointDef, PointRef};
+use fox_model::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
@@ -67,16 +67,36 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       )
     })(),
     "pipe" => (|| {
+      const KEYS: [&str; 10] =
+        ["cmd", "path", "path_curves", "diameter", "size", "wall", "section", "distance", "distance_one", "operation"];
+      if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !KEYS.contains(&k.as_str()))) {
+        return Err(CmdError::new(format!("pipe doesn't take '{k}' ({})", KEYS[1..].join(", "))));
+      }
       let path_sketch = FeatureId(req_u32(p, "path")?);
       s.design.sketch(path_sketch)?;
+      let section = match opt_str(p, "section").unwrap_or("circular") {
+        "circular" | "circle" => PipeSection::Circular,
+        "square" => PipeSection::Square,
+        "triangular" | "triangle" => PipeSection::Triangular,
+        o => return Err(CmdError::new(format!("unknown section '{o}' (circular, square, triangular)"))),
+      };
+      let diameter = match opt_expr(p, "size") {
+        Some(_) if p.get("diameter").is_some() => {
+          return Err(CmdError::new("pipe takes 'diameter' or 'size', not both"));
+        }
+        Some(size) => size,
+        None => req_expr(p, "diameter").map_err(|_| CmdError::new("missing 'diameter' (or 'size')"))?,
+      };
       add_feature(
         s,
         FeatureKind::Pipe {
           path_sketch,
           path_curves: ids(p, "path_curves").into_iter().map(CurveId).collect(),
-          diameter: req_expr(p, "diameter")?,
+          diameter,
           wall: opt_expr(p, "wall").unwrap_or_default(),
           operation: operation(p)?,
+          section,
+          distance: opt_expr(p, "distance").or_else(|| opt_expr(p, "distance_one")).unwrap_or_default(),
         },
       )
     })(),
