@@ -88,11 +88,10 @@ impl Camera {
   /// Camera right / up vectors.
   pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
     let back = self.eye_dir();
-    let mut right = DVec3::Z.cross(back);
-    if right.length_squared() < 1e-12 {
-      right = DVec3::X;
-    }
-    let right = right.normalize();
+    // Z × back, normalized; pitch stays short of ±90°, so this is right even looking straight
+    // down, where the cross product vanishes and the yaw would otherwise be lost
+    let (sy, cy) = self.yaw.sin_cos();
+    let right = DVec3::new(cy, sy, 0.0);
     let up = back.cross(right).normalize();
     (right, up, back)
   }
@@ -729,6 +728,18 @@ mod tests {
       colors: vec![],
       analyze: false,
     }
+  }
+
+  #[test]
+  fn orbiting_turns_the_top_view() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    let (right, ..) = cam.basis();
+    assert!((right - DVec3::X).length() < 1e-9);
+    cam.orbit(0.5, 0.2);
+    let (turned, up, back) = cam.basis();
+    assert!((turned - DVec3::new(0.5f64.cos(), 0.5f64.sin(), 0.0)).length() < 1e-9, "{turned}");
+    assert!(turned.dot(up).abs() < 1e-9 && turned.dot(back).abs() < 1e-9);
   }
 
   #[test]
