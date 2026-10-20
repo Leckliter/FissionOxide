@@ -585,6 +585,12 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if !sketching || app.tool == Tool::Select {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
     select_click(app, add || app.dialog.is_some());
+    // double-clicking an edge selects its loop
+    if resp.double_clicked()
+      && let Some(Pick::Edge { body, edge }) = app.hover
+    {
+      crate::select::pick_loop(app, body, edge, add || app.dialog.is_some());
+    }
     // double-clicking a letter of a text edits the text
     if resp.double_clicked()
       && app.dialog.is_none()

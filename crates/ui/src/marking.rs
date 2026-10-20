@@ -705,6 +705,57 @@ fn row_top(rect: Rect, items: &[Option<Item>], k: usize) -> f32 {
   rect.top() + 3.0 + items[..k].iter().map(|it| if it.is_some() { ROW_H } else { SEP_H }).sum::<f32>()
 }
 
+/// Where the menu goes for a right-click at `center`: the ring centre and the overflow list's
+/// box. Like Fusion, the ring is never covered. The ring is kept inside the canvas and the list
+/// sits under it; when the list won't fit below, the whole menu moves up, and when it can't move
+/// far enough the list opens beside the ring instead.
+fn layout(canvas: Rect, center: Pos2, ring: &[Option<Vec2>; 8], list: Vec2) -> (Pos2, Rect) {
+  const GAP: f32 = 8.0;
+  let inner = canvas.shrink(4.0);
+  let bounds = |c: Pos2| {
+    ring
+      .iter()
+      .enumerate()
+      .filter_map(|(i, s)| s.map(|s| item_rect(c, i, s)))
+      .fold(Rect::from_center_size(c, Vec2::splat(2.0 * DEAD_ZONE)), |a, r| a.union(r))
+  };
+  // the ring itself inside the canvas, where it fits
+  let b = bounds(center);
+  let shift = |lo: f32, hi: f32, min: f32, max: f32| {
+    if hi - lo > max - min {
+      0.0
+    } else if lo < min {
+      min - lo
+    } else if hi > max {
+      max - hi
+    } else {
+      0.0
+    }
+  };
+  let mut center = center + vec2(shift(b.left(), b.right(), inner.left(), inner.right()), 0.0);
+  center.y += shift(b.top(), b.bottom(), inner.top(), inner.bottom());
+  let b = bounds(center);
+
+  // under the ring, moving the menu up as far as it needs and can
+  let over = b.bottom() + GAP + list.y - inner.bottom();
+  let room = (b.top() - inner.top()).max(0.0);
+  if over <= room {
+    let lift = over.max(0.0);
+    let c = center - vec2(0.0, lift);
+    return (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - lift + GAP), list));
+  }
+  // beside the ring, right then left, its top level with the ring's
+  if b.right() + GAP + list.x <= inner.right() {
+    return (center, clamp(canvas, pos2(b.right() + GAP, b.top()), list));
+  }
+  if b.left() - GAP - list.x >= inner.left() {
+    return (center, clamp(canvas, pos2(b.left() - GAP - list.x, b.top()), list));
+  }
+  // no room anywhere: as high as it goes, the list under it
+  let c = center - vec2(0.0, room);
+  (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - room + GAP), list))
+}
+
 /// Keeps a list's box inside the canvas.
 fn clamp(canvas: Rect, min: Pos2, size: Vec2) -> Rect {
   let x = min.x.clamp(canvas.left() + 4.0, (canvas.right() - size.x - 4.0).max(canvas.left() + 4.0));
@@ -778,22 +829,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     ctx.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked(), i.pointer.secondary_clicked()));
   let canvas = app.canvas;
 
-  // layout: the ring, the overflow list directly under it
-  let ring_rects: Vec<Option<Rect>> = ring
-    .iter()
-    .enumerate()
-    .map(|(i, it)| {
-      it.as_ref().map(|it| {
-        let tw = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
-        let more = if it.children.is_empty() { 0.0 } else { 14.0 };
-        item_rect(center, i, vec2(tw + 40.0 + more, 26.0))
-      })
+  // layout: the ring, the overflow list under it (or beside it) without covering it
+  let ring_sizes: [Option<Vec2>; 8] = std::array::from_fn(|i| {
+    ring[i].as_ref().map(|it| {
+      let tw = painter.layout_no_wrap(it.label.clone(), font.clone(), theme::TEXT).size().x;
+      let more = if it.children.is_empty() { 0.0 } else { 14.0 };
+      vec2(tw + 40.0 + more, 26.0)
     })
-    .collect();
-  let list_w = list_width(&painter, &font, &overflow);
-  let list_h = list_height(&overflow);
-  let ring_bottom = ring_rects.iter().flatten().map(|r| r.bottom()).fold(center.y, f32::max);
-  let list_rect = clamp(canvas, pos2(center.x - list_w / 2.0, ring_bottom + 8.0), vec2(list_w, list_h));
+  });
+  let list_size = vec2(list_width(&painter, &font, &overflow), list_height(&overflow));
+  let (center, list_rect) = layout(canvas, center, &ring_sizes, list_size);
+  let ring_rects: Vec<Option<Rect>> =
+    ring_sizes.iter().enumerate().map(|(i, s)| s.map(|s| item_rect(center, i, s))).collect();
 
   // an overflow row with children opens its sub-list on hover
   if let Some(p) = pointer
@@ -914,6 +961,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   }
 
   if let Some(m) = app.marking.as_mut() {
+    // the menu stays where the layout moved it
+    m.center = center;
     m.sub = sub;
   }
 
@@ -976,6 +1025,53 @@ mod tests {
   fn ring_labels(app: &App) -> Vec<String> {
     let cx = context(app);
     ring(app, &cx).iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_default()).collect()
+  }
+
+  /// The ring's boxes for a layout, with every slot filled.
+  fn full_ring() -> [Option<Vec2>; 8] {
+    std::array::from_fn(|i| Some(vec2(if i % 4 == 0 { 110.0 } else { 140.0 }, 26.0)))
+  }
+
+  fn ring_clear(canvas: Rect, center: Pos2, sizes: &[Option<Vec2>; 8], list: Rect) {
+    for (i, s) in sizes.iter().enumerate() {
+      let r = item_rect(center, i, s.unwrap());
+      assert!(!r.intersects(list), "list {list:?} covers ring slot {i} {r:?}");
+      assert!(canvas.contains_rect(r), "ring slot {i} {r:?} is off the canvas {canvas:?}");
+    }
+    assert!(!Rect::from_center_size(center, Vec2::splat(2.0 * DEAD_ZONE)).intersects(list), "list covers the hub");
+    assert!(canvas.contains_rect(list), "list {list:?} is off the canvas");
+  }
+
+  #[test]
+  fn list_goes_under_the_ring_when_it_fits() {
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 1000.0));
+    let at = pos2(700.0, 300.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    assert_eq!(c, at, "the menu opens where it was clicked");
+    assert!((list.center().x - at.x).abs() < 0.5 && list.top() > at.y, "{list:?}");
+    ring_clear(canvas, c, &full_ring(), list);
+  }
+
+  #[test]
+  fn menu_moves_up_when_the_list_wont_fit_below() {
+    // a face in the middle of the canvas: the ~460 px list doesn't fit under the ring
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 800.0));
+    let at = pos2(700.0, 400.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    assert!(c.y < at.y && (c.x - at.x).abs() < 0.5, "the whole menu moves up: {c:?}");
+    assert!(list.top() > c.y, "the list stays under the ring");
+    ring_clear(canvas, c, &full_ring(), list);
+  }
+
+  #[test]
+  fn list_opens_beside_the_ring_near_the_bottom_of_a_short_canvas() {
+    let canvas = Rect::from_min_size(pos2(40.0, 90.0), vec2(1200.0, 520.0));
+    for x in [200.0, 640.0, 1100.0] {
+      let at = pos2(x, 590.0);
+      let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+      assert!(c.y < at.y, "the ring is lifted inside the canvas");
+      ring_clear(canvas, c, &full_ring(), list);
+    }
   }
 
   #[test]
