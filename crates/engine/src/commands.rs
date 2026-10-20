@@ -96,7 +96,7 @@ cmds! {
   "sketch.construction" => "Toggle construction geometry", "{curves: [id], on?: bool}";
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
-  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id}, curves?: [id], translate?, angle?, scale?, center?}";
+  "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id, units?: px|document (SVG; px = 96 dpi, 0,0 on the origin, as Fusion)}, curves?: [id], translate?, angle?, scale?, center?}";
   "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
@@ -1508,7 +1508,13 @@ fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), 
   let path = PathBuf::from(path);
   let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
   if ext == "dxf" || ext == "svg" {
-    return crate::files::dxf_sketch(&path);
+    // an SVG goes in as Fusion's Insert SVG puts it: px user units, its 0,0 on the origin
+    let units = match opt_str(from, "units").unwrap_or("px") {
+      "px" => fox_exchange::svg::SvgUnits::Px,
+      "document" => fox_exchange::svg::SvgUnits::Document,
+      u => return Err(CmdError::new(format!("an SVG's units are \"px\" or \"document\", not \"{u}\""))),
+    };
+    return crate::files::dxf_sketch(&path, units);
   }
   if !matches!(ext.as_str(), "fox" | "foxz" | "clf" | "clfz") {
     return Err(CmdError::new("insert from a .dxf, .svg, .fox or .foxz file"));

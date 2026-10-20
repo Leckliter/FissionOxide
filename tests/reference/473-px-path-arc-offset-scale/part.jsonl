@@ -1,7 +1,7 @@
 # 473-px-path-arc-offset-scale: added by the parity loop from a Fusion probe
 # px-path-arc-offset-scale: px SVG (width 100 height 50, no viewBox): closed path with lines and a circular arc (A 15 15 sweep 1); imported on XY at x=10 mm, y=20 mm, scale 2; extruded 3 mm.
-# hand-written; reads part.svg from the case folder (absolute path)
+# hand-written; reads part.svg from the case folder (path relative to the repository root)
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.insert", "from": {"path": "C:/Users/colli/OneDrive/Documents/GitHub/FissionOxide/.claude/worktrees/parity-loop-driver/parity/probes/sketchimportsvg/px-path-arc-offset-scale/part.svg"}, "translate": [10.0, 20.0], "scale": 2.0}
+{"cmd": "sketch.insert", "from": {"path": "tests/reference/473-px-path-arc-offset-scale/part.svg"}, "translate": [10.0, 20.0], "scale": 2.0}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 3.0, "operation": "new_body"}

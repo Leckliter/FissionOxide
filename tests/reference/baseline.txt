@@ -334,3 +334,6 @@
 386-edges-meeting-at-vertex
 387-edges-extended-intersection
 388-sketch-line-and-edge
+472-mm-viewbox-plate-hole
+473-px-path-arc-offset-scale
+474-group-transform-cubic

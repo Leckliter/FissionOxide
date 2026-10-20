@@ -83,6 +83,9 @@ fn read_script(dir: &Path) -> Option<String> {
 }
 
 fn build(script: &str) -> Result<Session, String> {
+  // file paths in a script are relative to the repository root, as `fissionoxide-cli run` reads
+  // them from there (every test here sets the same directory, so parallel tests agree)
+  std::env::set_current_dir(root()).map_err(|e| e.to_string())?;
   let mut s = Session::default();
   for (n, line) in script.lines().enumerate() {
     let line = line.trim();

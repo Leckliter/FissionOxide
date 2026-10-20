@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use fox_exchange::archive::{Archive, read_foxz, write_foxz};
 use fox_exchange::dxf::{Drawing, Entity, Spline, read_dxf, write_dxf};
-use fox_exchange::svg::{read_svg, write_svg};
+use fox_exchange::svg::{SvgUnits, read_svg_as, write_svg};
 use fox_exchange::{FormatKind, Mesh, format_for_path};
 use fox_kernel::glam::DVec3;
 use fox_model::{Design, FeatureId, FeatureKind, MeshData};
@@ -330,11 +330,16 @@ fn import_fusion(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   )
 }
 
-/// A DXF or SVG file's 2D geometry.
+/// A DXF or SVG file's 2D geometry, an SVG sized as the document says.
 fn read_drawing(path: &Path) -> Result<Drawing, CmdError> {
+  read_drawing_as(path, SvgUnits::Document)
+}
+
+/// A DXF or SVG file's 2D geometry, an SVG's user units mapped by `units`.
+fn read_drawing_as(path: &Path, units: SvgUnits) -> Result<Drawing, CmdError> {
   let bytes = std::fs::read(path)?;
   let svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
-  if svg { read_svg(&bytes) } else { read_dxf(&bytes) }.map_err(ex)
+  if svg { read_svg_as(&bytes, units) } else { read_dxf(&bytes) }.map_err(ex)
 }
 
 fn skipped_warning(path: &Path, d: &Drawing) -> Option<String> {
@@ -396,9 +401,9 @@ fn import_dxf(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
 }
 
 /// The curves of a DXF or SVG file as a free-standing sketch (endpoints joined), and a warning
-/// about skipped entities.
-pub(crate) fn dxf_sketch(path: &Path) -> Result<(Sketch, Option<String>), CmdError> {
-  let drawing = read_drawing(path)?;
+/// about skipped entities. `units` maps an SVG's user units.
+pub(crate) fn dxf_sketch(path: &Path, units: SvgUnits) -> Result<(Sketch, Option<String>), CmdError> {
+  let drawing = read_drawing_as(path, units)?;
   let mut sk = Sketch::new();
   for (e, construction) in &drawing.entities {
     if let Some(c) = add_entity(&mut sk, e.clone())?
