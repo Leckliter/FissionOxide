@@ -285,15 +285,23 @@ def usage_limited(meta, text):
   return any(w in blob for w in LIMIT_WORDS)
 
 
-def limit_reset(meta):
-  """When the usage limit resets, as local time text, if the agent's run said."""
-  import datetime
+def limit_reset_epoch(meta):
+  """The Unix time the usage limit resets, when the agent's run reported it."""
   import re
 
   at = (meta.get("rate_limit") or {}).get("resets_at")
   if not at:
     m = re.search(r"\|(\d{10})", " ".join(str(e) for e in meta.get("errors") or []))
     at = int(m.group(1)) if m else None
+  return at
+
+
+def limit_reset(meta):
+  """When the usage limit resets, as local time text, if the agent's run said."""
+  import datetime
+  import re
+
+  at = limit_reset_epoch(meta)
   if at:
     return datetime.datetime.fromtimestamp(at).strftime("%Y-%m-%d %H:%M")
   m = re.search(r"resets? ([^.\n]+)", " ".join(str(e) for e in meta.get("errors") or []), re.I)

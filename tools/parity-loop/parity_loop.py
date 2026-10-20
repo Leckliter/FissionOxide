@@ -168,6 +168,8 @@ class Loop:
     self.sem = asyncio.Semaphore(a.fixers)
     self.fixing = set()
     self.halt = None  # set when the subscription's usage limit stops an agent
+    self.halt_reset = None  # Unix time it resets, when the agent reported one
+    self.started = 0  # probes and fixers this run started
     self.claimed = set()  # cargo target slots this process holds
     os.environ["FOX_CLI"] = fox_cli()
     os.makedirs(os.path.join(LOOP, "logs"), exist_ok=True)
@@ -200,6 +202,7 @@ class Loop:
       return False
     resets = agents.limit_reset(meta)
     self.halt = f"usage limit hit during {kind} {key}; resets {resets}"
+    self.halt_reset = agents.limit_reset_epoch(meta)
     self.ledger.update(key, note=f"{kind} stopped by the usage limit (resets {resets}); the next run resumes it")
     print(f"  STOP: {self.halt}", flush=True)
     return True
@@ -295,6 +298,7 @@ class Loop:
     async with self.sem:
       if self.halt or self.stop_requested():
         return
+      self.started += 1
       slot = self.claim_slot()
       try:
         await self._fix(key, slot)
@@ -522,6 +526,7 @@ class Loop:
         if e is None:
           return
         claimed[0] += 1
+        self.started += 1
         self.probing.add(e["key"])
         try:
           await self.probe(e)
@@ -559,6 +564,92 @@ def release_fusion(owner):
       except SystemExit:
         pass
     client.fusion_release(owner)
+
+
+# ---- until done ----------------------------------------------------------------------------------
+
+RESET_TZ = "America/Chicago"
+RESET_AT = (2, 30)  # the user's Max usage resets at 2:30 AM US Central
+RESET_MARGIN = 5 * 60
+
+
+def next_reset(reported=None):
+  """When to resume after a usage limit: the reset the agent reported, else the next 2:30 AM
+  Central; plus a margin either way."""
+  import datetime
+  import zoneinfo
+
+  if reported and reported > time.time():
+    return reported + RESET_MARGIN
+  tz = zoneinfo.ZoneInfo(RESET_TZ)
+  now_c = datetime.datetime.now(tz)
+  at = now_c.replace(hour=RESET_AT[0], minute=RESET_AT[1], second=0, microsecond=0)
+  if at <= now_c:
+    at = (now_c + datetime.timedelta(days=1)).replace(hour=RESET_AT[0], minute=RESET_AT[1], second=0,
+                                                       microsecond=0)
+  return at.timestamp() + RESET_MARGIN
+
+
+def design_done(entries):
+  """True when every Design entry is probed, and every gap has a PR or has used its fixer attempts."""
+  for e in entries:
+    if e.get("scope") != "design":
+      continue
+    if e["status"] in (L.UNTESTED, L.PROBING):
+      return False
+    if L.needs_fix(e) or (e.get("fix") or {}).get("state") in ("pushed", "agent") or L.fixer_running_elsewhere(e):
+      return False
+  return True
+
+
+def stamp(t=None):
+  return time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(t))
+
+
+def wait_until(t, why):
+  """Sleeps until t, waking each minute to honour the STOP file. Returns False if stopped."""
+  print(f"[{stamp()}] waiting: {why}; resuming at {stamp(t)}", flush=True)
+  while time.time() < t:
+    if os.path.exists(STOP_FILE):
+      return False
+    time.sleep(min(60, max(1, t - time.time())))
+  print(f"[{stamp()}] resuming", flush=True)
+  return True
+
+
+def run_until_done(a):
+  """Runs batches until the Design scope is done, waiting out usage limits."""
+  a.budget_usd = float("inf")  # the usage limit is the real stop
+  a.max_features = 10 ** 9
+  batch = 0
+  while True:
+    batch += 1
+    print(f"[{stamp()}] batch {batch}", flush=True)
+    loop = Loop(a)
+    asyncio.run(loop.run())
+    if os.path.exists(STOP_FILE):
+      print(f"[{stamp()}] stopped: {STOP_FILE} exists", flush=True)
+      return
+    if design_done(Ledger(a.ledger).read()):
+      print(f"[{stamp()}] done: every Design entry is probed, and every gap has a PR or used its attempts", flush=True)
+      return
+    if loop.halt:
+      if not wait_until(next_reset(loop.halt_reset), loop.halt):
+        return
+    elif loop.started == 0:
+      # Nothing to start, but not done: another process is probing or fixing what's left.
+      if not wait_until(time.time() + 600, "the remaining entries are busy in another driver process"):
+        return
+
+
+def keep_awake(on):
+  """Stops Windows idle sleep while the driver runs (a closed lid or a manual Sleep still wins)."""
+  if os.name != "nt":
+    return
+  import ctypes
+
+  ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+  ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0))
 
 
 # ---- gh ----------------------------------------------------------------------------------------
@@ -663,6 +754,8 @@ def main():
   r.add_argument("--max-features", type=int, default=3, help="probe at most this many entries (default 3)")
   r.add_argument("--only", nargs="*", help="limit the run to these ledger keys")
   r.add_argument("--no-fix", action="store_true", help="probe only; start no fixers")
+  r.add_argument("--until-done", action="store_true", help="run batches until every Design entry is done; wait "
+                 "out usage limits (resets 2:30 AM Central) instead of exiting; no dollar cap")
   r.add_argument("--probes", type=int, default=1, help="probe agents at once (default 1); they share Fusion "
                  "through the bridge's lock")
   r.add_argument("--ui", action="store_true", help="also UI-probe entries that need it (takes over the mouse)")
@@ -688,10 +781,18 @@ def main():
   if (a.cmd == "ui-probe" or getattr(a, "ui", False)) and not a.yes:
     if input("A UI probe moves your mouse and types into Fusion and FissionOxide. Continue? [y/N] ").lower() != "y":
       return
-  loop = Loop(a)
   if a.cmd == "run":
-    asyncio.run(loop.run())
-  elif a.cmd == "probe":
+    keep_awake(True)
+    try:
+      if a.until_done:
+        return run_until_done(a)
+      loop = Loop(a)
+      asyncio.run(loop.run())
+    finally:
+      keep_awake(False)
+    return print(f"spent ${loop.budget.spent_usd:.2f}, {loop.budget.spent_tokens:,} tokens")
+  loop = Loop(a)
+  if a.cmd == "probe":
     asyncio.run(loop.probe(loop.ledger.get(a.key)))
   elif a.cmd == "fix":
     loop.ledger.update(a.key, note="fixer requested by hand")

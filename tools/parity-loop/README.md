@@ -76,6 +76,21 @@ the lock. A lock idle for 10 minutes is taken over.
 | `--base BRANCH` | main | The branch fixers start from and open PRs against. |
 | `--commit` | | Commit the ledger and new cases on the current branch after each step. |
 | `--ui` | | Also UI-probe the entries that need one (see below). |
+| `--until-done` | | Keep running batches until the Design scope is done (below). No dollar cap. |
+
+### Running until done
+
+`run --until-done --probes 3 --fixers 4 --commit` runs batch after batch. It stops when no Design
+entry is `untested` or `probing`, and when every `mismatch` and `fox-missing` entry has a PR or has
+used up its fixer attempts. A usage limit doesn't end it. The driver logs the wait, sleeps until
+the limit resets, then resumes from the ledger. It uses the reset time the agent's run reported,
+or else the next 2:30 AM US Central (the user's Max reset), plus 5 minutes of margin. `STOP`
+ends it, waits included. UI probes stay off unless you add `--ui`.
+
+While any `run` is going, waits included, the driver asks Windows not to idle-sleep
+(`SetThreadExecutionState`), and it clears that when it exits. This prevents idle sleep only and
+changes no power settings: closing the laptop lid or choosing Sleep still stops the run. The
+next run resumes it.
 
 Spend per agent run, and the running totals, go to `parity/loop/state.json`. Each agent's
 transcript goes to `parity/loop/logs/`. `status` prints both.
