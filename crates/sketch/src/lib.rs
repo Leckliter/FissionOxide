@@ -7,6 +7,7 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod behaviour;
 mod build;
 mod conic;
 mod curve3d;
@@ -24,6 +25,7 @@ mod transform;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub use behaviour::Behaviours;
 pub use build::{PtSpec, circumcenter};
 pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
 pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
@@ -61,6 +63,11 @@ pub struct Sketch {
   /// sketch plane, usable as sweep paths and rails but never part of a profile.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub curves3d: Vec<Curve3d>,
+  /// The geometry behaviours this sketch was made with (profiles, solver, curve evaluation): a
+  /// new sketch has all of [`behaviour::CURRENT`], one read from a file what it stored (none if
+  /// the field is missing), so it rebuilds as it did. See [`behaviour`].
+  #[serde(default, skip_serializing_if = "Behaviours::is_empty")]
+  pub behaviours: Behaviours,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -465,6 +472,7 @@ impl Sketch {
       next_id: 1,
       texts: Vec::new(),
       curves3d: Vec::new(),
+      behaviours: Behaviours::current(),
     }
   }
 
