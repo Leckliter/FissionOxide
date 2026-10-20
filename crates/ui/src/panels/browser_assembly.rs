@@ -15,6 +15,7 @@ pub(super) fn sections(app: &mut App, ui: &mut egui::Ui) {
   feature_folder(app, ui, "Motion Links", Icon::DriveJoint, |k| matches!(k, FeatureKind::MotionLink { .. }));
   contact_sets(app, ui);
   linked_components(app, ui);
+  feature_folder(app, ui, "Cams", Icon::DriveJoint, |k| matches!(k, FeatureKind::CamFollower { .. }));
 }
 
 /// What a feature row shows after its name.
@@ -25,6 +26,7 @@ fn detail(app: &App, kind: &FeatureKind) -> String {
     FeatureKind::JointOrigin { component, .. } => comp(*component),
     FeatureKind::RigidGroup { components, .. } => components.iter().map(|c| comp(*c)).collect::<Vec<_>>().join(", "),
     FeatureKind::MotionLink { leader, follower, .. } => format!("{} → {}", name(*leader), name(*follower)),
+    FeatureKind::CamFollower { cam, follower, .. } => format!("{} → {}", comp(*cam), name(*follower)),
     _ => String::new(),
   }
 }
@@ -34,6 +36,7 @@ fn bodies(app: &App, kind: &FeatureKind) -> Vec<Sel> {
   let comps = match kind {
     FeatureKind::JointOrigin { component, .. } => vec![*component],
     FeatureKind::RigidGroup { components, .. } => components.clone(),
+    FeatureKind::CamFollower { cam, .. } => vec![*cam],
     _ => Vec::new(),
   };
   comps
@@ -184,4 +187,39 @@ fn linked_components(app: &mut App, ui: &mut egui::Ui) {
       });
     }
   }
+}
+
+/// Components in browser order (each followed by its sub-components) with their depth.
+pub(super) fn component_tree(app: &App) -> Vec<(u32, usize)> {
+  let d = &app.s.design;
+  let mut out: Vec<(u32, usize)> = Vec::new();
+  fn walk(d: &fox_engine::model::Design, parent: Option<ComponentId>, depth: usize, out: &mut Vec<(u32, usize)>) {
+    for c in &d.components {
+      let p = c.parent.filter(|p| d.component(*p).is_some());
+      if p == parent && !out.iter().any(|(x, _)| *x == c.id.0) && depth < 64 {
+        out.push((c.id.0, depth));
+        walk(d, Some(c.id), depth + 1, out);
+      }
+    }
+  }
+  walk(d, None, 0, &mut out);
+  for c in &d.components {
+    if !out.iter().any(|(x, _)| *x == c.id.0) {
+      out.push((c.id.0, 0));
+    }
+  }
+  out
+}
+
+/// An inserted sub-assembly's rigid/flexible state, if `component` is one (or is in one).
+pub(super) fn flexible_of(app: &App, component: u32) -> Option<bool> {
+  app.s.design.features.iter().find_map(|f| match &f.kind {
+    FeatureKind::InsertDesign { sub: Some(sub), .. }
+      if sub.has_joints()
+        && (sub.top == Some(ComponentId(component)) || sub.components.iter().any(|c| c.id.0 == component)) =>
+    {
+      Some(sub.flexible)
+    }
+    _ => None,
+  })
 }

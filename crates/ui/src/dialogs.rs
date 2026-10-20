@@ -473,7 +473,8 @@ pub struct Dialog {
   manip: manip::Cache,
 }
 
-const CORNERS: [(&str, &str); 4] = [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap")];
+const CORNERS: [(&str, &str); 5] =
+  [("miter", "Miter"), ("open", "Open"), ("closed", "Closed"), ("overlap", "Overlap"), ("butt", "Butt")];
 const CORNER_RELIEFS: [(&str, &str); 4] =
   [("none", "None"), ("round", "Round"), ("square", "Square"), ("tear", "Tear")];
 
@@ -769,6 +770,7 @@ impl Dialog {
         d.angle = "0 deg".into();
         d.distance = "0 mm".into();
         d.origins = sel_origins(s);
+        d.e = "2 mm".into();
       }
       Kind::Material => d.name = "Steel".into(),
       Kind::SkFillet => d.radius = "2 mm".into(),
@@ -1121,6 +1123,9 @@ impl Dialog {
         }
         if self.saved[1].is_empty() {
           p["fixed"] = json!(fc);
+        }
+        if self.choice == "screw" {
+          p["lead"] = json!(self.e);
         }
         ("joint", p)
       }
@@ -2302,7 +2307,7 @@ impl Dialog {
       [("base", "Base (profile)"), ("edge", "Edge"), ("contour", "Contour (open path)")];
     const POSITIONS: [(&str, &str); 3] = [("adjacent", "Adjacent"), ("inside", "Inside"), ("outside", "Outside")];
     const RELIEFS: [(&str, &str); 3] = [("rectangular", "Rectangular"), ("round", "Round"), ("none", "None")];
-    const JOINTS: [(&str, &str); 7] = [
+    const JOINTS: [(&str, &str); 8] = [
       ("rigid", "Rigid"),
       ("revolute", "Revolute"),
       ("slider", "Slider"),
@@ -2310,6 +2315,7 @@ impl Dialog {
       ("pin_slot", "Pin-slot"),
       ("planar", "Planar"),
       ("ball", "Ball"),
+      ("screw", "Screw"),
     ];
     match self.kind {
       Kind::Loft => {
@@ -2636,6 +2642,9 @@ impl Dialog {
           ui.end_row();
         }
         Self::choose(ui, "Motion", "joint", &mut self.choice, &JOINTS, dirty);
+        if self.choice == "screw" {
+          Self::field(ui, "Lead (per turn)", &mut self.e, dirty);
+        }
         Self::field(ui, "Angle", &mut self.angle, dirty);
         Self::field(ui, "Offset", &mut self.distance, dirty);
         Self::check(ui, "Flip", &mut self.flip, dirty);

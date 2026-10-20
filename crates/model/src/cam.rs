@@ -13,7 +13,9 @@ use crate::regen::{Body, Model};
 use crate::{BodyId, FaceRef};
 
 pub mod adaptive;
+pub mod adaptive3d;
 pub mod arcs;
+pub mod finish3d;
 pub mod post;
 pub mod region;
 pub mod rest;
@@ -50,6 +52,12 @@ pub struct Setup {
   /// G-code in inches.
   #[serde(default)]
   pub imperial: bool,
+  /// Keep straight moves in G-code (no G2/G3 arcs fitted to the toolpaths).
+  #[serde(default)]
+  pub straight: bool,
+  /// How far an arc may stray from the moves it replaces (mm; 0 = 0.01).
+  #[serde(default)]
+  pub arc_tolerance: f64,
 }
 
 fn one() -> f64 {
@@ -94,6 +102,12 @@ pub struct Tool {
   pub flute_length: f64,
   #[serde(default)]
   pub flutes: u32,
+  /// Diameter of the tool holder (mm; 0 = no holder checks).
+  #[serde(default)]
+  pub holder_diameter: f64,
+  /// How far the tool sticks out of its holder, tip to holder face (mm).
+  #[serde(default)]
+  pub stickout: f64,
 }
 
 fn tip_angle() -> f64 {
@@ -241,6 +255,36 @@ pub enum OpKind {
     #[serde(default)]
     faces: Vec<FaceRef>,
   },
+  /// 3D adaptive roughing: the stock around the part cleared level by level, each level grown
+  /// in from the open side (or a helix in closed areas) by the step-over so the engagement
+  /// stays about constant; flat areas of the part get a level of their own.
+  Adaptive3d,
+  /// 3D pencil finishing: one pass along each concave corner and fillet tighter than the tool,
+  /// where it touches the part on two sides at once.
+  Pencil {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+  },
+  /// 3D steep and shallow finishing: contour (waterline) passes a step-down apart where the
+  /// part is steeper than `threshold` degrees, parallel rows a step-over apart where it isn't.
+  SteepShallow {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default = "threshold")]
+    threshold: f64,
+  },
+  /// 3D contour (waterline) finishing: closed passes at constant heights a step-down apart,
+  /// where the part is at least `min_slope` degrees steep.
+  Contour3d {
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    min_slope: f64,
+  },
+}
+
+fn threshold() -> f64 {
+  45.0
 }
 
 /// One move of a toolpath, in world coordinates.
@@ -533,6 +577,10 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
     }
     OpKind::Parallel { faces, angle } => surface::parallel(&mut p, setup, model, op, faces, *angle)?,
     OpKind::Scallop { faces } => surface::scallop(&mut p, setup, model, op, faces)?,
+    OpKind::Adaptive3d => adaptive3d::rough(&mut p, setup, model, op)?,
+    OpKind::Pencil { faces } => finish3d::pencil(&mut p, setup, model, op, faces)?,
+    OpKind::SteepShallow { faces, threshold } => finish3d::steep_shallow(&mut p, setup, model, op, faces, *threshold)?,
+    OpKind::Contour3d { faces, min_slope } => finish3d::contour(&mut p, setup, model, op, faces, *min_slope)?,
     OpKind::Drill { holes, peck } => {
       let mut found = Vec::new();
       let faces: Vec<(&Body, u32)> = if holes.is_empty() {
@@ -889,5 +937,6 @@ fn cylinder_span(b: &Body, face: u32) -> Option<(f64, f64, bool)> {
 pub fn gcode(setup: &Setup, paths: &[Toolpath], origin: DVec3) -> String {
   let post = post::find(&setup.post).unwrap_or(&post::POSTS[0]);
   let units = if setup.imperial { post::Units::Imperial } else { post::Units::Metric };
-  post::write(post, units, &setup.name, paths, origin)
+  let arcs = (!setup.straight).then_some(setup.arc_tolerance);
+  post::write_with(post, units, &setup.name, paths, origin, arcs)
 }

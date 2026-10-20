@@ -10,6 +10,7 @@
 
 pub mod archive;
 pub mod dxf;
+pub mod flatcheck;
 mod glb;
 pub mod nurbs;
 mod obj;

@@ -8,6 +8,7 @@
 mod assembly_forms;
 mod cam_ui;
 mod config_ui;
+mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
@@ -89,8 +90,8 @@ pub struct App {
   pub data: data_panel::DataPanel,
   /// The drawing open in the Drawing workspace; None = the Design workspace.
   pub drawing: Option<u32>,
-  /// The open drawing's rendered sheet, keyed by (design revision, drawing).
-  sheet_cache: Option<((u64, u32), Result<fox_engine::model::plot::Plot, String>)>,
+  /// The open drawing's rendered sheet, keyed by (design revision, drawing, sheet).
+  sheet_cache: Option<((u64, u32, u32), Result<fox_engine::model::plot::Plot, String>)>,
   /// Sheet zoom and pan in the Drawing workspace.
   sheet_view: (f32, egui::Vec2),
   /// What clicks and window selection pick: faces (default), edges, bodies or components.
@@ -124,6 +125,8 @@ pub struct App {
   pub(crate) manip: manipulators::State,
   /// The bodies as the open dialog found them, drawn as ghosts behind its preview.
   pub(crate) ghost: preview::Ghost,
+  /// The 2D cut window (laser, plasma, waterjet), while open.
+  pub cut_window: Option<cut_ui::CutWindow>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// A design being opened on another thread (the one the app was started with).
@@ -249,6 +252,7 @@ impl App {
       region: select::Region::default(),
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
+      cut_window: None,
       updates: updates::Updates::default(),
       opening: None,
     }
@@ -943,6 +947,7 @@ impl App {
     updates::window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
+    cut_ui::cut_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

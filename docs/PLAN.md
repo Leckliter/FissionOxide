@@ -71,7 +71,8 @@ recorded Fusion tutorials can be followed step by step.
    a die-opening calculator, and bend tables exported as CSV.
 3. **Sheet metal features:** lofted flanges, corner closure, and the flat pattern as an
    editable sketch.
-4. **G2/G3 arcs** in CAM output. *Done:* the posts fit arcs to runs of short moves.
+4. **G2/G3 arcs** in CAM output (done: arcs and helices are fitted to the toolpaths within a
+   tolerance, straight moves on request).
 
 *Done when* the sheet metal reference parts pass and their DXFs pass the validator.
 
@@ -105,26 +106,24 @@ First milestone: **sheet-metal part → flat pattern → nested sheet → DXF or
 | Phase | Item | State |
 |---|---|---|
 | 0 | Green build and CI | done: all 221 workspace tests pass on a fresh OpenCASCADE build |
-| 0 | Reference parts harness | done: **77 of 83 pass**, see [reference-parts.md](reference-parts.md) |
-| 0 | Edit checks | done: **44 of 44** checkable parts rebuild correctly when their first extrusion grows |
-| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds |
+| 0 | Reference parts harness | done: **83 of 83 pass**, see [reference-parts.md](reference-parts.md) |
+| 0 | Edit checks | done: **48 of 48** checkable parts rebuild correctly when their first extrusion grows; and **31 of 31** hand-written variants of 23 parts (`variants.json`: parameters, dimensions, dragged sketches, moved holes, fillet/chamfer/shell/sheet values) match closed-form answers, a from-scratch rebuild, and the original part once undone, see [reference-variants.md](reference-variants.md) |
+| 0 | Robustness fuzzing | done: 400 seeds (about 2,000 accepted steps) clean; it found an inside-out chamfer and a crash in OCCT's fillet, both fixed. CI runs 40 seeds. `fuzz_features.rs` adds patterns, edits of earlier features and parameters, and checks undo/redo and incremental against from-scratch regeneration after every step: it found booleans and shape repair changing cached bodies in place (undo and rollback gave back invalid bodies), fixed, and two more crashes inside OCCT, see [tests/fuzz](../tests/fuzz/README.md) |
 | 1 | Stable references | started: split edges and split faces keep their features on every piece, and a sketch stays on its face when an inserted feature cuts a gap under its pick point (both used to jump silently to a look-alike); `tests/edits.rs` covers these. Next: OCCT modification history |
+| 2 | Flat-pattern DXF | layers by role (`CUT`, `BEND_UP`, `BEND_DOWN`, `ETCH`, `NOTES`), bend notes and a `SHEET` note; validator `sheet.check_dxf` / `fissionoxide-cli check-dxf` (closed, unbranched contours, no duplicates, minimum feature size, holes clear of bends); the sheet metal reference DXFs pass it, except 74, whose slot (cut while flat) deliberately crosses a bend and is reported. Splines are still written as short lines |
+| 2 | Sheet metal corners | edge flange `butt` corners (SolidCraft's convention, case 69) and setbacks that trim an earlier flange's bend (case 75); corner references measured against Fusion still to come |
+| 3 | 2D cutting and machine posts (items 1, 2) | done: `fox-cut` crate, `cut.*` commands, `fissionoxide-cli cut`, 2D Cut window; posts not yet run on real machines |
 
 ### Reference part failures to fix
 
-Wrong results:
+Open:
 
-- **42** Where two patterned holes are exactly tangent, the plate has zero thickness along a line
-  and each hole wall stays split in two there (the edge joins four faces, so faces can't be
-  merged across it). Volume is right; low priority.
-- **69, 75** Sheet metal corners. Not bugs: these expected values follow SolidCraft's own corner
-  convention (walls stretched until their inner corners are a gap apart, open relief), which their
-  notes say. What matters is Fusion's corner and relief behaviour, which needs references measured
-  against Fusion before these cases mean anything.
+None open. Cases 69 and 75 follow SolidCraft's own sheet metal corner convention (walls stretched
+until their inner corners are a gap apart, open relief); corner references measured against Fusion
+are still to come.
 
-Missing options:
-
-- **78** A variable fillet whose radius runs down to zero (OpenCASCADE needs a radius above zero).
-- **80, 81** Fillet radius that follows the room available, and a radius given as B-spline
-  control values: SolidCraft options that Fusion doesn't have. Fusion's own variable fillet
-  (radii at points along the edge) is the version worth adding.
+Fixed in wave 3: **42** (hole walls split where a patterned hole is exactly tangent to another are
+merged again after the boolean; only shapes with an edge shared by more than two faces are touched),
+**69, 75** (sheet metal butt corners and setbacks, matching the reference convention), **78, 80, 81** (variable fillet with radii at points along the edge, Fusion's version, radii may be
+zero; 80's taper-to-fit and 81's B-spline radius law are given to it as radius points, 80 by hand
+since FissionOxide, like Fusion, has no taper-to-fit option).

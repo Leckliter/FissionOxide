@@ -1,0 +1,42 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "cut-moved",
+      "edits": [
+        {
+          "cmd": "sketch.transform",
+          "sketch": 3,
+          "translate": [
+            20,
+            0
+          ]
+        }
+      ],
+      "expected": {
+        "method": "cut slot moved +20 in x: two boxes 55x20x20 and 15x20x20",
+        "body_count": 2,
+        "volume_mm3": 28000.0,
+        "area_mm2": 7200,
+        "center_of_mass": [
+          37.142857143,
+          10.0,
+          10.0
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            80.0,
+            20.0,
+            20.0
+          ]
+        },
+        "faces": 12
+      }
+    }
+  ]
+}

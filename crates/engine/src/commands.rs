@@ -106,7 +106,7 @@ cmds! {
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
-  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono, explode?}";
+  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -207,28 +207,28 @@ cmds! {
   "component.rename" => "Rename a component", "{component, name}";
   "component.ground" => "Ground (fix) or unground a component", "{component, grounded?}";
   "component.material" => "Set a component's physical material (for mass and the BOM)", "{component, material}";
-  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
+  "joint" => "Joint: mate a moving component's origin to a fixed one; motion stays free to drive", "{moving, moving_origin: {face}|{edge}|{at, z?, x?}, fixed?, fixed_origin, kind?: rigid|revolute|slider|cylindrical|pin_slot|planar|ball|screw, lead? (screw: advance per turn), angle?, offset?, flip?, as_built?, rotation?, slide?, slide2?, pitch?, limits?: {rotation?: [min, max], slide?: [min, max]}}";
   "joint.drive" => "Set a joint's motion values", "{joint, rotation?, slide?, slide2?, pitch?}";
   "motion.study" => "Step a joint through a range and report interference at each step", "{joint, motion?: rotation|slide|slide2|pitch, from, to, steps?}";
   "assembly.interference" => "Overlapping bodies of different components", "{}";
-  "assembly.bom" => "Bill of materials: components, materials, volumes and masses", "{}";
+  "assembly.bom" => "Bill of materials: components, materials, volumes and masses; indented by sub-assembly level, top level only, or parts only", "{view?: indented|top|parts}";
   "drawing.create" => "New drawing with standard views (front, top, right, iso by default)", "{name?, views?: [front|back|top|bottom|left|right|iso | {section: x|y|z, offset, flip?} | {flat: body} | {detail: view, center: [x,y,z], radius, factor?}], sheet?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto, projection?: third_angle|first_angle, bodies?, auto_dimensions?}";
   "drawing.set" => "Change a drawing's sheet, scale, projection or auto dimensions", "{drawing?, sheet?, scale?, projection?, auto_dimensions?, parts_list?, rename?, standard?: asme|iso, auto_balloons?}";
-  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?}";
+  "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?, sheet?}";
   "drawing.remove_view" => "Remove a view", "{drawing?, view}";
-  "drawing.move_view" => "Place a view (sheet mm; null = automatic)", "{drawing?, view, at}";
+  "drawing.move_view" => "Place a view (sheet mm; null = automatic), or move it to another sheet", "{drawing?, view, at, sheet?}";
   "drawing.dimension" => "Dimension two model points in a view", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?}";
-  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text}";
+  "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text, sheet?}";
   "drawing.title" => "Fill in the title block", "{drawing?, title?, author?, part_number?, material?, revision?, company?}";
   "drawing.info" => "A drawing's views, scale and text", "{drawing?}";
   "drawing.list" => "List drawings", "{}";
   "drawing.delete" => "Delete a drawing", "{drawing?}";
-  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf", "{drawing?, path}";
+  "drawing.export" => "Write a drawing as .svg, .pdf or .dxf: every sheet (PDF pages, DXF side by side, name-N.svg files) or one", "{drawing?, path, sheet?}";
   "drawing.break" => "Broken view: leave a stretch of a view out (model mm along the view's horizontal or vertical); dimensions keep the true length", "{drawing?, view, from, to, direction?: horizontal|vertical, gap?: sheet mm}";
   "drawing.remove_breaks" => "Remove a view's breaks", "{drawing?, view}";
   "drawing.ordinate" => "Ordinate dimensions: distances of points from an origin along the view's horizontal or vertical", "{drawing?, view?, origin: [x,y,z], points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?}";
   "drawing.angle" => "Angular dimension at a vertex between the edges to two points", "{drawing?, view?, vertex: [x,y,z], a: [x,y,z], b: [x,y,z], radius?: sheet mm}";
-  "drawing.feature_control" => "GD&T feature control frame on a model point (per the drawing's standard)", "{drawing?, view?, point: [x,y,z], offset?: [x,y] sheet mm, characteristic: straightness|flatness|circularity|cylindricity|profile_of_line|profile_of_surface|angularity|perpendicularity|parallelism|position|concentricity|symmetry|circular_runout|total_runout, tolerance, diameter?, modifier?: none|mmc|lmc, datums?: [\"A\", ...]}";
+  "drawing.feature_control" => "GD&T feature control frame on a model point (per the drawing's standard)", "{drawing?, view?, point: [x,y,z], offset?: [x,y] sheet mm, characteristic: straightness|flatness|circularity|cylindricity|profile_of_line|profile_of_surface|angularity|perpendicularity|parallelism|position|concentricity|symmetry|circular_runout|total_runout, tolerance, diameter?, modifier?: none|mmc|lmc, datums?: [\"A\", ...], lower?: {tolerance, diameter?, modifier?, datums?} (composite frame)}";
   "drawing.datum" => "Datum feature identifier on a model point (next free letter by default)", "{drawing?, view?, point: [x,y,z], offset?: [x,y], label?}";
   "drawing.surface_finish" => "Surface texture symbol (Ra, µm) on a model point", "{drawing?, view?, point: [x,y,z], offset?: [x,y], roughness, process?: any|removal|no_removal}";
   "drawing.balloon" => "Balloon with a component's parts list item number (follows the parts list)", "{drawing?, view?, component: id|name, point?: [x,y,z], offset?: [x,y]}";
@@ -238,7 +238,7 @@ cmds! {
   "sheet.rule_remove" => "Delete an unused sheet metal rule", "{name}";
   "sheet.flange" => "Sheet metal flange from closed sketch profiles (a flat sheet of the rule's thickness)", "{sketch?, profiles?, rule?, flip?, operation?: new_body|join, targets?: [body] (bodies join/cut may change)}";
   "sheet.contour_flange" => "Sheet metal from an open sketch path: corners become bends, extruded by distance", "{sketch?, curves?: [id], distance, symmetric?, flip?, flip_direction?, rule?}";
-  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap}";
+  "sheet.edge_flange" => "Bend a flange up from straight sheet edges", "{edges: [{body, edge} | {point}], height, angle?, flip?, position?: adjacent|inside|outside, offset_start?, offset_end?, corners?: miter|open|closed|overlap|butt}";
   "sheet.hem" => "Fold sheet edges back 180° (flat hem)", "{edges: [{body, edge} | {point}], length, gap?, flip?}";
   "sheet.bend" => "Bend a flat sheet along a sketch line on one of its faces", "{sketch?, line: curve id, angle, flip?, flip_side?}";
   "sheet.convert" => "Turn a thin solid into sheet metal (thickness measured from the body); sharp corners become bends", "{body, face?: {body, face} | {point}, rule?, bends?}";
@@ -254,10 +254,10 @@ cmds! {
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
   "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular", "{edges, distance, mode?: natural|tangent|perpendicular}";
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
-  "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?}";
-  "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap}";
+  "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
+  "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
   "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
-  "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap, relief?: none|round|square|tear, relief_size?, rule?}";
+  "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
   "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, flip?, name?}";
   "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
   "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
@@ -292,6 +292,32 @@ cmds! {
   "hub.comments" => "Comments on an item's versions", "{item?, version?}";
   "hub.comment.delete" => "Delete a comment", "{item?, comment}";
   "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
+  "sheet.check_dxf" => "Check a flat pattern DXF (a file, or a sheet metal body's flat pattern) against shop rules: closed contours, no duplicates, minimum feature size, holes clear of bends", "{path? | body?, face?, min_feature?, hole_to_bend?}";
+  "sketch.fonts" => "Fonts sketch text can use: built in, and font files in the system's font folders (FOX_FONT_DIR first); a text's font may also be a font file's path", "{}";
+  "sketch.elliptical_arc" => "Elliptical arc: the ellipse from its centre, major axis end and minor radius, counter-clockwise from the point nearest start to the one nearest end", "{center, major: [x,y], minor, start: [x,y], end: [x,y]}";
+  "cam_follower" => "Cam motion: a joint's slide keeps its follower in contact with a cam component as the cam moves", "{cam: component | bodies: [body], follower: joint id or name, flat?: bool, clearance?, name?}";
+  "component.flexible" => "Solve an inserted sub-assembly's own joints in this design (flexible) or keep the source's positions (rigid)", "{component, flexible?: bool}";
+  "component.sub_joints" => "The joints inside an inserted sub-assembly, with their motions", "{component}";
+  "component.drive" => "Drive a joint inside a flexible inserted sub-assembly", "{component, joint: name, rotation?, slide?, slide2?, pitch?}";
+  "component.parent" => "Move a component into another one (a sub-assembly), or back to the top level", "{component, parent?: component | null}";
+  "drawing.add_sheet" => "Add a sheet to a drawing (its own size and scale, or the drawing's)", "{drawing?, name?, size?: a4..a0|letter|tabloid, scale?: \"1:2\"|0.5|auto}";
+  "drawing.set_sheet" => "Rename a sheet or change its size or scale", "{drawing?, sheet, name?, size?, scale?}";
+  "drawing.remove_sheet" => "Delete a sheet with its views and notes (a drawing keeps one)", "{drawing?, sheet}";
+  "drawing.baseline" => "Baseline dimensions: points measured from one origin along the view's horizontal or vertical, stacked", "{drawing?, view?, origin: [x,y,z], points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?, spacing?: sheet mm}";
+  "drawing.chain" => "Chain dimensions: consecutive distances between points on one line", "{drawing?, view?, points: [[x,y,z], ...] | \"x y z; ...\", orientation?: horizontal|vertical, offset?}";
+  "drawing.weld" => "Welding symbol on a joint (AWS A2.4 or ISO 2553 per the drawing's standard)", "{drawing?, view?, point: [x,y,z], kind: fillet|square|v|bevel|u|j|plug|spot|seam, side?: arrow|other|both, size?, length?: \"50\"|\"50-150\", all_around?, field?, tail?, offset?: [x,y]}";
+  "drawing.datum_target" => "Datum target (A1, B2, ...) on a model point; area > 0 for an area target", "{drawing?, view?, point: [x,y,z], label, area?: model mm, offset?: [x,y]}";
+  "drawing.revision" => "Add a row to the revision table (next letter by default)", "{drawing?, rev?, description?, date?, by?}";
+  "drawing.remove_revision" => "Remove a revision table row", "{drawing?, index}";
+  "cam.adaptive3d" => "3D adaptive roughing: clear the stock around the part level by level, growing in from the open side (or a helix) by the step-over so the engagement stays about constant; flat areas get a level of their own", "{setup?, tool_number? | tool | tool_diameter, stepover?: fraction (default 0.15), stepdown?, stock_to_leave? (default 0.3), entry?: helix|plunge, ramp_angle?, helix_diameter?}";
+  "cam.pencil" => "3D pencil finishing: a pass along each concave corner or fillet tighter than the tool", "{setup?, faces?, tool_number? | tool | tool_diameter, tool_kind?}";
+  "cam.steep_shallow" => "3D steep and shallow finishing: waterline passes a step-down apart on areas steeper than the threshold, parallel rows a step-over apart on the rest", "{setup?, faces?, threshold?: degrees (default 45), tool_number? | tool | tool_diameter, stepover?, stepdown?}";
+  "cam.contour3d" => "3D contour (waterline) finishing: passes at constant heights a step-down apart on areas at least min_slope steep", "{setup?, faces?, min_slope?: degrees, tool_number? | tool | tool_diameter, stepdown?}";
+  "cut.machines" => "Laser, plasma and waterjet machine profiles (built in, and the hub's machines.json) with their processes", "{}";
+  "cut.machine.add" => "Add or replace a machine profile in the hub: G-code templates and any number of processes", "{machine: {id, name, kind?: laser|plasma|waterjet|dxf, extension?, arcs?, header?, pierce?, off?, footer?, rapid?, line?, arc_cw?, arc_ccw?, max_power?, rapid_rate?, processes?: [{name, kerf?, feed?, power?, pierce_delay?, ...}]}}";
+  "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
+  "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
+  "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -321,6 +347,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::config::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::cut::run(s, name, p) {
     return r;
   }
   match name {
@@ -707,6 +736,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           radius2: opt_expr(p, "radius2"),
           setback: opt_expr(p, "setback"),
           chord: p.get("chord").and_then(Value::as_bool).unwrap_or(false),
+          radii: crate::fillet::radius_points(p)?,
         },
       )
     }
@@ -1135,6 +1165,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.break"
     | "sketch.tangent_circle"
     | "sketch.blend" => sketch_tools::run(s, name, p),
+    "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -1558,7 +1589,7 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(path);
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
-      "dxf" => std::fs::write(&path, fox_model::sheet::flat_dxf(&flat).map_err(CmdError::new)?)?,
+      "dxf" => std::fs::write(&path, crate::sheet2::flat_dxf(body, &flat)?)?,
       "step" | "stp" => fox_kernel::write_step([&flat.shape], &path)?,
       "stl" => fox_kernel::write_stl(&[flat.shape.tessellate(0.02)?], &path)?,
       o => return Err(CmdError::new(format!("unknown flat pattern format '.{o}' (dxf, step, stl)"))),
@@ -2742,3 +2773,5 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
 }
 
 mod sketch_tools;
+
+mod sketch_curves;

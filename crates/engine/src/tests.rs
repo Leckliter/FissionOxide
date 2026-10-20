@@ -207,7 +207,7 @@ fn sheet_metal_with_commands() {
   assert!((a - 80.0).abs() < 1e-3 && (b - width).abs() < 1e-3, "{flat} {width}");
   let text = std::fs::read_to_string(&dxf).unwrap();
   let _ = std::fs::remove_file(&dxf);
-  assert!(text.contains("BEND_") && text.contains("OUTLINE"));
+  assert!(text.contains("BEND_") && text.contains("CUT"));
   // unfold in the timeline; the rule still drives the folded part underneath
   let r = run(&mut s, "sheet.unfold", json!({}));
   assert!(r["error"].is_null(), "{r}");

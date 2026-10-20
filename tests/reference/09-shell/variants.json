@@ -1,0 +1,81 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "thickness-3",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 3,
+          "set": {
+            "thickness": "3"
+          }
+        }
+      ],
+      "expected": {
+        "method": "shell 2 -> 3: 50x40x30 box minus cavity [3,47]x[3,37]x[3,30]",
+        "body_count": 1,
+        "volume_mm3": 19608.0,
+        "area_mm2": 13612,
+        "center_of_mass": [
+          25.0,
+          20.0,
+          11.91003672
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            50.0,
+            40.0,
+            30.0
+          ]
+        },
+        "faces": 11
+      }
+    },
+    {
+      "name": "height-40",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "40"
+            }
+          }
+        }
+      ],
+      "note": "the shell picks its open face by a point on the 30 mm box's top; the face has to follow the edit",
+      "expected": {
+        "method": "extrude 30 -> 40 under the shell: 50x40x40 box shelled 2 with the top open",
+        "body_count": 1,
+        "volume_mm3": 17072.0,
+        "area_mm2": 17432,
+        "center_of_mass": [
+          25.0,
+          20.0,
+          16.313964386
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            50.0,
+            40.0,
+            40.0
+          ]
+        },
+        "faces": 11
+      }
+    }
+  ]
+}

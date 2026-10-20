@@ -307,6 +307,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cavalier_contours"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85e06038a969c5e4d93565f12b044814d3b1a48d50c4ef868d588e79956fea51"
+dependencies = [
+ "ahash",
+ "num-traits",
+ "smallvec",
+ "static_aabb2d_index",
+]
+
+[[package]]
 name = "cc"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1009,6 +1021,15 @@ name = "fox-brand"
 version = "0.1.0"
 
 [[package]]
+name = "fox-cut"
+version = "0.1.0"
+dependencies = [
+ "cavalier_contours",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fox-desktop"
 version = "0.1.0"
 dependencies = [
@@ -1023,6 +1044,8 @@ dependencies = [
 name = "fox-engine"
 version = "0.1.0"
 dependencies = [
+ "epaint_default_fonts",
+ "fox-cut",
  "fox-exchange",
  "fox-expr",
  "fox-kernel",
@@ -2908,6 +2931,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "static_aabb2d_index"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a753368e4dd146a347d0ea692f0f8a37df18df7eee5659d36dd75eb287c6454"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

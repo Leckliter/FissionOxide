@@ -1,0 +1,40 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "length-80",
+      "edits": [
+        {
+          "cmd": "sketch.set_dimension",
+          "sketch": 1,
+          "constraint": 20,
+          "value": "80"
+        }
+      ],
+      "expected": {
+        "method": "the 60 mm dimension set to 80: L (0,0)-(80,0)-(80,8)-(8,8)-(8,40)-(0,40) extruded 20",
+        "body_count": 1,
+        "volume_mm3": 17920,
+        "area_mm2": 6592,
+        "center_of_mass": [
+          29.714285714,
+          9.714285714,
+          10.0
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            80.0,
+            40.0,
+            20.0
+          ]
+        },
+        "faces": 8
+      }
+    }
+  ]
+}

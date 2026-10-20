@@ -14,6 +14,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "cam.face" | "cam.pocket" | "cam.contour" | "cam.drill" | "cam.adaptive" | "cam.parallel" | "cam.scallop" => {
       operation(s, name, p)
     }
+    "cam.adaptive3d" | "cam.pencil" | "cam.steep_shallow" | "cam.contour3d" => operation(s, name, p),
     "cam.generate" => generate(s, p),
     "cam.post" => post(s, p),
     "cam.list" => Ok(json!(
@@ -115,6 +116,8 @@ fn setup(s: &mut Session, p: &Value) -> CmdResult {
     operations: Vec::new(),
     post: post_of(p)?.unwrap_or_default(),
     imperial: imperial_of(p)?.unwrap_or(false),
+    straight: p.get("arcs").is_some() && !flag(p, "arcs"),
+    arc_tolerance: num(p, "arc_tolerance", 0.0).max(0.0),
   };
   let (lo, hi) = cam::stock(&st, &s.model).map_err(CmdError::new)?;
   s.edit(|d| {
@@ -142,6 +145,7 @@ fn tool_json(t: &Tool) -> Value {
     "number": t.number, "name": t.name, "kind": t.kind.id(), "diameter": t.diameter,
     "corner_radius": t.corner_radius, "angle": t.angle, "tip_diameter": t.tip_diameter,
     "flute_length": t.flute_length, "flutes": t.flutes, "rpm": t.rpm, "feed": t.feed, "plunge": t.plunge,
+    "holder_diameter": t.holder_diameter, "stickout": t.stickout,
     "description": t.describe(),
   })
 }
@@ -169,6 +173,8 @@ fn tool_fields(t: &Value, base: Tool) -> Result<Tool, CmdError> {
     rpm: num(t, "rpm", base.rpm),
     feed: num(t, "feed", base.feed),
     plunge: num(t, "plunge", base.plunge),
+    holder_diameter: num(t, "holder_diameter", base.holder_diameter),
+    stickout: num(t, "stickout", base.stickout),
     ..base
   };
   tool.check().map_err(CmdError::new)?;
@@ -302,6 +308,12 @@ fn operation(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "cam.parallel" => OpKind::Parallel { faces: faces_of(s, p, "faces")?, angle: num(p, "angle", 0.0) },
     "cam.scallop" => OpKind::Scallop { faces: faces_of(s, p, "faces")? },
+    "cam.adaptive3d" => OpKind::Adaptive3d,
+    "cam.pencil" => OpKind::Pencil { faces: faces_of(s, p, "faces")? },
+    "cam.steep_shallow" => {
+      OpKind::SteepShallow { faces: faces_of(s, p, "faces")?, threshold: num(p, "threshold", 45.0) }
+    }
+    "cam.contour3d" => OpKind::Contour3d { faces: faces_of(s, p, "faces")?, min_slope: num(p, "min_slope", 0.0) },
     _ => OpKind::Drill { holes: faces_of(s, p, "holes")?, peck: num(p, "peck", 0.0) },
   };
   let label = match name {
@@ -311,14 +323,22 @@ fn operation(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "cam.adaptive" => "2D Adaptive",
     "cam.parallel" => "Parallel",
     "cam.scallop" => "Scallop",
+    "cam.adaptive3d" => "Adaptive",
+    "cam.pencil" => "Pencil",
+    "cam.steep_shallow" => "Steep and Shallow",
+    "cam.contour3d" => "Contour",
     _ => "Drill",
   };
   // adaptive clearing takes light, deep cuts and spirals in by default
   let (stepover, stepdown, entry) = match name {
     "cam.adaptive" => (0.1, 10.0, Entry::Helix),
-    "cam.parallel" | "cam.scallop" => (0.1, 2.0, Entry::Plunge),
+    "cam.parallel" | "cam.scallop" | "cam.pencil" => (0.1, 2.0, Entry::Plunge),
+    "cam.adaptive3d" => (0.15, 3.0, Entry::Helix),
+    "cam.steep_shallow" | "cam.contour3d" => (0.1, 0.5, Entry::Plunge),
     _ => (0.4, 2.0, Entry::Plunge),
   };
+  // roughing leaves some for finishing
+  let stock_to_leave = if name == "cam.adaptive3d" { 0.3 } else { 0.0 };
   let entry = match opt_str(p, "entry").filter(|e| !e.trim().is_empty()) {
     Some(e) => Entry::parse(e).ok_or_else(|| CmdError::new(format!("unknown entry '{e}' (plunge, ramp, helix)")))?,
     None => entry,
@@ -330,7 +350,7 @@ fn operation(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     tool,
     stepover: num(p, "stepover", stepover),
     stepdown: num(p, "stepdown", stepdown),
-    stock_to_leave: num(p, "stock_to_leave", 0.0),
+    stock_to_leave: num(p, "stock_to_leave", stock_to_leave),
     entry,
     ramp_angle: num(p, "ramp_angle", 5.0),
     helix_diameter: num(p, "helix_diameter", 0.0),
@@ -383,6 +403,12 @@ fn post(s: &mut Session, p: &Value) -> CmdResult {
   if let Some(imperial) = imperial_of(p)? {
     st.imperial = imperial;
   }
+  if p.get("arcs").is_some() {
+    st.straight = !flag(p, "arcs");
+  }
+  if p.get("arc_tolerance").is_some() {
+    st.arc_tolerance = num(p, "arc_tolerance", 0.0).max(0.0);
+  }
   let paths = cam::toolpaths(&st, &s.model).map_err(CmdError::new)?;
   if paths.is_empty() {
     return Err(CmdError::new("the setup has no operations"));
@@ -391,12 +417,16 @@ fn post(s: &mut Session, p: &Value) -> CmdResult {
   let code = cam::gcode(&st, &paths, origin);
   let used = cam::post::find(&st.post).map(|p| p.id).unwrap_or("fanuc");
   let units = if st.imperial { "inch" } else { "mm" };
+  let arcs = code
+    .lines()
+    .filter(|l| l.starts_with("G2 ") || l.starts_with("G3 ") || l.starts_with("G02 ") || l.starts_with("G03 "))
+    .count();
   match opt_str(p, "path") {
     Some(path) => {
       std::fs::write(path, &code)?;
-      Ok(json!({"path": path, "lines": code.lines().count(), "post": used, "units": units}))
+      Ok(json!({"path": path, "lines": code.lines().count(), "post": used, "units": units, "arcs": arcs}))
     }
-    None => Ok(json!({"gcode": code, "post": used, "units": units})),
+    None => Ok(json!({"gcode": code, "post": used, "units": units, "arcs": arcs})),
   }
 }
 

@@ -27,6 +27,10 @@ pub struct Component {
   /// Physical material (see [`MATERIALS`]); empty = steel.
   #[serde(default)]
   pub material: String,
+  /// The component this one belongs to (sub-assemblies); `None` = the top level. Joints that
+  /// move a component move everything below it.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub parent: Option<ComponentId>,
 }
 
 /// Physical materials: name and density in g/cm³.
@@ -69,6 +73,8 @@ pub enum JointKind {
   Planar,
   /// Rotates about Z and tilts about X.
   Ball,
+  /// Rotates about Z, and slides along Z by the joint's lead per turn (a leadscrew or bolt).
+  Screw,
 }
 
 impl JointKind {
@@ -81,6 +87,8 @@ impl JointKind {
       JointKind::Cylindrical | JointKind::PinSlot => (true, true, false, false),
       JointKind::Planar => (true, true, true, false),
       JointKind::Ball => (true, false, false, true),
+      // the slide follows the rotation (see `screw_slide`)
+      JointKind::Screw => (true, true, false, false),
     }
   }
 }
@@ -209,6 +217,12 @@ impl Motion {
   }
 }
 
+/// How far a screw joint advances along its axis for a rotation (rad), given its lead (the
+/// advance per full turn; negative = left-handed).
+pub fn screw_slide(rotation: f64, lead: f64) -> f64 {
+  rotation / std::f64::consts::TAU * lead
+}
+
 /// Where the moving component goes: the transform taking its bodies from where they are to their
 /// jointed position.
 pub fn joint_transform(
@@ -272,7 +286,8 @@ impl MotionAxis {
     let (rot, sl, sl2, pitch) = kind.freedoms();
     match self {
       MotionAxis::Rotation => rot,
-      MotionAxis::Slide => sl,
+      // a screw's slide isn't free: its rotation sets it
+      MotionAxis::Slide => sl && kind != JointKind::Screw,
       MotionAxis::Slide2 => sl2,
       MotionAxis::Pitch => pitch,
     }

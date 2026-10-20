@@ -8,6 +8,7 @@ use fox_store::{ItemKind, Store};
 use serde_json::{Map, Value, json};
 
 use crate::commands::{expr_of, ids, opt_expr, opt_str, req_str, req_u32};
+use crate::subassembly::Source;
 use crate::{CmdError, CmdResult, Session, hub};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -83,11 +84,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       })?;
       Ok(json!({}))
     })(),
-    _ => return None,
+    _ => return crate::subassembly::run(s, name, p),
   })
 }
 
-fn feature_json(s: &Session, id: FeatureId) -> Value {
+pub(crate) fn feature_json(s: &Session, id: FeatureId) -> Value {
   json!({
     "feature": id.0,
     "name": s.design.feature(id).map(|f| f.name.clone()),
@@ -96,7 +97,7 @@ fn feature_json(s: &Session, id: FeatureId) -> Value {
 }
 
 /// Optional `name` for a new feature.
-fn rename(s: &mut Session, id: FeatureId, p: &Value) -> Result<(), CmdError> {
+pub(crate) fn rename(s: &mut Session, id: FeatureId, p: &Value) -> Result<(), CmdError> {
   if let Some(n) = opt_str(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
     let n = n.to_string();
     s.edit(|d| {
@@ -110,7 +111,7 @@ fn rename(s: &mut Session, id: FeatureId, p: &Value) -> Result<(), CmdError> {
 }
 
 /// `components: [id]`, or the components of `bodies: [id]` (in pick order, no repeats).
-fn components_of(s: &Session, p: &Value) -> Result<Vec<ComponentId>, CmdError> {
+pub(crate) fn components_of(s: &Session, p: &Value) -> Result<Vec<ComponentId>, CmdError> {
   let mut out = Vec::new();
   for c in ids(p, "components") {
     let id = ComponentId(c);
@@ -135,7 +136,12 @@ fn contact_set_id(s: &Session, p: &Value) -> Result<u32, CmdError> {
 }
 
 /// A feature of the given kind by id or name.
-fn feature_by(s: &Session, v: Option<&Value>, what: &str, ok: fn(&FeatureKind) -> bool) -> Result<FeatureId, CmdError> {
+pub(crate) fn feature_by(
+  s: &Session,
+  v: Option<&Value>,
+  what: &str,
+  ok: fn(&FeatureKind) -> bool,
+) -> Result<FeatureId, CmdError> {
   let v = v.ok_or(CmdError::new(format!("missing '{what}'")))?;
   let f = match v {
     Value::String(n) => s.design.features.iter().find(|f| f.name == *n),
@@ -314,8 +320,9 @@ pub(crate) fn last_clear(trial: &mut Trial, from: &[(String, f64)], to: &[(Strin
 
 // ---- inserted designs ----
 
-/// The bodies of a hub design version, as BRep text, with its first physical material.
-fn source_bodies(st: &Store, item: &str, version: u32) -> Result<(Vec<String>, String), CmdError> {
+/// The bodies of a hub design version, as BRep text, with its first physical material and its
+/// assembly structure.
+fn source_bodies(st: &Store, item: &str, version: u32) -> Result<(Vec<String>, String, Source), CmdError> {
   let it = st.item(item)?;
   if it.kind != ItemKind::Design {
     return Err(CmdError::new(format!("{} is a file, not a design; open it and save it as a design first", it.name)));
@@ -331,7 +338,8 @@ fn source_bodies(st: &Store, item: &str, version: u32) -> Result<(Vec<String>, S
     return Err(CmdError::new(format!("{} v{version} has no bodies", it.name)));
   }
   let material = src.design.components.iter().map(|c| c.material.clone()).find(|m| !m.is_empty()).unwrap_or_default();
-  Ok((breps, material))
+  let structure = Source::of(&src)?;
+  Ok((breps, material, structure))
 }
 
 /// Body ids an insert feature gives its bodies (see `new_body` in the regeneration).
@@ -348,7 +356,7 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
     None => item.latest().map(|v| v.number).ok_or(CmdError::new("the item has no versions"))?,
   };
   item.version(version).ok_or(CmdError::new(format!("{} has no version {version}", item.name)))?;
-  let (breps, material) = source_bodies(&st, &item.id, version)?;
+  let (breps, material, structure) = source_bodies(&st, &item.id, version)?;
   let t = match p.get("translate").and_then(Value::as_array) {
     Some(a) if a.len() == 3 => [expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?],
     Some(_) => return Err(CmdError::new("translate needs [x, y, z]")),
@@ -359,11 +367,13 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let n = breps.len();
   let source = linked.then(|| HubSource { item: item.id.clone(), version });
   let (fid, cid) = s.edit(|d| {
-    let fid = d.add_feature(FeatureKind::InsertDesign { name: name.clone(), source, breps, translate: t })?;
+    let fid =
+      d.add_feature(FeatureKind::InsertDesign { name: name.clone(), source, breps, translate: t, sub: None })?;
     let cid = d.add_component(&name, insert_bodies(fid, n))?;
     if let Some(c) = d.component_mut(cid) {
       c.material = material;
     }
+    structure.attach(d, fid, cid)?;
     Ok((fid, cid))
   })?;
   let mut out = feature_json(s, fid);
@@ -377,11 +387,18 @@ fn has_inserts(d: &Design) -> bool {
   d.features.iter().any(|f| matches!(f.kind, FeatureKind::InsertDesign { .. }))
 }
 
-/// The insert feature that made a component's bodies.
+/// The insert feature that made a component (not one of its sub-assembly's components).
 pub(crate) fn insert_of(d: &Design, c: ComponentId) -> Option<FeatureId> {
+  if let Some(f) = crate::subassembly::insert_with_top(d, c) {
+    return Some(f);
+  }
   let b = d.component(c)?.bodies.first()?;
   let fid = FeatureId(b.0 / 1000);
-  matches!(d.feature(fid)?.kind, FeatureKind::InsertDesign { .. }).then_some(fid)
+  match &d.feature(fid)?.kind {
+    FeatureKind::InsertDesign { sub: Some(sub), .. } if sub.components.iter().any(|x| x.id == c) => None,
+    FeatureKind::InsertDesign { .. } => Some(fid),
+    _ => None,
+  }
 }
 
 /// The inserted component's feature from `component`.
@@ -445,7 +462,7 @@ fn update_links(s: &mut Session, p: &Value) -> CmdResult {
     }
     let item = l["item"].as_str().unwrap_or_default().to_string();
     let latest = l["latest"].as_u64().unwrap_or(0) as u32;
-    let (breps, _) = source_bodies(&st, &item, latest)?;
+    let (breps, _, structure) = source_bodies(&st, &item, latest)?;
     let cid = ComponentId(l["component"].as_u64().unwrap_or(0) as u32);
     let n = breps.len();
     s.edit(|d| {
@@ -462,6 +479,7 @@ fn update_links(s: &mut Session, p: &Value) -> CmdResult {
       if let Some(c) = d.component_mut(cid) {
         c.bodies = bodies;
       }
+      structure.attach(d, fid, cid)?;
       Ok(())
     })?;
     updated.push(json!({"component": cid.0, "version": latest}));

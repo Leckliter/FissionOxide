@@ -1,0 +1,38 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "thickness-2",
+      "edits": [
+        {
+          "cmd": "param.set",
+          "name": "sm_thickness",
+          "expr": "2 mm"
+        }
+      ],
+      "expected": {
+        "method": "rule thickness 3 -> 2: base, R2..4 bend, flange to z 20",
+        "body_count": 1,
+        "volume_mm3": 15342.477796076937,
+        "area_mm2": 16049.327351998476,
+        "center_of_mass": [
+          50.0,
+          23.69260359,
+          3.356905267
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            100.0,
+            60.0,
+            20.0
+          ]
+        }
+      }
+    }
+  ]
+}
