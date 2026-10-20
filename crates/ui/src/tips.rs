@@ -219,7 +219,7 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Click the two lines, then set a distance for each. The first distance goes on the first line you \
        pick.",
     ),
-    (_, "Distance-Angle Chamfer") => (
+    (_, "Distance and Angle Chamfer") => (
       "Bevels a sketch corner by a distance and an angle.",
       "Click the two lines, then set the distance along the first one and the angle of the bevel from \
        it. Use it when a drawing gives the chamfer as, say, 2 mm at 30 degrees.",
