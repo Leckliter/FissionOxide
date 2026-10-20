@@ -1,11 +1,12 @@
 # 206-sketch-line-sweep-path: added by the parity loop from a Fusion probe
-# A sketch on XZ holds a line from world (0,0,0) to (0,0,30); Fusion includes it into an XY sketch
-# (Include 3D Geometry) beside a r5 circle and sweeps the circle along it. Fox has no include, so
-# the sweep takes the XZ sketch's line as its path directly: a r5 x 30 cylinder.
+# A sketch on XZ holds a line from world (0,0,0) to (0,0,30); a sketch on XY includes that sketch
+# line (Include 3D Geometry of a sketch curve: it stays a 3D line along Z) beside a r5 circle at
+# the origin, and the circle is swept along the included line: a r5 x 30 cylinder.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [0, 30]]}
 {"cmd": "sketch.finish"}
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.include", "curves": [{"sketch": 1, "curve": 2}]}
 {"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
 {"cmd": "sketch.finish"}
-{"cmd": "sweep", "sketch": 2, "path": 1, "operation": "new_body"}
+{"cmd": "sweep", "sketch": 2, "path": 2, "path_curves": [1], "operation": "new_body"}

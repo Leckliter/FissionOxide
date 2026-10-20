@@ -567,7 +567,7 @@ const SK_SPLINE: &[E] = &[
 const SK_PROJECT: &[E] = &[
   c("Project", Icon::Project, D(Kind::Project)).k("P"),
   x("Intersect", Icon::Intersect),
-  x("Include 3D Geometry", Icon::Include3D),
+  c("Include 3D Geometry", Icon::Include3D, D(Kind::Form(&forms::SK_INCLUDE))),
   x("Project To Surface", Icon::ProjectSurface),
 ];
 
