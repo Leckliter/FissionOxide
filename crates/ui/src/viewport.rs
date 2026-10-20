@@ -1004,7 +1004,8 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
         | CurveKind::ControlSpline { .. }
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. },
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. },
       )
       | None => return,
     },

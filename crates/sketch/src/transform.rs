@@ -177,6 +177,10 @@ impl Sketch {
           start: pt(self, *start)?,
           end: pt(self, *end)?,
         },
+        // a rational curve's weights survive affine maps: rho stays
+        CurveKind::Conic { start, end, apex, rho } => {
+          CurveKind::Conic { start: pt(self, *start)?, end: pt(self, *end)?, apex: pt(self, *apex)?, rho: *rho }
+        }
       };
       let id = self.add_curve(kind)?;
       if c.construction {

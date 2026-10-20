@@ -584,7 +584,8 @@ pub fn curve_polyline(sk: &Sketch, kind: &CurveKind) -> Vec<[f64; 2]> {
     CurveKind::Spline { .. }
     | CurveKind::ControlSpline { .. }
     | CurveKind::Bezier { .. }
-    | CurveKind::EllipticalArc { .. } => {
+    | CurveKind::EllipticalArc { .. }
+    | CurveKind::Conic { .. } => {
       let bz = sk.kind_beziers(kind);
       let mut out = Vec::new();
       for b in &bz {
