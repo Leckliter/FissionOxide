@@ -450,7 +450,7 @@ impl Frame {
 /// [`Mesh::analyze`]) at their lowest point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Effects {
-  /// The bodies' outline, from straight above, darkened on the ground.
+  /// The bodies' outline cast onto the ground by a light high above, darkened.
   pub ground_shadow: bool,
   /// The bodies mirrored under a glossy ground.
   pub reflections: bool,
@@ -504,16 +504,18 @@ impl Effects {
       let z = z0 - lift;
       let corners = vec![[c.x - e, c.y - e, z], [c.x + e, c.y - e, z], [c.x + e, c.y + e, z], [c.x - e, c.y + e, z]];
       // over the reflections the ground is nearly opaque, so they read as a sheen
-      let alpha = if self.reflections { 200 } else { 90 };
-      added.push(flat(corners, vec![0, 1, 2, 0, 2, 3], [214, 218, 224, alpha]));
+      let color = if self.reflections { [222, 226, 232, 190] } else { [190, 196, 205, 100] };
+      added.push(flat(corners, vec![0, 1, 2, 0, 2, 3], color));
     }
     if self.ground_shadow {
-      let hull = convex_hull(pts().map(|p| [p[0], p[1]]).collect());
+      // the light leans a little, so a body's sides cast some shadow beside its footprint
+      let (sx, sy) = (0.35, 0.25);
+      let hull = convex_hull(pts().map(|p| [p[0] + (p[2] - z0) * sx, p[1] + (p[2] - z0) * sy]).collect());
       if hull.len() >= 3 {
         let z = z0 - lift * 0.5;
         let positions: Vec<[f32; 3]> = hull.iter().map(|p| [p[0], p[1], z]).collect();
         let indices = (1..hull.len() as u32 - 1).flat_map(|i| [0, i, i + 1]).collect();
-        added.push(flat(positions, indices, [40, 44, 52, 70]));
+        added.push(flat(positions, indices, [40, 44, 52, 90]));
       }
     }
     scene.meshes.extend(added);
@@ -676,8 +678,8 @@ fn draw_hidden(f: &mut Frame, l: &Polyline, vp: &DMat4) {
   hidden.dedup();
   for i in hidden {
     if let Some(p) = f.rgba.get_mut(i * 4..i * 4 + 4) {
-      for k in 0..3 {
-        p[k] = ((l.color[k] as u32 * alpha + p[k] as u32 * (255 - alpha)) / 255) as u8;
+      for (c, ink) in p.iter_mut().zip(l.color).take(3) {
+        *c = ((ink as u32 * alpha + *c as u32 * (255 - alpha)) / 255) as u8;
       }
     }
   }
@@ -1118,7 +1120,9 @@ mod tests {
       let i = ((y * f.width + x) * 4) as usize;
       [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]]
     };
-    let y = (0..f.height).min_by_key(|&y| px(100, y).iter().map(|&c| c as u32).sum::<u32>()).unwrap_or(50);
+    // the rows the edge covers: the one with the most ink
+    let ink = |y: u32| (85..115).map(|x| px(x, y).iter().map(|&c| 255 - c as u32).sum::<u32>()).sum::<u32>();
+    let y = (45..55).max_by_key(|&y| ink(y)).unwrap_or(50);
     ((85..115).map(|x| px(x, y)).collect(), px(100, 40))
   }
 
@@ -1148,7 +1152,7 @@ mod tests {
     assert!(row.iter().all(|c| *c == [255, 255, 255]), "{row:?}");
     // wireframe, hidden edges: the hidden edge is faint and dashed
     let (row, _) = row_and_face(&styled(VisualStyle::WireframeHiddenEdges));
-    assert!(row.iter().any(faint) && row.iter().any(|c| *c == [255, 255, 255]), "{row:?}");
+    assert!(row.iter().any(faint) && row.contains(&[255, 255, 255]), "{row:?}");
     assert!(row.iter().all(|c| !dark(c)));
   }
 

@@ -434,11 +434,11 @@ mod tests {
     let t = Triad::world(DVec3::new(10.0, 0.0, 0.0));
     // grab the X arrow at x = 30 and drag to x = 41.3: moves 11.3, snapped to 0.5 → 11.5
     let mut d = TriadDrag::begin(t, Handle::Arrow(0), DVec3::new(30.0, 0.0, 50.0), DVec3::NEG_Z).unwrap();
-    let e = d.update(DVec3::new(41.3, 6.0, 50.0), DVec3::NEG_Z, 0.5).unwrap();
+    let e = d.update(DVec3::new(41.3, 6.0, 50.0), DVec3::NEG_Z, 0.5, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(21.5, 0.0, 0.0)));
     // the XY planar handle (across Z) follows the pointer in both directions
     let mut d = TriadDrag::begin(t, Handle::Plane(2), DVec3::new(12.0, 2.0, 50.0), DVec3::NEG_Z).unwrap();
-    let e = d.update(DVec3::new(15.0, -4.0, 50.0), DVec3::NEG_Z, 1.0).unwrap();
+    let e = d.update(DVec3::new(15.0, -4.0, 50.0), DVec3::NEG_Z, 1.0, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(13.0, -6.0, 0.0)));
   }
 

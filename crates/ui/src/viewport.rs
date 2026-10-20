@@ -242,6 +242,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     h: ((rect.height() * ppp).round() as u32).max(1),
   };
 
+  // a navigation drag that ends this frame (Zoom Window turns its mode off) isn't a click
+  let navigating = app.nav_mode.is_some();
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
   let planes = plane_pick(app, &resp, &view);
@@ -304,7 +306,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     && let Some(p) = resp.interact_pointer_pos()
   {
     crate::marking::open(app, p);
-  } else if !consumed && app.nav_mode.is_none() && app.marking.is_none() {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
@@ -385,7 +387,10 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
       }
       Drag::ZoomWindow { start, now } => {
-        if let Some(to) = zoom_window(&app.cam, view, Rect::from_two_pos(start, now)) {
+        let bx = Rect::from_two_pos(start, now);
+        let (o, d) = view.ray(&app.cam, bx.center());
+        let hit = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|(t, _)| o + d * *t);
+        if let Some(to) = zoom_window(&app.cam, view, bx, hit) {
           app.fly_to(to);
         }
         // one box, as in Fusion
@@ -565,19 +570,25 @@ fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<
   Some((p, None))
 }
 
-/// Zoom Window: the camera that fills the view with `bx` (screen points), centred on it; None for
-/// a box too small to mean anything.
-fn zoom_window(cam: &render::Camera, view: &View, bx: Rect) -> Option<render::Camera> {
+/// Zoom Window: the camera that fills the view with `bx` (screen points), centred on it: on `hit`
+/// (the model under the box's centre) when given, else on the target's depth. None for a box too
+/// small to mean anything.
+fn zoom_window(cam: &render::Camera, view: &View, bx: Rect, hit: Option<DVec3>) -> Option<render::Camera> {
   if bx.width() < 4.0 || bx.height() < 4.0 || view.rect.width() < 1.0 || view.rect.height() < 1.0 {
     return None;
   }
   let (o, d) = view.ray(cam, bx.center());
   let (_, _, back) = cam.basis();
-  let centre = ray_plane(o, d, DVec3::from(cam.target), back)?;
+  let centre = match hit {
+    Some(h) => h,
+    None => ray_plane(o, d, DVec3::from(cam.target), back)?,
+  };
+  // the box spans this much of the view at the centre's depth
+  let depth = (cam.eye() - centre).dot(back).max(1e-3);
   let k = (bx.width() / view.rect.width()).max(bx.height() / view.rect.height()) as f64;
   let mut to = *cam;
   to.target = centre.to_array();
-  to.distance = (cam.distance * k).clamp(1e-3, 1e7);
+  to.distance = if cam.ortho { cam.distance * k } else { depth * k }.clamp(1e-3, 1e7);
   Some(to)
 }
 
@@ -2468,6 +2479,29 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 mod tests {
   use super::*;
   use fox_engine::Session;
+
+  #[test]
+  fn zoom_window_fills_the_view_with_the_box() {
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0)), ppp: 1.0, w: 400, h: 200 };
+    let mut cam = render::Camera { distance: 100.0, ..render::Camera::default() };
+    cam.set_view(StandardView::Top);
+    // a box a quarter of the width, right of centre
+    let bx = Rect::from_center_size(Pos2::new(300.0, 100.0), Vec2::new(100.0, 20.0));
+    let to = zoom_window(&cam, &view, bx, None).unwrap();
+    assert!((to.distance - 25.0).abs() < 1e-9, "{}", to.distance);
+    // the box's centre is now the view's centre
+    let (o, d) = view.ray(&cam, bx.center());
+    let hit = ray_plane(o, d, DVec3::ZERO, DVec3::Z).unwrap();
+    let (x, y, _) = to.project(hit, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6, "{x} {y}");
+    assert!(zoom_window(&cam, &view, Rect::from_center_size(Pos2::new(50.0, 50.0), Vec2::splat(2.0)), None).is_none());
+    // onto the model under the box: its point comes to the centre at the box's scale
+    let near = DVec3::new(10.0, 0.0, 60.0);
+    let to = zoom_window(&cam, &view, bx, Some(near)).unwrap();
+    assert!((to.distance - 10.0).abs() < 1e-9, "{}", to.distance);
+    let (x, y, _) = to.project(near, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+  }
 
   /// An app editing a new sketch on XY with `tool` active.
   fn sketching(tool: Tool) -> (App, FeatureId) {
