@@ -1,0 +1,25 @@
+{
+  "source": "Autodesk Fusion 2705.1.30 (FoxBridge)",
+  "method": "Measured in Fusion by tools/parity-loop/probe_case.py from recipe.json",
+  "body_count": 3,
+  "volume_mm3": 42849.555921537954,
+  "area_mm2": 10226.548245743668,
+  "center_of_mass": [
+    28.798016928848647,
+    21.598512697326484,
+    5.6009915351156785
+  ],
+  "bbox": {
+    "min": [
+      0.0,
+      0.0,
+      -30.0
+    ],
+    "max": [
+      50.0,
+      40.0,
+      30.0
+    ]
+  },
+  "faces": 15
+}
