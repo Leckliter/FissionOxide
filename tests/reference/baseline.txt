@@ -184,3 +184,7 @@
 # Reference parts that pass; see README.md. One directory name per line.
 417-form-box-smooth
 418-form-box-pulled-top
+# Reference parts that pass; see README.md. One directory name per line.
+431-vertex-offset-angle
+432-face-flip
+433-offset-xy
