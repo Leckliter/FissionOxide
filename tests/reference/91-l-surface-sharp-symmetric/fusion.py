@@ -1,0 +1,26 @@
+# Open L of two lines on XY ((0,0)-(30,0)-(30,20)) extruded 25 mm as a two-face surface; thickened
+# 2 mm symmetrically (Fusion: 2 mm each side) (Sharp type, so the outer corner is mitred square) into a new body, the
+# surface then removed.
+P = lambda x, y, z=0: adsk.core.Point3D.create(x / 10, y / 10, z / 10)
+VI = adsk.core.ValueInput.createByReal
+design.fusionUnitsManager.distanceDisplayUnits = adsk.fusion.DistanceUnits.MillimeterDistanceUnits
+ext = root.features.extrudeFeatures
+sk = root.sketches.add(root.xYConstructionPlane)
+lines = sk.sketchCurves.sketchLines
+a = lines.addByTwoPoints(P(0, 0), P(30, 0))
+b = lines.addByTwoPoints(a.endSketchPoint, P(30, 20))
+inp = ext.createInput(root.createOpenProfile(a, True), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+inp.isSolid = False
+inp.setDistanceExtent(False, VI(2.5))
+surf = ext.add(inp).bodies.item(0)
+faces = adsk.core.ObjectCollection.create()
+for f in surf.faces:
+  faces.add(f)
+ti = root.features.thickenFeatures.createInput(faces, adsk.core.ValueInput.createByString("2 mm"), True,
+                                               adsk.fusion.FeatureOperations.NewBodyFeatureOperation, False)
+ti.thickenType = adsk.fusion.ThickenTypes.SharpThickenType
+tf = root.features.thickenFeatures.add(ti)
+# the API doubles a symmetric thickness given to createInput (2 mm in, a 4.00 mm parameter out);
+# set the parameter the user types in the dialog: Thickness 2 mm, Direction Symmetric (2 mm each side)
+tf.thickness.expression = "2 mm"
+root.features.removeFeatures.add(surf)

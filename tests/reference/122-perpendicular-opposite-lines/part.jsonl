@@ -1,0 +1,13 @@
+# 122-perpendicular-opposite-lines: added by the parity loop from a Fusion probe
+# perpendicular-opposite-lines: Quadrilateral (0,0)-(40,0)-(70,18)-(-10,20); base and left-side corners fixed, top horizontal, right side made perpendicular to the (non-adjacent) slanted left side, so its top corner goes to (80,20): trapezoid area 1300, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [70, 18]]}
+{"cmd": "sketch.line", "points": [[70, 18], [-10, 20]]}
+{"cmd": "sketch.line", "points": [[-10, 20], [0, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [6]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [7]}
+{"cmd": "sketch.constrain", "type": "perpendicular", "curves": [5, 8]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

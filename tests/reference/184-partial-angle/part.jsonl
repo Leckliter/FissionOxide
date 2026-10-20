@@ -1,0 +1,16 @@
+# 184-partial-angle: added by the parity loop from a Fusion probe
+# partial-angle: 80x80x5 plate centred on the origin; r3 hole at (30,0) circular-patterned 4x over 90 deg about the origin (ends included); cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-40, -40], [40, -40]]}
+{"cmd": "sketch.line", "points": [[40, -40], [40, 40]]}
+{"cmd": "sketch.line", "points": [[40, 40], [-40, 40]]}
+{"cmd": "sketch.line", "points": [[-40, 40], [-40, -40]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [30, 0], "radius": 3}
+{"cmd": "sketch.pattern_circ", "curves": [2], "center": [0, 0], "count": 4, "angle": "90 deg"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}
