@@ -435,6 +435,8 @@ pub struct Dialog {
   curves: Vec<u32>,
   /// Mirror / fold line.
   line: Option<u32>,
+  /// Mirror in "features" mode: the features whose cut/join is mirrored.
+  mirror_features: Vec<u32>,
   /// Joint origins in pick order: body and `{"face"|"edge": ...}`.
   origins: Vec<(u32, Value)>,
   /// Components of the picked bodies / joint origins (None = a root body).
@@ -554,6 +556,7 @@ impl Dialog {
       path: None,
       curves: Vec::new(),
       line: None,
+      mirror_features: Vec::new(),
       origins: Vec::new(),
       comps: Vec::new(),
       choice: "",
@@ -663,7 +666,10 @@ impl Dialog {
         d.b = "5 mm".into();
       }
       Kind::Revolve => d.axis = "z".into(),
-      Kind::Mirror => d.join = false,
+      Kind::Mirror => {
+        d.join = false;
+        d.choice = "bodies";
+      }
       Kind::RectPattern | Kind::CircPattern => d.join = false,
       Kind::Combine => d.op = "join",
       Kind::Loft => {
@@ -1296,6 +1302,9 @@ impl Dialog {
         ("torus", json!({"plane": self.plane, "at": self.at_pt()?, "major": self.a, "minor": self.b, "operation": op}))
       }
       Kind::OffsetPlane => ("plane.offset", json!({"plane": self.plane, "offset": self.distance})),
+      Kind::Mirror if self.choice == "features" => {
+        ("mirror", json!({"plane": self.plane, "features": self.mirror_features}))
+      }
       Kind::Mirror => ("mirror", json!({"plane": self.plane, "bodies": self.bodies, "join": self.join})),
       Kind::RectPattern => {
         let mut p = json!({
@@ -1410,6 +1419,7 @@ impl Dialog {
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
+      Kind::Mirror if self.choice == "features" => !self.mirror_features.is_empty(),
       Kind::Loft => self.sections.len() >= 2,
       Kind::Sweep => self.sketch.is_some() && self.path.is_some(),
       Kind::Hole | Kind::Fold => self.sketch.is_some(),
@@ -2021,14 +2031,62 @@ impl Dialog {
           self.text(ui, true);
           ui.end_row();
         } else {
-          ui.label("Bodies");
-          sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
+          ui.label("Type");
+          let types = [("bodies", "Bodies"), ("features", "Features")];
+          let label = types.iter().find(|(k, _)| *k == self.choice).map_or("Bodies", |(_, l)| *l);
+          egui::ComboBox::from_id_salt("mirror_type").selected_text(label).width(140.0).show_ui(ui, |ui| {
+            for (k, l) in types {
+              if ui.selectable_label(self.choice == k, l).clicked() {
+                self.choice = k;
+                self.dirty = true;
+              }
+            }
+          });
           ui.end_row();
-          ui.label("");
-          if ui.checkbox(&mut self.join, "Join to original").changed() {
-            self.dirty = true;
+          if self.choice == "features" {
+            // features that add or remove a solid: their tool is what gets mirrored
+            let tools: Vec<(u32, String)> = app
+              .s
+              .design
+              .features
+              .iter()
+              .filter(|f| {
+                matches!(
+                  f.kind,
+                  FeatureKind::Extrude { .. }
+                    | FeatureKind::Revolve { .. }
+                    | FeatureKind::Primitive { .. }
+                    | FeatureKind::Loft { .. }
+                    | FeatureKind::Sweep { .. }
+                    | FeatureKind::Hole { .. }
+                )
+              })
+              .map(|f| (f.id.0, f.name.clone()))
+              .collect();
+            ui.label("Features");
+            ui.vertical(|ui| {
+              for (id, name) in tools {
+                let mut on = self.mirror_features.contains(&id);
+                if ui.checkbox(&mut on, name).changed() {
+                  self.mirror_features.retain(|f| *f != id);
+                  if on {
+                    self.mirror_features.push(id);
+                  }
+                  self.dirty = true;
+                }
+              }
+            });
+            ui.end_row();
+          } else {
+            ui.label("Bodies");
+            sel_chip(ui, self.accent(), &self.bodies_label(), !self.bodies.is_empty());
+            ui.end_row();
+            ui.label("");
+            if ui.checkbox(&mut self.join, "Join to original").changed() {
+              self.dirty = true;
+            }
+            ui.end_row();
           }
-          ui.end_row();
         }
       }
       Kind::RectPattern | Kind::CircPattern => {

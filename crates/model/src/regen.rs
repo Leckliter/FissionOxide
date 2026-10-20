@@ -148,6 +148,8 @@ struct State {
   axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
+  /// Each feature's tool solid, operation and targets, for mirroring features.
+  tools: BTreeMap<FeatureId, (Shape, Operation, Vec<BodyId>)>,
   body_counter: u32,
   /// Saved joint origins: component and frame (as the component is now).
   joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
@@ -740,7 +742,19 @@ impl Ctx<'_> {
         self.state.planes.insert(id, pl.offset(d));
         Ok(None)
       }
-      FeatureKind::Mirror { bodies, plane, join } => {
+      FeatureKind::Mirror { plane, features, .. } if !features.is_empty() => {
+        let pl = self.resolve_plane(plane)?;
+        for f in features.iter() {
+          let (tool, op, targets) =
+            self.state.tools.get(f).cloned().ok_or("a mirrored feature failed or has no solid to mirror")?;
+          let copy = tool.mirrored(pl.origin, pl.normal()).map_err(ke)?;
+          // the mirror's own targets, else the bodies the feature itself was limited to
+          let targets = if self.targets.is_empty() { targets } else { self.targets.to_vec() };
+          self.operate_on(id, copy, op, &targets)?;
+        }
+        Ok(None)
+      }
+      FeatureKind::Mirror { bodies, plane, join, .. } => {
         let pl = self.resolve_plane(plane)?;
         let targets = self.select(bodies)?;
         for bi in targets {
@@ -1929,10 +1943,18 @@ impl Ctx<'_> {
   }
 
   /// Applies a new/join/cut/intersect operation with a tool solid.
+  /// The tool is kept so a later mirror can apply it again.
   fn operate(&mut self, feature: FeatureId, tool: Shape, op: Operation) -> Result<(), String> {
+    let targets = self.targets.to_vec();
+    self.state.tools.insert(feature, (tool.clone(), op, targets.clone()));
+    self.operate_on(feature, tool, op, &targets)
+  }
+
+  /// [`Self::operate`] limited to `targets` (empty = any body the tool touches).
+  fn operate_on(&mut self, feature: FeatureId, tool: Shape, op: Operation, targets: &[BodyId]) -> Result<(), String> {
     let tool_box = tool.mass().map(|m| (m.bbox_min, m.bbox_max)).map_err(ke)?;
     let overlapping: Vec<usize> = (0..self.state.bodies.len())
-      .filter(|&i| self.targets.is_empty() || self.targets.contains(&self.state.bodies[i].id))
+      .filter(|&i| targets.is_empty() || targets.contains(&self.state.bodies[i].id))
       .filter(|&i| self.state.bodies[i].bbox().is_some_and(|b| boxes_touch(b, tool_box)))
       .collect();
     match op {

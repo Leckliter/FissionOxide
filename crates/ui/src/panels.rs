@@ -363,7 +363,7 @@ impl Cmd {
         Kind::Torus => (Icon::Torus, "Torus", "Create a solid torus"),
         Kind::RectPattern => (Icon::Pattern, "Rectangular Pattern", "Copy bodies in rows and columns"),
         Kind::CircPattern => (Icon::CircPattern, "Circular Pattern", "Copy bodies around an axis"),
-        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies across a plane"),
+        Kind::Mirror => (Icon::Mirror, "Mirror", "Mirror bodies or features across a plane"),
         Kind::Fillet => (Icon::Fillet, "Fillet", "Round selected edges (F)"),
         Kind::Chamfer => (Icon::Chamfer, "Chamfer", "Bevel selected edges"),
         Kind::Shell => (Icon::Shell, "Shell", "Hollow a body, removing selected faces"),

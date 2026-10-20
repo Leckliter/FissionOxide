@@ -204,7 +204,7 @@ fn patterns_mirror_primitives_and_shell() {
   let m = regenerate(&mut d);
   ok(&m);
   assert_eq!(m.bodies.len(), 6);
-  d.add_feature(FeatureKind::Mirror { bodies: BodySel::All, plane: XY, join: false }).unwrap();
+  d.add_feature(FeatureKind::Mirror { bodies: BodySel::All, plane: XY, features: vec![], join: false }).unwrap();
   let m = regenerate(&mut d);
   ok(&m);
   assert_eq!(m.bodies.len(), 12);
