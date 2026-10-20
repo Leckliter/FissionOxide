@@ -190,6 +190,7 @@ struct RenderKey {
   /// Bodies highlighted from the browser or timeline, and the isolated bodies.
   peek: Vec<u32>,
   isolate: Option<Vec<u32>>,
+  opacity: Vec<(u32, u8)>,
 }
 
 impl App {

@@ -898,7 +898,6 @@ struct RowEvents {
   response: Option<egui::Response>,
 }
 
-/// One browser row: expander, visibility eye, icon and name.
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
 /// and the name on a grey pill (a dark pill with an activation radio for the root component).
 fn tree_row(
@@ -914,7 +913,8 @@ fn tree_row(
   label_color: Color32,
 ) -> RowEvents {
   let width = ui.available_width();
-  let (rect, resp) = ui.allocate_exact_size(vec2(width, 25.0), egui::Sense::click());
+  // dragged rows move bodies and components (see browser_edit)
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, 25.0), egui::Sense::click_and_drag());
   let open_id = id.with("open");
   let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).or(expand).unwrap_or(false);
   let p = ui.painter().clone();
@@ -1106,7 +1106,8 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-components");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
+  let ev = tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
+  browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::TopLevel);
   if !is_open(ui, id, true) {
     return;
   }
@@ -1125,9 +1126,18 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
     let row = id.with(cid);
     let ev = tree_row(ui, row, 2 + depth, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
-    if ev.clicked || ev.double_clicked {
+    let target = RenameTarget::Component(cid);
+    browser_edit::slow_click(ui, &ev, row, target, &name, selected);
+    if ev.double_clicked {
+      browser_edit::begin(ui, row, target, &name);
+    } else if ev.clicked {
       app.s.selection = bodies.iter().map(|b| Sel::Body { body: *b }).collect();
     }
+    let now = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    browser_edit::slow_click_due(ui, row, now);
+    browser_edit::drag_source(ui, &ev, browser_edit::Dragged::Component(cid), &name);
+    browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
+    browser_edit::edit_box(app, ui, &ev, row, 2 + depth);
     if let Some(r) = ev.response {
       if r.hovered() {
         marking::peek(app, bodies.clone(), name.clone());
@@ -1135,7 +1145,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       r.context_menu(|ui| {
         if ui.button("Rename").clicked() {
           ui.close();
-          app.rename = Some((RenameTarget::Component(cid), name.clone()));
+          browser_edit::begin(ui, row, target, &name);
         }
         if ui.button(if grounded { "Unground" } else { "Ground" }).clicked() {
           ui.close();
@@ -1175,10 +1185,14 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       for b in bodies {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
-        let ev = tree_row(ui, row.with(b.0), 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        let brow = row.with(b.0);
+        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
+        body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
         if ev.clicked {
           toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
         }
+        browser_edit::slow_click_due(ui, brow, app.s.selection.contains(&Sel::Body { body: b }));
+        browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
       }
     }
   }
@@ -1298,24 +1312,50 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
   for (bid, name, visible) in bodies {
     let selected = app.s.selection.contains(&Sel::Body { body: bid });
     let color = if visible { theme::TEXT } else { theme::MUTED };
-    let ev = tree_row(ui, id.with(bid.0), 2, None, Some(visible), Icon::Body, &name, selected, color);
+    let row = id.with(bid.0);
+    let ev = tree_row(ui, row, 2, None, Some(visible), Icon::Body, &name, selected, color);
     if ev.eye {
       app.run("body.visible", json!({"body": bid.0, "visible": !visible}));
-    } else if ev.clicked || ev.double_clicked {
-      toggle_sel(&mut app.s, Sel::Body { body: bid }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+    } else {
+      body_row_edits(app, ui, &ev, row, 2, bid, &name, selected);
+      if ev.clicked {
+        toggle_sel(&mut app.s, Sel::Body { body: bid }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+      }
+      browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Body { body: bid }));
     }
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Body { body: bid }, &r);
       if r.hovered() {
         marking::peek(app, vec![bid], name.clone());
       }
-      r.context_menu(|ui| body_menu(app, ui, bid, &name, visible));
+      r.context_menu(|ui| body_menu(app, ui, row, bid, &name, visible));
     }
   }
 }
 
+/// A body row's in-place rename (double-click or slow-click) and dragging it onto a component.
+#[allow(clippy::too_many_arguments)]
+fn body_row_edits(
+  app: &mut App,
+  ui: &mut egui::Ui,
+  ev: &RowEvents,
+  row: egui::Id,
+  depth: usize,
+  bid: BodyId,
+  name: &str,
+  selected: bool,
+) {
+  let target = RenameTarget::Body(bid.0);
+  browser_edit::slow_click(ui, ev, row, target, name, selected);
+  if ev.double_clicked {
+    browser_edit::begin(ui, row, target, name);
+  }
+  browser_edit::drag_source(ui, ev, browser_edit::dragged_bodies(app, bid), name);
+  browser_edit::edit_box(app, ui, ev, row, depth);
+}
+
 /// A browser body's right-click menu, as in Fusion (less what FissionOxide can't do yet).
-fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible: bool) {
+fn body_menu(app: &mut App, ui: &mut egui::Ui, row: egui::Id, bid: BodyId, name: &str, visible: bool) {
   let only = vec![Sel::Body { body: bid }];
   let start = |app: &mut App, ui: &mut egui::Ui, kind: Kind| {
     ui.close();
@@ -1326,7 +1366,26 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
     start(app, ui, Kind::Move);
   }
   ui.separator();
-  if app.s.design.component_of(bid).is_some() && menu_item(ui, Icon::PhysMaterial, "Physical Material", None).clicked()
+  // like Fusion's, these act on every selected body when the row is one of them
+  let browser_edit::Dragged::Bodies(bodies) = browser_edit::dragged_bodies(app, bid) else { return };
+  if menu_item(ui, Icon::Component, "Create Components from Bodies", None)
+    .on_hover_text("Each body becomes a component of its own, named after it")
+    .clicked()
+  {
+    ui.close();
+    for b in &bodies {
+      let name = app.s.body_name(*b);
+      app.run("component.create", json!({"name": name, "bodies": [b.0]}));
+    }
+  }
+  ui.separator();
+  // physical materials belong to components in FissionOxide
+  let in_component = app.s.design.component_of(bid).is_some();
+  if ui
+    .add_enabled_ui(in_component, |ui| menu_item(ui, Icon::PhysMaterial, "Physical Material", None))
+    .inner
+    .on_disabled_hover_text("Create a component from the body to give it a physical material")
+    .clicked()
   {
     start(app, ui, Kind::Material);
   }
@@ -1356,7 +1415,7 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
   }
   if menu_item(ui, Icon::Params, "Rename", None).clicked() {
     ui.close();
-    app.rename = Some((RenameTarget::Body(bid.0), name.to_string()));
+    browser_edit::begin(ui, row, RenameTarget::Body(bid.0), name);
   }
   ui.separator();
   if menu_item(ui, if visible { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", Some("V")).clicked() {
@@ -1372,6 +1431,23 @@ fn body_menu(app: &mut App, ui: &mut egui::Ui, bid: BodyId, name: &str, visible:
     ui.close();
     marking::find_in_window(app, &[bid], None);
   }
+  ui.separator();
+  let locked = app.ctx_menu.unselectable.contains(&bid);
+  if menu_item(ui, Icon::Select, if locked { "Selectable" } else { "Selectable/Unselectable" }, None)
+    .on_hover_text(if locked { "Let the canvas pick the body again" } else { "Stop the canvas picking the body" })
+    .clicked()
+  {
+    ui.close();
+    let m = &mut app.ctx_menu;
+    m.unselectable.retain(|b| !bodies.contains(b));
+    if !locked {
+      m.unselectable.extend(&bodies);
+      app.s.selection.retain(
+        |s| !matches!(s, Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } if bodies.contains(body)),
+      );
+    }
+  }
+  browser_edit::opacity_menu(app, ui, &bodies);
 }
 
 /// A context-menu row with an icon on the left and its shortcut key on the right.
@@ -1582,12 +1658,18 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
     } else {
       theme::TEXT
     };
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::SketchSmall, &name, selected, color);
+    let row = id.with(fid.0);
+    let ev = tree_row(ui, row, 2, None, None, Icon::SketchSmall, &name, selected, color);
+    // double-click edits the sketch, as in Fusion; a slow click renames it
+    let target = RenameTarget::Feature(fid.0);
+    browser_edit::slow_click(ui, &ev, row, target, &name, selected && !editing);
     if ev.double_clicked {
       app.edit_sketch(fid);
     } else if ev.clicked {
       app.s.selection = vec![Sel::Feature { feature: fid }];
     }
+    browser_edit::slow_click_due(ui, row, app.s.selection.contains(&Sel::Feature { feature: fid }));
+    browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Feature { feature: fid }, &r);
       if r.hovered() {
@@ -1595,8 +1677,11 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
       }
       r.on_hover_text("Double-click to edit").context_menu(|ui| {
         let items = sketch_menu(app, fid);
-        if let Some(cmd) = row_menu(ui, &items) {
-          run_sketch_cmd(app, fid, &name, cmd);
+        match row_menu(ui, &items) {
+          // renamed in place in the browser row
+          Some(RowCmd::Rename) => browser_edit::begin(ui, row, target, &name),
+          Some(cmd) => run_sketch_cmd(app, fid, &name, cmd),
+          None => {}
         }
       });
     }
@@ -1623,18 +1708,38 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
   for (fid, name) in planes {
     let plane = json!({"feature": fid.0});
     let picked = app.picked_plane.as_ref() == Some(&plane);
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    let row = id.with(fid.0);
+    let ev = tree_row(ui, row, 2, None, None, Icon::Plane, &name, picked, theme::TEXT);
+    // double-click sketches on the plane, as on the origin planes; a slow click renames it
+    let target = RenameTarget::Feature(fid.0);
+    browser_edit::slow_click(ui, &ev, row, target, &name, picked);
     if ev.double_clicked {
       // the first click already started it if Create Sketch was waiting for a plane
       if app.s.edit_sketch.is_none() {
-        app.create_sketch(plane);
+        app.create_sketch(plane.clone());
       }
-    } else if ev.clicked {
-      pick_plane(app, plane);
+    } else if ev.clicked && !picked {
+      pick_plane(app, plane.clone());
     }
+    browser_edit::slow_click_due(ui, row, app.picked_plane.as_ref() == Some(&plane));
+    browser_edit::edit_box(app, ui, &ev, row, 2);
     if let Some(r) = ev.response {
       reveal_row(app, Sel::Feature { feature: fid }, &r);
-      r.on_hover_text("Double-click to sketch on this plane");
+      r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
+        if ui.button("Create Sketch").clicked() {
+          ui.close();
+          app.create_sketch(plane.clone());
+        }
+        if ui.button("Rename").clicked() {
+          ui.close();
+          browser_edit::begin(ui, row, target, &name);
+        }
+        ui.separator();
+        if ui.button("Delete").clicked() {
+          ui.close();
+          app.run("feature.delete", json!({"feature": fid.0}));
+        }
+      });
     }
   }
 }
@@ -2750,6 +2855,7 @@ pub fn parameters_window(app: &mut App, ctx: &egui::Context) {
 
 mod browser_assembly;
 mod browser_config;
+mod browser_edit;
 
 #[cfg(test)]
 mod row_menu_tests {

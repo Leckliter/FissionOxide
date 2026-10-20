@@ -56,6 +56,10 @@ pub(crate) struct MenuState {
   pub(crate) reveal: Option<Sel>,
   /// Isolate: only these bodies are drawn (a view state; nothing in the design changes).
   pub(crate) isolate: Option<Vec<BodyId>>,
+  /// Bodies drawn see-through, (body, alpha) (Opacity Control; a view state).
+  pub(crate) opacity: Vec<(BodyId, u8)>,
+  /// Bodies the canvas can't pick (Selectable/Unselectable); the browser still selects them.
+  pub(crate) unselectable: Vec<BodyId>,
 }
 
 #[derive(Clone)]
