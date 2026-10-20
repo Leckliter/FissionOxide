@@ -41,6 +41,46 @@ fn polar(c: P, r: f64, a: f64) -> P {
   [c[0] + r * a.cos(), c[1] + r * a.sin()]
 }
 
+/// One direction of a sketch rectangular pattern, as Fusion's sketch Rectangular Pattern sets it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternDir {
+  pub direction: P,
+  /// Instances along this direction, the original included.
+  pub count: usize,
+  /// The spacing between neighbours, or the whole pattern's size when `extent` is set.
+  pub distance: f64,
+  pub extent: bool,
+  /// Centre the instances on the original (`count` in total) instead of running one way.
+  pub symmetric: bool,
+}
+
+impl PatternDir {
+  /// `count` instances along `direction` every `spacing`, one way from the original.
+  pub fn spacing(direction: P, count: usize, spacing: f64) -> Self {
+    Self { direction, count, distance: spacing, extent: false, symmetric: false }
+  }
+
+  /// Index of the original among `offsets`. A symmetric pattern with an even count puts the
+  /// extra instance on the positive side.
+  fn original(&self) -> usize {
+    if self.symmetric { (self.count.max(1) - 1) / 2 } else { 0 }
+  }
+
+  /// Offsets of the instances along the direction, in order; the original's is zero.
+  fn offsets(&self) -> Result<Vec<f64>, SketchError> {
+    if !self.distance.is_finite() {
+      return Err(SketchError::InvalidValue("pattern distance must be a number".into()));
+    }
+    let step = match (self.extent, self.count) {
+      (false, _) => self.distance,
+      (true, n) if n > 1 => self.distance / (n - 1) as f64,
+      (true, _) => 0.0,
+    };
+    let first = self.original() as f64;
+    Ok((0..self.count).map(|k| step * (k as f64 - first)).collect())
+  }
+}
+
 /// A curve's current geometry.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Geo {
@@ -70,7 +110,7 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } => return None,
+      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } | crate::Seg::Conic { .. } => return None,
     })
   }
 
@@ -187,7 +227,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         return None;
       }
     })
@@ -250,6 +291,13 @@ impl Sketch {
         }
         CurveKind::EllipticalArc { center, major, start, end, .. } => {
           for q in [center, major, start, end] {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::Conic { start, end, apex, .. } => {
+          for q in [start, end, apex] {
             if *q == old {
               *q = new;
             }
@@ -539,6 +587,11 @@ impl Sketch {
           let (start, end) = if flip { (e, s) } else { (s, e) };
           CurveKind::EllipticalArc { center, major, minor, start, end }
         }
+        CurveKind::Conic { start, end, apex, rho } => {
+          let (s, e, apex) = (get(self, start)?, get(self, end)?, get(self, apex)?);
+          let (start, end) = if flip { (e, s) } else { (s, e) };
+          CurveKind::Conic { start, end, apex, rho }
+        }
       };
       let nid = self.add_curve(kind)?;
       if c.construction {
@@ -576,29 +629,37 @@ impl Sketch {
     Ok(out)
   }
 
-  /// Copies of curves on a grid: `n1` along `d1` every `s1`, and `n2` along `d2` every `s2`.
+  /// The direction of a sketch line, from its start to its end (the pattern direction Fusion
+  /// takes from a picked line).
+  pub fn line_direction(&self, line: CurveId) -> Result<P, SketchError> {
+    let Some(Geo::Line { a, b }) = self.geo(line) else {
+      return Err(SketchError::WrongGeometry("pattern direction", "a line"));
+    };
+    unit(sub(b, a)).ok_or(SketchError::InvalidValue("zero-length direction line".into()))
+  }
+
+  /// Copies of curves on a grid, as Fusion's sketch Rectangular Pattern: `a` sets the first
+  /// direction and `b` the second (a zero `b.direction` is 90° counter-clockwise from `a`'s; the
+  /// `sketch.pattern_rect` command passes +Y when its `direction2` is omitted).
   pub fn pattern_rect(
     &mut self,
     curves: &[CurveId],
-    d1: P,
-    n1: usize,
-    s1: f64,
-    d2: P,
-    n2: usize,
-    s2: f64,
+    a: PatternDir,
+    b: PatternDir,
   ) -> Result<Vec<CurveId>, SketchError> {
-    if n1 * n2 > 2000 || n1 == 0 || n2 == 0 {
+    if a.count * b.count > 2000 || a.count == 0 || b.count == 0 {
       return Err(SketchError::InvalidValue("pattern counts must be 1..2000 in total".into()));
     }
-    let u1 = unit(d1).ok_or(SketchError::InvalidValue("zero pattern direction".into()))?;
-    let u2 = unit(d2).unwrap_or([-u1[1], u1[0]]);
+    let u1 = unit(a.direction).ok_or(SketchError::InvalidValue("zero pattern direction".into()))?;
+    let u2 = unit(b.direction).unwrap_or([-u1[1], u1[0]]);
+    let (o1, o2) = (a.offsets()?, b.offsets()?);
     let mut out = Vec::new();
-    for i in 0..n1 {
-      for j in 0..n2 {
-        if i == 0 && j == 0 {
+    for (i, &t1) in o1.iter().enumerate() {
+      for (j, &t2) in o2.iter().enumerate() {
+        if i == a.original() && j == b.original() {
           continue;
         }
-        let off = add(mul(u1, s1 * i as f64), mul(u2, s2 * j as f64));
+        let off = add(mul(u1, t1), mul(u2, t2));
         out.extend(self.copy_curves(curves, &move |p| add(p, off), false)?.0);
       }
     }
@@ -606,22 +667,27 @@ impl Sketch {
   }
 
   /// `n` copies of curves around `center` spread over `angle` (radians; a full turn spaces them
-  /// evenly).
+  /// evenly). `symmetric` spreads a partial turn over both sides of the originals, like Fusion's
+  /// Symmetric option (3 over 90 degrees gives -45, 0 and +45); with an even count the extra copy
+  /// goes on the positive side.
   pub fn pattern_circ(
     &mut self,
     curves: &[CurveId],
     center: P,
     n: usize,
     angle: f64,
+    symmetric: bool,
   ) -> Result<Vec<CurveId>, SketchError> {
     if !(1..=2000).contains(&n) {
       return Err(SketchError::InvalidValue("pattern count must be 1..2000".into()));
     }
     let full = (angle.abs() - TAU).abs() < 1e-9;
     let step = if full || n < 2 { angle / n as f64 } else { angle / (n - 1) as f64 };
+    // slots on the negative side of the originals
+    let back = if symmetric && !full { (n - 1) / 2 } else { 0 };
     let mut out = Vec::new();
-    for k in 1..n {
-      let (s, c) = (step * k as f64).sin_cos();
+    for k in (0..n).filter(|k| *k != back) {
+      let (s, c) = (step * (k as f64 - back as f64)).sin_cos();
       let rot = move |p: P| {
         let v = sub(p, center);
         add(center, [c * v[0] - s * v[1], s * v[0] + c * v[1]])
@@ -879,9 +945,32 @@ mod tests {
     assert!(s.solve().ok());
     let Some(Geo::Arc { c: mc, .. }) = s.geo(m[0]) else { panic!() };
     assert!(dist(mc, [-5.0, 2.0]) < 1e-9);
-    assert_eq!(s.pattern_rect(&[c], [1.0, 0.0], 3, 4.0, [0.0, 1.0], 2, 5.0).unwrap().len(), 5);
-    let circ = s.pattern_circ(&[c], [0.0, 0.0], 4, TAU).unwrap();
+    let (a, b) = (PatternDir::spacing([1.0, 0.0], 3, 4.0), PatternDir::spacing([0.0, 1.0], 2, 5.0));
+    assert_eq!(s.pattern_rect(&[c], a, b).unwrap().len(), 5);
+    let centres = |s: &Sketch, made: &[CurveId]| -> Vec<P> {
+      made.iter().map(|id| if let Some(Geo::Arc { c, .. }) = s.geo(*id) { c } else { [f64::NAN; 2] }).collect()
+    };
+    // Extent: 4 instances spread over 12 are 4 apart; symmetric: 3 instances centred on the original.
+    let ext = PatternDir { extent: true, ..PatternDir::spacing([1.0, 0.0], 4, 12.0) };
+    let made = s.pattern_rect(&[c], ext, PatternDir::spacing([0.0, 0.0], 1, 0.0)).unwrap();
+    let want = [[9.0, 2.0], [13.0, 2.0], [17.0, 2.0]];
+    assert!(centres(&s, &made).iter().zip(want).all(|(p, q)| dist(*p, q) < 1e-9), "{:?}", centres(&s, &made));
+    let sym = PatternDir { symmetric: true, ..PatternDir::spacing([0.0, 1.0], 3, 6.0) };
+    let made = s.pattern_rect(&[c], sym, PatternDir::spacing([0.0, 0.0], 1, 0.0)).unwrap();
+    let want = [[5.0, -4.0], [5.0, 8.0]];
+    assert!(centres(&s, &made).iter().zip(want).all(|(p, q)| dist(*p, q) < 1e-9), "{:?}", centres(&s, &made));
+    let (a, b) = (PatternDir::spacing([1.0, 0.0], 2, 4.0), PatternDir::spacing([0.0, 0.0], 2, 5.0));
+    let made = s.pattern_rect(&[c], a, b).unwrap();
+    assert!(dist(centres(&s, &made)[0], [5.0, 7.0]) < 1e-9, "second direction defaults to 90° from the first");
+    let circ = s.pattern_circ(&[c], [0.0, 0.0], 4, TAU, false).unwrap();
     let Some(Geo::Arc { c: pc, .. }) = s.geo(circ[0]) else { panic!() };
     assert!(dist(pc, [-2.0, 5.0]) < 1e-9);
+    // symmetric: 3 over 90 degrees puts the copies at -45 and +45
+    let sym = s.pattern_circ(&[c], [0.0, 0.0], 3, TAU / 4.0, true).unwrap();
+    let rot = |a: f64| [5.0 * a.cos() - 2.0 * a.sin(), 5.0 * a.sin() + 2.0 * a.cos()];
+    for (id, a) in sym.iter().zip([-TAU / 8.0, TAU / 8.0]) {
+      let Some(Geo::Arc { c: sc, .. }) = s.geo(*id) else { panic!() };
+      assert!(dist(sc, rot(a)) < 1e-9, "{sc:?}");
+    }
   }
 }

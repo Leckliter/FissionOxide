@@ -272,8 +272,26 @@ fn line_kind(k: u8) -> LineKind {
   }
 }
 
+/// Behaviour-gated choices for building a face from a sketch profile that the profile itself
+/// doesn't carry. The default is the legacy behaviour, so old files rebuild unchanged; callers
+/// fill the fields from the sketch's (or design's) `Behaviours`. See `fox_sketch::behaviour`.
+///
+/// Merging a curve's pieces into one edge is not an option here: each loop segment carries its
+/// own flag ([`fox_sketch::Loop::src`]), set by the sketch from its behaviours, and
+/// [`Shape::face_with`] always honours it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FaceOptions {}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
+
+/// Per-segment merge flags for `make_face` / `make_wire` (1 = becomes one edge with the next), or
+/// empty when nothing merges, so the kernel takes the legacy path.
+fn merge_bytes(flags: impl IntoIterator<Item = bool>) -> Vec<u8> {
+  let v: Vec<u8> = flags.into_iter().map(u8::from).collect();
+  if v.contains(&1) { v } else { Vec::new() }
+}
 
 impl Shape {
   fn wrap(p: UniquePtr<sys::Shape>) -> Result<Shape> {
@@ -287,23 +305,34 @@ impl Shape {
     self.inner.as_ref().ok_or(KernelError::Empty)
   }
 
-  /// A planar face from a sketch profile on `plane`.
+  /// A planar face from a sketch profile on `plane`, built the legacy way
+  /// ([`FaceOptions::default`]).
   pub fn face(plane: &Plane, profile: &Profile) -> Result<Shape> {
+    Shape::face_with(plane, profile, FaceOptions::default())
+  }
+
+  /// A planar face from a sketch profile on `plane`, with behaviour-gated `opts` (see
+  /// [`FaceOptions`]). Each run of loop segments marked to merge ([`fox_sketch::Loop::merge_next`],
+  /// pieces of one sketch curve whose one-edge behaviour is on) becomes one edge; with none
+  /// marked the face is built exactly as before.
+  pub fn face_with(plane: &Plane, profile: &Profile, opts: FaceOptions) -> Result<Shape> {
+    // No options yet. A gated change reads its field here and passes it on to `sys::make_face`
+    // (a new argument in ffi.rs and kernel.cpp).
+    let FaceOptions {} = opts;
     let mut segs = Vec::new();
     let mut lens = Vec::new();
+    let mut merge = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
       lens.push(u32::try_from(lp.segs.len()).map_err(|_| KernelError::Input("too many segments".into()))?);
-      // start the loop where an edge starts, not part way along a spline
-      let k = (0..lp.segs.len())
-        .find(|&i| !joins(&lp.segs[(i + lp.segs.len() - 1) % lp.segs.len()], &lp.segs[i]))
-        .unwrap_or(0);
-      let looped: Vec<Seg> = lp.segs[k..].iter().chain(&lp.segs[..k]).copied().collect();
-      push_segs(&mut segs, plane, &looped);
+      for s in &lp.segs {
+        push_seg(&mut segs, plane, s);
+      }
+      merge.extend(lp.merge_next());
     }
     if segs.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("non-finite profile coordinates".into()));
     }
-    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens)?)
+    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens, &merge_bytes(merge))?)
   }
 
   /// Sweeps a face along a vector into a solid.
@@ -466,12 +495,23 @@ impl Shape {
 
   /// An open chain of sketch segments on `plane` as a wire (sweep paths).
   pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
+    Shape::path_with(plane, segs, &[])
+  }
+
+  /// [`Shape::path`] where `merge_next[k]` lets segment `k` become one edge with segment `k + 1`
+  /// (the first, after the last, when the chain closes), as for a face's loops (flags from
+  /// `Sketch::merge_flags` or [`fox_sketch::Loop::merge_next`]). Empty or all false: the legacy
+  /// wire.
+  pub fn path_with(plane: &Plane, segs: &[Seg], merge_next: &[bool]) -> Result<Shape> {
     let mut data = Vec::new();
-    push_segs(&mut data, plane, segs);
+    for s in segs {
+      push_seg(&mut data, plane, s);
+    }
     if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("the path is empty or not finite".into()));
     }
-    Shape::wrap(sys::make_wire(&data)?)
+    let merge = if merge_next.len() == segs.len() { merge_bytes(merge_next.iter().copied()) } else { Vec::new() };
+    Shape::wrap(sys::make_wire(&data, &merge)?)
   }
 
   /// Sweeps this face along a path wire.
@@ -960,25 +1000,7 @@ pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<(
   std::fs::write(path, s)
 }
 
-/// Whether `b` continues the edge `a` is part of: neighbouring pieces of one fit-point spline.
-fn joins(a: &Seg, b: &Seg) -> bool {
-  match (a, b) {
-    (Seg::Bezier { chain: c1, .. }, Seg::Bezier { chain: c2, .. }) => *c1 != 0 && c1 == c2,
-    _ => false,
-  }
-}
-
-/// Pushes a chain of segments, marking the pieces that continue the previous one's edge.
-fn push_segs(out: &mut Vec<f64>, plane: &Plane, segs: &[Seg]) {
-  for (i, s) in segs.iter().enumerate() {
-    let joined = i > 0 && joins(&segs[i - 1], s);
-    push_seg(out, plane, s, joined);
-  }
-}
-
-/// Pushes one segment (13 doubles); `joined` makes a Bézier piece continue the previous one's
-/// edge (kind 5).
-fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg, joined: bool) {
+fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
   let mut put = |kind: f64, p: [DVec3; 4]| {
     out.push(kind);
     for v in p {
@@ -994,13 +1016,16 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg, joined: bool) {
       let n = if ccw { plane.normal() } else { -plane.normal() };
       put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0), DVec3::ZERO])
     }
-    Seg::Bezier { p, .. } => put(if joined { 5.0 } else { 3.0 }, p.map(|q| plane.to_world(q))),
+    Seg::Bezier { p } => put(3.0, p.map(|q| plane.to_world(q))),
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       let a = major[0].hypot(major[1]).max(1e-300);
       let v = [center[0] - major[1] / a * minor, center[1] + major[0] / a * minor];
       let m = [center[0] + major[0], center[1] + major[1]];
       let range = DVec3::new(start, start + sweep, 0.0);
       put(4.0, [plane.to_world(center), plane.to_world(m), plane.to_world(v), range])
+    }
+    Seg::Conic { p, w } => {
+      put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
     }
   }
 }
@@ -1023,4 +1048,9 @@ mod refparts;
 #[cfg(test)]
 mod tests_ellipse;
 #[cfg(test)]
+mod tests_merge;
+#[cfg(test)]
 mod tests_refparts;
+
+mod path3d;
+pub use path3d::Seg3;

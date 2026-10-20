@@ -151,7 +151,7 @@ mod tests {
     let r = s.solve();
     assert!(r.ok() && r.dof == 0, "{r:?}");
     let kind = s.curve(sp).unwrap().kind.clone();
-    let (at, dir, k) = crate::freeform::end_frame(&kind, true, &|p| s.pos(p)).unwrap();
+    let (at, dir, k) = crate::freeform::end_frame(&kind, true, &|p| s.pos(p), &s.behaviours).unwrap();
     assert!(crate::dist(at, [40.0, 10.0]) < 1e-9);
     assert!(dir[0].abs() < 1e-7 && dir[1] > 0.0, "{dir:?}");
     assert!((k + 0.1).abs() < 1e-7, "turning right into the arc: {k}");

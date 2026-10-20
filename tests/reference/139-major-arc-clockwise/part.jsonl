@@ -1,0 +1,7 @@
+# 139-major-arc-clockwise: added by the parity loop from a Fusion probe
+# major-arc-clockwise: 3-point arc picked clockwise from (8,6) through (0,-10) to (-8,6): the 286 deg major arc of the circle R10 at the origin, closed by the chord (-8,6)-(8,6); extruded 5 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [8, 6], "mid": [0, -10], "end": [-8, 6]}
+{"cmd": "sketch.line", "points": [[-8, 6], [8, 6]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

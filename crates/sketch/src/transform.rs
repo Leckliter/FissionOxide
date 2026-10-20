@@ -66,6 +66,16 @@ impl Sketch {
         }
       }
     }
+    // a polygon constraint's centre goes with its lines
+    for con in &self.constraints {
+      if let ConstraintKind::Polygon { center, lines } = &con.kind
+        && lines.iter().all(|l| curves.contains(l))
+        && !moved.contains(center)
+        && self.point(*center).is_some_and(|q| !q.fixed)
+      {
+        moved.push(*center);
+      }
+    }
     for p in self.points.iter_mut().filter(|p| moved.contains(&p.id)) {
       [p.x, p.y] = t.apply([p.x, p.y]);
     }
@@ -113,6 +123,11 @@ impl Sketch {
         && moved.contains(p)
       {
         [*x, *y] = t.apply([*x, *y]);
+      }
+      if let ConstraintKind::FixRadius { curve, radius } = &mut con.kind
+        && curves.contains(curve)
+      {
+        *radius *= t.scale;
       }
       if (t.scale - 1.0).abs() > 1e-12
         && scaled.contains(&con.id)
@@ -179,6 +194,10 @@ impl Sketch {
           start: pt(self, *start)?,
           end: pt(self, *end)?,
         },
+        // a rational curve's weights survive affine maps: rho stays
+        CurveKind::Conic { start, end, apex, rho } => {
+          CurveKind::Conic { start: pt(self, *start)?, end: pt(self, *end)?, apex: pt(self, *apex)?, rho: *rho }
+        }
       };
       let id = self.add_curve(kind)?;
       if c.construction {

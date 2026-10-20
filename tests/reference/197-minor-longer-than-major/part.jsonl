@@ -1,0 +1,7 @@
+# 197-minor-longer-than-major: added by the parity loop from a Fusion probe
+# minor-longer-than-major: XY: ellipse centre (2,1), first-axis end (12,1) (radius 10), third pick (2,16) on the perpendicular axis (radius 15, longer than the first); extruded 3.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.ellipse", "center": [2, 1], "major": [12, 1], "minor": 15}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}

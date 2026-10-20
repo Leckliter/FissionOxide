@@ -3,6 +3,7 @@
 #include "fox-kernel/src/ffi.rs.h"
 
 #include <cmath>
+#include <array>
 #include <deque>
 #include <map>
 #include <sstream>
@@ -69,8 +70,8 @@
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <Geom_BezierCurve.hxx>
-#include <GeomConvert_CompCurveToBSplineCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
@@ -122,6 +123,11 @@
 #include <Geom_Ellipse.hxx>
 #include <gp_Elips.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <GeomConvert.hxx>
+#include <GeomConvert_CompCurveToBSplineCurve.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_Circle.hxx>
+#include <ElCLib.hxx>
 
 namespace fox {
 
@@ -263,7 +269,21 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     if (!me.IsDone()) throw std::runtime_error("degenerate arc in profile");
     return me.Edge();
   }
-  if (kind == 3 || kind == 5) {
+  if (kind == 5) {
+    // a conic: the rational quadratic Bezier p0, p1, p2 weighted 1, p3.x, 1
+    TColgp_Array1OfPnt poles(1, 3);
+    for (int k = 0; k < 3; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
+    TColStd_Array1OfReal weights(1, 3);
+    weights.SetValue(1, 1.0);
+    weights.SetValue(2, segs[o + 10]);
+    weights.SetValue(3, 1.0);
+    if (!(segs[o + 10] > 0.0) || !std::isfinite(segs[o + 10])) throw std::runtime_error("degenerate conic in profile");
+    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles, weights);
+    BRepBuilderAPI_MakeEdge me(bz);
+    if (!me.IsDone()) throw std::runtime_error("degenerate conic in profile");
+    return me.Edge();
+  }
+  if (kind == 3) {
     TColgp_Array1OfPnt poles(1, 4);
     for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
     Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles);
@@ -277,30 +297,190 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
   return me.Edge();
 }
 
-// Segments `first` .. `first + count` (cubic Beziers, kinds 3 and 5) as one B-spline edge.
-TopoDS_Edge chain_edge(rust::Slice<const double> segs, size_t first, size_t count) {
-  GeomConvert_CompCurveToBSplineCurve cc;
-  for (size_t i = 0; i < count; ++i) {
-    size_t o = (first + i) * 13;
-    need(segs, o + 13, "segments");
-    TColgp_Array1OfPnt poles(1, 4);
-    for (int k = 0; k < 4; ++k) poles.SetValue(k + 1, pnt(segs, o + 1 + 3 * k));
-    Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles);
-    if (!cc.Add(bz, 1e-5, Standard_True)) throw std::runtime_error("spline pieces do not meet");
+// ---- one edge per sketch curve ----
+//
+// A segment list may carry merge flags, one per segment: nonzero lets the segment become one edge
+// with the next in its chain. The sketch sets them only between pieces of one curve (see
+// fox_sketch::behaviour), so a run of flagged segments is one curve cut into pieces.
+
+// Points closer than this join (as the sketch's profile graph).
+const double JOIN_TOL = 1e-6;
+
+// Segments [first, first + count) of a chain, indices taken round the chain.
+struct Run {
+  size_t first, count;
+};
+
+// Splits a chain of n segments into runs, each to become one edge: flag k joins segment k to
+// k + 1. In a cyclic chain the last joins the first and a run may wrap; `whole` is set when every
+// join holds, so the one run is the whole closed chain.
+std::vector<Run> merge_runs(const uint8_t *flags, size_t n, bool cyclic, bool &whole) {
+  std::vector<Run> runs;
+  whole = false;
+  if (n == 0) return runs;
+  auto joined = [&](size_t k) { return flags[k % n] != 0 && (cyclic || k + 1 < n); };
+  size_t start = 0;
+  if (cyclic) {
+    size_t k = 0;
+    while (k < n && joined(k)) ++k;
+    if (k == n) {
+      whole = true;
+      runs.push_back({0, n});
+      return runs;
+    }
+    start = k + 1; // a run starts just after a break
   }
-  BRepBuilderAPI_MakeEdge me(cc.BSplineCurve());
-  if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
-  return me.Edge();
+  for (size_t done = 0, at = start; done < n;) {
+    size_t len = 1;
+    while (done + len < n && joined(at + len - 1)) ++len;
+    runs.push_back({at % n, len});
+    at += len;
+    done += len;
+  }
+  return runs;
 }
 
-// The edge starting at segment `seg` (a run of joined Bezier pieces makes one); `used` is how
-// many segments it took (at most `avail`).
-TopoDS_Edge next_edge(rust::Slice<const double> segs, size_t seg, size_t avail, size_t &used) {
-  used = 1;
-  while (used < avail && (seg + used + 1) * 13 <= segs.size() && static_cast<int>(segs[(seg + used) * 13]) == 5) {
-    ++used;
+int seg_kind(rust::Slice<const double> segs, size_t seg) {
+  need(segs, seg * 13 + 13, "segments");
+  return static_cast<int>(segs[seg * 13]);
+}
+
+// Elliptical arcs (kind 4) of one ellipse, run end to start, as one exact arc, or the whole
+// ellipse when `closed`.
+bool merged_ellipse(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed,
+                    TopoDS_Edge &out) {
+  size_t o0 = idx[0] * 13;
+  double dir0 = segs[o0 + 11] - segs[o0 + 10], total = 0;
+  for (size_t i : idx) {
+    size_t o = i * 13;
+    for (int k = 1; k <= 9; ++k)
+      if (std::abs(segs[o + k] - segs[o0 + k]) > JOIN_TOL) return false;
+    double sweep = segs[o + 11] - segs[o + 10];
+    if (sweep * dir0 <= 0) return false;
+    total += sweep;
   }
-  return used > 1 ? chain_edge(segs, seg, used) : seg_edge(segs, seg);
+  if (closed) {
+    if (std::abs(std::abs(total) - 2 * M_PI) > 1e-6) return false;
+    total = total > 0 ? 2 * M_PI : -2 * M_PI;
+  } else if (std::abs(total) >= 2 * M_PI - 1e-9) {
+    return false;
+  }
+  std::array<double, 13> rec;
+  for (size_t k = 0; k < 13; ++k) rec[k] = segs[o0 + k];
+  rec[11] = rec[10] + total;
+  out = ellipse_edge(rust::Slice<const double>(rec.data(), rec.size()), 0);
+  return true;
+}
+
+// Circular arcs (kind 1) of one circle, run end to start, as one arc, or the whole circle when
+// `closed`.
+bool merged_arc(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
+  auto arc = [&](size_t i) -> Handle(Geom_TrimmedCurve) {
+    size_t o = i * 13;
+    GC_MakeArcOfCircle a(pnt(segs, o + 1), pnt(segs, o + 4), pnt(segs, o + 7));
+    return a.IsDone() ? a.Value() : Handle(Geom_TrimmedCurve)();
+  };
+  Handle(Geom_TrimmedCurve) a0 = arc(idx[0]);
+  if (a0.IsNull()) return false;
+  Handle(Geom_Circle) circle = Handle(Geom_Circle)::DownCast(a0->BasisCurve());
+  if (circle.IsNull()) return false;
+  gp_Circ c0 = circle->Circ();
+  double total = 0;
+  for (size_t i : idx) {
+    Handle(Geom_TrimmedCurve) a = arc(i);
+    if (a.IsNull()) return false;
+    Handle(Geom_Circle) ci = Handle(Geom_Circle)::DownCast(a->BasisCurve());
+    if (ci.IsNull()) return false;
+    gp_Circ c = ci->Circ();
+    if (c.Location().Distance(c0.Location()) > JOIN_TOL || std::abs(c.Radius() - c0.Radius()) > JOIN_TOL ||
+        c.Axis().Direction().Dot(c0.Axis().Direction()) < 1 - 1e-9)
+      return false;
+    total += a->LastParameter() - a->FirstParameter();
+  }
+  if (closed) {
+    if (std::abs(total - 2 * M_PI) > 1e-6) return false;
+    double u0 = a0->FirstParameter();
+    BRepBuilderAPI_MakeEdge me(circle, u0, u0 + 2 * M_PI);
+    if (!me.IsDone()) return false;
+    out = me.Edge();
+    return true;
+  }
+  if (total >= 2 * M_PI - 1e-9) return false;
+  // through the first piece's end, which lies inside the merged arc
+  size_t o0 = idx[0] * 13, o1 = idx.back() * 13;
+  GC_MakeArcOfCircle a(pnt(segs, o0 + 1), pnt(segs, o0 + 7), pnt(segs, o1 + 7));
+  if (!a.IsDone()) return false;
+  BRepBuilderAPI_MakeEdge me(a.Value());
+  if (!me.IsDone()) return false;
+  out = me.Edge();
+  return true;
+}
+
+// Edges run end to start as one B-spline edge (C0 joins smoothed where the shape allows).
+bool merged_bspline(const std::vector<TopoDS_Edge> &edges, TopoDS_Edge &out) {
+  GeomConvert_CompCurveToBSplineCurve cc;
+  for (const TopoDS_Edge &e : edges) {
+    double f, l;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, f, l);
+    if (c.IsNull()) return false;
+    Handle(Geom_BSplineCurve) b = GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(c, f, l));
+    if (b.IsNull() || !cc.Add(b, JOIN_TOL, Standard_True)) return false;
+  }
+  Handle(Geom_BSplineCurve) r = cc.BSplineCurve();
+  if (r.IsNull()) return false;
+  for (int i = r->NbKnots() - 1; i >= 2; --i) {
+    int m = r->Multiplicity(i);
+    for (int target = 0; target < m; ++target)
+      if (r->RemoveKnot(i, target, 1e-7)) break;
+  }
+  BRepBuilderAPI_MakeEdge me(r);
+  if (!me.IsDone()) return false;
+  out = me.Edge();
+  return true;
+}
+
+// One edge for the segments `idx` (one curve's pieces, run end to start; `closed`: they are the
+// whole closed chain): exact for an ellipse's or a circle's arcs, else a B-spline. False to keep
+// them separate edges.
+bool merged_edge(rust::Slice<const double> segs, const std::vector<size_t> &idx, bool closed, TopoDS_Edge &out) {
+  try {
+    int kind = seg_kind(segs, idx[0]);
+    bool same = true;
+    for (size_t i : idx) same = same && seg_kind(segs, i) == kind;
+    if (same && kind == 4 && merged_ellipse(segs, idx, closed, out)) return true;
+    if (same && kind == 1 && merged_arc(segs, idx, closed, out)) return true;
+    if (same && kind == 2) return false;
+    std::vector<TopoDS_Edge> edges;
+    for (size_t i : idx) edges.push_back(seg_edge(segs, i));
+    return merged_bspline(edges, out);
+  } catch (...) {
+    return false;
+  }
+}
+
+// Edges for the chain of n segments from `base` with merge `flags` (some set): each run of
+// joined segments one edge.
+std::vector<TopoDS_Edge> merged_chain(rust::Slice<const double> segs, size_t base, size_t n, const uint8_t *flags,
+                                      bool cyclic) {
+  std::vector<TopoDS_Edge> out;
+  bool whole = false;
+  for (Run r : merge_runs(flags, n, cyclic, whole)) {
+    std::vector<size_t> idx;
+    for (size_t j = 0; j < r.count; ++j) idx.push_back(base + (r.first + j) % n);
+    TopoDS_Edge e;
+    if (idx.size() > 1 && merged_edge(segs, idx, whole, e)) {
+      out.push_back(e);
+    } else {
+      for (size_t i : idx) out.push_back(seg_edge(segs, i));
+    }
+  }
+  return out;
+}
+
+bool any_set(const uint8_t *flags, size_t n) {
+  for (size_t k = 0; flags && k < n; ++k)
+    if (flags[k]) return true;
+  return false;
 }
 } // namespace
 
@@ -308,10 +488,12 @@ TopoDS_Edge next_edge(rust::Slice<const double> segs, size_t seg, size_t avail, 
 // segs: 13 doubles each: kind (0 line, 1 arc through 3 points, 2 circle, 3 cubic Bezier), p0..p3
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 //   kind 4, an elliptical arc: see ellipse_edge
-//   kind 5, a cubic Bezier continuing the previous one's edge (the pieces of one spline)
+//   kind 5, a conic: rational quadratic Bezier through p0 (start), p1 (apex), p2 (end), apex weight p3.x
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
+// merge: empty, or one flag per segment: nonzero lets it become one edge with the next in its loop
+//   (the first, after the last); see "one edge per sketch curve". No flag set: built as before.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
-                                 rust::Slice<const uint32_t> loop_lens) {
+                                 rust::Slice<const uint32_t> loop_lens, rust::Slice<const uint8_t> merge) {
   FOX_TRY
   need(plane, 9, "make_face plane");
   gp_Pln pln(gp_Ax3(pnt(plane, 0), dir(plane, 3), dir(plane, 6)));
@@ -319,13 +501,23 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
   std::vector<TopoDS_Wire> wires;
   for (uint32_t n : loop_lens) {
     BRepBuilderAPI_MakeWire mw;
-    for (uint32_t k = 0; k < n;) {
-      size_t used = 1;
-      TopoDS_Edge e = next_edge(segs, seg, n - k, used);
-      seg += used;
-      k += static_cast<uint32_t>(used);
-      mw.Add(e);
-      if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+    const uint8_t *flags = nullptr;
+    if (!merge.empty()) {
+      if (merge.size() < seg + n) throw std::runtime_error("too few merge flags");
+      flags = merge.data() + seg;
+    }
+    if (any_set(flags, n)) {
+      for (const TopoDS_Edge &e : merged_chain(segs, seg, n, flags, true)) {
+        mw.Add(e);
+        if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+      }
+      seg += n;
+    } else {
+      for (uint32_t k = 0; k < n; ++k, ++seg) {
+        TopoDS_Edge e = seg_edge(segs, seg);
+        mw.Add(e);
+        if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
+      }
     }
     if (!mw.IsDone()) throw std::runtime_error("empty profile loop");
     wires.push_back(mw.Wire());
@@ -811,15 +1003,30 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
   FOX_CATCH("face")
 }
 
-// An open or closed chain of segments (see make_face) as a wire.
-std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
+// An open or closed chain of segments (see make_face) as a wire. merge as for make_face; the last
+// segment joins the first only when the chain closes.
+std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs, rust::Slice<const uint8_t> merge) {
   FOX_TRY
   BRepBuilderAPI_MakeWire mw;
-  for (size_t i = 0; i * 13 < segs.size();) {
-    size_t used = 1;
-    mw.Add(next_edge(segs, i, segs.size() / 13 - i, used));
-    i += used;
-    if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+  size_t n = (segs.size() + 12) / 13;
+  const uint8_t *flags = nullptr;
+  if (!merge.empty()) {
+    if (merge.size() < n) throw std::runtime_error("too few merge flags");
+    flags = merge.data();
+  }
+  if (any_set(flags, n)) {
+    TopoDS_Edge first = seg_edge(segs, 0), last = seg_edge(segs, n - 1);
+    bool closed = BRep_Tool::Pnt(TopExp::FirstVertex(first))
+                      .Distance(BRep_Tool::Pnt(TopExp::LastVertex(last))) <= JOIN_TOL;
+    for (const TopoDS_Edge &e : merged_chain(segs, 0, n, flags, closed)) {
+      mw.Add(e);
+      if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+    }
+  } else {
+    for (size_t i = 0; i * 13 < segs.size(); ++i) {
+      mw.Add(seg_edge(segs, i));
+      if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
+    }
   }
   if (!mw.IsDone()) throw std::runtime_error("empty path");
   return wrap(mw.Wire());

@@ -1,0 +1,8 @@
+# 176-nested-center-rectangles-frame: added by the parity loop from a Fusion probe
+# nested-center-rectangles-frame: Two center rectangles on XY sharing centre (10,5): outer corner (35,20) gives 50x30, inner corner (-5,-3) gives 30x16; the frame between them is extruded 6 mm.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "center": [10, 5], "corner": [35, 20]}
+{"cmd": "sketch.rect", "center": [10, 5], "corner": [-5, -3]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[10, 17]], "distance": 6, "operation": "new_body"}

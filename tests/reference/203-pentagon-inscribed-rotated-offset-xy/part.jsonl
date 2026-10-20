@@ -1,0 +1,7 @@
+# 203-pentagon-inscribed-rotated-offset-xy: added by the parity loop from a Fusion probe
+# pentagon-inscribed-rotated-offset-xy: Inscribed pentagon centred at (5,5) with a corner 12 mm away at 30 deg ([15.392304845, 11.0]): circumradius 12, odd side count so the orientation shows in the bbox; extruded 7.
+# sketch S: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "center": [5, 5], "vertex": [15.392304845, 11.0], "sides": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 7, "operation": "new_body"}

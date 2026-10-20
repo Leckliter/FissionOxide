@@ -1,0 +1,13 @@
+# 238-symmetric-direction: added by the parity loop from a Fusion probe
+# symmetric-direction: 100x60x5 plate centred on the origin; r3 hole at (0,-10) sketch-rectangular-patterned 3x every 15 along X, symmetric about the original, and 2x every 20 along Y (one-sided); cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-50, -30], [50, -30], [50, 30], [-50, 30]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, -10], "radius": 3}
+{"cmd": "sketch.pattern_rect", "curves": [2], "direction": [1, 0], "count": 3, "spacing": 15, "direction2": [0, 1], "count2": 2, "spacing2": 20, "symmetric": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}

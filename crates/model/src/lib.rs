@@ -17,6 +17,7 @@ pub mod cutcheck;
 pub mod direct;
 pub mod drawing;
 pub mod fillet;
+pub mod include;
 pub mod mechanism;
 pub mod meshops;
 pub mod plot;
@@ -35,12 +36,15 @@ pub use fillet::{FilletSet, RadiusPoint};
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
+pub use fox_sketch::Behaviours;
 pub use refs::{EdgeRef, FaceRef};
 
 use fox_sketch::{CurveId, PointId, Sketch};
 
 /// Current file format version.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// - 2: a symmetric thicken's `thickness` is the thickness on each side (it was the total).
+pub const FORMAT_VERSION: u32 = 2;
 /// Hostile-file guards.
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMETERS: usize = 10_000;
@@ -92,6 +96,12 @@ pub struct Design {
   /// "Capture design history" is off: direct edits collect in a base feature.
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub history_off: bool,
+  /// The feature and regeneration behaviours this design was made with: a new design has all of
+  /// [`sketch::behaviour::CURRENT`], one read from a file what it stored (none if the field is
+  /// missing), so it rebuilds as it did. Each sketch carries its own set for sketch-level
+  /// behaviour. See [`fox_sketch::behaviour`] for how to gate a change.
+  #[serde(default, skip_serializing_if = "Behaviours::is_empty")]
+  pub behaviours: Behaviours,
   #[serde(default)]
   next_id: u32,
 }
@@ -946,7 +956,7 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
-  /// A round tube swept along a path of lines and arcs, solid or hollow.
+  /// A tube (round, square or triangular) swept along a path of lines and arcs, solid or hollow.
   Pipe {
     path_sketch: FeatureId,
     #[serde(default)]
@@ -957,6 +967,12 @@ pub enum FeatureKind {
     wall: String,
     #[serde(default)]
     operation: Operation,
+    /// Section shape; `diameter` is its size.
+    #[serde(default)]
+    section: construct::PipeSection,
+    /// Fraction of the path (from its start) the pipe follows; empty = all of it.
+    #[serde(default)]
+    distance: String,
   },
   /// A rib (thickness across the sketch plane) or web (thickness in the sketch plane) grown from
   /// open sketch lines until it meets the body, or to a depth.
@@ -1002,13 +1018,17 @@ pub enum FeatureKind {
     #[serde(default)]
     bodies: Vec<BodyId>,
     thickness: String,
-    /// Half the thickness each side.
+    /// The full thickness on each side (twice it in all), as Fusion does.
     #[serde(default)]
     symmetric: bool,
     #[serde(default)]
     flip: bool,
     #[serde(default)]
     operation: Operation,
+    /// Round the corners where the faces of a surface meet at an angle (default: sharp, the
+    /// offset faces extended until they meet).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    round: bool,
   },
   /// A surface extruded from open (or closed) sketch curves.
   SurfaceExtrude {
@@ -1530,6 +1550,7 @@ impl Design {
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,
+      behaviours: Behaviours::current(),
       next_id: 1,
     }
   }
@@ -1646,18 +1667,28 @@ impl Design {
   /// Moves a feature to a new timeline index, refusing moves that would put it before a feature
   /// it depends on (or after one that depends on it).
   pub fn move_feature(&mut self, id: FeatureId, to: usize) -> Result<(), DesignError> {
+    self.check_move(id, to)?;
     let from = self.index_of(id).ok_or(DesignError::NoFeature(id))?;
-    let to = to.min(self.features.len().saturating_sub(1));
     let f = self.features.remove(from);
-    self.features.insert(to, f);
-    // validate ordering
-    let bad = self.features.iter().enumerate().find_map(|(i, feat)| {
-      feat.kind.depends_on().iter().any(|d| self.index_of(*d).is_some_and(|di| di > i)).then(|| feat.name.clone())
-    });
-    if let Some(name) = bad {
-      let f = self.features.remove(to);
-      self.features.insert(from, f);
-      return Err(DesignError::InUse(name, "a feature it would come before".into()));
+    self.features.insert(to.min(self.features.len()), f);
+    Ok(())
+  }
+
+  /// Whether [`Design::move_feature`] would accept moving `id` to timeline index `to`, without
+  /// moving it. Only the references the timeline records directly (sketches, construction
+  /// geometry) are checked; references to bodies need a regeneration to judge.
+  pub fn check_move(&self, id: FeatureId, to: usize) -> Result<(), DesignError> {
+    let from = self.index_of(id).ok_or(DesignError::NoFeature(id))?;
+    let mut order: Vec<FeatureId> = self.features.iter().map(|f| f.id).collect();
+    order.remove(from);
+    order.insert(to.min(order.len()), id);
+    let pos = |f: FeatureId| order.iter().position(|o| *o == f);
+    for (i, fid) in order.iter().enumerate() {
+      let Some(feat) = self.feature(*fid) else { continue };
+      if let Some(dep) = feat.kind.depends_on().into_iter().find(|d| pos(*d).is_some_and(|di| di > i)) {
+        let dep_name = self.feature(dep).map(|f| f.name.clone()).unwrap_or_default();
+        return Err(DesignError::InUse(dep_name, format!("{}, which would come before it", feat.name)));
+      }
     }
     Ok(())
   }
@@ -1909,14 +1940,40 @@ impl Design {
   }
 
   pub fn from_json(s: &str) -> Result<Design, DesignError> {
-    let d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
+    let mut d: Design = serde_json::from_str(s).map_err(|e| DesignError::File(e.to_string()))?;
     if d.version > FORMAT_VERSION {
       return Err(DesignError::Version(d.version));
     }
     if d.features.len() > MAX_FEATURES || d.parameters.len() > MAX_PARAMETERS {
       return Err(DesignError::TooMany);
     }
+    // a hand-edited rho outside the range would give the conic an infinite or negative weight
+    for f in &d.features {
+      if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+        for c in &sketch.curves {
+          if let fox_sketch::CurveKind::Conic { rho, .. } = c.kind
+            && !fox_sketch::RHO_RANGE.contains(&rho)
+          {
+            return Err(DesignError::File(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
+          }
+        }
+      }
+    }
+    d.migrate();
     Ok(d)
+  }
+
+  /// Brings a design read from an older file up to [`FORMAT_VERSION`], so it rebuilds as it did.
+  fn migrate(&mut self) {
+    if self.version < 2 {
+      // a symmetric thicken's thickness was the total, half on each side; now it is per side
+      for f in &mut self.features {
+        if let FeatureKind::Thicken { thickness, symmetric: true, .. } = &mut f.kind {
+          *thickness = format!("({}) / 2", thickness.trim());
+        }
+      }
+    }
+    self.version = FORMAT_VERSION;
   }
 
   pub fn save(&self, path: &std::path::Path) -> Result<(), DesignError> {
@@ -2083,10 +2140,13 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
-    FeatureKind::Pipe { diameter, wall, .. } => {
+    FeatureKind::Pipe { diameter, wall, distance, .. } => {
       f(diameter);
       if !wall.is_empty() {
         f(wall);
+      }
+      if !distance.is_empty() {
+        f(distance);
       }
     }
     FeatureKind::Rib { thickness, depth, .. } => {
@@ -2280,5 +2340,55 @@ mod tests {
   #[test]
   fn rename_ident_whole_words_only() {
     assert_eq!(rename_ident("w + width*w2 - w", "w", "x"), "x + width*w2 - x");
+  }
+
+  #[test]
+  fn behaviour_flags_new_legacy_and_unknown() {
+    // a new design and a new sketch get every current behaviour
+    assert_eq!(Design::new("n").behaviours, Behaviours::current());
+    // a file from before behaviour flags has none, in the design and in its sketches
+    let old = r#"{"version": 2, "name": "old", "features": [{"id": 1, "name": "Sketch1",
+      "kind": {"type": "sketch", "plane": {"type": "origin", "plane": "xy"},
+      "sketch": {"points": [], "curves": [], "constraints": [], "next_id": 1}}}]}"#;
+    let d = Design::from_json(old).unwrap();
+    assert!(d.behaviours.is_empty());
+    let FeatureKind::Sketch { sketch, .. } = &d.features[0].kind else { panic!("not a sketch") };
+    assert!(sketch.behaviours.is_empty());
+    // a sketch added to an old design is new geometry: it gets the current set, not the design's
+    let mut d = d;
+    let s = d
+      .add_feature(FeatureKind::Sketch {
+        plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+        sketch: Sketch::new(),
+        links: Vec::new(),
+      })
+      .unwrap();
+    let Some(FeatureKind::Sketch { sketch, .. }) = d.feature(s).map(|f| &f.kind) else { panic!("no sketch") };
+    assert_eq!(sketch.behaviours, Behaviours::current());
+    // names from a newer build survive a load and save, on the design and on a sketch
+    let mut d = Design::new("newer");
+    d.behaviours.insert("future_regen_change");
+    let mut sk = Sketch::new();
+    sk.behaviours.insert("future_profile_change");
+    d.add_feature(FeatureKind::Sketch {
+      plane: PlaneRef::Origin { plane: OriginPlane::Xy },
+      sketch: sk,
+      links: Vec::new(),
+    })
+    .unwrap();
+    let json = d.to_json();
+    let back = Design::from_json(&json).unwrap();
+    assert_eq!(back, d);
+    assert_eq!(Design::from_json(&back.to_json()).unwrap(), d);
+    assert!(back.behaviours.iter().any(|n| n == "future_regen_change"));
+    assert!(json.contains("future_profile_change"));
+    // with no current behaviours, a legacy design saves without the field (files unchanged)
+    if behaviour_current_is_empty() {
+      assert!(!Design::new("plain").to_json().contains("behaviours"));
+    }
+  }
+
+  fn behaviour_current_is_empty() -> bool {
+    fox_sketch::behaviour::CURRENT.is_empty()
   }
 }

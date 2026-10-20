@@ -22,6 +22,13 @@ fn sketch(s: &Session) -> &fox_sketch::Sketch {
   &s.model.sketches[&id].sketch
 }
 
+/// Makes the sketch being edited a legacy one, as read from a file saved before behaviour flags
+/// (Catmull-Rom fit-point splines, one edge per piece).
+fn make_legacy(s: &mut Session) {
+  let id = s.edit_sketch.expect("a sketch being edited");
+  s.design.sketch_mut(id).unwrap().behaviours = fox_sketch::Behaviours::legacy();
+}
+
 fn volume(s: &Session) -> f64 {
   s.model.bodies.iter().map(|b| b.shape.mass().map(|m| m.volume).unwrap_or(0.0)).sum()
 }
@@ -126,14 +133,53 @@ fn closed_fit_point_splines_have_no_corner() {
 }
 
 #[test]
+fn a_legacy_fit_point_spline_keeps_its_catmull_rom_shape_and_faces() {
+  // a sketch from a file saved before the quintic: main's Catmull-Rom curve, one face per piece
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  make_legacy(&mut s);
+  run(&mut s, "sketch.spline", json!({"points": [[0, 0], [20, 20], [40, 0]]}));
+  run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, -5], [0, -5], [0, 0]]}));
+  let sk = sketch(&s);
+  let sp = sk.curves.iter().find(|c| matches!(c.kind, CurveKind::Spline { .. })).unwrap().id;
+  let catmull_rom = fox_sketch::spline_beziers(&[[0.0, 0.0], [20.0, 20.0], [40.0, 0.0]]);
+  assert_eq!(sk.beziers(sp), catmull_rom, "exactly main's pieces");
+  assert_eq!(catmull_rom.len(), 2);
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5}));
+  assert_eq!(s.model.bodies[0].faces().len(), 7, "a side face per spline piece, as on main");
+}
+
+#[test]
 fn fit_point_splines_stay_fit_point_through_trim_and_extend() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  make_legacy(&mut s);
+  let sp =
+    run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 5]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.line", json!({"points": [[25, -10], [25, 20]]}));
+  run(&mut s, "sketch.trim", json!({"curve": sp, "at": [29, 4]}));
+  run(&mut s, "sketch.line", json!({"points": [[-10, -20], [-10, 20]]}));
+  run(&mut s, "sketch.extend", json!({"curve": sp, "at": [0, 0]}));
+  let sk = sketch(&s);
+  let c = sk.curves.iter().find(|c| c.id.0 as u64 == sp).unwrap();
+  let CurveKind::Spline { points, .. } = &c.kind else { panic!("still a fit-point spline: {:?}", c.kind) };
+  let first = sk.pos(points[0]).unwrap();
+  let last = sk.pos(*points.last().unwrap()).unwrap();
+  assert!((first[0] + 10.0).abs() < 1e-6, "{first:?}");
+  assert!((last[0] - 25.0).abs() < 1e-6, "{last:?}");
+}
+
+#[test]
+fn quintic_fit_point_splines_stay_fit_point_through_trim_and_extend() {
   let mut s = Session::default();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   let sp =
     run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 5]]}))["curves"][0].as_u64().unwrap();
   run(&mut s, "sketch.line", json!({"points": [[25, -10], [25, 20]]}));
   run(&mut s, "sketch.trim", json!({"curve": sp, "at": [29, 4]}));
-  // the curve leaves (0, 0) steeply (about 2.2 up for 1 across), so reaches x = -10 near y = -22
+  // the quintic leaves (0, 0) more steeply than the Catmull-Rom curve (about 2.2 up for 1
+  // across), so it reaches x = -10 near y = -22, below the legacy test's line
   run(&mut s, "sketch.line", json!({"points": [[-10, -40], [-10, 20]]}));
   run(&mut s, "sketch.extend", json!({"curve": sp, "at": [0, 0]}));
   let sk = sketch(&s);

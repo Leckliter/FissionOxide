@@ -153,7 +153,7 @@ impl Ctx<'_> {
           let mut wires = Vec::new();
           for pr in &sk.profiles {
             for l in std::iter::once(&pr.outer).chain(&pr.holes) {
-              wires.push(Shape::path(&sk.plane, &l.segs).map_err(ke)?);
+              wires.push(Shape::path_with(&sk.plane, &l.segs, &l.merge_next()).map_err(ke)?);
             }
           }
           (wires, Side::Profiles(sk.plane, sk.profiles.clone()))
@@ -402,5 +402,48 @@ mod tests {
     assert!(matches!(u, FeatureKind::Untrim { loops: UntrimLoops::All, .. }));
     let t: FeatureKind = serde_json::from_str(r#"{"type": "trim_with", "bodies": [3], "tool": {"body": 4}}"#).unwrap();
     assert!(matches!(t, FeatureKind::TrimWith { tool: TrimTool::Body { body: BodyId(4) }, flip: false, .. }));
+  }
+
+  #[test]
+  fn version_1_symmetric_thicken_keeps_its_total_thickness() {
+    // version 1 stored a symmetric thicken's total thickness (half each side); version 2 stores
+    // the thickness on each side, so an old file must still rebuild 4 mm thick in all
+    let volume = |m: &regen::Model| -> f64 { m.bodies.iter().map(|b| b.shape.mass().unwrap().volume).sum() };
+    for thickness in ["4 mm", "t"] {
+      let mut d = Design::new("sheet");
+      d.add_parameter("t", "4 mm", ParamKind::Length, "").unwrap();
+      let mut sk = Sketch::new();
+      sk.add_rectangle([0.0, 0.0], [10.0, 10.0]).unwrap();
+      let s = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: sk, links: Vec::new() }).unwrap();
+      d.add_feature(FeatureKind::Patch { edges: vec![], sketch: Some(s) }).unwrap();
+      let body = regenerate(&mut d).bodies[0].id;
+      d.add_feature(FeatureKind::Thicken {
+        faces: vec![],
+        bodies: vec![body],
+        thickness: thickness.into(),
+        symmetric: true,
+        flip: false,
+        operation: Operation::NewBody,
+        round: false,
+      })
+      .unwrap();
+      let mut v1: serde_json::Value = serde_json::from_str(&d.to_json()).unwrap();
+      v1["version"] = 1.into();
+
+      let mut old = Design::from_json(&v1.to_string()).unwrap();
+      assert_eq!(old.version, FORMAT_VERSION);
+      let m = regenerate(&mut old);
+      assert!(m.errors().is_empty(), "{:?}", m.errors());
+      assert!((volume(&m) - 400.0).abs() < 1e-6, "{thickness}: {}", volume(&m));
+
+      // saved again it is a current file, not halved a second time
+      let mut again = Design::from_json(&old.to_json()).unwrap();
+      assert_eq!(again, old);
+      assert!((volume(&regenerate(&mut again)) - 400.0).abs() < 1e-6);
+
+      // and a current file is left alone: 4 mm on each side
+      let mut current = Design::from_json(&d.to_json()).unwrap();
+      assert!((volume(&regenerate(&mut current)) - 800.0).abs() < 1e-6);
+    }
   }
 }

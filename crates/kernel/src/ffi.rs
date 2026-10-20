@@ -72,7 +72,9 @@ pub(crate) mod ffi {
     fn shape_is_null(s: &Shape) -> bool;
     fn shape_type(s: &Shape) -> i32;
 
-    fn make_face(plane: &[f64], segs: &[f64], loop_lens: &[u32]) -> Result<UniquePtr<Shape>>;
+    /// `merge`: empty, or one flag per segment: nonzero lets it become one edge with the next
+    /// in its loop (see `Shape::face_with`).
+    fn make_face(plane: &[f64], segs: &[f64], loop_lens: &[u32], merge: &[u8]) -> Result<UniquePtr<Shape>>;
     fn make_prism(face: &Shape, dx: f64, dy: f64, dz: f64) -> Result<UniquePtr<Shape>>;
     fn make_revol(face: &Shape, axis: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
     fn make_box(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> Result<UniquePtr<Shape>>;
@@ -103,7 +105,8 @@ pub(crate) mod ffi {
     fn fillet_var(s: &Shape, edges: &[u32], r1: f64, r2: f64) -> Result<UniquePtr<Shape>>;
     fn split_by_shape(s: &Shape, tool: &Shape) -> Result<UniquePtr<Shape>>;
     fn hlr_project(s: &Shape, view: &[f64], deflection: f64) -> Result<HlrData>;
-    fn make_wire(segs: &[f64]) -> Result<UniquePtr<Shape>>;
+    /// `merge` as for `make_face`.
+    fn make_wire(segs: &[f64], merge: &[u8]) -> Result<UniquePtr<Shape>>;
     fn make_pipe(face: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
     fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
     fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
@@ -178,6 +181,7 @@ pub(crate) mod ffi {
     fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
     fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
+    fn offset_joined(s: &Shape, d: f64, round: bool, thicken: bool) -> Result<UniquePtr<Shape>>;
     // sheet2.cpp
     fn ruled_bspline(a: &[f64], b: &[f64], u: &[f64]) -> Result<UniquePtr<Shape>>;
 

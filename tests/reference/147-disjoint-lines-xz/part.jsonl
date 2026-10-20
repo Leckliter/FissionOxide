@@ -1,0 +1,8 @@
+# 147-disjoint-lines-xz: added by the parity loop from a Fusion probe
+# disjoint-lines-xz: On XZ (sketch y = world -Z): lines (10,0)-(40,0) and (0,10)-(0,40) don't touch but their extensions meet at the origin; radius 6, hint (-15,20) in the quadrant left of the vertical line and above the horizontal one, so the centre is (-6,6); extruded 8.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 40]]}
+{"cmd": "sketch.tangent_circle", "curves": [3, 7], "radius": 6, "near": [-15, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[-6, 6]], "distance": 8, "operation": "new_body"}

@@ -1,0 +1,7 @@
+# 252-offset-shallow-arc-slot: added by the parity loop from a Fusion probe
+# offset-shallow-arc-slot: Three point arc slot off the origin from (5,5) to (35,5) with the third point (10,9.2524) off the arc's apex (centre (20,-7.571), radius 19.571), width 5; extruded 2.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [5, 5], "mid": [10, 9.252388], "end": [35, 5], "width": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 2, "operation": "new_body"}

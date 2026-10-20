@@ -7,7 +7,10 @@
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod behaviour;
 mod build;
+mod conic;
+mod curve3d;
 mod edit;
 mod ellipse;
 mod fitspline;
@@ -24,10 +27,14 @@ mod transform;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub use behaviour::Behaviours;
 pub use build::{PtSpec, circumcenter};
+pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
+pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
+pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
-pub use profile::{Loop, Profile, Seg, find_profiles};
+pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
 pub use solve::{SolveReport, SolveStatus};
 pub use text::{SketchText, TextId, text_fonts};
 pub use transform::{TransformReport, Xform2};
@@ -54,6 +61,15 @@ pub struct Sketch {
   /// generates (sketches from before text was editable have none, only exploded curves).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub texts: Vec<SketchText>,
+  /// Included 3D geometry (Include 3D Geometry): curves kept at their world positions, off the
+  /// sketch plane, usable as sweep paths and rails but never part of a profile.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub curves3d: Vec<Curve3d>,
+  /// The geometry behaviours this sketch was made with (profiles, solver, curve evaluation): a
+  /// new sketch has all of [`behaviour::CURRENT`], one read from a file what it stored (none if
+  /// the field is missing), so it rebuilds as it did. See [`behaviour`].
+  #[serde(default, skip_serializing_if = "Behaviours::is_empty")]
+  pub behaviours: Behaviours,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -92,13 +108,15 @@ pub enum CurveKind {
     start: PointId,
     end: PointId,
   },
-  /// A smooth curve through fit points: Fusion's minimum-energy quintic (see `quintic`), drawn as
-  /// cubic pieces. Closed (periodic, no corner at the start) when the last point is the first.
+  /// A smooth curve through fit points, drawn as cubic pieces: in a sketch with
+  /// [`behaviour::QUINTIC_FIT_SPLINE`] Fusion's minimum-energy quintic (see `quintic`), closed
+  /// (periodic, no corner at the start) when the last point is the first; in older sketches a
+  /// Catmull-Rom spline, one piece per gap.
   Spline {
     points: Vec<PointId>,
     /// Tangent handle at the start: where the inner control point of a cubic Bézier spanning the
-    /// first gap would be. Added when a tangency or curvature constraint uses that end, so the fit
-    /// points stay free.
+    /// first gap would be (for a Catmull-Rom spline, the first piece's inner control point).
+    /// Added when a tangency or curvature constraint uses that end, so the fit points stay free.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_handle: Option<PointId>,
     /// Tangent handle at the end, as the start's for the last gap.
@@ -140,6 +158,15 @@ pub enum CurveKind {
     start: PointId,
     end: PointId,
   },
+  /// A conic arc from `start` to `end` whose end tangents meet at `apex`, its shape set by `rho`
+  /// (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic): the rational quadratic Bézier
+  /// with control points start, apex, end and apex weight rho / (1 - rho).
+  Conic {
+    start: PointId,
+    end: PointId,
+    apex: PointId,
+    rho: f64,
+  },
 }
 
 impl CurveKind {
@@ -157,6 +184,7 @@ impl CurveKind {
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. }
     )
   }
 
@@ -203,6 +231,11 @@ pub enum ConstraintKind {
     x: f64,
     y: f64,
   },
+  /// Locks a circle's radius: fixing a circle fixes its centre and adds this.
+  FixRadius {
+    curve: CurveId,
+    radius: f64,
+  },
   Horizontal {
     line: CurveId,
   },
@@ -223,6 +256,7 @@ pub enum ConstraintKind {
     a: CurveId,
     b: CurveId,
   },
+  /// Two lines at 90°, or a line normal to a circle/arc (the extended line runs through its centre).
   Perpendicular {
     a: CurveId,
     b: CurveId,
@@ -248,6 +282,8 @@ pub enum ConstraintKind {
     p: PointId,
     curve: CurveId,
   },
+  /// `p` at the midpoint of `line`: a line, or an arc (the middle of its counter-clockwise
+  /// sweep).
   Midpoint {
     p: PointId,
     line: CurveId,
@@ -256,6 +292,13 @@ pub enum ConstraintKind {
   Symmetric {
     a: PointId,
     b: PointId,
+    line: CurveId,
+  },
+  /// Curves `a` and `b` mirror each other across `line`: two lines as infinite lines (their
+  /// endpoints stay free), or two circles/arcs by their centres, with equal radii.
+  SymmetricCurves {
+    a: CurveId,
+    b: CurveId,
     line: CurveId,
   },
   Distance {
@@ -298,6 +341,13 @@ pub enum ConstraintKind {
     a: CurveId,
     b: CurveId,
   },
+  /// A closed loop of lines kept a regular polygon about `center`: every side the same length and
+  /// every corner the same distance from the centre. The centre is a point of its own (no curve
+  /// uses it), so other constraints and dimensions can refer to it.
+  Polygon {
+    center: PointId,
+    lines: Vec<CurveId>,
+  },
 }
 
 impl ConstraintKind {
@@ -337,7 +387,7 @@ impl ConstraintKind {
   pub fn name(&self) -> &'static str {
     match self {
       ConstraintKind::Coincident { .. } => "Coincident",
-      ConstraintKind::Fix { .. } => "Fix",
+      ConstraintKind::Fix { .. } | ConstraintKind::FixRadius { .. } => "Fix",
       ConstraintKind::Horizontal { .. } | ConstraintKind::HorizontalPoints { .. } => "Horizontal",
       ConstraintKind::Vertical { .. } | ConstraintKind::VerticalPoints { .. } => "Vertical",
       ConstraintKind::Parallel { .. } => "Parallel",
@@ -348,7 +398,7 @@ impl ConstraintKind {
       ConstraintKind::Concentric { .. } => "Concentric",
       ConstraintKind::PointOnCurve { .. } => "Point on curve",
       ConstraintKind::Midpoint { .. } => "Midpoint",
-      ConstraintKind::Symmetric { .. } => "Symmetric",
+      ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => "Symmetric",
       ConstraintKind::Distance { .. } => "Distance",
       ConstraintKind::HorizontalDistance { .. } => "Horizontal distance",
       ConstraintKind::VerticalDistance { .. } => "Vertical distance",
@@ -357,6 +407,7 @@ impl ConstraintKind {
       ConstraintKind::Diameter { .. } => "Diameter",
       ConstraintKind::Angle { .. } => "Angle",
       ConstraintKind::Curvature { .. } => "Curvature",
+      ConstraintKind::Polygon { .. } => "Polygon",
     }
   }
 
@@ -374,6 +425,7 @@ impl ConstraintKind {
       | ConstraintKind::PointOnCurve { p, .. }
       | ConstraintKind::Midpoint { p, .. }
       | ConstraintKind::PointLineDistance { p, .. } => vec![*p],
+      ConstraintKind::Polygon { center, .. } => vec![*center],
       _ => vec![],
     }
   }
@@ -390,12 +442,15 @@ impl ConstraintKind {
       | ConstraintKind::Concentric { a, b }
       | ConstraintKind::Curvature { a, b }
       | ConstraintKind::Angle { a, b, .. } => vec![*a, *b],
+      ConstraintKind::SymmetricCurves { a, b, line } => vec![*a, *b, *line],
       ConstraintKind::PointOnCurve { curve, .. }
+      | ConstraintKind::FixRadius { curve, .. }
       | ConstraintKind::Radius { curve, .. }
       | ConstraintKind::Diameter { curve, .. } => vec![*curve],
       ConstraintKind::Midpoint { line, .. }
       | ConstraintKind::Symmetric { line, .. }
       | ConstraintKind::PointLineDistance { line, .. } => vec![*line],
+      ConstraintKind::Polygon { lines, .. } => lines.clone(),
       _ => vec![],
     }
   }
@@ -431,6 +486,8 @@ impl Sketch {
       constraints: Vec::new(),
       next_id: 1,
       texts: Vec::new(),
+      curves3d: Vec::new(),
+      behaviours: Behaviours::current(),
     }
   }
 
@@ -498,6 +555,11 @@ impl Sketch {
     {
       return Err(SketchError::InvalidValue(format!("circle radius {radius}")));
     }
+    if let CurveKind::Conic { rho, .. } = kind
+      && !RHO_RANGE.contains(&rho)
+    {
+      return Err(SketchError::InvalidValue(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
+    }
     let id = CurveId(self.alloc());
     self.curves.push(Curve { id, kind, construction: false });
     Ok(id)
@@ -507,7 +569,10 @@ impl Sketch {
   pub fn add_constraint(&mut self, kind: ConstraintKind) -> Result<ConstraintId, SketchError> {
     self.validate(&kind)?;
     if let ConstraintKind::Tangent { a, b } | ConstraintKind::Curvature { a, b } = kind {
-      let curvature = matches!(kind, ConstraintKind::Curvature { .. });
+      // a curvature constraint adds curvature handles too (smooth ends), in sketches that have them
+      let curvature = matches!(kind, ConstraintKind::Curvature { .. })
+        && self.behaviours.has(behaviour::SPLINE_CURVATURE_HANDLES)
+        && self.behaviours.has(behaviour::QUINTIC_FIT_SPLINE);
       self.add_spline_handle(a, b, curvature);
       self.add_spline_handle(b, a, curvature);
     }
@@ -516,10 +581,48 @@ impl Sketch {
     Ok(id)
   }
 
+  /// Locks a curve's size and location (Fusion's Fix on a curve): every point that defines it
+  /// gets a `Fix` and a circle's radius a `FixRadius`. Points already fixed are skipped. Returns
+  /// the constraints added; deleting them unfixes the curve.
+  pub fn fix_curve(&mut self, curve: CurveId) -> Result<Vec<ConstraintId>, SketchError> {
+    let kind = self.curve(curve).ok_or(SketchError::NoCurve(curve))?.kind.clone();
+    let mut added = Vec::new();
+    for p in curve_points(&kind) {
+      let Some(pt) = self.point(p).copied() else { continue };
+      let pinned =
+        pt.fixed || self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Fix { p: q, .. } if q == p));
+      if !pinned {
+        added.push(self.add_constraint(ConstraintKind::Fix { p, x: pt.x, y: pt.y })?);
+      }
+    }
+    if let CurveKind::Circle { radius, .. } = kind
+      && !self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::FixRadius { curve: q, .. } if q == curve))
+    {
+      added.push(self.add_constraint(ConstraintKind::FixRadius { curve, radius })?);
+    }
+    Ok(added)
+  }
+
   pub fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), SketchError> {
-    let before = self.constraints.len();
+    let removed = self.constraint(id).ok_or(SketchError::NoConstraint(id))?.clone();
     self.constraints.retain(|c| c.id != id);
-    if self.constraints.len() == before { Err(SketchError::NoConstraint(id)) } else { Ok(()) }
+    self.remove_polygon_centers(&[removed]);
+    Ok(())
+  }
+
+  /// Deletes the centre points of removed polygon constraints, with the constraints on them,
+  /// unless a curve or another polygon constraint still uses the point.
+  fn remove_polygon_centers(&mut self, removed: &[Constraint]) {
+    for c in removed {
+      let ConstraintKind::Polygon { center, .. } = c.kind else { continue };
+      let used = center == ORIGIN
+        || self.curves.iter().any(|c| curve_points(&c.kind).contains(&center))
+        || self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Polygon { center: o, .. } if o == center));
+      if !used {
+        self.points.retain(|p| p.id != center);
+        self.constraints.retain(|c| !c.kind.points().contains(&center));
+      }
+    }
   }
 
   /// Deletes a curve, its points that nothing else uses, and constraints that referred to them.
@@ -528,13 +631,21 @@ impl Sketch {
     if let Some(t) = self.text_of(id) {
       return self.remove_text(t);
     }
+    if self.curve3d(id).is_some() {
+      self.curves3d.retain(|c| c.id != id);
+      return Ok(());
+    }
     let curve = self.curve(id).ok_or(SketchError::NoCurve(id))?.clone();
     self.curves.retain(|c| c.id != id);
     let still_used: Vec<PointId> = self.curves.iter().flat_map(|c| curve_points(&c.kind)).collect();
     let orphans: Vec<PointId> =
       curve_points(&curve.kind).into_iter().filter(|p| *p != ORIGIN && !still_used.contains(p)).collect();
     self.points.retain(|p| !orphans.contains(&p.id));
-    self.constraints.retain(|c| !c.kind.curves().contains(&id) && !c.kind.points().iter().any(|p| orphans.contains(p)));
+    let (removed, kept): (Vec<Constraint>, Vec<Constraint>) = std::mem::take(&mut self.constraints)
+      .into_iter()
+      .partition(|c| c.kind.curves().contains(&id) || c.kind.points().iter().any(|p| orphans.contains(p)));
+    self.constraints = kept;
+    self.remove_polygon_centers(&removed);
     Ok(())
   }
 
@@ -590,7 +701,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => None,
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => None,
     }
   }
 
@@ -601,7 +713,7 @@ impl Sketch {
 
   /// [`Sketch::beziers`] of a curve kind at the current point positions.
   pub fn kind_beziers(&self, kind: &CurveKind) -> Vec<[[f64; 2]; 4]> {
-    kind_beziers(kind, &|p| self.pos(p))
+    kind_beziers(kind, &|p| self.pos(p), &self.behaviours)
   }
 
   /// A spline or ellipse flattened to a polyline (empty for other curves).
@@ -639,10 +751,11 @@ impl Sketch {
         _ => Vec::new(),
       },
       k if k.is_elliptic() => ellipse::kind_segs(k, &|p| self.pos(p)),
-      _ => {
-        let chain = profile::spline_chain(id, &c.kind);
-        self.beziers(id).into_iter().map(|p| Seg::Bezier { p, chain }).collect()
-      }
+      CurveKind::Conic { start, end, apex, rho } => match (self.pos(*start), self.pos(*apex), self.pos(*end)) {
+        (Some(s), Some(a), Some(e)) if dist(s, e) > 1e-9 => vec![Seg::Conic { p: [s, a, e], w: conic_weight(*rho) }],
+        _ => Vec::new(),
+      },
+      _ => self.beziers(id).into_iter().map(|p| Seg::Bezier { p }).collect(),
     }
   }
 
@@ -691,7 +804,18 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Spline { .. } | CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => {
+        // a Catmull-Rom spline is bounded by its points, as before; a quintic one is sampled
+        CurveKind::Spline { .. } if !self.behaviours.has(behaviour::QUINTIC_FIT_SPLINE) => {
+          for p in curve_points(&c.kind) {
+            if let Some(p) = self.pos(p) {
+              add(p);
+            }
+          }
+        }
+        CurveKind::Spline { .. }
+        | CurveKind::Ellipse { .. }
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. } => {
           for p in self.spline_points(c.id) {
             add(p);
           }
@@ -742,7 +866,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;
@@ -814,14 +939,55 @@ impl Sketch {
       ConstraintKind::Horizontal { line: l } => line(*l, "Horizontal"),
       ConstraintKind::Vertical { line: l } => line(*l, "Vertical"),
       ConstraintKind::Parallel { a, b } => line(*a, "Parallel").and(line(*b, "Parallel")),
-      ConstraintKind::Perpendicular { a, b } => line(*a, "Perpendicular").and(line(*b, "Perpendicular")),
+      ConstraintKind::Perpendicular { a, b } => {
+        // a line and a circle/arc: the line is normal to the curve, i.e. runs through its centre
+        let is_round =
+          |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        if is_round(*a) || is_round(*b) {
+          let l = if is_round(*a) { *b } else { *a };
+          line(l, "Perpendicular").map_err(|e| match e {
+            SketchError::WrongGeometry(..) => {
+              SketchError::WrongGeometry("Perpendicular", "two lines, or a line and a circle or arc")
+            }
+            e => e,
+          })
+        } else {
+          line(*a, "Perpendicular").and(line(*b, "Perpendicular"))
+        }
+      }
       ConstraintKind::Collinear { a, b } => line(*a, "Collinear").and(line(*b, "Collinear")),
       ConstraintKind::Angle { a, b, .. } => line(*a, "Angle").and(line(*b, "Angle")),
-      ConstraintKind::Midpoint { line: l, .. } => line(*l, "Midpoint"),
+      ConstraintKind::Midpoint { line: l, .. } => match self.curve(*l).map(|c| &c.kind) {
+        Some(CurveKind::Line { .. } | CurveKind::Arc { .. }) => Ok(()),
+        Some(_) => Err(SketchError::WrongGeometry("Midpoint", "a line or an arc")),
+        None => Err(SketchError::NoCurve(*l)),
+      },
       ConstraintKind::Symmetric { line: l, .. } => line(*l, "Symmetric"),
+      ConstraintKind::SymmetricCurves { a, b, line: l } => {
+        line(*l, "Symmetric")?;
+        any(*a)?;
+        any(*b)?;
+        let is_line = |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_round =
+          |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let pair = (is_line(*a) && is_line(*b)) || (is_round(*a) && is_round(*b));
+        if a == b || a == l || b == l || !pair {
+          Err(SketchError::WrongGeometry("Symmetric", "two points, two lines or two circles/arcs, and an axis line"))
+        } else {
+          Ok(())
+        }
+      }
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
       ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
+      ConstraintKind::FixRadius { curve, radius } => {
+        round(*curve, "Fix")?;
+        if radius.is_finite() && *radius > 0.0 {
+          Ok(())
+        } else {
+          Err(SketchError::InvalidValue(format!("radius {radius}")))
+        }
+      }
       ConstraintKind::Diameter { curve, .. } => round(*curve, "Diameter"),
       ConstraintKind::Equal { a, b } => {
         any(*a)?;
@@ -854,6 +1020,15 @@ impl Sketch {
         }
       }
       ConstraintKind::PointOnCurve { curve, .. } => exists(*curve),
+      ConstraintKind::Polygon { center, lines } => {
+        for l in lines {
+          line(*l, "Polygon")?;
+        }
+        match self.polygon_corners(lines) {
+          Some(corners) if !corners.contains(center) => Ok(()),
+          _ => Err(SketchError::WrongGeometry("Polygon", "three or more lines forming one closed loop")),
+        }
+      }
       _ => {
         if let Some(d) = kind.dim()
           && !d.value.is_finite()
@@ -892,14 +1067,22 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
     CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
+    CurveKind::Conic { start, end, apex, .. } => vec![*start, *apex, *end],
   }
 }
 
-/// A curve's Bézier pieces with point positions from `pos` (empty for lines, circles and arcs).
-pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> Vec<[[f64; 2]; 4]> {
+/// A curve's Bézier pieces with point positions from `pos` (empty for lines, circles and arcs),
+/// for a curve of a sketch with `behaviours` (which pick how a fit-point spline is fitted).
+pub fn kind_beziers(
+  kind: &CurveKind,
+  pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  behaviours: &Behaviours,
+) -> Vec<[[f64; 2]; 4]> {
   let pts = |ids: &[PointId]| -> Vec<[f64; 2]> { ids.iter().filter_map(|p| pos(*p)).collect() };
   match kind {
-    CurveKind::Spline { .. } => spline_fit(kind, pos).map(|f| f.0).unwrap_or_default(),
+    CurveKind::Spline { .. } => {
+      spline_fit(kind, pos, behaviours.has(behaviour::QUINTIC_FIT_SPLINE)).map(|f| f.0).unwrap_or_default()
+    }
     CurveKind::ControlSpline { points } => bspline_beziers(&pts(points)),
     CurveKind::Bezier { points } => {
       let p = pts(points);
@@ -916,6 +1099,10 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
       Some((e, t0, sweep)) => e.beziers(t0, sweep, std::f64::consts::FRAC_PI_4),
       None => Vec::new(),
     },
+    CurveKind::Conic { start, end, apex, rho } => match (pos(*start), pos(*apex), pos(*end)) {
+      (Some(s), Some(a), Some(e)) => conic_beziers(&[s, a, e], conic_weight(*rho)),
+      _ => Vec::new(),
+    },
     _ => Vec::new(),
   }
 }
@@ -927,12 +1114,29 @@ pub fn spline_closed(points: &[PointId]) -> bool {
 
 /// A fit-point spline's Bézier pieces and the index of the piece each fit point starts (for an
 /// open spline the last fit point's is the piece count; a closed one lists its start once).
-/// Falls back to Catmull-Rom pieces, one per gap, if the fit fails.
+///
+/// `quintic` ([`behaviour::QUINTIC_FIT_SPLINE`]): Fusion's minimum-energy quintic, closed when the
+/// last point is the first, falling back to Catmull-Rom pieces if the fit fails. Otherwise the
+/// Catmull-Rom spline older sketches were drawn with: one piece per gap, the tangent handles
+/// replacing the first and last pieces' inner control points.
 pub(crate) fn spline_fit(
   kind: &CurveKind,
   pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  quintic: bool,
 ) -> Option<(Vec<[[f64; 2]; 4]>, Vec<usize>)> {
-  let CurveKind::Spline { points, .. } = kind else { return None };
+  let CurveKind::Spline { points, start_handle, end_handle, .. } = kind else { return None };
+  if !quintic {
+    let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| pos(*p)).collect();
+    let mut bz = spline_beziers(&pts);
+    if let (Some(h), Some(first)) = (start_handle.and_then(pos), bz.first_mut()) {
+      first[1] = h;
+    }
+    if let (Some(h), Some(last)) = (end_handle.and_then(pos), bz.last_mut()) {
+      last[2] = h;
+    }
+    let starts = (0..=bz.len()).collect();
+    return Some((bz, starts));
+  }
   let closed = spline_closed(points);
   let ids = if closed { &points[..points.len() - 1] } else { &points[..] };
   let pts: Vec<[f64; 2]> = ids.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
@@ -951,9 +1155,13 @@ pub(crate) fn spline_fit(
   }
 }
 
-/// The Bézier pieces of a fit-point spline (without tangent handles) through `pts`; closed when
-/// `closed` (the last point repeating the first).
-pub fn fit_point_beziers(pts: &[[f64; 2]], closed: bool) -> Vec<[[f64; 2]; 4]> {
+/// The Bézier pieces of a fit-point spline (without tangent handles) through `pts`, fitted as a
+/// sketch fits it: the quintic when `quintic` ([`behaviour::QUINTIC_FIT_SPLINE`]; closed when
+/// `closed`, the last point repeating the first), else Catmull-Rom.
+pub fn fit_point_beziers(pts: &[[f64; 2]], closed: bool, quintic: bool) -> Vec<[[f64; 2]; 4]> {
+  if !quintic {
+    return spline_beziers(pts);
+  }
   let closed = closed && pts.len() >= 3;
   let inner = if closed { &pts[..pts.len() - 1] } else { pts };
   match quintic::Quintic::fit(inner, closed, (None, None)) {
@@ -962,13 +1170,19 @@ pub fn fit_point_beziers(pts: &[[f64; 2]], closed: bool) -> Vec<[[f64; 2]; 4]> {
   }
 }
 
-/// The tangent handles (start, end) that keep an open fit-point spline as it is: where the inner
-/// control points of cubics spanning its first and last gaps would be.
+/// The tangent handles (start, end) that keep an open fit-point spline as it is: for a quintic
+/// one where the inner control points of cubics spanning its first and last gaps would be, for a
+/// Catmull-Rom one its first and last pieces' inner control points.
 pub(crate) fn spline_handles(
   kind: &CurveKind,
   pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+  quintic: bool,
 ) -> Option<([f64; 2], [f64; 2])> {
   let CurveKind::Spline { points, .. } = kind else { return None };
+  if !quintic {
+    let bz = spline_fit(kind, pos, false)?.0;
+    return Some((bz.first()?[1], bz.last()?[2]));
+  }
   if spline_closed(points) {
     return None;
   }

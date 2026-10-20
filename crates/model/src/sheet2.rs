@@ -52,12 +52,12 @@ fn seg_len(s: &Seg) -> f64 {
     Seg::Line { a, b } => len2(sub(b, a)),
     Seg::Arc { radius, sweep, .. } => radius * sweep.abs(),
     Seg::Circle { radius, .. } => 2.0 * PI * radius,
-    Seg::Bezier { p, .. } => {
+    Seg::Bezier { p } => {
       let pts: Vec<P2> =
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
     }
-    Seg::EllipseArc { .. } => {
+    Seg::EllipseArc { .. } | Seg::Conic { .. } => {
       let mut pts = Vec::new();
       s.flatten(&mut pts);
       pts.push(s.end());
@@ -72,17 +72,27 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
     Seg::Line { a, b } => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f],
     Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep * f),
     Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { 2.0 * PI * f } else { -2.0 * PI * f }),
-    Seg::Bezier { p, .. } => {
-      let pts: Vec<P2> =
-        (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
+    Seg::Bezier { .. } | Seg::Conic { .. } => {
+      let pts: Vec<P2> = match *s {
+        Seg::Bezier { p } => {
+          (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect()
+        }
+        _ => {
+          let mut pts = Vec::new();
+          s.flatten(&mut pts);
+          pts.push(s.end());
+          pts
+        }
+      };
+      let n = pts.len() - 1;
       let cum: Vec<f64> = std::iter::once(0.0)
         .chain(pts.windows(2).scan(0.0, |acc, w| {
           *acc += len2(sub(w[1], w[0]));
           Some(*acc)
         }))
         .collect();
-      let target = f * cum[BEZIER_STEPS];
-      let i = cum.iter().position(|c| *c >= target).unwrap_or(BEZIER_STEPS).clamp(1, BEZIER_STEPS);
+      let target = f * cum[n];
+      let i = cum.iter().position(|c| *c >= target).unwrap_or(n).clamp(1, n);
       let span = (cum[i] - cum[i - 1]).max(1e-12);
       let k = ((target - cum[i - 1]) / span).clamp(0.0, 1.0);
       [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k]
@@ -228,7 +238,7 @@ impl Development {
   pub fn flat_pattern(&self, t: f64) -> Result<FlatPattern, String> {
     let n = self.outline.len();
     let segs = (0..n).map(|i| Seg::Line { a: self.outline[i], b: self.outline[(i + 1) % n] }).collect();
-    let mut outer = Loop { segs };
+    let mut outer = Loop::new(segs);
     if outer.signed_area() < 0.0 {
       outer = outer.reversed();
     }
@@ -336,7 +346,7 @@ fn tangent_elements(segs: &[Seg]) -> Option<Vec<El>> {
       Seg::Circle { center, radius, ccw: true } => {
         items.push(El::Curve { phi0: PI / 2.0, phi1: PI / 2.0 + 2.0 * PI, c: center, r: radius })
       }
-      Seg::Bezier { p, .. } => {
+      Seg::Bezier { p } => {
         let pts: Vec<P2> = (0..=16).map(|i| fox_sketch::bezier_at(&p, i as f64 / 16.0)).collect();
         for w in pts.windows(2) {
           if len2(sub(w[1], w[0])) > 1e-9 {
@@ -422,7 +432,7 @@ fn tangent_pairs(
   let to_a = |p: P2| pl.to_local(b.plane.to_world(p));
   let sb: Vec<Seg> = b.segs.iter().map(|s| map_seg(s, &to_a, na.dot(nb) < 0.0)).collect();
   let ccw = |segs: Vec<Seg>| {
-    let l = Loop { segs };
+    let l = Loop::new(segs);
     if l.signed_area() < 0.0 { (l.reversed().segs, true) } else { (l.segs, false) }
   };
   let (sa, flipped) = ccw(a.segs.clone());
@@ -927,7 +937,8 @@ pub fn map_seg(s: &Seg, f: &impl Fn(P2) -> P2, mirror: bool) -> Seg {
       Seg::Arc { center: c, radius, start_angle: d[1].atan2(d[0]), sweep: sweep * sg }
     }
     Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius, ccw: ccw != mirror },
-    Seg::Bezier { p, chain } => Seg::Bezier { p: p.map(f), chain },
+    Seg::Bezier { p } => Seg::Bezier { p: p.map(f) },
+    Seg::Conic { p, w } => Seg::Conic { p: p.map(f), w },
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       let c = f(center);
       let m = sub(f([center[0] + major[0], center[1] + major[1]]), c);
@@ -971,7 +982,7 @@ pub fn miter_section(path: &[Seg], t: f64, r: f64) -> Result<(Profile, f64, f64)
   let mut kept = kept;
   kept.push(Seg::Line { a, b });
   let shift = |p: P2| [p[0] + cut, p[1]];
-  let outer = Loop { segs: kept.iter().map(|s| map_seg(s, &shift, false)).collect() };
+  let outer = Loop::new(kept.iter().map(|s| map_seg(s, &shift, false)).collect());
   Ok((Profile { outer, holes: Vec::new() }, turn.abs(), cut))
 }
 
@@ -1013,7 +1024,7 @@ pub fn corner_relief(
     CornerRelief::None => return Ok(None),
     CornerRelief::Square => sheet::rectangle([-s / 2.0, -s / 2.0], [s / 2.0, s / 2.0]),
     CornerRelief::Round | CornerRelief::Tear => Profile {
-      outer: Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: s / 2.0, ccw: true }] },
+      outer: Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: s / 2.0, ccw: true }]),
       holes: Vec::new(),
     },
   };

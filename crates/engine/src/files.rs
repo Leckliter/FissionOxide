@@ -494,8 +494,11 @@ fn add_spline(sk: &mut Sketch, sp: &Spline) -> Result<Option<fox_sketch::CurveId
     }
     Ok(ids)
   };
+  let quintic = sk.behaviours.has(fox_sketch::behaviour::QUINTIC_FIT_SPLINE);
   let closed = sp.fit.len() >= 3 && sp.fit.first().zip(sp.fit.last()).is_some_and(|(a, b)| dist(*a, *b) < DXF_SNAP);
-  if sp.fit.len() >= 2 && (sp.control.is_empty() || same(&fox_sketch::fit_point_beziers(&sp.fit, closed), &pieces)) {
+  if sp.fit.len() >= 2
+    && (sp.control.is_empty() || same(&fox_sketch::fit_point_beziers(&sp.fit, closed, quintic), &pieces))
+  {
     if sp.fit.iter().all(|p| dist(*p, sp.fit[0]) < DXF_SNAP) {
       return Ok(None);
     }
@@ -584,6 +587,14 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           Some(e) => e,
           None => continue,
         },
+        // a conic is a rational quadratic: one exact NURBS span
+        CurveKind::Conic { start, end, apex, rho } => Entity::Spline(Spline {
+          degree: 2,
+          knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+          control: vec![pos(*start), pos(*apex), pos(*end)],
+          weights: vec![1.0, fox_sketch::conic_weight(*rho), 1.0],
+          fit: Vec::new(),
+        }),
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
       out.push((e, c.construction));
@@ -594,7 +605,8 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         continue;
       }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },
