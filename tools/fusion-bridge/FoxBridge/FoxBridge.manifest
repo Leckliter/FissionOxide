@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "ed1ae5b3-7c7d-4234-a715-4e8c404f5854",
+  "author": "FissionOxide",
+  "description": {
+    "": "Local bridge for the FissionOxide parity loop: lists every Fusion command and builds neutral recipes so they can be measured."
+  },
+  "version": "0.1.0",
+  "runOnStartup": true,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
