@@ -1,0 +1,12 @@
+# 405-features-cut-half-turn: added by the parity loop from a Fusion probe
+# features-cut-half-turn: Disc r40 h8; d8 hole at (30,0) cut through; the cut feature circular-patterned 5x over 180 deg about Z (holes at 0/45/90/135/180 deg).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 40}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [30, 0], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 8, "operation": "new_body"}
+{"cmd": "pattern.circular", "axis": "z", "count": 5, "angle": "180 deg", "bodies": [4000], "join": false}
+{"cmd": "combine", "target": 2000, "tools": [4000, 5000, 5001, 5002, 5003], "operation": "cut"}

@@ -1,0 +1,225 @@
+{
+ "id": "guide-rail-scale",
+ "name": "guide-rail-scale",
+ "description": "10x10 square centred on the origin on XY swept 40 up +Z along a straight line on XZ, guided by a rail on the same XZ sketch from (5,0,0) to (10,0,40) with profile scaling 'scale': the section grows uniformly to 20x20.",
+ "exercises": [
+  "sweep",
+  "guide_rail"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Path",
+   "plane": {
+    "ref": "XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       -40
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       5,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       -40
+      ]
+     },
+     "id": "r1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "sketch",
+   "name": "ProfileSketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       -5,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       -5
+      ]
+     },
+     "id": "q1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "q1.end",
+      "at": [
+       5,
+       -5
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       5
+      ]
+     },
+     "id": "q2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "q2.end",
+      "at": [
+       5,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       -5,
+       5
+      ]
+     },
+     "id": "q3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "q3.end",
+      "at": [
+       -5,
+       5
+      ]
+     },
+     "end": {
+      "ref": "q1.start",
+      "at": [
+       -5,
+       -5
+      ]
+     },
+     "id": "q4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "sweep",
+   "name": "Sweep1",
+   "operation": "new",
+   "profile": {
+    "sketch": "ProfileSketch",
+    "loops": [
+     {
+      "outer": true,
+      "curves": [
+       "q1",
+       "q2",
+       "q3",
+       "q4"
+      ]
+     }
+    ]
+   },
+   "path": {
+    "sketch": "Path",
+    "curves": [
+     "l1"
+    ],
+    "chained": false
+   },
+   "rail": {
+    "sketch": "Path",
+    "curves": [
+     "r1"
+    ],
+    "chained": false
+   },
+   "profile_scaling": "scale",
+   "orientation": "perpendicular",
+   "result_bodies": [
+    "Flared"
+   ]
+  }
+ ]
+}

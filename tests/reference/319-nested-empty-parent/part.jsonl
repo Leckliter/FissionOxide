@@ -1,0 +1,16 @@
+# 319-nested-empty-parent: added by the parity loop from a Fusion probe
+# nested-empty-parent: New Component (internal, empty) "Assy", then "Part" with parent Assy,
+# holding a 20x20x15 box (x 0..20, y 0..20) with a 5 mm radius through hole at its centre.
+# Fox has no active component, so the body is built in the root and moved into Part.
+{"cmd": "component.create", "name": "Assy", "bodies": []}
+{"cmd": "component.create", "name": "Part", "bodies": []}
+{"cmd": "component.parent", "component": 2, "parent": 1}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.circle", "center": [10, 10], "radius": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[2, 2]], "distance": 15, "operation": "new_body"}
+{"cmd": "component.add_bodies", "component": 2, "bodies": [1000]}

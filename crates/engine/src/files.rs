@@ -595,6 +595,14 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
           weights: vec![1.0, fox_sketch::conic_weight(*rho), 1.0],
           fit: Vec::new(),
         }),
+        // a blend curve is one exact quintic B-spline
+        CurveKind::QuinticSpline { points } => Entity::Spline(Spline {
+          degree: 5,
+          knots: [[0.0; 6].as_slice(), &[0.2, 0.4, 0.6, 0.8], &[1.0; 6]].concat(),
+          control: pts(points),
+          weights: Vec::new(),
+          fit: Vec::new(),
+        }),
         _ => Entity::Spline(Spline::from_beziers(&sk.beziers(c.id))),
       };
       out.push((e, c.construction));
@@ -606,7 +614,8 @@ fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => {
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         continue;
       }
       CurveKind::Line { a, b } => Entity::Line { a: pos(a), b: pos(b) },

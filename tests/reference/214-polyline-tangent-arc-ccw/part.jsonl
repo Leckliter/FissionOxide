@@ -1,0 +1,8 @@
+# 214-polyline-tangent-arc-ccw: added by the parity loop from a Fusion probe
+# polyline-tangent-arc-ccw: Line tool: line (0,0)-(30,0), drag a tangent arc from its end to (30,20) (CCW semicircle R10 about (30,10)), then lines back to the start: area 600+50pi, extruded 6.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.arc", "tangent": 2, "start": [30, 0], "end": [30, 20]}
+{"cmd": "sketch.line", "points": [[30, 20], [0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}

@@ -1,0 +1,12 @@
+# 371-line-edge-physical-distance-mirror: added by the parity loop from a Fusion probe
+# 20x10x5 box; construction point 4 mm (physical distance) along the bottom front edge (x=4 or 16); plane through it and the vertical edge at (0,10); body mirrored about the plane and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "point", "method": "along_path", "edge": {"point": [10, 0, 0]}, "distance": "4 mm"}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}

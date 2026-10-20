@@ -1,0 +1,13 @@
+# 294-arc-and-spline-middle-trims: added by the parity loop from a Fusion probe
+# arc-and-spline-middle-trims: 40x30 rectangle crossed top to bottom by an arc (centre (40,15), r20, from (40,35) through (20,15) to (40,-5)) and a fit-point spline through (10,-5), (6,15), (10,35); Trim each between its crossings with the rectangle (at (20,15) and (6,15)), leaving only stubs outside; extrude the whole rectangle 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.arc", "start": [40, 35], "mid": [20, 15], "end": [40, -5]}
+{"cmd": "sketch.spline", "points": [[10, -5], [6, 15], [10, 35]]}
+{"cmd": "sketch.trim", "at": [20, 15]}
+{"cmd": "sketch.trim", "at": [6, 15]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[15, 15]], "distance": 10, "operation": "new_body"}

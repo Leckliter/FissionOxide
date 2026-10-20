@@ -33,6 +33,57 @@ pub struct SketchText {
   pub points: Vec<PointId>,
   /// Each glyph point in text coordinates (baseline along +X, before turning by `angle`).
   pub local: Vec<[f64; 2]>,
+  /// Bold, italic, underline, alignment and character spacing (left out of files when plain).
+  #[serde(default, skip_serializing_if = "TextStyle::is_plain")]
+  pub style: TextStyle,
+}
+
+/// Where a text's lines sit across the anchor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HAlign {
+  /// Lines start at the anchor.
+  #[default]
+  Left,
+  Center,
+  /// Lines end at the anchor.
+  Right,
+}
+
+/// Where a text's block of lines sits up and down from the anchor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VAlign {
+  /// The first line's baseline is on the anchor.
+  #[default]
+  Baseline,
+  /// The first line's capitals reach the anchor.
+  Top,
+  Middle,
+  /// The last line's baseline is on the anchor.
+  Bottom,
+}
+
+/// Fusion's text options beyond font and size.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TextStyle {
+  /// Strokes thickened (outlines pushed out by a twentieth of the height).
+  pub bold: bool,
+  /// Slanted 12 degrees.
+  pub italic: bool,
+  /// A bar under each line (its own closed profile).
+  pub underline: bool,
+  pub halign: HAlign,
+  pub valign: VAlign,
+  /// Extra space between characters, in percent of the text height (negative packs them).
+  pub spacing: f64,
+}
+
+impl TextStyle {
+  pub fn is_plain(&self) -> bool {
+    *self == TextStyle::default()
+  }
 }
 
 /// The built-in fonts: the UI's proportional font and its monospace font. A text can also use a
@@ -124,10 +175,14 @@ impl ttf_parser::OutlineBuilder for Outline<'_> {
   }
 }
 
-/// Outlines of `text` with capital letters `height` tall, the first baseline starting at (0, 0).
-fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
+/// Outlines of `text` with capital letters `height` tall, styled by `style`; with the default
+/// alignment the first baseline starts at (0, 0).
+fn outline(text: &str, font: &str, height: f64, style: &TextStyle) -> Result<Glyphs, SketchError> {
   if !(height.is_finite() && height > 0.0) {
     return Err(SketchError::InvalidValue("the text height must be positive".into()));
+  }
+  if !style.spacing.is_finite() || style.spacing.abs() > 1000.0 {
+    return Err(SketchError::InvalidValue(format!("character spacing {}%", style.spacing)));
   }
   if text.chars().count() > MAX_CHARS {
     return Err(SketchError::InvalidValue(format!("at most {MAX_CHARS} characters")));
@@ -138,21 +193,135 @@ fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
   let cap = face.capital_height().filter(|h| *h > 0).map(f64::from).unwrap_or(f64::from(face.ascender()) * 0.7);
   let k = height / cap;
   let line_gap = f64::from(face.height()) * k;
+  let bold = if style.bold { height * BOLD } else { 0.0 };
+  let extra = style.spacing / 100.0 * height + 2.0 * bold;
+  let slant = if style.italic { ITALIC.to_radians().tan() } else { 0.0 };
   let mut g = Glyphs::default();
   let mut pen = [0.0f64, 0.0f64];
+  // each line: its first point and curve, and its width
+  let mut lines: Vec<(usize, usize, f64)> = Vec::new();
+  let mut line_start = (0, 0);
+  let mut width = 0.0f64;
   for ch in text.chars() {
     if ch == '\n' {
+      lines.push((line_start.0, line_start.1, width));
+      line_start = (g.points.len(), g.curves.len());
+      width = 0.0;
       pen = [0.0, pen[1] - line_gap];
       continue;
     }
     let Some(id) = face.glyph_index(ch).or_else(|| face.glyph_index('?')) else { continue };
     let origin = pen;
-    let map = move |x: f32, y: f32| -> [f64; 2] { [origin[0] + f64::from(x) * k, origin[1] + f64::from(y) * k] };
+    let map = move |x: f32, y: f32| -> [f64; 2] {
+      let (x, y) = (f64::from(x) * k, f64::from(y) * k);
+      [origin[0] + bold + x + y * slant, origin[1] + y]
+    };
+    let (p0, c0) = (g.points.len(), g.curves.len());
     let mut o = Outline { g: &mut g, map: &map, start: None, last: None };
     face.outline_glyph(id, &mut o);
-    pen[0] += f64::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
+    if bold > 0.0 {
+      embolden(&mut g, p0, c0, bold);
+    }
+    let advance = f64::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
+    width = pen[0] + advance + 2.0 * bold;
+    pen[0] += advance + extra;
+  }
+  lines.push((line_start.0, line_start.1, width));
+  if style.underline {
+    // a bar under each line, as long as the line, after the glyphs it belongs to
+    let mut with_bars = Glyphs::default();
+    let mut moved = Vec::new();
+    for (i, &(p0, c0, w)) in lines.iter().enumerate() {
+      let (p1, c1) = lines.get(i + 1).map_or((g.points.len(), g.curves.len()), |l| (l.0, l.1));
+      let base = with_bars.points.len();
+      with_bars.points.extend_from_slice(&g.points[p0..p1]);
+      for (line, idx) in &g.curves[c0..c1] {
+        with_bars.curves.push((*line, idx.iter().map(|j| j - p0 + base).collect()));
+      }
+      let start = with_bars.points.len();
+      if w > 0.0 {
+        let y = -(i as f64) * line_gap - UNDERLINE.0 * height;
+        let t = UNDERLINE.1 * height;
+        with_bars.points.extend_from_slice(&[[0.0, y], [w, y], [w, y - t], [0.0, y - t]]);
+        for j in 0..4 {
+          with_bars.curves.push((true, vec![start + j, start + (j + 1) % 4]));
+        }
+      }
+      moved.push((base, with_bars.curves.len() - (c1 - c0) - if w > 0.0 { 4 } else { 0 }, w));
+    }
+    g = with_bars;
+    lines = moved;
+  }
+  // alignment: each line across the anchor, the block up and down from it
+  let n = lines.len();
+  for (i, &(p0, _, w)) in lines.iter().enumerate() {
+    let p1 = lines.get(i + 1).map_or(g.points.len(), |l| l.0);
+    let dx = match style.halign {
+      HAlign::Left => 0.0,
+      HAlign::Center => -w / 2.0,
+      HAlign::Right => -w,
+    };
+    let bottom = -((n - 1) as f64) * line_gap;
+    let dy = match style.valign {
+      VAlign::Baseline => 0.0,
+      VAlign::Top => -height,
+      VAlign::Middle => -(height + bottom) / 2.0,
+      VAlign::Bottom => -bottom,
+    };
+    for p in &mut g.points[p0..p1] {
+      p[0] += dx;
+      p[1] += dy;
+    }
   }
   Ok(g)
+}
+
+/// How far bold pushes outlines out, as a fraction of the text height.
+const BOLD: f64 = 0.05;
+/// Italic slant (degrees).
+const ITALIC: f64 = 12.0;
+/// Underline: its gap below the baseline and its thickness, as fractions of the text height.
+const UNDERLINE: (f64, f64) = (0.15, 0.07);
+
+/// Thickens the glyph whose points start at `p0` and curves at `c0`: every point moves out from
+/// its contour by `d` (along the corner's bisector, as FreeType's emboldening does), so outer
+/// outlines grow and holes shrink.
+fn embolden(g: &mut Glyphs, p0: usize, c0: usize, d: f64) {
+  let n = g.points.len() - p0;
+  let (mut prev, mut next) = (vec![None; n], vec![None; n]);
+  let mut area = 0.0;
+  for (_, idx) in &g.curves[c0..] {
+    for w in idx.windows(2) {
+      let (a, b) = (w[0] - p0, w[1] - p0);
+      next[a] = Some(b);
+      prev[b] = Some(a);
+      let (pa, pb) = (g.points[w[0]], g.points[w[1]]);
+      area += pa[0] * pb[1] - pb[0] * pa[1];
+    }
+  }
+  // outward is to the right of a counter-clockwise outline's direction and left of a clockwise one
+  let side = if area >= 0.0 { 1.0 } else { -1.0 };
+  let normal = |a: [f64; 2], b: [f64; 2]| -> Option<[f64; 2]> {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l = dx.hypot(dy);
+    (l > 1e-12).then(|| [side * dy / l, -side * dx / l])
+  };
+  let pts = g.points[p0..].to_vec();
+  for i in 0..n {
+    let (Some(a), Some(b)) = (prev[i], next[i]) else { continue };
+    let (n1, n2) = (normal(pts[a], pts[i]), normal(pts[i], pts[b]));
+    let m = match (n1, n2) {
+      (Some(u), Some(v)) => {
+        let s = [u[0] + v[0], u[1] + v[1]];
+        let dot = 1.0 + u[0] * v[0] + u[1] * v[1];
+        // the bisector, long enough that both sides move by d (capped at sharp corners)
+        if dot > 0.2 { [s[0] / dot, s[1] / dot] } else { u }
+      }
+      (Some(u), None) | (None, Some(u)) => u,
+      (None, None) => continue,
+    };
+    g.points[p0 + i] = [pts[i][0] + m[0] * d, pts[i][1] + m[1] * d];
+  }
 }
 
 impl Sketch {
@@ -175,11 +344,24 @@ impl Sketch {
     height: f64,
     angle: f64,
   ) -> Result<TextId, SketchError> {
+    self.add_text_styled(at, text, font, height, angle, TextStyle::default())
+  }
+
+  /// [`Sketch::add_text`] with bold, italic, underline, alignment and spacing.
+  pub fn add_text_styled(
+    &mut self,
+    at: PtSpec,
+    text: &str,
+    font: &str,
+    height: f64,
+    angle: f64,
+    style: TextStyle,
+  ) -> Result<TextId, SketchError> {
     if !angle.is_finite() {
       return Err(SketchError::InvalidValue(format!("text angle {angle}")));
     }
     // check everything before adding anything
-    outline(text, font, height)?;
+    outline(text, font, height, &style)?;
     let anchor = self.resolve(at)?;
     let id = TextId(self.alloc());
     let font = if font.is_empty() { "sans" } else { font };
@@ -193,6 +375,7 @@ impl Sketch {
       curves: Vec::new(),
       points: Vec::new(),
       local: Vec::new(),
+      style,
     });
     self.regenerate_text(id)?;
     Ok(id)
@@ -217,12 +400,22 @@ impl Sketch {
     if !angle.is_finite() {
       return Err(SketchError::InvalidValue(format!("text angle {angle}")));
     }
-    outline(&text, &font, height)?;
+    outline(&text, &font, height, &t.style)?;
     if let Some(t) = self.texts.iter_mut().find(|t| t.id == id) {
       t.text = text;
       t.font = font;
       t.height = height;
       t.angle = angle;
+    }
+    self.regenerate_text(id)
+  }
+
+  /// Changes a text's bold, italic, underline, alignment and spacing, and regenerates its glyphs.
+  pub fn set_text_style(&mut self, id: TextId, style: TextStyle) -> Result<(), SketchError> {
+    let t = self.text(id).ok_or(SketchError::InvalidValue(format!("no text {}", id.0)))?;
+    outline(&t.text, &t.font, t.height, &style)?;
+    if let Some(t) = self.texts.iter_mut().find(|t| t.id == id) {
+      t.style = style;
     }
     self.regenerate_text(id)
   }
@@ -265,7 +458,7 @@ impl Sketch {
   fn regenerate_text(&mut self, id: TextId) -> Result<(), SketchError> {
     let Some(t) = self.text(id).cloned() else { return Ok(()) };
     self.clear_glyphs(&t);
-    let g = outline(&t.text, &t.font, t.height)?;
+    let g = outline(&t.text, &t.font, t.height, &t.style)?;
     let ids: Vec<PointId> = g
       .points
       .iter()
@@ -415,5 +608,51 @@ mod tests {
     assert_eq!(back.curves.len(), curves.len());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "comic-no-such-font", 5.0, 0.0).is_err());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "sans", 0.0, 0.0).is_err());
+  }
+
+  #[test]
+  fn text_styles_change_the_glyphs() {
+    let plain = |style: TextStyle| {
+      let mut s = Sketch::new();
+      let t = s.add_text_styled(PtSpec::At(0.0, 0.0), "HI", "sans", 10.0, 0.0, style).unwrap();
+      (s, t)
+    };
+    let (base, _) = plain(TextStyle::default());
+    let (lo, hi) = base.bounds().unwrap();
+    let width = hi[0] - lo[0];
+    // right-aligned text ends at the anchor, centred text straddles it
+    let (s, _) = plain(TextStyle { halign: HAlign::Right, ..Default::default() });
+    let (_, hr) = s.bounds().unwrap();
+    assert!(hr[0] <= 0.0 + 1e-9 && hr[0] > -2.0, "{hr:?}");
+    let (s, _) = plain(TextStyle { halign: HAlign::Center, valign: VAlign::Top, ..Default::default() });
+    let (l, h) = s.bounds().unwrap();
+    assert!(l[0] < 0.0 && h[0] > 0.0 && (h[1]).abs() < 0.3, "{l:?} {h:?}");
+    let (s, _) = plain(TextStyle { valign: VAlign::Middle, ..Default::default() });
+    let (l, h) = s.bounds().unwrap();
+    assert!((l[1] + h[1]).abs() < 0.3, "{l:?} {h:?}");
+    // spacing and bold widen it, italic leans it right at the top
+    let (s, _) = plain(TextStyle { spacing: 50.0, ..Default::default() });
+    let (l, h) = s.bounds().unwrap();
+    assert!((h[0] - l[0]) - width > 4.0, "{width} {l:?} {h:?}");
+    let (s, _) = plain(TextStyle { bold: true, ..Default::default() });
+    let (l, h) = s.bounds().unwrap();
+    assert!((h[0] - l[0]) > width + 0.5 && h[1] > hi[1] + 0.3, "{l:?} {h:?}");
+    assert_eq!(find_profiles(&s).len(), 2, "bold glyphs stay closed profiles");
+    let (s, _) = plain(TextStyle { italic: true, ..Default::default() });
+    let (_, h) = s.bounds().unwrap();
+    assert!(h[0] > hi[0] + 1.0, "{h:?} {hi:?}");
+    // underline: a bar below the baseline, its own profile
+    let (s, t) = plain(TextStyle { underline: true, ..Default::default() });
+    let (l, _) = s.bounds().unwrap();
+    assert!(l[1] < -1.0, "{l:?}");
+    assert_eq!(find_profiles(&s).len(), 3);
+    // plain text files keep their old form; styled ones round-trip
+    assert!(!serde_json::to_string(&base).unwrap().contains("style"));
+    let back: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back, s);
+    // restyling regenerates
+    let mut s = s;
+    s.set_text_style(t, TextStyle::default()).unwrap();
+    assert_eq!(find_profiles(&s).len(), 2);
   }
 }

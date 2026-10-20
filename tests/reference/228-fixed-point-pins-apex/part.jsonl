@@ -1,0 +1,12 @@
+# 228-fixed-point-pins-apex: added by the parity loop from a Fusion probe
+# fixed-point-pins-apex: Triangle origin-(40,0)-(28,18) drawn loosely; a sketch point at (12,25) is fixed, and the apex is made coincident with it, so the apex moves to (12,25). Base 40 on the X axis (start on the origin, horizontal, length 40): area 500, extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [28, 18]]}
+{"cmd": "sketch.line", "points": [[28, 18], [0, 0]]}
+{"cmd": "sketch.point", "at": [12, 25]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [7]}
+{"cmd": "sketch.constrain", "type": "coincident", "points": [4, 7]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 40}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

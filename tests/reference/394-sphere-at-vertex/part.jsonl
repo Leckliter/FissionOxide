@@ -1,0 +1,16 @@
+# 394-sphere-at-vertex: added by the parity loop from a Fusion probe
+# sphere-at-vertex: Box 0..30 cube and a separate sphere r=10 at the origin; construction plane tangent to the sphere toward the box vertex (30,30,30) (x+y+z=17.32); box split by it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 30]]}
+{"cmd": "sketch.line", "points": [[30, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [0, 10], "mid": [10, 0], "end": [0, -10]}
+{"cmd": "sketch.line", "points": [[0, -10], [0, 10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 3, "axis": "z", "angle": "360 deg", "operation": "new_body"}
+{"cmd": "plane", "method": "tangent", "face": {"point": [0, -7.0710678, 7.0710678]}, "near": [30, 30, 30]}
+{"cmd": "split", "plane": {"feature": 5}, "bodies": [2000]}

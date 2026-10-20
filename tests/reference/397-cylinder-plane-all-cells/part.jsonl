@@ -1,0 +1,8 @@
+# 397-cylinder-plane-all-cells: added by the parity loop from a Fusion probe
+# cylinder-plane-all-cells: cylinder r=10 h=30 and a plane at z=12 as tools; boundary fill keeps every cell (merged into one new body), tool kept (2 bodies).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 30, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "xy", "offset": 12}
+{"cmd": "boundary_fill", "tools": [2000], "planes": [{"feature": 3}], "operation": "new_body", "remove_tools": false}

@@ -1,0 +1,11 @@
+# 366-world-axis-from-xz: added by the parity loop from a Fusion probe
+# world-axis-from-xz: Box x 0..40, y 0..30, z 0..20; plane at angle 30 deg about the world Z axis from the XZ plane; box split by it (one side of the cut only exists for the right rotation sense).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane", "method": "angle", "axis": "z", "plane": "xz", "angle": "30 deg"}
+{"cmd": "split", "plane": {"feature": 3}, "bodies": [2000]}

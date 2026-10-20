@@ -1,0 +1,12 @@
+# 233-plate-hole-body-silhouette: added by the parity loop from a Fusion probe
+# 30x20x5 plate with a r4 hole at (15,10); a sketch on a plane at z=20 projects the whole body
+# (no face given) unlinked; the profile holding (2,2) is extruded 3 mm as a new body.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [30, 20]}
+{"cmd": "sketch.circle", "center": [15, 10], "radius": 4}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[2, 2]], "distance": 5, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 20.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.project", "body": 2000, "associative": false}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "profiles": [[2, 2]], "distance": 3, "operation": "new_body"}

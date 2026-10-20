@@ -1,0 +1,9 @@
+# 261-break-circle-delete-arc: added by the parity loop from a Fusion probe
+# break-circle-delete-arc: Circle r20 at the origin crossed by a horizontal line y=0 from x=-30 to 30; Break the circle at its top (0,20), splitting it at the two crossings; delete the top arc; extrude the half disc 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 20}
+{"cmd": "sketch.line", "points": [[-30, 0], [30, 0]]}
+{"cmd": "sketch.break", "at": [0, 20]}
+{"cmd": "sketch.delete", "curves": [1]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[0, -10]], "distance": 10, "operation": "new_body"}
