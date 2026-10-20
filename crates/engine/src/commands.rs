@@ -114,14 +114,14 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y], count, spacing, direction2?, count2?, spacing2?}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|to_face|to_body, to?: face (flat or curved) | {body}, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
-  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet", "{edges: [{body, edge} | {point}], radius, radius2?, chord?: bool, setback?}";
+  "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
@@ -587,12 +587,13 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "symmetric" => ExtentKind::Symmetric,
         "two_sides" => ExtentKind::TwoSides,
         "through_all" | "all" => ExtentKind::ThroughAll,
+        "through_all_both" | "all_both" => ExtentKind::ThroughAllBoth,
         "to_face" | "to" => ExtentKind::ToFace,
         "to_body" | "to_object" => ExtentKind::ToBody,
         other => return Err(CmdError::new(format!("unknown extent '{other}'"))),
       };
       let distance = match kind {
-        ExtentKind::ThroughAll => "0".to_string(),
+        ExtentKind::ThroughAll | ExtentKind::ThroughAllBoth => "0".to_string(),
         ExtentKind::ToFace | ExtentKind::ToBody => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
         _ => req_expr(p, "distance")?,
       };
@@ -618,6 +619,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         thin: opt_expr(p, "thin").unwrap_or_default(),
         thin_side,
         to,
+        start: opt_expr(p, "start").unwrap_or_default(),
+        start_face: p.get("start_face").map(|f| face_ref(s, f)).transpose()?,
       };
       let operation = operation(p)?;
       add_op_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation }, p)
@@ -727,16 +730,17 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip })
     }
     "fillet" => {
-      let edges = edge_refs(s, p)?;
+      let (edges, radius, sets) = crate::fillet::selection_sets(s, p)?;
       add_feature(
         s,
         FeatureKind::Fillet {
           edges,
-          radius: req_expr(p, "radius")?,
+          radius,
           radius2: opt_expr(p, "radius2"),
           setback: opt_expr(p, "setback"),
           chord: p.get("chord").and_then(Value::as_bool).unwrap_or(false),
           radii: crate::fillet::radius_points(p)?,
+          sets,
         },
       )
     }

@@ -13,6 +13,8 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod extrude;
+mod live;
 mod manip;
 mod solid;
 
@@ -374,13 +376,6 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
 }
 
 const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
-const EXTENTS: [(&str, &str); 5] = [
-  ("one_side", "One side"),
-  ("symmetric", "Symmetric"),
-  ("two_sides", "Two sides"),
-  ("through_all", "All"),
-  ("to_object", "To object"),
-];
 
 pub struct Dialog {
   pub kind: Kind,
@@ -471,6 +466,8 @@ pub struct Dialog {
   pub trace: Option<Box<crate::trace::TraceState>>,
   /// Where the viewport manipulators sit (see [`manip`]).
   manip: manip::Cache,
+  /// Live preview (see [`live`]).
+  live: live::Live,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -572,6 +569,7 @@ impl Dialog {
       saved: [String::new(), String::new()],
       trace: (kind == Kind::TraceImage).then(Box::default),
       manip: manip::Cache::default(),
+      live: live::Live::default(),
     }
   }
 
@@ -878,12 +876,14 @@ impl Dialog {
           ExtentKind::Symmetric => "symmetric",
           ExtentKind::TwoSides => "two_sides",
           ExtentKind::ThroughAll => "through_all",
+          ExtentKind::ThroughAllBoth => "through_all_both",
           ExtentKind::ToFace | ExtentKind::ToBody => "to_object",
         };
         if let ExtentKind::ToFace | ExtentKind::ToBody = extent.kind {
           let kind = if extent.kind == ExtentKind::ToBody { "to_body" } else { "to_face" };
           d.load_object(kind, serde_json::to_value(&extent.to).unwrap_or_default());
         }
+        d.load_extrude_rows(extent);
         d.op = op_str(*operation);
         d
       }
@@ -902,10 +902,11 @@ impl Dialog {
         };
         d
       }
-      FeatureKind::Fillet { radius, edges, setback, chord, .. } => {
+      FeatureKind::Fillet { radius, edges, setback, chord, sets, .. } => {
         let mut d = Dialog::blank(Kind::Fillet);
         d.radius = radius.clone();
         d.load_setback(setback, *chord);
+        d.load_fillet_sets(sets);
         d.edges = vec![Value::Null; edges.len()];
         d
       }
@@ -1244,10 +1245,10 @@ impl Dialog {
       }
       Kind::Extrude => (
         "extrude",
-        self.with_object(json!({
+        self.with_extrude_rows(self.with_object(json!({
           "sketch": self.sketch?.0, "profiles": self.profiles, "distance": self.distance, "distance2": self.distance2,
           "extent": self.extent, "flip": self.flip, "operation": op,
-        }))?,
+        }))?)?,
       ),
       Kind::Revolve => {
         let axis = match (self.axis.strip_prefix("line:"), self.axis.strip_prefix("axis:")) {
@@ -1260,7 +1261,7 @@ impl Dialog {
           json!({"sketch": self.sketch?.0, "profiles": self.profiles, "axis": axis, "angle": self.angle, "operation": op}),
         )
       }
-      Kind::Fillet => ("fillet", self.with_setback(json!({"edges": self.edges, "radius": self.radius}), false)),
+      Kind::Fillet => ("fillet", self.fillet_params()),
       Kind::Chamfer => ("chamfer", json!({"edges": self.edges, "distance": self.radius})),
       Kind::Shell => (
         "shell",
@@ -1314,13 +1315,13 @@ impl Dialog {
   fn edit_set(&self) -> Option<Value> {
     Some(match self.kind {
       Kind::Extrude => json!({
-        "extent": self.edit_extent(
+        "extent": self.edit_extrude_rows(self.edit_extent(
           json!({"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip}),
-        ),
+        )),
         "operation": self.op,
       }),
       Kind::Revolve => json!({"angle": self.angle, "operation": self.op}),
-      Kind::Fillet => self.with_setback(json!({"radius": self.radius}), true),
+      Kind::Fillet => self.fillet_edit_set(),
       Kind::Chamfer => json!({"distance": self.radius}),
       Kind::Shell => json!({"thickness": self.radius, "round": self.flag}),
       Kind::Box => {
@@ -1364,6 +1365,7 @@ impl Dialog {
     if !self.ready() {
       return;
     }
+    self.live_applying(s, cmd, &params);
     let result = s.execute(cmd, &params);
     if let Some(t) = self.trace.as_mut() {
       t.result = result.as_ref().ok().cloned();
@@ -1388,7 +1390,8 @@ impl Dialog {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
       Kind::Extrude | Kind::Revolve => self.sketch.is_some(),
-      Kind::Fillet | Kind::Chamfer => !self.edges.is_empty(),
+      Kind::Fillet => self.fillet_ready(),
+      Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty(),
       Kind::Combine => self.bodies.len() >= 2,
       Kind::Loft => self.sections.len() >= 2,
@@ -1571,7 +1574,15 @@ impl Dialog {
           self.sync_object(s);
         }
       }
-      Kind::Fillet | Kind::Chamfer if !self.applied => {
+      Kind::Fillet if !self.applied => {
+        // a picked face rounds all its edges
+        let (e, f) = (sel_edges(s), sel_faces(s));
+        if e != self.edges || f != self.faces {
+          self.edges = e;
+          self.faces = f;
+        }
+      }
+      Kind::Chamfer if !self.applied => {
         let e: Vec<Value> = s
           .selection
           .iter()
@@ -1759,14 +1770,7 @@ impl Dialog {
               );
               if self.kind != Kind::PickPlane && !self.kind.reports() {
                 if self.picks() && self.editing.is_none() {
-                  let mut on = self.applied;
-                  if ui.checkbox(&mut on, "Preview").changed() {
-                    if self.applied {
-                      self.withdraw(&mut app.s);
-                    } else {
-                      self.preview(&mut app.s);
-                    }
-                  }
+                  self.live_checkbox(ui, &mut app.s);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                   if panels::secondary_button(ui, "Cancel").clicked() {
@@ -1789,6 +1793,7 @@ impl Dialog {
           });
         });
       });
+    self.live_check();
     if self.dirty {
       self.preview(&mut app.s);
     }
@@ -1834,7 +1839,8 @@ impl Dialog {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
       Kind::Extrude | Kind::Revolve => "select a profile",
-      Kind::Fillet | Kind::Chamfer => "select edges",
+      Kind::Fillet => "select edges or faces",
+      Kind::Chamfer => "select edges",
       Kind::Shell => "select faces to remove",
       Kind::Combine => "select a target body and tool bodies",
       Kind::Loft => "select profiles on two or more sketches",
@@ -1877,7 +1883,8 @@ impl Dialog {
         });
         ui.end_row();
       }
-      Kind::Extrude | Kind::Revolve => {
+      Kind::Extrude => self.extrude_rows(ui),
+      Kind::Revolve => {
         ui.label("Profiles");
         let n = self.profiles.len();
         if self.editing.is_some() {
@@ -1888,61 +1895,39 @@ impl Dialog {
           sel_chip(ui, self.accent(), &format!("{n} selected"), true);
         }
         ui.end_row();
-        if self.kind == Kind::Extrude {
-          ui.label("Extent");
-          self.combo(ui, "extent", &EXTENTS, true);
-          ui.end_row();
-          if self.extent == "to_object" {
-            self.object_row(ui);
-          }
-          if self.extent != "through_all" {
-            ui.label(if self.extent == "two_sides" { "Distance 1" } else { "Distance" });
-            self.text(ui, true);
-            ui.end_row();
-          }
-          if self.extent == "two_sides" {
-            ui.label("Distance 2");
-            if ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0)).changed() {
+        ui.label("Axis");
+        let lines = self.sketch_lines(app);
+        let current = self.axis.clone();
+        egui::ComboBox::from_id_salt("axis").selected_text(axis_label(&current)).show_ui(ui, |ui| {
+          for a in ["x", "y", "z"] {
+            if ui.selectable_label(current == a, axis_label(a)).clicked() {
+              self.axis = a.into();
               self.dirty = true;
             }
-            ui.end_row();
           }
-          ui.label("Direction");
-          if ui.checkbox(&mut self.flip, "Flip").changed() {
-            self.dirty = true;
-          }
-          ui.end_row();
-        } else {
-          ui.label("Axis");
-          let lines = self.sketch_lines(app);
-          let current = self.axis.clone();
-          egui::ComboBox::from_id_salt("axis").selected_text(axis_label(&current)).show_ui(ui, |ui| {
-            for a in ["x", "y", "z"] {
-              if ui.selectable_label(current == a, axis_label(a)).clicked() {
-                self.axis = a.into();
-                self.dirty = true;
-              }
+          for (id, label) in lines {
+            let key = format!("line:{id}");
+            if ui.selectable_label(current == key, label).clicked() {
+              self.axis = key;
+              self.dirty = true;
             }
-            for (id, label) in lines {
-              let key = format!("line:{id}");
-              if ui.selectable_label(current == key, label).clicked() {
-                self.axis = key;
-                self.dirty = true;
-              }
-            }
-          });
-          ui.end_row();
-          ui.label("Angle");
-          if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
-            self.dirty = true;
           }
-          ui.end_row();
+        });
+        ui.end_row();
+        ui.label("Angle");
+        if ui.add(egui::TextEdit::singleline(&mut self.angle).desired_width(140.0)).changed() {
+          self.dirty = true;
         }
+        ui.end_row();
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
       }
-      Kind::Fillet | Kind::Chamfer | Kind::Shell => {
+      Kind::Fillet => {
+        self.fillet_rows(app, ui, creating);
+        self.setback_row(ui, creating);
+      }
+      Kind::Chamfer | Kind::Shell => {
         let (what, n) =
           if self.kind == Kind::Shell { ("Faces", self.faces.len()) } else { ("Edges", self.edges.len()) };
         ui.label(what);
@@ -1953,7 +1938,6 @@ impl Dialog {
         }
         ui.end_row();
         ui.label(match self.kind {
-          Kind::Fillet => "Radius",
           Kind::Chamfer => "Distance",
           _ => "Thickness",
         });
@@ -1969,9 +1953,6 @@ impl Dialog {
             self.dirty = true;
           }
           ui.end_row();
-        }
-        if self.kind == Kind::Fillet {
-          self.setback_row(ui, creating);
         }
       }
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {

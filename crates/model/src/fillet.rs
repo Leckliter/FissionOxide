@@ -1,6 +1,15 @@
-//! Variable-radius fillets with radii at points along the edge.
+//! Variable-radius fillets with radii at points along the edge, and fillet selection sets.
 
 use serde::{Deserialize, Serialize};
+
+use crate::EdgeRef;
+
+/// A further set of filleted edges with its own radius (a row of Fusion's Fillet dialog).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilletSet {
+  pub edges: Vec<EdgeRef>,
+  pub radius: String,
+}
 
 /// A radius at a point along a filleted edge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

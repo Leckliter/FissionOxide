@@ -107,6 +107,7 @@ fn fillet_survives_parameter_change() {
     setback: None,
     chord: false,
     radii: vec![],
+    sets: vec![],
   })
   .unwrap();
   let m = regenerate(&mut d);
@@ -253,6 +254,7 @@ fn failing_feature_does_not_stop_the_timeline() {
       setback: None,
       chord: false,
       radii: vec![],
+      sets: vec![],
     })
     .unwrap();
   let bad2 = d

@@ -485,9 +485,11 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if let Some(d) = app.dialog.as_mut()
     && d.previewing_model()
   {
-    d.unpreview(&mut app.s);
-    app.status = Some(("Preview hidden — keep selecting, then Preview or OK".into(), false));
-    return;
+    // pick on the model without the preview (it comes back once the picks change)
+    app.hover = d.unpreview_pick(&mut app.s, app.hover);
+    if app.hover.is_none() {
+      return;
+    }
   }
   let sketching = app.s.edit_sketch.is_some();
   if !sketching || app.tool == Tool::Select {

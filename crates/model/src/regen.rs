@@ -427,6 +427,9 @@ impl Ctx<'_> {
             "the selected profiles no longer exist".into()
           });
         }
+        let mut sk = sk;
+        let lift = self.extrude_start(extent, &sk.plane)?;
+        sk.plane.origin += sk.plane.normal() * lift;
         let mut n = sk.plane.normal() * if extent.flip { -1.0 } else { 1.0 };
         let mut trim = None;
         let (start, length) = match extent.kind {
@@ -440,6 +443,10 @@ impl Ctx<'_> {
             (-d2, d1 + d2)
           }
           ExtentKind::ThroughAll => (0.0, self.through_all(&sk.plane)),
+          ExtentKind::ThroughAllBoth => {
+            let d = self.through_all(&sk.plane);
+            (-d, 2.0 * d)
+          }
           ExtentKind::ToFace => {
             let fr = extent.to.as_mut().ok_or("pick the face to extrude to")?;
             let bi = self.body_index(fr.body)?;
@@ -534,7 +541,7 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2, setback, chord, radii } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback, chord, radii, sets } => {
         let r = self.len(radius)?;
         let sb = match setback.as_deref().map(str::trim) {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
@@ -544,6 +551,39 @@ impl Ctx<'_> {
           Some(sb) => solid::setback(s, &f, ids, sb),
           None => Ok(f),
         };
+        if !sets.is_empty() {
+          if radius2.is_some() || !radii.is_empty() {
+            return Err("a variable radius works with one selection set".into());
+          }
+          // every set's edges in one rounding, each edge with its set's radius
+          let mut all = edges.clone();
+          let mut set_r = vec![r; edges.len()];
+          for set in sets.iter() {
+            let rs = self.len(&set.radius)?;
+            all.extend(set.edges.iter().cloned());
+            set_r.extend(std::iter::repeat_n(rs, set.edges.len()));
+          }
+          let chord = *chord;
+          let out = self.edge_op_from(id, &mut all, |s, ids, from| {
+            let mut list = Vec::new();
+            for (eid, k) in ids.iter().zip(from) {
+              let r = if chord { chord_radii(s, &[*eid], set_r[*k])?[0].1 } else { set_r[*k] };
+              list.push((*eid, r));
+            }
+            round(s, s.fillet_each(&list)?, ids)
+          });
+          // keep the refreshed references
+          let mut rest = all.into_iter();
+          for e in edges.iter_mut() {
+            *e = rest.next().ok_or("internal: lost a fillet edge")?;
+          }
+          for set in sets.iter_mut() {
+            for e in set.edges.iter_mut() {
+              *e = rest.next().ok_or("internal: lost a fillet edge")?;
+            }
+          }
+          return out;
+        }
         let r2 = radius2.as_deref().map(|e| self.len(e)).transpose()?;
         if !radii.is_empty() || r2.is_some_and(|r2| r2 <= 1e-9) || (r2.is_some() && r <= 1e-9) {
           let mut law = vec![(0.0, r)];
@@ -1808,6 +1848,21 @@ impl Ctx<'_> {
     }
   }
 
+  /// How far along the sketch normal an extrusion starts: its start face (flat and parallel to
+  /// the sketch) plus its start offset.
+  fn extrude_start(&self, extent: &mut crate::Extent, plane: &Plane) -> Result<f64, String> {
+    let offset = if extent.start.trim().is_empty() { 0.0 } else { self.len(&extent.start)? };
+    let Some(fr) = extent.start_face.as_mut() else { return Ok(offset) };
+    let body = &self.state.bodies[self.body_index(fr.body)?];
+    let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the start face could not be found")?;
+    refresh_face(fr, body, fid);
+    let info = body.faces().iter().find(|f| f.id == fid).ok_or("the start face could not be found")?;
+    if info.kind != fox_kernel::SurfaceKind::Plane || info.normal.cross(plane.normal()).length() > 1e-6 {
+      return Err("the start face must be flat and parallel to the sketch".into());
+    }
+    Ok((info.origin - plane.origin).dot(plane.normal()) + offset)
+  }
+
   fn through_all(&self, plane: &Plane) -> f64 {
     let mut lo = DVec3::splat(f64::INFINITY);
     let mut hi = DVec3::splat(f64::NEG_INFINITY);
@@ -1953,6 +2008,16 @@ impl Ctx<'_> {
     edges: &mut [EdgeRef],
     op: impl Fn(&Shape, &[u32]) -> fox_kernel::Result<Shape>,
   ) -> FResult {
+    self.edge_op_from(feature, edges, |s, ids, _| op(s, ids))
+  }
+
+  /// [`Self::edge_op`], also telling `op` which of `edges` each edge id came from.
+  fn edge_op_from(
+    &mut self,
+    feature: FeatureId,
+    edges: &mut [EdgeRef],
+    op: impl Fn(&Shape, &[u32], &[usize]) -> fox_kernel::Result<Shape>,
+  ) -> FResult {
     let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
     for (i, e) in edges.iter().enumerate() {
       by_body.entry(e.body).or_default().push(i);
@@ -1965,7 +2030,7 @@ impl Ctx<'_> {
       let bi = self.body_index(bid)?;
       let body = &self.state.bodies[bi];
       let scale = body.diagonal();
-      let mut ids = Vec::new();
+      let (mut ids, mut from) = (Vec::new(), Vec::new());
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
         let found = er.resolve_all(body.edges(), body.faces(), scale);
@@ -1980,13 +2045,14 @@ impl Ctx<'_> {
         for eid in found {
           if !ids.contains(&eid) {
             ids.push(eid);
+            from.push(i);
           }
         }
       }
       if ids.is_empty() {
         return Err("the selected edges could not be found".into());
       }
-      let shape = op(&body.shape, &ids).map_err(ke)?;
+      let shape = op(&body.shape, &ids, &from).map_err(ke)?;
       self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, feature);
     }
     Ok(missing.then(|| "some edges could not be found".to_string()))

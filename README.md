@@ -32,10 +32,12 @@ change a parameter and watch the whole history rebuild.
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
   rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
   split each other, so two overlapping rectangles give three regions without trimming.
-- **Solid features.** Extrude (one side, symmetric, two sides, through all, to a face — flat or
-  curved, with an offset past it — or to a body; taper angle; thin walls inside/outside/centred;
-  new body, join, cut, intersect), revolve, fillet (constant or variable radius, setback corners
-  where three filleted edges meet), chamfer (equal, two distances, or distance and angle),
+- **Solid features.** Extrude (one side, symmetric, two sides, through all one or both ways, to a
+  face — flat or curved, with an offset past it — or to a body; starting at the sketch plane, an
+  offset from it or a parallel face; taper angle; thin walls inside/outside/centred; new body,
+  join, cut, intersect), revolve, fillet (edges or whole faces, tangent chains, several selection
+  sets each with its own radius, constant or variable radius, setback corners where three filleted
+  edges meet), chamfer (equal, two distances, or distance and angle),
   press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
   rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
 - **Construction geometry.** Planes offset, at an angle, midway, through three points or two

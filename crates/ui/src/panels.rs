@@ -1246,8 +1246,16 @@ fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
-  let bodies: Vec<(BodyId, String, bool)> =
-    app.s.model.bodies.iter().map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id))).collect();
+  // bodies a dialog's preview added appear on OK
+  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
+  let bodies: Vec<(BodyId, String, bool)> = app
+    .s
+    .model
+    .bodies
+    .iter()
+    .filter(|b| !previewed.contains(&b.id))
+    .map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id)))
+    .collect();
   if bodies.is_empty() {
     return;
   }
@@ -1722,7 +1730,10 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
       Sel::Vertex { .. } => "Vertex",
     }
   };
+  // an extrude's picked profiles: "1 Profile | Area: …"
+  let profiles = app.dialog.as_ref().and_then(|d| d.profile_status(&app.s));
   let text = match app.s.selection.as_slice() {
+    _ if profiles.is_some() => profiles.unwrap_or_default(),
     [] => match app.hover {
       Some(h) => name(&h.to_sel()).to_string(),
       None => return,
