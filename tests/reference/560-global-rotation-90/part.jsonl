@@ -1,0 +1,14 @@
+# 560-global-rotation-90: added by the parity loop from a Fusion probe
+# arrange with a global rotation of 90/270 only: one box component 40x15x8 at x 100..140, arranged
+# by the rectangular solver on a 60x50 envelope on the XY plane, 2 mm spacing, no frame. The
+# source stays; like fusion.py, it's hidden so only the placed copy is measured.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[100, 0], [140, 0]]}
+{"cmd": "sketch.line", "points": [[140, 0], [140, 15]]}
+{"cmd": "sketch.line", "points": [[140, 15], [100, 15]]}
+{"cmd": "sketch.line", "points": [[100, 15], [100, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [2000]}
+{"cmd": "arrange", "components": [1], "plane": "xy", "length": 60, "width": 50, "solver": "rectangular", "spacing": 2, "frame": 0, "rotation": "90"}
+{"cmd": "body.visible", "body": 2000, "visible": false}

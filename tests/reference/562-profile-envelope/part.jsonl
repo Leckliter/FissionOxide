@@ -1,0 +1,21 @@
+# 562-profile-envelope: added by the parity loop from a Fusion probe
+# arrange into a sketch-profile envelope (a 50x30 rectangle at x -20..30, y 30..60): Fox's arrange
+# only takes a plane plus length and width, with the envelope's corner at the plane's origin, so
+# the closest script packs into a 50x30 envelope on the XY plane. One box component 40x15x8 at
+# x 100..140, rectangular solver, 2 mm spacing, no frame; the source is hidden.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[100, 0], [140, 0]]}
+{"cmd": "sketch.line", "points": [[140, 0], [140, 15]]}
+{"cmd": "sketch.line", "points": [[140, 15], [100, 15]]}
+{"cmd": "sketch.line", "points": [[100, 15], [100, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "component.create", "name": "A", "bodies": [2000]}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-20, 30], [30, 30]]}
+{"cmd": "sketch.line", "points": [[30, 30], [30, 60]]}
+{"cmd": "sketch.line", "points": [[30, 60], [-20, 60]]}
+{"cmd": "sketch.line", "points": [[-20, 60], [-20, 30]]}
+{"cmd": "sketch.finish"}
+{"cmd": "arrange", "components": [1], "plane": "xy", "length": 50, "width": 30, "solver": "rectangular", "spacing": 2, "frame": 0}
+{"cmd": "body.visible", "body": 2000, "visible": false}
