@@ -383,9 +383,19 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
       near: req_vec3(p, "near")?,
     },
     "along_path" => PlaneDef::AlongPath { edge: edge(s, p, "edge")?, t: t_of(p) },
+    "perpendicular" => PlaneDef::Perpendicular {
+      base: plane_of(s, p, "plane")?,
+      through: p.get("through").map(|v| point_ref(s, v)).transpose()?,
+      distance: opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+      v: match opt_str(p, "direction").unwrap_or("u") {
+        "u" | "U" => false,
+        "v" | "V" => true,
+        o => return Err(CmdError::new(format!("unknown direction '{o}' (u, v)"))),
+      },
+    },
     o => {
       return Err(CmdError::new(format!(
-        "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path; plane.offset for offsets)"
+        "unknown plane method '{o}' (angle, midplane, three_points, two_edges, tangent, along_path, perpendicular; plane.offset for offsets)"
       )));
     }
   };

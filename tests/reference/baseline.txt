@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+352-top-face-through-vertex
+353-top-face-through-vertex-v-direction
+354-origin-plane-through-vertex
+355-origin-plane-offset

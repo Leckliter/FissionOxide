@@ -42,6 +42,18 @@ pub enum PlaneDef {
     #[serde(default = "half")]
     t: String,
   },
+  /// Perpendicular to a plane or planar face: its normal is the base's U direction (in-plane X),
+  /// or V (in-plane Y) when `v`. It passes through `through` when given; otherwise it starts at
+  /// the base's origin and moves `distance` along its own normal.
+  Perpendicular {
+    base: PlaneRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    through: Option<PointRef>,
+    #[serde(default = "zero")]
+    distance: String,
+    #[serde(default)]
+    v: bool,
+  },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +94,10 @@ pub enum PointDef {
 
 fn half() -> String {
   "0.5".to_string()
+}
+
+fn zero() -> String {
+  "0".to_string()
 }
 
 /// Profile of a coil's wire.
@@ -138,6 +154,9 @@ impl PlaneDef {
       PlaneDef::Angle { axis, base, .. } => axis_dep(axis).into_iter().chain(plane_dep(base)).collect(),
       PlaneDef::Midplane { a, b } => plane_dep(a).into_iter().chain(plane_dep(b)).collect(),
       PlaneDef::ThreePoints { a, b, c } => [a, b, c].iter().filter_map(|p| p.feature()).collect(),
+      PlaneDef::Perpendicular { base, through, .. } => {
+        plane_dep(base).into_iter().chain(through.as_ref().and_then(PointRef::feature)).collect()
+      }
       _ => vec![],
     }
   }
@@ -146,6 +165,7 @@ impl PlaneDef {
     match self {
       PlaneDef::Angle { angle, .. } => vec![angle],
       PlaneDef::AlongPath { t, .. } => vec![t],
+      PlaneDef::Perpendicular { distance, .. } => vec![distance],
       _ => vec![],
     }
   }

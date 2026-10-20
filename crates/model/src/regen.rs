@@ -950,9 +950,17 @@ impl Ctx<'_> {
         let mut split_any = false;
         for bid in targets {
           let bi = self.body_index(bid)?;
-          let pieces = self.state.bodies[bi].shape.split(pl.origin, pl.normal()).map_err(ke)?;
+          let shape = &self.state.bodies[bi].shape;
+          let mut pieces = shape.split(pl.origin, pl.normal()).map_err(ke)?;
           if pieces.len() < 2 {
             continue;
+          }
+          // A cut along an existing face leaves the new face beside the old one; Fusion merges
+          // them. Only merge when the body had no coplanar neighbours of its own (split faces
+          // stay split).
+          let face_count = |s: &Shape| s.faces().map(|f| f.len()).unwrap_or(0);
+          if shape.unified().is_ok_and(|u| face_count(&u) == face_count(shape)) {
+            pieces = pieces.into_iter().map(|p| p.unified().unwrap_or(p)).collect();
           }
           split_any = true;
           let sheet = self.state.bodies[bi].sheet.clone();
