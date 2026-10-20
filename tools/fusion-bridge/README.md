@@ -76,5 +76,5 @@ screenshot from each app.
 - `history`, `notes`, `cases` and `prs` are kept when `ledger.py` runs again. Entries whose
   command disappears from Fusion are marked `removed`.
 
-The parity loop (`tools/parity-loop/`, next) picks the next entry, probes it in both apps, and
+The parity loop ([`tools/parity-loop/`](../parity-loop/RUNBOOK.md)) picks the next entry, probes it in both apps, and
 starts a fixer agent for each mismatch.
