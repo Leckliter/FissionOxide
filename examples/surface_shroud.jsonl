@@ -7,7 +7,8 @@
 {"cmd": "sketch.arc", "center": [0, 0], "start": [40, 0], "end": [0, 40]}
 {"cmd": "surface.extrude", "distance": "30 mm"}
 {"cmd": "surface.extend", "edges": [{"point": [40, 0, 15]}, {"point": [0, 40, 15]}], "distance": "wrap", "mode": "natural"}
+# the window on the YZ plane (sketch x = -Z, y = Y): centre at y 12, z 15
 {"cmd": "sketch.create", "plane": "yz"}
-{"cmd": "sketch.circle", "center": [12, 15], "radius": 8}
+{"cmd": "sketch.circle", "center": [-15, 12], "radius": 8}
 {"cmd": "surface.trim", "bodies": [2000], "tool": {"sketch": 4}}
 {"cmd": "thicken", "bodies": [2000], "thickness": "2 mm"}

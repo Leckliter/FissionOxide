@@ -14,8 +14,9 @@
 {"cmd": "sketch.create", "plane": "xy"}
 {"cmd": "sketch.rect", "corner1": [200, 0], "corner2": [300, 60]}
 {"cmd": "sheet.flange"}
+# the hat profile on the YZ plane (sketch x = -Z, y = Y)
 {"cmd": "sketch.create", "plane": "yz"}
-{"cmd": "sketch.line", "points": [[60, 1], [60, 16], [68, 16]]}
+{"cmd": "sketch.line", "points": [[-1, 60], [-16, 60], [-16, 68]]}
 {"cmd": "sheet.miter_flange", "edges": [{"point": [250, 60, 1]}, {"point": [300, 30, 1]}, {"point": [250, 0, 1]}], "corners": "closed"}
 {"cmd": "sheet.flat_pattern", "body": 7000}
 {"cmd": "sheet.flat_sketch", "body": 7000}

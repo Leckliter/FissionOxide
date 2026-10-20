@@ -3,9 +3,9 @@
 {"cmd": "param.add", "name": "width", "expr": "60 mm", "comment": "bracket width"}
 {"cmd": "param.add", "name": "thick", "expr": "6 mm", "comment": "plate thickness"}
 {"cmd": "param.add", "name": "hole", "expr": "8 mm"}
-# L profile on the front (XZ) plane, extruded symmetrically
+# L profile on the XZ plane (sketch x = X, y = -Z, so up is -y), extruded symmetrically
 {"cmd": "sketch.create", "plane": "xz"}
-{"cmd": "sketch.line", "points": [[0, 0], [70, 0], [70, 6], [6, 6], [6, 50], [0, 50]], "closed": true}
+{"cmd": "sketch.line", "points": [[0, 0], [70, 0], [70, -6], [6, -6], [6, -50], [0, -50]], "closed": true}
 {"cmd": "sketch.dimension", "type": "distance", "curves": [2], "value": "70"}
 {"cmd": "extrude", "distance": "width / 2", "extent": "symmetric"}
 # mounting holes in the base, sketched on its top face
