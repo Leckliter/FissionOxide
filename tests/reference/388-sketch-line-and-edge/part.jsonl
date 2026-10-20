@@ -1,0 +1,15 @@
+# 388-sketch-line-and-edge: added by the parity loop from a Fusion probe
+# sketch-line-and-edge: 20x10x5 box; a second XY sketch with one line (5,-3)-(8,-6); construction point through that sketch line and the bottom front edge (y=0,z=0), which meet with the line extended at (2,0,0); plane through it and the vertical edge at (0,10); mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[5, -3], [8, -6]]}
+{"cmd": "sketch.finish"}
+{"cmd": "point", "method": "two_edges", "a": {"sketch": 3, "curve": 0}, "b": {"point": [10, 0, 0]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 4}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
+{"cmd": "mirror", "plane": {"feature": 5}, "bodies": [2000], "join": true}

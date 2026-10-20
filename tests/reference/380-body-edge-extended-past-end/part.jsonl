@@ -1,0 +1,14 @@
+# 380-body-edge-extended-past-end: added by the parity loop from a Fusion probe
+# L-shaped prism 5 high; construction point where the bottom edge at x=20 (y 0..4, z=0), extended past its end, meets the plane of the back face y=10 (which spans only x 0..8), at (20,10,0); plane through it and the vertical edge at the origin; mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 4]]}
+{"cmd": "sketch.line", "points": [[20, 4], [8, 4]]}
+{"cmd": "sketch.line", "points": [[8, 4], [8, 10]]}
+{"cmd": "sketch.line", "points": [[8, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "point", "method": "edge_plane", "edge": {"point": [20, 2, 0]}, "plane": {"point": [4, 10, 2.5], "normal": [0, 1, 0]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [0, 0, 0]}, "c": {"at": [0, 0, 5]}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}

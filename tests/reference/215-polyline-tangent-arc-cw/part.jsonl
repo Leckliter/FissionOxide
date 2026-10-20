@@ -1,0 +1,8 @@
+# 215-polyline-tangent-arc-cw: added by the parity loop from a Fusion probe
+# polyline-tangent-arc-cw: Line tool: line (0,0)-(0,20), drag a clockwise tangent arc to (10,30) (R10 about (10,20)), then lines round a 30x30 square: area 900-(100-25pi), extruded 4.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 20]]}
+{"cmd": "sketch.arc", "tangent": 2, "start": [0, 20], "end": [10, 30]}
+{"cmd": "sketch.line", "points": [[10, 30], [30, 30], [30, 0], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 4, "operation": "new_body"}

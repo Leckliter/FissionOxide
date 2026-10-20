@@ -1,0 +1,200 @@
+{
+ "id": "body-edge-offset-plane",
+ "name": "body-edge-offset-plane",
+ "description": "20x10x5 box; construction point where the bottom front edge (y=0,z=0) meets a plane offset 6 from YZ (x=6); plane through it and the vertical edge at (0,10); body mirrored about the plane and joined.",
+ "exercises": [
+  "extrude",
+  "construction_point edge_plane",
+  "construction_plane three_points",
+  "mirror (join)"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "Base_plane",
+   "method": "offset",
+   "base": "YZ",
+   "offset": 6
+  },
+  {
+   "op": "construction_point",
+   "name": "Point1",
+   "method": "edge_plane",
+   "edge": {
+    "point": [
+     10,
+     0,
+     0
+    ]
+   },
+   "plane": "Base_plane"
+  },
+  {
+   "op": "construction_plane",
+   "name": "Plane1",
+   "method": "three_points",
+   "a": {
+    "ref": "Point1"
+   },
+   "b": {
+    "vertex": [
+     0,
+     10,
+     0
+    ]
+   },
+   "c": {
+    "vertex": [
+     0,
+     10,
+     5
+    ]
+   }
+  },
+  {
+   "op": "mirror",
+   "name": "Mirror1",
+   "mirror_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "plane": "Plane1",
+   "combine": true
+  }
+ ]
+}

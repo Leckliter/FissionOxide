@@ -1,0 +1,10 @@
+# 403-bodies-partial-angle: added by the parity loop from a Fusion probe
+# bodies-partial-angle: Tab 10x6x5 at x 20..30, y -3..3; body circular-patterned 4x over 90 deg about Z (instances at 0/30/60/90 deg).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[20, -3], [30, -3]]}
+{"cmd": "sketch.line", "points": [[30, -3], [30, 3]]}
+{"cmd": "sketch.line", "points": [[30, 3], [20, 3]]}
+{"cmd": "sketch.line", "points": [[20, 3], [20, -3]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "pattern.circular", "axis": "z", "count": 4, "angle": "90 deg", "join": false}

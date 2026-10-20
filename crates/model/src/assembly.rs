@@ -164,13 +164,28 @@ fn x_for(z: DVec3) -> DVec3 {
   if z.z.abs() > 0.9 { DVec3::X } else { DVec3::Z.cross(z).normalize_or_zero() }
 }
 
+/// An axis line's direction with a fixed sense: +Z first, then +Y, then +X, so a cylinder gives
+/// the same joint axis however its surface happens to be parametrised.
+fn canonical_axis(a: DVec3) -> DVec3 {
+  const EPS: f64 = 1e-9;
+  let lead = if a.z.abs() > EPS {
+    a.z
+  } else if a.y.abs() > EPS {
+    a.y
+  } else {
+    a.x
+  };
+  if lead < 0.0 { -a } else { a }
+}
+
 /// Frame of a face joint origin.
 pub fn face_frame(f: &FaceInfo) -> Result<DMat4, String> {
   match f.kind {
     SurfaceKind::Plane => frame(f.center, f.normal, x_for(f.normal)),
     SurfaceKind::Cylinder => {
-      // on the axis, level with the face's centroid
-      let a = f.normal.normalize_or_zero();
+      // on the axis, level with the face's centroid; OCC's axis sense depends on how the surface
+      // was parametrised, so give it a fixed sense (+Z for an upright cylinder, as in Fusion)
+      let a = canonical_axis(f.normal.normalize_or_zero());
       let o = f.origin + a * (f.center - f.origin).dot(a);
       frame(o, a, x_for(a))
     }

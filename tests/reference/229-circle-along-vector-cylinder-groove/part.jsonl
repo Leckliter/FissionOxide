@@ -1,0 +1,10 @@
+# 229-circle-along-vector-cylinder-groove: added by the parity loop from a Fusion probe
+# r10 h30 cylinder; Fusion projects an r5 circle drawn on the plane x=20 onto the side face
+# (along-vector projection) and cuts a d2 pipe groove along the 3D curves. Fox has no Project To Surface,
+# so the closest script only draws the flat circle (two arcs) on the tangent plane x=10; Fox's pipe
+# also refuses closed paths ("the contour is closed"), so no groove is cut.
+{"cmd": "cylinder", "radius": 10, "height": 30}
+{"cmd": "sketch.create", "plane": {"origin": [10.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}}
+{"cmd": "sketch.arc", "center": [0, 15], "start": [5, 15], "end": [-5, 15]}
+{"cmd": "sketch.arc", "center": [0, 15], "start": [-5, 15], "end": [5, 15]}
+{"cmd": "sketch.finish"}

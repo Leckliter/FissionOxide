@@ -1,0 +1,9 @@
+# 280-extend-spline-to-line: added by the parity loop from a Fusion probe
+# extend-spline-to-line: Fit-point spline through (0,0), (10,8), (20,10), a line y=0 from x 0 to 40 and a vertical line x=30 (y -5..25); Extend the spline from its (20,10) end until it meets x=30; extrude the region under the spline 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [10, 8], [20, 10]]}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[30, -5], [30, 25]]}
+{"cmd": "sketch.extend", "at": [20, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[15, 3]], "distance": 10, "operation": "new_body"}

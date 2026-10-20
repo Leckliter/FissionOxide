@@ -1,0 +1,148 @@
+{
+ "id": "extend-line-both-ends-to-arc",
+ "name": "extend-line-both-ends-to-arc",
+ "description": "Semicircular arc r20 (from (20,0) over (0,20) to (-20,0)) on a line y=0 (x -20..20), and a short line y=10 from x=-5 to 5; Extend the short line from its right end and then its left end, so it reaches the arc at x=+-17.32; extrude the circular segment above y=10 by 10 mm.",
+ "exercises": [
+  "sketch",
+  "extend",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_three_point",
+     "id": "a",
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "mid": {
+      "at": [
+       0,
+       20
+      ]
+     },
+     "end": {
+      "at": [
+       -20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "base",
+     "start": {
+      "at": [
+       -20,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "ch",
+     "start": {
+      "at": [
+       -5,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       5,
+       10
+      ]
+     }
+    },
+    {
+     "type": "extend",
+     "curve": "ch",
+     "at": {
+      "at": [
+       4,
+       10
+      ]
+     }
+    },
+    {
+     "type": "extend",
+     "curve": "ch",
+     "at": {
+      "at": [
+       -4,
+       10
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a",
+        "ch"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

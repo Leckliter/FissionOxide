@@ -1,0 +1,9 @@
+# 224-arc-region-across-profile-edge: added by the parity loop from a Fusion probe
+# arc-region-across-profile-edge: A normal (non-construction) line from the origin to (20,30) is the mirror line; a line from the origin to (30,5) and a three-point arc from (30,5) through (32,20) to (20,30) close a region on its right; both are mirrored about the line, and only the mirrored region (bounded by the mirror line and the copies) is extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 30]]}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 5]]}
+{"cmd": "sketch.arc", "start": [30, 5], "mid": [32, 20], "end": [20, 30]}
+{"cmd": "sketch.mirror", "curves": [4, 6], "line": 2}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[3.38, 23.08]], "distance": 10, "operation": "new_body"}

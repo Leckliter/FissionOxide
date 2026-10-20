@@ -256,7 +256,11 @@ fn cylinder_and_square() -> (Design, FeatureId, FaceRef, f64) {
   let mut d = Design::new("emboss");
   primitive(&mut d, Primitive::Cylinder { radius: "20".into(), height: "40".into() }, XY, [0.0, 0.0]);
   let front = offset_plane(&mut d, XZ, "-30");
+<<<<<<< HEAD
   let sk = sketch(&mut d, front, rect([-5.0, -25.0], [5.0, -15.0]));
+=======
+  let sk = sketch(&mut d, front, rect([-5.0, 15.0], [5.0, 25.0]));
+>>>>>>> origin/main
   let m = regenerate(&mut d);
   ok(&m);
   let body = &m.bodies[0];
@@ -275,6 +279,9 @@ fn emboss_and_deboss_on_a_cylinder() {
       depth: "2 mm".into(),
       deboss: false,
       wrap: true,
+      horizontal: "0".into(),
+      vertical: "0".into(),
+      rotation: "0".into(),
     })
     .unwrap();
   let m = regenerate(&mut d);

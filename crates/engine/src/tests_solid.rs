@@ -149,3 +149,65 @@ fn boundary_fill_cells_and_replace_face() {
   assert!((volume(&s) - 3200.0).abs() < 1e-3, "{}", volume(&s));
   assert!(s.execute("replace_face", &json!({"faces": [{"point": [20, 10, 4]}]})).is_err());
 }
+
+#[test]
+fn shell_directions_whole_bodies_and_tangent_chain() {
+  let cube = |s: &mut Session| {
+    run(s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    let b = &s.model.bodies[0];
+    let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    json!({"body": b.id.0, "face": top})
+  };
+  for (dir, extra, want) in [
+    ("inside", json!({}), 8000.0 - 16.0 * 16.0 * 18.0),
+    ("outside", json!({}), 24.0 * 24.0 * 22.0 - 8000.0),
+    ("both", json!({"outside_thickness": 2}), 24.0 * 24.0 * 22.0 - 18.0 * 18.0 * 19.0),
+  ] {
+    let mut s = Session::default();
+    let top = cube(&mut s);
+    let mut p = json!({"faces": [top], "thickness": if dir == "both" { 1 } else { 2 }, "direction": dir});
+    for (k, v) in extra.as_object().unwrap() {
+      p[k] = v.clone();
+    }
+    run(&mut s, "shell", p);
+    assert!(close(volume(&s), want, 1e-6), "{dir}: {} vs {want}", volume(&s));
+    // the direction survives a save and an edit of the thickness
+    let id = s.design.features.last().unwrap().id.0;
+    run(
+      &mut s,
+      "feature.edit",
+      json!({"feature": id, "set": {"thickness": if dir == "both" { "1 mm" } else { "2 mm" }}}),
+    );
+    assert!(close(volume(&s), want, 1e-6), "{dir} after edit: {}", volume(&s));
+  }
+  // a whole body: hollow and closed
+  let mut s = Session::default();
+  cube(&mut s);
+  let b = s.model.bodies[0].id.0;
+  run(&mut s, "shell", json!({"bodies": [b], "thickness": 2}));
+  assert!(close(volume(&s), 8000.0 - 4096.0, 1e-6), "{}", volume(&s));
+  assert!(s.execute("shell", &json!({"thickness": 2})).is_err(), "nothing picked");
+  assert!(s.execute("shell", &json!({"bodies": [b], "thickness": 2, "direction": "up"})).is_err());
+
+  // tangent chain: a 40 x 20 block rounded at the +x end; the end face brings the rounds and
+  // the long sides they run into, not the square -x end, top or bottom
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 40, "depth": 20, "height": 10}));
+  let b = &s.model.bodies[0];
+  let edges: Vec<Value> = b
+    .edges()
+    .iter()
+    .filter(|e| (e.mid.x - 20.0).abs() < 1e-6 && (e.mid.y.abs() - 10.0).abs() < 1e-6)
+    .map(|e| json!({"body": b.id.0, "edge": e.id}))
+    .collect();
+  assert_eq!(edges.len(), 2);
+  run(&mut s, "fillet", json!({"edges": edges, "radius": 5}));
+  let b = &s.model.bodies[0];
+  let end = b.faces().iter().find(|f| f.normal.x > 0.9).unwrap().id;
+  let v0 = volume(&s);
+  let pick = json!({"body": b.id.0, "face": end});
+  run(&mut s, "shell", json!({"faces": [pick], "thickness": 1, "tangent_chain": true}));
+  let f = s.design.features.last().unwrap();
+  assert!(matches!(&f.kind, fox_model::FeatureKind::Shell { faces, .. } if faces.len() == 5), "{:?}", f.kind);
+  assert!(volume(&s) < v0 * 0.5, "{} of {v0}", volume(&s));
+}

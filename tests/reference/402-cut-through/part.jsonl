@@ -1,0 +1,5 @@
+# 402-cut-through: added by the parity loop from a Fusion probe
+# cut-through: 50x40x20 box at X 0..50, Y 0..40, then a 10x16x20 box cut through it centred at (25,20): square hole X 20..30, Y 12..28.
+# hand-written; Fusion side is the equivalent sketch rectangle + extrude
+{"cmd": "box", "plane": "xy", "at": [25, 20], "width": 50, "depth": 40, "height": 20}
+{"cmd": "box", "plane": "xy", "at": [25, 20], "width": 10, "depth": 16, "height": 20, "operation": "cut"}
