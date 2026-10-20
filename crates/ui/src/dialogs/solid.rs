@@ -54,6 +54,8 @@ pub(super) struct Extra {
   pub(super) shell_dir: &'static str,
   pub(super) thickness_out: String,
   pub(super) shell_no_chain: bool,
+  /// Hole placement and rectangular pattern options (see [`super::hole_pattern`]).
+  pub(super) hp: super::hole_pattern::State,
 }
 
 /// Fusion's Chamfer Type.

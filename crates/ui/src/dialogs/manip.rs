@@ -20,6 +20,8 @@ use crate::manipulators::{Triad, TriadEdit};
 pub(super) struct Cache {
   /// The pick the anchor was found for, and the anchor: a point and a unit direction.
   anchor: Option<(Value, DVec3, DVec3)>,
+  /// Rectangular Pattern: the bodies and their centre before the preview.
+  pivot: Option<(Vec<u32>, DVec3)>,
   /// Offset Plane: the base last taken from the selection (a planar face or construction
   /// plane), so a plane chosen from the dropdown afterwards isn't overridden by it.
   offset_base: Option<Value>,
@@ -148,6 +150,10 @@ impl Dialog {
           self.manip.anchor = offset_anchor(s, &self.curves).map(|(o, d)| (key, o, d));
         }
       }
+      // the pattern's arrow starts at the objects' centre before the preview
+      Kind::RectPattern if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
+        self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
+      }
       Kind::Move => self.refresh_move(s),
       _ => {}
     }
@@ -156,6 +162,10 @@ impl Dialog {
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
   /// along the first face's normal).
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
+    if self.kind == Kind::RectPattern && self.editing.is_none() {
+      let (bodies, c) = self.manip.pivot.as_ref()?;
+      return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
+    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
       return None;
     }
@@ -179,6 +189,7 @@ impl Dialog {
         self.distance = mm(nonzero(v, step));
         self.follow = false;
       }
+      Kind::RectPattern => self.set_pattern_arrow(v, step),
       _ => return false,
     }
     true
