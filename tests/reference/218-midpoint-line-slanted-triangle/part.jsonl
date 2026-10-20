@@ -1,0 +1,9 @@
+# 218-midpoint-line-slanted-triangle: added by the parity loop from a Fusion probe
+# midpoint-line-slanted-triangle: Midpoint Line with midpoint (5,5) and end (25,15), so the mirrored end is (-15,-5); closed into a triangle with apex (0,30); no dimensions; extruded 10.
+# The first line is what Fox's Midpoint Line tool emits: a plain sketch.line from the mirrored end (2*mid - end) to the end.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-15, -5], [25, 15]]}
+{"cmd": "sketch.line", "points": [[25, 15], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [-15, -5]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

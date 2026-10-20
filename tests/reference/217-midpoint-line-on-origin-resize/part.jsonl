@@ -1,0 +1,16 @@
+# 217-midpoint-line-on-origin-resize: added by the parity loop from a Fusion probe
+# midpoint-line-on-origin-resize: Midpoint Line from the sketch origin to (25,0) (other end mirrored to (-25,0), midpoint held on the origin) closed into a rectangle with H/V sides; the right end is dimensioned 20 from the origin so both ends move: x -20..20, y 0..20; extruded 10.
+# The first line is what Fox's Midpoint Line tool emits (viewport.rs Tool::MidpointLine): a plain sketch.line with the mirrored end.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-25, 0], [25, 0]]}
+{"cmd": "sketch.line", "points": [[25, 0], [25, 20]]}
+{"cmd": "sketch.line", "points": [[25, 20], [-25, 20]]}
+{"cmd": "sketch.line", "points": [[-25, 20], [-25, 0]]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [3]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [6]}
+{"cmd": "sketch.constrain", "type": "horizontal", "curves": [9]}
+{"cmd": "sketch.constrain", "type": "vertical", "curves": [11]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 2], "value": 20}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [2, 5], "value": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
