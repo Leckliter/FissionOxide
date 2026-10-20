@@ -135,3 +135,7 @@
 270-triangle-acute-obtuse-vertex
 271-apparent-intersection-gap
 272-crossing-lines-overshoot
+# Reference parts that pass; see README.md. One directory name per line.
+332-cylinder-axis-circular-pattern
+333-cone-axis-revolve
+334-torus-axis-circular-pattern
