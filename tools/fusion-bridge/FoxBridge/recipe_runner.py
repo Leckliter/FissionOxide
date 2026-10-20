@@ -631,6 +631,30 @@ class Runner:
     self.name_bodies(feat, f.get("result_bodies"))
     return feat
 
+  def op_pipe(self, f):
+    path = self.root.features.createPath(collection(self.curves(f["path"])), bool(f["path"].get("chained", True)))
+    pipes = self.root.features.pipeFeatures
+    inp = pipes.createInput(path, OPERATIONS[f.get("operation", "new")])
+    sections = {
+      "circular": adsk.fusion.PipeSectionTypes.CircularPipeSectionType,
+      "square": adsk.fusion.PipeSectionTypes.SquarePipeSectionType,
+      "triangular": adsk.fusion.PipeSectionTypes.TriangularPipeSectionType,
+    }
+    if f.get("section", "circular") not in sections:
+      raise Unsupported(f"pipe section {f.get('section')}")
+    inp.sectionType = sections[f.get("section", "circular")]
+    inp.sectionSize = V(f["size"])
+    if f.get("wall") is not None:
+      inp.isHollow = True
+      inp.sectionThickness = V(f["wall"])
+    if f.get("distance_one") is not None:
+      inp.distanceOne = V(f["distance_one"], "")
+    if f.get("distance_two") is not None:
+      inp.distanceTwo = V(f["distance_two"], "")
+    feat = pipes.add(inp)
+    self.name_bodies(feat, f.get("result_bodies"))
+    return feat
+
   def op_loft(self, f):
     if f.get("rails"):
       raise Unsupported("loft rails")
@@ -645,6 +669,27 @@ class Runner:
     feat = lofts.add(inp)
     self.name_bodies(feat, f.get("result_bodies"))
     return feat
+
+  def op_thread(self, f):
+    threads = self.root.features.threadFeatures
+    info = threads.createThreadInfo(bool(f.get("internal", False)), f.get("thread_type", "ISO Metric profile"),
+                                    f["designation"], f["class"])
+    faces = self.faces(f["faces"]) if "faces" in f else [self.find(f["face"]["point"], "face", f["face"])]
+    inp = threads.createInput(collection(faces), info)
+    inp.isModeled = bool(f.get("modeled", False))
+    inp.isRightHanded = bool(f.get("right_handed", True))
+    inp.isFullLength = bool(f.get("full_length", True))
+    if not inp.isFullLength:
+      inp.threadLength = V(f["length"])
+      inp.threadOffset = V(f.get("offset", 0))
+      loc = f.get("location")
+      if loc == "high_end":
+        inp.threadLocation = adsk.fusion.ThreadLocations.HighEndThreadLocation
+      elif loc == "low_end":
+        inp.threadLocation = adsk.fusion.ThreadLocations.LowEndThreadLocation
+      elif loc is not None:
+        raise Unsupported(f"thread location {loc}")
+    return threads.add(inp)
 
   def op_split_body(self, f):
     splits = self.root.features.splitBodyFeatures
