@@ -145,10 +145,16 @@ impl Ctx<'_> {
         if size <= 0.0 {
           return Err("the size must be positive".into());
         }
-        // the section's x runs across the path in the sketch plane, its y along the sketch normal
         let n = ps.plane.normal();
         let t = tangent.try_normalize().ok_or("the path has no direction at its start")?;
-        let sec = Plane { origin: start, x: n.cross(t), y: n };
+        let sec = if *section == PipeSection::Circular {
+          // the frame older files were built with: x (so the circle's seam) along the sketch
+          // normal. Changing it would move the seam edge and side face of every saved round pipe.
+          Plane::from_normal(start, t, n).map_err(ke)?
+        } else {
+          // the section's x runs across the path in the sketch plane, its y along the sketch normal
+          Plane { origin: start, x: n.cross(t), y: n }
+        };
         let w = if wall.trim().is_empty() { None } else { Some(self.len(wall)?) };
         let (outer, holes) = pipe_section(*section, size, w)?;
         let face = Shape::face(&sec, &Profile { outer, holes }).map_err(ke)?;
@@ -819,7 +825,6 @@ fn trim(v: f64) -> String {
   fox_expr::trim_number((v * 1000.0).round() / 1000.0)
 }
 
-/// Start point and direction (sketch coordinates) of a path segment.
 /// The outer loop and hole of a pipe section of this size, centred on the origin (see
 /// [`PipeSection`]); `wall` makes it hollow by an inward offset.
 fn pipe_section(section: PipeSection, size: f64, wall: Option<f64>) -> Result<(Loop, Vec<Loop>), String> {
@@ -952,6 +957,7 @@ fn path_head(segs: &[Seg], len: f64) -> Vec<Seg> {
   out
 }
 
+/// Start point and direction (sketch coordinates) of a path segment.
 fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
   match s {
     Seg::Line { a, b } => (*a, [b[0] - a[0], b[1] - a[1]]),

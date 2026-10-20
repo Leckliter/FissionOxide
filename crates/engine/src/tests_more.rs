@@ -461,4 +461,32 @@ fn pipe_sections_and_partial_paths() {
   let id = path(&mut s);
   assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "shape": "square"})).is_err());
   assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "section": "hexagon"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "size": 4})).is_err());
+
+  // a round pipe rebuilds exactly as older files did: the same edges (its seam, the side face's
+  // one straight edge, included) as the old construction, a circle on
+  // Plane::from_normal(start, tangent, sketch normal) swept along the path
+  use fox_kernel::glam::DVec3;
+  use fox_kernel::{Plane, Shape};
+  use fox_sketch::{Loop, Profile, Seg};
+  let s = pipe(json!({"diameter": 6}));
+  let new = s.model.bodies[0].shape.edges().unwrap();
+  let sketch = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
+  let line = [Seg::Line { a: [0.0, 0.0], b: [0.0, -40.0] }];
+  let sec = Plane::from_normal(DVec3::ZERO, DVec3::Z, sketch.normal()).unwrap();
+  let circle = Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: 3.0, ccw: true }] };
+  let old = Shape::face(&sec, &Profile { outer: circle, holes: vec![] })
+    .unwrap()
+    .sweep(&Shape::path(&sketch, &line).unwrap())
+    .unwrap()
+    .edges()
+    .unwrap();
+  assert_eq!(new.len(), old.len(), "{new:?} vs {old:?}");
+  for (a, b) in new.iter().zip(&old) {
+    let same = a.kind == b.kind
+      && [(a.start, b.start), (a.mid, b.mid), (a.end, b.end)].iter().all(|(p, q)| p.distance(*q) < 1e-6);
+    assert!(same, "{a:?} vs {b:?}");
+  }
+  let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
+  assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
 }

@@ -81,6 +81,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         o => return Err(CmdError::new(format!("unknown section '{o}' (circular, square, triangular)"))),
       };
       let diameter = match opt_expr(p, "size") {
+        Some(_) if p.get("diameter").is_some() => {
+          return Err(CmdError::new("pipe takes 'diameter' or 'size', not both"));
+        }
         Some(size) => size,
         None => req_expr(p, "diameter").map_err(|_| CmdError::new("missing 'diameter' (or 'size')"))?,
       };
