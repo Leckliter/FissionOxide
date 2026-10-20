@@ -733,14 +733,25 @@ impl Ctx<'_> {
         }
         Ok((!split_any).then(|| "the tool doesn't cross the bodies".to_string()))
       }
-      FeatureKind::Shell { faces, thickness, round } => {
+      FeatureKind::Shell { faces, thickness, round, direction, thickness_out, bodies } => {
         let t = self.len(thickness)?;
+        let (inside, outside) = match direction {
+          crate::ShellDirection::Inside => (t, 0.0),
+          crate::ShellDirection::Outside => (0.0, t),
+          crate::ShellDirection::Both => {
+            (t, if thickness_out.trim().is_empty() { t } else { self.len(thickness_out)? })
+          }
+        };
         let mut by_body: BTreeMap<BodyId, Vec<usize>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
           by_body.entry(f.body).or_default().push(i);
         }
+        // whole bodies: hollow and closed
+        for b in bodies.iter() {
+          by_body.entry(*b).or_default();
+        }
         if by_body.is_empty() {
-          return Err("select faces to remove".into());
+          return Err("select faces to remove or a body".into());
         }
         let mut missing = false;
         for (bid, idxs) in by_body {
@@ -753,7 +764,7 @@ impl Ctx<'_> {
             missing |= found.is_empty();
             ids.extend(found.into_iter().filter(|f| !ids.contains(f)).collect::<Vec<_>>());
           }
-          let shape = body.shape.shell(&ids, t, *round).map_err(ke)?;
+          let shape = body.shape.shell_sides(&ids, inside, outside, *round).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(missing.then(|| "some faces could not be found".to_string()))

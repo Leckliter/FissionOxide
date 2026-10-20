@@ -125,7 +125,7 @@ cmds! {
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
-  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}); walls meet in sharp corners unless corners is round", "{faces: [{body, face} | {point}], thickness, corners?: \"sharp\"|\"round\"}";
+  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}; tangent_chain adds the faces that continue them smoothly) or whole bodies (closed, hollow inside); walls go inside the surface, outside it, or both (thickness inside, outside_thickness outside); walls meet in sharp corners unless corners is round", "{faces?: [{body, face} | {point}], bodies?: [body], thickness, direction?: \"inside\"|\"outside\"|\"both\", outside_thickness?, tangent_chain?: bool, corners?: \"sharp\"|\"round\"}";
   "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -787,18 +787,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let remove_tool = p.get("remove_tool").and_then(Value::as_bool).unwrap_or(false);
       add_feature(s, FeatureKind::SplitByBody { bodies: body_sel(p), tool, remove_tool })
     }
-    "shell" => {
-      let mut faces = Vec::new();
-      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
-        faces.push(face_ref(s, f)?);
-      }
-      let round = match p.get("corners").and_then(Value::as_str) {
-        None | Some("sharp") => false,
-        Some("round") => true,
-        Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
-      };
-      add_feature(s, FeatureKind::Shell { faces, thickness: req_expr(p, "thickness")?, round })
-    }
+    "shell" => crate::solid::shell(s, p),
     "box" | "cylinder" | "sphere" | "torus" => {
       let shape = match name {
         "box" => {
