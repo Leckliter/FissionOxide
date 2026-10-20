@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+284-rounded-rect-outward-ring
+285-open-l-chain-left
+286-circle-both-sides
+287-rounded-rect-inward-past-radius
