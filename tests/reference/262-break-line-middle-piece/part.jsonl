@@ -1,0 +1,10 @@
+# 262-break-line-middle-piece: added by the parity loop from a Fusion probe
+# break-line-middle-piece: 60x20 rectangle crossed by vertical lines x=20 and x=40 (y -5..25); Break the top edge at (30,20), splitting it into three at both crossings; delete the middle piece; extrude the two closed squares 10 mm (two bodies).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [60, 0], [60, 20], [0, 20]], "closed": true}
+{"cmd": "sketch.line", "points": [[20, -5], [20, 25]]}
+{"cmd": "sketch.line", "points": [[40, -5], [40, 25]]}
+{"cmd": "sketch.break", "at": [30, 20]}
+{"cmd": "sketch.delete", "curves": [22]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[10, 10], [50, 10]], "distance": 10, "operation": "new_body"}
