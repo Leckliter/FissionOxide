@@ -1,0 +1,8 @@
+# 107-equal-rectangle-square: added by the parity loop from a Fusion probe
+# equal-rectangle-square: Rectangle drawn 30x18 at the origin, bottom dimensioned 30, left side equal to the bottom; solves to a 30x30 square; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0], [30, 18], [0, 18]], "closed": true}
+{"cmd": "sketch.constrain", "type": "equal", "curves": [2, 10]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 30}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

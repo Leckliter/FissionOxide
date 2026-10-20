@@ -1,0 +1,12 @@
+# 102-concentric-arc-to-circle: added by the parity loop from a Fusion probe
+# concentric-arc-to-circle: half disc R20 (arc + line) moved concentric with a construction circle R5 at the origin.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 5}
+{"cmd": "sketch.construction", "curves": [1]}
+{"cmd": "sketch.arc", "center": [3, 2], "start": [23, 2], "end": [-17, 2]}
+{"cmd": "sketch.line", "points": [[-17, 2], [23, 2]]}
+{"cmd": "sketch.constrain", "type": "point_on_curve", "points": [2], "curves": [6]}
+{"cmd": "sketch.constrain", "type": "concentric", "curves": [1, 5]}
+{"cmd": "sketch.dimension", "type": "radius", "curves": [5], "value": 20}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[0, 10]], "distance": 6, "operation": "new_body"}

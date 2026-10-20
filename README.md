@@ -47,7 +47,8 @@ change a parameter and watch the whole history rebuild.
   can be sketch planes, revolve axes and inputs to each other.
 - **Threads, coils, pipes, ribs and webs.** Cosmetic or modeled (an ISO 60° helical groove)
   threads with ISO metric coarse pitches by default, coils with round, square or triangular
-  wire, solid or hollow pipes along a path, ribs and webs that grow until they meet the body.
+  wire, round, square or triangular pipes, solid or hollow, along all or part of a path, ribs and
+  webs that grow until they meet the body.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
 - **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
   sweep along a path of lines and arcs (with a guide rail that turns and scales the profile, or a

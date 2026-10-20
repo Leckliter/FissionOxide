@@ -1,0 +1,231 @@
+{
+ "id": "coincident-point-point",
+ "name": "Coincident: point to point",
+ "description": "Four lines drawn apart with gaps; coincident end-to-start constraints close them into a 40x25 rectangle, one corner coincident with the origin; extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "coincident",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0.5,
+       0.3
+      ]
+     },
+     "end": {
+      "at": [
+       38,
+       1
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       41,
+       -1
+      ]
+     },
+     "end": {
+      "at": [
+       39,
+       22
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       42,
+       26
+      ]
+     },
+     "end": {
+      "at": [
+       2,
+       23
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       -2,
+       21
+      ]
+     },
+     "end": {
+      "at": [
+       1,
+       -2
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.end",
+      "l2.start"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l2.end",
+      "l3.start"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l3.end",
+      "l4.start"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l4.end",
+      "l1.start"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l3"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l4"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 40,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "l2.start",
+      "l2.end"
+     ],
+     "value": 25,
+     "unit": "mm",
+     "orientation": "vertical"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,282 @@
+{
+ "id": "line-loop-partial",
+ "name": "line-loop-partial",
+ "description": "80x60x5 plate from (-40,-20); triangle hole (15,-4),(27,0),(15,4) circular-patterned 3x over 150 deg about the origin; cut through.",
+ "exercises": [
+  "extrude",
+  "sketch circular pattern",
+  "extrude cut"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "r0",
+     "start": {
+      "at": [
+       -40,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       -20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r1",
+     "start": {
+      "ref": "r0.end",
+      "at": [
+       40,
+       -20
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r2",
+     "start": {
+      "ref": "r1.end",
+      "at": [
+       40,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       -40,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r3",
+     "start": {
+      "ref": "r2.end",
+      "at": [
+       -40,
+       40
+      ]
+     },
+     "end": {
+      "ref": "r0.start",
+      "at": [
+       -40,
+       -20
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r0",
+        "r1",
+        "r2",
+        "r3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Holes",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "t0",
+     "start": {
+      "at": [
+       15,
+       -4
+      ]
+     },
+     "end": {
+      "at": [
+       27,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t1",
+     "start": {
+      "ref": "t0.end",
+      "at": [
+       27,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       15,
+       4
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t2",
+     "start": {
+      "ref": "t1.end",
+      "at": [
+       15,
+       4
+      ]
+     },
+     "end": {
+      "ref": "t0.start",
+      "at": [
+       15,
+       -4
+      ]
+     }
+    },
+    {
+     "curves": [
+      "t0",
+      "t1",
+      "t2"
+     ],
+     "center": {
+      "ref": "origin"
+     },
+     "count": 3,
+     "angle_deg": 150,
+     "type": "circular_pattern",
+     "id": "p"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cut",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Holes",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "t0",
+        "t1",
+        "t2",
+        "p.0",
+        "p.1",
+        "p.2",
+        "p.3",
+        "p.4",
+        "p.5"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "through_all",
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  }
+ ]
+}

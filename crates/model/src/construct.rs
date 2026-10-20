@@ -178,3 +178,17 @@ impl PointDef {
     }
   }
 }
+
+/// Cross-section of a pipe, centred on its path at the start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PipeSection {
+  /// A circle; the size is its diameter.
+  #[default]
+  Circular,
+  /// A square; the size is its side.
+  Square,
+  /// An equilateral triangle; the size is its height, measured along the path sketch's normal
+  /// from the base to the apex, with the base centred on the path (as Fusion places it).
+  Triangular,
+}

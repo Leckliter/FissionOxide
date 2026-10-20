@@ -1,0 +1,6 @@
+# 132-rect-two-point-xy: added by the parity loop from a Fusion probe
+# rect-two-point-xy: 2-point rectangle on XY from (5,-10) to (45,15) (40x25), extruded 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [5, -10], "corner2": [45, 15]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

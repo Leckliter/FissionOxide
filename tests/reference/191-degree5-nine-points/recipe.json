@@ -1,0 +1,35 @@
+{
+ "id": "degree5-nine-points",
+ "name": "Degree-5 control point spline, several spans",
+ "description": "Degree-5 control point spline with 9 control points (interior knots) from (0,0) to (80,0), closed by a line along X, extruded 10 mm.",
+ "exercises": ["sketch.control_spline", "extrude"],
+ "units": {"length": "mm", "angle": "deg", "area": "mm2", "volume": "mm3"},
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {"ref": "XY", "origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0], "normal": [0.0, 0.0, 1.0]},
+   "entities": [
+    {"type": "control_spline", "degree": 5, "control_points": [[0.0, 0.0], [5.0, 30.0], [15.0, 40.0], [25.0, 5.0], [40.0, 45.0], [55.0, 10.0], [65.0, 35.0], [75.0, 25.0], [80.0, 0.0]], "id": "s1"},
+    {"type": "line", "start": {"ref": "s1.end", "at": [80.0, 0.0]}, "end": {"ref": "s1.start", "at": [0.0, 0.0]}, "id": "l1"}
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [{"sketch": "Extrude1_sketch", "loops": [{"outer": true, "curves": ["s1", "l1"]}]}],
+   "extent": {"type": "distance", "distance": 10, "direction": "positive"},
+   "result_bodies": ["Body1"]
+  }
+ ]
+}
