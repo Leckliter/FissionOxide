@@ -1,0 +1,7 @@
+# 526-uniform-about-vertex: added by the parity loop from a Fusion probe
+# uniform-about-vertex: box (0,0)-(40,20) x10; Scale x0.5 about its top far corner vertex (40,20,10); expect (20,10,5)-(40,20,10)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "scale", "bodies": [2000], "center": [40, 20, 10], "factor": 0.5}

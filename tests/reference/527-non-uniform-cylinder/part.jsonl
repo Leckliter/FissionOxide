@@ -1,0 +1,7 @@
+# 527-non-uniform-cylinder: added by the parity loop from a Fusion probe
+# non-uniform-cylinder: cylinder r10 h10 centred at (20,0); non-uniform Scale [2,1,0.5] about the origin; expect elliptic cylinder a=20 b=10 h=5 centred (40,0)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [20, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "scale", "bodies": [2000], "center": [0, 0, 0], "factors": [2, 1, 0.5]}

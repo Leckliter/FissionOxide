@@ -1,0 +1,8 @@
+# 525-uniform-about-origin: added by the parity loop from a Fusion probe
+# uniform-about-origin: box (10,10)-(30,20) x5 with a r3 through hole at (20,15); Scale x2 about the origin; expect (20,20,0)-(60,40,10), r6 hole
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [10, 10], "corner2": [30, 20]}
+{"cmd": "sketch.circle", "center": [20, 15], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[12, 12]], "distance": 5, "operation": "new_body"}
+{"cmd": "scale", "bodies": [2000], "center": [0, 0, 0], "factor": 2}
