@@ -114,7 +114,7 @@ pub(crate) fn selection_sets(s: &Session, p: &Value) -> Result<(Vec<EdgeRef>, St
 }
 
 /// Edges meeting `id` end to end without a kink (Fusion's tangent chain).
-fn tangent_neighbours(edges: &[EdgeInfo], id: u32) -> Vec<u32> {
+pub fn tangent_neighbours(edges: &[EdgeInfo], id: u32) -> Vec<u32> {
   let Some(e) = edges.iter().find(|x| x.id == id) else { return Vec::new() };
   let tol = 1e-6 * (1.0 + e.length);
   let mut out = Vec::new();
