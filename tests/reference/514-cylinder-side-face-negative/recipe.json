@@ -1,0 +1,107 @@
+{
+ "id": "cylinder-side-face-negative",
+ "name": "R10 x 20 cylinder",
+ "description": "R10 x 20 cylinder; Press Pull on the curved side face by -3 mm (Offset Face) shrinks it to R7.",
+ "exercises": [
+  "extrude",
+  "press_pull"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0.0,
+       0.0
+      ]
+     },
+     "radius": 10,
+     "id": "c1"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Extrude1_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "offset_faces",
+   "name": "OffsetFaces1",
+   "faces": [
+    {
+     "type": "cylinder",
+     "normal_at_point_on_face": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "point": [
+      10.0,
+      0.0,
+      10.0
+     ],
+     "radius": 10
+    }
+   ],
+   "distance": -3
+  }
+ ]
+}

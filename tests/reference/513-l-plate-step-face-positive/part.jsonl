@@ -1,0 +1,12 @@
+# 513-l-plate-step-face-positive: added by the parity loop from a Fusion probe
+# l-plate-step-face-positive: L-shaped plate (40x15 + 20x15 arm) 10 mm thick; Press Pull on the inner step face x=20 by +8 mm widens the arm to 28 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 15]]}
+{"cmd": "sketch.line", "points": [[40, 15], [20, 15]]}
+{"cmd": "sketch.line", "points": [[20, 15], [20, 30]]}
+{"cmd": "sketch.line", "points": [[20, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "press_pull", "faces": [{"point": [20.0, 22.5, 5.0]}], "distance": 8}
