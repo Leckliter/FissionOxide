@@ -131,3 +131,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+332-cylinder-axis-circular-pattern
+333-cone-axis-revolve
+334-torus-axis-circular-pattern

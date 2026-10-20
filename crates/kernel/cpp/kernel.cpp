@@ -115,9 +115,11 @@
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Torus.hxx>
 #include <gp_Trsf.hxx>
 #include <Geom_Ellipse.hxx>
 #include <gp_Elips.hxx>
@@ -640,14 +642,30 @@ rust::Vec<FaceInfo> face_infos(const Shape &s) {
       info.radius = c.Radius();
       break;
     }
-    case GeomAbs_Cone: info.kind = 2; break;
+    case GeomAbs_Cone: {
+      // origin and axis like a cylinder; the radius is the one at the origin
+      gp_Cone c = surf.Cone();
+      info.kind = 2;
+      info.origin = arr(c.Location().XYZ());
+      info.normal = arr(c.Axis().Direction().XYZ());
+      info.radius = c.RefRadius();
+      break;
+    }
     case GeomAbs_Sphere: {
       info.kind = 3;
       info.origin = arr(surf.Sphere().Location().XYZ());
       info.radius = surf.Sphere().Radius();
       break;
     }
-    case GeomAbs_Torus: info.kind = 4; break;
+    case GeomAbs_Torus: {
+      // the axis it sweeps around; the radius is the major one
+      gp_Torus t = surf.Torus();
+      info.kind = 4;
+      info.origin = arr(t.Location().XYZ());
+      info.normal = arr(t.Axis().Direction().XYZ());
+      info.radius = t.MajorRadius();
+      break;
+    }
     default: info.kind = 5; break;
     }
     out.push_back(info);
