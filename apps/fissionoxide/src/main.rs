@@ -40,6 +40,13 @@ impl Desktop {
     let app = fox_ui::App::new(cc, open);
     #[cfg(windows)]
     {
+      // a click where the cursor came back without moving would otherwise be dropped
+      use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+      if let Ok(h) = cc.window_handle()
+        && let RawWindowHandle::Win32(w) = h.as_raw()
+      {
+        fox_desktop::pointer::keep_position(w.hwnd.get());
+      }
       let ctx = cc.egui_ctx.clone();
       let tray = eframe::icon_data::from_png_bytes(include_bytes!("../../../brand/logo/png/icon-32.png"))
         .map_err(|e| e.to_string())

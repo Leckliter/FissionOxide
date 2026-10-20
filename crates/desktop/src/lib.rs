@@ -1,9 +1,12 @@
 //! Desktop integration for the FissionOxide app: where its settings and caches live, updates
 //! from GitHub releases (check, download, verify, hand over to the installer) and, on Windows, the
-//! notification-area (tray) icon.
+//! notification-area (tray) icon and a fix for clicks lost when the cursor returns to the window
+//! without moving.
 //!
 //! Nothing here touches the CAD engine; the app's UI drives it (see `fox-ui`'s `updates` module).
 
+#[cfg(windows)]
+pub mod pointer;
 pub mod settings;
 #[cfg(windows)]
 pub mod tray;

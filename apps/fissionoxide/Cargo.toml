@@ -9,6 +9,7 @@ license.workspace = true
 fox-ui.workspace = true
 fox-desktop.workspace = true
 eframe.workspace = true
+raw-window-handle = "0.6"
 env_logger.workspace = true
 log.workspace = true
 
