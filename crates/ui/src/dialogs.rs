@@ -1585,9 +1585,13 @@ impl Dialog {
       }
       Kind::OffsetPlane => {
         let base = plane_of(s, &self.plane)?;
-        // offsets from XZ go along +Y (see `OriginPlane::offset_sign`)
-        let sign =
-          if self.plane.as_str() == Some("xz") { fox_engine::model::OriginPlane::Xz.offset_sign() } else { 1.0 };
+        // offsets from XZ go along +Y in designs made with XZ_OFFSET_PLUS_Y (see
+        // `OriginPlane::offset_sign`)
+        let sign = if self.plane.as_str() == Some("xz") {
+          fox_engine::model::OriginPlane::Xz.offset_sign(&s.design.behaviours)
+        } else {
+          1.0
+        };
         Some(Manipulator { origin: base.origin, dir: sign * base.normal(), value: len(&self.distance)? })
       }
       _ => self.more_manipulator(s),

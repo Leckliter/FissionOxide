@@ -819,8 +819,8 @@ impl Ctx<'_> {
       FeatureKind::ConstructionPlane { base, offset } => {
         let pl = self.resolve_plane(base)?;
         let d = self.len(offset)?;
-        // XZ keeps its frame but offsets along +Y, as in Fusion
-        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign() } else { 1.0 };
+        // XZ keeps its frame but offsets along +Y, as in Fusion (legacy designs: along its normal)
+        let sign = if let PlaneRef::Origin { plane } = base { plane.offset_sign(self.behaviours) } else { 1.0 };
         self.state.planes.insert(id, pl.offset(sign * d));
         Ok(None)
       }
@@ -940,7 +940,7 @@ impl Ctx<'_> {
           Operation::Cut => BoolOp::Subtract,
           Operation::Intersect => BoolOp::Intersect,
         };
-        if op == BoolOp::Intersect {
+        if op == BoolOp::Intersect && self.behaviours.has(fox_sketch::behaviour::INTERSECT_ANY_TOOL) {
           // Fusion keeps the part of the target inside any tool, target ∩ (t1 ∪ t2 ∪ …),
           // not just the part inside every tool
           let mut union: Option<Shape> = None;
@@ -958,7 +958,8 @@ impl Ctx<'_> {
             shape = shape.boolean(&u, BoolOp::Intersect).map_err(ke)?;
           }
         } else {
-          // cutting or joining the tools one at a time equals doing it with their union
+          // cutting or joining the tools one at a time equals doing it with their union; designs
+          // from before INTERSECT_ANY_TOOL intersect with each tool in turn, target ∩ t1 ∩ t2 ∩ …
           for t in tools.iter() {
             if t == target {
               continue;
