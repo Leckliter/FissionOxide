@@ -272,8 +272,26 @@ fn line_kind(k: u8) -> LineKind {
   }
 }
 
+/// Behaviour-gated choices for building a face from a sketch profile that the profile itself
+/// doesn't carry. The default is the legacy behaviour, so old files rebuild unchanged; callers
+/// fill the fields from the sketch's (or design's) `Behaviours`. See `fox_sketch::behaviour`.
+///
+/// Merging a curve's pieces into one edge is not an option here: each loop segment carries its
+/// own flag ([`fox_sketch::Loop::src`]), set by the sketch from its behaviours, and
+/// [`Shape::face_with`] always honours it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FaceOptions {}
+
 /// Boolean fuzzy tolerance (mm): absorbs round-off between coincident faces.
 const FUZZY: f64 = 1e-6;
+
+/// Per-segment merge flags for `make_face` / `make_wire` (1 = becomes one edge with the next), or
+/// empty when nothing merges, so the kernel takes the legacy path.
+fn merge_bytes(flags: impl IntoIterator<Item = bool>) -> Vec<u8> {
+  let v: Vec<u8> = flags.into_iter().map(u8::from).collect();
+  if v.contains(&1) { v } else { Vec::new() }
+}
 
 impl Shape {
   fn wrap(p: UniquePtr<sys::Shape>) -> Result<Shape> {
@@ -287,20 +305,34 @@ impl Shape {
     self.inner.as_ref().ok_or(KernelError::Empty)
   }
 
-  /// A planar face from a sketch profile on `plane`.
+  /// A planar face from a sketch profile on `plane`, built the legacy way
+  /// ([`FaceOptions::default`]).
   pub fn face(plane: &Plane, profile: &Profile) -> Result<Shape> {
+    Shape::face_with(plane, profile, FaceOptions::default())
+  }
+
+  /// A planar face from a sketch profile on `plane`, with behaviour-gated `opts` (see
+  /// [`FaceOptions`]). Each run of loop segments marked to merge ([`fox_sketch::Loop::merge_next`],
+  /// pieces of one sketch curve whose one-edge behaviour is on) becomes one edge; with none
+  /// marked the face is built exactly as before.
+  pub fn face_with(plane: &Plane, profile: &Profile, opts: FaceOptions) -> Result<Shape> {
+    // No options yet. A gated change reads its field here and passes it on to `sys::make_face`
+    // (a new argument in ffi.rs and kernel.cpp).
+    let FaceOptions {} = opts;
     let mut segs = Vec::new();
     let mut lens = Vec::new();
+    let mut merge = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
       lens.push(u32::try_from(lp.segs.len()).map_err(|_| KernelError::Input("too many segments".into()))?);
       for s in &lp.segs {
         push_seg(&mut segs, plane, s);
       }
+      merge.extend(lp.merge_next());
     }
     if segs.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("non-finite profile coordinates".into()));
     }
-    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens)?)
+    Shape::wrap(sys::make_face(&plane.data(), &segs, &lens, &merge_bytes(merge))?)
   }
 
   /// Sweeps a face along a vector into a solid.
@@ -463,6 +495,14 @@ impl Shape {
 
   /// An open chain of sketch segments on `plane` as a wire (sweep paths).
   pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
+    Shape::path_with(plane, segs, &[])
+  }
+
+  /// [`Shape::path`] where `merge_next[k]` lets segment `k` become one edge with segment `k + 1`
+  /// (the first, after the last, when the chain closes), as for a face's loops (flags from
+  /// `Sketch::merge_flags` or [`fox_sketch::Loop::merge_next`]). Empty or all false: the legacy
+  /// wire.
+  pub fn path_with(plane: &Plane, segs: &[Seg], merge_next: &[bool]) -> Result<Shape> {
     let mut data = Vec::new();
     for s in segs {
       push_seg(&mut data, plane, s);
@@ -470,7 +510,8 @@ impl Shape {
     if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("the path is empty or not finite".into()));
     }
-    Shape::wrap(sys::make_wire(&data)?)
+    let merge = if merge_next.len() == segs.len() { merge_bytes(merge_next.iter().copied()) } else { Vec::new() };
+    Shape::wrap(sys::make_wire(&data, &merge)?)
   }
 
   /// Sweeps this face along a path wire.
@@ -1006,6 +1047,8 @@ mod sheet2;
 mod refparts;
 #[cfg(test)]
 mod tests_ellipse;
+#[cfg(test)]
+mod tests_merge;
 #[cfg(test)]
 mod tests_refparts;
 

@@ -238,7 +238,7 @@ impl Development {
   pub fn flat_pattern(&self, t: f64) -> Result<FlatPattern, String> {
     let n = self.outline.len();
     let segs = (0..n).map(|i| Seg::Line { a: self.outline[i], b: self.outline[(i + 1) % n] }).collect();
-    let mut outer = Loop { segs };
+    let mut outer = Loop::new(segs);
     if outer.signed_area() < 0.0 {
       outer = outer.reversed();
     }
@@ -432,7 +432,7 @@ fn tangent_pairs(
   let to_a = |p: P2| pl.to_local(b.plane.to_world(p));
   let sb: Vec<Seg> = b.segs.iter().map(|s| map_seg(s, &to_a, na.dot(nb) < 0.0)).collect();
   let ccw = |segs: Vec<Seg>| {
-    let l = Loop { segs };
+    let l = Loop::new(segs);
     if l.signed_area() < 0.0 { (l.reversed().segs, true) } else { (l.segs, false) }
   };
   let (sa, flipped) = ccw(a.segs.clone());
@@ -982,7 +982,7 @@ pub fn miter_section(path: &[Seg], t: f64, r: f64) -> Result<(Profile, f64, f64)
   let mut kept = kept;
   kept.push(Seg::Line { a, b });
   let shift = |p: P2| [p[0] + cut, p[1]];
-  let outer = Loop { segs: kept.iter().map(|s| map_seg(s, &shift, false)).collect() };
+  let outer = Loop::new(kept.iter().map(|s| map_seg(s, &shift, false)).collect());
   Ok((Profile { outer, holes: Vec::new() }, turn.abs(), cut))
 }
 
@@ -1024,7 +1024,7 @@ pub fn corner_relief(
     CornerRelief::None => return Ok(None),
     CornerRelief::Square => sheet::rectangle([-s / 2.0, -s / 2.0], [s / 2.0, s / 2.0]),
     CornerRelief::Round | CornerRelief::Tear => Profile {
-      outer: Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: s / 2.0, ccw: true }] },
+      outer: Loop::new(vec![Seg::Circle { center: [0.0, 0.0], radius: s / 2.0, ccw: true }]),
       holes: Vec::new(),
     },
   };
