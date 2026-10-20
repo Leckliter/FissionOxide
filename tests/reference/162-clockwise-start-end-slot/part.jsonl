@@ -1,0 +1,7 @@
+# 162-clockwise-start-end-slot: added by the parity loop from a Fusion probe
+# clockwise-start-end-slot: Center point arc slot about the origin from start (0,25) to end (25,0), width 6 (Fusion takes the shorter 90 deg arc, clockwise here, not the 270 deg ccw one); extruded 4.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "arc_center": [0, 0], "start": [0, 25], "end": [25, 0], "width": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 4, "operation": "new_body"}

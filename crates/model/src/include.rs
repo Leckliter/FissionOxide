@@ -73,6 +73,7 @@ pub fn sketch_curve3d(sk: &SketchResult, curve: CurveId) -> Result<Curve3dKind, 
       _ => Err(missing()),
     },
     CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => Err(unsupported("curve is an ellipse")),
+    CurveKind::Conic { .. } => Err(unsupported("curve is a conic")),
     _ => Err(unsupported("curve is a spline")),
   }
 }
