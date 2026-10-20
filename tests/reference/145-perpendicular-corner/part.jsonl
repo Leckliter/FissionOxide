@@ -5,4 +5,4 @@
 {"cmd": "sketch.line", "points": [[0, 0], [0, 40]]}
 {"cmd": "sketch.tangent_circle", "curves": [2, 5], "radius": 8, "near": [20, 20]}
 {"cmd": "sketch.finish"}
-{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[8, 8]], "distance": 10, "operation": "new_body"}

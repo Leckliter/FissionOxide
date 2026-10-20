@@ -279,7 +279,9 @@ impl Sketch {
             }
           }
         }
-        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
+        CurveKind::ControlSpline { points, .. }
+        | CurveKind::Bezier { points }
+        | CurveKind::QuinticSpline { points } => {
           for q in points {
             if *q == old {
               *q = new;
@@ -596,8 +598,8 @@ impl Sketch {
           start_curvature: start_curvature.map(|p| get(self, p)).transpose()?,
           end_curvature: end_curvature.map(|p| get(self, p)).transpose()?,
         },
-        CurveKind::ControlSpline { points } => {
-          CurveKind::ControlSpline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }
+        CurveKind::ControlSpline { points, degree } => {
+          CurveKind::ControlSpline { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()?, degree }
         }
         CurveKind::Bezier { points } => {
           CurveKind::Bezier { points: points.iter().map(|p| get(self, *p)).collect::<Result<_, _>>()? }

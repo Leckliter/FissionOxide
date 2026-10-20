@@ -42,6 +42,7 @@
 #include <GProp_GProps.hxx>
 #include <Geom2dAPI_Interpolate.hxx>
 #include <Geom2d_BSplineCurve.hxx>
+#include <Geom2d_BezierCurve.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
@@ -50,6 +51,7 @@
 #include <GeomLProp_SLProps.hxx>
 #include <GeomLib.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Geom_BoundedSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_OffsetSurface.hxx>
@@ -64,6 +66,9 @@
 #include <Standard_Failure.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <TColgp_HArray1OfPnt2d.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt2d.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -712,6 +717,45 @@ std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape
           if (p0.Distance(p1) < 1e-12) continue;
           Handle(Geom2d_Line) ln = new Geom2d_Line(p0, gp_Dir2d(gp_Vec2d(p0, p1)));
           c2 = new Geom2d_TrimmedCurve(ln, 0.0, p0.Distance(p1));
+        } else if (c.GetType() == GeomAbs_BSplineCurve || c.GetType() == GeomAbs_BezierCurve) {
+          // uv is linear in the point, so a spline maps exactly through its poles (a sketch
+          // spline is one edge however many spans it has: sampling it would lose its shape)
+          double u0 = c.FirstParameter(), u1 = c.LastParameter();
+          if (c.GetType() == GeomAbs_BSplineCurve) {
+            Handle(Geom_BSplineCurve) b = c.BSpline();
+            TColgp_Array1OfPnt2d poles(1, b->NbPoles());
+            for (int i = 1; i <= b->NbPoles(); ++i) poles.SetValue(i, uv(b->Pole(i)));
+            TColStd_Array1OfReal knots(1, b->NbKnots());
+            TColStd_Array1OfInteger mults(1, b->NbKnots());
+            b->Knots(knots);
+            b->Multiplicities(mults);
+            Handle(Geom2d_BSplineCurve) b2;
+            if (b->IsRational()) {
+              TColStd_Array1OfReal w(1, b->NbPoles());
+              b->Weights(w);
+              b2 = new Geom2d_BSplineCurve(poles, w, knots, mults, b->Degree(), b->IsPeriodic());
+            } else {
+              b2 = new Geom2d_BSplineCurve(poles, knots, mults, b->Degree(), b->IsPeriodic());
+            }
+            if (u0 > b2->FirstParameter() + 1e-12 || u1 < b2->LastParameter() - 1e-12) b2->Segment(u0, u1);
+            if (rev) b2->Reverse();
+            c2 = b2;
+          } else {
+            Handle(Geom_BezierCurve) b = c.Bezier();
+            TColgp_Array1OfPnt2d poles(1, b->NbPoles());
+            for (int i = 1; i <= b->NbPoles(); ++i) poles.SetValue(i, uv(b->Pole(i)));
+            Handle(Geom2d_BezierCurve) b2;
+            if (b->IsRational()) {
+              TColStd_Array1OfReal w(1, b->NbPoles());
+              b->Weights(w);
+              b2 = new Geom2d_BezierCurve(poles, w);
+            } else {
+              b2 = new Geom2d_BezierCurve(poles);
+            }
+            if (u0 > 1e-12 || u1 < 1.0 - 1e-12) b2->Segment(u0, u1);
+            if (rev) b2->Reverse();
+            c2 = b2;
+          }
         } else {
           GCPnts_UniformAbscissa ua(c, 33);
           if (!ua.IsDone()) throw std::runtime_error("a profile curve could not be sampled");

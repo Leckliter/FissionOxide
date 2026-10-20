@@ -97,18 +97,18 @@ pub struct Design {
   /// "Capture design history" is off: direct edits collect in a base feature.
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub history_off: bool,
-  /// Saved cameras (the browser's Named Views below Top, Front, Right and Home).
-  #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub named_views: Vec<NamedView>,
-  /// Appearances applied to single faces (Appearance's Faces mode); they draw over the body's.
-  #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub face_appearances: Vec<FaceAppearance>,
   /// The feature and regeneration behaviours this design was made with: a new design has all of
   /// [`sketch::behaviour::CURRENT`], one read from a file what it stored (none if the field is
   /// missing), so it rebuilds as it did. Each sketch carries its own set for sketch-level
   /// behaviour. See [`fox_sketch::behaviour`] for how to gate a change.
   #[serde(default, skip_serializing_if = "Behaviours::is_empty")]
   pub behaviours: Behaviours,
+  /// Saved cameras (the browser's Named Views below Top, Front, Right and Home).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub named_views: Vec<NamedView>,
+  /// Appearances applied to single faces (Appearance's Faces mode); they draw over the body's.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub face_appearances: Vec<FaceAppearance>,
   #[serde(default)]
   next_id: u32,
 }
@@ -1668,9 +1668,9 @@ impl Design {
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,
+      behaviours: Behaviours::current(),
       named_views: Vec::new(),
       face_appearances: Vec::new(),
-      behaviours: Behaviours::current(),
       next_id: 1,
     }
   }
