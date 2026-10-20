@@ -101,9 +101,12 @@ pub enum CurveKind {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end_handle: Option<PointId>,
   },
-  /// A cubic B-spline shaped by control points (it passes through the first and last).
+  /// A clamped uniform B-spline shaped by control points (it passes through the first and
+  /// last): cubic unless `degree` says otherwise.
   ControlSpline {
     points: Vec<PointId>,
+    #[serde(default = "cubic", skip_serializing_if = "is_cubic")]
+    degree: u8,
   },
   /// An ellipse: centre, the end of its major axis, and the minor radius.
   Ellipse {
@@ -129,7 +132,20 @@ pub enum CurveKind {
   },
 }
 
+fn cubic() -> u8 {
+  3
+}
+
+fn is_cubic(d: &u8) -> bool {
+  *d == 3
+}
+
 impl CurveKind {
+  /// A cubic control-point spline.
+  pub fn control_spline(points: Vec<PointId>) -> CurveKind {
+    CurveKind::ControlSpline { points, degree: 3 }
+  }
+
   /// A fit-point spline without tangent handles.
   pub fn spline(points: Vec<PointId>) -> CurveKind {
     CurveKind::Spline { points, start_handle: None, end_handle: None }
@@ -463,7 +479,7 @@ impl Sketch {
         return Err(SketchError::NoPoint(p));
       }
     }
-    if let CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } = &kind
+    if let CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points, .. } = &kind
       && (points.len() < 2 || points.len() > 1000)
     {
       return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
@@ -867,7 +883,7 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Spline { points, start_handle, end_handle } => {
       points.iter().copied().chain(*start_handle).chain(*end_handle).collect()
     }
-    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
+    CurveKind::ControlSpline { points, .. } | CurveKind::Bezier { points } => points.clone(),
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
     CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
   }
@@ -887,7 +903,7 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
       }
       bz
     }
-    CurveKind::ControlSpline { points } => bspline_beziers(&pts(points)),
+    CurveKind::ControlSpline { points, degree } => bspline_pieces(&pts(points), *degree),
     CurveKind::Bezier { points } => {
       let p = pts(points);
       if p.len() < 4 || p.len() % 3 != 1 {
@@ -944,6 +960,90 @@ pub fn bspline_beziers(ctrl: &[[f64; 2]]) -> Vec<[[f64; 2]; 4]> {
     }
   }
   pts.windows(4).step_by(3).map(|w| [w[0], w[1], w[2], w[3]]).collect()
+}
+
+/// Cubic pieces approximating each Bézier span of a control-point spline of degree 4 or more.
+const SPAN_PIECES: usize = 16;
+
+/// Cubic Bézier pieces of a clamped uniform B-spline of `degree` with these control points (the
+/// degree drops to one less than the number of points when there are too few). Exact up to
+/// degree 3; above that each Bézier span is 16 cubic pieces matching the curve's points and
+/// first derivatives at their ends (within about 1e-5 of the span's size of the true curve).
+pub fn bspline_pieces(ctrl: &[[f64; 2]], degree: u8) -> Vec<[[f64; 2]; 4]> {
+  if degree == 3 || ctrl.len() < 2 {
+    return bspline_beziers(ctrl);
+  }
+  let lerp = |a: [f64; 2], b: [f64; 2], t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  let p = (degree.max(1) as usize).min(ctrl.len() - 1);
+  bspline_spans(ctrl, p)
+    .into_iter()
+    .flat_map(|span| match p {
+      1 => vec![[span[0], lerp(span[0], span[1], 1.0 / 3.0), lerp(span[0], span[1], 2.0 / 3.0), span[1]]],
+      2 => vec![[span[0], lerp(span[0], span[1], 2.0 / 3.0), lerp(span[2], span[1], 2.0 / 3.0), span[2]]],
+      3 => vec![[span[0], span[1], span[2], span[3]]],
+      _ => {
+        let h = 1.0 / SPAN_PIECES as f64;
+        (0..SPAN_PIECES)
+          .map(|i| {
+            let (t0, t1) = (i as f64 * h, (i + 1) as f64 * h);
+            let ((a, da), (b, db)) = (bezier_point_deriv(&span, t0), bezier_point_deriv(&span, t1));
+            let k = h / 3.0;
+            [a, [a[0] + da[0] * k, a[1] + da[1] * k], [b[0] - db[0] * k, b[1] - db[1] * k], b]
+          })
+          .collect()
+      }
+    })
+    .collect()
+}
+
+/// The Bézier spans (degree `p`, `p + 1` control points each) of a clamped uniform B-spline of
+/// degree `p` (at most one less than the number of control points): each interior knot is
+/// inserted until it has multiplicity `p` (Boehm).
+fn bspline_spans(ctrl: &[[f64; 2]], p: usize) -> Vec<Vec<[f64; 2]>> {
+  let lerp = |a: [f64; 2], b: [f64; 2], t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  let m = ctrl.len() - p;
+  let mut knots: Vec<f64> = std::iter::repeat_n(0.0, p + 1)
+    .chain((1..m).map(|k| k as f64))
+    .chain(std::iter::repeat_n(m as f64, p + 1))
+    .collect();
+  let mut pts = ctrl.to_vec();
+  for u in 1..m {
+    let u = u as f64;
+    for _ in 1..p {
+      let Some(k) = (0..knots.len() - 1).rev().find(|&i| knots[i] <= u && u < knots[i + 1]) else { break };
+      let s = knots.iter().filter(|&&x| x == u).count();
+      let mut q = Vec::with_capacity(pts.len() + 1);
+      for i in 0..=pts.len() {
+        if i + p <= k {
+          q.push(pts[i]);
+        } else if i + s <= k {
+          let a = (u - knots[i]) / (knots[i + p] - knots[i]);
+          q.push(lerp(pts[i - 1], pts[i], a));
+        } else {
+          q.push(pts[i - 1]);
+        }
+      }
+      knots.insert(k + 1, u);
+      pts = q;
+    }
+  }
+  pts.windows(p + 1).step_by(p).map(<[[f64; 2]]>::to_vec).collect()
+}
+
+/// A point on a Bézier of any degree and its first derivative (de Casteljau).
+fn bezier_point_deriv(ctrl: &[[f64; 2]], t: f64) -> ([f64; 2], [f64; 2]) {
+  let n = ctrl.len() - 1;
+  let mut q = ctrl.to_vec();
+  for level in 1..n {
+    for i in 0..=n - level {
+      q[i] = [q[i][0] + (q[i + 1][0] - q[i][0]) * t, q[i][1] + (q[i + 1][1] - q[i][1]) * t];
+    }
+  }
+  if n == 0 {
+    return (q[0], [0.0, 0.0]);
+  }
+  let d = [(q[1][0] - q[0][0]) * n as f64, (q[1][1] - q[0][1]) * n as f64];
+  ([q[0][0] + (q[1][0] - q[0][0]) * t, q[0][1] + (q[1][1] - q[0][1]) * t], d)
 }
 
 /// An ellipse as eight cubic Bézier pieces (about 4e-6 of the radius from the true curve).
@@ -1071,6 +1171,48 @@ mod tests {
         ([w[0][3][0] - w[0][2][0], w[0][3][1] - w[0][2][1]], [w[1][1][0] - w[1][0][0], w[1][1][1] - w[1][0][1]]);
       assert!((a[0] * b[1] - a[1] * b[0]).abs() < 1e-9);
     }
+  }
+
+  #[test]
+  fn quintic_pieces_follow_the_curve() {
+    let ctrl =
+      [[0.0, 0.0], [5.0, 30.0], [15.0, 40.0], [25.0, 5.0], [40.0, 45.0], [55.0, 10.0], [65.0, 35.0], [80.0, 0.0]];
+    let bz = bspline_pieces(&ctrl, 5);
+    // three spans of sixteen pieces, joined with matching derivatives
+    assert_eq!(bz.len(), 3 * SPAN_PIECES);
+    assert_eq!(bz[0][0], ctrl[0]);
+    assert!(dist(bz[bz.len() - 1][3], ctrl[7]) < 1e-12);
+    for w in bz.windows(2) {
+      assert!(dist(w[0][3], w[1][0]) < 1e-12);
+      let (a, b) =
+        ([w[0][3][0] - w[0][2][0], w[0][3][1] - w[0][2][1]], [w[1][1][0] - w[1][0][0], w[1][1][1] - w[1][0][1]]);
+      assert!(dist(a, b) < 1e-9, "{a:?} {b:?}");
+    }
+    // against de Boor on the true quintic (knots 0 x6, 1, 2, 3 x6)
+    let knots = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0];
+    let de_boor = |u: f64| {
+      let p = 5;
+      let k = (p..ctrl.len()).rev().find(|&i| knots[i] <= u).unwrap().min(ctrl.len() - 1);
+      let mut d: Vec<[f64; 2]> = (0..=p).map(|j| ctrl[j + k - p]).collect();
+      for r in 1..=p {
+        for j in (r..=p).rev() {
+          let i = j + k - p;
+          let a = (u - knots[i]) / (knots[i + p + 1 - r] - knots[i]);
+          d[j] = [d[j - 1][0] + (d[j][0] - d[j - 1][0]) * a, d[j - 1][1] + (d[j][1] - d[j - 1][1]) * a];
+        }
+      }
+      d[p]
+    };
+    for (i, b) in bz.iter().enumerate() {
+      for s in [0.0, 0.5, 1.0] {
+        let u = (i as f64 + s) / SPAN_PIECES as f64;
+        let e = dist(bezier_at(b, s), de_boor(u.min(3.0 - 1e-12)));
+        assert!(e < 2e-3, "piece {i} at {s}: {e}");
+      }
+    }
+    // degree 3 keeps the exact cubic pieces; too few points lower the degree
+    assert_eq!(bspline_pieces(&ctrl, 3), bspline_beziers(&ctrl));
+    assert_eq!(bspline_pieces(&ctrl[..4], 5), bspline_beziers(&ctrl[..4]));
   }
 
   #[test]

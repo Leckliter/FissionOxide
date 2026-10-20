@@ -164,9 +164,10 @@ impl Sketch {
         CurveKind::Bezier { points } => {
           CurveKind::Bezier { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
         }
-        CurveKind::ControlSpline { points } => {
-          CurveKind::ControlSpline { points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()? }
-        }
+        CurveKind::ControlSpline { points, degree } => CurveKind::ControlSpline {
+          points: points.iter().map(|p| pt(self, *p)).collect::<Result<_, _>>()?,
+          degree: *degree,
+        },
         CurveKind::Ellipse { center, major, minor } => {
           CurveKind::Ellipse { center: pt(self, *center)?, major: pt(self, *major)?, minor: minor * t.scale }
         }

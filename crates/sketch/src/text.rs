@@ -280,7 +280,7 @@ impl Sketch {
       let pts: Vec<PointId> = idx.iter().map(|i| ids[*i]).collect();
       let kind = match (line, pts.as_slice()) {
         (true, [a, b]) => CurveKind::Line { a: *a, b: *b },
-        _ => CurveKind::ControlSpline { points: pts },
+        _ => CurveKind::control_spline(pts),
       };
       curves.push(self.add_curve(kind)?);
     }
