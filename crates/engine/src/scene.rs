@@ -15,7 +15,12 @@ pub const BODY_COLOR: [u8; 4] = [186, 190, 196, 255];
 pub const HOVER_COLOR: [u8; 4] = [128, 190, 238, 255];
 pub const SELECT_COLOR: [u8; 4] = [36, 142, 220, 255];
 pub const EDGE_COLOR: [u8; 4] = [35, 38, 44, 255];
-pub const PROFILE_COLOR: [u8; 4] = [246, 214, 160, 255];
+/// Closed profiles: Fusion's pale blue, a light tint of the sketch-curve blue ([`SKETCH_FREE`]).
+pub const PROFILE_COLOR: [u8; 4] = [208, 224, 250, 255];
+/// A hovered profile: the stronger orange tint.
+pub const PROFILE_HOVER: [u8; 4] = [250, 196, 120, 255];
+/// A selected profile.
+pub const PROFILE_SELECTED: [u8; 4] = [120, 170, 240, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [225, 130, 40, 255];
@@ -321,9 +326,9 @@ impl SceneBuilder {
           .or_insert_with(|| Shape::face(&r.plane, prof).ok().and_then(|face| face.tessellate(0.05).ok()));
         let Some(m) = mesh else { continue };
         let color = if selected.contains(&pick) {
-          [120, 170, 240, 255]
+          PROFILE_SELECTED
         } else if opts.hover == Some(pick) {
-          [250, 196, 120, 255]
+          PROFILE_HOVER
         } else {
           PROFILE_COLOR
         };

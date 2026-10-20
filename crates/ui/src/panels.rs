@@ -495,6 +495,7 @@ impl Cmd {
         Tool::Blend => {
           (Icon::BlendCurve, "Blend Curve", "Tangent (or curvature) continuous spline joining two curve ends")
         }
+        Tool::Fillet => (Icon::SkFillet, "Fillet", "Round the corner where two lines or arcs meet"),
       },
       Cmd::Construction => (Icon::Construction, "Construction", "Toggle construction linetype (X)"),
       Cmd::Constraint(kind) => {

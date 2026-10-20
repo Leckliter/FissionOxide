@@ -30,6 +30,7 @@ mod preferences;
 mod preview;
 mod select;
 mod sheet;
+mod sketch_fillet;
 mod theme;
 mod tips;
 mod toolbox;
@@ -980,6 +981,11 @@ impl App {
 
   pub fn set_tool(&mut self, t: Tool) {
     self.end_hint();
+    // another tool keeps a previewed fillet (only Esc withdraws it)
+    self.tstate.fillet.accept();
+    if t == Tool::Fillet && self.tool != Tool::Fillet {
+      self.tstate.fillet = sketch_fillet::FilletFlow::new(self.s.design.units);
+    }
     self.tool = t;
     self.drag = None;
     viewport::reset_tool_state(self);

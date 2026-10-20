@@ -605,7 +605,7 @@ const SK_CHAMFER: &[E] = &[
 ];
 
 const SKETCH_MODIFY: &[E] = &[
-  c("Fillet", Icon::SkFillet, D(Kind::SkFillet)),
+  c("Fillet", Icon::SkFillet, T(Tool::Fillet)),
   E::Sub("Chamfer", SK_CHAMFER),
   c("Blend Curve", Icon::BlendCurve, T(Tool::Blend)),
   c("Offset", Icon::SkOffset, D(Kind::SkOffset)).k("O"),

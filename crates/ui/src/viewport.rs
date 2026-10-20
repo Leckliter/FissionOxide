@@ -68,6 +68,8 @@ pub enum Tool {
   Circle2T,
   Circle3T,
   Blend,
+  /// Sketch Fillet: in the canvas, no dialog (see [`crate::sketch_fillet`]).
+  Fillet,
 }
 
 impl Tool {
@@ -128,6 +130,8 @@ pub struct ToolState {
   arc_wind: Option<(f64, f64)>,
   /// Line: a press on the end of the last segment is being dragged; it draws a tangent arc.
   line_arc: bool,
+  /// Sketch Fillet's picks and preview.
+  pub(crate) fillet: crate::sketch_fillet::FilletFlow,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -171,7 +175,7 @@ fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
 
 impl ToolState {
   pub fn is_empty(&self) -> bool {
-    self.pts.is_empty() && self.dim_first.is_none() && self.curves.is_empty()
+    self.pts.is_empty() && self.dim_first.is_none() && self.curves.is_empty() && self.fillet.is_idle()
   }
 }
 
@@ -182,6 +186,8 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.hud = HeadsUp::default();
   app.tstate.arc_wind = None;
   app.tstate.line_arc = false;
+  // Esc (or leaving the tool by it) withdraws a fillet preview
+  app.tstate.fillet.cancel(&mut app.s);
 }
 
 /// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
@@ -292,6 +298,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
+  consumed |= fillet_overlay(app, &resp, &painter, &view, &ctx);
   if app.objects.joints {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   }
@@ -489,6 +496,9 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   if sketching && app.tool.picks_curves() {
     // trim / extend / break / tangent circles / blend pick curves
     app.hover = pick_kind(|p| matches!(p, Pick::SketchCurve { .. }));
+  } else if sketching && app.tool == Tool::Fillet {
+    // Fillet: a corner point picks both curves that meet there, else a line or arc
+    app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. } | Pick::SketchCurve { .. }));
   } else if sketching && app.tool != Tool::Select && app.tool != Tool::Dimension {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   } else if !sketching {
@@ -825,6 +835,14 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     return;
   }
   let Some((sk, plane)) = sketch_plane(app) else { return };
+  if app.tool == Tool::Fillet {
+    let hover = app.hover;
+    app.tstate.fillet.click(&mut app.s, sk, hover);
+    if let Some(e) = app.tstate.fillet.error.clone() {
+      app.status = Some((e, true));
+    }
+    return;
+  }
   if matches!(app.tool, Tool::Trim | Tool::Extend) {
     let (o, d) = view.ray(&app.cam, pos);
     let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
@@ -2516,6 +2534,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     },
     (true, Tool::Circle3T) => "3-tangent circle: click three lines, circles or arcs near where it should touch",
     (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G2 (curvature continuous)",
+    (true, Tool::Fillet) => app.tstate.fillet.hint(),
     (false, _) => return,
   };
   if app.status.is_some() {
@@ -2762,6 +2781,123 @@ fn manipulator(
     }
     ctx.request_repaint();
     return true;
+  }
+  hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
+}
+
+/// Sketch Fillet in the canvas: the tooltip while picking, and on the previewed arc the heads-up
+/// radius box and a drag arrow, as in Fusion. Enter (in the box or not) accepts the fillet, Esc
+/// in the box withdraws it. True while the arrow takes the pointer.
+fn fillet_overlay(
+  app: &mut App,
+  resp: &egui::Response,
+  painter: &egui::Painter,
+  view: &View,
+  ctx: &egui::Context,
+) -> bool {
+  if app.tool != Tool::Fillet {
+    return false;
+  }
+  let Some((_, plane)) = sketch_plane(app) else { return false };
+  app.tstate.fillet.validate(&app.s);
+  let Some(info) = app.tstate.fillet.arc(&app.s) else {
+    if app.drag.is_none() && resp.hovered() {
+      resp.clone().on_hover_text_at_pointer(app.tstate.fillet.hint());
+    }
+    return false;
+  };
+  let (Some(mid), Some(corner)) =
+    (view.to_screen(&app.cam, plane.to_world(info.mid)), view.to_screen(&app.cam, plane.to_world(info.corner)))
+  else {
+    return false;
+  };
+  // the arrow runs from the arc's middle away from the corner (a bigger radius)
+  let (dx, dy) = (info.mid[0] - info.corner[0], info.mid[1] - info.corner[1]);
+  let len = dx.hypot(dy);
+  let v = if len > 1e-9 { [dx / len, dy / len] } else { [0.0, 1.0] };
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let reach = 40.0 * wpp;
+  let tip_local = [info.mid[0] + v[0] * reach, info.mid[1] + v[1] * reach];
+  let Some(tip) = view.to_screen(&app.cam, plane.to_world(tip_local)) else { return false };
+  let hot = resp.hover_pos().is_some_and(|p| (p - tip).length() < 12.0);
+  let active = matches!(app.drag, Some(Drag::Manip)) && app.tstate.fillet.grab.is_some();
+  let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
+  painter.line_segment([mid, tip], Stroke::new(2.0, col));
+  let dir2 = (tip - mid).normalized();
+  let dir2 = if dir2.is_finite() && (tip - mid).length() > 1.0 { dir2 } else { (mid - corner).normalized() };
+  let side = Vec2::new(-dir2.y, dir2.x);
+  let head = [tip + dir2 * 12.0, tip + side * 6.0, tip - side * 6.0];
+  painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
+
+  // the arrow runs along the corner's bisector: where the pointer is along it sets the radius
+  let along = |p: Pos2| {
+    let (o, d) = view.ray(&app.cam, p);
+    ray_plane(o, d, plane.origin, plane.normal()).map(|hit| {
+      let q = plane.to_local(hit);
+      (q[0] - info.corner[0]) * v[0] + (q[1] - info.corner[1]) * v[1]
+    })
+  };
+  let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - tip).length() < 14.0);
+  if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {
+    let grab = ctx.input(|i| i.pointer.press_origin()).and_then(along).map(|a| a - len);
+    app.tstate.fillet.grab = grab;
+    if grab.is_some() {
+      app.drag = Some(Drag::Manip);
+    }
+  }
+  if !matches!(app.drag, Some(Drag::Manip)) {
+    app.tstate.fillet.grab = None;
+  }
+  if let (Some(grab), Some(Drag::Manip)) = (app.tstate.fillet.grab, app.drag) {
+    if let Some(a) = resp.interact_pointer_pos().and_then(along)
+      && let Some(r) = crate::sketch_fillet::radius_for(&info, a - grab)
+    {
+      let step = app.increments.linear_step(grid_step(app, view) / 10.0);
+      let r = if step > 0.0 { ((r / step).round() * step).max(step) } else { r };
+      let text = app.s.design.units.format((r * 1e4).round() / 1e4);
+      app.tstate.fillet.set_radius(&mut app.s, text);
+    }
+    ctx.request_repaint();
+    return true;
+  }
+
+  // the heads-up radius box at the arc
+  let mut text = app.tstate.fillet.radius.clone();
+  let fresh = std::mem::take(&mut app.tstate.fillet.fresh);
+  let (mut commit, mut cancel, mut changed) = (false, false, false);
+  egui::Area::new(egui::Id::new("fillet-radius"))
+    .fixed_pos(mid + (mid - corner).normalized() * 10.0 + Vec2::new(10.0, -12.0))
+    .order(egui::Order::Foreground)
+    .show(ctx, |ui| {
+      egui::Frame::popup(ui.style()).inner_margin(3.0).show(ui, |ui| {
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
+        if fresh {
+          focus_text(ctx, &r, &text, true);
+        }
+        changed = r.changed();
+        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        cancel = esc && (r.has_focus() || r.lost_focus());
+        commit = enter && !esc && (r.has_focus() || r.lost_focus());
+      });
+    });
+  if changed {
+    let unit = app.s.design.units;
+    let ok = fox_engine::expr::eval(&unit.typed(&text), fox_engine::expr::Kind::Length, &app.s.model.params)
+      .is_ok_and(|r| r > 0.0);
+    if ok {
+      app.tstate.fillet.set_radius(&mut app.s, text);
+      if let Some(e) = app.tstate.fillet.error.clone() {
+        app.status = Some((e, true));
+      }
+    }
+  }
+  // Enter with no box focused accepts too
+  let enter_free = !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+  if commit || enter_free {
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    app.tstate.fillet.accept();
+  } else if cancel {
+    app.tstate.fillet.cancel(&mut app.s);
   }
   hot || pressed_on_head && ctx.input(|i| i.pointer.primary_down())
 }

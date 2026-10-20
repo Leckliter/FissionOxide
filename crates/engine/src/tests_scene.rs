@@ -204,3 +204,70 @@ fn constrained_sketch_curves_draw_black_and_free_ones_blue() {
   assert_eq!(colour(&open), scene::SKETCH_FREE, "its radius is still free");
   assert_eq!(colour(&pinned), scene::SKETCH_FIXED, "Fix holds a circle's radius too");
 }
+
+/// The colour of each profile of `sk` in the scene (None: not filled).
+fn profile_fills(s: &Session, sk: fox_model::FeatureId, opts: &ViewOptions) -> Vec<Option<[u8; 4]>> {
+  let n = s.model.sketches[&sk].profiles.len();
+  let (scene, picks) = SceneBuilder::default().build(s, opts);
+  let mut found = vec![None; n];
+  for m in &scene.meshes {
+    let id = m.tri_ids.first().copied().unwrap_or(m.id);
+    if let Some(Pick::Profile { sketch, index }) = picks.get(id)
+      && sketch == sk
+    {
+      found[index] = Some(m.color);
+    }
+  }
+  found
+}
+
+/// Fusion fills every closed profile pale blue (a light tint of the sketch-curve blue), in sketch
+/// edit and out of it, circles included (ui:sketch:profile-fill-color).
+#[test]
+fn every_closed_profile_fills_pale_blue_in_and_out_of_sketch_edit() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+  run(&mut s, "sketch.circle", json!({"center": [20, 10], "radius": 8}));
+  run(&mut s, "sketch.circle", json!({"center": [70, 10], "radius": 8}));
+  let sk = s.edit_sketch.unwrap();
+  let n = s.model.sketches[&sk].profiles.len();
+  assert_eq!(n, 3, "the rectangle (round its hole), the circle inside it and the lone circle");
+  let all = vec![Some(scene::PROFILE_COLOR); n];
+  assert_eq!(profile_fills(&s, sk, &ViewOptions::default()), all, "while editing");
+  run(&mut s, "sketch.finish", json!({}));
+  assert_eq!(profile_fills(&s, sk, &ViewOptions::default()), all, "after finishing");
+  // pale blue: a light tint of the free sketch-curve blue (blue strongest, then green, then red)
+  let [r, g, b, _] = scene::PROFILE_COLOR;
+  let [cr, cg, cb, _] = scene::SKETCH_FREE;
+  assert!(b > g && g > r && r > 180, "{:?}", scene::PROFILE_COLOR);
+  assert!(r > cr && g > cg && b >= cb);
+  // a hovered profile keeps its stronger orange tint
+  let hover = ViewOptions { hover: Some(Pick::Profile { sketch: sk, index: 1 }), ..Default::default() };
+  assert_eq!(profile_fills(&s, sk, &hover)[1], Some(scene::PROFILE_HOVER));
+
+  // a circle on the sketch origin beside a rectangle, as drawn in the parity check
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [20, -10], "corner2": [60, 10]}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 8}));
+  let sk = s.edit_sketch.unwrap();
+  assert_eq!(profile_fills(&s, sk, &ViewOptions::default()), vec![Some(scene::PROFILE_COLOR); 2]);
+  // and the rendered frame shows each one inside it
+  let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  let mut cam = crate::render::Camera::default();
+  cam.fit(DVec3::new(-10.0, -12.0, 0.0), DVec3::new(62.0, 12.0, 0.0), 4.0 / 3.0);
+  let frame = crate::render::render(&scene, &cam, 400, 300);
+  let mut shown: Vec<usize> = [[40.0, 4.0], [4.0, 3.0]]
+    .iter()
+    .map(|at| {
+      let (x, y, _) = cam.project(DVec3::new(at[0], at[1], 0.0), 400, 300).unwrap();
+      match picks.get(frame.pick(x, y, 0, |_| true)) {
+        Some(Pick::Profile { index, .. }) => index,
+        p => panic!("{p:?} at {at:?}"),
+      }
+    })
+    .collect();
+  shown.sort();
+  assert_eq!(shown, vec![0, 1]);
+}
