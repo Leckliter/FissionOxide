@@ -132,7 +132,7 @@ cmds! {
   "torus" => "Torus primitive", "{plane?, at?, major, minor, operation?, targets?: [body] (bodies join/cut may change)}";
   "plane.offset" => "Construction plane offset from a plane or planar face; a plane can also be {origin: [x,y,z], normal, x?} anywhere a plane is taken", "{plane, offset?}";
   "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
-  "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
+  "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge} (a body edge {body, edge}|{point}, a sketch line {sketch, line} or {point} on it, or an axis {axis})", "{method, ...}";
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
@@ -1784,6 +1784,25 @@ fn seg_dist3(a: DVec3, b: DVec3, p: DVec3) -> f64 {
   let l2 = ab.length_squared();
   let t = if l2 > 0.0 { ((p - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
   (a + ab * t - p).length()
+}
+
+/// The sketch line passing nearest a world point, newest sketch first.
+pub(crate) fn sketch_line_at(s: &Session, p: DVec3) -> Result<(FeatureId, CurveId), CmdError> {
+  let mut best: Option<(FeatureId, CurveId, f64)> = None;
+  for (id, r) in s.model.sketches.iter().rev() {
+    for c in &r.sketch.curves {
+      let CurveKind::Line { a, b } = c.kind else { continue };
+      let (Some(pa), Some(pb)) = (r.sketch.pos(a), r.sketch.pos(b)) else { continue };
+      let d = seg_dist3(r.plane.to_world(pa), r.plane.to_world(pb), p);
+      if best.is_none_or(|(_, _, bd)| d < bd - 1e-9) {
+        best = Some((*id, c.id, d));
+      }
+    }
+  }
+  match best {
+    Some((sk, c, d)) if d < 0.05 => Ok((sk, c)),
+    _ => Err(CmdError::new(format!("no edge or sketch line at {:?}", p.to_array()))),
+  }
 }
 
 /// {"body", "edge"} or {"point": [x,y,z]} on the edge.

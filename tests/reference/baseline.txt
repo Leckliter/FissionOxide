@@ -148,3 +148,7 @@
 345-opposed-face-and-plane
 346-perpendicular-faces
 347-two-origin-planes
+# Reference parts that pass; see README.md. One directory name per line.
+335-box-vertical-edge-pattern
+336-prism-slanted-edge-pattern
+337-sketch-line-revolve
