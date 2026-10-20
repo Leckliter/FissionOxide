@@ -2045,11 +2045,13 @@ std::unique_ptr<Shape> offset_face(const Shape &face, double d) {
   FOX_CATCH("offset profile")
 }
 
-// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad). d1 and the
-// angle are measured on the face the edge runs forward in, as Fusion does (on an extrusion's
-// cap edges, the cap); `flip` measures them on the other face.
+// Chamfers edges (1-based) with two distances; `angle` mode: d2 is an angle (rad). With
+// `forward_face`, d1 and the angle are measured on the face the edge runs forward in, as Fusion
+// does (on an extrusion's cap edges, the cap); without it (designs from before the
+// chamfer_forward_face behaviour), on the edge's first adjacent face. `flip` measures them on the
+// other face.
 std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edges, double d1, double d2, bool angle,
-                                bool flip) {
+                                bool flip, bool forward_face) {
   FOX_TRY
   TopTools_IndexedMapOfShape map;
   index_map(s.s, TopAbs_EDGE, map);
@@ -2064,7 +2066,16 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
     if (!ef.Contains(e) || ef.FindFromKey(e).IsEmpty()) continue;
     const TopTools_ListOfShape &faces = ef.FindFromKey(e);
     TopoDS_Face f = TopoDS::Face(faces.First());
-    bool found = false;
+    if (!forward_face && flip) {
+      // legacy: the first adjacent face, or with `flip` the other one
+      for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+        if (!it.Value().IsSame(faces.First())) {
+          f = TopoDS::Face(it.Value());
+          break;
+        }
+      }
+    }
+    bool found = !forward_face;
     for (TopTools_ListIteratorOfListOfShape it(faces); it.More() && !found; it.Next()) {
       for (TopExp_Explorer x(it.Value(), TopAbs_EDGE); x.More(); x.Next()) {
         if (x.Current().IsSame(e) && x.Current().Orientation() == want) {

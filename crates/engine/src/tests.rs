@@ -768,6 +768,49 @@ fn extrude_options_press_pull_chamfers_and_split_by_body() {
     let got = 8000.0 - total_volume(&s);
     assert!((got - cut).abs() < 1e-6, "flipped {flipped}: {got} vs {cut}");
   }
+  // a design from before CHAMFER_FORWARD_FACE keeps main's chamfers: d1 on each edge's first
+  // adjacent face (here the sides), so 5 in and 2 down, as before the change
+  for (edges, dist, cut_new, cut_old) in [
+    // 40 × 30 × 20 box, its top loop, 2 and 5 mm
+    (
+      json!([{"point": [0, 15, 20]}, {"point": [20, 0, 20]}, {"point": [40, 15, 20]}, {"point": [20, 30, 20]}]),
+      json!({"distance": 2, "distance2": 5}),
+      24000.0 - 23326.666666666668,
+      24000.0 - 23366.666666666664,
+    ),
+    // r 15 cylinder's top edge, 3 mm at 30°: main gave 13901.73 mm³
+    (
+      json!([{"point": [0, 15, 20]}]),
+      json!({"distance": 3, "angle": 30}),
+      f64::NAN,
+      15.0 * 15.0 * std::f64::consts::PI * 20.0 - 13901.72880494322,
+    ),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    if edges.as_array().unwrap().len() == 1 {
+      run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 15}));
+    } else {
+      run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"distance": 20}));
+    let before = total_volume(&s);
+    let mut p = dist.clone();
+    p["edges"] = edges;
+    let r = run(&mut s, "chamfer", p);
+    assert!(r["error"].is_null(), "{r}");
+    assert!(s.design.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE));
+    let new = before - total_volume(&s);
+    if cut_new.is_finite() {
+      assert!((new - cut_new).abs() < 1e-6, "new design: {new} vs {cut_new}");
+    }
+    s.design.behaviours = fox_model::Behaviours::legacy();
+    s.rebuild();
+    let old = before - total_volume(&s);
+    assert!((old - cut_old).abs() < 1e-6, "legacy design: {old} vs {cut_old}");
+    assert!((old - new).abs() > 1.0, "the behaviour changes this chamfer: {old} vs {new}");
+  }
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
   let r = run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "radius": 1, "radius2": 4}));

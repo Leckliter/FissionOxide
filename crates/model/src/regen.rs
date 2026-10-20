@@ -397,7 +397,6 @@ struct Ctx<'a> {
   /// The design's behaviour flags: gate a feature-level geometry change on
   /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
   /// [`fox_sketch::behaviour`].
-  #[allow(dead_code)] // read by the first regen-level gate
   behaviours: &'a crate::Behaviours,
 }
 
@@ -661,14 +660,19 @@ impl Ctx<'_> {
       FeatureKind::Chamfer { edges, distance, distance2, angle, flipped } => {
         let flip = *flipped;
         let d = self.len(distance)?;
+        // designs from before CHAMFER_FORWARD_FACE measure d1 on each edge's first adjacent face
+        let forward = self.behaviours.has(fox_sketch::behaviour::CHAMFER_FORWARD_FACE);
+        let two = move |s: &Shape, ids: &[u32], d2: f64, angle: bool| {
+          if forward { s.chamfer_two(ids, d, d2, angle, flip) } else { s.chamfer_two_legacy(ids, d, d2, angle, flip) }
+        };
         match (distance2, angle) {
           (_, Some(a)) => {
             let a = self.angle(a)?;
-            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, a, true, flip))
+            self.edge_op(id, edges, |s, ids| two(s, ids, a, true))
           }
           (Some(d2), None) => {
             let d2 = self.len(d2)?;
-            self.edge_op(id, edges, |s, ids| s.chamfer_two(ids, d, d2, false, flip))
+            self.edge_op(id, edges, |s, ids| two(s, ids, d2, false))
           }
           (None, None) => self.edge_op(id, edges, |s, ids| s.chamfer(ids, d)),
         }

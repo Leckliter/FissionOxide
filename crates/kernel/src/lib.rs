@@ -636,10 +636,20 @@ impl Shape {
   /// Chamfers with two distances (`angle` = false) or a distance and an angle in radians. `d1`
   /// and the angle are on the face each edge runs forward in (Fusion's choice); `flip` swaps.
   pub fn chamfer_two(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, true)
+  }
+
+  /// [`Shape::chamfer_two`] as designs from before the `chamfer_forward_face` behaviour build it:
+  /// `d1` and the angle on each edge's first adjacent face (`flip`: the other one).
+  pub fn chamfer_two_legacy(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool) -> Result<Shape> {
+    self.chamfer_two_on(edges, d1, d2, angle, flip, false)
+  }
+
+  fn chamfer_two_on(&self, edges: &[u32], d1: f64, d2: f64, angle: bool, flip: bool, forward: bool) -> Result<Shape> {
     if !(d1 > 1e-9 && d2 > 1e-9 && d1.is_finite() && d2.is_finite()) {
       return Err(KernelError::Input("chamfer sizes must be positive".into()));
     }
-    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip)?)?.outward()
+    Shape::wrap(sys::chamfer2(self.get()?, edges, d1, d2, angle, flip, forward)?)?.outward()
   }
 
   /// Fillets edges with the radius running from `r1` to `r2` along each edge.

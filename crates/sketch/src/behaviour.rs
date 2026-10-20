@@ -59,10 +59,15 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// A two-distance or distance-and-angle chamfer measures its first distance (and the angle) on
+/// the face each edge runs forward in, as Fusion does (an extrusion's cap), instead of on the
+/// edge's first adjacent face.
+pub const CHAMFER_FORWARD_FACE: &str = "chamfer_forward_face";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  CHAMFER_FORWARD_FACE,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
