@@ -108,6 +108,7 @@ pub(crate) mod ffi {
     fn make_loft(sections: &Shape, ruled: bool, closed: bool) -> Result<UniquePtr<Shape>>;
     fn split_by_plane(s: &Shape, plane: &[f64], size: f64) -> Result<UniquePtr<Shape>>;
     fn draft(s: &Shape, faces: &[u32], plane: &[f64], angle: f64) -> Result<UniquePtr<Shape>>;
+    fn draft_two_sided(s: &Shape, faces: &[u32], plane: &[f64], angle: f64, angle2: f64) -> Result<UniquePtr<Shape>>;
 
     fn edge_at_index(s: &Shape, edge: u32) -> Result<UniquePtr<Shape>>;
     fn min_distance(a: &Shape, b: &Shape) -> Result<Vec<f64>>;

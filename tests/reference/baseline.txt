@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+499-flipped-two-faces
+500-mid-plane-single
+501-mid-plane-symmetric
+502-mid-plane-two-angles
