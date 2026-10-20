@@ -1,0 +1,10 @@
+# 170-disjoint-segments-xz: added by the parity loop from a Fusion probe
+# disjoint-segments-xz: On XZ (sketch y = world -Z): construction segments (20,0)-(35,0), (40,7.5)-(30,15), (6,18)-(3,9) lie on the sides of triangle (0,0),(50,0),(10,30) without touching; hint (16,11) inside, so the circle is that triangle's incircle, r = 750/65.811 = 11.396 at (15.811, 11.396); extruded 6.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[20, 0], [35, 0]]}
+{"cmd": "sketch.line", "points": [[40, 7.5], [30, 15]]}
+{"cmd": "sketch.line", "points": [[6, 18], [3, 9]]}
+{"cmd": "sketch.construction", "curves": [3, 7, 10], "on": true}
+{"cmd": "sketch.tangent_circle", "curves": [3, 7, 10], "near": [16, 11]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[15.811, 11.396]], "distance": 6, "operation": "new_body"}
