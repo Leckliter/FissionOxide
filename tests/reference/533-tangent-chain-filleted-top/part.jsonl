@@ -1,0 +1,12 @@
+# 533-tangent-chain-filleted-top: added by the parity loop from a Fusion probe
+# tangent-chain-filleted-top: 40x20x10 block with its two long top edges filleted r=3; Replace Face with tangent chain on picks the top face, which pulls in both tangent fillets, and swaps all three for a plane offset 15 from XY: the sides extend and the result is a plain 40x20x15 box (12000 mm3, 6 faces). Fox has no tangent-chain flag, so the script lists the top and both fillet faces.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "fillet", "edges": [{"point": [20, 0, 10]}, {"point": [20, 20, 10]}], "radius": 3}
+{"cmd": "plane.offset", "plane": "xy", "offset": 15}
+{"cmd": "replace_face", "faces": [{"point": [20, 10, 10]}, {"point": [20, 0.87868, 9.12132]}, {"point": [20, 19.12132, 9.12132]}], "plane": {"feature": 4}}

@@ -1,0 +1,202 @@
+{
+ "id": "l-plate-step-face-positive",
+ "name": "L-shaped plate (40x15 + 20x15 arm) 10 mm thick",
+ "description": "L-shaped plate (40x15 + 20x15 arm) 10 mm thick; Press Pull on the inner step face x=20 by +8 mm widens the arm to 28 mm.",
+ "exercises": [
+  "extrude",
+  "press_pull"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Extrude1_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       40,
+       15
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       15
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "ref": "l3.end",
+      "at": [
+       20,
+       15
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l5",
+     "start": {
+      "ref": "l4.end",
+      "at": [
+       20,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l6",
+     "start": {
+      "ref": "l5.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "l1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Extrude1_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "offset_faces",
+   "name": "OffsetFaces1",
+   "faces": [
+    {
+     "type": "plane",
+     "normal_at_point_on_face": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "point": [
+      20.0,
+      22.5,
+      5.0
+     ]
+    }
+   ],
+   "distance": 8
+  }
+ ]
+}

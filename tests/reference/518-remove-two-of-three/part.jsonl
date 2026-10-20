@@ -1,0 +1,25 @@
+# 518-remove-two-of-three: added by the parity loop from a Fusion probe
+# remove-two-of-three: Three boxes: 40x30x20 at origin, 20x20x10 at x=50..70, 10x10x30 at x=80..90; Remove the first and third bodies (two Remove features): only the 20x20x10 box remains.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[50, 0], [70, 0]]}
+{"cmd": "sketch.line", "points": [[70, 0], [70, 20]]}
+{"cmd": "sketch.line", "points": [[70, 20], [50, 20]]}
+{"cmd": "sketch.line", "points": [[50, 20], [50, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[80, 0], [90, 0]]}
+{"cmd": "sketch.line", "points": [[90, 0], [90, 10]]}
+{"cmd": "sketch.line", "points": [[90, 10], [80, 10]]}
+{"cmd": "sketch.line", "points": [[80, 10], [80, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 5, "distance": 30, "operation": "new_body"}
+{"cmd": "body.remove", "bodies": [2000]}
+{"cmd": "body.remove", "bodies": [6000]}

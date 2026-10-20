@@ -1,0 +1,17 @@
+# 516-remove-second-body: added by the parity loop from a Fusion probe
+# remove-second-body: 40x30x20 box and a separate 20x20x10 box at x=50..70; Remove the second body: only the first box remains, both extrudes stay in the timeline.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[50, 0], [70, 0]]}
+{"cmd": "sketch.line", "points": [[70, 0], [70, 20]]}
+{"cmd": "sketch.line", "points": [[70, 20], [50, 20]]}
+{"cmd": "sketch.line", "points": [[50, 20], [50, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "body.remove", "bodies": [4000]}

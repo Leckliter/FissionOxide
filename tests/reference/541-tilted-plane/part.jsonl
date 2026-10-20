@@ -1,0 +1,10 @@
+# 541-tilted-plane: added by the parity loop from a Fusion probe
+# tilted-plane: 40x20x10 block on y=10..30; Split Face divides its top, front (y=10) and two end faces with a plane through the X axis tilted 20 deg from XY (z = y*tan20), giving 10 faces
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 10], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "split_face", "faces": [{"point": [20, 20, 10]}, {"point": [20, 10, 2]}, {"point": [0, 20, 9]}, {"point": [40, 20, 9]}], "tool": {"origin": [0, 0, 0], "normal": [0, -0.342020143326, 0.939692620786]}}

@@ -1,0 +1,12 @@
+# 542-body-face-tool-extended: added by the parity loop from a Fusion probe
+# body-face-tool-extended: L-shaped plate (40x10 foot plus 20x20 upright) 10 thick; Split Face extends the inner riser face x=20 to divide the bottom, top and front (y=0) faces, giving 11 faces
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [20, 30]]}
+{"cmd": "sketch.line", "points": [[20, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "split_face", "faces": [{"point": [10, 5, 0]}, {"point": [10, 5, 10]}, {"point": [20, 0, 5]}], "tool": {"point": [20, 20, 5]}}

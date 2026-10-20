@@ -1,0 +1,7 @@
+# 514-cylinder-side-face-negative: added by the parity loop from a Fusion probe
+# cylinder-side-face-negative: R10 x 20 cylinder; Press Pull on the curved side face by -3 mm (Offset Face) shrinks it to R7.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "press_pull", "faces": [{"point": [10.0, 0.0, 10.0]}], "distance": -3}

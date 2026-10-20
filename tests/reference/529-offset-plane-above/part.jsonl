@@ -1,0 +1,11 @@
+# 529-offset-plane-above: added by the parity loop from a Fusion probe
+# offset-plane-above: 40x20x10 block; Replace Face swaps its top face (z=10) for a construction plane offset 15 from XY, so the four sides extend and the block grows to 15 tall (12000 mm3).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.line", "points": [[40, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "xy", "offset": 15}
+{"cmd": "replace_face", "faces": [{"point": [20, 10, 10]}], "plane": {"feature": 3}}

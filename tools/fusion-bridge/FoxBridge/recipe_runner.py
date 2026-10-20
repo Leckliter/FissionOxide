@@ -995,6 +995,10 @@ class Runner:
     if "thin" in f and "curves" in f["thin"]:
       th = f["thin"]
       prof = self.root.createOpenProfile(collection(self.curves(th)), False)
+    elif "surface" in f:
+      # A surface extrude: "surface": {"sketch", "curves"} open (or closed) sketch curves swept
+      # into a surface body instead of a solid.
+      prof = self.root.createOpenProfile(collection(self.curves(f["surface"])), False)
     else:
       prof = self.profile_input(f["profiles"])
     inp = ext.createInput(prof, op)
@@ -1020,6 +1024,8 @@ class Runner:
       raise Unsupported(f"extrude extent {t}")
     if e.get("start_offset"):
       inp.startExtent = adsk.fusion.OffsetStartDefinition.create(V(e["start_offset"]))
+    if "surface" in f:
+      inp.isSolid = False
     if "thin" in f:
       th = f["thin"]
       loc = adsk.fusion.ThinExtrudeWallLocation
@@ -1106,6 +1112,21 @@ class Runner:
 
   def op_chamfer(self, f):
     chamfers = self.root.features.chamferFeatures
+    if "sets" in f or "corner_type" in f:
+      # several edge sets in one feature (each its own type and sizes), and/or a corner type
+      if not hasattr(chamfers, "createInput2"):
+        raise Unsupported("chamfer edge sets / corner type (needs createInput2)")
+      inp = chamfers.createInput2()
+      for s in f.get("sets", [f]):
+        self.chamfer_set(inp, dict(s, tangent_chain=s.get("tangent_chain", f.get("tangent_chain", False))))
+      if "corner_type" in f:
+        types = {"chamfer": adsk.fusion.ChamferCornerTypes.ChamferCornerType,
+                 "miter": adsk.fusion.ChamferCornerTypes.MiterCornerType,
+                 "blend": adsk.fusion.ChamferCornerTypes.BlendCornertype}
+        if f["corner_type"] not in types:
+          raise Unsupported(f"chamfer corner type {f['corner_type']}")
+        inp.cornerType = types[f["corner_type"]]
+      return chamfers.add(inp)
     edges = collection(self.edges(f["edges"]))
     chain = bool(f.get("tangent_chain", False))
     t = f.get("type", "equal_distance")
@@ -1130,9 +1151,29 @@ class Runner:
       inp.setToEqualDistance(V(f["distance"]))
     return chamfers.add(inp)
 
+  def chamfer_set(self, inp, f):
+    edges = collection(self.edges(f["edges"]))
+    chain = bool(f.get("tangent_chain", False))
+    flipped = bool(f.get("flipped", False))
+    t = f.get("type", "equal_distance")
+    sets = inp.chamferEdgeSets
+    if t == "equal_distance":
+      sets.addEqualDistanceChamferEdgeSet(edges, V(f["distance"]), chain)
+    elif t == "two_distance":
+      sets.addTwoDistancesChamferEdgeSet(edges, V(f["distance"]), V(f["distance2"]), flipped, chain)
+    elif t == "distance_angle":
+      sets.addDistanceAndAngleChamferEdgeSet(edges, V(f["distance"]), V(f["angle"], "deg"), flipped, chain)
+    else:
+      raise Unsupported(f"chamfer type {t}")
+
   def op_shell(self, f):
     shells = self.root.features.shellFeatures
-    inp = shells.createInput(collection(self.faces(f["faces_removed"])), bool(f.get("tangent_chain", False)))
+    # faces_removed opens those faces; bodies (names) hollows the whole body closed
+    ents = self.faces(f.get("faces_removed", [])) + [self.body(b) for b in f.get("bodies", [])]
+    inp = shells.createInput(collection(ents), bool(f.get("tangent_chain", False)))
+    if f.get("shell_type"):
+      inp.shellType = {"sharp": adsk.fusion.ShellTypes.SharpOffsetShellType,
+                       "rounded": adsk.fusion.ShellTypes.RoundedOffsetShellType}[f["shell_type"]]
     if f.get("inside_thickness"):
       inp.insideThickness = V(f["inside_thickness"])
     if f.get("outside_thickness"):
@@ -1494,6 +1535,28 @@ class Runner:
     inp = offsets.createInput(self.faces(f["faces"]), V(f["distance"]))
     return offsets.add(inp)
 
+  def op_remove_faces(self, f):
+    # Remove Faces (Modify > Remove Faces): deletes "faces" and heals the body by extending the
+    # neighbouring faces (a parametric DeleteFaceFeature).
+    return self.root.features.deleteFaceFeatures.add(collection(self.faces(f["faces"])))
+
+  def op_replace_face(self, f):
+    # Replace Face (Modify > Replace Face): swaps "faces" (source faces on one body) for the
+    # target: "plane" (a construction plane name, as plane() takes it) or "target" (a list of
+    # face picks {"point"} on surface bodies, or {"body": name} for whole surface bodies). The
+    # neighbouring faces extend or trim to meet it. "tangent_chain" adds tangent faces.
+    targets = []
+    if f.get("plane") is not None:
+      targets.append(self.plane(f["plane"]))
+    for t in f.get("target", []):
+      targets.append(self.body(t["body"]) if "body" in t else self.find(t["point"], "face", t))
+    if not targets:
+      raise RuntimeError("replace_face needs a 'plane' or 'target'")
+    feats = self.root.features.replaceFaceFeatures
+    inp = feats.createInput(collection(self.faces(f["faces"])), bool(f.get("tangent_chain", False)),
+                            collection(targets))
+    return feats.add(inp)
+
   def op_sweep(self, f):
     path = self.root.features.createPath(collection(self.curves(f["path"])), bool(f["path"].get("chained", True)))
     sweeps = self.root.features.sweepFeatures
@@ -1615,13 +1678,18 @@ class Runner:
   def op_move(self, f):
     """Move/Copy (parametric Move feature) of "bodies" (names) or "faces" ([{"point"}]): by
     "translate" [x, y, z] mm, then rotated "angle" deg about "axis" (as axis() takes it). Both
-    together are one free move (translation first, then the rotation)."""
-    if f.get("copy"):
-      raise Unsupported("move with create copy")
+    together are one free move (translation first, then the rotation). "copy": true moves a copy
+    of the bodies and keeps the originals (Create Copy)."""
     if f.get("faces"):
+      if f.get("copy"):
+        raise Unsupported("move faces with create copy")
       ents = collection([self.find(x["point"], "face", x) for x in f["faces"]])
     else:
       ents = collection([self.body(b) for b in f["bodies"]])
+      if f.get("copy"):
+        # Create Copy: the UI adds a Copy Paste Bodies feature, then moves the pasted bodies.
+        pasted = self.root.features.copyPasteBodies.add(ents)
+        ents = collection([pasted.bodies.item(i) for i in range(pasted.bodies.count)])
     moves = self.root.features.moveFeatures
     inp = moves.createInput2(ents)
     t = [float(x) for x in f.get("translate", [0, 0, 0])]
@@ -1645,12 +1713,61 @@ class Runner:
       inp.defineAsTranslateXYZ(V(t[0]), V(t[1]), V(t[2]), True)
     return moves.add(inp)
 
+  def op_scale(self, f):
+    """Scale (parametric Scale feature) of "bodies" (names, or {"point": [x,y,z]} for the body
+    containing it) about "point": "origin" (default) or a point as point_entity() takes it
+    ({"vertex": [x,y,z]}, {"sketch", "point"}, {"ref"}). "factor" scales uniformly; "factors"
+    [x, y, z] is a non-uniform scale along the world axes."""
+    bodies = f.get("bodies") or []
+    if not bodies:
+      raise Unsupported("scale needs 'bodies'")
+    ents = collection([self.body_at(b["point"]) if isinstance(b, dict) else self.body(b) for b in bodies])
+    pt = f.get("point", "origin")
+    pt = self.root.originConstructionPoint if pt == "origin" else self.point_entity(pt)
+    scales = self.root.features.scaleFeatures
+    U = lambda v: V(v) if isinstance(v, str) else adsk.core.ValueInput.createByReal(float(v))
+    inp = scales.createInput(ents, pt, U(f.get("factor", 1)))
+    if "factors" in f:
+      x, y, z = [U(v) for v in f["factors"]]
+      inp.setToNonUniform(x, y, z)
+    return scales.add(inp)
+
   def op_split_body(self, f):
     splits = self.root.features.splitBodyFeatures
-    inp = splits.createInput(self.body(f["body"]), self.plane(f["tool"]), bool(f.get("extend_tool", True)))
+    # "tool": a plane (construction plane name, free plane, {"face": {"point"}}), or {"body": name}
+    # for a body tool.
+    t = f["tool"]
+    tool = self.body(t["body"]) if isinstance(t, dict) and "body" in t else self.plane(t)
+    inp = splits.createInput(self.body(f["body"]), tool, bool(f.get("extend_tool", True)))
     feat = splits.add(inp)
     self.name_bodies(feat, f.get("result_bodies"))
     return feat
+
+  def op_split_face(self, f):
+    # Split Face (Modify > Split Face): divides "faces" (face picks {"point"}) with "tool": a
+    # plane (anything plane() takes, including {"face": {"point"}}), {"body": name}, or
+    # {"sketch": name, "curves": [ids]}. "extend_tool" (default true) extends a face/body tool
+    # to cross the faces. "split_type": "surface" (default), "along_vector" with "direction"
+    # (an axis as axis() takes it, or {"plane": ...}), or "closest_point".
+    t = f["tool"]
+    if isinstance(t, dict) and "body" in t:
+      tool = self.body(t["body"])
+    elif isinstance(t, dict) and "sketch" in t:
+      ents = self.sketches[t["sketch"]]["entities"]
+      tool = collection([ents[c] for c in t["curves"]])
+    else:
+      tool = self.plane(t)
+    feats = self.root.features.splitFaceFeatures
+    inp = feats.createInput(collection(self.faces(f["faces"])), tool, bool(f.get("extend_tool", True)))
+    kind = f.get("split_type", "surface")
+    if kind == "along_vector":
+      d = f["direction"]
+      inp.setAlongVectorSplitType(self.plane(d["plane"]) if isinstance(d, dict) and "plane" in d else self.axis(d))
+    elif kind == "closest_point":
+      inp.setClosestPointSplitType()
+    elif kind != "surface":
+      raise Unsupported(f"split_face split_type {kind!r}")
+    return feats.add(inp)
 
   def op_set_parameter(self, f):
     """Change Parameters: set an existing user parameter's expression after the features that use
@@ -1679,6 +1796,28 @@ class Runner:
     if not target.deleteMe():
       raise RuntimeError(f"Fusion refused to delete {f}")
     return None
+
+  def op_remove(self, f):
+    """Remove (soft delete): take bodies out of the design as a Remove feature in the timeline,
+    leaving the features that made them. Fusion's Remove takes one item, so each body in
+    "bodies" gets its own Remove feature; the last one is returned. A body is a name, or
+    {"point": [x,y,z]} (mm) for the body that contains that point."""
+    bodies = f.get("bodies") or ([f["body"]] if "body" in f else [])
+    if not bodies:
+      raise Unsupported("remove needs 'bodies'")
+    targets = [self.body_at(b["point"]) if isinstance(b, dict) else self.body(b) for b in bodies]
+    feat = None
+    for b in targets:
+      feat = self.root.features.removeFeatures.add(b)
+    return feat
+
+  def body_at(self, point):
+    pt = adsk.core.Point3D.create(*[c / 10.0 for c in point])
+    for i in range(self.root.bRepBodies.count):
+      b = self.root.bRepBodies.item(i)
+      if b.pointContainment(pt) == adsk.fusion.PointContainment.PointInsidePointContainment:
+        return b
+    raise RuntimeError(f"no body contains {point}")
 
   def op_compute_all(self, f):
     """Compute All: recompute every parameter, feature and assembly relationship in the design."""

@@ -1,0 +1,11 @@
+# 547-shell-tangent-chain: added by the parity loop from a Fusion probe
+# shell-tangent-chain: 40x30 block (R10 round on the +X+Y vertical corner) extruded 20, shelled 2 mm inward from the back face (y=30) with tangent chain on, so the corner round and the right face (x=40) open too.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 20]]}
+{"cmd": "sketch.arc", "start": [40, 20], "mid": [37.071067812, 27.071067812000003], "end": [30, 30]}
+{"cmd": "sketch.line", "points": [[30, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "shell", "faces": [{"point": [15.0, 30.0, 10.0], "normal": [0.0, 1.0, 0.0]}], "thickness": 2, "tangent_chain": true}

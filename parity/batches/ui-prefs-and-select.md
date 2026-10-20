@@ -1,0 +1,17 @@
+# Parity batch: ui-prefs-and-select
+
+Make FissionOxide match Autodesk Fusion for each item below. Each item says what Fusion
+does, what FissionOxide does now, and where to start. Keep changes scoped to these items, add tests
+where the behaviour is testable, and run `cargo test` and `cargo clippy` before opening the PR.
+
+## selection tools (P2)
+- key: `ui:canvas:selection-tools`
+- Fusion: SELECT dropdown: Select, Window (1), Freeform (2), Paint (3), Selection Tools > (Invert Selection, Select by Boundary, Select by Name, Select Bodies by Size, Select Seed and Boundary Faces), a Component Drag checkbox (on by default: dragging a component in the canvas moves it), Selection Priority >, Selection Filters >.
+- FissionOxide: FissionOxide's Selection Tools has Select All, Select Other and Invert Selection. Missing: Select by Boundary (pick boundary faces and a seed, selects the faces inside), Select by Name (dialog with a name filter), Select Bodies by Size (dialog with a size range), Select Seed and Boundary Faces, and the Component Drag toggle (ledger toolbar:FusionDragCompControlsCmd and the Select* entries, untested).
+- Start here: `crates/ui/src/menus.rs`, `crates/ui/src/select.rs`
+
+## preferences detail (P2)
+- key: `ui:chrome:preferences-detail`
+- Fusion: Preferences tree: General (> API, Design, Manufacture, Electronics, Render, Drawing, Simulation), Tokens, Material, Graphics, Network, Data Collection and Use, Unit and Value Display, Default Units, Preview Features, Compatibility. General: language, theme, graphics driver, offline cache, default design type, automatic recovery backup interval, default modeling orientation, show tooltips, show command prompt, show default measure, show in-command errors and warnings, mouse setup, default orbit type (Free/Constrained), reverse zoom, enable camera pivot, ViewCube size, gestures, spacebar repeats last command. Design: default modeling mode (Parametric/Direct), PMI standard and tolerance, auto project edges on reference, auto look at sketch, edit dimension when created, show ghosted result body, auto project geometry on active sketch plane, auto hide sketch on feature creation, scale entire sketch at first dimension, mesh insert options. Unit and Value Display: general/angular/scientific precision, foot-inch and degree format, decimal point, unit abbreviations/symbols, scientific notation thresholds, hide trailing zeroes. Graphics: preset, dynamic FPS, selection display style, transparency effect, animate view transitions, surface normal display, hidden edge dimming.
+- FissionOxide: FissionOxide's Preferences has General, Design, Sketch, Graphics, Navigation and Units pages with about a dozen settings: up axis, capture history, default units, auto look at sketch, sketch snap/constraints/dimensions, GPU renderer, the navigation preset, reverse zoom and zoom to cursor. Missing settings that FissionOxide's features already cover: show tooltips, show command prompt, show in-command errors and warnings, default orbit type, spacebar repeats last command, ViewCube size, automatic recovery interval, edit dimension when created, show ghosted result body, auto project geometry on the sketch plane, auto hide sketch on feature creation, scale entire sketch at first dimension, the whole Unit and Value Display page (precision, trailing zeroes, abbreviations), and Graphics' animate view transitions, hidden edge dimming and transparency. The page tree also differs from Fusion's.
+- Start here: `crates/ui/src/preferences.rs`

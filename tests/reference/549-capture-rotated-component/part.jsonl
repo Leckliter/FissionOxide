@@ -1,0 +1,10 @@
+# 549-capture-rotated-component: added by the parity loop from a Fusion probe
+# Capture Position: 20x10x5 box made a component, the component turned 90 deg about Z then moved (30, 0, 0); Fox records component moves in the history directly.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "component.create", "name": "Box", "bodies": [2000]}
+{"cmd": "move", "component": 1, "axis": "z", "angle": 90}
+{"cmd": "move", "component": 1, "translate": [30, 0, 0]}
+{"cmd": "info"}

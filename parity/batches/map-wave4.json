@@ -1,0 +1,22 @@
+{
+  "ui:sketch:modify-move-copy": "ui-wire-engine-menus",
+  "ui:sketch:modify-sketch-scale": "ui-wire-engine-menus",
+  "ui:sketch:project-intersect": "ui-wire-engine-menus",
+  "ui:sketch:project-to-surface": "ui-wire-engine-menus",
+  "ui:sketch:polygon-constraint": "ui-wire-engine-menus",
+  "ui:dialogs:align": "ui-wire-engine-menus",
+  "ui:dialogs:create-base-feature": "ui-wire-engine-menus",
+  "ui:construct:ucs": "ui-wire-engine-menus",
+  "ui:insert:duplicate-with-joints": "ui-wire-engine-menus",
+  "ui:canvas:filter-construction": "ui-wire-engine-menus",
+  "ui:toolbar:panel-order": "ui-wire-engine-menus",
+  "ui:tabs:surface-sweep-loft": "ui-surface-sweep-loft",
+  "ui:tabs:sheet-metal-modify": "ui-sheet-metal-modify",
+  "ui:tabs:mesh-commands": "ui-mesh-commands",
+  "ui:inspect:analyses": "ui-inspect-tools",
+  "ui:inspect:display-toggles": "ui-inspect-tools",
+  "ui:chrome:utilities-utility": "ui-inspect-tools",
+  "ui:timeline:context-menu": "ui-history-leftovers",
+  "ui:chrome:undo-history": "ui-history-leftovers",
+  "ui:chrome:status-bar-units": "ui-history-leftovers"
+}

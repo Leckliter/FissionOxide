@@ -1,0 +1,9 @@
+# 548-capture-translated-component: added by the parity loop from a Fusion probe
+# Capture Position: 20x10x5 box made a component, the component moved (15, 5, 8); Fox records component moves in the history directly (no separate snapshot step).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "component.create", "name": "Box", "bodies": [2000]}
+{"cmd": "move", "component": 1, "translate": [15, 5, 8]}
+{"cmd": "info"}

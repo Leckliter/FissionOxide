@@ -1,0 +1,300 @@
+{
+ "id": "subset-non-uniform-about-vertex",
+ "name": "two 10x10x10 cubes at x 0..10 and 20..30",
+ "description": "two 10x10x10 cubes at x 0..10 and 20..30; only the second scaled [1.5,2,3] about its vertex (20,0,0); expect it (20,0,0)-(35,20,30)",
+ "exercises": [
+  "extrude",
+  "scale"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "a1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a2",
+     "start": {
+      "at": [
+       10,
+       0
+      ],
+      "ref": "a1.end"
+     },
+     "end": {
+      "at": [
+       10,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a3",
+     "start": {
+      "at": [
+       10,
+       10
+      ],
+      "ref": "a2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "a4",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "a3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "a1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body1"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Sketch2",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b1",
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b2",
+     "start": {
+      "at": [
+       30,
+       0
+      ],
+      "ref": "b1.end"
+     },
+     "end": {
+      "at": [
+       30,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b3",
+     "start": {
+      "at": [
+       30,
+       10
+      ],
+      "ref": "b2.end"
+     },
+     "end": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "b4",
+     "start": {
+      "at": [
+       20,
+       10
+      ],
+      "ref": "b3.end"
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "b1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude2",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch2",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b1",
+        "b2",
+        "b3",
+        "b4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body2"
+   ]
+  },
+  {
+   "op": "scale",
+   "name": "Scale1",
+   "bodies": [
+    "Body2"
+   ],
+   "point": {
+    "vertex": [
+     20,
+     0,
+     0
+    ]
+   },
+   "factors": [
+    1.5,
+    2,
+    3
+   ]
+  }
+ ]
+}

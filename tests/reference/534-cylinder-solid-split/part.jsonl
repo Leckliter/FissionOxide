@@ -1,0 +1,8 @@
+# 534-cylinder-solid-split: added by the parity loop from a Fusion probe
+# cylinder-solid-split: cylinder r10 along Y (30 long, centred), silhouette split as solid bodies, view along the Z axis
+# Fox has no silhouette split command; the last line names the missing feature.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "extent": "symmetric", "distance": 15, "operation": "new_body"}
+{"cmd": "silhouette_split", "body": 1, "view": "z", "operation": "solid"}

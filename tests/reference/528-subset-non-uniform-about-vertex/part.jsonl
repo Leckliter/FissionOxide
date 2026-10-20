@@ -1,0 +1,11 @@
+# 528-subset-non-uniform-about-vertex: added by the parity loop from a Fusion probe
+# subset-non-uniform-about-vertex: two 10x10x10 cubes at x 0..10 and 20..30; only the second scaled [1.5,2,3] about its vertex (20,0,0); expect it (20,0,0)-(35,20,30)
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [10, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [20, 0], "corner2": [30, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 10, "operation": "new_body"}
+{"cmd": "scale", "bodies": [4000], "center": [20, 0, 0], "factors": [1.5, 2, 3]}

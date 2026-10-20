@@ -1,0 +1,20 @@
+# 550-revert-pending-component-move: added by the parity loop from a Fusion probe
+# Revert Position: Fox has no uncaptured (pending) component positions and no Revert Position
+# command, so this script builds only the as-built state Fusion returns to: the pin component is
+# never moved, and its pocket is cut from the box. It does not exercise the feature.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 10], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [10, 20]]}
+{"cmd": "sketch.line", "points": [[10, 20], [10, 10]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 30, "operation": "new_body"}
+{"cmd": "component.create", "name": "Pin", "bodies": [4000]}
+{"cmd": "combine", "target": 2000, "tools": [4000], "operation": "cut", "keep_tools": true}

@@ -1,0 +1,15 @@
+# 539-cylindrical-face-tool-extended: added by the parity loop from a Fusion probe
+# cylindrical-face-tool-extended: 40x30x20 box and a separate R10 cylinder centred (40,30), z 25..30, above the box; the box is split by the cylinder's side face extended down through it: a quarter-cylinder piece and the rest, cylinder untouched (3 bodies).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 25], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [40, 30], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 5, "operation": "new_body"}
+# Fox's split takes planar faces only; the curved face extended as the tool is the gap this case shows.
+{"cmd": "split", "plane": {"point": [32.9289, 22.9289, 27.5]}, "bodies": [2000]}
