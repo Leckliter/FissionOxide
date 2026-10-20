@@ -140,3 +140,29 @@ fn extrude_start_offset_start_face_and_all_both_ways() {
   run(&mut s, "extrude", json!({"extent": "through_all_both", "operation": "cut"}));
   assert!((volume(&s) - (8000.0 - 36.0 * 20.0)).abs() < 1e-6, "{}", volume(&s));
 }
+
+#[test]
+fn asymmetric_and_full_round_fillets() {
+  // 6 down the front face (it sorts first), 2 into the top: a quarter ellipse along 20 mm
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20, "at": [10, 10]}));
+  run(&mut s, "fillet", json!({"edges": [{"point": [10, 0, 20]}], "distance": 6, "distance2": 2}));
+  let removed = 8000.0 - volume(&s);
+  assert!((removed - 12.0 * (1.0 - std::f64::consts::PI / 4.0) * 20.0).abs() < 1e-3, "{removed}");
+  let FeatureKind::Fillet { distance2, flipped, .. } = &s.design.features.last().unwrap().kind else { panic!() };
+  assert_eq!((distance2.as_deref(), *flipped), (Some("2"), false));
+
+  // the top of a 10 mm wall becomes a half-cylinder
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 20, "at": [10, 5]}));
+  let round = json!({"full_round": [{
+    "center": {"point": [10, 5, 20], "normal": [0, 0, 1]},
+    "side_one": [{"point": [10, 0, 10], "normal": [0, -1, 0]}],
+    "side_two": {"point": [10, 10, 10], "normal": [0, 1, 0]},
+  }]});
+  run(&mut s, "fillet", round);
+  assert!(matches!(s.design.features.last().unwrap().kind, FeatureKind::FullRoundFillet { .. }));
+  let v = volume(&s);
+  assert!((v - (20.0 * 10.0 * 15.0 + std::f64::consts::PI * 12.5 * 20.0)).abs() < 1e-3, "{v}");
+  assert_eq!(s.model.bodies[0].faces().len(), 6);
+}

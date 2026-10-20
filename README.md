@@ -37,7 +37,8 @@ change a parameter and watch the whole history rebuild.
   offset from it or a parallel face; taper angle; thin walls inside/outside/centred; new body,
   join, cut, intersect), revolve, fillet (edges or whole faces, tangent chains, several selection
   sets each with its own radius, constant or variable radius, setback corners where three filleted
-  edges meet), chamfer (equal, two distances, or distance and angle),
+  edges meet, asymmetric offsets for an elliptical round, full round across a rib), chamfer (equal,
+  two distances, or distance and angle),
   press-pull and offset of flat or curved faces, shell, box/cylinder/sphere/torus, mirror,
   rectangular and circular patterns, move/rotate, scale (uniform or per axis), combine.
 - **Construction geometry.** Planes offset, at an angle, midway, through three points or two

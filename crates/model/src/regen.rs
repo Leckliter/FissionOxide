@@ -542,8 +542,16 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Fillet { edges, radius, radius2, setback, chord, radii, sets } => {
+      FeatureKind::Fillet { edges, radius, radius2, setback, chord, radii, sets, distance2, flipped } => {
         let r = self.len(radius)?;
+        if let Some(d2) = distance2 {
+          if !sets.is_empty() || radius2.is_some() || !radii.is_empty() || setback.is_some() || *chord {
+            return Err("an asymmetric fillet has one selection set and two offsets".into());
+          }
+          let d2 = self.len(d2)?;
+          let (a, b) = if *flipped { (d2, r) } else { (r, d2) };
+          return self.edge_op(id, edges, |s, ids| fillet2::asymmetric(s, ids, a, b));
+        }
         let sb = match setback.as_deref().map(str::trim) {
           Some(e) if !e.is_empty() => Some(self.len(e)?),
           _ => None,
@@ -2207,3 +2215,7 @@ mod subasm;
 mod tests_config;
 #[cfg(test)]
 mod tests_subasm;
+
+mod fillet2;
+#[cfg(test)]
+mod tests_fillet2;

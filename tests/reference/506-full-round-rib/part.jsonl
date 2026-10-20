@@ -1,0 +1,11 @@
+# 506-full-round-rib: added by the parity loop from a Fusion probe
+# full-round-rib: 40x10x20 rib; full round fillet with the top face (z=20) as the centre face and the y=0 and y=10 faces as sides: the top becomes a 5 mm half-cylinder.
+# sketch Extrude1_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "fillet", "full_round": [{"center": {"point": [20, 5, 20], "normal": [0, 0, 1]}, "side_one": [{"point": [20, 0, 10], "normal": [0, -1, 0]}], "side_two": [{"point": [20, 10, 10], "normal": [0, 1, 0]}]}]}
