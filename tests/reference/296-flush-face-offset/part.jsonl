@@ -1,0 +1,10 @@
+# 296-flush-face-offset: added by the parity loop from a Fusion probe
+# flush-face-offset: Align (assembly) constraint, flush with 5 mm offset. Grounded 40x30x10 plate A,
+# 10x10x10 block B at x 50..60, y 0..10; B's bottom face mated to A's top face, 5 mm apart: B moves
+# only along the normal, to z 15..25, and keeps its place in x and y.
+{"cmd": "box", "width": 40, "depth": 30, "height": 10, "at": [20, 15]}
+{"cmd": "component.create", "name": "A", "bodies": [1000]}
+{"cmd": "component.ground", "component": 1}
+{"cmd": "box", "width": 10, "depth": 10, "height": 10, "at": [55, 5]}
+{"cmd": "component.create", "name": "B", "bodies": [2000]}
+{"cmd": "align", "moving_geometry": {"face": {"point": [55, 5, 0]}}, "fixed_geometry": {"face": {"point": [20, 15, 10]}}, "relation": "flush", "offset": 5}

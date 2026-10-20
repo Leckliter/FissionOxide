@@ -57,7 +57,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       })?;
       Ok(json!({}))
     })(),
-    _ => return None,
+    _ => return crate::align::run(s, name, p),
   })
 }
 
@@ -92,6 +92,7 @@ impl Source {
             | FeatureKind::RigidGroup { .. }
             | FeatureKind::MotionLink { .. }
             | FeatureKind::CamFollower { .. }
+            | FeatureKind::AlignConstraint { .. }
         ) {
           f.suppressed = true;
         }
