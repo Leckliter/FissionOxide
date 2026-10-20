@@ -6,8 +6,8 @@ use fox_kernel::{BoolOp, EdgeInfo, FaceInfo, Plane, Shape, SurfaceKind};
 use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
-use crate::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PlaneRef};
+use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PlaneRef};
 
 /// ISO metric coarse pitches by nominal diameter (mm).
 const ISO_COARSE: [(f64, f64); 18] = [
@@ -537,6 +537,27 @@ impl Ctx<'_> {
     Ok((bi, info))
   }
 
+  /// A straight edge, axis or sketch line as a point on it and its direction (for an edge, the
+  /// start and start-to-end).
+  fn line_of(&mut self, l: &mut LineRef) -> Result<(DVec3, DVec3), String> {
+    match l {
+      LineRef::Edge(e) => {
+        let (_, info) = self.edge_info(e)?;
+        if info.kind != fox_kernel::CurveKind::Line {
+          return Err("pick straight edges, axes or sketch lines".into());
+        }
+        Ok((info.start, info.end - info.start))
+      }
+      LineRef::Sketch { sketch, curve } => self.resolve_axis(&mut AxisRef::SketchLine { curve: *curve }, Some(*sketch)),
+      LineRef::Axis(a) => {
+        if matches!(a, AxisRef::SketchLine { .. }) {
+          return Err("give a sketch line as {sketch, curve}".into());
+        }
+        self.resolve_axis(a, None)
+      }
+    }
+  }
+
   /// An edge as a polyline, start to end.
   fn edge_points(&mut self, e: &mut EdgeRef) -> Result<Vec<DVec3>, String> {
     let (bi, info) = self.edge_info(e)?;
@@ -711,23 +732,19 @@ impl Ctx<'_> {
         Plane::from_normal(n * n.dot(a), n, x).map_err(ke)
       }
       PlaneDef::TwoEdges { a, b } => {
-        let (_, ea) = self.edge_info(a)?;
-        let (_, eb) = self.edge_info(b)?;
-        if ea.kind != fox_kernel::CurveKind::Line || eb.kind != fox_kernel::CurveKind::Line {
-          return Err("pick two straight edges".into());
-        }
-        let da = ea.end - ea.start;
-        let mut n = da.cross(eb.end - eb.start);
+        let (oa, da) = self.line_of(a)?;
+        let (ob, db) = self.line_of(b)?;
+        let mut n = da.cross(db);
         if n.length() < 1e-9 {
-          n = da.cross(eb.start - ea.start);
+          n = da.cross(ob - oa);
         }
         if n.length() < 1e-9 {
           return Err("the edges are collinear".into());
         }
-        if n.normalize().dot(eb.start - ea.start).abs() > 1e-4 {
+        if n.normalize().dot(ob - oa).abs() > 1e-4 {
           return Err("the edges are not in one plane".into());
         }
-        Plane::from_normal(ea.start, n, da).map_err(ke)
+        Plane::from_normal(oa, n, da).map_err(ke)
       }
       PlaneDef::Tangent { face, near } => {
         let (p, n) = self.face_point(face, DVec3::from(*near))?;
@@ -787,12 +804,27 @@ impl Ctx<'_> {
     match def {
       PointDef::Ref { point } => self.point_of(point),
       PointDef::TwoEdges { a, b } => {
-        let (ba, ea) = self.edge_info(a)?;
-        let (bb, eb) = self.edge_info(b)?;
-        let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
-        let sb = self.state.bodies[bb].shape.edge_shape(eb.id).map_err(ke)?;
-        let (_, pa, pb) = sa.distance_to(&sb).map_err(ke)?;
-        Ok((pa + pb) / 2.0)
+        if let (LineRef::Edge(a), LineRef::Edge(b)) = (&mut *a, &mut *b) {
+          // two body edges: their closest approach as bounded curves (curved edges too)
+          let (ba, ea) = self.edge_info(a)?;
+          let (bb, eb) = self.edge_info(b)?;
+          let sa = self.state.bodies[ba].shape.edge_shape(ea.id).map_err(ke)?;
+          let sb = self.state.bodies[bb].shape.edge_shape(eb.id).map_err(ke)?;
+          let (_, pa, pb) = sa.distance_to(&sb).map_err(ke)?;
+          return Ok((pa + pb) / 2.0);
+        }
+        // an axis or sketch line: the closest approach of the two infinite lines
+        let (oa, da) = self.line_of(a)?;
+        let (ob, db) = self.line_of(b)?;
+        let (da, db) = (da.normalize(), db.normalize());
+        let w = oa - ob;
+        let (k, d, e) = (da.dot(db), da.dot(w), db.dot(w));
+        let den = 1.0 - k * k;
+        if den < 1e-12 {
+          return Err("the lines are parallel".into());
+        }
+        let (s, t) = ((k * e - d) / den, (e - k * d) / den);
+        Ok((oa + da * s + ob + db * t) / 2.0)
       }
       PointDef::ThreePlanes { a, b, c } => {
         let ps = [self.resolve_plane(a)?, self.resolve_plane(b)?, self.resolve_plane(c)?];

@@ -10,5 +10,5 @@
 {"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
 {"cmd": "sketch.line", "points": [[10, 0], [40, 30]]}
 {"cmd": "sketch.finish"}
-{"cmd": "plane", "method": "two_edges", "a": {"sketch": 3, "curve": 0}, "b": {"point": [40, 30, 10]}}
+{"cmd": "plane", "method": "two_edges", "a": {"sketch": 3, "curve": 3}, "b": {"point": [40, 30, 10]}}
 {"cmd": "split", "plane": {"feature": 4}, "bodies": [2000]}
