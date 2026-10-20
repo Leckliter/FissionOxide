@@ -194,6 +194,27 @@ pub struct App {
   pub(crate) help: help::Help,
   /// A command started: the app bar's menus close at the end of the frame, as in Fusion.
   close_menus: bool,
+  /// Joint glyph hover from the browser, the glyph's menu, Edit Motion Limits and Animate Joint.
+  pub(crate) joints: panels::JointUi,
+  /// The document tabs, in order. The active tab's slot is empty: its document is `s`.
+  tabs: Vec<Option<Box<Parked>>>,
+  active_tab: usize,
+}
+
+/// A document open in a tab behind the active one, with its view.
+struct Parked {
+  s: Session,
+  cam: Camera,
+  drawing: Option<u32>,
+}
+
+/// A document's name as its tab shows it: the file's name, else the design's.
+fn doc_name(s: &Session) -> String {
+  s.path
+    .as_ref()
+    .and_then(|p| p.file_stem())
+    .map(|n| n.to_string_lossy().to_string())
+    .unwrap_or_else(|| s.design.name.clone())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -374,6 +395,9 @@ impl App {
       canvas_ui: canvas_ui::CanvasUi::default(),
       help: help::Help::default(),
       close_menus: false,
+      joints: panels::JointUi::default(),
+      tabs: vec![None],
+      active_tab: 0,
     }
   }
 
@@ -448,7 +472,7 @@ impl App {
   pub fn open_path(&mut self, p: &std::path::Path) {
     if trace::is_image(p) {
       // a picture opens as a new design with a sketch to trace it into
-      self.replace_session(Session::default());
+      self.open_in_tab(Session::default());
       self.trace_image(p.to_path_buf());
       return;
     }
@@ -458,7 +482,7 @@ impl App {
   fn opened(&mut self, p: &std::path::Path, opened: Result<Session, fox_engine::CmdError>) {
     match opened {
       Ok(s) => {
-        self.replace_session(s);
+        self.open_in_tab(s);
         let msg = match self.s.path {
           Some(_) => format!("Opened {}", p.display()),
           None => format!("Opened {} as a new design (Save to keep it)", p.display()),
@@ -480,6 +504,110 @@ impl App {
     self.tool = Tool::Select;
     self.fit_view_now();
     self.data.invalidate();
+  }
+
+  // ---- document tabs ----
+
+  /// Whether the active document is a new design nobody has touched yet: opening a file takes
+  /// its tab rather than adding another.
+  fn untouched(&self) -> bool {
+    !self.s.dirty
+      && self.s.path.is_none()
+      && self.s.hub.is_none()
+      && self.s.design.features.is_empty()
+      && self.s.model.bodies.is_empty()
+      && !self.s.can_undo()
+  }
+
+  /// Opens a design in a new document tab after the active one, as Fusion does: the documents
+  /// already open, changed or not, stay as they are in their tabs.
+  fn open_in_tab(&mut self, s: Session) {
+    if self.untouched() {
+      self.replace_session(s);
+      return;
+    }
+    self.cancel_dialog();
+    self.park();
+    self.active_tab += 1;
+    self.tabs.insert(self.active_tab, None);
+    self.replace_session(s);
+  }
+
+  /// Moves the active document into its tab's slot (the caller puts another in `s`).
+  fn park(&mut self) {
+    let s = std::mem::take(&mut self.s);
+    self.s.store_root = s.store_root.clone();
+    self.s.revision = s.revision;
+    let parked = Parked { s, cam: self.cam, drawing: self.drawing };
+    self.tabs[self.active_tab] = Some(Box::new(parked));
+  }
+
+  /// The document tabs: each one's name (with * when it has unsaved changes) and whether it is
+  /// the active one.
+  pub fn tab_titles(&self) -> Vec<(String, bool)> {
+    let title = |s: &Session| format!("{} v1{}", doc_name(s), if s.dirty { "*" } else { "" });
+    self
+      .tabs
+      .iter()
+      .map(|t| match t {
+        Some(p) => (title(&p.s), false),
+        None => (title(&self.s), true),
+      })
+      .collect()
+  }
+
+  /// New Design: a new empty design in a tab of its own, as in Fusion.
+  pub fn new_design_tab(&mut self) {
+    if !self.untouched() {
+      self.cancel_dialog();
+      self.park();
+      self.active_tab += 1;
+      self.tabs.insert(self.active_tab, None);
+    }
+    self.new_design();
+  }
+
+  /// Brings document tab `i` to the front, keeping the active one's document and view in its tab.
+  pub fn switch_tab(&mut self, i: usize) {
+    if i == self.active_tab || i >= self.tabs.len() || self.rebuild.is_some() || self.opening.is_some() {
+      return;
+    }
+    let Some(next) = self.tabs[i].take() else { return };
+    self.cancel_dialog();
+    self.park();
+    self.active_tab = i;
+    let revision = self.s.revision;
+    let Parked { s, cam, drawing } = *next;
+    self.s = s;
+    self.swapped_session(revision);
+    self.cam = cam;
+    self.cam_move = None;
+    self.drawing = drawing;
+    self.tool = Tool::Select;
+    self.data.invalidate();
+  }
+
+  /// Closes document tab `i` (the last one left becomes a new empty design).
+  pub fn close_tab(&mut self, i: usize) {
+    if i >= self.tabs.len() {
+      return;
+    }
+    if self.tabs.len() == 1 {
+      self.new_design();
+      return;
+    }
+    if i == self.active_tab {
+      // the tab after it comes to the front, else the one before
+      let next = if i + 1 < self.tabs.len() { i + 1 } else { i - 1 };
+      self.switch_tab(next);
+      if self.active_tab == i {
+        return;
+      }
+    }
+    self.tabs.remove(i);
+    if self.active_tab > i {
+      self.active_tab -= 1;
+    }
   }
 
   /// After the session was replaced by another design (opened, new, from the hub). Every session
@@ -810,7 +938,7 @@ impl App {
       self.open_dialog();
     }
     if pressed(Key::N, Modifiers::COMMAND) {
-      self.new_design();
+      self.new_design_tab();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
       if self.canvas_ui.cancel() {
@@ -1011,7 +1139,7 @@ impl App {
   }
 
   /// Shows or hides the bodies of the selection (bodies, or the bodies of selected faces and
-  /// edges), as V does in Fusion.
+  /// edges) and the glyphs of selected joints, as V does in Fusion.
   pub fn toggle_visibility(&mut self) {
     let mut bodies: Vec<fox_engine::model::BodyId> = Vec::new();
     for s in &self.s.selection {
@@ -1021,9 +1149,20 @@ impl App {
         bodies.push(*body);
       }
     }
-    if bodies.is_empty() {
+    let joints: Vec<(u32, bool)> = self
+      .s
+      .selection
+      .iter()
+      .filter_map(|s| if let Sel::Feature { feature } = s { self.s.design.feature(*feature) } else { None })
+      .filter(|f| matches!(f.kind, fox_engine::model::FeatureKind::Joint { .. }))
+      .map(|f| (f.id.0, f.visible != Some(false)))
+      .collect();
+    if bodies.is_empty() && joints.is_empty() {
       self.hint("Show/Hide: select bodies, faces or edges first");
       return;
+    }
+    for (j, visible) in joints {
+      self.run("joint.visible", json!({"joint": j, "visible": !visible}));
     }
     for b in bodies {
       let visible = self.s.body_visible(b);
@@ -1354,6 +1493,7 @@ impl App {
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
     self.dropped_files(&ctx);
+    panels::animate(self, &ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
     if self.drawing.is_none() {
@@ -1400,6 +1540,8 @@ impl App {
     if self.show_params {
       params_ui::window(self, &ctx);
     }
+    panels::canvas_popup(self, &ctx);
+    panels::limits_window(self, &ctx);
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);
     customize::key_window(self, &ctx);
@@ -1572,6 +1714,56 @@ mod tests {
     let before = app.s.revision;
     app.new_design();
     assert!(app.s.revision > before);
+  }
+
+  #[test]
+  fn opening_a_file_over_a_changed_design_opens_a_new_tab() {
+    let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/bracket.fox"));
+    // an untouched new design is simply replaced
+    let mut app = App::with_session(Session::default());
+    app.open_path(&path);
+    assert_eq!(app.tab_titles(), [("bracket v1".to_string(), true)]);
+    // a modified Untitled stays, unsaved, in its own tab (as a file handed over from outside does)
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+    assert!(app.s.dirty);
+    let untitled = app.s.design.name.clone();
+    app.open_file(path.clone());
+    while app.poll_opening() {
+      std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(app.tab_titles(), [(format!("{untitled} v1*"), false), ("bracket v1".to_string(), true)]);
+    assert_eq!(app.s.path.as_deref(), Some(path.as_path()));
+    let bracket_bodies = app.s.model.bodies.len();
+    // back to the first tab: its changes are all there
+    app.switch_tab(0);
+    assert!(app.s.dirty && app.s.path.is_none() && app.s.model.bodies.len() == 1 && app.s.can_undo());
+    assert!(app.render_key.is_none(), "the viewport draws the tab's design");
+    // File > Open puts another tab after the active one
+    app.open_path(&path);
+    assert_eq!(app.tab_titles().iter().map(|t| t.1).collect::<Vec<_>>(), [false, true, false]);
+    // closing the active tab brings the next one forward
+    app.close_tab(1);
+    assert_eq!(app.tab_titles().len(), 2);
+    assert_eq!((app.active_tab, app.s.model.bodies.len()), (1, bracket_bodies));
+    app.close_tab(0);
+    assert_eq!(app.tab_titles(), [("bracket v1".to_string(), true)]);
+    // the last tab closing leaves a new empty design
+    app.close_tab(0);
+    assert!(app.s.path.is_none() && app.s.design.features.is_empty() && app.tab_titles().len() == 1);
+  }
+
+  #[test]
+  fn new_design_opens_a_tab_of_its_own() {
+    let mut app = App::with_session(Session::default());
+    app.new_design_tab();
+    assert_eq!(app.tab_titles().len(), 1, "an untouched design is just replaced");
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+    app.new_design_tab();
+    assert_eq!(app.tab_titles().len(), 2);
+    assert!(app.s.model.bodies.is_empty());
+    app.switch_tab(0);
+    assert_eq!(app.s.model.bodies.len(), 1);
   }
 
   fn settle_camera(app: &mut App) {

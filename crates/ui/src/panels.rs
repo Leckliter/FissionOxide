@@ -106,10 +106,10 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
           .show(|ui| history_menu(app, ui, false));
         ui.add_space(10.0);
-        // the document tab fills the middle of the bar, its title centred, as in Fusion
+        // the document tabs fill the middle of the bar, their titles centred, as in Fusion
         let right_w = 250.0;
-        let tab_w = (ui.available_width() - right_w - 40.0).max(160.0);
-        document_tab(app, ui, tab_w);
+        let tabs_w = (ui.available_width() - right_w - 40.0).max(160.0);
+        document_tabs(app, ui, tabs_w);
         ui.add_space(4.0);
         let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), egui::Sense::click());
         ui.painter().rect_filled(
@@ -119,7 +119,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         );
         icons::draw(ui.painter(), r.shrink(8.0), Icon::Plus, Color32::from_gray(70));
         if resp.on_hover_text("New Design (Ctrl+N)").clicked() {
-          app.new_design();
+          app.new_design_tab();
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
@@ -204,7 +204,7 @@ fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egu
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(240.0);
   if ui.button("New Design            Ctrl+N").clicked() {
-    app.new_design();
+    app.new_design_tab();
     ui.close();
   }
   if ui
@@ -338,35 +338,60 @@ fn avatar(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
-  let name = app
-    .s
-    .path
-    .as_ref()
-    .and_then(|p| p.file_stem())
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| app.s.design.name.clone());
-  let label = if app.s.dirty { format!("{name} v1*") } else { format!("{name} v1") };
+/// The document tabs, sharing width `w`: click one to bring it to the front, × to close it.
+fn document_tabs(app: &mut App, ui: &mut egui::Ui, w: f32) {
+  let titles = app.tab_titles();
+  let n = titles.len().max(1);
+  let tab_w = if n == 1 { w } else { (w / n as f32 - 2.0).clamp(120.0, 300.0) };
+  let mut switch = None;
+  let mut close = None;
+  for (i, (label, active)) in titles.into_iter().enumerate() {
+    if i > 0 {
+      ui.add_space(2.0);
+    }
+    let (open, closed) = document_tab(ui, i, &label, active, tab_w);
+    if open {
+      switch = Some(i);
+    }
+    if closed {
+      close = Some(i);
+    }
+  }
+  if let Some(i) = close {
+    app.close_tab(i);
+  } else if let Some(i) = switch {
+    app.switch_tab(i);
+  }
+}
+
+/// One document tab; returns (clicked, close clicked).
+fn document_tab(ui: &mut egui::Ui, i: usize, label: &str, active: bool, w: f32) -> (bool, bool) {
   let font = egui::FontId::proportional(13.5);
   let full = ui.max_rect();
-  let (slot, _) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::hover());
-  // the tab runs to the bottom edge of the bar and merges into the toolbar
+  let (slot, resp) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::click());
+  // the active tab runs to the bottom edge of the bar and merges into the toolbar
   let rect = Rect::from_min_max(pos2(slot.min.x, full.bottom() - 33.0), pos2(slot.max.x, full.bottom() + 1.0));
   let p = ui.painter();
-  p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::TOOLBAR);
-  let galley = p.layout_no_wrap(label, font, theme::TEXT);
-  let tx = rect.center().x - galley.size().x / 2.0 + 11.0;
+  let fill = if active {
+    theme::TOOLBAR
+  } else if resp.hovered() {
+    Color32::from_gray(214)
+  } else {
+    Color32::from_gray(200)
+  };
+  p.rect_filled(rect, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, fill);
+  let galley = p.layout_no_wrap(label.to_string(), font, theme::TEXT);
+  let tx = (rect.center().x - galley.size().x / 2.0 + 11.0).max(rect.left() + 30.0);
   icons::draw_color(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), Icon::Component);
   p.galley(pos2(tx, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
   let close = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), Vec2::splat(18.0));
-  let cr = ui.interact(close, ui.id().with("doc-close"), egui::Sense::click());
+  let cr = ui.interact(close, ui.id().with(("doc-close", i)), egui::Sense::click());
   if cr.hovered() {
     ui.painter().rect_filled(close, 2.0, Color32::from_gray(222));
   }
   icons::draw(ui.painter(), close, Icon::Close, theme::ICON_INK);
-  if cr.on_hover_text("Close (opens a new empty design)").clicked() {
-    app.new_design();
-  }
+  let closed = cr.on_hover_text("Close").clicked();
+  (resp.clicked() && !closed && !active, closed)
 }
 
 // ---------------------------------------------------------------- toolbar
@@ -980,12 +1005,19 @@ fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, root: bool, color: Colo
 }
 
 /// What happened to a browser row.
-#[derive(Default)]
 struct RowEvents {
   clicked: bool,
   double_clicked: bool,
   eye: bool,
   response: Option<egui::Response>,
+  /// The name's pill (badges after it go to its right).
+  pill: Rect,
+}
+
+impl Default for RowEvents {
+  fn default() -> Self {
+    RowEvents { clicked: false, double_clicked: false, eye: false, response: None, pill: Rect::NOTHING }
+  }
 }
 
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
@@ -1042,6 +1074,7 @@ fn tree_row(
     (if root { theme::PILL_ROOT } else { theme::PILL }, Stroke::NONE)
   };
   p.rect(pill, 2.0, fill, stroke, egui::StrokeKind::Inside);
+  ev.pill = pill;
   icons::draw_color(&p, Rect::from_center_size(pos2(icon_x, cy), Vec2::splat(16.0)), icon);
   let text_color = if selected && root { theme::TEXT } else { text_color };
   p.galley_with_override_text_color(pos2(icon_x + 13.0, cy - galley.size().y / 2.0), galley, text_color);
@@ -1065,6 +1098,8 @@ fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
 }
 
 pub fn browser(app: &mut App, ctx: &egui::Context) {
+  // the joint row under the pointer is found again as the rows draw
+  app.joints.hover = None;
   let canvas = app.canvas;
   egui::Area::new(egui::Id::new("browser")).fixed_pos(canvas.min + vec2(6.0, 6.0)).order(egui::Order::Middle).show(
     ctx,
@@ -1106,6 +1141,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     };
     ui.data_mut(|d| {
       d.insert_temp(root.with("open"), true);
+      if folder == Some("tree-joints") {
+        d.insert_temp(egui::Id::new("tree-relationships").with("open"), true);
+      }
       if let Some(f) = folder {
         d.insert_temp(egui::Id::new(f).with("open"), true);
       }
@@ -1118,7 +1156,8 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     .and_then(|p| p.file_stem())
     .map(|n| n.to_string_lossy().to_string())
     .unwrap_or_else(|| app.s.design.name.clone());
-  tree_row(ui, root, 0, Some(true), None, Icon::Component, &format!("{name} v1"), false, theme::TEXT);
+  let ev = tree_row(ui, root, 0, Some(true), None, Icon::Component, &format!("{name} v1"), false, theme::TEXT);
+  browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::TopLevel);
   if !is_open(ui, root, true) {
     return;
   }
@@ -1199,14 +1238,54 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
     }
   }
-  components_section(app, ui);
+  joints::relationships_section(app, ui);
   bodies_section(app, ui);
   sketches_section(app, ui);
   planes_section(app, ui);
-  joints_section(app, ui);
   browser_assembly::sections(app, ui);
   drawings_section(app, ui);
   browser_config::section(app, ui);
+  occurrences_section(app, ui);
+}
+
+/// A component's occurrence as the browser names it: "Bracket:1", as in Fusion. A copy whose
+/// name already carries its instance number ("Bracket:2") keeps it.
+pub(crate) fn occurrence_label(name: &str) -> String {
+  let numbered = name.rsplit_once(':').is_some_and(|(_, n)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+  if numbered { name.to_string() } else { format!("{name}:1") }
+}
+
+/// The bodies the root's Bodies folder lists: those in no component (a component's bodies are
+/// listed inside its occurrence only, as in Fusion), without bodies a dialog's preview added.
+pub(crate) fn root_bodies(app: &App) -> Vec<BodyId> {
+  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
+  app
+    .s
+    .model
+    .bodies
+    .iter()
+    .map(|b| b.id)
+    .filter(|b| !previewed.contains(b) && app.s.design.component_of(*b).is_none())
+    .collect()
+}
+
+/// An occurrence row's activation radio (filled when the component is active) and, when it is
+/// grounded, the pin badge after it. Returns whether the radio was clicked.
+fn occurrence_badges(ui: &egui::Ui, row: egui::Id, pill: Rect, active: bool, grounded: bool) -> bool {
+  let p = ui.painter();
+  let c = pos2(pill.right() + 12.0, pill.center().y);
+  let hit = ui.interact(Rect::from_center_size(c, Vec2::splat(16.0)), row.with("radio"), egui::Sense::click());
+  p.circle(c, 6.0, Color32::WHITE, Stroke::new(1.0, if hit.hovered() { theme::ACCENT } else { theme::GROUP_LABEL }));
+  if active {
+    p.circle_filled(c, 3.0, theme::ACCENT);
+  }
+  if grounded {
+    // a push pin: round head, needle down to the left
+    let at = c + vec2(18.0, 0.0);
+    p.line_segment([at + vec2(-1.0, 1.0), at + vec2(-6.0, 6.0)], Stroke::new(1.5, theme::GROUP_LABEL));
+    p.circle_filled(at + vec2(1.0, -1.0), 4.0, theme::ERROR);
+  }
+  hit.on_hover_text(if active { "Activate the top level" } else { "Activate this component" }).clicked()
 }
 
 /// The tag on an isolated body's browser row.
@@ -1287,23 +1366,17 @@ fn named_view_menu(app: &mut App, ui: &mut egui::Ui, name: &str) {
   }
 }
 
-/// Components with their bodies; right-click to rename, ground, duplicate or delete.
-fn components_section(app: &mut App, ui: &mut egui::Ui) {
+/// The components' occurrences, listed under the root as Fusion does ("Bracket:1", each with
+/// its eye, activation radio and a pin when grounded), with their bodies inside; right-click to
+/// rename, ground, duplicate or delete.
+fn occurrences_section(app: &mut App, ui: &mut egui::Ui) {
   // sub-components follow their parent, one level deeper
   let comps: Vec<(u32, String, bool, Vec<BodyId>, usize)> = browser_assembly::component_tree(app)
     .into_iter()
     .filter_map(|(id, depth)| app.s.design.component(fox_engine::model::ComponentId(id)).map(|c| (id, c, depth)))
     .map(|(id, c, depth)| (id, c.name.clone(), c.grounded, c.bodies.clone(), depth))
     .collect();
-  if comps.is_empty() {
-    return;
-  }
   let id = egui::Id::new("tree-components");
-  let ev = tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Components", false, theme::TEXT);
-  browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::TopLevel);
-  if !is_open(ui, id, true) {
-    return;
-  }
   let mut closed_at: Option<usize> = None;
   for (cid, name, grounded, bodies, depth) in comps {
     if closed_at.is_some_and(|d| depth > d) {
@@ -1311,15 +1384,26 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     }
     closed_at = None;
     let flexible = browser_assembly::flexible_of(app, cid);
-    let label = if grounded { format!("{name}  (grounded)") } else { name.clone() };
-    let label = if app.s.active_component.is_some_and(|a| a.0 == cid) { format!("{label}  (active)") } else { label };
+    let label = occurrence_label(&name);
     let label = match flexible {
       Some(true) => format!("{label}  (flexible)"),
       _ => label,
     };
+    let active = app.s.active_component.is_some_and(|a| a.0 == cid);
     let selected = !bodies.is_empty() && bodies.iter().all(|b| app.s.selection.contains(&Sel::Body { body: *b }));
+    let all = component_bodies(app, cid);
+    let visible = all.is_empty() || all.iter().any(|b| app.s.body_visible(*b));
     let row = id.with(cid);
-    let ev = tree_row(ui, row, 2 + depth, Some(false), None, Icon::Component, &label, selected, theme::TEXT);
+    let ev = tree_row(ui, row, 1 + depth, Some(false), Some(visible), Icon::Component, &label, selected, theme::TEXT);
+    if occurrence_badges(ui, row, ev.pill, active, grounded) {
+      let param = if active { json!({}) } else { json!({"component": cid}) };
+      app.run("component.activate", param);
+    }
+    if ev.eye {
+      for b in &all {
+        app.run("body.visible", json!({"body": b.0, "visible": !visible}));
+      }
+    }
     let target = RenameTarget::Component(cid);
     browser_edit::slow_click(ui, &ev, row, target, &name, selected);
     if ev.double_clicked {
@@ -1331,7 +1415,7 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
     browser_edit::slow_click_due(ui, row, now);
     browser_edit::drag_source(ui, &ev, browser_edit::Dragged::Component(cid), &name);
     browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
-    browser_edit::edit_box(app, ui, &ev, row, 2 + depth);
+    browser_edit::edit_box(app, ui, &ev, row, 1 + depth);
     if let Some(r) = ev.response {
       if r.hovered() {
         marking::peek(app, bodies.clone(), name.clone());
@@ -1381,14 +1465,27 @@ fn components_section(app: &mut App, ui: &mut egui::Ui) {
       for b in bodies {
         let name = app.s.body_name(b);
         let sel = app.s.selection.contains(&Sel::Body { body: b });
+        let shown = app.s.body_visible(b);
         let brow = row.with(b.0);
-        let ev = tree_row(ui, brow, 3 + depth, None, None, Icon::Body, &name, sel, theme::TEXT);
-        body_row_edits(app, ui, &ev, brow, 3 + depth, b, &name, sel);
-        if ev.clicked {
-          toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+        let color = if shown { theme::TEXT } else { theme::MUTED };
+        let ev = tree_row(ui, brow, 2 + depth, None, Some(shown), Icon::Body, &name, sel, color);
+        if ev.eye {
+          app.run("body.visible", json!({"body": b.0, "visible": !shown}));
+        } else {
+          body_row_edits(app, ui, &ev, brow, 2 + depth, b, &name, sel);
+          if ev.clicked {
+            toggle_sel(&mut app.s, Sel::Body { body: b }, ui.input(|i| i.modifiers.shift || i.modifiers.command));
+          }
+          browser_edit::slow_click_due(ui, brow, app.s.selection.contains(&Sel::Body { body: b }));
         }
-        browser_edit::slow_click_due(ui, brow, app.s.selection.contains(&Sel::Body { body: b }));
         browser_edit::drop_target(app, ui, &ev, browser_edit::DropOn::Component(cid));
+        if let Some(r) = ev.response {
+          reveal_row(app, Sel::Body { body: b }, &r);
+          if r.hovered() {
+            marking::peek(app, vec![b], name.clone());
+          }
+          r.context_menu(|ui| body_menu(app, ui, brow, b, &name, shown));
+        }
       }
     }
   }
@@ -1483,60 +1580,6 @@ fn save_component_copy(app: &mut App, name: &str, bodies: &[BodyId]) {
   }
 }
 
-/// Joints: double-click to drive one.
-fn joints_section(app: &mut App, ui: &mut egui::Ui) {
-  let joints: Vec<(FeatureId, String)> = app
-    .s
-    .design
-    .features
-    .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::Joint { .. }))
-    .map(|f| (f.id, f.name.clone()))
-    .collect();
-  if joints.is_empty() {
-    return;
-  }
-  let id = egui::Id::new("tree-joints");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Joints", false, theme::TEXT);
-  if !is_open(ui, id, true) {
-    return;
-  }
-  for (fid, name) in joints {
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, Icon::JointOrigin, &name, false, theme::TEXT);
-    let drive = |app: &mut App, kind: Kind| {
-      app.start(kind);
-      if let Some(d) = app.dialog.as_mut() {
-        d.set_target(&app.s, fid.0);
-      }
-    };
-    if ev.double_clicked {
-      drive(app, Kind::DriveJoint);
-    }
-    if let Some(r) = ev.response {
-      reveal_row(app, Sel::Feature { feature: fid }, &r);
-      r.on_hover_text("Double-click to drive").context_menu(|ui| {
-        if ui.button("Drive Joint").clicked() {
-          ui.close();
-          drive(app, Kind::DriveJoint);
-        }
-        if ui.button("Motion Study").clicked() {
-          ui.close();
-          drive(app, Kind::MotionStudy);
-        }
-        if ui.button("Rename").clicked() {
-          ui.close();
-          app.rename = Some((RenameTarget::Feature(fid.0), name.clone()));
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-          ui.close();
-          app.run("feature.delete", json!({"feature": fid.0}));
-        }
-      });
-    }
-  }
-}
-
 /// Drawings of the design: double-click to open one in the Drawing workspace.
 fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
   let drawings: Vec<(u32, String)> = app.s.design.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
@@ -1570,16 +1613,9 @@ fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
-  // bodies a dialog's preview added appear on OK
-  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
-  let bodies: Vec<(BodyId, String, bool)> = app
-    .s
-    .model
-    .bodies
-    .iter()
-    .filter(|b| !previewed.contains(&b.id))
-    .map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id)))
-    .collect();
+  // bodies a dialog's preview added appear on OK; a component's bodies are inside its occurrence
+  let bodies: Vec<(BodyId, String, bool)> =
+    root_bodies(app).into_iter().map(|b| (b, app.s.body_name(b), app.s.body_visible(b))).collect();
   if bodies.is_empty() {
     return;
   }
@@ -2612,6 +2648,10 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           }
           let (rect, r) = ui.allocate_exact_size(vec2(26.0, 28.0), egui::Sense::click_and_drag());
           rects.push(rect);
+          if app.joints.reveal_timeline == Some(id) {
+            app.joints.reveal_timeline = None;
+            r.scroll_to_me(Some(egui::Align::Center));
+          }
           let p = ui.painter();
           if st.error.is_some() {
             p.rect(
@@ -3098,6 +3138,8 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
 }
 
 mod browser_assembly;
+mod joints;
+pub(crate) use joints::{JointUi, animate, canvas_popup, limits_window};
 mod browser_config;
 mod browser_edit;
 
@@ -3157,6 +3199,39 @@ mod row_menu_tests {
     assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
     run_sketch_cmd(&mut app, sk, "Sketch1", RowCmd::EditSketch);
     assert_eq!(app.s.edit_sketch, Some(sk));
+  }
+
+  #[test]
+  fn occurrences_are_labelled_as_fusion_does() {
+    assert_eq!(occurrence_label("Bracket"), "Bracket:1");
+    // a copy already numbered keeps its number
+    assert_eq!(occurrence_label("Bracket:2"), "Bracket:2");
+    // a colon that isn't an instance number
+    assert_eq!(occurrence_label("Part: base"), "Part: base:1");
+    assert_eq!(occurrence_label("A:"), "A::1");
+  }
+
+  #[test]
+  fn a_components_bodies_are_listed_only_inside_it() {
+    let mut app = App::with_session(Session::default());
+    for x in [0, 50, 100] {
+      app.run("box", json!({"width": 10, "depth": 10, "height": 10, "at": [x, 0]}));
+    }
+    let ids: Vec<BodyId> = app.s.model.bodies.iter().map(|b| b.id).collect();
+    assert_eq!(root_bodies(&app), ids);
+    app.run("component.create", json!({"name": "A", "bodies": [ids[0].0]}));
+    app.run("component.create", json!({"name": "B", "bodies": [ids[1].0]}));
+    // only the body in no component stays in the root Bodies folder
+    assert_eq!(root_bodies(&app), vec![ids[2]]);
+    // and every body is listed exactly once: in the root or in its occurrence
+    let mut listed = root_bodies(&app);
+    for c in &app.s.design.components {
+      listed.extend(c.bodies.iter().copied());
+    }
+    listed.sort();
+    let mut all = ids.clone();
+    all.sort();
+    assert_eq!(listed, all);
   }
 
   #[test]

@@ -1122,6 +1122,19 @@ impl Dialog {
       kind @ (FeatureKind::Emboss { .. } | FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. }) => {
         solid::edit_form(kind)?
       }
+      // Edit Joint: the motion type, angle, offset and flip of the joint as it is; its two
+      // origins stay as picked
+      FeatureKind::Joint { moving, fixed, kind, angle, offset, flip, lead, .. } => {
+        let mut d = Dialog::blank(Kind::Joint);
+        d.choice = joint_choice(*kind);
+        d.angle = angle.clone();
+        d.distance = offset.clone();
+        d.flip = *flip;
+        d.e = lead.clone();
+        let comp = |c: fox_engine::model::ComponentId| app.s.design.component(c).map(|c| c.name.clone());
+        d.saved = [comp(*moving).unwrap_or_else(|| "?".into()), fixed.and_then(comp).unwrap_or_else(|| "World".into())];
+        d
+      }
       _ => return None,
     };
     d.editing = Some(id);
@@ -1507,6 +1520,13 @@ impl Dialog {
       }
       Kind::Move => self.move_edit_set(),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
+      Kind::Joint => {
+        let mut set = json!({"kind": self.choice, "angle": self.angle, "offset": self.distance, "flip": self.flip});
+        if self.choice == "screw" {
+          set["lead"] = json!(self.e);
+        }
+        set
+      }
       _ => return None,
     })
   }
@@ -2881,7 +2901,7 @@ impl Dialog {
           ui.label(&self.saved[0]);
         }
         ui.end_row();
-        if !saved.is_empty() {
+        if !saved.is_empty() && self.editing.is_none() {
           Self::saved_origin(ui, "jo-a", &mut self.saved[0], &saved, dirty);
         }
         ui.label("Component 2");
@@ -2891,7 +2911,7 @@ impl Dialog {
           ui.label(&self.saved[1]);
         }
         ui.end_row();
-        if !saved.is_empty() {
+        if !saved.is_empty() && self.editing.is_none() {
           Self::saved_origin(ui, "jo-b", &mut self.saved[1], &saved, dirty);
         }
         if self.saved[0].is_empty() && !self.origins.is_empty() && self.comps.first().is_some_and(Option::is_none) {
@@ -4307,6 +4327,21 @@ fn sel_sections(s: &Session) -> Vec<(u32, [f64; 2])> {
 
 /// Joints in the timeline: id and name.
 /// Names of the saved joint origins.
+/// The Joint dialog's motion choice for a joint type.
+fn joint_choice(kind: fox_engine::model::JointKind) -> &'static str {
+  use fox_engine::model::JointKind as J;
+  match kind {
+    J::Rigid => "rigid",
+    J::Revolute => "revolute",
+    J::Slider => "slider",
+    J::Cylindrical => "cylindrical",
+    J::PinSlot => "pin_slot",
+    J::Planar => "planar",
+    J::Ball => "ball",
+    J::Screw => "screw",
+  }
+}
+
 fn saved_origins(s: &Session) -> Vec<String> {
   s.design
     .features
@@ -5460,5 +5495,38 @@ mod tests {
     assert!((d.manipulator(&s).unwrap().origin.x - 5.0).abs() < 1e-9);
     let ok = d.command().unwrap();
     assert_eq!(ok.1["plane"], json!({"feature": pl.0}));
+  }
+
+  #[test]
+  fn edit_joint_reopens_the_joint_dialog_and_changes_the_joint_in_place() {
+    let mut app = App::with_session(Session::default());
+    for (name, at) in [("Base", [0, 0]), ("Arm", [0, 100])] {
+      app.run("box", json!({"width": 20, "depth": 20, "height": 5, "at": at}));
+      let b = app.s.model.bodies.last().unwrap().id.0;
+      app.run("component.create", json!({"name": name, "bodies": [b]}));
+    }
+    let (base, arm) = (app.s.design.components[0].id.0, app.s.design.components[1].id.0);
+    let r = app
+      .run(
+        "joint",
+        json!({"moving": arm, "moving_origin": {"at": [0, 100, 0]}, "fixed": base, "fixed_origin": {"at": [0, 0, 5]}, "kind": "revolute", "angle": "10 deg"}),
+      )
+      .unwrap();
+    let j = FeatureId(r["feature"].as_u64().unwrap() as u32);
+    panels::edit_feature(&mut app, j);
+    let mut d = app.dialog.take().expect("Edit Joint opens the joint dialog");
+    assert_eq!((d.kind, d.editing), (Kind::Joint, Some(j)));
+    assert_eq!((d.choice, d.angle.as_str(), d.saved.clone()), ("revolute", "10 deg", ["Arm".into(), "Base".into()]));
+    d.choice = "slider";
+    d.angle = "30 deg".into();
+    d.preview(&mut app.s);
+    let joints: Vec<_> = app.s.design.features.iter().filter(|f| matches!(f.kind, FeatureKind::Joint { .. })).collect();
+    assert_eq!(joints.len(), 1, "the joint is changed, not another added");
+    assert!(
+      matches!(&joints[0].kind, FeatureKind::Joint { kind: fox_engine::model::JointKind::Slider, angle, .. } if angle == "30 deg"),
+      "{:?}",
+      joints[0]
+    );
+    assert_eq!(joints[0].name, "Revolute 1", "an edited joint keeps its name, as in Fusion");
   }
 }

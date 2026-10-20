@@ -951,7 +951,6 @@ dependencies = [
  "fox-ui",
  "log",
  "raw-window-handle",
- "rfd",
  "winresource",
 ]
 

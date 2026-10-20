@@ -13,6 +13,8 @@ use fox_engine::{Sel, Session};
 
 use crate::{App, theme};
 
+mod glyphs;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Priority {
   Face,
@@ -627,7 +629,9 @@ const JOINT_R: f32 = 7.0;
 
 /// Draws the joints and saved joint origins and lets a click pick one: into the open Joint
 /// dialog (a saved origin for the next side to fill), Drive Joints / Motion Study (the joint),
-/// or the selection. Returns true when the pointer is on a glyph.
+/// or the selection. A right-click on a joint opens its menu. Joints draw as Fusion's glyphs
+/// (see [`glyphs`]), lit up blue while hovered here or in the browser. Returns true when the
+/// pointer is on a glyph.
 pub(crate) fn joint_glyphs(
   app: &mut App,
   resp: &egui::Response,
@@ -643,21 +647,43 @@ pub(crate) fn joint_glyphs(
   }
   let hover = resp.hover_pos();
   let mut hot: Option<(f32, fox_engine::scene::JointMark)> = None;
-  let mut drawn: Vec<(Pos2, fox_engine::scene::JointMark)> = Vec::new();
+  let mut drawn: Vec<(Pos2, fox_engine::scene::JointMark, Option<glyphs::Glyph>)> = Vec::new();
   for m in &marks {
     let o = m.frame.w_axis.truncate();
     let Some(c) = project(o) else { continue };
+    let glyph = m.kind.map(|k| glyphs::joint_glyph(k, &m.frame, joint_axis_len(project, o), project));
     if let Some(h) = hover {
-      let d = (h - c).length();
+      // on the origin, or on a joint's stem, ring or arrows
+      let d = (h - c).length().min(glyph.as_ref().map(|g| g.distance(h) + 2.0).unwrap_or(f32::INFINITY));
       if d <= JOINT_R + 3.0 && hot.is_none_or(|(best, _)| d < best) {
         hot = Some((d, *m));
       }
     }
-    drawn.push((c, *m));
+    drawn.push((c, *m, glyph));
   }
   let selected = |m: &fox_engine::scene::JointMark| app.s.selection.contains(&Sel::Feature { feature: m.feature });
-  for (c, m) in &drawn {
-    let is_hot = hot.is_some_and(|(_, h)| h.feature == m.feature);
+  // a glyph lit up draws last, over the others
+  let lit = |m: &fox_engine::scene::JointMark| {
+    hot.is_some_and(|(_, h)| h.feature == m.feature) || app.joints.hover == Some(m.feature)
+  };
+  drawn.sort_by_key(|(_, m, _)| lit(m));
+  for (c, m, glyph) in &drawn {
+    let is_hot = lit(m);
+    if let Some(g) = glyph {
+      let (ink, halo) = glyphs::glyph_stroke(is_hot, selected(m));
+      if let Some(h) = halo {
+        g.paint(painter, h);
+      }
+      g.paint(painter, ink);
+      painter.circle_filled(*c, 3.0, ink.color);
+      if m.locked {
+        // a small padlock beside the origin
+        let at = *c + egui::vec2(9.0, 7.0);
+        painter.rect_filled(egui::Rect::from_center_size(at, egui::vec2(7.0, 5.0)), 1.0, ink.color);
+        painter.circle_stroke(at - egui::vec2(0.0, 3.5), 2.2, egui::Stroke::new(1.2, ink.color));
+      }
+      continue;
+    }
     let ring = if is_hot {
       egui::Color32::from_rgb(255, 140, 20)
     } else if selected(m) {
@@ -665,7 +691,7 @@ pub(crate) fn joint_glyphs(
     } else {
       egui::Color32::from_gray(60)
     };
-    // the frame's axes, as short stubs (X red, Y green, Z blue)
+    // a saved joint origin: the frame's axes, as short stubs (X red, Y green, Z blue)
     let o = m.frame.w_axis.truncate();
     let len = joint_axis_len(project, o);
     for (axis, col) in [
@@ -679,12 +705,7 @@ pub(crate) fn joint_glyphs(
     }
     painter.circle_filled(*c, JOINT_R, egui::Color32::WHITE);
     painter.circle_stroke(*c, JOINT_R, egui::Stroke::new(if is_hot { 2.5 } else { 1.5 }, ring));
-    if m.joint {
-      // a joint: two half discs, as Fusion's joint glyph
-      painter.circle_filled(*c, JOINT_R * 0.45, ring);
-    } else {
-      painter.circle_stroke(*c, JOINT_R * 0.45, egui::Stroke::new(1.0, ring));
-    }
+    painter.circle_stroke(*c, JOINT_R * 0.45, egui::Stroke::new(1.0, ring));
   }
   let Some((_, m)) = hot else { return false };
   let name = app.s.design.feature(m.feature).map(|f| f.name.clone()).unwrap_or_default();
@@ -697,7 +718,11 @@ pub(crate) fn joint_glyphs(
       egui::Color32::from_gray(30),
     );
   }
-  if resp.clicked() {
+  if resp.secondary_clicked() && m.joint && app.dialog.is_none() {
+    // the joint's own menu, as a right-click on its browser row opens
+    app.s.selection = vec![Sel::Feature { feature: m.feature }];
+    app.joints.popup = resp.interact_pointer_pos().map(|p| (m.feature, p));
+  } else if resp.clicked() {
     let picked = match app.dialog.as_mut() {
       Some(d) => d.pick_joint_mark(&mut app.s, &m, &name),
       None => false,

@@ -2097,7 +2097,8 @@ impl Design {
   /// number for that type ("Revolute 1", "Revolute 2", "Rigid 1"), as in Fusion.
   pub fn joint_type_name(&self, kind: assembly::JointKind) -> String {
     let base = kind.label();
-    let n = self.features.iter().filter(|f| matches!(&f.kind, FeatureKind::Joint { kind: k, .. } if *k == kind)).count();
+    let n =
+      self.features.iter().filter(|f| matches!(&f.kind, FeatureKind::Joint { kind: k, .. } if *k == kind)).count();
     let mut k = n + 1;
     loop {
       let name = format!("{base} {k}");

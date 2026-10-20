@@ -292,9 +292,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  if app.objects.joints {
-    consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
-  }
+  // a right-click on a joint glyph opens the joint's menu rather than the marking menu
+  let on_joint = app.objects.joints && crate::select::joint_glyphs(app, &resp, &painter, &project);
+  consumed |= on_joint;
   dim_editor(app, &ctx);
   track_arc_wind(app, &resp, &view);
   offset_follow(app, &resp, &view);
@@ -318,6 +318,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   // right-click without dragging opens the marking menu; while it's open it owns the clicks
   if resp.secondary_clicked()
+    && !(on_joint && app.joints.popup.is_some())
     && let Some(p) = resp.interact_pointer_pos()
   {
     // a right-click on a canvas (with nothing nearer under the pointer) is for the canvas

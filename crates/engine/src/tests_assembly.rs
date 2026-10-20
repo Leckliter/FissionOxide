@@ -578,7 +578,11 @@ fn three_joints(s: &mut Session) -> Vec<String> {
 /// A part jointed to the world at `x` by a joint of `kind`; returns the joint's command result.
 fn world_joint(s: &mut Session, name: &str, x: f64, kind: &str) -> Value {
   let (c, _) = part(s, name, [10.0, 10.0, 5.0], [x, 300.0]);
-  run(s, "joint", json!({"moving": c, "moving_origin": {"at": [x, 300, 0]}, "fixed_origin": {"at": [0, 0, 0]}, "kind": kind}))
+  run(
+    s,
+    "joint",
+    json!({"moving": c, "moving_origin": {"at": [x, 300, 0]}, "fixed_origin": {"at": [0, 0, 0]}, "kind": kind}),
+  )
 }
 
 #[test]
@@ -635,10 +639,10 @@ fn joints_lock_take_motion_limits_and_hide() {
   assert!(mark(&s, &j).unwrap().locked);
   // the lock is saved with the design, and only while on
   let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
-  assert!(matches!(back.feature(s.design.features.last().unwrap().id).unwrap().kind, fox_model::FeatureKind::Joint {
-    locked: true,
-    ..
-  }));
+  assert!(matches!(
+    back.feature(s.design.features.last().unwrap().id).unwrap().kind,
+    fox_model::FeatureKind::Joint { locked: true, .. }
+  ));
   assert_eq!(run(&mut s, "joint.lock", json!({"joint": j, "locked": false}))["locked"], false);
   assert!(!s.design.to_json().contains("\"locked\""));
   run(&mut s, "joint.drive", json!({"joint": j, "rotation": "30 deg"}));
@@ -646,7 +650,7 @@ fn joints_lock_take_motion_limits_and_hide() {
   run(&mut s, "joint.limits", json!({"joint": j, "rotation": ["-10 deg", "45 deg"], "slide": [0, 5]}));
   let limits = |s: &Session| match &s.design.feature(fox_model::FeatureId(j.as_u64().unwrap() as u32)).unwrap().kind {
     fox_model::FeatureKind::Joint { limits, .. } => limits.clone(),
-    _ => unreachable!(),
+    other => panic!("not a joint: {other:?}"),
   };
   assert_eq!(limits(&s).rotation, Some(("-10 deg".into(), "45 deg".into())));
   run(&mut s, "joint.limits", json!({"joint": j, "slide": null}));

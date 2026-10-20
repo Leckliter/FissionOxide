@@ -48,10 +48,10 @@ pub static MOTION_LINK: Form = Form {
   cmd: "motion_link",
   fixed: &[],
   inputs: &[
-    Input::Text { key: "leader", label: "Joint 1 (drives)", default: "Joint1" },
+    Input::Text { key: "leader", label: "Joint 1 (drives)", default: "Revolute 1" },
     Input::Choice { key: "leader_motion", label: "Motion 1", options: MOTIONS },
     Input::Expr { key: "leader_value", label: "Value 1 (empty = 360° / 10 mm)", default: "" },
-    Input::Text { key: "follower", label: "Joint 2 (driven)", default: "Joint2" },
+    Input::Text { key: "follower", label: "Joint 2 (driven)", default: "Revolute 2" },
     Input::Choice { key: "follower_motion", label: "Motion 2", options: MOTIONS },
     Input::Expr { key: "follower_value", label: "Value 2 (empty = 360° / 10 mm)", default: "" },
     Input::Check { key: "reverse", label: "Reverse" },
@@ -82,7 +82,7 @@ pub static CAM_FOLLOWER: Form = Form {
   fixed: &[],
   inputs: &[
     Input::Bodies { key: "bodies", label: "Cam", required: true },
-    Input::Text { key: "follower", label: "Follower joint (slides)", default: "Joint2" },
+    Input::Text { key: "follower", label: "Follower joint (slides)", default: "Slider 1" },
     Input::Check { key: "flat", label: "Flat-faced follower" },
     Input::Expr { key: "clearance", label: "Clearance (roller radius)", default: "0 mm" },
     Input::Text { key: "name", label: "Name", default: "" },
@@ -132,10 +132,11 @@ mod tests {
       s.execute("joint", &j).unwrap();
     }
     // default motions and values: slide to slide, 10 mm to 10 mm (C moves from x = 95 to 100)
-    run_form(&mut s, &MOTION_LINK, &[("leader", json!("Joint1")), ("follower", json!("Joint2"))]);
+    // joints are named by type, as in Fusion
+    run_form(&mut s, &MOTION_LINK, &[("leader", json!("Slider 1")), ("follower", json!("Slider 2"))]);
     s.execute(
       "joint.drive",
-      &json!({"joint": s.design.features.iter().find(|f| f.name == "Joint1").unwrap().id.0, "slide": 5}),
+      &json!({"joint": s.design.features.iter().find(|f| f.name == "Slider 1").unwrap().id.0, "slide": 5}),
     )
     .unwrap();
     let x = s.model.bodies.iter().find(|b| b.id.0 == bodies[2]).unwrap().shape.mass().unwrap().bbox_min.x;

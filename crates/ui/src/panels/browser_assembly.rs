@@ -10,12 +10,30 @@ use crate::icons::Icon;
 use crate::{App, RenameTarget, theme};
 
 pub(super) fn sections(app: &mut App, ui: &mut egui::Ui) {
-  feature_folder(app, ui, "Joint Origins", Icon::JointOrigin, |k| matches!(k, FeatureKind::JointOrigin { .. }));
-  feature_folder(app, ui, "Rigid Groups", Icon::Component, |k| matches!(k, FeatureKind::RigidGroup { .. }));
-  feature_folder(app, ui, "Motion Links", Icon::DriveJoint, |k| matches!(k, FeatureKind::MotionLink { .. }));
-  contact_sets(app, ui);
+  feature_folder(app, ui, 1, "Joint Origins", Icon::JointOrigin, |k| matches!(k, FeatureKind::JointOrigin { .. }));
   linked_components(app, ui);
-  feature_folder(app, ui, "Cams", Icon::DriveJoint, |k| matches!(k, FeatureKind::CamFollower { .. }));
+  feature_folder(app, ui, 1, "Cams", Icon::DriveJoint, |k| matches!(k, FeatureKind::CamFollower { .. }));
+}
+
+fn is_rigid_group(k: &FeatureKind) -> bool {
+  matches!(k, FeatureKind::RigidGroup { .. })
+}
+
+fn is_motion_link(k: &FeatureKind) -> bool {
+  matches!(k, FeatureKind::MotionLink { .. })
+}
+
+/// Whether the design has relationships besides joints (rigid groups, motion links, contact sets).
+pub(super) fn has_relationships(app: &App) -> bool {
+  !app.s.design.contact_sets.is_empty()
+    || app.s.design.features.iter().any(|f| is_rigid_group(&f.kind) || is_motion_link(&f.kind))
+}
+
+/// The folders under Relationships besides Joints, at `depth`.
+pub(super) fn relationship_folders(app: &mut App, ui: &mut egui::Ui, depth: usize) {
+  feature_folder(app, ui, depth, "Rigid Groups", Icon::Component, is_rigid_group);
+  feature_folder(app, ui, depth, "Motion Links", Icon::DriveJoint, is_motion_link);
+  contact_sets(app, ui, depth);
 }
 
 /// What a feature row shows after its name.
@@ -48,7 +66,14 @@ fn bodies(app: &App, kind: &FeatureKind) -> Vec<Sel> {
 
 /// A folder of features of one kind: click to select their components, right-click to rename
 /// or delete.
-fn feature_folder(app: &mut App, ui: &mut egui::Ui, title: &str, icon: Icon, of: fn(&FeatureKind) -> bool) {
+fn feature_folder(
+  app: &mut App,
+  ui: &mut egui::Ui,
+  depth: usize,
+  title: &str,
+  icon: Icon,
+  of: fn(&FeatureKind) -> bool,
+) {
   let rows: Vec<(FeatureId, String, String, Vec<Sel>)> = app
     .s
     .design
@@ -61,7 +86,7 @@ fn feature_folder(app: &mut App, ui: &mut egui::Ui, title: &str, icon: Icon, of:
     return;
   }
   let id = egui::Id::new("tree-asm").with(title);
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, title, false, theme::TEXT);
+  tree_row(ui, id, depth, Some(true), None, Icon::Folder, title, false, theme::TEXT);
   if !is_open(ui, id, true) {
     return;
   }
@@ -69,7 +94,7 @@ fn feature_folder(app: &mut App, ui: &mut egui::Ui, title: &str, icon: Icon, of:
     let failed = app.s.model.status(fid).and_then(|st| st.error.clone());
     let label = if detail.is_empty() { name.clone() } else { format!("{name}  ({detail})") };
     let color = if failed.is_some() { theme::WARNING } else { theme::TEXT };
-    let ev = tree_row(ui, id.with(fid.0), 2, None, None, icon, &label, false, color);
+    let ev = tree_row(ui, id.with(fid.0), depth + 1, None, None, icon, &label, false, color);
     if ev.clicked && !sel.is_empty() {
       app.s.selection = sel;
     }
@@ -94,19 +119,19 @@ fn feature_folder(app: &mut App, ui: &mut egui::Ui, title: &str, icon: Icon, of:
 }
 
 /// Contact sets: the eye turns one on or off.
-fn contact_sets(app: &mut App, ui: &mut egui::Ui) {
+fn contact_sets(app: &mut App, ui: &mut egui::Ui, depth: usize) {
   let sets: Vec<(u32, String, bool, Vec<ComponentId>)> =
     app.s.design.contact_sets.iter().map(|c| (c.id, c.name.clone(), c.enabled, c.components.clone())).collect();
   if sets.is_empty() {
     return;
   }
   let id = egui::Id::new("tree-contact-sets");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Contact Sets", false, theme::TEXT);
+  tree_row(ui, id, depth, Some(true), None, Icon::Folder, "Contact Sets", false, theme::TEXT);
   if !is_open(ui, id, true) {
     return;
   }
   for (cid, name, enabled, comps) in sets {
-    let ev = tree_row(ui, id.with(cid), 2, None, Some(enabled), Icon::Interference, &name, false, theme::TEXT);
+    let ev = tree_row(ui, id.with(cid), depth + 1, None, Some(enabled), Icon::Interference, &name, false, theme::TEXT);
     if ev.eye {
       app.run("contact_set.enable", json!({"contact_set": cid, "enabled": !enabled}));
     }

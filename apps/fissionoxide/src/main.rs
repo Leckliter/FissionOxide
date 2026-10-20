@@ -114,8 +114,8 @@ impl Desktop {
     Desktop { app, splash: Some(Default::default()), instance, handed: None }
   }
 
-  /// Later launches: brings the window to the front, then (on the next frame, so a prompt shows
-  /// over it) opens the file handed over.
+  /// Later launches: brings the window to the front, then (on the next frame) opens the file
+  /// handed over.
   fn handed_over(&mut self, ctx: &eframe::egui::Context) {
     use eframe::egui::ViewportCommand;
     if let Some(p) = self.handed.take() {
@@ -133,20 +133,9 @@ impl Desktop {
     }
   }
 
-  /// Opens a handed-over file in place of the design, asking first if that has unsaved changes.
+  /// Opens a handed-over file in a new document tab, as Fusion does: the open designs, changed
+  /// or not, stay as they are in their tabs.
   fn open_handed(&mut self, p: std::path::PathBuf) {
-    if self.app.s.dirty {
-      let name = p.file_name().unwrap_or(p.as_os_str()).to_string_lossy().to_string();
-      let discard = rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("FissionOxide")
-        .set_description(format!("{} has unsaved changes. Discard them and open {name}?", self.app.s.design.name))
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show();
-      if discard != rfd::MessageDialogResult::Ok {
-        return;
-      }
-    }
     self.app.open_file(p);
   }
 

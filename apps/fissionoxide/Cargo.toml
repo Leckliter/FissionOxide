@@ -12,7 +12,6 @@ eframe.workspace = true
 raw-window-handle = "0.6"
 env_logger.workspace = true
 log.workspace = true
-rfd.workspace = true
 
 [build-dependencies]
 winresource = { version = "0.1", default-features = false }
