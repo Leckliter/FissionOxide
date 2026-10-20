@@ -600,7 +600,7 @@ const SKETCH_CREATE: &[E] = &[
 const SK_CHAMFER: &[E] = &[
   c("Equal Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer)),
   c("Distance-Distance Chamfer", Icon::SkChamfer, D(Kind::SkChamfer2)),
-  x("Distance-Angle Chamfer", Icon::SkChamfer),
+  c("Distance and Angle Chamfer", Icon::SkChamfer, D(Kind::SkChamferAngle)),
 ];
 
 const SKETCH_MODIFY: &[E] = &[

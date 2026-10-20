@@ -66,6 +66,7 @@ pub enum Kind {
   SkFillet,
   SkChamfer,
   SkChamfer2,
+  SkChamferAngle,
   SkOffset,
   SkMirror,
   SkCircPattern,
@@ -138,7 +139,7 @@ impl Kind {
       Kind::Bom => "BILL OF MATERIALS",
       Kind::CenterOfMass => "CENTER OF MASS",
       Kind::SkFillet => "SKETCH FILLET",
-      Kind::SkChamfer | Kind::SkChamfer2 => "SKETCH CHAMFER",
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "SKETCH CHAMFER",
       Kind::SkOffset => "OFFSET",
       Kind::TraceImage => "TRACE IMAGE",
       Kind::SkMirror => "SKETCH MIRROR",
@@ -212,7 +213,7 @@ impl Kind {
       Kind::Analysis(_) => Icon::CurvMap,
       Kind::CenterOfMass => Icon::CenterOfMass,
       Kind::SkFillet => Icon::SkFillet,
-      Kind::SkChamfer | Kind::SkChamfer2 => Icon::SkChamfer,
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => Icon::SkChamfer,
       Kind::SkOffset => Icon::SkOffset,
       Kind::TraceImage => Icon::TraceImage,
       Kind::SkMirror => Icon::SkMirror,
@@ -265,6 +266,9 @@ impl Kind {
       Kind::SkFillet => ("Fillet", "Round the corner where two lines meet"),
       Kind::SkChamfer => ("Equal Distance Chamfer", "Bevel the corner where two lines meet"),
       Kind::SkChamfer2 => ("Distance-Distance Chamfer", "Bevel a corner by two distances"),
+      Kind::SkChamferAngle => {
+        ("Distance and Angle Chamfer", "Bevel a corner by a distance along the first line and an angle from it")
+      }
       Kind::SkOffset => ("Offset", "Offset a chain of curves (O)"),
       Kind::TraceImage => ("Trace Image", "Trace a photo, logo or scan into closed sketch curves"),
       Kind::SkMirror => ("Mirror", "Mirror sketch curves across a line"),
@@ -347,6 +351,7 @@ impl Kind {
       Kind::SkFillet
         | Kind::SkChamfer
         | Kind::SkChamfer2
+        | Kind::SkChamferAngle
         | Kind::SkOffset
         | Kind::SkMirror
         | Kind::SkCircPattern
@@ -804,9 +809,10 @@ impl Dialog {
       }
       Kind::Material => d.name = "Steel".into(),
       Kind::SkFillet => d.radius = "2 mm".into(),
-      Kind::SkChamfer | Kind::SkChamfer2 => {
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         d.distance = "2 mm".into();
         d.distance2 = "3 mm".into();
+        d.angle = "45 deg".into();
       }
       Kind::SkOffset => {
         d.distance = "2 mm".into();
@@ -836,6 +842,7 @@ impl Dialog {
       Kind::SkFillet
         | Kind::SkChamfer
         | Kind::SkChamfer2
+        | Kind::SkChamferAngle
         | Kind::SkOffset
         | Kind::SkMirror
         | Kind::SkCircPattern
@@ -1179,6 +1186,9 @@ impl Dialog {
       Kind::SkChamfer2 => {
         ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "distance2": self.distance2}))
       }
+      Kind::SkChamferAngle => {
+        ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "angle": self.angle}))
+      }
       Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
@@ -1463,7 +1473,7 @@ impl Dialog {
         self.origins.len() >= need && (!self.saved[0].is_empty() || self.comps.first().is_some_and(Option::is_some))
       }
       Kind::Material => self.comps.iter().any(Option::is_some),
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => self.curves.len() == 2,
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
       Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
@@ -1717,6 +1727,7 @@ impl Dialog {
       Kind::SkFillet
       | Kind::SkChamfer
       | Kind::SkChamfer2
+      | Kind::SkChamferAngle
       | Kind::SkOffset
       | Kind::SkMirror
       | Kind::SkCircPattern
@@ -1919,7 +1930,8 @@ impl Dialog {
       Kind::ConvertSheet | Kind::NewComponent | Kind::Project => "select a body",
       Kind::Joint => "select a face or edge on the moving component, then one on the fixed one",
       Kind::Material => "select a body of a component",
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => "select two lines that meet",
+      Kind::SkFillet => "select two lines that meet",
+      Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
       Kind::SkMirror => "select curves and a mirror line",
       Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
       Kind::TraceImage => "pick an image to trace",
@@ -2767,7 +2779,7 @@ impl Dialog {
           ui.end_row();
         }
       }
-      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 => {
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => {
         ui.label("Lines");
         chip(ui, self.curves.len(), "selected");
         ui.end_row();
@@ -2776,12 +2788,15 @@ impl Dialog {
         } else {
           Self::field(
             ui,
-            if self.kind == Kind::SkChamfer { "Distance" } else { "Distance 1" },
+            if self.kind == Kind::SkChamfer2 { "Distance 1" } else { "Distance" },
             &mut self.distance,
             dirty,
           );
           if self.kind == Kind::SkChamfer2 {
             Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+          }
+          if self.kind == Kind::SkChamferAngle {
+            Self::field(ui, "Angle", &mut self.angle, dirty);
           }
         }
       }

@@ -212,3 +212,7 @@
 254-text-rotated
 255-text-two-glyphs-hole
 256-text-along-path
+265-rect-corner-distance-angle
+266-rect-corner-first-line-swapped
+267-trapezoid-obtuse-corner
+268-apparent-intersection

@@ -101,7 +101,7 @@ cmds! {
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines meet", "{curves: [line, line], radius}";
-  "sketch.chamfer" => "Bevel the corner where two lines meet", "{curves: [line, line], distance, distance2?}";
+  "sketch.chamfer" => "Bevel the corner of two lines (meeting at an end, crossing, or apparently crossing): equal distance, two distances, or distance along the first line and angle from it", "{curves: [line, line], distance, distance2? | angle?}";
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
@@ -1966,6 +1966,7 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   enum Op {
     Fillet(f64),
     Chamfer(f64, f64),
+    ChamferAngle(f64, f64),
     Offset(f64),
     Trim(Option<CurveId>, [f64; 2]),
     Extend(Option<CurveId>, [f64; 2]),
@@ -1979,7 +1980,13 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "sketch.chamfer" => {
       let d = num("distance", fox_expr::Kind::Length)?;
       let d2 = opt_expr(p, "distance2").map(|e| fox_expr::eval(&e, fox_expr::Kind::Length, &scope)).transpose()?;
-      Op::Chamfer(d, d2.unwrap_or(d))
+      // Fusion's Distance and Angle chamfer: the distance and the angle are both from the first line
+      let angle = opt_expr(p, "angle").map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &scope)).transpose()?;
+      match (d2, angle) {
+        (Some(_), Some(_)) => return Err(CmdError::new("a sketch chamfer takes distance2 or angle, not both")),
+        (None, Some(a)) => Op::ChamferAngle(d, a),
+        (d2, None) => Op::Chamfer(d, d2.unwrap_or(d)),
+      }
     }
     "sketch.offset" => Op::Offset(num("distance", fox_expr::Kind::Length)?),
     "sketch.trim" => Op::Trim(curve, req_pt(p, "at")?),
@@ -2012,6 +2019,10 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Op::Chamfer(d1, d2) => {
         let [a, b] = curves.as_slice() else { return Err(CmdError::new("a chamfer needs two lines")) };
         vec![sketch.chamfer(*a, *b, d1, d2)?]
+      }
+      Op::ChamferAngle(d, angle) => {
+        let [a, b] = curves.as_slice() else { return Err(CmdError::new("a chamfer needs two lines")) };
+        vec![sketch.chamfer_angle(*a, *b, d, angle)?]
       }
       Op::Offset(dist) => sketch.offset(&curves, dist)?,
       Op::Trim(c, at) => {

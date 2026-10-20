@@ -1,6 +1,6 @@
 # 265-rect-corner-distance-angle: added by the parity loop from a Fusion probe
 # rect-corner-distance-angle: 40x30 rectangle; Distance and Angle sketch chamfer at the (40,0) vertex, 10 along the bottom line (first) at 30 deg from it; extruded 10.
-# Fox's sketch.chamfer has no angle option; the angle is passed as Fusion's tool takes it.
+# Distance and Angle chamfer: the distance and the angle are both from the first line, as Fusion's tool takes them.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
 {"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
