@@ -120,6 +120,13 @@ fn stats(s: &Session) -> Value {
   })
 }
 
+/// Whether `design`, saved as `name`, would be an empty "Untitled" design: nothing in it but
+/// what a new design starts with.
+fn is_blank(design: &Design, name: &str) -> bool {
+  let unnamed = name.is_empty() || name == Design::default().name;
+  unnamed && design.to_json() == Design::new(design.name.clone()).to_json()
+}
+
 fn meta(s: &Session, p: &Value) -> VersionMeta {
   VersionMeta {
     description: opt(p, "description").unwrap_or_default().to_string(),
@@ -236,6 +243,14 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "hub.save" => {
       let as_new = p.get("new").and_then(Value::as_bool).unwrap_or(false);
+      let name = opt(p, "name").map(str::trim).unwrap_or(&s.design.name);
+      let new_item = as_new || opt(p, "item").is_none() && s.hub.is_none();
+      // a blank "Untitled" design only goes to the hub when someone asked for exactly that
+      if new_item && is_blank(&s.design, name) && p.get("explicit").and_then(Value::as_bool) != Some(true) {
+        return Err(CmdError::new(
+          "nothing to save: the design is empty and unnamed (name it, or pass \"explicit\": true)",
+        ));
+      }
       // the design takes the item's name, as in Fusion
       if let Some(n) = opt(p, "name") {
         s.design.name = n.trim().to_string();
