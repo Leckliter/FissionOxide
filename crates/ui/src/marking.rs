@@ -350,7 +350,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   };
   app.marking = None;
   match picked {
-    Some(Action::Cmd(c)) | Some(Action::Repeat(c)) => c.run(app),
+    Some(Action::Cmd(c)) => c.run(app),
+    // repeating a modelling command from inside a sketch finishes the sketch first
+    Some(Action::Repeat(c)) => app.launch(c),
     Some(Action::EditFeature(f)) => panels::edit_feature(app, f),
     None => {}
   }

@@ -25,6 +25,7 @@ mod preview;
 mod select;
 mod sheet;
 mod theme;
+mod toolbox;
 mod trace;
 mod updates;
 mod viewport;
@@ -76,6 +77,10 @@ pub struct App {
   playing: Option<f64>,
   /// Last repeatable command, for the marking menu's Repeat.
   last_cmd: Option<panels::Cmd>,
+  /// Recently started commands, newest first (the S toolbox's recent row).
+  recent: Vec<panels::Cmd>,
+  /// The open S toolbox.
+  toolbox: Option<toolbox::Toolbox>,
   /// The open right-click marking menu.
   marking: Option<marking::MarkingMenu>,
   /// The canvas (viewport) rectangle, for panels floating over it.
@@ -251,6 +256,8 @@ impl App {
       tab: panels::Tab::Solid,
       playing: None,
       last_cmd: None,
+      recent: Vec::new(),
+      toolbox: None,
       marking: None,
       canvas: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0)),
       dim_edit: None,
@@ -625,6 +632,16 @@ impl App {
       }
       self.dim_edit = None;
     }
+    // the S toolbox, at the pointer over the canvas (in a sketch and on a drawing sheet too)
+    if let Some(p) = ctx.pointer_hover_pos().filter(|p| self.canvas.contains(*p))
+      && pressed(Key::S, Modifiers::NONE)
+    {
+      // the S itself mustn't land in the search field
+      ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(t) if t.eq_ignore_ascii_case("s"))));
+      self.marking = None;
+      self.toolbox = Some(toolbox::Toolbox::at(p));
+      return;
+    }
     if self.drawing.is_some() {
       // the model's shortcuts don't apply on a drawing sheet
       return;
@@ -642,7 +659,26 @@ impl App {
       self.cam.set_view(fox_engine::render::StandardView::Home);
       self.fit_view();
     }
+    if pressed(Key::V, Modifiers::NONE) {
+      self.toggle_visibility();
+    }
+    use panels::Cmd;
     let sketching = self.s.edit_sketch.is_some();
+    // modelling commands; in a sketch they finish it first (E extrudes its profiles), except A,
+    // which is the sketch's Arc
+    for (k, d) in [
+      (Key::E, dialogs::Kind::Extrude),
+      (Key::F, dialogs::Kind::Fillet),
+      (Key::M, dialogs::Kind::Move),
+      (Key::I, dialogs::Kind::Inspect),
+      (Key::H, dialogs::Kind::Hole),
+      (Key::Q, dialogs::Kind::PressPull),
+      (Key::J, dialogs::Kind::Joint),
+    ] {
+      if pressed(k, Modifiers::NONE) {
+        self.launch(Cmd::Dialog(d));
+      }
+    }
     if sketching {
       for (k, t) in [
         (Key::L, Tool::Line),
@@ -654,35 +690,18 @@ impl App {
         (Key::T, Tool::Trim),
       ] {
         if pressed(k, Modifiers::NONE) {
-          self.set_tool(t);
+          self.launch(Cmd::SketchTool(t));
         }
       }
       if pressed(Key::X, Modifiers::NONE) {
         self.toggle_construction();
       }
       if pressed(Key::O, Modifiers::NONE) {
-        self.start(dialogs::Kind::SkOffset);
+        self.launch(Cmd::Dialog(dialogs::Kind::SkOffset));
       }
     } else {
-      if pressed(Key::E, Modifiers::NONE) {
-        self.start(dialogs::Kind::Extrude);
-      }
-      if pressed(Key::F, Modifiers::NONE) {
-        self.start(dialogs::Kind::Fillet);
-      }
-      if pressed(Key::M, Modifiers::NONE) {
-        self.start(dialogs::Kind::Move);
-      }
-      for (k, d) in [
-        (Key::I, dialogs::Kind::Inspect),
-        (Key::H, dialogs::Kind::Hole),
-        (Key::Q, dialogs::Kind::PressPull),
-        (Key::J, dialogs::Kind::Joint),
-        (Key::A, dialogs::Kind::Form(&forms::APPEARANCE)),
-      ] {
-        if pressed(k, Modifiers::NONE) {
-          self.start(d);
-        }
+      if pressed(Key::A, Modifiers::NONE) {
+        self.launch(Cmd::Dialog(dialogs::Kind::Form(&forms::APPEARANCE)));
       }
       // window, freeform and paint selection
       for (k, m) in
@@ -739,7 +758,53 @@ impl App {
     viewport::reset_tool_state(self);
   }
 
+  /// Remembers a command the user started, for the marking menu's Repeat and the S toolbox's
+  /// recent row. Every way of starting one (shortcut, toolbox, toolbar, menus) comes through
+  /// here, via [`panels::Cmd::run`] or [`App::start`].
+  pub(crate) fn note_cmd(&mut self, c: panels::Cmd) {
+    if !c.repeatable() {
+      return;
+    }
+    self.last_cmd = Some(c);
+    self.recent.retain(|r| *r != c);
+    self.recent.insert(0, c);
+    self.recent.truncate(toolbox::RECENT);
+  }
+
+  /// Runs a command from a shortcut, the S toolbox or Repeat. A modelling command the sketch
+  /// toolbar doesn't offer finishes the open sketch first, as in Fusion (E in a sketch extrudes
+  /// its profile).
+  pub(crate) fn launch(&mut self, c: panels::Cmd) {
+    if self.s.edit_sketch.is_some() && self.drawing.is_none() && !menus::offers(panels::Tab::Sketch, c) {
+      self.finish_sketch();
+    }
+    c.run(self);
+  }
+
+  /// Shows or hides the bodies of the selection (bodies, or the bodies of selected faces and
+  /// edges), as V does in Fusion.
+  pub fn toggle_visibility(&mut self) {
+    let mut bodies: Vec<fox_engine::model::BodyId> = Vec::new();
+    for s in &self.s.selection {
+      if let Sel::Body { body } | Sel::Face { body, .. } | Sel::Edge { body, .. } = s
+        && !bodies.contains(body)
+      {
+        bodies.push(*body);
+      }
+    }
+    if bodies.is_empty() {
+      self.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+      return;
+    }
+    for b in bodies {
+      let visible = self.s.body_visible(b);
+      self.run("body.visible", json!({"body": b.0, "visible": !visible}));
+    }
+    self.s.selection.clear();
+  }
+
   pub fn start(&mut self, kind: dialogs::Kind) {
+    self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
     self.ghost.capture(&self.s);
@@ -777,6 +842,7 @@ impl App {
   /// Starts a sketch on the selected plane or planar face, or asks for one: the origin planes
   /// show in the viewport to click, as in Fusion.
   pub fn new_sketch(&mut self) {
+    self.note_cmd(panels::Cmd::NewSketch);
     self.cancel_dialog();
     if let Some(plane) = self.preselected_plane() {
       self.create_sketch(plane);
@@ -1034,6 +1100,7 @@ impl App {
       panels::sketch_palette(self, &ctx);
       marking::show(self, &ctx);
     }
+    toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
     panels::selection_info(self, &ctx);
@@ -1221,6 +1288,90 @@ mod tests {
     assert!((mid.yaw - std::f64::consts::PI).abs() < 1e-9, "{}", mid.yaw);
     assert!((mid.distance - 400.0).abs() < 1e-9);
     assert_eq!(lerp_camera(&a, &b, 1.0), b);
+  }
+
+  /// One frame of keyboard shortcuts with `key` pressed (and typed) and the pointer at `at`.
+  fn press(app: &mut App, ctx: &egui::Context, key: egui::Key, at: egui::Pos2) {
+    let input = egui::RawInput {
+      events: vec![
+        egui::Event::PointerMoved(at),
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+        egui::Event::Text(key.name().to_lowercase()),
+      ],
+      ..Default::default()
+    };
+    ctx.run_ui(input, |ui| app.shortcuts(ui.ctx())).drop_without_applying_deltas();
+  }
+
+  fn with_box() -> App {
+    let mut app = App::with_session(Session::default());
+    for (c, p) in [
+      ("sketch.create", json!({"plane": "xy"})),
+      ("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]})),
+      ("extrude", json!({"distance": 5})),
+    ] {
+      app.run(c, p).unwrap();
+    }
+    app
+  }
+
+  #[test]
+  fn shortcuts_set_what_repeat_offers() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let mid = app.canvas.center();
+    app.new_sketch();
+    app.cancel_dialog();
+    assert_eq!(app.last_cmd, Some(panels::Cmd::NewSketch));
+    press(&mut app, &ctx, egui::Key::F, mid);
+    assert_eq!(app.dialog.as_ref().map(|d| d.kind), Some(dialogs::Kind::Fillet));
+    assert_eq!(app.last_cmd, Some(panels::Cmd::Dialog(dialogs::Kind::Fillet)));
+    assert_eq!(app.recent[..2], [panels::Cmd::Dialog(dialogs::Kind::Fillet), panels::Cmd::NewSketch]);
+  }
+
+  #[test]
+  fn e_in_a_sketch_finishes_it_and_extrudes_its_profile() {
+    let ctx = egui::Context::default();
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]})).unwrap();
+    let sketch = app.s.edit_sketch;
+    let mid = app.canvas.center();
+    // the sketch letters still pick sketch tools
+    press(&mut app, &ctx, egui::Key::R, mid);
+    assert_eq!((app.tool, app.s.edit_sketch), (Tool::Rect, sketch));
+    // Measure works inside the sketch
+    press(&mut app, &ctx, egui::Key::I, mid);
+    assert!(app.s.edit_sketch.is_some());
+    press(&mut app, &ctx, egui::Key::E, mid);
+    assert!(app.s.edit_sketch.is_none());
+    let d = app.dialog.as_ref().unwrap();
+    assert_eq!((d.kind, d.sketch), (dialogs::Kind::Extrude, sketch));
+  }
+
+  #[test]
+  fn v_hides_and_shows_the_selected_face_body() {
+    let ctx = egui::Context::default();
+    let mut app = with_box();
+    let body = app.s.model.bodies[0].id;
+    let mid = app.canvas.center();
+    app.s.selection = vec![Sel::Face { body, face: app.s.model.bodies[0].faces()[0].id }];
+    press(&mut app, &ctx, egui::Key::V, mid);
+    assert!(!app.s.body_visible(body));
+    app.s.selection = vec![Sel::Body { body }];
+    press(&mut app, &ctx, egui::Key::V, mid);
+    assert!(app.s.body_visible(body));
+  }
+
+  #[test]
+  fn s_opens_the_toolbox_over_the_canvas_only() {
+    let ctx = egui::Context::default();
+    let mut app = App::with_session(Session::default());
+    app.canvas = egui::Rect::from_min_size(egui::pos2(0.0, 100.0), egui::vec2(800.0, 500.0));
+    press(&mut app, &ctx, egui::Key::S, egui::pos2(400.0, 50.0));
+    assert!(app.toolbox.is_none());
+    press(&mut app, &ctx, egui::Key::S, egui::pos2(400.0, 300.0));
+    assert!(app.toolbox.is_some());
   }
 
   #[test]
