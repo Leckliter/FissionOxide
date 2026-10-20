@@ -1,0 +1,215 @@
+{
+ "id": "construction-reference-parallel",
+ "name": "construction-reference-parallel",
+ "description": "Fixed construction line (0,40)-(30,55) (slope 1/2); quad A(10,5) B(50,5) C(50,35) fixed, D drawn (12,22); DA vertical and CD parallel to the construction line put D at (10,15): area 800; extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "parallel",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       55
+      ]
+     },
+     "id": "c",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       5
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       50,
+       5
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       50,
+       35
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       50,
+       35
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       12,
+       22
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       12,
+       22
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       10,
+       5
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "c.start"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "c.end"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l1.start"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l1.end"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l2.end"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l4"
+     ]
+    },
+    {
+     "type": "parallel",
+     "refs": [
+      "l3",
+      "c"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

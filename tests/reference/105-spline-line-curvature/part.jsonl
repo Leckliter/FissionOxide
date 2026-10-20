@@ -1,0 +1,17 @@
+# 105-spline-line-curvature: added by the parity loop from a Fusion probe
+# spline-line-curvature: Fitted spline (0,0)-(12,6)-(25,9)-(40,10) meets a fixed horizontal line to (60,10); lines close it to y=-10. All points fixed; a curvature (G2) constraint makes the spline leave horizontally with zero curvature. Extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [12, 6], [25, 9], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [60, 10]]}
+{"cmd": "sketch.line", "points": [[60, 10], [60, -10]]}
+{"cmd": "sketch.line", "points": [[60, -10], [0, -10]]}
+{"cmd": "sketch.line", "points": [[0, -10], [0, 0]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [3]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [8]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [11]}
+{"cmd": "sketch.constrain", "type": "curvature", "curves": [4, 6]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
