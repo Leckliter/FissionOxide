@@ -127,3 +127,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+265-rect-corner-distance-angle
+266-rect-corner-first-line-swapped
+267-trapezoid-obtuse-corner
+268-apparent-intersection

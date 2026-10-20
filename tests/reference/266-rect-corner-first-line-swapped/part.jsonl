@@ -1,0 +1,11 @@
+# 266-rect-corner-first-line-swapped: added by the parity loop from a Fusion probe
+# rect-corner-first-line-swapped: 40x30 rectangle; Distance and Angle sketch chamfer at the (40,0) vertex with the right line first: 8 up the right line at 60 deg from it; extruded 10.
+# Distance and Angle chamfer: the distance and the angle are both from the first line, as Fusion's tool takes them.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [5, 2], "distance": 8, "angle": 60}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

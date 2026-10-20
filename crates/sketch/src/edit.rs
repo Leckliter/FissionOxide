@@ -41,6 +41,17 @@ fn polar(c: P, r: f64, a: f64) -> P {
   [c[0] + r * a.cos(), c[1] + r * a.sin()]
 }
 
+/// Where two lines meet for a chamfer; see [`Sketch::chamfer`].
+struct ChamferCorner {
+  p: P,
+  near1: PointId,
+  near2: PointId,
+  u: P,
+  v: P,
+  reach1: f64,
+  reach2: f64,
+}
+
 /// One direction of a sketch rectangular pattern, as Fusion's sketch Rectangular Pattern sets it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PatternDir {
@@ -366,42 +377,91 @@ impl Sketch {
     Ok(arc)
   }
 
-  /// Bevels the corner where two lines meet: the lines are cut back `d1` and `d2` from the corner
-  /// and joined by a new line.
+  /// Bevels the corner of two lines: each line is cut back from the corner (`d1` along `l1`, `d2`
+  /// along `l2`) and the cut ends are joined by a new line. The corner is where the lines meet
+  /// at an end or, as Fusion takes it, where they cross or would cross if extended: each line
+  /// keeps its end farther from that point and its near end moves to the chamfer.
   pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
     if !(d1 > EPS && d2 > EPS && d1.is_finite() && d2.is_finite()) {
       return Err(SketchError::InvalidValue("chamfer distances must be positive".into()));
     }
+    let c = self.chamfer_corner(l1, l2)?;
+    if d1 >= c.reach1 - 1e-9 || d2 >= c.reach2 - 1e-9 {
+      return Err(SketchError::InvalidValue("the chamfer doesn't fit on these lines".into()));
+    }
+    let (t1, t2) = (add(c.p, mul(c.u, d1)), add(c.p, mul(c.v, d2)));
+    let (n1, n2) = (self.add_point(t1[0], t1[1]), self.add_point(t2[0], t2[1]));
+    self.swap_point(l1, c.near1, n1);
+    self.swap_point(l2, c.near2, n2);
+    let line = self.add_curve(CurveKind::Line { a: n1, b: n2 })?;
+    self.drop_if_unused(c.near1);
+    self.drop_if_unused(c.near2);
+    Ok(line)
+  }
+
+  /// Fusion's Distance and Angle sketch chamfer: cuts `l1` back `distance` from the corner, and
+  /// the chamfer leaves that point at `angle` (radians) to `l1`, measured inside the corner, to
+  /// meet `l2`.
+  pub fn chamfer_angle(&mut self, l1: CurveId, l2: CurveId, distance: f64, angle: f64) -> Result<CurveId, SketchError> {
+    self.not_text(l1)?;
+    self.not_text(l2)?;
+    if !(angle > EPS && angle < PI && angle.is_finite()) {
+      return Err(SketchError::InvalidValue("the chamfer angle must be between 0 and 180 degrees".into()));
+    }
+    let c = self.chamfer_corner(l1, l2)?;
+    let alpha = dot(c.u, c.v).clamp(-1.0, 1.0).acos();
+    // the cut-off triangle has the corner angle alpha at p and `angle` at the point on l1
+    let rest = PI - alpha - angle;
+    if rest < 1e-9 {
+      return Err(SketchError::InvalidValue("at this angle the chamfer doesn't reach the second line".into()));
+    }
+    let d2 = distance * angle.sin() / rest.sin();
+    self.chamfer(l1, l2, distance, d2)
+  }
+
+  /// The corner two lines make for a chamfer: the point where they meet (at an end, a crossing
+  /// or an apparent intersection), the end of each line that moves to the chamfer, the unit
+  /// direction from the corner along each line towards the end it keeps, and how far that end is.
+  fn chamfer_corner(&self, l1: CurveId, l2: CurveId) -> Result<ChamferCorner, SketchError> {
     let ends = |s: &Sketch, id: CurveId| match s.curve(id).map(|c| &c.kind) {
       Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
       _ => Err(SketchError::WrongGeometry("a sketch chamfer", "two lines")),
     };
     let (a1, b1) = ends(self, l1)?;
     let (a2, b2) = ends(self, l2)?;
+    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
     let near =
       |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
-    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
+    let shared = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
       .into_iter()
-      .find(|(p, _, q, _)| near(self, *p, *q))
-      .ok_or(SketchError::WrongGeometry("a sketch chamfer", "two lines that meet at an end"))?;
-    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
-    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
+      .find(|(p, _, q, _)| near(self, *p, *q));
+    let (p, near1, far1, near2, far2) = match shared {
+      Some((c1, f1, c2, f2)) => (pos(c1)?, c1, f1, c2, f2),
+      None => {
+        // where the lines (extended) cross; each keeps the end farther from it
+        let (pa1, pb1, pa2, pb2) = (pos(a1)?, pos(b1)?, pos(a2)?, pos(b2)?);
+        let (e1, e2) = (sub(pb1, pa1), sub(pb2, pa2));
+        let den = cross(e1, e2);
+        if den.abs() < EPS * e1[0].hypot(e1[1]) * e2[0].hypot(e2[1]) {
+          return Err(SketchError::InvalidValue("the lines are parallel".into()));
+        }
+        let p = add(pa1, mul(e1, cross(sub(pa2, pa1), e2) / den));
+        let (n1, f1) = if dist(p, pa1) <= dist(p, pb1) { (a1, b1) } else { (b1, a1) };
+        let (n2, f2) = if dist(p, pa2) <= dist(p, pb2) { (a2, b2) } else { (b2, a2) };
+        (p, n1, f1, n2, f2)
+      }
+    };
+    let (q1, q2) = (pos(far1)?, pos(far2)?);
     let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
       return Err(SketchError::InvalidValue("zero-length line".into()));
     };
-    if d1 >= dist(p, q1) - 1e-9 || d2 >= dist(p, q2) - 1e-9 {
-      return Err(SketchError::InvalidValue("the chamfer doesn't fit on these lines".into()));
+    let theta = dot(u, v).clamp(-1.0, 1.0).acos();
+    if !(theta > 1e-6 && theta < PI - 1e-6) {
+      return Err(SketchError::InvalidValue("the lines are parallel".into()));
     }
-    let (t1, t2) = (add(p, mul(u, d1)), add(p, mul(v, d2)));
-    let (n1, n2) = (self.add_point(t1[0], t1[1]), self.add_point(t2[0], t2[1]));
-    self.swap_point(l1, c1, n1);
-    self.swap_point(l2, c2, n2);
-    let line = self.add_curve(CurveKind::Line { a: n1, b: n2 })?;
-    self.drop_if_unused(c1);
-    self.drop_if_unused(c2);
-    Ok(line)
+    Ok(ChamferCorner { p, near1, near2, u, v, reach1: dist(p, q1), reach2: dist(p, q2) })
   }
 
   // ---------------------------------------------------------------- trim / extend
@@ -863,6 +923,38 @@ mod tests {
     assert_eq!(p.len(), 1);
     let expect = 800.0 - (25.0 - std::f64::consts::PI * 25.0 / 4.0);
     assert!((p[0].area() - expect).abs() < 0.05, "{}", p[0].area());
+  }
+
+  #[test]
+  fn chamfer_by_distance_and_angle_from_the_first_line() {
+    // a 40 x 30 rectangle cut at (40, 0): 10 along the bottom at 30 degrees, so 10 tan 30 up
+    let mut s = Sketch::new();
+    let r = s.add_rectangle([0.0, 0.0], [40.0, 30.0]).unwrap();
+    s.chamfer_angle(r[0], r[1], 10.0, 30f64.to_radians()).unwrap();
+    assert!(s.solve().ok());
+    let up = 10.0 * 30f64.to_radians().tan();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert!((p[0].area() - (1200.0 - 5.0 * up)).abs() < 1e-6, "{}", p[0].area());
+    // the angle has to leave room to reach the second line
+    let mut s = Sketch::new();
+    let r = s.add_rectangle([0.0, 0.0], [40.0, 30.0]).unwrap();
+    assert!(s.chamfer_angle(r[0], r[1], 10.0, 90f64.to_radians()).is_err());
+  }
+
+  #[test]
+  fn chamfer_at_an_apparent_intersection_trims_both_lines() {
+    // the bottom stops at x = 30 and the right side starts at y = 10; they'd meet at (40, 0)
+    let mut s = Sketch::new();
+    let (b, [b0, _]) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.0, 0.0)).unwrap();
+    let (r, [_, r1]) = s.add_line(PtSpec::At(40.0, 10.0), PtSpec::At(40.0, 30.0)).unwrap();
+    let (_, [_, t1]) = s.add_line(PtSpec::Point(r1), PtSpec::At(0.0, 30.0)).unwrap();
+    s.add_line(PtSpec::Point(t1), PtSpec::Point(b0)).unwrap();
+    s.chamfer_angle(b, r, 15.0, 45f64.to_radians()).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert!((p[0].area() - (1200.0 - 112.5)).abs() < 1e-6, "{}", p[0].area());
   }
 
   #[test]
