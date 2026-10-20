@@ -438,6 +438,14 @@ pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 /// Selects what the covered pixels (`inside`: pixel count per pick id) pick. With `window` only
 /// what lies wholly inside counts; otherwise anything touched. Priority and filters decide what a
 /// covered pick selects (faces, edges, bodies or components; sketch geometry while sketching).
+/// The body a canvas pick lies on.
+pub(crate) fn pick_body(p: &Pick) -> Option<BodyId> {
+  match *p {
+    Pick::Face { body, .. } | Pick::Edge { body, .. } | Pick::Vertex { body, .. } => Some(body),
+    _ => None,
+  }
+}
+
 pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bool, add: bool) {
   let Some(frame) = &app.frame else { return };
   let mut total: HashMap<u32, usize> = HashMap::new();
@@ -459,6 +467,7 @@ pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bo
       matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. })
     } else {
       filter.allows(&p, priority)
+        && !pick_body(&p).is_some_and(|b| app.ctx_menu.unselectable.contains(&b))
         && !matches!(
           (priority, p),
           (Priority::Face, Pick::Edge { .. } | Pick::Vertex { .. })

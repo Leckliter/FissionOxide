@@ -287,8 +287,10 @@ fn loft_sweep_hole_split_draft() {
 
 #[test]
 fn every_listed_command_is_handled() {
+  // hub.save, cam.library ... write to the hub: a scratch one, not the user's
+  let root = store::Store::scratch_root();
   for c in COMMANDS {
-    let mut s = Session::default();
+    let mut s = Session { store_root: Some(root.clone()), ..Session::default() };
     if let Err(e) = s.execute(c.id, &json!({})) {
       assert!(!e.0.starts_with("unknown command"), "{}: {e}", c.id);
     }
