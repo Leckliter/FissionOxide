@@ -105,7 +105,7 @@ cmds! {
   "sketch.spline" => "Smooth curve through points", "{points: [[x,y], ...]}";
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
-  "sketch.conic" => "Conic curve from start to end, pulled toward an apex by rho (0.5 = parabola)", "{start, end, apex, rho?}";
+  "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
   "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
@@ -2395,17 +2395,19 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       "sketch.conic" => {
         let (st, en, apex) = (req_pt(&p, "start")?, req_pt(&p, "end")?, req_pt(&p, "apex")?);
         let rho = p.get("rho").and_then(Value::as_f64).unwrap_or(0.5);
-        if !(0.01..0.99).contains(&rho) {
+        if !fox_sketch::RHO_RANGE.contains(&rho) {
           return Err(CmdError::new("rho must be between 0.01 and 0.99"));
         }
-        // a cubic through start and end pulled towards the apex (rho 0.5 is a parabola)
-        let k = 4.0 * rho / 3.0;
-        let c1 = [st[0] + (apex[0] - st[0]) * k, st[1] + (apex[1] - st[1]) * k];
-        let c2 = [en[0] + (apex[0] - en[0]) * k, en[1] + (apex[1] - en[1]) * k];
+        let cross = (en[0] - st[0]) * (apex[1] - st[1]) - (en[1] - st[1]) * (apex[0] - st[0]);
+        if cross.abs() <= 1e-9 * (en[0] - st[0]).hypot(en[1] - st[1]).powi(2) {
+          return Err(CmdError::new("the apex must lie off the line from start to end"));
+        }
+        // the exact conic: the rational quadratic Bézier start, apex, end (rho 0.5 is a parabola)
         let (a, b) = (snap(sketch, st), snap(sketch, en));
-        let ids =
-          vec![sketch.resolve(a)?, sketch.add_point(c1[0], c1[1]), sketch.add_point(c2[0], c2[1]), sketch.resolve(b)?];
-        sketch.add_curve(CurveKind::ControlSpline { points: ids })?;
+        let (start, end) = (sketch.resolve(a)?, sketch.resolve(b)?);
+        // the apex floats off the curve, like a control point: it never snaps
+        let apex = sketch.add_point(apex[0], apex[1]);
+        sketch.add_curve(CurveKind::Conic { start, end, apex, rho })?;
       }
       _ => {
         let at = req_pt(&p, "at")?;

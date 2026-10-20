@@ -70,7 +70,7 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } => return None,
+      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } | crate::Seg::Conic { .. } => return None,
     })
   }
 
@@ -187,7 +187,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         return None;
       }
     })
@@ -244,6 +245,13 @@ impl Sketch {
         }
         CurveKind::EllipticalArc { center, major, start, end, .. } => {
           for q in [center, major, start, end] {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::Conic { start, end, apex, .. } => {
+          for q in [start, end, apex] {
             if *q == old {
               *q = new;
             }
@@ -530,6 +538,11 @@ impl Sketch {
           let (center, major, s, e) = (get(self, center)?, get(self, major)?, get(self, start)?, get(self, end)?);
           let (start, end) = if flip { (e, s) } else { (s, e) };
           CurveKind::EllipticalArc { center, major, minor, start, end }
+        }
+        CurveKind::Conic { start, end, apex, rho } => {
+          let (s, e, apex) = (get(self, start)?, get(self, end)?, get(self, apex)?);
+          let (start, end) = if flip { (e, s) } else { (s, e) };
+          CurveKind::Conic { start, end, apex, rho }
         }
       };
       let nid = self.add_curve(kind)?;

@@ -57,7 +57,7 @@ fn seg_len(s: &Seg) -> f64 {
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
     }
-    Seg::EllipseArc { .. } => {
+    Seg::EllipseArc { .. } | Seg::Conic { .. } => {
       let mut pts = Vec::new();
       s.flatten(&mut pts);
       pts.push(s.end());
@@ -72,17 +72,27 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
     Seg::Line { a, b } => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f],
     Seg::Arc { center, radius, start_angle, sweep } => polar(center, radius, start_angle + sweep * f),
     Seg::Circle { center, radius, ccw } => polar(center, radius, if ccw { 2.0 * PI * f } else { -2.0 * PI * f }),
-    Seg::Bezier { p } => {
-      let pts: Vec<P2> =
-        (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
+    Seg::Bezier { .. } | Seg::Conic { .. } => {
+      let pts: Vec<P2> = match *s {
+        Seg::Bezier { p } => {
+          (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect()
+        }
+        _ => {
+          let mut pts = Vec::new();
+          s.flatten(&mut pts);
+          pts.push(s.end());
+          pts
+        }
+      };
+      let n = pts.len() - 1;
       let cum: Vec<f64> = std::iter::once(0.0)
         .chain(pts.windows(2).scan(0.0, |acc, w| {
           *acc += len2(sub(w[1], w[0]));
           Some(*acc)
         }))
         .collect();
-      let target = f * cum[BEZIER_STEPS];
-      let i = cum.iter().position(|c| *c >= target).unwrap_or(BEZIER_STEPS).clamp(1, BEZIER_STEPS);
+      let target = f * cum[n];
+      let i = cum.iter().position(|c| *c >= target).unwrap_or(n).clamp(1, n);
       let span = (cum[i] - cum[i - 1]).max(1e-12);
       let k = ((target - cum[i - 1]) / span).clamp(0.0, 1.0);
       [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k]
@@ -928,6 +938,7 @@ pub fn map_seg(s: &Seg, f: &impl Fn(P2) -> P2, mirror: bool) -> Seg {
     }
     Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius, ccw: ccw != mirror },
     Seg::Bezier { p } => Seg::Bezier { p: p.map(f) },
+    Seg::Conic { p, w } => Seg::Conic { p: p.map(f), w },
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       let c = f(center);
       let m = sub(f([center[0] + major[0], center[1] + major[1]]), c);

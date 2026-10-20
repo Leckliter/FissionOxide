@@ -8,6 +8,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 mod build;
+mod conic;
 mod edit;
 mod ellipse;
 mod fitspline;
@@ -23,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub use build::{PtSpec, circumcenter};
+pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
@@ -127,6 +129,15 @@ pub enum CurveKind {
     start: PointId,
     end: PointId,
   },
+  /// A conic arc from `start` to `end` whose end tangents meet at `apex`, its shape set by `rho`
+  /// (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic): the rational quadratic Bézier
+  /// with control points start, apex, end and apex weight rho / (1 - rho).
+  Conic {
+    start: PointId,
+    end: PointId,
+    apex: PointId,
+    rho: f64,
+  },
 }
 
 impl CurveKind {
@@ -144,6 +155,7 @@ impl CurveKind {
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. }
     )
   }
 
@@ -512,6 +524,11 @@ impl Sketch {
     {
       return Err(SketchError::InvalidValue(format!("circle radius {radius}")));
     }
+    if let CurveKind::Conic { rho, .. } = kind
+      && !RHO_RANGE.contains(&rho)
+    {
+      return Err(SketchError::InvalidValue(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
+    }
     let id = CurveId(self.alloc());
     self.curves.push(Curve { id, kind, construction: false });
     Ok(id)
@@ -645,7 +662,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => None,
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => None,
     }
   }
 
@@ -694,6 +712,10 @@ impl Sketch {
         _ => Vec::new(),
       },
       k if k.is_elliptic() => ellipse::kind_segs(k, &|p| self.pos(p)),
+      CurveKind::Conic { start, end, apex, rho } => match (self.pos(*start), self.pos(*apex), self.pos(*end)) {
+        (Some(s), Some(a), Some(e)) if dist(s, e) > 1e-9 => vec![Seg::Conic { p: [s, a, e], w: conic_weight(*rho) }],
+        _ => Vec::new(),
+      },
       _ => self.beziers(id).into_iter().map(|p| Seg::Bezier { p }).collect(),
     }
   }
@@ -743,7 +765,7 @@ impl Sketch {
             }
           }
         }
-        CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } => {
+        CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. } | CurveKind::Conic { .. } => {
           for p in self.spline_points(c.id) {
             add(p);
           }
@@ -794,7 +816,8 @@ impl Sketch {
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
-      | CurveKind::EllipticalArc { .. } => {
+      | CurveKind::EllipticalArc { .. }
+      | CurveKind::Conic { .. } => {
         let path = self.beziers(id);
         if path.is_empty() {
           return None;
@@ -989,6 +1012,7 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => points.clone(),
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
     CurveKind::EllipticalArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
+    CurveKind::Conic { start, end, apex, .. } => vec![*start, *apex, *end],
   }
 }
 
@@ -1021,6 +1045,10 @@ pub fn kind_beziers(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>)
     CurveKind::EllipticalArc { .. } => match ellipse::arc_of(kind, pos) {
       Some((e, t0, sweep)) => e.beziers(t0, sweep, std::f64::consts::FRAC_PI_4),
       None => Vec::new(),
+    },
+    CurveKind::Conic { start, end, apex, rho } => match (pos(*start), pos(*apex), pos(*end)) {
+      (Some(s), Some(a), Some(e)) => conic_beziers(&[s, a, e], conic_weight(*rho)),
+      _ => Vec::new(),
     },
     _ => Vec::new(),
   }

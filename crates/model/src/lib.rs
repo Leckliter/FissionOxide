@@ -1928,6 +1928,18 @@ impl Design {
     if d.features.len() > MAX_FEATURES || d.parameters.len() > MAX_PARAMETERS {
       return Err(DesignError::TooMany);
     }
+    // a hand-edited rho outside the range would give the conic an infinite or negative weight
+    for f in &d.features {
+      if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+        for c in &sketch.curves {
+          if let fox_sketch::CurveKind::Conic { rho, .. } = c.kind
+            && !fox_sketch::RHO_RANGE.contains(&rho)
+          {
+            return Err(DesignError::File(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
+          }
+        }
+      }
+    }
     d.migrate();
     Ok(d)
   }
