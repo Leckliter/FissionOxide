@@ -63,6 +63,8 @@ enum Action {
   Cmd(Cmd),
   Repeat(Cmd),
   EditFeature(FeatureId),
+  /// Calibrate a canvas: pick two points on it, type their real distance.
+  Calibrate(FeatureId),
   EditSketch(FeatureId),
   /// Create a sketch on the selected planar face and start a sketch tool in it.
   SketchOnFace(Tool),
@@ -110,33 +112,9 @@ impl Item {
   }
 }
 
-/// The key that runs a command, as the app binds it (see `App::shortcuts`).
+/// The key that runs a command, as the app binds it (see [`crate::keymap`]).
 fn shortcut(c: Cmd) -> Option<&'static str> {
-  Some(match c {
-    Cmd::Dialog(Kind::Extrude) => "E",
-    Cmd::Dialog(Kind::Fillet) => "F",
-    Cmd::Dialog(Kind::Move) => "M",
-    Cmd::Dialog(Kind::Inspect) => "I",
-    Cmd::Dialog(Kind::Hole) => "H",
-    Cmd::Dialog(Kind::PressPull) => "Q",
-    Cmd::Dialog(Kind::Joint) => "J",
-    Cmd::Dialog(Kind::SkOffset) => "O",
-    Cmd::Dialog(Kind::Form(f)) if std::ptr::eq(f, &crate::forms::APPEARANCE) => "A",
-    Cmd::SketchTool(Tool::Line) => "L",
-    Cmd::SketchTool(Tool::Rect) => "R",
-    Cmd::SketchTool(Tool::Circle) => "C",
-    Cmd::SketchTool(Tool::Arc3) => "A",
-    Cmd::SketchTool(Tool::Point) => "P",
-    Cmd::SketchTool(Tool::Dimension) => "D",
-    Cmd::SketchTool(Tool::Trim) => "T",
-    Cmd::Construction => "X",
-    Cmd::Delete => "Del",
-    Cmd::Undo => "Ctrl+Z",
-    Cmd::Redo => "Ctrl+Y",
-    Cmd::Fit => "F6",
-    Cmd::ToggleVisibility => "V",
-    _ => return None,
-  })
+  crate::keymap::key_for(c)
 }
 
 const APPEARANCE: Cmd = Cmd::Dialog(Kind::Form(&crate::forms::APPEARANCE));
@@ -498,7 +476,13 @@ fn overflow(app: &App, cx: &Context) -> Vec<Option<Item>> {
       v.push(Some(Item::cmd(Cmd::Dialog(Kind::Revolve))));
       sep(&mut v);
     }
-    v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    if app.s.design.feature(f).is_some_and(|x| matches!(x.kind, FeatureKind::Canvas { .. })) {
+      // Fusion's canvas menu: Edit Canvas (opacity, size, position) and Calibrate
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Canvas, "Edit Canvas")));
+      v.push(Some(Item::new(Action::Calibrate(f), Icon::Measure, "Calibrate")));
+    } else {
+      v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
+    }
     let sel = Sel::Feature { feature: f };
     find(&mut v, in_browser(app, &sel).then_some(sel));
   } else if cx.profile {
@@ -548,6 +532,7 @@ fn run(app: &mut App, action: Action) {
     // repeating a modelling command from inside a sketch finishes the sketch first
     Action::Repeat(c) => app.launch(c),
     Action::EditFeature(f) => panels::edit_feature(app, f),
+    Action::Calibrate(f) => crate::canvas_ui::start_calibrate(app, f),
     Action::EditSketch(f) => app.edit_sketch(f),
     Action::SketchOnFace(t) => {
       app.new_sketch();

@@ -7,15 +7,18 @@
 
 mod assembly_forms;
 mod cam_ui;
+mod canvas_ui;
 mod config_ui;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod forms;
 mod gpu;
+mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
+mod keymap;
 mod logo;
 mod manipulators;
 mod marking;
@@ -148,6 +151,12 @@ pub struct App {
   pub updates: updates::Updates,
   /// A design being opened on another thread (the one the app was started with).
   opening: Option<(PathBuf, std::thread::JoinHandle<Result<Session, fox_engine::CmdError>>)>,
+  /// Insert > Canvas, Edit Canvas and Calibrate.
+  pub(crate) canvas_ui: canvas_ui::CanvasUi,
+  /// The Help menu's windows.
+  pub(crate) help: help::Help,
+  /// A command started: the app bar's menus close at the end of the frame, as in Fusion.
+  close_menus: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -294,6 +303,9 @@ impl App {
       cut_window: None,
       updates: updates::Updates::default(),
       opening: None,
+      canvas_ui: canvas_ui::CanvasUi::default(),
+      help: help::Help::default(),
+      close_menus: false,
     }
   }
 
@@ -586,6 +598,13 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
+    use egui::{Key, Modifiers};
+    // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
+    // does anything else, as in Fusion
+    if egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+      egui::Popup::close_all(ctx);
+      return;
+    }
     if ctx.egui_wants_keyboard_input() {
       // Esc in a command dialog's field cancels the command and drops its selection, as in Fusion
       if self.dialog.is_some()
@@ -598,136 +617,73 @@ impl App {
       }
       return;
     }
-    use egui::{Key, Modifiers};
-    let pressed = |k: Key, m: Modifiers| ctx.input_mut(|i| i.consume_key(m, k));
-    if pressed(Key::Z, Modifiers::COMMAND) {
-      self.cancel_dialog();
-      self.s.undo();
-    }
-    if pressed(Key::Y, Modifiers::COMMAND) || pressed(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT) {
-      self.s.redo();
-    }
-    if pressed(Key::S, Modifiers::COMMAND | Modifiers::SHIFT) {
-      self.save(true);
-    }
-    if pressed(Key::S, Modifiers::COMMAND) {
-      self.save(false);
-    }
-    if pressed(Key::O, Modifiers::COMMAND) {
-      self.open_dialog();
-    }
-    if pressed(Key::N, Modifiers::COMMAND) {
-      self.new_design();
-    }
-    if pressed(Key::G, Modifiers::COMMAND) && self.manufacture {
-      self.cam_generate(true);
-    }
-    if pressed(Key::B, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run_background("compute_all", json!({}));
-    }
-    if pressed(Key::A, Modifiers::COMMAND) && self.drawing.is_none() {
-      self.run("select.all", json!({}));
-    }
-    if pressed(Key::Escape, Modifiers::NONE) {
-      if self.marking.is_some() {
-        self.marking = None;
-      } else if self.dim_edit.is_some() {
-        self.dim_edit = None;
-      } else if self.nav_mode.is_some() {
-        self.nav_mode = None;
-      } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
-      } else if !self.tstate.is_empty() {
-        viewport::reset_tool_state(self);
-      } else if self.tool != Tool::Select {
-        self.tool = Tool::Select;
-      } else if self.dialog.is_some() {
-        self.cancel_dialog();
-        self.s.selection.clear();
-      } else {
-        self.s.selection.clear();
-      }
-      self.dim_edit = None;
-    }
-    // the S toolbox, at the pointer over the canvas (in a sketch and on a drawing sheet too)
-    if let Some(p) = ctx.pointer_hover_pos().filter(|p| self.canvas.contains(*p))
-      && pressed(Key::S, Modifiers::NONE)
-    {
-      // the S itself mustn't land in the search field
-      ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(t) if t.eq_ignore_ascii_case("s"))));
-      self.marking = None;
-      self.toolbox = Some(toolbox::Toolbox::at(p));
-      return;
-    }
-    if self.drawing.is_some() {
-      // the model's shortcuts don't apply on a drawing sheet
-      return;
-    }
-    if pressed(Key::Enter, Modifiers::NONE) && self.tool == Tool::Spline {
-      viewport::finish_spline(self);
-    }
-    if pressed(Key::Delete, Modifiers::NONE) || pressed(Key::Backspace, Modifiers::NONE) {
-      self.delete_selection();
-    }
-    if pressed(Key::F6, Modifiers::NONE) {
-      self.fit_view();
-    }
-    if pressed(Key::Home, Modifiers::NONE) {
-      self.cam.set_view(fox_engine::render::StandardView::Home);
-      self.fit_view();
-    }
-    if pressed(Key::V, Modifiers::NONE) {
-      self.toggle_visibility();
-    }
-    use panels::Cmd;
+    use keymap::{Act, Scope};
     let sketching = self.s.edit_sketch.is_some();
-    // modelling commands; in a sketch they finish it first (E extrudes its profiles), except A,
-    // which is the sketch's Arc
-    for (k, d) in [
-      (Key::E, dialogs::Kind::Extrude),
-      (Key::F, dialogs::Kind::Fillet),
-      (Key::M, dialogs::Kind::Move),
-      (Key::I, dialogs::Kind::Inspect),
-      (Key::H, dialogs::Kind::Hole),
-      (Key::Q, dialogs::Kind::PressPull),
-      (Key::J, dialogs::Kind::Joint),
-    ] {
-      if pressed(k, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(d));
+    let design = self.drawing.is_none();
+    for b in keymap::BINDINGS {
+      let applies = match b.scope {
+        Scope::Everywhere => true,
+        Scope::Manufacture => self.manufacture,
+        Scope::Design => design,
+        Scope::Sketch => design && sketching,
+        Scope::Model => design && !sketching,
+      };
+      if !applies {
+        continue;
       }
-    }
-    if sketching {
-      for (k, t) in [
-        (Key::L, Tool::Line),
-        (Key::R, Tool::Rect),
-        (Key::C, Tool::Circle),
-        (Key::A, Tool::Arc3),
-        (Key::P, Tool::Point),
-        (Key::D, Tool::Dimension),
-        (Key::T, Tool::Trim),
-      ] {
-        if pressed(k, Modifiers::NONE) {
-          self.launch(Cmd::SketchTool(t));
+      // the S toolbox opens at the pointer over the canvas (in a sketch and on a drawing too)
+      let pointer = ctx.pointer_hover_pos().filter(|p| self.canvas.contains(*p));
+      if b.act == Act::Toolbox && pointer.is_none() {
+        continue;
+      }
+      if !ctx.input_mut(|i| i.consume_key(b.mods, b.key)) {
+        continue;
+      }
+      match b.act {
+        Act::Cmd(c @ (panels::Cmd::Dialog(_) | panels::Cmd::SketchTool(_))) => self.launch(c),
+        Act::Cmd(c) => c.run(self),
+        Act::Save => self.save(false),
+        Act::SaveAs => self.save(true),
+        Act::Open => self.open_dialog(),
+        Act::NewDesign => self.new_design(),
+        Act::Escape => self.escape(),
+        Act::Toolbox => {
+          // the S itself mustn't land in the search field
+          ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(t) if t.eq_ignore_ascii_case("s"))));
+          self.marking = None;
+          self.toolbox = pointer.map(toolbox::Toolbox::at);
+          return;
+        }
+        Act::FinishSpline => {
+          if self.tool == Tool::Spline {
+            viewport::finish_spline(self);
+          }
         }
       }
-      if pressed(Key::X, Modifiers::NONE) {
-        self.toggle_construction();
-      }
-      if pressed(Key::O, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::SkOffset));
-      }
+    }
+  }
+
+  /// Esc: closes what is open, innermost first, then drops the selection.
+  fn escape(&mut self) {
+    if self.canvas_ui.cancel() {
+    } else if self.marking.is_some() {
+      self.marking = None;
+    } else if self.dim_edit.is_some() {
+      self.dim_edit = None;
+    } else if self.nav_mode.is_some() {
+      self.nav_mode = None;
+    } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
+    } else if !self.tstate.is_empty() {
+      viewport::reset_tool_state(self);
+    } else if self.tool != Tool::Select {
+      self.tool = Tool::Select;
+    } else if self.dialog.is_some() {
+      self.cancel_dialog();
+      self.s.selection.clear();
     } else {
-      if pressed(Key::A, Modifiers::NONE) {
-        self.launch(Cmd::Dialog(dialogs::Kind::Form(&forms::APPEARANCE)));
-      }
-      // window, freeform and paint selection
-      for (k, m) in
-        [(Key::Num1, select::Mode::Window), (Key::Num2, select::Mode::Freeform), (Key::Num3, select::Mode::Paint)]
-      {
-        if pressed(k, Modifiers::NONE) {
-          self.sel_mode = m;
-        }
-      }
+      self.s.selection.clear();
     }
+    self.dim_edit = None;
   }
 
   /// Switches to the Drawing workspace: the last drawing, or Create Drawing when there is none.
@@ -778,6 +734,8 @@ impl App {
   /// recent row. Every way of starting one (shortcut, toolbox, toolbar, menus) comes through
   /// here, via [`panels::Cmd::run`] or [`App::start`].
   pub(crate) fn note_cmd(&mut self, c: panels::Cmd) {
+    // a command starting closes the File and Help menus (and any other drop-down), as in Fusion
+    self.close_menus = true;
     if !c.repeatable() {
       return;
     }
@@ -1135,6 +1093,11 @@ impl App {
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
+    canvas_ui::windows(self, &ctx);
+    help::window(self, &ctx);
+    if std::mem::take(&mut self.close_menus) {
+      egui::Popup::close_all(&ctx);
+    }
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {

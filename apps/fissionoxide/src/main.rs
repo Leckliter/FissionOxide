@@ -9,8 +9,38 @@
 // a release build is a windowed app on Windows: no console window behind it
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+/// Log lines go to stderr and to the diagnostic log file (Help > Diagnostic Log).
+struct Tee(std::fs::File);
+
+impl std::io::Write for Tee {
+  fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    let _ = std::io::stderr().write_all(buf);
+    self.0.write_all(buf)?;
+    Ok(buf.len())
+  }
+
+  fn flush(&mut self) -> std::io::Result<()> {
+    self.0.flush()
+  }
+}
+
+/// The diagnostic log for this run, the previous one kept beside it.
+fn log_file() -> Option<std::fs::File> {
+  let dir = fox_desktop::log_dir();
+  std::fs::create_dir_all(&dir).ok()?;
+  let path = dir.join("fissionoxide.log");
+  let _ = std::fs::rename(&path, dir.join("fissionoxide.prev.log"));
+  std::fs::File::create(path).ok()
+}
+
 fn main() -> eframe::Result<()> {
-  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+  let mut logger =
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,fissionoxide=info"));
+  if let Some(f) = log_file() {
+    logger.target(env_logger::Target::Pipe(Box::new(Tee(f))));
+  }
+  logger.init();
+  log::info!("FissionOxide {} starting", fox_desktop::VERSION);
   let (flags, files): (Vec<_>, Vec<_>) = std::env::args_os().skip(1).partition(|a| a == "--new-instance");
   let open = files.into_iter().next().map(std::path::PathBuf::from);
   let instance = if flags.is_empty() && !fox_desktop::instance::disabled_by_env() {
