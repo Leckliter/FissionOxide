@@ -948,7 +948,7 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
-  /// A round tube swept along a path of lines and arcs, solid or hollow.
+  /// A tube (round, square or triangular) swept along a path of lines and arcs, solid or hollow.
   Pipe {
     path_sketch: FeatureId,
     #[serde(default)]
@@ -959,6 +959,12 @@ pub enum FeatureKind {
     wall: String,
     #[serde(default)]
     operation: Operation,
+    /// Section shape; `diameter` is its size.
+    #[serde(default)]
+    section: construct::PipeSection,
+    /// Fraction of the path (from its start) the pipe follows; empty = all of it.
+    #[serde(default)]
+    distance: String,
   },
   /// A rib (thickness across the sketch plane) or web (thickness in the sketch plane) grown from
   /// open sketch lines until it meets the body, or to a depth.
@@ -2103,10 +2109,13 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
         f(e);
       }
     }
-    FeatureKind::Pipe { diameter, wall, .. } => {
+    FeatureKind::Pipe { diameter, wall, distance, .. } => {
       f(diameter);
       if !wall.is_empty() {
         f(wall);
+      }
+      if !distance.is_empty() {
+        f(distance);
       }
     }
     FeatureKind::Rib { thickness, depth, .. } => {

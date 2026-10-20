@@ -82,6 +82,10 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+84-circular-solid
+85-circular-hollow
+86-square-section
+87-triangular-partial-path
 88-box-patch-join
 89-box-patch-flip-cut
 90-arc-surface-symmetric
