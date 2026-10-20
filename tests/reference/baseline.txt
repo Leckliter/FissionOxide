@@ -309,3 +309,6 @@
 199-open-five-point-wave
 200-uneven-spacing
 201-closed-four-point
+104-spline-arc-curvature
+105-spline-line-curvature
+106-spline-arc-same-turn-curvature

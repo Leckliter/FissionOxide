@@ -85,6 +85,12 @@ pub const ELLIPSE_CONCENTRIC_PASS: &str = "ellipse_concentric_pass";
 /// corner, when the last point is the first), not the Catmull-Rom spline older sketches drew;
 /// trimming and extending one follow it. See `crate::fitquintic`.
 pub const QUINTIC_FIT_SPLINE: &str = "quintic_fit_spline";
+/// A curvature constraint on a fit-point spline end adds a curvature handle beside the tangent
+/// handle, making the end smooth as in Fusion (the quintic takes the other curve's direction and
+/// curvature there; see `crate::smoothend`), and spline end frames come from the curve itself
+/// rather than its cubic pieces. Needs [`QUINTIC_FIT_SPLINE`]; without it a curvature constraint
+/// works on the tangent handle and the pieces, as before.
+pub const SPLINE_CURVATURE_HANDLES: &str = "spline_curvature_handles";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -99,6 +105,7 @@ pub const CURRENT: &[&str] = &[
   ONE_EDGE_CONTROL_SPLINE,
   ONE_EDGE_FIT_SPLINE,
   QUINTIC_FIT_SPLINE,
+  SPLINE_CURVATURE_HANDLES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

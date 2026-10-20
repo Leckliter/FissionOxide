@@ -158,7 +158,7 @@ impl Sketch {
         }
         SpunSeg::Spline { points } => {
           let ids: Vec<PointId> = points.iter().map(|q| at(self, *q)).collect();
-          self.add_curve(CurveKind::Spline { points: ids, start_handle: None, end_handle: None })?
+          self.add_curve(CurveKind::spline(ids))?
         }
       };
       curves.push(c);

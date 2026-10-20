@@ -19,6 +19,7 @@ mod fonts;
 mod freeform;
 mod profile;
 mod quintic;
+mod smoothend;
 mod solve;
 mod spun;
 mod tangent;
@@ -128,6 +129,15 @@ pub enum CurveKind {
     /// Tangent handle at the end, as the start's for the last gap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end_handle: Option<PointId>,
+    /// Curvature handle at the start: a point off the start's tangent whose offset across it sets
+    /// the curvature there (see `smoothend::handle_curvature`). Added with the
+    /// tangent handle when a curvature constraint uses that end, which then is smooth as in Fusion
+    /// (direction from the tangent handle, speed by Fusion's rule; see `smoothend`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_curvature: Option<PointId>,
+    /// Curvature handle at the end, as the start's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_curvature: Option<PointId>,
   },
   /// A clamped uniform B-spline shaped by control points (it passes through the first and last),
   /// cubic or quintic. With too few points for its degree it is the single Bézier through them.
@@ -178,7 +188,7 @@ pub enum CurveKind {
 impl CurveKind {
   /// A fit-point spline without tangent handles.
   pub fn spline(points: Vec<PointId>) -> CurveKind {
-    CurveKind::Spline { points, start_handle: None, end_handle: None }
+    CurveKind::Spline { points, start_handle: None, end_handle: None, start_curvature: None, end_curvature: None }
   }
 
   /// A cubic control point spline.
@@ -600,8 +610,12 @@ impl Sketch {
   pub fn add_constraint(&mut self, kind: ConstraintKind) -> Result<ConstraintId, SketchError> {
     self.validate(&kind)?;
     if let ConstraintKind::Tangent { a, b } | ConstraintKind::Curvature { a, b } = kind {
-      self.add_spline_handle(a, b);
-      self.add_spline_handle(b, a);
+      // a curvature constraint adds curvature handles too (smooth ends), in sketches that have them
+      let curvature = matches!(kind, ConstraintKind::Curvature { .. })
+        && self.behaviours.has(behaviour::SPLINE_CURVATURE_HANDLES)
+        && self.behaviours.has(behaviour::QUINTIC_FIT_SPLINE);
+      self.add_spline_handle(a, b, curvature);
+      self.add_spline_handle(b, a, curvature);
     }
     let id = ConstraintId(self.alloc());
     self.constraints.push(Constraint { id, kind });
@@ -1113,9 +1127,14 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Line { a, b } => vec![*a, *b],
     CurveKind::Circle { center, .. } => vec![*center],
     CurveKind::Arc { center, start, end } => vec![*center, *start, *end],
-    CurveKind::Spline { points, start_handle, end_handle } => {
-      points.iter().copied().chain(*start_handle).chain(*end_handle).collect()
-    }
+    CurveKind::Spline { points, start_handle, end_handle, start_curvature, end_curvature } => points
+      .iter()
+      .copied()
+      .chain(*start_handle)
+      .chain(*end_handle)
+      .chain(*start_curvature)
+      .chain(*end_curvature)
+      .collect(),
     CurveKind::ControlSpline { points, .. } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
       points.clone()
     }
@@ -1182,7 +1201,7 @@ pub(crate) fn spline_fit(
   pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
   quintic: bool,
 ) -> Option<(Vec<[[f64; 2]; 4]>, Vec<usize>)> {
-  let CurveKind::Spline { points, start_handle, end_handle } = kind else { return None };
+  let CurveKind::Spline { points, start_handle, end_handle, .. } = kind else { return None };
   if !quintic {
     let pts: Vec<[f64; 2]> = points.iter().filter_map(|p| pos(*p)).collect();
     let mut bz = spline_beziers(&pts);
@@ -1198,8 +1217,8 @@ pub(crate) fn spline_fit(
   let closed = spline_closed(points);
   let ids = if closed { &points[..points.len() - 1] } else { &points[..] };
   let pts: Vec<[f64; 2]> = ids.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
-  let handles = if closed { (None, None) } else { (start_handle.and_then(pos), end_handle.and_then(pos)) };
-  match fitquintic::Quintic::fit(&pts, closed, handles) {
+  let ends = if closed { (fitquintic::End::Free, fitquintic::End::Free) } else { spline_ends(kind, pos) };
+  match fitquintic::Quintic::fit_ends(&pts, closed, ends) {
     Some(q) => Some(q.beziers()),
     None => {
       let mut pts = pts;
@@ -1236,7 +1255,7 @@ pub(crate) fn spline_handles(
   pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
   quintic: bool,
 ) -> Option<([f64; 2], [f64; 2])> {
-  let CurveKind::Spline { points, start_handle, end_handle } = kind else { return None };
+  let CurveKind::Spline { points, .. } = kind else { return None };
   if !quintic {
     let bz = spline_fit(kind, pos, false)?.0;
     return Some((bz.first()?[1], bz.last()?[2]));
@@ -1245,7 +1264,45 @@ pub(crate) fn spline_handles(
     return None;
   }
   let pts: Vec<[f64; 2]> = points.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
-  fitquintic::Quintic::fit(&pts, false, (start_handle.and_then(pos), end_handle.and_then(pos)))?.handles()
+  fitquintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.handles()
+}
+
+/// How each end of an open fit-point spline is held: smooth with both handles, by its tangent
+/// handle alone, or free.
+fn spline_ends(kind: &CurveKind, pos: &dyn Fn(PointId) -> Option<[f64; 2]>) -> (fitquintic::End, fitquintic::End) {
+  use fitquintic::End;
+  let CurveKind::Spline { start_handle, end_handle, start_curvature, end_curvature, .. } = kind else {
+    return (End::Free, End::Free);
+  };
+  let end = |h: Option<PointId>, k: Option<PointId>| match (h.and_then(pos), k.and_then(pos)) {
+    (Some(handle), Some(curvature)) => End::Smooth { handle, curvature },
+    (Some(h), None) => End::Handle(h),
+    _ => End::Free,
+  };
+  (end(*start_handle, *start_curvature), end(*end_handle, *end_curvature))
+}
+
+/// An open fit-point spline's end from the curve itself rather than its Bézier pieces (whose
+/// second derivatives are only close): (position, direction pointing out of the curve, signed
+/// curvature arriving there heading that way), as `freeform::end_frame`.
+pub(crate) fn spline_end_frame(
+  kind: &CurveKind,
+  at_end: bool,
+  pos: &dyn Fn(PointId) -> Option<[f64; 2]>,
+) -> Option<([f64; 2], [f64; 2], f64)> {
+  let CurveKind::Spline { points, .. } = kind else { return None };
+  if spline_closed(points) {
+    return None;
+  }
+  let pts: Vec<[f64; 2]> = points.iter().map(|p| pos(*p)).collect::<Option<_>>()?;
+  let (p, d1, d2) = fitquintic::Quintic::fit_ends(&pts, false, spline_ends(kind, pos))?.end_derivs(at_end);
+  let speed = d1[0].hypot(d1[1]);
+  if !(speed > 1e-12) {
+    return None;
+  }
+  let t = [d1[0] / speed, d1[1] / speed];
+  let k = (d1[0] * d2[1] - d1[1] * d2[0]) / speed.powi(3);
+  Some(if at_end { (p, t, k) } else { (p, [-t[0], -t[1]], -k) })
 }
 
 /// Cubic Bézier pieces of a clamped uniform cubic B-spline with these control points (fewer
