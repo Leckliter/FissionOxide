@@ -153,7 +153,7 @@ impl Ctx<'_> {
           let mut wires = Vec::new();
           for pr in &sk.profiles {
             for l in std::iter::once(&pr.outer).chain(&pr.holes) {
-              wires.push(Shape::path(&sk.plane, &l.segs).map_err(ke)?);
+              wires.push(Shape::path_with(&sk.plane, &l.segs, &l.merge_next()).map_err(ke)?);
             }
           }
           (wires, Side::Profiles(sk.plane, sk.profiles.clone()))

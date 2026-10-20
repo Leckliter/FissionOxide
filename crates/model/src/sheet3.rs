@@ -173,7 +173,7 @@ pub fn developed_with_cuts(dev: &Development, t: f64, current: &Shape) -> Result
     let pl = Plane { origin: p3[0] - z3 * (2.0 * t), x: x3, y: y3 };
     let loc = |p: DVec3| [(p - p3[0]).dot(x3), (p - p3[0]).dot(y3)];
     let (a, b, c) = (loc(p3[0]), loc(p3[1]), loc(p3[2]));
-    let mut tri = Loop { segs: vec![Seg::Line { a, b }, Seg::Line { a: b, b: c }, Seg::Line { a: c, b: a }] };
+    let mut tri = Loop::new(vec![Seg::Line { a, b }, Seg::Line { a: b, b: c }, Seg::Line { a: c, b: a }]);
     if tri.signed_area() < 0.0 {
       tri = tri.reversed();
     }
