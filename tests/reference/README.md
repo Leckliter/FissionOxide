@@ -8,8 +8,9 @@ Parts whose measurements are known independently of FissionOxide. Each directory
   world-space point).
 - `part.jsonl`: the same part as a FissionOxide command script (one JSON command per line, as
   `fissionoxide-cli run` reads it). Generated from `recipe.json` by `tools/reference-import`, then
-  edited by hand where needed. File paths in it (an SVG to insert, say) are relative to the
-  repository root.
+  edited by hand where needed. File paths in it (a mesh to import, an SVG to insert) are relative to
+  the case's directory, where the files sit beside the script: the parity bridge runs
+  `fissionoxide-cli run` from there, and the test makes them absolute.
 
 `cargo test -p fox-engine --test reference_parts` builds every part that has a `part.jsonl` and
 compares it with `expected.json`. Each built part must also be a valid solid that survives a STEP

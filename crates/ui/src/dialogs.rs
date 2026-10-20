@@ -728,8 +728,9 @@ impl Dialog {
       // Move turns by nothing until asked (the blank dialog's angle is a full turn)
       Kind::Move => {
         d.angle = "0 deg".into();
-        // in an open sketch with curves picked, the sketch objects move
-        if s.edit_sketch.is_some() && !sel_curves(s).is_empty() {
+        // in an open sketch the sketch objects move (as SKETCH > MODIFY > Move/Copy), unless
+        // bodies are picked
+        if s.edit_sketch.is_some() && (!sel_curves(s).is_empty() || sel_bodies(s).is_empty()) {
           d.mv.object = "sketch";
         }
       }
@@ -4983,6 +4984,86 @@ mod tests {
     apply(&mut s, &mut d);
     let sk = s.edit_sketch.unwrap();
     assert!(!s.model.sketches[&sk].profiles.is_empty());
+  }
+
+  #[test]
+  fn sketch_scale_project_intersect_and_align_forms() {
+    use crate::forms::*;
+    // Sketch Scale: a 10 mm square doubled about the origin
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = s.edit_sketch.unwrap();
+    let mut d = form(&mut s, &SK_SCALE, vec![], &[("scale", json!("2"))]);
+    assert_eq!(d.command().unwrap().0, "sketch.transform");
+    apply(&mut s, &mut d);
+    let sketch = s.design.sketch(sk).unwrap();
+    let max_x = sketch
+      .curves
+      .iter()
+      .flat_map(|c| sketch.curve_points(c.id))
+      .filter_map(|p| sketch.pos(p))
+      .map(|p| p[0])
+      .fold(f64::MIN, f64::max);
+    assert!((max_x - 20.0).abs() < 1e-6, "{max_x}");
+
+    // a box under a sketch 30 mm up: Project To Surface and Intersection Curve onto its top
+    let setup = |s: &mut Session| {
+      run(s, "box", json!({"width": 40, "depth": 40, "height": 10}));
+      run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
+      run(s, "sketch.line", json!({"points": [[-15, 0], [15, 0]]}));
+      let b = s.model.bodies[0].id;
+      let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+      vec![Sel::Face { body: b, face: top }]
+    };
+    let mut s = Session::default();
+    let top = setup(&mut s);
+    let mut d = form(&mut s, &SK_PROJECT_SURFACE, top, &[]);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(
+      (cmd, p.get("type"), p.get("direction")),
+      ("sketch.project_to_surface", Some(&json!("closest_point")), None)
+    );
+    apply(&mut s, &mut d);
+    assert!(matches!(s.design.features.last().unwrap().kind, FeatureKind::ProjectToSurface { .. }));
+    let mut s = Session::default();
+    let top = setup(&mut s);
+    let mut d = form(&mut s, &SK_INTERSECTION_CURVE, top, &[]);
+    apply(&mut s, &mut d);
+    assert!(matches!(s.design.features.last().unwrap().kind, FeatureKind::IntersectionCurve { .. }));
+
+    // Align: a block's bottom made flush with a plate's top
+    let mut s = Session::default();
+    let mut comps = Vec::new();
+    for (x, h) in [(0, 10), (60, 5)] {
+      run(&mut s, "box", json!({"width": 20, "depth": 20, "height": h, "at": [x, 0]}));
+      let b = s.model.bodies.last().unwrap().id.0;
+      comps.push(run(&mut s, "component.create", json!({"bodies": [b]}))["component"].clone());
+    }
+    run(&mut s, "component.ground", json!({"component": comps[0]}));
+    let (plate, block) = (s.model.bodies[0].id, s.model.bodies[1].id);
+    let bottom = s.model.bodies[1].faces().iter().find(|f| f.normal.z < -0.9).unwrap().id;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let picks = vec![Sel::Face { body: block, face: bottom }, Sel::Face { body: plate, face: top }];
+    let mut d = form(&mut s, &ALIGN, picks, &[]);
+    assert_eq!(d.command().unwrap().0, "align");
+    apply(&mut s, &mut d);
+    let m = s.model.body(block).unwrap().shape.mass().unwrap();
+    assert!((m.bbox_min.z - 10.0).abs() < 1e-6 && (m.bbox_min.x - 50.0).abs() < 1e-6, "{:?}", m.bbox_min);
+  }
+
+  #[test]
+  fn move_in_a_sketch_moves_sketch_objects() {
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 10, "depth": 10, "height": 10})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    app.s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    app.s.execute("sketch.rect", &json!({"corner1": [0, 0], "corner2": [10, 10]})).unwrap();
+    app.s.selection.clear();
+    assert_eq!(Dialog::open(&mut app, Kind::Move).mv.object, "sketch");
+    // a picked body still moves the body
+    app.s.selection = vec![Sel::Body { body: b }];
+    assert_eq!(Dialog::open(&mut app, Kind::Move).mv.object, "bodies");
   }
 
   #[test]

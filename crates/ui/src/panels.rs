@@ -559,6 +559,7 @@ impl Cmd {
         "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
         "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
         "vertices" => (Icon::Point, "Vertices", "Show body vertices and allow selecting them"),
+        "construction" => (Icon::Plane, "Construction", "Allow selecting construction planes, axes and points"),
         _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
       },
       Cmd::ConfigTable => (
@@ -729,6 +730,7 @@ fn constraint_info(kind: &str) -> (Icon, &'static str) {
     "concentric" => (Icon::Concentric, "Concentric"),
     "collinear" => (Icon::Collinear, "Collinear"),
     "curvature" => (Icon::Curvature, "Curvature"),
+    "polygon" => (Icon::PolygonCon, "Polygon"),
     _ => (Icon::Symmetric, "Symmetry"),
   }
 }

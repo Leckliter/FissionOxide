@@ -207,6 +207,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the faces and the curves, then project them along a direction or along the face normals. \
        Use the result to split faces or to guide a sweep on a curved part.",
     ),
+    (_, "Intersection Curve") => (
+      "Makes 3D curves where sketch curves, pushed along the sketch normal, cross faces.",
+      "Pick sketch curves and the faces they should meet; the curves are pushed straight out of their \
+       sketch plane and the lines where they cross the faces become 3D curves. A pipe or sweep can \
+       follow them, and they update when the body changes.",
+    ),
 
     // SKETCH CHAMFER
     (_, "Equal Distance Chamfer") => (
