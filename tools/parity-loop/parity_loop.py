@@ -537,6 +537,8 @@ def status(a):
 # ---- CLI ---------------------------------------------------------------------------------------
 
 def main():
+  for stream in (sys.stdout, sys.stderr):
+    stream.reconfigure(encoding="utf-8", errors="replace")  # agents' summaries aren't cp1252
   ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
   ap.add_argument("--ledger", default=os.path.join(ROOT, "parity", "ledger.jsonl"))
   sub = ap.add_subparsers(dest="cmd", required=True)
