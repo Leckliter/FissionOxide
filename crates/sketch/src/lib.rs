@@ -27,6 +27,7 @@ use std::collections::HashMap;
 pub use build::{PtSpec, circumcenter};
 pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
 pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
+pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
 pub use fonts::{font_dirs, system_fonts};
 pub use profile::{Loop, Profile, Seg, find_profiles};
