@@ -948,7 +948,7 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
     }
     (Tool::Blend, [a, b]) => {
       app.tstate.curves.clear();
-      let continuity = if shift { "g1" } else { "g2" };
+      let continuity = if shift { "g2" } else { "g1" };
       app.run("sketch.blend", json!({"sketch": sk.0, "curves": curves, "near": [a.1, b.1], "continuity": continuity}));
     }
     _ => {}
@@ -1034,7 +1034,8 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
-        | CurveKind::Conic { .. },
+        | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. },
       )
       | None => return,
     },
@@ -1964,7 +1965,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
       _ => "2-tangent circle: click to place it (the size follows the cursor)",
     },
     (true, Tool::Circle3T) => "3-tangent circle: click three lines, circles or arcs near where it should touch",
-    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G1 (tangent only)",
+    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G2 (curvature continuous)",
     (false, _) => return,
   };
   if app.status.is_some() {

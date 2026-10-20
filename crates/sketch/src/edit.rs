@@ -70,7 +70,10 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } | crate::Seg::Conic { .. } => return None,
+      crate::Seg::Bezier { .. }
+      | crate::Seg::EllipseArc { .. }
+      | crate::Seg::Conic { .. }
+      | crate::Seg::Quintic { .. } => return None,
     })
   }
 
@@ -188,7 +191,8 @@ impl Sketch {
       | CurveKind::Ellipse { .. }
       | CurveKind::Bezier { .. }
       | CurveKind::EllipticalArc { .. }
-      | CurveKind::Conic { .. } => {
+      | CurveKind::Conic { .. }
+      | CurveKind::QuinticSpline { .. } => {
         return None;
       }
     })
@@ -229,7 +233,7 @@ impl Sketch {
             }
           }
         }
-        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
+        CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
           for q in points {
             if *q == old {
               *q = new;
@@ -543,6 +547,13 @@ impl Sketch {
           let (s, e, apex) = (get(self, start)?, get(self, end)?, get(self, apex)?);
           let (start, end) = if flip { (e, s) } else { (s, e) };
           CurveKind::Conic { start, end, apex, rho }
+        }
+        CurveKind::QuinticSpline { points } => {
+          let mut points = points.iter().map(|p| get(self, *p)).collect::<Result<Vec<_>, _>>()?;
+          if flip {
+            points.reverse();
+          }
+          CurveKind::QuinticSpline { points }
         }
       };
       let nid = self.add_curve(kind)?;

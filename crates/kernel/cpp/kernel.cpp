@@ -68,8 +68,10 @@
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <BRepLib.hxx>
@@ -245,11 +247,36 @@ TopoDS_Edge ellipse_edge(rust::Slice<const double> segs, size_t o) {
   return me.Edge();
 }
 
-// Edge `seg` of a segment list (13 doubles each, see make_face).
-TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
-  size_t o = seg * 13;
+// A quintic spline (kind 6): ten control points in the p0..p3 of three records (4, 4, 2), the
+// clamped degree-5 B-spline with knots 0 x6, 0.2, 0.4, 0.6, 0.8, 1 x6.
+TopoDS_Edge quintic_edge(rust::Slice<const double> segs, size_t o) {
+  need(segs, o + 3 * 13, "segments");
+  TColgp_Array1OfPnt poles(1, 10);
+  for (int k = 0; k < 10; ++k) poles.SetValue(k + 1, pnt(segs, o + 13 * (k / 4) + 1 + 3 * (k % 4)));
+  TColStd_Array1OfReal knots(1, 6);
+  TColStd_Array1OfInteger mults(1, 6);
+  for (int k = 0; k < 6; ++k) {
+    knots.SetValue(k + 1, k / 5.0);
+    mults.SetValue(k + 1, k == 0 || k == 5 ? 6 : 1);
+  }
+  if (poles(1).Distance(poles(10)) < 1e-9) throw std::runtime_error("degenerate spline in profile");
+  Handle(Geom_BSplineCurve) bs = new Geom_BSplineCurve(poles, knots, mults, 5);
+  BRepBuilderAPI_MakeEdge me(bs);
+  if (!me.IsDone()) throw std::runtime_error("degenerate spline in profile");
+  return me.Edge();
+}
+
+// The edge starting at record `rec` of a segment list (13 doubles each, see make_face); moves
+// `rec` past it (a quintic spline takes three records, the rest one).
+TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t &rec) {
+  size_t o = rec * 13;
   need(segs, o + 13, "segments");
   int kind = static_cast<int>(segs[o]);
+  if (kind == 6) {
+    rec += 3;
+    return quintic_edge(segs, o);
+  }
+  rec += 1;
   if (kind == 4) return ellipse_edge(segs, o);
   if (kind == 0) {
     BRepBuilderAPI_MakeEdge me(pnt(segs, o + 1), pnt(segs, o + 4));
@@ -297,18 +324,19 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
 //   line: p0 → p1;  arc: start p0, interior p1, end p2;  circle: centre p0, normal p1, radius p2.x
 //   kind 4, an elliptical arc: see ellipse_edge
 //   kind 5, a conic: rational quadratic Bezier through p0 (start), p1 (apex), p2 (end), apex weight p3.x
+//   kind 6, a quintic spline: three records, see quintic_edge
 // loop_lens: number of segments per loop; the first loop is the outer boundary, the rest holes.
 std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<const double> segs,
                                  rust::Slice<const uint32_t> loop_lens) {
   FOX_TRY
   need(plane, 9, "make_face plane");
   gp_Pln pln(gp_Ax3(pnt(plane, 0), dir(plane, 3), dir(plane, 6)));
-  size_t seg = 0;
+  size_t rec = 0;
   std::vector<TopoDS_Wire> wires;
   for (uint32_t n : loop_lens) {
     BRepBuilderAPI_MakeWire mw;
-    for (uint32_t k = 0; k < n; ++k, ++seg) {
-      TopoDS_Edge e = seg_edge(segs, seg);
+    for (uint32_t k = 0; k < n; ++k) {
+      TopoDS_Edge e = seg_edge(segs, rec);
       mw.Add(e);
       if (!mw.IsDone()) throw std::runtime_error("profile loop is not connected");
     }
@@ -800,8 +828,8 @@ std::unique_ptr<Shape> face_at_index(const Shape &s, uint32_t face) {
 std::unique_ptr<Shape> make_wire(rust::Slice<const double> segs) {
   FOX_TRY
   BRepBuilderAPI_MakeWire mw;
-  for (size_t i = 0; i * 13 < segs.size(); ++i) {
-    mw.Add(seg_edge(segs, i));
+  for (size_t rec = 0; rec * 13 < segs.size();) {
+    mw.Add(seg_edge(segs, rec));
     if (!mw.IsDone()) throw std::runtime_error("the path is not connected");
   }
   if (!mw.IsDone()) throw std::runtime_error("empty path");

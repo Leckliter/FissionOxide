@@ -1736,7 +1736,8 @@ impl Ctx<'_> {
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
         | CurveKind::EllipticalArc { .. }
-        | CurveKind::Conic { .. } => {}
+        | CurveKind::Conic { .. }
+        | CurveKind::QuinticSpline { .. } => {}
       }
     }
     lost
