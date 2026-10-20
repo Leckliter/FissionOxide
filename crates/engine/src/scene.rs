@@ -573,7 +573,9 @@ fn fully_dimensioned_circle(sk: &Sketch, c: fox_sketch::CurveId, free: &[PointId
   centre_fixed
     && sk.constraints.iter().any(|k| match &k.kind {
       ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => *curve == c,
-      ConstraintKind::Equal { a, b } | ConstraintKind::Tangent { a, b } => *a == c || *b == c,
+      ConstraintKind::Equal { a, b }
+      | ConstraintKind::Tangent { a, b }
+      | ConstraintKind::SymmetricCurves { a, b, .. } => *a == c || *b == c,
       _ => false,
     })
 }

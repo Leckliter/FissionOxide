@@ -1,0 +1,6 @@
+# 201-closed-four-point: added by the parity loop from a Fusion probe
+# closed-four-point: Closed (periodic) fit point spline through (0,0)-(30,-5)-(35,20)-(5,25) and back to the start, its own profile; extruded 5.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.spline", "points": [[0, 0], [30, -5], [35, 20], [5, 25], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

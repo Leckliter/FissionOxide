@@ -1,0 +1,12 @@
+# 159-xz-plate-center-hole: added by the parity loop from a Fusion probe
+# xz-plate-center-hole: 40x30 plate on XZ (sketch y = -Z) with a centre-diameter circle hole at (25,12), diameter 10 (dimensioned); plate region extruded 5 along +Y.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.circle", "center": [25, 12], "diameter": 10}
+{"cmd": "sketch.dimension", "type": "diameter", "curves": [13], "value": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[3, 3]], "distance": 5, "operation": "new_body"}

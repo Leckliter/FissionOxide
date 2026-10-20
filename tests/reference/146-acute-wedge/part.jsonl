@@ -1,0 +1,8 @@
+# 146-acute-wedge: added by the parity loop from a Fusion probe
+# acute-wedge: Lines (0,0)-(40,0) and (0,0)-(30.642,25.712) (40 deg); radius 5, hint (30,10) on the wedge's far side, so the centre is on the 20-deg bisector at 5/sin20 = 14.62 from the vertex; extruded 6.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[0, 0], [30.642, 25.712]]}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5], "radius": 5, "near": [30, 10]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[13.737, 5.0]], "distance": 6, "operation": "new_body"}

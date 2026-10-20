@@ -673,8 +673,16 @@ impl<'a> System<'a> {
         vec![cross(u, v)]
       }
       K::Perpendicular { a, b } => {
-        let (u, v) = (self.dir(x, *a), self.dir(x, *b));
-        vec![dot(u, v)]
+        if self.is_line(*a) && self.is_line(*b) {
+          let (u, v) = (self.dir(x, *a), self.dir(x, *b));
+          vec![dot(u, v)]
+        } else {
+          // a line normal to a circle/arc: the line, extended, passes through the centre
+          let (l, r) = if self.is_line(*a) { (*a, *b) } else { (*b, *a) };
+          let (la, lb) = self.line(x, l);
+          let (c, _) = self.round(x, r);
+          vec![cross(unit(sub(lb, la)), sub(c, la))]
+        }
       }
       K::Collinear { a, b } => {
         let (a0, a1) = self.line(x, *a);
@@ -721,8 +729,21 @@ impl<'a> System<'a> {
       }
       K::Midpoint { p, line } => {
         let p = self.p(x, *p);
-        let (a, b) = self.line(x, *line);
-        vec![p[0] - (a[0] + b[0]) / 2.0, p[1] - (a[1] + b[1]) / 2.0]
+        let m = match self.curve(*line) {
+          Some((_, CurveKind::Arc { center, start, end })) => {
+            // the middle of the counter-clockwise sweep from start to end (past 180° too)
+            let (c, s, e) = (self.p(x, *center), self.p(x, *start), self.p(x, *end));
+            let a0 = crate::angle_of(c, s);
+            let mid = a0 + crate::ccw_sweep(a0, crate::angle_of(c, e)) / 2.0;
+            let r = crate::dist(c, s);
+            [c[0] + r * mid.cos(), c[1] + r * mid.sin()]
+          }
+          _ => {
+            let (a, b) = self.line(x, *line);
+            [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
+          }
+        };
+        vec![p[0] - m[0], p[1] - m[1]]
       }
       K::Symmetric { a, b, line } => {
         let (pa, pb) = (self.p(x, *a), self.p(x, *b));
@@ -730,6 +751,31 @@ impl<'a> System<'a> {
         let u = unit(sub(lb, la));
         let m = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0];
         vec![cross(u, sub(m, la)), dot(u, sub(pb, pa))]
+      }
+      K::SymmetricCurves { a, b, line } => {
+        let (la, lb) = self.line(x, *line);
+        let u = unit(sub(lb, la));
+        // mirror image across the axis
+        let reflect = |p: [f64; 2]| {
+          let d = sub(p, la);
+          let t = dot(d, u);
+          [la[0] + 2.0 * t * u[0] - d[0], la[1] + 2.0 * t * u[1] - d[1]]
+        };
+        if self.is_line(*a) {
+          // a's mirror image is b's infinite line (the endpoints stay free): parallel to b, and
+          // a's mirrored start on it
+          let (a0, a1) = self.line(x, *a);
+          let (b0, b1) = self.line(x, *b);
+          let (m0, m1) = (reflect(a0), reflect(a1));
+          let vb = unit(sub(b1, b0));
+          vec![cross(unit(sub(m1, m0)), vb), cross(vb, sub(m0, b0))]
+        } else {
+          // mirrored centres, equal radii
+          let (c1, r1) = self.round(x, *a);
+          let (c2, r2) = self.round(x, *b);
+          let m = reflect(c1);
+          vec![m[0] - c2[0], m[1] - c2[1], r1 - r2]
+        }
       }
       K::Distance { a, b, value } => vec![crate::dist(self.p(x, *a), self.p(x, *b)) - value.value],
       K::HorizontalDistance { a, b, value } => vec![sign * (self.p(x, *b)[0] - self.p(x, *a)[0]) - value.value],
@@ -739,6 +785,7 @@ impl<'a> System<'a> {
         vec![sign * cross(unit(sub(b, a)), sub(self.p(x, *p), a)) - value.value]
       }
       K::Radius { curve, value } => vec![self.round(x, *curve).1 - value.value],
+      K::FixRadius { curve, radius } => vec![self.round(x, *curve).1 - radius],
       K::Diameter { curve, value } => vec![2.0 * self.round(x, *curve).1 - value.value],
       // spline joints are evaluated in `eval_at`
       K::Curvature { .. } => vec![0.0, 0.0],
@@ -896,6 +943,7 @@ fn analyze(j: &[f64], m: usize, n: usize) -> (usize, Vec<bool>) {
 
 #[cfg(test)]
 mod tests {
+  use super::{cross, sub, unit};
   use crate::*;
 
   fn rect_fully_constrained() -> (Sketch, [CurveId; 4]) {
@@ -991,6 +1039,66 @@ mod tests {
   }
 
   #[test]
+  fn perpendicular_line_to_circle_and_arc_runs_through_centre() {
+    let mut s = Sketch::new();
+    let c = s.add_circle(PtSpec::At(20.0, 30.0), 5.0).unwrap();
+    let arc = s.add_arc_center(PtSpec::At(-50.0, 0.0), PtSpec::At(-40.0, 0.0), [-50.0, 10.0]).unwrap();
+    let (l1, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(25.0, 25.0)).unwrap();
+    let (l2, _) = s.add_line(PtSpec::At(-30.0, 5.0), PtSpec::At(-20.0, 20.0)).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: l1, b: c }).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: arc, b: l2 }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    for (l, r) in [(l1, c), (l2, arc)] {
+      let c = s.pos(s.curve_points(r)[0]).unwrap();
+      let p = s.curve_points(l);
+      let (a, b) = (s.pos(p[0]).unwrap(), s.pos(p[1]).unwrap());
+      assert!(cross(unit(sub(b, a)), sub(c, a)).abs() < 1e-6);
+    }
+    // a spline or ellipse still can't be perpendicular to a line, nor two circles to each other
+    let c2 = s.add_circle(PtSpec::At(0.0, 60.0), 4.0).unwrap();
+    assert!(s.add_constraint(ConstraintKind::Perpendicular { a: c, b: c2 }).is_err());
+  }
+
+  #[test]
+  fn symmetric_lines_and_circles() {
+    // lines about a vertical axis: b lands on a's mirror image, its endpoints still free
+    let mut s = Sketch::new();
+    let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(0.0, 30.0)).unwrap();
+    s.add_constraint(ConstraintKind::Vertical { line: axis }).unwrap();
+    let (a, [a0, a1]) = s.add_line(PtSpec::At(-10.0, 0.0), PtSpec::At(-5.0, 10.0)).unwrap();
+    s.add_constraint(ConstraintKind::Fix { p: a0, x: -10.0, y: 0.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Fix { p: a1, x: -5.0, y: 10.0 }).unwrap();
+    let (b, [b0, b1]) = s.add_line(PtSpec::At(8.0, 1.0), PtSpec::At(4.0, 9.0)).unwrap();
+    s.add_constraint(ConstraintKind::SymmetricCurves { a, b, line: axis }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    assert_eq!(r.dof, 3, "{r:?}"); // the axis length, and b's two endpoints along its line
+    for p in [b0, b1] {
+      let [x, y] = s.pos(p).unwrap();
+      assert!((2.0 * x + y - 20.0).abs() < 1e-6, "{x} {y}"); // on the line through (10,0), (5,10)
+    }
+    // circles about the 45° line: mirrored centres, equal radii
+    let mut s = Sketch::new();
+    let (axis, _) = s.add_line(PtSpec::Point(ORIGIN), PtSpec::At(20.0, 20.0)).unwrap();
+    let ax = s.curve_points(axis)[1];
+    s.add_constraint(ConstraintKind::Fix { p: ax, x: 20.0, y: 20.0 }).unwrap();
+    let ca = s.add_circle(PtSpec::At(10.0, 2.0), 4.0).unwrap();
+    let pa = s.curve_points(ca)[0];
+    s.add_constraint(ConstraintKind::Fix { p: pa, x: 10.0, y: 2.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Radius { curve: ca, value: Dim::new(4.0) }).unwrap();
+    let cb = s.add_circle(PtSpec::At(1.0, 8.0), 2.0).unwrap();
+    s.add_constraint(ConstraintKind::SymmetricCurves { a: ca, b: cb, line: axis }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    assert_eq!(r.dof, 0, "{r:?}");
+    let c = s.pos(s.curve_points(cb)[0]).unwrap();
+    assert!((c[0] - 2.0).abs() < 1e-6 && (c[1] - 10.0).abs() < 1e-6, "{c:?}");
+    // a line and a circle aren't a symmetric pair
+    assert!(s.add_constraint(ConstraintKind::SymmetricCurves { a: ca, b: axis, line: axis }).is_err());
+  }
+
+  #[test]
   fn slot_and_polygon_solve() {
     let mut s = Sketch::new();
     s.add_slot([0.0, 0.0], [30.0, 0.0], 10.0).unwrap();
@@ -1026,5 +1134,49 @@ mod tests {
     let r1 = super::super::dist(c, s.pos(pts[1]).unwrap());
     let r2 = super::super::dist(c, s.pos(pts[2]).unwrap());
     assert!((r1 - r2).abs() < 1e-6);
+  }
+
+  #[test]
+  fn fixed_curves_hold_their_place_and_size() {
+    let mut s = Sketch::new();
+    let (line, [a, b]) = s.add_line(PtSpec::At(10.0, 5.0), PtSpec::At(34.0, 23.0)).unwrap();
+    assert_eq!(s.fix_curve(line).unwrap().len(), 2);
+    // fixing again adds nothing
+    assert!(s.fix_curve(line).unwrap().is_empty());
+    let (other, _) = s.add_line(PtSpec::Point(b), PtSpec::At(30.0, 30.0)).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: line, b: other }).unwrap();
+    assert!(s.solve().ok());
+    assert_eq!(s.pos(a).unwrap(), [10.0, 5.0]);
+    assert_eq!(s.pos(b).unwrap(), [34.0, 23.0]);
+
+    let c1 = s.add_circle(PtSpec::At(15.0, 15.0), 10.0).unwrap();
+    let c2 = s.add_circle(PtSpec::At(45.0, 15.0), 6.0).unwrap();
+    assert_eq!(s.fix_curve(c1).unwrap().len(), 2);
+    s.add_constraint(ConstraintKind::Equal { a: c1, b: c2 }).unwrap();
+    assert!(s.solve().ok());
+    assert!((s.radius(c1).unwrap() - 10.0).abs() < 1e-9);
+    assert!((s.radius(c2).unwrap() - 10.0).abs() < 1e-9);
+    assert!(!s.solve().free_curves.contains(&c1));
+  }
+
+  #[test]
+  fn midpoint_of_an_arc() {
+    // counter-clockwise from (10,0) to (0,-10): a 270° sweep whose middle is at 135°
+    let mut s = Sketch::new();
+    let a = s.add_arc_center(PtSpec::Point(ORIGIN), PtSpec::At(10.0, 0.0), [0.0, -10.0]).unwrap();
+    for p in &s.curve_points(a)[1..] {
+      let [x, y] = s.pos(*p).unwrap();
+      s.add_constraint(ConstraintKind::Fix { p: *p, x, y }).unwrap();
+    }
+    let m = s.add_point(-5.0, 9.0);
+    s.add_constraint(ConstraintKind::Midpoint { p: m, line: a }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    let p = s.pos(m).unwrap();
+    let h = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    assert!((p[0] + h).abs() < 1e-6 && (p[1] - h).abs() < 1e-6, "{p:?}");
+    // circles have no midpoint
+    let c = s.add_circle(PtSpec::At(30.0, 0.0), 5.0).unwrap();
+    assert!(s.add_constraint(ConstraintKind::Midpoint { p: m, line: c }).is_err());
   }
 }
