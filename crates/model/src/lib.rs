@@ -645,6 +645,9 @@ pub enum FeatureKind {
     /// Total angle the instances span (360° = evenly around).
     #[serde(default = "full_turn")]
     angle: String,
+    /// Spread the instances over -angle/2..angle/2 around the original (Fusion's Symmetric).
+    #[serde(default)]
+    symmetric: bool,
     #[serde(default = "yes")]
     join: bool,
   },

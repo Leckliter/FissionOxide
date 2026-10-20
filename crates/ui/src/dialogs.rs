@@ -966,10 +966,11 @@ impl Dialog {
         d.join = *join;
         d
       }
-      FeatureKind::CircularPattern { count, angle, join, .. } => {
+      FeatureKind::CircularPattern { count, angle, symmetric, join, .. } => {
         let mut d = Dialog::blank(Kind::CircPattern);
         d.count = count.clone();
         d.angle = angle.clone();
+        d.symmetric[0] = *symmetric;
         d.join = *join;
         d
       }
@@ -1310,7 +1311,10 @@ impl Dialog {
       }
       Kind::CircPattern => (
         "pattern.circular",
-        json!({"bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle, "join": self.join}),
+        json!({
+          "bodies": self.bodies, "axis": self.axis, "count": self.count, "angle": self.angle,
+          "symmetric": self.symmetric[0], "join": self.join,
+        }),
       ),
       Kind::Combine => {
         let (target, tools) = self.bodies.split_first()?;
@@ -1354,7 +1358,9 @@ impl Dialog {
       Kind::RectPattern => {
         json!({"count": self.count, "spacing": self.spacing, "count2": self.count2, "spacing2": self.spacing2, "join": self.join})
       }
-      Kind::CircPattern => json!({"count": self.count, "angle": self.angle, "join": self.join}),
+      Kind::CircPattern => {
+        json!({"count": self.count, "angle": self.angle, "symmetric": self.symmetric[0], "join": self.join})
+      }
       Kind::Move => json!({"translate": self.translate, "angle": self.angle}),
       Kind::Form(f) => solid::form_edit_set(f, &self.form.values),
       _ => return None,
@@ -2092,6 +2098,11 @@ impl Dialog {
           ui.end_row();
           ui.label("Total angle");
           if value_edit(ui, &mut self.angle).changed() {
+            self.dirty = true;
+          }
+          ui.end_row();
+          ui.label("");
+          if ui.checkbox(&mut self.symmetric[0], "Symmetric").changed() {
             self.dirty = true;
           }
           ui.end_row();

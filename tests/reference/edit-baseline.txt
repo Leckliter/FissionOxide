@@ -81,3 +81,7 @@
 392-offset-cylinder-angle-from-yz
 393-cylinder-at-vertex
 394-sphere-at-vertex
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+403-bodies-partial-angle
+404-bodies-symmetric-angle
+405-features-cut-half-turn

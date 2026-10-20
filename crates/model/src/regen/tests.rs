@@ -198,6 +198,7 @@ fn patterns_mirror_primitives_and_shell() {
     axis: AxisRef::Z,
     count: "6".into(),
     angle: "360 deg".into(),
+    symmetric: false,
     join: false,
   })
   .unwrap();
