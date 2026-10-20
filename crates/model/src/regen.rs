@@ -1011,7 +1011,7 @@ impl Ctx<'_> {
             (None, None) => return Err(format!("section {} has no profile", i + 1)),
           }
         }
-        let tool = self.loft_guided(&faces, *ruled, *closed, rails, centerline.as_ref())?;
+        let tool = self.loft_ends(sections, &faces, *ruled, *closed, rails, centerline.as_ref())?;
         self.operate(id, tool, *operation)?;
         Ok(None)
       }

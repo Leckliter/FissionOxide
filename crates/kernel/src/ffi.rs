@@ -160,7 +160,7 @@ pub(crate) mod ffi {
     fn sweep_rail(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
     fn sweep_twist(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
     fn sweep_sections(sections: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
-    fn loft_rails(sections: &Shape, rails: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_rails(sections: &Shape, rails: &Shape, spread: bool) -> Result<UniquePtr<Shape>>;
     fn emboss_tool(
       body: &Shape,
       face: u32,
@@ -176,6 +176,8 @@ pub(crate) mod ffi {
     fn extended_face(face: &Shape, size: f64, offset: f64, at: &[f64], toward: &[f64]) -> Result<UniquePtr<Shape>>;
     fn side_of(face: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn setback_corners(s: &Shape, points: &[f64], radius: f64) -> Result<UniquePtr<Shape>>;
+    fn loft_closed(sections: &Shape) -> Result<UniquePtr<Shape>>;
+    fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: &[f64], weight: f64) -> Result<UniquePtr<Shape>>;
     // surface workspace (cpp/surface2.cpp)
     include!("fox-kernel/cpp/surface2.hxx");
     fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;

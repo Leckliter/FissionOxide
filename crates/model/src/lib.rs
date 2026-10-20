@@ -554,6 +554,29 @@ pub struct LoftSection {
   /// A point inside the profile; `None` = the sketch's largest profile.
   #[serde(default)]
   pub profile: Option<[f64; 2]>,
+  /// How the loft meets this section (the first or last).
+  #[serde(default, skip_serializing_if = "LoftEnd::is_free")]
+  pub end: LoftEnd,
+}
+
+/// A loft's end condition at its first or last section.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LoftEnd {
+  /// No condition: the loft leaves the section as the other sections shape it.
+  #[default]
+  Free,
+  /// A point section the loft comes to a sharp tip at (as `Free`).
+  PointSharp,
+  /// A point section the loft arrives at tangent to the point's sketch plane, rounded like a
+  /// dome; `weight` scales how far the flat top reaches (1 = a paraboloid).
+  PointTangent { weight: f64 },
+}
+
+impl LoftEnd {
+  pub fn is_free(&self) -> bool {
+    matches!(self, LoftEnd::Free)
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

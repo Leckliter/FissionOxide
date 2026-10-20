@@ -76,6 +76,14 @@ impl Shape {
 
   /// A loft through the outer boundaries of `sections` whose sides follow rail wires.
   pub fn loft_rails(sections: &[Shape], rails: &[Shape]) -> Result<Shape> {
+    Shape::loft_rails_with(sections, rails, true)
+  }
+
+  /// [`Shape::loft_rails`], choosing how two or more rails spread around a polygonal section:
+  /// with `spread`, corner to corner as Fusion does (a side no rail touches stays straight);
+  /// without, smoothly round the loop from one rail to the next (designs made before the
+  /// `loft_rail_spread` behaviour).
+  pub fn loft_rails_with(sections: &[Shape], rails: &[Shape], spread: bool) -> Result<Shape> {
     if sections.len() < 2 {
       return Err(KernelError::Input("a loft needs at least two profiles".into()));
     }
@@ -83,7 +91,27 @@ impl Shape {
       return Err(KernelError::Input("no rails".into()));
     }
     let (c, r) = (Shape::compound(sections)?, Shape::compound(rails)?);
-    Shape::wrap(sys::loft_rails(c.get()?, r.get()?)?)?.solid_or("loft")
+    Shape::wrap(sys::loft_rails(c.get()?, r.get()?, spread)?)?.solid_or("loft")
+  }
+
+  /// A closed loft through the outer boundaries of `sections` (three or more), in order and back
+  /// to the first: one surface, smooth through every section including the first.
+  pub fn loft_closed(sections: &[Shape]) -> Result<Shape> {
+    if sections.len() < 3 {
+      return Err(KernelError::Input("a closed loft needs at least three profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    Shape::wrap(sys::loft_closed(c.get()?)?)?.solid_or("loft")
+  }
+
+  /// A loft from `profile` to the point `apex` (a vertex) that arrives tangent to the plane
+  /// across `axis` there, rounded like a dome; `weight` (1 = a paraboloid) sets how far the flat
+  /// top reaches.
+  pub fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: DVec3, weight: f64) -> Result<Shape> {
+    if !(weight > 0.0 && weight.is_finite()) {
+      return Err(KernelError::Input("the weight must be above zero".into()));
+    }
+    Shape::wrap(sys::loft_point_tangent(profile.get()?, apex.get()?, &axis.to_array(), weight)?)?.solid_or("loft")
   }
 
   /// The material an emboss adds to (or a deboss removes from) this body: `profiles` (planar

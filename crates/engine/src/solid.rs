@@ -4,7 +4,7 @@
 use fox_kernel::Shape;
 use fox_kernel::glam::DVec3;
 use fox_model::bounding::BoundShape;
-use fox_model::{BodyId, BodySel, FaceRef, FeatureId, FeatureKind, PathRef, PlaneRef, ShellDirection};
+use fox_model::{BodyId, BodySel, FaceRef, FeatureId, FeatureKind, LoftEnd, PathRef, PlaneRef, ShellDirection};
 use fox_sketch::CurveId;
 use serde_json::{Value, json};
 
@@ -109,6 +109,25 @@ pub(crate) fn path_ref(s: &Session, v: &Value) -> Result<PathRef, CmdError> {
   let sketch = FeatureId(u32::try_from(sketch).map_err(|_| CmdError::new("bad sketch id"))?);
   s.design.sketch(sketch)?;
   Ok(PathRef { sketch, curves })
+}
+
+/// A loft section's end condition: `end_condition` (free, point_sharp or point_tangent, with
+/// `weight`, default 1) on a `{sketch, ...}` section; a bare sketch id is free.
+pub(crate) fn loft_end(v: &Value) -> Result<LoftEnd, CmdError> {
+  let Some(kind) = v.get("end_condition") else { return Ok(LoftEnd::Free) };
+  let weight = v.get("weight").map(|w| w.as_f64().ok_or(CmdError::new("'weight' must be a number"))).transpose()?;
+  match kind.as_str() {
+    Some("free") => Ok(LoftEnd::Free),
+    Some("point_sharp") => Ok(LoftEnd::PointSharp),
+    Some("point_tangent") => {
+      let weight = weight.unwrap_or(1.0);
+      if !(weight > 0.0 && weight.is_finite()) {
+        return Err(CmdError::new("a point tangent weight must be above zero"));
+      }
+      Ok(LoftEnd::PointTangent { weight })
+    }
+    _ => Err(CmdError::new("end_condition is free, point_sharp or point_tangent")),
+  }
 }
 
 /// A face reference standing for a whole body (`extrude` to a body): {body} alone uses its first face.

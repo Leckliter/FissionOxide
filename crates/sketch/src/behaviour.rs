@@ -91,6 +91,14 @@ pub const QUINTIC_FIT_SPLINE: &str = "quintic_fit_spline";
 /// rather than its cubic pieces. Needs [`QUINTIC_FIT_SPLINE`]; without it a curvature constraint
 /// works on the tangent handle and the pieces, as before.
 pub const SPLINE_CURVATURE_HANDLES: &str = "spline_curvature_handles";
+/// A smooth (not ruled) closed loft is one periodic surface through every section and back to
+/// the first, with no seam (`Shape::loft_closed`); without it, the first section is added again
+/// at the end of an open loft.
+pub const LOFT_CLOSED_SMOOTH: &str = "loft_closed_smooth";
+/// Two or more loft rails on a polygonal section spread their pull corner to corner, as Fusion
+/// does (a side no rail touches stays straight); without it, the pull blends smoothly round the
+/// loop from one rail to the next.
+pub const LOFT_RAIL_SPREAD: &str = "loft_rail_spread";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -106,6 +114,8 @@ pub const CURRENT: &[&str] = &[
   ONE_EDGE_FIT_SPLINE,
   QUINTIC_FIT_SPLINE,
   SPLINE_CURVATURE_HANDLES,
+  LOFT_CLOSED_SMOOTH,
+  LOFT_RAIL_SPREAD,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
