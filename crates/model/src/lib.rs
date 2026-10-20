@@ -17,6 +17,7 @@ pub mod cutcheck;
 pub mod direct;
 pub mod drawing;
 pub mod fillet;
+pub mod form;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
@@ -1284,6 +1285,14 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     clearance: String,
   },
+  /// Create Form: a T-spline body, the smooth limit surface of a quad control cage given in the
+  /// plane's coordinates (see [`form`]). History-free: form edits change the cage itself.
+  Form {
+    plane: PlaneRef,
+    cage: form::FormCage,
+    #[serde(default)]
+    operation: Operation,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1422,6 +1431,7 @@ impl FeatureKind {
       FeatureKind::InsertDesign { .. } => "Insert",
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
+      FeatureKind::Form { .. } => "Form",
     }
   }
 
@@ -1493,6 +1503,7 @@ impl FeatureKind {
       FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
+      FeatureKind::Form { plane, .. } => plane_dep(plane),
       _ => vec![],
     }
   }
@@ -2197,6 +2208,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::RigidGroup { .. } => {}
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
+    FeatureKind::Form { .. } => {}
   }
 }
 

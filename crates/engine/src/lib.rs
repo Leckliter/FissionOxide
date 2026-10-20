@@ -16,6 +16,7 @@ mod drawings;
 mod features;
 pub mod files;
 mod fillet;
+mod form;
 pub mod hub;
 mod inspect;
 mod mates;
@@ -479,6 +480,8 @@ mod tests_cut;
 mod tests_files;
 #[cfg(test)]
 mod tests_fillet;
+#[cfg(test)]
+mod tests_form;
 #[cfg(test)]
 mod tests_include;
 #[cfg(test)]

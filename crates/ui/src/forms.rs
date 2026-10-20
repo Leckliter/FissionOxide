@@ -1802,3 +1802,23 @@ pub static SK_INCLUDE: Form = Form {
   inputs: &[Input::Edges { key: "edges", label: "Edges" }],
   picks_model: true,
 };
+
+pub static FORM_BOX: Form = Form {
+  title: "CREATE FORM",
+  name: "Create Form",
+  hint: "A T-spline form body: the smooth surface inside a box control cage; pull its vertices with form.move_vertex",
+  icon: Icon::CreateForm,
+  cmd: "form.box",
+  fixed: &[],
+  inputs: &[
+    Input::Plane { key: "plane", label: "Plane" },
+    Input::Expr { key: "length", label: "Length", default: "40 mm" },
+    Input::Expr { key: "width", label: "Width", default: "40 mm" },
+    Input::Expr { key: "height", label: "Height", default: "40 mm" },
+    Input::Expr { key: "length_faces", label: "Length faces", default: "2" },
+    Input::Expr { key: "width_faces", label: "Width faces", default: "2" },
+    Input::Expr { key: "height_faces", label: "Height faces", default: "2" },
+    Input::Choice { key: "operation", label: "Operation", options: OPS },
+  ],
+  picks_model: false,
+};
