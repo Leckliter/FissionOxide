@@ -1,6 +1,5 @@
 # 458-taper-circle-straight: added by the parity loop from a Fusion probe
 # taper-circle-straight: r5 circle at the origin on XY swept 40 up +Z along a straight line drawn on XZ with a 5 deg taper angle (outward): a cone frustum.
-# Fox's sweep has no taper option; the 'taper' key is what a taper option would look like.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0, 0], [0, -40]]}
 {"cmd": "sketch.finish"}

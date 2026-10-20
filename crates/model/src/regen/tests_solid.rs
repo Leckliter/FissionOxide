@@ -72,6 +72,9 @@ fn sweep_along_a_rail_then_twisted() {
       operation: Operation::NewBody,
       rail: Some(PathRef { sketch: path_sketch, curves: vec![rail] }),
       twist: String::new(),
+      taper: String::new(),
+      orientation: Default::default(),
+      profile_scaling: Default::default(),
     })
     .unwrap();
   let m = regenerate(&mut d);

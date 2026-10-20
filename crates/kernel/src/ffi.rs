@@ -166,8 +166,18 @@ pub(crate) mod ffi {
     fn mesh_to_shape(pos: &[f64], tris: &[u32], merge: bool) -> Result<UniquePtr<Shape>>;
 
     // second batch of solid features (cpp/features2.cpp)
-    fn sweep_rail(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
-    fn sweep_twist(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
+    fn sweep_rail_legacy(profile: &Shape, spine: &Shape, rail: &Shape) -> Result<UniquePtr<Shape>>;
+    fn sweep_twist_legacy(profile: &Shape, spine: &Shape, twist: f64) -> Result<UniquePtr<Shape>>;
+    fn sweep_guided(
+      profile: &Shape,
+      spine: &Shape,
+      rail: &Shape,
+      has_rail: bool,
+      scale: bool,
+      twist: f64,
+      taper: f64,
+      parallel: bool,
+    ) -> Result<UniquePtr<Shape>>;
     fn sweep_sections(sections: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
     fn loft_rails(sections: &Shape, rails: &Shape, spread: bool) -> Result<UniquePtr<Shape>>;
     fn emboss_tool(

@@ -139,7 +139,11 @@
 447-two-side-revolve
 448-intersect-revolve-sketch-line-axis
 45-shell-boss-plate
+457-twist-square-straight
+458-taper-circle-straight
+459-guide-rail-scale
 46-shell-two-open-faces
+460-parallel-orientation-arc
 47-draft-curved-pocket
 48-pulley
 485-two-distance-box-top-loop

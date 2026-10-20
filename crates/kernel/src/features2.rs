@@ -7,6 +7,21 @@ use glam::DVec3;
 use crate::ffi::ffi as sys;
 use crate::{KernelError, Result, Shape};
 
+/// How a sweep steers and shapes its profile along the path.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SweepOptions<'a> {
+  /// A guide rail: the section turns to face it.
+  pub rail: Option<&'a Shape>,
+  /// With a rail: the section scales about the path as the rail's distance from it changes.
+  pub scale: bool,
+  /// Turn about the path from start to end, radians (no rail).
+  pub twist: f64,
+  /// The section grows all round by tan(taper) per unit of path length, radians.
+  pub taper: f64,
+  /// The section keeps its orientation and only moves along the path.
+  pub parallel: bool,
+}
+
 /// Where a point lies relative to a solid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inside {
@@ -54,15 +69,48 @@ impl Shape {
 
   /// Sweeps this profile along a path wire, oriented and scaled to keep touching a guide rail.
   pub fn sweep_rail(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
-    Shape::wrap(sys::sweep_rail(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")
+    self.sweep_guided(path, &SweepOptions { rail: Some(rail), scale: true, ..Default::default() })
   }
 
   /// Sweeps this profile along a path wire, turning it by `twist` radians from start to end.
   pub fn sweep_twisted(&self, path: &Shape, twist: f64) -> Result<Shape> {
+    self.sweep_guided(path, &SweepOptions { twist, ..Default::default() })
+  }
+
+  /// [`Shape::sweep_rail`] as designs from before the `sweep_unified` behaviour build it: each
+  /// section scaled until its outline touches the rail (BRepFill contact on border).
+  pub fn sweep_rail_legacy(&self, path: &Shape, rail: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::sweep_rail_legacy(self.get()?, path.get()?, rail.get()?)?)?.solid_or("sweep")
+  }
+
+  /// [`Shape::sweep_twisted`] as designs from before the `sweep_unified` behaviour build it.
+  pub fn sweep_twisted_legacy(&self, path: &Shape, twist: f64) -> Result<Shape> {
     if !twist.is_finite() {
       return Err(KernelError::Input("the twist angle is not finite".into()));
     }
-    Shape::wrap(sys::sweep_twist(self.get()?, path.get()?, twist)?)?.solid_or("sweep")
+    Shape::wrap(sys::sweep_twist_legacy(self.get()?, path.get()?, twist)?)?.solid_or("sweep")
+  }
+
+  /// Sweeps this profile along a path wire, steered and shaped by `opts`.
+  pub fn sweep_guided(&self, path: &Shape, opts: &SweepOptions) -> Result<Shape> {
+    if !opts.twist.is_finite() || !opts.taper.is_finite() {
+      return Err(KernelError::Input("the twist or taper angle is not finite".into()));
+    }
+    if opts.taper.abs() >= std::f64::consts::FRAC_PI_2 {
+      return Err(KernelError::Input("the taper angle must be under 90 degrees".into()));
+    }
+    let rail = opts.rail.unwrap_or(path);
+    let r = sys::sweep_guided(
+      self.get()?,
+      path.get()?,
+      rail.get()?,
+      opts.rail.is_some(),
+      opts.scale,
+      opts.twist,
+      opts.taper,
+      opts.parallel,
+    )?;
+    Shape::wrap(r)?.solid_or("sweep")
   }
 
   /// A loft through the outer boundaries of `sections`, in order, along a centre line wire.

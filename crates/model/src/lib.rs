@@ -579,6 +579,28 @@ impl LoftEnd {
   }
 }
 
+/// How a sweep's profile is oriented along the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SweepOrientation {
+  /// The profile stays at the same angle to the path as it turns.
+  #[default]
+  Perpendicular,
+  /// The profile keeps its orientation and only moves along the path.
+  Parallel,
+}
+
+/// How a sweep's profile follows a guide rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileScaling {
+  /// The profile scales about the path as the rail moves away from it or closer.
+  #[default]
+  Scale,
+  /// The profile keeps its size and only turns to face the rail.
+  None,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum HoleKind {
@@ -869,6 +891,15 @@ pub enum FeatureKind {
     /// Twist angle from start to end of the path (no rail); empty = none.
     #[serde(default)]
     twist: String,
+    /// Taper angle: the profile grows all round by tan(taper) per unit of path length (negative
+    /// shrinks it); empty = none.
+    #[serde(default)]
+    taper: String,
+    #[serde(default)]
+    orientation: SweepOrientation,
+    /// With a rail: whether the profile scales to keep touching it.
+    #[serde(default)]
+    profile_scaling: ProfileScaling,
   },
   /// Drilled holes at sketch points, into the material (against the sketch normal).
   Hole {
@@ -2603,9 +2634,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     | FeatureKind::Unstitch { .. }
     | FeatureKind::ReverseNormal { .. } => {}
     FeatureKind::Loft { .. } | FeatureKind::SplitBody { .. } => {}
-    FeatureKind::Sweep { twist, .. } => {
+    FeatureKind::Sweep { twist, taper, .. } => {
       if !twist.is_empty() {
         f(twist);
+      }
+      if !taper.is_empty() {
+        f(taper);
       }
     }
     FeatureKind::Mirror { .. }
