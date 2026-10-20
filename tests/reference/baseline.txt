@@ -82,6 +82,10 @@
 83-boundary-loop-thicken
 69-sm-tray
 75-sm-bracket-holes
+249-ccw-quarter-arc-slot
+250-cw-quarter-arc-slot
+251-major-arc-slot
+252-offset-shallow-arc-slot
 84-circular-solid
 85-circular-hollow
 86-square-section
@@ -119,8 +123,14 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+205-vertical-edge-sweep-path
+206-sketch-line-sweep-path
 217-midpoint-line-on-origin-resize
 218-midpoint-line-slanted-triangle
+235-grid-spacing
+236-line-direction
+237-extent-distance
+238-symmetric-direction
 257-g1-line-u-turn
 258-g2-line-u-turn
 259-g1-arc-line-arch
