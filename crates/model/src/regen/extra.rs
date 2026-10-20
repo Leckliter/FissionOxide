@@ -869,6 +869,7 @@ fn seg_point(s: &Seg, u: f64) -> [f64; 2] {
       let (sn, c) = (start + sweep * u).sin_cos();
       [center[0] + major[0] * c + v[0] * sn, center[1] + major[1] * c + v[1] * sn]
     }
+    Seg::Conic { p, w } => fox_sketch::conic_at(&p, w, u),
   }
 }
 
@@ -924,6 +925,14 @@ fn seg_head(s: &Seg, len: f64) -> Seg {
     }
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       Seg::EllipseArc { center, major, minor, start, sweep: sweep * u }
+    }
+    Seg::Conic { p, w } => {
+      // de Casteljau on the weighted points: the piece up to `u` is again a conic, its control
+      // point weighted w01 and its end w012; rescaled so both ends weigh 1
+      let w01 = 1.0 - u + u * w;
+      let w012 = (1.0 - u) * (1.0 - u) + 2.0 * u * (1.0 - u) * w + u * u;
+      let mid = [((1.0 - u) * p[0][0] + u * w * p[1][0]) / w01, ((1.0 - u) * p[0][1] + u * w * p[1][1]) / w01];
+      Seg::Conic { p: [p[0], mid, fox_sketch::conic_at(&p, w, u)], w: w01 / w012.sqrt() }
     }
   }
 }
@@ -1052,4 +1061,28 @@ fn thicken_joined(skin: &Shape, t: f64, symmetric: bool, round: bool) -> Option<
   let a = skin.thicken_joined(t, round).ok()?;
   let b = skin.thicken_joined(-t, round).ok()?;
   a.boolean(&b, BoolOp::Union).ok()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_conic_path_head_stays_on_the_conic() {
+    let (p, w) = ([[0.0, 0.0], [10.0, 25.0], [40.0, 0.0]], fox_sketch::conic_weight(0.8));
+    let whole = Seg::Conic { p, w };
+    let head = seg_head(&whole, seg_length(&whole) * 0.3);
+    let Seg::Conic { p: h, w: hw } = head else { panic!("{head:?}") };
+    assert_eq!(h[0], p[0]);
+    // every point of the head is a point of the whole conic, and it is 0.3 of the length
+    for k in 0..=8 {
+      let q = fox_sketch::conic_at(&h, hw, k as f64 / 8.0);
+      let d = (0..=20000)
+        .map(|i| seg_point(&whole, i as f64 / 20000.0))
+        .map(|s| (s[0] - q[0]).hypot(s[1] - q[1]))
+        .fold(f64::INFINITY, f64::min);
+      assert!(d < 1e-2, "{q:?} is {d} off");
+    }
+    assert!((seg_length(&head) - seg_length(&whole) * 0.3).abs() < 1e-3 * seg_length(&whole));
+  }
 }

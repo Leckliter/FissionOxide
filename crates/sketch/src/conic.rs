@@ -67,22 +67,39 @@ mod tests {
     }
   }
 
+  /// The distance from `q` to the conic: the nearest of dense samples, then refined by a
+  /// ternary search around it. Refining matters at high weights, where the curve races
+  /// through the parameter near its ends and uniform samples there are far apart.
+  fn distance_to_conic(p: &[[f64; 2]; 3], w: f64, q: [f64; 2]) -> f64 {
+    let f = |t: f64| {
+      let s = conic_at(p, w, t);
+      (s[0] - q[0]).hypot(s[1] - q[1])
+    };
+    const N: usize = 4000;
+    let i = (0..=N).min_by(|&a, &b| f(a as f64 / N as f64).total_cmp(&f(b as f64 / N as f64))).unwrap();
+    let (mut lo, mut hi) = (i.saturating_sub(1) as f64 / N as f64, (i + 1).min(N) as f64 / N as f64);
+    for _ in 0..100 {
+      let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+      if f(a) < f(b) { hi = b } else { lo = a }
+    }
+    f((lo + hi) / 2.0)
+  }
+
   #[test]
   fn cubic_pieces_follow_the_conic() {
     let p = [[0.0, 0.0], [10.0, 25.0], [40.0, 0.0]];
-    for rho in [0.05, 0.3, 0.5, 0.8, 0.97] {
+    for rho in [0.01, 0.05, 0.3, 0.5, 0.8, 0.97, 0.99] {
       let w = conic_weight(rho);
       let bz = conic_beziers(&p, w);
       assert_eq!(bz.len(), 8);
       assert_eq!(bz[0][0], p[0]);
       assert_eq!(bz[7][3], p[2]);
-      // every cubic point lies on the conic's implicit curve: check against dense samples
-      let dense: Vec<[f64; 2]> = (0..=4000).map(|i| conic_at(&p, w, i as f64 / 4000.0)).collect();
+      // every cubic point lies on the conic (the worst is about 3e-5 on this 40-wide curve)
       for b in &bz {
         for k in 0..=10 {
           let q = crate::bezier_at(b, k as f64 / 10.0);
-          let d = dense.iter().map(|s| (s[0] - q[0]).hypot(s[1] - q[1])).fold(f64::INFINITY, f64::min);
-          assert!(d < 0.05, "{rho}: {q:?} is {d} off");
+          let d = distance_to_conic(&p, w, q);
+          assert!(d < 1e-3, "{rho}: {q:?} is {d} off");
         }
       }
     }

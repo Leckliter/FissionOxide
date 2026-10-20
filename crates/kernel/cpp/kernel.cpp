@@ -271,7 +271,7 @@ TopoDS_Edge seg_edge(rust::Slice<const double> segs, size_t seg) {
     weights.SetValue(1, 1.0);
     weights.SetValue(2, segs[o + 10]);
     weights.SetValue(3, 1.0);
-    if (!(segs[o + 10] > 0.0)) throw std::runtime_error("degenerate conic in profile");
+    if (!(segs[o + 10] > 0.0) || !std::isfinite(segs[o + 10])) throw std::runtime_error("degenerate conic in profile");
     Handle(Geom_BezierCurve) bz = new Geom_BezierCurve(poles, weights);
     BRepBuilderAPI_MakeEdge me(bz);
     if (!me.IsDone()) throw std::runtime_error("degenerate conic in profile");
