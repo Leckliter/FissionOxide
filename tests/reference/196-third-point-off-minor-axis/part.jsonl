@@ -1,7 +1,7 @@
 # 196-third-point-off-minor-axis: added by the parity loop from a Fusion probe
 # third-point-off-minor-axis: XY: ellipse centre (0,0), major-axis end (20,0), third pick (15,5) is a point ON the ellipse (Fusion: minor = 5/sqrt(1-(15/20)^2) = 7.559); extruded 4.
-# hand-written: Fox's Ellipse tool (crates/ui/src/viewport.rs) turns the third pick into minor = its distance from the major axis (5); sketch.ellipse has no point-on-ellipse input
+# hand-written: the third pick is a point on the ellipse
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
-{"cmd": "sketch.ellipse", "center": [0, 0], "major": [20, 0], "minor": 5}
+{"cmd": "sketch.ellipse", "center": [0, 0], "major": [20, 0], "point": [15, 5]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 4, "operation": "new_body"}

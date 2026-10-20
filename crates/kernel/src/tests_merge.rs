@@ -1,11 +1,9 @@
-//! One edge per sketch curve: profile pieces flagged to merge (pending behaviours turned on in
+//! One edge per sketch curve: profile pieces flagged to merge (one-edge behaviours turned on in
 //! the sketch) become one edge; pieces of different curves never do.
 
 use super::*;
-use fox_sketch::behaviour::{
-  ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_ELLIPSE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS, PENDING,
-};
-use fox_sketch::{CurveKind, PtSpec, Sketch, find_profiles};
+use fox_sketch::behaviour::{ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_ELLIPSE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS};
+use fox_sketch::{Behaviours, CurveKind, PtSpec, Sketch, find_profiles};
 use std::f64::consts::PI;
 
 /// Extrudes every profile of the sketch 2 mm; (faces, volume) of each, largest profile first.
@@ -35,13 +33,20 @@ fn mesh_volume(p: &fox_sketch::Profile) -> f64 {
     / 6.0
 }
 
+/// Every one-edge behaviour, shipped or pending.
+const ALL: &[&str] = &[ONE_EDGE_ELLIPSE, ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE, ONE_EDGE_SPLIT_ARCS];
+
+/// A sketch with no behaviours, as an old file loads.
+fn legacy() -> Sketch {
+  let mut s = Sketch::new();
+  s.behaviours = Behaviours::legacy();
+  s
+}
+
+/// The sketch with these behaviours turned on.
 fn with(mut s: Sketch, names: &[&str]) -> Sketch {
   for n in names {
-    if PENDING.contains(n) {
-      s.behaviours.enable_pending_for_tests(n);
-    } else {
-      s.behaviours.insert(*n);
-    }
+    s.behaviours.insert(*n);
   }
   s
 }
@@ -53,7 +58,7 @@ fn ellipse(s: &mut Sketch, c: [f64; 2], major: [f64; 2], minor: f64) {
 
 #[test]
 fn a_whole_ellipse_extrudes_to_one_side_face_with_one_edge_ellipse() {
-  let mut s = Sketch::new();
+  let mut s = legacy();
   ellipse(&mut s, [5.0, 3.0], [5.0, 11.0], 4.0);
   let legacy = extrude_all(&s);
   let merged = extrude_all(&with(s, &[ONE_EDGE_ELLIPSE]));
@@ -68,7 +73,7 @@ fn a_whole_ellipse_extrudes_to_one_side_face_with_one_edge_ellipse() {
 
 #[test]
 fn an_ellipse_hole_merges_too() {
-  let mut s = Sketch::new();
+  let mut s = legacy();
   s.add_rectangle([-20.0, -20.0], [20.0, 20.0]).unwrap();
   // minor larger than major: OCCT swaps the axes
   ellipse(&mut s, [0.0, 0.0], [6.0, 0.0], 9.0);
@@ -85,7 +90,7 @@ fn an_ellipse_hole_merges_too() {
 fn separate_curves_joined_smoothly_stay_separate_edges() {
   // two arcs of one circle, and two elliptical arcs of one ellipse: each pair makes a whole round
   // that one curve would, but they are two curves
-  let mut s = Sketch::new();
+  let mut s = legacy();
   let c = s.add_point(0.0, 0.0);
   let (a, b) = (s.add_point(10.0, 0.0), s.add_point(-10.0, 0.0));
   s.add_curve(CurveKind::Arc { center: c, start: a, end: b }).unwrap();
@@ -96,7 +101,7 @@ fn separate_curves_joined_smoothly_stay_separate_edges() {
   s.add_curve(CurveKind::EllipticalArc { center: c, major: m, minor: 5.0, start: top, end: bottom }).unwrap();
   s.add_curve(CurveKind::EllipticalArc { center: c, major: m, minor: 5.0, start: bottom, end: top }).unwrap();
   let legacy = extrude_all(&s);
-  let all = extrude_all(&with(s, PENDING));
+  let all = extrude_all(&with(s, ALL));
   assert_eq!(legacy.len(), 2);
   assert_eq!(legacy.iter().map(|p| p.0).collect::<Vec<_>>(), [4, 4]);
   assert_eq!(all.iter().map(|p| p.0).collect::<Vec<_>>(), [4, 4], "every flag on, still two sides each");
@@ -104,8 +109,7 @@ fn separate_curves_joined_smoothly_stay_separate_edges() {
 
 #[test]
 fn a_circle_split_where_lines_touch_it_merges_back_with_one_edge_split_arcs() {
-  let mut s = Sketch::new();
-  s.behaviours = fox_sketch::Behaviours::legacy();
+  let mut s = legacy();
   s.add_circle(PtSpec::At(0.0, 0.0), 10.0).unwrap();
   // dangling lines ending on the circle split it, then are pruned from the profile
   s.add_line(PtSpec::At(20.0, 0.0), PtSpec::At(10.0, 0.0)).unwrap();
@@ -120,7 +124,7 @@ fn a_circle_split_where_lines_touch_it_merges_back_with_one_edge_split_arcs() {
 #[test]
 fn spline_pieces_become_one_b_spline_edge() {
   for (kind, flag) in [(0, ONE_EDGE_FIT_SPLINE), (1, ONE_EDGE_CONTROL_SPLINE)] {
-    let mut s = Sketch::new();
+    let mut s = legacy();
     let pts: Vec<_> =
       [[0.0, 0.0], [5.0, 6.0], [12.0, 4.0], [18.0, 9.0], [24.0, 0.0]].iter().map(|p| s.add_point(p[0], p[1])).collect();
     let curve = if kind == 0 {

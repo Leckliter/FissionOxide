@@ -90,6 +90,9 @@
 89-box-patch-flip-cut
 90-arc-surface-symmetric
 91-l-surface-sharp-symmetric
+101-concentric-circle-chain
+102-concentric-arc-to-circle
+103-concentric-circle-to-ellipse
 111-fix-point-rectangle
 112-fix-line-rotated-rectangle
 113-fix-circle-equal
@@ -123,6 +126,9 @@
 184-partial-angle
 185-symmetric-angle
 186-line-loop-partial
+195-rotated-offset-ellipse-xz
+196-third-point-off-minor-axis
+197-minor-longer-than-major
 205-vertical-edge-sweep-path
 206-sketch-line-sweep-path
 217-midpoint-line-on-origin-resize

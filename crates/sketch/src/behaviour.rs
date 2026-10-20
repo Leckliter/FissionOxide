@@ -59,17 +59,23 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// The solver first tries each ellipse named in a Concentric constraint with its free major-axis
+/// point riding on its centre, so the constraint slides the ellipse rather than turning or
+/// stretching it, as in Fusion. Other ellipses solve as before.
+pub const ELLIPSE_CONCENTRIC_PASS: &str = "ellipse_concentric_pass";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  ONE_EDGE_ELLIPSE,
+  ELLIPSE_CONCENTRIC_PASS,
   ONE_EDGE_SPLIT_ARCS,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
 /// moving its name from here to [`CURRENT`]. Tests turn them on with
 /// [`Behaviours::enable_pending_for_tests`].
-pub const PENDING: &[&str] = &[ONE_EDGE_ELLIPSE, ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE];
+pub const PENDING: &[&str] = &[ONE_EDGE_CONTROL_SPLINE, ONE_EDGE_FIT_SPLINE];
 
 /// A flag only this crate's own unit tests register, to exercise [`Behaviours::has`].
 const TEST_ONLY: &str = "test_only_dummy";

@@ -916,6 +916,19 @@ impl Sketch {
         None => Err(SketchError::NoCurve(id)),
       }
     };
+    // anything with a centre: circles, arcs, ellipses and elliptical arcs
+    let centred = |id: CurveId, what: &'static str| -> Result<(), SketchError> {
+      match self.curve(id).map(|c| &c.kind) {
+        Some(
+          CurveKind::Circle { .. }
+          | CurveKind::Arc { .. }
+          | CurveKind::Ellipse { .. }
+          | CurveKind::EllipticalArc { .. },
+        ) => Ok(()),
+        Some(_) => Err(SketchError::WrongGeometry(what, "circles, arcs or ellipses")),
+        None => Err(SketchError::NoCurve(id)),
+      }
+    };
     let any = |id: CurveId| -> Result<(), SketchError> {
       match self.curve(id).map(|c| &c.kind) {
         Some(k) if k.is_freeform() => {
@@ -971,7 +984,7 @@ impl Sketch {
         }
       }
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
-      ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),
+      ConstraintKind::Concentric { a, b } => centred(*a, "Concentric").and(centred(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
       ConstraintKind::FixRadius { curve, radius } => {
         round(*curve, "Fix")?;
