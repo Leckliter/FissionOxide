@@ -274,3 +274,39 @@ fn trimmed_and_extended_surfaces_stitch_back_into_a_solid() {
   let v: f64 = s.model.bodies.iter().map(|b| b.shape.mass().unwrap().volume).sum();
   assert!(close(v, 800.0, 1e-3), "{v}");
 }
+
+#[test]
+fn thicken_an_l_surface_with_sharp_and_rounded_corners() {
+  // an open L ((0,0)-(30,0)-(30,20)) extruded 25 mm: a two-face surface with a 90° corner
+  let thick = |p: Value| {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [30, 20]]}));
+    run(&mut s, "surface.extrude", json!({"distance": 25}));
+    let id = last(&s);
+    let mut p = p;
+    p["bodies"] = json!([id]);
+    p["thickness"] = json!(2);
+    run(&mut s, "thicken", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    let solids: Vec<_> = s.model.bodies.iter().filter(|b| b.shape.solid_count() > 0).collect();
+    assert_eq!(solids.len(), 1);
+    let m = solids[0].shape.mass().unwrap();
+    (m.volume, solids[0].shape.faces().unwrap().len())
+  };
+  // symmetric is 2 mm on each side, the outer corner filled square: an L section of 200 mm²
+  let (v, n) = thick(json!({"symmetric": true}));
+  assert!(close(v, 5000.0, 1e-3) && n == 8, "{v} {n}");
+  // one side each way: outside (30·2 + 20·2 + 2·2 = 104 mm²) and inside (96 mm²)
+  let (a, na) = thick(json!({}));
+  let (b, nb) = thick(json!({"flip": true}));
+  assert!(close(a + b, 5000.0, 1e-3) && na == 8 && nb == 8, "{a} {b} {na} {nb}");
+  assert!(close(a.max(b), 2600.0, 1e-3), "{a} {b}");
+  // rounded: the outside corner is a quarter disc of radius 2 instead of a square
+  let (a, _) = thick(json!({"corners": "round"}));
+  let (b, _) = thick(json!({"corners": "round", "flip": true}));
+  assert!(close(a.max(b), (100.0 + PI) * 25.0, 1e-3) && close(a.min(b), 2400.0, 1e-3), "{a} {b}");
+  let (v, _) = thick(json!({"corners": "round", "symmetric": true}));
+  assert!(close(v, (196.0 + PI) * 25.0, 1e-3), "{v}");
+}

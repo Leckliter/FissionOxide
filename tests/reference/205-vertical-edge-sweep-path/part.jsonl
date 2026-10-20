@@ -1,0 +1,15 @@
+# 205-vertical-edge-sweep-path: added by the parity loop from a Fusion probe
+# 20x20x10 box; a sketch on XY takes the box's vertical edge at x=20,y=20 as a 3D line (Fusion:
+# Include 3D Geometry; Fox has no include, sketch.project is the closest), and a r3 circle at
+# (20,20) is swept along it, joined.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [20, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.project", "body": 2000, "face": 2, "associative": false}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [20, 20], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "sweep", "sketch": 4, "path": 3, "operation": "join"}

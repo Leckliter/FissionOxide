@@ -1,0 +1,235 @@
+{
+ "id": "symmetric-angle",
+ "name": "symmetric-angle",
+ "description": "80x80x5 plate centred on the origin; r3 hole at (30,0) circular-patterned 3x over 90 deg about the origin, symmetric about the original; cut through.",
+ "exercises": [
+  "extrude",
+  "sketch circular pattern",
+  "extrude cut"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Plate_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "r0",
+     "start": {
+      "at": [
+       -40,
+       -40
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       -40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r1",
+     "start": {
+      "ref": "r0.end",
+      "at": [
+       40,
+       -40
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r2",
+     "start": {
+      "ref": "r1.end",
+      "at": [
+       40,
+       40
+      ]
+     },
+     "end": {
+      "at": [
+       -40,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r3",
+     "start": {
+      "ref": "r2.end",
+      "at": [
+       -40,
+       40
+      ]
+     },
+     "end": {
+      "ref": "r0.start",
+      "at": [
+       -40,
+       -40
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Plate",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Plate_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r0",
+        "r1",
+        "r2",
+        "r3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Holes",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "h",
+     "center": {
+      "at": [
+       30,
+       0
+      ]
+     },
+     "radius": 3
+    },
+    {
+     "curves": [
+      "h"
+     ],
+     "center": {
+      "ref": "origin"
+     },
+     "count": 3,
+     "angle_deg": 90,
+     "symmetric": true,
+     "type": "circular_pattern",
+     "id": "p"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cut",
+   "operation": "cut",
+   "profiles": [
+    {
+     "sketch": "Holes",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "h",
+        "p.0",
+        "p.1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "through_all",
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Plate"
+   ]
+  }
+ ]
+}

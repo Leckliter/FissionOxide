@@ -1,0 +1,214 @@
+{
+ "id": "slanted-construction-collinear",
+ "name": "slanted-construction-collinear",
+ "description": "Quad whose top edge (drawn (40,22)->(0,14), running -x) is made collinear with a fixed slanted construction line (0,10)->(50,30), so the top becomes y=10+0.4x. Extruded 10 mm.",
+ "exercises": [
+  "sketch_constraints",
+  "collinear",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       50,
+       30
+      ]
+     },
+     "id": "c",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       22
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       22
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       14
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       14
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "c"
+     ]
+    },
+    {
+     "type": "horizontal",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "vertical",
+     "refs": [
+      "l4"
+     ]
+    },
+    {
+     "type": "coincident",
+     "refs": [
+      "l1.start",
+      "origin"
+     ]
+    },
+    {
+     "type": "collinear",
+     "refs": [
+      "l3",
+      "c"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l1.start",
+      "l1.end"
+     ],
+     "value": 40,
+     "unit": "mm",
+     "orientation": "horizontal"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

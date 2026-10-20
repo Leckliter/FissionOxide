@@ -1,0 +1,192 @@
+{
+ "id": "fix-line-rotated-rectangle",
+ "name": "fix-line-rotated-rectangle",
+ "description": "Slanted line (10,5)-(34,23) fixed as a whole; perpendicular sides from both ends, opposite side parallel, side dimensioned 15 (drawn 10): a 30x15 rectangle rotated atan(3/4); extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "fix",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       10,
+       5
+      ]
+     },
+     "end": {
+      "at": [
+       34,
+       23
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       34,
+       23
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       28,
+       31
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       28,
+       31
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       4,
+       13
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       4,
+       13
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       10,
+       5
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "perpendicular",
+     "refs": [
+      "l1",
+      "l2"
+     ]
+    },
+    {
+     "type": "perpendicular",
+     "refs": [
+      "l1",
+      "l4"
+     ]
+    },
+    {
+     "type": "parallel",
+     "refs": [
+      "l3",
+      "l1"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "distance",
+     "refs": [
+      "l2.start",
+      "l2.end"
+     ],
+     "value": 15,
+     "unit": "mm"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}
