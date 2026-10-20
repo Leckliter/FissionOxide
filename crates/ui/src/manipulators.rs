@@ -372,7 +372,8 @@ fn readout(
   project: &dyn Fn(DVec3) -> Option<Pos2>,
 ) {
   let moved = t.origin - start.origin;
-  let mm = |v: f64| format!("{} mm", fox_engine::sketch::Dim::new(v).expr);
+  let unit = crate::units::current(painter.ctx());
+  let mm = |v: f64| unit.format(v);
   let (at, text) = match h {
     Handle::Ring(_) => (project(t.origin), format!("{:.1}°", t.angle.to_degrees())),
     Handle::Arrow(i) => (l.arrows[i].map(|a| a.1), mm(moved.dot(t.axes[i]))),

@@ -78,6 +78,11 @@ cmds! {
   "param.set" => "Change a parameter's expression", "{name, expr}";
   "param.rename" => "Rename a parameter (rewrites expressions using it)", "{name, to}";
   "param.remove" => "Delete an unused parameter", "{name}";
+  "param.comment" => "Set a user parameter's comment", "{name, comment}";
+  "param.favorite" => "Star a parameter in Change Parameters (Favorites); toggles without 'on'", "{name} | {feature, index}, on?: bool";
+  "param.model" => "Model parameters d1, d2, ...: every feature's and sketch dimension's expression, in timeline order", "{}";
+  "param.model_set" => "Change a model parameter's expression", "{feature, index, expr}";
+  "design.units" => "Document units: how lengths show and what bare numbers typed mean (values stay in mm); no unit reads it", "{unit?: mm|cm|m|in|ft}";
   "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
@@ -351,6 +356,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cut::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::params::run(s, name, p) {
     return r;
   }
   match name {

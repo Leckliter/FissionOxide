@@ -85,7 +85,9 @@ impl Dialog {
     dirty |= pick(ui, "Start", "ext-start", &STARTS, &mut ext.start);
     if ext.start == "offset" {
       ui.label("Offset");
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.start_offset).desired_width(140.0)).changed();
+      let mut r = ui.add(egui::TextEdit::singleline(&mut ext.start_offset).desired_width(140.0));
+      crate::units::pin(ui, &mut r, &mut ext.start_offset);
+      dirty |= r.changed();
       ui.end_row();
     } else if ext.start == "object" {
       ui.label("Start object");
@@ -119,7 +121,9 @@ impl Dialog {
         self.text(ui, true);
         ui.end_row();
         ui.label("Distance 2");
-        dirty |= ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0)).changed();
+        let mut r = ui.add(egui::TextEdit::singleline(&mut self.distance2).desired_width(140.0));
+        crate::units::pin(ui, &mut r, &mut self.distance2);
+        dirty |= r.changed();
         ui.end_row();
       }
       e => {
@@ -142,7 +146,9 @@ impl Dialog {
       }
       dirty |= pick(ui, "Wall location", "ext-wall", &WALLS, &mut ext.thin_side);
       ui.label("Wall thickness");
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.thickness).hint_text("1 mm").desired_width(140.0)).changed();
+      let mut r = ui.add(egui::TextEdit::singleline(&mut ext.thickness).hint_text("1 mm").desired_width(140.0));
+      crate::units::pin(ui, &mut r, &mut ext.thickness);
+      dirty |= r.changed();
       ui.end_row();
     }
 

@@ -24,8 +24,9 @@ pub(super) struct Cache {
 
 const AXES: [&str; 3] = ["x", "y", "z"];
 
-fn mm(v: f64) -> String {
-  format!("{} mm", fox_engine::sketch::Dim::new((v * 1e4).round() / 1e4).expr)
+/// A dragged length (mm) as a value box shows it, in the design's unit.
+pub(super) fn mm(unit: fox_engine::model::LengthUnit, v: f64) -> String {
+  unit.format((v * 1e4).round() / 1e4)
 }
 
 fn deg(a: f64) -> String {
@@ -109,8 +110,8 @@ impl Dialog {
   pub(super) fn set_more_manipulator(&mut self, v: f64, step: f64) -> bool {
     match self.kind {
       // a radius or distance can't reach zero: the smallest step is as far as it goes
-      Kind::Fillet | Kind::Chamfer => self.radius = mm(v.max(step.max(1e-3))),
-      Kind::PressPull => self.distance = mm(v),
+      Kind::Fillet | Kind::Chamfer => self.radius = mm(self.unit, v.max(step.max(1e-3))),
+      Kind::PressPull => self.distance = mm(self.unit, v),
       _ => return false,
     }
     true
@@ -186,12 +187,12 @@ impl Dialog {
           }
         };
         let t = r.inverse() * to - c;
-        self.translate = [mm(t.x), mm(t.y), mm(t.z)];
+        self.translate = [mm(self.unit, t.x), mm(self.unit, t.y), mm(self.unit, t.z)];
       }
       Kind::Joint => match edit {
         TriadEdit::Move(p) => {
           let Some(f) = self.joint_fixed_frame(s) else { return };
-          self.distance = mm((p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
+          self.distance = mm(self.unit, (p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
         }
         TriadEdit::Rotate(_, a) => self.angle = deg(a),
       },

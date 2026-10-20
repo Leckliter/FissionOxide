@@ -21,12 +21,14 @@ mod manipulators;
 mod marking;
 mod menus;
 mod panels;
+mod params_ui;
 mod preview;
 mod select;
 mod sheet;
 mod theme;
 mod toolbox;
 mod trace;
+mod units;
 mod updates;
 mod viewport;
 
@@ -1069,6 +1071,7 @@ impl App {
   pub fn draw(&mut self, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
+    units::publish(&ctx, self.s.design.units);
     if self.poll_opening() {
       self.draw_busy(ui, &ctx);
       return;
@@ -1128,7 +1131,7 @@ impl App {
       }
     }
     if self.show_params {
-      panels::parameters_window(self, &ctx);
+      params_ui::window(self, &ctx);
     }
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);
