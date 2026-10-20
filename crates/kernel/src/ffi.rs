@@ -203,6 +203,9 @@ pub(crate) mod ffi {
     // where shapes cross, as wires; where a wire starts (cpp/curves3d.cpp)
     include!("fox-kernel/cpp/curves3d.hxx");
     fn section_wires(a: &Shape, b: &Shape, tolerance: f64) -> Result<UniquePtr<Shape>>;
+    fn chain_wires(s: &Shape, tolerance: f64) -> Result<UniquePtr<Shape>>;
+    fn split_at_corners(w: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
+    fn wire_corners(w: &Shape, angle: f64) -> Result<Vec<f64>>;
     fn wire_start(w: &Shape) -> Result<Vec<f64>>;
     fn wire_count(s: &Shape) -> usize;
     fn wire_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;

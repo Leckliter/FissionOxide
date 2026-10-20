@@ -80,3 +80,53 @@ fn intersection_curve_needs_something_to_cross() {
   run(&mut s, "sketch.finish", json!({}));
   assert!(s.execute("sketch.intersection_curve", &json!({"sketch": 1})).is_err());
 }
+
+/// The volume of a pipe (`p`: its options) along where a 40 x 20 rectangle on xy (x 10..50,
+/// y -10..10), pushed up and down, crosses the side of an r20 rod along x (0..60): one closed loop
+/// on top and one below, each two straight runs of 40 at y = ±10 and two arcs of r20 spanning
+/// 2·asin(10/20) = 60°, meeting square at 4 corners.
+fn rectangle_pipe(p: Value) -> f64 {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "yz"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 20}));
+  run(&mut s, "extrude", json!({"distance": 60}));
+  let rect = run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [10, -10], "corner2": [50, 10]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ic =
+    run(&mut s, "sketch.intersection_curve", json!({"sketch": rect["sketch"], "faces": [{"point": [30, 0, 20]}]}));
+  let mut p = p;
+  p["path"] = ic["feature"].clone();
+  p["operation"] = json!("new_body");
+  run(&mut s, "pipe", p);
+  assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+  // the sides' pieces chain into one closed path above the rod and one below; each smooth run is
+  // swept on its own and every corner closed with a ball, so no flat end is left anywhere
+  for b in &s.model.bodies[1..] {
+    assert!(b.shape.is_valid(), "the pipe is a valid solid");
+  }
+  let flat: usize = s.model.bodies[1..]
+    .iter()
+    .map(|b| b.shape.faces().unwrap().iter().filter(|f| f.kind == fox_kernel::SurfaceKind::Plane).count())
+    .sum();
+  assert_eq!(flat, 0, "the pipes along closed paths have no end faces or notches");
+  volume(&s) - std::f64::consts::PI * 20.0 * 20.0 * 60.0
+}
+
+#[test]
+fn pipe_along_a_rectangles_intersection_curve_has_round_corners() {
+  // by hand, for a round section of radius r: the runs hold πr² a unit of length; at each square
+  // corner the two runs' ends overlap by 4r³/3 (two crossed half-cylinders) and the ball adds
+  // the quarter lune both miss, πr³/3. Flat-ended tubes unioned at the corners lack the lune.
+  let pi = std::f64::consts::PI;
+  let path = 2.0 * 40.0 + 2.0 * 20.0 * std::f64::consts::FRAC_PI_3;
+  let notched = |r: f64| 2.0 * (pi * r * r * path - 4.0 * 4.0 * r.powi(3) / 3.0);
+  let round = |r: f64| notched(r) + 2.0 * 4.0 * pi * r.powi(3) / 3.0;
+  let solid = rectangle_pipe(json!({"diameter": 2}));
+  assert!((solid - round(1.0)).abs() < 1e-4 * round(1.0), "pipes {solid} vs {}", round(1.0));
+  assert!(solid > notched(1.0) + 8.0, "pipes {solid} fill the corners the notched {} lack", notched(1.0));
+  // hollow: the bore, corners and all, cut out of the solid pipe
+  let hollow = rectangle_pipe(json!({"diameter": 2, "wall": 0.5}));
+  let want = round(1.0) - round(0.5);
+  assert!((hollow - want).abs() < 1e-4 * want, "hollow pipes {hollow} vs {want}");
+}

@@ -31,6 +31,9 @@
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
 
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
+
 #include <vector>
 
 namespace fox {
@@ -48,6 +51,60 @@ namespace {
   } catch (...) {
     throw std::runtime_error(std::string(what) + ": unknown kernel error");
   }
+}
+
+// An edge of a wire in order along it: where and which way it starts, and which way it ends.
+struct PathEdge {
+  TopoDS_Edge e;
+  gp_Pnt p0;
+  gp_Vec d0, d1;
+};
+
+bool wire_closed(const TopoDS_Wire &wire) {
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(wire, v0, v1);
+  if (v0.IsNull() || v1.IsNull()) return false;
+  if (v0.IsSame(v1)) return true;
+  return BRep_Tool::Pnt(v0).Distance(BRep_Tool::Pnt(v1)) <=
+         std::max(BRep_Tool::Tolerance(v0), BRep_Tool::Tolerance(v1));
+}
+
+std::vector<PathEdge> path_edges(const TopoDS_Wire &wire) {
+  std::vector<PathEdge> out;
+  for (BRepTools_WireExplorer ex(wire); ex.More(); ex.Next()) {
+    PathEdge pe;
+    pe.e = ex.Current();
+    BRepAdaptor_Curve c(pe.e);
+    bool rev = pe.e.Orientation() == TopAbs_REVERSED;
+    gp_Pnt p1;
+    c.D1(rev ? c.LastParameter() : c.FirstParameter(), pe.p0, pe.d0);
+    c.D1(rev ? c.FirstParameter() : c.LastParameter(), p1, pe.d1);
+    if (rev) {
+      pe.d0.Reverse();
+      pe.d1.Reverse();
+    }
+    out.push_back(pe);
+  }
+  return out;
+}
+
+// Which edges start at a sharp corner, where the path's direction turns by more than `angle`
+// radians. On an open wire the first edge never does; on a closed one it may.
+std::vector<bool> corner_starts(const std::vector<PathEdge> &edges, bool closed, double angle) {
+  std::vector<bool> out(edges.size(), false);
+  for (size_t i = 0; i < edges.size(); ++i) {
+    if (i == 0 && !closed) continue;
+    const gp_Vec &in = edges[i == 0 ? edges.size() - 1 : i - 1].d1;
+    const gp_Vec &o = edges[i].d0;
+    // no direction to compare: treat it as a corner, which is always safe
+    out[i] = in.Magnitude() < 1e-12 || o.Magnitude() < 1e-12 || in.Angle(o) > angle;
+  }
+  return out;
+}
+
+const TopoDS_Wire &as_path(const Shape &w) {
+  if (w.s.IsNull() || w.s.ShapeType() != TopAbs_WIRE) throw std::runtime_error("not a wire");
+  return TopoDS::Wire(w.s);
 }
 
 } // namespace
@@ -81,6 +138,88 @@ std::unique_ptr<Shape> section_wires(const Shape &a, const Shape &b, double tole
     return r;
   } catch (...) {
     fail("intersection curve");
+  }
+}
+
+// The edges of `s` (wires from separate sections, say) chained end to end, within `tolerance`,
+// into as few wires as they make: a compound of wires.
+std::unique_ptr<Shape> chain_wires(const Shape &s, double tolerance) {
+  try {
+    Handle(TopTools_HSequenceOfShape) edges = new TopTools_HSequenceOfShape;
+    for (TopExp_Explorer ex(s.s, TopAbs_EDGE); ex.More(); ex.Next()) edges->Append(ex.Current());
+    if (edges->IsEmpty()) throw std::runtime_error("there are no curves to chain");
+    Handle(TopTools_HSequenceOfShape) wires;
+    ShapeAnalysis_FreeBounds::ConnectEdgesToWires(edges, tolerance, Standard_False, wires);
+    TopoDS_Compound out;
+    BRep_Builder bb;
+    bb.MakeCompound(out);
+    for (int i = 1; i <= wires->Length(); ++i) bb.Add(out, wires->Value(i));
+    auto r = std::make_unique<Shape>();
+    r->s = out;
+    return r;
+  } catch (...) {
+    fail("chain curves");
+  }
+}
+
+// A wire split at its sharp corners (where its direction turns by more than `angle` radians) into
+// smooth runs, as a compound of wires in order along it. A closed wire with corners splits into
+// runs that each start and end at one; a wire without corners comes back whole.
+std::unique_ptr<Shape> split_at_corners(const Shape &w, double angle) {
+  try {
+    const TopoDS_Wire &wire = as_path(w);
+    std::vector<PathEdge> edges = path_edges(wire);
+    if (edges.empty()) throw std::runtime_error("the wire is empty");
+    bool closed = wire_closed(wire);
+    std::vector<bool> corner = corner_starts(edges, closed, angle);
+    TopoDS_Compound out;
+    BRep_Builder bb;
+    bb.MakeCompound(out);
+    if (std::find(corner.begin(), corner.end(), true) == corner.end()) {
+      bb.Add(out, wire);
+    } else {
+      // a closed wire starts its first run at its first corner
+      size_t first = 0;
+      if (closed) {
+        while (!corner[first]) ++first;
+      }
+      std::vector<TopoDS_Edge> run;
+      auto flush = [&]() {
+        BRepBuilderAPI_MakeWire mw;
+        for (const TopoDS_Edge &e : run) mw.Add(e);
+        if (!mw.IsDone()) throw std::runtime_error("a run of the path could not be made");
+        bb.Add(out, mw.Wire());
+        run.clear();
+      };
+      for (size_t k = 0; k < edges.size(); ++k) {
+        size_t i = (first + k) % edges.size();
+        if (!run.empty() && corner[i]) flush();
+        run.push_back(edges[i].e);
+      }
+      flush();
+    }
+    auto r = std::make_unique<Shape>();
+    r->s = out;
+    return r;
+  } catch (...) {
+    fail("split path at corners");
+  }
+}
+
+// Where a wire turns sharply (by more than `angle` radians): [x, y, z] per corner.
+rust::Vec<double> wire_corners(const Shape &w, double angle) {
+  try {
+    const TopoDS_Wire &wire = as_path(w);
+    std::vector<PathEdge> edges = path_edges(wire);
+    std::vector<bool> corner = corner_starts(edges, wire_closed(wire), angle);
+    rust::Vec<double> out;
+    for (size_t i = 0; i < edges.size(); ++i) {
+      if (!corner[i]) continue;
+      for (double v : {edges[i].p0.X(), edges[i].p0.Y(), edges[i].p0.Z()}) out.push_back(v);
+    }
+    return out;
+  } catch (...) {
+    fail("path corners");
   }
 }
 

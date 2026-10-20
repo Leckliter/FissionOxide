@@ -18,6 +18,29 @@ impl Shape {
     c.wires()
   }
 
+  /// The edges of `wires` chained end to end into as few wires as they make: ends that meet
+  /// within `tolerance` join, so curves sectioned one at a time come back as connected paths.
+  pub fn chain_wires(wires: &[Shape], tolerance: f64) -> Result<Vec<Shape>> {
+    if !(tolerance > 0.0 && tolerance.is_finite()) {
+      return Err(KernelError::Input("the tolerance must be positive".into()));
+    }
+    let c = Shape::compound(wires)?;
+    Shape::wrap(sys::chain_wires(c.get()?, tolerance)?)?.wires()
+  }
+
+  /// This wire split at its sharp corners (where its direction turns by more than `angle`
+  /// radians) into smooth runs, in order along it. A closed wire with corners splits into runs
+  /// that each start and end at a corner; a wire without corners comes back whole.
+  pub fn split_at_corners(&self, angle: f64) -> Result<Vec<Shape>> {
+    Shape::wrap(sys::split_at_corners(self.get()?, angle)?)?.wires()
+  }
+
+  /// Where this wire turns sharply: its direction turns by more than `angle` radians.
+  pub fn wire_corners(&self, angle: f64) -> Result<Vec<DVec3>> {
+    let v = sys::wire_corners(self.get()?, angle)?;
+    Ok(v.chunks_exact(3).map(|c| DVec3::new(c[0], c[1], c[2])).collect())
+  }
+
   /// The wires in this shape, in order.
   pub fn wires(&self) -> Result<Vec<Shape>> {
     let s = self.get()?;
