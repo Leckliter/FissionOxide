@@ -1,0 +1,15 @@
+# 121-midpoint-point-on-arc: added by the parity loop from a Fusion probe
+# midpoint-point-on-arc: Profile (0,0),(40,0),(40,10), arc to (0,20), back down; a sketch point is constrained to the arc's midpoint and dimensioned 30 above the origin, which fixes the arc through (23.75,30); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 10]]}
+{"cmd": "sketch.arc", "start": [40, 10], "mid": [23, 30], "end": [0, 20]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.point", "at": [23, 30]}
+{"cmd": "sketch.constrain", "type": "midpoint", "points": [12], "curves": [9]}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 40}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [1, 4], "value": 10}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [0, 7], "value": 20}
+{"cmd": "sketch.dimension", "type": "vertical", "points": [0, 12], "value": 30}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
