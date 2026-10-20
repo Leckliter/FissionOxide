@@ -164,3 +164,132 @@ fn splines_and_ellipses_in_trim_extend_offset_and_constraints() {
   let spline = info["curves"].as_array().unwrap().iter().find(|c| c["id"] == sp).unwrap();
   assert!(spline["kind"]["start_handle"].is_u64() && spline["kind"]["end_handle"].is_u64(), "{spline}");
 }
+
+#[test]
+fn sketch_rectangular_pattern_options() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]]}))["curves"][0].as_u64().unwrap();
+  let c = run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 1}))["curves"][0].as_u64().unwrap();
+  let centres = |s: &mut Session, made: &Value| -> Vec<[f64; 2]> {
+    let info = run(s, "sketch.info", json!({}));
+    let curves = info["geometry"].as_array().cloned().unwrap_or_default();
+    ids(&made["curves"])
+      .iter()
+      .map(|id| {
+        let cv = curves.iter().find(|v| v["curve"].as_u64() == Some(*id)).unwrap_or_else(|| panic!("{id}: {info}"));
+        let b = &cv["bbox"];
+        let mid = |k: usize| (b[0][k].as_f64().unwrap() + b[1][k].as_f64().unwrap()) / 2.0;
+        [mid(0), mid(1)]
+      })
+      .collect()
+  };
+  let close = |got: &[[f64; 2]], want: &[[f64; 2]]| {
+    got.len() == want.len() && got.iter().zip(want).all(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() < 1e-6)
+  };
+  // Extent along a picked line (start to end is +Y), symmetric, with the second direction
+  // given as 90° counter-clockwise from it (-X).
+  let made = run(
+    &mut s,
+    "sketch.pattern_rect",
+    json!({"curves": [c], "direction": line, "count": 3, "spacing": 20, "distance_type": "extent",
+           "symmetric": true, "direction2": [-1, 0], "count2": 2, "spacing2": 5}),
+  );
+  let mut got = centres(&mut s, &made);
+  got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+  let want = [[-5.0, -10.0], [-5.0, 0.0], [-5.0, 10.0], [0.0, -10.0], [0.0, 10.0]];
+  assert!(close(&got, &want), "{got:?}");
+  // Without direction2 the second direction stays +Y, even when the first is not along +X.
+  let made = run(
+    &mut s,
+    "sketch.pattern_rect",
+    json!({"curves": [c], "direction": [0, -1], "count": 2, "spacing": 4, "count2": 2, "spacing2": 7}),
+  );
+  let mut got = centres(&mut s, &made);
+  got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+  assert!(close(&got, &[[0.0, -4.0], [0.0, 3.0], [0.0, 7.0]]), "{got:?}");
+  // unknown distance types are errors, not ignored
+  let bad = json!({"curves": [c], "count": 2, "spacing": 5, "distance_type": "total"});
+  assert!(s.execute("sketch.pattern_rect", &bad).is_err());
+}
+
+#[test]
+fn polygon_constraint_keeps_a_square_square_about_its_centre() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sq = run(&mut s, "sketch.line", json!({"points": [[-5, -5], [5, -5], [5, 5], [-5, 5]], "closed": true}));
+  let lines = ids(&sq["curves"]);
+  // a rectangle isn't a regular polygon, and three sides aren't a closed loop
+  let rect = run(&mut s, "sketch.line", json!({"points": [[20, 0], [30, 0], [30, 5], [20, 5]], "closed": true}));
+  assert!(s.execute("sketch.constrain", &json!({"type": "polygon", "curves": ids(&rect["curves"])})).is_err());
+  assert!(s.execute("sketch.constrain", &json!({"type": "polygon", "curves": &lines[..3]})).is_err());
+  run(&mut s, "sketch.delete", json!({"curves": ids(&rect["curves"])}));
+  let pg = run(&mut s, "sketch.constrain", json!({"type": "polygon", "curves": lines}));
+  let center = pg["center"].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "coincident", "points": [center, 0]}));
+  // the first corner 10 from the centre: a square of side 10√2 about the origin
+  let info = run(&mut s, "sketch.info", json!({}));
+  let corner = info["curves"].as_array().unwrap().iter().find(|c| c["id"] == lines[0]).unwrap()["kind"]["a"].clone();
+  let d = run(&mut s, "sketch.dimension", json!({"type": "distance", "points": [center, corner], "value": 10}));
+  assert_eq!(d["dof"], 0, "{d}");
+  run(&mut s, "extrude", json!({"distance": 1}));
+  assert!((volume(&s) - 200.0).abs() < 1e-6, "{}", volume(&s));
+}
+
+#[test]
+fn centre_arc_sweeps_clockwise() {
+  // Fusion's Center Point Arc runs either way: a typed negative sweep, or `clockwise`, draws the
+  // quarter below the start instead of the three quarters above it
+  let quarter = std::f64::consts::PI * 400.0 / 4.0 * 8.0;
+  for arc in [
+    json!({"center": [0, 0], "start": [20, 0], "sweep": -90}),
+    json!({"center": [0, 0], "start": [20, 0], "end": [0, -20], "clockwise": true}),
+  ] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.arc", arc.clone());
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, 0], [20, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "extrude", json!({"sketch": 1, "distance": 8}));
+    let v = volume(&s);
+    assert!((v - quarter).abs() < 1e-3 * quarter, "{arc}: {v} vs {quarter}");
+  }
+  // a positive sweep stays counter-clockwise: 270° is the pac-man
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "sweep": "270 deg"}));
+  run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, 0], [20, 0]]}));
+  // zero, a full turn, or both an end and a sweep are refused
+  for bad in [
+    json!({"center": [0, 0], "start": [20, 0], "sweep": 0}),
+    json!({"center": [0, 0], "start": [20, 0], "sweep": 360}),
+    json!({"center": [0, 0], "start": [20, 0], "end": [0, 20], "sweep": 90}),
+  ] {
+    assert!(s.execute("sketch.arc", &bad).is_err(), "{bad}");
+  }
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 8}));
+  let v = volume(&s);
+  assert!((v - 3.0 * quarter).abs() < 1e-3 * quarter, "{v} vs {}", 3.0 * quarter);
+}
+
+#[test]
+fn fixing_a_circle_locks_it_and_deleting_the_fix_frees_it() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c1 = ids(&run(&mut s, "sketch.circle", json!({"center": [15, 15], "radius": 10}))["curves"])[0];
+  let c2 = ids(&run(&mut s, "sketch.circle", json!({"center": [45, 15], "radius": 6}))["curves"])[0];
+  let fix = run(&mut s, "sketch.constrain", json!({"type": "fix", "curves": [c1]}));
+  // the centre and the radius
+  let fixes = ids(&fix["constraints"]);
+  assert_eq!(fixes.len(), 2, "{fix}");
+  run(&mut s, "sketch.constrain", json!({"type": "equal", "curves": [c1, c2]}));
+  let sk = s.edit_sketch.unwrap();
+  let radius = |s: &Session, c: u64| s.model.sketches[&sk].sketch.radius(fox_sketch::CurveId(c as u32)).unwrap();
+  assert!((radius(&s, c1) - 10.0).abs() < 1e-9);
+  assert!((radius(&s, c2) - 10.0).abs() < 1e-9);
+  // unfixed, a radius dimension on the second circle drives both
+  run(&mut s, "sketch.delete", json!({"constraints": fixes}));
+  run(&mut s, "sketch.dimension", json!({"type": "radius", "curves": [c2], "value": 4}));
+  assert!((radius(&s, c1) - 4.0).abs() < 1e-9);
+}

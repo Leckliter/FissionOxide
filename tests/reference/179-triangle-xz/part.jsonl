@@ -1,0 +1,7 @@
+# 179-triangle-xz: added by the parity loop from a Fusion probe
+# triangle-xz: Circumscribed triangle on XZ (sketch y = -world Z) centred at (20,10) with an edge midpoint at (20,4): apothem 6, flat edge at sketch y=4 and apex at sketch y=22; extruded 5 along +Y.
+# sketch S: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "center": [20, 10], "vertex": [20, 4], "sides": 3, "circumscribed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

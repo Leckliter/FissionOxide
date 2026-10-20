@@ -1,0 +1,7 @@
+# 133-rect-reversed-diagonal-xz: added by the parity loop from a Fusion probe
+# rect-reversed-diagonal-xz: 2-point rectangle on XZ picked upper-right to lower-left,
+# world (30,0,20) to (-10,0,-5), extruded symmetrically 6 mm each side.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, -1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [30, 20], "corner2": [-10, -5]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "extent": "symmetric", "distance": 6, "operation": "new_body"}

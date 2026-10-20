@@ -1,0 +1,7 @@
+# 171-horizontal-yz: added by the parity loop from a Fusion probe
+# horizontal-yz: Center to center slot, along sketch x on YZ: arc centres (-6, 4) -> (18, 4), width 8; extruded 5.
+# sketch SlotSketch: YZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [1.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [-6, 4], "end": [18, 4], "width": 8, "kind": "center_to_center"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

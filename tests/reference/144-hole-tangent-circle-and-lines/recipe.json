@@ -1,0 +1,274 @@
+{
+ "id": "hole-tangent-circle-and-lines",
+ "name": "hole-tangent-circle-and-lines",
+ "description": "Fixed 60x40 plate outline; fixed construction circle R10 at (15,20) and construction lines y=10, y=30. A hole drawn at (33,21) R9 is made tangent to all three (externally to the circle), so it becomes R10 at (35,20); extruded 10.",
+ "exercises": [
+  "sketch",
+  "tangent constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       60,
+       0
+      ]
+     },
+     "id": "r1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       60,
+       0
+      ],
+      "ref": "r1.end"
+     },
+     "end": {
+      "at": [
+       60,
+       40
+      ]
+     },
+     "id": "r2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       60,
+       40
+      ],
+      "ref": "r2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       40
+      ]
+     },
+     "id": "r3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       40
+      ],
+      "ref": "r3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "r1.start"
+     },
+     "id": "r4"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       15,
+       20
+      ]
+     },
+     "radius": 10,
+     "id": "cc",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       5,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       55,
+       10
+      ]
+     },
+     "id": "c1",
+     "construction": true
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       5,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       55,
+       30
+      ]
+     },
+     "id": "c2",
+     "construction": true
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       33,
+       21
+      ]
+     },
+     "radius": 9,
+     "id": "h"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "r1"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "r2"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "r3"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "r4"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "cc"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "c1"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "c2"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "h",
+      "cc"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "h",
+      "c1"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "h",
+      "c2"
+     ]
+    }
+   ],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1",
+        "r2",
+        "r3",
+        "r4"
+       ]
+      },
+      {
+       "outer": false,
+       "curves": [
+        "h"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+# 202-hexagon-inscribed-origin-xy: added by the parity loop from a Fusion probe
+# hexagon-inscribed-origin-xy: Inscribed hexagon centred on the origin with a corner at (10,0): circumradius 10, corners at x=+-10, flat sides at y=+-8.660; extruded 10.
+# sketch S: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "center": [0, 0], "vertex": [10, 0], "sides": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
