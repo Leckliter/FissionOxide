@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <BOPAlgo_MakerVolume.hxx>
@@ -76,6 +77,12 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Pln.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <TColStd_Array2OfReal.hxx>
+#include <TColStd_HArray1OfReal.hxx>
+#include <TColgp_Array2OfPnt.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Quaternion.hxx>
 
 namespace fox {
 
@@ -445,10 +452,109 @@ struct Rail {
 };
 
 double smooth(double t) { return t * t * (3.0 - 2.0 * t); }
+
+// How steeply a rail's bulge leaves a corner of a polygonal section, as the slope of a Hermite
+// cubic over the corner-to-rail stretch, in thirds (Fusion's, measured on a square: pi/10).
+const double corner_pull = M_PI / 10.0;
+
+// The rails' pulls spread around a polygonal section: `pts` (closed, `k` points per edge) with
+// rail pulls at point indices. As Fusion's loft with rails: a corner is pulled by the rails on
+// either side, in proportion to the distance around the section to the far end of each rail's
+// edge; an edge no rail touches stays straight (its pull runs linearly between its corners); an
+// edge a rail touches bends from its corners to the rail as a cubic, flat where the rail is.
+std::vector<gp_Vec> polygon_pulls(const std::vector<gp_Pnt> &pts, size_t k,
+                                  const std::vector<std::pair<size_t, gp_Vec>> &pulls) {
+  size_t np = pts.size(), ne = np / k;
+  std::vector<double> s(np + 1, 0.0);
+  for (size_t i = 1; i <= np; ++i) s[i] = s[i - 1] + pts[i - 1].Distance(pts[i % np]);
+  double total = s[np];
+  auto ahead = [&](size_t from, size_t to) { // distance around from vertex `from` on to vertex `to`
+    double d = s[to * k] - s[from * k];
+    return d <= 1e-12 ? d + total : d;
+  };
+  std::vector<std::vector<std::pair<size_t, gp_Vec>>> on_edge(ne);
+  std::vector<int> at_vertex(ne, -1);
+  for (size_t j = 0; j < pulls.size(); ++j) {
+    size_t i = pulls[j].first % np;
+    if (i % k == 0) {
+      at_vertex[i / k] = static_cast<int>(j);
+    } else {
+      on_edge[i / k].push_back({i, pulls[j].second});
+    }
+  }
+  for (auto &e : on_edge) std::sort(e.begin(), e.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+  std::vector<gp_Vec> corner(ne);
+  for (size_t v = 0; v < ne; ++v) {
+    if (at_vertex[v] >= 0) {
+      corner[v] = pulls[static_cast<size_t>(at_vertex[v])].second;
+      continue;
+    }
+    gp_Vec fwd, back;
+    double df = 0, db = 0;
+    for (size_t step = 0; step < ne; ++step) {
+      size_t w = (v + step) % ne;
+      if (step > 0 && at_vertex[w] >= 0) {
+        fwd = pulls[static_cast<size_t>(at_vertex[w])].second;
+        df = ahead(v, w);
+        break;
+      }
+      if (!on_edge[w].empty()) {
+        fwd = on_edge[w].front().second;
+        df = ahead(v, (w + 1) % ne);
+        break;
+      }
+    }
+    for (size_t step = 0; step < ne; ++step) {
+      size_t w = (v + ne - step) % ne, e = (v + 2 * ne - 1 - step) % ne;
+      if (step > 0 && at_vertex[w] >= 0) {
+        back = pulls[static_cast<size_t>(at_vertex[w])].second;
+        db = ahead(w, v);
+        break;
+      }
+      if (!on_edge[e].empty()) {
+        back = on_edge[e].back().second;
+        db = ahead(e, v);
+        break;
+      }
+    }
+    corner[v] = df + db > 1e-12 ? (back * df + fwd * db) / (df + db) : fwd;
+  }
+  // a cubic from a corner (t = 0, leaving at corner_pull) to a rail (t = 1, flat)
+  auto rise = [](double t) { return t * t * (3 - 2 * t) + 3 * corner_pull * t * (1 - t) * (1 - t); };
+  std::vector<gp_Vec> d(np);
+  for (size_t e = 0; e < ne; ++e) {
+    // the edge's nodes: its corners and the rails on it, with whether each is a corner
+    std::vector<std::tuple<size_t, gp_Vec, bool>> nodes{{e * k, corner[e], true}};
+    for (const auto &c : on_edge[e]) nodes.push_back({c.first, c.second, false});
+    nodes.push_back({(e + 1) * k, corner[(e + 1) % ne], true});
+    for (size_t n = 0; n + 1 < nodes.size(); ++n) {
+      auto [i0, p0, c0] = nodes[n];
+      auto [i1, p1, c1] = nodes[n + 1];
+      double len = s[i1] - s[i0];
+      for (size_t i = i0; i < i1; ++i) {
+        double t = len > 1e-12 ? (s[i] - s[i0]) / len : 0.0;
+        double h;
+        if (on_edge[e].empty()) {
+          h = t;
+        } else if (c0 && !c1) {
+          h = rise(t);
+        } else if (!c0 && c1) {
+          h = 1 - rise(1 - t);
+        } else {
+          h = t * t * (3 - 2 * t);
+        }
+        d[i % np] = p0 * (1 - h) + p1 * h;
+      }
+    }
+  }
+  return d;
+}
 } // namespace
 
 // Lofts through sections guided by rails: between the sections, every point is pulled along with
-// the rails (smoothly between them around the loop), so the loft's sides follow the rails.
+// the rails, so the loft's sides follow the rails. One rail carries the sections along; around a
+// polygonal section the pulls spread as `polygon_pulls` says, around a smooth one smoothly from
+// one rail to the next.
 std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
   FOX2_TRY
   std::vector<TopoDS_Wire> ws;
@@ -583,6 +689,7 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
       double t = static_cast<double>(m) / steps;
       // the rails' pull at their contact positions
       std::vector<std::pair<double, gp_Vec>> pull;
+      std::vector<std::pair<size_t, gp_Vec>> at;
       for (size_t j = 0; j < rs.size(); ++j) {
         auto [ua, sa] = hit[i][j];
         auto [ub, sb] = hit[i + 1][j];
@@ -590,15 +697,30 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
         gp_Pnt blended(a[ka].XYZ() * (1 - t) + b[kb].XYZ() * t);
         gp_Pnt target = rs[j].at(sa + (sb - sa) * t);
         pull.push_back({ua + (ub - ua) * t, gp_Vec(blended, target)});
+        at.push_back({static_cast<size_t>(std::lround((ua + (ub - ua) * t) * np)) % np, gp_Vec(blended, target)});
       }
       std::sort(pull.begin(), pull.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
       std::vector<gp_Pnt> mid;
-      for (size_t k = 0; k < np; ++k) {
-        double u = static_cast<double>(k) / static_cast<double>(np);
-        gp_Vec d(0, 0, 0);
-        if (pull.size() == 1) {
-          d = pull[0].second * ((1 + std::cos(2 * M_PI * (u - pull[0].first))) / 2);
-        } else {
+      for (size_t k = 0; k < np; ++k) mid.push_back(gp_Pnt(a[k].XYZ() * (1 - t) + b[k].XYZ() * t));
+      if (pull.size() == 1) {
+        // one rail carries the section along without reshaping it
+        for (auto &q : mid) q.Translate(pull[0].second);
+      } else if (per_edge) {
+        // the pulls' common part along the loft moves the whole section; the rest reshapes it
+        gp_Vec ax(centroid(a), centroid(b));
+        gp_Vec shift(0, 0, 0);
+        if (ax.Magnitude() > 1e-9) {
+          ax.Normalize();
+          double along = 0;
+          for (const auto &p : at) along += p.second.Dot(ax);
+          shift = ax * (along / static_cast<double>(at.size()));
+        }
+        for (auto &p : at) p.second -= shift;
+        std::vector<gp_Vec> d = polygon_pulls(mid, secs[0].runs[0].size() - 1, at);
+        for (size_t k = 0; k < np; ++k) mid[k].Translate(d[k] + shift);
+      } else {
+        for (size_t k = 0; k < np; ++k) {
+          double u = static_cast<double>(k) / static_cast<double>(np);
           // the contacts on either side of u, around the loop
           size_t hi = 0;
           while (hi < pull.size() && pull[hi].first <= u) ++hi;
@@ -609,9 +731,8 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
           if (span <= 0) span += 1;
           if (off < 0) off += 1;
           double h = smooth(std::clamp(off / span, 0.0, 1.0));
-          d = pull[lo].second * (1 - h) + pull[hi].second * h;
+          mid[k].Translate(pull[lo].second * (1 - h) + pull[hi].second * h);
         }
-        mid.push_back(gp_Pnt(a[k].XYZ() * (1 - t) + b[k].XYZ() * t).Translated(d));
       }
       add(mid);
     }
@@ -622,6 +743,255 @@ std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails) {
   TopoDS_Shape s = mk.Shape();
   if (volume(s) < 0) s.Reverse();
   return out(valid(s, "loft"));
+  FOX2_CATCH("loft")
+}
+
+namespace {
+// A cubic B-spline through points at equal parameter steps over 0..1 (periodic: closing back to the
+// first point), so curves through equally many points share their knots and their poles blend.
+Handle(Geom_BSplineCurve) interp_uniform(const std::vector<gp_Pnt> &pts, bool periodic) {
+  int n = static_cast<int>(pts.size());
+  Handle(TColgp_HArray1OfPnt) arr = new TColgp_HArray1OfPnt(1, n);
+  for (int i = 0; i < n; ++i) arr->SetValue(i + 1, pts[static_cast<size_t>(i)]);
+  int np = periodic ? n + 1 : n;
+  Handle(TColStd_HArray1OfReal) par = new TColStd_HArray1OfReal(1, np);
+  for (int i = 0; i < np; ++i) par->SetValue(i + 1, static_cast<double>(i) / static_cast<double>(np - 1));
+  GeomAPI_Interpolate in(arr, par, periodic ? Standard_True : Standard_False, 1e-9);
+  in.Perform();
+  if (!in.IsDone()) throw std::runtime_error("a loft section could not be interpolated");
+  return in.Curve();
+}
+
+// A solid bounded by faces: sewn into one closed shell, oriented outward.
+TopoDS_Shape solid_of(const std::vector<TopoDS_Face> &faces, const char *what) {
+  BRepBuilderAPI_Sewing sew(1e-4);
+  for (const auto &f : faces) sew.Add(f);
+  sew.Perform();
+  TopoDS_Shape sewn = sew.SewedShape();
+  TopoDS_Shell shell;
+  int shells = 0;
+  for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next(), ++shells) shell = TopoDS::Shell(ex.Current());
+  if (shells == 0) {
+    // a single face closed on itself (a ring) sews to the bare face
+    BRep_Builder bb;
+    bb.MakeShell(shell);
+    for (TopExp_Explorer ex(sewn, TopAbs_FACE); ex.More(); ex.Next(), ++shells) bb.Add(shell, ex.Current());
+    if (shells != 1) throw std::runtime_error(std::string(what) + " is not closed");
+    shell.Closed(Standard_True);
+  } else if (shells != 1) {
+    throw std::runtime_error(std::string(what) + " is not closed");
+  }
+  BRepBuilderAPI_MakeSolid ms(shell);
+  if (!ms.IsDone()) throw std::runtime_error(std::string(what) + " is not closed");
+  ShapeFix_Solid fs(ms.Solid());
+  fs.Perform();
+  TopoDS_Shape solid = fs.Solid();
+  if (volume(solid) < 0) solid.Reverse();
+  return valid(solid, what);
+}
+
+// A B-spline surface face from rows of poles (one row per v pole, each as long as `curve`'s
+// poles): u takes `curve`'s knots, degree and periodicity, v the given ones.
+TopoDS_Face grid_face(const Handle(Geom_BSplineCurve) &curve, const std::vector<std::vector<gp_Pnt>> &rows,
+                      const std::vector<std::vector<double>> &weights, int vdeg, const std::vector<double> &vknots,
+                      const std::vector<int> &vmults, bool vperiodic) {
+  int nu = curve->NbPoles(), nv = static_cast<int>(rows.size());
+  TColgp_Array2OfPnt poles(1, nu, 1, nv);
+  TColStd_Array2OfReal w(1, nu, 1, nv);
+  for (int j = 0; j < nv; ++j) {
+    for (int i = 0; i < nu; ++i) {
+      poles.SetValue(i + 1, j + 1, rows[static_cast<size_t>(j)][static_cast<size_t>(i)]);
+      w.SetValue(i + 1, j + 1, weights[static_cast<size_t>(j)][static_cast<size_t>(i)]);
+    }
+  }
+  TColStd_Array1OfReal vk(1, static_cast<int>(vknots.size()));
+  TColStd_Array1OfInteger vm(1, static_cast<int>(vmults.size()));
+  for (size_t i = 0; i < vknots.size(); ++i) {
+    vk.SetValue(static_cast<int>(i) + 1, vknots[i]);
+    vm.SetValue(static_cast<int>(i) + 1, vmults[i]);
+  }
+  Handle(Geom_BSplineSurface) s = new Geom_BSplineSurface(poles, w, curve->Knots(), vk, curve->Multiplicities(), vm,
+                                                          curve->Degree(), vdeg, curve->IsPeriodic(), vperiodic);
+  BRepBuilderAPI_MakeFace mf(s, Precision::Confusion());
+  if (!mf.IsDone()) throw std::runtime_error("a loft face could not be built");
+  return mf.Face();
+}
+
+std::vector<gp_Pnt> poles_of(const Handle(Geom_BSplineCurve) &c) {
+  std::vector<gp_Pnt> p;
+  for (int i = 1; i <= c->NbPoles(); ++i) p.push_back(c->Pole(i));
+  return p;
+}
+
+std::vector<double> weights_of(const Handle(Geom_BSplineCurve) &c) {
+  std::vector<double> w;
+  for (int i = 1; i <= c->NbPoles(); ++i) w.push_back(c->Weight(i));
+  return w;
+}
+} // namespace
+
+// A closed loft through sections (faces or wires of a compound, in order): one surface that runs
+// smoothly through every section and back to the first, with no seam. Corresponding points of the
+// sections are joined by a periodic Catmull-Rom spline (each point's tangent is half the step
+// from the section before to the one after), as Fusion's closed loft is.
+std::unique_ptr<Shape> loft_closed(const Shape &sections) {
+  FOX2_TRY
+  std::vector<TopoDS_Wire> ws;
+  for (TopoDS_Iterator it(sections.s); it.More(); it.Next()) {
+    if (it.Value().ShapeType() == TopAbs_VERTEX) throw std::runtime_error("a closed loft can't pass through a point");
+    bool holes = false;
+    std::vector<TopoDS_Wire> l = loops(it.Value(), holes);
+    if (holes) throw std::runtime_error("loft sections can't have holes");
+    ws.push_back(l[0]);
+  }
+  if (ws.size() < 3) throw std::runtime_error("a closed loft needs at least three profiles");
+  const size_t n = ws.size();
+  const int total = 96;
+  // one face per edge when every section has as many edges (corners stay sharp), else one around
+  size_t ne = ordered_edges(ws[0]).size();
+  bool per_edge = ne > 1;
+  for (const auto &w : ws) per_edge = per_edge && ordered_edges(w).size() == ne;
+  int k = per_edge ? std::max(6, total / static_cast<int>(ne)) : total;
+  std::vector<std::vector<gp_Pnt>> flat(n);
+  for (size_t i = 0; i < n; ++i) {
+    if (per_edge) {
+      for (const auto &e : ordered_edges(ws[i])) {
+        std::vector<gp_Pnt> r = sample_edge(e, k + 1);
+        flat[i].insert(flat[i].end(), r.begin(), r.end() - 1);
+      }
+    } else {
+      std::vector<gp_Pnt> p;
+      std::vector<gp_Vec> t;
+      sample_wire(ws[i], total + 1, p, t);
+      p.pop_back();
+      flat[i] = p;
+    }
+  }
+  size_t np = flat[0].size();
+  for (const auto &f : flat) {
+    if (f.size() != np) throw std::runtime_error("the sections could not be matched up");
+  }
+  // every section wound the same way along the loop, and started where the one before starts once
+  // it is turned to face the same way (so a ring of circles doesn't twist)
+  std::vector<gp_Pnt> cen;
+  for (const auto &f : flat) cen.push_back(centroid(f));
+  std::vector<gp_Vec> nrm(n);
+  for (size_t i = 0; i < n; ++i) {
+    gp_Vec along(cen[(i + n - 1) % n], cen[(i + 1) % n]);
+    gp_Vec nv = loop_normal(flat[i]);
+    if (along.Magnitude() > 1e-9 && nv.Dot(along) < 0) {
+      // reversed, still starting at the same point (and so at a corner)
+      std::reverse(flat[i].begin(), flat[i].end());
+      std::rotate(flat[i].begin(), flat[i].end() - 1, flat[i].end());
+      nv.Reverse();
+    }
+    if (nv.Magnitude() < 1e-12) throw std::runtime_error("a loft section has no area");
+    nrm[i] = nv.Normalized();
+  }
+  for (size_t i = 1; i < n; ++i) {
+    gp_Quaternion q(nrm[i], nrm[i - 1]);
+    size_t step = per_edge ? static_cast<size_t>(k) : 1, best = 0;
+    double bd = 1e300;
+    for (size_t off = 0; off < np; off += step) {
+      double d = 0;
+      for (size_t j = 0; j < np; ++j) {
+        gp_Vec a = q.Multiply(gp_Vec(cen[i], flat[i][(j + off) % np]));
+        d += (a - gp_Vec(cen[i - 1], flat[i - 1][j])).SquareMagnitude();
+      }
+      if (d < bd) {
+        bd = d;
+        best = off;
+      }
+    }
+    std::rotate(flat[i].begin(), flat[i].begin() + static_cast<long>(best), flat[i].end());
+  }
+  // v: section i at knot i, Bezier poles P, P + T/3, P' - T'/3 to the next section (periodic)
+  std::vector<double> vknots;
+  std::vector<int> vmults;
+  for (size_t i = 0; i <= n; ++i) {
+    vknots.push_back(static_cast<double>(i));
+    vmults.push_back(3);
+  }
+  std::vector<TopoDS_Face> faces;
+  size_t runs = per_edge ? ne : 1;
+  for (size_t r = 0; r < runs; ++r) {
+    std::vector<Handle(Geom_BSplineCurve)> cs;
+    for (size_t i = 0; i < n; ++i) {
+      std::vector<gp_Pnt> run;
+      if (per_edge) {
+        for (int m = 0; m <= k; ++m) run.push_back(flat[i][(r * static_cast<size_t>(k) + static_cast<size_t>(m)) % np]);
+      } else {
+        run = flat[i];
+      }
+      cs.push_back(interp_uniform(run, !per_edge));
+    }
+    std::vector<std::vector<gp_Pnt>> rows;
+    std::vector<std::vector<double>> wts;
+    for (size_t i = 0; i < n; ++i) {
+      std::vector<gp_Pnt> p = poles_of(cs[i]), pn = poles_of(cs[(i + 1) % n]), pp = poles_of(cs[(i + n - 1) % n]),
+                          pnn = poles_of(cs[(i + 2) % n]);
+      std::vector<gp_Pnt> a, b;
+      for (size_t j = 0; j < p.size(); ++j) {
+        gp_XYZ t0 = (pn[j].XYZ() - pp[j].XYZ()) / 2.0, t1 = (pnn[j].XYZ() - p[j].XYZ()) / 2.0;
+        a.push_back(gp_Pnt(p[j].XYZ() + t0 / 3.0));
+        b.push_back(gp_Pnt(pn[j].XYZ() - t1 / 3.0));
+      }
+      rows.push_back(p);
+      rows.push_back(a);
+      rows.push_back(b);
+      for (int m = 0; m < 3; ++m) wts.push_back(std::vector<double>(p.size(), 1.0));
+    }
+    faces.push_back(grid_face(cs[0], rows, wts, 3, vknots, vmults, true));
+  }
+  return out(solid_of(faces, "closed loft"));
+  FOX2_CATCH("closed loft")
+}
+
+// A loft from a profile to a point (`apex`) that arrives tangent to the plane through the point
+// across `axis`, as Fusion's point tangent end condition: each point P of the profile runs to the
+// apex along a parabola whose middle pole is A + weight/2 * (P - A) with the axis part removed,
+// so a circle under its centre gives a paraboloid.
+std::unique_ptr<Shape> loft_point_tangent(const Shape &profile, const Shape &apex, rust::Slice<const double> axis,
+                                          double weight) {
+  FOX2_TRY
+  need3(axis, 3, "axis");
+  if (apex.s.IsNull() || apex.s.ShapeType() != TopAbs_VERTEX) throw std::runtime_error("the end must be a point");
+  if (!(weight > 0)) throw std::runtime_error("the weight must be above zero");
+  gp_Vec n(axis[0], axis[1], axis[2]);
+  if (n.Magnitude() < 1e-12) throw std::runtime_error("zero axis");
+  n.Normalize();
+  gp_Pnt a = BRep_Tool::Pnt(TopoDS::Vertex(apex.s));
+  bool holes = false;
+  std::vector<TopoDS_Wire> l = loops(profile.s, holes);
+  if (holes) throw std::runtime_error("loft sections can't have holes");
+  TopoDS_Face cap;
+  if (profile.s.ShapeType() == TopAbs_FACE) {
+    cap = TopoDS::Face(profile.s);
+  } else {
+    BRepBuilderAPI_MakeFace mf(l[0], Standard_True);
+    if (!mf.IsDone()) throw std::runtime_error("the profile is not flat");
+    cap = mf.Face();
+  }
+  std::vector<TopoDS_Face> faces{cap};
+  // each edge as a curve through points along it (a lone closed edge, periodic)
+  std::vector<TopoDS_Edge> es = ordered_edges(l[0]);
+  bool loop = es.size() == 1;
+  int k = loop ? 96 : std::max(8, 96 / static_cast<int>(es.size()));
+  for (const auto &e : es) {
+    std::vector<gp_Pnt> pts = sample_edge(e, k + 1);
+    if (loop) pts.pop_back();
+    Handle(Geom_BSplineCurve) bs = interp_uniform(pts, loop);
+    std::vector<gp_Pnt> p = poles_of(bs), mid, top;
+    for (const auto &q : p) {
+      gp_Vec d(a, q);
+      d -= n * d.Dot(n);
+      mid.push_back(a.Translated(d * (weight / 2.0)));
+      top.push_back(a);
+    }
+    std::vector<double> w(p.size(), 1.0);
+    faces.push_back(grid_face(bs, {p, mid, top}, {w, w, w}, 2, {0.0, 1.0}, {3, 3}, false));
+  }
+  return out(solid_of(faces, "loft"));
   FOX2_CATCH("loft")
 }
 

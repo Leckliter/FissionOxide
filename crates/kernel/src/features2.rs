@@ -54,6 +54,26 @@ impl Shape {
     Shape::wrap(sys::loft_rails(c.get()?, r.get()?)?)?.solid_or("loft")
   }
 
+  /// A closed loft through the outer boundaries of `sections` (three or more), in order and back
+  /// to the first: one surface, smooth through every section including the first.
+  pub fn loft_closed(sections: &[Shape]) -> Result<Shape> {
+    if sections.len() < 3 {
+      return Err(KernelError::Input("a closed loft needs at least three profiles".into()));
+    }
+    let c = Shape::compound(sections)?;
+    Shape::wrap(sys::loft_closed(c.get()?)?)?.solid_or("loft")
+  }
+
+  /// A loft from `profile` to the point `apex` (a vertex) that arrives tangent to the plane
+  /// across `axis` there, rounded like a dome; `weight` (1 = a paraboloid) sets how far the flat
+  /// top reaches.
+  pub fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: DVec3, weight: f64) -> Result<Shape> {
+    if !(weight > 0.0 && weight.is_finite()) {
+      return Err(KernelError::Input("the weight must be above zero".into()));
+    }
+    Shape::wrap(sys::loft_point_tangent(profile.get()?, apex.get()?, &axis.to_array(), weight)?)?.solid_or("loft")
+  }
+
   /// The material an emboss adds to (or a deboss removes from) this body: `profiles` (planar
   /// faces) projected along `dir` onto face `face` (1-based), `depth` deep. With `wrap` they are
   /// wrapped around a cylindrical face instead, keeping their lengths.

@@ -6,7 +6,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
-use crate::{BodyId, FeatureId, FeatureKind, PathRef, PlaneRef};
+use crate::{BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef};
 
 /// What an extrude stops at besides a parallel flat face.
 pub(super) enum Trim {
@@ -224,6 +224,29 @@ impl Ctx<'_> {
     }
   }
 
+  /// A loft with its sections' end conditions: a point tangent end makes a dome from the other
+  /// (profile) section to the point; the rest loft as [`Self::loft_guided`] does.
+  pub(super) fn loft_ends(
+    &self,
+    sections: &[LoftSection],
+    faces: &[Shape],
+    ruled: bool,
+    closed: bool,
+    rails: &[PathRef],
+    centerline: Option<&PathRef>,
+  ) -> Result<Shape, String> {
+    let tangent = sections.iter().position(|s| matches!(s.end, LoftEnd::PointTangent { .. }));
+    let Some(at) = tangent else { return self.loft_guided(faces, ruled, closed, rails, centerline) };
+    let LoftEnd::PointTangent { weight } = sections[at].end else { unreachable!() };
+    if sections.len() != 2 || closed || ruled || !rails.is_empty() || centerline.is_some() {
+      return Err("a point tangent end needs a loft of one profile and one point, without rails".into());
+    }
+    let (apex, profile) = (&faces[at], &faces[1 - at]);
+    let sk = self.state.sketches.get(&sections[at].sketch).ok_or("the point's sketch failed")?;
+    let axis = sk.plane.x.cross(sk.plane.y);
+    Shape::loft_point_tangent(profile, apex, axis, weight).map_err(ke)
+  }
+
   pub(super) fn loft_guided(
     &self,
     faces: &[Shape],
@@ -233,6 +256,8 @@ impl Ctx<'_> {
     centerline: Option<&PathRef>,
   ) -> Result<Shape, String> {
     match (rails.is_empty(), centerline) {
+      // a smooth closed loop: periodic all the way round, with no seam at the first section
+      (true, None) if closed && !ruled => Shape::loft_closed(faces).map_err(ke),
       (true, None) => Shape::loft(faces, ruled, closed).map_err(ke),
       _ if closed => Err("a closed loft can't follow rails or a centre line".into()),
       (false, Some(_)) => Err("a loft follows rails or a centre line, not both".into()),
