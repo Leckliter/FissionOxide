@@ -120,6 +120,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       };
       let bodies: Vec<BodyId> = ids(p, "bodies").into_iter().map(BodyId).collect();
       let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      let round = match p.get("corners").and_then(Value::as_str) {
+        None | Some("sharp") => false,
+        Some("round") => true,
+        Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
+      };
       add_feature(
         s,
         FeatureKind::Thicken {
@@ -129,6 +134,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           symmetric: flag("symmetric"),
           flip: flag("flip"),
           operation: operation(p)?,
+          round,
         },
       )
     })(),

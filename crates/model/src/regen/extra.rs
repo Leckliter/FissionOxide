@@ -267,7 +267,7 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Thicken { faces, bodies, thickness, symmetric, flip, operation } => {
+      FeatureKind::Thicken { faces, bodies, thickness, symmetric, flip, operation, round } => {
         let t = self.len(thickness)? * if *flip { -1.0 } else { 1.0 };
         let mut skins = Vec::new();
         for (bi, fids) in self.faces_by_body(faces)? {
@@ -284,33 +284,23 @@ impl Ctx<'_> {
         if skins.is_empty() {
           return Err("select faces or surface bodies to thicken".into());
         }
-        // each face is thickened on its own and the slabs are joined: offsetting a whole shell
-        // at once goes wrong where its faces meet at an angle
-        let mut faces = Vec::new();
+        let mut tools = Vec::new();
         for skin in skins {
           let n = skin.faces().map_err(ke)?.len() as u32;
           if n <= 1 {
-            faces.push(skin);
-          } else {
-            for f in 1..=n {
-              faces.push(skin.face_shape(f).map_err(ke)?);
-            }
+            tools.extend(thicken_face(&skin, t, *symmetric)?);
+            continue;
           }
-        }
-        let mut tools = Vec::new();
-        for face in faces {
-          if *symmetric {
-            // one slab from the surface offset back by half: two half slabs would leave every
-            // side wall in two pieces
-            match face.offset_surface(-t / 2.0).and_then(|back| back.thicken(t)) {
-              Ok(slab) => tools.push(slab),
-              Err(_) => {
-                tools.push(face.thicken(t / 2.0).map_err(ke)?);
-                tools.push(face.thicken(-t / 2.0).map_err(ke)?);
-              }
-            }
-          } else {
-            tools.push(face.thicken(t).map_err(ke)?);
+          // a surface of several faces is offset as one, so the corners where its faces meet at
+          // an angle close up (sharp or rounded) as Fusion's do
+          if let Some(slab) = thicken_joined(&skin, t, *symmetric, *round) {
+            tools.push(slab);
+            continue;
+          }
+          // failing that each face is thickened on its own and the slabs are joined, which
+          // leaves a notch at convex corners
+          for f in 1..=n {
+            tools.extend(thicken_face(&skin.face_shape(f).map_err(ke)?, t, *symmetric)?);
           }
         }
         // thickened surface bodies replace the surfaces
@@ -886,4 +876,35 @@ fn helix_points(start: DVec3, dir: DVec3, x: DVec3, r: f64, pitch: f64, length: 
       start + dir * (length * s) + (x * a.cos() + y * a.sin()) * r
     })
     .collect()
+}
+
+/// One face thickened by `t` (`symmetric`: `t` on each side).
+fn thicken_face(face: &Shape, t: f64, symmetric: bool) -> Result<Vec<Shape>, String> {
+  if !symmetric {
+    return Ok(vec![face.thicken(t).map_err(ke)?]);
+  }
+  // one slab from the surface offset back: two slabs would leave every side wall in two pieces
+  match face.offset_surface(-t).and_then(|back| back.thicken(2.0 * t)) {
+    Ok(slab) => Ok(vec![slab]),
+    Err(_) => Ok(vec![face.thicken(t).map_err(ke)?, face.thicken(-t).map_err(ke)?]),
+  }
+}
+
+/// A shell of several faces thickened by `t` (`symmetric`: on each side) as one solid, the
+/// corners where its faces meet sharp or `round`; `None` when OCCT can't do it.
+fn thicken_joined(skin: &Shape, t: f64, symmetric: bool, round: bool) -> Option<Shape> {
+  if !symmetric {
+    return skin.thicken_joined(t, round).ok();
+  }
+  if !round {
+    // offset back by t, then thickened by 2t through the surface: one slab whose side walls are
+    // single faces
+    if let Ok(slab) = skin.offset_joined(-t, false).and_then(|back| back.thicken_joined(2.0 * t, false)) {
+      return Some(slab);
+    }
+  }
+  // rounded corners are arcs about the surface's own edges, so each side is thickened apart
+  let a = skin.thicken_joined(t, round).ok()?;
+  let b = skin.thicken_joined(-t, round).ok()?;
+  a.boolean(&b, BoolOp::Union).ok()
 }
