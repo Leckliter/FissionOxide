@@ -266,7 +266,7 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
   for c in comps {
     let mut faces = Vec::new();
     let mut outer: Option<(Loop, f64)> = None;
-    for l in c {
+    for l in c.into_iter().map(join_arcs) {
       let a = l.signed_area();
       if a > 1e-12 {
         faces.push(l);
@@ -301,6 +301,51 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
   }
   profiles.sort_by(|a, b| b.area().total_cmp(&a.area()));
   profiles
+}
+
+/// Joins neighbouring pieces of one circle in a loop (a circle split only where other curves
+/// touch it from outside the region, such as tangent lines), so the region's edge is one arc, or
+/// the whole circle, as in Fusion.
+fn join_arcs(l: Loop) -> Loop {
+  let same = |a: &Seg, b: &Seg| match (*a, *b) {
+    (Seg::Arc { center: c0, radius: r0, sweep: s0, .. }, Seg::Arc { center: c1, radius: r1, sweep: s1, .. }) => {
+      dist(c0, c1) <= MERGE_TOL && (r0 - r1).abs() <= MERGE_TOL && (s0 > 0.0) == (s1 > 0.0)
+    }
+    _ => false,
+  };
+  let n = l.segs.len();
+  if n < 2 {
+    return l;
+  }
+  // start where a run of one circle's pieces begins
+  let Some(first) = (0..n).find(|&i| !same(&l.segs[(i + n - 1) % n], &l.segs[i])) else {
+    // every piece is the same circle: the whole circle
+    let (center, radius, sweep) = match l.segs[0] {
+      Seg::Arc { center, radius, .. } => (center, radius, l.segs.iter().map(arc_sweep).sum::<f64>()),
+      _ => return l,
+    };
+    return Loop { segs: vec![Seg::Circle { center, radius, ccw: sweep > 0.0 }] };
+  };
+  if !(0..n).any(|i| same(&l.segs[i], &l.segs[(i + 1) % n])) {
+    return l;
+  }
+  let mut segs: Vec<Seg> = Vec::with_capacity(n);
+  for k in 0..n {
+    let s = l.segs[(first + k) % n];
+    match segs.last_mut() {
+      Some(last @ Seg::Arc { .. }) if same(last, &s) => {
+        if let Seg::Arc { sweep, .. } = last {
+          *sweep += arc_sweep(&s);
+        }
+      }
+      _ => segs.push(s),
+    }
+  }
+  Loop { segs }
+}
+
+fn arc_sweep(s: &Seg) -> f64 {
+  if let Seg::Arc { sweep, .. } = *s { sweep } else { 0.0 }
 }
 
 /// Half-edge face tracing per connected component. Returns the traced loops of each component and
@@ -758,5 +803,21 @@ mod crossing_tests {
     let p = find_profiles(&s);
     assert_eq!(p.len(), 3, "two discs and the band between them");
     assert!(p.iter().any(|r| r.contains([25.0, 0.0])), "the band is a region");
+  }
+
+  #[test]
+  fn circle_touched_by_tangent_lines_stays_one_circle() {
+    // a circle in a 40° wedge splits where the lines touch it; the disc's edge is still the
+    // whole circle, not two arcs, and the corner region's edge is one arc
+    let mut s = Sketch::new();
+    let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let (w, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.642, 25.712)).unwrap();
+    s.add_tangent_circle(&[h, w], Some(crate::Dim::new(5.0)), [30.0, 10.0]).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    let disc = p.iter().find(|r| r.contains([13.737, 5.0])).expect("the disc");
+    assert!(matches!(disc.outer.segs[..], [Seg::Circle { ccw: true, .. }]), "{:?}", disc.outer);
+    let corner = p.iter().find(|r| r.contains([4.0, 0.5])).unwrap_or_else(|| panic!("{p:?}"));
+    assert_eq!(corner.outer.segs.len(), 3, "{:?}", corner.outer);
   }
 }
