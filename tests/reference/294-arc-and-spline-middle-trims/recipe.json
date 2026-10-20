@@ -1,0 +1,204 @@
+{
+ "id": "arc-and-spline-middle-trims",
+ "name": "arc-and-spline-middle-trims",
+ "description": "40x30 rectangle crossed top to bottom by an arc (centre (40,15), r20, from (40,35) through (20,15) to (40,-5)) and a fit-point spline through (10,-5), (6,15), (10,35); Trim each between its crossings with the rectangle (at (20,15) and (6,15)), leaving only stubs outside; extrude the whole rectangle 10 mm.",
+ "exercises": [
+  "sketch",
+  "trim",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Sketch1",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "r1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r2",
+     "start": {
+      "ref": "r1.end",
+      "at": [
+       40,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r3",
+     "start": {
+      "ref": "r2.end",
+      "at": [
+       40,
+       30
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r4",
+     "start": {
+      "ref": "r3.end",
+      "at": [
+       0,
+       30
+      ]
+     },
+     "end": {
+      "ref": "r1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    },
+    {
+     "type": "arc_three_point",
+     "id": "arc",
+     "start": {
+      "at": [
+       40,
+       35
+      ]
+     },
+     "mid": {
+      "at": [
+       20,
+       15
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       -5
+      ]
+     }
+    },
+    {
+     "type": "fitted_spline",
+     "id": "s",
+     "fit_points": [
+      [
+       10,
+       -5
+      ],
+      [
+       6,
+       15
+      ],
+      [
+       10,
+       35
+      ]
+     ]
+    },
+    {
+     "type": "trim",
+     "curve": "arc",
+     "at": {
+      "at": [
+       20,
+       15
+      ]
+     }
+    },
+    {
+     "type": "trim",
+     "curve": "s",
+     "at": {
+      "at": [
+       6,
+       15
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Sketch1",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "r1",
+        "r2",
+        "r3",
+        "r4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

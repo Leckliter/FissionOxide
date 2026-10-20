@@ -1,0 +1,11 @@
+# 349-top-face-offset-mirror: added by the parity loop from a Fusion probe
+# top-face-offset-mirror: 20x10x6 box; construction plane offset 4 from its top face (z=10); box mirrored across it as a second body.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": {"point": [10, 5, 6], "normal": [0, 0, 1]}, "offset": 4}
+{"cmd": "mirror", "plane": {"feature": 3}, "bodies": [2000], "join": false}

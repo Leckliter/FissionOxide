@@ -1,0 +1,9 @@
+# 248-arc-to-arc-reverse: added by the parity loop from a Fusion probe
+# arc-to-arc-reverse: Line (0,0)-(20,0); tangent arc off it to (30,10) (CCW, centre (20,10) R10); a second tangent arc off that arc's end to (42,16) (CW, centre (37.5,10) R7.5, ~127 deg); closed by lines (42,16)-(42,-5)-(0,-5)-(0,0); extruded 8 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.arc", "tangent": 2, "start": [20, 0], "end": [30, 10]}
+{"cmd": "sketch.arc", "tangent": 6, "start": [30, 10], "end": [42, 16]}
+{"cmd": "sketch.line", "points": [[42, 16], [42, -5], [0, -5], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

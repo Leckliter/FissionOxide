@@ -1,0 +1,9 @@
+# 257-g1-line-u-turn: added by the parity loop from a Fusion probe
+# g1-line-u-turn: Blend curve (G1): lines (0,0)->(30,0) and (30,20)->(0,20) joined at their right ends by a tangent continuous blend, closed by (0,20)->(0,0); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.blend", "curves": [2, 6], "near": [[30, 0], [30, 20]], "continuity": "g1"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

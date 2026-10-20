@@ -106,7 +106,7 @@ cmds! {
   "sketch.control_spline" => "Cubic B-spline from control points", "{points: [[x,y], ...]}";
   "sketch.ellipse" => "Ellipse from its centre, the end of the major axis and the minor radius", "{center, major: [x,y], minor}";
   "sketch.conic" => "Exact conic curve from start to end whose end tangents meet at the apex; rho shapes it (below 0.5 elliptical, 0.5 a parabola, above 0.5 hyperbolic)", "{start, end, apex, rho?: 0.01 to 0.99}";
-  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, explode?}";
+  "sketch.text" => "Editable text: closed glyph outlines you can extrude, regenerated when the text changes (explode: plain curves)", "{at: [x,y] | point id, text, height?, angle?: deg, font?: sans|mono|font file path|system font name, bold?, italic?, underline?, halign?: left|center|right, valign?: baseline|top|middle|bottom, spacing?: % of height, explode?}";
   "sketch.offset" => "Offset a chain of lines/arcs or circles (positive = outward / left)", "{curves: [id], distance}";
   "sketch.trim" => "Remove the piece of a curve between its nearest crossings", "{curve?, at: [x,y]}";
   "sketch.extend" => "Extend a line to the next curve", "{curve?, at: [x,y]}";
@@ -114,25 +114,25 @@ cmds! {
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle, thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
-  "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
+  "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
   "chamfer" => "Bevel edges: equal distance, two distances, or distance and angle", "{edges: [{body, edge}], distance, distance2? | angle?}";
   "press_pull" => "Push (+) or pull (−) flat faces along their normals", "{faces: [{body, face} | {point}], distance}";
   "split_by_body" => "Split bodies with another body", "{tool, bodies?, remove_tool?}";
-  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}); walls meet in sharp corners unless corners is round", "{faces: [{body, face} | {point}], thickness, corners?: \"sharp\"|\"round\"}";
+  "shell" => "Hollow bodies, opening the given faces (a face is {body, face} or {point, normal?}; tangent_chain adds the faces that continue them smoothly) or whole bodies (closed, hollow inside); walls go inside the surface, outside it, or both (thickness inside, outside_thickness outside); walls meet in sharp corners unless corners is round", "{faces?: [{body, face} | {point}], bodies?: [body], thickness, direction?: \"inside\"|\"outside\"|\"both\", outside_thickness?, tangent_chain?: bool, corners?: \"sharp\"|\"round\"}";
   "box" => "Box primitive (base centred on a plane point)", "{plane?, at?, width, depth, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "cylinder" => "Cylinder primitive", "{plane?, at?, radius, height, operation?, targets?: [body] (bodies join/cut may change)}";
   "sphere" => "Sphere primitive", "{plane?, at?, radius, operation?, targets?: [body] (bodies join/cut may change)}";
   "torus" => "Torus primitive", "{plane?, at?, major, minor, operation?, targets?: [body] (bodies join/cut may change)}";
   "plane.offset" => "Construction plane offset from a plane or planar face; a plane can also be {origin: [x,y,z], normal, x?} anywhere a plane is taken", "{plane, offset?}";
   "plane" => "Construction plane by method: angle {axis, plane, angle}, midplane {a, b}, three_points {a, b, c}, two_edges {a, b}, tangent {face, near}, along_path {edge, t}", "{method, ...}";
-  "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge}", "{method, ...}";
+  "axis" => "Construction axis by method: face {face} (cylinder/cone/torus), normal {face, near}, two_planes {a, b}, two_points {a, b}, edge {edge} (a body edge {body, edge}|{point}, a sketch line {sketch, line} or {point} on it, or an axis {axis})", "{method, ...}";
   "point" => "Construction point by method: vertex {point}, two_edges {a, b}, three_planes {a, b, c}, center {face}, edge_plane {edge, plane}, along_path {edge, t}; a point is {at}|{vertex: edge, end?}|{center: edge}|{point: id}", "{method, ...}";
   "thread" => "Thread cylindrical faces: cosmetic, or modeled (a helical ISO groove); pitch defaults to ISO coarse", "{faces, pitch?, length?, offset?, modeled?, left?, flip?}";
   "coil" => "Helical coil around a plane's normal at a plane point", "{plane?, at?: [x,y], diameter, pitch, height | revolutions, section?: circular|square|triangle_out|triangle_in, section_size, left?, operation?}";
@@ -157,6 +157,7 @@ cmds! {
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
   "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
+  "face.appearance" => "Set the appearance of single faces, over their body's (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{faces: [{body, face} | {point}], appearance? | color?}";
   "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner; post-processor and units for its G-code", "{name?, body?, stock_side?, stock_top?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch}";
   "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool_number? (library) | tool: {diameter, number?, kind?, rpm?, feed?, plunge?, ...} | tool_diameter, stepover?: fraction, stepdown?}";
   "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands); rest: only what earlier operations left", "{setup?, floors: [face], tool_number? | tool | tool_diameter, stepover?, stepdown?, stock_to_leave?, rest?, entry?: plunge|ramp|helix, ramp_angle?, helix_diameter?}";
@@ -176,7 +177,7 @@ cmds! {
   "cam.posts" => "The post-processors G-code can be written for", "{}";
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
-  "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
+  "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
   "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
@@ -184,16 +185,21 @@ cmds! {
   "body.visible" => "Show or hide a body", "{body, visible}";
   "body.topology" => "A body's faces and edges: surface/curve kind, area, normal, centre, endpoints, length and which faces meet at each edge", "{body, faces?: bool, edges?: bool}";
   "feature.edit" => "Change feature properties (fields merged into the feature)", "{feature, set: {...}}";
-  "feature.delete" => "Delete a feature and the features that depend on it", "{feature}";
+  "feature.delete" => "Delete a feature and the features that depend on it; a deleted sketch's features stay, built from its cached geometry with a warning, unless cascade", "{feature, cascade?: bool}";
   "feature.suppress" => "Suppress or unsuppress a feature", "{feature, suppressed?: bool}";
   "feature.rename" => "Rename a feature", "{feature, name}";
-  "feature.move" => "Reorder a feature in the timeline", "{feature, to: index}";
+  "feature.move" => "Reorder a feature in the timeline (refused when it would come before what it references)", "{feature, to: index}";
   "timeline.marker" => "Roll the timeline back to after N features (null = end)", "{at: number|null}";
   "attribute.set" => "Attach a named value to the design, a body, component, feature or sketch curve/point", "{target?: \"design\" | {body} | {component} | {feature} | {sketch} | {sketch, curve} | {sketch, point}, group, name, value}";
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
   "attribute.delete" => "Remove attributes from a target (no name = the whole group)", "{target?, group, name?}";
   "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, background?: \"#rrggbb\"}";
+  "view.named.save" => "Save a camera as a named view (an existing name is replaced)", "{name? (default Named View N), target: [x,y,z], yaw, pitch, distance, fov?, ortho?}";
+  "view.named.list" => "The design's named views", "{}";
+  "view.named.get" => "One named view's camera", "{name}";
+  "view.named.rename" => "Rename a named view", "{name, to}";
+  "view.named.delete" => "Delete a named view", "{name}";
   "select" => "Set the selection", "{items: [Sel]}";
   "selection" => "The current selection", "{}";
   "select.all" => "Select every body (or every face, edge, or curve of the edited sketch)", "{kind?: bodies|faces|edges|sketch}";
@@ -247,8 +253,8 @@ cmds! {
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
   "sheet.check" => "Check a sheet metal body's flat pattern against the rules shops cut by: hole sizes, material between holes and edges, holes near bends, and the sheet size; defaults follow the body's thickness and bend radius", "{body?, face?, min_hole?, min_web?, bend_clearance?, sheet?: [width, height]}";
-  "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?}";
-  "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?}";
+  "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?, horizontal?, vertical? (move the profiles along the sketch x / the face's up), rotation?: deg (about the profiles' centre)}";
+  "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?, horizontal?, vertical?, rotation?: deg}";
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
   "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
@@ -258,7 +264,7 @@ cmds! {
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
   "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
   "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
-  "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, flip?, name?}";
+  "joint_origin" => "Save a joint origin on a component (joints use it as {origin: id|name}); moves with the component", "{component?, face?|edge?|at?: [x,y,z], z?, x?, angle?, offset?, offset_x?, offset_y?, flip?, name?}";
   "rigid_group" => "Make components move as one: a joint moving any of them moves them all", "{components?: [id], bodies?: [id], name?}";
   "motion_link" => "Drive one joint from another: when the leader moves leader_value, the follower moves follower_value", "{leader, follower, leader_motion?: rotation|slide|slide2|pitch, follower_motion?, leader_value?, follower_value?, reverse?, name?}";
   "contact_set.create" => "Contact set: components that can't pass through each other; driving a joint stops at contact", "{components?: [id], bodies?: [id], name?}";
@@ -269,11 +275,11 @@ cmds! {
   "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
   "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
-  "sketch.text_edit" => "Change a text's string, height, angle, font or position (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, at?: [x,y]}";
+  "sketch.text_edit" => "Change a text's string, height, angle, font or position (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, bold?, italic?, underline?, halign?, valign?, spacing?, at?: [x,y]}";
   "sketch.text_explode" => "Turn a text into plain curves", "{text_id? | curve?}";
   "sketch.break" => "Split a curve without removing anything: at its crossings around a point, or at the point", "{curve?, at: [x,y], at_point?, snap?}";
   "sketch.tangent_circle" => "Circle tangent to two curves (with a radius) or three; the one nearest 'near'", "{curves: [id, id, id?], radius?, near?: [x,y]}";
-  "sketch.blend" => "Blend curve: a spline joining the ends of two curves, tangent (g1) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
+  "sketch.blend" => "Blend curve: Fusion's spline joining the ends of two curves, tangent (g1, the default) or curvature continuous (g2)", "{curves: [id, id], near?: [[x,y], [x,y]], continuity?: g1|g2}";
   "config.list" => "Configurations (named variants), the active one and whether design history is captured", "{}";
   "config.create" => "Add a configuration, empty or copying another's overrides", "{name, copy?, activate?: bool}";
   "config.delete" => "Delete a configuration", "{name}";
@@ -319,6 +325,9 @@ cmds! {
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
   "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
+  "form.box" => "Create Form with a box: a T-spline body, the smooth limit surface of a box control cage (centred on 'at', standing on the plane) with the given faces per side", "{plane?, at?: [x, y], length, width, height, length_faces?, width_faces?, height_faces? (default 2), operation?}";
+  "form.cage" => "Create Form from a control cage: vertices (plane coordinates) and closed quad faces, counter-clockwise seen from outside; the body is the cage's smooth limit surface", "{plane?, vertices: [[x, y, z]], faces: [[a, b, c, d]], operation?}";
+  "form.move_vertex" => "Pull a form's control vertex (by index, or the one nearest a point) to a position or by an offset, in the form's plane coordinates", "{feature? (default the last form), vertex? | point?: [x, y, z], to?: [x, y, z] | by?: [dx, dy, dz]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -326,6 +335,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::drawings::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::views::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::inspect::run(s, name, p) {
@@ -351,6 +363,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cut::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::form::run(s, name, p) {
     return r;
   }
   match name {
@@ -617,6 +632,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         distance2: opt_expr(p, "distance2").unwrap_or_else(|| "0".into()),
         flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
         taper: opt_expr(p, "taper").unwrap_or_default(),
+        taper2: opt_expr(p, "taper2").unwrap_or_default(),
         thin: opt_expr(p, "thin").unwrap_or_default(),
         thin_side,
         to,
@@ -735,7 +751,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
       let plane = plane_ref(s, p.get("plane").ok_or(CmdError::new("missing 'plane'"))?)?;
       let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip })
+      let symmetric = p.get("symmetric").and_then(Value::as_bool).unwrap_or(false);
+      let angle2 = opt_expr(p, "angle2");
+      add_feature(s, FeatureKind::Draft { faces, plane, angle: req_expr(p, "angle")?, flip, symmetric, angle2 })
     }
     "fillet" => {
       let (edges, radius, sets) = crate::fillet::selection_sets(s, p)?;
@@ -776,18 +794,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let remove_tool = p.get("remove_tool").and_then(Value::as_bool).unwrap_or(false);
       add_feature(s, FeatureKind::SplitByBody { bodies: body_sel(p), tool, remove_tool })
     }
-    "shell" => {
-      let mut faces = Vec::new();
-      for f in p.get("faces").and_then(Value::as_array).ok_or(CmdError::new("missing 'faces'"))? {
-        faces.push(face_ref(s, f)?);
-      }
-      let round = match p.get("corners").and_then(Value::as_str) {
-        None | Some("sharp") => false,
-        Some("round") => true,
-        Some(o) => return Err(CmdError::new(format!("unknown corners '{o}' (sharp or round)"))),
-      };
-      add_feature(s, FeatureKind::Shell { faces, thickness: req_expr(p, "thickness")?, round })
-    }
+    "shell" => crate::solid::shell(s, p),
     "box" | "cylinder" | "sphere" | "torus" => {
       let shape = match name {
         "box" => {
@@ -837,6 +844,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           axis,
           count: req_expr(p, "count")?,
           angle: opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into()),
+          symmetric: p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
           join: p.get("join").and_then(Value::as_bool).unwrap_or(true),
         },
       )
@@ -910,11 +918,29 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "feature.delete" => {
       let id = FeatureId(req_u32(p, "feature")?);
-      let removed = s.edit(|d| Ok(d.remove_feature(id)?))?;
+      let cascade = p.get("cascade").and_then(Value::as_bool).unwrap_or(false);
+      // Fusion's Delete on a sketch keeps the features that use it, on cached geometry
+      let solved = match s.design.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch { .. }) if !cascade => s.model.sketches.get(&id).map(|r| {
+          let pl = r.plane;
+          (
+            PlaneRef::Free { origin: pl.origin.into(), normal: pl.normal().into(), x: Some(pl.x.into()) },
+            r.sketch.clone(),
+          )
+        }),
+        _ => None,
+      };
+      let (removed, kept) = match solved {
+        Some((plane, sketch)) => (vec![id], s.edit(|d| Ok(d.remove_sketch_keep_dependents(id, plane, &sketch)?))?),
+        None => (s.edit(|d| Ok(d.remove_feature(id)?))?, Vec::new()),
+      };
       if s.edit_sketch.is_some_and(|e| removed.contains(&e)) {
         s.edit_sketch = None;
       }
-      Ok(json!({"removed": removed.iter().map(|f| f.0).collect::<Vec<_>>()}))
+      Ok(json!({
+        "removed": removed.iter().map(|f| f.0).collect::<Vec<_>>(),
+        "cached": kept.iter().map(|f| f.0).collect::<Vec<_>>(),
+      }))
     }
     "feature.suppress" => {
       let id = FeatureId(req_u32(p, "feature")?);
@@ -938,8 +964,30 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "feature.move" => {
       let id = FeatureId(req_u32(p, "feature")?);
       let to = req_u32(p, "to")? as usize;
+      // references to bodies, faces and edges only show up when the timeline recomputes: a move
+      // that makes a feature fail that computed before is undone, like Fusion refusing the drop
+      let failing = |s: &Session| -> Vec<FeatureId> {
+        s.design
+          .features
+          .iter()
+          .map(|f| f.id)
+          .filter(|f| s.model.status(*f).is_some_and(|st| st.error.is_some()))
+          .collect()
+      };
+      let before = failing(s);
       s.edit(|d| Ok(d.move_feature(id, to)?))?;
-      Ok(json!({}))
+      let broken: Vec<String> = failing(s)
+        .into_iter()
+        .filter(|f| !before.contains(f))
+        .filter_map(|f| s.design.feature(f).map(|f| f.name.clone()))
+        .collect();
+      if !broken.is_empty() {
+        s.undo();
+        s.redo.pop();
+        let name = s.design.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+        return Err(CmdError::new(format!("moving {name} there would break {}", broken.join(", "))));
+      }
+      Ok(json!({"index": s.design.index_of(id)}))
     }
     "timeline.marker" => {
       let at = p.get("at").and_then(Value::as_u64).map(|v| v as usize);
@@ -1791,6 +1839,25 @@ fn seg_dist3(a: DVec3, b: DVec3, p: DVec3) -> f64 {
   let l2 = ab.length_squared();
   let t = if l2 > 0.0 { ((p - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
   (a + ab * t - p).length()
+}
+
+/// The sketch line passing nearest a world point, newest sketch first.
+pub(crate) fn sketch_line_at(s: &Session, p: DVec3) -> Result<(FeatureId, CurveId), CmdError> {
+  let mut best: Option<(FeatureId, CurveId, f64)> = None;
+  for (id, r) in s.model.sketches.iter().rev() {
+    for c in &r.sketch.curves {
+      let CurveKind::Line { a, b } = c.kind else { continue };
+      let (Some(pa), Some(pb)) = (r.sketch.pos(a), r.sketch.pos(b)) else { continue };
+      let d = seg_dist3(r.plane.to_world(pa), r.plane.to_world(pb), p);
+      if best.is_none_or(|(_, _, bd)| d < bd - 1e-9) {
+        best = Some((*id, c.id, d));
+      }
+    }
+  }
+  match best {
+    Some((sk, c, d)) if d < 0.05 => Ok((sk, c)),
+    _ => Err(CmdError::new(format!("no edge or sketch line at {:?}", p.to_array()))),
+  }
 }
 
 /// {"body", "edge"} or {"point": [x,y,z]} on the edge.

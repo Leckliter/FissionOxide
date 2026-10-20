@@ -1,0 +1,20 @@
+# 480-face-to-face-flipped: added by the parity loop from a Fusion probe
+# Align (plane mode, faces facing): the bar's +X face (centre (50,5,15)) onto the box's top face
+# (centre (10,10,10)). Fox has no Align command; the closest is a Move rotating +90 deg about Y
+# ((x,y,z) -> (z,y,-x), so the face centre goes to (15,5,-50)) then translating by (-5,5,60).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[40, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [50, 10]]}
+{"cmd": "sketch.line", "points": [[50, 10], [40, 10]]}
+{"cmd": "sketch.line", "points": [[40, 10], [40, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 30, "operation": "new_body"}
+{"cmd": "move", "bodies": [4000], "axis": "y", "angle": 90}
+{"cmd": "move", "bodies": [4000], "translate": [-5, 5, 60]}

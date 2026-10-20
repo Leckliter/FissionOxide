@@ -1,0 +1,8 @@
+# 278-extend-arc-around-to-line: added by the parity loop from a Fusion probe
+# extend-arc-around-to-line: Line y=0 (x -30..30) and a quarter arc r20 about the origin from (20,0) through (14.14,14.14) to (0,20); Extend the arc from its (0,20) end, which carries on round its circle to the line at (-20,0); extrude the half disc 10 mm.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-30, 0], [30, 0]]}
+{"cmd": "sketch.arc", "start": [20, 0], "mid": [14.142136, 14.142136], "end": [0, 20]}
+{"cmd": "sketch.extend", "at": [2, 19.899749]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[0, 10]], "distance": 10, "operation": "new_body"}

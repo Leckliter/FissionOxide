@@ -1,0 +1,11 @@
+# 341-box-face-diagonal-vertices: added by the parity loop from a Fusion probe
+# box-face-diagonal-vertices: 20x10x5 box; axis through body vertices (20,0,0) then (20,10,5) (right face diagonal); body patterned 2x over 90 deg about it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "axis", "method": "two_points", "a": {"vertex": {"point": [20, 0, 2.5]}, "end": false}, "b": {"vertex": {"point": [20, 10, 2.5]}, "end": true}}
+{"cmd": "pattern.circular", "axis": {"axis": 3}, "count": 2, "angle": "90 deg", "join": false}

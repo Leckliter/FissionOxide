@@ -1,0 +1,300 @@
+{
+ "id": "cut-two-tools-keep",
+ "name": "cut-two-tools-keep",
+ "description": "Box 40x40x20 cut by two cylinders r=6 h=30 at (12,20) and (28,20), keep tools on (3 bodies).",
+ "exercises": [
+  "extrude",
+  "combine_cut"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "A_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       40,
+       40
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       40
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       40
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "A",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "A_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 20,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "A"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "B_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       12,
+       20
+      ]
+     },
+     "radius": 6
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "B",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "B_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 30,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "B"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "C_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "id": "c1",
+     "center": {
+      "at": [
+       28,
+       20
+      ]
+     },
+     "radius": 6
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "C",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "C_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c1"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 30,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "C"
+   ]
+  },
+  {
+   "op": "combine",
+   "name": "Combine1",
+   "operation": "cut",
+   "target_body": "A",
+   "tool_bodies": [
+    "B",
+    "C"
+   ],
+   "keep_tools": true
+  }
+ ]
+}

@@ -1,0 +1,217 @@
+{
+ "id": "cylinder-emboss-wrap",
+ "name": "cylinder-emboss-wrap",
+ "description": "r20 cylinder along X (x 0..40, axis at z=-20, top line at z=0); a 20x16 rectangle (10,-8)-(30,8) on XY wrapped onto the curved face and embossed 2 mm (wrapped: 0.8 rad sector).",
+ "exercises": [
+  "extrude",
+  "emboss"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Cyl_sketch",
+   "plane": {
+    "ref": "YZ",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "normal": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       0,
+       -20
+      ]
+     },
+     "radius": 20,
+     "id": "c"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Cyl",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Cyl_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "c"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 40,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Cyl"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Emboss_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x_dir": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y_dir": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "w1",
+     "start": {
+      "at": [
+       10,
+       -8
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       -8
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "w2",
+     "start": {
+      "ref": "w1.end",
+      "at": [
+       30,
+       -8
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       8
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "w3",
+     "start": {
+      "ref": "w2.end",
+      "at": [
+       30,
+       8
+      ]
+     },
+     "end": {
+      "at": [
+       10,
+       8
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "w4",
+     "start": {
+      "ref": "w3.end",
+      "at": [
+       10,
+       8
+      ]
+     },
+     "end": {
+      "ref": "w1.start",
+      "at": [
+       10,
+       -8
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "emboss",
+   "name": "Emboss1",
+   "depth": 2,
+   "profiles": [
+    {
+     "sketch": "Emboss_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "w1",
+        "w2",
+        "w3",
+        "w4"
+       ]
+      }
+     ]
+    }
+   ],
+   "faces": [
+    {
+     "point": [
+      20.0,
+      0.0,
+      0.0
+     ],
+     "type": "cylinder",
+     "radius": 20
+    }
+   ]
+  }
+ ]
+}

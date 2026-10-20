@@ -1,0 +1,7 @@
+# 413-xz-origin-plane: added by the parity loop from a Fusion probe
+# xz-origin-plane: Rectangle (5,2)-(35,12) in the XZ plane's sketch frame (Fusion: x=+X, y=-Z, normal +Y), extruded 8 along the normal: X 5..35, Z -12..-2, Y 0..8.
+# hand-written: the sketch is placed by picking the plane/face (Fox's own sketch frame), sketch coords as in the recipe
+{"cmd": "sketch.create", "plane": "xz"}
+{"cmd": "sketch.rect", "corner1": [5, 2], "corner2": [35, 12]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}

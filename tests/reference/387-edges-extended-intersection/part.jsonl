@@ -1,0 +1,14 @@
+# 387-edges-extended-intersection: added by the parity loop from a Fusion probe
+# edges-extended-intersection: L-shaped prism 5 high (20x4 foot, 8x6 upright); construction point through the top edge y=4 (x 8..20) and the top edge x=0 (y 0..10), which don't touch but extended meet at (0,4,5); plane through it and the vertical edge at (20,0); mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 4]]}
+{"cmd": "sketch.line", "points": [[20, 4], [8, 4]]}
+{"cmd": "sketch.line", "points": [[8, 4], [8, 10]]}
+{"cmd": "sketch.line", "points": [[8, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "point", "method": "two_edges", "a": {"point": [14, 4, 5]}, "b": {"point": [0, 7, 5]}}
+{"cmd": "plane", "method": "three_points", "a": {"point": 3}, "b": {"at": [20, 0, 0]}, "c": {"at": [20, 0, 5]}}
+{"cmd": "mirror", "plane": {"feature": 4}, "bodies": [2000], "join": true}
