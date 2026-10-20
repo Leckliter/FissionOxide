@@ -1,0 +1,13 @@
+# 237-extent-distance: added by the parity loop from a Fusion probe
+# extent-distance: 100x60x5 plate centred on the origin; r3 hole at (-30,-15) sketch-rectangular-patterned 4x over a 60 extent along X and 2x over a 30 extent along Y (distance type Extent: the distances are the whole pattern's size); cut through.
+# sketch Plate_sketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-50, -30], [50, -30], [50, 30], [-50, 30]], "closed": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+# sketch Holes: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [-30, -15], "radius": 3}
+{"cmd": "sketch.pattern_rect", "curves": [2], "direction": [1, 0], "count": 4, "spacing": 60, "direction2": [0, 1], "count2": 2, "spacing2": 30, "extent": true}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "operation": "cut", "targets": [2000]}
