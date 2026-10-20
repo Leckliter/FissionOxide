@@ -892,6 +892,7 @@ impl Ctx<'_> {
         diameter,
         depth,
         through_all,
+        to,
         tip_angle,
         head_diameter,
         head_depth,
@@ -903,7 +904,17 @@ impl Ctx<'_> {
         if !(r > 1e-6) {
           return Err("the hole diameter must be positive".into());
         }
-        let deep = if *through_all { self.through_all(&sk.plane) } else { self.len(depth)? };
+        let target = match to {
+          Some(pl) if !*through_all => Some(self.resolve_plane(pl)?),
+          _ => None,
+        };
+        let deep = if *through_all {
+          self.through_all(&sk.plane)
+        } else if target.is_some() {
+          f64::INFINITY // worked out per centre below
+        } else {
+          self.len(depth)?
+        };
         if !(deep > 1e-6) {
           return Err("the hole depth must be positive".into());
         }
@@ -917,7 +928,7 @@ impl Ctx<'_> {
             sheet::HoleHead::Countersink { radius: self.len(head_diameter)? / 2.0, angle: self.angle(head_angle)? }
           }
         };
-        let section = sheet::hole_section(r, deep, tip, head)?;
+        let shared = if target.is_none() { Some(sheet::hole_section(r, deep, tip, head)?) } else { None };
         let centres: Vec<[f64; 2]> = if points.is_empty() {
           let used: Vec<fox_sketch::PointId> =
             sk.sketch.curves.iter().flat_map(|c| sk.sketch.curve_points(c.id)).collect();
@@ -937,8 +948,23 @@ impl Ctx<'_> {
         let mut tools = Vec::new();
         for c in centres {
           let o = sk.plane.to_world(c);
+          let own;
+          let section = match (&shared, &target) {
+            (Some(s), _) => s,
+            (None, Some(t)) => {
+              // 'To': the full diameter runs from the centre to the plane; the tip goes past it
+              let along = down.dot(t.normal());
+              let d = if along.abs() > 1e-9 { (t.origin - o).dot(t.normal()) / along } else { f64::NAN };
+              if !(d > 1e-6) {
+                return Err("the 'to' plane is not ahead of the hole".into());
+              }
+              own = sheet::hole_section(r, d, tip, head)?;
+              &own
+            }
+            (None, None) => return Err("the hole has no depth".into()),
+          };
           let plane = Plane { origin: o, x: sk.plane.x, y: down };
-          let face = Shape::face(&plane, &section).map_err(ke)?;
+          let face = Shape::face(&plane, section).map_err(ke)?;
           tools.push(face.revolve(o, down, std::f64::consts::TAU).map_err(ke)?);
         }
         self.operate(id, union_all(tools)?, Operation::Cut)?;

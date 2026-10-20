@@ -118,7 +118,7 @@ cmds! {
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y]}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), twist?: angle, operation?, targets?: [body] (bodies join/cut may change)}";
-  "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all?, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
+  "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane", "{faces: [{body, face} | {point}], plane, angle, flip?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?}";
@@ -700,6 +700,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         o => return Err(CmdError::new(format!("unknown hole kind '{o}' (simple, counterbore, countersink)"))),
       };
       let through_all = p.get("through_all").and_then(Value::as_bool).unwrap_or(false);
+      // 'To' extent: the hole runs to a plane or planar face instead of a fixed depth
+      let to = if through_all { None } else { p.get("to").map(|v| plane_ref(s, v)).transpose()? };
+      let blind = !through_all && to.is_none();
       add_feature(
         s,
         FeatureKind::Hole {
@@ -707,8 +710,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           points: ids(p, "points").into_iter().map(PointId).collect(),
           kind,
           diameter: req_expr(p, "diameter")?,
-          depth: if through_all { "0".into() } else { req_expr(p, "depth")? },
+          depth: if blind { req_expr(p, "depth")? } else { "0".into() },
           through_all,
+          to,
           tip_angle: opt_expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()),
           head_diameter: opt_expr(p, "head_diameter").unwrap_or_else(|| "0".into()),
           head_depth: opt_expr(p, "head_depth").unwrap_or_else(|| "0".into()),

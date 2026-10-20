@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+427-counterbore-blind-tip90
+428-countersink-blind-flat-bottom
+429-flipped-hole-from-midplane
+430-hole-to-plane-extent
