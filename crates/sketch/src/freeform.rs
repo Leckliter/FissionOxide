@@ -474,7 +474,7 @@ impl Sketch {
       CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } | CurveKind::Bezier { points } => {
         Some((*points.first()?, *points.last()?))
       }
-      CurveKind::EllipticalArc { start, end, .. } => Some((*start, *end)),
+      CurveKind::EllipticalArc { start, end, .. } | CurveKind::Conic { start, end, .. } => Some((*start, *end)),
       CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => None,
     }
   }
@@ -1315,7 +1315,8 @@ pub(crate) fn end_frame(kind: &CurveKind, at_end: bool, pos: &dyn Fn(PointId) ->
     CurveKind::Spline { .. }
     | CurveKind::ControlSpline { .. }
     | CurveKind::Bezier { .. }
-    | CurveKind::EllipticalArc { .. } => {
+    | CurveKind::EllipticalArc { .. }
+    | CurveKind::Conic { .. } => {
       let bz = crate::kind_beziers(kind, pos);
       if at_end {
         let b = *bz.last()?;

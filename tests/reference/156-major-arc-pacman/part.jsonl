@@ -1,0 +1,8 @@
+# 156-major-arc-pacman: added by the parity loop from a Fusion probe
+# major-arc-pacman: Center point arc: centre (10,0), start (22,0), 270 deg counter-clockwise to (10,-12); closed to the centre by two lines (pac-man, R12); extruded 6 on XY.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "center": [10, 0], "start": [22, 0], "end": [10, -12]}
+{"cmd": "sketch.line", "points": [[10.0, -12.0], [10, 0]]}
+{"cmd": "sketch.line", "points": [[10, 0], [22, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 6, "operation": "new_body"}

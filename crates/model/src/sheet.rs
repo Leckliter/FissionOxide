@@ -172,12 +172,12 @@ fn tangents(s: &Seg) -> Option<(P2, P2)> {
       Some((t(start_angle), t(start_angle + sweep)))
     }
     Seg::Circle { .. } => None,
-    Seg::Bezier { p, .. } => {
+    Seg::Bezier { p } => {
       let a = unit(sub(if len2(sub(p[1], p[0])) > 1e-12 { p[1] } else { p[2] }, p[0]))?;
       let b = unit(sub(p[3], if len2(sub(p[3], p[2])) > 1e-12 { p[2] } else { p[1] }))?;
       Some((a, b))
     }
-    Seg::EllipseArc { .. } => {
+    Seg::EllipseArc { .. } | Seg::Conic { .. } => {
       let (a, b) = s.end_tangents();
       Some((unit(a)?, unit(b)?))
     }
@@ -212,9 +212,9 @@ pub fn open_path(sketch: &Sketch, curves: &[CurveId]) -> Result<Vec<Seg>, String
         segs.push(Seg::Arc { center: c, radius: len2(sub(s, c)), start_angle: a0, sweep });
       }
       CurveKind::Spline { .. } | CurveKind::ControlSpline { .. } | CurveKind::Bezier { .. } => {
-        segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p, chain: 0 }));
+        segs.extend(sketch.beziers(c.id).into_iter().map(|p| Seg::Bezier { p }));
       }
-      CurveKind::EllipticalArc { .. } => segs.extend(sketch.curve_segs(c.id)),
+      CurveKind::EllipticalArc { .. } | CurveKind::Conic { .. } => segs.extend(sketch.curve_segs(c.id)),
       CurveKind::Ellipse { .. } => {
         if !curves.is_empty() {
           return Err("a path can't include a full ellipse".into());
@@ -320,6 +320,7 @@ pub fn contour_section(path: &[Seg], t: f64, r: f64, flip: bool) -> Result<Profi
       Seg::Circle { .. } => return Err("bad path segment".into()),
       Seg::Bezier { .. } => return Err("contour flanges follow lines and arcs, not splines".into()),
       Seg::EllipseArc { .. } => return Err("contour flanges follow lines and arcs, not ellipses".into()),
+      Seg::Conic { .. } => return Err("contour flanges follow lines and arcs, not conics".into()),
     });
   }
   let (Some(p0), Some(p1), Some(q0), Some(q1)) = (p.first(), p.last(), q.first(), q.last()) else {

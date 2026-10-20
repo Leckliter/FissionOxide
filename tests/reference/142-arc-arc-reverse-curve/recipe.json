@@ -1,0 +1,207 @@
+{
+ "id": "arc-arc-reverse-curve",
+ "name": "arc-arc-reverse-curve",
+ "description": "Arc R20 about the origin from fixed (20,0) counter-clockwise (drawn 155 deg) to a free end shared with an R10 arc that ends at fixed (-30,0); lines down to y=-10 and back close it. Tangency at the shared end (a reverse curve) puts the join at 161.2 deg, R10 centre (-28.33,9.86); extruded 10.",
+ "exercises": [
+  "sketch",
+  "tangent constraint",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "arc_center_start_sweep",
+     "center": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "start": {
+      "at": [
+       20,
+       0
+      ]
+     },
+     "sweep_deg": 155,
+     "id": "a1"
+    },
+    {
+     "type": "arc_three_point",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       -18.126156,
+       8.452365
+      ]
+     },
+     "mid": {
+      "at": [
+       -23.5,
+       2.0
+      ]
+     },
+     "end": {
+      "at": [
+       -30,
+       0
+      ]
+     },
+     "id": "a2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "a2.end",
+      "at": [
+       -30,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       -30,
+       -10
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       -30,
+       -10
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       -10
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "ref": "l2.end",
+      "at": [
+       20,
+       -10
+      ]
+     },
+     "end": {
+      "ref": "a1.start",
+      "at": [
+       20,
+       0
+      ]
+     },
+     "id": "l3"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "a1.start"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "a2.end"
+     ]
+    },
+    {
+     "type": "tangent",
+     "refs": [
+      "a1",
+      "a2"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l2"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "radius",
+     "refs": [
+      "a2"
+     ],
+     "value": 10
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "a1",
+        "a2",
+        "l1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

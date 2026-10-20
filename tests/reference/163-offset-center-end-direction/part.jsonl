@@ -1,0 +1,7 @@
+# 163-offset-center-end-direction: added by the parity loop from a Fusion probe
+# offset-center-end-direction: Center point arc slot centred at (10,5), start at 30 deg on R20, end point (-20,5) off the radius so it only sets the end direction (180 deg), width 5; extruded 3.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "arc_center": [10, 5], "start": [27.320508075688775, 15], "end": [-20, 5], "width": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 3, "operation": "new_body"}

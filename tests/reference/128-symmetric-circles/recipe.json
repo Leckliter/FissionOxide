@@ -1,0 +1,170 @@
+{
+ "id": "symmetric-circles",
+ "name": "Symmetry: two circles about a vertical axis",
+ "description": "Construction axis on the Y axis; circle A radius 5 centred (15,10) by dimensions; circle B drawn radius 3 at (-12,8) and made symmetric to A about the axis, so it solves to radius 5 at (-15,10); both extruded 10.",
+ "exercises": [
+  "sketch_constraints",
+  "symmetric",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated",
+  "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "ref": "origin",
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "ax",
+     "construction": true
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       15,
+       10
+      ]
+     },
+     "radius": 5,
+     "id": "ca"
+    },
+    {
+     "type": "circle",
+     "center": {
+      "at": [
+       -12,
+       8
+      ]
+     },
+     "radius": 3,
+     "id": "cb"
+    }
+   ],
+   "constraints": [
+    {
+     "type": "vertical",
+     "refs": [
+      "ax"
+     ]
+    },
+    {
+     "type": "symmetric",
+     "refs": [
+      "ca",
+      "cb",
+      "ax"
+     ]
+    }
+   ],
+   "dimensions": [
+    {
+     "type": "radius",
+     "refs": [
+      "ca"
+     ],
+     "value": 5,
+     "unit": "mm"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "origin",
+      "ca.center"
+     ],
+     "value": 15,
+     "unit": "mm",
+     "orientation": "horizontal"
+    },
+    {
+     "type": "distance",
+     "refs": [
+      "origin",
+      "ca.center"
+     ],
+     "value": 10,
+     "unit": "mm",
+     "orientation": "vertical"
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "ca"
+       ]
+      },
+      {
+       "outer": true,
+       "curves": [
+        "cb"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   }
+  }
+ ]
+}

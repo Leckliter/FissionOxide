@@ -33,6 +33,7 @@ use fox_model::{BodyId, Design, FeatureId};
 use serde_json::Value;
 
 pub use commands::{COMMANDS, CommandSpec};
+pub use fillet::tangent_neighbours;
 pub use fox_exchange as exchange;
 pub use fox_expr as expr;
 pub use fox_kernel as kernel;
@@ -479,6 +480,8 @@ mod tests_cut;
 mod tests_files;
 #[cfg(test)]
 mod tests_fillet;
+#[cfg(test)]
+mod tests_include;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]

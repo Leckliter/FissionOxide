@@ -1,0 +1,8 @@
+# 193-pentagon-right-slanted-xy: added by the parity loop from a Fusion probe
+# pentagon-right-slanted-xy: Edge polygon from (2,3) to (12,8), 5 sides, on the right side of the edge (looking from start to end); side length 11.18; extruded 7.
+# Fox's edge polygon always lies left of the edge, so the right side is the reversed edge.
+# sketch S: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.polygon", "edge": [[12, 8], [2, 3]], "sides": 5}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 7, "operation": "new_body"}

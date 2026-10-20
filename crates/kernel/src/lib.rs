@@ -293,12 +293,9 @@ impl Shape {
     let mut lens = Vec::new();
     for lp in std::iter::once(&profile.outer).chain(profile.holes.iter()) {
       lens.push(u32::try_from(lp.segs.len()).map_err(|_| KernelError::Input("too many segments".into()))?);
-      // start the loop where an edge starts, not part way along a spline
-      let k = (0..lp.segs.len())
-        .find(|&i| !joins(&lp.segs[(i + lp.segs.len() - 1) % lp.segs.len()], &lp.segs[i]))
-        .unwrap_or(0);
-      let looped: Vec<Seg> = lp.segs[k..].iter().chain(&lp.segs[..k]).copied().collect();
-      push_segs(&mut segs, plane, &looped);
+      for s in &lp.segs {
+        push_seg(&mut segs, plane, s);
+      }
     }
     if segs.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("non-finite profile coordinates".into()));
@@ -467,7 +464,9 @@ impl Shape {
   /// An open chain of sketch segments on `plane` as a wire (sweep paths).
   pub fn path(plane: &Plane, segs: &[Seg]) -> Result<Shape> {
     let mut data = Vec::new();
-    push_segs(&mut data, plane, segs);
+    for s in segs {
+      push_seg(&mut data, plane, s);
+    }
     if data.is_empty() || data.iter().any(|v| !v.is_finite()) {
       return Err(KernelError::Input("the path is empty or not finite".into()));
     }
@@ -960,25 +959,7 @@ pub fn write_obj(meshes: &[(String, TriMesh)], path: &Path) -> std::io::Result<(
   std::fs::write(path, s)
 }
 
-/// Whether `b` continues the edge `a` is part of: neighbouring pieces of one fit-point spline.
-fn joins(a: &Seg, b: &Seg) -> bool {
-  match (a, b) {
-    (Seg::Bezier { chain: c1, .. }, Seg::Bezier { chain: c2, .. }) => *c1 != 0 && c1 == c2,
-    _ => false,
-  }
-}
-
-/// Pushes a chain of segments, marking the pieces that continue the previous one's edge.
-fn push_segs(out: &mut Vec<f64>, plane: &Plane, segs: &[Seg]) {
-  for (i, s) in segs.iter().enumerate() {
-    let joined = i > 0 && joins(&segs[i - 1], s);
-    push_seg(out, plane, s, joined);
-  }
-}
-
-/// Pushes one segment (13 doubles); `joined` makes a Bézier piece continue the previous one's
-/// edge (kind 5).
-fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg, joined: bool) {
+fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg) {
   let mut put = |kind: f64, p: [DVec3; 4]| {
     out.push(kind);
     for v in p {
@@ -994,13 +975,16 @@ fn push_seg(out: &mut Vec<f64>, plane: &Plane, s: &Seg, joined: bool) {
       let n = if ccw { plane.normal() } else { -plane.normal() };
       put(2.0, [plane.to_world(center), n, DVec3::new(radius, 0.0, 0.0), DVec3::ZERO])
     }
-    Seg::Bezier { p, .. } => put(if joined { 5.0 } else { 3.0 }, p.map(|q| plane.to_world(q))),
+    Seg::Bezier { p } => put(3.0, p.map(|q| plane.to_world(q))),
     Seg::EllipseArc { center, major, minor, start, sweep } => {
       let a = major[0].hypot(major[1]).max(1e-300);
       let v = [center[0] - major[1] / a * minor, center[1] + major[0] / a * minor];
       let m = [center[0] + major[0], center[1] + major[1]];
       let range = DVec3::new(start, start + sweep, 0.0);
       put(4.0, [plane.to_world(center), plane.to_world(m), plane.to_world(v), range])
+    }
+    Seg::Conic { p, w } => {
+      put(5.0, [plane.to_world(p[0]), plane.to_world(p[1]), plane.to_world(p[2]), DVec3::new(w, 0.0, 0.0)])
     }
   }
 }
@@ -1024,3 +1008,6 @@ mod refparts;
 mod tests_ellipse;
 #[cfg(test)]
 mod tests_refparts;
+
+mod path3d;
+pub use path3d::Seg3;

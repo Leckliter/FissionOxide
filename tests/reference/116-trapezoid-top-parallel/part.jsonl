@@ -1,0 +1,14 @@
+# 116-trapezoid-top-parallel: added by the parity loop from a Fusion probe
+# trapezoid-top-parallel: Quad A(10,5) B(50,5) C(40,25) fixed, D drawn (15,28); top CD made parallel to AB and dimensioned 25, so D=(15,25): a 40/25 x 20 trapezoid (area 650); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 5], [50, 5]]}
+{"cmd": "sketch.line", "points": [[50, 5], [40, 25]]}
+{"cmd": "sketch.line", "points": [[40, 25], [15, 28]]}
+{"cmd": "sketch.line", "points": [[15, 28], [10, 5]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [5]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [8, 3]}
+{"cmd": "sketch.dimension", "type": "distance", "points": [5, 7], "value": 25}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
