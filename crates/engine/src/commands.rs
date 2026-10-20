@@ -81,7 +81,7 @@ cmds! {
   "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
-  "sketch.line" => "Line or polyline (consecutive points share endpoints)", "{points: [[x,y],...], closed?: bool, sketch?}";
+  "sketch.line" => "Line or polyline (consecutive points share endpoints), or a midpoint line: mirrored about mid, which is held at its middle", "{points: [[x,y],...], closed?: bool, sketch?} | {mid: [x,y], end: [x,y], sketch?}";
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
   "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end} | {tangent: curve, start, end}";
@@ -2074,6 +2074,21 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       }
     };
     match name.as_str() {
+      "sketch.line" if p.get("mid").is_some() => {
+        // Fusion's Midpoint Line: the other end mirrors `end` through `mid`, and the midpoint
+        // (an existing point it lands on, such as the origin, or a new one) stays on the middle
+        let (m, e) = (req_pt(&p, "mid")?, req_pt(&p, "end")?);
+        if (e[0] - m[0]).hypot(e[1] - m[1]) < 1e-9 {
+          return Err(CmdError::new("the end is on the midpoint"));
+        }
+        let mid = snap(sketch, m);
+        let a = [2.0 * m[0] - e[0], 2.0 * m[1] - e[1]];
+        let (a, b) = (snap(sketch, a), snap(sketch, e));
+        let (line, _) = sketch.add_line(a, b)?;
+        let mid = sketch.resolve(mid)?;
+        auto_hv(sketch, line);
+        sketch.add_constraint(ConstraintKind::Midpoint { p: mid, line })?;
+      }
       "sketch.line" => {
         let pts: Vec<[f64; 2]> = p
           .get("points")
