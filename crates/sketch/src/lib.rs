@@ -245,6 +245,13 @@ pub enum ConstraintKind {
     b: PointId,
     line: CurveId,
   },
+  /// Curves `a` and `b` mirror each other across `line`: two lines as infinite lines (their
+  /// endpoints stay free), or two circles/arcs by their centres, with equal radii.
+  SymmetricCurves {
+    a: CurveId,
+    b: CurveId,
+    line: CurveId,
+  },
   Distance {
     a: PointId,
     b: PointId,
@@ -335,7 +342,7 @@ impl ConstraintKind {
       ConstraintKind::Concentric { .. } => "Concentric",
       ConstraintKind::PointOnCurve { .. } => "Point on curve",
       ConstraintKind::Midpoint { .. } => "Midpoint",
-      ConstraintKind::Symmetric { .. } => "Symmetric",
+      ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => "Symmetric",
       ConstraintKind::Distance { .. } => "Distance",
       ConstraintKind::HorizontalDistance { .. } => "Horizontal distance",
       ConstraintKind::VerticalDistance { .. } => "Vertical distance",
@@ -377,6 +384,7 @@ impl ConstraintKind {
       | ConstraintKind::Concentric { a, b }
       | ConstraintKind::Curvature { a, b }
       | ConstraintKind::Angle { a, b, .. } => vec![*a, *b],
+      ConstraintKind::SymmetricCurves { a, b, line } => vec![*a, *b, *line],
       ConstraintKind::PointOnCurve { curve, .. }
       | ConstraintKind::Radius { curve, .. }
       | ConstraintKind::Diameter { curve, .. } => vec![*curve],
@@ -802,6 +810,20 @@ impl Sketch {
       ConstraintKind::Angle { a, b, .. } => line(*a, "Angle").and(line(*b, "Angle")),
       ConstraintKind::Midpoint { line: l, .. } => line(*l, "Midpoint"),
       ConstraintKind::Symmetric { line: l, .. } => line(*l, "Symmetric"),
+      ConstraintKind::SymmetricCurves { a, b, line: l } => {
+        line(*l, "Symmetric")?;
+        any(*a)?;
+        any(*b)?;
+        let is_line = |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_round =
+          |id| matches!(self.curve(id).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let pair = (is_line(*a) && is_line(*b)) || (is_round(*a) && is_round(*b));
+        if a == b || a == l || b == l || !pair {
+          Err(SketchError::WrongGeometry("Symmetric", "two points, two lines or two circles/arcs, and an axis line"))
+        } else {
+          Ok(())
+        }
+      }
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
       ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
