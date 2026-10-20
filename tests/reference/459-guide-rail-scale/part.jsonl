@@ -1,0 +1,10 @@
+# 459-guide-rail-scale: added by the parity loop from a Fusion probe
+# guide-rail-scale: 10x10 square centred on the origin on XY swept 40 up +Z along a straight line on XZ, guided by a rail on the same XZ sketch from (5,0,0) to (10,0,40) with profile scaling 'scale': the section grows uniformly to 20x20.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, -40]]}
+{"cmd": "sketch.line", "points": [[5, 0], [10, -40]]}
+{"cmd": "sketch.finish"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-5, -5], "corner2": [5, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "sweep", "sketch": 2, "path": 1, "path_curves": [2], "rail": {"sketch": 1, "curves": [6]}, "operation": "new_body"}
