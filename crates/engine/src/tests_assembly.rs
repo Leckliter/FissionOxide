@@ -370,3 +370,36 @@ fn center_constraint_moves_a_component_only_along_the_plane_normal() {
   );
   assert!(bad.unwrap()["error"].as_str().is_some_and(|e| e.contains("grounded")));
 }
+
+#[test]
+fn interference_creates_bodies() {
+  let mut s = Session::default();
+  let cube = |s: &mut Session, at: [f64; 2], w: f64| {
+    run(s, "box", json!({"at": at, "width": w, "depth": 20, "height": 20, "operation": "new_body"}));
+    s.model.bodies.last().unwrap().id.0
+  };
+  let (a, b) = (cube(&mut s, [10.0, 10.0], 20.0), cube(&mut s, [20.0, 10.0], 20.0));
+  // a third body in A's component overlaps A (and touches B): only checked when selected
+  let c = cube(&mut s, [5.0, 10.0], 10.0);
+  run(&mut s, "component.create", json!({"name": "A", "bodies": [a, c]}));
+  run(&mut s, "component.create", json!({"name": "B", "bodies": [b]}));
+  let all = run(&mut s, "assembly.interference", json!({}));
+  assert_eq!(all.as_array().unwrap().len(), 1, "{all}");
+  let picked = run(&mut s, "assembly.interference", json!({"bodies": [a, c]}));
+  assert_eq!(picked.as_array().unwrap().len(), 1, "{picked}");
+  assert!((picked[0]["volume_mm3"].as_f64().unwrap() - 4000.0).abs() < 1e-3, "{picked}");
+  // the overlap of A and B becomes a body in a new component
+  let n = s.model.bodies.len();
+  let r = run(&mut s, "assembly.interference", json!({"bodies": [a, b], "create_bodies": true}));
+  let body = r[0]["body"].as_u64().unwrap() as u32;
+  assert_eq!(s.model.bodies.len(), n + 1);
+  let (lo, hi) = bbox(&s, body);
+  assert!(near(lo, [10.0, 0.0, 0.0], 1e-6) && near(hi, [20.0, 20.0, 20.0], 1e-6), "{lo:?} {hi:?}");
+  assert_eq!(s.design.component_of(fox_model::BodyId(body)).unwrap().name, "Interference1");
+  // without components it stays in the root
+  s.undo();
+  assert_eq!(s.model.bodies.len(), n);
+  let r = run(&mut s, "assembly.interference", json!({"bodies": [a, b], "create_bodies": true, "components": false}));
+  assert!(r[0]["component"].is_null(), "{r}");
+  assert!(s.design.component_of(fox_model::BodyId(r[0]["body"].as_u64().unwrap() as u32)).is_none());
+}

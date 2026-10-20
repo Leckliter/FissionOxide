@@ -254,7 +254,9 @@ impl Kind {
       Kind::NewComponent => ("New Component", "Make a component from the selected bodies"),
       Kind::Joint => ("Joint", "Join two components at a face or edge of each"),
       Kind::Material => ("Physical Material", "Set a component's material for mass and the BOM"),
-      Kind::Interference => ("Interference", "Find overlapping bodies of different components"),
+      Kind::Interference => {
+        ("Interference", "Find overlapping bodies of different components, or of the selected bodies")
+      }
       Kind::Bom => ("Bill of Materials", "Components, materials and masses"),
       Kind::Form(f) => (f.name, f.hint),
       Kind::Section => ("Section Analysis", "Cut the view open along a plane"),
@@ -726,6 +728,7 @@ impl Dialog {
         d.plane_label = "XY plane".into();
       }
       Kind::SplitBody => d.bodies = sel_only_bodies(s),
+      Kind::Interference => d.flag = true,
       Kind::DriveJoint | Kind::MotionStudy => {
         d.target = joints(s).first().map(|(id, _)| *id);
         d.position = "rotation";
@@ -2831,6 +2834,16 @@ impl Dialog {
           self.refresh_report(&mut app.s);
         }
         ui.end_row();
+        // adds each overlap as a static body (in a new component when ticked)
+        ui.label("");
+        ui.checkbox(&mut self.flag, "Create components");
+        ui.end_row();
+        ui.label("");
+        let overlap = self.report.as_ref().and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        if ui.add_enabled(overlap, egui::Button::new("Create Bodies")).clicked() {
+          self.create_interference(&mut app.s);
+        }
+        ui.end_row();
       }
       Kind::CenterOfMass => {
         let r = self.report.clone().unwrap_or(Value::Null);
@@ -3180,7 +3193,12 @@ impl Dialog {
           v
         })
       }
-      Kind::Interference => s.execute("assembly.interference", &json!({})),
+      Kind::Interference => {
+        // the selected bodies (two or more), else every pair of components
+        let picked = sel_only_bodies(s);
+        self.bodies = if picked.len() >= 2 { picked } else { Vec::new() };
+        s.execute("assembly.interference", &json!({"bodies": self.bodies}))
+      }
       Kind::Bom => s.execute("assembly.bom", &json!({})),
       Kind::CenterOfMass => {
         let bodies = sel_only_bodies(s);
@@ -3207,6 +3225,18 @@ impl Dialog {
         self.report = None;
         self.error = Some(e.0);
       }
+    }
+  }
+
+  /// Adds the interferences of the bodies last computed as bodies (in components when ticked).
+  fn create_interference(&mut self, s: &mut Session) {
+    let p = json!({"bodies": self.bodies, "create_bodies": true, "components": self.flag});
+    match s.execute("assembly.interference", &p) {
+      Ok(v) => {
+        self.report = Some(v);
+        self.error = None;
+      }
+      Err(e) => self.error = Some(e.0),
     }
   }
 
@@ -4486,6 +4516,11 @@ mod tests {
     let mut d = Dialog::blank(Kind::Interference);
     d.refresh_report(&mut s);
     assert!(d.report.is_some(), "{:?}", d.error);
+    let clashes = d.report.as_ref().and_then(Value::as_array).map_or(0, Vec::len);
+    let n = s.model.bodies.len();
+    d.create_interference(&mut s);
+    assert!(d.error.is_none(), "{:?}", d.error);
+    assert_eq!(s.model.bodies.len(), n + clashes);
   }
 
   #[test]
