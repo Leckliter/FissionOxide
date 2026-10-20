@@ -673,8 +673,16 @@ impl<'a> System<'a> {
         vec![cross(u, v)]
       }
       K::Perpendicular { a, b } => {
-        let (u, v) = (self.dir(x, *a), self.dir(x, *b));
-        vec![dot(u, v)]
+        if self.is_line(*a) && self.is_line(*b) {
+          let (u, v) = (self.dir(x, *a), self.dir(x, *b));
+          vec![dot(u, v)]
+        } else {
+          // a line normal to a circle/arc: the line, extended, passes through the centre
+          let (l, r) = if self.is_line(*a) { (*a, *b) } else { (*b, *a) };
+          let (la, lb) = self.line(x, l);
+          let (c, _) = self.round(x, r);
+          vec![cross(unit(sub(lb, la)), sub(c, la))]
+        }
       }
       K::Collinear { a, b } => {
         let (a0, a1) = self.line(x, *a);
@@ -896,6 +904,7 @@ fn analyze(j: &[f64], m: usize, n: usize) -> (usize, Vec<bool>) {
 
 #[cfg(test)]
 mod tests {
+  use super::{cross, sub, unit};
   use crate::*;
 
   fn rect_fully_constrained() -> (Sketch, [CurveId; 4]) {
@@ -988,6 +997,28 @@ mod tests {
     assert!(((d(&s, l4) - a1) - 0.5).sin().abs() < 1e-6);
     let cc = s.pos(s.curve_points(c)[0]).unwrap();
     assert!((s.distance_to_curve(l2, cc).unwrap() - s.radius(c).unwrap()).abs() < 1e-6);
+  }
+
+  #[test]
+  fn perpendicular_line_to_circle_and_arc_runs_through_centre() {
+    let mut s = Sketch::new();
+    let c = s.add_circle(PtSpec::At(20.0, 30.0), 5.0).unwrap();
+    let arc = s.add_arc_center(PtSpec::At(-50.0, 0.0), PtSpec::At(-40.0, 0.0), [-50.0, 10.0]).unwrap();
+    let (l1, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(25.0, 25.0)).unwrap();
+    let (l2, _) = s.add_line(PtSpec::At(-30.0, 5.0), PtSpec::At(-20.0, 20.0)).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: l1, b: c }).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: arc, b: l2 }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    for (l, r) in [(l1, c), (l2, arc)] {
+      let c = s.pos(s.curve_points(r)[0]).unwrap();
+      let p = s.curve_points(l);
+      let (a, b) = (s.pos(p[0]).unwrap(), s.pos(p[1]).unwrap());
+      assert!(cross(unit(sub(b, a)), sub(c, a)).abs() < 1e-6);
+    }
+    // a spline or ellipse still can't be perpendicular to a line, nor two circles to each other
+    let c2 = s.add_circle(PtSpec::At(0.0, 60.0), 4.0).unwrap();
+    assert!(s.add_constraint(ConstraintKind::Perpendicular { a: c, b: c2 }).is_err());
   }
 
   #[test]
