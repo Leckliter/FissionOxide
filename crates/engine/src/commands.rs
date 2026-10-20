@@ -178,7 +178,7 @@ cmds! {
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
-  "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
+  "move" => "Move/rotate bodies or a component: turned about pivot by rotate (X, Y, Z angles, as Fusion's Free Move), translated, then turned about axis by angle; copy keeps the originals and adds moved copies (Create Copy)", "{bodies? | component?, translate?: [x,y,z], axis?, angle?, rotate?: [ax, ay, az], pivot?: [x,y,z], copy?: bool}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
@@ -850,7 +850,21 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       };
       let axis = p.get("axis").map(|a| axis_ref(s, a)).transpose()?;
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "0".into());
-      add_feature(s, FeatureKind::Move { bodies: body_sel(p), translate: t, axis, angle })
+      let rotate = match p.get("rotate").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Some([expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?]),
+        Some(_) => return Err(CmdError::new("rotate needs [x, y, z] angles")),
+        None => None,
+      };
+      let pivot = match p.get("pivot").and_then(Value::as_array) {
+        Some(a) => {
+          let v: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+          let [x, y, z] = v[..] else { return Err(CmdError::new("pivot needs [x, y, z]")) };
+          Some([x, y, z])
+        }
+        None => None,
+      };
+      let copy = p.get("copy").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Move { bodies: body_sel(p), translate: t, axis, angle, rotate, pivot, copy })
     }
     "combine" => {
       let target = BodyId(req_u32(p, "target")?);
@@ -1432,11 +1446,20 @@ fn xform(s: &Session, p: &Value) -> Result<fox_sketch::Xform2, CmdError> {
   let num = |k: &str, kind| -> Result<Option<f64>, CmdError> {
     opt_expr(p, k).map(|e| fox_expr::eval(&e, kind, &scope)).transpose().map_err(CmdError::from)
   };
+  // the translation may be length expressions ("10 mm", "w / 2")
+  let translate = match p.get("translate").and_then(Value::as_array) {
+    Some(a) if a.len() == 2 && a.iter().any(Value::is_string) => {
+      let len =
+        |v: &Value| -> Result<f64, CmdError> { Ok(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &scope)?) };
+      [len(&a[0])?, len(&a[1])?]
+    }
+    _ => opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
+  };
   Ok(fox_sketch::Xform2 {
     scale: num("scale", fox_expr::Kind::Unitless)?.unwrap_or(1.0),
     angle: num("angle", fox_expr::Kind::Angle)?.unwrap_or(0.0),
     center: opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
-    translate: opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
+    translate,
   })
 }
 

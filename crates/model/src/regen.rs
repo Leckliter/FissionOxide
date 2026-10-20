@@ -863,18 +863,37 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Move { bodies, translate, axis, angle } => {
+      FeatureKind::Move { bodies, translate, axis, angle, rotate, pivot, copy } => {
         let v = DVec3::new(self.len(&translate[0])?, self.len(&translate[1])?, self.len(&translate[2])?);
         let rot = match axis {
           Some(a) => Some((self.resolve_axis(a, None)?, self.angle(angle)?)),
           None => None,
         };
+        let turns = match rotate {
+          Some(r) => [self.angle(&r[0])?, self.angle(&r[1])?, self.angle(&r[2])?],
+          None => [0.0; 3],
+        };
+        let c = pivot.map(DVec3::from).unwrap_or(DVec3::ZERO);
+        let mut copies = Vec::new();
         for bi in self.select(bodies)? {
-          let mut s = self.state.bodies[bi].shape.translated(v).map_err(ke)?;
+          let mut s = self.state.bodies[bi].shape.clone();
+          for (a, d) in turns.iter().zip([DVec3::X, DVec3::Y, DVec3::Z]) {
+            if *a != 0.0 {
+              s = s.rotated(c, d, *a).map_err(ke)?;
+            }
+          }
+          s = s.translated(v).map_err(ke)?;
           if let Some(((o, d), a)) = rot {
             s = s.rotated(o, d, a).map_err(ke)?;
           }
-          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+          if *copy {
+            copies.push((bi, s));
+          } else {
+            self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+          }
+        }
+        for (bi, s) in copies {
+          self.add_copies(id, bi, vec![s], false)?;
         }
         Ok(None)
       }
