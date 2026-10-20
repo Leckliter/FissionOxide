@@ -559,6 +559,8 @@ mod tests_sheet2;
 #[cfg(test)]
 mod tests_sheet3;
 #[cfg(test)]
+mod tests_sheet4;
+#[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
 mod tests_sketch_curves;
