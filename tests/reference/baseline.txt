@@ -139,3 +139,7 @@
 332-cylinder-axis-circular-pattern
 333-cone-axis-revolve
 334-torus-axis-circular-pattern
+# Reference parts that pass; see README.md. One directory name per line.
+322-rigid-face-offset-angle
+323-revolute-hole-edge-on-pin
+324-cylindrical-hole-face-on-pin

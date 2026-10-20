@@ -60,3 +60,7 @@
 238-symmetric-direction
 332-cylinder-axis-circular-pattern
 334-torus-axis-circular-pattern
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+322-rigid-face-offset-angle
+323-revolute-hole-edge-on-pin
+324-cylindrical-hole-face-on-pin
