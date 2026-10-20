@@ -491,15 +491,21 @@ pub static COIL: Form = Form {
 pub static PIPE: Form = Form {
   title: "PIPE",
   name: "Pipe",
-  hint: "A round tube along a sketch path of lines and arcs",
+  hint: "A round, square or triangular tube along a sketch path of lines and arcs",
   icon: Icon::Pipe,
   cmd: "pipe",
   fixed: &[],
   inputs: &[
     Input::Sketch { key: "path", label: "Path sketch" },
     Input::Curves { key: "path_curves", label: "Path curves (default all)" },
-    Input::Expr { key: "diameter", label: "Diameter", default: "10 mm" },
+    Input::Choice {
+      key: "section",
+      label: "Section",
+      options: &[("circular", "Circular"), ("square", "Square"), ("triangular", "Triangular")],
+    },
+    Input::Expr { key: "diameter", label: "Size", default: "10 mm" },
     Input::Expr { key: "wall", label: "Wall (empty = solid)", default: "" },
+    Input::Expr { key: "distance", label: "Distance (fraction of the path)", default: "1" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
   ],
   picks_model: false,
@@ -606,6 +612,7 @@ pub static THICKEN: Form = Form {
     Input::Check { key: "symmetric", label: "Symmetric" },
     Input::Check { key: "flip", label: "Flip" },
     Input::Choice { key: "operation", label: "Operation", options: OPS },
+    Input::Choice { key: "corners", label: "Thicken type", options: &[("sharp", "Sharp"), ("round", "Rounded")] },
   ],
   picks_model: true,
 };
@@ -1785,4 +1792,15 @@ pub static CAM_CONTOUR3D: Form = Form {
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
   ],
   picks_model: false,
+};
+
+pub static SK_INCLUDE: Form = Form {
+  title: "INCLUDE 3D GEOMETRY",
+  name: "Include 3D Geometry",
+  hint: "Bring edges into the sketch at their real 3D positions (sweep paths, rails); they follow the model",
+  icon: Icon::Include3D,
+  cmd: "sketch.include",
+  fixed: &[],
+  inputs: &[Input::Edges { key: "edges", label: "Edges" }],
+  picks_model: true,
 };

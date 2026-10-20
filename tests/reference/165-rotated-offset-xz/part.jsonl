@@ -1,0 +1,7 @@
+# 165-rotated-offset-xz: added by the parity loop from a Fusion probe
+# rotated-offset-xz: Center point slot, oblique, off-origin centre on XZ: centre (10, 5), arc centre (19.6, 12.2), width 6; extruded 4.
+# sketch SlotSketch: XZ
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "center": [10, 5], "end": [19.6, 12.2], "width": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 4, "operation": "new_body"}

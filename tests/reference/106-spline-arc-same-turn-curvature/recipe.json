@@ -1,0 +1,212 @@
+{
+ "id": "spline-arc-same-turn-curvature",
+ "name": "Curvature: spline into an arc turning the same way",
+ "description": "Fitted spline (0,0)-(15,-3)-(30,2)-(40,10) meets a fixed R10 arc (centre 34,18) running counter-clockwise from (40,10) to (44,18); lines close it along y=18 and x=0. All points fixed; a curvature (G2) constraint makes the spline arrive along (0.8,0.6) with curvature 1/10. Extruded 5.",
+ "exercises": [
+  "sketch_only",
+  "sketch_constraints",
+  "curvature"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+  "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+  "extrude_direction": "positive = along sketch plane normal unless stated"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "fitted_spline",
+     "id": "s1",
+     "fit_points": [
+      [
+       0,
+       0
+      ],
+      [
+       15,
+       -3
+      ],
+      [
+       30,
+       2
+      ],
+      [
+       40,
+       10
+      ]
+     ]
+    },
+    {
+     "type": "arc_three_point",
+     "id": "a1",
+     "start": {
+      "ref": "s1.end",
+      "at": [
+       40,
+       10
+      ]
+     },
+     "mid": [
+      42,
+      12
+     ],
+     "end": {
+      "at": [
+       44,
+       18
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "ref": "a1.end",
+      "at": [
+       44,
+       18
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       18
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "ref": "l1.end",
+      "at": [
+       0,
+       18
+      ]
+     },
+     "end": {
+      "ref": "s1.start",
+      "at": [
+       0,
+       0
+      ]
+     }
+    }
+   ],
+   "constraints": [
+    {
+     "type": "fix",
+     "refs": [
+      "s1.fit0"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "s1.fit1"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "s1.fit2"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "s1.fit3"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "a1"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l1"
+     ]
+    },
+    {
+     "type": "fix",
+     "refs": [
+      "l2"
+     ]
+    },
+    {
+     "type": "smooth",
+     "refs": [
+      "s1",
+      "a1"
+     ]
+    }
+   ]
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "s1",
+        "a1",
+        "l1",
+        "l2"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 5,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

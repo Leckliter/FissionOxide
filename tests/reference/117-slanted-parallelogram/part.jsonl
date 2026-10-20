@@ -1,0 +1,14 @@
+# 117-slanted-parallelogram: added by the parity loop from a Fusion probe
+# slanted-parallelogram: Lines A(10,5)-B(50,15) and B-C(58,35) fixed; D drawn (16,30); CD parallel to AB and DA parallel to BC put D at (18,25): a parallelogram of area 720; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 5], [50, 15]]}
+{"cmd": "sketch.line", "points": [[50, 15], [58, 35]]}
+{"cmd": "sketch.line", "points": [[58, 35], [16, 30]]}
+{"cmd": "sketch.line", "points": [[16, 30], [10, 5]]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [1]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [2]}
+{"cmd": "sketch.constrain", "type": "fix", "points": [4]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [7, 3]}
+{"cmd": "sketch.constrain", "type": "parallel", "curves": [8, 5]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

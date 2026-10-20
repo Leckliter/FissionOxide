@@ -1,0 +1,8 @@
+# 145-perpendicular-corner: added by the parity loop from a Fusion probe
+# perpendicular-corner: Lines (0,0)-(40,0) and (0,0)-(0,40); a 2-tangent circle of radius 8 tangent to both with the hint at (20,20), so it sits at (8,8); extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 40]]}
+{"cmd": "sketch.tangent_circle", "curves": [2, 5], "radius": 8, "near": [20, 20]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

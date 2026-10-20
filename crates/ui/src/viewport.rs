@@ -113,6 +113,9 @@ pub struct ToolState {
   curves: Vec<(u32, [f64; 2])>,
   /// Heads-up value boxes of the shape being drawn.
   hud: HeadsUp,
+  /// Center Point Arc: the cursor's last angle around the centre and the signed sweep it has
+  /// wound from the start, so the arc runs the way the cursor went (negative = clockwise).
+  arc_wind: Option<(f64, f64)>,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -163,6 +166,29 @@ pub fn reset_tool_state(app: &mut App) {
   app.tstate.dim_first = None;
   app.tstate.curves.clear();
   app.tstate.hud = HeadsUp::default();
+  app.tstate.arc_wind = None;
+}
+
+/// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
+/// sweeps the way the cursor went, as in Fusion.
+fn track_arc_wind(app: &mut App, resp: &egui::Response, view: &View) {
+  let wind = match (app.tool, app.tstate.pts.as_slice()) {
+    (Tool::CenterArc, [c, a]) => {
+      let (c, a) = (*c, *a);
+      resp.hover_pos().and_then(|pos| sketch_cursor(app, view, pos)).map(|(cur, _)| {
+        let cur = hud_apply(app, cur);
+        let ang = (cur[1] - c[1]).atan2(cur[0] - c[0]);
+        let (last, sweep) = app.tstate.arc_wind.unwrap_or(((a[1] - c[1]).atan2(a[0] - c[0]), 0.0));
+        let step = (ang - last + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        // past a full turn either way the direction stays as it was
+        (ang, (sweep + step).clamp(-std::f64::consts::TAU, std::f64::consts::TAU))
+      })
+    }
+    _ => None,
+  };
+  if wind.is_some() || app.tstate.pts.len() != 2 || app.tool != Tool::CenterArc {
+    app.tstate.arc_wind = wind;
+  }
 }
 
 /// Viewport geometry for one frame: maps between egui points, frame pixels and the world.
@@ -226,6 +252,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 
   // overlays that take clicks come first
   let mut consumed = false;
+  shown_dims_overlay(app, &painter, &view);
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
@@ -246,6 +273,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
   dim_editor(app, &ctx);
+  track_arc_wind(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
@@ -399,6 +427,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_grid: app.show_grid,
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
+    hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
@@ -422,6 +451,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hide_edges: !app.show_edges,
     hide_grid: !app.show_grid,
     show_profiles_of: profiles_of,
+    hide_profiles_of: app.hidden_profiles.clone(),
     show_vertices: key.vertices,
     peek: app.ctx_menu.peek.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
@@ -635,7 +665,9 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     },
     Tool::Arc3 if n == 3 => Some(("sketch.arc", json!({"sketch": sid, "start": first, "end": pts[1], "mid": p}))),
     Tool::CenterArc if n == 3 => {
-      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p})))
+      // the arc runs the way the cursor wound around the centre
+      let clockwise = app.tstate.arc_wind.take().is_some_and(|(_, sweep)| sweep < 0.0);
+      Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p, "clockwise": clockwise})))
     }
     Tool::Polygon if n == 2 => {
       Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6})))
@@ -689,8 +721,8 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
     }
     Tool::MidpointLine if n == 2 => {
-      let a = [2.0 * first[0] - p[0], 2.0 * first[1] - p[1]];
-      Some(("sketch.line", json!({"sketch": sid, "points": [a, p]})))
+      // the engine mirrors the end through the midpoint and keeps the midpoint on the line's middle
+      Some(("sketch.line", json!({"sketch": sid, "mid": first, "end": p})))
     }
     Tool::TangentArc if n == 2 => match tangent_curve(app, sk, first) {
       Some(curve) => Some(("sketch.arc", json!({"sketch": sid, "tangent": curve, "start": first, "end": p}))),
@@ -1004,7 +1036,8 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
         | CurveKind::ControlSpline { .. }
         | CurveKind::Ellipse { .. }
         | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. },
+        | CurveKind::EllipticalArc { .. }
+        | CurveKind::Conic { .. },
       )
       | None => return,
     },
@@ -1123,6 +1156,40 @@ pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, se
 }
 
 // ---------------------------------------------------------------- overlays
+
+/// The dimensions of sketches the browser's Show Dimensions turned on, drawn (not editable)
+/// while they're not being edited.
+fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let font = egui::FontId::proportional(12.0);
+  for sk in &app.shown_dims {
+    if app.s.edit_sketch == Some(*sk) || !fox_engine::scene::sketch_visible(&app.s, *sk) {
+      continue;
+    }
+    let Some(r) = app.s.model.sketches.get(sk) else { continue };
+    let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
+    for c in &r.sketch.constraints {
+      let Some(dim) = c.kind.dim() else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim) else { continue };
+      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
+      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
+      let at = match &shape {
+        Some(s) => s.label,
+        None => match to_screen(anchor) {
+          Some(p) => p,
+          None => continue,
+        },
+      };
+      if let Some(s) = &shape {
+        paint_dim(painter, s, DIM_INK);
+      }
+      let rect = Rect::from_center_size(at, size);
+      painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+      painter.galley(rect.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+    }
+  }
+}
 
 /// Dimension labels and constraint glyphs of the sketch being edited. Returns true when a click
 /// was consumed.
@@ -1488,8 +1555,9 @@ fn glyph(k: &ConstraintKind) -> Icon {
     ConstraintKind::Tangent { .. } => Icon::Tangent,
     ConstraintKind::Concentric { .. } => Icon::Concentric,
     ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } => Icon::Symmetric,
+    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
     ConstraintKind::Curvature { .. } => Icon::Curvature,
+    ConstraintKind::Polygon { .. } => Icon::Equal,
     _ => Icon::Fix,
   }
 }
@@ -1570,7 +1638,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc | Tool::MidpointLine, [a]) => line(*a, cur),
+    (Tool::MidpointLine, [a]) => line([2.0 * a[0] - cur[0], 2.0 * a[1] - cur[1]], cur),
+    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
@@ -1604,7 +1673,23 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         circle(c, (a[0] - c[0]).hypot(a[1] - c[1]));
       }
     }
-    (Tool::CenterArc, [c, a]) => circle(*c, (a[0] - c[0]).hypot(a[1] - c[1])),
+    (Tool::CenterArc, [c, a]) => {
+      // the arc so far, the way the cursor wound; a full circle until it moves
+      let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+      match app.tstate.arc_wind {
+        Some((_, sweep)) if sweep.abs() > 1e-9 => {
+          let a0 = (a[1] - c[1]).atan2(a[0] - c[0]);
+          let pts: Vec<[f64; 2]> = (0..=64)
+            .map(|i| {
+              let t = a0 + sweep * i as f64 / 64.0;
+              [c[0] + r * t.cos(), c[1] + r * t.sin()]
+            })
+            .collect();
+          poly(&pts, false);
+        }
+        _ => circle(*c, r),
+      }
+    }
     (Tool::Slot, [a, b]) => {
       let w = point_line_dist(cur, *a, *b);
       circle(*a, w);
@@ -2129,7 +2214,7 @@ fn sketch_planes(app: &App) -> Vec<(serde_json::Value, Plane)> {
 }
 
 /// Half the side of a plane's square: the size the scene draws construction planes at.
-fn plane_half_size(app: &App) -> f64 {
+pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
@@ -2166,12 +2251,14 @@ struct PlanePick {
 /// browser, if any.
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
-  if !picking && (app.picked_plane.is_none() || app.s.edit_sketch.is_some()) {
+  let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
+  if !picking && picked.is_none() && app.shown_planes.is_empty() {
     return None;
   }
   let mut planes = sketch_planes(app);
   if !picking {
-    planes.retain(|(p, _)| Some(p) == app.picked_plane.as_ref());
+    // the plane picked in the browser, and the origin planes Show/Hide turned on
+    planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));
   }
   let half = plane_half_size(app);
   let hot = if picking && app.drag.is_none() {
@@ -2197,12 +2284,12 @@ fn sketch_planes_overlay(
   let PlanePick { planes, half, picking, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
   let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
-  for (i, (_, pl)) in planes.iter().enumerate() {
+  for (i, (p, pl)) in planes.iter().enumerate() {
     let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
     };
-    let lit = hot == Some(i) || !picking;
+    let lit = hot == Some(i) || (!picking && app.picked_plane.as_ref() == Some(p));
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));

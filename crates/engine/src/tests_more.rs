@@ -442,3 +442,110 @@ fn threads_iso_size_and_class() {
   let _ = s.execute("feature.edit", &json!({"feature": f, "set": {"class": "6x"}}));
   assert!(!s.model.errors().is_empty(), "a bad class is an error");
 }
+
+#[test]
+fn center_arc_slot_takes_the_shorter_arc_unless_told() {
+  let pi = std::f64::consts::PI;
+  // the area of a width-4 slot along `sweep` radians of an R20 arc, extruded 1
+  let slot = |sweep: f64| sweep * 20.0 * 4.0 + pi * 4.0;
+  for (ccw, sweep) in [(None, pi / 2.0), (Some(true), 1.5 * pi), (Some(false), pi / 2.0)] {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let mut p = json!({"arc_center": [0, 0], "start": [0, 20], "end": [20, 0], "width": 4});
+    if let Some(ccw) = ccw {
+      p["ccw"] = json!(ccw);
+    }
+    run(&mut s, "sketch.slot", p);
+    run(&mut s, "extrude", json!({"distance": 1}));
+    let v = volume(&s);
+    assert!((v - slot(sweep)).abs() < 1e-3 * slot(sweep), "{ccw:?}: {v} vs {}", slot(sweep));
+  }
+}
+
+#[test]
+fn pipe_sections_and_partial_paths() {
+  // a straight 40 mm path up z, in a sketch whose normal is +y
+  let path = |s: &mut Session| {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "x": [1, 0, 0]}}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [0, -40]]}));
+    let path = s.edit_sketch.unwrap().0;
+    run(s, "sketch.finish", json!({}));
+    path
+  };
+  let pipe = |p: Value| {
+    let mut s = Session::default();
+    let id = path(&mut s);
+    let mut p = p;
+    p["path"] = json!(id);
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    s
+  };
+  let near = |s: &Session, want: f64| {
+    let v = volume(s);
+    assert!((v - want).abs() < want * 1e-6, "{v} vs {want}");
+  };
+  near(&pipe(json!({"size": 6, "section": "square"})), 36.0 * 40.0);
+  near(&pipe(json!({"size": 6, "section": "square", "wall": 1})), (36.0 - 16.0) * 40.0);
+  // a triangle of height 6 has side 4√3; half the path
+  let s = pipe(json!({"size": 6, "section": "triangular", "distance": 0.5}));
+  near(&s, 12.0 * 3f64.sqrt() * 20.0);
+  // the base lies 3 below the path along the sketch normal (y), the apex 3 above
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_min.y + 3.0).abs() < 1e-3 && (m.bbox_max.y - 3.0).abs() < 1e-3, "{m:?}");
+  assert!((m.center_of_mass.y + 1.0).abs() < 1e-6 && (m.bbox_max.z - 20.0).abs() < 1e-3, "{m:?}");
+  // hollow: the triangle with inradius 2 - 1, so a quarter of the area is the hole
+  near(&pipe(json!({"size": 6, "section": "triangular", "wall": 1})), 0.75 * 12.0 * 3f64.sqrt() * 40.0);
+
+  // half a spline path holds half the volume of the whole one
+  let spline = |d: Option<f64>| {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.spline", json!({"points": [[0, 0], [10, -20], [0, -40], [15, -60]]}));
+    let id = s.edit_sketch.unwrap().0;
+    run(&mut s, "sketch.finish", json!({}));
+    let mut p = json!({"path": id, "diameter": 2});
+    if let Some(d) = d {
+      p["distance"] = json!(d);
+    }
+    run(&mut s, "pipe", p);
+    assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+    volume(&s)
+  };
+  let (half, whole) = (spline(Some(0.5)), spline(None));
+  assert!((half / whole - 0.5).abs() < 2e-3, "{half} / {whole}");
+
+  // keys it doesn't know are refused rather than ignored
+  let mut s = Session::default();
+  let id = path(&mut s);
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "shape": "square"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "section": "hexagon"})).is_err());
+  assert!(s.execute("pipe", &json!({"path": id, "diameter": 6, "size": 4})).is_err());
+
+  // a round pipe rebuilds exactly as older files did: the same edges (its seam, the side face's
+  // one straight edge, included) as the old construction, a circle on
+  // Plane::from_normal(start, tangent, sketch normal) swept along the path
+  use fox_kernel::glam::DVec3;
+  use fox_kernel::{Plane, Shape};
+  use fox_sketch::{Loop, Profile, Seg};
+  let s = pipe(json!({"diameter": 6}));
+  let new = s.model.bodies[0].shape.edges().unwrap();
+  let sketch = Plane { origin: DVec3::ZERO, x: DVec3::X, y: DVec3::NEG_Z };
+  let line = [Seg::Line { a: [0.0, 0.0], b: [0.0, -40.0] }];
+  let sec = Plane::from_normal(DVec3::ZERO, DVec3::Z, sketch.normal()).unwrap();
+  let circle = Loop { segs: vec![Seg::Circle { center: [0.0, 0.0], radius: 3.0, ccw: true }] };
+  let old = Shape::face(&sec, &Profile { outer: circle, holes: vec![] })
+    .unwrap()
+    .sweep(&Shape::path(&sketch, &line).unwrap())
+    .unwrap()
+    .edges()
+    .unwrap();
+  assert_eq!(new.len(), old.len(), "{new:?} vs {old:?}");
+  for (a, b) in new.iter().zip(&old) {
+    let same = a.kind == b.kind
+      && [(a.start, b.start), (a.mid, b.mid), (a.end, b.end)].iter().all(|(p, q)| p.distance(*q) < 1e-6);
+    assert!(same, "{a:?} vs {b:?}");
+  }
+  let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
+  assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
+}

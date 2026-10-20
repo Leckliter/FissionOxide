@@ -10,9 +10,18 @@
 14-combine-cut
 15-combine-intersect
 18-hole-features
+183-full-turn-off-origin-center
+184-partial-angle
+185-symmetric-angle
+186-line-loop-partial
+205-vertical-edge-sweep-path
 21-draft
 22-split-body
 23-bracket-multifeature
+235-grid-spacing
+236-line-direction
+237-extent-distance
+238-symmetric-direction
 28-blind-pocket-fillets
 29-two-sided-and-partial-revolve
 30-fillet-after-shell
@@ -47,6 +56,8 @@
 80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
+88-box-patch-join
+89-box-patch-flip-cut
 92-external-modeled-full
 93-internal-modeled-full
 94-external-modeled-partial-left

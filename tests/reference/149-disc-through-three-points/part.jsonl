@@ -1,0 +1,7 @@
+# 149-disc-through-three-points: added by the parity loop from a Fusion probe
+# disc-through-three-points: 3-point circle through (0,0), (30,0), (10,20) (centre (15,5), r=sqrt(250)) on XY; disc extruded 5.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "through": [[0, 0], [30, 0], [10, 20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
