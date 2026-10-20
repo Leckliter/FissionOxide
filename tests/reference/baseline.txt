@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+445-partial-revolve-direction
+446-symmetric-revolve
+447-two-side-revolve
+448-intersect-revolve-sketch-line-axis

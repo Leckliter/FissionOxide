@@ -175,6 +175,8 @@ fn revolve_around_sketch_line() {
     profiles: vec![],
     axis: AxisRef::SketchLine { curve: axis },
     angle: "360".into(),
+    symmetric: false,
+    angle2: None,
     operation: Operation::NewBody,
   })
   .unwrap();

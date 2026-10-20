@@ -525,18 +525,38 @@ impl Ctx<'_> {
         self.operate(id, tool, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
       }
-      FeatureKind::Revolve { sketch, profiles, axis, angle, operation } => {
+      FeatureKind::Revolve { sketch, profiles, axis, angle, symmetric, angle2, operation } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let (chosen, missing) = pick_profiles(&sk.profiles, profiles);
         if chosen.is_empty() {
           return Err("no profiles to revolve".into());
         }
-        let (o, d) = self.resolve_axis(axis, Some(*sketch))?;
+        let (o, mut d) = self.resolve_axis(axis, Some(*sketch))?;
+        if matches!(axis, AxisRef::SketchLine { .. }) {
+          // as in Fusion, the way the axis line was drawn doesn't matter: the profile turns
+          // towards the sketch normal, as it does about a world axis lying in the sketch
+          let p = sk.plane.to_world(chosen[0].interior_point());
+          if d.cross(p - o).dot(sk.plane.normal()) < 0.0 {
+            d = -d;
+          }
+        }
         let a = self.angle(angle)?;
+        // where the sweep starts (turned back from the profile) and how far it turns
+        let (back, total) = match angle2 {
+          _ if *symmetric => (a, 2.0 * a),
+          Some(a2) => {
+            let a2 = self.angle(a2)?;
+            (a2, a + a2)
+          }
+          None => (0.0, a),
+        };
         let mut tools = Vec::new();
         for p in &chosen {
-          let face = Shape::face(&sk.plane, p).map_err(ke)?;
-          tools.push(face.revolve(o, d, a).map_err(ke)?);
+          let mut face = Shape::face(&sk.plane, p).map_err(ke)?;
+          if back.abs() > 1e-12 {
+            face = face.rotated(o, d, -back).map_err(ke)?;
+          }
+          tools.push(face.revolve(o, d, total).map_err(ke)?);
         }
         let tool = union_all(tools)?;
         self.operate(id, tool, *operation)?;

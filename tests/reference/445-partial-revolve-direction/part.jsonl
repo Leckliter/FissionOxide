@@ -1,0 +1,9 @@
+# 445-partial-revolve-direction: added by the parity loop from a Fusion probe
+# partial-revolve-direction: Rectangle x 10..20, z 0..10 on XZ revolved 90 deg one side about the world Z axis (direction of rotation shows in the bbox).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, -10]]}
+{"cmd": "sketch.line", "points": [[20, -10], [10, -10]]}
+{"cmd": "sketch.line", "points": [[10, -10], [10, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 1, "axis": "z", "angle": "90 deg", "operation": "new_body"}

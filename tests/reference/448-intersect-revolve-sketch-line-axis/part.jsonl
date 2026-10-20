@@ -1,0 +1,16 @@
+# 448-intersect-revolve-sketch-line-axis: added by the parity loop from a Fusion probe
+# intersect-revolve-sketch-line-axis: 40x40x20 box on XY; rectangle x 0..15, z 0..30 on XZ revolved 270 deg about its own x=0 edge (a sketch line) with intersect -> 3/4 cylinder r15 h20.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-20, -20], [20, -20]]}
+{"cmd": "sketch.line", "points": [[20, -20], [20, 20]]}
+{"cmd": "sketch.line", "points": [[20, 20], [-20, 20]]}
+{"cmd": "sketch.line", "points": [[-20, 20], [-20, -20]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 1.0, 0.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [15, 0]]}
+{"cmd": "sketch.line", "points": [[15, 0], [15, -30]]}
+{"cmd": "sketch.line", "points": [[15, -30], [0, -30]]}
+{"cmd": "sketch.line", "points": [[0, -30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "revolve", "sketch": 3, "axis": {"line": 10}, "angle": "270 deg", "operation": "intersect"}
