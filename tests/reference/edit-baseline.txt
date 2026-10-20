@@ -149,3 +149,7 @@
 93-internal-modeled-full
 94-external-modeled-partial-left
 95-external-cosmetic
+352-top-face-through-vertex
+353-top-face-through-vertex-v-direction
+354-origin-plane-through-vertex
+355-origin-plane-offset

@@ -320,3 +320,7 @@
 104-spline-arc-curvature
 105-spline-line-curvature
 106-spline-arc-same-turn-curvature
+352-top-face-through-vertex
+353-top-face-through-vertex-v-direction
+354-origin-plane-through-vertex
+355-origin-plane-offset

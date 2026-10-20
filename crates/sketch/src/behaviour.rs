@@ -103,6 +103,10 @@ pub const LOFT_RAIL_SPREAD: &str = "loft_rail_spread";
 /// the sketch normal, as about a world axis in the sketch; without it, the profile turns
 /// right-handed about the line from its start to its end.
 pub const REVOLVE_AXIS_UNDIRECTED: &str = "revolve_axis_undirected";
+/// Split Body merges the coplanar faces a cut leaves in each piece (a cut along an existing face
+/// leaves the new face beside the old one), as Fusion does, when the body had none of its own.
+/// Without it, the pieces keep every face the cut made.
+pub const UNIFY_SPLIT_PIECES: &str = "unify_split_pieces";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -121,6 +125,7 @@ pub const CURRENT: &[&str] = &[
   LOFT_CLOSED_SMOOTH,
   LOFT_RAIL_SPREAD,
   REVOLVE_AXIS_UNDIRECTED,
+  UNIFY_SPLIT_PIECES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

@@ -859,3 +859,39 @@ fn flanges_from_separate_features_leave_an_open_corner() {
   let flat = m.bodies[0].flat_pattern(None).unwrap();
   assert_eq!(flat.bends.len(), 2);
 }
+
+/// An L-shaped block (40×20×10 with a 20×20×20 tower) split at the step's height, z = 10: the cut
+/// face lies beside the step's top face. Returns the face count of each piece, lowest first.
+fn split_at_step(behaviours: Behaviours) -> Vec<usize> {
+  let (mut d, _, _) = block_design();
+  d.behaviours = behaviours;
+  let mut s2 = Sketch::new();
+  s2.add_rectangle([0.0, 0.0], [20.0, 20.0]).unwrap();
+  let s2 = d.add_feature(FeatureKind::Sketch { plane: XY, sketch: s2, links: Vec::new() }).unwrap();
+  d.add_feature(FeatureKind::Extrude {
+    sketch: s2,
+    profiles: vec![],
+    extent: Extent::distance("20"),
+    operation: Operation::Join,
+  })
+  .unwrap();
+  d.add_feature(FeatureKind::SplitBody {
+    bodies: BodySel::default(),
+    plane: PlaneRef::Free { origin: [0.0, 0.0, 10.0], normal: [0.0, 0.0, 1.0], x: None },
+  })
+  .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert_eq!(m.bodies.len(), 2);
+  let mut bodies: Vec<_> = m.bodies.iter().collect();
+  bodies.sort_by(|a, b| a.shape.mass().unwrap().center_of_mass.z.total_cmp(&b.shape.mass().unwrap().center_of_mass.z));
+  bodies.iter().map(|b| b.faces().len()).collect()
+}
+
+#[test]
+fn split_pieces_merge_coplanar_faces_only_in_new_designs() {
+  // a design saved before the flag keeps the cut face and the step's top face apart
+  assert_eq!(split_at_step(Behaviours::legacy()), vec![7, 6]);
+  // a new one merges them into one top face, as Fusion does
+  assert_eq!(split_at_step(Behaviours::current()), vec![6, 6]);
+}

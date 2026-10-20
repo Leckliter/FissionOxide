@@ -8,7 +8,7 @@ use fox_sketch::{CurveKind, Loop, Profile, Seg};
 
 use super::{Ctx, FResult, ke, refresh_face, union_all};
 use crate::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
-use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, PathRef, PlaneRef};
+use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, FeatureKind, Operation, OriginPlane, PathRef, PlaneRef};
 
 /// The ISO coarse pitch for a thread of this major diameter (nearest size).
 pub fn iso_pitch(diameter: f64) -> f64 {
@@ -950,6 +950,17 @@ impl Ctx<'_> {
       PlaneDef::AlongCurve { path, t, distance } => {
         let (p, d) = self.along_curve(path, t, distance)?;
         Plane::from_normal(p, d, perpendicular(d)).map_err(ke)
+      }
+      PlaneDef::Perpendicular { base, through, distance, v } => {
+        let bp = self.resolve_plane(base)?;
+        // Fusion's XZ plane runs its U direction along -X; Fox's XZ runs X along +X.
+        let u = if matches!(base, PlaneRef::Origin { plane: OriginPlane::Xz }) { -bp.x } else { bp.x };
+        let n = if *v { bp.y } else { u };
+        let o = match through {
+          Some(p) => self.point_of(p)?,
+          None => bp.origin + n * self.len(distance)?,
+        };
+        Plane::from_normal(o, n, bp.normal()).map_err(ke)
       }
     }
   }

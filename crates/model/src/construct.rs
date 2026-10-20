@@ -77,6 +77,18 @@ pub enum PlaneDef {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     distance: String,
   },
+  /// Perpendicular to a plane or planar face: its normal is the base's U direction (in-plane X),
+  /// or V (in-plane Y) when `v`. It passes through `through` when given; otherwise it starts at
+  /// the base's origin and moves `distance` along its own normal.
+  Perpendicular {
+    base: PlaneRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    through: Option<PointRef>,
+    #[serde(default = "zero")]
+    distance: String,
+    #[serde(default)]
+    v: bool,
+  },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,6 +153,10 @@ fn along_exprs<'a>(t: &'a mut String, distance: &'a mut String) -> Vec<&'a mut S
   if distance.trim().is_empty() { vec![t] } else { vec![t, distance] }
 }
 
+fn zero() -> String {
+  "0".to_string()
+}
+
 /// Profile of a coil's wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -197,6 +213,9 @@ impl PlaneDef {
       PlaneDef::ThreePoints { a, b, c } => [a, b, c].iter().filter_map(|p| p.feature()).collect(),
       PlaneDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
       PlaneDef::AlongCurve { path, .. } => vec![path.sketch],
+      PlaneDef::Perpendicular { base, through, .. } => {
+        plane_dep(base).into_iter().chain(through.as_ref().and_then(PointRef::feature)).collect()
+      }
       _ => vec![],
     }
   }
@@ -205,6 +224,7 @@ impl PlaneDef {
     match self {
       PlaneDef::Angle { angle, .. } => vec![angle],
       PlaneDef::AlongPath { t, distance, .. } | PlaneDef::AlongCurve { t, distance, .. } => along_exprs(t, distance),
+      PlaneDef::Perpendicular { distance, .. } => vec![distance],
       _ => vec![],
     }
   }
