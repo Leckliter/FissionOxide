@@ -1,0 +1,14 @@
+# 377-oblique-plane-origin-plane-face: added by the parity loop from a Fusion probe
+# 20x10x5 box; oblique construction plane through (20,0,0),(0,10,0),(0,10,5) (x/20+y/10=1); construction point where it, a plane offset 6 from YZ and the origin XY plane meet, at (6,7,0); plane through it and the vertical edge at the origin; mirrored and joined.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0]]}
+{"cmd": "sketch.line", "points": [[20, 0], [20, 10]]}
+{"cmd": "sketch.line", "points": [[20, 10], [0, 10]]}
+{"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}
+{"cmd": "plane", "method": "three_points", "a": {"at": [20, 0, 0]}, "b": {"at": [0, 10, 0]}, "c": {"at": [0, 10, 5]}}
+{"cmd": "plane.offset", "plane": "yz", "offset": 6}
+{"cmd": "point", "method": "three_planes", "a": {"feature": 3}, "b": {"feature": 4}, "c": "xy"}
+{"cmd": "plane", "method": "three_points", "a": {"point": 5}, "b": {"at": [0, 0, 0]}, "c": {"at": [0, 0, 5]}}
+{"cmd": "mirror", "plane": {"feature": 6}, "bodies": [2000], "join": true}
