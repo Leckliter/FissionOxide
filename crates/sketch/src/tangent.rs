@@ -141,8 +141,9 @@ impl Sketch {
   }
 
   /// A circle tangent to two curves with radius `radius`, or to three curves (`radius` None).
-  /// Curves are lines, circles or arcs (lines count as infinite, arcs as whole circles); of the
-  /// possible circles, the one whose centre is nearest `near` is drawn. Two curves also get a
+  /// Curves are lines, circles or arcs (lines count as infinite, arcs as whole circles). With two
+  /// curves, `near` picks the side of each line the circle sits on (its quadrant, as in Fusion);
+  /// of the circles left, the one whose centre is nearest `near` is drawn. Two curves also get a
   /// radius dimension.
   pub fn add_tangent_circle(
     &mut self,
@@ -167,28 +168,46 @@ impl Sketch {
       let ds: Vec<f64> = curves.iter().filter_map(|c| self.distance_to_curve(*c, near)).collect();
       (ds.iter().sum::<f64>() / ds.len().max(1) as f64).max(1e-3)
     });
-    let mut combos: Vec<Vec<i8>> = vec![vec![]];
-    for t in &targets {
-      combos =
-        combos.into_iter().flat_map(|c| t.branches().iter().map(move |b| [c.clone(), vec![*b]].concat())).collect();
-    }
-    let mut best: Option<(f64, P, f64)> = None;
-    for combo in &combos {
-      let eval = |x: &[f64]| -> Vec<f64> {
+    let combos = |sided: bool| -> Vec<Vec<i8>> {
+      let mut combos: Vec<Vec<i8>> = vec![vec![]];
+      for t in &targets {
+        let bs = match (*t, sided) {
+          (Target::Line { a, d }, true) => match d[0] * (near[1] - a[1]) - d[1] * (near[0] - a[0]) {
+            sd if sd > 1e-9 => vec![1],
+            sd if sd < -1e-9 => vec![-1],
+            _ => t.branches().to_vec(),
+          },
+          _ => t.branches().to_vec(),
+        };
+        combos = combos.into_iter().flat_map(|c| bs.iter().map(move |b| [c.clone(), vec![*b]].concat())).collect();
+      }
+      combos
+    };
+    let nearest = |combos: &[Vec<i8>]| -> Option<(f64, P, f64)> {
+      let mut best: Option<(f64, P, f64)> = None;
+      for combo in combos {
+        let eval = |x: &[f64]| -> Vec<f64> {
+          let (c, r) = ([x[0], x[1]], fixed_r.unwrap_or_else(|| x.get(2).copied().unwrap_or(0.0)));
+          targets.iter().zip(combo).map(|(t, b)| t.residual(*b, c, r)).collect()
+        };
+        let x0 = if fixed_r.is_some() { vec![near[0], near[1]] } else { vec![near[0], near[1], r0] };
+        let Some(x) = newton(&eval, x0) else { continue };
         let (c, r) = ([x[0], x[1]], fixed_r.unwrap_or_else(|| x.get(2).copied().unwrap_or(0.0)));
-        targets.iter().zip(combo).map(|(t, b)| t.residual(*b, c, r)).collect()
-      };
-      let x0 = if fixed_r.is_some() { vec![near[0], near[1]] } else { vec![near[0], near[1], r0] };
-      let Some(x) = newton(&eval, x0) else { continue };
-      let (c, r) = ([x[0], x[1]], fixed_r.unwrap_or_else(|| x.get(2).copied().unwrap_or(0.0)));
-      if !(r > 1e-9 && c[0].is_finite() && c[1].is_finite()) {
-        continue;
+        if !(r > 1e-9 && c[0].is_finite() && c[1].is_finite()) {
+          continue;
+        }
+        let d = dist(c, near);
+        if best.is_none_or(|b| d < b.0 - 1e-9) {
+          best = Some((d, c, r));
+        }
       }
-      let d = dist(c, near);
-      if best.is_none_or(|b| d < b.0 - 1e-9) {
-        best = Some((d, c, r));
-      }
-    }
+      best
+    };
+    // Like Fusion's 2-Tangent Circle, the pick names the side of each line the circle sits on (the
+    // quadrant it is in); the nearest centre decides among what's left, and among everything if
+    // nothing fits. A 3-tangent circle (no radius) takes the nearest centre of all, as before.
+    let best =
+      if n == 2 { nearest(&combos(true)).or_else(|| nearest(&combos(false))) } else { nearest(&combos(false)) };
     let (_, c, r) = best.ok_or(SketchError::InvalidValue("no circle is tangent to those curves".into()))?;
     let center = self.add_point(c[0], c[1]);
     let circle = self.add_curve(CurveKind::Circle { center, radius: r })?;
@@ -223,6 +242,18 @@ mod tests {
   }
 
   #[test]
+  fn two_tangent_circle_stays_in_the_picked_quadrant() {
+    // a 20° wedge picked near its vertex: the circle sits in the wedge, not the nearer one below
+    let mut s = Sketch::new();
+    let (h, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(40.0, 0.0)).unwrap();
+    let (w, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(28.191, 10.261)).unwrap();
+    let c = s.add_tangent_circle(&[h, w], Some(Dim::new(4.0)), [3.0, 0.4]).unwrap();
+    assert!(s.solve().ok());
+    let o = s.pos(s.curve_points(c)[0]).unwrap();
+    assert!((o[1] - 4.0).abs() < 1e-6 && (o[0] - 22.6845).abs() < 1e-3, "{o:?}");
+  }
+
+  #[test]
   fn three_tangent_circle_is_the_incircle_or_touches_circles() {
     let mut s = Sketch::new();
     // 3-4-5 right triangle: incircle radius 1 at (1, 1)
@@ -241,5 +272,19 @@ mod tests {
     assert!(s.solve().ok());
     let (o, r) = (s.pos(s.curve_points(t)[0]).unwrap(), s.radius(t).unwrap());
     assert!((o[1] - r).abs() < 1e-6 && (dist(o, [10.0, 5.0]) - 5.0 - r).abs() < 1e-6, "{o:?} {r}");
+  }
+
+  #[test]
+  fn three_tangent_circle_ignores_the_picks_side_of_each_line() {
+    // 3-4-5 triangle, picked just outside the hypotenuse: the 2-curve side rule would give the
+    // excircle beyond it (radius 6 at (6, 6)); three curves keep the nearest centre, the incircle
+    let mut s = Sketch::new();
+    let (a, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(4.0, 0.0)).unwrap();
+    let (b, _) = s.add_line(PtSpec::At(4.0, 0.0), PtSpec::At(0.0, 3.0)).unwrap();
+    let (c, _) = s.add_line(PtSpec::At(0.0, 3.0), PtSpec::At(0.0, 0.0)).unwrap();
+    let t = s.add_tangent_circle(&[a, b, c], None, [2.2, 1.6]).unwrap();
+    assert!(s.solve().ok());
+    let (o, r) = (s.pos(s.curve_points(t)[0]).unwrap(), s.radius(t).unwrap());
+    assert!((r - 1.0).abs() < 1e-6 && dist(o, [1.0, 1.0]) < 1e-6, "{o:?} {r}");
   }
 }

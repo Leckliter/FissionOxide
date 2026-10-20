@@ -124,9 +124,12 @@ pub enum CurveKind {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end_handle: Option<PointId>,
   },
-  /// A cubic B-spline shaped by control points (it passes through the first and last).
+  /// A clamped uniform B-spline shaped by control points (it passes through the first and last),
+  /// cubic or quintic. With too few points for its degree it is the single Bézier through them.
   ControlSpline {
     points: Vec<PointId>,
+    #[serde(default = "cubic", skip_serializing_if = "is_cubic")]
+    degree: u8,
   },
   /// An ellipse: centre, the end of its major axis, and the minor radius.
   Ellipse {
@@ -173,6 +176,11 @@ impl CurveKind {
     CurveKind::Spline { points, start_handle: None, end_handle: None }
   }
 
+  /// A cubic control point spline.
+  pub fn control_spline(points: Vec<PointId>) -> CurveKind {
+    CurveKind::ControlSpline { points, degree: 3 }
+  }
+
   /// Splines, ellipses and Bézier chains: curves drawn as Bézier pieces.
   pub fn is_freeform(&self) -> bool {
     matches!(
@@ -191,6 +199,14 @@ impl CurveKind {
   pub fn is_elliptic(&self) -> bool {
     matches!(self, CurveKind::Ellipse { .. } | CurveKind::EllipticalArc { .. })
   }
+}
+
+fn cubic() -> u8 {
+  3
+}
+
+fn is_cubic(d: &u8) -> bool {
+  *d == 3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -532,7 +548,12 @@ impl Sketch {
         return Err(SketchError::NoPoint(p));
       }
     }
-    if let CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points } = &kind
+    if let CurveKind::ControlSpline { degree, .. } = kind
+      && !matches!(degree, 3 | 5)
+    {
+      return Err(SketchError::InvalidValue(format!("a control point spline is degree 3 or 5, not {degree}")));
+    }
+    if let CurveKind::Spline { points, .. } | CurveKind::ControlSpline { points, .. } = &kind
       && (points.len() < 2 || points.len() > 1000)
     {
       return Err(SketchError::InvalidValue("a spline needs 2 to 1000 points".into()));
@@ -929,6 +950,19 @@ impl Sketch {
         None => Err(SketchError::NoCurve(id)),
       }
     };
+    // anything with a centre: circles, arcs, ellipses and elliptical arcs
+    let centred = |id: CurveId, what: &'static str| -> Result<(), SketchError> {
+      match self.curve(id).map(|c| &c.kind) {
+        Some(
+          CurveKind::Circle { .. }
+          | CurveKind::Arc { .. }
+          | CurveKind::Ellipse { .. }
+          | CurveKind::EllipticalArc { .. },
+        ) => Ok(()),
+        Some(_) => Err(SketchError::WrongGeometry(what, "circles, arcs or ellipses")),
+        None => Err(SketchError::NoCurve(id)),
+      }
+    };
     let any = |id: CurveId| -> Result<(), SketchError> {
       match self.curve(id).map(|c| &c.kind) {
         Some(k) if k.is_freeform() => {
@@ -984,7 +1018,7 @@ impl Sketch {
         }
       }
       ConstraintKind::PointLineDistance { line: l, .. } => line(*l, "Point-line distance"),
-      ConstraintKind::Concentric { a, b } => round(*a, "Concentric").and(round(*b, "Concentric")),
+      ConstraintKind::Concentric { a, b } => centred(*a, "Concentric").and(centred(*b, "Concentric")),
       ConstraintKind::Radius { curve, .. } => round(*curve, "Radius"),
       ConstraintKind::FixRadius { curve, radius } => {
         round(*curve, "Fix")?;
@@ -1065,7 +1099,7 @@ pub fn curve_points(kind: &CurveKind) -> Vec<PointId> {
     CurveKind::Spline { points, start_handle, end_handle } => {
       points.iter().copied().chain(*start_handle).chain(*end_handle).collect()
     }
-    CurveKind::ControlSpline { points } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
+    CurveKind::ControlSpline { points, .. } | CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
       points.clone()
     }
     CurveKind::Ellipse { center, major, .. } => vec![*center, *major],
@@ -1086,7 +1120,8 @@ pub fn kind_beziers(
     CurveKind::Spline { .. } => {
       spline_fit(kind, pos, behaviours.has(behaviour::QUINTIC_FIT_SPLINE)).map(|f| f.0).unwrap_or_default()
     }
-    CurveKind::ControlSpline { points } => bspline_beziers(&pts(points)),
+    CurveKind::ControlSpline { points, degree } if *degree <= 3 => bspline_beziers(&pts(points)),
+    CurveKind::ControlSpline { points, degree } => bspline_degree_beziers(&pts(points), *degree as usize),
     CurveKind::Bezier { points } => {
       let p = pts(points);
       if p.len() < 4 || p.len() % 3 != 1 {
@@ -1233,6 +1268,59 @@ pub fn bspline_beziers(ctrl: &[[f64; 2]]) -> Vec<[[f64; 2]; 4]> {
     }
   }
   pts.windows(4).step_by(3).map(|w| [w[0], w[1], w[2], w[3]]).collect()
+}
+
+/// Cubic Bézier pieces following a clamped uniform B-spline of `degree` (above 3) with these
+/// control points: each span is split into short cubics matching the curve's position and
+/// tangent at their ends (about 1e-5 of the curve's size from it for a quintic). With no more
+/// points than `degree` the curve is the single Bézier of one degree less than the point count.
+pub fn bspline_degree_beziers(ctrl: &[[f64; 2]], degree: usize) -> Vec<[[f64; 2]; 4]> {
+  let p = degree.min(ctrl.len().saturating_sub(1));
+  if p <= 3 {
+    return bspline_beziers(ctrl);
+  }
+  let spans = ctrl.len() - p;
+  let knots: Vec<f64> = std::iter::repeat_n(0.0, p + 1)
+    .chain((1..spans).map(|k| k as f64))
+    .chain(std::iter::repeat_n(spans as f64, p + 1))
+    .collect();
+  // derivative curve: degree p - 1 on the inner knots
+  let deriv: Vec<[f64; 2]> = (0..ctrl.len() - 1)
+    .map(|i| {
+      let s = p as f64 / (knots[i + p + 1] - knots[i + 1]);
+      [(ctrl[i + 1][0] - ctrl[i][0]) * s, (ctrl[i + 1][1] - ctrl[i][1]) * s]
+    })
+    .collect();
+  let pieces = (4096 / spans).clamp(4, 32);
+  let mut out = Vec::with_capacity(spans * pieces);
+  let mut prev = (ctrl[0], de_boor(p - 1, &knots[1..knots.len() - 1], &deriv, 0.0));
+  for k in 1..=spans * pieces {
+    let u = k as f64 / pieces as f64;
+    let at = if k == spans * pieces { *ctrl.last().unwrap_or(&ctrl[0]) } else { de_boor(p, &knots, ctrl, u) };
+    let d = de_boor(p - 1, &knots[1..knots.len() - 1], &deriv, u);
+    let h = 1.0 / (3.0 * pieces as f64);
+    let (a, da) = prev;
+    out.push([a, [a[0] + da[0] * h, a[1] + da[1] * h], [at[0] - d[0] * h, at[1] - d[1] * h], at]);
+    prev = (at, d);
+  }
+  out
+}
+
+/// A point on the B-spline of `degree` with `knots` and control points `ctrl` at parameter `u`.
+fn de_boor(degree: usize, knots: &[f64], ctrl: &[[f64; 2]], u: f64) -> [f64; 2] {
+  let n = ctrl.len();
+  // the span holding u (the last one at the end of the range)
+  let k = (degree..n).rev().find(|&i| knots[i] <= u).unwrap_or(degree).min(n - 1);
+  let mut d: Vec<[f64; 2]> = (0..=degree).map(|j| ctrl[j + k - degree]).collect();
+  for r in 1..=degree {
+    for j in (r..=degree).rev() {
+      let i = j + k - degree;
+      let den = knots[i + degree + 1 - r] - knots[i];
+      let a = if den > 0.0 { (u - knots[i]) / den } else { 0.0 };
+      d[j] = [(1.0 - a) * d[j - 1][0] + a * d[j][0], (1.0 - a) * d[j - 1][1] + a * d[j][1]];
+    }
+  }
+  d[degree]
 }
 
 /// An ellipse as eight cubic Bézier pieces (about 4e-6 of the radius from the true curve).

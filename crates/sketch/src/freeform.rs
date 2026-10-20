@@ -472,7 +472,7 @@ impl Sketch {
       CurveKind::Line { a, b } => Some((*a, *b)),
       CurveKind::Arc { start, end, .. } => Some((*start, *end)),
       CurveKind::Spline { points, .. }
-      | CurveKind::ControlSpline { points }
+      | CurveKind::ControlSpline { points, .. }
       | CurveKind::Bezier { points }
       | CurveKind::QuinticSpline { points } => Some((*points.first()?, *points.last()?)),
       CurveKind::EllipticalArc { start, end, .. } | CurveKind::Conic { start, end, .. } => Some((*start, *end)),
@@ -1411,7 +1411,7 @@ mod tests {
       assert!(deviation(&before, &s.beziers(*p)) < 1.0, "close to the old shape");
     }
     let ids = [[0.0, 60.0], [10.0, 70.0], [20.0, 60.0], [30.0, 65.0]].map(|p| s.add_point(p[0], p[1]));
-    let cs = s.add_curve(CurveKind::ControlSpline { points: ids.to_vec() }).unwrap();
+    let cs = s.add_curve(CurveKind::control_spline(ids.to_vec())).unwrap();
     let before = s.beziers(cs);
     let parts = s.break_curve(cs, [15.0, 65.0], true, 0.0).unwrap();
     assert_eq!(parts.len(), 2);

@@ -109,6 +109,11 @@ fn splines_and_freeform_edges_are_refused_for_now() {
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   run(&mut s, "sketch.ellipse", json!({"center": [40, 0], "major": [50, 0], "minor": 4}));
   run(&mut s, "sketch.finish", json!({}));
+  // a legacy sketch, whose ellipse extrudes with freeform half-ellipse edges (a new one's ellipse
+  // is one exact edge)
+  if let Some(fox_model::FeatureKind::Sketch { sketch, .. }) = s.design.features.last_mut().map(|f| &mut f.kind) {
+    sketch.behaviours = fox_sketch::Behaviours::legacy();
+  }
   run(&mut s, "extrude", json!({"distance": 10, "operation": "new_body"}));
   run(&mut s, "sketch.create", json!({"plane": "yz"}));
   let e = s.execute("sketch.include", &json!({"curves": [{"sketch": src, "curve": spline}]})).unwrap_err();

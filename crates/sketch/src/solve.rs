@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use crate::behaviour::ELLIPSE_CONCENTRIC_PASS;
 use crate::{ConstraintId, ConstraintKind, CurveId, CurveKind, PointId, Sketch};
 
 const MAX_ITERS: usize = 100;
@@ -94,8 +95,26 @@ impl Sketch {
     r
   }
 
+  /// With [`ELLIPSE_CONCENTRIC_PASS`], solves first with the free major-axis point of each ellipse
+  /// named in a Concentric constraint riding on its centre, so the constraint slides the ellipse
+  /// rather than turning or stretching it (as Fusion does); if that can't satisfy the
+  /// constraints, or there is no such ellipse, solves with every point free.
   fn solve_inner(&mut self, hold: Option<PointId>, keep_on_failure: bool) -> SolveReport {
-    let sys = System::new(self, hold);
+    if !followers(self, hold).is_empty() {
+      let first = self.solve_pass(hold, true, false);
+      if first.ok() {
+        // the full system gives the degrees of freedom and free points (and is already solved)
+        let mut r = self.solve_pass(hold, false, keep_on_failure);
+        r.iterations += first.iterations;
+        return r;
+      }
+    }
+    self.solve_pass(hold, false, keep_on_failure)
+  }
+
+  /// One solve; with `follow`, the points from [`followers`] keep their offset from their centre.
+  fn solve_pass(&mut self, hold: Option<PointId>, follow: bool, keep_on_failure: bool) -> SolveReport {
+    let sys = System::new(self, hold, follow);
     let n = sys.n_vars();
     let m = sys.n_rows;
     if m > MAX_EQUATIONS || n > MAX_VARS {
@@ -184,7 +203,7 @@ impl Sketch {
         free_curves.push(c.id);
       }
     }
-    let vars = VarMap { px: sys.px.clone(), py: sys.py.clone(), cr: sys.cr.clone() };
+    let vars = VarMap { px: sys.px.clone(), py: sys.py.clone(), cr: sys.cr.clone(), follow: sys.follow.clone() };
     drop(sys);
     if solved || keep_on_failure {
       vars.write_back(self, &x);
@@ -202,11 +221,48 @@ impl Sketch {
   }
 }
 
+/// Ellipses named in a Concentric constraint whose major-axis point only shapes the ellipse: no
+/// constraint names it, no other curve uses it, and it and the centre are free. As (major point
+/// index, centre point index). None without [`ELLIPSE_CONCENTRIC_PASS`]: a legacy sketch solves
+/// every ellipse with all its points free.
+fn followers(sketch: &Sketch, hold: Option<PointId>) -> Vec<(usize, usize)> {
+  if !sketch.behaviours.has(ELLIPSE_CONCENTRIC_PASS) {
+    return Vec::new();
+  }
+  let concentric = |id: CurveId| {
+    sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Concentric { a, b } if a == id || b == id))
+  };
+  let pidx = sketch.point_index();
+  let mut out = Vec::new();
+  for (ci, c) in sketch.curves.iter().enumerate() {
+    let (CurveKind::Ellipse { center, major, .. } | CurveKind::EllipticalArc { center, major, .. }) = c.kind else {
+      continue;
+    };
+    if !concentric(c.id) {
+      continue;
+    }
+    let (Some(&m), Some(&cp)) = (pidx.get(&major), pidx.get(&center)) else { continue };
+    let movable = |i: usize| sketch.points.get(i).is_some_and(|p| !p.fixed && Some(p.id) != hold);
+    if m == cp || !movable(m) || !movable(cp) {
+      continue;
+    }
+    let named = sketch.constraints.iter().any(|k| k.kind.points().contains(&major));
+    let shared =
+      sketch.curves.iter().enumerate().any(|(i, o)| i != ci && crate::curve_points(&o.kind).contains(&major));
+    if !named && !shared {
+      out.push((m, cp));
+    }
+  }
+  out
+}
+
 /// Where each point coordinate / radius lives in the unknown vector.
 struct VarMap {
   px: Vec<Option<usize>>,
   py: Vec<Option<usize>>,
   cr: Vec<Option<usize>>,
+  /// Points that ride on another point: (index of that point, offset from it).
+  follow: Vec<Option<(usize, [f64; 2])>>,
 }
 
 impl VarMap {
@@ -217,6 +273,15 @@ impl VarMap {
       }
       if let Some(Some(v)) = self.py.get(i) {
         p.y = x.get(*v).copied().unwrap_or(p.y);
+      }
+    }
+    for (i, f) in self.follow.iter().enumerate() {
+      if let Some((c, off)) = f
+        && let Some(&crate::Point { x: cx, y: cy, .. }) = sketch.points.get(*c)
+        && let Some(p) = sketch.points.get_mut(i)
+      {
+        p.x = cx + off[0];
+        p.y = cy + off[1];
       }
     }
     for (i, c) in sketch.curves.iter_mut().enumerate() {
@@ -250,6 +315,9 @@ struct System<'a> {
   py: Vec<Option<usize>>,
   /// Variable index of each circle's radius.
   cr: Vec<Option<usize>>,
+  /// Per point: rides on another point (its index and the offset from it) instead of having
+  /// variables of its own.
+  follow: Vec<Option<(usize, [f64; 2])>>,
   x0: Vec<f64>,
   eqns: Vec<Eqn>,
   /// Residual row range of each equation.
@@ -273,14 +341,22 @@ struct Joint {
 }
 
 impl<'a> System<'a> {
-  fn new(sketch: &'a Sketch, hold: Option<PointId>) -> Self {
+  fn new(sketch: &'a Sketch, hold: Option<PointId>, follow_centres: bool) -> Self {
     let pidx = sketch.point_index();
     let cidx = sketch.curve_index();
+    let mut follow = vec![None; sketch.points.len()];
+    if follow_centres {
+      for (m, c) in followers(sketch, hold) {
+        if let (Some(pm), Some(pc)) = (sketch.points.get(m), sketch.points.get(c)) {
+          follow[m] = Some((c, [pm.x - pc.x, pm.y - pc.y]));
+        }
+      }
+    }
     let mut x0 = Vec::new();
     let mut px = Vec::with_capacity(sketch.points.len());
     let mut py = Vec::with_capacity(sketch.points.len());
-    for p in &sketch.points {
-      if p.fixed || Some(p.id) == hold {
+    for (i, p) in sketch.points.iter().enumerate() {
+      if p.fixed || Some(p.id) == hold || follow[i].is_some() {
         px.push(None);
         py.push(None);
       } else {
@@ -315,6 +391,7 @@ impl<'a> System<'a> {
       px,
       py,
       cr,
+      follow,
       x0,
       eqns,
       rows_of: Vec::new(),
@@ -423,6 +500,15 @@ impl<'a> System<'a> {
 
   fn p(&self, x: &[f64], id: PointId) -> [f64; 2] {
     let Some(&i) = self.pidx.get(&id) else { return [0.0, 0.0] };
+    self.p_at(x, i)
+  }
+
+  /// Position of the point at index `i` (a following point is placed from the one it rides on).
+  fn p_at(&self, x: &[f64], i: usize) -> [f64; 2] {
+    if let Some(Some((c, off))) = self.follow.get(i) {
+      let c = self.p_at(x, *c);
+      return [c[0] + off[0], c[1] + off[1]];
+    }
     let Some(pt) = self.sketch.points.get(i) else { return [0.0, 0.0] };
     let vx = self.px.get(i).copied().flatten().and_then(|v| x.get(v).copied()).unwrap_or(pt.x);
     let vy = self.py.get(i).copied().flatten().and_then(|v| x.get(v).copied()).unwrap_or(pt.y);
@@ -453,6 +539,14 @@ impl<'a> System<'a> {
         (c, crate::dist(c, self.p(x, *start)))
       }
       _ => ([0.0, 0.0], 0.0),
+    }
+  }
+
+  /// Centre of a circle, arc, ellipse or elliptical arc.
+  fn centre(&self, x: &[f64], id: CurveId) -> [f64; 2] {
+    match self.curve(id) {
+      Some((_, CurveKind::Ellipse { center, .. } | CurveKind::EllipticalArc { center, .. })) => self.p(x, *center),
+      _ => self.round(x, id).0,
     }
   }
 
@@ -574,6 +668,10 @@ impl<'a> System<'a> {
 
   fn point_vars(&self, id: PointId, out: &mut Vec<usize>) {
     if let Some(&i) = self.pidx.get(&id) {
+      if let Some(Some((c, _))) = self.follow.get(i) {
+        out.extend(self.px.get(*c).copied().flatten());
+        out.extend(self.py.get(*c).copied().flatten());
+      }
       out.extend(self.px.get(i).copied().flatten());
       out.extend(self.py.get(i).copied().flatten());
     }
@@ -715,8 +813,7 @@ impl<'a> System<'a> {
         }
       }
       K::Concentric { a, b } => {
-        let (c1, _) = self.round(x, *a);
-        let (c2, _) = self.round(x, *b);
+        let (c1, c2) = (self.centre(x, *a), self.centre(x, *b));
         vec![c1[0] - c2[0], c1[1] - c2[1]]
       }
       K::PointOnCurve { p, curve } => {
@@ -1155,6 +1252,84 @@ mod tests {
     let r1 = super::super::dist(c, s.pos(pts[1]).unwrap());
     let r2 = super::super::dist(c, s.pos(pts[2]).unwrap());
     assert!((r1 - r2).abs() < 1e-6);
+  }
+
+  /// Every point's position.
+  fn positions(s: &Sketch) -> Vec<[f64; 2]> {
+    s.points.iter().map(|p| [p.x, p.y]).collect()
+  }
+
+  #[test]
+  fn only_concentric_ellipses_of_new_sketches_take_the_sliding_pass() {
+    // an ellipse whose centre a Coincident moves, with no Concentric: one full solve, as before
+    let ellipse_dragged = |behaviours: crate::Behaviours| {
+      let mut s = Sketch::new();
+      s.behaviours = behaviours;
+      let (center, major) = (s.add_point(5.0, 3.0), s.add_point(15.0, 3.0));
+      s.add_curve(CurveKind::Ellipse { center, major, minor: 4.0 }).unwrap();
+      s.add_constraint(ConstraintKind::Coincident { a: center, b: ORIGIN }).unwrap();
+      assert!(super::followers(&s, None).is_empty());
+      let mut full = s.clone();
+      assert!(s.solve().ok());
+      assert!(full.solve_pass(None, false, false).ok());
+      assert_eq!(positions(&s), positions(&full));
+      positions(&s)
+    };
+    assert_eq!(ellipse_dragged(crate::Behaviours::current()), ellipse_dragged(crate::Behaviours::legacy()));
+
+    // a legacy sketch's Concentric ellipse solves with every point free, as on main
+    let mut s = Sketch::new();
+    s.behaviours = crate::Behaviours::legacy();
+    let circle = s.add_circle(PtSpec::Point(ORIGIN), 4.0).unwrap();
+    let (center, major) = (s.add_point(5.0, 3.0), s.add_point(15.0, 3.0));
+    let e = s.add_curve(CurveKind::Ellipse { center, major, minor: 4.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Concentric { a: circle, b: e }).unwrap();
+    assert!(super::followers(&s, None).is_empty());
+    let mut full = s.clone();
+    assert!(s.solve().ok());
+    assert!(full.solve_pass(None, false, false).ok());
+    assert_eq!(positions(&s), positions(&full));
+    // a new one's rides its major-axis point on the centre
+    s.behaviours = crate::Behaviours::current();
+    assert_eq!(super::followers(&s, None).len(), 1);
+  }
+
+  #[test]
+  fn concentric_slides_an_ellipse_onto_a_circle() {
+    let mut s = Sketch::new();
+    let circle = s.add_circle(PtSpec::Point(ORIGIN), 4.0).unwrap();
+    let (center, major) = (s.add_point(5.0, 3.0), s.add_point(15.0, 3.0));
+    let e = s.add_curve(CurveKind::Ellipse { center, major, minor: 4.0 }).unwrap();
+    s.add_constraint(ConstraintKind::Concentric { a: circle, b: e }).unwrap();
+    let r = s.solve();
+    assert!(r.ok(), "{r:?}");
+    // the ellipse moves across without turning or stretching; its axis and the radius stay free
+    let (c, m) = (s.pos(center).unwrap(), s.pos(major).unwrap());
+    assert!(c[0].abs() < 1e-9 && c[1].abs() < 1e-9, "{c:?}");
+    assert!((m[0] - 10.0).abs() < 1e-9 && m[1].abs() < 1e-9, "{m:?}");
+    assert_eq!(r.dof, 3, "{r:?}");
+    assert!(r.free_points.contains(&major));
+
+    // a constrained major-axis end stays where its constraint puts it while the ellipse turns
+    s.add_constraint(ConstraintKind::Fix { p: major, x: 0.0, y: 12.0 }).unwrap();
+    assert!(s.solve().ok());
+    assert!(crate::dist(s.pos(major).unwrap(), [0.0, 12.0]) < 1e-9);
+    assert!(crate::dist(s.pos(center).unwrap(), [0.0, 0.0]) < 1e-9);
+
+    // the circle moves to a fixed ellipse's centre instead
+    let mut s = Sketch::new();
+    let major = s.add_point(20.0, 0.0);
+    let e = s.add_curve(CurveKind::Ellipse { center: ORIGIN, major, minor: 10.0 }).unwrap();
+    let circle = s.add_circle(PtSpec::At(5.0, 3.0), 4.0).unwrap();
+    s.add_constraint(ConstraintKind::Concentric { a: e, b: circle }).unwrap();
+    assert!(s.solve().ok());
+    let CurveKind::Circle { center, .. } = s.curve(circle).unwrap().kind else { panic!() };
+    assert!(crate::dist(s.pos(center).unwrap(), [0.0, 0.0]) < 1e-9);
+    assert!(crate::dist(s.pos(major).unwrap(), [20.0, 0.0]) < 1e-9);
+
+    // lines have no centre
+    let (l, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(10.0, 1.0)).unwrap();
+    assert!(s.add_constraint(ConstraintKind::Concentric { a: e, b: l }).is_err());
   }
 
   #[test]

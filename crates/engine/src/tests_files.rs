@@ -171,3 +171,76 @@ fn hub_comments_and_visual_diff() {
   assert!(!scene.meshes.iter().any(|m| m.color == crate::diff::ADDED_COLOR));
   let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn quintic_control_splines_extrude_as_one_face_and_keep_their_degree_in_dxf() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let pts = json!([[0, 0], [8, 20], [18, 2], [28, 22], [40, 4], [50, 12]]);
+  assert!(s.execute("sketch.control_spline", &json!({"points": pts, "degree": 4})).is_err(), "degree 3 or 5 only");
+  run(&mut s, "sketch.control_spline", json!({"points": pts, "degree": 5}));
+  run(&mut s, "sketch.line", json!({"points": [[50, 12], [50, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[50, -10], [0, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 0]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5, "operation": "new_body"}));
+  // one span of a quintic, the Bézier with these control points (area exact; Fox follows it with
+  // short cubics, about 1e-5 mm off)
+  let body = &s.model.bodies[0];
+  assert_eq!(body.faces().len(), 6, "the spline is one side face");
+  let v = body.shape.mass().unwrap().volume;
+  assert!((v - 5036.507936507936).abs() < 1e-2, "{v:.9}");
+
+  let dir = temp_dir("dxf-quintic");
+  let path = dir.join("quintic.dxf");
+  run(&mut s, "export", json!({"path": path, "sketch": 1}));
+  let mut t = Session::default();
+  run(&mut t, "import", json!({"path": path}));
+  let sk = &t.model.sketches[&t.design.features[0].id].sketch;
+  assert!(
+    sk.curves
+      .iter()
+      .any(|c| matches!(&c.kind, fox_sketch::CurveKind::ControlSpline { points, degree: 5 } if points.len() == 6)),
+    "{:?}",
+    sk.curves
+  );
+  let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_old_files_control_spline_keeps_its_pieces_and_a_new_one_is_one_edge() {
+  // the six-point cubic of reference case 188: three Bézier spans, closed by three lines
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.control_spline", json!({"points": [[0, 0], [8, 20], [18, 2], [28, 22], [40, 4], [50, 12]]}));
+  run(&mut s, "sketch.line", json!({"points": [[50, 12], [50, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[50, -10], [0, -10]]}));
+  run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 0]]}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 1, "distance": 5, "operation": "new_body"}));
+  let counts = |s: &Session| {
+    let b = &s.model.bodies[0];
+    (b.faces().len(), b.edges().len(), b.shape.mass().unwrap().volume)
+  };
+  let (faces, edges, v) = counts(&s);
+  assert_eq!((faces, edges), (6, 12), "a new design: the spline is one edge and one side face");
+
+  // the same design saved before behaviour flags: no `behaviours`, so it rebuilds as it did
+  let mut old = s.design.clone();
+  old.behaviours = fox_sketch::Behaviours::legacy();
+  for f in &mut old.features {
+    if let fox_model::FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+      sketch.behaviours = fox_sketch::Behaviours::legacy();
+    }
+  }
+  let json = old.to_json();
+  assert!(!json.contains("behaviours"));
+  let dir = temp_dir("legacy-control-spline");
+  let path = dir.join("old.fox");
+  std::fs::write(&path, json).unwrap();
+  let t = Session::open(&path).unwrap();
+  let (faces, edges, w) = counts(&t);
+  assert_eq!((faces, edges), (8, 18), "an old design: one edge and side face per span, as before");
+  assert!((v - w).abs() < 1e-3 * v, "{v} vs {w}");
+  let _ = std::fs::remove_dir_all(dir);
+}
