@@ -1,0 +1,12 @@
+# 553-join-cell-boss: added by the parity loop from a Fusion probe
+# join-cell-boss: plate 40x40x10; cylinder r=8 h=30 and plane z=20 as tools; lower cell joins the plate, tools removed.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [40, 40]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.circle", "center": [20, 20], "radius": 8}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 30, "operation": "new_body"}
+{"cmd": "plane.offset", "plane": "xy", "offset": 20}
+{"cmd": "boundary_fill", "tools": [4000], "planes": [{"feature": 5}], "cells": [[20, 20, 15]], "operation": "join", "remove_tools": true}
