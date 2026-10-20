@@ -86,6 +86,23 @@ class Ledger:
           return e
     raise KeyError(key)
 
+  def claim_next(self, keys=None, busy=()):
+    """Claims the next entry to probe under the lock, marking it probing for this process; None
+    when there's nothing left. Skips entries a live process is probing (this one included)."""
+    with self.locked():
+      entries = self.read()
+      free = [e for e in entries if e["key"] not in busy and not (
+        e["status"] == PROBING and e.get("probe_pid") not in (None, os.getpid()) and pid_alive(e.get("probe_pid")))]
+      e = next_untested(free, keys)
+      if e is None:
+        return None
+      e["probe_pid"] = os.getpid()
+      if e["status"] != PROBING:
+        e["status"] = PROBING
+        e.setdefault("history", []).append({"at": now(), "by": "parity-loop", "status": PROBING, "note": "claimed"})
+      self._write(entries)
+      return e
+
   def mutate(self, key, fn, note=None):
     """Applies fn(entry) under the lock (for list fields such as prs and cases)."""
     with self.locked():

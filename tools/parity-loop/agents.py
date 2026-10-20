@@ -114,8 +114,11 @@ Your job:
    For mismatch and fox-missing, put in fix_hint where in Fox the gap is.
 
 Rules:
-- Probes run one at a time against a single Fusion. Only use the bridge through client.py and
-  probe_case.py. Close any document you open with --keep-open (`py tools/fusion-bridge/client.py close`).
+- Other probe agents share this Fusion. Only use it through client.py and probe_case.py, which
+  take turns through a lock. A `python` call or a `recipe --keep-open` keeps Fusion yours until you
+  run `py tools/fusion-bridge/client.py close`, and every other probe waits meanwhile, so run
+  `close` as soon as you've finished each such piece of work. "waiting for Fusion" on stderr just
+  means another probe has it.
 - Don't change FissionOxide's Rust code, tests/reference/ or the ledger: the driver does that. Only
   write under `{scratch}` (and tools/fusion-bridge/FoxBridge/recipe_runner.py if you extend it).
 - Run Python with `py`. The repository is {root}. Keep going without asking questions.

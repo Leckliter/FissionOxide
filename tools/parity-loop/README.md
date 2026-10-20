@@ -48,10 +48,20 @@ py tools/parity-loop/probe_case.py CASE_DIR [--write-expected] [--png]
 **`run`** first restarts unfinished work: fixers for entries that still need one, and PRs for
 branches that were pushed without one. It then probes up to `--max-features` entries (default
 3). It picks `scope: design` entries with `status: untested`, lowest `priority` first, after any
-entry a crash left in `probing`. As each probe finds a gap, `run` starts a fixer for it. Probes run
-one at a time, because there's only one Fusion. Fixers run `--fixers` at a time (default 2), each
-with its own cargo target directory (`target/parity-1`, `target/parity-2`, ...). They all share
-the main checkout's OpenCASCADE build through `FOX_OCCT_DIR`.
+entry a crash left in `probing`. As each probe finds a gap, `run` starts a fixer for it. Up to
+`--probes` probe agents run at once (default 1), and each claims its entry under the ledger lock,
+so no two probes (even in two driver processes) take the same one. Fixers run `--fixers` at a
+time (default 2). Each fixer claims its own cargo target directory (`target/parity-1`,
+`target/parity-2`, ...), and they all share the main checkout's OpenCASCADE build through
+`FOX_OCCT_DIR`.
+
+The probes share one Fusion. Fusion runs bridge requests one at a time, so short self-contained
+requests (a recipe that closes its document, `compare`, `probe_case.py`) interleave freely.
+`client.py` takes a cross-process lock (`%APPDATA%/FoxBridge/fusion.lock`) for every request. A
+`python` call, or a `recipe --keep-open`, keeps the lock until that client runs `close`, so no
+other probe's document becomes active under it. Each probe agent gets its own owner name
+(`$FOXBRIDGE_OWNER`), and when the agent ends the driver closes anything it left open and frees
+the lock. A lock idle for 10 minutes is taken over.
 
 | Flag | Default | |
 |---|---|---|
@@ -59,6 +69,7 @@ the main checkout's OpenCASCADE build through `FOX_OCCT_DIR`.
 | `--budget-usd X` | 25 (or `$PARITY_BUDGET_USD`) | Start no new agent once this run has spent X dollars. Each agent is also capped at what's left. |
 | `--budget-tokens T` | off | Also stop at T tokens (input, output and cache). |
 | `--probe-usd` / `--fix-usd` / `--ui-usd` | 4 / 20 / 6 | Cap per agent. |
+| `--probes N` | 1 | Probe agents at once. |
 | `--fixers N` | 2 | Fixers at once. |
 | `--only KEY ...` | | Limit the run to these ledger keys. |
 | `--no-fix` | | Probe only. |
@@ -72,7 +83,11 @@ transcript goes to `parity/loop/logs/`. `status` prints both.
 **`status`** counts entries by scope and status, and by Design tab. It lists every probed entry
 with its fix state and PR, names the next entry to probe, and prints the total agent spend.
 
-## Resuming
+## Stopping and resuming
+
+To stop a run cleanly, create `parity/loop/STOP`. No new probe or fixer starts, and the running
+ones finish. Delete the file before the next run. When the Max plan's usage limit stops an agent,
+the run stops the same way and prints when the limit resets.
 
 Every step writes to the ledger before and after it runs. Writes go to a temporary file that's
 renamed over the ledger, under `parity/ledger.jsonl.lock`. Stop the driver at any point (Ctrl+C,
@@ -80,6 +95,8 @@ a crash, the budget) and run it again:
 
 - An entry left `probing` is probed again before anything new. The agent is pointed at the cases
   it already wrote in `parity/probes/<entry>/`.
+- A fixer whose process died is resumed without using up an attempt. A second driver skips an
+  entry whose fixer is still running in another live process.
 - An entry whose fixer stopped still has its worktree, `.claude/worktrees/parity-<entry>`, and
   its branch, `parity/<entry>`. The next fixer carries on there. Each entry gets two fixer
   attempts; set `no_fix: true` on an entry to stop fixers for it.

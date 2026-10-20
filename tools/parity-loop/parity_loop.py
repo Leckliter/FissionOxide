@@ -30,6 +30,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "fusion-bridge"))
 
 import agents  # noqa: E402
+import client  # noqa: E402
 import ledger_io as L  # noqa: E402
 from ledger_io import Ledger, now, slug  # noqa: E402
 
@@ -37,6 +38,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 REF = os.path.join(ROOT, "tests", "reference")
 LOOP = os.path.join(ROOT, "parity", "loop")
 PROBES = os.path.join(ROOT, "parity", "probes")
+STOP_FILE = os.path.join(LOOP, "STOP")  # create it to stop a run cleanly: running agents finish, nothing new starts
 EXE = ".exe" if os.name == "nt" else ""
 CASE_FILES = ("recipe.json", "fusion.py", "part.jsonl", "expected.json")
 
@@ -162,7 +164,7 @@ class Loop:
     self.a = a
     self.ledger = Ledger(a.ledger)
     self.budget = Budget(a.budget_usd, a.budget_tokens)
-    self.fusion_lock = asyncio.Lock()  # one Fusion: probes, verifies and UI probes take turns
+    self.probing = set()  # entries this process is probing now
     self.sem = asyncio.Semaphore(a.fixers)
     self.fixing = set()
     self.halt = None  # set when the subscription's usage limit stops an agent
@@ -188,6 +190,9 @@ class Loop:
           print(f"  commit skipped: {ex}"[:400], flush=True)
           return
         time.sleep(1 + attempt)
+
+  def stop_requested(self):
+    return os.path.exists(STOP_FILE)
 
   def usage_stop(self, kind, key, meta):
     """Stops the batch cleanly when the subscription's usage limit is hit. Returns True if it was."""
@@ -237,25 +242,28 @@ class Loop:
     prompt = agents.probe_prompt(entry, ROOT, scratch.replace("\\", "/"), fox_cli())
     if resumed:
       prompt += f"\nAn earlier probe of this entry stopped part way. Its cases are in {scratch}: reuse them.\n"
-    async with self.fusion_lock:
+    owner = f"probe-{os.getpid()}-{slug(key)}"
+    try:
       report, meta = await agents.run_agent(
         prompt, ROOT, agents.PROBE_SCHEMA, self.budget.agent_cap(self.a.probe_usd), self.a.probe_turns,
-        log_path=self.log("probe", key))
-      self.budget.record("probe", key, meta)
-      if self.usage_stop("probe", key, meta):
-        self.ledger.update(key, probe_attempts=attempts - 1)  # stays probing; resumes next run
-        return
-      if not report:
-        why = "; ".join(meta.get("errors") or []) or meta.get("subtype") or "no report"
-        if attempts >= 2:
-          self.ledger.update(key, status=L.BLOCKED, note=f"probe agent failed twice: {why}")
-        else:
-          self.ledger.update(key, note=f"probe agent ended without a report ({why}); stays probing to resume")
-        return
-      # Re-run every case here: the ledger records what the driver measured, not what the agent said.
-      dirs = [os.path.join(scratch, c["dir"]) for c in report.get("cases", [])
-              if os.path.isdir(os.path.join(scratch, c.get("dir", "")))]
-      verdicts = await asyncio.to_thread(probe_cases, dirs) if dirs else {}
+        env={"FOXBRIDGE_OWNER": owner}, log_path=self.log("probe", key))
+    finally:
+      await asyncio.to_thread(release_fusion, owner)
+    self.budget.record("probe", key, meta)
+    if self.usage_stop("probe", key, meta):
+      self.ledger.update(key, probe_attempts=attempts - 1)  # stays probing; resumes next run
+      return
+    if not report:
+      why = "; ".join(meta.get("errors") or []) or meta.get("subtype") or "no report"
+      if attempts >= 2:
+        self.ledger.update(key, status=L.BLOCKED, note=f"probe agent failed twice: {why}")
+      else:
+        self.ledger.update(key, note=f"probe agent ended without a report ({why}); stays probing to resume")
+      return
+    # Re-run every case here: the ledger records what the driver measured, not what the agent said.
+    dirs = [os.path.join(scratch, c["dir"]) for c in report.get("cases", [])
+            if os.path.isdir(os.path.join(scratch, c.get("dir", "")))]
+    verdicts = await asyncio.to_thread(probe_cases, dirs) if dirs else {}
     built = {n: v for n, v in verdicts.items() if v["fusion"]["ok"]}
     if not built:
       status = L.BLOCKED
@@ -285,7 +293,7 @@ class Loop:
 
   async def fix(self, key):
     async with self.sem:
-      if self.halt:
+      if self.halt or self.stop_requested():
         return
       slot = self.claim_slot()
       try:
@@ -314,7 +322,9 @@ class Loop:
       dst = os.path.join(wt, "tests", "reference", c)
       if not os.path.isdir(dst):
         shutil.copytree(os.path.join(REF, c), dst)
-    fix.update(branch=branch, worktree=wt, state="agent", attempts=fix.get("attempts", 0) + 1, slot=slot, pid=os.getpid(),
+    interrupted = fix.get("state") in ("agent", "interrupted")
+    fix.update(branch=branch, worktree=wt, state="agent", slot=slot, pid=os.getpid(),
+               attempts=fix.get("attempts", 0) + (0 if interrupted and fix.get("attempts") else 1),
                started=now())
     self.ledger.update(key, fix=fix, note=f"fixer {fix['attempts']} started on {branch} in {wt}")
     print(f"fix {key} on {branch} (slot {slot})", flush=True)
@@ -438,8 +448,7 @@ class Loop:
     for e in merged:
       dirs = [os.path.join(wt, "tests", "reference", c) for c in e.get("cases", [])]
       dirs = [d for d in dirs if os.path.isdir(d)]
-      async with self.fusion_lock:
-        verdicts = await asyncio.to_thread(self._reprobe, dirs)
+      verdicts = await asyncio.to_thread(self._reprobe, dirs)
       ok = dirs and all(v["status"] in ("match", "match-geometry") for v in verdicts.values())
       if not e.get("cases"):
         ok = True  # a UI fix has no cases; the merged PR is the evidence
@@ -464,11 +473,16 @@ class Loop:
     fox_exe = os.path.join(os.path.dirname(fox_cli()), "fissionoxide" + EXE)
     self.ledger.update(key, note="UI probe started")
     print(f"ui-probe {key} ({entry['name']})", flush=True)
-    async with self.fusion_lock:
+    # The UI probe works Fusion's windows, so it holds Fusion for its whole run.
+    owner = f"ui-{os.getpid()}"
+    await asyncio.to_thread(client.fusion_acquire, True, owner)
+    try:
       report, meta = await agents.run_agent(
         agents.ui_prompt(entry, ROOT, fox_exe), ROOT, agents.UI_SCHEMA, self.budget.agent_cap(self.a.ui_usd),
         self.a.ui_turns, mcp_servers={"desktop": desktop.server()}, tools=["Bash", "Read"],
-        log_path=self.log("ui", key))
+        env={"FOXBRIDGE_OWNER": owner}, log_path=self.log("ui", key))
+    finally:
+      await asyncio.to_thread(client.fusion_release, owner)
     self.budget.record("ui", key, meta)
     if self.usage_stop("UI probe", key, meta):
       return
@@ -498,16 +512,26 @@ class Loop:
         continue
       if (keys is None or e["key"] in keys) and (L.needs_fix(e) or (e.get("fix") or {}).get("state") == "pushed"):
         start_fix(e["key"])
-    probed = 0
-    while probed < self.a.max_features and self.budget.ok() and not self.halt:
-      e = L.next_untested(self.ledger.read(), keys)
-      if e is None:
-        break
-      await self.probe(e)
-      probed += 1
-      e = self.ledger.get(e["key"])
-      if L.needs_fix(e) and not self.halt:
-        start_fix(e["key"])
+    claimed = [0]
+
+    async def prober():
+      # Up to --probes of these run at once. Each claims its entry under the ledger lock, so two
+      # probes (in this process or another) never take the same one.
+      while claimed[0] < self.a.max_features and self.budget.ok() and not self.halt and not self.stop_requested():
+        e = self.ledger.claim_next(keys, self.probing)
+        if e is None:
+          return
+        claimed[0] += 1
+        self.probing.add(e["key"])
+        try:
+          await self.probe(e)
+        finally:
+          self.probing.discard(e["key"])
+        e = self.ledger.get(e["key"])
+        if L.needs_fix(e) and not self.halt and not self.stop_requested():
+          start_fix(e["key"])
+
+    await asyncio.gather(*[prober() for _ in range(max(1, self.a.probes))])
     if self.a.ui:
       ui = [e for e in self.ledger.read() if e.get("needs_ui") and (keys is None or e["key"] in keys)]
       for e in ui[: self.a.max_features]:
@@ -517,10 +541,24 @@ class Loop:
     if tasks:
       print(f"waiting for {len(tasks)} fixer(s)", flush=True)
       await asyncio.gather(*tasks)
+    if self.stop_requested():
+      print(f"stopped: {STOP_FILE} exists (delete it before the next run). Unfinished entries resume next run.")
     if self.halt:
       print(f"stopped: {self.halt}. Progress is in the ledger; run the same command again after the reset.")
     if not self.budget.ok():
       print(f"stopped: budget reached (${self.budget.spent_usd:.2f}, {self.budget.spent_tokens:,} tokens)")
+
+
+def release_fusion(owner):
+  """After a probe agent ends: close any document it left open and free Fusion if it held it."""
+  cur = client._read_lock()
+  if cur and cur.get("owner") == owner:
+    if cur.get("hold"):
+      try:
+        client._call("close_all", 120)
+      except SystemExit:
+        pass
+    client.fusion_release(owner)
 
 
 # ---- gh ----------------------------------------------------------------------------------------
@@ -625,6 +663,8 @@ def main():
   r.add_argument("--max-features", type=int, default=3, help="probe at most this many entries (default 3)")
   r.add_argument("--only", nargs="*", help="limit the run to these ledger keys")
   r.add_argument("--no-fix", action="store_true", help="probe only; start no fixers")
+  r.add_argument("--probes", type=int, default=1, help="probe agents at once (default 1); they share Fusion "
+                 "through the bridge's lock")
   r.add_argument("--ui", action="store_true", help="also UI-probe entries that need it (takes over the mouse)")
   r.add_argument("--yes", action="store_true", help="don't ask before a UI probe takes over the mouse")
   p = sub.add_parser("probe", parents=[common], help="probe one entry")

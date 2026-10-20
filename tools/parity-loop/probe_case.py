@@ -65,7 +65,7 @@ def fusion_side(case_dir, png=None, keep_open=False):
     with open(py, encoding="utf-8") as f:
       code = f.read()
     head = f"CASE = {name!r}\nCODE = {code!r}\nPNG = {png!r}\nKEEP_OPEN = {keep_open!r}\n"
-    res = client.call("python", code=head + FUSION_PY)
+    res = client.call("python", code=head + FUSION_PY, hold=keep_open)  # closes its own document
     if not res.get("ok"):
       return {"ok": False, "error": res.get("error")}
     return res["result"]

@@ -17,11 +17,13 @@ Python 3 standard library only. Fusion must be running with the FoxBridge add-in
 """
 
 import argparse
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -41,7 +43,102 @@ def token():
     sys.exit(f"no bridge token at {path}: is Fusion running with the FoxBridge add-in started?")
 
 
-def call(op=None, timeout=900, **req):
+# ---- the Fusion lock ----------------------------------------------------------------------------
+# Fusion runs bridge requests one at a time, so short self-contained ones (a recipe that closes its
+# document, a compare) can interleave between clients. A client that leaves a document open
+# (--keep-open) or runs `python` (which may work on the active document) holds the lock across
+# calls until it runs `close`, so nobody else's document becomes active under it. Clients name
+# themselves with $FOXBRIDGE_OWNER (the parity loop sets one per probe); a lock whose owner hasn't
+# used Fusion for LOCK_STALE seconds is taken over.
+
+LOCK_STALE = 600
+_LOCK = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "FoxBridge", "fusion.lock")
+
+
+def _owner():
+  return os.environ.get("FOXBRIDGE_OWNER") or f"pid-{os.getpid()}"
+
+
+@contextlib.contextmanager
+def _mutex():
+  mx = _LOCK + ".mx"
+  while True:
+    try:
+      os.close(os.open(mx, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+      break
+    except FileExistsError:
+      try:
+        if time.time() - os.path.getmtime(mx) > 30:
+          os.unlink(mx)
+      except OSError:
+        pass
+      time.sleep(0.05)
+  try:
+    yield
+  finally:
+    try:
+      os.unlink(mx)
+    except OSError:
+      pass
+
+
+def _read_lock():
+  try:
+    with open(_LOCK, encoding="utf-8") as f:
+      return json.load(f)
+  except (OSError, ValueError):
+    return None
+
+
+def fusion_acquire(hold, owner=None, wait=3600):
+  """Waits until Fusion is free or ours; with hold, keeps it until fusion_release."""
+  owner = owner or _owner()
+  deadline, said = time.time() + wait, False
+  while True:
+    with _mutex():
+      cur = _read_lock()
+      if cur is None or cur.get("owner") == owner or time.time() - cur.get("touched", 0) > LOCK_STALE:
+        held = hold or bool(cur and cur.get("owner") == owner and cur.get("hold"))
+        os.makedirs(os.path.dirname(_LOCK), exist_ok=True)
+        with open(_LOCK, "w", encoding="utf-8") as f:
+          json.dump({"owner": owner, "hold": held, "touched": time.time()}, f)
+        return held
+    if time.time() > deadline:
+      sys.exit(f"Fusion has been busy for {wait} s (held by {cur.get('owner')}: {_LOCK})")
+    if not said:
+      print(f"waiting for Fusion (held by {cur.get('owner')})", file=sys.stderr, flush=True)
+      said = True
+    time.sleep(0.5)
+
+
+def fusion_release(owner=None, force=False):
+  """Frees the lock if this owner has it (force: whoever has it)."""
+  owner = owner or _owner()
+  with _mutex():
+    cur = _read_lock()
+    if cur and (force or cur.get("owner") == owner):
+      try:
+        os.unlink(_LOCK)
+      except OSError:
+        pass
+
+
+def call(op=None, timeout=900, hold=None, **req):
+  """One bridge request. Every request but ping takes the Fusion lock; `hold` (default: true for
+  `python` and for a kept-open recipe) keeps it after the request until `close`."""
+  if op is None:
+    return _call()
+  if hold is None:
+    hold = op == "python" or bool(req.get("keep_open"))
+  held = fusion_acquire(hold)
+  try:
+    return _call(op, timeout, **req)
+  finally:
+    if op == "close_all" or not held:
+      fusion_release()
+
+
+def _call(op=None, timeout=900, **req):
   url = f"http://127.0.0.1:{PORT}/" + ("ping" if op is None else "run")
   data = None if op is None else json.dumps(dict(req, op=op)).encode()
   r = urllib.request.Request(url, data=data, headers={"X-Fox-Token": token(), "Content-Type": "application/json"})
@@ -82,7 +179,7 @@ def recipe_call(recipe, keep_open=False, screenshot=None):
   here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FoxBridge").replace("\\", "/")
   code = (f"DIR = {here!r}\nRECIPE = {json.dumps(json.dumps(recipe))}\nKEEP_OPEN = {bool(keep_open)!r}\n"
           f"SCREENSHOT = {screenshot!r}\n" + LOCAL_RUNNER)
-  res = call("python", code=code)
+  res = call("python", code=code, hold=bool(keep_open))  # the runner closes its own document
   if not res.get("ok"):
     return res
   return res.get("result") or {"ok": False, "error": "runner returned nothing"}
