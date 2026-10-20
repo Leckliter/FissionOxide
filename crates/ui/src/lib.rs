@@ -21,6 +21,7 @@ mod manipulators;
 mod marking;
 mod menus;
 mod panels;
+mod preferences;
 mod preview;
 mod select;
 mod sheet;
@@ -146,6 +147,8 @@ pub struct App {
   pub cut_window: Option<cut_ui::CutWindow>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
+  /// The Preferences dialog and the saved preferences.
+  pub(crate) prefs: preferences::Preferences,
   /// A design being opened on another thread (the one the app was started with).
   opening: Option<(PathBuf, std::thread::JoinHandle<Result<Session, fox_engine::CmdError>>)>,
 }
@@ -185,6 +188,8 @@ impl App {
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
+    app.prefs = preferences::Preferences::load();
+    preferences::apply(&mut app);
     // the first start puts the fox in 3D in the hub, and shows it unless a file was asked for
     let welcome = fox_engine::hub::add_welcome(&app.hub_root()).unwrap_or_else(|e| {
       log::warn!("couldn't add the welcome design to the hub: {}", e.0);
@@ -293,6 +298,7 @@ impl App {
       ghost: preview::Ghost::default(),
       cut_window: None,
       updates: updates::Updates::default(),
+      prefs: preferences::Preferences::default(),
       opening: None,
     }
   }
@@ -432,6 +438,11 @@ impl App {
   pub fn new_design(&mut self) {
     let root = self.s.store_root.clone();
     self.s = Session::default();
+    // Preferences → Design: new designs without a timeline (a fresh session, so the setting
+    // isn't an undo step)
+    if !self.prefs.values.capture_history && self.s.execute("design.history", &json!({"capture": false})).is_ok() {
+      self.s = Session::new(self.s.design.clone());
+    }
     self.drawing = None;
     self.s.store_root = root;
     self.dialog = None;
@@ -900,7 +911,7 @@ impl App {
       }
       self.s.selection.clear();
       self.picked_plane = None;
-      self.look_at_sketch();
+      self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
@@ -916,7 +927,7 @@ impl App {
       if !was_sketching {
         self.pre_sketch_cam = Some(before);
       }
-      self.look_at_sketch();
+      self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
       self.tool = Tool::Select;
     }
@@ -967,6 +978,13 @@ impl App {
       self.cam_move = None;
     }
     self.cam_move.is_some()
+  }
+
+  /// Turns the camera to the opened sketch, when Preferences → Sketch → Auto look at sketch is on.
+  fn auto_look_at_sketch(&mut self) {
+    if self.prefs.values.auto_look_at {
+      self.look_at_sketch();
+    }
   }
 
   fn look_at_sketch(&mut self) {
@@ -1134,6 +1152,7 @@ impl App {
     updates::window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);
+    preferences::window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;

@@ -87,13 +87,24 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           app.save(false);
         }
         ui.add_space(6.0);
-        if caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo()).clicked() && app.s.can_undo() {
+        // the icon undoes one step; the caret lists the steps to jump back (or forward) to
+        let undo = caret_button(ui, Icon::Undo, "Undo (Ctrl+Z)", app.s.can_undo());
+        let undo_list = caret_hit(&undo);
+        if undo.clicked() && !undo_list && app.s.can_undo() {
           app.cancel_dialog();
           app.s.undo();
         }
-        if caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo()).clicked() && app.s.can_redo() {
+        egui::Popup::menu(&undo)
+          .open_memory(undo_list.then_some(egui::SetOpenCommand::Toggle))
+          .show(|ui| history_menu(app, ui, true));
+        let redo = caret_button(ui, Icon::Redo, "Redo (Ctrl+Y)", app.s.can_redo());
+        let redo_list = caret_hit(&redo);
+        if redo.clicked() && !redo_list && app.s.can_redo() {
           app.s.redo();
         }
+        egui::Popup::menu(&redo)
+          .open_memory(redo_list.then_some(egui::SetOpenCommand::Toggle))
+          .show(|ui| history_menu(app, ui, false));
         ui.add_space(10.0);
         // the document tab fills the middle of the bar, its title centred, as in Fusion
         let right_w = 250.0;
@@ -112,7 +123,7 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
-          avatar(ui);
+          avatar(app, ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
           egui::Popup::menu(&help).show(|ui| help_menu(app, ui));
           let news = app.updates.tooltip_line().map(|l| format!("FissionOxide {l}"));
@@ -135,6 +146,42 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
         });
       });
     });
+}
+
+/// Whether a click on a [`caret_button`] landed on its caret (the drop-down) rather than its icon.
+fn caret_hit(resp: &egui::Response) -> bool {
+  resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| p.x >= resp.rect.right() - 14.0)
+}
+
+/// Most steps the Undo and Redo lists show.
+const HISTORY_ROWS: usize = 25;
+
+/// The Undo (or Redo) drop-down: the steps by name, newest first; picking one undoes (redoes)
+/// back to before (after) it.
+fn history_menu(app: &mut App, ui: &mut egui::Ui, undo: bool) {
+  ui.set_min_width(230.0);
+  let names = if undo { app.s.undo_history() } else { app.s.redo_history() };
+  ui.label(RichText::new(if undo { "Undo" } else { "Redo" }).small().color(theme::MUTED));
+  if names.is_empty() {
+    ui.label(RichText::new(if undo { "Nothing to undo" } else { "Nothing to redo" }).color(theme::MUTED));
+    return;
+  }
+  for (i, name) in names.iter().enumerate().take(HISTORY_ROWS) {
+    let steps = i + 1;
+    let hint = format!("{} {steps} step{}", if undo { "Undo" } else { "Redo" }, if steps == 1 { "" } else { "s" });
+    if ui.button(name).on_hover_text(hint).clicked() {
+      if undo {
+        app.cancel_dialog();
+        app.s.undo_steps(steps);
+      } else {
+        app.s.redo_steps(steps);
+      }
+      ui.close();
+    }
+  }
+  if names.len() > HISTORY_ROWS {
+    ui.label(RichText::new(format!("… {} more", names.len() - HISTORY_ROWS)).small().color(theme::MUTED));
+  }
 }
 
 /// An application bar icon with a drop-down caret (File, Undo, Redo).
@@ -226,6 +273,11 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
     ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
   });
+  ui.separator();
+  if ui.button("Preferences...").on_hover_text("Units, navigation, design, sketch and graphics settings").clicked() {
+    ui.close();
+    crate::preferences::open(app);
+  }
 }
 
 fn help_menu(app: &mut App, ui: &mut egui::Ui) {
@@ -236,7 +288,11 @@ fn help_menu(app: &mut App, ui: &mut egui::Ui) {
   }
   ui.separator();
   ui.label(RichText::new("Navigation").strong());
-  ui.label("Middle-drag pan · Shift+middle-drag or right-drag orbit · wheel zoom");
+  let nav = app.prefs.values.nav;
+  {
+    use crate::preferences::NavAction::*;
+    ui.label(format!("Orbit: {} · Pan: {} · Zoom: {}", nav.describe(Orbit), nav.describe(Pan), nav.describe(Zoom)));
+  }
   ui.add_space(4.0);
   ui.label(RichText::new("Shortcuts").strong());
   ui.label("Sketch: L line · R rectangle · C circle · A arc · P point · D dimension · X construction");
@@ -250,11 +306,21 @@ fn help_menu(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-fn avatar(ui: &mut egui::Ui) {
+/// The profile button; its menu has Preferences, as in Fusion.
+fn avatar(app: &mut App, ui: &mut egui::Ui) {
   let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
   ui.painter().circle_filled(rect.center(), 12.0, Color32::from_rgb(92, 84, 196));
   ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "CL", egui::FontId::proportional(11.0), Color32::WHITE);
-  resp.on_hover_text("Local user");
+  let resp = resp.on_hover_text("Local user");
+  egui::Popup::menu(&resp).show(|ui| {
+    ui.set_min_width(180.0);
+    ui.label(RichText::new("Local user").strong());
+    ui.separator();
+    if ui.button("Preferences").clicked() {
+      ui.close();
+      crate::preferences::open(app);
+    }
+  });
 }
 
 fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
