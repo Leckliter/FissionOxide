@@ -67,3 +67,7 @@
 # Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
 335-box-vertical-edge-pattern
 336-prism-slanted-edge-pattern
+# Reference parts whose first extrusion can be edited and rebuild correctly; see README.md.
+348-xz-plane-offset-mirror
+349-top-face-offset-mirror
+350-side-face-negative-offset-mirror-join

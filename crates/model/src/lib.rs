@@ -298,6 +298,12 @@ impl OriginPlane {
       OriginPlane::Yz => kernel::Plane::YZ,
     }
   }
+
+  /// Which way a positive offset from this plane moves along `plane().normal()`: Fusion offsets
+  /// from XZ along +Y, the opposite of the XZ frame's normal (X right, Z up).
+  pub fn offset_sign(self) -> f64 {
+    if self == OriginPlane::Xz { -1.0 } else { 1.0 }
+  }
 }
 
 /// Where a sketch or construction plane sits.

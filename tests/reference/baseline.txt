@@ -152,3 +152,8 @@
 335-box-vertical-edge-pattern
 336-prism-slanted-edge-pattern
 337-sketch-line-revolve
+# Reference parts that pass; see README.md. One directory name per line.
+348-xz-plane-offset-mirror
+349-top-face-offset-mirror
+350-side-face-negative-offset-mirror-join
+351-yz-negative-offset-sketch-extrude

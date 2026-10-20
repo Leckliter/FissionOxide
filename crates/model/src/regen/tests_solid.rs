@@ -255,7 +255,7 @@ fn extrude_up_to_a_curved_face_or_a_body() {
 fn cylinder_and_square() -> (Design, FeatureId, FaceRef, f64) {
   let mut d = Design::new("emboss");
   primitive(&mut d, Primitive::Cylinder { radius: "20".into(), height: "40".into() }, XY, [0.0, 0.0]);
-  let front = offset_plane(&mut d, XZ, "30");
+  let front = offset_plane(&mut d, XZ, "-30");
   let sk = sketch(&mut d, front, rect([-5.0, 15.0], [5.0, 25.0]));
   let m = regenerate(&mut d);
   ok(&m);
