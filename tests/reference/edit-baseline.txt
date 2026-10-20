@@ -58,3 +58,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+360-parallel-body-edges
+361-axis-and-edge
+362-sketch-line-and-edge

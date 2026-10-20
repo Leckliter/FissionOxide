@@ -1,0 +1,11 @@
+# 361-axis-and-edge: added by the parity loop from a Fusion probe
+# axis-and-edge: Box x 10..50, y 0..30, z 0..20; plane through the world Z axis and the vertical edge at (50,30); box split by it (cut line y=0.6x).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[10, 0], [50, 0]]}
+{"cmd": "sketch.line", "points": [[50, 0], [50, 30]]}
+{"cmd": "sketch.line", "points": [[50, 30], [10, 30]]}
+{"cmd": "sketch.line", "points": [[10, 30], [10, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "plane", "method": "two_edges", "a": "z", "b": {"point": [50, 30, 10]}}
+{"cmd": "split", "plane": {"feature": 3}, "bodies": [2000]}

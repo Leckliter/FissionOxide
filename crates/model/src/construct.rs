@@ -3,7 +3,32 @@
 
 use serde::{Deserialize, Serialize};
 
+use fox_sketch::CurveId;
+
 use crate::{AxisRef, EdgeRef, FaceRef, FeatureId, PlaneRef};
+
+/// A straight line used to build construction geometry: a body edge, an axis or a sketch line.
+/// Untagged so that files from before axes and sketch lines were accepted (a bare edge) load.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LineRef {
+  /// A straight edge of a body.
+  Edge(EdgeRef),
+  /// A line in a sketch.
+  Sketch { sketch: FeatureId, curve: CurveId },
+  /// A world axis or a construction axis.
+  Axis(AxisRef),
+}
+
+impl LineRef {
+  fn feature(&self) -> Option<FeatureId> {
+    match self {
+      LineRef::Edge(_) => None,
+      LineRef::Sketch { sketch, .. } => Some(*sketch),
+      LineRef::Axis(a) => axis_dep(a),
+    }
+  }
+}
 
 /// A point used to build construction geometry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,8 +57,8 @@ pub enum PlaneDef {
   Midplane { a: PlaneRef, b: PlaneRef },
   /// Through three points.
   ThreePoints { a: PointRef, b: PointRef, c: PointRef },
-  /// Through two coplanar straight edges.
-  TwoEdges { a: EdgeRef, b: EdgeRef },
+  /// Through two coplanar straight edges, axes or sketch lines.
+  TwoEdges { a: LineRef, b: LineRef },
   /// Tangent to a cylinder, cone or sphere at the point of it nearest `near`.
   Tangent { face: FaceRef, near: [f64; 3] },
   /// Perpendicular to an edge at a fraction `t` (0 = start, 1 = end) of its length.
@@ -64,8 +89,8 @@ pub enum AxisDef {
 pub enum PointDef {
   /// A vertex, a circle's centre, or a point in space.
   Ref { point: PointRef },
-  /// Where two edges meet (the midpoint of their closest approach).
-  TwoEdges { a: EdgeRef, b: EdgeRef },
+  /// Where two edges, axes or sketch lines meet (the midpoint of their closest approach).
+  TwoEdges { a: LineRef, b: LineRef },
   /// Where three planes meet.
   ThreePlanes { a: PlaneRef, b: PlaneRef, c: PlaneRef },
   /// The centre of a sphere or torus face, or of a circular edge's face.
@@ -138,6 +163,7 @@ impl PlaneDef {
       PlaneDef::Angle { axis, base, .. } => axis_dep(axis).into_iter().chain(plane_dep(base)).collect(),
       PlaneDef::Midplane { a, b } => plane_dep(a).into_iter().chain(plane_dep(b)).collect(),
       PlaneDef::ThreePoints { a, b, c } => [a, b, c].iter().filter_map(|p| p.feature()).collect(),
+      PlaneDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
       _ => vec![],
     }
   }
@@ -167,6 +193,7 @@ impl PointDef {
       PointDef::Ref { point } => point.feature().into_iter().collect(),
       PointDef::ThreePlanes { a, b, c } => [a, b, c].iter().filter_map(|p| plane_dep(p)).collect(),
       PointDef::EdgePlane { plane, .. } => plane_dep(plane).into_iter().collect(),
+      PointDef::TwoEdges { a, b } => a.feature().into_iter().chain(b.feature()).collect(),
       _ => vec![],
     }
   }
@@ -191,4 +218,31 @@ pub enum PipeSection {
   /// An equilateral triangle; the size is its height, measured along the path sketch's normal
   /// from the base to the apex, with the base centred on the path (as Fusion places it).
   Triangular,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn two_edges_lines_load_old_files_and_round_trip() {
+    // a file from when only body edges were taken
+    let old = r#"{"type":"two_edges",
+      "a":{"body":2000,"point":[20,0,20],"dir":[1,0,0],"n1":[0,0,1],"n2":[0,-1,0]},
+      "b":{"body":2000,"point":[20,30,0],"dir":[1,0,0],"n1":[0,0,-1],"n2":[0,1,0]}}"#;
+    let PlaneDef::TwoEdges { a, .. } = serde_json::from_str(old).unwrap() else { panic!("not two_edges") };
+    assert!(matches!(a, LineRef::Edge(_)));
+    let new = PlaneDef::TwoEdges {
+      a: LineRef::Axis(AxisRef::Z),
+      b: LineRef::Sketch { sketch: FeatureId(3), curve: CurveId(3) },
+    };
+    let back: PlaneDef = serde_json::from_str(&serde_json::to_string(&new).unwrap()).unwrap();
+    assert_eq!(back, new);
+    // the plane follows a construction axis and a sketch it was built on
+    let deps = PointDef::TwoEdges {
+      a: LineRef::Axis(AxisRef::Construction { feature: FeatureId(4) }),
+      b: LineRef::Sketch { sketch: FeatureId(3), curve: CurveId(3) },
+    };
+    assert_eq!(deps.depends_on(), vec![FeatureId(4), FeatureId(3)]);
+  }
 }

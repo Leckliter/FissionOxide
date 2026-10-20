@@ -1,9 +1,9 @@
 //! Commands for construction geometry by method, threads, coils, pipes, ribs and webs, scale,
 //! split/remove faces, thicken, surfaces, mesh tools and appearances.
 
-use fox_model::construct::{AxisDef, CoilSection, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
+use fox_model::construct::{AxisDef, CoilSection, LineRef, MeshOp, PipeSection, PlaneDef, PointDef, PointRef};
 use fox_model::{BodyId, EdgeRef, FaceRef, FeatureId, FeatureKind, PlaneRef};
-use fox_sketch::CurveId;
+use fox_sketch::{CurveId, CurveKind};
 use serde_json::{Value, json};
 
 use crate::commands::{
@@ -329,6 +329,24 @@ fn edge(s: &Session, p: &Value, k: &str) -> Result<EdgeRef, CmdError> {
   edge_ref_of(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge)")))?)
 }
 
+/// A straight line: an axis as `axis_ref` takes it ("x"/"y"/"z" or {axis: id}), a sketch line
+/// {sketch, curve}, or a body edge ({point} or {body, edge}).
+fn line(s: &Session, p: &Value, k: &str) -> Result<LineRef, CmdError> {
+  let v = p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (an edge, axis or sketch line)")))?;
+  if v.is_string() || v.get("axis").is_some() {
+    return Ok(LineRef::Axis(axis_ref(s, v)?));
+  }
+  if v.get("sketch").is_some() {
+    let sketch = FeatureId(req_u32(v, "sketch")?);
+    let curve = CurveId(req_u32(v, "curve")?);
+    match s.design.sketch(sketch)?.curve(curve).map(|c| &c.kind) {
+      Some(CurveKind::Line { .. }) => return Ok(LineRef::Sketch { sketch, curve }),
+      _ => return Err(CmdError::new(format!("curve {} of that sketch is not a line", curve.0))),
+    }
+  }
+  Ok(LineRef::Edge(edge_ref_of(s, v)?))
+}
+
 fn plane_of(s: &Session, p: &Value, k: &str) -> Result<PlaneRef, CmdError> {
   plane_ref(s, p.get(k).ok_or_else(|| CmdError::new(format!("missing '{k}' (a plane)")))?)
 }
@@ -377,7 +395,7 @@ fn plane(s: &mut Session, p: &Value) -> CmdResult {
     },
     "midplane" => PlaneDef::Midplane { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")? },
     "three_points" => PlaneDef::ThreePoints { a: pref(s, p, "a")?, b: pref(s, p, "b")?, c: pref(s, p, "c")? },
-    "two_edges" => PlaneDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PlaneDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "tangent" => PlaneDef::Tangent {
       face: face_ref(s, p.get("face").ok_or(CmdError::new("missing 'face'"))?)?,
       near: req_vec3(p, "near")?,
@@ -410,7 +428,7 @@ fn axis(s: &mut Session, p: &Value) -> CmdResult {
 fn point(s: &mut Session, p: &Value) -> CmdResult {
   let def = match opt_str(p, "method").unwrap_or("") {
     "vertex" | "at" | "center_of_edge" => PointDef::Ref { point: pref(s, p, "point")? },
-    "two_edges" => PointDef::TwoEdges { a: edge(s, p, "a")?, b: edge(s, p, "b")? },
+    "two_edges" => PointDef::TwoEdges { a: line(s, p, "a")?, b: line(s, p, "b")? },
     "three_planes" => {
       PointDef::ThreePlanes { a: plane_of(s, p, "a")?, b: plane_of(s, p, "b")?, c: plane_of(s, p, "c")? }
     }
