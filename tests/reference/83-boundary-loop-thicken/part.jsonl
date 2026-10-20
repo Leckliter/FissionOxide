@@ -8,5 +8,6 @@
 {"cmd": "sketch.line", "points": [[0, 10], [0, 0]]}
 {"cmd": "sketch.finish"}
 {"cmd": "surface.patch", "sketch": 1}
-{"cmd": "thicken", "bodies": [2000], "thickness": 2, "operation": "new_body", "symmetric": true}
+# the recipe's symmetric thickness is the total; Fox's (as Fusion's) is each side, so 1 mm
+{"cmd": "thicken", "bodies": [2000], "thickness": 1, "operation": "new_body", "symmetric": true}
 {"cmd": "body.remove", "bodies": [2000]}
