@@ -15,19 +15,24 @@ use crate::FaceRef;
 use crate::regen::Model;
 
 /// The part's surface, what to machine of it and the tool dropped onto it.
-struct Surface<'a> {
-  part: Heightfield,
+pub(super) struct Surface<'a> {
+  pub(super) part: Heightfield,
   /// Distance from each part cell to the nearest cell of the faces to machine.
   near: Vec<f64>,
-  op: &'a Operation,
+  pub(super) op: &'a Operation,
   /// The tool's tip never goes below this (the part's bottom).
-  floor: f64,
-  lo: DVec2,
-  hi: DVec2,
+  pub(super) floor: f64,
+  pub(super) lo: DVec2,
+  pub(super) hi: DVec2,
 }
 
 impl Surface<'_> {
-  fn new<'a>(setup: &Setup, model: &Model, op: &'a Operation, faces: &[FaceRef]) -> Result<Surface<'a>, String> {
+  pub(super) fn new<'a>(
+    setup: &Setup,
+    model: &Model,
+    op: &'a Operation,
+    faces: &[FaceRef],
+  ) -> Result<Surface<'a>, String> {
     let (plo, phi) = super::part_box(setup, model)?;
     let r = op.tool.radius();
     let extent = (phi - plo).truncate().max_element().max(1e-3);
@@ -76,7 +81,7 @@ impl Surface<'_> {
   }
 
   /// Whether the tool at `c` touches the faces to machine.
-  fn covers(&self, c: DVec2) -> bool {
+  pub(super) fn covers(&self, c: DVec2) -> bool {
     let p = &self.part;
     let i = ((c.x - p.x0) / p.h - 0.5).round();
     let j = ((c.y - p.y0) / p.h - 0.5).round();
@@ -86,19 +91,19 @@ impl Surface<'_> {
     self.near[j as usize * p.nx + i as usize] <= self.op.tool.radius()
   }
 
-  fn drop(&self, c: DVec2) -> DVec3 {
+  pub(super) fn drop(&self, c: DVec2) -> DVec3 {
     DVec3::new(c.x, c.y, self.part.drop_tool_over(&self.op.tool, c).max(self.floor))
   }
 
   /// A straight move dropped onto the surface, sampled finely enough to follow it.
-  fn dropped(&self, a: DVec2, b: DVec2) -> Vec<DVec3> {
+  pub(super) fn dropped(&self, a: DVec2, b: DVec2) -> Vec<DVec3> {
     let n = (((b - a).length() / self.part.h).ceil() as usize).max(1);
     (0..=n).map(|k| self.drop(a.lerp(b, k as f64 / n as f64))).collect()
   }
 
   /// Emits passes (tool centre polylines in XY), dropped, nearest first, staying down between
   /// passes less than `link` apart.
-  fn emit(&self, p: &mut Path, passes: Vec<(Vec<DVec2>, bool)>, link: f64) {
+  pub(super) fn emit(&self, p: &mut Path, passes: Vec<(Vec<DVec2>, bool)>, link: f64) {
     let tol = (self.part.h * 0.05).clamp(0.001, 0.005);
     let mut at: Option<DVec3> = None;
     for (pts, closed) in passes {
@@ -134,7 +139,7 @@ impl Surface<'_> {
 
 /// Drops points within `tol` of the 3D line through their neighbours, and never where that
 /// line would pass below a dropped point (that would cut into the surface).
-fn simplify3(points: &[DVec3], tol: f64) -> Vec<DVec3> {
+pub(super) fn simplify3(points: &[DVec3], tol: f64) -> Vec<DVec3> {
   if points.len() < 3 {
     return points.to_vec();
   }
@@ -168,6 +173,22 @@ pub(super) fn parallel(
 ) -> Result<(), String> {
   let s = Surface::new(setup, model, op, faces)?;
   let step = op.tool.diameter * op.stepover;
+  let passes = rows(&s, step, angle, &|c| s.covers(c))?;
+  if passes.is_empty() {
+    return Err("the tool can't reach the faces".into());
+  }
+  s.emit(p, passes, step * 1.5);
+  Ok(())
+}
+
+/// Rows `angle` degrees from the X axis, `step` apart, zigzagging: their runs where `keep`
+/// holds, as tool centre polylines in XY.
+pub(super) fn rows(
+  s: &Surface,
+  step: f64,
+  angle: f64,
+  keep: &dyn Fn(DVec2) -> bool,
+) -> Result<Vec<(Vec<DVec2>, bool)>, String> {
   let a = angle.to_radians();
   let (u, v) = (DVec2::new(a.cos(), a.sin()), DVec2::new(-a.sin(), a.cos()));
   let corners = [s.lo, DVec2::new(s.hi.x, s.lo.y), s.hi, DVec2::new(s.lo.x, s.hi.y)];
@@ -189,7 +210,7 @@ pub(super) fn parallel(
     let mut run = Vec::new();
     for i in 0..n {
       let c = u * (u0 + i as f64 * du).min(u1) + v * vv;
-      if s.covers(c) {
+      if keep(c) {
         run.push(c);
       } else if !run.is_empty() {
         runs.push(std::mem::take(&mut run));
@@ -206,11 +227,7 @@ pub(super) fn parallel(
     }
     passes.extend(runs.into_iter().filter(|r| r.len() > 1).map(|r| (r, false)));
   }
-  if passes.is_empty() {
-    return Err("the tool can't reach the faces".into());
-  }
-  s.emit(p, passes, step * 1.5);
-  Ok(())
+  Ok(passes)
 }
 
 /// Rings a constant distance apart measured over the surface (so the scallops left between

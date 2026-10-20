@@ -1,0 +1,44 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "distance-25",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "symmetric",
+              "distance": "25"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "symmetric distance 15 -> 25: box 50 x 50 x 20 centred on the origin",
+        "body_count": 1,
+        "volume_mm3": 50000.0,
+        "area_mm2": 9000,
+        "center_of_mass": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bbox": {
+          "min": [
+            -25.0,
+            -25.0,
+            -10.0
+          ],
+          "max": [
+            25.0,
+            25.0,
+            10.0
+          ]
+        },
+        "faces": 6
+      }
+    }
+  ]
+}

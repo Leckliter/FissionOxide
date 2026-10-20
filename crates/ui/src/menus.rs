@@ -287,6 +287,7 @@ const ASSEMBLE: &[E] = &[
   c("Motion Link", Icon::DriveJoint, D(Kind::Form(&assembly_forms::MOTION_LINK))),
   c("Contact Set", Icon::Interference, D(Kind::Form(&assembly_forms::CONTACT_SET))),
   c("Insert Component", Icon::InsertComponent, Cmd::InsertComponent),
+  c("Cam Follower", Icon::DriveJoint, D(Kind::Form(&assembly_forms::CAM_FOLLOWER))),
 ];
 
 const SELECTION_TOOLS: &[E] = &[
@@ -712,12 +713,17 @@ const DRAWING_MODIFY: &[E] = &[
   c("Delete", Icon::Remove, D(Kind::DrawingMoveView)),
   E::Sep,
   c("Sheet Settings", Icon::SheetSettings, D(Kind::DrawingSettings)),
+  E::Sep,
+  c("New Sheet", Icon::Plus, D(Kind::Form(&crate::sheet::DRAWING_NEW_SHEET))),
+  c("Edit Sheet", Icon::SheetSettings, D(Kind::Form(&crate::sheet::DRAWING_EDIT_SHEET))),
 ];
 
 const DRAWING_DIMENSIONS: &[E] = &[
   c("Dimension", Icon::Dimension, D(Kind::DrawingDimension)).k("D"),
   c("Ordinate Dimension", Icon::OrdinateDim, D(Kind::Form(&forms::DRAWING_ORDINATE))),
   c("Angular Dimension", Icon::AngleDim, D(Kind::Form(&forms::DRAWING_ANGLE))),
+  c("Baseline Dimension", Icon::OrdinateDim, D(Kind::Form(&crate::sheet::DRAWING_BASELINE))),
+  c("Chain Dimension", Icon::Dimension, D(Kind::Form(&crate::sheet::DRAWING_CHAIN))),
 ];
 
 const DRAWING_TEXT: &[E] = &[c("Text", Icon::SkText, D(Kind::DrawingNote)).k("T")];
@@ -728,12 +734,16 @@ const DRAWING_TABLES: &[E] = &[
   E::Sep,
   c("Balloon", Icon::Balloon, D(Kind::Form(&forms::DRAWING_BALLOON))),
   c("Auto Balloon", Icon::Balloon, D(Kind::DrawingSettings)),
+  E::Sep,
+  c("Revision Table", Icon::TitleBlock, D(Kind::Form(&crate::sheet::DRAWING_REVISION))),
 ];
 
 const DRAWING_SYMBOLS: &[E] = &[
   c("Feature Control Frame", Icon::FeatureControl, D(Kind::Form(&forms::DRAWING_FCF))),
   c("Datum Identifier", Icon::DatumId, D(Kind::Form(&forms::DRAWING_DATUM))),
   c("Surface Texture", Icon::SurfaceTexture, D(Kind::Form(&forms::DRAWING_FINISH))),
+  c("Weld Symbol", Icon::Fillet, D(Kind::Form(&crate::sheet::DRAWING_WELD))),
+  c("Datum Target", Icon::DatumId, D(Kind::Form(&crate::sheet::DRAWING_DATUM_TARGET))),
 ];
 
 const DRAWING_EXPORT: &[E] = &[
@@ -786,6 +796,10 @@ const CAM_2D: &[E] = &[
 const CAM_3D: &[E] = &[
   c("Parallel", Icon::Zebra, D(Kind::Form(&forms::CAM_PARALLEL))),
   c("Scallop", Icon::Isocurve, D(Kind::Form(&forms::CAM_SCALLOP))),
+  c("Adaptive Clearing", Icon::Shell, D(Kind::Form(&forms::CAM_ADAPTIVE3D))),
+  c("Steep and Shallow", Icon::Zebra, D(Kind::Form(&forms::CAM_STEEP_SHALLOW))),
+  c("Contour", Icon::SkOffset, D(Kind::Form(&forms::CAM_CONTOUR3D))),
+  c("Pencil", Icon::Line, D(Kind::Form(&forms::CAM_PENCIL))),
 ];
 
 const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
@@ -795,6 +809,7 @@ const CAM_ACTIONS: &[E] = &[
   c("Simulate", Icon::MotionStudy, Cmd::CamSimulate),
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
   c("Delete Setup", Icon::Remove, Cmd::CamDelete),
+  c("2D Cut (Laser, Plasma, Waterjet)", Icon::ExportDxf, Cmd::Cut2d),
 ];
 
 /// The Manufacture workspace's MILLING tab.

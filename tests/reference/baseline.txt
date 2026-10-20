@@ -40,6 +40,7 @@
 39-tee-pipe
 40-box-sphere-torus
 41-tube-radial-holes
+42-overlapping-patterns
 43-cut-splits-body
 44-shell-l-bracket
 45-shell-boss-plate
@@ -73,6 +74,11 @@
 74-sm-unfold-refold
 76-sm-thickness-variant
 77-fillet-variable-linear
+78-fillet-variable-to-zero
 79-fillet-chord-length
+80-fillet-taper-to-fit
+81-fillet-spline-radius
 82-thin-extrude-frame
 83-boundary-loop-thicken
+69-sm-tray
+75-sm-bracket-holes

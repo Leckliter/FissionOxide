@@ -22,6 +22,17 @@ pub(super) struct Mates {
   driven: BTreeMap<FeatureId, Vec<(MotionAxis, f64)>>,
   /// Why a motion link doesn't work, by link.
   errors: BTreeMap<FeatureId, String>,
+  /// Cam followers: follower joint → cam.
+  cams: BTreeMap<FeatureId, Cam>,
+}
+
+/// A cam follower, worked out before the replay.
+#[derive(Debug)]
+pub(super) struct Cam {
+  name: String,
+  cam: ComponentId,
+  flat: bool,
+  clearance: f64,
 }
 
 impl Mates {
@@ -35,6 +46,11 @@ impl Mates {
     for (axis, v) in self.driven.get(&joint).into_iter().flatten() {
       axis.set(m, *v);
     }
+  }
+
+  /// The cam a joint follows, if any.
+  pub(super) fn cam(&self, joint: FeatureId) -> Option<&Cam> {
+    self.cams.get(&joint)
   }
 }
 
@@ -53,7 +69,7 @@ impl Ctx<'_> {
         .copied()
         .collect();
       if more.is_empty() {
-        return out;
+        return self.with_children(out);
       }
       for m in more {
         if !out.contains(&m) {
@@ -61,6 +77,23 @@ impl Ctx<'_> {
         }
       }
     }
+  }
+}
+
+impl Ctx<'_> {
+  /// Components and everything below them (sub-assemblies move with their parent).
+  pub(super) fn with_children(&self, mut out: Vec<ComponentId>) -> Vec<ComponentId> {
+    let mut i = 0;
+    while i < out.len() {
+      let c = out[i];
+      for k in self.components.iter().filter(|k| k.parent == Some(c)) {
+        if !out.contains(&k.id) {
+          out.push(k.id);
+        }
+      }
+      i += 1;
+    }
+    out
   }
 }
 
@@ -158,7 +191,50 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
       }
     }
   }
+  cams(design, active, &links, &eval, &mut out);
   out
+}
+
+/// Gathers the active cam followers.
+fn cams(
+  design: &Design,
+  active: &[crate::Feature],
+  links: &BTreeMap<(FeatureId, MotionAxis), Link>,
+  eval: &dyn Fn(&str, bool) -> Result<f64, String>,
+  out: &mut Mates,
+) {
+  for f in active.iter().filter(|f| !f.suppressed) {
+    let FeatureKind::CamFollower { cam, follower, flat, clearance } = &f.kind else { continue };
+    let r = (|| {
+      let joint =
+        active.iter().find(|j| j.id == *follower && !j.suppressed).ok_or("the follower's joint no longer exists")?;
+      let FeatureKind::Joint { kind, moving, .. } = &joint.kind else {
+        return Err("the follower must be a joint".to_string());
+      };
+      if !MotionAxis::Slide.allowed(*kind) {
+        return Err(format!("{} doesn't slide", joint.name));
+      }
+      let c = design.component(*cam).ok_or("the cam component no longer exists")?;
+      if c.id == *moving {
+        return Err(format!("{} can't follow itself", c.name));
+      }
+      if let Some(l) = links.get(&(*follower, MotionAxis::Slide)) {
+        return Err(format!("{}'s slide is already driven by {}", joint.name, l.name));
+      }
+      if let Some(other) = out.cams.get(follower) {
+        return Err(format!("{} already follows {}", joint.name, other.name));
+      }
+      Ok(Cam { name: f.name.clone(), cam: *cam, flat: *flat, clearance: eval(clearance, false)? })
+    })();
+    match r {
+      Ok(c) => {
+        out.cams.insert(*follower, c);
+      }
+      Err(e) => {
+        out.errors.insert(f.id, e);
+      }
+    }
+  }
 }
 
 impl Ctx<'_> {
@@ -205,10 +281,13 @@ impl Ctx<'_> {
         self.transform_components(id, &lagging, lead)?;
         Ok(None)
       }
-      FeatureKind::MotionLink { .. } => match self.mates.errors.get(&id) {
+      FeatureKind::MotionLink { .. } | FeatureKind::CamFollower { .. } => match self.mates.errors.get(&id) {
         Some(e) => Err(e.clone()),
         None => Ok(None),
       },
+      FeatureKind::InsertDesign { name, breps, translate, sub: Some(sub), .. } if sub.flexible && sub.has_joints() => {
+        self.insert_flexible(id, name, breps, translate, sub)
+      }
       FeatureKind::InsertDesign { name, breps, translate, .. } => {
         if breps.is_empty() {
           return Err(format!("{name} has no bodies to insert"));
@@ -264,6 +343,34 @@ impl Ctx<'_> {
       return Err(format!("{} has no bodies", self.component(moving)?.name));
     }
     Ok(None)
+  }
+
+  /// The slide that keeps a cam follower's joint in contact with its cam: `place` is where the
+  /// joint puts the follower for a motion.
+  pub(super) fn cam_slide(
+    &self,
+    joint: FeatureId,
+    moving_frame: DMat4,
+    place: &dyn Fn(assembly::Motion) -> DMat4,
+    motion: assembly::Motion,
+  ) -> Result<f64, String> {
+    let cam = self.mates.cam(joint).ok_or("no cam")?;
+    let comps = self.with_children(vec![cam.cam]);
+    let mut tris = Vec::new();
+    for c in &comps {
+      for b in &self.component(*c)?.bodies {
+        let Ok(bi) = self.body_index(*b) else { continue };
+        let body = &self.state.bodies[bi];
+        // finer than the display mesh: the follower rides on the facets
+        let mesh = body.shape.tessellate((body.diagonal() * 2e-5).clamp(1e-4, 0.01)).map_err(ke)?;
+        tris.extend(crate::mechanism::triangles(&mesh.positions, &mesh.indices));
+      }
+    }
+    let o = moving_frame.w_axis.truncate();
+    let at = |s: f64| place(assembly::Motion { slide: s, ..motion }).transform_point3(o);
+    let tip = at(0.0);
+    crate::mechanism::cam_contact(&tris, tip, at(1.0) - tip, cam.flat, cam.clearance)
+      .map_err(|e| format!("{}: {e}", cam.name))
   }
 
   /// How far joints have moved a component.

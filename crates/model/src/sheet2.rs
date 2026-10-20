@@ -57,6 +57,12 @@ fn seg_len(s: &Seg) -> f64 {
         (0..=BEZIER_STEPS).map(|i| fox_sketch::bezier_at(&p, i as f64 / BEZIER_STEPS as f64)).collect();
       pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
     }
+    Seg::EllipseArc { .. } => {
+      let mut pts = Vec::new();
+      s.flatten(&mut pts);
+      pts.push(s.end());
+      pts.windows(2).map(|w| len2(sub(w[1], w[0]))).sum()
+    }
   }
 }
 
@@ -80,6 +86,12 @@ fn seg_at(s: &Seg, f: f64) -> P2 {
       let span = (cum[i] - cum[i - 1]).max(1e-12);
       let k = ((target - cum[i - 1]) / span).clamp(0.0, 1.0);
       [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k]
+    }
+    // by parameter: close to by length for the gentle arcs a chain carries
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      fox_sketch::Ellipse2::new(center, [center[0] + major[0], center[1] + major[1]], minor)
+        .map(|e| e.at(start + sweep * f))
+        .unwrap_or(center)
     }
   }
 }
@@ -195,6 +207,14 @@ pub struct Development {
   pub bends: Vec<Bend>,
   /// Volume of the flange as built (later changes to the body aren't in the flat pattern).
   pub volume: f64,
+  /// Each facet's triangle on the neutral layer, where it lies in the flat (`outline`'s
+  /// coordinates) and its normal towards the material: what carries later cuts into the flat.
+  pub facets: Vec<([DVec3; 3], [P2; 3], DVec3)>,
+  /// How far the neutral layer lies inside the sheet from the profiles' side (the flat's top).
+  pub depth: f64,
+  /// The flange as built; later cuts are what's missing from it. (Behind a mutex: shapes may
+  /// move between threads but not be shared.)
+  pub built: Option<std::sync::Arc<std::sync::Mutex<Shape>>>,
 }
 
 impl PartialEq for Development {
@@ -224,15 +244,18 @@ const DIE_FACETS: f64 = 96.0;
 
 /// Builds a lofted flange between two profiles. The profiles are one face of the sheet, the
 /// material lies along (a × b) where a runs along the first profile and b from it to the
-/// second (the other way when `flip`). `bends` is the press-brake bend count to aim for.
+/// second (the other way when `flip`). `bends` is the press-brake bend count to aim for, and
+/// `rounded` rounds those bends to the rule's bend radius; the warning says which stayed sharp
+/// (see [`crate::sheet3::round_folds`]).
 pub fn lofted_flange(
   a: &Chain,
   b: &Chain,
   method: LoftMethod,
   bends: usize,
   flip: bool,
+  rounded: bool,
   sheet: &SheetInfo,
-) -> Result<(Shape, Development), String> {
+) -> Result<(Shape, Development, Option<String>), String> {
   let (t, k) = (sheet.thickness, sheet.k_factor);
   if a.closed != b.closed {
     return Err("the profiles must both be closed or both open".into());
@@ -245,10 +268,15 @@ pub fn lofted_flange(
   let smooth = method == LoftMethod::DieFormed && !sharp;
   let strip = Strip::new(pa, pb, flip, smooth)?;
   let shape = if smooth { strip.smooth_solid(t)? } else { strip.solid(t)? };
-  let volume = shape.mass().map_err(|e| e.to_string())?.volume;
   let mut dev = strip.develop(t, k, method == LoftMethod::PressBrake)?;
-  dev.volume = volume;
-  Ok((shape, dev))
+  let (shape, warning) = if rounded && method == LoftMethod::PressBrake {
+    crate::sheet3::round_folds(&shape, &dev.bends, sheet)?
+  } else {
+    (shape, None)
+  };
+  dev.volume = shape.mass().map_err(|e| e.to_string())?.volume;
+  dev.built = Some(std::sync::Arc::new(std::sync::Mutex::new(shape.clone())));
+  Ok((shape, dev, warning))
 }
 
 /// Angle between samples of a die-formed flange's curved parts.
@@ -872,7 +900,17 @@ impl Strip {
         }
       }
     }
-    Ok(Development { plane, outline, bends, volume: 0.0 })
+    let quads = self.n.len();
+    let facets = self
+      .triangles()
+      .iter()
+      .map(|tri| {
+        let quad = tri.iter().map(|&i| i % m).min().unwrap_or(0).min(quads - 1);
+        (tri.map(|i| pts[i]), tri.map(|i| to2(flat[i])), self.n[quad])
+      })
+      .filter(|(p3, _, _)| (p3[1] - p3[0]).cross(p3[2] - p3[0]).length() > 1e-12)
+      .collect();
+    Ok(Development { plane, outline, bends, volume: 0.0, facets, depth: d, built: None })
   }
 }
 
@@ -890,6 +928,12 @@ pub fn map_seg(s: &Seg, f: &impl Fn(P2) -> P2, mirror: bool) -> Seg {
     }
     Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius, ccw: ccw != mirror },
     Seg::Bezier { p } => Seg::Bezier { p: p.map(f) },
+    Seg::EllipseArc { center, major, minor, start, sweep } => {
+      let c = f(center);
+      let m = sub(f([center[0] + major[0], center[1] + major[1]]), c);
+      // a mirror turns the minor axis over: the image runs the parameter backwards
+      Seg::EllipseArc { center: c, major: m, minor, start: start * sg, sweep: sweep * sg }
+    }
   }
 }
 

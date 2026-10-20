@@ -8,4 +8,8 @@
 {"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 15, "operation": "new_body"}
-# UNSUPPORTED: fillet Fillet1: fillet fit 'taper' (radius following the room available)
+# hand-edited
+# FissionOxide has no taper-to-fit fillet (nor does Fusion). The radius law from
+# expected.json (a clamped cubic B-spline in u = x/40 on 8 equal spans, control radii 3 x 9,
+# 2.475, 1.8) is given as radii at 33 points along the edge instead.
+{"cmd": "fillet", "edges": [{"point": [20.0, 0.0, 15.0]}], "radius": 3, "radius2": 1.8, "radii": [[0.03125, 3], [0.0625, 3], [0.09375, 3], [0.125, 3], [0.15625, 3], [0.1875, 3], [0.21875, 3], [0.25, 3], [0.28125, 3], [0.3125, 3], [0.34375, 3], [0.375, 3], [0.40625, 3], [0.4375, 3], [0.46875, 3], [0.5, 3], [0.53125, 3], [0.5625, 3], [0.59375, 3], [0.625, 3], [0.65625, 3], [0.6875, 3], [0.71875, 3], [0.75, 3], [0.78125, 2.997949219], [0.8125, 2.98359375], [0.84375, 2.944628906], [0.875, 2.86875], [0.90625, 2.741308594], [0.9375, 2.53828125], [0.96875, 2.233300781]]}

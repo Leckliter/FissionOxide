@@ -1,0 +1,78 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "width-80",
+      "edits": [
+        {
+          "cmd": "param.set",
+          "name": "width",
+          "expr": "80 mm"
+        }
+      ],
+      "expected": {
+        "method": "width 60 -> 80: block 80 x 40 x 15 with the d10 hole still centred",
+        "body_count": 1,
+        "volume_mm3": 46821.90275490383,
+        "area_mm2": 10314.15926535898,
+        "center_of_mass": [
+          40.0,
+          20.0,
+          7.5
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            80.0,
+            40.0,
+            15.0
+          ]
+        },
+        "faces": 7
+      }
+    },
+    {
+      "name": "height-25-hole-20",
+      "edits": [
+        {
+          "cmd": "param.set",
+          "name": "height",
+          "expr": "25 mm"
+        },
+        {
+          "cmd": "param.set",
+          "name": "hole_d",
+          "expr": "20 mm"
+        }
+      ],
+      "expected": {
+        "method": "height 15 -> 25 and hole_d 10 -> 20",
+        "body_count": 1,
+        "volume_mm3": 52146.01836602551,
+        "area_mm2": 10742.477796076937,
+        "center_of_mass": [
+          30.0,
+          20.0,
+          12.5
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            60.0,
+            40.0,
+            25.0
+          ]
+        },
+        "faces": 7
+      }
+    }
+  ]
+}

@@ -234,6 +234,7 @@ fn lofted(d: &mut Design, a: FeatureId, b: FeatureId, method: LoftMethod, bends:
     bends: bends.into(),
     flip: false,
     rule: String::new(),
+    rounded: false,
   })
   .unwrap();
   regenerate(d)

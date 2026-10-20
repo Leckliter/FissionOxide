@@ -1,0 +1,41 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "thickness-4",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 3,
+          "set": {
+            "thickness": "4"
+          }
+        }
+      ],
+      "expected": {
+        "method": "shell 3 -> 4 with top and front open: box minus [4,46]x[0,36]x[4,30]",
+        "body_count": 1,
+        "volume_mm3": 20688.0,
+        "area_mm2": 11272,
+        "center_of_mass": [
+          25.0,
+          23.800464037,
+          11.199535963
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            50.0,
+            40.0,
+            30.0
+          ]
+        },
+        "faces": 10
+      }
+    }
+  ]
+}

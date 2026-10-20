@@ -10,16 +10,19 @@ mod assembly;
 mod cam;
 mod commands;
 pub mod config;
+mod cut;
 pub mod diff;
 mod drawings;
 mod features;
 pub mod files;
+mod fillet;
 pub mod hub;
 mod inspect;
 mod mates;
 pub mod scene;
 mod sheet2;
 mod solid;
+mod subassembly;
 mod surfaces;
 mod trace;
 
@@ -156,6 +159,9 @@ pub struct Session {
   pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
   pub diff: Option<diff::DiffView>,
+  /// The drawing sheet being worked on, (drawing, sheet): where new views and notes go when a
+  /// command names no sheet. `drawing.add_sheet` moves it to the new sheet.
+  pub drawing_sheet: Option<(u32, u32)>,
 }
 
 impl Default for Session {
@@ -184,6 +190,7 @@ impl Session {
       toolpaths_of: None,
       simulation: None,
       diff: None,
+      drawing_sheet: None,
     };
     s.rebuild();
     s
@@ -463,9 +470,15 @@ mod tests_assembly;
 #[cfg(test)]
 mod tests_cam;
 #[cfg(test)]
+mod tests_cam3d;
+#[cfg(test)]
 mod tests_config;
 #[cfg(test)]
+mod tests_cut;
+#[cfg(test)]
 mod tests_files;
+#[cfg(test)]
+mod tests_fillet;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
@@ -473,9 +486,15 @@ mod tests_scene;
 #[cfg(test)]
 mod tests_sheet2;
 #[cfg(test)]
+mod tests_sheet3;
+#[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
+mod tests_sketch_curves;
+#[cfg(test)]
 mod tests_solid;
+#[cfg(test)]
+mod tests_subassembly;
 #[cfg(test)]
 mod tests_surface;
 #[cfg(test)]

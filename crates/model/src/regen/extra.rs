@@ -459,6 +459,7 @@ impl Ctx<'_> {
       | FeatureKind::RigidGroup { .. }
       | FeatureKind::MotionLink { .. }
       | FeatureKind::InsertDesign { .. } => self.apply_assembly(id, kind),
+      FeatureKind::CamFollower { .. } => self.apply_assembly(id, kind),
       FeatureKind::BaseFeature { .. } => self.apply_base(id, kind),
       _ => Err("this feature type isn't supported".into()),
     }
@@ -822,6 +823,7 @@ fn seg_start(s: &Seg) -> ([f64; 2], [f64; 2]) {
     }
     Seg::Circle { center, radius, .. } => ([center[0] + radius, center[1]], [0.0, 1.0]),
     Seg::Bezier { p } => (p[0], [p[1][0] - p[0][0], p[1][1] - p[0][1]]),
+    Seg::EllipseArc { .. } => (s.start(), s.end_tangents().0),
   }
 }
 

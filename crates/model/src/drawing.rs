@@ -16,9 +16,14 @@ use crate::{BodyId, ComponentId, Design};
 
 mod annotate;
 mod breaks;
+mod chain;
+mod sheets;
+mod weld;
 
 pub use annotate::{Characteristic, Datums, FinishProcess, MaterialCondition, Standard};
 pub use breaks::{BreakDirection, DEFAULT_GAP, ViewBreak};
+pub use sheets::{FIRST_SHEET, Revision, Sheet};
+pub use weld::{FrameTier, WeldKind, WeldSide, WeldSymbol};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Drawing {
@@ -51,6 +56,12 @@ pub struct Drawing {
   /// A balloon for every parts list row that has none, kept in step with the parts list.
   #[serde(default)]
   pub auto_balloons: bool,
+  /// The sheets, in order; empty = one sheet (id [`FIRST_SHEET`]) of the drawing's size and scale.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub sheets: Vec<Sheet>,
+  /// Revision history, drawn as a table at the top right of the first sheet.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub revisions: Vec<Revision>,
 }
 
 fn yes() -> bool {
@@ -122,6 +133,9 @@ pub struct DrawingView {
   /// Stretches left out of the view (a broken view).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub breaks: Vec<ViewBreak>,
+  /// The sheet the view is on.
+  #[serde(default = "sheets::first", skip_serializing_if = "sheets::is_first")]
+  pub sheet: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,7 +260,12 @@ pub enum DrawingDim {
     offset: f64,
   },
   /// Free text on the sheet.
-  Note { at: [f64; 2], text: String },
+  Note {
+    at: [f64; 2],
+    text: String,
+    #[serde(default = "sheets::first", skip_serializing_if = "sheets::is_first")]
+    sheet: u32,
+  },
   /// Ordinate dimensions: distances of points from `origin` along the view's horizontal or
   /// vertical.
   Ordinate {
@@ -286,6 +305,9 @@ pub enum DrawingDim {
     /// Primary, secondary and tertiary datum references.
     #[serde(default)]
     datums: Vec<String>,
+    /// The lower tier of a composite frame (position or profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lower: Option<FrameTier>,
   },
   /// A datum feature identifier on a model point.
   Datum {
@@ -313,6 +335,46 @@ pub enum DrawingDim {
     offset: [f64; 2],
     component: ComponentId,
   },
+  /// Baseline dimensions: each point's distance from `origin` along the view's horizontal or
+  /// vertical, stacked `spacing` sheet mm apart.
+  Baseline {
+    view: u32,
+    origin: [f64; 3],
+    points: Vec<[f64; 3]>,
+    #[serde(default = "horizontal")]
+    orientation: DimOrientation,
+    #[serde(default = "dim_offset")]
+    offset: f64,
+    #[serde(default = "chain::spacing")]
+    spacing: f64,
+  },
+  /// Chain dimensions: the distances between consecutive points, on one line.
+  Chain {
+    view: u32,
+    points: Vec<[f64; 3]>,
+    #[serde(default = "horizontal")]
+    orientation: DimOrientation,
+    #[serde(default = "dim_offset")]
+    offset: f64,
+  },
+  /// A welding symbol (AWS A2.4 or ISO 2553, per the drawing's standard) on a leader to a joint.
+  Weld {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default = "leader_offset")]
+    offset: [f64; 2],
+    symbol: WeldSymbol,
+  },
+  /// A datum target: a point (`area` 0) or a circular area of `area` model mm across.
+  DatumTarget {
+    view: u32,
+    point: [f64; 3],
+    #[serde(default = "leader_offset")]
+    offset: [f64; 2],
+    label: String,
+    #[serde(default)]
+    area: f64,
+  },
 }
 
 impl DrawingDim {
@@ -320,6 +382,10 @@ impl DrawingDim {
   pub fn view(&self) -> Option<u32> {
     match self {
       DrawingDim::Note { .. } => None,
+      DrawingDim::Baseline { view, .. }
+      | DrawingDim::Chain { view, .. }
+      | DrawingDim::Weld { view, .. }
+      | DrawingDim::DatumTarget { view, .. } => Some(*view),
       DrawingDim::Distance { view, .. }
       | DrawingDim::Ordinate { view, .. }
       | DrawingDim::Angle { view, .. }
@@ -379,6 +445,8 @@ impl Drawing {
       parts_list: true,
       standard: Standard::default(),
       auto_balloons: false,
+      sheets: Vec::new(),
+      revisions: Vec::new(),
     }
   }
 
@@ -389,10 +457,20 @@ impl Drawing {
   }
 }
 
+impl DrawingDim {
+  /// The sheet a dimension or annotation is on: its view's, or a note's own.
+  pub fn sheet(&self, d: &Drawing) -> Option<u32> {
+    match self {
+      DrawingDim::Note { sheet, .. } => Some(*sheet),
+      o => o.view().and_then(|v| d.views.iter().find(|x| x.id == v)).map(|v| v.sheet),
+    }
+  }
+}
+
 impl DrawingView {
   pub fn new(id: u32, kind: ViewKind) -> DrawingView {
     let hidden_lines = !matches!(kind, ViewKind::Iso);
-    DrawingView { id, kind, at: None, hidden_lines, breaks: Vec::new() }
+    DrawingView { id, kind, at: None, hidden_lines, breaks: Vec::new(), sheet: FIRST_SHEET }
   }
 }
 
@@ -421,6 +499,8 @@ struct Projected {
   mul: f64,
   /// Broken-out stretches along the view's horizontal and vertical.
   cuts: [Vec<breaks::Cut>; 2],
+  /// Position in the drawing's view list (section and detail letters).
+  n: usize,
 }
 
 impl Projected {
@@ -452,8 +532,23 @@ impl Projected {
   }
 }
 
-/// Lays the drawing out on its sheet.
+/// Lays the drawing's first sheet out.
 pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, String> {
+  render_sheet(d, design, model, d.sheet_list()[0].id)
+}
+
+/// Every sheet of the drawing, in order.
+pub fn render_sheets(d: &Drawing, design: &Design, model: &Model) -> Result<Vec<Plot>, String> {
+  d.sheet_list().iter().map(|s| render_sheet(d, design, model, s.id)).collect()
+}
+
+/// Lays one sheet of the drawing out: its views, their dimensions and annotations, its notes and
+/// its title block (the first sheet also gets the parts list and the revision table).
+pub fn render_sheet(d: &Drawing, design: &Design, model: &Model, sheet: u32) -> Result<Plot, String> {
+  let sheets = d.sheet_list();
+  let ordinal = sheets.iter().position(|s| s.id == sheet).ok_or(format!("no sheet {sheet} in the drawing"))?;
+  let this = &sheets[ordinal];
+  let first = ordinal == 0;
   let bodies: Vec<&crate::regen::Body> = model
     .bodies
     .iter()
@@ -469,31 +564,36 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
   let defl = (diag * 5e-4).clamp(1e-3, 0.5);
 
   let mut views = Vec::new();
-  for v in &d.views {
-    if let ViewKind::Detail { parent, center, radius, factor } = &v.kind {
+  for (n, v) in d.views.iter().enumerate().filter(|(_, v)| v.sheet == sheet) {
+    let mut pv = if let ViewKind::Detail { parent, center, radius, factor } = &v.kind {
       let pv = d.views.iter().find(|x| x.id == *parent && !matches!(x.kind, ViewKind::Detail { .. }));
       let pv = pv.ok_or(format!("detail view {}: its parent view is gone", v.id))?;
       let base = project_view(pv, &part, model, defl)?;
-      views.push(detail(v, base, DVec3::from(*center), *radius, *factor)?);
+      detail(v, base, DVec3::from(*center), *radius, *factor)?
     } else {
-      views.push(project_view(v, &part, model, defl)?);
-    }
+      project_view(v, &part, model, defl)?
+    };
+    pv.n = n;
+    views.push(pv);
   }
   for pv in &mut views {
     pv.cuts = breaks::cuts(&pv.view.breaks, pv.lo, pv.hi);
   }
-  let (w, h) = d.sheet.size();
-  let scale = match d.scale {
+  let size = this.size.unwrap_or(d.sheet);
+  let (w, h) = size.size();
+  let reserve = if first { sheets::revision_table_height(&d.revisions) } else { 0.0 };
+  let scale = match this.scale.or(d.scale) {
     Some(s) if s > 0.0 && s.is_finite() => s,
-    _ => auto_scale(&views, d.projection, w, h),
+    _ if views.is_empty() => 1.0,
+    _ => auto_scale(&views, d.projection, w, h - reserve),
   };
-  place(&mut views, d.projection, scale, w, h);
+  place(&mut views, d.projection, scale, w, h - reserve);
 
   let mut plot = Plot { width: w, height: h, items: Vec::new() };
-  for (n, pv) in views.iter().enumerate() {
-    draw_view(&mut plot, pv, scale, n);
+  for pv in &views {
+    draw_view(&mut plot, pv, scale, pv.n);
   }
-  for (n, v) in views.iter().enumerate() {
+  for v in &views {
     if let ViewKind::Detail { parent, center, radius, .. } = &v.view.kind
       && let Some(pv) = views.iter().find(|x| x.view.id == *parent)
     {
@@ -506,7 +606,7 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
         })
         .collect();
       plot.items.push(Item::Line { pen: Pen::Thin, points: ring });
-      let letter = char::from(b'A' + (n % 26) as u8).to_string();
+      let letter = char::from(b'A' + (v.n % 26) as u8).to_string();
       plot.items.push(Item::Text {
         at: [c[0] + r * 0.8, c[1] + r * 0.8],
         size: TEXT,
@@ -519,7 +619,7 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
     auto_dims(&mut plot, &views, scale, d.standard);
   }
   let rows = bom_rows(design);
-  if d.parts_list && !design.components.is_empty() {
+  if first && d.parts_list && !design.components.is_empty() {
     parts_list(&mut plot, &rows);
   }
   let std = d.standard;
@@ -538,8 +638,10 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
         };
         linear_dim(&mut plot, anchor(a), anchor(b), *orientation, *offset, &std.number(value));
       }
-      DrawingDim::Note { at, text } => {
-        plot.items.push(Item::Text { at: *at, size: TEXT, text: text.clone(), anchor: Anchor::Start })
+      DrawingDim::Note { at, text, sheet: on } => {
+        if *on == sheet {
+          plot.items.push(Item::Text { at: *at, size: TEXT, text: text.clone(), anchor: Anchor::Start })
+        }
       }
       DrawingDim::Ordinate { origin, points, orientation, offset, .. } => {
         let Some(pv) = pv else { continue };
@@ -549,10 +651,24 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
         let Some(pv) = pv else { continue };
         annotate::angle(&mut plot, std, pv, scale, *vertex, *a, *b, *radius);
       }
-      DrawingDim::FeatureControl { point, offset, characteristic, tolerance, diameter, modifier, datums, .. } => {
+      DrawingDim::FeatureControl {
+        point,
+        offset,
+        characteristic,
+        tolerance,
+        diameter,
+        modifier,
+        datums,
+        lower,
+        ..
+      } => {
         if pv.is_some() {
           let (ch, tol) = (*characteristic, *tolerance);
           annotate::feature_control(&mut plot, std, anchor(point), *offset, ch, tol, *diameter, *modifier, datums);
+          if let Some(lower) = lower {
+            let upper = FrameTier { tolerance: tol, diameter: *diameter, modifier: *modifier, datums: datums.clone() };
+            weld::composite_lower(&mut plot, std, anchor(point), *offset, &upper, lower);
+          }
         }
       }
       DrawingDim::Datum { point, offset, label, .. } => {
@@ -572,12 +688,32 @@ pub fn render(d: &Drawing, design: &Design, model: &Model) -> Result<Plot, Strin
           annotate::balloon(&mut plot, anchor(point), *offset, &(n + 1).to_string());
         }
       }
+      DrawingDim::Baseline { origin, points, orientation, offset, spacing, .. } => {
+        let Some(pv) = pv else { continue };
+        chain::baseline(&mut plot, std, pv, scale, *origin, points, *orientation, *offset, *spacing);
+      }
+      DrawingDim::Chain { points, orientation, offset, .. } => {
+        let Some(pv) = pv else { continue };
+        chain::chain(&mut plot, std, pv, scale, points, *orientation, *offset);
+      }
+      DrawingDim::Weld { point, offset, symbol, .. } => {
+        if pv.is_some() {
+          weld::weld(&mut plot, std, anchor(point), *offset, symbol);
+        }
+      }
+      DrawingDim::DatumTarget { point, offset, label, area, .. } => {
+        let Some(pv) = pv else { continue };
+        weld::datum_target(&mut plot, std, anchor(point), *offset, label, *area, scale * pv.mul);
+      }
     }
   }
-  if d.auto_balloons {
+  if first && d.auto_balloons {
     auto_balloons(&mut plot, d, &views, scale, &rows, design, &bodies);
   }
-  frame(&mut plot, d, design, scale);
+  if first {
+    sheets::revision_table(&mut plot, &d.revisions);
+  }
+  frame(&mut plot, d, design, scale, size, (ordinal, sheets.len()));
   Ok(plot)
 }
 
@@ -646,7 +782,19 @@ fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Resu
   }
   let proj = shape.project(z, right, defl).map_err(|e| e.to_string())?;
   let (lo, hi) = proj.bounds().ok_or("the view is empty")?;
-  Ok(Projected { view: v.clone(), proj, lo, hi, right, up, hatch, bends, mul: 1.0, cuts: [Vec::new(), Vec::new()] })
+  Ok(Projected {
+    view: v.clone(),
+    proj,
+    lo,
+    hi,
+    right,
+    up,
+    hatch,
+    bends,
+    mul: 1.0,
+    cuts: [Vec::new(), Vec::new()],
+    n: 0,
+  })
 }
 
 /// A detail view: the parent's projection clipped to a circle around `center` and enlarged.
@@ -1143,8 +1291,8 @@ fn auto_balloons(
   }
 }
 
-/// Border and title block.
-fn frame(plot: &mut Plot, d: &Drawing, design: &Design, scale: f64) {
+/// Border and title block; `sheet` is (index, count).
+fn frame(plot: &mut Plot, d: &Drawing, design: &Design, scale: f64, size: SheetSize, sheet: (usize, usize)) {
   let (w, h) = (plot.width, plot.height);
   let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
   plot.items.push(Item::Line { pen: Pen::Border, points: rect(MARGIN, MARGIN, w - MARGIN, h - MARGIN) });
@@ -1166,18 +1314,26 @@ fn frame(plot: &mut Plot, d: &Drawing, design: &Design, scale: f64) {
   let t = &d.title;
   let title = if t.title.is_empty() { design.name.clone() } else { t.title.clone() };
   label(plot, x0, rows[1], "TITLE", &title);
-  label(plot, x0, rows[0], "DRAWING", &d.name);
+  let name = if sheet.1 > 1 { format!("{} · {}/{}", d.name, sheet.0 + 1, sheet.1) } else { d.name.clone() };
+  label(plot, x0, rows[0], "DRAWING", &name);
   label(plot, cols[0], rows[0], "PART NUMBER", &t.part_number);
   label(plot, cols[1], rows[0], "MATERIAL", &t.material);
   label(plot, x0, y0, "SCALE", &scale_text(scale));
   let size = format!(
     "{:?} · mm · {} · {}",
-    d.sheet,
+    size,
     if d.projection == ProjectionAngle::ThirdAngle { "3rd angle" } else { "1st angle" },
     d.standard.name()
   );
   label(plot, cols[0], y0, "SHEET", &size);
-  let rev = if t.revision.is_empty() { "-".to_string() } else { t.revision.clone() };
+  let latest = d.revisions.last().map(|r| r.rev.clone()).unwrap_or_default();
+  let rev = if !t.revision.is_empty() {
+    t.revision.clone()
+  } else if !latest.is_empty() {
+    latest
+  } else {
+    "-".to_string()
+  };
   let who =
     [t.author.as_str(), t.company.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ");
   label(plot, cols[1], y0, "REV / BY", &format!("{rev} {who}"));

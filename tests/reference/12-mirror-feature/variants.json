@@ -1,0 +1,44 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "block-14",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "14"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "method": "block 10 -> 14 thick; the bosses (sketched at z = 10, 15 tall) now rise 11 above it",
+        "body_count": 1,
+        "volume_mm3": 27688.141381643116,
+        "area_mm2": 6949.380460547705,
+        "center_of_mass": [
+          0.0,
+          15.0,
+          8.123288373
+        ],
+        "bbox": {
+          "min": [
+            -30.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            30.0,
+            30.0,
+            25.0
+          ]
+        },
+        "faces": 10
+      }
+    }
+  ]
+}
