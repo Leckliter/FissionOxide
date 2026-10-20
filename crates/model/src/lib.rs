@@ -31,7 +31,7 @@ pub mod surface;
 use serde::{Deserialize, Serialize};
 
 pub use assembly::{Component, ComponentId, JointGeometry, JointKind, JointLimits};
-pub use fillet::RadiusPoint;
+pub use fillet::{FilletSet, RadiusPoint};
 pub use fox_expr::Kind as ParamKind;
 pub use fox_kernel as kernel;
 pub use fox_sketch as sketch;
@@ -366,6 +366,8 @@ pub enum ExtentKind {
   TwoSides,
   /// Through every body, in the chosen direction.
   ThroughAll,
+  /// Through every body on both sides of the sketch plane (Fusion's All, symmetric).
+  ThroughAllBoth,
   /// Up to a face (`to`, flat or curved), plus `distance` past it.
   ToFace,
   /// Up to the body `to` is on: the extrusion stops where it meets the body.
@@ -404,6 +406,13 @@ pub struct Extent {
   /// The face a `to_face` extent stops at.
   #[serde(default)]
   pub to: Option<FaceRef>,
+  /// Start offset from the sketch plane along its normal (Fusion's Start: Offset). Empty = the
+  /// profile plane.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub start: String,
+  /// Start at a flat face parallel to the sketch (Fusion's Start: Object); `start` is added to it.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub start_face: Option<FaceRef>,
 }
 
 fn zero() -> String {
@@ -421,6 +430,8 @@ impl Extent {
       thin: String::new(),
       thin_side: ThinSide::Inside,
       to: None,
+      start: String::new(),
+      start_face: None,
     }
   }
 }
@@ -543,6 +554,10 @@ pub enum FeatureKind {
     /// `radius`) at the end. Radii may be zero.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     radii: Vec<RadiusPoint>,
+    /// More selection sets, each with its own radius (the rows of Fusion's dialog); `edges` and
+    /// `radius` are the first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sets: Vec<FilletSet>,
   },
   Chamfer {
     edges: Vec<EdgeRef>,
@@ -1949,15 +1964,18 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::Extrude { extent, .. } => {
       f(&mut extent.distance);
       f(&mut extent.distance2);
-      for e in [&mut extent.taper, &mut extent.thin] {
+      for e in [&mut extent.taper, &mut extent.thin, &mut extent.start] {
         if !e.is_empty() {
           f(e);
         }
       }
     }
     FeatureKind::Revolve { angle, .. } => f(angle),
-    FeatureKind::Fillet { radius, radius2, setback, radii, .. } => {
+    FeatureKind::Fillet { radius, radius2, setback, radii, sets, .. } => {
       f(radius);
+      for set in sets {
+        f(&mut set.radius);
+      }
       for r in [radius2, setback].into_iter().flatten() {
         f(r);
       }

@@ -1277,8 +1277,16 @@ fn drawings_section(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
-  let bodies: Vec<(BodyId, String, bool)> =
-    app.s.model.bodies.iter().map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id))).collect();
+  // bodies a dialog's preview added appear on OK
+  let previewed = app.dialog.as_ref().map(|d| d.preview_bodies(&app.s)).unwrap_or_default();
+  let bodies: Vec<(BodyId, String, bool)> = app
+    .s
+    .model
+    .bodies
+    .iter()
+    .filter(|b| !previewed.contains(&b.id))
+    .map(|b| (b.id, app.s.body_name(b.id), app.s.body_visible(b.id)))
+    .collect();
   if bodies.is_empty() {
     return;
   }
@@ -1826,7 +1834,14 @@ pub fn unsaved_banner(app: &mut App, ctx: &egui::Context) {
 
 /// What is selected (or hovered), at the canvas's bottom-right corner, as Fusion shows it.
 pub fn selection_info(app: &mut App, ctx: &egui::Context) {
-  let Some(text) = selection_text(app) else { return };
+  // an extrude's picked profiles read "1 Profile | Area: …"; otherwise what's selected or hovered
+  let text = match app.dialog.as_ref().and_then(|d| d.profile_status(&app.s)) {
+    Some(p) => p,
+    None => {
+      let Some(t) = selection_text(app) else { return };
+      t
+    }
+  };
   let canvas = app.canvas;
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
   painter.text(

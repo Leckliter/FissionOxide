@@ -25,11 +25,111 @@ pub(super) struct Extra {
   /// When editing an extrude to an object: its extent kind and stored reference.
   to_kind: &'static str,
   to_ref: Value,
+  /// Fillet selection sets (empty: just the one in the dialog's fields) and the active one.
+  pub(super) rows: Vec<FilletRow>,
+  active: usize,
+  /// Fillet: tangent chain off (on by default, as in Fusion).
+  pub(super) no_chain: bool,
+  /// Fillet corner type: setback (else rolling ball).
+  setback_corner: bool,
+  /// An edited fillet's stored sets after the first.
+  edit_sets: Value,
+  /// Extrude rows (see [`super::extrude`]).
+  pub(super) ext: super::extrude::Rows,
+}
+
+/// One fillet selection set: edges, faces (all their edges) and its radius.
+#[derive(Debug, Clone, Default)]
+pub(super) struct FilletRow {
+  pub(super) edges: Vec<Value>,
+  pub(super) faces: Vec<Value>,
+  pub(super) radius: String,
+}
+
+impl FilletRow {
+  fn is_empty(&self) -> bool {
+    self.edges.is_empty() && self.faces.is_empty()
+  }
+
+  /// "1 Face", "2 Edges", "1 Face, 2 Edges" or "Select".
+  fn label(&self) -> String {
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    match (self.faces.len(), self.edges.len()) {
+      (0, 0) => "Select".into(),
+      (f, 0) => n(f, "Face", "Faces"),
+      (0, e) => n(e, "Edge", "Edges"),
+      (f, e) => format!("{}, {}", n(f, "Face", "Faces"), n(e, "Edge", "Edges")),
+    }
+  }
 }
 
 impl Dialog {
   // ---- fillet ----
 
+  /// Fusion's selection rows: each set of edges and faces with its own radius, the active one
+  /// in `edges` / `faces` / `radius` (and the viewport selection), + for another set.
+  pub(super) fn fillet_rows(&mut self, app: &mut App, ui: &mut egui::Ui, creating: bool) {
+    let rows = self.fillet_sets();
+    let accent = self.accent();
+    let (mut switch, mut remove, mut add) = (None, None, false);
+    for (i, row) in rows.iter().enumerate() {
+      ui.label(if i == 0 { "Edges / Faces" } else { "" });
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let active = i == self.solid.active;
+        let text = if creating { row.label() } else { format!("{} (unchanged)", row.edges.len()) };
+        let chip = sel_chip(ui, accent, &text, active && (!row.edges.is_empty() || !row.faces.is_empty()));
+        if !active && chip.interact(egui::Sense::click()).on_hover_text("Select this set").clicked() {
+          switch = Some(i);
+        }
+        // the active set's radius takes typing aimed at the dialog
+        let changed = if active {
+          super::value_edit_w(ui, &mut self.radius, 64.0).changed()
+        } else {
+          ui.add(egui::TextEdit::singleline(&mut self.solid.rows[i].radius).desired_width(64.0)).changed()
+        };
+        if changed {
+          self.dirty = !creating || self.applied;
+          self.live_reset();
+        }
+        if creating && rows.len() > 1 && ui.small_button("✕").on_hover_text("Remove this set").clicked() {
+          remove = Some(i);
+        }
+      });
+      ui.end_row();
+    }
+    if creating {
+      ui.label("");
+      if ui.small_button("+").on_hover_text("Add a selection set with its own radius").clicked() {
+        add = true;
+      }
+      ui.end_row();
+    }
+    ui.label("Tangent chain");
+    let mut chain = !self.solid.no_chain;
+    if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
+      self.solid.no_chain = !chain;
+    }
+    ui.end_row();
+    let s = &mut app.s;
+    if let Some(j) = switch {
+      self.switch_fillet_set(s, j);
+    } else if let Some(j) = remove {
+      self.withdraw(s);
+      self.store_fillet_set();
+      self.solid.rows.remove(j);
+      let k = if self.solid.active >= j && self.solid.active > 0 { self.solid.active - 1 } else { self.solid.active };
+      self.solid.active = usize::MAX;
+      self.switch_fillet_set(s, k.min(self.solid.rows.len() - 1));
+    } else if add {
+      self.store_fillet_set();
+      let radius = self.radius.clone();
+      self.solid.rows.push(FilletRow { radius, ..FilletRow::default() });
+      self.switch_fillet_set(s, self.solid.rows.len() - 1);
+    }
+  }
+
+  /// Radius type and Fusion's Corner Type: rolling ball, or setback (with its distance).
   pub(super) fn setback_row(&mut self, ui: &mut egui::Ui, creating: bool) {
     ui.label("Radius type");
     let mut changed = false;
@@ -37,16 +137,23 @@ impl Dialog {
       changed |= ui.radio_value(&mut self.solid.chord, false, "Constant").changed();
       changed |= ui.radio_value(&mut self.solid.chord, true, "Chord length").changed();
     });
+    ui.end_row();
+    ui.label("Corner type");
+    let shown = if self.solid.setback_corner { "Setback" } else { "Rolling ball" };
+    egui::ComboBox::from_id_salt("fillet-corner").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      changed |= ui.selectable_value(&mut self.solid.setback_corner, false, "Rolling ball").changed();
+      changed |= ui.selectable_value(&mut self.solid.setback_corner, true, "Setback").changed();
+    });
+    ui.end_row();
+    if self.solid.setback_corner {
+      ui.label("Setback");
+      let r = ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("distance").desired_width(140.0));
+      changed |= r.changed();
+      ui.end_row();
+    }
     if changed && (!creating || self.applied) {
       self.dirty = true;
     }
-    ui.end_row();
-    ui.label("Setback (corners)");
-    let r = ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("none").desired_width(140.0));
-    if r.changed() && (!creating || self.applied) {
-      self.dirty = true;
-    }
-    ui.end_row();
   }
 
   /// Fillet parameters with the setback (left out when empty; `null` when editing clears it).
@@ -54,7 +161,7 @@ impl Dialog {
     if self.solid.chord || editing {
       p["chord"] = json!(self.solid.chord);
     }
-    let sb = self.solid.setback.trim();
+    let sb = if self.solid.setback_corner { self.solid.setback.trim() } else { "" };
     if !sb.is_empty() {
       p["setback"] = json!(sb);
     } else if editing {
@@ -65,7 +172,96 @@ impl Dialog {
 
   pub(super) fn load_setback(&mut self, setback: &Option<String>, chord: bool) {
     self.solid.setback = setback.clone().unwrap_or_default();
+    self.solid.setback_corner = !self.solid.setback.trim().is_empty();
     self.solid.chord = chord;
+  }
+
+  /// An edited fillet's sets after the first: their edge counts, radii and stored edges.
+  pub(super) fn load_fillet_sets(&mut self, sets: &[fox_engine::model::FilletSet]) {
+    if sets.is_empty() {
+      return;
+    }
+    self.solid.rows = vec![FilletRow::default()];
+    for set in sets {
+      self.solid.rows.push(FilletRow {
+        edges: vec![Value::Null; set.edges.len()],
+        faces: Vec::new(),
+        radius: set.radius.clone(),
+      });
+    }
+    self.solid.edit_sets = serde_json::to_value(sets).unwrap_or_default();
+  }
+
+  /// Every selection set, the active one as it is now.
+  pub(super) fn fillet_sets(&self) -> Vec<FilletRow> {
+    let now = FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone() };
+    if self.solid.rows.is_empty() {
+      return vec![now];
+    }
+    let mut rows = self.solid.rows.clone();
+    rows[self.solid.active] = now;
+    rows
+  }
+
+  /// The fillet command: one set, or `sets` each with its radius; tangent chains on by default.
+  pub(super) fn fillet_params(&self) -> Value {
+    let rows: Vec<FilletRow> = self.fillet_sets().into_iter().filter(|r| !r.is_empty()).collect();
+    let mut p = match rows.as_slice() {
+      [] => json!({"edges": [], "radius": self.radius}),
+      [one] => json!({"edges": one.edges, "faces": one.faces, "radius": one.radius}),
+      many => {
+        json!({"sets": many.iter().map(|r| json!({"edges": r.edges, "faces": r.faces, "radius": r.radius})).collect::<Vec<_>>()})
+      }
+    };
+    p["tangent_chain"] = json!(!self.solid.no_chain);
+    self.with_setback(p, false)
+  }
+
+  /// `feature.edit` fields of an edited fillet: the radius of each set.
+  pub(super) fn fillet_edit_set(&self) -> Value {
+    let rows = self.fillet_sets();
+    let mut p = json!({"radius": rows[0].radius});
+    if let Some(sets) = self.solid.edit_sets.as_array() {
+      let mut sets = sets.clone();
+      for (set, row) in sets.iter_mut().zip(rows.iter().skip(1)) {
+        set["radius"] = json!(row.radius);
+      }
+      p["sets"] = json!(sets);
+    }
+    self.with_setback(p, true)
+  }
+
+  pub(super) fn fillet_ready(&self) -> bool {
+    self.fillet_sets().iter().any(|r| !r.is_empty())
+  }
+
+  pub(super) fn store_fillet_set(&mut self) {
+    let now = FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone() };
+    match self.solid.rows.get_mut(self.solid.active) {
+      Some(r) => *r = now,
+      None => {
+        self.solid.rows = vec![now];
+        self.solid.active = 0;
+      }
+    }
+  }
+
+  /// Makes set `j` the active one: its picks become the viewport selection.
+  pub(super) fn switch_fillet_set(&mut self, s: &mut Session, j: usize) {
+    self.withdraw(s);
+    if self.solid.active < self.solid.rows.len() {
+      self.store_fillet_set();
+    }
+    let row = self.solid.rows[j].clone();
+    self.solid.active = j;
+    self.edges = row.edges;
+    self.faces = row.faces;
+    self.radius = row.radius;
+    if self.editing.is_none() {
+      s.selection = self.picked_selection();
+    }
+    self.live_reset();
+    self.dirty = self.editing.is_some();
   }
 
   // ---- sweep and loft ----
@@ -150,18 +346,27 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// The face or body picked for an extrude to an object (the last one picked).
+  /// The face or body picked for an extrude to an object (the last one picked) and, with Start:
+  /// Object, the start face (the first face picked).
   pub(super) fn sync_object(&mut self, s: &Session) {
-    let to = s
+    let picks: Vec<Value> = s
       .selection
       .iter()
-      .rev()
-      .find_map(|x| match x {
+      .filter_map(|x| match x {
         Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
         Sel::Body { body } => Some(json!({"body": body.0})),
         _ => None,
       })
-      .unwrap_or(Value::Null);
+      .collect();
+    let start = match self.solid.ext.start {
+      "object" => picks.iter().find(|v| v.get("face").is_some()).cloned().unwrap_or(Value::Null),
+      _ => Value::Null,
+    };
+    if start != self.solid.ext.start_face && self.editing.is_none() {
+      self.solid.ext.start_face = start.clone();
+      self.dirty = true;
+    }
+    let to = picks.into_iter().rev().find(|v| start.is_null() || *v != start).unwrap_or(Value::Null);
     if to != self.solid.to {
       self.solid.to = to;
       if self.extent == "to_object" {
@@ -531,6 +736,7 @@ mod tests {
     d.edges = edges;
     d.radius = "3".into();
     d.solid.setback = "7".into();
+    d.solid.setback_corner = true;
     apply(&mut s, &mut d);
     let f = s.design.features.last().unwrap();
     assert!(matches!(&f.kind, FeatureKind::Fillet { setback: Some(x), .. } if x == "7"));
