@@ -1,0 +1,10 @@
+# 485-two-distance-box-top-loop: added by the parity loop from a Fusion probe
+# two-distance-box-top-loop: 40x30x20 box, two-distance chamfer (2 mm, 5 mm, not flipped) on the 4 edges of the top face.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "chamfer", "edges": [{"point": [0.0, 15.0, 20.0]}, {"point": [20.0, 0.0, 20.0]}, {"point": [40.0, 15.0, 20.0]}, {"point": [20.0, 30.0, 20.0]}], "distance": 2, "distance2": 5}
