@@ -114,7 +114,7 @@ cmds! {
   "sketch.mirror" => "Mirror curves across a line (symmetry-constrained)", "{curves: [id], line}";
   "sketch.pattern_rect" => "Rectangular pattern of sketch curves", "{curves, direction?: [x,y] | line id, count, spacing, symmetric?, direction2?: [x,y] | line id (default +Y), count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the whole pattern size)}";
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
-  "sketch.project" => "Project a body's edges (or one face's edges) into the sketch; they follow the body", "{body, face?, associative?}";
+  "sketch.project" => "Project a body's silhouette (or one face's edges, which follow the body) into the sketch", "{body, face?, associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
   "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
@@ -2202,8 +2202,8 @@ fn rect_pattern(p: &Value, scope: &std::collections::HashMap<String, f64>) -> Re
   Ok(RectPattern { a, b, line_a, line_b })
 }
 
-/// Projects body edges onto the sketch plane as fixed geometry. Straight and circular edges stay
-/// linked to the body (they move when it changes) unless `associative` is false.
+/// Projects a body's silhouette, or one face's edges, onto the sketch plane as fixed geometry. A
+/// face's straight and circular edges stay linked to the body (they move when it changes) unless `associative` is false.
 fn project(s: &mut Session, p: &Value) -> CmdResult {
   let sk = sketch_id(s, p)?;
   let plane = s.model.sketches.get(&sk).map(|r| r.plane).ok_or(CmdError::new("the sketch failed to build"))?;
@@ -2217,8 +2217,90 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
     Circle([f64; 2], f64),
     Arc([f64; 2], [f64; 2], [f64; 2]),
   }
+  /// Joins pieces that continue one another (collinear lines, arcs of one circle) where they meet
+  /// at a point nothing else touches: the silhouette comes split wherever other edges crossed it.
+  fn join(pieces: &mut Vec<E>) {
+    let same = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-6;
+    let ends = |e: &E| match *e {
+      E::Line(a, b) | E::Arc(a, _, b) => Some((a, b)),
+      E::Circle(..) => None,
+    };
+    let circle = |a: [f64; 2], m: [f64; 2], b: [f64; 2]| {
+      let d = 2.0 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+      if d.abs() < 1e-12 {
+        return None;
+      }
+      let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+      let cx = (sq(a) * (m[1] - b[1]) + sq(m) * (b[1] - a[1]) + sq(b) * (a[1] - m[1])) / d;
+      let cy = (sq(a) * (b[0] - m[0]) + sq(m) * (a[0] - b[0]) + sq(b) * (m[0] - a[0])) / d;
+      Some(([cx, cy], (a[0] - cx).hypot(a[1] - cy)))
+    };
+    'again: loop {
+      for i in 0..pieces.len() {
+        let Some((ia, ib)) = ends(&pieces[i]) else { continue };
+        for p in [ia, ib] {
+          let touching: Vec<usize> =
+            (0..pieces.len()).filter(|&k| ends(&pieces[k]).is_some_and(|(a, b)| same(a, p) || same(b, p))).collect();
+          let [x, y] = touching.as_slice() else { continue };
+          let (Some((xa, xb)), Some((ya, yb))) = (ends(&pieces[*x]), ends(&pieces[*y])) else { continue };
+          let xo = if same(xa, p) { xb } else { xa };
+          let yo = if same(ya, p) { yb } else { ya };
+          let joined = match (&pieces[*x], &pieces[*y]) {
+            (E::Line(..), E::Line(..)) => {
+              let (u, v) = ([p[0] - xo[0], p[1] - xo[1]], [yo[0] - p[0], yo[1] - p[1]]);
+              let cross = u[0] * v[1] - u[1] * v[0];
+              let dot = u[0] * v[0] + u[1] * v[1];
+              (dot > 0.0 && cross.abs() <= 1e-9 * u[0].hypot(u[1]) * v[0].hypot(v[1])).then_some(E::Line(xo, yo))
+            }
+            (E::Arc(_, xm, _), E::Arc(_, ym, _)) => match (circle(xa, *xm, xb), circle(ya, *ym, yb)) {
+              (Some((c1, r1)), Some((c2, r2))) if same(c1, c2) && (r1 - r2).abs() <= 1e-6 => {
+                Some(if same(xo, yo) { E::Circle(c1, r1) } else { E::Arc(xo, p, yo) })
+              }
+              _ => None,
+            },
+            _ => None,
+          };
+          if let Some(j) = joined {
+            let (lo, hi) = (*x.min(y), *x.max(y));
+            pieces.remove(hi);
+            pieces[lo] = j;
+            continue 'again;
+          }
+        }
+      }
+      break;
+    }
+  }
   let mut todo: Vec<(E, Option<EdgeRef>)> = Vec::new();
-  for e in body.edges().iter().filter(|e| face.is_none_or(|f| e.faces.contains(&f))) {
+  if face.is_none() {
+    // a whole body projects as its silhouette, as in Fusion: the outline of its shadow along the
+    // sketch normal, which no single edge of the body follows, so nothing stays linked
+    let outline = body.shape.silhouette(&plane)?;
+    let deflection = (body.diagonal() * 0.001).clamp(0.005, 0.2);
+    let polylines = outline.edge_lines(deflection)?;
+    let l = |v: fox_kernel::glam::DVec3| plane.to_local(v);
+    let mut pieces = Vec::new();
+    for e in outline.edges()? {
+      match e.kind {
+        fox_kernel::CurveKind::Line => pieces.push(E::Line(l(e.start), l(e.end))),
+        fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
+          pieces.push(E::Circle(l(e.center), e.radius))
+        }
+        fox_kernel::CurveKind::Circle => pieces.push(E::Arc(l(e.start), l(e.mid), l(e.end))),
+        fox_kernel::CurveKind::Degenerate => {}
+        fox_kernel::CurveKind::Other => {
+          if let Some(pl) = polylines.iter().find(|x| x.id == e.id) {
+            for w in pl.points.windows(2) {
+              pieces.push(E::Line(l(w[0]), l(w[1])));
+            }
+          }
+        }
+      }
+    }
+    join(&mut pieces);
+    todo.extend(pieces.into_iter().map(|e| (e, None)));
+  }
+  for e in body.edges().iter().filter(|e| face.is_some_and(|f| e.faces.contains(&f))) {
     let l = |v: fox_kernel::glam::DVec3| plane.to_local(v);
     let link = associative.then(|| EdgeRef::from_edge(body.id, e, body.faces()));
     match e.kind {

@@ -1092,6 +1092,7 @@ mod refparts;
 
 mod project;
 pub use project::{PathEnds, Projection3d};
+mod silhouette;
 #[cfg(test)]
 mod tests_ellipse;
 #[cfg(test)]
@@ -1099,6 +1100,8 @@ mod tests_project;
 mod tests_merge;
 #[cfg(test)]
 mod tests_refparts;
+#[cfg(test)]
+mod tests_silhouette;
 
 mod threads;
 

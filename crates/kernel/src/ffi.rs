@@ -256,6 +256,9 @@ pub(crate) mod ffi {
     fn wire_count(s: &Shape) -> usize;
     fn wire_at(s: &Shape, i: usize) -> Result<UniquePtr<Shape>>;
     fn wire_from_middle(w: &Shape) -> Result<UniquePtr<Shape>>;
+    // a body's silhouette on a plane (cpp/silhouette.cpp)
+    include!("fox-kernel/cpp/silhouette.hxx");
+    fn silhouette(s: &Shape, plane: &[f64]) -> Result<UniquePtr<Shape>>;
   }
 }
 

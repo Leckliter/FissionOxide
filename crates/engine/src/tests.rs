@@ -442,6 +442,28 @@ fn sketch_modify_tools_and_project() {
   assert!((total_volume(&s) - 50.0 * 20.0 * 15.0).abs() < 1e-6, "{}", total_volume(&s));
 }
 
+#[test]
+fn project_body_silhouette() {
+  // a cylinder lying along X projects into a sketch above it as one 20 x 10 rectangle
+  let mut s = Session::default();
+  let yz = json!({"origin": [0, 0, 0], "normal": [1, 0, 0], "x": [0, 1, 0]});
+  run(&mut s, "sketch.create", json!({"plane": yz}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 5}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"distance": 20}));
+  let b = s.model.bodies[0].id.0;
+  let above = json!({"origin": [0, 0, 20], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  run(&mut s, "sketch.create", json!({"plane": above}));
+  let r = run(&mut s, "sketch.project", json!({"body": b, "associative": false}));
+  assert_eq!(r["curves"].as_array().unwrap().len(), 4, "{r}");
+  assert_eq!(r["profiles"], 1);
+  run(&mut s, "sketch.finish", json!({}));
+  let before = total_volume(&s);
+  let r = run(&mut s, "extrude", json!({"distance": 3, "operation": "new_body"}));
+  assert!(r["error"].is_null(), "{r}");
+  assert!((total_volume(&s) - before - 600.0).abs() < 1e-6, "{}", total_volume(&s));
+}
+
 fn temp_dir(name: &str) -> std::path::PathBuf {
   let d = std::env::temp_dir().join(format!("fox-engine-{name}-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&d);

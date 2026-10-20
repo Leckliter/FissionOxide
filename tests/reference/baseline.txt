@@ -193,6 +193,10 @@
 81-fillet-spline-radius
 82-thin-extrude-frame
 83-boundary-loop-thicken
+231-plate-hole-top-face-offset
+232-wedge-slanted-face-foreshortened
+233-plate-hole-body-silhouette
+234-cylinder-body-silhouette
 84-circular-solid
 85-circular-hollow
 86-square-section
