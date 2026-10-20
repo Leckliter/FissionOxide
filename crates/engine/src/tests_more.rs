@@ -77,6 +77,20 @@ fn construction_planes_axes_and_points() {
     json!({"method": "three_points", "a": {"at": [0, 0, 3]}, "b": {"at": [1, 0, 3]}, "c": {"at": [0, 1, 3]}}),
   );
   let f3 = three["feature"].as_u64().unwrap();
+  // Fusion's sketch frame: the world origin dropped onto the plane, x = Z × n (world X for +Z)
+  let pl = s.model.planes[&crate::model::FeatureId(f3 as u32)];
+  assert!(
+    (pl.origin - fox_kernel::glam::DVec3::new(0.0, 0.0, 3.0)).length() < 1e-9
+      && (pl.x - fox_kernel::glam::DVec3::X).length() < 1e-9
+  );
+  let tilted = run(
+    &mut s,
+    "plane",
+    json!({"method": "three_points", "a": {"at": [40, 0, 0]}, "b": {"at": [0, 30, 0]}, "c": {"at": [0, 0, 20]}}),
+  );
+  let pl = s.model.planes[&crate::model::FeatureId(tilted["feature"].as_u64().unwrap() as u32)];
+  assert!((pl.x - fox_kernel::glam::DVec3::new(-0.8, 0.6, 0.0)).length() < 1e-9, "{pl:?}");
+  assert!((pl.origin - fox_kernel::glam::DVec3::new(5.9016, 7.8689, 11.8033)).length() < 1e-3, "{pl:?}");
   run(&mut s, "split", json!({"plane": {"feature": f3}}));
   assert_eq!(s.model.bodies.len(), 2);
   // axis along an edge, plane at 45° about it
@@ -99,6 +113,28 @@ fn construction_planes_axes_and_points() {
   let sk = s.design.features.iter().rev().find(|f| f.kind.base_name() == "Sketch").unwrap().id.0;
   run(&mut s, "revolve", json!({"sketch": sk, "axis": {"axis": z["feature"]}}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
+}
+
+#[test]
+fn axis_through_sketch_line_or_axis() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xz"}))["sketch"].as_u64().unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]]}))["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.finish", json!({}));
+  let axis = |s: &mut Session, edge: Value| {
+    let f = run(s, "axis", json!({"method": "edge", "edge": edge}))["feature"].as_u64().unwrap();
+    s.model.axes[&crate::model::FeatureId(f as u32)]
+  };
+  let want = fox_kernel::glam::DVec3::new(1.0, 0.0, 1.0).normalize();
+  // by sketch and line, by a point on the line (no body there), and along that axis
+  let (o, d) = axis(&mut s, json!({"sketch": sk, "line": line}));
+  assert!(o.length() < 1e-9 && (d - want).length() < 1e-9, "{o} {d}");
+  let (_, d) = axis(&mut s, json!({"point": [5, 0, 5]}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  let f = s.design.features.last().unwrap().id.0;
+  let (_, d) = axis(&mut s, json!({"axis": f}));
+  assert!((d - want).length() < 1e-9, "{d}");
+  assert!(s.execute("axis", &json!({"method": "edge", "edge": {"point": [50, 50, 50]}})).is_err());
 }
 
 #[test]
@@ -150,7 +186,7 @@ fn rib_grows_to_the_floor() {
   run(&mut s, "extrude", json!({"distance": 20, "operation": "join"}));
   let v0 = volume(&s);
   // a rib sketched on the XZ plane (y = 0 is the channel's side; move it to y = 10)
-  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": -10}));
+  run(&mut s, "plane.offset", json!({"plane": "xz", "offset": 10}));
   let pl = s.design.features.last().unwrap().id.0;
   run(&mut s, "sketch.create", json!({"plane": {"feature": pl}}));
   // a line across the top between the walls; the rib grows down to the floor
@@ -549,4 +585,31 @@ fn pipe_sections_and_partial_paths() {
   }
   let seam = new.iter().find(|e| e.kind == fox_kernel::CurveKind::Line).expect("a seam");
   assert!(seam.mid.distance(DVec3::new(3.0, 0.0, 20.0)) < 1e-6, "{seam:?}");
+}
+
+#[test]
+fn deleting_a_used_sketch_keeps_its_extrude_on_cached_geometry() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]}}))["sketch"].clone();
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 30]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ex = run(&mut s, "extrude", json!({"distance": 20}))["feature"].clone();
+  let r = run(&mut s, "feature.delete", json!({"feature": sk}));
+  assert_eq!(r["removed"], json!([sk]));
+  assert_eq!(r["cached"], json!([ex]));
+  assert_eq!(s.design.features.len(), 1);
+  assert!(s.model.sketches.is_empty(), "the cached sketch isn't shown");
+  assert!((volume(&s) - 24000.0).abs() < 1e-6, "{}", volume(&s));
+  let st = &s.model.status[0];
+  assert!(st.error.is_none() && st.warning.as_deref().is_some_and(|w| w.contains("cached geometry")), "{st:?}");
+  assert_eq!(s.model.bounds().unwrap().0.z, 5.0);
+  // the extrude stays editable, and the cache survives a save
+  run(&mut s, "feature.edit", json!({"feature": ex, "set": {"extent": {"kind": "one_side", "distance": "10"}}}));
+  assert!((volume(&s) - 12000.0).abs() < 1e-6, "{}", volume(&s));
+  let d: fox_model::Design = serde_json::from_str(&serde_json::to_string(&s.design).unwrap()).unwrap();
+  assert_eq!(d, s.design);
+  // cascade deletes the extrude too, as before
+  assert!(s.undo() && s.undo());
+  assert_eq!(run(&mut s, "feature.delete", json!({"feature": sk, "cascade": true}))["removed"], json!([sk, ex]));
+  assert!(s.model.bodies.is_empty());
 }

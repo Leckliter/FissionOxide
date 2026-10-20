@@ -68,6 +68,11 @@ pub enum Seg {
     p: [[f64; 2]; 3],
     w: f64,
   },
+  /// A quintic spline (Fusion's fitted spline through two points): the clamped degree-5
+  /// B-spline with these ten control points and knots 0 ×6, 0.2, 0.4, 0.6, 0.8, 1 ×6.
+  Quintic {
+    p: [[f64; 2]; crate::QUINTIC_POINTS],
+  },
 }
 
 impl Seg {
@@ -79,6 +84,7 @@ impl Seg {
       Seg::Bezier { p } => p[0],
       Seg::EllipseArc { center, major, minor, start, .. } => ellipse_point(center, major, minor, start),
       Seg::Conic { p, .. } => p[0],
+      Seg::Quintic { p } => p[0],
     }
   }
 
@@ -90,6 +96,7 @@ impl Seg {
       Seg::Bezier { p } => p[3],
       Seg::EllipseArc { center, major, minor, start, sweep } => ellipse_point(center, major, minor, start + sweep),
       Seg::Conic { p, .. } => p[2],
+      Seg::Quintic { p } => p[crate::QUINTIC_POINTS - 1],
     }
   }
 
@@ -104,6 +111,7 @@ impl Seg {
         ellipse_point(center, major, minor, start + sweep / 2.0)
       }
       Seg::Conic { p, w } => crate::conic_at(&p, w, 0.5),
+      Seg::Quintic { p } => crate::quintic_at(&p, 0.5),
     }
   }
 
@@ -119,6 +127,11 @@ impl Seg {
         Seg::EllipseArc { center, major, minor, start: start + sweep, sweep: -sweep }
       }
       Seg::Conic { p, w } => Seg::Conic { p: [p[2], p[1], p[0]], w },
+      // the knots are symmetric: reversed control points run the same curve backwards
+      Seg::Quintic { mut p } => {
+        p.reverse();
+        Seg::Quintic { p }
+      }
     }
   }
 
@@ -152,6 +165,16 @@ impl Seg {
         let (a, b) = ([p[1][0] - p[0][0], p[1][1] - p[0][1]], [p[2][0] - p[1][0], p[2][1] - p[1][1]]);
         let nz = |v: [f64; 2]| if v[0].hypot(v[1]) > 1e-12 { v } else { chord };
         (nz(a), nz(b))
+      }
+      Seg::Quintic { p } => {
+        // along the end legs of the control polygon, or the next leg where one is degenerate
+        let lead = |q: &[[f64; 2]]| {
+          q.windows(2).map(|w| [w[1][0] - w[0][0], w[1][1] - w[0][1]]).find(|v| v[0].hypot(v[1]) > 1e-12)
+        };
+        let mut back = p;
+        back.reverse();
+        let (a, b) = (lead(&p).unwrap_or_default(), lead(&back).unwrap_or_default());
+        (a, [-b[0], -b[1]])
       }
     }
   }
@@ -188,6 +211,13 @@ impl Seg {
         for b in crate::conic_beziers(&p, w) {
           for i in 0..6 {
             out.push(crate::bezier_at(&b, i as f64 / 6.0));
+          }
+        }
+      }
+      Seg::Quintic { p } => {
+        for b in crate::quintic_beziers(&p) {
+          for i in 0..4 {
+            out.push(crate::bezier_at(&b, i as f64 / 4.0));
           }
         }
       }
@@ -426,7 +456,7 @@ fn build_components(sketch: &Sketch) -> (Vec<Vec<Loop>>, Vec<([f64; 2], f64, Cur
           sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (s, id)),
         );
       }
-      CurveKind::Conic { .. } => {
+      CurveKind::Conic { .. } | CurveKind::QuinticSpline { .. } => {
         pieces.extend(
           sketch.curve_segs(c.id).into_iter().filter(|s| dist(s.start(), s.end()) > MERGE_TOL).map(|s| (s, id)),
         );
@@ -562,7 +592,7 @@ fn split_at_crossings(segs: Vec<(Seg, CurveId)>, circles: Vec<Circle>) -> (Vec<(
   use crate::edit::{Geo, meet};
   // spline pieces and conics don't split (yet); they join the graph as they are
   let (curved, segs): (Vec<(Seg, CurveId)>, Vec<(Seg, CurveId)>) =
-    segs.into_iter().partition(|s| matches!(s.0, Seg::Bezier { .. } | Seg::Conic { .. }));
+    segs.into_iter().partition(|s| matches!(s.0, Seg::Bezier { .. } | Seg::Conic { .. } | Seg::Quintic { .. }));
   // elliptical arcs split where lines, arcs and circles cross them (and split those), not each other
   let (elliptic, segs): (Vec<(Seg, CurveId)>, Vec<(Seg, CurveId)>) =
     segs.into_iter().partition(|s| matches!(s.0, Seg::EllipseArc { .. }));
@@ -673,6 +703,10 @@ fn departure_angle(s: &Seg) -> f64 {
     Seg::Conic { p, .. } => {
       let q = if dist(p[0], p[1]) > 1e-12 { p[1] } else { p[2] };
       angle_of(p[0], q)
+    }
+    Seg::Quintic { p } => {
+      let d = s.end_tangents().0;
+      angle_of(p[0], [p[0][0] + d[0], p[0][1] + d[1]])
     }
   }
 }

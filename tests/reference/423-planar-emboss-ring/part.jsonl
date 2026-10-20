@@ -1,0 +1,11 @@
+# 423-planar-emboss-ring: added by the parity loop from a Fusion probe
+# planar-emboss-ring: 40x30x10 plate (top face z=0); a 16x10 rectangle with a r3 hole, sketched on XY, embossed 2 mm up on the top face.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-20, -15], "corner2": [20, 15]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "flip": true, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [-8, -5], "corner2": [8, 5]}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 3}
+{"cmd": "sketch.finish"}
+{"cmd": "emboss", "sketch": 3, "profiles": [[6, 0]], "face": {"point": [15.0, 10.0, 0.0]}, "depth": 2}

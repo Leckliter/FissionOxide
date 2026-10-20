@@ -1,0 +1,11 @@
+# 498-delete-consumed-sketch: added by the parity loop from a Fusion probe
+# delete-consumed-sketch: 40x30x20 box extruded from Sketch1, then Delete Sketch1: Fusion keeps Extrude1 (lost-profile warning, cached geometry), so the box remains.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+# Delete Sketch1 (feature 1)
+{"cmd": "feature.delete", "feature": 1}

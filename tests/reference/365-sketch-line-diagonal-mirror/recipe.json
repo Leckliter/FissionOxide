@@ -1,0 +1,215 @@
+{
+ "id": "sketch-line-diagonal-mirror",
+ "name": "sketch-line-diagonal-mirror",
+ "description": "20x20x10 box; a second XY sketch holds one line (0,0)-(20,20); construction plane along that sketch line at t=0.25 (through (5,5,0), normal (1,1,0)); body mirrored about it and joined (two overlapping 20x20 squares, volume 7000, bbox -10..20 or 0..30).",
+ "exercises": [
+  "extrude",
+  "sketch line",
+  "construction_plane along_path (sketch line)",
+  "mirror (join)"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       20
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       20
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       20
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "sketch",
+   "name": "Path_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "p1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       20
+      ]
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "construction_plane",
+   "name": "Plane1",
+   "method": "along_path",
+   "path": {
+    "sketch": "Path_sketch",
+    "curve": "p1"
+   },
+   "t": 0.25
+  },
+  {
+   "op": "mirror",
+   "name": "Mirror1",
+   "mirror_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "plane": "Plane1",
+   "combine": true
+  }
+ ]
+}

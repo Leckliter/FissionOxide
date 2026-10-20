@@ -1000,14 +1000,71 @@ pub static SK_TEXT: Form = Form {
   fixed: &[],
   inputs: &[
     Input::Text { key: "text", label: "Text", default: "FissionOxide" },
-    Input::Expr { key: "height", label: "Height", default: "5" },
+    Input::Choice { key: "placement", label: "Placement", options: TEXT_PLACEMENTS },
     Input::Expr { key: "x", label: "X", default: "0" },
     Input::Expr { key: "y", label: "Y", default: "0" },
+    Input::Expr { key: "x2", label: "Corner 2 X (box)", default: "40" },
+    Input::Expr { key: "y2", label: "Corner 2 Y (box)", default: "10" },
+    Input::Expr { key: "height", label: "Height", default: "5" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
     Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
+    Input::Check { key: "bold", label: "Bold" },
+    Input::Check { key: "italic", label: "Italic" },
+    Input::Check { key: "underline", label: "Underline" },
+    Input::Choice { key: "halign", label: "Horizontal alignment", options: TEXT_HALIGN },
+    Input::Choice { key: "valign", label: "Vertical alignment", options: TEXT_VALIGN },
+    Input::Expr { key: "spacing", label: "Character spacing (%)", default: "0" },
   ],
   picks_model: false,
 };
+
+/// Sketch Text: at a point, or in a box between two corners (the alignment places it in the box).
+const TEXT_PLACEMENTS: &[(&str, &str)] = &[("point", "Point"), ("box", "Two-corner box")];
+const TEXT_HALIGN: &[(&str, &str)] = &[("left", "Left"), ("center", "Center"), ("right", "Right")];
+const TEXT_VALIGN: &[(&str, &str)] =
+  &[("baseline", "Baseline"), ("top", "Top"), ("middle", "Middle"), ("bottom", "Bottom")];
+
+/// The `sketch.text` parameters of the Text form's values: a box's corners place the text by its
+/// alignment (left, centre or right; top, middle or bottom of the box).
+fn text_params(p: &Value) -> Value {
+  let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
+  let get = |k: &str, d: &str| p.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
+  let (halign, mut valign) = (get("halign", "left"), get("valign", "baseline"));
+  let at = if get("placement", "point") == "box" {
+    let (x0, x1) = (num("x").min(num("x2")), num("x").max(num("x2")));
+    let (y0, y1) = (num("y").min(num("y2")), num("y").max(num("y2")));
+    if valign == "baseline" {
+      valign = "top".into();
+    }
+    let x = match halign.as_str() {
+      "center" => (x0 + x1) / 2.0,
+      "right" => x1,
+      _ => x0,
+    };
+    let y = match valign.as_str() {
+      "middle" => (y0 + y1) / 2.0,
+      "bottom" => y0,
+      _ => y1,
+    };
+    [x, y]
+  } else {
+    [num("x"), num("y")]
+  };
+  let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+  json!({
+    "at": at,
+    "text": p.get("text").cloned().unwrap_or(json!("")),
+    "height": num("height").max(0.01),
+    "angle": num("angle"),
+    "font": p.get("font").cloned().unwrap_or(json!("sans")),
+    "bold": flag("bold"),
+    "italic": flag("italic"),
+    "underline": flag("underline"),
+    "halign": halign,
+    "valign": valign,
+    "spacing": num("spacing"),
+  })
+}
 
 /// Commands a form runs that need their parameters reshaped first ("plane.points" →
 /// "plane" with point references, …). Returns the engine command and parameters.
@@ -1020,13 +1077,7 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       "point",
       json!({"method": "vertex", "point": {"vertex": p.get("edge").cloned().unwrap_or(Value::Null), "end": p.get("end") == Some(&json!("end"))}}),
     ),
-    "sketch.text.form" => {
-      let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
-      (
-        "sketch.text",
-        json!({"at": [num("x"), num("y")], "text": p.get("text").cloned().unwrap_or(json!("")), "height": num("height").max(0.01), "angle": num("angle"), "font": p.get("font").cloned().unwrap_or(json!("sans"))}),
-      )
-    }
+    "sketch.text.form" => ("sketch.text", text_params(&p)),
     // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
     c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
@@ -1074,6 +1125,12 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       // the angle box is in degrees: a plain number is what the command takes
       if let Some(a) = p.get("angle").and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()) {
         q["angle"] = json!(a);
+      }
+      // an empty spacing box keeps the text's spacing
+      if p.get("spacing").and_then(Value::as_str).is_some_and(|t| t.trim().is_empty())
+        && let Some(o) = q.as_object_mut()
+      {
+        o.remove("spacing");
       }
       ("sketch.text_edit", q)
     }
@@ -1267,6 +1324,12 @@ pub static SK_TEXT_EDIT: Form = Form {
     Input::Expr { key: "height", label: "Height", default: "" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "" },
     Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
+    Input::Check { key: "bold", label: "Bold" },
+    Input::Check { key: "italic", label: "Italic" },
+    Input::Check { key: "underline", label: "Underline" },
+    Input::Choice { key: "halign", label: "Horizontal alignment", options: TEXT_HALIGN },
+    Input::Choice { key: "valign", label: "Vertical alignment", options: TEXT_VALIGN },
+    Input::Expr { key: "spacing", label: "Character spacing (%)", default: "" },
   ],
   picks_model: false,
 };
@@ -1485,6 +1548,9 @@ pub static EMBOSS: Form = Form {
     Input::Expr { key: "depth", label: "Depth", default: "1 mm" },
     Input::Check { key: "deboss", label: "Deboss (sink into the face)" },
     Input::Check { key: "wrap", label: "Wrap around a cylinder" },
+    Input::Expr { key: "horizontal", label: "Horizontal distance", default: "0 mm" },
+    Input::Expr { key: "vertical", label: "Vertical distance", default: "0 mm" },
+    Input::Expr { key: "rotation", label: "Rotation", default: "0 deg" },
   ],
   picks_model: true,
 };
@@ -1708,6 +1774,12 @@ pub fn prefill(form: &Form, state: &mut State, s: &Session) {
       "height" => json!(fox_engine::sketch::Dim::new(t.height).expr),
       "angle" => json!(fox_engine::sketch::Dim::new(t.angle.to_degrees()).expr),
       "font" => json!(t.font),
+      "bold" => json!(t.style.bold),
+      "italic" => json!(t.style.italic),
+      "underline" => json!(t.style.underline),
+      "halign" => serde_json::to_value(t.style.halign).unwrap_or(json!("left")),
+      "valign" => serde_json::to_value(t.style.valign).unwrap_or(json!("baseline")),
+      "spacing" => json!(fox_engine::sketch::Dim::new(t.style.spacing).expr),
       _ => continue,
     };
     if let Some(slot) = state.values.get_mut(i) {
@@ -1801,4 +1873,24 @@ pub static SK_INCLUDE: Form = Form {
   fixed: &[],
   inputs: &[Input::Edges { key: "edges", label: "Edges" }],
   picks_model: true,
+};
+
+pub static FORM_BOX: Form = Form {
+  title: "CREATE FORM",
+  name: "Create Form",
+  hint: "A T-spline form body: the smooth surface inside a box control cage; pull its vertices with form.move_vertex",
+  icon: Icon::CreateForm,
+  cmd: "form.box",
+  fixed: &[],
+  inputs: &[
+    Input::Plane { key: "plane", label: "Plane" },
+    Input::Expr { key: "length", label: "Length", default: "40 mm" },
+    Input::Expr { key: "width", label: "Width", default: "40 mm" },
+    Input::Expr { key: "height", label: "Height", default: "40 mm" },
+    Input::Expr { key: "length_faces", label: "Length faces", default: "2" },
+    Input::Expr { key: "width_faces", label: "Width faces", default: "2" },
+    Input::Expr { key: "height_faces", label: "Height faces", default: "2" },
+    Input::Choice { key: "operation", label: "Operation", options: OPS },
+  ],
+  picks_model: false,
 };

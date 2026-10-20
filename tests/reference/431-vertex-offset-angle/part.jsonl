@@ -1,0 +1,14 @@
+# 431-vertex-offset-angle: added by the parity loop from a Fusion probe
+# Joint origin on a vertex with a Z offset and an angle. Grounded block A 20x20x10 at the origin;
+# block B 10x6x4 at x 40..50, y 0..6. B's joint origin on its corner (40,0,0), offset 3 along Z,
+# angle 30 deg; a rigid joint puts it on A's top corner (20,20,10).
+# Fusion keeps the two joint origins' Z axes pointing the same way; Fox's joint faces them
+# unless flipped, so the joint carries flip: true (as in 297-hinged-plate-angle).
+{"cmd": "box", "width": 20, "depth": 20, "height": 10, "at": [10, 10]}
+{"cmd": "component.create", "name": "A", "bodies": [1000]}
+{"cmd": "component.ground", "component": 1}
+{"cmd": "box", "width": 10, "depth": 6, "height": 4, "at": [45, 3]}
+{"cmd": "component.create", "name": "B", "bodies": [2000]}
+{"cmd": "joint_origin", "component": 2, "at": [40, 0, 0], "offset": 3, "angle": "30 deg", "name": "BO"}
+{"cmd": "joint", "moving_origin": {"origin": "BO"}, "fixed": 1, "fixed_origin": {"at": [20, 20, 10]}, "kind": "rigid", "flip": true}
+{"cmd": "info"}

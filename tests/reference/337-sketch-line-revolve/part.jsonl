@@ -1,0 +1,11 @@
+# 337-sketch-line-revolve: added by the parity loop from a Fusion probe
+# sketch-line-revolve: XY sketch: diagonal line (0,0)-(20,20) and a 4x4 square at x 10..14, y 0..4; axis through the sketch line; square revolved 360 deg about it.
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 20]]}
+{"cmd": "sketch.line", "points": [[10, 0], [14, 0]]}
+{"cmd": "sketch.line", "points": [[14, 0], [14, 4]]}
+{"cmd": "sketch.line", "points": [[14, 4], [10, 4]]}
+{"cmd": "sketch.line", "points": [[10, 4], [10, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "axis", "method": "edge", "edge": {"point": [10, 10, 0]}}
+{"cmd": "revolve", "sketch": 1, "axis": {"axis": 2}, "angle": "360 deg", "operation": "new_body"}

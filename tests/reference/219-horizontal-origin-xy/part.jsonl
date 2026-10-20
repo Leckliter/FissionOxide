@@ -1,0 +1,7 @@
+# 219-horizontal-origin-xy: added by the parity loop from a Fusion probe
+# horizontal-origin-xy: Overall slot, horizontal from the origin on XY: slot ends (0, 0) -> (30, 0), width 10; extruded 5.
+# sketch SlotSketch: XY
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.slot", "start": [0, 0], "end": [30, 0], "width": 10, "kind": "overall"}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 5, "operation": "new_body"}

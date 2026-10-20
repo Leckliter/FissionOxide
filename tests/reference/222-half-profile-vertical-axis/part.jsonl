@@ -1,0 +1,11 @@
+# 222-half-profile-vertical-axis: added by the parity loop from a Fusion probe
+# half-profile-vertical-axis: Construction line on the Y axis; the right half of a profile (line along X to (20,0), up to (20,15), a three-point arc bulging out through (30,25) to (20,35), back to the axis at (0,35)) mirrored about it into a closed outline 40 wide with two side bulges; extruded 10.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 40]]}
+{"cmd": "sketch.construction", "curves": [2], "on": true}
+{"cmd": "sketch.line", "points": [[0, 0], [20, 0], [20, 15]]}
+{"cmd": "sketch.arc", "start": [20, 15], "mid": [30, 25], "end": [20, 35]}
+{"cmd": "sketch.line", "points": [[20, 35], [0, 35]]}
+{"cmd": "sketch.mirror", "curves": [5, 8, 12, 14], "line": 2}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

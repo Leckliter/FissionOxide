@@ -182,7 +182,15 @@ fn joint_origin(s: &mut Session, p: &Value) -> CmdResult {
   };
   let e = |k: &str| opt_expr(p, k).unwrap_or_else(|| "0".into());
   let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-  let kind = FeatureKind::JointOrigin { component, geometry, angle: e("angle"), offset: e("offset"), flip };
+  let kind = FeatureKind::JointOrigin {
+    component,
+    geometry,
+    angle: e("angle"),
+    offset: e("offset"),
+    offset_x: e("offset_x"),
+    offset_y: e("offset_y"),
+    flip,
+  };
   let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   rename(s, id, p)?;
   let mut out = feature_json(s, id);

@@ -1,0 +1,12 @@
+# 476-two-bodies-combined: added by the parity loop from a Fusion probe
+# two-bodies-combined: 30x20 rectangle and r=6 circle at (55,30) on XY, both extruded 10 as new bodies; then Center of Mass of both.
+# hand-written
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [30, 0]]}
+{"cmd": "sketch.line", "points": [[30, 0], [30, 20]]}
+{"cmd": "sketch.line", "points": [[30, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.circle", "center": [55, 30], "radius": 6}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "profiles": [[15, 10], [55, 30]], "distance": 10, "operation": "new_body"}
+{"cmd": "inspect.center_of_mass"}

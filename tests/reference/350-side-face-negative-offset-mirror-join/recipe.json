@@ -1,0 +1,180 @@
+{
+ "id": "side-face-negative-offset-mirror-join",
+ "name": "side-face-negative-offset-mirror-join",
+ "description": "20x10x6 box; construction plane offset -5 from its x=20 face (x=15, inside the box); box mirrored across it and joined (x 0..30).",
+ "exercises": [
+  "extrude",
+  "construction_plane offset negative (planar face)",
+  "mirror bodies combine"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       20,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       20,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l4",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 6,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "OffSide",
+   "method": "offset",
+   "base": {
+    "face": {
+     "type": "plane",
+     "point": [
+      20,
+      5,
+      3
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    }
+   },
+   "offset": -5
+  },
+  {
+   "op": "mirror",
+   "name": "Mirror1",
+   "mirror_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "plane": {
+    "ref": "OffSide"
+   },
+   "combine": true
+  }
+ ]
+}

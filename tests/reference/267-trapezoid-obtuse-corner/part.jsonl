@@ -1,0 +1,11 @@
+# 267-trapezoid-obtuse-corner: added by the parity loop from a Fusion probe
+# trapezoid-obtuse-corner: Trapezoid (0,0),(40,0),(30,20),(0,20); Distance and Angle sketch chamfer at the obtuse-interior (40,0) vertex: 6 along the bottom line at 40 deg from it; extruded 10.
+# Fox's sketch.chamfer has no angle option; the angle is passed as Fusion's tool takes it.
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [30, 20]]}
+{"cmd": "sketch.line", "points": [[30, 20], [0, 20]]}
+{"cmd": "sketch.line", "points": [[0, 20], [0, 0]]}
+{"cmd": "sketch.chamfer", "curves": [2, 5], "distance": 6, "angle": 40}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}

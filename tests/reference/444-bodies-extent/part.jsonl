@@ -1,0 +1,11 @@
+# 444-bodies-extent: added by the parity loop from a Fusion probe
+# bodies-extent: Block 8x6x4 at x 0..8, y 0..6; body rect-patterned 4 along +X over an extent of 30 mm (instances 10 mm apart).
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [8, 0]]}
+{"cmd": "sketch.line", "points": [[8, 0], [8, 6]]}
+{"cmd": "sketch.line", "points": [[8, 6], [0, 6]]}
+{"cmd": "sketch.line", "points": [[0, 6], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 4, "operation": "new_body"}
+# Fox has spacing only; the 30 mm extent over 4 instances is spacing 30/3
+{"cmd": "pattern.rectangular", "direction": [1, 0, 0], "count": 4, "spacing": "30 mm / 3", "join": false}

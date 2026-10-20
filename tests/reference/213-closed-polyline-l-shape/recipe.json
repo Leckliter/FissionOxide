@@ -1,0 +1,183 @@
+{
+ "id": "closed-polyline-l-shape",
+ "name": "closed-polyline-l-shape",
+ "description": "Line tool polyline of six segments closed back on its start: L-shape 40x30 with 10 and 15 thick legs (area 700), extruded 8.",
+ "exercises": [
+  "sketch",
+  "line",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       40,
+       10
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       40,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       15,
+       10
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       15,
+       10
+      ],
+      "ref": "l3.end"
+     },
+     "end": {
+      "at": [
+       15,
+       30
+      ]
+     },
+     "id": "l4"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       15,
+       30
+      ],
+      "ref": "l4.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     },
+     "id": "l5"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "l5.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     },
+     "id": "l6"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

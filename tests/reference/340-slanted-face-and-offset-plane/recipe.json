@@ -1,0 +1,171 @@
+{
+ "id": "slanted-face-and-offset-plane",
+ "name": "slanted-face-and-offset-plane",
+ "description": "Right-triangle prism (legs 20 and 10, 8 tall); construction plane XY offset 4; axis through the slanted face and that plane (oblique, mid-height); body patterned 3x about it.",
+ "exercises": [
+  "extrude",
+  "construction_plane offset",
+  "construction_axis two_planes (face + plane)",
+  "circular_pattern"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Base_sketch",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "l1",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       20,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l2",
+     "start": {
+      "at": [
+       20,
+       0
+      ],
+      "ref": "l1.end"
+     },
+     "end": {
+      "at": [
+       0,
+       10
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l3",
+     "start": {
+      "at": [
+       0,
+       10
+      ],
+      "ref": "l2.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "l1.start"
+     }
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "Base_sketch",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "l1",
+        "l2",
+        "l3"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 8,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  },
+  {
+   "op": "construction_plane",
+   "name": "Mid",
+   "method": "offset",
+   "base": "XY",
+   "offset": 4
+  },
+  {
+   "op": "construction_axis",
+   "name": "Axis1",
+   "method": "two_planes",
+   "a": {
+    "face": {
+     "type": "plane",
+     "point": [
+      10,
+      5,
+      4
+     ],
+     "normal": [
+      0.4472136,
+      0.8944272,
+      0
+     ]
+    }
+   },
+   "b": "Mid"
+  },
+  {
+   "op": "circular_pattern",
+   "name": "Pattern1",
+   "pattern_of": "bodies",
+   "bodies": [
+    "Body"
+   ],
+   "axis": {
+    "ref": "Axis1"
+   },
+   "count": 3,
+   "total_angle": 360
+  }
+ ]
+}
