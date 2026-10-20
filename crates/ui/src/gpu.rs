@@ -253,6 +253,7 @@ mod tests {
       vertices: false,
       peek: Vec::new(),
       isolate: None,
+      opacity: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

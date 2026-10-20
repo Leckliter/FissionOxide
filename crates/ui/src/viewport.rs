@@ -430,7 +430,8 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
     app.hover = app.hover.filter(|p| matches!(p, Pick::SketchPoint { .. }));
   } else if !sketching {
     let (filter, priority) = (app.sel_filter, app.sel_priority);
-    let ok = |p: &Pick| filter.allows(p, priority);
+    let locked = &app.ctx_menu.unselectable;
+    let ok = |p: &Pick| filter.allows(p, priority) && !crate::select::pick_body(p).is_some_and(|b| locked.contains(&b));
     if !app.hover.as_ref().is_some_and(ok) {
       // the front-most pick is filtered out: the nearest allowed one around the cursor wins
       app.hover = picks.get(frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| ok(&p)))).filter(ok);
@@ -456,6 +457,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
+    opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -479,6 +481,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_vertices: key.vertices,
     peek: app.ctx_menu.peek.clone(),
     only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    opacity: app.ctx_menu.opacity.clone(),
     ..analysis
   };
   let (scene, picks) = app.scene.build(&app.s, &opts);
