@@ -58,3 +58,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+322-rigid-face-offset-angle
+323-revolute-hole-edge-on-pin
+324-cylindrical-hole-face-on-pin
