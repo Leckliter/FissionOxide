@@ -323,6 +323,9 @@ class Loop:
     finally:
       await asyncio.to_thread(release_fusion, owner)
     self.budget.record("probe", key, meta)
+    # If Fusion died while the agent worked, its report (often "blocked") says nothing about the
+    # feature: this ping raises SystemExit, and the prober puts the entry back.
+    await asyncio.to_thread(client.call)
     if self.usage_stop("probe", key, meta):
       self.ledger.update(key, probe_attempts=attempts - 1)  # stays probing; resumes next run
       return
