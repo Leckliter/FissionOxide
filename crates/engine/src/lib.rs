@@ -6,6 +6,7 @@
 //! can also script.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
+mod align;
 mod assembly;
 mod cam;
 mod commands;

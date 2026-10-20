@@ -228,3 +228,4 @@
 289-rect-corner-second-line-first
 290-triangle-acute-vertex
 291-apparent-intersection
+296-flush-face-offset

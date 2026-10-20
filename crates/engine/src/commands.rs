@@ -328,6 +328,7 @@ cmds! {
   "form.box" => "Create Form with a box: a T-spline body, the smooth limit surface of a box control cage (centred on 'at', standing on the plane) with the given faces per side", "{plane?, at?: [x, y], length, width, height, length_faces?, width_faces?, height_faces? (default 2), operation?}";
   "form.cage" => "Create Form from a control cage: vertices (plane coordinates) and closed quad faces, counter-clockwise seen from outside; the body is the cage's smooth limit surface", "{plane?, vertices: [[x, y, z]], faces: [[a, b, c, d]], operation?}";
   "form.move_vertex" => "Pull a form's control vertex (by index, or the one nearest a point) to a position or by an offset, in the form's plane coordinates", "{feature? (default the last form), vertex? | point?: [x, y, z], to?: [x, y, z] | by?: [dx, dy, dz]}";
+  "align" => "Align (assembly) constraint: make a moving component's face, axis or point flush, concentric or coincident with one on a fixed component (or the world), moving it only along what the relation fixes; the rest of its position stays", "{moving_geometry: {face}|{edge}|{at, z?, x?}|{origin}, fixed_geometry, moving? (default: the geometry's component), fixed? (default: the geometry's component; null = the world), relation?: auto|flush|coincident|concentric, offset?, flip?, name?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

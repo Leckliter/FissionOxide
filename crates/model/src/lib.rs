@@ -1400,6 +1400,29 @@ pub enum FeatureKind {
     #[serde(default)]
     operation: Operation,
   },
+  /// An align (assembly) constraint: makes a moving component's face, axis or point flush,
+  /// concentric or coincident with one on a fixed component (or the world), moving it only as
+  /// far as that takes (see [`assembly::align_transform`]); unlike a joint, the rest of its
+  /// position is kept.
+  AlignConstraint {
+    #[serde(default = "no_component")]
+    moving: ComponentId,
+    #[serde(default = "origin_point")]
+    moving_geometry: JointGeometry,
+    /// `None` = the world.
+    #[serde(default)]
+    fixed: Option<ComponentId>,
+    #[serde(default = "origin_point")]
+    fixed_geometry: JointGeometry,
+    #[serde(default)]
+    relation: assembly::AlignRelation,
+    /// Gap between flush planes (along the fixed normal) or coincident points (along fixed Z).
+    #[serde(default = "zero")]
+    offset: String,
+    /// Flush: normals point the same way instead of facing. Concentric: reverse the axis.
+    #[serde(default)]
+    flip: bool,
+  },
 }
 
 fn lofted_bends() -> String {
@@ -1539,6 +1562,7 @@ impl FeatureKind {
       FeatureKind::BaseFeature { .. } => "BaseFeature",
       FeatureKind::CamFollower { .. } => "Cam",
       FeatureKind::Form { .. } => "Form",
+      FeatureKind::AlignConstraint { .. } => "Align",
     }
   }
 
@@ -1611,6 +1635,9 @@ impl FeatureKind {
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
       FeatureKind::CamFollower { follower, .. } => vec![*follower],
       FeatureKind::Form { plane, .. } => plane_dep(plane),
+      FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, .. } => {
+        [moving_geometry, fixed_geometry].into_iter().filter_map(assembly::JointGeometry::origin).collect()
+      }
       _ => vec![],
     }
   }
@@ -2006,6 +2033,11 @@ impl Design {
       {
         return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
       }
+      if let FeatureKind::AlignConstraint { moving, fixed, .. } = &f.kind
+        && (*moving == id || *fixed == Some(id))
+      {
+        return Err(DesignError::InUse(c.name.clone(), f.name.clone()));
+      }
     }
     // its sub-components move up a level
     let up = self.component(id).and_then(|c| c.parent);
@@ -2380,6 +2412,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::BaseFeature { .. } => {}
     FeatureKind::CamFollower { clearance, .. } => f(clearance),
     FeatureKind::Form { .. } => {}
+    FeatureKind::AlignConstraint { offset, .. } => f(offset),
   }
 }
 

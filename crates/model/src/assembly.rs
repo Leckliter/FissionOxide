@@ -6,7 +6,7 @@
 //! within the degrees of freedom of the joint type. Motion values are expressions, so parameters
 //! drive mechanisms and limits are checked on every rebuild.
 
-use fox_kernel::glam::{DMat4, DVec3};
+use fox_kernel::glam::{DMat4, DQuat, DVec3};
 use fox_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind};
 use serde::{Deserialize, Serialize};
 
@@ -356,9 +356,117 @@ fn yes() -> bool {
   true
 }
 
+/// What an align constraint makes of its two geometries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AlignRelation {
+  /// Flush for two flat faces, concentric for two axes (cylinders, edges), coincident otherwise.
+  #[default]
+  Auto,
+  /// Planes: the moving plane lies on the fixed one (offset along its normal), normals opposed.
+  Flush,
+  /// Points: the moving point lies on the fixed one (offset along the fixed Z axis).
+  Coincident,
+  /// Axes: the moving axis lies on the fixed one.
+  Concentric,
+}
+
+/// The kind of geometry an align constraint picked: a flat face, an axis or a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignShape {
+  Plane,
+  Axis,
+  Point,
+}
+
+impl AlignRelation {
+  pub fn parse(s: &str) -> Option<AlignRelation> {
+    match s {
+      "auto" => Some(AlignRelation::Auto),
+      "flush" => Some(AlignRelation::Flush),
+      "coincident" => Some(AlignRelation::Coincident),
+      "concentric" => Some(AlignRelation::Concentric),
+      _ => None,
+    }
+  }
+
+  /// The relation `Auto` stands for, given the two geometries.
+  pub fn resolve(self, a: AlignShape, b: AlignShape) -> AlignRelation {
+    match (self, a, b) {
+      (AlignRelation::Auto, AlignShape::Plane, AlignShape::Plane) => AlignRelation::Flush,
+      (AlignRelation::Auto, AlignShape::Axis, AlignShape::Axis) => AlignRelation::Concentric,
+      (AlignRelation::Auto, _, _) => AlignRelation::Coincident,
+      (r, _, _) => r,
+    }
+  }
+}
+
+/// Where an align constraint moves the moving component. Unlike a joint, it removes only the
+/// freedoms its relation fixes and moves the component as little as it can, so what the relation
+/// leaves free stays where it was (Fusion's assembly constraints).
+///
+/// - Flush: turns the moving plane about its origin, by the smallest rotation, until its normal
+///   opposes the fixed one (or matches it with `flip`), then slides it along that normal to
+///   `offset` from the fixed plane.
+/// - Concentric: turns the moving axis parallel to the fixed one (the nearer way, the other with
+///   `flip`), then slides it across onto the fixed axis, keeping its position along the axis.
+/// - Coincident: translates the moving point onto the fixed one, `offset` along the fixed Z.
+pub fn align_transform(
+  fixed: DMat4,
+  moving: DMat4,
+  relation: AlignRelation,
+  offset: f64,
+  flip: bool,
+) -> Result<DMat4, String> {
+  let axis = |m: DMat4| m.z_axis.truncate().try_normalize().ok_or("an align axis has no direction");
+  let (fo, fz) = (fixed.w_axis.truncate(), axis(fixed)?);
+  let (mo, mz) = (moving.w_axis.truncate(), axis(moving)?);
+  // the smallest turn taking `from` to `to`, about the moving geometry's origin
+  let turn = |from: DVec3, to: DVec3| {
+    DMat4::from_translation(mo) * DMat4::from_quat(DQuat::from_rotation_arc(from, to)) * DMat4::from_translation(-mo)
+  };
+  Ok(match relation {
+    AlignRelation::Flush | AlignRelation::Auto => {
+      let r = turn(mz, if flip { fz } else { -fz });
+      DMat4::from_translation(fz * (fo + fz * offset - mo).dot(fz)) * r
+    }
+    AlignRelation::Concentric => {
+      if offset.abs() > 1e-12 {
+        return Err("a concentric alignment takes no offset".into());
+      }
+      let same = mz.dot(fz) >= 0.0;
+      let r = turn(mz, if same != flip { fz } else { -fz });
+      let d = fo - mo;
+      DMat4::from_translation(d - fz * d.dot(fz)) * r
+    }
+    AlignRelation::Coincident => DMat4::from_translation(fo + fz * offset - mo),
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn align_moves_only_what_the_relation_fixes() {
+    // a block's bottom (at (55, 5, 0), facing down) flush 5 mm above a plate's top (z 10)
+    let fixed = frame(DVec3::new(20.0, 15.0, 10.0), DVec3::Z, DVec3::X).unwrap();
+    let moving = frame(DVec3::new(55.0, 5.0, 0.0), -DVec3::Z, DVec3::X).unwrap();
+    let t = align_transform(fixed, moving, AlignRelation::Flush, 5.0, false).unwrap();
+    assert!(close(t.transform_point3(DVec3::new(60.0, 10.0, 0.0)), DVec3::new(60.0, 10.0, 15.0)));
+    // a face turned on its side is turned down onto the plane about its own centre
+    let moving = frame(DVec3::new(55.0, 5.0, 0.0), DVec3::X, DVec3::Y).unwrap();
+    let t = align_transform(fixed, moving, AlignRelation::Flush, 0.0, false).unwrap();
+    assert!(close(t.transform_point3(DVec3::new(55.0, 5.0, 0.0)), DVec3::new(55.0, 5.0, 10.0)));
+    assert!(close(t.transform_vector3(DVec3::X), -DVec3::Z));
+    // concentric keeps the axial position; coincident snaps the points together
+    let fixed = frame(DVec3::ZERO, DVec3::Z, DVec3::X).unwrap();
+    let moving = frame(DVec3::new(3.0, 4.0, 7.0), -DVec3::Z, DVec3::X).unwrap();
+    let t = align_transform(fixed, moving, AlignRelation::Concentric, 0.0, false).unwrap();
+    assert!(close(t.transform_point3(DVec3::new(3.0, 4.0, 9.0)), DVec3::new(0.0, 0.0, 9.0)));
+    let t = align_transform(fixed, moving, AlignRelation::Coincident, 1.0, false).unwrap();
+    assert!(close(t.transform_point3(DVec3::new(3.0, 4.0, 7.0)), DVec3::new(0.0, 0.0, 1.0)));
+  }
 
   fn close(a: DVec3, b: DVec3) -> bool {
     (a - b).length() < 1e-9

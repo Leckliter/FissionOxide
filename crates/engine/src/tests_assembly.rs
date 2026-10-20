@@ -291,3 +291,44 @@ fn inserted_hub_designs_update_and_unlink() {
   assert!(s.execute("component.insert", &json!({"item": item, "version": 9})).is_err());
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn align_moves_a_component_only_as_far_as_the_relation_needs() {
+  let mut s = Session::default();
+  let (plate, _) = part(&mut s, "Plate", [40.0, 30.0, 10.0], [20.0, 15.0]);
+  run(&mut s, "component.ground", json!({"component": plate}));
+  let (_, block) = part(&mut s, "Block", [10.0, 10.0, 10.0], [55.0, 5.0]);
+  // flush: the block's bottom 5 mm above the plate's top; it keeps its x and y
+  let r = run(
+    &mut s,
+    "align",
+    json!({"moving_geometry": {"face": {"point": [55, 5, 0]}}, "fixed_geometry": {"face": {"point": [20, 15, 10]}}, "offset": "5"}),
+  );
+  assert_eq!(r["name"], "Align1");
+  let (lo, hi) = bbox(&s, block);
+  assert!(near(lo, [50.0, 0.0, 15.0], 1e-6) && near(hi, [60.0, 10.0, 25.0], 1e-6), "{lo} {hi}");
+  // the offset is an expression: editing it moves the block along the normal again
+  let f = r["feature"].as_u64().unwrap();
+  run(&mut s, "feature.edit", json!({"feature": f, "set": {"offset": "0"}}));
+  assert!(near(bbox(&s, block).0, [50.0, 0.0, 10.0], 1e-6));
+  // a pin made concentric with a hole slides across onto its axis and keeps its height
+  run(&mut s, "cylinder", json!({"radius": 3, "height": 10, "at": [10, 10], "operation": "cut"}));
+  run(&mut s, "cylinder", json!({"radius": 2, "height": 8, "at": [100, 100], "operation": "new_body"}));
+  let pin_body = s.model.bodies.last().unwrap().id.0;
+  let pin_comp = run(&mut s, "component.create", json!({"name": "Pin", "bodies": [pin_body]}))["component"].clone();
+  run(
+    &mut s,
+    "align",
+    json!({"moving": pin_comp, "moving_geometry": {"face": {"point": [102, 100, 4]}}, "fixed_geometry": {"face": {"point": [13, 10, 5]}}}),
+  );
+  let (lo, hi) = bbox(&s, pin_body);
+  assert!(near(lo, [8.0, 8.0, 0.0], 1e-6) && near(hi, [12.0, 12.0, 8.0], 1e-6), "{lo} {hi}");
+  // a component can't be aligned to itself
+  assert!(
+    s.execute(
+      "align",
+      &json!({"moving_geometry": {"face": {"point": [55, 5, 10]}}, "fixed_geometry": {"face": {"point": [55, 5, 10]}}})
+    )
+    .is_err()
+  );
+}

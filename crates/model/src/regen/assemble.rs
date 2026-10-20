@@ -301,12 +301,46 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
+      FeatureKind::AlignConstraint { moving, moving_geometry, fixed, fixed_geometry, relation, offset, flip } => {
+        let comp = self.component(*moving).map_err(|_| "the moving component no longer exists".to_string())?;
+        if comp.grounded {
+          return Err(format!("{} is grounded", comp.name));
+        }
+        if let Some(f) = fixed {
+          self.component(*f).map_err(|_| "the fixed component no longer exists".to_string())?;
+        }
+        let fixed_frame = self.joint_frame(fixed_geometry)?;
+        let moving_frame = self.joint_frame(moving_geometry)?;
+        let rel = relation.resolve(self.align_shape(moving_geometry)?, self.align_shape(fixed_geometry)?);
+        let m = assembly::align_transform(fixed_frame, moving_frame, rel, self.len(offset)?, *flip)?;
+        self.move_component(id, *moving, *fixed, m)
+      }
       _ => Err("this feature type isn't supported".into()),
     }
   }
 
   fn component(&self, id: ComponentId) -> Result<&crate::Component, String> {
     self.components.iter().find(|c| c.id == id).ok_or(format!("component {} no longer exists", id.0))
+  }
+
+  /// What an align constraint's geometry is: a flat face's plane, an axis (a cylinder, cone or
+  /// edge) or a point. Call after [`Ctx::joint_frame`] has refreshed its reference.
+  fn align_shape(&self, g: &assembly::JointGeometry) -> Result<assembly::AlignShape, String> {
+    use assembly::{AlignShape, JointGeometry};
+    use fox_kernel::SurfaceKind;
+    Ok(match g {
+      JointGeometry::Face { face } => {
+        let body = &self.state.bodies[self.body_index(face.body)?];
+        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("an align face could not be found")?;
+        match body.faces().iter().find(|f| f.id == fid).map(|f| f.kind) {
+          Some(SurfaceKind::Plane) => AlignShape::Plane,
+          Some(SurfaceKind::Cylinder | SurfaceKind::Cone) => AlignShape::Axis,
+          _ => AlignShape::Point,
+        }
+      }
+      JointGeometry::Edge { .. } => AlignShape::Axis,
+      JointGeometry::Point { .. } | JointGeometry::Origin { .. } => AlignShape::Point,
+    })
   }
 
   /// A saved joint origin's frame where its component is now.
