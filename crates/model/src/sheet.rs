@@ -330,7 +330,7 @@ pub fn contour_section(path: &[Seg], t: f64, r: f64, flip: bool) -> Result<Profi
   segs.push(Seg::Line { a: p1.end(), b: q1.end() });
   segs.extend(q.iter().rev().map(|s| s.reversed()));
   segs.push(Seg::Line { a: q0.start(), b: p0.start() });
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }
@@ -365,7 +365,7 @@ pub fn flange_section(r: f64, t: f64, angle: f64, straight: f64) -> Profile {
   }
   segs.push(arc(c, r + t, o1, -angle));
   segs.push(Seg::Line { a: o0, b: i0 });
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }
@@ -376,7 +376,7 @@ pub fn flange_section(r: f64, t: f64, angle: f64, straight: f64) -> Profile {
 pub fn rectangle(lo: P2, hi: P2) -> Profile {
   let (a, b, c, d) = (lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]);
   let segs = vec![Seg::Line { a, b }, Seg::Line { a: b, b: c }, Seg::Line { a: c, b: d }, Seg::Line { a: d, b: a }];
-  Profile { outer: Loop { segs }, holes: Vec::new() }
+  Profile { outer: Loop::new(segs), holes: Vec::new() }
 }
 
 /// A bend relief notch in (along the edge, across it; + = outward) coordinates: `along` is the
@@ -394,7 +394,7 @@ pub fn relief_profile(along: (f64, f64), inner: f64, outer: f64, round: bool) ->
     Seg::Arc { center: c, radius: w / 2.0, start_angle: PI, sweep: PI },
     Seg::Line { a: [a1, c[1]], b: [a1, outer] },
   ];
-  Profile { outer: Loop { segs }, holes: Vec::new() }
+  Profile { outer: Loop::new(segs), holes: Vec::new() }
 }
 
 /// A slab standing in for the half-space in front of a plane (towards `normal`).
@@ -473,7 +473,7 @@ pub fn hole_section(r: f64, depth: f64, tip: f64, head: HoleHead) -> Result<Prof
     pts.push([0.0, depth]);
   }
   let segs = (0..pts.len()).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % pts.len()] }).collect();
-  let mut outer = Loop { segs };
+  let mut outer = Loop::new(segs);
   if outer.signed_area() < 0.0 {
     outer = outer.reversed();
   }
