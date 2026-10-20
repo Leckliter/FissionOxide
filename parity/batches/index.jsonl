@@ -14,6 +14,6 @@
 {"name": "ui-preferences-undo", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/108"}
 {"name": "ui-sketch-tools", "items": 5, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/112"}
 {"name": "ui-chrome-polish", "items": 3, "status": "fixing", "pr": null}
-{"name": "ui-components", "items": 3, "status": "fixing", "pr": null}
+{"name": "ui-components", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/117"}
 {"name": "ui-sketch-polish", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/115"}
 {"name": "ui-units-and-parameters", "items": 2, "status": "fixing", "pr": null}
