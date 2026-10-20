@@ -56,6 +56,9 @@ pub struct App {
   pub dialog: Option<Dialog>,
   /// Status-bar message: (text, is_error).
   pub status: Option<(String, bool)>,
+  /// The status text when it is a tool's or command's hint ("select lines or two points"): it
+  /// clears when that tool or command ends, as Fusion's canvas hint does.
+  hint: Option<String>,
   pub show_params: bool,
   pub show_edges: bool,
   pub show_grid: bool,
@@ -244,6 +247,7 @@ impl App {
       tool: Tool::Select,
       dialog: None,
       status: None,
+      hint: None,
       show_params: false,
       drawing: None,
       sheet_cache: None,
@@ -325,6 +329,22 @@ impl App {
       });
     }
     self.rebuild.is_some()
+  }
+
+  /// Shows a tool's or command's hint at the lower left of the canvas until it ends.
+  pub(crate) fn hint(&mut self, msg: impl Into<String>) {
+    let msg = msg.into();
+    self.status = Some((msg.clone(), false));
+    self.hint = Some(msg);
+  }
+
+  /// Clears the hint of the tool or command that ended (other status messages stay).
+  pub(crate) fn end_hint(&mut self) {
+    if let Some(h) = self.hint.take()
+      && self.status.as_ref().is_some_and(|(t, err)| !err && *t == h)
+    {
+      self.status = None;
+    }
   }
 
   /// Runs a command, reporting errors in the status bar. Returns the result on success.
@@ -637,8 +657,10 @@ impl App {
         self.nav_mode = None;
       } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
       } else if !self.tstate.is_empty() {
+        self.end_hint();
         viewport::reset_tool_state(self);
       } else if self.tool != Tool::Select {
+        self.end_hint();
         self.tool = Tool::Select;
       } else if self.dialog.is_some() {
         self.cancel_dialog();
@@ -769,6 +791,7 @@ impl App {
   }
 
   pub fn set_tool(&mut self, t: Tool) {
+    self.end_hint();
     self.tool = t;
     self.drag = None;
     viewport::reset_tool_state(self);
@@ -809,7 +832,7 @@ impl App {
       }
     }
     if bodies.is_empty() {
-      self.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+      self.hint("Show/Hide: select bodies, faces or edges first");
       return;
     }
     for b in bodies {
@@ -820,6 +843,7 @@ impl App {
   }
 
   pub fn start(&mut self, kind: dialogs::Kind) {
+    self.end_hint();
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
@@ -904,7 +928,7 @@ impl App {
       self.tab = panels::Tab::Sketch;
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
-      self.status = Some((SKETCHING.into(), false));
+      self.hint(SKETCHING);
     }
   }
 
@@ -923,6 +947,7 @@ impl App {
   }
 
   pub fn finish_sketch(&mut self) {
+    self.end_hint();
     self.last_sketch = self.s.edit_sketch;
     self.left_sketch();
     self.run("sketch.finish", json!({}));
@@ -1000,7 +1025,7 @@ impl App {
         let to = self.looking_along(n);
         self.fly_to(to);
       }
-      None => self.status = Some(("Look At: select a planar face".into(), false)),
+      None => self.hint("Look At: select a planar face"),
     }
   }
 
@@ -1413,5 +1438,38 @@ mod tests {
     assert!((v - 3000.0).abs() < 1e-6, "{v}");
     app.run_background("param.set", json!({"name": "h", "expr": "1 +"}));
     assert!(app.rebuild.is_none() && app.status.as_ref().is_some_and(|s| s.1));
+  }
+
+  #[test]
+  fn the_sketch_palette_stacks_below_a_command_dialog() {
+    let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+    let home = panels::palette_pos(canvas, None);
+    assert_eq!(home, egui::pos2(1166.0, 190.0));
+    // the OFFSET dialog sits where the palette goes: the palette moves below it
+    let dialog = egui::Rect::from_min_max(egui::pos2(866.0, 190.0), egui::pos2(1166.0, 330.0));
+    assert_eq!(panels::palette_pos(canvas, Some(dialog)), egui::pos2(1166.0, 338.0));
+    // a dialog dragged elsewhere leaves it be
+    let moved = dialog.translate(egui::vec2(-600.0, 0.0));
+    assert_eq!(panels::palette_pos(canvas, Some(moved)), home);
+  }
+
+  #[test]
+  fn a_tool_hint_clears_when_the_tool_ends() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    // Horizontal/Vertical with nothing selected asks for lines
+    panels::Cmd::Constraint("hv").run(&mut app);
+    assert!(app.status.as_ref().is_some_and(|s| s.0.starts_with("Horizontal/Vertical")));
+    // picking a tool ends it: the canvas hint describes the tool again
+    app.set_tool(Tool::Trim);
+    assert!(app.status.is_none(), "{:?}", app.status);
+    panels::Cmd::Constraint("hv").run(&mut app);
+    app.finish_sketch();
+    assert!(app.status.is_none(), "no stale hint after Finish Sketch: {:?}", app.status);
+    // other messages stay
+    app.hint("Look At: select a planar face");
+    app.status = Some(("Saved".into(), false));
+    app.end_hint();
+    assert_eq!(app.status, Some(("Saved".into(), false)));
   }
 }

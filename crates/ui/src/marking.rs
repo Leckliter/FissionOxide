@@ -286,7 +286,7 @@ pub(crate) fn find_in_window(app: &mut App, bodies: &[BodyId], sketch: Option<Fe
 /// Shows the bodies if any is hidden, else hides them.
 pub(crate) fn show_hide(app: &mut App, bodies: &[BodyId]) {
   if bodies.is_empty() {
-    app.status = Some(("Show/Hide: select bodies, faces or edges first".into(), false));
+    app.hint("Show/Hide: select bodies, faces or edges first");
     return;
   }
   let show = bodies.iter().any(|b| !app.s.body_visible(*b));
