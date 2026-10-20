@@ -103,3 +103,6 @@
 126-symmetric-points-slanted-axis
 127-symmetric-lines-trapezoid
 128-symmetric-circles
+155-quarter-sector-end-off-radius
+156-major-arc-pacman
+157-clockwise-sweep-sector
