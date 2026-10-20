@@ -59,10 +59,15 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Split Body merges the coplanar faces a cut leaves in each piece (a cut along an existing face
+/// leaves the new face beside the old one), as Fusion does, when the body had none of its own.
+/// Without it, the pieces keep every face the cut made.
+pub const UNIFY_SPLIT_PIECES: &str = "unify_split_pieces";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  UNIFY_SPLIT_PIECES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by
