@@ -300,6 +300,13 @@ pub enum ConstraintKind {
     a: CurveId,
     b: CurveId,
   },
+  /// A closed loop of lines kept a regular polygon about `center`: every side the same length and
+  /// every corner the same distance from the centre. The centre is a point of its own (no curve
+  /// uses it), so other constraints and dimensions can refer to it.
+  Polygon {
+    center: PointId,
+    lines: Vec<CurveId>,
+  },
 }
 
 impl ConstraintKind {
@@ -359,6 +366,7 @@ impl ConstraintKind {
       ConstraintKind::Diameter { .. } => "Diameter",
       ConstraintKind::Angle { .. } => "Angle",
       ConstraintKind::Curvature { .. } => "Curvature",
+      ConstraintKind::Polygon { .. } => "Polygon",
     }
   }
 
@@ -376,6 +384,7 @@ impl ConstraintKind {
       | ConstraintKind::PointOnCurve { p, .. }
       | ConstraintKind::Midpoint { p, .. }
       | ConstraintKind::PointLineDistance { p, .. } => vec![*p],
+      ConstraintKind::Polygon { center, .. } => vec![*center],
       _ => vec![],
     }
   }
@@ -400,6 +409,7 @@ impl ConstraintKind {
       ConstraintKind::Midpoint { line, .. }
       | ConstraintKind::Symmetric { line, .. }
       | ConstraintKind::PointLineDistance { line, .. } => vec![*line],
+      ConstraintKind::Polygon { lines, .. } => lines.clone(),
       _ => vec![],
     }
   }
@@ -542,9 +552,25 @@ impl Sketch {
   }
 
   pub fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), SketchError> {
-    let before = self.constraints.len();
+    let removed = self.constraint(id).ok_or(SketchError::NoConstraint(id))?.clone();
     self.constraints.retain(|c| c.id != id);
-    if self.constraints.len() == before { Err(SketchError::NoConstraint(id)) } else { Ok(()) }
+    self.remove_polygon_centers(&[removed]);
+    Ok(())
+  }
+
+  /// Deletes the centre points of removed polygon constraints, with the constraints on them,
+  /// unless a curve or another polygon constraint still uses the point.
+  fn remove_polygon_centers(&mut self, removed: &[Constraint]) {
+    for c in removed {
+      let ConstraintKind::Polygon { center, .. } = c.kind else { continue };
+      let used = center == ORIGIN
+        || self.curves.iter().any(|c| curve_points(&c.kind).contains(&center))
+        || self.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Polygon { center: o, .. } if o == center));
+      if !used {
+        self.points.retain(|p| p.id != center);
+        self.constraints.retain(|c| !c.kind.points().contains(&center));
+      }
+    }
   }
 
   /// Deletes a curve, its points that nothing else uses, and constraints that referred to them.
@@ -559,7 +585,11 @@ impl Sketch {
     let orphans: Vec<PointId> =
       curve_points(&curve.kind).into_iter().filter(|p| *p != ORIGIN && !still_used.contains(p)).collect();
     self.points.retain(|p| !orphans.contains(&p.id));
-    self.constraints.retain(|c| !c.kind.curves().contains(&id) && !c.kind.points().iter().any(|p| orphans.contains(p)));
+    let (removed, kept): (Vec<Constraint>, Vec<Constraint>) = std::mem::take(&mut self.constraints)
+      .into_iter()
+      .partition(|c| c.kind.curves().contains(&id) || c.kind.points().iter().any(|p| orphans.contains(p)));
+    self.constraints = kept;
+    self.remove_polygon_centers(&removed);
     Ok(())
   }
 
@@ -917,6 +947,15 @@ impl Sketch {
         }
       }
       ConstraintKind::PointOnCurve { curve, .. } => exists(*curve),
+      ConstraintKind::Polygon { center, lines } => {
+        for l in lines {
+          line(*l, "Polygon")?;
+        }
+        match self.polygon_corners(lines) {
+          Some(corners) if !corners.contains(center) => Ok(()),
+          _ => Err(SketchError::WrongGeometry("Polygon", "three or more lines forming one closed loop")),
+        }
+      }
       _ => {
         if let Some(d) = kind.dim()
           && !d.value.is_finite()

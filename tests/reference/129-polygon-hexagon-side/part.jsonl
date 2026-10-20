@@ -1,13 +1,9 @@
 # 129-polygon-hexagon-side: added by the parity loop from a Fusion probe
 # polygon-hexagon-side: Regular hexagon drawn with side 10 (first side on the X axis from the origin) and polygon-constrained; the first side is then dimensioned to 20, so the whole hexagon grows to a regular hexagon of side 20 (x -10..30, y 0..34.64); extruded 10.
-# Fox has no polygon constraint; equal-length sides are the closest it can say.
+# The first corner snaps to the origin and the first side gets an automatic horizontal constraint.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.line", "points": [[0.0, 0.0], [10.0, 0.0], [15.0, 8.660254038], [10.0, 17.320508076], [0.0, 17.320508076], [-5.0, 8.660254038]], "closed": true}
-{"cmd": "sketch.constrain", "type": "equal", "curves": [2, 5]}
-{"cmd": "sketch.constrain", "type": "equal", "curves": [5, 7]}
-{"cmd": "sketch.constrain", "type": "equal", "curves": [7, 9]}
-{"cmd": "sketch.constrain", "type": "equal", "curves": [9, 12]}
-{"cmd": "sketch.constrain", "type": "equal", "curves": [12, 13]}
+{"cmd": "sketch.constrain", "type": "polygon", "curves": [2, 5, 7, 9, 12, 13]}
 {"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 20}
 {"cmd": "sketch.finish"}
 {"cmd": "extrude", "sketch": 1, "distance": 10, "operation": "new_body"}
