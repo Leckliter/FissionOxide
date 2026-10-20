@@ -312,29 +312,51 @@ impl Sketch {
 
   // ---------------------------------------------------------------- fillet
 
+  /// The corner two lines make, for a fillet or chamfer: the shared end where they meet, else
+  /// the intersection of the lines extended (an apparent intersection, or where they cross).
+  /// Returns the corner, each line's end nearer it (the one that moves) and the position of each
+  /// line's other end (the side that's kept).
+  fn corner(&self, what: &'static str, l1: CurveId, l2: CurveId) -> Result<(P, PointId, P, PointId, P), SketchError> {
+    let ends = |id: CurveId| match self.curve(id).map(|c| &c.kind) {
+      Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
+      _ => Err(SketchError::WrongGeometry(what, "two lines")),
+    };
+    let (a1, b1) = ends(l1)?;
+    let (a2, b2) = ends(l2)?;
+    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
+    // the shared corner (by id, else by position)
+    let near = |p: PointId, q: PointId| p == q || self.pos(p).zip(self.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
+    if let Some((c1, f1, c2, f2)) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
+      .into_iter()
+      .find(|(p, _, q, _)| near(*p, *q))
+    {
+      return Ok((pos(c1)?, c1, pos(f1)?, c2, pos(f2)?));
+    }
+    // no shared end: where the lines (extended) meet
+    let (pa1, pb1, pa2, pb2) = (pos(a1)?, pos(b1)?, pos(a2)?, pos(b2)?);
+    let (r, s) = (sub(pb1, pa1), sub(pb2, pa2));
+    let den = cross(r, s);
+    if den.abs() < 1e-9 * (dot(r, r) * dot(s, s)).sqrt() {
+      return Err(SketchError::InvalidValue("the lines are parallel".into()));
+    }
+    let x = add(pa1, mul(r, cross(sub(pa2, pa1), s) / den));
+    // each line keeps its end farther from the corner
+    let pick = |a: PointId, pa: P, b: PointId, pb: P| if dist(pa, x) <= dist(pb, x) { (a, pb) } else { (b, pa) };
+    let (c1, q1) = pick(a1, pa1, b1, pb1);
+    let (c2, q2) = pick(a2, pa2, b2, pb2);
+    Ok((x, c1, q1, c2, q2))
+  }
+
   /// Rounds the corner where two lines meet with an arc of `radius`, tangent to both (the lines
-  /// are trimmed back). The radius becomes a driving dimension.
+  /// are trimmed or extended to it). The corner is their shared end, else where the lines
+  /// extended meet (an apparent intersection, or a crossing). The radius becomes a driving dimension.
   pub fn fillet(&mut self, l1: CurveId, l2: CurveId, radius: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
     if !(radius > EPS && radius.is_finite()) {
       return Err(SketchError::InvalidValue(format!("fillet radius {radius}")));
     }
-    let ends = |s: &Sketch, id: CurveId| match s.curve(id).map(|c| &c.kind) {
-      Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
-      _ => Err(SketchError::WrongGeometry("a sketch fillet", "two lines")),
-    };
-    let (a1, b1) = ends(self, l1)?;
-    let (a2, b2) = ends(self, l2)?;
-    // the shared corner (by id, else by position)
-    let near =
-      |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
-    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
-      .into_iter()
-      .find(|(p, _, q, _)| near(self, *p, *q))
-      .ok_or(SketchError::WrongGeometry("a sketch fillet", "two lines that meet at an end"))?;
-    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
-    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
+    let (p, c1, q1, c2, q2) = self.corner("a sketch fillet", l1, l2)?;
     let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
       return Err(SketchError::InvalidValue("zero-length line".into()));
     };
@@ -367,27 +389,15 @@ impl Sketch {
   }
 
   /// Bevels the corner where two lines meet: the lines are cut back `d1` and `d2` from the corner
-  /// and joined by a new line.
+  /// and joined by a new line. The corner is their shared end, else where the lines extended meet
+  /// (an apparent intersection, or a crossing): each keeps its end farther from it.
   pub fn chamfer(&mut self, l1: CurveId, l2: CurveId, d1: f64, d2: f64) -> Result<CurveId, SketchError> {
     self.not_text(l1)?;
     self.not_text(l2)?;
     if !(d1 > EPS && d2 > EPS && d1.is_finite() && d2.is_finite()) {
       return Err(SketchError::InvalidValue("chamfer distances must be positive".into()));
     }
-    let ends = |s: &Sketch, id: CurveId| match s.curve(id).map(|c| &c.kind) {
-      Some(CurveKind::Line { a, b }) => Ok((*a, *b)),
-      _ => Err(SketchError::WrongGeometry("a sketch chamfer", "two lines")),
-    };
-    let (a1, b1) = ends(self, l1)?;
-    let (a2, b2) = ends(self, l2)?;
-    let near =
-      |s: &Sketch, p: PointId, q: PointId| p == q || s.pos(p).zip(s.pos(q)).is_some_and(|(x, y)| dist(x, y) < 1e-6);
-    let (c1, f1, c2, f2) = [(a1, b1, a2, b2), (a1, b1, b2, a2), (b1, a1, a2, b2), (b1, a1, b2, a2)]
-      .into_iter()
-      .find(|(p, _, q, _)| near(self, *p, *q))
-      .ok_or(SketchError::WrongGeometry("a sketch chamfer", "two lines that meet at an end"))?;
-    let pos = |id| self.pos(id).ok_or(SketchError::NoPoint(id));
-    let (p, q1, q2) = (pos(c1)?, pos(f1)?, pos(f2)?);
+    let (p, c1, q1, c2, q2) = self.corner("a sketch chamfer", l1, l2)?;
     let (Some(u), Some(v)) = (unit(sub(q1, p)), unit(sub(q2, p))) else {
       return Err(SketchError::InvalidValue("zero-length line".into()));
     };
@@ -863,6 +873,38 @@ mod tests {
     assert_eq!(p.len(), 1);
     let expect = 800.0 - (25.0 - std::f64::consts::PI * 25.0 / 4.0);
     assert!((p[0].area() - expect).abs() < 0.05, "{}", p[0].area());
+  }
+
+  #[test]
+  fn chamfer_and_fillet_at_an_apparent_intersection() {
+    // a 40 x 30 outline with a gap at the (40, 0) corner: the chamfer extends and trims the
+    // lines to the corner they'd make, which closes the profile
+    let outline = |s: &mut Sketch| {
+      let (b, [b0, _]) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(30.0, 0.0)).unwrap();
+      let (r, [_, r1]) = s.add_line(PtSpec::At(40.0, 10.0), PtSpec::At(40.0, 30.0)).unwrap();
+      let (_, [_, t1]) = s.add_line(PtSpec::Point(r1), PtSpec::At(0.0, 30.0)).unwrap();
+      s.add_line(PtSpec::Point(t1), PtSpec::Point(b0)).unwrap();
+      (b, r)
+    };
+    let mut s = Sketch::new();
+    let (b, r) = outline(&mut s);
+    s.chamfer(b, r, 15.0, 20.0).unwrap();
+    assert!(s.solve().ok());
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    assert!((p[0].area() - 1050.0).abs() < 1e-6, "{}", p[0].area());
+    let mut s = Sketch::new();
+    let (b, r) = outline(&mut s);
+    s.fillet(b, r, 5.0).unwrap();
+    let p = find_profiles(&s);
+    assert_eq!(p.len(), 1);
+    let expect = 1200.0 - (25.0 - std::f64::consts::PI * 25.0 / 4.0);
+    assert!((p[0].area() - expect).abs() < 0.05, "{}", p[0].area());
+    // parallel lines have no corner
+    let mut s = Sketch::new();
+    let (a, _) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(10.0, 0.0)).unwrap();
+    let (c, _) = s.add_line(PtSpec::At(0.0, 5.0), PtSpec::At(10.0, 5.0)).unwrap();
+    assert!(s.chamfer(a, c, 1.0, 1.0).is_err());
   }
 
   #[test]

@@ -1,0 +1,157 @@
+{
+ "id": "apparent-intersection",
+ "name": "apparent-intersection",
+ "description": "40x30 rectangle whose bottom line stops at x=30 and right line starts at y=10; Two Distance sketch chamfer at their apparent intersection (40,0): 15 along the bottom, 20 up the right line, which trims both lines and closes the profile; extruded 10.",
+ "exercises": [
+  "sketch",
+  "sketch_chamfer_distance_distance",
+  "extrude"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "S",
+   "plane": {
+    "ref": "XY",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "id": "b",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       30,
+       0
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "r",
+     "start": {
+      "at": [
+       40,
+       10
+      ]
+     },
+     "end": {
+      "at": [
+       40,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "t",
+     "start": {
+      "at": [
+       40,
+       30
+      ],
+      "ref": "r.end"
+     },
+     "end": {
+      "at": [
+       0,
+       30
+      ]
+     }
+    },
+    {
+     "type": "line",
+     "id": "l",
+     "start": {
+      "at": [
+       0,
+       30
+      ],
+      "ref": "t.end"
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ],
+      "ref": "b.start"
+     }
+    },
+    {
+     "type": "chamfer_distance",
+     "id": "ch",
+     "lines": [
+      "b",
+      "r"
+     ],
+     "distance": 15,
+     "distance2": 20
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "extrude",
+   "name": "Extrude1",
+   "operation": "new",
+   "profiles": [
+    {
+     "sketch": "S",
+     "loops": [
+      {
+       "outer": true,
+       "curves": [
+        "b",
+        "r",
+        "t",
+        "l",
+        "ch"
+       ]
+      }
+     ]
+    }
+   ],
+   "extent": {
+    "type": "distance",
+    "distance": 10,
+    "direction": "positive"
+   },
+   "result_bodies": [
+    "Body"
+   ]
+  }
+ ]
+}

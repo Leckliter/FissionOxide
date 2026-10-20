@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+288-rect-corner-two-distances
+289-rect-corner-second-line-first
+290-triangle-acute-vertex
+291-apparent-intersection
