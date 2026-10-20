@@ -513,6 +513,11 @@ impl Ctx<'_> {
       FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
       FeatureKind::FullRoundFillet { sets } => self.full_round(id, sets),
       FeatureKind::IntersectionCurve { .. } => self.apply_curves3d(id, kind),
+      FeatureKind::Canvas { plane, .. } => {
+        let pl = self.resolve_plane(plane)?;
+        self.state.canvases.insert(id, pl);
+        Ok(None)
+      }
       _ => Err("this feature type isn't supported".into()),
     }
   }

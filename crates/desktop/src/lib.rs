@@ -42,6 +42,12 @@ pub fn config_dir() -> PathBuf {
   home.map(|h| h.join(".config/fissionoxide")).unwrap_or_else(|| PathBuf::from("fissionoxide-config"))
 }
 
+/// Where the app writes its diagnostic log, `fissionoxide.log` (the run before is kept as
+/// `fissionoxide.prev.log`); Help > Diagnostic Log opens it.
+pub fn log_dir() -> PathBuf {
+  config_dir().join("logs")
+}
+
 /// Opens a web page or folder with the system's default handler.
 pub fn open(target: &str) -> std::io::Result<()> {
   let mut cmd = if cfg!(windows) {

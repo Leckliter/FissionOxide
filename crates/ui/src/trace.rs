@@ -358,20 +358,54 @@ pub fn overlay(app: &mut App, painter: &egui::Painter, to_screen: &dyn Fn(DVec3)
     t.texture = load_texture(painter.ctx(), &path).map(|tex| (path.clone(), tex));
   }
   let Some((_, tex)) = &t.texture else { return };
-  let (s, c) = angle.sin_cos();
-  // u, v in 0..1 across the image (v down, as in the file) → world
-  let world = |u: f64, v: f64| {
-    let (x, y) = ((u - 0.5) * w, (0.5 - v) * h);
-    plane.to_world([at[0] + x * c - y * s, at[1] + x * s + y * c])
-  };
-  // a grid of quads, so perspective views stay close to right
+  let placed = Placed { plane, at, size: [w, h], angle };
+  if let Some(mesh) = image_mesh(tex.id(), &placed, Color32::from_white_alpha(110), to_screen) {
+    painter.add(mesh);
+  }
+}
+
+/// An image lying on a plane: its centre `at` (plane coordinates), `size` (mm) and rotation
+/// `angle` (radians) about the centre.
+#[derive(Debug, Clone, Copy)]
+pub struct Placed {
+  pub plane: fox_engine::kernel::Plane,
+  pub at: [f64; 2],
+  pub size: [f64; 2],
+  pub angle: f64,
+}
+
+impl Placed {
+  /// Plane coordinates of a point of the image: `u`, `v` in 0..1 across it (v down, as in the
+  /// file).
+  pub fn local(&self, u: f64, v: f64) -> [f64; 2] {
+    let (s, c) = self.angle.sin_cos();
+    let (x, y) = ((u - 0.5) * self.size[0], (0.5 - v) * self.size[1]);
+    [self.at[0] + x * c - y * s, self.at[1] + x * s + y * c]
+  }
+
+  /// Whether a point (plane coordinates) lies on the image.
+  pub fn contains(&self, p: [f64; 2]) -> bool {
+    let (s, c) = self.angle.sin_cos();
+    let (dx, dy) = (p[0] - self.at[0], p[1] - self.at[1]);
+    let (x, y) = (dx * c + dy * s, -dx * s + dy * c);
+    x.abs() <= self.size[0] / 2.0 && y.abs() <= self.size[1] / 2.0
+  }
+}
+
+/// The image `tex` drawn where `placed` puts it, tinted (`tint`'s alpha is its opacity). A grid
+/// of quads, so perspective views stay close to right. None when part of it is off the view.
+pub fn image_mesh(
+  tex: egui::TextureId,
+  placed: &Placed,
+  tint: Color32,
+  to_screen: &dyn Fn(DVec3) -> Option<Pos2>,
+) -> Option<egui::Shape> {
   const N: usize = 8;
-  let mut mesh = egui::Mesh::with_texture(tex.id());
-  let tint = Color32::from_white_alpha(110);
+  let mut mesh = egui::Mesh::with_texture(tex);
   for j in 0..=N {
     for i in 0..=N {
       let (u, v) = (i as f64 / N as f64, j as f64 / N as f64);
-      let Some(p) = to_screen(world(u, v)) else { return };
+      let p = to_screen(placed.plane.to_world(placed.local(u, v)))?;
       mesh.vertices.push(egui::epaint::Vertex { pos: p, uv: Pos2::new(u as f32, v as f32), color: tint });
     }
   }
@@ -383,5 +417,10 @@ pub fn overlay(app: &mut App, painter: &egui::Painter, to_screen: &dyn Fn(DVec3)
       mesh.add_triangle(k + 1, k + n + 1, k + n);
     }
   }
-  painter.add(egui::Shape::mesh(mesh));
+  Some(egui::Shape::mesh(mesh))
+}
+
+/// An image file as a texture (scaled down to at most [`MAX_TEXTURE`] across).
+pub fn texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+  load_texture(ctx, path)
 }

@@ -79,6 +79,11 @@ cmds! {
   "param.set" => "Change a parameter's expression", "{name, expr}";
   "param.rename" => "Rename a parameter (rewrites expressions using it)", "{name, to}";
   "param.remove" => "Delete an unused parameter", "{name}";
+  "param.comment" => "Set a user parameter's comment", "{name, comment}";
+  "param.favorite" => "Star a parameter in Change Parameters (Favorites); toggles without 'on'", "{name} | {feature, index}, on?: bool";
+  "param.model" => "Model parameters d1, d2, ...: every feature's and sketch dimension's expression, in timeline order", "{}";
+  "param.model_set" => "Change a model parameter's expression", "{feature, index, expr}";
+  "design.units" => "Document units: how lengths show and what bare numbers typed mean (values stay in mm); no unit reads it", "{unit?: mm|cm|m|in|ft}";
   "sketch.create" => "New sketch on a plane and start editing it", "{plane: \"xy\"|\"xz\"|\"yz\"|{feature}|{body, face}|{point: [x,y,z], normal?} (face there)|{origin: [x,y,z], normal, x?} (free plane)}";
   "sketch.edit" => "Edit an existing sketch", "{sketch}";
   "sketch.finish" => "Stop editing the sketch", "{}";
@@ -99,6 +104,9 @@ cmds! {
   "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id, units?: px|document (SVG; px = 96 dpi, 0,0 on the origin, as Fusion)}, curves?: [id], translate?, angle?, scale?, center?}";
   "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
+  "canvas.insert" => "Insert > Canvas: a reference image on a plane (adds no geometry); height follows the image aspect", "{image: path, plane?: (default xy), width?: mm (default 100) | height?, at?: [x,y] (image centre), angle?: deg, opacity?: 0-1, name?}";
+  "canvas.edit" => "Edit a canvas: opacity, size (keeps the aspect unless both given), centre, angle, plane", "{feature, opacity?, width?, height?, at?, angle?, plane?}";
+  "canvas.calibrate" => "Calibrate a canvas: scale it about 'from' so the two picked points (plane coordinates) are 'distance' apart", "{feature, from: [x,y], to: [x,y], distance: mm}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
   "sketch.fillet" => "Round the corner where two lines or arcs meet at an end with a tangent arc", "{curves: [line|arc, line|arc], radius}";
@@ -120,7 +128,7 @@ cmds! {
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), profile_scaling?: scale|none (with a rail), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
-  "hole" => "Holes at sketch points (into the face the sketch is on)", "{sketch?, points?: [id], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, flip?}";
+  "hole" => "Holes at sketch points (into the face the sketch is on), or one hole on a face (Fusion's single hole) held at offsets from its edges", "{sketch?, points?: [id] | face: {body, face}, at?: [x,y,z], offsets?: [{edge, distance}], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, drill_point?: angle|flat, tap?: simple|clearance|tapped (tapped: a cosmetic thread on the walls), pitch? (tapped; default ISO coarse), flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
   "fillet" => "Round edges (an edge is {body, edge} or {point: [x,y,z]} on it); radius2 makes it variable; chord makes radius the round's width across the edge; setback re-blends corners where three edges meet; faces round all their edges; tangent_chain adds the edges that continue them smoothly; sets give each selection its own radius; distance2 makes it asymmetric (radius, or distance, along each edge's first face: the one whose outward normal sorts first by x, y, z; flipped swaps them); full_round replaces each centre face with a round tangent to it and its side faces", "{edges?: [{body, edge} | {point}], faces?: [{body, face}], radius | distance, sets?: [{edges?, faces?, radius}] (instead of edges, faces and radius), tangent_chain?: bool, radius2?, chord?: bool, setback?, distance2?, flipped?: bool} | {full_round: [{center: face, side_one: [face], side_two: [face]}]} (a face is {body, face} or {point, normal?})";
@@ -178,9 +186,9 @@ cmds! {
   "cam.tool.delete" => "Remove a tool from the library", "{number}";
   "cam.posts" => "The post-processors G-code can be written for", "{}";
   "mirror" => "Mirror bodies, or features (their cut/join applied again), across a plane", "{plane, bodies?, features?: [id], join?, targets?}";
-  "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, symmetric?, direction2?, count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the distance to the farthest instance), bodies?, join?}";
+  "pattern.rectangular" => "Rectangular pattern of bodies, or of components (a copy per instance; suppress leaves instances out)", "{direction: [x,y,z] | {body, edge, flip?}, count, spacing, symmetric?, direction2?, count2?, spacing2?, symmetric2?, distance_type?: spacing|extent (extent: spacing is the distance to the farthest instance), bodies? | components?: [id], suppress?: [[i, j]], join?}";
   "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
-  "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
+  "move" => "Move/rotate bodies or a component: turned about pivot by rotate (X, Y, Z angles, as Fusion's Free Move), translated, then turned about axis by angle; copy keeps the originals and adds moved copies (Create Copy)", "{bodies? | component?, translate?: [x,y,z], axis?, angle?, rotate?: [ax, ay, az], pivot?: [x,y,z], copy?: bool}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
   "body.rename" => "Rename a body", "{body, name}";
@@ -208,7 +216,9 @@ cmds! {
   "select.invert" => "Select what isn't selected (of the selected kind)", "{}";
   "measure" => "Measure one entity (properties) or the distance and angle between two; an entity is {body}, {body, face}, {body, edge} or {point, snap?: face|edge}; default the selection", "{a?, b?}";
   "inspect.center_of_mass" => "Centre of mass, volume and mass of bodies (default all visible)", "{bodies?}";
-  "component.create" => "New component from bodies (taken out of other components)", "{name?, bodies: [id]}";
+  "component.create" => "New component, empty or from bodies (taken out of other components)", "{name?, bodies?: [id], type?: standard|sheet_metal, part_number?, description?, parent?: component, activate?: bool}";
+  "component.properties" => "A component's properties (name, part number, description, type, material ...); sets those given", "{component, name?, part_number?, description?, type?: standard|sheet_metal}";
+  "component.activate" => "Activate a component: bodies later features make go into it (no component: the top level)", "{component?}";
   "component.copy" => "Another instance of a component, rebuilt from it on every change", "{component, translate?: [x,y,z], name?}";
   "component.add_bodies" => "Move bodies into a component", "{component, bodies: [id]}";
   "component.delete" => "Delete a component (its bodies go back to the root)", "{component}";
@@ -340,6 +350,9 @@ cmds! {
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  if let Some(r) = hole_pattern::run(s, name, p) {
+    return r;
+  }
   if let Some(r) = crate::assembly::run(s, name, p) {
     return r;
   }
@@ -378,6 +391,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::arrange::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::params::run(s, name, p) {
     return r;
   }
   match name {
@@ -921,7 +937,21 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       };
       let axis = p.get("axis").map(|a| axis_ref(s, a)).transpose()?;
       let angle = opt_expr(p, "angle").unwrap_or_else(|| "0".into());
-      add_feature(s, FeatureKind::Move { bodies: body_sel(p), translate: t, axis, angle })
+      let rotate = match p.get("rotate").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Some([expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?]),
+        Some(_) => return Err(CmdError::new("rotate needs [x, y, z] angles")),
+        None => None,
+      };
+      let pivot = match p.get("pivot").and_then(Value::as_array) {
+        Some(a) => {
+          let v: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+          let [x, y, z] = v[..] else { return Err(CmdError::new("pivot needs [x, y, z]")) };
+          Some([x, y, z])
+        }
+        None => None,
+      };
+      let copy = p.get("copy").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::Move { bodies: body_sel(p), translate: t, axis, angle, rotate, pivot, copy })
     }
     "combine" => {
       let target = BodyId(req_u32(p, "target")?);
@@ -1291,6 +1321,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     "sketch.include" => sketch_include::include(s, p),
+    "canvas.insert" | "canvas.edit" | "canvas.calibrate" => crate::canvas::run(s, name, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -1503,11 +1534,20 @@ fn xform(s: &Session, p: &Value) -> Result<fox_sketch::Xform2, CmdError> {
   let num = |k: &str, kind| -> Result<Option<f64>, CmdError> {
     opt_expr(p, k).map(|e| fox_expr::eval(&e, kind, &scope)).transpose().map_err(CmdError::from)
   };
+  // the translation may be length expressions ("10 mm", "w / 2")
+  let translate = match p.get("translate").and_then(Value::as_array) {
+    Some(a) if a.len() == 2 && a.iter().any(Value::is_string) => {
+      let len =
+        |v: &Value| -> Result<f64, CmdError> { Ok(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &scope)?) };
+      [len(&a[0])?, len(&a[1])?]
+    }
+    _ => opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
+  };
   Ok(fox_sketch::Xform2 {
     scale: num("scale", fox_expr::Kind::Unitless)?.unwrap_or(1.0),
     angle: num("angle", fox_expr::Kind::Angle)?.unwrap_or(0.0),
     center: opt_pt(p, "center")?.unwrap_or([0.0, 0.0]),
-    translate: opt_pt(p, "translate")?.unwrap_or([0.0, 0.0]),
+    translate,
   })
 }
 
@@ -3282,6 +3322,7 @@ pub fn selected_edges(s: &Session) -> Vec<Value> {
     .collect()
 }
 
+mod hole_pattern;
 mod sketch_tools;
 
 mod sketch_curves;

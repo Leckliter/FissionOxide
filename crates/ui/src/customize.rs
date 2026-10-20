@@ -56,7 +56,7 @@ pub(crate) struct Binding {
 }
 
 /// Keys the app keeps for itself: (combo, what it does, the toolbar it's taken on; None = all).
-const RESERVED: &[(&str, &str, Option<Scope>)] = &[
+pub(crate) const RESERVED: &[(&str, &str, Option<Scope>)] = &[
   ("Ctrl+Z", "Undo", None),
   ("Ctrl+Y", "Redo", None),
   ("Ctrl+Shift+Z", "Redo", None),
@@ -73,6 +73,11 @@ const RESERVED: &[(&str, &str, Option<Scope>)] = &[
   ("V", "Show/Hide", None),
   ("X", "Construction", Some(Scope::Sketch)),
 ];
+
+/// The first key the app keeps for `what` ("Undo" is Ctrl+Z).
+pub(crate) fn reserved_key(what: &str) -> Option<&'static str> {
+  RESERVED.iter().find(|(_, w, _)| *w == what).map(|(k, ..)| *k)
+}
 
 /// Parses "Ctrl+Shift+E" (Cmd counts as Ctrl). None for an empty or unknown key.
 pub(crate) fn parse_combo(s: &str) -> Option<(Modifiers, Key)> {

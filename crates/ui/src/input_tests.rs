@@ -303,3 +303,143 @@ fn ctrl_s_in_a_test_saves_to_a_scratch_hub() {
   let index = std::fs::read_to_string(root.join("hub.json")).expect("the scratch hub has the design");
   assert!(index.contains("Untitled"), "{index}");
 }
+
+impl Harness {
+  /// A drag with `button` and `modifiers` held, across the middle of the canvas.
+  fn drag_with(&mut self, button: egui::PointerButton, modifiers: egui::Modifiers) {
+    let a = self.app.canvas.center() + vec2(-80.0, 40.0);
+    let b = a + vec2(90.0, -40.0);
+    let press = |pos, pressed| Event::PointerButton { pos, button, pressed, modifiers };
+    self.frame(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(a)]);
+    self.frame(vec![press(a, true)]);
+    for i in 1..=6 {
+      self.frame(vec![Event::PointerMoved(a + (b - a) * i as f32 / 6.0)]);
+    }
+    self.frame(vec![press(b, false)]);
+    self.frame(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+  }
+}
+
+/// What a drag did to the camera: (turned, panned, zoomed).
+fn camera_change(before: fox_engine::render::Camera, after: fox_engine::render::Camera) -> (bool, bool, bool) {
+  let turned = (before.yaw - after.yaw).abs() > 1e-6 || (before.pitch - after.pitch).abs() > 1e-6;
+  let zoomed = (before.distance - after.distance).abs() > 1e-6;
+  (turned, before.target != after.target && !turned && !zoomed, zoomed)
+}
+
+#[test]
+fn the_navigation_preset_drives_the_mouse_buttons() {
+  use crate::preferences::NavPreset;
+  use egui::{Modifiers, PointerButton::*};
+  let mut h = Harness::new();
+  let orbit = (true, false, false);
+  let pan = (false, true, false);
+  let zoom = (false, false, true);
+  let cases = [
+    (NavPreset::Fusion, Middle, Modifiers::NONE, pan),
+    (NavPreset::Fusion, Middle, Modifiers::SHIFT, orbit),
+    (NavPreset::Fusion, Secondary, Modifiers::NONE, orbit),
+    (NavPreset::SolidWorks, Middle, Modifiers::NONE, orbit),
+    (NavPreset::SolidWorks, Middle, Modifiers::CTRL, pan),
+    (NavPreset::SolidWorks, Middle, Modifiers::SHIFT, zoom),
+    (NavPreset::Inventor, Middle, Modifiers::NONE, pan),
+    (NavPreset::Inventor, Middle, Modifiers::SHIFT, orbit),
+    (NavPreset::Alias, Primary, Modifiers::SHIFT | Modifiers::ALT, orbit),
+    (NavPreset::Alias, Middle, Modifiers::SHIFT | Modifiers::ALT, pan),
+  ];
+  for (preset, button, mods, want) in cases {
+    h.app.preferences.values.nav = preset;
+    h.app.cam = fox_engine::render::Camera::default();
+    let before = h.app.cam;
+    h.drag_with(button, mods);
+    assert_eq!(camera_change(before, h.app.cam), want, "{preset:?} {button:?} {mods:?}");
+    assert!(h.app.drag.is_none() && h.app.s.selection.is_empty(), "no selection box");
+  }
+}
+
+fn key(key: egui::Key) -> Event {
+  Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }
+}
+
+/// Keys as a keyboard delivers a typed value: each digit's key press and its text.
+fn typing(s: &str) -> Vec<Event> {
+  let mut ev = Vec::new();
+  for c in s.chars() {
+    if let Some(k) = egui::Key::from_name(&c.to_string()) {
+      ev.push(key(k));
+    }
+    ev.push(Event::Text(c.to_string()));
+  }
+  ev
+}
+
+/// The sketch's driving dimension values, in creation order.
+fn dims(app: &App, sk: fox_engine::model::FeatureId) -> Vec<f64> {
+  let s = app.s.design.sketch(sk).unwrap();
+  s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.value)).collect()
+}
+
+/// Tab moves between the heads-up boxes of every tool with more than one, as in Fusion:
+/// `40 Tab 20 Enter` sets both values.
+#[test]
+fn tab_moves_between_the_heads_up_boxes() {
+  use crate::viewport::Tool;
+  for tool in [Tool::Rect, Tool::CenterRect, Tool::Line] {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+    let sk = h.app.s.edit_sketch.unwrap();
+    h.app.set_tool(tool);
+    let c = h.app.canvas.center();
+    h.move_then_click(c);
+    h.frame(vec![Event::PointerMoved(c + vec2(60.0, -40.0))]);
+    h.frame(vec![]);
+    h.frame(typing("40"));
+    h.frame(vec![]);
+    h.frame(vec![key(egui::Key::Tab)]);
+    h.frame(vec![]);
+    h.frame(typing("20"));
+    h.frame(vec![]);
+    h.frame(vec![key(egui::Key::Enter)]);
+    h.frame(vec![]);
+    let d = dims(&h.app, sk);
+    if tool == Tool::Line {
+      // the angle box sets the line's direction
+      let s = h.app.s.design.sketch(sk).unwrap();
+      let c = s.curves.last().unwrap().id;
+      let [a, b] = [0, 1].map(|k| s.pos(s.curve_points(c)[k]).unwrap());
+      let ang = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+      assert!(d == [40.0] && (ang - 20.0).abs() < 1e-6, "{tool:?}: {d:?} at {ang}°");
+    } else {
+      assert_eq!(d, [40.0, 20.0], "{tool:?}");
+    }
+  }
+}
+
+/// The File button (after the logo and the data panel button) and the Help (?) button (left of
+/// the avatar at the right end) of the application bar.
+const FILE: Pos2 = Pos2::new(88.0, 19.0);
+const HELP: Pos2 = Pos2::new(1386.0, 19.0);
+
+#[test]
+fn app_bar_menus_close_on_escape() {
+  for at in [FILE, HELP] {
+    let mut h = Harness::new();
+    h.move_then_click(at);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the menu at {at:?} opens");
+    h.frame(vec![key(egui::Key::Escape)]);
+    h.frame(vec![]);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "Esc closes the menu at {at:?}");
+  }
+}
+
+#[test]
+fn a_command_starting_closes_the_help_menu() {
+  let mut h = Harness::new();
+  h.move_then_click(HELP);
+  assert!(egui::Popup::is_any_open(&h.ctx));
+  // a shortcut starts a command over the open menu
+  h.frame(vec![key(egui::Key::E), Event::Text("e".into())]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_some(), "E started Extrude");
+  assert!(!egui::Popup::is_any_open(&h.ctx), "the Help menu closed");
+}

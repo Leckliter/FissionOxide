@@ -12,12 +12,15 @@ use fox_engine::sketch::{ConstraintKind, CurveKind, Ellipse2, PointId, Sketch};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
+use crate::preferences::NavAction;
 use crate::{App, RenderKey};
 
 /// Screen-space snap radius for sketch points (points, logical pixels).
 const SNAP_PX: f32 = 9.0;
 /// Lines within this angle of horizontal/vertical snap to it (degrees).
 const HV_SNAP_DEG: f64 = 2.5;
+/// The cursor lines up with a sketch point within this many logical pixels (inference lines).
+const ALIGN_PX: f64 = 6.0;
 /// Max rendered pixels (keeps software rendering interactive on HiDPI screens).
 const MAX_PIXELS: f32 = 3_000_000.0;
 
@@ -27,6 +30,8 @@ pub enum NavMode {
   Orbit,
   Pan,
   Zoom,
+  /// Drag a box to zoom into it (once).
+  ZoomWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +102,11 @@ pub enum Drag {
   Paint,
   /// Dragging a handle of the dialog's move/rotate triad (see [`crate::manipulators`]).
   Triad,
+  /// Zoom Window: the box being dragged.
+  ZoomWindow {
+    start: Pos2,
+    now: Pos2,
+  },
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
@@ -133,6 +143,8 @@ struct HeadsUp {
   buf: Option<String>,
   /// Give the active box the keyboard this frame (selecting its text when true).
   focus: Option<bool>,
+  /// Tab (false) or Shift+Tab (true) was pressed for the boxes this frame.
+  tab: Option<bool>,
   /// The last cursor position on the sketch plane, and the point it snapped to.
   cursor: Option<([f64; 2], Option<PointId>)>,
 }
@@ -238,6 +250,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     h: ((rect.height() * ppp).round() as u32).max(1),
   };
 
+  // a navigation drag that ends this frame (Zoom Window turns its mode off) isn't a click
+  let navigating = app.nav_mode.is_some();
   navigate(app, &resp, &view, &ctx);
   update_hover(app, &resp, &view);
   appearance_drop(app, &resp, &view, &ctx);
@@ -251,16 +265,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
 
   let cam = app.cam;
+  crate::canvas_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::preview::overlay(app, &painter, &|p| view.to_screen(&cam, p));
 
   // overlays that take clicks come first
   let mut consumed = false;
   shown_dims_overlay(app, &painter, &view);
+  consumed |= crate::canvas_ui::calibrate_clicks(app, &resp, &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
+  offset_plane_overlay(app, &painter, &view);
   if app.show_viewcube {
     consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
@@ -271,11 +288,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       app.create_sketch(plane);
     }
   }
-  let step = grid_step(app, &view) / 10.0;
+  let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
-  consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  if app.objects.joints {
+    consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
+  }
   dim_editor(app, &ctx);
   track_arc_wind(app, &resp, &view);
   offset_follow(app, &resp, &view);
@@ -290,6 +309,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
     painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
+  if let Some(Drag::ZoomWindow { start, now }) = app.drag {
+    let col = Color32::from_rgb(40, 120, 230);
+    painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
+  }
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
 
@@ -297,28 +320,45 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   if resp.secondary_clicked()
     && let Some(p) = resp.interact_pointer_pos()
   {
+    // a right-click on a canvas (with nothing nearer under the pointer) is for the canvas
+    if app.hover.is_none() {
+      let (o, d) = view.ray(&cam, p);
+      if let Some((canvas, _)) = crate::canvas_ui::canvas_at(app, o, d) {
+        app.s.selection = vec![Sel::Feature { feature: canvas }];
+      }
+    }
     crate::marking::open(app, p);
-  } else if !consumed && app.nav_mode.is_none() && app.marking.is_none() {
+  } else if !consumed && !navigating && app.nav_mode.is_none() && app.marking.is_none() && !left_navigating(app, &resp)
+  {
     handle_clicks(app, &resp, &view, &ctx);
   }
 }
 
 // ---------------------------------------------------------------- camera
 
+/// A left drag moving the camera (the Alias preset's Shift+Alt+left orbit): it selects nothing.
+fn left_navigating(app: &App, resp: &egui::Response) -> bool {
+  matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom))
+    && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped_by(egui::PointerButton::Primary))
+}
+
 fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Context) {
-  let (shift, scroll, zoom) = ctx.input(|i| (i.modifiers.shift, i.smooth_scroll_delta(), i.zoom_delta()));
+  let (mods, scroll, zoom) = ctx.input(|i| (i.modifiers, i.smooth_scroll_delta(), i.zoom_delta()));
+  // Preferences → Navigation: the preset's buttons, the zoom direction, zooming to the cursor
+  let prefs = &app.preferences.values;
+  let (preset, zoom_sign, to_cursor) = (prefs.nav, if prefs.reverse_zoom { -1.0 } else { 1.0 }, prefs.zoom_to_cursor);
   // the canvas still zooms with the pointer over its own overlays (the ViewCube), not over
   // panels and dialogs drawn above it
   if ctx.rect_contains_pointer(resp.layer_id, resp.rect) {
     let mut factor = 1.0;
     if scroll.y.abs() > 0.0 {
-      factor *= (-scroll.y as f64 * 0.0015).exp();
+      factor *= (-scroll.y as f64 * 0.0015 * zoom_sign).exp();
     }
     if (zoom - 1.0).abs() > 1e-4 {
       factor /= zoom as f64;
     }
     if (factor - 1.0f64).abs() > 1e-6 {
-      let toward = ctx.pointer_latest_pos().and_then(|p| {
+      let toward = ctx.pointer_latest_pos().filter(|_| to_cursor).and_then(|p| {
         let (o, d) = view.ray(&app.cam, p);
         let (_, _, back) = app.cam.basis();
         ray_plane(o, d, DVec3::from(app.cam.target), back)
@@ -327,29 +367,42 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       app.cam.zoom(factor, toward);
     }
   }
-  if resp.drag_started_by(egui::PointerButton::Secondary) {
-    app.drag = Some(if shift { Drag::Pan } else { Drag::Orbit });
-  }
-  if resp.drag_started_by(egui::PointerButton::Middle) {
-    app.drag = Some(if shift { Drag::Orbit } else { Drag::Pan });
+  for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+    if resp.drag_started_by(button)
+      && let Some(action) = preset.action(button, mods)
+    {
+      app.drag = Some(match action {
+        NavAction::Orbit => Drag::Orbit,
+        NavAction::Pan => Drag::Pan,
+        NavAction::Zoom => Drag::Zoom,
+      });
+    }
   }
   if let Some(mode) = app.nav_mode
     && resp.drag_started_by(egui::PointerButton::Primary)
   {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
     app.drag = Some(match mode {
       NavMode::Orbit => Drag::Orbit,
       NavMode::Pan => Drag::Pan,
       NavMode::Zoom => Drag::Zoom,
+      NavMode::ZoomWindow => Drag::ZoomWindow { start, now: start },
     });
+  }
+  if let Some(Drag::ZoomWindow { now, .. }) = &mut app.drag
+    && let Some(p) = resp.interact_pointer_pos()
+  {
+    *now = p;
   }
   let d = resp.drag_delta();
   if d != Vec2::ZERO && matches!(app.drag, Some(Drag::Orbit | Drag::Pan | Drag::Zoom)) {
     app.stop_cam_move();
   }
   match app.drag {
+    Some(Drag::Orbit) if app.free_orbit => app.cam.free_orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Orbit) => app.cam.orbit(-d.x as f64 * 0.008, d.y as f64 * 0.008),
     Some(Drag::Pan) => app.cam.pan(d.x as f64 * view.ppp as f64, d.y as f64 * view.ppp as f64, view.h as f64),
-    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006).exp(), None),
+    Some(Drag::Zoom) => app.cam.zoom((d.y as f64 * 0.006 * zoom_sign).exp(), None),
     _ => {}
   }
   if resp.drag_stopped()
@@ -369,6 +422,16 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
       Drag::Lasso => {
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
+      }
+      Drag::ZoomWindow { start, now } => {
+        let bx = Rect::from_two_pos(start, now);
+        let (o, d) = view.ray(&app.cam, bx.center());
+        let hit = fox_engine::scene::ray_hits(&app.s, o, d).first().map(|(t, _)| o + d * *t);
+        if let Some(to) = zoom_window(&app.cam, view, bx, hit) {
+          app.fly_to(to);
+        }
+        // one box, as in Fusion
+        app.nav_mode = None;
       }
       _ => {}
     }
@@ -448,8 +511,11 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     hover: app.hover,
     selection: app.s.selection.clone(),
     edit_sketch: app.s.edit_sketch,
-    show_edges: app.show_edges,
+    style: app.visual_style,
+    objects: app.objects,
+    effects: app.effects,
     show_grid: app.show_grid,
+    grid_step: app.grid.step(),
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
     profiles_of: profiles_of.clone(),
     hidden_profiles: app.hidden_profiles.clone(),
@@ -472,19 +538,32 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
       ViewOptions::default()
     }
   };
+  let vis = app.objects;
   let opts = ViewOptions {
     hover: app.hover,
-    hide_edges: !app.show_edges,
+    hide_edges: !app.visual_style.edges(),
     hide_grid: !app.show_grid,
+    hide_origin: !vis.origins,
+    hide_sketches: !vis.sketches || analysis.hide_sketches,
+    hide_construction: !vis.construction,
+    grid_step: key.grid_step,
     show_profiles_of: profiles_of,
     hide_profiles_of: app.hidden_profiles.clone(),
-    show_vertices: key.vertices,
+    show_vertices: key.vertices && vis.bodies,
     peek: app.ctx_menu.peek.clone(),
-    only_bodies: app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone()),
+    only_bodies: if vis.bodies {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    } else {
+      Some(Vec::new())
+    },
     opacity: app.ctx_menu.opacity.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
     ..analysis
   };
-  let (scene, picks) = app.scene.build(&app.s, &opts);
+  let (mut scene, picks) = app.scene.build(&app.s, &opts);
+  scene.style = app.visual_style;
+  app.effects.apply(&mut scene);
   if crate::gpu::active(app) {
     crate::gpu::set_scene(app, scene, picks, key);
     return;
@@ -521,31 +600,131 @@ fn sketch_plane(app: &App) -> Option<(FeatureId, Plane)> {
 
 /// Cursor position on the sketch plane, snapped to nearby points and H/V alignment.
 fn sketch_cursor(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>)> {
+  sketch_inference(app, view, pos).map(|(p, snapped, _)| (p, snapped))
+}
+
+/// [`sketch_cursor`], plus the points the cursor lines up with in x and in y (the inference
+/// lines' far ends).
+fn sketch_inference(app: &App, view: &View, pos: Pos2) -> Option<([f64; 2], Option<PointId>, Aligned)> {
   let (sk, plane) = sketch_plane(app)?;
   // snap to the hovered point (exact coordinates)
   if let Some(Pick::SketchPoint { sketch, point }) = app.hover
     && sketch == sk
     && let Some(p) = app.s.design.sketch(sk).ok().and_then(|s| s.pos(point))
   {
-    return Some((p, Some(point)));
+    return Some((p, Some(point), [None, None]));
   }
   let (o, d) = view.ray(&app.cam, pos);
   let hit = ray_plane(o, d, plane.origin, plane.normal())?;
   let mut p = plane.to_local(hit);
   // H/V inference against the previous click
+  let mut locked = [false, false];
   if let Some(prev) = app.tstate.pts.last() {
     let (dx, dy) = (p[0] - prev[0], p[1] - prev[1]);
     let ang = dy.atan2(dx).to_degrees().abs();
     if ang < HV_SNAP_DEG || (180.0 - ang) < HV_SNAP_DEG {
       p[1] = prev[1];
+      locked[1] = true;
     } else if (ang - 90.0).abs() < HV_SNAP_DEG {
       p[0] = prev[0];
+      locked[0] = true;
     }
   }
-  // tidy coordinates: round to a precision that matches the zoom (a quarter grid cell with Snap)
-  let step = grid_step(app, view) / if app.snap { 4.0 } else { 100.0 };
+  // tidy coordinates: round to a precision that matches the zoom; Snap goes to the grid (a
+  // quarter cell of the adaptive one, or the set spacing)
+  let step = match (app.snap, app.grid.step()) {
+    (true, Some(fixed)) => fixed,
+    (true, None) => grid_step(app, view) / 4.0,
+    (false, _) => grid_step(app, view) / 100.0,
+  };
   p = [round_to(p[0], step), round_to(p[1], step)];
-  Some((p, None))
+  // inference lines: line up exactly with sketch points in line with the cursor
+  let world_per_px = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let (p, aligned) = align_to_points(p, &inference_points(app, sk), ALIGN_PX * world_per_px, locked);
+  Some((p, None, aligned))
+}
+
+/// The sketch points the cursor lines up with in x (a vertical guide) and in y (horizontal).
+type Aligned = [Option<[f64; 2]>; 2];
+
+/// Points the cursor infers alignment from: the sketch's points (ends, centres), line midpoints,
+/// and the clicks of the shape being drawn except the last (H/V against that is the line's own).
+fn inference_points(app: &App, sk: FeatureId) -> Vec<[f64; 2]> {
+  let mut out: Vec<[f64; 2]> = Vec::new();
+  if let Ok(s) = app.s.design.sketch(sk) {
+    out.extend(s.points.iter().map(|q| [q.x, q.y]));
+    for c in &s.curves {
+      if let CurveKind::Line { a, b } = c.kind
+        && let (Some(a), Some(b)) = (s.pos(a), s.pos(b))
+      {
+        out.push([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+      }
+    }
+  }
+  if let [rest @ .., _] = app.tstate.pts.as_slice() {
+    out.extend_from_slice(rest);
+  }
+  if let Some(last) = app.tstate.pts.last() {
+    out.retain(|q| (q[0] - last[0]).hypot(q[1] - last[1]) > 1e-9);
+  }
+  out
+}
+
+/// Snaps `p`'s x (and y) to the nearest point in `pts` whose x (y) is within `tol`, leaving
+/// `locked` axes alone. Of the points that line up, the one nearest the cursor anchors the guide.
+fn align_to_points(mut p: [f64; 2], pts: &[[f64; 2]], tol: f64, locked: [bool; 2]) -> ([f64; 2], Aligned) {
+  let mut aligned: Aligned = [None, None];
+  for axis in 0..2 {
+    if locked[axis] {
+      continue;
+    }
+    let other = 1 - axis;
+    let off = |q: &[f64; 2]| ((q[axis] - p[axis]).abs(), (q[other] - p[other]).abs());
+    let best = pts.iter().filter(|q| off(q).0 <= tol).min_by(|a, b| {
+      let ((da, oa), (db, ob)) = (off(a), off(b));
+      da.total_cmp(&db).then(oa.total_cmp(&ob))
+    });
+    if let Some(q) = best {
+      p[axis] = q[axis];
+      aligned[axis] = Some(*q);
+    }
+  }
+  (p, aligned)
+}
+
+/// Dotted inference lines from the points the cursor lines up with, as Fusion draws them.
+fn paint_inference_lines(app: &App, painter: &egui::Painter, view: &View, pos: Pos2) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let Some((cur, _, aligned)) = sketch_inference(app, view, pos) else { return };
+  let s = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let col = Color32::from_rgb(110, 110, 120);
+  for q in aligned.into_iter().flatten() {
+    if let (Some(a), Some(b)) = (s(q), s(cur)) {
+      painter.extend(egui::Shape::dotted_line(&[a, b], col, 5.0, 1.0));
+    }
+  }
+}
+
+/// Zoom Window: the camera that fills the view with `bx` (screen points), centred on it: on `hit`
+/// (the model under the box's centre) when given, else on the target's depth. None for a box too
+/// small to mean anything.
+fn zoom_window(cam: &render::Camera, view: &View, bx: Rect, hit: Option<DVec3>) -> Option<render::Camera> {
+  if bx.width() < 4.0 || bx.height() < 4.0 || view.rect.width() < 1.0 || view.rect.height() < 1.0 {
+    return None;
+  }
+  let (o, d) = view.ray(cam, bx.center());
+  let (_, _, back) = cam.basis();
+  let centre = match hit {
+    Some(h) => h,
+    None => ray_plane(o, d, DVec3::from(cam.target), back)?,
+  };
+  // the box spans this much of the view at the centre's depth
+  let depth = (cam.eye() - centre).dot(back).max(1e-3);
+  let k = (bx.width() / view.rect.width()).max(bx.height() / view.rect.height()) as f64;
+  let mut to = *cam;
+  to.target = centre.to_array();
+  to.distance = if cam.ortho { cam.distance * k } else { depth * k }.clamp(1e-3, 1e7);
+  Some(to)
 }
 
 fn round_to(v: f64, step: f64) -> f64 {
@@ -812,8 +991,14 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
     .iter()
     .enumerate()
     .filter(|(i, _)| hud_value(app, *i).is_some())
-    .map(|(i, f)| (*f, app.tstate.hud.typed[i].trim().to_string()))
+    .map(|(i, f)| (*f, hud_text(app, *f, &app.tstate.hud.typed[i])))
     .collect()
+}
+
+/// Heads-up box text as an expression: a bare length means the design's unit.
+fn hud_text(app: &App, field: Field, text: &str) -> String {
+  let t = text.trim();
+  if field == Field::Angle { t.to_string() } else { app.s.design.units.typed(t) }
 }
 
 /// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
@@ -824,7 +1009,7 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
     return None;
   }
   let kind = if field == Field::Angle { fox_engine::expr::Kind::Angle } else { fox_engine::expr::Kind::Length };
-  let v = fox_engine::expr::eval(text, kind, &app.s.model.params).ok()?;
+  let v = fox_engine::expr::eval(&hud_text(app, field, text), kind, &app.s.model.params).ok()?;
   (field == Field::Angle || v > 1e-9).then_some(v)
 }
 
@@ -1335,7 +1520,11 @@ fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
       return;
     }
   };
-  let text = current.map(|v| fox_engine::sketch::Dim::new(v).expr).unwrap_or_default();
+  // the measured value, in the design's unit (degrees for an angle)
+  let angle = cmd["type"] == "angle";
+  let unit = app.s.design.units;
+  let text =
+    current.map(|v| if angle { fox_engine::sketch::Dim::new(v).expr } else { unit.number(v) }).unwrap_or_default();
   // stash the pending dimension in the editor (constraint id 0 = new)
   app.dim_edit = Some((0, text, pos));
   app.tstate.pending_dim = Some(cmd);
@@ -1390,14 +1579,25 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
     // the Enter is this box's, not the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     if let Some(sk) = app.s.edit_sketch {
+      // a bare length means the design's unit
+      let unit = app.s.design.units;
       if cid == 0 {
         if let Some(mut cmd) = app.tstate.pending_dim.take() {
+          let value = if cmd["type"] == "angle" { text.clone() } else { unit.typed(&text) };
           cmd["sketch"] = json!(sk.0);
-          cmd["value"] = json!(text);
+          cmd["value"] = json!(value);
           app.run("sketch.dimension", cmd);
         }
       } else {
-        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": text}));
+        let angle = app
+          .s
+          .design
+          .sketch(sk)
+          .ok()
+          .and_then(|s| s.constraint(fox_engine::sketch::ConstraintId(cid)))
+          .is_some_and(|c| c.kind.is_angle());
+        let value = if angle { text.clone() } else { unit.typed(&text) };
+        app.run("sketch.set_dimension", json!({"sketch": sk.0, "constraint": cid, "value": value}));
       }
     }
   }
@@ -1437,7 +1637,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
     let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, r.plane.to_world(p));
     for c in &r.sketch.constraints {
       let Some(dim) = c.kind.dim() else { continue };
-      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim) else { continue };
+      let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim, app.s.design.units) else { continue };
       let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
       let size = galley.size() + Vec2::new(8.0, 4.0);
       let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
@@ -1474,7 +1674,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     }
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
-      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim) else { continue };
+      let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim, app.s.design.units) else { continue };
       let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
       let size = galley.size() + Vec2::new(8.0, 4.0);
       // extension lines, dimension line and arrows, offset from the geometry as in Fusion
@@ -1505,7 +1705,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       painter.galley(r.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
-        app.dim_edit = Some((c.id.0, dim.expr.clone(), at));
+        // a stored bare length is mm: shown with its unit in a design in another unit
+        let text = if c.kind.is_angle() { dim.expr.clone() } else { app.s.design.units.shown(&dim.expr) };
+        app.dim_edit = Some((c.id.0, text, at));
         consumed = true;
       } else if resp.clicked() {
         let add = ui.input(|i| i.modifiers.shift);
@@ -1767,12 +1969,19 @@ fn dim_shape(
   }
 }
 
-fn dim_label(s: &Sketch, k: &ConstraintKind, dim: &fox_engine::sketch::Dim) -> Option<([f64; 2], String)> {
-  let numeric = dim.expr.trim().parse::<f64>().is_ok();
+fn dim_label(
+  s: &Sketch,
+  k: &ConstraintKind,
+  dim: &fox_engine::sketch::Dim,
+  unit: fox_engine::model::LengthUnit,
+) -> Option<([f64; 2], String)> {
+  // a plain value ("10", "1 in") shows as the number; an expression with parameters as "w = 10"
+  let numeric = fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_ok();
   let val = if k.is_angle() {
     format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
   } else {
-    fox_engine::sketch::Dim::new(dim.value).expr
+    // in the design's unit, without the unit (as Fusion labels sketch dimensions)
+    fox_engine::expr::trim_number(unit.from_mm(dim.value))
   };
   let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
@@ -1974,6 +2183,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     _ => {}
   }
+  paint_inference_lines(app, painter, view, pos);
   // cursor marker, and a coordinate readout where no heads-up dimensions show
   if let Some(p) = s(cur) {
     let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -1981,7 +2191,8 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     if !hud_fields(app.tool, pts.len()).is_empty() {
       return;
     }
-    let txt = format!("{}, {}", fox_engine::sketch::Dim::new(cur[0]).expr, fox_engine::sketch::Dim::new(cur[1]).expr);
+    let u = app.s.design.units;
+    let txt = format!("{}, {}", u.number(cur[0]), u.number(cur[1]));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -1996,6 +2207,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
 /// open dialog's primary value, as in Fusion. Runs before the shortcuts, so a digit can't also
 /// switch the selection mode.
 pub fn route_typing(app: &mut App, ctx: &egui::Context) {
+  take_hud_tab(app, ctx);
   if ctx.egui_wants_keyboard_input() || app.drawing.is_some() || app.dim_edit.is_some() || app.marking.is_some() {
     return;
   }
@@ -2034,9 +2246,34 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
   });
 }
 
+/// Tab belongs to the heads-up boxes while a shape with more than one is drawn (and no other
+/// text box has the keyboard). It's taken before any widget runs, so egui's focus traversal
+/// can't also move the keyboard (to a panel's field, or back to the box it came from).
+fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
+  let hud = &mut app.tstate.hud;
+  hud.tab = None;
+  if app.s.edit_sketch.is_none()
+    || hud_fields(app.tool, app.tstate.pts.len()).len() < 2
+    || app.drawing.is_some()
+    || app.dim_edit.is_some()
+    || app.marking.is_some()
+    || (hud.buf.is_none() && ctx.egui_wants_keyboard_input())
+  {
+    return;
+  }
+  let (tab, shift_tab) = ctx.input_mut(|i| {
+    (i.consume_key(egui::Modifiers::NONE, egui::Key::Tab), i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab))
+  });
+  if tab || shift_tab {
+    ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    hud.tab = Some(shift_tab);
+  }
+}
+
 /// The heads-up dimensions of the shape being drawn: each value's dimension follows the cursor
 /// with its box. Typing sets the active box, Tab moves to the next, Enter places the point.
 fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View, ctx: &egui::Context) {
+  let tab = app.tstate.hud.tab.take();
   let fields = hud_fields(app.tool, app.tstate.pts.len());
   let Some((sk, plane)) = sketch_plane(app).filter(|_| !fields.is_empty()) else {
     if app.tstate.hud.buf.is_some() || !app.tstate.hud.typed.iter().all(String::is_empty) {
@@ -2090,20 +2327,25 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     at.push(shape.map(|s| s.label));
   }
+  // lengths in the design's unit (a bare number typed back means that unit, see [`hud_text`])
+  let unit = app.s.design.units;
   let fmt = |i: usize| {
-    let v = fox_engine::sketch::Dim::new(live[i]).expr;
-    if fields[i] == Field::Angle { format!("{v}°") } else { v }
+    if fields[i] == Field::Angle {
+      format!("{}°", fox_engine::sketch::Dim::new(live[i]).expr)
+    } else {
+      unit.number(live[i])
+    }
   };
   let n = fields.len();
   let hud = &mut app.tstate.hud;
   hud.active = hud.active.min(n - 1);
-  let (tab, shift_tab) = ctx.input(|i| {
-    (i.key_pressed(egui::Key::Tab) && !i.modifiers.shift, i.key_pressed(egui::Key::Tab) && i.modifiers.shift)
-  });
   let mut commit = false;
-  // Tab with no box focused starts typing in the next box, with its value selected
-  if hud.buf.is_none() && (tab || shift_tab) && !ctx.egui_wants_keyboard_input() && n > 1 {
-    hud.active = (hud.active + 1) % n;
+  // Tab keeps what was typed and moves on to the next box (Shift+Tab: the previous one), or with
+  // no box focused starts typing in the next box; either way the box's value is selected
+  if let Some(back) = tab
+    && n > 1
+  {
+    hud.active = if back { (hud.active + n - 1) % n } else { (hud.active + 1) % n };
     let t = if hud.typed[hud.active].is_empty() { fmt(hud.active) } else { hud.typed[hud.active].clone() };
     hud.buf = Some(t);
     hud.focus = Some(true);
@@ -2134,13 +2376,7 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
             hud.typed[i] = buf.clone();
           }
           let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-          if r.has_focus() && (tab || shift_tab) && n > 1 {
-            // Tab keeps what was typed and moves on
-            let next = (i + 1) % n;
-            hud.active = next;
-            buf = if hud.typed[next].is_empty() { fmt(next) } else { hud.typed[next].clone() };
-            hud.focus = Some(true);
-          } else if enter && (r.has_focus() || r.lost_focus()) {
+          if enter && (r.has_focus() || r.lost_focus()) {
             commit = true;
             keep = false;
           } else if esc || (!r.has_focus() && hud.focus.is_none() && r.lost_focus()) {
@@ -2227,7 +2463,7 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
     painter.line_segment([w[0], w[1]], stroke);
   }
   if let Some(p) = view.to_screen(&app.cam, plane.to_world(at)) {
-    let txt = format!("R {}", fox_engine::sketch::Dim::new(r).expr);
+    let txt = format!("R {}", app.s.design.units.number(r));
     painter.text(
       p + Vec2::new(10.0, 10.0),
       egui::Align2::LEFT_TOP,
@@ -2398,6 +2634,28 @@ fn sketch_planes_overlay(
   planes.into_iter().nth(hot?).map(|(p, _)| p)
 }
 
+/// The corners of the square drawn for a plane: `half` either side of `centre` along its axes.
+pub(crate) fn plane_square(pl: &Plane, centre: DVec3, half: f64) -> [DVec3; 4] {
+  [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[u, v]| centre + pl.x * (u * half) + pl.y * (v * half))
+}
+
+/// Offset Plane's new plane as a see-through orange square at the offset, centred over its base
+/// (a picked face's centre), as Fusion previews it.
+fn offset_plane_overlay(app: &App, painter: &egui::Painter, view: &View) {
+  let Some((pl, centre)) = app.dialog.as_ref().and_then(|d| d.offset_plane_preview(&app.s)) else { return };
+  let Some(pts) = plane_square(&pl, centre, plane_half_size(app))
+    .iter()
+    .map(|p| view.to_screen(&app.cam, *p))
+    .collect::<Option<Vec<Pos2>>>()
+  else {
+    return;
+  };
+  let [r, g, b] = PLANE_RGB;
+  let fill = Color32::from_rgba_unmultiplied(r, g, b, 70);
+  let edge = Color32::from_rgba_unmultiplied(r, g, b, 230);
+  painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(1.5, edge)));
+}
+
 // ---------------------------------------------------------------- window selection, Select Other
 
 /// Selects what a window from `a` to `b` covers. Left to right selects only what lies fully
@@ -2471,7 +2729,7 @@ fn manipulator(
   painter.text(
     b + side * 14.0 + dir2 * 4.0,
     egui::Align2::LEFT_CENTER,
-    format!("{} mm", fox_engine::sketch::Dim::new(m.value).expr),
+    app.s.design.units.format(m.value),
     egui::FontId::proportional(12.0),
     Color32::from_gray(40),
   );
@@ -2490,7 +2748,7 @@ fn manipulator(
       let den = aa * cc - bb * bb;
       if den.abs() > 1e-12 {
         let t = (bb * ee - cc * dd) / den;
-        let step = grid_step(app, view) / 10.0;
+        let step = app.increments.linear_step(grid_step(app, view) / 10.0);
         if let Some(dlg) = app.dialog.as_mut() {
           dlg.set_manipulator(t, step);
         }
@@ -2543,6 +2801,29 @@ mod tests {
   use super::*;
   use fox_engine::Session;
 
+  #[test]
+  fn zoom_window_fills_the_view_with_the_box() {
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0)), ppp: 1.0, w: 400, h: 200 };
+    let mut cam = render::Camera { distance: 100.0, ..render::Camera::default() };
+    cam.set_view(render::StandardView::Top);
+    // a box a quarter of the width, right of centre
+    let bx = Rect::from_center_size(Pos2::new(300.0, 100.0), Vec2::new(100.0, 20.0));
+    let to = zoom_window(&cam, &view, bx, None).unwrap();
+    assert!((to.distance - 25.0).abs() < 1e-9, "{}", to.distance);
+    // the box's centre is now the view's centre
+    let (o, d) = view.ray(&cam, bx.center());
+    let hit = ray_plane(o, d, DVec3::ZERO, DVec3::Z).unwrap();
+    let (x, y, _) = to.project(hit, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6, "{x} {y}");
+    assert!(zoom_window(&cam, &view, Rect::from_center_size(Pos2::new(50.0, 50.0), Vec2::splat(2.0)), None).is_none());
+    // onto the model under the box: its point comes to the centre at the box's scale
+    let near = DVec3::new(10.0, 0.0, 60.0);
+    let to = zoom_window(&cam, &view, bx, Some(near)).unwrap();
+    assert!((to.distance - 10.0).abs() < 1e-9, "{}", to.distance);
+    let (x, y, _) = to.project(near, 400, 200).unwrap();
+    assert!((x - 200.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+  }
+
   /// An app editing a new sketch on XY with `tool` active.
   fn sketching(tool: Tool) -> (App, FeatureId) {
     let mut app = App::with_session(Session::default());
@@ -2566,6 +2847,50 @@ mod tests {
   }
 
   #[test]
+  fn alignment_snaps_free_axes_to_points_in_line() {
+    let pts = [[20.0, 0.0], [0.0, 7.0], [20.3, 50.0]];
+    // x within tolerance of the line end (and of a farther point): the nearer one anchors
+    let (p, a) = align_to_points([20.4, -10.0], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.3, -10.0]);
+    assert_eq!(a, [Some([20.3, 50.0]), None]);
+    let (p, a) = align_to_points([19.8, 7.2], &pts, 0.5, [false, false]);
+    assert_eq!(p, [20.0, 7.0]);
+    assert_eq!(a, [Some([20.0, 0.0]), Some([0.0, 7.0])]);
+    // out of tolerance, or an axis the H/V snap holds: untouched
+    assert_eq!(align_to_points([21.0, -10.0], &pts, 0.5, [false, false]), ([21.0, -10.0], [None, None]));
+    assert_eq!(align_to_points([20.1, 3.0], &pts, 0.5, [true, false]), ([20.1, 3.0], [None, None]));
+  }
+
+  #[test]
+  fn inference_points_take_ends_midpoints_and_earlier_clicks() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    let pts = inference_points(&app, sk);
+    assert!(pts.contains(&[0.0, 0.0]) && pts.contains(&[10.0, 0.0]));
+    // the click the line runs from is the line's own H/V, not an inference
+    assert!(!pts.contains(&[20.0, 0.0]), "{pts:?}");
+  }
+
+  #[test]
+  fn line_end_below_another_end_snaps_under_it() {
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    reset_tool_state(&mut app);
+    app.cam.set_view(fox_engine::render::StandardView::Top);
+    let view = View { rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)), ppp: 1.0, w: 800, h: 600 };
+    place_point(&mut app, sk, [5.0, -30.0], None);
+    let plane = sketch_plane(&app).unwrap().1;
+    // a cursor 2 px right of the point directly below the first line's end
+    let below = view.to_screen(&app.cam, plane.to_world([20.0, -10.0])).unwrap() + Vec2::new(2.0, 0.0);
+    app.hover = None;
+    let (p, snapped, aligned) = sketch_inference(&app, &view, below).unwrap();
+    assert_eq!((p[0], snapped), (20.0, None), "{p:?}");
+    assert_eq!(aligned[0], Some([20.0, 0.0]));
+  }
+
+  #[test]
   fn typed_rectangle_sizes_become_driving_dimensions() {
     let (mut app, sk) = sketching(Tool::Rect);
     place_point(&mut app, sk, [0.0, 0.0], None);
@@ -2578,6 +2903,45 @@ mod tests {
     // the rectangle and its dimensions are one undo step
     app.s.undo();
     assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+  }
+
+  #[test]
+  fn typed_sizes_take_the_design_unit() {
+    let (mut app, sk) = sketching(Tool::Rect);
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["2", "10 mm"]);
+    place_point(&mut app, sk, [3.0, 7.0], None);
+    assert_eq!(dims(&app, sk), vec![50.8, 10.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    let exprs: Vec<String> = s.constraints.iter().filter_map(|c| c.kind.dim().map(|d| d.expr.clone())).collect();
+    assert_eq!(exprs, ["2 in", "10 mm"], "a bare number is pinned to inches; an explicit unit stays");
+    // the labels show inches
+    let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
+    let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "2");
+  }
+
+  #[test]
+  fn a_sized_rectangle_from_the_origin_draws_black() {
+    use fox_engine::scene::{Pick, SKETCH_FIXED, SKETCH_FREE, SceneBuilder, ViewOptions};
+    let (mut app, sk) = sketching(Tool::Rect);
+    let colours = |app: &App| {
+      let (scene, picks) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
+      let curve = |id| matches!(picks.get(id), Some(Pick::SketchCurve { .. }));
+      scene.lines.iter().filter(|l| curve(l.id)).map(|l| l.color).collect::<Vec<_>>()
+    };
+    // sized but loose: it can still move
+    place_point(&mut app, sk, [5.0, 5.0], None);
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    assert_eq!(colours(&app), [SKETCH_FREE; 4]);
+    // started on the origin, the same rectangle is fully constrained
+    place_point(&mut app, sk, [0.0, 0.0], Some(fox_engine::sketch::ORIGIN));
+    typed(&mut app, ["40", "20"]);
+    place_point(&mut app, sk, [9.0, 9.0], None);
+    let c = colours(&app);
+    assert_eq!(c[4..], [SKETCH_FIXED; 4], "{c:?}");
   }
 
   #[test]

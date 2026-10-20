@@ -7,7 +7,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{EdgeLine, Plane, Shape, TriMesh};
 use fox_model::{BodyId, FeatureId, FeatureKind};
 use fox_render::{Marker, Mesh, Polyline, Scene};
-use fox_sketch::{ConstraintKind, CurveKind, PointId, Sketch};
+use fox_sketch::{CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
@@ -130,8 +130,17 @@ pub struct ViewOptions {
   pub toolpaths: bool,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
+  /// Draw no construction planes, axes or points (Object Visibility).
+  pub hide_construction: bool,
+  /// Draw the grid without the origin axes (Object Visibility ▸ Origins).
+  pub hide_origin: bool,
+  /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
+  pub grid_step: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
+  /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
+  /// itself).
+  pub hide_planes: Vec<FeatureId>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -298,7 +307,7 @@ impl SceneBuilder {
       let Some(r) = s.model.sketches.get(&f.id) else { continue };
       let is_edit = s.edit_sketch == Some(f.id);
       let auto = !sketch_consumed(s, f.id) || opts.show_profiles_of.contains(&f.id);
-      let show = !f.suppressed && !opts.hide_sketches && (is_edit || f.visible.unwrap_or(auto));
+      let show = !f.suppressed && (is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto));
       if !show {
         continue;
       }
@@ -327,22 +336,13 @@ impl SceneBuilder {
         }
         scene.meshes.push(pm);
       }
-      sketch_lines(
-        &mut scene,
-        &mut picks,
-        f.id,
-        &r.sketch,
-        &r.plane,
-        is_edit,
-        &r.report.free_points,
-        &selected,
-        opts.hover,
-      );
+      sketch_lines(&mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover);
     }
 
     // construction planes
     for (id, pl) in &s.model.planes {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) || opts.hide_planes.contains(id)
+      {
         continue;
       }
       let size = scene_size(s) * 0.35;
@@ -366,7 +366,7 @@ impl SceneBuilder {
     // construction axes (dashed, through the model), points and cosmetic threads
     let reach = scene_size(s) * 0.4;
     for (id, (o, d)) in &s.model.axes {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       scene.lines.push(Polyline {
@@ -380,7 +380,7 @@ impl SceneBuilder {
       });
     }
     for (id, p) in &s.model.points {
-      if s.design.feature(*id).is_some_and(|f| f.suppressed) {
+      if opts.hide_construction || s.design.feature(*id).is_some_and(|f| f.suppressed) {
         continue;
       }
       scene.markers.push(Marker {
@@ -421,7 +421,7 @@ impl SceneBuilder {
     }
 
     if !opts.hide_grid {
-      grid(&mut scene, s);
+      grid(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0), !opts.hide_origin);
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
@@ -458,13 +458,18 @@ fn scene_size(s: &Session) -> f64 {
   s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0)
 }
 
-fn grid(scene: &mut Scene, s: &Session) {
+/// The grid's adaptive spacing: a tenth of the model's size, rounded to 1, 2 or 5 × 10^k.
+pub fn grid_step(s: &Session) -> f64 {
+  nice_step(scene_size(s) / 10.0)
+}
+
+fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: bool) {
   let plane = match s.edit_sketch.and_then(|e| s.model.sketches.get(&e)) {
     Some(r) => r.plane,
     None => Plane::XY,
   };
   let size = scene_size(s);
-  let step = nice_step(size / 10.0);
+  let step = fixed.unwrap_or_else(|| grid_step(s));
   let n = ((size / step).ceil() as i64).clamp(2, 60);
   let ext = n as f64 * step;
   for i in -n..=n {
@@ -482,6 +487,9 @@ fn grid(scene: &mut Scene, s: &Session) {
         behind: true,
       });
     }
+  }
+  if !origin {
+    return;
   }
   // origin axes: X and Y run across the whole grid, as in Fusion; Z is a short stub
   let l = ext as f32;
@@ -531,7 +539,7 @@ fn sketch_lines(
   sk: &Sketch,
   plane: &Plane,
   editing: bool,
-  free: &[PointId],
+  report: &fox_sketch::SolveReport,
   selected: &[Pick],
   hover: Option<Pick>,
 ) {
@@ -542,8 +550,7 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let is_free = fox_sketch::curve_points(&c.kind).iter().any(|p| free.contains(p))
-      || matches!(c.kind, CurveKind::Circle { .. }) && !fully_dimensioned_circle(sk, c.id, free);
+    let is_free = report.curve_free(sk, c.id);
     let color = if selected.contains(&pick) {
       SELECT_COLOR
     } else if hover == Some(pick) {
@@ -633,7 +640,7 @@ fn sketch_lines(
         HOVER_COLOR
       } else if p.id == fox_sketch::ORIGIN {
         [200, 60, 40, 255]
-      } else if free.contains(&p.id) {
+      } else if report.free_points.contains(&p.id) {
         SKETCH_FREE
       } else {
         SKETCH_FIXED
@@ -641,20 +648,6 @@ fn sketch_lines(
       scene.markers.push(Marker { at: w([p.x, p.y]), color, size: 3.0, id: picks.id(pick), on_top: true });
     }
   }
-}
-
-/// A circle's radius is "free" when the solver reports it so; we approximate with the presence of
-/// a radius/diameter/equal/tangent constraint once its centre is fixed.
-fn fully_dimensioned_circle(sk: &Sketch, c: fox_sketch::CurveId, free: &[PointId]) -> bool {
-  let centre_fixed = sk.curve_points(c).first().is_some_and(|p| !free.contains(p));
-  centre_fixed
-    && sk.constraints.iter().any(|k| match &k.kind {
-      ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => *curve == c,
-      ConstraintKind::Equal { a, b }
-      | ConstraintKind::Tangent { a, b }
-      | ConstraintKind::SymmetricCurves { a, b, .. } => *a == c || *b == c,
-      _ => false,
-    })
 }
 
 /// Flattened curve in sketch coordinates.

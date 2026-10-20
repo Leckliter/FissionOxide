@@ -54,6 +54,12 @@ impl SolveReport {
   pub fn fully_constrained(&self) -> bool {
     self.ok() && self.dof == 0
   }
+
+  /// Whether `curve` can still move or change size (drawn blue), rather than being fully
+  /// constrained (drawn black): one of its points is free, or it is a circle with a free radius.
+  pub fn curve_free(&self, sketch: &Sketch, curve: CurveId) -> bool {
+    self.free_curves.contains(&curve) || sketch.curve_points(curve).iter().any(|p| self.free_points.contains(p))
+  }
 }
 
 impl Sketch {
@@ -1132,6 +1138,27 @@ mod tests {
     let tr = s.curve_points(lines[1])[1];
     let p = s.pos(tr).unwrap();
     assert!((p[0] - 40.0).abs() < 1e-6 && (p[1] - 25.0).abs() < 1e-6, "{p:?}");
+  }
+
+  #[test]
+  fn per_curve_freedom_in_a_partly_constrained_sketch() {
+    let (mut s, rect) = rect_fully_constrained();
+    let (line, [a, _]) = s.add_line([30.0, 0.0].into(), [40.0, 5.0].into()).unwrap();
+    // two circles centred on the origin; only the first has its size
+    let circle = s.add_circle(PtSpec::Point(ORIGIN), 3.0).unwrap();
+    let ring = s.add_circle(PtSpec::Point(ORIGIN), 5.0).unwrap();
+    s.add_constraint(ConstraintKind::Radius { curve: circle, value: Dim::new(3.0) }).unwrap();
+    let r = s.solve();
+    assert!(r.ok() && r.dof == 5, "{r:?}"); // the line's 4, the ring's radius
+    for c in rect.into_iter().chain([circle]) {
+      assert!(!r.curve_free(&s, c), "{c:?} is fully constrained: {r:?}");
+    }
+    assert!(r.curve_free(&s, line));
+    assert!(r.curve_free(&s, ring), "its radius can change: {r:?}");
+    // pinning one end leaves the line free to turn and stretch
+    s.add_constraint(ConstraintKind::Fix { p: a, x: 30.0, y: 0.0 }).unwrap();
+    let r = s.solve();
+    assert!(!r.free_points.contains(&a) && r.curve_free(&s, line), "{r:?}");
   }
 
   #[test]

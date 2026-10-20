@@ -149,6 +149,7 @@ struct State {
   axes: BTreeMap<FeatureId, (DVec3, DVec3)>,
   points: BTreeMap<FeatureId, DVec3>,
   threads: Vec<(FeatureId, Vec<DVec3>)>,
+  canvases: BTreeMap<FeatureId, Plane>,
   body_counter: u32,
   /// Saved joint origins: component and frame (as the component is now).
   joint_origins: BTreeMap<FeatureId, (crate::ComponentId, DMat4)>,
@@ -176,6 +177,8 @@ pub struct Model {
   pub points: BTreeMap<FeatureId, DVec3>,
   /// Cosmetic threads, as helix polylines to draw on their faces.
   pub threads: Vec<(FeatureId, Vec<DVec3>)>,
+  /// Canvases (reference images): the plane each one lies on.
+  pub canvases: BTreeMap<FeatureId, Plane>,
   /// Status per feature, in timeline order.
   pub status: Vec<FeatureStatus>,
   /// Evaluated parameter values (mm / rad).
@@ -324,6 +327,7 @@ impl Regenerator {
       axes: state.axes,
       points: state.points,
       threads: state.threads,
+      canvases: state.canvases,
       status,
       params,
       param_errors,
@@ -945,18 +949,37 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::Move { bodies, translate, axis, angle } => {
+      FeatureKind::Move { bodies, translate, axis, angle, rotate, pivot, copy } => {
         let v = DVec3::new(self.len(&translate[0])?, self.len(&translate[1])?, self.len(&translate[2])?);
         let rot = match axis {
           Some(a) => Some((self.resolve_axis(a, None)?, self.angle(angle)?)),
           None => None,
         };
+        let turns = match rotate {
+          Some(r) => [self.angle(&r[0])?, self.angle(&r[1])?, self.angle(&r[2])?],
+          None => [0.0; 3],
+        };
+        let c = pivot.map(DVec3::from).unwrap_or(DVec3::ZERO);
+        let mut copies = Vec::new();
         for bi in self.select(bodies)? {
-          let mut s = self.state.bodies[bi].shape.translated(v).map_err(ke)?;
+          let mut s = self.state.bodies[bi].shape.clone();
+          for (a, d) in turns.iter().zip([DVec3::X, DVec3::Y, DVec3::Z]) {
+            if *a != 0.0 {
+              s = s.rotated(c, d, *a).map_err(ke)?;
+            }
+          }
+          s = s.translated(v).map_err(ke)?;
           if let Some(((o, d), a)) = rot {
             s = s.rotated(o, d, a).map_err(ke)?;
           }
-          self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+          if *copy {
+            copies.push((bi, s));
+          } else {
+            self.state.bodies[bi] = self.state.bodies[bi].with_shape(s, id);
+          }
+        }
+        for (bi, s) in copies {
+          self.add_copies(id, bi, vec![s], false)?;
         }
         Ok(None)
       }
