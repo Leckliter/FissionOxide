@@ -176,7 +176,7 @@ cmds! {
   "cam.posts" => "The post-processors G-code can be written for", "{}";
   "mirror" => "Mirror bodies across a plane", "{plane, bodies?, join?}";
   "pattern.rectangular" => "Rectangular pattern of bodies", "{direction: [x,y,z], count, spacing, direction2?, count2?, spacing2?, bodies?, join?}";
-  "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, bodies?, join?}";
+  "pattern.circular" => "Circular pattern of bodies", "{axis, count, angle?, symmetric?, bodies?, join?}";
   "move" => "Move/rotate bodies or a component", "{bodies? | component?, translate?: [x,y,z], axis?, angle?}";
   "combine" => "Join/cut/intersect bodies", "{target, tools: [id], operation, keep_tools?}";
   "body.remove" => "Remove bodies (as a timeline feature)", "{bodies: [id]}";
@@ -830,6 +830,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           axis,
           count: req_expr(p, "count")?,
           angle: opt_expr(p, "angle").unwrap_or_else(|| "360 deg".into()),
+          symmetric: p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
           join: p.get("join").and_then(Value::as_bool).unwrap_or(true),
         },
       )

@@ -58,3 +58,6 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+403-bodies-partial-angle
+404-bodies-symmetric-angle
+405-features-cut-half-turn

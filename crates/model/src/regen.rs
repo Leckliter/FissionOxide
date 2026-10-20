@@ -778,16 +778,30 @@ impl Ctx<'_> {
         }
         Ok(None)
       }
-      FeatureKind::CircularPattern { bodies, axis, count, angle, join } => {
+      FeatureKind::CircularPattern { bodies, axis, count, angle, symmetric, join } => {
         let (o, d) = self.resolve_axis(axis, None)?;
         let n = self.count(count)?;
         let total = self.angle(angle)?;
         let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
         let step = if full || n < 2 { total / n as f64 } else { total / (n - 1) as f64 };
+        // Symmetric (short of a full turn): the instances span -total/2..total/2.
+        let start = if *symmetric && !full && n >= 2 { -total / 2.0 } else { 0.0 };
+        let angles: Vec<f64> = (0..n).map(|k| start + step * k as f64).collect();
+        // The original stays put when an instance lands on it; otherwise (an even symmetric
+        // count) it moves to the first instance.
+        let stay = angles.iter().position(|a| a.abs() < 1e-12);
         for bi in self.select(bodies)? {
           let body = self.state.bodies[bi].clone();
+          let rest: Vec<f64> = match stay {
+            Some(i) => angles.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, a)| *a).collect(),
+            None => {
+              let moved = body.shape.rotated(o, d, angles[0]).map_err(ke)?;
+              self.state.bodies[bi] = body.with_shape(moved, id);
+              angles[1..].to_vec()
+            }
+          };
           let copies: Result<Vec<Shape>, String> =
-            (1..n).map(|k| body.shape.rotated(o, d, step * k as f64).map_err(ke)).collect();
+            rest.iter().map(|a| body.shape.rotated(o, d, *a).map_err(ke)).collect();
           self.add_copies(id, bi, copies?, *join)?;
         }
         Ok(None)
