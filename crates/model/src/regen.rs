@@ -397,7 +397,6 @@ struct Ctx<'a> {
   /// The design's behaviour flags: gate a feature-level geometry change on
   /// `self.behaviours.has(..)` (sketch-level ones on the sketch's own set). See
   /// [`fox_sketch::behaviour`].
-  #[allow(dead_code)] // read by the first regen-level gate
   behaviours: &'a crate::Behaviours,
 }
 
@@ -1314,6 +1313,8 @@ impl Ctx<'_> {
         {
           return Err("the fixed component no longer exists".into());
         }
+        // designs from before FUSION_JOINT_AXES face the Z axes unless flipped: the opposite mate
+        let flip = if self.behaviours.has(fox_sketch::behaviour::FUSION_JOINT_AXES) { *flip } else { !*flip };
         let mut motion = assembly::Motion {
           rotation: self.angle(rotation)?,
           slide: self.len(slide)?,
@@ -1326,7 +1327,7 @@ impl Ctx<'_> {
         }
         if self.mates.cam(id).is_some() {
           let (fixed_frame, moving_frame) = (self.joint_frame(fixed_origin)?, self.joint_frame(moving_origin)?);
-          let (kind, a, o, fl, ab) = (*joint_kind, self.angle(angle)?, self.len(offset)?, *flip, *as_built);
+          let (kind, a, o, fl, ab) = (*joint_kind, self.angle(angle)?, self.len(offset)?, flip, *as_built);
           let place = |m: assembly::Motion| assembly::joint_transform(fixed_frame, moving_frame, kind, a, o, fl, ab, m);
           motion.slide = self.cam_slide(id, moving_frame, &place, motion)?;
         }
@@ -1355,7 +1356,7 @@ impl Ctx<'_> {
           *joint_kind,
           self.angle(angle)?,
           self.len(offset)?,
-          *flip,
+          flip,
           *as_built,
           motion,
         );

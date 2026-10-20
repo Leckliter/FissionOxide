@@ -6,4 +6,4 @@
 {"cmd": "component.ground", "component": 1}
 {"cmd": "cylinder", "radius": 5, "height": 10, "at": [40, 0]}
 {"cmd": "component.create", "name": "B", "bodies": [2000]}
-{"cmd": "joint", "moving": 2, "moving_origin": {"at": [40, 0, 0]}, "fixed": 1, "fixed_origin": {"at": [0, 0, 13]}, "kind": "rigid", "flip": true, "angle": "0 deg"}
+{"cmd": "joint", "moving": 2, "moving_origin": {"at": [40, 0, 0]}, "fixed": 1, "fixed_origin": {"at": [0, 0, 13]}, "kind": "rigid", "angle": "0 deg"}

@@ -139,6 +139,14 @@
 270-triangle-acute-obtuse-vertex
 271-apparent-intersection-gap
 272-crossing-lines-overshoot
+297-hinged-plate-angle
+310-rigid-peg-second-point
+311-revolute-angle-second-point
+312-three-face-flush-offset
+313-concentric-stack-offset
+314-vertex-face-angle
+320-group-follows-joint-translate
+321-group-follows-joint-rotate
 322-rigid-face-offset-angle
 323-revolute-hole-edge-on-pin
 324-cylindrical-hole-face-on-pin

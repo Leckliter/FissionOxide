@@ -1,7 +1,6 @@
 # 321-group-follows-joint-rotate: added by the parity loop from a Fusion probe
 # Rigid Group: grounded base A 60x20x5; floating blocks B (x 0..10, y 0..10, z 20..30) and C (x 15..25) rigid-grouped,
 # then a 90 deg rigid joint mates C's bottom centre (20,5,20) to (30,10,5) on A's top: B swings round with C.
-# flip: Fusion's point joints keep both sketch-normal Z axes pointing the same way; Fox's default opposes them.
 {"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
 {"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [60, 20]}
 {"cmd": "sketch.finish"}
@@ -19,5 +18,5 @@
 {"cmd": "component.create", "name": "C", "bodies": [6000]}
 {"cmd": "component.ground", "component": 1}
 {"cmd": "rigid_group", "components": [2, 3]}
-{"cmd": "joint", "moving": 3, "moving_origin": {"at": [20, 5, 20]}, "fixed": 1, "fixed_origin": {"at": [30, 10, 5]}, "kind": "rigid", "angle": "90 deg", "flip": true}
+{"cmd": "joint", "moving": 3, "moving_origin": {"at": [20, 5, 20]}, "fixed": 1, "fixed_origin": {"at": [30, 10, 5]}, "kind": "rigid", "angle": "90 deg"}
 {"cmd": "info"}

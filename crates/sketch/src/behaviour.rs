@@ -59,10 +59,16 @@ pub const ONE_EDGE_FIT_SPLINE: &str = "one_edge_fit_spline";
 /// it (an end lying on it, a dangling line pruned from the profile), become one arc, or the whole
 /// circle, where they run on into each other in a loop.
 pub const ONE_EDGE_SPLIT_ARCS: &str = "one_edge_split_arcs";
+/// Joint axes as in Fusion: an unflipped joint lines the moving origin's axes up with the fixed
+/// origin's (the Z axes the same way), and flipping turns the moving frame half a turn about its X
+/// so the Z axes face each other. Without it (designs saved before), the Z axes face each other
+/// unless the joint is flipped.
+pub const FUSION_JOINT_AXES: &str = "fusion_joint_axes";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
   // one name per line, e.g. MERGE_SMOOTH_EDGES,
+  FUSION_JOINT_AXES,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

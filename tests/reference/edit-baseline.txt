@@ -58,6 +58,11 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+297-hinged-plate-angle
+310-rigid-peg-second-point
+311-revolute-angle-second-point
+320-group-follows-joint-translate
+321-group-follows-joint-rotate
 322-rigid-face-offset-angle
 323-revolute-hole-edge-on-pin
 324-cylindrical-hole-face-on-pin
