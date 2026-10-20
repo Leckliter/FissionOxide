@@ -246,6 +246,7 @@ cmds! {
   "sheet.refold" => "Fold an unfolded sheet back up, carrying cuts made while flat", "{body?}";
   "sheet.unfold" => "Flatten a sheet metal body onto its stationary face (timeline feature)", "{body?, face?, keep_folded?}";
   "sheet.flat_pattern" => "Flat pattern of a sheet metal body: size and bends; writes .dxf/.step/.stl when given a path", "{body?, face?, path?}";
+  "sheet.check" => "Check a sheet metal body's flat pattern against the rules shops cut by: hole sizes, material between holes and edges, holes near bends, and the sheet size; defaults follow the body's thickness and bend radius", "{body?, face?, min_hole?, min_web?, bend_clearance?, sheet?: [width, height]}";
   "emboss" => "Raise (or with deboss, sink) sketch profiles or text on a face, projected or wrapped around a cylinder", "{sketch?, profiles?, face, depth, deboss?, wrap?}";
   "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?}";
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
@@ -1127,6 +1128,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       add_feature(s, FeatureKind::Unfold { body, face, keep_folded })
     }
     "sheet.flat_pattern" => flat_pattern(s, p),
+    "sheet.check" => sheet_check(s, p),
     "sketch.text"
     | "sketch.text_edit"
     | "sketch.text_explode"
@@ -1475,7 +1477,11 @@ pub(crate) fn sheet_body(s: &Session, p: &Value) -> Result<BodyId, CmdError> {
   }
 }
 
-fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
+/// The flat pattern of the sheet metal body in `p` (`body?`, stationary `face?`).
+fn flat_of<'a>(
+  s: &'a Session,
+  p: &Value,
+) -> Result<(BodyId, &'a fox_model::regen::Body, fox_model::sheet::FlatPattern), CmdError> {
   let id = sheet_body(s, p)?;
   let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
   let face = match p.get("face") {
@@ -1489,6 +1495,53 @@ fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
     None => None,
   };
   let flat = body.flat_pattern(face).map_err(CmdError::new)?;
+  Ok((id, body, flat))
+}
+
+/// Checks a sheet metal body's flat pattern against the rules shops cut by.
+fn sheet_check(s: &Session, p: &Value) -> CmdResult {
+  let (id, body, flat) = flat_of(s, p)?;
+  let info = body.sheet.as_ref().ok_or(CmdError::new("not a sheet metal body"))?;
+  let mut rules = fox_model::cutcheck::Rules::for_sheet(info.thickness, info.bend_radius);
+  let scope = params_scope(s);
+  let len = |k: &str| -> Result<Option<f64>, CmdError> {
+    match p.get(k) {
+      Some(v) => Ok(Some(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &scope)?)),
+      None => Ok(None),
+    }
+  };
+  if let Some(v) = len("min_hole")? {
+    rules.min_hole = v;
+  }
+  if let Some(v) = len("min_web")? {
+    rules.min_web = v;
+  }
+  if let Some(v) = len("bend_clearance")? {
+    rules.bend_clearance = v;
+  }
+  if let Some(a) = p.get("sheet").and_then(Value::as_array) {
+    let side = |k: usize| a.get(k).ok_or(CmdError::new("sheet is [width, height]")).and_then(expr_of);
+    let (w, h) = (side(0)?, side(1)?);
+    rules.sheet =
+      Some([fox_expr::eval(&w, fox_expr::Kind::Length, &scope)?, fox_expr::eval(&h, fox_expr::Kind::Length, &scope)?]);
+  }
+  let (contours, bends) = fox_model::sheet::flat_contours(&flat).map_err(CmdError::new)?;
+  let findings = fox_model::cutcheck::check(&contours, &bends, &rules);
+  Ok(json!({
+    "body": id.0,
+    "ok": findings.is_empty(),
+    "findings": findings,
+    "rules": {
+      "min_hole": rules.min_hole,
+      "min_web": rules.min_web,
+      "bend_clearance": rules.bend_clearance,
+      "sheet": rules.sheet,
+    },
+  }))
+}
+
+fn flat_pattern(s: &Session, p: &Value) -> CmdResult {
+  let (id, body, flat) = flat_of(s, p)?;
   let m = flat.shape.mass()?;
   // size in the stationary plane
   let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);

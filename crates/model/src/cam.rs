@@ -13,6 +13,7 @@ use crate::regen::{Body, Model};
 use crate::{BodyId, FaceRef};
 
 pub mod adaptive;
+pub mod arcs;
 pub mod post;
 pub mod region;
 pub mod rest;

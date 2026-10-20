@@ -73,7 +73,9 @@ change a parameter and watch the whole history rebuild.
   closed, overlap) with round, square or tear corner reliefs, rectangular or round bend reliefs,
   and a flat pattern with bend lines exported as DXF (also STEP/STL) or made into an editable
   sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
-  bends running straight into other bends — come out in the flat pattern.
+  bends running straight into other bends — come out in the flat pattern. The flat pattern is
+  checked the way a shop checks a cut file: holes smaller than the material is thick, too little
+  material between holes and edges, holes too close to a bend, a part too big for the sheet.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
   parameter-driven motion and limits, as-built joints, motion studies, interference checks and a
