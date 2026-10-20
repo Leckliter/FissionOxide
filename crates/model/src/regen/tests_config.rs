@@ -135,6 +135,7 @@ fn joint_override_moves_the_component_and_keeps_the_joint() {
       slide2: "0".into(),
       pitch: "0".into(),
       limits: Default::default(),
+      lead: "0".into(),
     })
     .unwrap();
   let m = regenerate(&mut d);

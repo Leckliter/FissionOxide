@@ -12,4 +12,6 @@
 {"cmd": "sketch.line", "points": [[0, 60], [0, 0]]}
 {"cmd": "sketch.finish"}
 {"cmd": "sheet.flange", "sketch": 1, "rule": "Steel (mm)"}
-{"cmd": "sheet.edge_flange", "edges": [{"point": [50.0, 60.0, 2.5]}, {"point": [100.0, 30.0, 2.5]}, {"point": [50.0, 0.0, 2.5]}, {"point": [0.0, 30.0, 2.5]}], "height": 25, "angle": "90 deg", "position": "inside"}
+# the source's corners: walls run on, cut square, until their inside corners are the rule gap (the thickness) apart
+{"cmd": "sheet.rule", "name": "Steel (mm)", "gap": "sm_thickness"}
+{"cmd": "sheet.edge_flange", "edges": [{"point": [50.0, 60.0, 2.5]}, {"point": [100.0, 30.0, 2.5]}, {"point": [50.0, 0.0, 2.5]}, {"point": [0.0, 30.0, 2.5]}], "height": 25, "angle": "90 deg", "position": "inside", "corners": "butt"}

@@ -18,7 +18,8 @@ pub struct TextId(pub u32);
 pub struct SketchText {
   pub id: TextId,
   pub text: String,
-  /// One of [`text_fonts`].
+  /// One of [`text_fonts`], a font file's path, or the name of a font in the system's font
+  /// folders (see [`crate::system_fonts`]).
   pub font: String,
   /// Capital letter height (mm).
   pub height: f64,
@@ -34,17 +35,10 @@ pub struct SketchText {
   pub local: Vec<[f64; 2]>,
 }
 
-/// The fonts text can use: the UI's proportional font and its monospace font.
+/// The built-in fonts: the UI's proportional font and its monospace font. A text can also use a
+/// font file from disk, by path or by name (see [`crate::system_fonts`]).
 pub fn text_fonts() -> &'static [&'static str] {
   &["sans", "mono"]
-}
-
-fn font_data(font: &str) -> Result<&'static [u8], SketchError> {
-  match font {
-    "" | "sans" => Ok(epaint_default_fonts::UBUNTU_LIGHT),
-    "mono" => Ok(epaint_default_fonts::HACK_REGULAR),
-    other => Err(SketchError::InvalidValue(format!("unknown font '{other}' (sans or mono)"))),
-  }
 }
 
 /// Glyph outlines in text coordinates: `contours` of points, with each curve as a list of indices.
@@ -138,7 +132,8 @@ fn outline(text: &str, font: &str, height: f64) -> Result<Glyphs, SketchError> {
   if text.chars().count() > MAX_CHARS {
     return Err(SketchError::InvalidValue(format!("at most {MAX_CHARS} characters")));
   }
-  let face = ttf_parser::Face::parse(font_data(font)?, 0)
+  let data = crate::fonts::font_data(font)?;
+  let face = ttf_parser::Face::parse(data.bytes(), 0)
     .map_err(|e| SketchError::InvalidValue(format!("the font could not be read: {e}")))?;
   let cap = face.capital_height().filter(|h| *h > 0).map(f64::from).unwrap_or(f64::from(face.ascender()) * 0.7);
   let k = height / cap;
@@ -418,7 +413,7 @@ mod tests {
     json.as_object_mut().unwrap().remove("texts");
     let back: Sketch = serde_json::from_value(json).unwrap();
     assert_eq!(back.curves.len(), curves.len());
-    assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "comic", 5.0, 0.0).is_err());
+    assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "comic-no-such-font", 5.0, 0.0).is_err());
     assert!(s.add_text(PtSpec::At(0.0, 0.0), "x", "sans", 0.0, 0.0).is_err());
   }
 }

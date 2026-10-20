@@ -131,7 +131,7 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
         }
         Status::Checking => {
           ui.horizontal(|ui| {
-            ui.spinner();
+            crate::logo::ripple(ui, 18.0);
             ui.label("Looking for a newer version…");
           });
         }

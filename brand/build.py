@@ -7,12 +7,15 @@ Sources (edit these):
 
 Outputs (never edit by hand; re-run this script):
   brand/logo/           fox, single-colour fox, app icons, wordmarks (SVG) and PNG renders
-  brand/logo/motion/    animated SVGs: start-up splash and two loading indicators
+  brand/logo/motion/    animated SVGs: start-up splash and two loading indicators, and the splash's
+                        letters as an image for apps that play it themselves
   brand/web/            tokens.css, tokens.js, tailwind.preset.js, favicons, web manifest,
                         social preview image, head.html snippet
   brand/index.html      the brand guide
-  brand/windows/        the Windows app icon (.ico) and the installer's wizard images (.bmp)
-  crates/brand/src/tokens.rs, logo.rs   the same tokens and logo for Rust apps (fox-brand)
+  brand/windows/        the Windows app icon (.ico), the installer's wizard images (.bmp) and the
+                        ripple loader's frames for its progress page (loader/)
+  crates/brand/src/tokens.rs, logo.rs, motion.rs   the same tokens, logo and animation timing for
+                        Rust apps (fox-brand)
 
 Needs Python 3.9+, fontTools and resvg-py (pip install fonttools resvg-py), ImageMagick's
 `convert` for favicon.ico and the Windows icon and bitmaps, and the Inter font family (OFL, https://rsms.me/inter/). The wordmark
@@ -22,6 +25,7 @@ Run from anywhere: python3 brand/build.py
 
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -237,7 +241,9 @@ def stripe_stops():
 
 
 def text_glyphs(text, cap_px, font="InterDisplay-Bold.otf"):
-  """Like text_path, one outline per character: [(char, path, x, advance)], baseline at y=0."""
+  """Like text_path, one outline per character: [(char, path, x, advance, (x0, y0, x1, y1))],
+  baseline at y=0."""
+  from fontTools.pens.boundsPen import BoundsPen
   from fontTools.pens.svgPathPen import SVGPathPen
   from fontTools.pens.transformPen import TransformPen
 
@@ -248,8 +254,11 @@ def text_glyphs(text, cap_px, font="InterDisplay-Bold.otf"):
   out, x = [], 0
   for i, name in enumerate(names):
     pen = SVGPathPen(gs, ntos=lambda v: f"{v:.2f}".rstrip("0").rstrip("."))
-    gs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, x * scale, 0)))
-    out.append((text[i], pen.getCommands(), x * scale, gs[name].width * scale))
+    tf = (scale, 0, 0, -scale, x * scale, 0)
+    gs[name].draw(TransformPen(pen, tf))
+    bounds = BoundsPen(gs)
+    gs[name].draw(TransformPen(bounds, tf))
+    out.append((text[i], pen.getCommands(), x * scale, gs[name].width * scale, bounds.bounds))
     x += gs[name].width
     if i + 1 < len(names):
       x += kern.get((name, names[i + 1]), 0)
@@ -285,71 +294,122 @@ def far():
   return max(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 for _, p in facets() for x, y in p)
 
 
+# When each part of the splash moves (seconds). splash.svg's CSS and the desktop app's native
+# splash (fox-brand's motion.rs) both read these.
+SPLASH_T = {
+  "shard_for": 0.95,  # each shard's flight
+  "flash_for": 0.9,  # the glow at the nucleus
+  "ring_at": 0.35,
+  "ring_for": 1.0,
+  "pop_for": 0.45,  # F, O and x popping up
+  "pops": (1.05, 1.17, 1.29),
+  "open_at": 1.95,  # FOX opens out to FissionOxide
+  "open_for": 0.75,
+  "shrink_for": 0.6,  # the x settling to lower case
+  "unfold_for": 0.35,  # each hidden letter unfolding
+}
+
+
+def cs(v):
+  """Seconds as splash.svg has always spelled them: .95, 1.05."""
+  return f"{v:g}".removeprefix("0") if 0 < v < 1 else f"{v:g}"
+
+
+def burst(i, p):
+  """A splash shard's start, relative to its place in the fox: (dx, dy, degrees, delay s)."""
+  cx, cy = NUCLEUS
+  mx, my = centroid(p)
+  d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / far()
+  rot = (-1) ** i * (40 + (i * 37) % 80)
+  return round(cx - mx), round(cy - my), rot, round(0.35 + d * 0.45 + (i % 5) * 0.025, 2)
+
+
+def splash_plan():
+  """Where the splash's name sits and how its letters move. The glyphs' x and the offsets are in
+  the name's own space: baseline at y=0, the F's origin at x=0."""
+  cap = 168
+  name = T["name"]
+  glyphs = text_glyphs(name, cap)
+  _, adv = text_path(name, cap)
+  o = name.index("O")
+  x = name.index("x", o)
+  shift = glyphs[1][2] - glyphs[o][2]  # O and x slide left to sit where the second letter is
+  fox_w = glyphs[x][2] + glyphs[x][3] + shift
+  open_at = SPLASH_T["open_at"]
+  # each letter's part: ("pop", delay) for F, O, x; ("unfold", delay) for the rest
+  roles = {0: ("pop", SPLASH_T["pops"][0]), o: ("pop", SPLASH_T["pops"][1]), x: ("pop", SPLASH_T["pops"][2])}
+  for i in range(1, o):  # revealed as the O slides past each letter's right edge
+    right = glyphs[i][2] + glyphs[i][3]
+    roles[i] = ("unfold", round(open_at + 0.17 + 0.5 * (right - glyphs[1][2]) / -shift, 2))
+  for j, i in enumerate(range(x + 1, len(name))):
+    roles[i] = ("unfold", round(open_at + 0.5 + j * 0.06, 2))
+  return {
+    "cap": cap,
+    "glyphs": glyphs,
+    "roles": roles,
+    "o": o,
+    "x": x,
+    "shift": round(shift),
+    "centre": round((adv - fox_w) / 2),  # while it reads FOX, the short word is centred under the name's span
+    "text_x": W + 70,
+    "baseline": H * 0.55 + cap / 2,
+    "width": W + 70 + adv + 8,
+    "x_scale": round(x_height_ratio(), 3),
+  }
+
+
 def splash():
   """Start-up animation (about 3 s, plays once): the fox bursts out of a nucleus, "FOX" pops up
   beside it from the name's own F, O and x (the x raised to capital height), then the name opens
   out to FissionOxide. The last frame is wordmark.svg exactly."""
   cx, cy = NUCLEUS
-  reach = far()
+  t = SPLASH_T
+  plan = splash_plan()
+  glyphs, roles, o, x = plan["glyphs"], plan["roles"], plan["o"], plan["x"]
+  open_at, open_for = t["open_at"], t["open_for"]
 
-  def burst(i, p):
-    mx, my = centroid(p)
-    d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / reach
-    rot = (-1) ** i * (40 + (i * 37) % 80)
-    return f"--dx:{cx - mx:.0f}px;--dy:{cy - my:.0f}px;--r:{rot}deg;--d:{0.35 + d * 0.45 + (i % 5) * 0.025:.2f}s"
-
-  cap = 168
-  name = T["name"]
-  glyphs = text_glyphs(name, cap)
-  _, adv = text_path(name, cap)
-  text_x = W + 70
-  baseline = H * 0.55 + cap / 2
-  width = text_x + adv + 8
-  o = name.index("O")
-  x = name.index("x", o)
-  shift = glyphs[1][2] - glyphs[o][2]  # O and x slide left to sit where the second letter is
-  fox_w = glyphs[x][2] + glyphs[x][3] + shift
-  centre = (adv - fox_w) / 2  # while it reads FOX, the short word is centred under the name's span
-  open_at, open_for = 1.95, 0.75
+  def shard_style(i, p):
+    dx, dy, rot, delay = burst(i, p)
+    return f"--dx:{dx}px;--dy:{dy}px;--r:{rot}deg;--d:{delay:.2f}s"
 
   def g(i, cls, style=""):
     st = f' style="{style}"' if style else ""
     return f'      <g class="{cls}"{st}><path d="{glyphs[i][1]}"/></g>'
 
   rows = [g(0, "fox f1")]
-  for i in range(1, o):  # revealed as the O slides past each letter's right edge
-    right = glyphs[i][2] + glyphs[i][3]
-    rows.append(g(i, "hid", f"--h:{open_at + 0.17 + 0.5 * (right - glyphs[1][2]) / -shift:.2f}s"))
+  for i in range(1, o):
+    rows.append(g(i, "hid", f"--h:{roles[i][1]:.2f}s"))
   rows.append(
     '      <g class="slide">\n'
     f'        <g class="fox f2"><path d="{glyphs[o][1]}"/></g>\n'
     f'        <g class="fox f3"><path d="{glyphs[x][1]}"/></g>\n'
     "      </g>"
   )
-  for j, i in enumerate(range(x + 1, len(name))):
-    rows.append(g(i, "hid", f"--h:{open_at + 0.5 + j * 0.06:.2f}s"))
-  xs = x_height_ratio()
+  for i in range(x + 1, len(glyphs)):
+    rows.append(g(i, "hid", f"--h:{roles[i][1]:.2f}s"))
+  xs = plan["x_scale"]
   pop = "cubic-bezier(.3,1.6,.5,1)"
   ease = "cubic-bezier(.65,0,.25,1)"
+  f1, f2, f3 = t["pops"]
   style = (
     f".ink{{fill:{LIGHT['wordmark']}}}@media (prefers-color-scheme:dark){{.ink{{fill:{DARK['wordmark']}}}}}"
-    ".shard{transform-box:fill-box;transform-origin:center;animation:shard .95s cubic-bezier(.2,1.35,.4,1) var(--d) both}"
+    f".shard{{transform-box:fill-box;transform-origin:center;animation:shard {cs(t['shard_for'])}s cubic-bezier(.2,1.35,.4,1) var(--d) both}}"
     "@keyframes shard{from{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--r)) scale(.1)}35%{opacity:1}to{opacity:1;transform:none}}"
-    ".flash{transform-box:fill-box;transform-origin:center;animation:flash .9s ease-out both}"
+    f".flash{{transform-box:fill-box;transform-origin:center;animation:flash {cs(t['flash_for'])}s ease-out both}}"
     "@keyframes flash{0%{opacity:0;transform:scale(.2)}30%{opacity:1;transform:scale(1)}55%{opacity:1;transform:scale(.7)}100%{opacity:0;transform:scale(3.2)}}"
-    ".ring{transform-box:fill-box;transform-origin:center;animation:ring 1s ease-out .35s both}"
+    f".ring{{transform-box:fill-box;transform-origin:center;animation:ring {cs(t['ring_for'])}s ease-out {cs(t['ring_at'])}s both}}"
     "@keyframes ring{from{opacity:.8;transform:scale(.1)}to{opacity:0;transform:scale(2.6)}}"
     f".word{{animation:centre {open_for}s {ease} {open_at}s both}}"
-    f"@keyframes centre{{from{{transform:translateX({centre:.0f}px)}}to{{transform:none}}}}"
+    f"@keyframes centre{{from{{transform:translateX({plan['centre']}px)}}to{{transform:none}}}}"
     f".slide{{animation:slide {open_for}s {ease} {open_at}s both}}"
-    f"@keyframes slide{{from{{transform:translateX({shift:.0f}px)}}to{{transform:none}}}}"
-    f".fox{{transform-box:fill-box;transform-origin:50% 100%;animation:pop .45s {pop} both}}"
-    ".f1{animation-delay:1.05s}.f2{animation-delay:1.17s}"
-    f".f3{{animation:popx .45s {pop} 1.29s both,shrink .6s {ease} {open_at + 0.05:.2f}s forwards}}"
+    f"@keyframes slide{{from{{transform:translateX({plan['shift']}px)}}to{{transform:none}}}}"
+    f".fox{{transform-box:fill-box;transform-origin:50% 100%;animation:pop {cs(t['pop_for'])}s {pop} both}}"
+    f".f1{{animation-delay:{f1}s}}.f2{{animation-delay:{f2}s}}"
+    f".f3{{animation:popx {cs(t['pop_for'])}s {pop} {f3}s both,shrink {cs(t['shrink_for'])}s {ease} {open_at + 0.05:.2f}s forwards}}"
     "@keyframes pop{from{opacity:0;transform:translateY(60px) scale(.6)}to{opacity:1;transform:none}}"
     f"@keyframes popx{{from{{opacity:0;transform:translateY(60px) scale(.8)}}to{{opacity:1;transform:scale({xs:.3f})}}}}"
     f"@keyframes shrink{{from{{transform:scale({xs:.3f})}}to{{transform:scale(1)}}}}"
-    ".hid{transform-box:fill-box;transform-origin:50% 100%;animation:unfold .35s cubic-bezier(.3,1.4,.5,1) var(--h) both}"
+    f".hid{{transform-box:fill-box;transform-origin:50% 100%;animation:unfold {cs(t['unfold_for'])}s cubic-bezier(.3,1.4,.5,1) var(--h) both}}"
     "@keyframes unfold{from{opacity:0;transform:scaleX(.2) translateY(20px)}to{opacity:1;transform:none}}"
     + REDUCED
   )
@@ -365,14 +425,38 @@ def splash():
   <circle class="flash" cx="{cx}" cy="{cy}" r="90" fill="url(#glow)"/>
   <circle class="ring" cx="{cx}" cy="{cy}" r="120" fill="none" stroke="{blue['light']}" stroke-width="6"/>
   <g>
-{shard_paths("shard", burst)}
+{shard_paths("shard", shard_style)}
   </g>
-  <g class="ink" transform="translate({text_x:g} {baseline:g})">
+  <g class="ink" transform="translate({plan['text_x']:g} {plan['baseline']:g})">
     <g class="word">
 {chr(10).join(rows)}
     </g>
   </g>"""
-  return svg(width, H, inner, style=style)
+  return svg(plan["width"], H, inner, style=style)
+
+
+RIPPLE_PERIOD = 1.6
+RIPPLE_PAD = 30
+
+
+def ripple_lag(p):
+  """How far behind the nose a facet's ripple runs (s): the wave takes 0.9 s to reach the ear tips."""
+  cx, cy = NUCLEUS
+  mx, my = centroid(p)
+  return round(((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / far() * 0.9, 2)
+
+
+def ripple_glow():
+  """The ripple's nose glow: [(offset, colour, opacity)]."""
+  return [(0, "#FFFFFF", 1), (0.4, COLOR["amber"]["light"], 1), (1, COLOR["orange"]["base"], 0)]
+
+
+def ripple_stops():
+  rows = []
+  for off, c, a in ripple_glow():
+    op = "" if a == 1 else f' stop-opacity="{a:g}"'
+    rows.append(f'      <stop offset="{cs(off)}" stop-color="{c}"{op}/>')
+  return "\n".join(rows)
 
 
 def loader(kind):
@@ -402,12 +486,10 @@ def loader(kind):
     inner = f"  <g transform=\"translate({pad} {pad})\">\n{shard_paths('f', st)}\n  </g>"
     w, h = W + 2 * pad, H + 2 * pad
   else:
-    period = 1.6
+    period = RIPPLE_PERIOD
 
     def st(i, p):
-      mx, my = centroid(p)
-      d = ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 / reach
-      return f"animation-delay:{-period + d * 0.9:.2f}s"
+      return f"animation-delay:{-period + ripple_lag(p):.2f}s"
 
     style = (
       f".f{{transform-box:fill-box;transform-origin:center;animation:w {period}s ease-in-out infinite}}"
@@ -416,12 +498,10 @@ def loader(kind):
       "@keyframes n{0%{opacity:.9;transform:scale(.3)}60%,100%{opacity:0;transform:scale(2.4)}}"
       + slow
     )
-    pad = 30
+    pad = RIPPLE_PAD
     inner = f"""  <defs>
     <radialGradient id="glow">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset=".4" stop-color="{COLOR['amber']['light']}"/>
-      <stop offset="1" stop-color="{COLOR['orange']['base']}" stop-opacity="0"/>
+{ripple_stops()}
     </radialGradient>
   </defs>
   <g transform="translate({pad} {pad})">
@@ -431,6 +511,233 @@ def loader(kind):
     w, h = W + 2 * pad, H + 2 * pad
   out = svg(w, h, inner, title="Loading", style=style)
   return out.replace(f'width="{w:g}" height="{h:g}"', f'width="128" height="{128 * h / w:.0f}"', 1)
+
+
+def cubic_bezier(x1, y1, x2, y2):
+  """A CSS timing function: progress in, eased progress out."""
+
+  def ease(x):
+    if x <= 0 or x >= 1:
+      return min(max(x, 0.0), 1.0)
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+      t = (lo + hi) / 2
+      if 3 * (1 - t) ** 2 * t * x1 + 3 * (1 - t) * t * t * x2 + t**3 < x:
+        lo = t
+      else:
+        hi = t
+    t = (lo + hi) / 2
+    return 3 * (1 - t) ** 2 * t * y1 + 3 * (1 - t) * t * t * y2 + t**3
+
+  return ease
+
+
+EASE_IN_OUT = cubic_bezier(0.42, 0, 0.58, 1)
+EASE_OUT = cubic_bezier(0, 0, 0.58, 1)
+
+
+def keyframes(keys, u, ease):
+  """Values at progress u of [(at, values...)], each segment eased like CSS does."""
+  for (a, *va), (b, *vb) in zip(keys, keys[1:]):
+    if u <= b:
+      k = ease((u - a) / (b - a))
+      return [x + (y - x) * k for x, y in zip(va, vb)]
+  return keys[-1][1:]
+
+
+RIPPLE_FACET = [(0, 1, 1), (0.2, 0.35, 0.86), (0.55, 1, 1), (1, 1, 1)]  # (at, opacity, scale)
+RIPPLE_NOSE = [(0, 0.9, 0.3), (0.6, 0, 2.4), (1, 0, 2.4)]
+
+
+def ripple_frame(t):
+  """loader-ripple.svg at time t as a still SVG (for renderers that don't animate)."""
+  cx, cy = NUCLEUS
+  rows = []
+  for c, p in facets():
+    u = ((t - (-RIPPLE_PERIOD + ripple_lag(p))) / RIPPLE_PERIOD) % 1
+    op, sc = keyframes(RIPPLE_FACET, u, EASE_IN_OUT)
+    xs, ys = [x for x, _ in p], [y for _, y in p]
+    bx, by = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    tf = f"translate({bx:g} {by:g}) scale({sc:.4f}) translate({-bx:g} {-by:g})"
+    rows.append(
+      f'    <path transform="{tf}" opacity="{op:.4f}" d="{poly(p)}" fill="{c}" stroke="{c}" stroke-width="0.8" stroke-linejoin="round"/>'
+    )
+  op, sc = keyframes(RIPPLE_NOSE, (t / RIPPLE_PERIOD) % 1, EASE_OUT)
+  pad = RIPPLE_PAD
+  inner = f"""  <defs>
+    <radialGradient id="glow">
+{ripple_stops()}
+    </radialGradient>
+  </defs>
+  <g transform="translate({pad} {pad})">
+{chr(10).join(rows)}
+    <circle transform="translate({cx} {cy}) scale({sc:.4f})" opacity="{op:.4f}" r="70" fill="url(#glow)"/>
+  </g>"""
+  return svg(W + 2 * pad, H + 2 * pad, inner, title="Loading")
+
+
+INSTALLER_LOADER_FRAMES = 20
+INSTALLER_LOADER_WIDTH = 48  # at 100% screen scaling
+
+
+def installer_loader():
+  """brand/windows/loader/: the ripple as still frames for the installer's progress page, which
+  can only show bitmaps. loader-<scale>-<frame>.bmp, 24-bit on the wizard's white."""
+  n = INSTALLER_LOADER_FRAMES
+  for scale in (100, 150, 200):
+    width = INSTALLER_LOADER_WIDTH * scale // 100
+    for i in range(n):
+      write("windows/.loader.svg", ripple_frame(i * RIPPLE_PERIOD / n), quiet=True)
+      png("windows/.loader.svg", "windows/.loader.png", width, quiet=True)
+      out = os.path.join(HERE, f"windows/loader/loader-{scale}-{i:02}.bmp")
+      os.makedirs(os.path.dirname(out), exist_ok=True)
+      args = ["-background", LIGHT["background"], "-alpha", "remove", "-type", "TrueColor"]
+      subprocess.run(["convert", os.path.join(HERE, "windows/.loader.png"), *args, f"BMP3:{out}"], check=True)
+    print(f"wrote brand/windows/loader/loader-{scale}-*.bmp ({n} frames)")
+  for p in ("windows/.loader.svg", "windows/.loader.png"):
+    os.remove(os.path.join(HERE, p))
+
+
+GLYPH_PAD = 3  # transparent pixels around each letter in the atlas, so scaling doesn't bleed
+
+
+def splash_atlas():
+  """The splash's letters as one white-on-transparent image (one name unit = one pixel), for apps
+  that draw the splash themselves. Returns the SVG and each letter's (cell in name space, atlas x)."""
+  plan = splash_plan()
+  cells, ax, rows = [], 0, []
+  for ch, d, _, _, (x0, y0, x1, y1) in plan["glyphs"]:
+    c = (math.floor(x0) - GLYPH_PAD, math.floor(y0) - GLYPH_PAD, math.ceil(x1) + GLYPH_PAD, math.ceil(y1) + GLYPH_PAD)
+    cells.append((c, ax))
+    rows.append(f'  <path fill="#FFFFFF" transform="translate({ax - c[0]} {-c[1]})" d="{d}"/>')
+    ax += c[2] - c[0]
+  h = max(c[3] - c[1] for c, _ in cells)
+  return svg(ax, h, "\n".join(rows), title="FissionOxide letters"), cells
+
+
+def rs_f(v):
+  s = f"{round(v, 3):g}"
+  return s if any(ch in s for ch in ".e") else s + ".0"
+
+
+def motion_rs(cells):
+  t = SPLASH_T
+  plan = splash_plan()
+  cx, cy = NUCLEUS
+
+  def stops(rows):
+    return ", ".join(f"({rs_f(o)}, {rs_rgb(c)}, {rs_f(a)})" for o, c, a in rows)
+
+  amber, orange, red, blue = COLOR["amber"], COLOR["orange"], COLOR["red"], COLOR["blue"]
+  o = [
+    GEN.replace("tokens.json", "logo/fox.json and the splash's timing"),
+    "//! The numbers behind `brand/logo/motion/`, for apps that animate the fox themselves (see",
+    "//! [`crate::animate`]). Facet arrays line up with [`crate::logo::FACETS`].",
+    "",
+    "use crate::Rgb;",
+    "",
+    "/// Where the fox's centre line meets the eye mask: shards burst from here, the ripple starts here.",
+    f"pub const NUCLEUS: (f32, f32) = ({rs_f(cx)}, {rs_f(cy)});",
+    "",
+    "/// A radial gradient stop: (offset 0..1, colour, opacity).",
+    "pub type Stop = (f32, Rgb, f32);",
+    "",
+    "/// `splash.svg`: the fox bursts in, \"FOX\" pops up and opens out to the name.",
+    "pub mod splash {",
+    "  use super::Stop;",
+    "  use crate::Rgb;",
+    "",
+    "  /// The canvas: the fox at the origin, the name to its right.",
+    f"  pub const SIZE: (f32, f32) = ({rs_f(plan['width'])}, {rs_f(H)});",
+    "  /// Where the name's baseline starts.",
+    f"  pub const TEXT_ORIGIN: (f32, f32) = ({rs_f(plan['text_x'])}, {rs_f(plan['baseline'])});",
+    "",
+    "  /// Each shard's start relative to its place: (dx, dy, degrees, delay s).",
+    "  pub const SHARDS: &[(f32, f32, f32, f32)] = &[",
+  ]
+  for i, (_, p) in enumerate(facets()):
+    o.append("    (" + ", ".join(rs_f(v) for v in burst(i, p)) + "),")
+  o += [
+    "  ];",
+    f"  pub const SHARD_FOR: f32 = {rs_f(t['shard_for'])};",
+    f"  pub const FLASH_FOR: f32 = {rs_f(t['flash_for'])};",
+    "  pub const FLASH_RADIUS: f32 = 90.0;",
+    f"  pub const FLASH: &[Stop] = &[{stops([(0, '#FFFFFF', 1), (0.35, amber['light'], 1), (0.7, orange['base'], 0.6), (1, red['base'], 0)])}];",
+    f"  pub const RING_AT: f32 = {rs_f(t['ring_at'])};",
+    f"  pub const RING_FOR: f32 = {rs_f(t['ring_for'])};",
+    "  pub const RING_RADIUS: f32 = 120.0;",
+    "  pub const RING_WIDTH: f32 = 6.0;",
+    f"  pub const RING: Rgb = {rs_rgb(blue['light'])};",
+    "",
+    f"  pub const POP_FOR: f32 = {rs_f(t['pop_for'])};",
+    f"  pub const UNFOLD_FOR: f32 = {rs_f(t['unfold_for'])};",
+    f"  pub const OPEN_AT: f32 = {rs_f(t['open_at'])};",
+    f"  pub const OPEN_FOR: f32 = {rs_f(t['open_for'])};",
+    f"  pub const SHRINK_FOR: f32 = {rs_f(t['shrink_for'])};",
+    "  /// While it reads FOX: how far right the word sits, and how far left the O and x slide.",
+    f"  pub const CENTRE: f32 = {rs_f(plan['centre'])};",
+    f"  pub const SHIFT: f32 = {rs_f(plan['shift'])};",
+    "  /// The x stands at capital height (this much taller) until the name opens out.",
+    f"  pub const X_SCALE: f32 = {rs_f(plan['x_scale'])};",
+    "",
+    "  /// How a letter arrives.",
+    "  #[derive(Debug, Clone, Copy, PartialEq)]",
+    "  pub enum Part {",
+    "    /// F, O and x pop up from below at `at` s; `slides` (O and x) move left while it reads FOX,",
+    "    /// `raised` (x) stands at capital height.",
+    "    Pop { at: f32, slides: bool, raised: bool },",
+    "    /// The other letters unfold at `at` s as the name opens out.",
+    "    Unfold { at: f32 },",
+    "  }",
+    "",
+    "  /// One letter of the name. Rectangles are (x0, y0, x1, y1) from [`TEXT_ORIGIN`], y down.",
+    "  #[derive(Debug, Clone, Copy)]",
+    "  pub struct Glyph {",
+    "    pub ch: char,",
+    "    /// The outline's bounds (the origin letters scale about).",
+    "    pub bounds: (f32, f32, f32, f32),",
+    "    /// The rectangle its image in [`GLYPHS_PNG`] covers, `atlas_x` pixels from the image's left.",
+    "    pub cell: (f32, f32, f32, f32),",
+    "    pub atlas_x: f32,",
+    "    pub part: Part,",
+    "  }",
+    "",
+    "  pub const GLYPHS: &[Glyph] = &[",
+  ]
+  for i, ((ch, _, _, _, b), (c, ax)) in enumerate(zip(plan["glyphs"], cells)):
+    kind, at = plan["roles"][i]
+    if kind == "pop":
+      part = f"Part::Pop {{ at: {rs_f(at)}, slides: {str(i in (plan['o'], plan['x'])).lower()}, raised: {str(i == plan['x']).lower()} }}"
+    else:
+      part = f"Part::Unfold {{ at: {rs_f(at)} }}"
+    tup = lambda r: "(" + ", ".join(rs_f(v) for v in r) + ")"
+    o.append(f"    Glyph {{ ch: '{ch}', bounds: {tup(b)}, cell: {tup(c)}, atlas_x: {rs_f(ax)}, part: {part} }},")
+  o += [
+    "  ];",
+    "  /// The letters, white on transparent, one name unit to a pixel (`brand/logo/motion/splash-letters.png`).",
+    '  pub const GLYPHS_PNG: &[u8] = include_bytes!("../../../brand/logo/motion/splash-letters.png");',
+    "}",
+    "",
+    "/// `loader-ripple.svg`: a glow pulses from the nose and a wave runs out to the ear tips.",
+    "pub mod ripple {",
+    "  use super::Stop;",
+    "  use crate::Rgb;",
+    "",
+    f"  pub const PERIOD: f32 = {rs_f(RIPPLE_PERIOD)};",
+    "  /// Room around the fox: the canvas is the fox's size plus this on every side.",
+    f"  pub const PAD: f32 = {rs_f(RIPPLE_PAD)};",
+    "  /// How far behind the nose each facet's wave runs (s).",
+    "  pub const LAG: &[f32] = &[" + ", ".join(rs_f(ripple_lag(p)) for _, p in facets()) + "];",
+    "  /// (at, opacity, scale) through one period, eased in and out between keys.",
+    "  pub const FACET: &[(f32, f32, f32)] = &[" + ", ".join("(" + ", ".join(rs_f(v) for v in k) + ")" for k in RIPPLE_FACET) + "];",
+    "  /// The nose glow's (at, opacity, scale), eased out.",
+    "  pub const NOSE: &[(f32, f32, f32)] = &[" + ", ".join("(" + ", ".join(rs_f(v) for v in k) + ")" for k in RIPPLE_NOSE) + "];",
+    "  pub const NOSE_RADIUS: f32 = 70.0;",
+    f"  pub const GLOW: &[Stop] = &[{stops(ripple_glow())}];",
+    "}",
+    "",
+  ]
+  return "\n".join(o)
 
 
 # ---------------------------------------------------------------- web files
@@ -685,6 +992,7 @@ def guide():
     ("logo/motion/splash.svg", "Start-up animation: the fox bursts in, \"FOX\" opens out to the name. Plays once, about 3 s."),
     ("logo/motion/loader-explode.svg", "Loading indicator: the facets drift apart and snap back (2.4 s loop)."),
     ("logo/motion/loader-ripple.svg", "Loading indicator: a pulse ripples out through the facets (1.6 s loop)."),
+    ("logo/motion/splash-letters.png", "The splash's letters, for apps that play the splash themselves (fox-brand's animate)."),
     ("web/tokens.css", "CSS custom properties, with light and dark themes."),
     ("web/tokens.js", "The tokens as an ES module."),
     ("web/tailwind.preset.js", "Tailwind preset: fox colours, fonts and radii."),
@@ -874,6 +1182,7 @@ def windows_assets():
       args = ["-background", LIGHT["background"], "-alpha", "remove", "-type", "TrueColor"]
       subprocess.run(["convert", os.path.join(HERE, "windows/.small.png"), *args, f"BMP3:{out}"], check=True)
       print(f"wrote brand/windows/wizard-small-{scale}.bmp")
+    installer_loader()
   except (OSError, subprocess.CalledProcessError) as e:
     print(f"Windows icon and bitmaps skipped ({e})", file=sys.stderr)
   for p in tmp + ["windows/.wizard.png", "windows/.small.png"]:
@@ -884,19 +1193,20 @@ def windows_assets():
 # ---------------------------------------------------------------- write everything
 
 
-def write(rel, data):
+def write(rel, data, quiet=False):
   path = os.path.join(HERE, rel) if not rel.startswith("/") else rel
   os.makedirs(os.path.dirname(path), exist_ok=True)
   with open(path, "wb" if isinstance(data, bytes) else "w") as f:
     f.write(data)
-  print("wrote", os.path.relpath(path, ROOT))
+  if not quiet:
+    print("wrote", os.path.relpath(path, ROOT))
 
 
-def png(svg_rel, out_rel, width):
+def png(svg_rel, out_rel, width, quiet=False):
   import resvg_py
 
   data = resvg_py.svg_to_bytes(svg_path=os.path.join(HERE, svg_rel), width=width)
-  write(out_rel, bytes(data))
+  write(out_rel, bytes(data), quiet)
 
 
 def main():
@@ -911,6 +1221,10 @@ def main():
   write("logo/motion/splash.svg", splash())
   write("logo/motion/loader-explode.svg", loader("explode"))
   write("logo/motion/loader-ripple.svg", loader("ripple"))
+  letters, cells = splash_atlas()
+  write("logo/motion/.splash-letters.svg", letters, quiet=True)
+  png("logo/motion/.splash-letters.svg", "logo/motion/splash-letters.png", None)
+  os.remove(os.path.join(HERE, "logo/motion/.splash-letters.svg"))
 
   write("web/tokens.css", tokens_css())
   write("web/tokens.js", tokens_js())
@@ -925,8 +1239,9 @@ def main():
   crate = os.path.join(ROOT, "crates", "brand", "src")
   write(os.path.join(crate, "tokens.rs"), tokens_rs())
   write(os.path.join(crate, "logo.rs"), logo_rs())
+  write(os.path.join(crate, "motion.rs"), motion_rs(cells))
   try:
-    rs = [os.path.join(crate, f) for f in ("tokens.rs", "logo.rs")]
+    rs = [os.path.join(crate, f) for f in ("tokens.rs", "logo.rs", "motion.rs")]
     subprocess.run(["rustfmt", "--edition", "2024", "--config-path", os.path.join(ROOT, "rustfmt.toml"), *rs], check=True)
   except (OSError, subprocess.CalledProcessError) as e:
     print(f"rustfmt skipped ({e}); run cargo fmt", file=sys.stderr)

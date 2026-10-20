@@ -1,0 +1,41 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "thickness-3",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 3,
+          "set": {
+            "thickness": "3"
+          }
+        }
+      ],
+      "expected": {
+        "method": "shell 2 -> 3: L prism minus the L shrunk by 3 from z = 3 (same sharp-corner convention as the base case)",
+        "body_count": 1,
+        "volume_mm3": 11796.0,
+        "area_mm2": 8464,
+        "center_of_mass": [
+          21.112919634,
+          11.112919634,
+          9.628179044
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            60.0,
+            40.0,
+            20.0
+          ]
+        },
+        "faces": 15
+      }
+    }
+  ]
+}

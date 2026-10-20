@@ -1,0 +1,81 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "radius-5",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 3,
+          "set": {
+            "radius": "5"
+          }
+        }
+      ],
+      "expected": {
+        "method": "fillet radius 3 -> 5: box 40x30x20 = inner box 30x20x10 grown by a ball r 5 (Steiner)",
+        "body_count": 1,
+        "volume_mm3": 22235.98775598299,
+        "area_mm2": 4399.114857512855,
+        "center_of_mass": [
+          20.0,
+          15.0,
+          10.0
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            40.0,
+            30.0,
+            20.0
+          ]
+        },
+        "faces": 26
+      }
+    },
+    {
+      "name": "height-24",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 2,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "24"
+            }
+          }
+        }
+      ],
+      "note": "the fillet picks its edges by points on the 20 mm box; the top edges have to follow the edit",
+      "expected": {
+        "method": "extrude 20 -> 24 under the fillet: box 40x30x24 with every edge rounded r 3",
+        "body_count": 1,
+        "volume_mm3": 28109.946710584652,
+        "area_mm2": 5265.663585566178,
+        "center_of_mass": [
+          20.0,
+          15.0,
+          12.0
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            40.0,
+            30.0,
+            24.0
+          ]
+        },
+        "faces": 26
+      }
+    }
+  ]
+}

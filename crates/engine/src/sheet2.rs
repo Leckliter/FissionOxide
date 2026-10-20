@@ -28,6 +28,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           bends: opt_expr(p, "bends").unwrap_or_else(|| "8".into()),
           flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
           rule,
+          rounded: p.get("rounded").and_then(Value::as_bool).unwrap_or(false),
         },
       )
     })(),
@@ -38,19 +39,21 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       add_feature(s, FeatureKind::MiterFlange { sketch, curves, edges, corners: corner_mode(p)? })
     })(),
     "sheet.flat_sketch" => flat_sketch(s, p),
+    "sheet.check_dxf" => check_dxf(s, p),
     "sheet.corner_closure" => corner_closure(s, p),
     _ => return None,
   })
 }
 
-/// `corners`: miter (default) | open | closed | overlap.
+/// `corners`: miter (default) | open | closed | overlap | butt.
 pub(crate) fn corner_mode(p: &Value) -> Result<CornerMode, CmdError> {
   Ok(match opt_str(p, "corners").unwrap_or("miter") {
     "miter" => CornerMode::Miter,
     "open" => CornerMode::Open,
     "closed" => CornerMode::Closed,
     "overlap" => CornerMode::Overlap,
-    o => return Err(CmdError::new(format!("unknown corner mode '{o}' (miter, open, closed, overlap)"))),
+    "butt" => CornerMode::Butt,
+    o => return Err(CmdError::new(format!("unknown corner mode '{o}' (miter, open, closed, overlap, butt)"))),
   })
 }
 
@@ -164,5 +167,72 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
   out["body"] = json!(id.0);
   out["curves"] = json!(curves);
   out["bends"] = json!(bends);
+  Ok(out)
+}
+
+/// A body's flat pattern DXF: layered by role, with bend notes when the body has sheet settings.
+pub(crate) fn flat_dxf(
+  body: &fox_model::regen::Body,
+  flat: &fox_model::sheet::FlatPattern,
+) -> Result<String, CmdError> {
+  match &body.sheet {
+    Some(sheet) => fox_model::sheet::flat_dxf_for(flat, sheet),
+    None => fox_model::sheet::flat_dxf(flat),
+  }
+  .map_err(CmdError::new)
+}
+
+/// Checks a flat pattern DXF file (`path`), or a sheet metal body's flat pattern, against shop
+/// rules. The rules default to the body's sheet (or the file's `SHEET` note); `min_feature` and
+/// `hole_to_bend` override them.
+fn check_dxf(s: &Session, p: &Value) -> CmdResult {
+  use fox_exchange::flatcheck::{self, Rules};
+  let len = |k: &str| -> Result<Option<f64>, CmdError> {
+    match p.get(k) {
+      None => Ok(None),
+      Some(v) => {
+        let e = v.as_f64().map(|x| x.to_string()).or_else(|| v.as_str().map(str::to_string)).unwrap_or_default();
+        Ok(Some(fox_expr::eval(&e, fox_expr::Kind::Length, &s.model.params)?))
+      }
+    }
+  };
+  let (min_feature, hole_to_bend) = (len("min_feature")?, len("hole_to_bend")?);
+  let (bytes, body, sheet) = match opt_str(p, "path") {
+    Some(path) => (std::fs::read(path)?, None, None),
+    None => {
+      let id = sheet_body(s, p)?;
+      let body = s.model.body(id).ok_or(CmdError::new(format!("no body {}", id.0)))?;
+      let face = match p.get("face") {
+        Some(f) => {
+          let r = face_ref(s, f)?;
+          Some(r.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or(CmdError::new("no such face"))?)
+        }
+        None => None,
+      };
+      let flat = body.flat_pattern(face).map_err(CmdError::new)?;
+      (flat_dxf(body, &flat)?.into_bytes(), Some(id), body.sheet.clone())
+    }
+  };
+  let layered = flatcheck::read_layered(&bytes).map_err(|e| CmdError::new(e.to_string()))?;
+  let mut rules = match (&sheet, flatcheck::sheet_note(&layered.texts)) {
+    (Some(sh), _) => Rules::for_sheet(sh.thickness, sh.bend_radius),
+    (None, Some((t, r))) => Rules::for_sheet(t, r),
+    (None, None) if min_feature.is_some() || hole_to_bend.is_some() => Rules::for_sheet(1.0, 1.0),
+    (None, None) => {
+      return Err(CmdError::new("the DXF has no SHEET note: pass min_feature and hole_to_bend"));
+    }
+  };
+  if let Some(v) = min_feature {
+    rules.min_feature = v;
+  }
+  if let Some(v) = hole_to_bend {
+    rules.hole_to_bend = v;
+  }
+  let report = flatcheck::check(&layered, rules);
+  let mut out = serde_json::to_value(&report).map_err(|e| CmdError::new(e.to_string()))?;
+  out["ok"] = json!(report.ok());
+  if let Some(id) = body {
+    out["body"] = json!(id.0);
+  }
   Ok(out)
 }

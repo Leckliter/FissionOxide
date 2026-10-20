@@ -360,3 +360,226 @@ fn balloons_follow_the_parts_list() {
   assert_eq!(back.drawings[0].standard, fox_model::drawing::Standard::Asme);
   assert!(!back.drawings[0].auto_balloons);
 }
+
+/// A scratch directory for exports.
+fn scratch(tag: &str) -> std::path::PathBuf {
+  let dir = std::env::temp_dir().join(format!("fox-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  dir
+}
+
+#[test]
+fn several_sheets_with_their_own_views_and_exports() {
+  let mut s = Session::default();
+  bar(&mut s);
+  let r = run(&mut s, "drawing.add_sheet", json!({"name": "Details", "size": "a4"}));
+  assert_eq!(r["sheet"], 2);
+  // the new sheet is the active one: new views and notes go on it
+  let iso = run(&mut s, "drawing.add_view", json!({"kind": "iso"}))["view"].as_u64().unwrap();
+  run(&mut s, "drawing.note", json!({"at": [30, 180], "text": "SEE SHEET 1"}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert!(info["error"].is_null(), "{info}");
+  assert_eq!(info["sheets"][0]["views"], json!([1]));
+  assert_eq!(info["sheets"][1]["views"], json!([iso]));
+  assert_eq!(info["sheets"][1]["name"], "Details");
+  assert_eq!(info["sheets"][1]["sheet"], "A4");
+  let t = info_text(&mut s);
+  for want in ["Drawing1 · 1/2", "Drawing1 · 2/2", "A3 · mm · 3rd angle · ASME", "A4 · mm · 3rd angle · ASME"] {
+    assert!(t.iter().any(|x| x == want), "missing {want}: {t:?}");
+  }
+  // a view can be put on a given sheet, but not on one that doesn't exist
+  let top = run(&mut s, "drawing.add_view", json!({"kind": "top", "sheet": 1}))["view"].as_u64().unwrap();
+  assert_eq!(run(&mut s, "drawing.info", json!({}))["sheets"][0]["views"], json!([1, top]));
+  assert!(s.execute("drawing.add_view", &json!({"kind": "left", "sheet": 9})).is_err());
+
+  // PDF: a page per sheet, each its own size; DXF: the sheets side by side
+  let dir = scratch("sheets");
+  let pdf = dir.join("d.pdf");
+  let r = run(&mut s, "drawing.export", json!({"path": pdf}));
+  assert_eq!(r["sheets"], 2);
+  let pdf = String::from_utf8_lossy(&std::fs::read(&pdf).unwrap()).to_string();
+  assert!(pdf.contains("/Count 2") && pdf.contains("/MediaBox [0 0 841.89 595.28]"), "{pdf}");
+  assert!(pdf.contains("(SEE SHEET 1)"));
+  let e = dxf(&mut s);
+  let borders = lines(&e, "BORDER");
+  // the A4 sheet's border starts 10 mm into it, past the A3 sheet and the gap
+  let x0 = 420.0 + fox_model::plot::SHEET_GAP + 10.0;
+  assert!(borders.iter().any(|(a, b)| (a[0] - x0).abs() < 1e-9 && (b[0] - (x0 + 277.0)).abs() < 1e-9), "{borders:?}");
+  let (note, _) = text_at(&e, "SEE SHEET 1");
+  assert!(note[0] > 420.0, "{note:?}");
+
+  // SVG: a file per sheet, or the one sheet asked for
+  let r = run(&mut s, "drawing.export", json!({"path": dir.join("d.svg")}));
+  assert_eq!(r["paths"].as_array().unwrap().len(), 2);
+  let one = std::fs::read_to_string(dir.join("d-1.svg")).unwrap();
+  let two = std::fs::read_to_string(dir.join("d-2.svg")).unwrap();
+  assert!(!one.contains("SEE SHEET 1") && two.contains("SEE SHEET 1"));
+  assert!(two.contains("width=\"297mm\""));
+  run(&mut s, "drawing.export", json!({"path": dir.join("only.svg"), "sheet": 2}));
+  assert!(std::fs::read_to_string(dir.join("only.svg")).unwrap().contains("SEE SHEET 1"));
+  let _ = std::fs::remove_dir_all(&dir);
+
+  // rename, rescale, move a view across, and an empty sheet still draws
+  run(&mut s, "drawing.set_sheet", json!({"sheet": 2, "name": "Iso", "scale": "1:2"}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert_eq!((info["sheets"][1]["name"].as_str(), info["sheets"][1]["scale"].as_str()), (Some("Iso"), Some("1:2")));
+  run(&mut s, "drawing.move_view", json!({"view": iso, "at": null, "sheet": 1}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert!(info["error"].is_null() && info["sheets"][1]["views"] == json!([]), "{info}");
+
+  // saves and loads with its sheets
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.drawings, s.design.drawings);
+
+  // deleting a sheet takes its notes and views with it; the last sheet stays
+  run(&mut s, "drawing.remove_sheet", json!({"sheet": 2}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert_eq!(info["sheets"].as_array().unwrap().len(), 1);
+  assert!(!info_text(&mut s).iter().any(|t| t == "SEE SHEET 1"));
+  assert!(s.execute("drawing.remove_sheet", &json!({"sheet": 1})).is_err());
+  // with one sheet left the title block reads as before sheets existed
+  assert!(info_text(&mut s).iter().any(|t| t == "Drawing1"));
+  s.undo();
+  assert_eq!(run(&mut s, "drawing.info", json!({}))["sheets"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn baseline_and_chain_dimensions() {
+  let mut s = Session::default();
+  bar(&mut s);
+  let r = run(
+    &mut s,
+    "drawing.chain",
+    json!({"view": 1, "points": [[120, 0, 0], [0, 0, 0], [50, 0, 0], [200, 0, 10]], "offset": -10}),
+  );
+  assert_eq!(r["index"], 0);
+  let e = dxf(&mut s);
+  // in order along the view, one line under the part
+  let (a, _) = text_at(&e, "50");
+  let (b, _) = text_at(&e, "70");
+  let (c, _) = text_at(&e, "80");
+  assert!(a[0] < b[0] && b[0] < c[0], "{a:?} {b:?} {c:?}");
+  assert!((a[1] - b[1]).abs() < 1e-9 && (b[1] - c[1]).abs() < 1e-9);
+  let (x0, _) = visible_span(&e);
+  assert!((a[0] - (x0 + 25.0)).abs() < 1e-6 && (c[0] - (x0 + 160.0)).abs() < 1e-6);
+  run(&mut s, "drawing.remove_dimension", json!({"index": 0}));
+
+  // baseline: from one origin, nearest first, each line 8 mm further out
+  run(
+    &mut s,
+    "drawing.baseline",
+    json!({"view": 1, "origin": [0, 0, 0], "points": "200 0 0; 50 0 0; 120 0 0", "offset": 10, "spacing": 8}),
+  );
+  let e = dxf(&mut s);
+  let y: Vec<f64> = ["50", "120", "200"].iter().map(|t| text_at(&e, t).0[1]).collect();
+  assert!((y[1] - y[0] - 8.0).abs() < 1e-6 && (y[2] - y[1] - 8.0).abs() < 1e-6, "{y:?}");
+  // each dimension line starts on the origin's extension line
+  let (o, _) = visible_span(&e);
+  let starts =
+    lines(&e, "THIN").into_iter().filter(|(p, q)| (p[1] - q[1]).abs() < 1e-9 && (p[0] - o).abs() < 1e-9).count();
+  assert!(starts >= 3, "{starts}");
+  // up the side, for a vertical row
+  run(
+    &mut s,
+    "drawing.baseline",
+    json!({"view": 1, "origin": [0, 0, 0], "points": [[0, 0, 4], [0, 0, 10]], "orientation": "vertical"}),
+  );
+  let e = dxf(&mut s);
+  let ((p4, a4), (p10, _)) = (text_at(&e, "4"), text_at(&e, "10"));
+  assert_eq!(a4, 90.0);
+  assert!(p10[0] < p4[0], "{p4:?} {p10:?}");
+
+  assert!(s.execute("drawing.chain", &json!({"view": 1, "points": [[0, 0, 0]]})).is_err());
+  assert!(
+    s.execute("drawing.chain", &json!({"view": 1, "points": [[0, 0, 0], [1, 0, 0]], "orientation": "aligned"}))
+      .is_err()
+  );
+  assert!(s.execute("drawing.baseline", &json!({"view": 1, "origin": [0, 0, 0], "points": []})).is_err());
+}
+
+#[test]
+fn weld_symbols_datum_targets_and_composite_frames() {
+  let mut s = Session::default();
+  bar(&mut s);
+  let hidden = |e: &[Ent]| lines(e, "HIDDEN").len();
+  let h0 = hidden(&dxf(&mut s));
+  run(
+    &mut s,
+    "drawing.weld",
+    json!({"view": 1, "point": [100, 0, 10], "kind": "fillet", "size": 6, "length": "50-150", "all_around": true, "field": true, "tail": "GMAW"}),
+  );
+  let e = dxf(&mut s);
+  for want in ["6", "50-150", "GMAW"] {
+    assert!(texts(&e).iter().any(|t| t == want), "missing {want}: {:?}", texts(&e));
+  }
+  // AWS has no identification line; ISO 2553 draws a dashed one under the reference line
+  assert_eq!(hidden(&e), h0);
+  run(&mut s, "drawing.set", json!({"standard": "iso"}));
+  let e = dxf(&mut s);
+  assert_eq!(hidden(&e), h0 + 1);
+  run(&mut s, "drawing.set", json!({"standard": "asme"}));
+  assert!(s.execute("drawing.weld", &json!({"view": 1, "point": [0, 0, 0], "kind": "rivet"})).is_err());
+  assert!(s.execute("drawing.weld", &json!({"view": 1, "point": [0, 0, 0], "kind": "v", "side": "up"})).is_err());
+
+  run(&mut s, "drawing.datum_target", json!({"view": 1, "point": [20, 0, 0], "label": "a1"}));
+  run(&mut s, "drawing.datum_target", json!({"view": 1, "point": [180, 0, 0], "label": "A2", "area": 6}));
+  let t = info_text(&mut s);
+  for want in ["A1", "A2", "Ø6"] {
+    assert!(t.iter().any(|x| x == want), "missing {want}: {t:?}");
+  }
+  for bad in ["A", "O1", "1"] {
+    assert!(s.execute("drawing.datum_target", &json!({"view": 1, "point": [0, 0, 0], "label": bad})).is_err(), "{bad}");
+  }
+
+  // a composite position frame: the lower tier refines the upper one
+  run(&mut s, "drawing.datum", json!({"view": 1, "point": [0, 0, 5]}));
+  run(&mut s, "drawing.datum", json!({"view": 1, "point": [100, 0, 0]}));
+  let fcf = json!({"view": 1, "point": [150, 0, 5], "characteristic": "position", "tolerance": 0.5, "diameter": true, "datums": ["A", "B"], "lower": {"tolerance": 0.1, "datums": ["A"]}});
+  run(&mut s, "drawing.feature_control", fcf.clone());
+  let t = info_text(&mut s);
+  assert!(t.iter().any(|x| x == "Ø0.5") && t.iter().any(|x| x == "Ø0.1"), "{t:?}");
+  let bad = |s: &mut Session, lower: Value| {
+    let mut p = fcf.clone();
+    p["lower"] = lower;
+    s.execute("drawing.feature_control", &p).is_err()
+  };
+  assert!(bad(&mut s, json!({"tolerance": 0.1, "datums": ["B"]})));
+  assert!(bad(&mut s, json!({"tolerance": 0.7})));
+  let mut flat = fcf.clone();
+  flat["characteristic"] = json!("flatness");
+  flat["datums"] = json!([]);
+  flat["lower"] = json!({"tolerance": 0.01});
+  assert!(s.execute("drawing.feature_control", &flat).is_err());
+
+  // the new annotations save and load
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.drawings, s.design.drawings);
+}
+
+#[test]
+fn revision_table() {
+  let mut s = Session::default();
+  bar(&mut s);
+  run(&mut s, "drawing.title", json!({"author": "CL"}));
+  let a = run(&mut s, "drawing.revision", json!({"description": "First issue", "date": "2026-10-01", "by": "CL"}));
+  let b = run(&mut s, "drawing.revision", json!({"description": "Hole moved"}));
+  assert_eq!((a["rev"].as_str(), b["rev"].as_str()), (Some("A"), Some("B")));
+  let t = info_text(&mut s);
+  for want in ["REV", "DESCRIPTION", "First issue", "2026-10-01", "Hole moved", "B CL"] {
+    assert!(t.iter().any(|x| x == want), "missing {want}: {t:?}");
+  }
+  // the table sits in the top right corner of the A3 sheet
+  let e = dxf(&mut s);
+  let (p, _) = text_at(&e, "First issue");
+  assert!(p[0] > 420.0 - 10.0 - 180.0 && p[1] > 297.0 - 10.0 - 18.0, "{p:?}");
+  // the title block's revision wins when it is filled in
+  run(&mut s, "drawing.title", json!({"revision": "C"}));
+  assert!(info_text(&mut s).iter().any(|x| x == "C CL"));
+  run(&mut s, "drawing.remove_revision", json!({"index": 0}));
+  let info = run(&mut s, "drawing.info", json!({}));
+  assert_eq!(info["revisions"].as_array().unwrap().len(), 1);
+  assert_eq!(info["revisions"][0]["rev"], "B");
+  assert!(s.execute("drawing.remove_revision", &json!({"index": 5})).is_err());
+  assert_eq!(run(&mut s, "drawing.revision", json!({"rev": "07"}))["rev"], "07");
+  assert_eq!(run(&mut s, "drawing.revision", json!({}))["rev"], "08");
+}

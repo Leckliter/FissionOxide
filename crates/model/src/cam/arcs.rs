@@ -1,185 +1,315 @@
-//! Arc fitting: runs of short cutting moves that follow a circle in the XY plane become single
-//! G2/G3 arcs. Toolpaths come out of the offsetter and the sketch as polylines; controls move
-//! smoother and programs get far shorter when circles are sent as circles.
+//! Arc fitting for G-code: runs of cutting moves that lie on a circle in the XY plane (G17)
+//! become one G2/G3 arc, helical when Z changes evenly along it. Toolpaths stay polylines; only
+//! their output is fitted, so the simulation and the viewport see what they always did.
+//!
+//! An arc replaces a run of moves when every point of the run is within the tolerance of it and
+//! no chord bows away from it by more than twice the tolerance. Arcs start and end on the
+//! run's own end points, so controls see the same radius at both ends.
 
 use fox_kernel::glam::{DVec2, DVec3};
 
-/// A move from the previous point.
+use super::Move;
+
+/// Arc tolerance when a setup doesn't set one (mm).
+pub const DEFAULT_TOLERANCE: f64 = 0.01;
+/// Largest radius written as an arc (mm): flatter runs stay straight moves.
+const MAX_RADIUS: f64 = 1000.0;
+/// Fewest moves an arc replaces.
+const MIN_MOVES: usize = 3;
+/// Largest turn of one move inside an arc, so coarse polygons aren't rounded off.
+const MAX_STEP: f64 = 20.0 * std::f64::consts::PI / 180.0;
+/// Largest sweep of one arc (just under a full turn, where start and end would meet).
+const MAX_SWEEP: f64 = 350.0 * std::f64::consts::PI / 180.0;
+/// Most moves one arc may replace (keeps fitting linear-ish on long runs).
+const MAX_RUN: usize = 4000;
+
+/// A piece of G-code output: a move as it was, or an arc replacing several cutting moves.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Seg {
-  Line(DVec3),
-  /// To `to` around `center` (same Z), clockwise (G2) or counter-clockwise (G3).
-  Arc {
-    to: DVec3,
-    center: DVec3,
-    cw: bool,
-  },
+pub enum Segment {
+  Move(Move),
+  Arc(Arc),
 }
 
-/// The fewest points that make an arc; shorter runs stay lines.
-const MIN_POINTS: usize = 4;
-/// Arcs larger than this are left as lines: controls round big radii badly, and they are rarely
-/// arcs in the first place.
-const MAX_RADIUS: f64 = 5000.0;
-/// How far a step's chord may sag inside its arc (mm). Polylines that approximate circles sag
-/// far less; a polygon (a 13-sided pocket, say) sags more and stays a polygon. It also bounds how
-/// far the arcs stray from the polyline.
-pub const MAX_SAG: f64 = 0.02;
-/// How close the fitted arcs stay to the polyline's points (mm), as the posts fit them.
-pub const FIT_TOL: f64 = 0.002;
+/// A circular (or helical) cutting move in the XY plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Arc {
+  /// Where it starts (the tool's position before it).
+  pub from: DVec3,
+  pub to: DVec3,
+  /// Centre in XY (world coordinates).
+  pub centre: DVec2,
+  /// Counter-clockwise seen from above (G3); clockwise is G2.
+  pub ccw: bool,
+  pub feed: f64,
+  /// How many moves it replaces.
+  pub moves: usize,
+}
 
-/// Moves from `from` through `points` (all at one feed), with runs that lie within `tol` of a
-/// circle at one height merged into arcs (a full circle becomes two halves). Every point stays on the path: only the moves between
-/// them change.
-pub fn fit(from: DVec3, points: &[DVec3], tol: f64) -> Vec<Seg> {
-  let mut out = Vec::new();
-  let mut start = from;
-  let mut i = 0;
-  while i < points.len() {
-    // the longest run start, points[i..=j] that is one arc
-    let mut best = None;
-    let mut j = i + MIN_POINTS - 2;
-    while j < points.len() {
-      match arc_through(start, &points[i..=j], tol) {
-        Some(a) => best = Some((j, a)),
-        None => break,
-      }
-      j += 1;
-    }
-    match best {
-      Some((j, (center, cw, sweep))) => {
-        // a full turn as two halves, which every control reads the same way
-        if sweep > std::f64::consts::PI * 1.9 {
-          out.push(Seg::Arc { to: points[i + (j - i) / 2], center, cw });
+impl Arc {
+  pub fn radius(&self) -> f64 {
+    (self.from.truncate() - self.centre).length()
+  }
+
+  /// Sweep angle (radians, positive).
+  pub fn sweep(&self) -> f64 {
+    let a = angle(self.from.truncate() - self.centre);
+    let b = angle(self.to.truncate() - self.centre);
+    let d = if self.ccw { b - a } else { a - b };
+    d.rem_euclid(std::f64::consts::TAU)
+  }
+
+  /// Points along the arc no more than `step` radians apart, without its start.
+  pub fn points(&self, step: f64) -> Vec<DVec3> {
+    let sweep = self.sweep();
+    let n = ((sweep / step.max(1e-3)).ceil() as usize).max(1);
+    let a0 = angle(self.from.truncate() - self.centre);
+    let r = self.radius();
+    let dir = if self.ccw { 1.0 } else { -1.0 };
+    (1..=n)
+      .map(|k| {
+        let t = k as f64 / n as f64;
+        if k == n {
+          return self.to;
         }
-        out.push(Seg::Arc { to: points[j], center, cw });
-        start = points[j];
-        i = j + 1;
+        let a = a0 + dir * sweep * t;
+        let z = self.from.z + (self.to.z - self.from.z) * t;
+        DVec3::new(self.centre.x + r * a.cos(), self.centre.y + r * a.sin(), z)
+      })
+      .collect()
+  }
+}
+
+/// The moves of a toolpath with runs on circles replaced by arcs within `tol` (mm). `start`
+/// is where the tool is before the first move, if known.
+pub fn fit(moves: &[Move], start: Option<DVec3>, tol: f64) -> Vec<Segment> {
+  let tol = if tol > 0.0 { tol } else { DEFAULT_TOLERANCE };
+  let mut out = Vec::with_capacity(moves.len());
+  let mut at = start;
+  let mut i = 0;
+  while i < moves.len() {
+    let m = moves[i];
+    if let Some(from) = at.filter(|_| !m.rapid) {
+      // the longest run of cutting moves from here that fits an arc
+      let mut best = None;
+      let mut j = i + MIN_MOVES - 1;
+      while j < moves.len() && j - i < MAX_RUN {
+        if moves[j].rapid || (moves[j].feed - m.feed).abs() > 1e-9 {
+          break;
+        }
+        match arc_through(from, &moves[i..=j], tol) {
+          Some(a) => best = Some(a),
+          None => break,
+        }
+        j += 1;
       }
-      None => {
-        out.push(Seg::Line(points[i]));
-        start = points[i];
-        i += 1;
+      if let Some(a) = best.filter(|a| !straight(from, &moves[i..i + a.moves], tol)) {
+        i += a.moves;
+        at = Some(a.to);
+        out.push(Segment::Arc(a));
+        continue;
       }
     }
+    out.push(Segment::Move(m));
+    at = Some(m.to);
+    i += 1;
   }
   out
 }
 
-/// The circle through `start` and `run` when every point is within `tol` of it, all at one Z,
-/// turning one way by at most a full turn: (centre, clockwise, sweep).
-fn arc_through(start: DVec3, run: &[DVec3], tol: f64) -> Option<(DVec3, bool, f64)> {
-  if run.len() + 1 < MIN_POINTS || run.iter().any(|p| (p.z - start.z).abs() > 1e-9) {
-    return None;
-  }
-  let flat = |p: DVec3| DVec2::new(p.x, p.y);
-  // three points well apart (a closed circle ends where it starts)
-  let a = flat(start);
-  let c = circumcentre(a, flat(run[run.len() / 3]), flat(run[2 * run.len() / 3]))?;
-  let r = (a - c).length();
-  if !(r > tol * 10.0 && r < MAX_RADIUS) {
-    return None;
-  }
-  // every point on the circle (the polyline's chords sag inside the circle it approximates; the
-  // arc follows that circle), in small steps one way (a coarse polygon is not a circle)
-  let mut prev = a;
-  let mut turn = 0.0;
-  let mut sign = 0.0;
-  for p in run.iter().map(|p| flat(*p)) {
-    if ((p - c).length() - r).abs() > tol {
-      return None;
-    }
-    let step = (prev - c).perp_dot(p - c).atan2((prev - c).dot(p - c));
-    let sag = r * (1.0 - (step / 2.0).cos());
-    if step.abs() < 1e-12 || (sign != 0.0 && step.signum() != sign) || step.abs() > 0.5 || sag > MAX_SAG {
-      return None;
-    }
-    sign = step.signum();
-    turn += step;
-    prev = p;
-  }
-  if turn.abs() > std::f64::consts::TAU + 1e-9 {
-    return None;
-  }
-  Some((DVec3::new(c.x, c.y, start.z), turn < 0.0, turn.abs()))
+/// Whether every point of a run is within `tol` of the line from its start to its end (then it
+/// is better left to straight moves).
+fn straight(from: DVec3, run: &[Move], tol: f64) -> bool {
+  let to = run[run.len() - 1].to;
+  run.iter().all(|m| super::region::seg_distance(m.to.truncate(), from.truncate(), to.truncate()) <= tol)
 }
 
-fn circumcentre(a: DVec2, b: DVec2, c: DVec2) -> Option<DVec2> {
-  let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
-  if d.abs() < 1e-12 {
+/// The arc from `from` through the run's points, if they all fit it.
+fn arc_through(from: DVec3, run: &[Move], tol: f64) -> Option<Arc> {
+  let n = run.len();
+  let to = run[n - 1].to;
+  let mid = run[(n - 1) / 2].to;
+  let (a, b, c) = (from.truncate(), mid.truncate(), to.truncate());
+  let centre = circle(a, b, c)?;
+  let r = (a - centre).length();
+  if !(r > 1e-4 && r <= MAX_RADIUS) {
     return None;
   }
-  let (a2, b2, c2) = (a.length_squared(), b.length_squared(), c.length_squared());
-  Some(DVec2::new(
-    (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
-    (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
-  ))
+  let ccw = (b - a).perp_dot(c - b) > 0.0;
+  let dir = if ccw { 1.0 } else { -1.0 };
+  // walk the points around the centre: always the same way, in small steps
+  let mut angles = Vec::with_capacity(n);
+  let mut prev = angle(a - centre);
+  let mut total = 0.0;
+  let mut last = a;
+  for m in run {
+    let p = m.to.truncate();
+    if ((p - centre).length() - r).abs() > tol {
+      return None;
+    }
+    let ang = angle(p - centre);
+    let step = dir * wrap(ang - prev);
+    if !(-1e-9..=MAX_STEP).contains(&step) {
+      return None;
+    }
+    // the chord bows in from the arc by its sagitta
+    let chord = (p - last).length();
+    if r - (r * r - chord * chord / 4.0).max(0.0).sqrt() > 2.0 * tol {
+      return None;
+    }
+    total += step.max(0.0);
+    angles.push(total);
+    prev = ang;
+    last = p;
+  }
+  if !(1e-6..=MAX_SWEEP).contains(&total) {
+    return None;
+  }
+  // Z evenly along the sweep (flat or helical)
+  for (m, t) in run.iter().zip(&angles) {
+    let z = from.z + (to.z - from.z) * (t / total);
+    if (m.to.z - z).abs() > tol {
+      return None;
+    }
+  }
+  Some(Arc { from, to, centre, ccw, feed: run[0].feed, moves: n })
+}
+
+/// The direction of a vector (radians from +X).
+fn angle(v: DVec2) -> f64 {
+  v.y.atan2(v.x)
+}
+
+/// An angle wrapped into (−π, π].
+fn wrap(a: f64) -> f64 {
+  let t = std::f64::consts::TAU;
+  let a = a.rem_euclid(t);
+  if a > std::f64::consts::PI { a - t } else { a }
+}
+
+/// The centre of the circle through three points (None when they are in a line).
+fn circle(a: DVec2, b: DVec2, c: DVec2) -> Option<DVec2> {
+  let (ab, ac) = (b - a, c - a);
+  let d = 2.0 * ab.perp_dot(ac);
+  let scale = ab.length_squared().max(ac.length_squared()).max(1e-300);
+  if d.abs() < 1e-12 * scale {
+    return None;
+  }
+  let (b2, c2) = (ab.length_squared(), ac.length_squared());
+  Some(a + DVec2::new(ac.y * b2 - ab.y * c2, ab.x * c2 - ac.x * b2) / d)
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::f64::consts::TAU;
 
-  fn circle(c: DVec3, r: f64, n: usize, from: f64, turn: f64) -> Vec<DVec3> {
+  fn cut(p: DVec3) -> Move {
+    Move { rapid: false, to: p, feed: 800.0 }
+  }
+
+  /// Points on a circle (radius `r` round `c`) from angle `a0` to `a1` (degrees) in `n` steps.
+  fn ring(c: DVec2, r: f64, a0: f64, a1: f64, n: usize, z0: f64, z1: f64) -> Vec<DVec3> {
     (0..=n)
       .map(|k| {
-        c + DVec3::new(
-          r * (from + turn * k as f64 / n as f64).cos(),
-          r * (from + turn * k as f64 / n as f64).sin(),
-          0.0,
-        )
+        let t = k as f64 / n as f64;
+        let a = (a0 + (a1 - a0) * t).to_radians();
+        DVec3::new(c.x + r * a.cos(), c.y + r * a.sin(), z0 + (z1 - z0) * t)
       })
       .collect()
   }
 
   #[test]
-  fn a_polygonal_circle_becomes_two_half_arcs() {
-    let pts = circle(DVec3::new(10.0, 5.0, -2.0), 8.0, 72, 0.0, TAU);
-    let segs = fit(pts[0], &pts[1..], 0.002);
-    assert_eq!(segs.len(), 2, "{segs:?}");
+  fn circles_become_arcs_and_lines_stay() {
+    // a straight lead-in, a quarter circle counter-clockwise, a straight lead-out
+    let c = DVec2::new(10.0, 5.0);
+    let q = ring(c, 4.0, 0.0, 90.0, 18, -2.0, -2.0);
+    let mut moves = vec![cut(DVec3::new(14.0, -3.0, -2.0)), cut(DVec3::new(14.0, 5.0, -2.0))];
+    moves.extend(q[1..].iter().map(|p| cut(*p)));
+    moves.push(cut(DVec3::new(0.0, 9.0, -2.0)));
+    let segs = fit(&moves, Some(DVec3::new(14.0, -10.0, -2.0)), 0.01);
+    let arcs: Vec<&Arc> = segs
+      .iter()
+      .filter_map(|s| match s {
+        Segment::Arc(a) => Some(a),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(arcs.len(), 1, "{segs:?}");
+    let a = arcs[0];
+    assert!(a.ccw && (a.centre - c).length() < 1e-9 && (a.radius() - 4.0).abs() < 1e-9);
+    assert!((a.sweep() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    assert_eq!(a.moves, 18);
+    assert_eq!(segs.len(), 2 + 1 + 1);
+    // clockwise
+    let q = ring(c, 4.0, 90.0, -45.0, 30, 0.0, 0.0);
+    let moves: Vec<Move> = q[1..].iter().map(|p| cut(*p)).collect();
+    let segs = fit(&moves, Some(q[0]), 0.01);
+    assert!(matches!(segs[..], [Segment::Arc(Arc { ccw: false, moves: 30, .. })]), "{segs:?}");
+  }
+
+  #[test]
+  fn helices_noise_and_polygons() {
+    // a helix of two turns: arcs of up to 350° each, Z falling evenly
+    let c = DVec2::new(0.0, 0.0);
+    let q = ring(c, 3.0, 0.0, 720.0, 144, 0.0, -4.0);
+    let moves: Vec<Move> = q[1..].iter().map(|p| cut(*p)).collect();
+    let segs = fit(&moves, Some(q[0]), 0.01);
+    assert!(segs.len() <= 4 && segs.iter().all(|s| matches!(s, Segment::Arc(_))), "{segs:?}");
+    // they replay the helix
+    let mut at = q[0];
+    let mut k = 0;
     for s in &segs {
-      let Seg::Arc { center, cw, .. } = s else { panic!("{s:?}") };
-      assert!((*center - DVec3::new(10.0, 5.0, -2.0)).length() < 1e-9);
-      assert!(!cw, "counter-clockwise points make G3");
+      let Segment::Arc(a) = s else { continue };
+      assert_eq!(a.from, at);
+      for p in a.points(1f64.to_radians()) {
+        let r = p.truncate().length();
+        assert!((r - 3.0).abs() < 1e-9);
+        let ang = p.y.atan2(p.x);
+        // Z goes down 2 per turn
+        let turn = (-p.z / 2.0) * std::f64::consts::TAU;
+        assert!(wrap(turn - ang).abs() < 1e-6, "{p:?}");
+      }
+      k += a.moves;
+      at = a.to;
     }
-    assert!(matches!(segs[1], Seg::Arc { to, .. } if to == pts[72]), "ends where the circle closes");
-  }
-
-  #[test]
-  fn lines_stay_lines_and_corners_split_arcs() {
-    // a square: no arcs
-    let sq = [DVec3::new(10.0, 0.0, 0.0), DVec3::new(10.0, 10.0, 0.0), DVec3::new(0.0, 10.0, 0.0), DVec3::ZERO];
-    assert!(fit(DVec3::ZERO, &sq, 0.002).iter().all(|s| matches!(s, Seg::Line(_))));
-    // a clockwise quarter round, then a straight run: one G2 and lines
-    let mut pts = circle(DVec3::ZERO, 5.0, 12, TAU / 4.0, -TAU / 4.0);
-    pts.extend([DVec3::new(5.0, -10.0, 0.0), DVec3::new(5.0, -20.0, 0.0)]);
-    let segs = fit(pts[0], &pts[1..], 0.002);
-    assert!(matches!(segs[0], Seg::Arc { cw: true, .. }), "{segs:?}");
-    assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Arc { .. })).count(), 1);
-    assert_eq!(segs.last(), Some(&Seg::Line(DVec3::new(5.0, -20.0, 0.0))));
-  }
-
-  #[test]
-  fn ramps_and_wobbles_stay_lines() {
-    // a helix (Z changes) is not an XY arc
-    let mut helix = circle(DVec3::ZERO, 5.0, 24, 0.0, TAU / 2.0);
-    for (k, p) in helix.iter_mut().enumerate() {
-      p.z = -0.1 * k as f64;
+    assert_eq!(k, 144);
+    // noise beyond the tolerance keeps the moves
+    let mut q = ring(c, 10.0, 0.0, 60.0, 12, 0.0, 0.0);
+    q[5].x += 0.05;
+    let moves: Vec<Move> = q[1..].iter().map(|p| cut(*p)).collect();
+    let segs = fit(&moves, Some(q[0]), 0.01);
+    // the noisy point is never inside an arc, and every point an arc replaces is on it
+    let mut k = 0;
+    for s in &segs {
+      match s {
+        Segment::Move(_) => k += 1,
+        Segment::Arc(a) => {
+          assert!(!(k..k + a.moves - 1).contains(&4), "{segs:?}");
+          for m in &moves[k..k + a.moves] {
+            assert!(((m.to.truncate() - a.centre).length() - a.radius()).abs() <= 0.01);
+          }
+          k += a.moves;
+        }
+      }
     }
-    assert!(fit(helix[0], &helix[1..], 0.002).iter().all(|s| matches!(s, Seg::Line(_))));
-    // points off the circle by more than the tolerance
-    let mut rough = circle(DVec3::ZERO, 5.0, 24, 0.0, TAU / 2.0);
-    rough[6].x += 0.05;
-    let segs = fit(rough[0], &rough[1..], 0.002);
-    let on = |p: DVec3| segs.iter().any(|s| matches!(s, Seg::Line(q) | Seg::Arc { to: q, .. } if *q == p));
-    assert!(on(rough[6]), "the off point is still visited");
-  }
-
-  #[test]
-  fn polygons_stay_polygons() {
-    // a 13-sided pocket outline (each side sags 0.6 mm from its circle) is not a circle
-    let pts = circle(DVec3::ZERO, 20.0, 13, 0.0, TAU);
-    assert!(fit(pts[0], &pts[1..], 0.002).iter().all(|s| matches!(s, Seg::Line(_))));
+    assert_eq!(k, moves.len());
+    // a square's corners lie on a circle but stay corners
+    let sq = [DVec3::new(1.0, 0.0, 0.0), DVec3::new(1.0, 1.0, 0.0), DVec3::new(0.0, 1.0, 0.0), DVec3::ZERO];
+    let segs = fit(&sq.map(cut), Some(DVec3::ZERO), 0.01);
+    assert!(segs.iter().all(|s| matches!(s, Segment::Move(_))));
+    // collinear runs and rapids stay as they are
+    let line: Vec<Move> = (1..10).map(|k| cut(DVec3::new(k as f64, 0.0, 0.0))).collect();
+    assert!(fit(&line, Some(DVec3::ZERO), 0.01).iter().all(|s| matches!(s, Segment::Move(_))));
+    let q = ring(c, 3.0, 0.0, 90.0, 10, 0.0, 0.0);
+    let mut moves: Vec<Move> = q[1..].iter().map(|p| cut(*p)).collect();
+    moves[4].rapid = true;
+    let segs = fit(&moves, Some(q[0]), 0.01);
+    assert!(segs.iter().any(|s| matches!(s, Segment::Move(m) if m.rapid)));
+    // a feed change splits the run
+    let mut moves: Vec<Move> = q[1..].iter().map(|p| cut(*p)).collect();
+    for m in &mut moves[5..] {
+      m.feed = 400.0;
+    }
+    let segs = fit(&moves, Some(q[0]), 0.01);
+    assert_eq!(segs.iter().filter(|s| matches!(s, Segment::Arc(_))).count(), 2, "{segs:?}");
   }
 }

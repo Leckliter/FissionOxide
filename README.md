@@ -66,15 +66,15 @@ change a parameter and watch the whole history rebuild.
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
   Flange from closed profiles, Contour Flange from an open path (corners become bends), Edge
   Flange (any angle, adjacent/inside/outside bend position, offsets), Lofted Flange between two
-  profiles (die-formed or press-brake with a bend count), Miter Flange (a sketch profile swept
+  profiles (die-formed or press-brake with a bend count, sharp or rounded bends), Miter Flange (a sketch profile swept
   along a chain of edges), Hem, Bend along a sketch line, Rip, Convert to Sheet Metal (sharp
   corners become bends, with corner reliefs), Unfold and Refold in the timeline (cuts made while
   flat are carried back onto the bends), corner closures where flanges meet (miter, open,
-  closed, overlap) with round, square or tear corner reliefs, rectangular or round bend reliefs,
-  and a flat pattern with bend lines exported as DXF (also STEP/STL) or made into an editable
-  sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
+  closed, overlap, butt) with round, square or tear corner reliefs, rectangular or round bend
+  reliefs, and a flat pattern with bend lines exported as a layered DXF with bend notes (also
+  STEP/STL), checked against shop rules, or made into an editable sketch. The unfolder works on the B-rep, so holes and cuts anywhere — even across bends, and
   bends running straight into other bends — come out in the flat pattern. The flat pattern is
-  checked the way a shop checks a cut file: holes smaller than the material is thick, too little
+  also checked the way a shop checks a cut file: holes smaller than the material is thick, too little
   material between holes and edges, holes too close to a bend, a part too big for the sheet.
 - **Assemblies.** Components (with grounding and physical materials), joints — rigid, revolute,
   slider, cylindrical, pin-slot, planar, ball — on faces, circular edges or points, with
@@ -82,7 +82,10 @@ change a parameter and watch the whole history rebuild.
   bill of materials with masses. Component copies are linked: edit the original and every
   copy follows. Saved joint origins, rigid groups, motion links (gears, rack and pinion), contact
   sets that stop motion where bodies touch, and components inserted from other designs in the
-  data hub as linked references that update to the source's newest version.
+  data hub as linked references that update to the source's newest version. Screw joints
+  (rotation advances by a lead), cam followers that stay in contact with a turning cam, and
+  inserted assemblies kept as nested sub-assemblies (rigid or flexible) with a bill of
+  materials by level.
 - **Drawings.** Sheets A4–A0, Letter, Tabloid; first- or third-angle standard views, isometric,
   section views with hatching, detail views, and sheet metal flat-pattern views with bend notes, all exact
   hidden-line projections; broken views; automatic overall dimensions, hole callouts and centre marks; manual,
@@ -116,7 +119,8 @@ change a parameter and watch the whole history rebuild.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
   rectangular and circular patterns, and project body edges into a sketch (the projection
   follows the body when it changes). Trim, break, extend and offset work on splines and
-  ellipses too; what is left of one is an exact Bézier chain with draggable handles.
+  ellipses too; what is left of an ellipse is an elliptical arc, of a fit-point spline a
+  fit-point spline, and of other splines an exact Bézier chain with draggable handles.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;
@@ -143,6 +147,19 @@ change a parameter and watch the whole history rebuild.
   becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
   face — that collect in a Base Feature in the timeline. See
   [Configurations](#configurations-and-base-features).
+- **Elliptical arcs and fit-point splines through the modify tools.** Trimming or breaking an
+  ellipse leaves elliptical arcs (their own curve, also drawn with `sketch.elliptical_arc`) that
+  stay on the ellipse while you constrain, drag, trim and extend them, split profiles where
+  lines and circles cross them, extrude to exact ellipse faces and read and write DXF `ELLIPSE`
+  arcs. A fit-point spline stays a fit-point spline after Trim, Break and Extend (through the
+  fit points it keeps, its new ends holding their direction). Sketch text takes fonts from
+  disk: a font file's path or the name of one in the system's font folders (`sketch.fonts`).
+- **3D milling and arcs.** 3D adaptive roughing of the stock around the part, pencil,
+  steep-and-shallow and contour (waterline) finishing, and G2/G3 arcs (helical too) fitted to
+  the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
+- **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
+  DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
+  machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
 
 ## Install
 
@@ -245,8 +262,9 @@ fissionoxide-cli exec bracket.fox '{"cmd": "sheet.flat_pattern", "path": "bracke
 Sheet metal bodies are ordinary solids that carry their rule, so every other feature (holes,
 cuts, fillets, patterns) works on them. Bends are true cylinders: the flat length of a bend is
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
-sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline on layer
-`OUTLINE` and bend centre lines on `BEND_UP` / `BEND_DOWN`; `sheet.flat_sketch` makes the same
+sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline and holes
+on layer `CUT` and bend centre lines on `BEND_UP` / `BEND_DOWN` (dashed), with a bend note at
+each bend on `NOTES` and an `ETCH` layer for marking; `sheet.flat_sketch` makes the same
 outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
 XY at the origin, to dimension, extrude or export.
 
@@ -259,16 +277,27 @@ fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
   arc length, keeping the corners of either as facet boundaries, and closed profiles are opened
   at a seam (the rule's gap) so the flange can unfold. *Die formed* is one smooth surface;
   *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
-  pattern is the neutral layer developed facet by facet (later cuts on the flange aren't in it).
+  pattern is the neutral layer developed facet by facet; holes and notches cut in the flange
+  later are carried into it, facet by facet. `rounded` rounds a press-brake flange's bends to
+  the rule's bend radius (folds that converge too tightly to round stay sharp, with a warning).
 - **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
   edge, starting on it, swept along a chain of edges of one face; the profile is where the face
   of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.
 - **Corner closure**: where two flanges of one feature meet, `corners` is `miter` (cut along
   the bisector, leaving the rule's gap), `open`, `closed` (mitred with no gap, a welded seam) or
-  `overlap` (the first flange runs over the end of the second). The rule's `corner_relief`
+  `overlap` (the first flange runs over the end of the second) or `butt` (the walls run on, cut
+  square, until their inside corners are the rule's gap apart; the bends stop with the sheet,
+  leaving an open corner below the walls). The rule's `corner_relief`
   (`round`, `square`, `tear`; `corner_relief_size`) cuts a relief at the corner through the
   sheet and the bends; overlapping corners get a square one unless the rule says otherwise.
   `sheet.corner_closure` changes both on an existing flange.
+- **Setbacks through bends**: a flange whose edge ends where an earlier flange's bend starts
+  trims that bend back with the sheet (the earlier flange's wall keeps its length).
+- **Flat pattern checks** (`sheet.check_dxf`, `fissionoxide-cli check-dxf FILE.dxf|DESIGN.fox`):
+  a flat pattern DXF, or a body's flat pattern, against shop rules: every cut contour closed
+  and unbranched, nothing cut twice, no hole, slot or web narrower than the minimum feature size
+  (default the thickness) and holes at least 2·t + R from a bend line. The rules come from the
+  body or the DXF's `SHEET T=… R=… K=…` note; `min_feature` and `hole_to_bend` override them.
 
 ## Assemblies and drawings
 
@@ -299,6 +328,19 @@ instead, `angle` and `offset` adjust the placement, and the joint's motion (`rot
   hub design in as a component. Its bodies are stored in the design, so it opens without the
   hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
   gets it, and `component.break_link` keeps a local copy.
+- **Screw joints** (`"kind": "screw"` with a `lead`) slide along their axis by the lead for every
+  turn of rotation (a negative lead is left-handed); motion links can turn them but not slide them.
+- **Cam followers** (`cam_follower`) set a sliding joint's slide so its component stays in contact
+  with a cam component wherever the cam's own joint has turned it: a knife edge touches where
+  the slide line meets the cam, a flat follower the cam's furthest point; `clearance` keeps a
+  gap (a roller's radius). Motion studies of the cam move the follower too.
+- **Sub-assemblies.** Inserting a design that has components keeps them, as children of the
+  inserted component (the browser nests them; `component.parent` nests components by hand).
+  Joints that move a component move everything below it. The source's joints come along:
+  rigid (the default) keeps the positions the source solved; `component.flexible` solves them
+  again in this design so `component.drive` can move them (`component.sub_joints` lists them).
+  `assembly.bom` is indented by level, or `"view": "top"` (top-level totals) or `"parts"`
+  (leaf parts with quantities).
 
 Drawings annotate model points in a view, so annotations move with their view and follow
 parameter changes:
@@ -320,6 +362,24 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 - **Balloons** (`drawing.balloon`) carry a component's parts list item number, worked out each
   time the drawing is drawn, so they renumber when the parts list changes; `auto_balloons`
   balloons every row that has none.
+- **Sheets** (`drawing.add_sheet`, `drawing.set_sheet`, `drawing.remove_sheet`): a drawing has
+  one or more sheets, each with its own views, notes, size and scale and a title block that
+  numbers it ("Drawing1 · 2/3"); views go on the sheet named by `sheet`, else the active one (the
+  last added, or the tab clicked in the Drawing workspace), and `drawing.move_view` moves them
+  across. `drawing.export` writes every sheet: a PDF page each, a DXF with the sheets side by
+  side, `name-1.svg`, `name-2.svg`, … (or one sheet with `sheet`). Drawings saved before sheets
+  open as one sheet.
+- **Baseline** (`drawing.baseline`) and **chain** (`drawing.chain`) dimensions: rows of
+  dimensions from one origin, stacked `spacing` apart, or between consecutive points on one line.
+- **Weld symbols** (`drawing.weld`): fillet, square, V, bevel, U, J, plug, spot and seam welds
+  on the arrow side, the other side or both, with size, length-pitch, all-around, field weld and
+  a tail; AWS A2.4 layout for ASME drawings (arrow side below the reference line), ISO 2553 for
+  ISO ones (a dashed identification line).
+- **Datum targets** (`drawing.datum_target`, points or circular areas) and **composite** position
+  and profile frames (`lower` on `drawing.feature_control`).
+- **Revision table** (`drawing.revision`, `drawing.remove_revision`) in the first sheet's top right
+  corner; the next letter (ASME Y14.35: no I, O, Q, S, X, Z) by default, and the title block shows
+  the latest revision.
 
 ## File formats
 
@@ -405,6 +465,14 @@ operations:
 - **Parallel** and **Scallop** finish 3D surfaces on the triangulated part: rows, or rings a
   constant distance apart over the surface, with the tool (ball, bull-nose or flat) dropped onto
   it so it never cuts in.
+- **Adaptive Clearing** (3D) roughs the stock around the whole part in levels a step-down apart,
+  plus a level on each flat area: at each level the cut grows in from the open air around the
+  stock (or from a helix in closed areas) by the optimal load, so the engagement stays about
+  constant, keeping the stock to leave (0.3 mm by default) off the part.
+- **Contour** (3D) finishes steep areas in waterline passes at constant heights a step-down
+  apart (only where the part is at least the minimum slope steep); **Steep and Shallow** adds
+  parallel rows on the areas below the threshold angle; **Pencil** runs one pass along each
+  concave corner or fillet tighter than the tool, where it touches the part on two sides.
 
 Pockets and contours enter by plunging, **ramping** along the cut, or down a **helix**, at the
 ramp angle.
@@ -421,6 +489,10 @@ G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`
 (`.gcode`, no tool changer: it stops for each tool, drilling written out), LinuxCNC (`.ngc`)
 or Mach3/4 (`.tap`), in mm or inches.
 
+Cutting moves that lie on a circle in the XY plane are written as **G2/G3 arcs** (centre by
+I/J, helical when Z falls evenly along them, G17), within the setup's arc tolerance (0.01 mm by
+default); `"arcs": false` on the setup or on `cam.post` keeps straight moves.
+
 ```sh
 fissionoxide-cli exec part.fox '{"cmd": "cam.setup", "stock_side": 3, "stock_top": 1, "post": "haas"}' --save part.fox
 fissionoxide-cli exec part.fox '{"cmd": "cam.adaptive", "floors": [{"point": [35, 25, 12]}], "tool_number": 3}' --save part.fox
@@ -430,8 +502,36 @@ fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, s
 ```
 
 The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
-are no 3D roughing, 4/5-axis or turning toolpaths yet: check the G-code against your machine
-before running it.
+are no 4/5-axis or turning toolpaths yet: check the G-code against your machine before running
+it.
+
+### 2D cutting: laser, plasma, waterjet
+
+**2D Cut** (Manufacture ▸ ACTIONS, or `cut.gcode`) turns a sheet metal flat pattern, flat faces
+or a sketch's closed loops into a cutting program. The contours are offset by half the kerf
+into the scrap with true arcs, holes and parts nested in holes are found and cut before the
+contour around them, the rest go nearest first, and each contour starts with a lead-in (arc or
+line, shortened to fit small holes) and ends with an optional overcut and lead-out, all on the
+scrap side. Micro-joints (tabs) keep parts in the sheet, and small holes can run at a reduced
+feed. The part is on the right of the cut by default (outlines clockwise), the good side of a
+clockwise-swirl plasma torch.
+
+Machine profiles: GRBL and FluidNC lasers (M4 power that follows the speed), LinuxCNC
+QtPlasmaC (`M3 $0`, material table via `M190`), plasma with torch heights in the G-code
+(Mach-style), Wazer-style waterjet (lines only) and R12 DXF of the part geometry for OMAX-style
+software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
+pierce delay and heights per material); add your own with `cut.machine.add` (kept in the hub's
+`machines.json`). Rapids are real rapids and there is no limit on processes.
+
+```sh
+fissionoxide-cli cut machines
+fissionoxide-cli cut bracket.fox bracket.ngc --machine qtplasmac --process "3 mm mild steel, 45 A"
+fissionoxide-cli cut bracket.fox bracket.gcode --machine grbl_laser '{"kerf": 0.15, "tabs": 2, "lead_in": "line"}'
+fissionoxide-cli exec plate.fox '{"cmd": "cut.gcode", "sketch": 1, "machine": "dxf", "path": "plate.dxf"}'
+```
+
+The machine dialects were written from their documentation, not run on the machines: check a
+program in your control's preview (and on scrap) before cutting parts. Nesting is not there yet.
 
 ## Headless CLI and scripting
 
@@ -574,6 +674,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
+| `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).

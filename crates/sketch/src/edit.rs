@@ -70,7 +70,7 @@ impl Geo {
         }
       }
       crate::Seg::Circle { center, radius, .. } => Geo::Arc { c: center, r: radius, a0: 0.0, sweep: TAU },
-      crate::Seg::Bezier { .. } => return None,
+      crate::Seg::Bezier { .. } | crate::Seg::EllipseArc { .. } => return None,
     })
   }
 
@@ -186,7 +186,8 @@ impl Sketch {
       CurveKind::Spline { .. }
       | CurveKind::ControlSpline { .. }
       | CurveKind::Ellipse { .. }
-      | CurveKind::Bezier { .. } => {
+      | CurveKind::Bezier { .. }
+      | CurveKind::EllipticalArc { .. } => {
         return None;
       }
     })
@@ -236,6 +237,13 @@ impl Sketch {
         }
         CurveKind::Ellipse { center, major, .. } => {
           for q in [center, major] {
+            if *q == old {
+              *q = new;
+            }
+          }
+        }
+        CurveKind::EllipticalArc { center, major, start, end, .. } => {
+          for q in [center, major, start, end] {
             if *q == old {
               *q = new;
             }
@@ -352,9 +360,13 @@ impl Sketch {
 
   /// Removes the piece of `curve` around `at` between its nearest crossings with other curves
   /// (the whole curve if nothing crosses it). New ends stay on the curves they were cut at.
-  /// Splines and ellipses keep what is left as Bézier chains.
+  /// Ellipses leave elliptical arcs, fit-point splines fit-point splines, and other splines
+  /// Bézier chains.
   pub fn trim(&mut self, curve: CurveId, at: P) -> Result<Vec<CurveId>, SketchError> {
     self.not_text(curve)?;
+    if self.curve(curve).is_some_and(|c| c.kind.is_elliptic()) {
+      return self.trim_elliptic(curve, at);
+    }
     if self.curve(curve).is_some_and(|c| c.kind.is_freeform()) {
       return self.trim_free(curve, at);
     }
@@ -447,6 +459,7 @@ impl Sketch {
     self.not_text(line)?;
     match self.curve(line).map(|c| &c.kind) {
       Some(CurveKind::Arc { .. }) => return self.extend_arc(line, at),
+      Some(CurveKind::EllipticalArc { .. }) => return self.extend_elliptic(line, at),
       Some(k) if k.is_freeform() => return self.extend_free(line, at),
       _ => {}
     }
@@ -512,6 +525,11 @@ impl Sketch {
         }
         CurveKind::Ellipse { center, major, minor } => {
           CurveKind::Ellipse { center: get(self, center)?, major: get(self, major)?, minor }
+        }
+        CurveKind::EllipticalArc { center, major, minor, start, end } => {
+          let (center, major, s, e) = (get(self, center)?, get(self, major)?, get(self, start)?, get(self, end)?);
+          let (start, end) = if flip { (e, s) } else { (s, e) };
+          CurveKind::EllipticalArc { center, major, minor, start, end }
         }
       };
       let nid = self.add_curve(kind)?;

@@ -75,6 +75,8 @@ impl Tool {
       tip_diameter: 0.0,
       flute_length: 0.0,
       flutes: 0,
+      holder_diameter: 0.0,
+      stickout: 0.0,
     }
   }
 
@@ -130,6 +132,11 @@ impl Tool {
     }
     if !(self.rpm >= 0.0 && self.feed > 0.0 && self.plunge > 0.0) {
       return Err("the feeds must be positive".into());
+    }
+    if !(self.holder_diameter >= 0.0 && self.stickout >= 0.0)
+      || (self.holder_diameter > 0.0 && !(self.stickout > 0.0 && self.holder_diameter >= self.diameter))
+    {
+      return Err("a holder needs the tool's stickout, and must be at least as wide as the tool".into());
     }
     Ok(())
   }

@@ -389,44 +389,18 @@ fn posts_write_the_toolpaths_moves() {
   assert_eq!(run(&mut s, "cam.posts", json!({})).as_array().unwrap().len(), 5);
   for p in &post::POSTS {
     for units in ["mm", "inch"] {
-      let r = run(&mut s, "cam.post", json!({"post": p.id, "units": units}));
+      let r = run(&mut s, "cam.post", json!({"post": p.id, "units": units, "arcs": false}));
       assert_eq!(r["post"], p.id);
       let g = r["gcode"].as_str().unwrap();
       let read = post::read(g).unwrap_or_else(|e| panic!("{} {units}: {e}", p.id));
       let got: Vec<(DVec3, f64)> = read.iter().filter(|m| !m.0).map(|m| (m.1, m.2)).collect();
+      assert_eq!(got.len(), expected.len(), "{} {units}", p.id);
       // inches round to 0.0001", and pecks add up their rounded steps
       let tol = if units == "mm" { 1e-3 } else { 4e-3 };
-      // arcs stand in for runs of short moves (and read back as finer steps): the program passes
-      // through every toolpath point in order at its feed, and never strays from the toolpath
-      // further than an arc may sag from its chords
-      let off = |q: DVec3, a: DVec3, b: DVec3| {
-        let ab = b - a;
-        let t = if ab.length_squared() > 0.0 { ((q - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-        (q - (a + ab * t)).length()
-      };
-      let mut k = 0;
-      for (n, (b, fb)) in expected.iter().enumerate() {
-        let on = |k: usize| {
-          (got[k].0 - *b).length() < tol || (k > 0 && off(*b, got[k - 1].0, got[k].0) < tol + cam::arcs::FIT_TOL)
-        };
-        while k < got.len() && !on(k) {
-          k += 1;
-        }
-        assert!(k < got.len(), "{} {units}: toolpath point {n} {b:?} is not on the program's path", p.id);
-        let fa = got[k].1;
-        assert!((fa - fb).abs() < 0.1 + 1e-3 * fb, "{} {units} point {n}: F{fa} vs F{fb}", p.id);
+      for (k, ((a, fa), (b, fb))) in got.iter().zip(&expected).enumerate() {
+        assert!((*a - *b).length() < tol, "{} {units} move {k}: {a:?} vs {b:?}", p.id);
+        assert!((fa - fb).abs() < 0.1 + 1e-3 * fb, "{} {units} move {k}: F{fa} vs F{fb}", p.id);
       }
-      let path: Vec<DVec3> = expected.iter().map(|e| e.0).collect();
-      for (q, _) in &got {
-        let d = path.windows(2).map(|w| off(*q, w[0], w[1])).fold(f64::INFINITY, f64::min);
-        assert!(d <= cam::arcs::MAX_SAG + tol, "{} {units}: {q:?} strays {d} from the toolpath", p.id);
-      }
-      assert!(
-        g.lines()
-          .any(|l| l.starts_with("G2 ") || l.starts_with("G3 ") || l.starts_with("G02 ") || l.starts_with("G03 ")),
-        "{} {units}: circles go out as arcs",
-        p.id
-      );
       let lines: Vec<&str> = g.lines().collect();
       assert!(lines.iter().any(|l| l.contains(if units == "mm" { "G21" } else { "G20" })));
       match p.id {
@@ -437,7 +411,7 @@ fn posts_write_the_toolpaths_moves() {
           assert!(
             lines
               .iter()
-              .filter(|l| ["G0 ", "G1 ", "G2 ", "G3 "].iter().any(|g| l.starts_with(g)))
+              .filter(|l| l.starts_with("G0 ") || l.starts_with("G1 "))
               .all(|l| { l.split_whitespace().skip(1).all(|w| w.contains('.')) })
           );
         }
