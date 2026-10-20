@@ -752,6 +752,7 @@ impl<'a> System<'a> {
         vec![sign * cross(unit(sub(b, a)), sub(self.p(x, *p), a)) - value.value]
       }
       K::Radius { curve, value } => vec![self.round(x, *curve).1 - value.value],
+      K::FixRadius { curve, radius } => vec![self.round(x, *curve).1 - radius],
       K::Diameter { curve, value } => vec![2.0 * self.round(x, *curve).1 - value.value],
       // spline joints are evaluated in `eval_at`
       K::Curvature { .. } => vec![0.0, 0.0],
@@ -1039,6 +1040,29 @@ mod tests {
     let r1 = super::super::dist(c, s.pos(pts[1]).unwrap());
     let r2 = super::super::dist(c, s.pos(pts[2]).unwrap());
     assert!((r1 - r2).abs() < 1e-6);
+  }
+
+  #[test]
+  fn fixed_curves_hold_their_place_and_size() {
+    let mut s = Sketch::new();
+    let (line, [a, b]) = s.add_line(PtSpec::At(10.0, 5.0), PtSpec::At(34.0, 23.0)).unwrap();
+    assert_eq!(s.fix_curve(line).unwrap().len(), 2);
+    // fixing again adds nothing
+    assert!(s.fix_curve(line).unwrap().is_empty());
+    let (other, _) = s.add_line(PtSpec::Point(b), PtSpec::At(30.0, 30.0)).unwrap();
+    s.add_constraint(ConstraintKind::Perpendicular { a: line, b: other }).unwrap();
+    assert!(s.solve().ok());
+    assert_eq!(s.pos(a).unwrap(), [10.0, 5.0]);
+    assert_eq!(s.pos(b).unwrap(), [34.0, 23.0]);
+
+    let c1 = s.add_circle(PtSpec::At(15.0, 15.0), 10.0).unwrap();
+    let c2 = s.add_circle(PtSpec::At(45.0, 15.0), 6.0).unwrap();
+    assert_eq!(s.fix_curve(c1).unwrap().len(), 2);
+    s.add_constraint(ConstraintKind::Equal { a: c1, b: c2 }).unwrap();
+    assert!(s.solve().ok());
+    assert!((s.radius(c1).unwrap() - 10.0).abs() < 1e-9);
+    assert!((s.radius(c2).unwrap() - 10.0).abs() < 1e-9);
+    assert!(!s.solve().free_curves.contains(&c1));
   }
 
   #[test]
