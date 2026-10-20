@@ -87,6 +87,15 @@ the limit resets, then resumes from the ledger. It uses the reset time the agent
 or else the next 2:30 AM US Central (the user's Max reset), plus 5 minutes of margin. `STOP`
 ends it, waits included. UI probes stay off unless you add `--ui`.
 
+`--probe-until 02:55` (US Central; `'2026-10-20 02:55'` pins a date) hands Fusion back at a set
+time. From the cutoff on, no new probe starts, including after a usage-limit resume. Probes
+still running 3 minutes later are stopped, and their entries go back to `untested`. Then the
+FoxBridge scratch documents are closed and the Fusion lock is freed. Fixers carry on and open PRs
+as usual, and `verify`, which uses Fusion, refuses to run. Once the fixers have nothing left, the
+run ends. Probing stays off until the loop is started again without the cutoff. A plain `HH:MM`
+means the next such time, so restarting with the same flag after the cutoff would allow probing
+again the next night; pin the date to avoid that.
+
 While any `run` is going, waits included, the driver asks Windows not to idle-sleep
 (`SetThreadExecutionState`), and it clears that when it exits. This prevents idle sleep only and
 changes no power settings: closing the laptop lid or choosing Sleep still stops the run. The

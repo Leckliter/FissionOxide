@@ -144,9 +144,18 @@ def promote(scratch_case, name_hint):
   return name
 
 
-def probe_cases(case_dirs):
+class FusionCutoff(Exception):
+  """The --probe-until hard stop came while a probe still needed Fusion."""
+
+
+def probe_cases(case_dirs, deadline=None):
   import probe_case  # imported late: it needs FOX_CLI set
-  return {os.path.basename(d): probe_case.probe(d, write_expected=True) for d in case_dirs}
+  out = {}
+  for d in case_dirs:
+    if deadline and time.time() > deadline:
+      raise FusionCutoff()
+    out[os.path.basename(d)] = probe_case.probe(d, write_expected=True)
+  return out
 
 
 def short(v):
@@ -192,6 +201,29 @@ class Loop:
           print(f"  commit skipped: {ex}"[:400], flush=True)
           return
         time.sleep(1 + attempt)
+
+  def past_cutoff(self):
+    """No new probes (or other Fusion work) from --probe-until on."""
+    return bool(self.a.probe_cutoff) and time.time() >= self.a.probe_cutoff
+
+  def past_hard_stop(self):
+    return bool(self.a.hard_stop) and time.time() >= self.a.hard_stop
+
+  def put_back(self, key, why):
+    self.ledger.update(key, status=L.UNTESTED, probe_pid=None, note=f"put back to untested: {why}")
+    print(f"  {key}: put back to untested ({why})", flush=True)
+
+  async def cutoff_watchdog(self, probers):
+    """At the hard stop, cancels probes still running, puts their entries back and clears Fusion."""
+    await asyncio.sleep(max(0, self.a.hard_stop - time.time()))
+    running = list(self.probing)
+    for t in probers:
+      t.cancel()
+    await asyncio.gather(*probers, return_exceptions=True)
+    for key in running:
+      self.put_back(key, "still probing at the Fusion cutoff")
+    await asyncio.to_thread(clear_fusion)
+    print(f"[{stamp()}] Fusion cutoff: probes stopped, scratch documents closed; fixers continue", flush=True)
 
   def stop_requested(self):
     return os.path.exists(STOP_FILE)
@@ -266,7 +298,12 @@ class Loop:
     # Re-run every case here: the ledger records what the driver measured, not what the agent said.
     dirs = [os.path.join(scratch, c["dir"]) for c in report.get("cases", [])
             if os.path.isdir(os.path.join(scratch, c.get("dir", "")))]
-    verdicts = await asyncio.to_thread(probe_cases, dirs) if dirs else {}
+    if self.past_hard_stop():
+      return self.put_back(key, "the Fusion cutoff came before its cases were re-run")
+    try:
+      verdicts = await asyncio.to_thread(probe_cases, dirs, self.a.hard_stop) if dirs else {}
+    except FusionCutoff:
+      return self.put_back(key, "the Fusion cutoff came while its cases were being re-run")
     built = {n: v for n, v in verdicts.items() if v["fusion"]["ok"]}
     if not built:
       status = L.BLOCKED
@@ -424,6 +461,8 @@ class Loop:
     if env is None:
       sys.exit("verify needs gh: run `gh auth login`")
     todo = [e for e in self.ledger.read() if e["status"] == L.FIXING and e.get("prs")]
+    if self.past_cutoff():
+      sys.exit("verify uses Fusion, which is off-limits after --probe-until; run it once probing is back on")
     merged = []
     for e in todo:
       pr = e["prs"][-1]
@@ -521,7 +560,8 @@ class Loop:
     async def prober():
       # Up to --probes of these run at once. Each claims its entry under the ledger lock, so two
       # probes (in this process or another) never take the same one.
-      while claimed[0] < self.a.max_features and self.budget.ok() and not self.halt and not self.stop_requested():
+      while (claimed[0] < self.a.max_features and self.budget.ok() and not self.halt and not self.stop_requested()
+             and not self.past_cutoff()):
         e = self.ledger.claim_next(keys, self.probing)
         if e is None:
           return
@@ -539,8 +579,19 @@ class Loop:
         if L.needs_fix(e) and not self.halt and not self.stop_requested():
           start_fix(e["key"])
 
-    await asyncio.gather(*[prober() for _ in range(max(1, self.a.probes))])
-    if self.a.ui:
+    probers = [asyncio.create_task(prober()) for _ in range(max(1, self.a.probes))]
+    watchdog = None
+    if self.a.hard_stop and not self.past_hard_stop():
+      watchdog = asyncio.create_task(self.cutoff_watchdog(probers))
+    await asyncio.gather(*probers, return_exceptions=True)
+    if watchdog:
+      if self.past_hard_stop():
+        await watchdog  # it fired: let it put entries back and clear Fusion
+      else:
+        watchdog.cancel()
+    if self.past_cutoff():
+      print(f"[{stamp()}] past the Fusion cutoff: no probes; fixers only", flush=True)
+    if self.a.ui and not self.past_cutoff():
       ui = [e for e in self.ledger.read() if e.get("needs_ui") and (keys is None or e["key"] in keys)]
       for e in ui[: self.a.max_features]:
         if not self.budget.ok() or self.halt:
@@ -555,6 +606,15 @@ class Loop:
       print(f"stopped: {self.halt}. Progress is in the ledger; run the same command again after the reset.")
     if not self.budget.ok():
       print(f"stopped: budget reached (${self.budget.spent_usd:.2f}, {self.budget.spent_tokens:,} tokens)")
+
+
+def clear_fusion():
+  """Closes every FoxBridge scratch document and frees the Fusion lock, whoever holds it."""
+  try:
+    client._call("close_all", 120)
+  except SystemExit:
+    pass
+  client.fusion_release(force=True)
 
 
 def release_fusion(owner):
@@ -620,6 +680,27 @@ def wait_until(t, why):
   return True
 
 
+def parse_cutoff(text):
+  """--probe-until: 'HH:MM' (the next such time, US Central) or 'YYYY-MM-DD HH:MM' (US Central)."""
+  import datetime
+  import zoneinfo
+
+  tz = zoneinfo.ZoneInfo(RESET_TZ)
+  text = text.strip().replace("T", " ")
+  if " " in text:
+    at = datetime.datetime.strptime(text, "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+  else:
+    h, m = (int(x) for x in text.split(":"))
+    now_c = datetime.datetime.now(tz)
+    at = now_c.replace(hour=h, minute=m, second=0, microsecond=0)
+    if at <= now_c:
+      at += datetime.timedelta(days=1)
+  return at.timestamp()
+
+
+HARD_STOP_AFTER = 3 * 60  # probes still running this long after the cutoff are stopped
+
+
 def run_until_done(a):
   """Runs batches until the Design scope is done, waiting out usage limits."""
   a.budget_usd = float("inf")  # the usage limit is the real stop
@@ -648,6 +729,10 @@ def run_until_done(a):
     if loop.halt:
       if not wait_until(next_reset(loop.halt_reset), loop.halt):
         return
+    elif loop.started == 0 and loop.past_cutoff():
+      print(f"[{stamp()}] past the Fusion cutoff and no fixer work left: stopping. Probing stays off until "
+            "the user restarts the loop.", flush=True)
+      return
     elif loop.started == 0:
       # Nothing to start, but not done: another process is probing or fixing what's left.
       if not wait_until(time.time() + 600, "the remaining entries are busy in another driver process"):
@@ -766,6 +851,8 @@ def main():
   r.add_argument("--max-features", type=int, default=3, help="probe at most this many entries (default 3)")
   r.add_argument("--only", nargs="*", help="limit the run to these ledger keys")
   r.add_argument("--no-fix", action="store_true", help="probe only; start no fixers")
+  r.add_argument("--probe-until", help="stop using Fusion at this US Central time ('02:55' or "
+                 "'2026-10-20 02:55'): no new probes, running ones stopped 3 minutes later; fixers continue")
   r.add_argument("--until-done", action="store_true", help="run batches until every Design entry is done; wait "
                  "out usage limits (resets 2:30 AM Central) instead of exiting; no dollar cap")
   r.add_argument("--probes", type=int, default=1, help="probe agents at once (default 1); they share Fusion "
@@ -793,6 +880,11 @@ def main():
   if (a.cmd == "ui-probe" or getattr(a, "ui", False)) and not a.yes:
     if input("A UI probe moves your mouse and types into Fusion and FissionOxide. Continue? [y/N] ").lower() != "y":
       return
+  a.probe_cutoff = a.hard_stop = None
+  if getattr(a, "probe_until", None):
+    a.probe_cutoff = parse_cutoff(a.probe_until)
+    a.hard_stop = a.probe_cutoff + HARD_STOP_AFTER
+    print(f"probes stop at {stamp(a.probe_cutoff)}; any still running are stopped at {stamp(a.hard_stop)}", flush=True)
   if a.cmd == "run":
     keep_awake(True)
     try:
