@@ -293,7 +293,11 @@
 506-full-round-rib
 511-body-free-move
 512-body-copy-rotate
+519-remove-hole-wall
 51-loft-rect-circle-offset
+520-remove-edge-fillet
+521-remove-edge-chamfer
+522-remove-filleted-boss
 52-circular-pattern-fillet
 53-path-pattern
 54-mirror-body-fillets

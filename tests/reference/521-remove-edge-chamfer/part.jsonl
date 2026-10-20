@@ -1,0 +1,11 @@
+# 521-remove-edge-chamfer: added by the parity loop from a Fusion probe
+# remove-edge-chamfer: 40x30x20 box with a 4 mm chamfer on the top edge at y=0; Remove Faces on the chamfer face restores the sharp edge
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [40, 0]]}
+{"cmd": "sketch.line", "points": [[40, 0], [40, 30]]}
+{"cmd": "sketch.line", "points": [[40, 30], [0, 30]]}
+{"cmd": "sketch.line", "points": [[0, 30], [0, 0]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "chamfer", "edges": [{"point": [20.0, 0.0, 20.0]}], "distance": 4}
+{"cmd": "remove_faces", "faces": [{"point": [20.0, 2.0, 18.0]}]}

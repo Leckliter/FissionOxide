@@ -1,0 +1,16 @@
+# 522-remove-filleted-boss: added by the parity loop from a Fusion probe
+# remove-filleted-boss: 60x60x8 plate with a d20x15 boss filleted R3 at its base and R2 at its top; Remove Faces on all the boss faces heals the flat plate
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.line", "points": [[-30, -30], [30, -30]]}
+{"cmd": "sketch.line", "points": [[30, -30], [30, 30]]}
+{"cmd": "sketch.line", "points": [[30, 30], [-30, 30]]}
+{"cmd": "sketch.line", "points": [[-30, 30], [-30, -30]]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 8, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 8.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [0, 0], "radius": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "distance": 15, "operation": "join", "targets": [2000]}
+{"cmd": "fillet", "edges": [{"point": [0.0, -10.0, 8.0]}], "radius": 3}
+{"cmd": "fillet", "edges": [{"point": [0.0, 10.0, 23.0]}], "radius": 2}
+{"cmd": "remove_faces", "faces": [{"point": [10.0, 0.0, 15.0]}, {"point": [0.0, 0.0, 23.0]}, {"point": [9.414214, 0.0, 22.414214]}, {"point": [10.87868, 0.0, 8.87868]}]}
