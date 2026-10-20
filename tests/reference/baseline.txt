@@ -131,3 +131,7 @@
 236-line-direction
 237-extent-distance
 238-symmetric-direction
+434-centerline-arc
+435-rails-square-bulge
+436-closed-ring-four-circles
+437-point-tangent-dome

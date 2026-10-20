@@ -111,7 +111,8 @@ fn loft_with_rails_or_a_centre_line() {
   let r2 = rs.add_arc_3pt(PtSpec::At(-10.0, 0.0), [-15.0, 20.0], PtSpec::At(-10.0, 40.0)).unwrap();
   let c = rs.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 40.0)).unwrap().0;
   let rails = sketch(&mut d, XZ, rs);
-  let sections = vec![LoftSection { sketch: a, profile: None, end: Default::default() },
+  let sections = vec![
+    LoftSection { sketch: a, profile: None, end: Default::default() },
     LoftSection { sketch: b, profile: None, end: Default::default() },
   ];
   let loft = d

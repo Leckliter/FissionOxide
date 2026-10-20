@@ -235,9 +235,11 @@ impl Ctx<'_> {
     rails: &[PathRef],
     centerline: Option<&PathRef>,
   ) -> Result<Shape, String> {
-    let tangent = sections.iter().position(|s| matches!(s.end, LoftEnd::PointTangent { .. }));
-    let Some(at) = tangent else { return self.loft_guided(faces, ruled, closed, rails, centerline) };
-    let LoftEnd::PointTangent { weight } = sections[at].end else { unreachable!() };
+    let tangent = sections.iter().enumerate().find_map(|(i, s)| match s.end {
+      LoftEnd::PointTangent { weight } => Some((i, weight)),
+      _ => None,
+    });
+    let Some((at, weight)) = tangent else { return self.loft_guided(faces, ruled, closed, rails, centerline) };
     if sections.len() != 2 || closed || ruled || !rails.is_empty() || centerline.is_some() {
       return Err("a point tangent end needs a loft of one profile and one point, without rails".into());
     }
