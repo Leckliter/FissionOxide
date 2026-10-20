@@ -28,6 +28,7 @@ mod theme;
 mod toolbox;
 mod trace;
 mod updates;
+mod viewcube;
 mod viewport;
 
 use std::path::PathBuf;
@@ -100,6 +101,8 @@ pub struct App {
   /// The 3D view before the open sketch turned the camera to its plane; finishing the sketch
   /// goes back to it, as in Fusion.
   pre_sketch_cam: Option<Camera>,
+  /// The ViewCube's orientation, Home view and projection mode.
+  cube: viewcube::CubeState,
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
   /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
   pub(crate) picked_plane: Option<Value>,
@@ -284,6 +287,7 @@ impl App {
       last_sketch: None,
       cam_move: None,
       pre_sketch_cam: None,
+      cube: viewcube::CubeState::default(),
       picked_plane: None,
       shown_planes: Vec::new(),
       hidden_profiles: Vec::new(),
@@ -397,7 +401,7 @@ impl App {
     self.drawing = None;
     self.dialog = None;
     self.tool = Tool::Select;
-    self.fit_view();
+    self.fit_view_now();
     self.data.invalidate();
   }
 
@@ -422,7 +426,7 @@ impl App {
       self.swapped_session(revision);
       self.dialog = None;
       self.tool = Tool::Select;
-      self.fit_view();
+      self.fit_view_now();
       self.data.invalidate();
       if r.get("warning").is_none() {
         let v = r.get("version").and_then(Value::as_u64).unwrap_or(0);
@@ -431,15 +435,66 @@ impl App {
     }
   }
 
+  /// Fit: the camera moves smoothly to frame the whole model.
   pub fn fit_view(&mut self) {
+    let mut to = self.view_now();
+    self.fit_cam(&mut to);
+    self.fly_to(to);
+  }
+
+  /// Frames the whole model at once (a design just opened).
+  pub fn fit_view_now(&mut self) {
+    self.cam_move = None;
+    let mut cam = self.cam;
+    self.fit_cam(&mut cam);
+    self.cam = cam;
+  }
+
+  fn fit_cam(&self, cam: &mut Camera) {
     let (lo, hi) = self
       .s
       .model
       .bounds()
       .unwrap_or((fox_engine::kernel::glam::DVec3::splat(-50.0), fox_engine::kernel::glam::DVec3::splat(50.0)));
     let aspect = self.frame.as_ref().map(|f| f.width as f64 / f.height.max(1) as f64).unwrap_or(1.6);
-    self.cam_move = None;
-    self.cam.fit(lo, hi, aspect);
+    cam.fit(lo, hi, aspect);
+  }
+
+  /// Turns the camera smoothly to look from `dir` with `up` at the top of the screen, keeping
+  /// its target and distance (a ViewCube click).
+  pub(crate) fn fly_view(&mut self, dir: fox_engine::kernel::glam::DVec3, up: fox_engine::kernel::glam::DVec3) {
+    let mut to = self.view_now();
+    to.look_from(dir, up);
+    self.fly_to(to);
+  }
+
+  /// A standard view (Top, Front, ...) in the ViewCube's orientation, reached smoothly.
+  pub fn fly_standard_view(&mut self, v: fox_engine::render::StandardView) {
+    if v == fox_engine::render::StandardView::Home {
+      self.go_home();
+    } else {
+      let (dir, up) = self.cube.standard_view(v);
+      self.fly_view(dir, up);
+    }
+  }
+
+  /// Go Home: the Home view set from the ViewCube (fitted or at its own distance), else the
+  /// front-right-top corner fitted to the model.
+  pub fn go_home(&mut self) {
+    let mut to = self.view_now();
+    match self.cube.home {
+      Some((home, false)) => to = Camera { ortho: to.ortho, ..home },
+      Some((home, true)) => {
+        to.look_from(home.eye_dir(), home.basis().1);
+        self.fit_cam(&mut to);
+      }
+      None => {
+        let (dir, up) = self.cube.standard_view(fox_engine::render::StandardView::Home);
+        to.look_from(dir, up);
+        self.fit_cam(&mut to);
+      }
+    }
+    self.fly_to(to);
   }
 
   /// The data hub's folder.
@@ -591,7 +646,7 @@ impl App {
       if r.get("warning").is_none() {
         self.status = Some((format!("Inserted {}", p.display()), false));
       }
-      self.fit_view();
+      self.fit_view_now();
     }
   }
 
@@ -706,8 +761,7 @@ impl App {
       self.fit_view();
     }
     if pressed(Key::Home, Modifiers::NONE) {
-      self.cam.set_view(fox_engine::render::StandardView::Home);
-      self.fit_view();
+      self.go_home();
     }
     if pressed(Key::V, Modifiers::NONE) {
       self.toggle_visibility();
@@ -1055,6 +1109,7 @@ impl App {
     } else {
       cam.yaw = 0.0;
     }
+    cam.roll = 0.0;
     cam
   }
 
@@ -1143,6 +1198,7 @@ impl App {
     if self.step_cam_move(now()) {
       ctx.request_repaint();
     }
+    viewcube::keep_projection(self);
     if self.drawing.is_some() {
       egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
         sheet::show(self, ui);
@@ -1184,7 +1240,7 @@ impl App {
     if !self.fitted_once && self.frame.is_some() {
       self.fitted_once = true;
       if !self.s.model.bodies.is_empty() {
-        self.fit_view();
+        self.fit_view_now();
       }
     }
   }
@@ -1241,18 +1297,19 @@ impl App {
 /// The status hint while a new sketch is open.
 const SKETCHING: &str = "Sketching — draw with the Create tools; Finish Sketch when done";
 
-/// How long the camera takes to turn to a sketch plane and back.
-const CAM_MOVE_SECS: f64 = 0.45;
+/// How long a camera move takes (ViewCube, Home, Fit, Look At, a sketch opening and closing).
+const CAM_MOVE_SECS: f64 = 0.3;
 
-/// The camera a fraction `k` of the way from `a` to `b`: the shorter way round in yaw, and the
-/// distance changing by a steady factor.
+/// The camera a fraction `k` of the way from `a` to `b`: the shorter way round in yaw and roll,
+/// and the distance changing by a steady factor. The projection switches on arrival.
 fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
   if k >= 1.0 {
     return *b;
   }
   let lerp = |x: f64, y: f64| x + (y - x) * k;
   let pi = std::f64::consts::PI;
-  let dyaw = (b.yaw - a.yaw + pi).rem_euclid(std::f64::consts::TAU) - pi;
+  let turn = |x: f64, y: f64| (y - x + pi).rem_euclid(std::f64::consts::TAU) - pi;
+  let dyaw = turn(a.yaw, b.yaw);
   let distance = if a.distance > 0.0 && b.distance > 0.0 {
     (a.distance.ln() + (b.distance.ln() - a.distance.ln()) * k).exp()
   } else {
@@ -1264,7 +1321,8 @@ fn lerp_camera(a: &Camera, b: &Camera, k: f64) -> Camera {
     pitch: lerp(a.pitch, b.pitch),
     distance,
     fov: lerp(a.fov, b.fov),
-    ortho: b.ortho,
+    ortho: a.ortho,
+    roll: a.roll + turn(a.roll, b.roll) * k,
   }
 }
 
@@ -1382,6 +1440,38 @@ mod tests {
     settle_camera(&mut app);
     assert_eq!(app.cam, before);
     assert!(app.status.is_none(), "no stale Sketching hint: {:?}", app.status);
+  }
+
+  #[test]
+  fn view_changes_glide_and_end_on_the_view() {
+    use fox_engine::kernel::glam::DVec3;
+    let mut app = App::with_session(Session::default());
+    app.cam_move = None;
+    let start = app.cam;
+    let corner = DVec3::new(-1.0, -1.0, 1.0).normalize();
+    app.fly_view(corner, DVec3::Z);
+    assert_eq!(app.cam, start, "nothing jumps");
+    let (_, _, t0) = app.cam_move.expect("a move runs");
+    assert!(app.step_cam_move(t0 + CAM_MOVE_SECS / 2.0), "still running half way");
+    let mid = app.cam.eye_dir();
+    assert!((mid - corner).length() > 0.1 && (mid - start.eye_dir()).length() > 0.1, "{mid}");
+    assert!(!app.step_cam_move(t0 + CAM_MOVE_SECS + 1e-9), "done after {CAM_MOVE_SECS} s");
+    assert!((app.cam.eye_dir() - corner).length() < 1e-9);
+    assert_eq!(app.cam.distance, start.distance);
+    // Home and Fit glide too, and land where the instant versions do
+    app.go_home();
+    settle_camera(&mut app);
+    assert!((app.cam.eye_dir() - Camera::default().eye_dir()).length() < 1e-3);
+    let mut snapped = app.cam;
+    snapped.distance *= 3.0;
+    app.cam = snapped;
+    app.fit_view();
+    assert_eq!(app.cam, snapped);
+    settle_camera(&mut app);
+    let fitted = app.cam;
+    app.cam = snapped;
+    app.fit_view_now();
+    assert_eq!(app.cam, fitted);
   }
 
   #[test]

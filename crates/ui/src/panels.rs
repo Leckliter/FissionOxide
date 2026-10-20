@@ -609,10 +609,7 @@ impl Cmd {
       Cmd::Priority(p) => app.sel_priority = p,
       Cmd::Filter(f) => app.sel_filter.toggle(f),
       Cmd::Fit => app.fit_view(),
-      Cmd::Home => {
-        app.cam.set_view(StandardView::Home);
-        app.fit_view();
-      }
+      Cmd::Home => app.go_home(),
       Cmd::ToggleVisibility => app.toggle_visibility(),
       Cmd::ConfigTable => crate::config_ui::toggle_table(),
       Cmd::CaptureHistory => crate::config_ui::toggle_history(app),
@@ -1053,10 +1050,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     ] {
       let ev = tree_row(ui, nv.with(label), 2, None, None, Icon::Views, label, false, theme::TEXT);
       if ev.clicked || ev.double_clicked {
-        app.cam.set_view(v);
-        if v == StandardView::Home {
-          app.fit_view();
-        }
+        app.fly_standard_view(v);
       }
     }
   }
