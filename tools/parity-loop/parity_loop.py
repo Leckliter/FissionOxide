@@ -113,7 +113,7 @@ class Budget:
     state["runs"] = state["runs"][-500:]
     with open(self.path + ".tmp", "w", encoding="utf-8") as f:
       json.dump(state, f, indent=1)
-    os.replace(self.path + ".tmp", self.path)
+    L.replace(self.path + ".tmp", self.path)
     print(f"  [{kind}] {key}: ${meta.get('cost_usd', 0):.2f}, {meta.get('tokens', 0):,} tokens "
           f"(run total ${self.spent_usd:.2f} of ${self.usd:.2f})", flush=True)
 
@@ -220,9 +220,14 @@ class Loop:
     for t in probers:
       t.cancel()
     await asyncio.gather(*probers, return_exceptions=True)
-    for key in running:
-      self.put_back(key, "still probing at the Fusion cutoff")
-    await asyncio.to_thread(clear_fusion)
+    try:
+      for key in running:
+        try:
+          self.put_back(key, "still probing at the Fusion cutoff")
+        except Exception as ex:  # the entry stays probing and resumes; Fusion must still be cleared
+          print(f"  couldn't put {key} back: {ex}", flush=True)
+    finally:
+      await asyncio.to_thread(clear_fusion)
     print(f"[{stamp()}] Fusion cutoff: probes stopped, scratch documents closed; fixers continue", flush=True)
 
   def stop_requested(self):
