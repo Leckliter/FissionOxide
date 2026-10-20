@@ -1005,3 +1005,8 @@ mod refparts;
 mod tests_ellipse;
 #[cfg(test)]
 mod tests_refparts;
+
+mod spun;
+pub use spun::AxialEvents;
+#[cfg(test)]
+mod tests_spun;

@@ -198,6 +198,11 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/refparts.hxx");
     fn fillet_law(s: &Shape, edges: &[u32], at: &[f64], radii: &[f64]) -> Result<UniquePtr<Shape>>;
     fn unify_faces_internal(s: &Shape) -> Result<UniquePtr<Shape>>;
+
+    // spun profiles: a body's reach from an axis along it (cpp/spun.cpp)
+    include!("fox-kernel/cpp/spun.hxx");
+    fn axial_events(s: &Shape, axis: &[f64]) -> Result<Vec<f64>>;
+    fn radial_slices(s: &Shape, axis: &[f64], ts: &[f64]) -> Result<Vec<f64>>;
   }
 }
 
