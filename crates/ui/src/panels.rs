@@ -36,7 +36,7 @@ impl Tab {
   const MAIN: [Tab; 7] =
     [Tab::Solid, Tab::Surface, Tab::Mesh, Tab::SheetMetal, Tab::Plastic, Tab::Manage, Tab::Utilities];
 
-  fn label(self) -> &'static str {
+  pub(crate) fn label(self) -> &'static str {
     match self {
       Tab::Solid => "SOLID",
       Tab::Surface => "SURFACE",
@@ -525,9 +525,7 @@ impl Cmd {
   }
 
   pub(crate) fn run(self, app: &mut App) {
-    if self.repeatable() {
-      app.last_cmd = Some(self);
-    }
+    app.note_cmd(self);
     match self {
       Cmd::NewSketch => app.new_sketch(),
       Cmd::Dialog(k) => app.start(k),
@@ -614,15 +612,7 @@ impl Cmd {
         app.cam.set_view(StandardView::Home);
         app.fit_view();
       }
-      Cmd::ToggleVisibility => {
-        let bodies: Vec<BodyId> =
-          app.s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
-        for b in bodies {
-          let visible = app.s.body_visible(b);
-          app.run("body.visible", json!({"body": b.0, "visible": !visible}));
-        }
-        app.s.selection.clear();
-      }
+      Cmd::ToggleVisibility => app.toggle_visibility(),
       Cmd::ConfigTable => crate::config_ui::toggle_table(),
       Cmd::CaptureHistory => crate::config_ui::toggle_history(app),
       Cmd::SelectMode(m) => {

@@ -929,10 +929,10 @@ fn find(menu: &[E], label: &str) -> Option<Item> {
   })
 }
 
-/// Draws the tool groups of `tab`. Returns false for tabs without a layout yet.
-pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
+/// The tool groups of `tab`: its own, then the ones every modelling tab ends with.
+fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
   // MANAGE and UTILITIES stand alone; the modelling tabs end with the shared groups
-  let (own, shared): (&[Group], &[Group]) = match tab {
+  match tab {
     Tab::Solid => (&SOLID, &SHARED),
     Tab::Surface => (&SURFACE, &SHARED),
     Tab::Mesh => (&MESH, &SHARED),
@@ -943,7 +943,54 @@ pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
     Tab::Sketch => (&SKETCH, &[]),
     Tab::Drawing => (&DRAWING, &[]),
     Tab::Milling => (&MILLING, &[]),
-  };
+  }
+}
+
+/// A command FissionOxide runs, as the toolbar lists it (for the S toolbox's search).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Entry {
+  pub label: &'static str,
+  pub icon: Icon,
+  pub tint: Tint,
+  pub key: &'static str,
+  pub cmd: Cmd,
+  /// The tab it was found on.
+  pub tab: Tab,
+}
+
+/// Every command the toolbar offers on `tabs`, in toolbar order, each label/command pair once.
+pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
+  fn walk(menu: &[E], tab: Tab, out: &mut Vec<Entry>) {
+    for e in menu {
+      match e {
+        E::I(Item { label, icon, tint, key, cmd: Some(cmd), disabled: false }) => {
+          if !out.iter().any(|o| o.label == *label && o.cmd == *cmd) {
+            out.push(Entry { label, icon: *icon, tint: *tint, key, cmd: *cmd, tab });
+          }
+        }
+        E::Sub(_, sub) => walk(sub, tab, out),
+        _ => {}
+      }
+    }
+  }
+  let mut out = Vec::new();
+  for &tab in tabs {
+    let (own, shared) = groups(tab);
+    for g in own.iter().chain(shared.iter()) {
+      walk(g.menu, tab, &mut out);
+    }
+  }
+  out
+}
+
+/// Whether the toolbar offers `cmd` on `tab`.
+pub(crate) fn offers(tab: Tab, cmd: Cmd) -> bool {
+  commands(&[tab]).iter().any(|e| e.cmd == cmd)
+}
+
+/// Draws the tool groups of `tab`. Returns false for tabs without a layout yet.
+pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
+  let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
   for g in own.iter().chain(shared.iter()) {
     show_group(app, ui, tab, g, &mut pick);
