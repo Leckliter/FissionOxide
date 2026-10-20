@@ -111,6 +111,10 @@ pub const UNIFY_SPLIT_PIECES: &str = "unify_split_pieces";
 /// Without it, they walk the edge's tessellated polyline and take the direction of the segment the
 /// point falls on, so on a curved edge the point sits on a chord.
 pub const EXACT_EDGE_FRAMES: &str = "exact_edge_frames";
+/// A two-edges point on straight edges, axes or sketch lines is where the infinite lines cross
+/// (skew lines are an error), as in Fusion. Without it, it is the midpoint of the closest
+/// approach: of the bounded edges for two body edges, of the infinite lines otherwise.
+pub const INFINITE_LINE_CROSSING: &str = "infinite_line_crossing";
 
 /// Every behaviour this build implements; new sketches and designs get all of them. Append only.
 pub const CURRENT: &[&str] = &[
@@ -131,6 +135,7 @@ pub const CURRENT: &[&str] = &[
   REVOLVE_AXIS_UNDIRECTED,
   UNIFY_SPLIT_PIECES,
   EXACT_EDGE_FRAMES,
+  INFINITE_LINE_CROSSING,
 ];
 
 /// Behaviours declared and implemented but not yet given to new geometry; a change ships by

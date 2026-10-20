@@ -154,3 +154,6 @@
 354-origin-plane-through-vertex
 355-origin-plane-offset
 363-line-edge-quarter-mirror
+386-edges-meeting-at-vertex
+387-edges-extended-intersection
+388-sketch-line-and-edge

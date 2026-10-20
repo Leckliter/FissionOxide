@@ -115,7 +115,10 @@ pub enum AxisDef {
 pub enum PointDef {
   /// A vertex, a circle's centre, or a point in space.
   Ref { point: PointRef },
-  /// Where two edges, axes or sketch lines meet (the midpoint of their closest approach).
+  /// Where two lines meet, extended if need be: body edges, axes or sketch lines. Curved body
+  /// edges fall back to the midpoint of the edges' closest approach. Designs made before
+  /// `INFINITE_LINE_CROSSING` take the midpoint of the closest approach of two body edges (as
+  /// bounded curves), or of the infinite lines when an axis or sketch line is involved.
   TwoEdges { a: LineRef, b: LineRef },
   /// Where three planes meet.
   ThreePlanes { a: PlaneRef, b: PlaneRef, c: PlaneRef },

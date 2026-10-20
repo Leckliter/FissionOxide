@@ -327,3 +327,6 @@
 363-line-edge-quarter-mirror
 364-arc-edge-quarter-mirror
 365-sketch-line-diagonal-mirror
+386-edges-meeting-at-vertex
+387-edges-extended-intersection
+388-sketch-line-and-edge
