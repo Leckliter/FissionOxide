@@ -1,0 +1,62 @@
+# A 555 LED blinker in the Electronics workspace, from schematic to fab files. The board outline
+# is a sketch in the design (resize the sketch and the board follows); after ecad.push3d the board
+# and its parts are a component in the 3D model, kept up to date as the layout changes.
+# Run from the repo root: fissionoxide-cli run examples/electronics_blinky.jsonl --save blinky.fox
+{"cmd": "new", "name": "Blinky"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [32, 22]}
+{"cmd": "sketch.finish"}
+# schematic: an astable 555 (about 1.5 Hz with 1k, 47k and 10 µF) driving an LED
+{"cmd": "ecad.part.add", "device": "NE555D", "at": [0, 0]}
+{"cmd": "ecad.part.add", "device": "R_0603", "at": [-20.32, 12.7], "value": "1k"}
+{"cmd": "ecad.part.add", "device": "R_0603", "at": [-20.32, -5.08], "value": "47k"}
+{"cmd": "ecad.part.add", "device": "C_1206", "at": [-33.02, -5.08], "value": "10u"}
+{"cmd": "ecad.part.add", "device": "C_0603", "at": [-33.02, 12.7], "value": "10n"}
+{"cmd": "ecad.part.add", "device": "R_0603", "at": [22.86, 5.08], "value": "470"}
+{"cmd": "ecad.part.add", "device": "LED_0603", "at": [33.02, 5.08]}
+{"cmd": "ecad.part.add", "device": "C_0603", "at": [22.86, -12.7], "value": "100n"}
+{"cmd": "ecad.part.add", "device": "PinHeader_1x02", "at": [43.18, -10.16]}
+{"cmd": "ecad.connect", "part": "U1", "pin": "VCC", "net": "+5V"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "R", "net": "+5V"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "GND", "net": "GND"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "DIS", "net": "DIS"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "THR", "net": "THR"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "TRIG", "net": "THR"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "CV", "net": "CV"}
+{"cmd": "ecad.connect", "part": "U1", "pin": "Q", "net": "OUT"}
+{"cmd": "ecad.connect", "part": "R1", "pin": 1, "net": "+5V"}
+{"cmd": "ecad.connect", "part": "R1", "pin": 2, "net": "DIS"}
+{"cmd": "ecad.connect", "part": "R2", "pin": 1, "net": "DIS"}
+{"cmd": "ecad.connect", "part": "R2", "pin": 2, "net": "THR"}
+{"cmd": "ecad.connect", "part": "C1", "pin": 1, "net": "THR"}
+{"cmd": "ecad.connect", "part": "C1", "pin": 2, "net": "GND"}
+{"cmd": "ecad.connect", "part": "C2", "pin": 1, "net": "CV"}
+{"cmd": "ecad.connect", "part": "C2", "pin": 2, "net": "GND"}
+{"cmd": "ecad.connect", "part": "R3", "pin": 1, "net": "OUT"}
+{"cmd": "ecad.connect", "part": "R3", "pin": 2, "net": "LED"}
+{"cmd": "ecad.connect", "part": "D1", "pin": "A", "net": "LED"}
+{"cmd": "ecad.connect", "part": "D1", "pin": "K", "net": "GND"}
+{"cmd": "ecad.connect", "part": "C3", "pin": 1, "net": "+5V"}
+{"cmd": "ecad.connect", "part": "C3", "pin": 2, "net": "GND"}
+{"cmd": "ecad.connect", "part": "J1", "pin": 1, "net": "+5V"}
+{"cmd": "ecad.connect", "part": "J1", "pin": 2, "net": "GND"}
+{"cmd": "ecad.erc"}
+# board: the sketch's rectangle, two mounting holes, parts placed, routed and a ground pour
+{"cmd": "ecad.board.outline", "sketch": 1, "thickness": 1.6}
+{"cmd": "ecad.hole", "at": [3, 3], "drill": 3.2}
+{"cmd": "ecad.hole", "at": [29, 19], "drill": 3.2}
+{"cmd": "ecad.place", "refdes": "J1", "at": [4, 13]}
+{"cmd": "ecad.place", "refdes": "U1", "at": [16, 11]}
+{"cmd": "ecad.place", "refdes": "C3", "at": [16, 17]}
+{"cmd": "ecad.place", "refdes": "R1", "at": [10, 16], "rot": 90}
+{"cmd": "ecad.place", "refdes": "R2", "at": [10, 6], "rot": 90}
+{"cmd": "ecad.place", "refdes": "C1", "at": [16, 4]}
+{"cmd": "ecad.place", "refdes": "C2", "at": [22, 4], "rot": 90}
+{"cmd": "ecad.place", "refdes": "R3", "at": [23, 12], "rot": 90}
+{"cmd": "ecad.place", "refdes": "D1", "at": [27, 12], "rot": 270}
+{"cmd": "ecad.autoroute"}
+{"cmd": "ecad.pour", "net": "GND", "layer": "bottom"}
+{"cmd": "ecad.drc"}
+{"cmd": "ecad.export", "dir": "blinky-fab"}
+{"cmd": "ecad.push3d"}
+{"cmd": "info"}
