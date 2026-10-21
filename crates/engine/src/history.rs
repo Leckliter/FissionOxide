@@ -17,8 +17,8 @@ impl Session {
     (0..stack.len())
       .rev()
       .map(|i| {
-        let after = stack.get(i + 1).map_or(&self.design, |s| &s.0);
-        stack[i].1.clone().unwrap_or_else(|| step_label(&stack[i].0, after))
+        let after = stack.get(i + 1).map_or(&self.design, |s| &s.design);
+        stack[i].name.clone().unwrap_or_else(|| step_label(&stack[i].design, after))
       })
       .collect()
   }
@@ -27,9 +27,9 @@ impl Session {
   pub fn redo_history(&self) -> Vec<String> {
     let mut before = &self.design;
     let mut out = Vec::with_capacity(self.redo.len());
-    for (d, name) in self.redo.iter().rev() {
-      out.push(name.clone().unwrap_or_else(|| step_label(before, d)));
-      before = d;
+    for step in self.redo.iter().rev() {
+      out.push(step.name.clone().unwrap_or_else(|| step_label(before, &step.design)));
+      before = &step.design;
     }
     out
   }
@@ -37,13 +37,16 @@ impl Session {
   /// Undoes `n` steps (regenerating once). Returns how many were undone.
   pub fn undo_steps(&mut self, n: usize) -> usize {
     let mut done = 0;
+    let mut reopen = None;
     while done < n && self.can_undo() {
-      let Some((d, name)) = self.undo.pop() else { break };
-      self.redo.push((std::mem::replace(&mut self.design, d), name));
+      let Some(step) = self.undo.pop() else { break };
+      reopen = step.sketch;
+      self.redo.push(step.swap(&mut self.design));
       done += 1;
     }
     if done > 0 {
       self.after_history();
+      self.reopen_sketch(reopen, true);
     }
     done
   }
@@ -51,13 +54,16 @@ impl Session {
   /// Redoes `n` steps (regenerating once). Returns how many were redone.
   pub fn redo_steps(&mut self, n: usize) -> usize {
     let mut done = 0;
+    let mut finished = None;
     while done < n {
-      let Some((d, name)) = self.redo.pop() else { break };
-      self.undo.push((std::mem::replace(&mut self.design, d), name));
+      let Some(step) = self.redo.pop() else { break };
+      finished = step.sketch;
+      self.undo.push(step.swap(&mut self.design));
       done += 1;
     }
     if done > 0 {
       self.after_history();
+      self.reopen_sketch(finished, false);
     }
     done
   }
@@ -69,6 +75,7 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
   let ty = p.get("type").and_then(Value::as_str).unwrap_or("");
   let label = match name {
     "design.units" if has("unit") => "Change Units",
+    "sketch.create" => "Create Sketch",
     "sketch.line" => "Line",
     "sketch.rect" if has("center") => "Center Rectangle",
     "sketch.rect" if has("points") => "3-Point Rectangle",
@@ -285,16 +292,47 @@ mod tests {
     s.execute("design.units", &json!({"unit": "in"})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     s.execute("extrude", &json!({"distance": 5})).unwrap();
+    // finishing the sketch is a step of its own, as in Fusion
     assert_eq!(
       s.undo_history(),
-      ["Extrude", "Change Units", "2-Point Rectangle", "Fix", "Sketch Dimension", "Line", "Sketch"]
+      [
+        "Extrude",
+        "Finish Sketch",
+        "Change Units",
+        "2-Point Rectangle",
+        "Fix",
+        "Sketch Dimension",
+        "Line",
+        "Create Sketch"
+      ]
     );
     // a name travels with its step through undo and redo
-    assert_eq!(s.undo_steps(4), 4);
-    assert_eq!(s.redo_history(), ["Fix", "2-Point Rectangle", "Change Units", "Extrude"]);
-    assert_eq!(s.undo_history(), ["Sketch Dimension", "Line", "Sketch"]);
+    assert_eq!(s.undo_steps(5), 5);
+    assert_eq!(s.redo_history(), ["Fix", "2-Point Rectangle", "Change Units", "Finish Sketch", "Extrude"]);
+    assert_eq!(s.undo_history(), ["Sketch Dimension", "Line", "Create Sketch"]);
     assert_eq!(s.redo_steps(1), 1);
     assert_eq!(s.undo_history()[0], "Fix");
+  }
+
+  #[test]
+  fn undoing_finish_sketch_reopens_the_sketch() {
+    let mut s = Session::default();
+    let sk = s.execute("sketch.create", &json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap() as u32;
+    s.execute("sketch.rect", &json!({"corner1": [0, 0], "corner2": [10, 20]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    assert_eq!(s.edit_sketch, None);
+    assert_eq!(s.undo_history(), ["Finish Sketch", "2-Point Rectangle", "Create Sketch"]);
+    assert!(s.undo());
+    assert_eq!(s.edit_sketch.map(|f| f.0), Some(sk), "back in the sketch");
+    assert_eq!(s.design.features.len(), 1, "the design is as it was");
+    assert!(s.redo());
+    assert_eq!(s.edit_sketch, None, "finished again");
+    // finishing with no sketch open adds no step
+    s.execute("sketch.finish", &json!({})).unwrap();
+    assert_eq!(s.undo_history().len(), 3);
+    // undoing past the Finish Sketch step and the sketch's creation leaves no sketch open
+    assert_eq!(s.undo_steps(3), 3);
+    assert_eq!(s.edit_sketch, None);
   }
 
   #[test]
@@ -305,6 +343,6 @@ mod tests {
     let line = s.execute("sketch.line", &json!({"points": [[0, 0], [40, 0]]})).unwrap()["curves"][0].clone();
     s.execute("sketch.dimension", &json!({"type": "distance", "curves": [line], "value": "45"})).unwrap();
     s.execute("transaction.commit", &json!({})).unwrap();
-    assert_eq!(s.undo_history(), ["Line", "Sketch"]);
+    assert_eq!(s.undo_history(), ["Line", "Create Sketch"]);
   }
 }

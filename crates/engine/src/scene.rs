@@ -11,7 +11,8 @@ use fox_sketch::{CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
-pub const BODY_COLOR: [u8; 4] = [186, 190, 196, 255];
+/// Fusion's default look (Steel - Satin): a warm light grey, about (205, 200, 190) on a top face.
+pub const BODY_COLOR: [u8; 4] = [205, 200, 190, 255];
 pub const HOVER_COLOR: [u8; 4] = [128, 190, 238, 255];
 pub const SELECT_COLOR: [u8; 4] = [36, 142, 220, 255];
 pub const EDGE_COLOR: [u8; 4] = [35, 38, 44, 255];
@@ -110,6 +111,11 @@ pub struct ViewOptions {
   pub hover: Option<Pick>,
   /// Bodies drawn in the hover colour: what the pointer is over in the browser or timeline.
   pub peek: Vec<BodyId>,
+  /// Faces drawn in the hover colour (body, 1-based face id): what a hovered timeline feature
+  /// made (a fillet's rounds, a cut's walls).
+  pub peek_faces: Vec<(BodyId, u32)>,
+  /// Sketches drawn in the hover colour (shown even when hidden): a hovered timeline sketch.
+  pub peek_sketches: Vec<FeatureId>,
   pub hide_edges: bool,
   pub hide_grid: bool,
   /// Draw no sketches (renders of the finished part).
@@ -220,14 +226,17 @@ impl SceneBuilder {
         .collect();
       let first = scene.meshes.len();
       let face_cols = crate::views::body_face_colors(s, body.id);
-      if !face_cols.is_empty() {
-        // faces with an appearance of their own (and selected faces) draw as meshes of their colour
+      let peek_faces: Vec<u32> = opts.peek_faces.iter().filter(|(b, _)| *b == body.id).map(|(_, f)| *f).collect();
+      if !face_cols.is_empty() || !peek_faces.is_empty() {
+        // faces with an appearance of their own (and selected or peeked faces) draw as meshes of
+        // their colour
         let color_of = |t: usize, id: u32| {
           if sel_faces.contains(&id) {
             return SELECT_COLOR;
           }
           let f = m.tri_face.get(t).copied().unwrap_or(0);
-          face_cols.get(&f).map(|c| tint([c[0], c[1], c[2], 255])).unwrap_or(base)
+          let c = face_cols.get(&f).map(|c| tint([c[0], c[1], c[2], 255])).unwrap_or(base);
+          if peek_faces.contains(&f) { mix(c, HOVER_COLOR, 0.6) } else { c }
         };
         for (part, ids, color) in split_by_color(m, &tri_ids, color_of) {
           scene.meshes.push(mesh_of(&part, ids, color, hover));
@@ -331,7 +340,8 @@ impl SceneBuilder {
       let Some(r) = s.model.sketches.get(&f.id) else { continue };
       let is_edit = s.edit_sketch == Some(f.id);
       let auto = !sketch_consumed(s, f.id) || opts.show_profiles_of.contains(&f.id);
-      let show = !f.suppressed && (is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto));
+      let peeked = opts.peek_sketches.contains(&f.id);
+      let show = !f.suppressed && (is_edit || peeked || !opts.hide_sketches && f.visible.unwrap_or(auto));
       if !show {
         continue;
       }
@@ -360,7 +370,9 @@ impl SceneBuilder {
         }
         scene.meshes.push(pm);
       }
-      sketch_lines(&mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover);
+      sketch_lines(
+        &mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover, peeked,
+      );
     }
 
     // construction planes
@@ -591,6 +603,7 @@ fn sketch_lines(
   report: &fox_sketch::SolveReport,
   selected: &[Pick],
   hover: Option<Pick>,
+  peeked: bool,
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
   for c in &sk.curves {
@@ -602,7 +615,7 @@ fn sketch_lines(
     let is_free = report.curve_free(sk, c.id);
     let color = if selected.contains(&pick) {
       SELECT_COLOR
-    } else if hover == Some(pick) {
+    } else if hover == Some(pick) || peeked {
       HOVER_COLOR
     } else if !editing {
       SKETCH_IDLE
@@ -628,7 +641,7 @@ fn sketch_lines(
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
     let color = if selected.contains(&pick) {
       SELECT_COLOR
-    } else if hover == Some(pick) {
+    } else if hover == Some(pick) || peeked {
       HOVER_COLOR
     } else if editing {
       SKETCH_FIXED
@@ -936,7 +949,7 @@ fn split_by_color(
   out
 }
 
-fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
+pub fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
   let mut o = [255u8; 4];
   for i in 0..3 {
     o[i] = (a[i] as f32 * (1.0 - t) + b[i] as f32 * t).round() as u8;

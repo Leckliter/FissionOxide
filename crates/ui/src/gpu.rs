@@ -227,19 +227,6 @@ fn draw(gl: &glow::Context, sh: &mut Shared, view: Option<(Camera, [u32; 2], boo
   Ok(())
 }
 
-/// The renderer switch, for the Display Settings menu.
-pub fn settings(app: &mut App, ui: &mut egui::Ui) {
-  let resp = ui.checkbox(&mut app.gpu.enabled, "GPU Renderer");
-  match &app.gpu.failed {
-    Some(why) => {
-      resp.on_hover_text(format!("Unavailable: {why}. The CPU renderer draws the viewport."));
-    }
-    None => {
-      resp.on_hover_text("Draw the viewport with OpenGL; off draws it with the CPU renderer");
-    }
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -278,6 +265,8 @@ mod tests {
       peek: Vec::new(),
       isolate: None,
       opacity: Vec::new(),
+      peek_faces: Vec::new(),
+      peek_sketches: Vec::new(),
     };
     assert!(scene_changed(&app, &key));
     set_scene(&mut app, Scene::default(), PickTable::default(), key.clone());

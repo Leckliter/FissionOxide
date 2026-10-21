@@ -52,6 +52,11 @@ pub(crate) struct MenuState {
   pub(crate) peek_label: Option<String>,
   next_peek: Vec<BodyId>,
   next_label: Option<String>,
+  /// Faces and sketches drawn highlighted: what the timeline feature under the pointer made.
+  pub(crate) peek_faces: Vec<(BodyId, u32)>,
+  pub(crate) peek_sketches: Vec<FeatureId>,
+  next_faces: Vec<(BodyId, u32)>,
+  next_sketches: Vec<FeatureId>,
   /// The browser node Find in Browser scrolls to and selects.
   pub(crate) reveal: Option<Sel>,
   /// Isolate: only these bodies are drawn (a view state; nothing in the design changes).
@@ -355,13 +360,38 @@ pub(crate) fn peek(app: &mut App, bodies: Vec<BodyId>, label: String) {
   app.ctx_menu.next_label = Some(label);
 }
 
+/// Highlights what a timeline feature made, as Fusion does when its icon is hovered: a sketch's
+/// curves, the bodies a feature created, or just the faces it added (a fillet's rounds, a cut's
+/// walls); the bodies the feature last changed when nothing finer is known.
+pub(crate) fn peek_feature(app: &mut App, f: FeatureId, label: String) {
+  let sketch = app.s.design.feature(f).is_some_and(|x| matches!(x.kind, FeatureKind::Sketch { .. }));
+  if sketch {
+    app.ctx_menu.next_sketches = vec![f];
+    app.ctx_menu.next_label = Some(label);
+    return;
+  }
+  let made = app.s.feature_made(f);
+  if made.is_empty() {
+    peek(app, feature_bodies(app, f), label);
+    return;
+  }
+  app.ctx_menu.next_peek = made.bodies;
+  app.ctx_menu.next_faces =
+    made.faces.into_iter().flat_map(|(b, faces)| faces.into_iter().map(move |f| (b, f))).collect();
+  app.ctx_menu.next_label = Some(label);
+}
+
 /// After the panels: takes this frame's hover highlight and notes the last command run.
 pub fn end_frame(app: &mut App, ctx: &egui::Context) {
   let m = &mut app.ctx_menu;
   let bodies = std::mem::take(&mut m.next_peek);
+  let faces = std::mem::take(&mut m.next_faces);
+  let sketches = std::mem::take(&mut m.next_sketches);
   let label = m.next_label.take();
-  if m.peek != bodies || m.peek_label != label {
+  if m.peek != bodies || m.peek_faces != faces || m.peek_sketches != sketches || m.peek_label != label {
     m.peek = bodies;
+    m.peek_faces = faces;
+    m.peek_sketches = sketches;
     m.peek_label = label;
     ctx.request_repaint();
   }
@@ -1136,6 +1166,54 @@ mod tests {
     let cx = context(&app);
     let list = labels(&overflow(&app, &cx));
     assert!(list.iter().any(|l| l == "Remove") && list.iter().any(|l| l == "Move/Copy"), "{list:?}");
+  }
+
+  #[test]
+  fn timeline_hover_highlights_what_the_feature_made() {
+    use fox_engine::scene::{self, SceneBuilder, ViewOptions};
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let box_feature = app.s.design.features[0].id;
+    let edge = app.s.model.bodies[0].edges()[0].id;
+    app.run("fillet", json!({"edges": [{"body": body.0, "edge": edge}], "radius": 1}));
+    let fillet = app.s.design.features[1].id;
+    assert_eq!(app.s.model.bodies[0].faces().len(), 7, "the box has its round");
+    let ctx = egui::Context::default();
+    // the box made its body
+    peek_feature(&mut app, box_feature, "Box1".into());
+    end_frame(&mut app, &ctx);
+    assert_eq!(app.ctx_menu.peek, vec![body]);
+    assert!(app.ctx_menu.peek_faces.is_empty());
+    // the fillet made one face of it, not the body
+    peek_feature(&mut app, fillet, "Fillet1".into());
+    end_frame(&mut app, &ctx);
+    assert!(app.ctx_menu.peek.is_empty(), "the fillet doesn't tint the whole body");
+    assert_eq!(app.ctx_menu.peek_faces.len(), 1, "{:?}", app.ctx_menu.peek_faces);
+    assert_eq!(app.ctx_menu.peek_faces[0].0, body);
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Fillet1"));
+    // the scene draws that face in the hover colour and the rest in the body's
+    let opts = ViewOptions { peek_faces: app.ctx_menu.peek_faces.clone(), ..Default::default() };
+    let (sc, _) = SceneBuilder::default().build(&app.s, &opts);
+    let colors: Vec<[u8; 4]> = sc.meshes.iter().map(|m| m.color).collect();
+    let hovered = scene::mix(scene::BODY_COLOR, scene::HOVER_COLOR, 0.6);
+    assert!(colors.contains(&hovered) && colors.contains(&scene::BODY_COLOR), "{colors:?}");
+    // a sketch highlights its curves, shown even when hidden
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [5, 5]}));
+    app.finish_sketch();
+    app.run("sketch.visible", json!({"sketch": sk.0, "visible": false}));
+    peek_feature(&mut app, sk, "Sketch1".into());
+    end_frame(&mut app, &ctx);
+    assert_eq!(app.ctx_menu.peek_sketches, vec![sk]);
+    assert!(app.ctx_menu.peek.is_empty() && app.ctx_menu.peek_faces.is_empty());
+    let opts = ViewOptions { peek_sketches: vec![sk], ..Default::default() };
+    let (sc, _) = SceneBuilder::default().build(&app.s, &opts);
+    assert!(sc.lines.iter().any(|l| l.color == scene::HOVER_COLOR), "the hidden sketch's curves show highlighted");
+    let (sc, _) = SceneBuilder::default().build(&app.s, &ViewOptions::default());
+    assert!(!sc.lines.iter().any(|l| l.color == scene::HOVER_COLOR));
+    end_frame(&mut app, &ctx);
+    assert!(app.ctx_menu.peek_sketches.is_empty(), "the highlight goes when the pointer leaves");
   }
 
   #[test]

@@ -1125,14 +1125,16 @@ fn raster_tri(
       let view = if persp { (eye.as_vec3() - wpos).normalize_or_zero() } else { head };
       // two-sided: flip normals facing away
       let n = if n.dot(view) < 0.0 { -n } else { n };
-      let diff = 0.45 * n.dot(key).max(0.0) + 0.3 * n.dot(head).max(0.0) + 0.2 * n.dot(fill).max(0.0);
+      // soft shading, as Fusion's default look: a good deal of ambient light, so the sides of a
+      // body stay light grey rather than falling into shadow
+      let diff = 0.36 * n.dot(key).max(0.0) + 0.24 * n.dot(head).max(0.0) + 0.15 * n.dot(fill).max(0.0);
       let half = (key + view).normalize_or_zero();
-      let spec = n.dot(half).max(0.0).powf(40.0) * 0.2;
+      let spec = n.dot(half).max(0.0).powf(40.0) * 0.12;
       let base =
         if shade.vertex_colors { v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32 } else { base };
       let c = match shade.analysis {
         _ if shade.paper => base,
-        None => base * (0.38 + diff) + Vec3::splat(spec),
+        None => base * (0.5 + diff) + Vec3::splat(spec),
         Some(Analysis::Zebra { stripes }) => {
           // stripes of a striped environment reflected in the surface
           let r = n * (2.0 * n.dot(view)) - view;

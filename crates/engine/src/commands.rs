@@ -683,7 +683,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       Ok(json!({}))
     }
     "sketch.finish" => {
-      s.edit_sketch = None;
+      if let Some(id) = s.edit_sketch.take() {
+        s.finish_sketch_step(id);
+      }
       Ok(json!({}))
     }
     "sketch.line"

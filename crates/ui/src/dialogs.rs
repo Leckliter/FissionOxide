@@ -4108,7 +4108,7 @@ pub(crate) fn appearance_library(app: &mut App) -> Vec<(String, [u8; 3])> {
 }
 
 /// What bodies show without an appearance of their own: Fusion's default, Steel - Satin.
-const DEFAULT_APPEARANCE: [u8; 3] = [186, 190, 196];
+const DEFAULT_APPEARANCE: [u8; 3] = [205, 200, 190];
 
 /// The appearances the design uses (name, colour, how many bodies and faces carry it), in the
 /// order they are first met. Colours not in the library are named by their hex code.
@@ -5651,7 +5651,7 @@ mod tests {
     let lib = appearance_library(&mut app);
     assert!(lib.len() >= 16 && lib.iter().any(|(n, _)| n == "Copper"));
     // a new body shows the default appearance
-    assert_eq!(in_this_design(&app, &lib), [("Steel - Satin".to_string(), [186, 190, 196], 1)]);
+    assert_eq!(in_this_design(&app, &lib), [("Steel - Satin".to_string(), [205, 200, 190], 1)]);
 
     let copper = lib.iter().find(|(n, _)| n == "Copper").unwrap().1;
     assert!(!apply_appearance(&mut app, "Copper", copper, true, &[Sel::Body { body: b }]), "faces mode needs faces");

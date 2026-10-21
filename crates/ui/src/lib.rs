@@ -8,7 +8,9 @@
 mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
+mod capture;
 mod clipboard;
+mod comments;
 mod comp_drag;
 mod config_ui;
 mod customize;
@@ -32,6 +34,7 @@ mod manipulators;
 mod marking;
 mod menus;
 mod navbar;
+mod notifications;
 mod panels;
 mod params_ui;
 mod plugins_ui;
@@ -109,6 +112,14 @@ pub struct App {
   pub show_comments: bool,
   pub show_navbar: bool,
   pub show_viewcube: bool,
+  /// The COMMENTS panel: open or collapsed to its header, and its comments.
+  pub comments: comments::Comments,
+  /// The bell's Notifications panel.
+  pub notifications: notifications::Notifications,
+  /// File ▸ Capture Image... and 3D Print dialogs.
+  pub(crate) capture: capture::Capture,
+  /// Display Settings: environment, graphics preset, ground plane offset.
+  pub display: navbar::DisplaySettings,
   /// Navigation bar mode (orbit / pan / zoom with the left button).
   pub nav_mode: Option<NavMode>,
   /// Toolbar tab; opening a sketch switches to the contextual SKETCH tab.
@@ -131,6 +142,8 @@ pub struct App {
   pub(crate) ctx_menu: marking::MenuState,
   /// The canvas (viewport) rectangle, for panels floating over it.
   pub(crate) canvas: egui::Rect,
+  /// The canvas's size in pixels, as last drawn (what Capture Image's window size is).
+  pub(crate) canvas_px: [u32; 2],
   /// Inline dimension value editor: (constraint id, text, screen position).
   dim_edit: Option<(u32, String, egui::Pos2)>,
   /// Feature id being renamed in the timeline/browser.
@@ -273,6 +286,9 @@ struct RenderKey {
   peek: Vec<u32>,
   isolate: Option<Vec<u32>>,
   opacity: Vec<(u32, u8)>,
+  /// Faces and sketches highlighted from the timeline.
+  peek_faces: Vec<(u32, u32)>,
+  peek_sketches: Vec<u32>,
 }
 
 impl App {
@@ -281,6 +297,7 @@ impl App {
     let mut app = App::with_session(Session::default());
     app.gpu = gpu::Gpu::new(cc.gl.clone());
     app.updates = updates::Updates::start(&cc.egui_ctx);
+    notifications::post(&mut app, notifications::whats_new_notice());
     app.prefs = customize::Prefs::load();
     app.preferences = preferences::Preferences::load();
     preferences::apply(&mut app);
@@ -375,6 +392,11 @@ impl App {
       show_constraints: true,
       browser_open: true,
       show_comments: true,
+      canvas_px: [0, 0],
+      comments: comments::Comments::default(),
+      notifications: notifications::Notifications::default(),
+      capture: capture::Capture::default(),
+      display: navbar::DisplaySettings::default(),
       show_navbar: true,
       show_viewcube: true,
       nav_mode: None,
@@ -556,6 +578,8 @@ impl App {
     self.render_key = None;
     self.hover = None;
     self.ctx_menu.peek.clear();
+    self.ctx_menu.peek_faces.clear();
+    self.ctx_menu.peek_sketches.clear();
     self.ctx_menu.isolate = None;
     self.data.save = None;
   }
@@ -881,6 +905,10 @@ impl App {
     }
     if pressed(Key::S, Modifiers::COMMAND | Modifiers::SHIFT) {
       self.save(true);
+    }
+    // Display Settings ▸ Enter/Exit Full Screen
+    if pressed(Key::F, Modifiers::COMMAND | Modifiers::SHIFT) {
+      navbar::toggle_full_screen(ctx);
     }
     if pressed(Key::S, Modifiers::COMMAND) {
       self.save(false);
@@ -1576,6 +1604,7 @@ impl App {
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
     panels::selection_info(self, &ctx);
+    notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     if let Some(mut d) = self.dialog.take() {
       let keep = d.show(self, &ctx);
@@ -1590,6 +1619,8 @@ impl App {
     }
     data_panel::save_window(self, &ctx);
     updates::window(self, &ctx);
+    capture::windows(self, &ctx);
+    navbar::ground_offset_window(self, &ctx);
     customize::key_window(self, &ctx);
     cam_ui::tool_library_window(self, &ctx);
     config_ui::table_window(self, &ctx);

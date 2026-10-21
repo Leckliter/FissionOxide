@@ -1596,6 +1596,15 @@ fn row(ui: &mut egui::Ui, width: f32, it: Option<&Item>, key: &str, label: &str,
   resp
 }
 
+/// The icon the toolbar menus draw for the command labelled `label` on any tab (the Undo list
+/// shows a step's command with it).
+pub(crate) fn icon_of_label(label: &str) -> Option<Icon> {
+  ALL_TABS.iter().find_map(|tab| {
+    let (own, shared) = groups(*tab);
+    own.iter().chain(shared).find_map(|g| find(g.menu, label)).map(|i| i.icon)
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

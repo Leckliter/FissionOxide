@@ -293,7 +293,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
 
 /// Fusion's common appearances (library names) and the colour FissionOxide renders them in.
 pub const APPEARANCES: [(&str, [u8; 3]); 16] = [
-  ("Steel - Satin", [186, 190, 196]),
+  ("Steel - Satin", [205, 200, 190]),
   ("Aluminum - Anodized Black", [52, 54, 58]),
   ("Aluminum - Anodized Red", [176, 46, 44]),
   ("Aluminum - Anodized Blue", [46, 92, 170]),

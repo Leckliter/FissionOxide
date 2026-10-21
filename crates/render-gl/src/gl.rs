@@ -69,14 +69,15 @@ void main() {
   vec3 n = safe_norm(v_nrm);
   vec3 view = u_persp == 1 ? safe_norm(u_eye - v_wpos) : u_head;
   if (dot(n, view) < 0.0) n = -n;
-  float diff = 0.45 * max(dot(n, u_key), 0.0) + 0.3 * max(dot(n, u_head), 0.0) + 0.2 * max(dot(n, u_fill), 0.0);
+  // the CPU renderer's soft shading (see fox_render): plenty of ambient, a gentle key light
+  float diff = 0.36 * max(dot(n, u_key), 0.0) + 0.24 * max(dot(n, u_head), 0.0) + 0.15 * max(dot(n, u_fill), 0.0);
   vec3 h = safe_norm(u_key + view);
-  float spec = pow(max(dot(n, h), 0.0), 40.0) * 0.2;
+  float spec = pow(max(dot(n, h), 0.0), 40.0) * 0.12;
   vec3 c;
   if (u_mode == 4) {
     c = base;
   } else if (u_mode == 0) {
-    c = base * (0.38 + diff) + vec3(spec);
+    c = base * (0.5 + diff) + vec3(spec);
   } else if (u_mode == 1) {
     vec3 r = n * (2.0 * dot(n, view)) - view;
     float band = floor((r.z * 0.5 + 0.5) * u_param.x);

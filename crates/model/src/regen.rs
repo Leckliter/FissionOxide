@@ -2613,3 +2613,6 @@ mod tests_fillet2;
 mod offset;
 #[cfg(test)]
 mod tests_offset;
+
+mod made;
+pub use made::Made;

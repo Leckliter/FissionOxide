@@ -14,8 +14,67 @@ pub(crate) type Spot = [i8; 3];
 
 /// The part of a face's half-width that is its centre; the band outside it is edges and corners.
 const FACE_CORE: f64 = 0.6;
-/// Screen pixels per cube unit (the cube spans -1..1).
+/// Screen pixels per cube unit (the cube spans -1..1) at the Large size.
 const SCALE: f32 = 31.0;
+
+/// ViewCube menu ▸ ViewCube Size, as Fusion's (a preference).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CubeSize {
+  /// Sized by the canvas: Tiny in a small window up to Large in a big one.
+  #[default]
+  Automatic,
+  Tiny,
+  Small,
+  Normal,
+  Large,
+}
+
+impl CubeSize {
+  pub const ALL: [CubeSize; 5] =
+    [CubeSize::Automatic, CubeSize::Tiny, CubeSize::Small, CubeSize::Normal, CubeSize::Large];
+
+  pub fn key(self) -> &'static str {
+    match self {
+      CubeSize::Automatic => "automatic",
+      CubeSize::Tiny => "tiny",
+      CubeSize::Small => "small",
+      CubeSize::Normal => "normal",
+      CubeSize::Large => "large",
+    }
+  }
+
+  pub fn label(self) -> &'static str {
+    match self {
+      CubeSize::Automatic => "Automatic",
+      CubeSize::Tiny => "Tiny",
+      CubeSize::Small => "Small",
+      CubeSize::Normal => "Normal",
+      CubeSize::Large => "Large",
+    }
+  }
+
+  /// The cube's scale relative to Large, for a canvas `height` points tall.
+  pub fn factor(self, height: f32) -> f32 {
+    match self {
+      CubeSize::Automatic => {
+        if height < 480.0 {
+          CubeSize::Tiny
+        } else if height < 720.0 {
+          CubeSize::Small
+        } else if height < 1500.0 {
+          CubeSize::Normal
+        } else {
+          CubeSize::Large
+        }
+      }
+      .factor(height),
+      CubeSize::Tiny => 0.5,
+      CubeSize::Small => 0.65,
+      CubeSize::Normal => 0.8,
+      CubeSize::Large => 1.0,
+    }
+  }
+}
 /// Radius of the compass ring, in cube units, round the cube's bottom.
 const RING: f64 = 1.55;
 /// Opacity of the cube while the pointer is away from it.
@@ -154,17 +213,19 @@ struct Basis {
   right: DVec3,
   up: DVec3,
   back: DVec3,
+  /// Screen pixels per cube unit (the ViewCube Size).
+  scale: f32,
 }
 
 impl Basis {
   fn new(state: &CubeState, cam: &Camera) -> Self {
     let (right, up, back) = cam.basis();
-    Basis { right: state.in_cube(right), up: state.in_cube(up), back: state.in_cube(back) }
+    Basis { right: state.in_cube(right), up: state.in_cube(up), back: state.in_cube(back), scale: SCALE }
   }
 
   /// Screen offset from the cube's centre of a point in cube axes (y down).
   fn proj(&self, v: DVec3) -> Vec2 {
-    Vec2::new(v.dot(self.right) as f32, -v.dot(self.up) as f32) * SCALE
+    Vec2::new(v.dot(self.right) as f32, -v.dot(self.up) as f32) * self.scale
   }
 
   /// The faces turned towards the viewer: (axis, sign, how squarely it faces).
@@ -289,11 +350,14 @@ pub(crate) fn keep_projection(app: &mut App) {
 
 /// Draws the cube and handles it. Returns true when it took the click or is being dragged.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, rect: Rect) -> bool {
-  let center = rect.right_top() + Vec2::new(-92.0, 80.0);
+  // the ViewCube Size scales the cube and its buttons together
+  let k = app.preferences.values.cube_size.factor(rect.height());
+  let scale = SCALE * k;
+  let center = rect.right_top() + Vec2::new(-92.0, 80.0) * k;
   let at = |v: Vec2| center + v;
-  let area = Rect::from_center_size(center, Vec2::splat(124.0));
-  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0), Vec2::splat(18.0));
-  let menu = Rect::from_center_size(center + Vec2::new(46.0, 64.0), Vec2::splat(16.0));
+  let area = Rect::from_center_size(center, Vec2::splat(124.0 * k));
+  let home = Rect::from_center_size(center + Vec2::new(-62.0, -50.0) * k, Vec2::splat(18.0));
+  let menu = Rect::from_center_size(center + Vec2::new(46.0, 64.0) * k, Vec2::splat(16.0));
   let id = ui.id().with("viewcube");
   // the cube with its buttons is a widget like any other, so a dialog, menu or panel drawn over
   // it takes the pointer instead; the buttons come after the cube so they're on top of it
@@ -302,12 +366,13 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, re
   let menu_resp = ui.interact(menu, id.with("menu"), Sense::click());
   let moving = app.cam_move.is_some();
 
-  let b = Basis::new(&app.cube, &app.cam);
+  let mut b = Basis::new(&app.cube, &app.cam);
+  b.scale = scale;
   let pointer = if resp.dragged() { None } else { resp.hover_pos() };
   let off = pointer.map(|p| p - center);
   let face = if moving { None } else { app.cube.face_view(&app.cam) };
-  let arrows = face.map(|_| face_arrows(center)).unwrap_or_default();
-  let rolls = face.map(|_| roll_arrows(center)).unwrap_or_default();
+  let arrows = face.map(|_| face_arrows(center, scale)).unwrap_or_default();
+  let rolls = face.map(|_| roll_arrows(center, scale)).unwrap_or_default();
   let arrow_hit = pointer.and_then(|p| arrows.iter().position(|(r, ..)| r.contains(p)));
   let roll_hit = pointer.and_then(|p| rolls.iter().position(|(r, ..)| r.contains(p)));
   let over_arrow = arrow_hit.is_some() || roll_hit.is_some();
@@ -397,8 +462,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, re
 
 /// The four triangles round a face view that step to the next face: (hot area, triangle,
 /// (dx, dy) with y up).
-fn face_arrows(center: Pos2) -> Vec<(Rect, [Pos2; 3], (i32, i32))> {
-  let reach = SCALE + 12.0;
+fn face_arrows(center: Pos2, scale: f32) -> Vec<(Rect, [Pos2; 3], (i32, i32))> {
+  let reach = scale + 12.0;
   [(0, 1), (0, -1), (1, 0), (-1, 0)]
     .into_iter()
     .map(|(dx, dy)| {
@@ -414,8 +479,8 @@ fn face_arrows(center: Pos2) -> Vec<(Rect, [Pos2; 3], (i32, i32))> {
 
 /// The two curved arrows at a face view's top right that turn it a quarter: (hot area, arc
 /// points ending at the arrowhead, counter-clockwise).
-fn roll_arrows(center: Pos2) -> Vec<(Rect, Vec<Pos2>, bool)> {
-  let r = SCALE + 22.0;
+fn roll_arrows(center: Pos2, scale: f32) -> Vec<(Rect, Vec<Pos2>, bool)> {
+  let r = scale + 22.0;
   // screen angles, y down: the first sweeps up towards the top, the second down to the right
   [(-0.95f32, -1.35f32, true), (-0.6, -0.2, false)]
     .into_iter()
@@ -485,8 +550,8 @@ fn draw(painter: &egui::Painter, center: Pos2, b: &Basis, spot: Option<Spot>, ri
   }
   // soft shadow under the cube
   painter.add(egui::Shape::ellipse_filled(
-    center + Vec2::new(4.0, SCALE * 1.53),
-    Vec2::new(SCALE * 1.3, SCALE * 0.26),
+    center + Vec2::new(4.0, b.scale * 1.53),
+    Vec2::new(b.scale * 1.3, b.scale * 0.26),
     Color32::from_black_alpha(28),
   ));
   let hot = Color32::from_rgb(170, 208, 240);
@@ -538,9 +603,7 @@ fn cube_menu(app: &mut App, ui: &mut egui::Ui) {
     ("Perspective with Ortho Faces", Projection::OrthoFaces),
   ] {
     if ui.radio(p == mode, label).clicked() {
-      app.cube.ortho_faces = mode == Projection::OrthoFaces;
-      app.cam.ortho = mode == Projection::Orthographic;
-      keep_projection(app);
+      crate::navbar::set_projection(app, mode);
       ui.close();
     }
   }
@@ -572,6 +635,17 @@ fn cube_menu(app: &mut App, ui: &mut egui::Ui) {
     app.cube.frame = DMat3::IDENTITY;
     ui.close();
   }
+  ui.menu_button("ViewCube Size", |ui| {
+    ui.set_min_width(140.0);
+    let now = app.preferences.values.cube_size;
+    for s in CubeSize::ALL {
+      if ui.radio(now == s, s.label()).clicked() {
+        app.preferences.values.cube_size = s;
+        app.preferences.save();
+        ui.close();
+      }
+    }
+  });
 }
 
 #[cfg(test)]
@@ -616,6 +690,25 @@ mod tests {
     assert_eq!(b.spot_at(b.proj(DVec3::new(0.0, -0.9, 1.0))), Some([0, -1, 1]), "the edge between");
     // the far corner of the top face
     assert_eq!(b.spot_at(b.proj(DVec3::new(-0.95, 0.95, 1.0))), Some([-1, 1, 1]));
+  }
+
+  #[test]
+  fn viewcube_sizes_scale_the_cube() {
+    assert_eq!(CubeSize::Large.factor(900.0), 1.0);
+    assert!(CubeSize::Tiny.factor(900.0) < CubeSize::Small.factor(900.0));
+    assert!(CubeSize::Small.factor(900.0) < CubeSize::Normal.factor(900.0));
+    assert!(CubeSize::Normal.factor(900.0) < 1.0, "Fusion's normal cube is smaller than the large one");
+    // Automatic follows the canvas height
+    assert_eq!(CubeSize::Automatic.factor(300.0), CubeSize::Tiny.factor(300.0));
+    assert_eq!(CubeSize::Automatic.factor(600.0), CubeSize::Small.factor(600.0));
+    assert_eq!(CubeSize::Automatic.factor(900.0), CubeSize::Normal.factor(900.0));
+    assert_eq!(CubeSize::Automatic.factor(2000.0), CubeSize::Large.factor(2000.0));
+    let state = CubeState::default();
+    let (cam, mut b) = basis(&state, StandardView::Front);
+    b.scale = SCALE * 0.5;
+    assert_eq!(b.spot_at(Vec2::new(0.0, -0.85 * SCALE * 0.5)), Some([0, -1, 1]), "hit testing follows the size");
+    assert_eq!(b.spot_at(Vec2::new(0.0, -0.85 * SCALE)), None, "the old band is off a tiny cube");
+    let _ = cam;
   }
 
   #[test]

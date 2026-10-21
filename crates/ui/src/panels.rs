@@ -141,13 +141,15 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           avatar(app, ui);
           let help = bar_icon(ui, Icon::Help, "Help", true);
           egui::Popup::menu(&help).show(|ui| help_menu(app, ui));
-          let news = app.updates.tooltip_line().map(|l| format!("FissionOxide {l}"));
-          let bell = bar_icon(ui, Icon::Bell, news.as_deref().unwrap_or("Notifications"), true);
-          if bell.clicked() && news.is_some() {
-            app.updates.open = true;
+          // the bell opens the Notifications panel under it; the dot shows while there is news
+          let bell = bar_icon(ui, Icon::Bell, "Notifications", true);
+          if bell.clicked() {
+            crate::notifications::toggle(app);
           }
-          // the unread dot
-          ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
+          app.notifications.anchor = bell.rect;
+          if crate::notifications::unread(app) {
+            ui.painter().circle_filled(bell.rect.center() + vec2(6.0, -7.0), 3.5, theme::ICON_ORANGE);
+          }
           let _ = bar_icon(ui, Icon::Clock, "Recent activity", true);
           let _ = bar_icon(ui, Icon::Gauge, "Job Status: all changes are local", true);
           // the Autodesk Assistant button, shown pressed as in Fusion
@@ -173,20 +175,20 @@ fn caret_hit(resp: &egui::Response) -> bool {
 /// Most steps the Undo and Redo lists show.
 const HISTORY_ROWS: usize = 25;
 
-/// The Undo (or Redo) drop-down: the steps by name, newest first; picking one undoes (redoes)
-/// back to before (after) it.
+/// The Undo (or Redo) drop-down, as Fusion's: "Undo Fillet", "Undo Finish Sketch", … newest
+/// first, each with its command's icon; picking one undoes (redoes) back to before (after) it.
 fn history_menu(app: &mut App, ui: &mut egui::Ui, undo: bool) {
   ui.set_min_width(230.0);
   let names = if undo { app.s.undo_history() } else { app.s.redo_history() };
-  ui.label(RichText::new(if undo { "Undo" } else { "Redo" }).small().color(theme::MUTED));
   if names.is_empty() {
     ui.label(RichText::new(if undo { "Nothing to undo" } else { "Nothing to redo" }).color(theme::MUTED));
     return;
   }
   for (i, name) in names.iter().enumerate().take(HISTORY_ROWS) {
     let steps = i + 1;
-    let hint = format!("{} {steps} step{}", if undo { "Undo" } else { "Redo" }, if steps == 1 { "" } else { "s" });
-    if ui.button(name).on_hover_text(hint).clicked() {
+    let verb = if undo { "Undo" } else { "Redo" };
+    let hint = format!("{verb} {steps} step{}", if steps == 1 { "" } else { "s" });
+    if menu_item(ui, step_icon(name), &format!("{verb} {name}"), None).on_hover_text(hint).clicked() {
       if undo {
         app.cancel_dialog();
         app.s.undo_steps(steps);
@@ -198,6 +200,26 @@ fn history_menu(app: &mut App, ui: &mut egui::Ui, undo: bool) {
   }
   if names.len() > HISTORY_ROWS {
     ui.label(RichText::new(format!("… {} more", names.len() - HISTORY_ROWS)).small().color(theme::MUTED));
+  }
+}
+
+/// The icon the Undo list shows for a step: its command's (as the toolbar menus draw it), the
+/// edited feature's command's for "Edit Fillet2" and the like, else a generic history icon.
+pub(crate) fn step_icon(name: &str) -> Icon {
+  if let Some(icon) = crate::menus::icon_of_label(name) {
+    return icon;
+  }
+  let (verb, rest) = name.split_once(' ').unwrap_or((name, ""));
+  match verb {
+    "Finish" => Icon::Finish,
+    "Delete" | "Remove" => Icon::Remove,
+    "Edit" | "Suppress" | "Unsuppress" | "Rename" | "Reorder" | "Hide" | "Show" => {
+      let base = rest.split(' ').next().unwrap_or("").trim_end_matches(|c: char| c.is_ascii_digit());
+      crate::menus::icon_of_label(base).unwrap_or(Icon::History)
+    }
+    "Change" if rest == "Units" => Icon::Gear,
+    "Add" | "Change" if rest.starts_with("Parameter") => Icon::Params,
+    _ => Icon::History,
   }
 }
 
@@ -218,87 +240,88 @@ fn caret_button(ui: &mut egui::Ui, icon: Icon, hint: &str, enabled: bool) -> egu
   resp.on_hover_text(hint)
 }
 
+/// Fusion's File menu entries, in its order. The ones that need a Fusion Team cloud project are
+/// greyed, as Fusion greys them on an unsaved design.
+pub(crate) const FILE_MENU: [(&str, &str, bool); 15] = [
+  ("New...", "", true),
+  ("Add To Assembly", "", false),
+  ("Open...", "Ctrl+O", true),
+  ("Open Recovered Documents (0)", "", false),
+  ("Upload...", "", true),
+  ("Save", "Ctrl+S", true),
+  ("Save As", "", true),
+  ("Save As Latest", "", false),
+  ("Export...", "", true),
+  ("Create Version", "", false),
+  ("3D Print", "", true),
+  ("Capture Image...", "", true),
+  ("Share File Link", "", false),
+  ("View Details on Web", "", false),
+  ("View", "", true),
+];
+
+/// Why a greyed File menu entry is greyed.
+const CLOUD_ONLY: &str = "Needs a design saved to a Fusion Team cloud project; FissionOxide keeps designs locally";
+
 fn file_menu(app: &mut App, ui: &mut egui::Ui) {
   ui.set_min_width(240.0);
-  if ui.button("New Design            Ctrl+N").clicked() {
-    app.new_design();
-    ui.close();
-  }
-  if ui
-    .button("Open...                  Ctrl+O")
-    .on_hover_text("Designs, or STEP, IGES, STL, OBJ, 3MF, PLY, DXF … as a new design")
-    .clicked()
-  {
-    ui.close();
-    app.open_dialog();
-  }
-  ui.menu_button("Open Recent", |ui| {
-    let recent =
-      app.s.execute("hub.recent", &json!({"limit": 12})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-    if recent.is_empty() {
-      ui.label(RichText::new("Nothing saved yet").color(theme::MUTED));
+  let item = |ui: &mut egui::Ui, label: &str, key: &str, enabled: bool| -> bool {
+    let mut b = egui::Button::new(label).min_size(vec2(220.0, 0.0));
+    if !key.is_empty() {
+      b = b.shortcut_text(key);
     }
-    for it in recent {
-      let id = it["id"].as_str().unwrap_or_default().to_string();
-      let label =
-        format!("{}  v{}", it["name"].as_str().unwrap_or_default(), it["latest"]["number"].as_u64().unwrap_or(0));
-      if ui.button(label).clicked() {
-        ui.close();
-        app.open_hub_item(&id, None);
+    let r = ui.add_enabled(enabled, b);
+    if enabled { r.clicked() } else { r.on_disabled_hover_text(CLOUD_ONLY).clicked() }
+  };
+  for (i, (label, key, enabled)) in FILE_MENU.iter().enumerate() {
+    // the groups Fusion separates
+    if matches!(i, 2 | 5 | 8 | 12 | 14) {
+      ui.separator();
+    }
+    match *label {
+      "Export..." => {
+        ui.menu_button("Export...", |ui| {
+          for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
+            let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
+            if ui.button(label).on_hover_text(f.note).clicked() {
+              ui.close();
+              app.export(f.id);
+            }
+          }
+        });
+        continue;
       }
-    }
-  });
-  if ui.button(if app.data.open { "Hide Data Panel" } else { "Show Data Panel" }).clicked() {
-    app.data.toggle();
-    ui.close();
-  }
-  ui.separator();
-  if ui.button("Save                      Ctrl+S").on_hover_text("Save a new version to the data panel").clicked() {
-    ui.close();
-    app.save(false);
-  }
-  if ui.button("Save As...          Ctrl+Shift+S").on_hover_text("Save as a new design in the data panel").clicked() {
-    ui.close();
-    app.save(true);
-  }
-  if ui.button("Save to File...").on_hover_text("Write a .fox or .foxz file on this computer").clicked() {
-    ui.close();
-    app.save_file(true);
-  }
-  if ui.button("New Drawing from Design").on_hover_text("A drawing of this design (the Drawing workspace)").clicked() {
-    ui.close();
-    app.start(Kind::NewDrawing);
-  }
-  ui.separator();
-  if ui.button("Insert into Design...").on_hover_text("Add the bodies (or DXF sketch) from a file").clicked() {
-    ui.close();
-    app.import();
-  }
-  ui.menu_button("Export", |ui| {
-    for f in fox_engine::exchange::FORMATS.iter().filter(|f| f.export) {
-      let label = format!("{} (*.{})", f.name, f.extensions.join(", *."));
-      if ui.button(label).on_hover_text(f.note).clicked() {
-        ui.close();
-        app.export(f.id);
+      "View" => {
+        ui.menu_button("View", |ui| {
+          ui.checkbox(&mut app.browser_open, "Show Browser");
+          ui.checkbox(&mut app.show_comments, "Show Comments");
+          ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
+          ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
+          crate::explode_ui::view_menu(app, ui);
+        });
+        continue;
       }
+      _ => {}
     }
-  });
-  ui.separator();
-  ui.menu_button("View", |ui| {
-    ui.checkbox(&mut app.browser_open, "Show Browser");
-    ui.checkbox(&mut app.show_comments, "Show Comments");
-    ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
-    ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
-    crate::explode_ui::view_menu(app, ui);
-  });
-  ui.separator();
-  if ui.button("Plugins...").on_hover_text("Install, update and manage plugins (.foxplugin)").clicked() {
+    if !item(ui, label, key, *enabled) {
+      continue;
+    }
     ui.close();
-    crate::plugins_ui::open_window(app);
+    file_menu_action(app, label);
   }
-  if ui.button("Preferences...").on_hover_text("Units, navigation, design, sketch and graphics settings").clicked() {
-    ui.close();
-    crate::preferences::open(app);
+}
+
+/// Runs a File menu entry.
+pub(crate) fn file_menu_action(app: &mut App, label: &str) {
+  match label {
+    "New..." => app.new_design(),
+    "Open..." => app.open_dialog(),
+    "Upload..." => crate::data_panel::upload_dialog(app),
+    "Save" => app.save(false),
+    "Save As" => app.save(true),
+    "3D Print" => crate::capture::open_print(app),
+    "Capture Image..." => crate::capture::open_image(app),
+    _ => {}
   }
 }
 
@@ -1188,7 +1211,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
 /// A floating panel's header: collapse arrow and title.
 /// The header bar of the browser and comments panels: ◂◂ collapse arrows, title, and the
 /// options dot and pin bar on the right.
-fn float_header(ui: &mut egui::Ui, title: &str, open: &mut bool, width: f32) {
+pub(crate) fn float_header(ui: &mut egui::Ui, title: &str, open: &mut bool, width: f32) {
   let (rect, resp) = ui.allocate_exact_size(vec2(width, 26.0), egui::Sense::click());
   let p = ui.painter();
   p.rect(rect, 2.0, theme::FLOAT_HEADER, Stroke::new(1.0, Color32::from_gray(212)), egui::StrokeKind::Inside);
@@ -2316,18 +2339,9 @@ fn pick_plane(app: &mut App, plane: Value) {
   }
 }
 
-/// The collapsed COMMENTS panel in the canvas's bottom-left corner.
+/// The COMMENTS panel in the canvas's bottom-left corner (see [`crate::comments`]).
 pub fn comments(app: &mut App, ctx: &egui::Context) {
-  let canvas = app.canvas;
-  egui::Area::new(egui::Id::new("comments"))
-    .fixed_pos(canvas.left_bottom() + vec2(6.0, -6.0))
-    .pivot(egui::Align2::LEFT_BOTTOM)
-    .order(egui::Order::Middle)
-    .show(ctx, |ui| {
-      ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-      let mut open = false;
-      float_header(ui, "COMMENTS", &mut open, 270.0);
-    });
+  crate::comments::show(app, ctx);
 }
 
 /// Fusion's navigation bar at the bottom centre of the canvas.
@@ -2956,9 +2970,10 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if r.double_clicked() {
             edit_feature(app, id);
           }
-          // hovering an item highlights what it made and names it in the status bar
+          // hovering an item highlights what it made (a fillet's rounds, an extrude's body, a
+          // sketch's curves) and names it in the status bar
           if r.hovered() && drag.is_none() {
-            marking::peek(app, marking::feature_bodies(app, id), name.clone());
+            marking::peek_feature(app, id, name.clone());
           }
           r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
         }
@@ -3488,5 +3503,86 @@ mod row_menu_tests {
     assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::OffsetPlane));
     run_origin_plane_cmd(&mut app, "yz", RowCmd::CreateSketch);
     assert!(app.s.edit_sketch.is_some());
+  }
+}
+
+#[cfg(test)]
+mod chrome_tests {
+  use super::*;
+  use fox_engine::Session;
+
+  #[test]
+  fn the_file_menu_lists_fusions_entries_and_greys_the_cloud_ones() {
+    let labels: Vec<&str> = FILE_MENU.iter().map(|(l, ..)| *l).collect();
+    assert_eq!(
+      labels,
+      [
+        "New...",
+        "Add To Assembly",
+        "Open...",
+        "Open Recovered Documents (0)",
+        "Upload...",
+        "Save",
+        "Save As",
+        "Save As Latest",
+        "Export...",
+        "Create Version",
+        "3D Print",
+        "Capture Image...",
+        "Share File Link",
+        "View Details on Web",
+        "View",
+      ]
+    );
+    let greyed: Vec<&str> = FILE_MENU.iter().filter(|(_, _, on)| !on).map(|(l, ..)| *l).collect();
+    assert_eq!(
+      greyed,
+      [
+        "Add To Assembly",
+        "Open Recovered Documents (0)",
+        "Save As Latest",
+        "Create Version",
+        "Share File Link",
+        "View Details on Web"
+      ]
+    );
+    let keys: Vec<(&str, &str)> =
+      FILE_MENU.iter().filter(|(_, k, _)| !k.is_empty()).map(|(l, k, _)| (*l, *k)).collect();
+    assert_eq!(keys, [("Open...", "Ctrl+O"), ("Save", "Ctrl+S")]);
+    // the new entries open their dialogs
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 10, "depth": 10, "height": 10}));
+    file_menu_action(&mut app, "3D Print");
+    assert!(app.capture.print.is_some());
+    file_menu_action(&mut app, "Capture Image...");
+    assert!(app.capture.image.is_some());
+    file_menu_action(&mut app, "Save");
+    assert!(app.data.save.is_some(), "Save opens the save form");
+  }
+
+  #[test]
+  fn undo_steps_carry_their_commands_icons() {
+    assert_eq!(step_icon("Fillet"), Icon::Fillet);
+    assert_eq!(step_icon("Extrude"), Icon::Extrude);
+    assert_eq!(step_icon("Create Sketch"), Icon::Sketch);
+    assert_eq!(step_icon("Finish Sketch"), Icon::Finish);
+    assert_eq!(step_icon("2-Point Rectangle"), Icon::Rect);
+    assert_eq!(step_icon("Line"), Icon::Line);
+    assert_eq!(step_icon("Edit Fillet2"), Icon::Fillet);
+    assert_eq!(step_icon("Suppress Extrude1"), Icon::Extrude);
+    assert_eq!(step_icon("Delete Extrude1"), Icon::Remove);
+    assert_eq!(step_icon("Change Units"), Icon::Gear);
+    assert_eq!(step_icon("Add Parameter w"), Icon::Params);
+    assert_eq!(step_icon("Move Timeline Marker"), Icon::History);
+    // the list the Undo drop-down shows, as Fusion names it
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+    app.finish_sketch();
+    app.run("extrude", json!({"distance": 5}));
+    let names = app.s.undo_history();
+    assert_eq!(names, ["Extrude", "Finish Sketch", "2-Point Rectangle", "Create Sketch"]);
+    let icons: Vec<Icon> = names.iter().map(|n| step_icon(n)).collect();
+    assert_eq!(icons, [Icon::Extrude, Icon::Finish, Icon::Rect, Icon::Sketch]);
   }
 }

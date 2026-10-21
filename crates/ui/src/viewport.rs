@@ -253,6 +253,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     w: ((rect.width() * ppp).round() as u32).max(1),
     h: ((rect.height() * ppp).round() as u32).max(1),
   };
+  app.canvas_px = [view.w, view.h];
 
   // a navigation drag that ends this frame (Zoom Window turns its mode off) isn't a click
   let navigating = app.nav_mode.is_some();
@@ -528,6 +529,44 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   }
 }
 
+/// The options the viewport builds its scene with now: what is shown, hidden, highlighted and
+/// analysed (Capture Image renders the same scene at another size).
+pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
+  let profiles_of: Vec<FeatureId> = app.dialog.as_ref().map(|d| d.profile_sketches()).unwrap_or_default();
+  let analysis = match fox_engine::scene::view_options(&app.s, &view_params(app)) {
+    Ok(o) => o,
+    Err(e) => {
+      app.status = Some((e, true));
+      ViewOptions::default()
+    }
+  };
+  let vis = app.objects;
+  ViewOptions {
+    hover: app.hover,
+    hide_edges: !app.visual_style.edges(),
+    hide_grid: !app.show_grid,
+    hide_origin: !vis.origins,
+    hide_sketches: !vis.sketches || analysis.hide_sketches,
+    hide_construction: !vis.construction,
+    grid_step: app.grid.step(),
+    show_profiles_of: profiles_of,
+    hide_profiles_of: app.hidden_profiles.clone(),
+    show_vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none() && vis.bodies,
+    peek: app.ctx_menu.peek.clone(),
+    peek_faces: app.ctx_menu.peek_faces.clone(),
+    peek_sketches: app.ctx_menu.peek_sketches.clone(),
+    only_bodies: if vis.bodies {
+      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
+    } else {
+      Some(Vec::new())
+    },
+    opacity: app.ctx_menu.opacity.clone(),
+    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
+    hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
+    ..analysis
+  }
+}
+
 fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   let profiles_of: Vec<FeatureId> = app.dialog.as_ref().map(|d| d.profile_sketches()).unwrap_or_default();
   let key = RenderKey {
@@ -543,13 +582,15 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     show_grid: app.show_grid,
     grid_step: app.grid.step(),
     visible: app.s.design.bodies.iter().map(|b| (b.body.0, b.visible)).collect(),
-    profiles_of: profiles_of.clone(),
+    profiles_of,
     hidden_profiles: app.hidden_profiles.clone(),
     view: view_params(app),
     vertices: app.sel_filter.vertices && app.s.edit_sketch.is_none(),
     peek: app.ctx_menu.peek.iter().map(|b| b.0).collect(),
     isolate: app.ctx_menu.isolate.as_ref().map(|v| v.iter().map(|b| b.0).collect()),
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
+    peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
+    peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -557,36 +598,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   if app.render_key.as_ref() == Some(&key) && app.tex.is_some() {
     return;
   }
-  let analysis = match fox_engine::scene::view_options(&app.s, &key.view) {
-    Ok(o) => o,
-    Err(e) => {
-      app.status = Some((e, true));
-      ViewOptions::default()
-    }
-  };
-  let vis = app.objects;
-  let opts = ViewOptions {
-    hover: app.hover,
-    hide_edges: !app.visual_style.edges(),
-    hide_grid: !app.show_grid,
-    hide_origin: !vis.origins,
-    hide_sketches: !vis.sketches || analysis.hide_sketches,
-    hide_construction: !vis.construction,
-    grid_step: key.grid_step,
-    show_profiles_of: profiles_of,
-    hide_profiles_of: app.hidden_profiles.clone(),
-    show_vertices: key.vertices && vis.bodies,
-    peek: app.ctx_menu.peek.clone(),
-    only_bodies: if vis.bodies {
-      app.ctx_menu.isolate.clone().or(analysis.only_bodies.clone())
-    } else {
-      Some(Vec::new())
-    },
-    opacity: app.ctx_menu.opacity.clone(),
-    // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
-    hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
-    ..analysis
-  };
+  let opts = scene_options(app);
   let (mut scene, picks) = app.scene.build(&app.s, &opts);
   scene.style = app.visual_style;
   app.effects.apply(&mut scene);

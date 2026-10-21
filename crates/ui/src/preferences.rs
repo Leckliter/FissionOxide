@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use egui::{PointerButton, RichText};
 
+use crate::viewcube::CubeSize;
 use crate::{App, theme};
 
 /// Default units for new designs.
@@ -195,6 +196,9 @@ pub struct Prefs {
   pub gpu: bool,
   /// General → "Spacebar repeats last command", on by default as in Fusion.
   pub space_repeats: bool,
+  /// Graphics → the ViewCube is shown, and its size (the ViewCube menu's ViewCube Size).
+  pub show_viewcube: bool,
+  pub cube_size: CubeSize,
 }
 
 impl Default for Prefs {
@@ -212,6 +216,8 @@ impl Default for Prefs {
       snap: false,
       gpu: true,
       space_repeats: true,
+      show_viewcube: true,
+      cube_size: CubeSize::Automatic,
     }
   }
 }
@@ -250,6 +256,8 @@ impl Prefs {
       ("SketchSnap", flag(self.snap)),
       ("GpuRenderer", flag(self.gpu)),
       ("SpaceRepeats", flag(self.space_repeats)),
+      ("ShowViewCube", flag(self.show_viewcube)),
+      ("ViewCubeSize", self.cube_size.key().to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -278,6 +286,8 @@ impl Prefs {
         "sketchsnap" => p.snap = b.unwrap_or(p.snap),
         "gpurenderer" => p.gpu = b.unwrap_or(p.gpu),
         "spacerepeats" => p.space_repeats = b.unwrap_or(p.space_repeats),
+        "showviewcube" => p.show_viewcube = b.unwrap_or(p.show_viewcube),
+        "viewcubesize" => p.cube_size = pick(&CubeSize::ALL, CubeSize::key, v).unwrap_or(p.cube_size),
         _ => {}
       }
     }
@@ -356,6 +366,7 @@ pub fn apply(app: &mut App) {
   app.show_dims = p.show_dims;
   app.show_constraints = p.show_constraints;
   app.snap = p.snap;
+  app.show_viewcube = p.show_viewcube;
   if !p.gpu {
     app.gpu.enabled = false;
   }
@@ -445,6 +456,9 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
     if now.gpu != before.gpu {
       app.gpu.enabled = now.gpu;
     }
+    if now.show_viewcube != before.show_viewcube {
+      app.show_viewcube = now.show_viewcube;
+    }
     app.preferences.save();
   }
 }
@@ -506,6 +520,13 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
       ui.checkbox(&mut p.snap, "Snap to grid");
     }
     Page::Graphics => {
+      ui.checkbox(&mut p.show_viewcube, "Show ViewCube");
+      ui.horizontal(|ui| {
+        ui.label("ViewCube size");
+        choice(ui, "prefs-cube-size", &mut p.cube_size, &CubeSize::ALL, CubeSize::label);
+      });
+      note(ui, "Automatic sizes the ViewCube by the window; the ViewCube's own menu sets this too.");
+      ui.add_space(6.0);
       let resp = ui.checkbox(&mut p.gpu, "GPU renderer");
       match &app.gpu.failed {
         Some(why) => {
@@ -543,6 +564,8 @@ mod tests {
       snap: true,
       gpu: false,
       space_repeats: false,
+      show_viewcube: false,
+      cube_size: CubeSize::Tiny,
     };
     let ini = "[Updates]\nMode=notify\n\n[Window]\nMaximized=1\n";
     let text = p.write_into(ini);

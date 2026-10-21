@@ -988,7 +988,7 @@ pub fn pick_importable(title: &str, multiple: bool) -> Vec<std::path::PathBuf> {
   if multiple { d.pick_files().unwrap_or_default() } else { d.pick_file().into_iter().collect() }
 }
 
-fn upload_dialog(app: &mut App) {
+pub(crate) fn upload_dialog(app: &mut App) {
   let files = pick_importable("Upload to the data panel", true);
   let (project, folder) = app.data.location();
   for f in files {

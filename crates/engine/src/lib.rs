@@ -32,6 +32,7 @@ pub mod history;
 pub mod hub;
 mod inspect;
 pub mod library;
+mod made;
 mod mates;
 mod newcomp;
 mod params;
@@ -155,15 +156,36 @@ impl Rebuild {
   }
 }
 
+/// One undo (or redo) step.
+pub(crate) struct Step {
+  /// The design before (undo) or after (redo) the step.
+  pub(crate) design: Design,
+  /// The step's name from the command that made it; `None`: named from what changed.
+  pub(crate) name: Option<String>,
+  /// A Finish Sketch step: the sketch it closed (undoing it reopens the sketch).
+  pub(crate) sketch: Option<FeatureId>,
+}
+
+impl Step {
+  pub(crate) fn new(design: Design, name: Option<String>) -> Step {
+    Step { design, name, sketch: None }
+  }
+
+  /// Swaps the step's design with the session's, keeping its name and sketch.
+  pub(crate) fn swap(self, design: &mut Design) -> Step {
+    Step { design: std::mem::replace(design, self.design), name: self.name, sketch: self.sketch }
+  }
+}
+
 pub struct Session {
   pub design: Design,
   pub model: Model,
   pub(crate) regen: Regenerator,
   /// Undo steps: the design before each step, with the step's name from the command that made it
   /// (`None`: named from what changed, see [`history::step_label`]).
-  undo: Vec<(Design, Option<String>)>,
+  undo: Vec<Step>,
   /// Redo steps: the design after each step, with its name.
-  redo: Vec<(Design, Option<String>)>,
+  redo: Vec<Step>,
   /// The name the running command gives its undo step, and how deep commands are nested (the
   /// outermost command names the step).
   cmd_label: Option<String>,
@@ -288,7 +310,7 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
-        self.undo.push((before, self.cmd_label.clone()));
+        self.undo.push(Step::new(before, self.cmd_label.clone()));
         self.design.tidy_groups();
         self.trim_undo();
         self.redo.clear();
@@ -363,7 +385,7 @@ impl Session {
   pub fn commit_transaction_named(&mut self, name: &str) -> Result<bool, CmdError> {
     let start = self.txn.ok_or(CmdError::new("no transaction is open"))?;
     if let Some(step) = self.undo.get_mut(start) {
-      step.1 = Some(name.to_string());
+      step.name = Some(name.to_string());
     }
     self.commit_transaction()
   }
@@ -374,7 +396,7 @@ impl Session {
     if self.undo.len() <= start {
       return Ok(false);
     }
-    self.design = self.undo.swap_remove(start).0;
+    self.design = self.undo.swap_remove(start).design;
     self.undo.truncate(start);
     self.redo.clear();
     self.after_history();
@@ -391,9 +413,11 @@ impl Session {
       return false;
     }
     match self.undo.pop() {
-      Some((d, name)) => {
-        self.redo.push((std::mem::replace(&mut self.design, d), name));
+      Some(step) => {
+        let reopen = step.sketch;
+        self.redo.push(step.swap(&mut self.design));
         self.after_history();
+        self.reopen_sketch(reopen, true);
         true
       }
       None => false,
@@ -402,13 +426,29 @@ impl Session {
 
   pub fn redo(&mut self) -> bool {
     match self.redo.pop() {
-      Some((d, name)) => {
-        self.undo.push((std::mem::replace(&mut self.design, d), name));
+      Some(step) => {
+        let finished = step.sketch;
+        self.undo.push(step.swap(&mut self.design));
         self.after_history();
+        self.reopen_sketch(finished, false);
         true
       }
       None => false,
     }
+  }
+
+  /// Finishing a sketch is an undo step of its own, as in Fusion ("Undo Finish Sketch" reopens
+  /// the sketch): the design is unchanged, so the step only remembers the sketch.
+  pub(crate) fn finish_sketch_step(&mut self, sketch: FeatureId) {
+    self.undo.push(Step { design: self.design.clone(), name: Some("Finish Sketch".into()), sketch: Some(sketch) });
+    self.trim_undo();
+    self.redo.clear();
+  }
+
+  /// After undoing (`undoing`) or redoing a Finish Sketch step: back into the sketch, or out of it.
+  pub(crate) fn reopen_sketch(&mut self, sketch: Option<FeatureId>, undoing: bool) {
+    let Some(id) = sketch else { return };
+    self.edit_sketch = if undoing && self.design.sketch(id).is_ok() { Some(id) } else { None };
   }
 
   /// Forgets the redo history (used when a dialog's preview step is withdrawn).
@@ -482,7 +522,7 @@ impl Session {
     let before = self.design.clone();
     match f(&mut self.design) {
       Ok(v) => {
-        self.undo.push((before, self.cmd_label.clone()));
+        self.undo.push(Step::new(before, self.cmd_label.clone()));
         self.design.tidy_groups();
         self.trim_undo();
         self.redo.clear();
@@ -573,9 +613,9 @@ mod tests_cam;
 #[cfg(test)]
 mod tests_cam3d;
 #[cfg(test)]
-mod tests_cam_checks;
-#[cfg(test)]
 mod tests_cam5;
+#[cfg(test)]
+mod tests_cam_checks;
 #[cfg(test)]
 mod tests_canvas;
 #[cfg(test)]

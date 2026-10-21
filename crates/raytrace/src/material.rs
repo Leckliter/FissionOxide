@@ -211,7 +211,7 @@ fn emissive(name: &str, color: [u8; 3], strength: f32) -> Material {
 pub fn library() -> Vec<Material> {
   vec![
     // the appearances (see fox-engine's APPEARANCES)
-    m("Steel - Satin", "Metal", [186, 190, 196], 1.0, 0.32),
+    m("Steel - Satin", "Metal", [205, 200, 190], 1.0, 0.32),
     coat(m("Aluminum - Anodized Black", "Metal", [52, 54, 58], 1.0, 0.38), 0.2, 0.2),
     coat(m("Aluminum - Anodized Red", "Metal", [176, 46, 44], 1.0, 0.35), 0.2, 0.2),
     coat(m("Aluminum - Anodized Blue", "Metal", [46, 92, 170], 1.0, 0.35), 0.2, 0.2),
