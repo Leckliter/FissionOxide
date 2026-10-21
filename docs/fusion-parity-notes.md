@@ -306,3 +306,12 @@ FissionOxide follows the pointer from the start and its value box kept a stale s
 fields instead of a point pick and manipulator. 20 rows in five batches
 (`parity/batches/map-wave9.json`), six match rows, Trim's hover colour and the OFFSET rows
 verified, Move's Set Pivot reopened for the sketch case.
+
+### Second part, 2026-10-21 (sketch CREATE leftovers)
+
+2-Tangent and 3-Tangent Circle, angular and diameter dimensions, Text after the frame, Mirror and
+both patterns, on FissionOxide rebuilt at `ef41107` (report
+`parity/reports/2026-10-21-sketch-create-leftovers.md`). Text needs a drag and loses typed text;
+Mirror's line pick lands in Objects; tangent circles get an unasked radius dimension and no
+heads-up box; the diameter dimension ignores its placement click. 10 rows in two batches
+(`parity/batches/map-wave10.json`), five match rows, the diameter glyph verified.

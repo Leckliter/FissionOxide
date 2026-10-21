@@ -1,31 +1,37 @@
 # Prober progress
 
-## Last stop: 2026-10-21, 18:00, session "Parity prober 4" (every sketch MODIFY tool)
+## Last stop: 2026-10-21, 18:10, session "Parity prober 4" (sketch MODIFY tools, CREATE leftovers)
 
 Finished: every sketch MODIFY tool (Fillet, Chamfer and its submenu, Blend Curve, Offset on a
 circle and a line with the Direction list, Trim by drag, Extend, Break, Sketch Scale, Move/Copy,
-Change Parameters) with tooltips, prompts, heads-up boxes, previews and results. Report
-`parity/reports/2026-10-21-sketch-modify-tools.md`; batches `map-wave9.json`
-(`ui-sketch-fillet-chamfer-blend`, `ui-sketch-offset-value-box`, `ui-sketch-trim-extend-break`,
-`ui-sketch-scale-move-params`, `ui-sketch-modify-tooltips`, 20 rows), six match rows, two keys
-verified and one reopened. Earlier: chrome, toolbar, ViewCube and navigation bar, marking menus,
-browser and timeline menus, Preferences, the basic sketch flow, the first-pass feature dialogs,
-face/edge/body colours, every sketch CREATE tool, the selection remainder (reports in
-`parity/reports/`).
+Change Parameters) with tooltips, prompts, heads-up boxes, previews and results; then the CREATE
+leftovers (2-/3-Tangent Circle, angular and diameter dimensions, Text after the frame, Mirror,
+Circular and Rectangular Pattern). Reports `parity/reports/2026-10-21-sketch-modify-tools.md` and
+`parity/reports/2026-10-21-sketch-create-leftovers.md`; batches `map-wave9.json` (five batches,
+20 rows) and `map-wave10.json` (`ui-sketch-tangent-circles-dims`, `ui-sketch-text-mirror-patterns`,
+10 rows); eleven match rows; `ui:sketch:trim-hover-color`, `ui:dialogs:offset-sketch-fields` and
+`ui:sketch:diameter-glyph` verified; `ui:dialogs:move-set-pivot` reopened. Earlier: chrome,
+toolbar, ViewCube and navigation bar, marking menus, browser and timeline menus, Preferences, the
+basic sketch flow, the first-pass feature dialogs, face/edge/body colours, every sketch CREATE
+tool, the selection remainder (reports in `parity/reports/`).
 
 ## Next prober: start here
 
-1. The CREATE leftovers (coverage line under *sketch*, "Every CREATE tool"): 2-Tangent and
-   3-Tangent Circle, Text after the frame is placed, Mirror and Circular/Rectangular Pattern
-   previews, angular and diameter dimensions. Then "Every constraint" (mark it `in progress`
-   first). Both apps are in a sketch with a rectangle (filleted top-left, chamfered bottom-left),
-   an arc on the right edge, a blend spline and two short lines below, and a horizontal line into
-   the left edge; Fusion also has an offset circle. Draw fresh geometry left of x = 450 (screenshot
-   px) or press Ctrl+Z a few times; the Sketch Palette covers Fusion's canvas from x = 730.
-2. Two things worth a second look before writing rows (see the report's "Not conclusive"):
-   Fusion's Trim drag removed a whole circle that a line crossed (was it the offset constraint?),
-   and Blend Curve's choice of ends (try picking the vertical line near its top).
-3. Re-verify in the app any key marked `fixing-merged` once fixers have pushed
+1. "Every constraint" under *sketch* (coverage line `todo`): coincident, collinear, concentric,
+   midpoint, fix/unfix, parallel, perpendicular, horizontal/vertical, tangent, curvature, equal,
+   symmetry, lock; glyph positions and hover; constraint deletion. Mark it `in progress` and commit
+   first. Both apps are in a sketch on the XY plane with a horizontal line (300..430, y 520), a
+   diagonal line below it, a short horizontal line at y 470, a 2-tangent circle between the first
+   two lines, a 3-tangent circle, an angular and a diameter dimension; Fusion also holds the text
+   "Fox", the earlier rectangle/arc/blend geometry to the right (under its Sketch Palette from
+   x = 730) and an offset circle. FissionOxide's sketch also has a mirrored circle. Draw fresh
+   geometry left of x = 450 (screenshot px) or Ctrl+Z.
+2. Then "Sketch Palette: every option..." and "Heads-up input" (both `todo`), which the MODIFY and
+   CREATE sessions touched only in passing: Fusion's floating value boxes have a vertical-ellipsis
+   menu, select their value on appearance, and take Tab between boxes; none of that is recorded yet.
+3. Two things worth a second look before writing rows (see the modify report's "Not conclusive"):
+   Fusion's Trim drag removed a whole circle that a line crossed, and Blend Curve's choice of ends.
+4. Re-verify in the app any key marked `fixing-merged` once fixers have pushed
    (`parity/batches/index.jsonl`); `ui:sketch:offset-dimension` could not be checked this time.
 
 ## Traps
@@ -39,27 +45,37 @@ face/edge/body colours, every sketch CREATE tool, the selection remainder (repor
   below x = 1040 screenshot px. The overlay hides while desktop control runs, so it is not in
   screenshots, but its region still swallows clicks.
 - `request_access` refuses "fissionoxide.exe" while the app is not running: build, launch
-  (`Start-Process target\release\fissionoxide.exe`), then request. A fresh instance opens with the
-  Data Panel open and the window straddling the overlay: drag the title bar left by 65 px and
-  close the Data Panel with the grid icon. The previous instance's unsaved document is gone.
+  (`Start-Process target\release\fissionoxide.exe`), then request. `cargo build` fails with
+  "Access is denied" while fissionoxide.exe runs: `Stop-Process -Name fissionoxide` first. A fresh
+  instance opens with the Data Panel open and the window straddling the overlay: drag the title
+  bar so the window sits at x = 0..1092 (screenshot px) and close the Data Panel with the grid
+  icon at the top left; take a screenshot before clicking anything else, the window lands in a
+  different place each launch. The previous instance's unsaved document is gone.
 - Only one session can hold desktop control; if `request_access` says another session is using
   the computer, the user must stop that session first.
-- Clicking the taskbar button of the active window minimises it. Fusion is the orange "F"
-  button (497,804 screenshot), FissionOxide the one right of it (535,804).
+- Clicking the taskbar button of the active window minimises it (it happened once this session:
+  a whole batch meant for Fusion ran in FissionOxide). Fusion is the orange "F" button (497,804
+  screenshot), FissionOxide the one right of it (535,804). Check the window title in the first
+  screenshot of every batch.
 - Fusion: the big SELECT icon toggles the Select tool, the "SELECT" label opens the dropdown.
   Submenus open to the right under the overlay region when the menu is wide: hover them, never
-  click there (the MODIFY > Chamfer submenu at x = 330..460 is safe). Wheel down zooms in. Body
-  corners carry sketch points that win over vertices: hide the Sketches folder to pick a vertex.
-  Origin children show only when the Origin folder's eye is also on. The Sketch Palette sits at
-  x = 730..915, y = 200..600 and eats canvas clicks under it. Single-letter shortcuts need the
-  pointer over empty canvas. With a curve pre-selected, O opens OFFSET at 0.00 in: type the
-  distance.
+  click there (CREATE > Circle at x = 260..420 and MODIFY > Chamfer at x = 330..460 are safe).
+  Wheel down zooms in. Body corners carry sketch points that win over vertices: hide the Sketches
+  folder to pick a vertex. Origin children show only when the Origin folder's eye is also on. The
+  Sketch Palette sits at x = 730..915, y = 200..600 and eats canvas clicks under it. Single-letter
+  shortcuts need the pointer over empty canvas; one Escape ends the Line tool. With a curve
+  pre-selected, O opens OFFSET at 0.00 in: type the distance. Text's second frame corner is a
+  click, not a drag release; typing before it fires shortcuts (F, O ...) and can rotate the view;
+  recover with the ViewCube's FRONT face and the Fit button.
 - FissionOxide: the sketch Fillet/Trim/etc. prompts follow the pointer; the Parameters window
   stays open behind other commands and swallows clicks until its x is clicked; the floating value
   box may keep a stale select-all range (`ui:sketch:value-box-stale-selection`), so check the
-  dialog field after typing.
+  dialog field after typing; the Mirror line pick needs the Mirror Line row clicked first; the
+  Text frame needs a drag.
 - Fusion is in inches with Layout Grid off in 3D; FissionOxide is in mm. Ctrl+Z in sketch mode
   undoes one curve at a time in both apps.
 - `git pull --rebase` refuses while another session holds uncommitted edits in `crates/`; commit
   the parity files, then rebase and push from a temporary worktree
-  (`git worktree add <scratchpad>/wt origin/main`, cherry-pick, push, remove).
+  (`git worktree add <scratchpad>/wt origin/main`, cherry-pick, push, remove). A rebase conflict
+  in `ui-features.jsonl` is almost always both sides appending rows: keep both, drop the markers,
+  check for duplicate keys.

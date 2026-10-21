@@ -41,3 +41,5 @@
 {"name": "ui-sketch-offset-value-box", "items": 4, "status": "ready", "pr": null}
 {"name": "ui-sketch-scale-move-params", "items": 4, "status": "ready", "pr": null}
 {"name": "ui-sketch-trim-extend-break", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-sketch-tangent-circles-dims", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-sketch-text-mirror-patterns", "items": 5, "status": "ready", "pr": null}

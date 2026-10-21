@@ -1,0 +1,12 @@
+{
+  "ui:sketch:tangent-circle-radius-box": "ui-sketch-tangent-circles-dims",
+  "ui:sketch:tangent-circle-result": "ui-sketch-tangent-circles-dims",
+  "ui:sketch:three-tangent-prompts": "ui-sketch-tangent-circles-dims",
+  "ui:sketch:angular-dimension-text": "ui-sketch-tangent-circles-dims",
+  "ui:sketch:diameter-dimension-placement": "ui-sketch-tangent-circles-dims",
+  "ui:sketch:text-frame-flow": "ui-sketch-text-mirror-patterns",
+  "ui:sketch:text-dialog-rows": "ui-sketch-text-mirror-patterns",
+  "ui:sketch:mirror-line-picker": "ui-sketch-text-mirror-patterns",
+  "ui:sketch:circular-pattern-rows": "ui-sketch-text-mirror-patterns",
+  "ui:sketch:rectangular-pattern-rows": "ui-sketch-text-mirror-patterns"
+}
