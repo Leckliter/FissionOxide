@@ -1,6 +1,6 @@
 [package]
 name = "fox-store"
-description = "Local data hub: projects, folders, designs and their version history (Fusion's data panel)"
+description = "Data hub: projects, folders, designs and their version history (Fusion's data panel), local or on a hub server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,11 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+base64 = "0.23"
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
 
 [lints]
 workspace = true

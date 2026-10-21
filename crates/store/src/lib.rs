@@ -24,12 +24,25 @@
 //! merged with the one on disk on every write, so the app, the CLI and other machines sharing
 //! the hub through a sync folder don't lose each other's changes (see [`sync`]). Versions can
 //! carry **comments**.
+//!
+//! A design can be **locked** for editing: while one user holds its lock, nobody else can save
+//! a version of it (they can steal the lock, which is recorded in the activity feed). Which
+//! designs people have open is their **presence** (see [`presence`]).
+//!
+//! A hub can also live on a **hub server** (`fox-hub-server`): [`Store::open`] with an
+//! `http://` or `https://` URL instead of a directory gives a store backed by it (see
+//! [`remote`]). Every change goes to the server as one [`ops::Op`], the index is mirrored
+//! locally and version files are cached once fetched; presence and index changes arrive over a
+//! WebSocket in real time.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod ops;
+pub mod presence;
+pub mod remote;
 pub mod sync;
 
 pub const HUB_FORMAT_VERSION: u32 = 1;
@@ -47,6 +60,12 @@ pub enum StoreError {
   Io(#[from] std::io::Error),
   #[error("hub index: {0}")]
   Json(#[from] serde_json::Error),
+  /// Someone else holds the design's edit lock.
+  #[error("{0}")]
+  Locked(String),
+  /// The hub server couldn't be reached, refused the request or answered nonsense.
+  #[error("{0}")]
+  Remote(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -91,8 +110,39 @@ pub fn relative_time(t: Timestamp, now: Timestamp) -> String {
   }
 }
 
-fn user() -> String {
-  std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "me".into())
+/// The local user's name: the author of what this process saves to a local hub.
+pub fn user() -> String {
+  std::env::var("FOX_USER")
+    .or_else(|_| std::env::var("USER"))
+    .or_else(|_| std::env::var("USERNAME"))
+    .unwrap_or_else(|_| "me".into())
+}
+
+/// This computer's name, as far as it can be told.
+pub fn host() -> String {
+  std::env::var("HOSTNAME")
+    .or_else(|_| std::env::var("COMPUTERNAME"))
+    .ok()
+    .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+    .map(|h| h.trim().to_string())
+    .unwrap_or_default()
+}
+
+/// This process's session id: which app window or CLI run has a design open or locked.
+pub fn session_id() -> &'static str {
+  static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+  ID.get_or_init(|| format!("s{}{}", sync::writer_tag(), sync::writer_tag()))
+}
+
+/// Who holds a design's edit lock.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditLock {
+  pub user: String,
+  /// The session (app window, CLI run) that took it.
+  pub session: String,
+  #[serde(default)]
+  pub host: String,
+  pub since: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -196,6 +246,9 @@ pub struct Item {
   pub versions: Vec<Version>,
   #[serde(default)]
   pub last_opened: Option<Timestamp>,
+  /// The edit lock, while someone holds it.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub lock: Option<EditLock>,
 }
 
 impl Item {
@@ -223,7 +276,7 @@ pub struct Activity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct Index {
+pub(crate) struct Index {
   format_version: u32,
   next_id: u64,
   projects: Vec<Project>,
@@ -294,6 +347,13 @@ pub struct Store {
   tag: String,
   /// Conflict copies merged when the hub was opened.
   merged: usize,
+  /// Who acts through this store: the author of new versions, comments and activity, and the
+  /// holder of the locks it takes.
+  user: String,
+  session: String,
+  host: String,
+  /// The hub server this store mirrors, if it isn't a local directory.
+  remote: Option<std::sync::Arc<remote::Conn>>,
 }
 
 impl Store {
@@ -327,7 +387,12 @@ impl Store {
   /// Opens (or creates) a hub at `root`, merging in any conflict copies of its index.
   ///
   /// Panics in a test process if `root` is the user's real hub: tests must use a scratch hub.
+  ///
+  /// `root` may also be a hub server's URL (`https://hub.example.com`), see [`remote`].
   pub fn open(root: &Path) -> Result<Store> {
+    if let Some(url) = remote::url_of(root) {
+      return Self::open_remote(&url, None);
+    }
     assert!(
       !(is_test_process() && is_user_hub(root)),
       "a test opened the user's real data hub at {}; give it a scratch hub (Store::scratch_root)",
@@ -335,7 +400,17 @@ impl Store {
     );
     std::fs::create_dir_all(root.join("items"))?;
     let index = Self::read_index(root)?.unwrap_or_default();
-    let mut st = Store { root: root.to_path_buf(), base: index.clone(), index, tag: sync::writer_tag(), merged: 0 };
+    let mut st = Store {
+      root: root.to_path_buf(),
+      base: index.clone(),
+      index,
+      tag: sync::writer_tag(),
+      merged: 0,
+      user: user(),
+      session: session_id().to_string(),
+      host: host(),
+      remote: None,
+    };
     st.merge_conflict_copies()?;
     Ok(st)
   }
@@ -393,8 +468,66 @@ impl Store {
     self.merged
   }
 
+  /// The hub directory (for a hub server: the local cache of its files).
   pub fn root(&self) -> &Path {
     &self.root
+  }
+
+  /// The hub server's URL, if this store is backed by one.
+  pub fn server(&self) -> Option<&str> {
+    self.remote.as_ref().map(|c| c.url.as_str())
+  }
+
+  /// The user this store acts as (on a hub server: the one its token belongs to).
+  pub fn user(&self) -> &str {
+    &self.user
+  }
+
+  /// The session this store acts for (see [`session_id`]).
+  pub fn session(&self) -> &str {
+    &self.session
+  }
+
+  /// Acts as someone else from now on: a hub server sets the user a request's token belongs to,
+  /// and the session and host it came from, before applying it.
+  pub fn set_actor(&mut self, user: &str, session: &str, host: &str) {
+    self.user = user.to_string();
+    self.session = session.to_string();
+    self.host = host.to_string();
+  }
+
+  /// A store backed by the hub server at `url` (`token` = its access token; `None` = the one
+  /// remembered for it, see [`remote::token_for`]).
+  pub fn open_remote(url: &str, token: Option<&str>) -> Result<Store> {
+    let conn = remote::connect(url, token)?;
+    let index = conn.index()?;
+    Ok(Store {
+      root: conn.cache_dir(),
+      base: index.clone(),
+      index,
+      tag: sync::writer_tag(),
+      merged: 0,
+      user: conn.user.clone(),
+      session: session_id().to_string(),
+      host: host(),
+      remote: Some(conn),
+    })
+  }
+
+  /// The whole index as JSON, as a hub server sends it to its clients.
+  pub fn snapshot(&self) -> serde_json::Value {
+    serde_json::to_value(&self.index).unwrap_or(serde_json::Value::Null)
+  }
+
+  /// Sends `op` to the hub server and mirrors the index it leaves.
+  fn remote_op<T: serde::de::DeserializeOwned>(&mut self, op: ops::Op) -> Result<T> {
+    let Some(conn) = self.remote.clone() else { return Err(invalid("not a hub server")) };
+    let v = conn.op(&op, &self.session, &self.host);
+    // a refusal (someone else's lock ...) usually means the mirror is behind, too
+    let fresh = self.refresh();
+    let v = v?;
+    fresh?;
+    serde_json::from_value(v).map_err(|e| StoreError::Remote(format!("the hub server's answer: {e}")))
   }
 
   fn persist(&mut self) -> Result<()> {
@@ -438,7 +571,7 @@ impl Store {
   fn log(&mut self, project: &str, item: Option<&str>, text: String) {
     self.index.activity.push(Activity {
       time: now(),
-      author: user(),
+      author: self.user.clone(),
       project: project.to_string(),
       item: item.map(str::to_string),
       text,
@@ -489,6 +622,9 @@ impl Store {
   }
 
   pub fn create_project(&mut self, name: &str) -> Result<String> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::CreateProject { name: name.into() });
+    }
     let name = Self::clean_name(name)?;
     if self.index.projects.iter().any(|p| !p.trashed && p.name.eq_ignore_ascii_case(&name)) {
       return Err(invalid(format!("a project named '{name}' already exists")));
@@ -515,6 +651,9 @@ impl Store {
   }
 
   pub fn rename_project(&mut self, id: &str, name: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::RenameProject { id: id.into(), name: name.into() });
+    }
     let name = Self::clean_name(name)?;
     let p = self
       .index
@@ -529,6 +668,9 @@ impl Store {
 
   /// Moves a project and everything in it to the trash.
   pub fn trash_project(&mut self, id: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::TrashProject { id: id.into() });
+    }
     let p = self
       .index
       .projects
@@ -542,6 +684,9 @@ impl Store {
   }
 
   pub fn restore_project(&mut self, id: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::RestoreProject { id: id.into() });
+    }
     let p = self
       .index
       .projects
@@ -561,6 +706,9 @@ impl Store {
   }
 
   pub fn create_folder(&mut self, project: &str, parent: Option<&str>, name: &str) -> Result<String> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::CreateFolder { project: project.into(), parent: parent.map(Into::into), name: name.into() });
+    }
     let name = Self::clean_name(name)?;
     self.project(project)?;
     if let Some(p) = parent
@@ -590,6 +738,9 @@ impl Store {
   }
 
   pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::RenameFolder { id: id.into(), name: name.into() });
+    }
     let name = Self::clean_name(name)?;
     let f = self
       .index
@@ -605,6 +756,9 @@ impl Store {
 
   /// Deletes an empty folder (trashed items don't count; they move to the project root).
   pub fn delete_folder(&mut self, id: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::DeleteFolder { id: id.into() });
+    }
     let f = self.folder(id)?.clone();
     if self.index.folders.iter().any(|c| c.parent.as_deref() == Some(id))
       || self.index.items.iter().any(|i| !i.trashed && i.folder.as_deref() == Some(id))
@@ -674,11 +828,17 @@ impl Store {
       Some(n) => it.version(n).ok_or_else(|| StoreError::NotFound(format!("{} has no version {n}", it.name)))?,
       None => it.latest().ok_or_else(|| StoreError::NotFound(format!("{} has no versions", it.name)))?,
     };
-    Ok(self.item_dir(item).join(&v.file))
+    match &self.remote {
+      Some(conn) => conn.cached_file(item, &v.file),
+      None => Ok(self.item_dir(item).join(&v.file)),
+    }
   }
 
   pub fn read_version(&self, item: &str, version: Option<u32>) -> Result<Vec<u8>> {
     let path = self.version_path(item, version)?;
+    if self.remote.is_some() {
+      return Ok(std::fs::read(&path)?);
+    }
     std::fs::read(&path).map_err(|e| {
       if e.kind() == std::io::ErrorKind::NotFound {
         // a shared hub's index can arrive through the sync folder before the version file
@@ -698,7 +858,27 @@ impl Store {
       Some(n) => it.version(n)?,
       None => it.latest()?,
     };
-    std::fs::read(self.item_dir(item).join(v.thumbnail.as_ref()?)).ok()
+    let file = v.thumbnail.as_ref()?;
+    match &self.remote {
+      Some(conn) => std::fs::read(conn.cached_file(item, file).ok()?).ok(),
+      None => std::fs::read(self.item_dir(item).join(file)).ok(),
+    }
+  }
+
+  /// A file of an item's versions by its name in the item's directory (a hub server serves
+  /// these): only names the index lists.
+  pub fn item_file(&self, item: &str, file: &str) -> Result<Vec<u8>> {
+    let it = self.item(item)?;
+    let listed = it.versions.iter().any(|v| {
+      v.file == file || v.thumbnail.as_deref() == Some(file) || v.original.as_deref() == Some(file)
+    });
+    if !listed {
+      return Err(StoreError::NotFound(format!("{} has no file '{file}'", it.name)));
+    }
+    match &self.remote {
+      Some(conn) => Ok(std::fs::read(conn.cached_file(item, file)?)?),
+      None => Ok(std::fs::read(self.item_dir(item).join(file))?),
+    }
   }
 
   /// Creates a new item with `content` as version 1.
@@ -709,6 +889,9 @@ impl Store {
     origin: Origin,
     meta: VersionMeta,
   ) -> Result<(String, u32)> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::create_item(&at, content, origin, meta));
+    }
     let name = Self::clean_name(at.name)?;
     if self.project(at.project)?.trashed {
       return Err(invalid("the project is in the trash"));
@@ -736,6 +919,7 @@ impl Store {
       trashed: false,
       versions: Vec::new(),
       last_opened: Some(t),
+      lock: None,
     });
     let what = match &origin {
       Origin::Uploaded { file } => format!("uploaded {file} as {name}"),
@@ -757,10 +941,14 @@ impl Store {
 
   /// Adds a version to an existing item; returns its number.
   pub fn add_version(&mut self, item: &str, content: &[u8], origin: Origin, meta: VersionMeta) -> Result<u32> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::AddVersion { item: item.into(), content: content.into(), origin, meta: meta.into() });
+    }
     if self.item(item)?.trashed {
       return Err(invalid("the item is in the trash; restore it first"));
     }
     self.refresh()?;
+    self.check_unlocked(item)?;
     let n = self.write_version(item, content, origin, meta)?;
     let (project, name, file) = {
       let it = self.item(item)?;
@@ -778,9 +966,21 @@ impl Store {
 
   /// Picks up what other processes (or machines) wrote to the hub since it was read.
   pub fn refresh(&mut self) -> Result<()> {
-    let Some(disk) = Self::read_index(&self.root)? else { return Ok(()) };
+    self.reload().map(|_| ())
+  }
+
+  /// [`refresh`](Self::refresh), saying whether anything changed.
+  pub fn reload(&mut self) -> Result<bool> {
+    if let Some(conn) = &self.remote {
+      let index = conn.index()?;
+      let changed = index != self.index;
+      self.base = index.clone();
+      self.index = index;
+      return Ok(changed);
+    }
+    let Some(disk) = Self::read_index(&self.root)? else { return Ok(false) };
     if disk == self.base {
-      return Ok(());
+      return Ok(false);
     }
     let merged = sync::merge(
       &serde_json::to_value(&self.base)?,
@@ -791,7 +991,7 @@ impl Store {
     idx.next_id = self.index.next_id.max(disk.next_id);
     self.index = idx;
     self.base = disk;
-    Ok(())
+    Ok(true)
   }
 
   fn write_version(&mut self, item: &str, content: &[u8], origin: Origin, meta: VersionMeta) -> Result<u32> {
@@ -835,11 +1035,12 @@ impl Store {
       None => None,
     };
     let t = now();
+    let author = self.user.clone();
     let it = self.item_mut(item)?;
     it.versions.push(Version {
       number: n,
       created: t,
-      author: user(),
+      author,
       description: meta.description.trim().to_string(),
       milestone: meta.milestone.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
       origin,
@@ -856,6 +1057,10 @@ impl Store {
 
   /// Makes an earlier version the latest by copying it as a new version ("Promote").
   pub fn promote(&mut self, item: &str, version: u32) -> Result<u32> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::Promote { item: item.into(), version });
+    }
+    self.check_unlocked(item)?;
     let (content, thumb, stats) = {
       let it = self.item(item)?;
       let v =
@@ -881,6 +1086,9 @@ impl Store {
 
   /// Sets (or with `None`/empty, clears) a version's milestone name.
   pub fn set_milestone(&mut self, item: &str, version: u32, name: Option<&str>) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::SetMilestone { item: item.into(), version, name: name.map(Into::into) });
+    }
     let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
     let it = self.item_mut(item)?;
     let item_name = it.name.clone();
@@ -900,6 +1108,9 @@ impl Store {
   }
 
   pub fn set_description(&mut self, item: &str, version: u32, description: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::SetDescription { item: item.into(), version, description: description.into() });
+    }
     let it = self.item_mut(item)?;
     let v = it
       .versions
@@ -912,6 +1123,10 @@ impl Store {
 
   /// Deletes one version's files. The latest version and milestones can't be deleted.
   pub fn delete_version(&mut self, item: &str, version: u32) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::DeleteVersion { item: item.into(), version });
+    }
+    self.check_unlocked(item)?;
     let it = self.item(item)?;
     let v = it.version(version).ok_or_else(|| StoreError::NotFound(format!("{} has no version {version}", it.name)))?;
     if it.latest().map(|l| l.number) == Some(version) {
@@ -931,6 +1146,9 @@ impl Store {
   }
 
   pub fn rename_item(&mut self, item: &str, name: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::RenameItem { item: item.into(), name: name.into() });
+    }
     let name = Self::clean_name(name)?;
     let it = self.item_mut(item)?;
     let old = std::mem::replace(&mut it.name, name.clone());
@@ -940,6 +1158,9 @@ impl Store {
   }
 
   pub fn move_item(&mut self, item: &str, project: &str, folder: Option<&str>) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::MoveItem { item: item.into(), project: project.into(), folder: folder.map(Into::into) });
+    }
     self.project(project)?;
     if let Some(f) = folder
       && self.folder(f)?.project != project
@@ -957,6 +1178,9 @@ impl Store {
 
   /// Copies an item's version (default latest) to a new item.
   pub fn copy_item(&mut self, item: &str, version: Option<u32>, at: NewItem<'_>) -> Result<(String, u32)> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::copy_item(item, version, &at));
+    }
     let it = self.item(item)?;
     let v = match version {
       Some(n) => it.version(n),
@@ -977,11 +1201,18 @@ impl Store {
 
   /// Records that an item was opened (for the Recent list).
   pub fn touch(&mut self, item: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::Touch { item: item.into() });
+    }
     self.item_mut(item)?.last_opened = Some(now());
     self.persist()
   }
 
   pub fn trash_item(&mut self, item: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::TrashItem { item: item.into() });
+    }
+    self.check_unlocked(item)?;
     let it = self.item_mut(item)?;
     it.trashed = true;
     let (project, name) = (it.project.clone(), it.name.clone());
@@ -990,6 +1221,9 @@ impl Store {
   }
 
   pub fn restore_item(&mut self, item: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::RestoreItem { item: item.into() });
+    }
     let it = self.item_mut(item)?;
     it.trashed = false;
     let (project, name, folder) = (it.project.clone(), it.name.clone(), it.folder.clone());
@@ -1008,6 +1242,9 @@ impl Store {
 
   /// Permanently deletes a trashed item and all its versions.
   pub fn purge_item(&mut self, item: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::PurgeItem { item: item.into() });
+    }
     let it = self.item(item)?;
     if !it.trashed {
       return Err(invalid("only items in the trash can be deleted permanently"));
@@ -1089,6 +1326,9 @@ impl Store {
 
   /// Adds a comment to a version; returns its id.
   pub fn add_comment(&mut self, item: &str, version: u32, text: &str) -> Result<String> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::AddComment { item: item.into(), version, text: text.into() });
+    }
     let text = text.trim();
     if text.is_empty() {
       return Err(invalid("the comment is empty"));
@@ -1098,10 +1338,11 @@ impl Store {
     }
     self.item(item)?.version(version).ok_or_else(|| StoreError::NotFound(format!("no version {version}")))?;
     let id = self.new_id("c");
+    let author = self.user.clone();
     let it = self.item_mut(item)?;
     let (project, name) = (it.project.clone(), it.name.clone());
     if let Some(v) = it.versions.iter_mut().find(|v| v.number == version) {
-      v.comments.push(Comment { id: id.clone(), author: user(), time: now(), text: text.to_string() });
+      v.comments.push(Comment { id: id.clone(), author, time: now(), text: text.to_string() });
     }
     let short: String = text.chars().take(60).collect();
     let more = if short.len() < text.len() { "…" } else { "" };
@@ -1129,6 +1370,9 @@ impl Store {
 
   /// Deletes a comment.
   pub fn delete_comment(&mut self, item: &str, comment: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::DeleteComment { item: item.into(), comment: comment.into() });
+    }
     let it = self.item_mut(item)?;
     let before: usize = it.versions.iter().map(|v| v.comments.len()).sum();
     for v in &mut it.versions {
@@ -1140,6 +1384,91 @@ impl Store {
     let (project, name) = (it.project.clone(), it.name.clone());
     self.log(&project, Some(item), format!("deleted a comment on {name}"));
     self.persist()
+  }
+}
+
+// ---- edit locks ----
+
+impl Store {
+  /// The design's edit lock, if someone holds it.
+  pub fn lock_of(&self, item: &str) -> Result<Option<&EditLock>> {
+    Ok(self.item(item)?.lock.as_ref())
+  }
+
+  /// Whether `lock` is held by the user this store acts as.
+  pub fn is_mine(&self, lock: &EditLock) -> bool {
+    lock.user == self.user
+  }
+
+  /// Fails if someone other than this store's user holds the item's lock.
+  fn check_unlocked(&self, item: &str) -> Result<()> {
+    let it = self.item(item)?;
+    match &it.lock {
+      Some(l) if !self.is_mine(l) => Err(StoreError::Locked(format!(
+        "{} is locked by {}{} since {}: ask them to release it, or steal the lock",
+        it.name,
+        l.user,
+        if l.host.is_empty() { String::new() } else { format!(" on {}", l.host) },
+        format_time(l.since)
+      ))),
+      _ => Ok(()),
+    }
+  }
+
+  /// Takes a design's edit lock, so nobody else can save versions of it until it is released.
+  /// Fails if someone else holds it, unless `steal` (which takes it from them).
+  pub fn take_lock(&mut self, item: &str, steal: bool) -> Result<EditLock> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::TakeLock { item: item.into(), steal });
+    }
+    self.refresh()?;
+    if !steal {
+      self.check_unlocked(item)?;
+    }
+    let lock = EditLock { user: self.user.clone(), session: self.session.clone(), host: self.host.clone(), since: now() };
+    let it = self.item_mut(item)?;
+    if it.kind != ItemKind::Design {
+      return Err(invalid(format!("{} is a file, not a design: only designs can be locked", it.name)));
+    }
+    let (project, name) = (it.project.clone(), it.name.clone());
+    let before = it.lock.clone();
+    // taken again by its holder: keep when it was first taken
+    let lock = match &before {
+      Some(b) if b.user == lock.user => EditLock { since: b.since, ..lock },
+      _ => lock,
+    };
+    it.lock = Some(lock.clone());
+    match before {
+      Some(b) if b.user != lock.user => self.log(&project, Some(item), format!("took the lock on {name} from {}", b.user)),
+      Some(_) => {}
+      None => self.log(&project, Some(item), format!("locked {name} for editing")),
+    }
+    self.persist()?;
+    Ok(lock)
+  }
+
+  /// Releases the design's lock. Someone else's lock can't be released (steal it instead);
+  /// an unlocked design is left as it is.
+  pub fn release_lock(&mut self, item: &str) -> Result<()> {
+    if self.remote.is_some() {
+      return self.remote_op(ops::Op::ReleaseLock { item: item.into() });
+    }
+    self.refresh()?;
+    let it = self.item(item)?;
+    let Some(l) = &it.lock else { return Ok(()) };
+    if !self.is_mine(l) {
+      return Err(StoreError::Locked(format!("{} is locked by {}; steal the lock to take it over", it.name, l.user)));
+    }
+    let it = self.item_mut(item)?;
+    it.lock = None;
+    let (project, name) = (it.project.clone(), it.name.clone());
+    self.log(&project, Some(item), format!("released the lock on {name}"));
+    self.persist()
+  }
+
+  /// Designs this store's user has locked.
+  pub fn my_locks(&self) -> Vec<&Item> {
+    self.index.items.iter().filter(|i| i.lock.as_ref().is_some_and(|l| self.is_mine(l))).collect()
   }
 }
 

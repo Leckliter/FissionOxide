@@ -23,6 +23,7 @@ fox-render-gl = { path = "crates/render-gl" }
 fox-brand = { path = "crates/brand" }
 fox-cut = { path = "crates/cut" }
 fox-desktop = { path = "crates/desktop" }
+fox-hub-server = { path = "crates/hub-server" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

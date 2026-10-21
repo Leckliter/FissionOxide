@@ -360,3 +360,110 @@ fn comments_on_versions() {
   assert!(s.comments(&item, Some(v3)).unwrap().is_empty());
   let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn edit_locks_keep_others_from_saving() {
+  let root = temp_root("locks");
+  let mut alice = Store::open(&root).unwrap();
+  alice.set_actor("alice", "s-alice", "a-pc");
+  let p = alice.create_project("Locks").unwrap();
+  let (item, _) =
+    alice.create_item(NewItem { project: &p, name: "Hinge", ..design() }, b"1", Origin::Saved, Default::default()).unwrap();
+  let l = alice.take_lock(&item, false).unwrap();
+  assert_eq!((l.user.as_str(), l.host.as_str()), ("alice", "a-pc"));
+  // taking it again keeps when it was first taken
+  assert_eq!(alice.take_lock(&item, false).unwrap().since, l.since);
+  alice.add_version(&item, b"2", Origin::Saved, Default::default()).unwrap();
+
+  // another process, another user (as through a sync folder)
+  let mut bob = Store::open(&root).unwrap();
+  bob.set_actor("bob", "s-bob", "b-pc");
+  assert_eq!(bob.lock_of(&item).unwrap().map(|l| l.user.as_str()), Some("alice"));
+  let e = bob.add_version(&item, b"3", Origin::Saved, Default::default()).unwrap_err();
+  assert!(matches!(e, StoreError::Locked(_)) && e.to_string().contains("locked by alice on a-pc"), "{e}");
+  assert!(matches!(bob.take_lock(&item, false), Err(StoreError::Locked(_))));
+  assert!(matches!(bob.release_lock(&item), Err(StoreError::Locked(_))));
+  assert!(matches!(bob.promote(&item, 1), Err(StoreError::Locked(_))));
+  assert!(matches!(bob.trash_item(&item), Err(StoreError::Locked(_))));
+  // comments are fine while it's locked
+  bob.add_comment(&item, 2, "looks good").unwrap();
+
+  // stealing takes it over, and says so in the activity
+  bob.take_lock(&item, true).unwrap();
+  assert_eq!(bob.activity(None, Some(&item), 1)[0].text, "took the lock on Hinge from alice");
+  assert_eq!(bob.add_version(&item, b"3", Origin::Saved, Default::default()).unwrap(), 3);
+  alice.refresh().unwrap();
+  assert!(matches!(alice.add_version(&item, b"4", Origin::Saved, Default::default()), Err(StoreError::Locked(_))));
+  assert_eq!(bob.my_locks().len(), 1);
+  bob.release_lock(&item).unwrap();
+  bob.release_lock(&item).unwrap();
+  alice.refresh().unwrap();
+  assert!(alice.lock_of(&item).unwrap().is_none());
+  assert_eq!(alice.add_version(&item, b"4", Origin::Saved, Default::default()).unwrap(), 4);
+  assert_eq!(alice.item(&item).unwrap().latest().unwrap().author, "alice");
+  assert_eq!(alice.item(&item).unwrap().version(3).unwrap().author, "bob");
+
+  // files can't be locked
+  let at = NewItem { project: &p, name: "notes", kind: ItemKind::File, ext: "txt", folder: None };
+  let (f, _) = alice.create_item(at, b"x", Origin::Saved, Default::default()).unwrap();
+  assert!(alice.take_lock(&f, false).is_err());
+}
+
+#[test]
+fn presence_files_on_a_local_hub() {
+  let root = temp_root("presence");
+  let mut a = Store::open(&root).unwrap();
+  a.set_actor("alice", "s-a", "a-pc");
+  let mut b = Store::open(&root).unwrap();
+  b.set_actor("bob", "s-b", "b-pc");
+  a.here(&["i1".into(), "i2".into()]).unwrap();
+  b.here(&["i1".into()]).unwrap();
+  let on_i1: Vec<String> = b.presence(Some("i1")).unwrap().into_iter().map(|p| p.user).collect();
+  assert_eq!(on_i1.len(), 2);
+  assert!(on_i1.contains(&"alice".to_string()) && on_i1.contains(&"bob".to_string()));
+  assert_eq!(b.presence(None).unwrap().len(), 3);
+  // closing one keeps when the other was opened
+  let since = a.presence(Some("i2")).unwrap()[0].since;
+  a.here(&["i2".into()]).unwrap();
+  assert_eq!(a.presence(Some("i2")).unwrap()[0].since, since);
+  assert_eq!(a.presence(Some("i1")).unwrap().len(), 1);
+  a.here(&[]).unwrap();
+  assert!(b.presence(Some("i2")).unwrap().is_empty());
+  // presence not renewed for a while has ended
+  let path = root.join("presence").join("s-b.json");
+  let mut h: presence::Here = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+  h.time -= presence::TTL + 1;
+  std::fs::write(&path, serde_json::to_string(&h).unwrap()).unwrap();
+  assert!(a.presence(None).unwrap().is_empty());
+}
+
+#[test]
+fn ops_round_trip_through_json() {
+  let root = temp_root("ops");
+  let mut s = Store::open(&root).unwrap();
+  let p: String = serde_json::from_value(s.apply(ops::Op::CreateProject { name: "Ops".into() }).unwrap()).unwrap();
+  let op = ops::Op::CreateItem {
+    project: p.clone(),
+    folder: None,
+    name: "Cup".into(),
+    kind: ItemKind::Design,
+    ext: "fox".into(),
+    content: ops::Bytes(b"{\"cup\":1}".to_vec()),
+    origin: Origin::Saved,
+    meta: VersionMeta { thumbnail_png: Some(vec![9, 8, 7]), description: "first".into(), ..Default::default() }.into(),
+  };
+  // what goes over the wire
+  let wire = serde_json::to_string(&op).unwrap();
+  assert!(wire.contains("\"op\":\"create_item\"") && wire.contains("\"content\":\"eyJjdXAiOjF9\""), "{wire}");
+  let back: ops::Op = serde_json::from_str(&wire).unwrap();
+  assert_eq!(back, op);
+  let (item, v): (String, u32) = serde_json::from_value(s.apply(back).unwrap()).unwrap();
+  assert_eq!(v, 1);
+  assert_eq!(s.read_version(&item, None).unwrap(), b"{\"cup\":1}");
+  assert_eq!(s.thumbnail(&item, None).unwrap(), [9, 8, 7]);
+  let file = s.item(&item).unwrap().latest().unwrap().file.clone();
+  assert_eq!(s.item_file(&item, &file).unwrap(), b"{\"cup\":1}");
+  assert!(s.item_file(&item, "../hub.json").is_err(), "only files the index lists are served");
+  let lock = s.apply(ops::Op::TakeLock { item: item.clone(), steal: false }).unwrap();
+  assert_eq!(lock["user"], json!(user()));
+}
