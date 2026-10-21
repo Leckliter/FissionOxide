@@ -2,11 +2,11 @@
 //!
 //! The viewBox is the traced image in pixels (y flipped back to point down). Each non-background
 //! layer is a `<g>` filled with its colour; each shape (an outer boundary and the holes that
-//! follow it) is one `<path>` of closed subpaths with `fill-rule="evenodd"`. Background layers
-//! are left out.
+//! follow it) is one `<path>` of closed subpaths with `fill-rule="evenodd"`. Centre-line strokes
+//! are unfilled paths stroked at their traced width. Background layers are left out.
 
 use crate::fit::arc_sweep;
-use crate::{Contour, Seg, Trace};
+use crate::{Contour, Seg, Stroke, Trace};
 use std::f64::consts::PI;
 
 /// A coordinate with at most three decimals and no trailing zeros.
@@ -40,18 +40,46 @@ impl Trace {
         out.push_str(&format!("    <path d=\"{shape}\"/>\n"));
       }
       out.push_str("  </g>\n");
+      if !layer.strokes.is_empty() {
+        out.push_str(&format!(
+          "  <g fill=\"none\" stroke=\"#{r:02x}{g:02x}{b:02x}\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n"
+        ));
+        for st in &layer.strokes {
+          out.push_str(&format!("    <path stroke-width=\"{}\" d=\"{}\"/>\n", num(st.width), stroke(st, f64::from(h))));
+        }
+        out.push_str("  </g>\n");
+      }
     }
     out.push_str("</svg>\n");
     out
   }
 }
 
+/// A centre-line stroke as path data (closed with `Z` when it is a loop).
+fn stroke(st: &Stroke, h: f64) -> String {
+  let mut d = String::new();
+  segs(&st.segs, false, h, &mut d);
+  if st.closed {
+    d.push_str(" Z");
+  }
+  d
+}
+
 /// One closed subpath.
 fn path(c: &Contour, h: f64, out: &mut String) {
-  let Some(first) = c.segs.first() else { return };
+  if c.segs.is_empty() {
+    return;
+  }
+  segs(&c.segs, c.hole, h, out);
+  out.push_str(" Z");
+}
+
+/// Path data for segments in order; `cw` gives a lone circle's direction.
+fn segs(segs: &[Seg], cw: bool, h: f64, out: &mut String) {
+  let Some(first) = segs.first() else { return };
   let pt = |p: [f64; 2]| format!("{} {}", num(p[0]), num(h - p[1]));
   out.push_str(&format!("M {}", pt(first.start())));
-  for seg in &c.segs {
+  for seg in segs {
     match *seg {
       Seg::Line { b, .. } => out.push_str(&format!(" L {}", pt(b))),
       Seg::Arc { a, b, center, ccw } => {
@@ -64,11 +92,10 @@ fn path(c: &Contour, h: f64, out: &mut String) {
       Seg::Cubic { c1, c2, b, .. } => out.push_str(&format!(" C {} {} {}", pt(c1), pt(c2), pt(b))),
       Seg::Circle { center, radius } => {
         let r = num(radius);
-        let sweep = u8::from(c.hole);
+        let sweep = u8::from(cw);
         let far = [center[0] - radius, center[1]];
         out.push_str(&format!(" A {r} {r} 0 0 {sweep} {} A {r} {r} 0 0 {sweep} {}", pt(far), pt(seg.end())));
       }
     }
   }
-  out.push_str(" Z");
 }

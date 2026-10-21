@@ -614,7 +614,7 @@ impl Ctx<'_> {
 /// Least-squares cubic from `q[0]` to its last point with the given end tangents (`t2` points
 /// back from the end), refined by Newton reparameterisation. Returns the control points, the
 /// largest distance of a point from the curve at its parameter, and that point's index.
-fn schneider(q: &[P], t1: P, t2: P, tol: f64) -> ([P; 4], f64, usize) {
+pub(crate) fn schneider(q: &[P], t1: P, t2: P, tol: f64) -> ([P; 4], f64, usize) {
   let (a, b) = (q[0], q[q.len() - 1]);
   let mut u: Vec<f64> = Vec::with_capacity(q.len());
   let mut acc = 0.0;

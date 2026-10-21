@@ -16,10 +16,15 @@
 //!   pixels touching only at a corner belong to one shape, joined by a neck about 0.35 px wide;
 //! - outer boundaries run counter-clockwise, holes clockwise (`hole: true`), and each outer
 //!   boundary is followed directly by its own holes.
+//!
+//! [`Mode::Centerline`] instead thins the dark shapes to their centre lines and returns open
+//! single-line [`Stroke`]s (for engraving); strokes meeting at a junction share its end point
+//! exactly.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 // `!(x > 0.0)` is deliberate: it rejects NaN as well as non-positive values.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+mod centerline;
 mod clean;
 mod contour;
 mod fit;
@@ -30,6 +35,8 @@ mod validate;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_centerline;
 
 use std::path::Path;
 
@@ -99,6 +106,12 @@ pub enum Mode {
   },
   /// The image reduced to `count` colours (k-means in Lab, 1–64), one layer per colour.
   Colors { count: u8 },
+  /// One layer of single-line strokes along the middle of the dark shapes (thresholded as in
+  /// `Outline`), for engraving: [`Layer::strokes`] instead of closed contours.
+  Centerline {
+    #[serde(default)]
+    threshold: Option<u8>,
+  },
 }
 
 impl Default for Mode {
@@ -142,6 +155,9 @@ pub struct Options {
   pub fit: Fit,
   /// Images whose longer side exceeds this are downscaled (area averaging) first.
   pub max_side: u32,
+  /// Centre-line mode: side branches from a junction to a free end shorter than this (px) are
+  /// dropped as thinning noise. `None` = 1.5 × the typical stroke width.
+  pub spurs: Option<f64>,
 }
 
 impl Default for Options {
@@ -156,6 +172,7 @@ impl Default for Options {
       corner_angle: 120.0,
       fit: Fit::Curves,
       max_side: 2000,
+      spurs: None,
     }
   }
 }
@@ -174,6 +191,9 @@ impl Options {
     }
     if !(self.specks >= 0.0) || !(self.holes >= 0.0) {
       return bad("specks and holes must be non-negative areas");
+    }
+    if self.spurs.is_some_and(|v| !(v >= 0.0) || !v.is_finite()) {
+      return bad("spurs must be a non-negative length");
     }
     if self.max_side == 0 {
       return bad("max_side must be at least 1");
@@ -203,8 +223,23 @@ pub struct Layer {
   pub color: [u8; 3],
   /// The colour most common along the image border (Colours mode); callers usually skip it.
   pub background: bool,
-  /// Each outer boundary is followed by its holes.
+  /// Each outer boundary is followed by its holes (empty in centre-line mode).
   pub contours: Vec<Contour>,
+  /// Centre-line mode: the single-line strokes. Strokes meeting at a junction end at exactly
+  /// the same point.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub strokes: Vec<Stroke>,
+}
+
+/// A centre line: open (from one end or junction to another), or a closed loop.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stroke {
+  /// In order; each starts where the previous one ends. A closed stroke ends where it starts
+  /// (or is a single [`Seg::Circle`]).
+  pub segs: Vec<Seg>,
+  pub closed: bool,
+  /// The stroke's mean width (px), e.g. to pick an engraving cutter.
+  pub width: f64,
 }
 
 /// One closed boundary: counter-clockwise, or clockwise when it is a hole.
@@ -277,6 +312,13 @@ pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
   let masks = match options.mode {
     Mode::Outline { threshold } => vec![segment::outline(&rgb, threshold, options.invert)],
     Mode::Colors { count } => segment::colors(&rgb, count),
+    Mode::Centerline { threshold } => {
+      let mut m = segment::outline(&rgb, threshold, options.invert);
+      clean::clean(&mut m.mask, rgb.w, rgb.h, options.specks, options.holes);
+      let strokes = centerline::strokes(&m.mask, rgb.w, rgb.h, options);
+      let layer = Layer { color: m.color, background: false, contours: Vec::new(), strokes };
+      return Ok(Trace { width: rgb.w as u32, height: rgb.h as u32, layers: vec![layer] });
+    }
   };
   let (w, h) = (rgb.w, rgb.h);
   let layers = masks
@@ -286,7 +328,12 @@ pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
       let labels = clean::clean(&mut mask, w, h, options.specks, options.holes);
       let prepared: Vec<fit::Prepared> =
         contour::trace(&mask, &labels, w, h).iter().map(|raw| fit::prepare(raw, options)).collect();
-      Layer { color: m.color, background: m.background, contours: validate::finish(&prepared, options) }
+      Layer {
+        color: m.color,
+        background: m.background,
+        contours: validate::finish(&prepared, options),
+        strokes: Vec::new(),
+      }
     })
     .collect();
   Ok(Trace { width: w as u32, height: h as u32, layers })
