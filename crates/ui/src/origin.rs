@@ -338,10 +338,11 @@ pub(crate) fn under(
   // the depth along the ray of the point nearest to the item (the origin for the point)
   let in_front = |t: f64| t > 0.0 && face.is_none_or(|f| t <= f + 1e-9);
   let origin_t = (DVec3::ZERO - o).dot(d);
-  if visible(app, OriginItem::Point) && project(DVec3::ZERO).is_some_and(|c| (c - pos).length() <= PICK_PX) {
-    if in_front(origin_t) {
-      return Some(OriginItem::Point);
-    }
+  if visible(app, OriginItem::Point)
+    && project(DVec3::ZERO).is_some_and(|c| (c - pos).length() <= PICK_PX)
+    && in_front(origin_t)
+  {
+    return Some(OriginItem::Point);
   }
   for axis in OriginItem::AXES {
     if !visible(app, axis) {
