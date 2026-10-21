@@ -544,7 +544,7 @@ impl Ctx<'_> {
     Ok(())
   }
 
-  fn faces_by_body(&mut self, faces: &mut [FaceRef]) -> Result<Vec<(usize, Vec<u32>)>, String> {
+  pub(super) fn faces_by_body(&mut self, faces: &mut [FaceRef]) -> Result<Vec<(usize, Vec<u32>)>, String> {
     let mut out: Vec<(usize, Vec<u32>)> = Vec::new();
     for fr in faces.iter_mut() {
       let (bi, info) = self.face_info(fr)?;

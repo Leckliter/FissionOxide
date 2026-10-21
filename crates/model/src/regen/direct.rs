@@ -96,6 +96,20 @@ impl Ctx<'_> {
           let (_, info) = self.face_info(fr)?;
           moves.push(v.dot(info.normal));
         }
+        let mut still = 0;
+        for (fr, d) in faces.iter_mut().zip(moves) {
+          if d.abs() < 1e-9 {
+            still += 1;
+            continue;
+          }
+          let mut k = FeatureKind::OffsetFaces { faces: vec![fr.clone()], distance: mm(d) };
+          self.apply(id, &mut k)?;
+          if let FeatureKind::OffsetFaces { faces: mut f, .. } = k
+            && let Some(r) = f.pop()
+          {
+            *fr = r;
+          }
+        }
         Ok((still > 0).then(|| format!("{still} face(s) only slide within their own plane and don't change")))
       }
     }

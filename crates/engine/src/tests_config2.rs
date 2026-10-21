@@ -98,7 +98,8 @@ fn configured_component_switches_with_its_source() {
 
   // inserted in the Long configuration
   let mut s = Session { store_root: Some(dir.clone()), ..Session::default() };
-  let r = run(&mut s, "component.insert", json!({"item": item, "configuration": "Long"}));
+  // by its name (unique in the hub) as well as its id
+  let r = run(&mut s, "component.insert", json!({"item": "Plate", "configuration": "Long"}));
   assert_eq!(r["configuration"], "Long");
   let c = r["component"].as_u64().unwrap();
   assert!((volume(&s) - (150.0 * 20.0 - hole) * 5.0).abs() < 1e-3, "{}", volume(&s));
