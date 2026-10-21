@@ -169,7 +169,7 @@ impl App {
   }
 
   /// Picks up finished solves.
-  fn gen_poll(&mut self) {
+  pub(crate) fn gen_poll(&mut self) {
     if !self.gd.running.as_ref().is_some_and(|r| r.handle.is_finished()) {
       return;
     }
@@ -599,4 +599,46 @@ fn explorer(app: &mut App, ui: &mut egui::Ui, calls: &mut Vec<(&'static str, Val
       calls.push(("export", json!({"outcome": id})));
     }
   });
+}
+
+#[cfg(test)]
+mod tests {
+  use fox_engine::{Sel, Session};
+  use serde_json::json;
+
+  use crate::App;
+  use crate::panels::{Tab, switch_workspace};
+
+  #[test]
+  fn generative_workspace_from_selection_to_outcome() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 40, "depth": 10, "height": 10, "at": [20, 5]}));
+    let body = app.s.model.bodies[0].id;
+    switch_workspace(&mut app, "Generative Design");
+    assert!(app.generative && !app.manufacture && app.gd.open);
+    assert!(crate::menus::commands(&[Tab::Generative]).iter().any(|e| e.label == "Generate"));
+    // the selected body becomes preserve geometry (a study is made on the way)
+    app.s.selection = vec![Sel::Body { body }];
+    app.gen_command("preserve");
+    assert_eq!(app.s.design.generative[0].preserve, vec![body]);
+    let faces = app.s.model.body(body).unwrap().faces().to_vec();
+    let end = |x: f64| faces.iter().find(|f| (f.center.x - x).abs() < 1e-6).unwrap().id;
+    app.s.selection = vec![Sel::Face { body, face: end(0.0) }];
+    app.gen_command("constraint");
+    app.gd.force = ["0".into(), "0".into(), "-100".into()];
+    app.s.selection = vec![Sel::Face { body, face: end(40.0) }];
+    app.gen_command("load");
+    let st = &app.s.design.generative[0];
+    assert_eq!((st.cases[0].loads.len(), st.cases[0].constraints.len()), (1, 1));
+    app.run("gen.design_space", json!({"resolution": 2.5, "iterations": 10, "margin": 5}));
+    app.gen_command("generate");
+    assert!(app.gd.running.is_some());
+    while app.gd.running.is_some() {
+      std::thread::sleep(std::time::Duration::from_millis(20));
+      app.gen_poll();
+    }
+    assert_eq!(app.s.design.generative[0].outcomes.len(), 1, "{:?}", app.status);
+    switch_workspace(&mut app, "Design");
+    assert!(!app.generative);
+  }
 }
