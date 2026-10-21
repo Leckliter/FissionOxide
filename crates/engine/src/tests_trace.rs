@@ -348,7 +348,7 @@ fn a_canvas_traces_where_it_lies_at_its_calibrated_size() {
   assert_eq!(r["at"], json!([30.0, 10.0]), "{r}");
   // the disc (pixel 140 of 200) lands 40 mm right of the canvas centre
   let p = profiles(&mut s);
-  let disc = p.iter().find(|p| p["bbox"][0][0].as_f64().unwrap() > 50.0).unwrap();
+  let disc = p.iter().find(|p| p["bbox"][0][0].as_f64().unwrap() > 40.0).unwrap();
   let cx = (disc["bbox"][0][0].as_f64().unwrap() + disc["bbox"][1][0].as_f64().unwrap()) / 2.0;
   assert!((cx - 70.0).abs() < 0.5, "{disc}");
   run(&mut s, "sketch.finish", json!({}));

@@ -172,8 +172,10 @@ the traced curves once they are in the sketch, so they are read in sketch coordi
 the trace's rotation), with the distance tolerance half the trace's own tolerance in mm:
 
 - *horizontal / vertical*: lines within 1° of the axis;
-- *tangent*: a line and an arc, or two arcs, meeting within 5° of smoothly at a point no other
-  curve uses (two arcs on the same centre are concentric instead);
+- *tangent*: a line and an arc, or two arcs, meeting at a point no other curve uses and bending
+  there by less than half a corner (half of 180° less the corner angle, at most 30°; the fitter's
+  arcs meet lines up to some 20° off smooth, a real corner bends 60° or more by default); the
+  solve then makes them exactly tangent (two arcs on the same centre are concentric instead);
 - *coincident*: end points closer than the tolerance that aren't already one point;
   *point on curve*: a free end within the tolerance of another line or arc's inside;
 - *concentric*: arc and circle centres closer than the tolerance;

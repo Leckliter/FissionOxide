@@ -18,7 +18,8 @@ use crate::{ConstraintId, ConstraintKind, CurveId, CurveKind, PointId, Sketch, d
 pub struct InferTolerance {
   /// Largest angle (degrees) off horizontal/vertical for a line to become horizontal/vertical.
   pub angle: f64,
-  /// Largest angle (degrees) between two curves' directions where they meet to be tangent.
+  /// Largest angle (degrees) between two curves' directions where they meet to be tangent
+  /// (fitted curves meet less exactly than drawn ones: tracing uses more).
   pub tangent: f64,
   /// Largest distance (sketch units) between points to be coincident or centres concentric,
   /// and between lengths or radii to be equal.

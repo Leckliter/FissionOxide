@@ -633,8 +633,13 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let t = fox_sketch::Xform2 { angle, center: at, ..Default::default() };
       // constraints on the traced curves, unless turned off; tolerances follow the trace's own
       let infer = p.get("constraints").and_then(Value::as_bool).unwrap_or(true);
+      // a traced corner bends by at least 180° less the corner angle (60° by default), while
+      // the fitter's arcs meet their neighbours up to some 20° off smooth: joins bending less
+      // than half a corner are tangent
+      let o = crate::trace::options(p)?;
       let tol = fox_sketch::InferTolerance {
-        distance: crate::trace::options(p)?.tolerance * placed.mm_per_px() * 0.5,
+        distance: o.tolerance * placed.mm_per_px() * 0.5,
+        tangent: ((180.0 - o.corner_angle) / 2.0).clamp(5.0, 30.0),
         ..Default::default()
       };
       let (added, inferred) = s.edit(|d| {
