@@ -223,7 +223,7 @@ fn value(key: &str, v: &Value, u: LengthUnit) -> String {
 }
 
 /// The item's properties as label/value rows; nested objects (box, plane, frame) as indented rows.
-fn rows(ui: &mut egui::Ui, id: impl std::hash::Hash, item: &Value, u: LengthUnit) {
+fn rows(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, item: &Value, u: LengthUnit) {
   egui::Grid::new(id).num_columns(2).striped(true).show(ui, |ui| {
     let Some(o) = item.as_object() else { return };
     for (k, v) in o.iter().filter(|(k, _)| *k != "type") {

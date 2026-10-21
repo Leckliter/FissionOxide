@@ -570,6 +570,8 @@ mod tests_mechanism;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
+mod tests_properties;
+#[cfg(test)]
 mod tests_scene;
 #[cfg(test)]
 mod tests_sheet2;
@@ -589,5 +591,3 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
-#[cfg(test)]
-mod tests_properties;

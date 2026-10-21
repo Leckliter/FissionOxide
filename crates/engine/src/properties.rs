@@ -139,7 +139,11 @@ fn component_bodies(s: &Session, id: ComponentId) -> Vec<BodyId> {
   let mut todo = vec![id];
   while let Some(c) = todo.pop() {
     if let Some(comp) = s.design.component(c) {
-      out.extend(comp.bodies.iter().copied().filter(|b| !out.contains(b)));
+      for b in &comp.bodies {
+        if !out.contains(b) {
+          out.push(*b);
+        }
+      }
     }
     todo.extend(s.design.components.iter().filter(|x| x.parent == Some(c)).map(|x| x.id));
   }
@@ -350,9 +354,7 @@ fn solved(s: &Session, id: FeatureId) -> Result<(&Sketch, Option<fox_kernel::Pla
 }
 
 fn plane_json(pl: Option<fox_kernel::Plane>) -> Value {
-  pl.map_or(Value::Null, |pl| {
-    json!({"origin": v3(pl.origin), "x": v3(pl.x), "y": v3(pl.y), "normal": v3(pl.normal())})
-  })
+  pl.map_or(Value::Null, |pl| json!({"origin": v3(pl.origin), "x": v3(pl.x), "y": v3(pl.y), "normal": v3(pl.normal())}))
 }
 
 fn bounds2(pts: impl Iterator<Item = [f64; 2]>) -> ([f64; 2], [f64; 2]) {
@@ -496,14 +498,20 @@ fn overall_size(s: &Session, p: &Value) -> CmdResult {
     if s.design.component(ComponentId(c)).is_none() {
       return Err(CmdError::new(format!("no component {c}")));
     }
-    bodies.extend(component_bodies(s, ComponentId(c)).into_iter().filter(|b| !bodies.contains(b)));
+    for b in component_bodies(s, ComponentId(c)) {
+      if !bodies.contains(&b) {
+        bodies.push(b);
+      }
+    }
   }
   let explicit = p.get("bodies").is_some() || p.get("components").is_some();
   if !explicit {
     bodies = s.model.bodies.iter().filter(|b| s.body_visible(b.id)).map(|b| b.id).collect();
   }
-  let list: Vec<&fox_model::regen::Body> =
-    bodies.iter().map(|b| s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0)))).collect::<Result<_, _>>()?;
+  let list: Vec<&fox_model::regen::Body> = bodies
+    .iter()
+    .map(|b| s.model.body(*b).ok_or(CmdError::new(format!("no body {}", b.0))))
+    .collect::<Result<_, _>>()?;
   if list.is_empty() {
     return Err(CmdError::new("there are no bodies to measure"));
   }
@@ -564,7 +572,10 @@ fn size_export(r: &Value, units: LengthUnit, design: &str, ext: &str) -> Result<
       "box": {"min": vec_u(&r["box"]["min"]), "max": vec_u(&r["box"]["max"]), "size": vec_u(&r["box"]["size"])},
       "bodies": r["bodies"],
     }))?,
-    "csv" => format!("design,width,height,thickness,units,mode\n\"{}\",{w},{h},{t},{sym},{mode}\n", design.replace('"', "\"\"")),
+    "csv" => format!(
+      "design,width,height,thickness,units,mode\n\"{}\",{w},{h},{t},{sym},{mode}\n",
+      design.replace('"', "\"\"")
+    ),
     "txt" => format!(
       "{design}\nWidth: {} {sym}\nHeight: {} {sym}\nThickness: {} {sym}\nMode: {mode}\n",
       units.number(r["width"].as_f64().unwrap_or(0.0)),

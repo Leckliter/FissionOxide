@@ -29,7 +29,8 @@ fn properties_of_faces_edges_vertices_bodies_and_components() {
   let mut s = Session::default();
   let b = plate(&mut s);
   let body = s.model.body(fox_model::BodyId(b)).unwrap();
-  let top = body.faces().iter().max_by(|x, y| (x.center.z, x.area).partial_cmp(&(y.center.z, y.area)).unwrap()).unwrap().id;
+  let top =
+    body.faces().iter().max_by(|x, y| (x.center.z, x.area).partial_cmp(&(y.center.z, y.area)).unwrap()).unwrap().id;
   let edge = body.edges().iter().find(|e| (e.length - 40.0).abs() < 1e-6).unwrap().id;
   run(&mut s, "component.create", json!({"name": "Plate", "bodies": [b]}));
   let comp = s.design.components.iter().find(|c| c.name == "Plate").unwrap().id.0;
