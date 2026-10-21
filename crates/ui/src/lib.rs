@@ -192,6 +192,8 @@ pub struct App {
   pub cut_window: Option<cut_ui::CutWindow>,
   /// The Electronics workspace, while it is open (in place of the Design workspace).
   pub electronics: Option<ecad_ui::EcadView>,
+  /// A cut job whose preview failed at this design revision (not retried every frame).
+  pub cut_preview_failed: Option<(u32, u64)>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -393,6 +395,7 @@ impl App {
       ghost: preview::Ghost::default(),
       cut_window: None,
       electronics: None,
+      cut_preview_failed: None,
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -1475,6 +1478,8 @@ impl App {
       self.cam_generate(false);
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
+    // and its 2D cut preview
+    self.refresh_cut_preview();
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);

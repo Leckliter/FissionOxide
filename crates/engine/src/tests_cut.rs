@@ -116,3 +116,199 @@ fn machines_in_the_hub() {
   run(&mut s, "cut.machine.delete", json!({"id": "shop_laser"}));
   assert_eq!(run(&mut s, "cut.machines", json!({})).as_array().unwrap().len(), builtin);
 }
+
+/// A 100 × 60 plate sketch with a hole of radius `r` (a parameter) at (30, 30).
+fn plate_sketch(s: &mut Session) -> u64 {
+  run(s, "param.add", json!({"name": "r", "expr": "10 mm"}));
+  let id = run(s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
+  run(s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [100, 60]}));
+  let c = run(s, "sketch.circle", json!({"center": [30, 30], "radius": 10}));
+  let curve = c["curves"][0].as_u64().or(c["curve"].as_u64()).unwrap_or_else(|| panic!("{c}"));
+  run(s, "sketch.dimension", json!({"type": "radius", "curves": [curve], "value": "r"}));
+  run(s, "sketch.finish", json!({}));
+  id
+}
+
+#[test]
+fn nesting_to_sheets() {
+  let mut s = Session { store_root: Some(hub("nest")), ..Default::default() };
+  let id = plate_sketch(&mut s);
+  // 3 x 2 plates fit a 320 x 140 sheet (7 would need more area): 8 copies take two sheets
+  let p = json!({"sketch": id, "machine": "grbl_laser", "kerf": 0.2, "nest": {"sheet": "320 x 140"}, "quantity": 8});
+  let n = run(&mut s, "cut.nest", p.clone());
+  assert_eq!(n["sheets"].as_array().unwrap().len(), 2, "{n}");
+  assert_eq!(n["sheets"][0]["parts"], 6);
+  assert_eq!(n["parts"][0]["placed"], 8);
+  assert!(n["unplaced"].as_array().unwrap().is_empty());
+  let u = n["utilisation"].as_f64().unwrap();
+  let area = 6000.0 - 100.0 * std::f64::consts::PI;
+  assert!((u - 8.0 * area / (2.0 * 320.0 * 140.0)).abs() < 1e-3, "{u}");
+  assert_eq!(n["cut"].as_array().unwrap().len(), 2);
+
+  // G-code: one program per sheet
+  let g = run(&mut s, "cut.gcode", p.clone());
+  assert_eq!(g["sheets"], 2);
+  assert_eq!(g["programs"].as_array().unwrap().len(), 2);
+  assert_eq!(g["contours"], 16, "{g}");
+  assert_eq!(g["pierces"], 16);
+  assert!(g["gcode"].as_str().unwrap().contains("sheet 1 of 2"));
+  let mut second = p.clone();
+  second["sheet"] = json!(2);
+  let two = run(&mut s, "cut.gcode", second.clone());
+  assert_eq!(two["contours"], 4, "{two}");
+  assert!(two["gcode"].as_str().unwrap().contains("sheet 2 of 2"));
+  second["sheet"] = json!(3);
+  assert!(s.execute("cut.gcode", &second).is_err());
+
+  // to files: plate-sheet1.gcode, plate-sheet2.gcode; DXF with the sheet outline
+  let dir = hub("nest-files");
+  std::fs::create_dir_all(&dir).unwrap();
+  let mut w = p.clone();
+  w["path"] = json!(dir.join("plate.gcode"));
+  let r = run(&mut s, "cut.gcode", w);
+  let paths = r["paths"].as_array().unwrap();
+  assert_eq!(paths.len(), 2);
+  assert!(paths[1].as_str().unwrap().ends_with("plate-sheet2.gcode"));
+  assert!(dir.join("plate-sheet1.gcode").exists() && dir.join("plate-sheet2.gcode").exists());
+  let mut d = p.clone();
+  d["machine"] = json!("dxf");
+  d["sheet"] = json!(1);
+  let dxf = run(&mut s, "cut.gcode", d);
+  assert!(dxf["gcode"].as_str().unwrap().contains("\nSHEET\n"));
+
+  // a second part with its own quantity, rotations off, and errors
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [0, 0], "radius": 15}));
+  let disc = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.finish", json!({}));
+  let mixed = json!({"sketch": id, "quantity": 2, "parts": [{"sketch": disc, "quantity": 5, "name": "disc"}],
+    "nest": {"sheet": [320, 140], "rotations": 1, "spacing": 4}});
+  let m = run(&mut s, "cut.nest", mixed);
+  assert_eq!(m["sheets"].as_array().unwrap().len(), 1, "{m}");
+  assert_eq!(m["parts"][1]["name"], "disc");
+  assert_eq!(m["parts"][1]["placed"], 5);
+  for pl in m["sheets"][0]["placements"].as_array().unwrap() {
+    assert_eq!(pl["rotation"].as_f64().unwrap(), 0.0);
+  }
+  let big = json!({"sketch": id, "nest": {"sheet": [80, 80]}});
+  let b = run(&mut s, "cut.nest", big);
+  assert_eq!(b["unplaced"][0]["count"], 1, "{b}");
+  assert!(s.execute("cut.gcode", &json!({"sketch": id, "quantity": 3})).is_err(), "quantity needs a nest");
+  assert!(s.execute("cut.nest", &json!({"sketch": id, "kerf": 2, "nest": {"spacing": 1}})).is_err());
+  let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cut_jobs_follow_the_design() {
+  let mut s = Session { store_root: Some(hub("jobs")), ..Default::default() };
+  let id = plate_sketch(&mut s);
+  let undo = s.undo.len();
+  let j = run(&mut s, "cut.job.create", json!({"name": "Plate", "sketch": id, "machine": "wazer", "kerf": 1}));
+  assert_eq!(j["job"], 1);
+  assert_eq!(s.design.cut_jobs.len(), 1);
+  assert_eq!(s.undo.len(), undo + 1, "an undo step");
+  let before = run(&mut s, "cut.job.preview", json!({"job": "plate"}));
+  let cp = s.cut_preview.as_ref().unwrap();
+  assert_eq!(cp.revision, s.revision);
+  assert!(cp.lines.iter().any(|l| l.kind == crate::CutLineKind::Hole));
+  assert!(cp.lines.iter().any(|l| l.kind == crate::CutLineKind::Lead));
+  assert!(cp.lines.iter().any(|l| l.kind == crate::CutLineKind::Rapid));
+  // drawn in the viewport while it matches the design
+  let opts = crate::scene::view_options(&s, &json!({"cut": true})).unwrap();
+  assert!(opts.cut);
+
+  // the hole grows: the stored job follows
+  run(&mut s, "param.set", json!({"name": "r", "expr": "15 mm"}));
+  assert_ne!(s.cut_preview.as_ref().unwrap().revision, s.revision, "the preview is stale");
+  let after = run(&mut s, "cut.job.preview", json!({}));
+  let len = |v: &Value| v["cut_length"].as_f64().unwrap();
+  assert!(len(&after) - len(&before) > 2.0 * std::f64::consts::PI * 4.0, "{} → {}", len(&before), len(&after));
+  // posted from the job, with a per-run override
+  let g = run(&mut s, "cut.gcode", json!({"job": 1, "units": "inch"}));
+  assert!(g["gcode"].as_str().unwrap().contains("G20"));
+  assert_eq!(g["contours"], 2);
+
+  // edit: nest it; null removes a setting
+  // (at most five 100 x 60 plates fit a 250 x 150 sheet by area)
+  run(&mut s, "cut.job.edit", json!({"job": 1, "nest": {"sheet": [250, 150]}, "quantity": 6, "kerf": null}));
+  assert!(s.design.cut_jobs[0].params.get("kerf").is_none());
+  let n = run(&mut s, "cut.job.preview", json!({}));
+  let sheets = n["nest"]["sheets"].as_array().unwrap().len();
+  assert!(sheets >= 2, "{n}");
+  assert_eq!(n["nest"]["parts"][0]["placed"], 6);
+  let drawn = s.cut_preview.as_ref().unwrap().lines.iter().filter(|l| l.kind == crate::CutLineKind::Sheet).count();
+  assert_eq!(drawn, sheets);
+  run(&mut s, "cut.job.edit", json!({"job": 1, "nest": null, "quantity": null, "name": "Plate A"}));
+  assert_eq!(s.design.cut_jobs[0].name, "Plate A");
+
+  // kept in the file
+  let text = serde_json::to_string(&s.design).unwrap();
+  let back: fox_model::Design = serde_json::from_str(&text).unwrap();
+  assert_eq!(back.cut_jobs, s.design.cut_jobs);
+  assert_eq!(run(&mut s, "cut.job.list", json!({})).as_array().unwrap().len(), 1);
+
+  run(&mut s, "cut.job.delete", json!({"job": "Plate A"}));
+  assert!(s.design.cut_jobs.is_empty() && s.cut_preview.is_none());
+  assert!(s.execute("cut.job.preview", &json!({})).is_err());
+  run(&mut s, "undo", json!({}));
+  assert_eq!(s.design.cut_jobs.len(), 1);
+}
+
+/// The start of the first cutting move of the pass that cuts the outline (the contour not a
+/// hole), from the job's G-code-free summary: taken from the preview's outline line.
+fn outline_start(s: &Session) -> fox_kernel::glam::DVec3 {
+  let cp = s.cut_preview.as_ref().unwrap();
+  cp.lines.iter().find(|l| l.kind == crate::CutLineKind::Outline).unwrap().points[0]
+}
+
+#[test]
+fn lead_positions_picked_per_contour() {
+  let mut s = Session { store_root: Some(hub("leads")), ..Default::default() };
+  let id = plate_sketch(&mut s);
+  run(&mut s, "cut.job.create", json!({"sketch": id, "machine": "wazer", "kerf": 1}));
+  run(&mut s, "cut.job.preview", json!({}));
+  let first = outline_start(&s);
+  // pick on the outline's top edge, in the model (the sketch is on XY at the origin)
+  run(&mut s, "cut.job.lead", json!({"point": [70.0, 60.0, 0.0]}));
+  run(&mut s, "cut.job.preview", json!({}));
+  let p = outline_start(&s);
+  assert!((p.x - 70.0).abs() < 1e-6 && (p.y - 60.5).abs() < 1e-6, "{p:?} (was {first:?})");
+  // a second pick on the same contour replaces the first; one in the hole adds a point
+  run(&mut s, "cut.job.lead", json!({"point": [0.0, 20.0, 0.0]}));
+  run(&mut s, "cut.job.lead", json!({"point": [30.0, 22.0, 0.0]}));
+  let leads = s.design.cut_jobs[0].params["lead_points"].as_array().unwrap().clone();
+  assert_eq!(leads.len(), 2, "{leads:?}");
+  run(&mut s, "cut.job.preview", json!({}));
+  let p = outline_start(&s);
+  assert!((p.x + 0.5).abs() < 1e-6 && (p.y - 20.0).abs() < 1e-6, "{p:?}");
+  let cp = s.cut_preview.as_ref().unwrap();
+  let hole = cp.lines.iter().find(|l| l.kind == crate::CutLineKind::Hole).unwrap().points[0];
+  assert!((hole.x - 30.0).abs() < 1e-6 && (hole.y - 20.5).abs() < 1e-6, "{hole:?}");
+  // the picks stay on their contours when the design changes
+  run(&mut s, "param.set", json!({"name": "r", "expr": "12 mm"}));
+  run(&mut s, "cut.job.preview", json!({}));
+  let cp = s.cut_preview.as_ref().unwrap();
+  let hole = cp.lines.iter().find(|l| l.kind == crate::CutLineKind::Hole).unwrap().points[0];
+  assert!((hole.x - 30.0).abs() < 1e-6 && (hole.y - 18.5).abs() < 1e-6, "{hole:?}");
+
+  // nested: a pick on a copy goes back to the part, so every copy starts there
+  run(&mut s, "cut.job.lead", json!({"clear": true}));
+  run(&mut s, "cut.job.edit", json!({"nest": {"sheet": [250, 150], "rotations": 1}, "quantity": 4}));
+  run(&mut s, "cut.job.preview", json!({}));
+  let n = run(&mut s, "cut.job.list", json!({}));
+  assert!(n[0]["params"].get("lead_points").is_none());
+  let job = run(&mut s, "cut.nest", json!({"job": 1}));
+  let off = job["sheets"][0]["placements"][1]["offset"].clone();
+  let (ox, oy) = (off[0].as_f64().unwrap(), off[1].as_f64().unwrap());
+  // the copy's left edge, 20 up from its corner (sheet coordinates = model, the sketch's
+  // lower-left corner being the origin)
+  run(&mut s, "cut.job.lead", json!({"point": [ox, oy + 20.0, 0.0]}));
+  let leads = s.design.cut_jobs[0].params["lead_points"].as_array().unwrap().clone();
+  assert_eq!(leads.len(), 1);
+  assert!((leads[0][0].as_f64().unwrap()).abs() < 1e-6 && (leads[0][1].as_f64().unwrap() - 20.0).abs() < 1e-6, "{leads:?}");
+  let g = run(&mut s, "cut.gcode", json!({"job": 1, "sheet": 1}));
+  let text = g["gcode"].as_str().unwrap();
+  // every outline starts on its copy's left edge: a G1 to x = offset - 0.5 after each lead-in
+  let starts = text.lines().filter(|l| l.starts_with("G0 ")).count();
+  assert_eq!(starts, g["pierces"].as_u64().unwrap() as usize);
+}

@@ -275,6 +275,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let mut consumed = false;
   shown_dims_overlay(app, &painter, &view);
   consumed |= crate::canvas_ui::calibrate_clicks(app, &resp, &|p| view.ray(&cam, p));
+  consumed |= crate::cut_ui::lead_clicks(app, &resp, &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
@@ -603,6 +604,9 @@ fn view_params(app: &App) -> serde_json::Value {
   let mut v = app.analysis.clone().unwrap_or(json!({}));
   if app.manufacture {
     v["toolpaths"] = json!(app.s.toolpaths_of.map(|t| t.1));
+  }
+  if app.manufacture || app.cut_window.is_some() {
+    v["cut"] = json!(app.s.cut_preview.as_ref().map(|c| [c.job as u64, c.revision]));
   }
   if let Some(sec) = &app.section {
     v["section"] = sec.clone();

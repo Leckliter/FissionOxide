@@ -128,6 +128,8 @@ pub struct ViewOptions {
   pub curvature: bool,
   /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
   pub toolpaths: bool,
+  /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
+  pub cut: bool,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
@@ -426,6 +428,9 @@ impl SceneBuilder {
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
       simulated_stock(&mut scene, s);
+    }
+    if opts.cut {
+      cut_lines(&mut scene, s);
     }
     scene.analysis = opts.analysis;
     (scene, picks)
@@ -1065,6 +1070,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     o.section = Some(view_plane(s, &plane, offset, flip)?);
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
+  o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   let pull = match p.get("pull") {
     Some(serde_json::Value::String(a)) => match a.as_str() {
       "x" => [1.0, 0.0, 0.0],
@@ -1134,6 +1140,26 @@ fn toolpath_lines(scene: &mut Scene, s: &Session) {
       let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
       line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
     }
+  }
+}
+
+/// The previewed cut job: outlines blue, holes purple, leads green, rapids dashed orange, the
+/// sheets of a nest dashed grey.
+fn cut_lines(scene: &mut Scene, s: &Session) {
+  let Some(cp) = &s.cut_preview else { return };
+  if cp.revision != s.revision {
+    return;
+  }
+  for l in &cp.lines {
+    let (color, dashed, width) = match l.kind {
+      crate::CutLineKind::Outline => ([30, 100, 230, 255], false, 1.5),
+      crate::CutLineKind::Hole => ([150, 70, 210, 255], false, 1.5),
+      crate::CutLineKind::Lead => ([40, 170, 80, 255], false, 1.5),
+      crate::CutLineKind::Rapid => ([235, 150, 40, 255], true, 1.0),
+      crate::CutLineKind::Sheet => ([120, 130, 150, 255], true, 1.0),
+    };
+    let points = l.points.iter().map(|p| p.as_vec3().to_array()).collect();
+    scene.lines.push(Polyline { points, color, width, id: 0, on_top: false, dashed, behind: false });
   }
 }
 

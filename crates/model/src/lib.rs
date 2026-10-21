@@ -67,6 +67,17 @@ pub struct FeatureId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BodyId(pub u32);
 
+/// A 2D cut kept in the design: its source (sketch, faces or a sheet metal body's flat pattern),
+/// machine, process, overrides, lead points and nesting, as the parameters of `cut.gcode`. The
+/// cut itself is planned from them whenever it is needed, so it follows the design.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CutJob {
+  pub id: u32,
+  pub name: String,
+  #[serde(default)]
+  pub params: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Design {
   #[serde(default = "format_version")]
@@ -105,6 +116,9 @@ pub struct Design {
   /// Manufacture setups (CAM).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cam: Vec<cam::Setup>,
+  /// 2D cut jobs (laser, plasma, waterjet) kept with the design and recomputed as it changes.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub cut_jobs: Vec<CutJob>,
   /// Assembly contact sets (see [`assembly::ContactSet`]).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub contact_sets: Vec<assembly::ContactSet>,
@@ -2131,6 +2145,7 @@ impl Design {
       drawings: Vec::new(),
       attributes: Vec::new(),
       cam: Vec::new(),
+      cut_jobs: Vec::new(),
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,
