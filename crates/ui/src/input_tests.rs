@@ -449,6 +449,62 @@ fn tab_moves_between_the_heads_up_boxes() {
   }
 }
 
+/// Enter on typed heads-up values draws the rectangle and ends the Rectangle command (Select
+/// becomes active), while a click-drawn rectangle keeps the tool running, as in Fusion.
+#[test]
+fn enter_on_typed_values_ends_the_rectangle_tool() {
+  use crate::viewport::Tool;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.set_tool(Tool::Rect);
+  let c = h.app.canvas.center();
+  // a click-drawn rectangle: the tool stays (seen straight on, so the corners don't snap together)
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.move_then_click(c);
+  h.move_then_click(c + vec2(160.0, -120.0));
+  assert_eq!(h.app.s.design.sketch(sk).unwrap().curves.len(), 4);
+  assert_eq!(h.app.tool, Tool::Rect, "a click-drawn rectangle keeps the tool");
+  // a typed one: Enter commits it and ends the command
+  h.move_then_click(c + vec2(-200.0, 100.0));
+  h.frame(vec![Event::PointerMoved(c + vec2(-140.0, 60.0))]);
+  h.frame(vec![]);
+  h.frame(typing("40"));
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  h.frame(typing("20"));
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.s.design.sketch(sk).unwrap().curves.len(), 8, "the typed rectangle was drawn");
+  assert_eq!(dims(&h.app, sk), [40.0, 20.0]);
+  assert_eq!(h.app.tool, Tool::Select, "Enter on typed values ends the Rectangle command");
+  assert!(h.app.tstate.is_empty());
+}
+
+/// The browser's Origin folder is hidden by default; its bulb shows the three origin planes in
+/// the canvas (and the scene's short axes), each about 120 px wide.
+#[test]
+fn the_origin_folder_shows_camera_sized_planes() {
+  use fox_engine::kernel::glam::DVec3;
+  let mut h = Harness::new();
+  assert!(!h.app.origin_shown, "Origin is hidden by default");
+  h.app.origin_shown = true;
+  h.frame(vec![]);
+  let half = crate::viewport::origin_plane_half_size(&h.app);
+  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
+  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
+  // the XY square's width along X, foreshortened by the home view's turn
+  let w = (b - a).length();
+  assert!((60.0..=125.0).contains(&w), "the origin plane spans {w} px");
+  // looked at straight on it is the full 120 px
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  let a = on_screen(&h.app, DVec3::new(-half, 0.0, 0.0));
+  let b = on_screen(&h.app, DVec3::new(half, 0.0, 0.0));
+  assert!(((b - a).length() - 120.0).abs() < 1.0, "{}", (b - a).length());
+}
+
 /// The File button (after the logo and the data panel button) and the Help (?) button (left of
 /// the avatar at the right end) of the application bar.
 const FILE: Pos2 = Pos2::new(88.0, 19.0);

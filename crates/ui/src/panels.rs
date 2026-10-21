@@ -1463,7 +1463,11 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   if !app.s.selection.is_empty() {
     app.picked_plane = None;
   }
-  tree_row(ui, og, 1, Some(false), None, Icon::Folder, "Origin", false, theme::TEXT);
+  // the folder's light bulb shows the origin planes and short axes in the canvas (off by default)
+  let ev = tree_row(ui, og, 1, Some(false), Some(app.origin_shown), Icon::Folder, "Origin", false, theme::TEXT);
+  if ev.eye {
+    app.origin_shown = !app.origin_shown;
+  }
   if is_open(ui, og, false) {
     tree_row(ui, og.with("o"), 2, None, None, Icon::Origin, "O", false, theme::TEXT);
     for (label, plane) in [("XY", "xy"), ("XZ", "xz"), ("YZ", "yz")] {
@@ -2465,15 +2469,34 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         dialog_header(ui, Icon::Sketch, "SKETCH PALETTE", width);
         egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 14, top: 6, bottom: 8 }).show(ui, |ui| {
           ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
-          let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
-          triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
-          ui.painter().text(
-            r.left_center() + vec2(16.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            "Options",
-            egui::FontId::proportional(13.0),
-            theme::TEXT,
-          );
+          let section = |ui: &mut egui::Ui, title: &str| {
+            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
+            triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
+            ui.painter().text(
+              r.left_center() + vec2(16.0, 0.0),
+              egui::Align2::LEFT_CENTER,
+              title,
+              egui::FontId::proportional(13.0),
+              theme::TEXT,
+            );
+          };
+          // while a tool with several types runs, its types sit above Options, as in Fusion
+          let variants = feature_options(app.tool);
+          if !variants.is_empty() {
+            section(ui, "Feature Options");
+            ui.horizontal(|ui| {
+              ui.set_height(27.0);
+              ui.add_space(14.0);
+              for &t in variants {
+                let (icon, name, _) = Cmd::SketchTool(t).info();
+                if icons::icon_button(ui, icon, 22.0, name, app.tool == t, None).clicked() && app.tool != t {
+                  app.set_tool(t);
+                }
+              }
+            });
+            ui.add_space(2.0);
+          }
+          section(ui, "Options");
           let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.horizontal(|ui| {
               ui.set_height(27.0);
@@ -2482,8 +2505,14 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
               ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui));
             });
           };
+          // the toggles light up when every selected curve has that linetype
+          let (construction, centerline) = linetype_state(app, sk);
           row(ui, "Linetype", &mut |ui| {
-            if icons::icon_button(ui, Icon::Construction, 22.0, "Normal/Construction (X)", false, None).clicked() {
+            if icons::icon_button(ui, Icon::Centerline, 22.0, "Centerline", centerline, None).clicked() {
+              app.toggle_centerline();
+            }
+            if icons::icon_button(ui, Icon::Construction, 22.0, "Normal/Construction (X)", construction, None).clicked()
+            {
               app.toggle_construction();
             }
           });
@@ -2557,7 +2586,7 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
             ui.horizontal(|ui| {
               ui.add_space(14.0);
               ui.label(RichText::new(txt).color(col).small());
-              ui.label(RichText::new(format!("· {} profiles", r.profiles.len())).color(theme::MUTED).small());
+              ui.label(RichText::new(format!("· {}", profile_count(r.profiles.len()))).color(theme::MUTED).small());
             });
           }
         });
@@ -2572,6 +2601,49 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
         });
       });
     });
+}
+
+/// The types of the running sketch tool, for the palette's Feature Options section: Fusion
+/// lists a tool's variants there (2-point / 3-point / center rectangle, the five circles, ...)
+/// and nothing for tools with one form (Line).
+pub(crate) fn feature_options(tool: Tool) -> &'static [Tool] {
+  use Tool::*;
+  const RECTS: &[Tool] = &[Rect, Rect3, CenterRect];
+  const CIRCLES: &[Tool] = &[Circle, Circle2P, Circle3P, Circle2T, Circle3T];
+  const ARCS: &[Tool] = &[Arc3, CenterArc, TangentArc];
+  const POLYGONS: &[Tool] = &[Polygon, CircPolygon, EdgePolygon];
+  const SLOTS: &[Tool] = &[Slot, OverallSlot, CenterSlot, ArcSlot3, ArcSlotCenter];
+  const SPLINES: &[Tool] = &[Spline, ControlSpline];
+  for family in [RECTS, CIRCLES, ARCS, POLYGONS, SLOTS, SPLINES] {
+    if family.contains(&tool) {
+      return family;
+    }
+  }
+  &[]
+}
+
+/// "1 profile" / "2 profiles".
+pub(crate) fn profile_count(n: usize) -> String {
+  if n == 1 { "1 profile".to_string() } else { format!("{n} profiles") }
+}
+
+/// Whether every selected curve of the sketch is construction, and whether every one is a
+/// centerline (nothing selected: neither).
+fn linetype_state(app: &App, sk: FeatureId) -> (bool, bool) {
+  let Ok(sketch) = app.s.design.sketch(sk) else { return (false, false) };
+  let curves: Vec<_> = app
+    .s
+    .selection
+    .iter()
+    .filter_map(|s| match s {
+      Sel::SketchCurve { sketch: in_sk, curve } if *in_sk == sk => sketch.curve(*curve),
+      _ => None,
+    })
+    .collect();
+  if curves.is_empty() {
+    return (false, false);
+  }
+  (curves.iter().all(|c| c.construction), curves.iter().all(|c| c.centerline))
 }
 
 /// Frame of a command dialog (and the sketch palette).
@@ -3463,6 +3535,50 @@ mod timeline_groups;
 #[cfg(test)]
 mod row_menu_tests {
   use super::*;
+
+  /// The palette's Feature Options list a running tool's types, as Fusion's does: rectangles,
+  /// circles, arcs, polygons, slots and splines; Line (one form) and Select show none.
+  #[test]
+  fn feature_options_list_the_tools_types() {
+    assert_eq!(feature_options(Tool::Rect), &[Tool::Rect, Tool::Rect3, Tool::CenterRect]);
+    assert_eq!(feature_options(Tool::CenterRect), feature_options(Tool::Rect));
+    assert_eq!(feature_options(Tool::Circle3T).len(), 5);
+    assert!(feature_options(Tool::Circle).contains(&Tool::Circle2P));
+    assert_eq!(feature_options(Tool::TangentArc), &[Tool::Arc3, Tool::CenterArc, Tool::TangentArc]);
+    assert!(feature_options(Tool::Line).is_empty());
+    assert!(feature_options(Tool::Select).is_empty());
+    assert!(feature_options(Tool::Dimension).is_empty());
+    for t in feature_options(Tool::Slot) {
+      // every type has a ribbon icon and name for its toggle
+      assert!(!Cmd::SketchTool(*t).info().1.is_empty());
+    }
+  }
+
+  #[test]
+  fn profile_count_reads_singular_and_plural() {
+    assert_eq!(profile_count(0), "0 profiles");
+    assert_eq!(profile_count(1), "1 profile");
+    assert_eq!(profile_count(2), "2 profiles");
+  }
+
+  /// The Linetype toggles light up when every selected curve has that linetype.
+  #[test]
+  fn linetype_toggles_follow_the_selection() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.expect("sketching");
+    let r = app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    let c = r["curves"][0].as_u64().unwrap() as u32;
+    assert_eq!(linetype_state(&app, sk), (false, false));
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(c) }];
+    assert_eq!(linetype_state(&app, sk), (false, false));
+    app.toggle_construction();
+    assert_eq!(linetype_state(&app, sk), (true, false));
+    app.toggle_centerline();
+    assert_eq!(linetype_state(&app, sk), (true, true));
+    app.toggle_centerline();
+    assert_eq!(linetype_state(&app, sk), (false, false));
+  }
 
   fn labels(items: &[Option<RowItem>]) -> Vec<String> {
     items.iter().map(|i| i.as_ref().map(|i| i.label.clone()).unwrap_or_else(|| "-".into())).collect()

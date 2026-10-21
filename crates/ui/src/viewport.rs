@@ -289,6 +289,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   consumed |=
     crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
+    if app.show_grid {
+      grid_labels(app, &painter, &view);
+    }
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
@@ -559,7 +562,10 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hover: app.hover,
     hide_edges: !app.visual_style.edges(),
     hide_grid: !app.show_grid,
-    hide_origin: !vis.origins,
+    // the origin axes draw only while the browser's Origin folder is shown (and Object Visibility
+    // has origins on), as short stubs matching the origin planes' size
+    hide_origin: !(vis.origins && app.origin_shown),
+    origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
     hide_sketches: !vis.sketches || analysis.hide_sketches,
     hide_construction: !vis.construction,
     grid_step: app.grid.step(),
@@ -2021,6 +2027,51 @@ impl DimText {
   }
 }
 
+/// The positions (sketch units, mm) of the grid's major lines, which carry labels: every fifth
+/// line of the grid the scene draws for this step, within its extent.
+pub(crate) fn grid_label_positions(step: f64, size: f64) -> Vec<f64> {
+  let n = ((size / step).ceil() as i64).clamp(2, 60);
+  (-n..=n).filter(|i| i % 5 == 0).map(|i| i as f64 * step).collect()
+}
+
+/// The sketch grid's coordinate labels along both axes in the design's unit, as Fusion prints
+/// them (-2.5 ... 2.5 in), and a small marker at the origin.
+fn grid_labels(app: &App, painter: &egui::Painter, view: &View) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let step = app.grid.step().unwrap_or_else(|| fox_engine::scene::grid_step(&app.s));
+  let size = app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0);
+  let positions = grid_label_positions(step, size);
+  let unit = app.s.design.units;
+  let ink = Color32::from_gray(120);
+  let font = egui::FontId::proportional(11.0);
+  let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let last = positions.last().copied().unwrap_or(0.0);
+  for &t in &positions {
+    let mut text = unit.number(t);
+    // the unit's symbol once per axis, on the outermost label
+    if t == last {
+      text = format!("{text} {}", unit.symbol());
+    }
+    // along the sketch's X axis (below the axis) and its Y axis (left of the axis); zero once
+    if let Some(p) = to_screen([t, 0.0])
+      && view.rect.contains(p)
+    {
+      painter.text(p + Vec2::new(0.0, 4.0), egui::Align2::CENTER_TOP, &text, font.clone(), ink);
+    }
+    if t != 0.0
+      && let Some(p) = to_screen([0.0, t])
+      && view.rect.contains(p)
+    {
+      painter.text(p + Vec2::new(-5.0, 0.0), egui::Align2::RIGHT_CENTER, &text, font.clone(), ink);
+    }
+  }
+  if let Some(o) = to_screen([0.0, 0.0])
+    && view.rect.contains(o)
+  {
+    painter.circle_stroke(o, 3.5, Stroke::new(1.0, Color32::from_gray(90)));
+  }
+}
+
 /// A dimension's leader graphics in screen space: extension and dimension lines, an arc for an
 /// angle, arrowheads (tip and pointing direction) and where the value goes.
 struct DimShape {
@@ -2675,8 +2726,15 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         .pivot(egui::Align2::CENTER_CENTER)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
+          // a typed value is locked: a padlock before the box, which stays editable until Enter
+          if typed {
+            let (lr, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+            paint_lock(ui.painter(), lr.center(), ink);
+          }
+          // a fixed id: the padlock appearing before the box must not change it (and drop focus)
           let r = ui.add(
             egui::TextEdit::singleline(&mut buf)
+              .id(egui::Id::new(("hud-edit", i)))
               .desired_width(62.0)
               .font(egui::FontId::proportional(12.0))
               .margin(egui::Margin::symmetric(3, 1))
@@ -2700,11 +2758,18 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
       hud.buf = keep.then_some(buf).filter(|_| !commit);
       continue;
     }
-    // the other boxes show the live value, or what was typed (locked) in bold
-    let text = if typed { hud.typed[i].clone() } else { fmt(i) };
+    // the other boxes show the live value, or what was typed (locked, with its unit) after a
+    // padlock
+    let text = if typed {
+      let t = hud.typed[i].trim();
+      if matches!(fields[i], Field::Angle | Field::Sides) { t.to_string() } else { unit.typed(t) }
+    } else {
+      fmt(i)
+    };
     let font = egui::FontId::proportional(12.0);
     let galley = painter.layout_no_wrap(text, font, if typed { Color32::BLACK } else { Color32::from_gray(60) });
-    let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0, 5.0));
+    let lock_w = if typed { 14.0 } else { 0.0 };
+    let r = Rect::from_center_size(p, galley.size() + Vec2::new(10.0 + lock_w, 5.0));
     let active = i == hud.active;
     painter.rect(
       r,
@@ -2713,13 +2778,37 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
       Stroke::new(if active || typed { 1.5 } else { 1.0 }, if active || typed { ink } else { Color32::from_gray(160) }),
       egui::StrokeKind::Inside,
     );
-    painter.galley(r.center() - galley.size() / 2.0, galley, Color32::BLACK);
+    if typed {
+      paint_lock(painter, r.left_center() + Vec2::new(9.0, 0.0), ink);
+    }
+    painter.galley(r.min + Vec2::new(5.0 + lock_w, 2.5), galley, Color32::BLACK);
   }
   if commit {
     // this Enter places the point; it isn't the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let ends = matches!(app.tool, Tool::Rect | Tool::CenterRect) && app.tstate.pts.len() == 1;
     place_point(app, sk, raw, snapped);
+    // Enter on typed values finishes the rectangle and its command; a click-drawn one keeps the
+    // tool, as in Fusion
+    if ends && app.tstate.pts.is_empty() {
+      app.set_tool(Tool::Select);
+    }
   }
+}
+
+/// A small padlock: the glyph Fusion puts before a heads-up value once it's typed.
+fn paint_lock(painter: &egui::Painter, c: Pos2, col: Color32) {
+  let body = Rect::from_center_size(c + Vec2::new(0.0, 2.0), Vec2::new(8.0, 6.0));
+  painter.rect_filled(body, 1.0, col);
+  // the shackle: an arc over the body
+  let n = 8;
+  let pts: Vec<Pos2> = (0..=n)
+    .map(|i| {
+      let a = std::f32::consts::PI * (1.0 - i as f32 / n as f32);
+      Pos2::new(c.x + 2.6 * a.cos(), c.y - 1.0 - 3.0 * a.sin())
+    })
+    .collect();
+  painter.add(egui::Shape::line(pts, Stroke::new(1.3, col)));
 }
 
 /// A line's heads-up angle: an arc from the horizontal to the line at its start.
@@ -2884,12 +2973,33 @@ pub(crate) fn plane_half_size(app: &App) -> f64 {
   app.s.model.bounds().map(|(a, b)| (b - a).length()).unwrap_or(100.0).max(50.0) * 0.35
 }
 
+/// Half the side of an origin plane's square on screen, in points: Fusion keeps them about
+/// 120 px wide (twice the ViewCube) whatever the zoom.
+pub(crate) const ORIGIN_PLANE_HALF_PX: f64 = 60.0;
+/// How far the origin axis stubs reach, as a multiple of the origin planes' half size.
+pub(crate) const ORIGIN_AXIS_REACH: f64 = 1.3;
+
+/// Half the side of an origin plane's square, in world units: sized from the camera so the
+/// square stays about 120 px on screen at the origin's depth.
+pub(crate) fn origin_plane_half_size(app: &App) -> f64 {
+  let h = app.canvas.height() as f64;
+  let height = if h > 1.0 { h } else { 800.0 };
+  app.cam.view_height() / height * ORIGIN_PLANE_HALF_PX
+}
+
+/// The half size a `sketch.create` plane draws at: origin planes follow the camera, construction
+/// planes the model (the size the scene draws them at, so picking matches the picture).
+fn half_of(app: &App, plane: &serde_json::Value) -> f64 {
+  if plane.get("feature").is_none() { origin_plane_half_size(app) } else { plane_half_size(app) }
+}
+
 /// Which of `planes` (index) the ray through `pos` hits first, if nothing nearer (a body face)
 /// is in the way.
-fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, Plane)], half: f64) -> Option<usize> {
+fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, Plane)]) -> Option<usize> {
   let (o, d) = view.ray(&app.cam, pos);
   let mut best: Option<(f64, usize)> = None;
-  for (i, (_, pl)) in planes.iter().enumerate() {
+  for (i, (p, pl)) in planes.iter().enumerate() {
+    let half = half_of(app, p);
     let Some(hit) = ray_plane(o, d, pl.origin, pl.normal()) else { continue };
     let t = (hit - o).dot(d);
     let [u, v] = pl.to_local(hit);
@@ -2905,7 +3015,6 @@ fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, 
 /// The planes shown for picking a sketch plane this frame.
 struct PlanePick {
   planes: Vec<(serde_json::Value, Plane)>,
-  half: f64,
   /// Create Sketch is waiting for a plane (else only the plane picked in the browser shows).
   picking: bool,
   /// The plane under the cursor (index).
@@ -2918,7 +3027,8 @@ struct PlanePick {
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
   let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
-  if !picking && picked.is_none() && app.shown_planes.is_empty() {
+  let origin_shown = app.origin_shown && app.s.edit_sketch.is_none();
+  if !picking && picked.is_none() && app.shown_planes.is_empty() && !origin_shown {
     return None;
   }
   let mut planes = sketch_planes(app);
@@ -2927,19 +3037,21 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
     planes.retain(|(p, _)| p.get("feature").is_none());
   }
   if !picking {
-    // the plane picked in the browser, and the origin planes Show/Hide turned on
-    planes.retain(|(p, _)| Some(p) == picked || app.shown_planes.contains(p));
+    // the plane picked in the browser, the origin planes Show/Hide turned on, and all three
+    // while the Origin folder is shown
+    planes.retain(|(p, _)| {
+      Some(p) == picked || app.shown_planes.contains(p) || (origin_shown && p.get("feature").is_none())
+    });
   }
-  let half = plane_half_size(app);
   let hot = if picking && app.drag.is_none() {
-    resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes, half))
+    resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes))
   } else {
     None
   };
   if hot.is_some() {
     app.hover = None;
   }
-  Some(PlanePick { planes, half, picking, hot })
+  Some(PlanePick { planes, picking, hot })
 }
 
 /// Draws the planes as see-through orange squares, as in Fusion, the hovered (or browser-picked)
@@ -2951,10 +3063,16 @@ fn sketch_planes_overlay(
   painter: &egui::Painter,
   view: &View,
 ) -> Option<serde_json::Value> {
-  let PlanePick { planes, half, picking, hot } = pick?;
+  let PlanePick { planes, picking, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
-  let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
+  // Create Sketch's small dashed axis triad at the origin (the scene draws solid stubs while the
+  // Origin folder is shown, so it isn't doubled then)
+  if picking && !app.origin_shown && planes.iter().any(|(p, _)| p.get("feature").is_none()) {
+    origin_triad(app, painter, view, origin_plane_half_size(app) * ORIGIN_AXIS_REACH);
+  }
   for (i, (p, pl)) in planes.iter().enumerate() {
+    let half = half_of(app, p);
+    let corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
     let Some(pts) = corners.iter().map(|c| view.to_screen(&app.cam, pl.to_world(*c))).collect::<Option<Vec<Pos2>>>()
     else {
       continue;
@@ -2968,6 +3086,23 @@ fn sketch_planes_overlay(
     resp.clone().on_hover_text_at_pointer(crate::dialogs::PICK_PLANE_HINT);
   }
   planes.into_iter().nth(hot?).map(|(p, _)| p)
+}
+
+/// The origin's axis triad: dashed stubs of `reach` along world X (red), Y (green) and Z (blue).
+fn origin_triad(app: &App, painter: &egui::Painter, view: &View, reach: f64) {
+  let frames = app.s.design.frames();
+  let origin = fox_engine::model::OriginPlane::Xy.plane(frames).origin;
+  for (dir, col) in [
+    (DVec3::X, fox_engine::scene::ORIGIN_X_COLOR),
+    (DVec3::Y, fox_engine::scene::ORIGIN_Y_COLOR),
+    (DVec3::Z, fox_engine::scene::ORIGIN_Z_COLOR),
+  ] {
+    let (Some(a), Some(b)) = (view.to_screen(&app.cam, origin), view.to_screen(&app.cam, origin + dir * reach)) else {
+      continue;
+    };
+    let [r, g, b2, _] = col;
+    painter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5, Color32::from_rgb(r, g, b2)), 4.0, 3.0));
+  }
 }
 
 /// The corners of the square drawn for a plane: `half` either side of `centre` along its axes.
@@ -3136,6 +3271,30 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 mod tests {
   use super::*;
   use fox_engine::Session;
+
+  /// The origin planes keep about 120 px on screen whatever the zoom: their half size follows
+  /// the camera's distance.
+  #[test]
+  fn origin_planes_are_sized_from_the_camera() {
+    let mut app = App::with_session(Session::default());
+    app.canvas = Rect::from_min_size(Pos2::ZERO, Vec2::new(1456.0, 800.0));
+    let px_per_unit = 800.0 / app.cam.view_height();
+    let half = origin_plane_half_size(&app);
+    assert!((half * px_per_unit - ORIGIN_PLANE_HALF_PX).abs() < 1e-6, "{half}");
+    app.cam.distance *= 3.0;
+    let far = origin_plane_half_size(&app);
+    assert!((far / half - 3.0).abs() < 1e-9, "{far} vs {half}");
+    // construction planes keep the model-sized square the scene draws them at
+    assert!((plane_half_size(&app) - 100.0 * 0.35).abs() < 1e-9);
+  }
+
+  /// The labelled grid positions are the major lines (every fifth) within the grid's extent.
+  #[test]
+  fn grid_labels_sit_on_the_major_lines() {
+    assert_eq!(grid_label_positions(10.0, 100.0), vec![-100.0, -50.0, 0.0, 50.0, 100.0]);
+    // a tiny model still gets a 2-step grid: only the origin is a major line
+    assert_eq!(grid_label_positions(10.0, 1.0), vec![0.0]);
+  }
 
   #[test]
   fn zoom_window_fills_the_view_with_the_box() {

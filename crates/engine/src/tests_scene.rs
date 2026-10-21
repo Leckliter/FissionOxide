@@ -148,9 +148,16 @@ fn object_visibility_and_grid_spacing() {
   let no_construction = lines(&mut b, &ViewOptions { hide_construction: true, ..Default::default() });
   assert_eq!(dashed(&no_construction), 0);
 
-  // the origin axes are the grid's coloured lines
-  let axis = |l: &fox_render::Polyline| l.color == [232, 96, 92, 255];
-  assert_eq!(plain.iter().filter(|l| axis(l)).count(), 1);
+  // the origin axes are short stubs from the origin (Fusion draws no lines across the grid),
+  // reaching as far as the UI asks (its origin planes' size), else twice the grid step
+  let axis = |l: &fox_render::Polyline| l.color == scene::ORIGIN_X_COLOR;
+  let x_axis: Vec<_> = plain.iter().filter(|l| axis(l)).collect();
+  assert_eq!(x_axis.len(), 1);
+  let step = scene::grid_step(&s) as f32;
+  assert_eq!(x_axis[0].points, vec![[0.0, 0.0, 0.0], [2.0 * step, 0.0, 0.0]]);
+  let sized = lines(&mut b, &ViewOptions { origin_axis_len: Some(7.5), ..Default::default() });
+  let stub = sized.iter().find(|l| l.color == scene::ORIGIN_Z_COLOR).unwrap();
+  assert_eq!(stub.points, vec![[0.0, 0.0, 0.0], [0.0, 0.0, 7.5]]);
   let no_origin = lines(&mut b, &ViewOptions { hide_origin: true, ..Default::default() });
   assert_eq!(no_origin.iter().filter(|l| axis(l)).count(), 0);
   assert_eq!(no_origin.len(), plain.len() - 3);
@@ -203,4 +210,28 @@ fn constrained_sketch_curves_draw_black_and_free_ones_blue() {
   assert_eq!(colour(&circle), scene::SKETCH_FIXED);
   assert_eq!(colour(&open), scene::SKETCH_FREE, "its radius is still free");
   assert_eq!(colour(&pinned), scene::SKETCH_FIXED, "Fix holds a circle's radius too");
+}
+
+/// A sketch's closed profiles shade light blue seen from outside the sketch and pale blue-white
+/// while it is edited, as Fusion's do; a selected profile fills blue.
+#[test]
+fn profiles_shade_blue_outside_and_pale_inside_the_sketch() {
+  let mut s = Session::default();
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 5]}));
+  let mut b = SceneBuilder::default();
+  let profile_color = |b: &mut SceneBuilder, s: &Session| {
+    let (scene, picks) = b.build(s, &ViewOptions::default());
+    let m = scene
+      .meshes
+      .iter()
+      .find(|m| matches!(m.tri_ids.first().and_then(|id| picks.get(*id)), Some(scene::Pick::Profile { .. })))
+      .expect("the profile is shaded");
+    m.color
+  };
+  assert_eq!(profile_color(&mut b, &s), scene::PROFILE_COLOR_EDIT);
+  run(&mut s, "sketch.finish", json!({}));
+  assert_eq!(profile_color(&mut b, &s), scene::PROFILE_COLOR);
+  s.selection = vec![crate::Sel::Profile { sketch: crate::model::FeatureId(sk), index: 0 }];
+  assert_eq!(profile_color(&mut b, &s), scene::PROFILE_SELECTED);
 }

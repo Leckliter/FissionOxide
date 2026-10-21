@@ -118,6 +118,7 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
     "sketch.set_dimension" => "Edit Sketch Dimension",
     "sketch.delete" => "Delete",
     "sketch.construction" => "Normal/Construction",
+    "sketch.centerline" => "Centerline",
     "sketch.drag" => "Drag",
     "sketch.transform" => "Move/Copy",
     "sketch.insert" => "Insert",

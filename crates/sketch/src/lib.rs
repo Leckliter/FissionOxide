@@ -103,6 +103,10 @@ pub struct Curve {
   /// Construction geometry guides the sketch but never forms profiles.
   #[serde(default)]
   pub construction: bool,
+  /// A centerline: construction geometry drawn dash-dot (Fusion's Centerline linetype, the axis
+  /// of a revolve or a mirror). A centerline is always construction.
+  #[serde(default)]
+  pub centerline: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -610,7 +614,7 @@ impl Sketch {
       return Err(SketchError::InvalidValue(format!("conic rho {rho} (it must be 0.01 to 0.99)")));
     }
     let id = CurveId(self.alloc());
-    self.curves.push(Curve { id, kind, construction: false });
+    self.curves.push(Curve { id, kind, construction: false, centerline: false });
     Ok(id)
   }
 
@@ -737,7 +741,19 @@ impl Sketch {
   }
 
   pub fn set_construction(&mut self, id: CurveId, construction: bool) -> Result<(), SketchError> {
-    self.curve_mut(id).ok_or(SketchError::NoCurve(id))?.construction = construction;
+    let c = self.curve_mut(id).ok_or(SketchError::NoCurve(id))?;
+    c.construction = construction;
+    if !construction {
+      c.centerline = false;
+    }
+    Ok(())
+  }
+
+  /// Makes a curve a centerline (construction, drawn dash-dot) or a normal curve again.
+  pub fn set_centerline(&mut self, id: CurveId, centerline: bool) -> Result<(), SketchError> {
+    let c = self.curve_mut(id).ok_or(SketchError::NoCurve(id))?;
+    c.centerline = centerline;
+    c.construction = centerline;
     Ok(())
   }
 

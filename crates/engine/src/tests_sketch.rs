@@ -393,3 +393,25 @@ fn spun_profile_flips_to_the_other_side() {
   let xs: Vec<f64> = sk.points.iter().map(|p| p.x).collect();
   assert!(xs.iter().all(|x| *x <= 1e-9) && xs.iter().any(|x| (x + 20.0).abs() < 1e-6), "{xs:?}");
 }
+
+/// The Centerline linetype: a centerline is construction drawn dash-dot; turning it off makes
+/// the curve normal again, and Normal/Construction off clears it too.
+#[test]
+fn centerline_is_construction_and_toggles_back() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let sk = s.edit_sketch.unwrap();
+  let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}))["curves"][0].as_u64().unwrap();
+  let curve = |s: &Session| s.design.sketch(sk).unwrap().curve(fox_sketch::CurveId(line as u32)).unwrap().clone();
+  run(&mut s, "sketch.centerline", json!({"curves": [line]}));
+  let c = curve(&s);
+  assert!(c.centerline && c.construction, "{c:?}");
+  run(&mut s, "sketch.centerline", json!({"curves": [line]}));
+  let c = curve(&s);
+  assert!(!c.centerline && !c.construction, "{c:?}");
+  run(&mut s, "sketch.centerline", json!({"curves": [line], "on": true}));
+  run(&mut s, "sketch.construction", json!({"curves": [line], "on": false}));
+  let c = curve(&s);
+  assert!(!c.centerline && !c.construction, "{c:?}");
+  assert_eq!(crate::history::command_label("sketch.centerline", &json!({})).as_deref(), Some("Centerline"));
+}

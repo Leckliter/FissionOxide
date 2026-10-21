@@ -166,6 +166,9 @@ pub struct App {
   pub(crate) picked_plane: Option<Value>,
   /// Origin planes shown in the viewport (the browser's Show/Hide), as `sketch.create` planes.
   pub(crate) shown_planes: Vec<Value>,
+  /// The browser's Origin folder is shown (its light bulb): the origin planes and short axes
+  /// draw at the origin. Off by default, as in Fusion.
+  pub(crate) origin_shown: bool,
   /// Sketches whose profiles the browser's Hide Profile turned off.
   pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
@@ -422,6 +425,7 @@ impl App {
       cube: viewcube::CubeState::default(),
       picked_plane: None,
       shown_planes: Vec::new(),
+      origin_shown: false,
       hidden_profiles: Vec::new(),
       shown_dims: Vec::new(),
       data: data_panel::DataPanel::default(),
@@ -1489,6 +1493,20 @@ impl App {
       .collect();
     if !curves.is_empty() {
       self.run("sketch.construction", json!({"curves": curves}));
+    }
+  }
+
+  /// The Sketch Palette's Centerline toggle: the selected curves become centerlines (construction
+  /// drawn dash-dot) or normal curves again.
+  pub fn toggle_centerline(&mut self) {
+    let curves: Vec<u32> = self
+      .s
+      .selection
+      .iter()
+      .filter_map(|s| if let Sel::SketchCurve { curve, .. } = s { Some(curve.0) } else { None })
+      .collect();
+    if !curves.is_empty() {
+      self.run("sketch.centerline", json!({"curves": curves}));
     }
   }
 

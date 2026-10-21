@@ -506,6 +506,7 @@ cmds! {
   "cut.estimate" => "Cut estimate for quoting, per part and in total: area (in² and mm²), cut length, pierces (closed contours), pieces (outer contours), holes, bounding box", "{sketch? | body? | dxf?: path, export?: .csv|.json}";
   "sheet.collect_flat" => "All flat patterns on one sheet: every sheet metal body's flat pattern outline (bend lines as construction) in one new sketch, or one DXF, in rows that wrap before a part runs past max_width", "{bodies?: [body] (default every sheet metal body), max_width? (default 48 in), gap? (default 0.25 in), sketch_name? (default \"Cut File\"), path?: .dxf}";
   "body.classify" => "Whether points are inside a body, outside it or on its surface (which side of an edge the material is on, what a ray would hit)", "{body, points: [[x, y, z], ...]}";
+  "sketch.centerline" => "Toggle the Centerline linetype: construction geometry drawn dash-dot (off makes the curve normal again)", "{sketch?, curves: [id], on?: bool}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -1582,6 +1583,20 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "sketch.include" => sketch_include::include(s, p),
     "canvas.insert" | "canvas.edit" | "canvas.calibrate" => crate::canvas::run(s, name, p),
     "sketch.scale_to" => sketch_fit::scale_to(s, p),
+    "sketch.centerline" => {
+      let sk = sketch_id(s, p)?;
+      let curves = ids(p, "curves");
+      let on = p.get("on").and_then(Value::as_bool);
+      s.edit(|d| {
+        let sketch = d.sketch_mut(sk)?;
+        for c in curves {
+          let cur = sketch.curve(CurveId(c)).map(|c| c.centerline).unwrap_or(false);
+          sketch.set_centerline(CurveId(c), on.unwrap_or(!cur))?;
+        }
+        Ok(())
+      })?;
+      Ok(json!({}))
+    }
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }

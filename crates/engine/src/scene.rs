@@ -16,11 +16,21 @@ pub const BODY_COLOR: [u8; 4] = [205, 200, 190, 255];
 pub const HOVER_COLOR: [u8; 4] = [128, 190, 238, 255];
 pub const SELECT_COLOR: [u8; 4] = [36, 142, 220, 255];
 pub const EDGE_COLOR: [u8; 4] = [35, 38, 44, 255];
-pub const PROFILE_COLOR: [u8; 4] = [246, 214, 160, 255];
+/// A visible sketch's closed profiles seen from outside the sketch: Fusion's light blue.
+pub const PROFILE_COLOR: [u8; 4] = [178, 208, 240, 255];
+/// The profiles of the sketch being edited: Fusion's pale blue-white.
+pub const PROFILE_COLOR_EDIT: [u8; 4] = [226, 237, 250, 255];
+/// A profile under the cursor (a brighter blue) and a selected one (filled blue).
+pub const PROFILE_HOVER: [u8; 4] = [150, 198, 245, 255];
+pub const PROFILE_SELECTED: [u8; 4] = [96, 166, 232, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [225, 130, 40, 255];
 pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
+/// The origin axes' colours (X red, Y green, Z blue), shared with the viewport's axis triad.
+pub const ORIGIN_X_COLOR: [u8; 4] = [232, 96, 92, 255];
+pub const ORIGIN_Y_COLOR: [u8; 4] = [96, 190, 96, 255];
+pub const ORIGIN_Z_COLOR: [u8; 4] = [70, 110, 230, 255];
 
 /// What a pick id refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,6 +157,10 @@ pub struct ViewOptions {
   pub hide_origin: bool,
   /// The grid's spacing; `None` adapts it to the model's size (see [`grid_step`]).
   pub grid_step: Option<f64>,
+  /// How far the origin axes reach from the origin (short stubs, as Fusion draws them when the
+  /// Origin folder is shown); `None` = twice the grid step. The UI sizes them from the camera so
+  /// they match the origin planes it draws.
+  pub origin_axis_len: Option<f64>,
   /// Bodies drawn see-through: (body, alpha), as Fusion's Opacity Control.
   pub opacity: Vec<(BodyId, u8)>,
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
@@ -355,9 +369,11 @@ impl SceneBuilder {
           .or_insert_with(|| Shape::face(&r.plane, prof).ok().and_then(|face| face.tessellate(0.05).ok()));
         let Some(m) = mesh else { continue };
         let color = if selected.contains(&pick) {
-          [120, 170, 240, 255]
+          PROFILE_SELECTED
         } else if opts.hover == Some(pick) {
-          [250, 196, 120, 255]
+          PROFILE_HOVER
+        } else if is_edit {
+          PROFILE_COLOR_EDIT
         } else {
           PROFILE_COLOR
         };
@@ -457,7 +473,13 @@ impl SceneBuilder {
     }
 
     if !opts.hide_grid {
-      grid(&mut scene, s, opts.grid_step.filter(|g| g.is_finite() && *g > 0.0), !opts.hide_origin);
+      let axis_len = opts.origin_axis_len.filter(|l| l.is_finite() && *l > 0.0);
+      grid(
+        &mut scene,
+        s,
+        opts.grid_step.filter(|g| g.is_finite() && *g > 0.0),
+        (!opts.hide_origin).then_some(axis_len),
+      );
     }
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
@@ -524,7 +546,10 @@ pub fn grid_step(s: &Session) -> f64 {
   nice_step(scene_size(s) / 10.0)
 }
 
-fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: bool) {
+/// The ground grid on the sketch plane (the XY plane outside a sketch), and with `origin`
+/// (`Some(stub length)`) the origin axes as short coloured stubs at the origin: Fusion draws no
+/// axis lines across the grid, and none at all while the Origin folder is hidden.
+fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: Option<Option<f64>>) {
   let plane = match s.edit_sketch.and_then(|e| s.model.sketches.get(&e)) {
     Some(r) => r.plane,
     None => Plane::XY,
@@ -533,10 +558,14 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: bool) {
   let step = fixed.unwrap_or_else(|| grid_step(s));
   let n = ((size / step).ceil() as i64).clamp(2, 60);
   let ext = n as f64 * step;
+  // in a sketch the major lines (every fifth, the labelled ones) stand out more, as Fusion's do
+  let editing = s.edit_sketch.is_some();
+  let (major_col, minor_col) =
+    if editing { ([168, 172, 178, 255], [222, 224, 228, 255]) } else { ([190, 193, 198, 255], [218, 220, 224, 255]) };
   for i in -n..=n {
     let t = i as f64 * step;
     let major = i % 5 == 0;
-    let col = if major { [190, 193, 198, 255] } else { [218, 220, 224, 255] };
+    let col = if major { major_col } else { minor_col };
     for (a, b) in [([t, -ext], [t, ext]), ([-ext, t], [ext, t])] {
       scene.lines.push(Polyline {
         points: vec![plane.to_world(a).as_vec3().to_array(), plane.to_world(b).as_vec3().to_array()],
@@ -549,19 +578,12 @@ fn grid(scene: &mut Scene, s: &Session, fixed: Option<f64>, origin: bool) {
       });
     }
   }
-  if !origin {
-    return;
-  }
-  // origin axes: X and Y run across the whole grid, as in Fusion; Z is a short stub
-  let l = ext as f32;
-  let z = (ext * 0.25) as f32;
-  for (a, b, col) in [
-    ([-l, 0.0, 0.0], [l, 0.0, 0.0], [232, 96, 92, 255]),
-    ([0.0, -l, 0.0], [0.0, l, 0.0], [96, 190, 96, 255]),
-    ([0.0, 0.0, 0.0], [0.0, 0.0, z], [70, 110, 230, 255]),
-  ] {
+  let Some(axis_len) = origin else { return };
+  // origin axes: short stubs from the origin along world X (red), Y (green) and Z (blue)
+  let l = axis_len.unwrap_or(step * 2.0).min(ext) as f32;
+  for (b, col) in [([l, 0.0, 0.0], ORIGIN_X_COLOR), ([0.0, l, 0.0], ORIGIN_Y_COLOR), ([0.0, 0.0, l], ORIGIN_Z_COLOR)] {
     scene.lines.push(Polyline {
-      points: vec![a, b],
+      points: vec![[0.0, 0.0, 0.0], b],
       color: col,
       width: 1.5,
       id: 0,

@@ -253,6 +253,7 @@ const ALL: &[Icon] = &[
   Icon::SketchLibrary,
   Icon::SkRemoveDuplicates,
   Icon::SkCleanup,
+  Icon::Centerline,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

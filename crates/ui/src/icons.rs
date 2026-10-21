@@ -265,6 +265,8 @@ pub enum Icon {
   // sketch clean-up
   SkRemoveDuplicates,
   SkCleanup,
+  /// The Sketch Palette's Centerline linetype toggle (dash-dot).
+  Centerline,
 }
 
 #[derive(Clone, Copy)]
@@ -1995,6 +1997,12 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.dot((0.5, 0.94), Coral);
       k.thick((0.8, 0.06), (0.8, 0.38), Coral, 1.0);
       k.thick((0.64, 0.22), (0.96, 0.22), Coral, 1.0);
+    }
+    Icon::Centerline => {
+      // dash-dot-dash along the diagonal, as a centerline draws
+      k.thick((0.1, 0.9), (0.36, 0.64), Orange, 1.0);
+      k.dot((0.5, 0.5), Orange);
+      k.thick((0.64, 0.36), (0.9, 0.1), Orange, 1.0);
     }
   }
 }
