@@ -823,6 +823,26 @@ const CAM_3D: &[E] = &[
 
 const CAM_DRILLING: &[E] = &[c("Drill", Icon::Hole, D(Kind::Form(&forms::CAM_DRILL)))];
 
+const CAM_MULTI_AXIS: &[E] = &[
+  c("Rotary", Icon::Revolve, D(Kind::Form(&forms::CAM_ROTARY))),
+  c("Swarf", Icon::Draft, D(Kind::Form(&forms::CAM_SWARF))),
+];
+
+const CAM_TURN_SETUP: &[E] = &[
+  c("New Turning Setup", Icon::Revolve, D(Kind::Form(&forms::CAM_TURN_SETUP))),
+  E::Sep,
+  c("Tool Library", Icon::Configure, Cmd::CamTools),
+];
+
+const CAM_TURNING: &[E] = &[
+  c("Turning Face", Icon::Extrude, D(Kind::Form(&forms::CAM_TURN_FACE))),
+  c("Profile Roughing", Icon::Shell, D(Kind::Form(&forms::CAM_TURN_ROUGH))),
+  c("Profile Finishing", Icon::SkOffset, D(Kind::Form(&forms::CAM_TURN_FINISH))),
+  c("Groove", Icon::Slot, D(Kind::Form(&forms::CAM_GROOVE))),
+  c("Turning Thread", Icon::Thread, D(Kind::Form(&forms::CAM_THREAD))),
+  c("Part Off", Icon::SplitBody, D(Kind::Form(&forms::CAM_PART_OFF))),
+];
+
 const CAM_ACTIONS: &[E] = &[
   c("Generate", Icon::Play, Cmd::CamGenerate).k("Ctrl+G"),
   c("Simulate", Icon::MotionStudy, Cmd::CamSimulate),
@@ -883,11 +903,23 @@ const RENDER: [Group; 4] = [
 ];
 
 /// The Manufacture workspace's MILLING tab.
-const MILLING: [Group; 5] = [
+const MILLING: [Group; 6] = [
   Group { label: "SETUP", quick: &["New Setup", "Tool Library"], menu: CAM_SETUP },
   Group { label: "2D", quick: &["2D Adaptive Clearing", "2D Pocket", "Face", "2D Contour"], menu: CAM_2D },
   Group { label: "3D", quick: &["Parallel", "Scallop"], menu: CAM_3D },
   Group { label: "DRILLING", quick: &["Drill"], menu: CAM_DRILLING },
+  Group { label: "MULTI-AXIS", quick: &["Rotary", "Swarf"], menu: CAM_MULTI_AXIS },
+  Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS },
+];
+
+/// The Manufacture workspace's TURNING tab.
+const TURNING: [Group; 3] = [
+  Group { label: "SETUP", quick: &["New Turning Setup", "Tool Library"], menu: CAM_TURN_SETUP },
+  Group {
+    label: "TURNING",
+    quick: &["Turning Face", "Profile Roughing", "Profile Finishing", "Groove", "Turning Thread", "Part Off"],
+    menu: CAM_TURNING,
+  },
   Group { label: "ACTIONS", quick: &["Generate", "Simulate", "Post Process"], menu: CAM_ACTIONS },
 ];
 
@@ -1086,6 +1118,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Form => (&FORM, &[]),
     Tab::Generative => (&GENERATIVE, &[]),
     Tab::Render => (&RENDER, &[]),
+    Tab::Turning => (&TURNING, &[]),
   }
 }
 
@@ -1123,6 +1156,7 @@ const ALL_TABS: [Tab; 13] = [
   Tab::Form,
   Tab::Generative,
   Tab::Render,
+  Tab::Turning,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that

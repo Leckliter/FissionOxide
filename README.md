@@ -137,7 +137,10 @@ change a parameter and watch the whole history rebuild.
   pockets (islands stay standing, rest machining), adaptive clearing, 2D contours with holding
   tabs, ramp and helix entries, drilling (G81/G83), 3D parallel and scallop finishing, a stock
   removal simulation with gouge and collision warnings, and G-code for Fanuc, Haas, GRBL,
-  LinuxCNC and Mach3/4 in mm or inches. See [Manufacture](#manufacture-cam).
+  LinuxCNC and Mach3/4 in mm or inches. 3+2 milling on a tilted work plane, a 4th-axis rotary
+  wrap and simultaneous 5-axis swarf with table/table and head/table kinematics; turning
+  (facing, profile roughing and finishing, grooving, threading, part-off) with Fanuc, Haas and
+  LinuxCNC lathe posts. See [Manufacture](#manufacture-cam).
 - **Generative design.** A Generative Design workspace: preserve and obstacle geometry, a
   starting shape, load cases with forces, pressures and fixed constraints, maximum stiffness or
   minimum mass with safety factor and displacement limits, materials, and unrestricted, 3-axis
@@ -707,10 +710,81 @@ fissionoxide-cli exec part.fox '{"cmd": "cam.post", "path": "part.nc", "units": 
 fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, start to finish
 ```
 
-The simulation is a heightfield seen from above (no undercuts; holders and fixtures are checked
-from above too, so a fixture counts as solid down to the table), and there
-are no 4/5-axis or turning toolpaths yet: check the G-code against your machine before running
-it.
+The 3-axis simulation is a heightfield seen from above (no undercuts; holders and fixtures are
+checked from above too, so a fixture counts as solid down to the table): check the G-code
+against your machine before running it.
+
+### 4/5-axis milling
+
+Pick a **Machine** on the setup: a **table/table** trunnion (A tilts the table about X, C turns
+it), a **head/table** machine (B tilts the head about Y, C turns the table; with the pivot to
+tool tip distance, or 0 when the control follows the tool tip itself), or a **4th axis** (A
+turns the part about X), with the tilt axis's travel. The work origin moves to where the rotary
+axes are taken to cross: the middle of the stock's bottom (on the 4th axis, the turning axis at
+the stock's minimum X, the stock a cylinder around the part).
+
+- **3+2**: every milling operation takes a **tool axis** (or `work_plane`, a flat face whose
+  normal it uses). The part is turned so that axis points up, the operation computed as usual,
+  and the program rotates the table (or head) once before it, then cuts in the machine's frame
+  with arcs and drilling cycles as on 3 axes.
+- **Rotary** (MULTI-AXIS) wraps passes around the part on the 4th axis, the tool square to the
+  axis and dropped onto the part as it turns: passes along X a step-over apart around it, or
+  rings around it a step-over apart along it, in levels a step-down apart from the stock down.
+- **Swarf** (MULTI-AXIS) runs the side of a flat end mill along drafted or conical walls,
+  simultaneous 5-axis, its axis on each wall's steepest line, in passes a step-down apart.
+
+The posts (Fanuc, Haas, LinuxCNC, Mach3/4; GRBL has no rotary axes) send each move through the
+machine's kinematics: A/B and C beside X, Y and Z, the turning axis unwound instead of jumping
+a turn, the solution inside the tilt travel nearest the last, and inverse-time feeds (G93) for
+moves where the axes turn as they cut. Simulate cuts a voxel stock with the tool tilted along
+each move and reports gouges, rapids into the stock and tool directions beyond the machine's
+travel, with the range each rotary axis went through. Holder and fixture checks look from above,
+so they leave tilted toolpaths out.
+
+```sh
+fissionoxide-cli exec part.fox '{"cmd": "cam.setup", "machine": "table_table", "tilt_min": -110, "tilt_max": 110}' --save part.fox
+fissionoxide-cli exec part.fox '{"cmd": "cam.face", "work_plane": {"body": 1, "face": 7}, "tool_diameter": 10}' --save part.fox
+fissionoxide-cli exec part.fox '{"cmd": "cam.swarf", "faces": [{"body": 1, "face": 9}], "tool_diameter": 6}' --save part.fox
+```
+
+### Turning
+
+**New Turning Setup** (TURNING tab, or `cam.setup` with `"type": "turning"`) holds a bar in the
+chuck about the part's axis (the world axis it is round about, or one you give, or a
+cylindrical face's), with stock to face off in front, a gap before the jaws to part off in and
+the length gripped. Z runs along the axis towards the tailstock, X is the radius (written as a
+diameter), and Z0 is on the part's front face, the stock's front or the part's back face.
+Lathe tools are in the same library (from T11): turning inserts (included angle, nose radius),
+grooving and part-off inserts (width) and threading inserts, with feeds per revolution and a
+constant surface speed up to a spindle limit.
+
+- **Face** takes the bar's front down to the part in passes.
+- **Profile Roughing** clears the outside in passes along the axis a depth of cut apart,
+  following the profile up each shoulder and backing off at 45°, leaving stock for finishing.
+- **Profile Finishing** runs once from the centre up the front face and along the outside,
+  compensated for the nose radius (programmed at the imaginary tip).
+- **Groove** plunges the grooves and undercuts the profile passes can't reach, overlapping by
+  the step-over and pecking.
+- **Thread** cuts an outside thread on a cylindrical face (or a span along Z) in passes of equal
+  chip area with a spring pass, ISO depth unless given, stopping two pitches short of a shoulder.
+- **Part Off** plunges through at the part's back face, pecking.
+
+The lathe posts — Fanuc, Haas and LinuxCNC lathes — write diameters, G99/G95 feeds per
+revolution, G50/G96 constant surface speed (G97 for threading), threads as G32 (G33 K on
+LinuxCNC) passes and the turret's tool and offset numbers. Simulate turns the bar into a
+profile along the axis: removed volume, stock left on the part, gouges and tools running into
+the chuck.
+
+```sh
+fissionoxide-cli exec shaft.fox '{"cmd": "cam.setup", "type": "turning", "post": "haas_lathe"}' --save shaft.fox
+fissionoxide-cli exec shaft.fox '{"cmd": "cam.turn_rough"}' --save shaft.fox
+fissionoxide-cli exec shaft.fox '{"cmd": "cam.thread", "face": {"point": [10, 0, 50]}, "pitch": 1.5}' --save shaft.fox
+fissionoxide-cli exec shaft.fox '{"cmd": "cam.post", "path": "shaft.nc"}'
+```
+
+The multi-axis and lathe posts haven't been run on real machines: rotary directions, the
+rotary axes crossing at the work origin and the turret's offsets differ from machine to
+machine, so check each program in your control's simulation first.
 
 ### 2D cutting: laser, plasma, waterjet
 

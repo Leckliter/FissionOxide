@@ -188,6 +188,10 @@ pub enum WarningKind {
   Holder,
   /// The tool or its holder ran into a fixture.
   Fixture,
+  /// The machine's rotary axes can't point the tool this way.
+  AxisLimit,
+  /// A lathe tool ran into the chuck.
+  Chuck,
 }
 
 impl WarningKind {
@@ -198,6 +202,8 @@ impl WarningKind {
       WarningKind::Shank => "shank",
       WarningKind::Holder => "holder",
       WarningKind::Fixture => "fixture",
+      WarningKind::AxisLimit => "axis_limit",
+      WarningKind::Chuck => "chuck",
     }
   }
 }
@@ -221,6 +227,8 @@ impl Warning {
       WarningKind::Shank => "cuts deeper than the flutes",
       WarningKind::Holder => "runs the tool holder into the material",
       WarningKind::Fixture => "runs the tool or its holder into a fixture",
+      WarningKind::AxisLimit => "tilts the tool beyond the machine's rotary axes",
+      WarningKind::Chuck => "runs the tool into the chuck",
     };
     format!(
       "{} {what} ({} move(s), up to {:.3} mm, first at X{:.3} Y{:.3} Z{:.3})",

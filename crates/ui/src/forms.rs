@@ -1423,6 +1423,22 @@ const CAM_POSTS: &[(&str, &str)] =
 
 const CAM_TOOL: Input = Input::Expr { key: "tool_number", label: "Library tool (0 = by diameter)", default: "0" };
 
+/// 3+2 milling: the tool axis (straight down Z unless the setup has a 4/5-axis machine).
+const CAM_TOOL_AXIS: Input = Input::Vec3 { key: "tool_axis", label: "Tool axis (3+2)", default: ["0", "0", "1"] };
+
+const CAM_MACHINES: &[(&str, &str)] = &[
+  ("3axis", "3-axis mill"),
+  ("table_table", "5-axis, table/table (A tilt, C table)"),
+  ("head_table", "5-axis, head/table (B head, C table)"),
+  ("rotary", "4th axis (A about X)"),
+];
+
+const LATHE_POSTS: &[(&str, &str)] =
+  &[("fanuc_lathe", "Fanuc lathe"), ("haas_lathe", "Haas lathe"), ("linuxcnc_lathe", "LinuxCNC lathe")];
+
+/// A lathe tool from the library (0 = the library's first of the kind the operation needs).
+const LATHE_TOOL: Input = Input::Expr { key: "tool_number", label: "Library tool (0 = default)", default: "0" };
+
 pub static CAM_SETUP: Form = Form {
   title: "SETUP",
   name: "New Setup",
@@ -1437,6 +1453,157 @@ pub static CAM_SETUP: Form = Form {
     Input::Choice { key: "post", label: "Post-processor", options: CAM_POSTS },
     Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
     Input::Bodies { key: "fixtures", label: "Fixtures (vise, clamps)", required: false },
+    Input::Choice { key: "machine", label: "Machine", options: CAM_MACHINES },
+    Input::Expr { key: "tilt_min", label: "Tilt travel from (°)", default: "-120" },
+    Input::Expr { key: "tilt_max", label: "Tilt travel to (°)", default: "120" },
+    Input::Expr { key: "pivot", label: "Head pivot to tool tip (0 = TCP)", default: "0" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_TURN_SETUP: Form = Form {
+  title: "SETUP",
+  name: "New Turning Setup",
+  hint: "A lathe setup: the bar in the chuck about the part's axis, Z0 on a face, X0 on the axis",
+  icon: Icon::Revolve,
+  cmd: "cam.setup",
+  fixed: &[("type", "turning")],
+  inputs: &[
+    Input::Text { key: "name", label: "Name", default: "" },
+    Input::Choice {
+      key: "axis",
+      label: "Spindle axis",
+      options: &[("", "Automatic"), ("x", "X"), ("y", "Y"), ("z", "Z"), ("-x", "-X"), ("-y", "-Y"), ("-z", "-Z")],
+    },
+    Input::Expr { key: "stock_side", label: "Bar over the part (radial)", default: "2" },
+    Input::Expr { key: "stock_front", label: "Stock to face off", default: "1" },
+    Input::Expr { key: "chuck_gap", label: "Gap before the chuck", default: "5" },
+    Input::Expr { key: "grip", label: "Bar in the jaws", default: "15" },
+    Input::Choice {
+      key: "origin",
+      label: "Z0",
+      options: &[("front", "Part front face"), ("stock_front", "Stock front"), ("back", "Part back face")],
+    },
+    Input::Choice { key: "post", label: "Post-processor", options: LATHE_POSTS },
+    Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_TURN_FACE: Form = Form {
+  title: "FACE",
+  name: "Turning Face",
+  hint: "Face the front of the bar down to the part",
+  icon: Icon::Extrude,
+  cmd: "cam.turn_face",
+  fixed: &[],
+  inputs: &[LATHE_TOOL, Input::Expr { key: "stepdown", label: "Depth per pass", default: "1 mm" }],
+  picks_model: false,
+};
+
+pub static CAM_TURN_ROUGH: Form = Form {
+  title: "PROFILE ROUGHING",
+  name: "Profile Roughing",
+  hint: "Rough the outside down to the part in passes along the axis",
+  icon: Icon::Shell,
+  cmd: "cam.turn_rough",
+  fixed: &[],
+  inputs: &[
+    LATHE_TOOL,
+    Input::Expr { key: "stepdown", label: "Depth of cut (radial)", default: "1.5 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0.2 mm" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_TURN_FINISH: Form = Form {
+  title: "PROFILE FINISHING",
+  name: "Profile Finishing",
+  hint: "One pass down the front face and along the part's outside",
+  icon: Icon::SkOffset,
+  cmd: "cam.turn_finish",
+  fixed: &[],
+  inputs: &[LATHE_TOOL, Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" }],
+  picks_model: false,
+};
+
+pub static CAM_GROOVE: Form = Form {
+  title: "GROOVE",
+  name: "Groove",
+  hint: "Plunge the grooves and undercuts the profile passes can't reach",
+  icon: Icon::Slot,
+  cmd: "cam.groove",
+  fixed: &[],
+  inputs: &[
+    LATHE_TOOL,
+    Input::Expr { key: "stepover", label: "Step-over (of the insert)", default: "0.8" },
+    Input::Expr { key: "stepdown", label: "Peck depth", default: "2 mm" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_PART_OFF: Form = Form {
+  title: "PART",
+  name: "Part Off",
+  hint: "Part the finished part off the bar at its back face",
+  icon: Icon::SplitBody,
+  cmd: "cam.part_off",
+  fixed: &[],
+  inputs: &[LATHE_TOOL, Input::Expr { key: "stepdown", label: "Peck depth", default: "3 mm" }],
+  picks_model: false,
+};
+
+pub static CAM_THREAD: Form = Form {
+  title: "THREAD",
+  name: "Turning Thread",
+  hint: "Cut an outside thread along a cylindrical face",
+  icon: Icon::Thread,
+  cmd: "cam.thread",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Thread face" },
+    LATHE_TOOL,
+    Input::Expr { key: "pitch", label: "Pitch", default: "1.5 mm" },
+    Input::Expr { key: "depth", label: "Thread depth (0 = ISO)", default: "0" },
+    Input::Expr { key: "stepdown", label: "First pass depth", default: "0.15 mm" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_ROTARY: Form = Form {
+  title: "ROTARY",
+  name: "Rotary",
+  hint: "4th axis: passes wrapped around the part as it turns, the tool square to the axis",
+  icon: Icon::Revolve,
+  cmd: "cam.rotary",
+  fixed: &[],
+  inputs: &[
+    CAM_TOOL,
+    Input::Choice { key: "tool_kind", label: "Tool", options: &[("ball", "Ball end mill"), ("flat", "Flat end mill")] },
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Check { key: "around", label: "Rings around the axis (else passes along it)" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.15" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "3 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1200" },
+  ],
+  picks_model: false,
+};
+
+pub static CAM_SWARF: Form = Form {
+  title: "SWARF",
+  name: "Swarf",
+  hint: "Simultaneous 5-axis: the side of the tool along drafted or conical walls",
+  icon: Icon::Draft,
+  cmd: "cam.swarf",
+  fixed: &[],
+  inputs: &[
+    Input::Faces { key: "faces", label: "Walls" },
+    CAM_TOOL,
+    Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "6 mm" },
+    Input::Expr { key: "stepdown", label: "Maximum step-down", default: "5 mm" },
+    Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0" },
+    Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
   ],
   picks_model: false,
 };
@@ -1465,6 +1632,7 @@ pub static CAM_FACE: Form = Form {
     Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.7" },
     Input::Expr { key: "stepdown", label: "Maximum step-down", default: "1 mm" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -1492,6 +1660,7 @@ pub static CAM_POCKET: Form = Form {
     Input::Expr { key: "ramp_angle", label: "Ramp angle (°)", default: "5" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -1517,6 +1686,7 @@ pub static CAM_CONTOUR: Form = Form {
     Input::Expr { key: "tab_height", label: "Tab height", default: "2 mm" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1000" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -1534,6 +1704,7 @@ pub static CAM_DRILL: Form = Form {
     Input::Expr { key: "tool_diameter", label: "Drill diameter", default: "6 mm" },
     Input::Expr { key: "peck", label: "Peck depth (0 = none)", default: "0" },
     Input::Expr { key: "plunge", label: "Feed (mm/min)", default: "200" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -1604,6 +1775,7 @@ pub static CAM_ADAPTIVE: Form = Form {
     Input::Expr { key: "ramp_angle", label: "Helix angle (°)", default: "5" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -1647,6 +1819,7 @@ pub static CAM_PARALLEL: Form = Form {
     Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
     Input::Expr { key: "angle", label: "Pass angle (°)", default: "0" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -2134,6 +2307,7 @@ pub static CAM_ADAPTIVE3D: Form = Form {
     Input::Choice { key: "entry", label: "Entry", options: &[("helix", "Helix"), ("plunge", "Plunge")] },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -2173,6 +2347,7 @@ pub static CAM_STEEP_SHALLOW: Form = Form {
     Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
     Input::Expr { key: "stepdown", label: "Step-down", default: "0.5 mm" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };
@@ -2192,6 +2367,7 @@ pub static CAM_CONTOUR3D: Form = Form {
     Input::Expr { key: "min_slope", label: "Minimum slope (°)", default: "30" },
     Input::Expr { key: "stepdown", label: "Step-down", default: "0.5 mm" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
+    CAM_TOOL_AXIS,
   ],
   picks_model: false,
 };

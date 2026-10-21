@@ -3,7 +3,8 @@
 FissionOxide covers Fusion's core solid-modeling loop (sketch, constrain, dimension, extrude,
 revolve, sweep, loft, holes, threads, coils, ribs, fillet, chamfer, shell, draft, pattern,
 mirror, parameters, timeline editing), construction geometry, surfaces, mesh tools, sheet metal,
-assemblies with joints, drawings, inspection and analysis, a 2.5-axis Manufacture workspace, the
+assemblies with joints, drawings, inspection and analysis, a Manufacture workspace (milling up to
+simultaneous 5-axis, and turning), the
 common exchange formats, a versioned data panel and an MCP server for AI agents. The list below
 is what's missing compared with Fusion, roughly in the order it would pay off.
 
@@ -11,7 +12,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Manufacture | Turning and 4/5-axis |
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
 

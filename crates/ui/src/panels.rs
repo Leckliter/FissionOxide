@@ -39,6 +39,8 @@ pub enum Tab {
   Generative,
   /// The Render workspace's tab.
   Render,
+  /// The Manufacture workspace's turning tab.
+  Turning,
 }
 
 impl Tab {
@@ -61,6 +63,7 @@ impl Tab {
       Tab::Form => "FORM",
       Tab::Generative => "GENERATIVE",
       Tab::Render => "RENDER",
+      Tab::Turning => "TURNING",
     }
   }
 }
@@ -1039,9 +1042,11 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       tabs = vec![Tab::Generative];
       app.tab = Tab::Generative;
     } else if app.manufacture {
-      tabs = vec![Tab::Milling];
-      app.tab = Tab::Milling;
-    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Generative | Tab::Render) {
+      tabs = vec![Tab::Milling, Tab::Turning];
+      if !matches!(app.tab, Tab::Milling | Tab::Turning) {
+        app.tab = Tab::Milling;
+      }
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Turning | Tab::Generative | Tab::Render) {
       app.tab = Tab::Solid;
     }
     if app.drawing.is_none() && !app.manufacture && !app.render.active {

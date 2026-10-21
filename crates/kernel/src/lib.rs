@@ -852,8 +852,14 @@ impl Shape {
 
   /// Triangulates for display / STL. `tolerance` is the chordal deviation in mm.
   pub fn tessellate(&self, tolerance: f64) -> Result<TriMesh> {
+    self.tessellate_with(tolerance, 0.35)
+  }
+
+  /// [`Shape::tessellate`] with the angle between neighbouring facets limited too (radians).
+  pub fn tessellate_with(&self, tolerance: f64, angle: f64) -> Result<TriMesh> {
     let tol = if tolerance.is_finite() { tolerance.clamp(1e-4, 100.0) } else { 0.1 };
-    let m = sys::mesh_shape(self.get()?, tol, 0.35)?;
+    let angle = if angle.is_finite() { angle.clamp(0.01, 1.0) } else { 0.35 };
+    let m = sys::mesh_shape(self.get()?, tol, angle)?;
     let positions = m.positions.chunks_exact(3).map(|c| [c[0] as f32, c[1] as f32, c[2] as f32]).collect();
     let normals = m.normals.chunks_exact(3).map(|c| [c[0] as f32, c[1] as f32, c[2] as f32]).collect();
     Ok(TriMesh { positions, normals, indices: m.triangles, tri_face: m.tri_face })

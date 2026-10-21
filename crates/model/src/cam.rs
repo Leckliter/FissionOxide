@@ -1,5 +1,8 @@
 //! Manufacture (CAM): milling setups with 2.5-axis operations — facing, 2D pockets, 2D contours
-//! and drilling — their toolpaths, computed from the model as it is now, and G-code.
+//! and drilling — their toolpaths, computed from the model as it is now, and G-code. Milling
+//! setups may name a 4/5-axis machine ([`axes`]): operations then take a tilted tool axis (3+2),
+//! and rotary and swarf operations move the axis as they cut. Lathe setups ([`turn`]) turn
+//! the part instead.
 //!
 //! Operations refer to faces like features do, so changing the design moves the toolpaths with
 //! it. Coordinates in G-code are relative to the setup's work origin: the top of the stock at
@@ -16,6 +19,7 @@ pub mod adaptive;
 pub mod adaptive3d;
 pub mod arcs;
 pub mod collide;
+pub mod axes;
 pub mod finish3d;
 pub mod post;
 pub mod region;
@@ -23,6 +27,8 @@ pub mod rest;
 pub mod sim;
 pub mod surface;
 pub mod tools;
+pub mod turn;
+pub mod voxel;
 
 pub use tools::{HolderStep, Library, ToolKind};
 
@@ -63,6 +69,15 @@ pub struct Setup {
   /// checked for collisions with the tool and its holder.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub fixtures: Vec<BodyId>,
+  /// A lathe setup: the part turns about this spindle axis (milling settings above are unused).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub lathe: Option<turn::Lathe>,
+  /// A 4/5-axis milling machine: its kinematics for tilted and rotary operations.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub machine: Option<axes::Machine>,
+  /// The stock box in a tilted operation's frame (set while computing it).
+  #[serde(skip)]
+  pub frame_stock: Option<(DVec3, DVec3)>,
 }
 
 fn one() -> f64 {
@@ -117,6 +132,15 @@ pub struct Tool {
   /// A stepped holder: cylinders from its face up (the last runs up to the spindle).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub holder: Vec<tools::HolderStep>,
+  /// Lathe grooving and part-off insert width (mm; 0 = the diameter).
+  #[serde(default)]
+  pub width: f64,
+  /// Lathe constant surface speed (m/min; 0 = a fixed `rpm`, which is otherwise the limit).
+  #[serde(default)]
+  pub surface_speed: f64,
+  /// Lathe feed per revolution (mm/rev; 0 = `feed` over `rpm`).
+  #[serde(default)]
+  pub feed_per_rev: f64,
 }
 
 fn tip_angle() -> f64 {
@@ -158,6 +182,10 @@ pub struct Operation {
   /// Helix diameter (mm; 0 = the tool's diameter), less where the pocket is narrower.
   #[serde(default)]
   pub helix_diameter: f64,
+  /// 3+2 milling: the tool axis (pointing from the tip up the tool) the operation is computed
+  /// along, its work plane square to it; None = straight down Z.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub tool_axis: Option<[f64; 3]>,
 }
 
 fn ramp_angle() -> f64 {
@@ -297,6 +325,78 @@ pub enum OpKind {
     #[serde(default)]
     min_slope: f64,
   },
+  /// 4th axis: the tool kept square to the rotary (X) axis, dropped onto the part as it turns;
+  /// passes along the axis a step-over apart around it (or rings around it a step-over apart
+  /// along it), in levels a step-down apart from the stock down to the part.
+  Rotary {
+    #[serde(default)]
+    around: bool,
+  },
+  /// Simultaneous 5-axis swarf: the side of the tool along drafted or conical walls, its axis
+  /// following each wall's steepest line, in passes a step-down apart from the wall tops.
+  Swarf { faces: Vec<FaceRef> },
+  /// Lathe: faces the front of the bar down to the part.
+  TurnFace,
+  /// Lathe: roughs the outside down to the part in passes along the axis a step-down deep.
+  TurnRough,
+  /// Lathe: one finishing pass down the front face and along the outside profile.
+  TurnFinish,
+  /// Lathe: plunges the grooves (undercuts the profile passes can't reach).
+  Groove,
+  /// Lathe: parts the finished part off the bar at its back face.
+  PartOff,
+  /// Lathe: an outside thread of `pitch` along a cylinder (`faces`, else the given span from
+  /// `z_start` to `z_end` along the axis, in work coordinates), `depth` deep (0 = ISO metric).
+  Thread {
+    pitch: f64,
+    #[serde(default)]
+    faces: Vec<FaceRef>,
+    #[serde(default)]
+    z_start: f64,
+    #[serde(default)]
+    z_end: f64,
+    #[serde(default)]
+    depth: f64,
+  },
+}
+
+impl OpKind {
+  /// A lathe operation.
+  pub fn turns(&self) -> bool {
+    matches!(
+      self,
+      OpKind::TurnFace
+        | OpKind::TurnRough
+        | OpKind::TurnFinish
+        | OpKind::Groove
+        | OpKind::PartOff
+        | OpKind::Thread { .. }
+    )
+  }
+
+  /// The faces the operation refers to.
+  pub fn faces_mut(&mut self) -> Vec<&mut FaceRef> {
+    match self {
+      OpKind::Pocket { floors, .. } | OpKind::Adaptive { floors } => floors.iter_mut().collect(),
+      OpKind::Contour { faces, .. }
+      | OpKind::Parallel { faces, .. }
+      | OpKind::Scallop { faces }
+      | OpKind::Pencil { faces, .. }
+      | OpKind::SteepShallow { faces, .. }
+      | OpKind::Contour3d { faces, .. }
+      | OpKind::Swarf { faces }
+      | OpKind::Thread { faces, .. } => faces.iter_mut().collect(),
+      OpKind::Drill { holes, .. } => holes.iter_mut().collect(),
+      OpKind::Face
+      | OpKind::Adaptive3d { .. }
+      | OpKind::Rotary { .. }
+      | OpKind::TurnFace
+      | OpKind::TurnRough
+      | OpKind::TurnFinish
+      | OpKind::Groove
+      | OpKind::PartOff => Vec::new(),
+    }
+  }
 }
 
 fn threshold() -> f64 {
@@ -320,6 +420,10 @@ pub struct Toolpath {
   pub moves: Vec<Move>,
   /// Drilling: the holes (top point, depth) for canned cycles in G-code.
   pub drill: Option<(Vec<(DVec3, f64)>, f64)>,
+  /// The tool axis at the end of each move (unit, tip to shank); empty = straight down Z.
+  pub axes: Vec<DVec3>,
+  /// Lathe moves in work coordinates (the world `moves` show them in the viewport).
+  pub turn: Vec<turn::LatheMove>,
 }
 
 impl Toolpath {
@@ -342,17 +446,43 @@ impl Toolpath {
   }
 }
 
-/// The stock box (min, max) of a setup.
+/// The stock box (min, max) of a setup (around the bar, for a lathe; around the turning
+/// cylinder, for a rotary 4th axis).
 pub fn stock(setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
+  if let Some(b) = setup.frame_stock {
+    return Ok(b);
+  }
+  if let Some(l) = &setup.lathe {
+    return turn::stock_box(l, setup, model);
+  }
+  if let Some((c, radius, x0, x1)) = axes::rotary_stock(setup, model)? {
+    return Ok((DVec3::new(x0, c.y - radius, c.z - radius), DVec3::new(x1, c.y + radius, c.z + radius)));
+  }
   let (lo, hi) = part_box(setup, model)?;
   let side = DVec3::new(setup.stock_side, setup.stock_side, 0.0);
   Ok((lo - side, hi + side + DVec3::new(0.0, 0.0, setup.stock_top)))
 }
 
-/// The work origin: the top of the stock at its minimum X/Y corner.
+/// The work origin: the top of the stock at its minimum X/Y corner; on a 5-axis machine the
+/// centre of the stock's bottom, where its rotary axes cross; on a rotary 4th axis the turning
+/// axis at the stock's minimum X; on a lathe the axis at the front face (or the back face or the
+/// stock's front).
 pub fn origin(setup: &Setup, model: &Model) -> Result<DVec3, String> {
+  if let Some(l) = &setup.lathe {
+    return turn::world_origin(l, setup, model);
+  }
   let (lo, hi) = stock(setup, model)?;
-  Ok(DVec3::new(lo.x, lo.y, hi.z))
+  match setup.machine.map(|m| m.kinematics) {
+    Some(axes::Kinematics::Rotary) => Ok(DVec3::new(lo.x, (lo.y + hi.y) / 2.0, (lo.z + hi.z) / 2.0)),
+    Some(_) => Ok(DVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z)),
+    None => Ok(DVec3::new(lo.x, lo.y, hi.z)),
+  }
+}
+
+/// A body's triangles finer than its display mesh (in size and in the angle between facets),
+/// for lathe profiles, swarf walls and the 4/5-axis simulation.
+pub(crate) fn fine_mesh(b: &Body) -> Result<fox_kernel::TriMesh, String> {
+  b.shape.tessellate_with((b.diagonal() * 5e-5).clamp(0.002, 0.02), 0.05).map_err(|e| e.to_string())
 }
 
 /// The bodies to machine: the setup's part, or every body but the fixtures.
@@ -365,7 +495,7 @@ pub(crate) fn fixtures<'a>(setup: &Setup, model: &'a Model) -> Vec<&'a Body> {
   model.bodies.iter().filter(|b| setup.fixtures.contains(&b.id)).collect()
 }
 
-fn part_box(setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
+pub(crate) fn part_box(setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
   let mut acc: Option<(DVec3, DVec3)> = None;
   for b in bodies(setup, model) {
     let m = b.shape.mass().map_err(|e| e.to_string())?;
@@ -388,9 +518,12 @@ fn resolve<'a>(model: &'a Model, f: &FaceRef) -> Result<(&'a Body, u32), String>
 
 /// Toolpaths of every operation of a setup.
 pub fn toolpaths(setup: &Setup, model: &Model) -> Result<Vec<Toolpath>, String> {
+  if let Some(l) = &setup.lathe {
+    return turn::toolpaths(l, setup, model);
+  }
   let mut out = Vec::new();
   for op in &setup.operations {
-    let tp = toolpath(setup, op, model, &out).map_err(|e| format!("{}: {e}", op.name))?;
+    let tp = axes::toolpath(setup, op, model, &out).map_err(|e| format!("{}: {e}", op.name))?;
     out.push(tp);
   }
   Ok(out)
@@ -408,6 +541,12 @@ fn floor_face(model: &Model, f: &FaceRef) -> Result<(Shape, f64), String> {
 
 /// `previous`: the toolpaths of the setup's earlier operations (for rest machining).
 fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath]) -> Result<Toolpath, String> {
+  if op.kind.turns() {
+    return Err("a lathe operation needs a turning setup".into());
+  }
+  if op.tool.kind.turns() {
+    return Err("a lathe tool can't mill".into());
+  }
   let d = op.tool.diameter;
   if d.is_nan() || d <= 0.0 {
     return Err("the tool diameter must be positive".into());
@@ -606,6 +745,10 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
     OpKind::Pencil { faces, passes } => finish3d::pencil(&mut p, setup, model, op, faces, *passes)?,
     OpKind::SteepShallow { faces, threshold } => finish3d::steep_shallow(&mut p, setup, model, op, faces, *threshold)?,
     OpKind::Contour3d { faces, min_slope } => finish3d::contour(&mut p, setup, model, op, faces, *min_slope)?,
+    OpKind::Rotary { .. } | OpKind::Swarf { .. } => return Err("this operation needs a 4/5-axis machine".into()),
+    OpKind::TurnFace | OpKind::TurnRough | OpKind::TurnFinish | OpKind::Groove | OpKind::PartOff | OpKind::Thread { .. } => {
+      unreachable!("lathe operations are turned")
+    }
     OpKind::Drill { holes, peck } => {
       let mut found = Vec::new();
       let faces: Vec<(&Body, u32)> = if holes.is_empty() {
@@ -673,10 +816,10 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
       drill = Some((ordered, *peck));
     }
   }
-  Ok(Toolpath { name: op.name.clone(), tool: op.tool.clone(), moves: p.moves, drill })
+  Ok(Toolpath { name: op.name.clone(), tool: op.tool.clone(), moves: p.moves, drill, axes: Vec::new(), turn: Vec::new() })
 }
 
-struct Path {
+pub(crate) struct Path {
   moves: Vec<Move>,
   feed: f64,
   plunge: f64,
@@ -958,10 +1101,98 @@ fn cylinder_span(b: &Body, face: u32) -> Option<(f64, f64, bool)> {
 }
 
 /// G-code for a setup's toolpaths with its post-processor (Fanuc unless set) and units,
-/// relative to its work origin.
-pub fn gcode(setup: &Setup, paths: &[Toolpath], origin: DVec3) -> String {
+/// relative to its work origin: rotary axes for a 4/5-axis machine, a lathe program for a lathe.
+pub fn gcode(setup: &Setup, paths: &[Toolpath], origin: DVec3) -> Result<String, String> {
+  let imperial = setup.imperial;
+  if setup.lathe.is_some() {
+    let post = turn::find_post(&setup.post).ok_or_else(|| format!("'{}' isn't a lathe post", setup.post))?;
+    return Ok(turn::write(post, imperial, &setup.name, paths));
+  }
   let post = post::find(&setup.post).unwrap_or(&post::POSTS[0]);
-  let units = if setup.imperial { post::Units::Imperial } else { post::Units::Metric };
+  let units = if imperial { post::Units::Imperial } else { post::Units::Metric };
   let arcs = (!setup.straight).then_some(setup.arc_tolerance);
-  post::write_with(post, units, &setup.name, paths, origin, arcs)
+  if let Some(m) = &setup.machine {
+    if !post.rotary {
+      return Err(format!("the {} post has no rotary axes", post.name));
+    }
+    return post::write_machine(post, units, &setup.name, paths, origin, arcs, Some(m));
+  }
+  if paths.iter().any(|t| !t.axes.is_empty()) {
+    return Err("tilted toolpaths need a 4/5-axis machine".into());
+  }
+  Ok(post::write_with(post, units, &setup.name, paths, origin, arcs))
+}
+
+/// The stock after a setup's toolpaths: a heightfield for 3-axis milling, voxels for 4/5 axes,
+/// a turned profile on a lathe.
+#[derive(Debug, Clone)]
+pub enum Simulated {
+  Mill(sim::Simulation),
+  Voxels(voxel::VoxelSim),
+  Turned(turn::TurnSim),
+}
+
+impl Simulated {
+  /// The heightfield of a 3-axis milling setup's simulation.
+  pub fn mill(&self) -> Option<&sim::Simulation> {
+    match self {
+      Simulated::Mill(s) => Some(s),
+      _ => None,
+    }
+  }
+
+  pub fn warnings(&self) -> &[sim::Warning] {
+    match self {
+      Simulated::Mill(s) => &s.warnings,
+      Simulated::Voxels(s) => &s.warnings,
+      Simulated::Turned(s) => &s.warnings,
+    }
+  }
+
+  /// Removed volume per operation (mm³).
+  pub fn removed(&self) -> &[(String, f64)] {
+    match self {
+      Simulated::Mill(s) => &s.removed,
+      Simulated::Voxels(s) => &s.removed,
+      Simulated::Turned(s) => &s.removed,
+    }
+  }
+
+  /// Stock left on the part (mm³).
+  pub fn remaining(&self) -> f64 {
+    match self {
+      Simulated::Mill(s) => s.remaining(),
+      Simulated::Voxels(s) => s.remaining(),
+      Simulated::Turned(s) => s.remaining(),
+    }
+  }
+
+  /// The simulation's resolution (mm).
+  pub fn cell(&self) -> f64 {
+    match self {
+      Simulated::Mill(s) => s.stock.h,
+      Simulated::Voxels(s) => s.h,
+      Simulated::Turned(s) => s.h,
+    }
+  }
+
+  /// A mesh of the stock for display, at most about `max` cells a side.
+  pub fn mesh(&self, max: usize) -> sim::SimMesh {
+    match self {
+      Simulated::Mill(s) => s.mesh(max),
+      Simulated::Voxels(s) => s.mesh(max),
+      Simulated::Turned(s) => s.mesh(),
+    }
+  }
+}
+
+/// Runs a setup's toolpaths through its stock (see [`Simulated`]).
+pub fn simulate(setup: &Setup, model: &Model, paths: &[Toolpath]) -> Result<Simulated, String> {
+  if let Some(l) = &setup.lathe {
+    return turn::simulate(l, setup, model, paths).map(Simulated::Turned);
+  }
+  if setup.machine.is_some() || paths.iter().any(|t| !t.axes.is_empty()) {
+    return voxel::simulate(setup, model, paths).map(Simulated::Voxels);
+  }
+  sim::simulate(setup, model, paths).map(Simulated::Mill)
 }

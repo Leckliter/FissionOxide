@@ -169,7 +169,7 @@ fn adaptive3d_roughs_the_stock_around_the_part() {
   let removed: f64 = r["removed"].as_array().unwrap().iter().map(|o| o["mm3"].as_f64().unwrap()).sum();
   assert!(removed > 0.9 * (stock - part), "{removed} of {}", stock - part);
   // the stock to leave is left on the part
-  let (_, _, sim) = s.simulation.as_ref().unwrap();
+  let sim = s.simulation.as_ref().and_then(|x| x.2.mill()).unwrap();
   let (mut over, mut thin) = (0, 0);
   for (k, pz) in sim.part.z.iter().enumerate() {
     if pz.is_finite() {

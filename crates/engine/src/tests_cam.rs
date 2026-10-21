@@ -49,15 +49,15 @@ fn tool_library_in_the_hub() {
   let mut s = Session::new(crate::model::Design::new("Tools"));
   s.store_root = Some(hub("tools"));
   let tools = run(&mut s, "cam.tools", json!({}));
-  assert_eq!(tools.as_array().unwrap().len(), 8, "the standard library");
+  assert_eq!(tools.as_array().unwrap().len(), 13, "the standard library");
   let t = run(
     &mut s,
     "cam.tool.add",
     json!({"number": 12, "name": "4 mm bull", "kind": "bull_nose", "diameter": 4, "corner_radius": 0.5, "rpm": 15000, "feed": 900}),
   );
   assert_eq!(t["kind"], "bull_nose");
-  assert!(s.execute("cam.tool.add", &json!({"number": 13, "kind": "bull_nose", "diameter": 4})).is_err());
-  assert!(s.execute("cam.tool.add", &json!({"number": 13, "kind": "spoon", "diameter": 4})).is_err());
+  assert!(s.execute("cam.tool.add", &json!({"number": 20, "kind": "bull_nose", "diameter": 4})).is_err());
+  assert!(s.execute("cam.tool.add", &json!({"number": 20, "kind": "spoon", "diameter": 4})).is_err());
   assert!(cam::Library::path(s.store_root.as_ref().unwrap()).exists());
   part(&mut s);
   run(&mut s, "cam.setup", json!({}));
@@ -77,7 +77,7 @@ fn tool_library_in_the_hub() {
   assert!(s.execute("cam.pocket", &json!({"floors": [{"point": [25, 20, 12]}], "tool_number": 7})).is_err());
   assert!(s.execute("cam.pocket", &json!({"floors": [{"point": [25, 20, 12]}], "tool_number": 99})).is_err());
   run(&mut s, "cam.tool.delete", json!({"number": 12}));
-  assert_eq!(run(&mut s, "cam.tools", json!({})).as_array().unwrap().len(), 8);
+  assert_eq!(run(&mut s, "cam.tools", json!({})).as_array().unwrap().len(), 12);
   // the operation keeps its copy of the tool
   run(&mut s, "cam.generate", json!({}));
   assert_eq!(s.toolpaths[0].tool.diameter, 4.0);
@@ -178,7 +178,7 @@ fn holding_tabs_bridge_the_contour_bottom() {
   // the tabs survive the simulation: stock stands up to the tab top next to the part
   let sim = run(&mut s, "cam.simulate", json!({}));
   assert!(sim["warnings"].as_array().unwrap().is_empty(), "{sim}");
-  let (_, _, sim) = s.simulation.as_ref().unwrap();
+  let sim = s.simulation.as_ref().and_then(|x| x.2.mill()).unwrap();
   let hf = &sim.stock;
   let tab = (0..hf.nx * hf.ny).filter(|k| {
     let c = hf.centre(k % hf.nx, k / hf.nx);
@@ -252,7 +252,7 @@ fn adaptive_clearing_through_the_command_set() {
   let sim = run(&mut s, "cam.simulate", json!({}));
   assert!(sim["warnings"].as_array().unwrap().is_empty(), "{sim}");
   // the pocket is cleared to within the cell size, corners aside
-  let (_, _, sim) = s.simulation.as_ref().unwrap();
+  let sim = s.simulation.as_ref().and_then(|x| x.2.mill()).unwrap();
   let hf = &sim.stock;
   for j in 0..hf.ny {
     for i in 0..hf.nx {
@@ -284,7 +284,7 @@ fn simulation_finds_gouges_rapids_and_short_flutes() {
   assert!((removed + r["remaining_mm3"].as_f64().unwrap() - expected).abs() < 0.03 * expected, "{removed} {r}");
   // what's left is the pocket's rounded corners and the like: a little
   assert!(r["remaining_mm3"].as_f64().unwrap() < 0.02 * expected, "{r}");
-  let (_, _, sim) = s.simulation.as_ref().unwrap();
+  let sim = s.simulation.as_ref().and_then(|x| x.2.mill()).unwrap();
   assert!(sim.mesh(100).indices.len() > 1000);
 
   // cutting 1 mm into the part's sides gouges it
@@ -295,7 +295,7 @@ fn simulation_finds_gouges_rapids_and_short_flutes() {
   let r = run(&mut g, "cam.simulate", json!({}));
   let w = r["warnings"].as_array().unwrap();
   assert!(w.iter().any(|w| w["kind"] == "gouge" && (w["depth"].as_f64().unwrap() > 1.0)), "{r}");
-  assert!(g.simulation.as_ref().unwrap().2.gouged.iter().any(|x| *x));
+  assert!(g.simulation.as_ref().and_then(|x| x.2.mill()).unwrap().gouged.iter().any(|x| *x));
 
   // without facing, the drill's rapids to its retract plane (3 mm over the hole) hit the stock
   let mut c = Session::default();
@@ -386,7 +386,8 @@ fn posts_write_the_toolpaths_moves() {
   let origin = cam::origin(&st, &s.model).unwrap();
   let expected: Vec<(DVec3, f64)> =
     paths.iter().flat_map(|t| t.moves.iter()).filter(|m| !m.rapid).map(|m| (m.to - origin, m.feed)).collect();
-  assert_eq!(run(&mut s, "cam.posts", json!({})).as_array().unwrap().len(), 5);
+  let posts = run(&mut s, "cam.posts", json!({}));
+  assert_eq!(posts.as_array().unwrap().iter().filter(|p| p["machine"] == "mill").count(), 5);
   for p in &post::POSTS {
     for units in ["mm", "inch"] {
       let r = run(&mut s, "cam.post", json!({"post": p.id, "units": units, "arcs": false}));

@@ -1,5 +1,5 @@
-//! Cutting tools: their shapes (flat, ball, bull-nose end mills, drills, chamfer mills) and the
-//! tool library, a JSON file in the data hub (`tools.json`) with feeds and speeds per tool.
+//! Cutting tools: their shapes (flat, ball, bull-nose end mills, drills, chamfer mills; turning,
+//! grooving, part-off and threading inserts for the lathe) and the tool library, a JSON file in the data hub (`tools.json`) with feeds and speeds per tool.
 //!
 //! Operations keep a copy of their tool, so a design machines the same way on another computer
 //! whatever its library holds.
@@ -25,11 +25,30 @@ pub enum ToolKind {
   Drill,
   /// Chamfer mill: a cone of `angle` degrees included, `tip_diameter` flat at its end.
   Chamfer,
+  /// Lathe turning insert: `angle` degrees included (80 roughing, 35 finishing), nose radius
+  /// `corner_radius`; `diameter` is the insert's inscribed circle.
+  Turning,
+  /// Lathe grooving insert, `width` wide (its corner towards the chuck is the reference point).
+  Groove,
+  /// Lathe part-off blade, `width` wide (referenced like a grooving insert).
+  PartOff,
+  /// Lathe threading insert: a V of `angle` degrees included (60 metric), tip radius
+  /// `corner_radius`.
+  Thread,
 }
 
 impl ToolKind {
-  pub const ALL: [ToolKind; 5] =
-    [ToolKind::Flat, ToolKind::Ball, ToolKind::BullNose, ToolKind::Drill, ToolKind::Chamfer];
+  pub const ALL: [ToolKind; 9] = [
+    ToolKind::Flat,
+    ToolKind::Ball,
+    ToolKind::BullNose,
+    ToolKind::Drill,
+    ToolKind::Chamfer,
+    ToolKind::Turning,
+    ToolKind::Groove,
+    ToolKind::PartOff,
+    ToolKind::Thread,
+  ];
 
   pub fn id(self) -> &'static str {
     match self {
@@ -38,6 +57,10 @@ impl ToolKind {
       ToolKind::BullNose => "bull_nose",
       ToolKind::Drill => "drill",
       ToolKind::Chamfer => "chamfer",
+      ToolKind::Turning => "turning",
+      ToolKind::Groove => "groove",
+      ToolKind::PartOff => "part_off",
+      ToolKind::Thread => "thread",
     }
   }
 
@@ -49,6 +72,10 @@ impl ToolKind {
       "bull" | "bull_nose" | "bullnose" | "radius" => Some(ToolKind::BullNose),
       "drill" => Some(ToolKind::Drill),
       "chamfer" | "chamfer_mill" | "spot" => Some(ToolKind::Chamfer),
+      "turning" | "turn" | "turning_insert" => Some(ToolKind::Turning),
+      "groove" | "grooving" => Some(ToolKind::Groove),
+      "part_off" | "partoff" | "parting" | "cut_off" => Some(ToolKind::PartOff),
+      "thread" | "threading" => Some(ToolKind::Thread),
       _ => None,
     }
   }
@@ -56,6 +83,11 @@ impl ToolKind {
   /// Mills sideways (end mills); drills and chamfer mills only cut along their own edges.
   pub fn mills(self) -> bool {
     matches!(self, ToolKind::Flat | ToolKind::Ball | ToolKind::BullNose)
+  }
+
+  /// A lathe tool (turning, grooving, part-off or threading insert).
+  pub fn turns(self) -> bool {
+    matches!(self, ToolKind::Turning | ToolKind::Groove | ToolKind::PartOff | ToolKind::Thread)
   }
 }
 
@@ -78,6 +110,50 @@ impl Tool {
       holder_diameter: 0.0,
       stickout: 0.0,
       holder: Vec::new(),
+      width: 0.0,
+      surface_speed: 0.0,
+      feed_per_rev: 0.0,
+    }
+  }
+
+  /// A lathe tool with feeds per revolution and a constant surface speed (m/min) up to `rpm`.
+  pub fn lathe(number: u32, kind: ToolKind, fpr: f64, css: f64, rpm: f64) -> Tool {
+    let (d, angle, corner, width) = match kind {
+      ToolKind::Turning => (12.7, 80.0, 0.8, 0.0),
+      ToolKind::Thread => (16.0, 60.0, 0.05, 0.0),
+      _ => (3.0, 118.0, 0.2, 3.0),
+    };
+    Tool {
+      kind,
+      angle,
+      corner_radius: corner,
+      width,
+      feed_per_rev: fpr,
+      surface_speed: css,
+      rpm,
+      feed: fpr.max(0.1) * rpm,
+      plunge: fpr.max(0.1) * rpm / 2.0,
+      ..Tool::flat(number, d)
+    }
+  }
+
+  /// Grooving and part-off: the insert's width (its diameter when unset).
+  pub fn cut_width(&self) -> f64 {
+    if self.width > 0.0 { self.width } else { self.diameter }
+  }
+
+  /// Lathe feed per revolution (mm/rev): as set, else the feed over the speed.
+  pub fn per_rev(&self) -> f64 {
+    if self.feed_per_rev > 0.0 { self.feed_per_rev } else { self.feed / self.rpm.max(1.0) }
+  }
+
+  /// Spindle speed cutting at `radius` from the lathe's axis: the surface speed's, at most `rpm`.
+  pub fn rpm_at(&self, radius: f64) -> f64 {
+    if self.surface_speed > 0.0 {
+      let rpm = self.surface_speed * 1000.0 / (std::f64::consts::TAU * radius.abs().max(0.5));
+      if self.rpm > 0.0 { rpm.min(self.rpm) } else { rpm }
+    } else {
+      self.rpm
     }
   }
 
@@ -132,7 +208,7 @@ impl Tool {
     let rho = rho.min(r);
     let half = (self.angle.clamp(1.0, 179.0) / 2.0).to_radians();
     Some(match self.kind {
-      ToolKind::Flat => 0.0,
+      ToolKind::Flat | ToolKind::Turning | ToolKind::Groove | ToolKind::PartOff | ToolKind::Thread => 0.0,
       ToolKind::Ball | ToolKind::BullNose => {
         let c = self.corner();
         let flat = r - c;
@@ -156,8 +232,18 @@ impl Tool {
     if self.kind == ToolKind::BullNose && !(self.corner_radius > 0.0 && self.corner_radius <= self.radius() + 1e-9) {
       return Err("a bull-nose tool needs a corner radius up to half its diameter".into());
     }
-    if matches!(self.kind, ToolKind::Drill | ToolKind::Chamfer) && !(self.angle > 0.0 && self.angle < 180.0) {
+    if matches!(self.kind, ToolKind::Drill | ToolKind::Chamfer | ToolKind::Turning | ToolKind::Thread)
+      && !(self.angle > 0.0 && self.angle < 180.0)
+    {
       return Err("the tip angle must be between 0 and 180 degrees".into());
+    }
+    if self.kind.turns()
+      && !(self.corner_radius >= 0.0 && self.width >= 0.0 && self.surface_speed >= 0.0 && self.feed_per_rev >= 0.0)
+    {
+      return Err("a lathe tool's nose radius, width and feeds can't be negative".into());
+    }
+    if matches!(self.kind, ToolKind::Turning | ToolKind::Thread) && self.corner_radius > self.diameter / 2.0 {
+      return Err("the nose radius must be less than half the insert".into());
     }
     if !(self.rpm >= 0.0 && self.feed > 0.0 && self.plunge > 0.0) {
       return Err("the feeds must be positive".into());
@@ -196,7 +282,14 @@ impl Tool {
       ToolKind::BullNose => format!("bull-nose R{}", (self.corner() * 1000.0).round() / 1000.0),
       ToolKind::Drill => format!("drill {}°", self.angle),
       ToolKind::Chamfer => format!("chamfer mill {}°", self.angle),
+      ToolKind::Turning => format!("turning insert {}° R{}", self.angle, self.corner_radius),
+      ToolKind::Groove => format!("grooving insert {} mm wide", self.cut_width()),
+      ToolKind::PartOff => format!("part-off blade {} mm wide", self.cut_width()),
+      ToolKind::Thread => format!("threading insert {}°", self.angle),
     };
+    if self.kind.turns() && self.name.is_empty() {
+      return format!("T{} {kind}", self.number);
+    }
     if self.name.is_empty() {
       format!("T{} {d} mm {kind}", self.number)
     } else {
@@ -296,7 +389,8 @@ impl Library {
     self.tools.len() != n
   }
 
-  /// A starter set for aluminium: end mills, a ball, a bull nose, a drill and a chamfer mill.
+  /// A starter set for aluminium: end mills, a ball, a bull nose, a drill and a chamfer mill,
+  /// and lathe tools from T11 on: roughing and finishing inserts, grooving, part-off, threading.
   pub fn standard() -> Library {
     let t = |number: u32, name: &str, kind: ToolKind, d: f64, rpm: f64, feed: f64, plunge: f64| Tool {
       number,
@@ -319,6 +413,16 @@ impl Library {
         Tool { corner_radius: 1.0, ..t(6, "8 mm bull nose R1", ToolKind::BullNose, 8.0, 9500.0, 1100.0, 300.0) },
         t(7, "6 mm drill", ToolKind::Drill, 6.0, 3000.0, 300.0, 200.0),
         Tool { tip_diameter: 0.5, ..t(8, "10 mm 90° chamfer mill", ToolKind::Chamfer, 10.0, 8000.0, 800.0, 200.0) },
+        Tool { name: "CNMG 80° R0.8 roughing".into(), ..Tool::lathe(11, ToolKind::Turning, 0.25, 250.0, 3000.0) },
+        Tool {
+          name: "VNMG 35° R0.4 finishing".into(),
+          angle: 35.0,
+          corner_radius: 0.4,
+          ..Tool::lathe(12, ToolKind::Turning, 0.1, 300.0, 3500.0)
+        },
+        Tool { name: "3 mm grooving insert".into(), ..Tool::lathe(13, ToolKind::Groove, 0.05, 150.0, 2000.0) },
+        Tool { name: "3 mm part-off blade".into(), ..Tool::lathe(14, ToolKind::PartOff, 0.05, 120.0, 2000.0) },
+        Tool { name: "60° threading insert".into(), ..Tool::lathe(15, ToolKind::Thread, 0.0, 0.0, 800.0) },
       ],
     }
   }

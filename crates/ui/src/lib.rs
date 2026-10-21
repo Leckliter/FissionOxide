@@ -995,7 +995,7 @@ impl App {
     let tabs = if self.generative && self.drawing.is_none() {
       vec![panels::Tab::Generative]
     } else if self.manufacture && self.drawing.is_none() {
-      vec![panels::Tab::Milling, panels::Tab::Utilities]
+      vec![panels::Tab::Milling, panels::Tab::Turning, panels::Tab::Utilities]
     } else {
       toolbox::workspace_tabs(self)
     };

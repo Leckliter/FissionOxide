@@ -30,7 +30,7 @@ impl Scope {
     match tab {
       Tab::Sketch => Scope::Sketch,
       Tab::Drawing => Scope::Drawing,
-      Tab::Milling => Scope::Manufacture,
+      Tab::Milling | Tab::Turning => Scope::Manufacture,
       Tab::Form => Scope::Form,
       _ => Scope::Design,
     }

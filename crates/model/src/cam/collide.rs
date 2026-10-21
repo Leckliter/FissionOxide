@@ -152,6 +152,10 @@ impl Tally {
 /// Collisions found while generating a setup's toolpaths: tool holders running into the part,
 /// and tools or holders running into the fixtures.
 pub fn check(setup: &Setup, model: &Model, paths: &[Toolpath]) -> Result<Vec<Warning>, String> {
+  // the checks look from above: a lathe's tools and tilted tools aren't covered
+  if setup.lathe.is_some() {
+    return Ok(Vec::new());
+  }
   let holders = paths.iter().any(|t| !t.tool.holder_sections().is_empty());
   let mut part = if holders { Obstacle::of(&super::bodies(setup, model), cell(paths)) } else { None };
   let mut fix = fixtures(setup, model, paths);
@@ -162,6 +166,10 @@ pub fn check(setup: &Setup, model: &Model, paths: &[Toolpath]) -> Result<Vec<War
   at.z += super::CLEARANCE;
   let mut out = Vec::new();
   for tp in paths {
+    if tp.axes.iter().any(|a| a.z < 1.0 - 1e-9) {
+      at = tp.moves.last().map_or(at, |m| m.to);
+      continue;
+    }
     let mut tally = Tally::new(&tp.name);
     for m in &tp.moves {
       if let Some(o) = part.as_mut()

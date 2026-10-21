@@ -187,7 +187,7 @@ pub struct Session {
   /// The setup and design revision they were generated for.
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
-  pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
+  pub simulation: Option<(u32, u64, fox_model::cam::Simulated)>,
   /// The last previewed 2D cut job (`cut.job.preview`), drawn in the viewport.
   pub cut_preview: Option<cut::CutPreview>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
@@ -574,6 +574,7 @@ mod tests_cam;
 mod tests_cam3d;
 #[cfg(test)]
 mod tests_cam_checks;
+mod tests_cam5;
 #[cfg(test)]
 mod tests_canvas;
 #[cfg(test)]

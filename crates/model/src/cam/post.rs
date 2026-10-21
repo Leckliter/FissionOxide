@@ -2,12 +2,15 @@
 //!
 //! A post is a small table of what its control wants (program number, a decimal point on whole
 //! numbers, tool changes, tool length offsets, canned drilling cycles, how to send Z home) and
-//! one writer for all of them, in millimetres or inches.
+//! one writer for all of them, in millimetres or inches. With a 4/5-axis machine the moves go
+//! through its kinematics: tilted (3+2) operations rotate the part once and cut in the machine's
+//! frame; simultaneous ones move every axis together with inverse-time feeds (G93).
 
 use std::fmt::Write;
 
 use fox_kernel::glam::{DVec2, DVec3};
 
+use super::axes::{Angles, Machine};
 use super::{CLEARANCE, RETRACT, Toolpath};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,8 @@ pub struct Post {
   pub length_offset: bool,
   /// Canned drilling cycles (G81, G83); without them drilling is written out as moves.
   pub cycles: bool,
+  /// Rotary axes (A, B, C) for 4/5-axis machines.
+  pub rotary: bool,
   /// Safe start line (units are added).
   pub safe_start: &'static str,
   /// Extra setup lines after it.
@@ -74,6 +79,7 @@ pub static POSTS: [Post; 5] = [
     tool_change: true,
     length_offset: true,
     cycles: true,
+    rotary: true,
     safe_start: "G90 G94 G17 G40 G49 G80",
     preamble: &[],
     home: &["G28 G91 Z0.", "G90"],
@@ -90,6 +96,7 @@ pub static POSTS: [Post; 5] = [
     tool_change: true,
     length_offset: true,
     cycles: true,
+    rotary: true,
     safe_start: "G00 G17 G40 G49 G80 G90",
     preamble: &[],
     home: &["G28 G91 Z0.", "G90"],
@@ -106,6 +113,7 @@ pub static POSTS: [Post; 5] = [
     tool_change: false,
     length_offset: false,
     cycles: false,
+    rotary: false,
     safe_start: "G90 G94 G17",
     preamble: &[],
     home: &[],
@@ -122,6 +130,7 @@ pub static POSTS: [Post; 5] = [
     tool_change: true,
     length_offset: true,
     cycles: true,
+    rotary: true,
     safe_start: "G90 G94 G17 G40 G49 G80",
     preamble: &["G64 P0.01"],
     home: &["G53 G0 Z0"],
@@ -138,6 +147,7 @@ pub static POSTS: [Post; 5] = [
     tool_change: true,
     length_offset: true,
     cycles: true,
+    rotary: true,
     safe_start: "G90 G94 G17 G40 G49 G80",
     preamble: &[],
     home: &["G53 G0 Z0"],
@@ -232,6 +242,80 @@ pub fn write_with(
   origin: DVec3,
   arcs: Option<f64>,
 ) -> String {
+  let jobs: Vec<Job> =
+    paths.iter().map(|tp| Job { tp: tp.clone(), angles: Vec::new(), together: false, travel: Vec::new() }).collect();
+  write_jobs(post, units, title, &jobs, origin, arcs, None)
+}
+
+/// A toolpath ready to write: moved into the machine's frame, with the rotary positions of each
+/// move (none on a 3-axis machine), whether they change as it cuts and how far the tip moves
+/// over the part each move.
+struct Job {
+  tp: Toolpath,
+  angles: Vec<Angles>,
+  together: bool,
+  travel: Vec<f64>,
+}
+
+/// [`write_with`] for a 4/5-axis machine: each move's tool axis through the machine's
+/// kinematics, the rotary axes written beside X, Y and Z. Fails where the machine can't point
+/// the tool.
+pub fn write_machine(
+  post: &Post,
+  units: Units,
+  title: &str,
+  paths: &[Toolpath],
+  origin: DVec3,
+  arcs: Option<f64>,
+  machine: Option<&Machine>,
+) -> Result<String, String> {
+  let Some(m) = machine else {
+    return Ok(write_with(post, units, title, paths, origin, arcs));
+  };
+  let mut prev = Angles::default();
+  let mut jobs = Vec::new();
+  let mut tip: Option<DVec3> = None;
+  for tp in paths {
+    let mut angles = Vec::with_capacity(tp.moves.len());
+    let mut travel = Vec::with_capacity(tp.moves.len());
+    let mut out = tp.clone();
+    for (i, mv) in tp.moves.iter().enumerate() {
+      travel.push(tip.map_or(0.0, |t| (mv.to - t).length()));
+      tip = Some(mv.to);
+      let t = tp.axes.get(i).copied().unwrap_or(DVec3::Z);
+      let a = m.solve(t, prev).ok_or_else(|| {
+        format!("{}: the machine can't point the tool along ({:.3}, {:.3}, {:.3})", tp.name, t.x, t.y, t.z)
+      })?;
+      prev = a;
+      out.moves[i].to = origin + m.to_machine(mv.to - origin, a);
+      angles.push(a);
+    }
+    let first = angles.first().copied().unwrap_or(prev);
+    let together = angles.iter().any(|a| (a.tilt - first.tilt).abs() > 1e-9 || (a.turn - first.turn).abs() > 1e-9);
+    // drilling cycles run along the machine's Z only
+    match &mut out.drill {
+      Some((holes, _)) if !together && m.tool_along_z(first) => {
+        for (top, _) in holes.iter_mut() {
+          *top = origin + m.to_machine(*top - origin, first);
+        }
+      }
+      _ => out.drill = None,
+    }
+    jobs.push(Job { tp: out, angles, together, travel });
+  }
+  Ok(write_jobs(post, units, title, &jobs, origin, arcs, Some(m)))
+}
+
+fn write_jobs(
+  post: &Post,
+  units: Units,
+  title: &str,
+  jobs: &[Job],
+  origin: DVec3,
+  arcs: Option<f64>,
+  machine: Option<&Machine>,
+) -> String {
+  let paths: Vec<&Toolpath> = jobs.iter().map(|j| &j.tp).collect();
   let mut o = Out { post, units, g: String::new() };
   let safe = paths.iter().flat_map(|t| t.moves.iter()).map(|m| m.to.z - origin.z).fold(CLEARANCE, f64::max);
   if post.percent {
@@ -247,7 +331,11 @@ pub fn write_with(
     comment(post.name),
     if units == Units::Metric { "MM" } else { "INCH" }
   ));
-  o.line("(WORK ORIGIN: STOCK TOP, MIN X/Y CORNER - G54)");
+  match machine.map(|m| m.kinematics) {
+    None => o.line("(WORK ORIGIN: STOCK TOP, MIN X/Y CORNER - G54)"),
+    Some(super::axes::Kinematics::Rotary) => o.line("(WORK ORIGIN: ON THE A AXIS AT THE STOCK'S MIN X - G54)"),
+    Some(_) => o.line("(WORK ORIGIN: STOCK BOTTOM CENTRE, WHERE THE ROTARY AXES CROSS - G54)"),
+  }
   o.line(&format!("{} {}", post.safe_start, if units == Units::Metric { "G21" } else { "G20" }));
   for l in post.preamble {
     o.line(l);
@@ -256,7 +344,18 @@ pub fn write_with(
   let mut tool = None;
   // where the tool is, for the first arc of a toolpath
   let mut at: Option<DVec3> = None;
-  for tp in paths {
+  let mut rotary: Option<Angles> = None;
+  let axis_words = |o: &Out, a: Angles| -> String {
+    let Some(m) = machine else { return String::new() };
+    let (tilt, turn) = m.kinematics.letters();
+    let mut w = format!(" {tilt}{}", o.fmt(a.tilt, 3));
+    if let Some(c) = turn {
+      w += &format!(" {c}{}", o.fmt(a.turn, 3));
+    }
+    w
+  };
+  for job in jobs {
+    let tp = &job.tp;
     o.line(&format!("({} - {})", comment(&tp.name), comment(&tp.tool.describe())));
     if tool != Some(tp.tool.number) {
       o.line(&o.code('M', 5));
@@ -275,7 +374,52 @@ pub fn write_with(
       }
       tool = Some(tp.tool.number);
     }
+    // turn the part (or the head) to the toolpath's first orientation, clear of it
+    if let Some(first) = job.angles.first().copied()
+      && rotary.is_none_or(|r| (r.tilt - first.tilt).abs() > 1e-9 || (r.turn - first.turn).abs() > 1e-9)
+    {
+      if rotary.is_some() {
+        o.home(safe);
+      }
+      let w = axis_words(&o, first);
+      o.line(&format!("{}{w}", o.code('G', 0)));
+      rotary = Some(first);
+      at = None;
+    }
     let local = |p: DVec3| p - origin;
+    if job.together {
+      // every axis together, at inverse-time feeds
+      let mut from = at.or(tp.moves.first().map(|m| m.to)).unwrap_or(origin);
+      let mut inverse = false;
+      for (i, m) in tp.moves.iter().enumerate() {
+        let p = local(m.to);
+        let w = axis_words(&o, job.angles[i]);
+        let (x, y, z) = (o.num(p.x), o.num(p.y), o.num(p.z));
+        if m.rapid {
+          if inverse {
+            o.line(&o.code('G', 94));
+            inverse = false;
+          }
+          o.line(&format!("{} X{x} Y{y} Z{z}{w}", o.code('G', 0)));
+        } else {
+          if !inverse {
+            o.line(&o.code('G', 93));
+            inverse = true;
+          }
+          // the tip's travel on the part, or the machine's where the tip stands still
+          let len = job.travel.get(i).copied().unwrap_or(0.0).max((m.to - from).length()).max(0.01);
+          o.line(&format!("{} X{x} Y{y} Z{z}{w} F{}", o.code('G', 1), o.fmt(m.feed / len, 3)));
+        }
+        from = m.to;
+      }
+      if inverse {
+        o.line(&o.code('G', 94));
+      }
+      rotary = job.angles.last().copied();
+      at = None;
+      continue;
+    }
+    let arcs = arcs.filter(|_| machine.is_none_or(|m| job.angles.first().is_none_or(|a| m.tool_along_z(*a))));
     if post.cycles
       && let Some((holes, peck)) = &tp.drill
     {
@@ -336,6 +480,11 @@ pub fn write_with(
   }
   o.line(&o.code('M', 5));
   o.home(safe);
+  if rotary.is_some() {
+    // the rotary axes back to zero
+    let w = axis_words(&o, Angles::default());
+    o.line(&format!("{}{w}", o.code('G', 0)));
+  }
   o.line(post.end);
   if post.percent {
     o.line("%");

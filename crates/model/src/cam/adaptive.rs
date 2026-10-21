@@ -390,6 +390,7 @@ mod tests {
       entry: Entry::Helix,
       ramp_angle: 3.0,
       helix_diameter: 0.0,
+      tool_axis: None,
     }
   }
 
