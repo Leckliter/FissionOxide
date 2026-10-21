@@ -469,3 +469,148 @@ fn intersect_sections_bodies_with_the_sketch_plane_and_follows_them() {
   assert!(s.execute("sketch.intersect", &json!({"faces": [{"body": b1, "face": 999}]})).is_err());
   assert!(s.execute("sketch.intersect", &json!({})).is_err());
 }
+
+/// How many constraints of the edited sketch `f` matches.
+fn constraints(s: &Session, f: impl Fn(&fox_sketch::ConstraintKind) -> bool) -> usize {
+  let sk = s.edit_sketch.unwrap();
+  s.design.sketch(sk).unwrap().constraints.iter().filter(|c| f(&c.kind)).count()
+}
+
+/// The edited sketch's curves as (construction, kind).
+fn curves(s: &Session) -> Vec<(bool, fox_sketch::CurveKind)> {
+  let sk = s.edit_sketch.unwrap();
+  s.design.sketch(sk).unwrap().curves.iter().map(|c| (c.construction, c.kind.clone())).collect()
+}
+
+#[test]
+fn polygons_keep_one_polygon_glyph_and_no_construction_circle() {
+  use fox_sketch::{ConstraintKind, CurveKind};
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.polygon", json!({"center": [0, 0], "vertex": [10, 0], "sides": 6}));
+  assert_eq!(r["curves"].as_array().map(Vec::len), Some(6), "{r}");
+  let c = curves(&s);
+  assert_eq!(c.len(), 6);
+  assert!(c.iter().all(|(cons, k)| !cons && matches!(k, CurveKind::Line { .. })), "{c:?}");
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Polygon { .. })), 1);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Equal { .. } | ConstraintKind::PointOnCurve { .. })), 0);
+  // the polygon's centre is the origin it was placed on
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let centre = sketch.constraints.iter().find_map(|c| match c.kind {
+    ConstraintKind::Polygon { center, .. } => Some(center),
+    _ => None,
+  });
+  assert_eq!(centre, Some(fox_sketch::ORIGIN));
+  // a dimension from the centre still sizes it
+  let vertex = sketch.curve_points(fox_sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32))[0].0;
+  run(&mut s, "sketch.dimension", json!({"type": "distance", "points": [0, vertex], "value": 20}));
+  run(&mut s, "extrude", json!({"distance": 1}));
+  let hex = 6.0 * 20.0 * 20.0 * 3f64.sqrt() / 4.0;
+  assert!((volume(&s) - hex).abs() < 1e-6, "{} vs {hex}", volume(&s));
+}
+
+#[test]
+fn edge_polygon_lies_on_the_side_of_the_edge_it_is_given() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let ys = |s: &Session| -> Vec<f64> {
+    let sk = s.edit_sketch.unwrap();
+    s.design.sketch(sk).unwrap().points.iter().map(|p| p.y).collect()
+  };
+  // no side: on the left of the edge, as before
+  run(&mut s, "sketch.polygon", json!({"edge": [[0, 0], [10, 0]], "sides": 4}));
+  assert!(ys(&s).iter().all(|y| *y >= -1e-9), "{:?}", ys(&s));
+  // a side below the edge puts the square below it, its first side still the edge
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.polygon", json!({"edge": [[0, 0], [10, 0]], "sides": 4, "side": [5, -3]}));
+  assert!(ys(&s).iter().all(|y| *y <= 1e-9), "{:?}", ys(&s));
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let first = fox_sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+  let mut ends: Vec<[f64; 2]> = sketch.curve_points(first).iter().map(|p| sketch.pos(*p).unwrap()).collect();
+  ends.sort_by(|a, b| a[0].total_cmp(&b[0]));
+  assert_eq!(ends, [[0.0, 0.0], [10.0, 0.0]]);
+}
+
+#[test]
+fn centre_rectangle_keeps_two_grey_diagonals() {
+  use fox_sketch::ConstraintKind;
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.rect", json!({"center": [0, 0], "corner": [20, 10]}));
+  assert_eq!(r["curves"].as_array().map(Vec::len), Some(6), "{r}");
+  let c = curves(&s);
+  assert_eq!(c.iter().filter(|(cons, _)| *cons).count(), 2, "{c:?}");
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Midpoint { p, .. } if *p == fox_sketch::ORIGIN)), 1);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Equal { .. })), 1);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })), 4);
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["solved"], true, "{info}");
+  // construction geometry draws grey and dashed
+  assert_eq!(crate::scene::SKETCH_CONSTRUCTION[..3], [128, 128, 132]);
+}
+
+#[test]
+fn ellipses_keep_construction_axes_through_the_centre() {
+  use fox_sketch::{ConstraintKind, CurveKind};
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor": 10}));
+  assert_eq!(r["curves"].as_array().map(Vec::len), Some(3), "{r}");
+  assert_eq!(r["profiles"], 1, "{r}");
+  let c = curves(&s);
+  assert!(matches!(c[0], (false, CurveKind::Ellipse { .. })), "the ellipse is the first curve: {c:?}");
+  assert!(c[1..].iter().all(|(cons, k)| *cons && matches!(k, CurveKind::Line { .. })), "{c:?}");
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let ends = |i: usize| -> Vec<[f64; 2]> {
+    let mut v: Vec<[f64; 2]> =
+      sketch.curve_points(sketch.curves[i].id).iter().map(|p| sketch.pos(*p).unwrap()).collect();
+    v.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    v
+  };
+  assert_eq!(ends(1), [[-20.0, 0.0], [20.0, 0.0]]);
+  assert_eq!(ends(2), [[0.0, -10.0], [0.0, 10.0]]);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Midpoint { p, .. } if *p == fox_sketch::ORIGIN)), 2);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Perpendicular { .. })), 1);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Horizontal { .. })), 1, "a horizontal major axis");
+}
+
+#[test]
+fn slots_keep_a_centreline_and_fusions_glyphs() {
+  use fox_sketch::{ConstraintKind, CurveKind};
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.slot", json!({"start": [0, 0], "end": [40, 0], "width": 10}));
+  assert_eq!(r["curves"].as_array().map(Vec::len), Some(5), "{r}");
+  assert_eq!(r["profiles"], 1, "{r}");
+  let c = curves(&s);
+  assert!(matches!(c[4], (true, CurveKind::Line { .. })), "{c:?}");
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Tangent { .. })), 4);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Parallel { .. })), 1);
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Equal { .. })), 1);
+  // a centre point slot keeps its centre on the middle of the centreline
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.slot", json!({"center": [0, 0], "end": [20, 0], "width": 10}));
+  assert_eq!(constraints(&s, |k| matches!(k, ConstraintKind::Midpoint { p, .. } if *p == fox_sketch::ORIGIN)), 1);
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["solved"], true, "{info}");
+  // an arc slot keeps a dashed arc centreline about its centre
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.slot", json!({"start": [0, 0], "mid": [10, 5], "end": [20, 0], "width": 4}));
+  assert_eq!(r["curves"].as_array().map(Vec::len), Some(5), "{r}");
+  let c = curves(&s);
+  let (cons, CurveKind::Arc { center, start, end }) = &c[4] else { panic!("{c:?}") };
+  assert!(cons);
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let p = |id| sketch.pos(id).unwrap();
+  assert!((p(*center)[0] - 10.0).abs() < 1e-9 && (p(*center)[1] + 7.5).abs() < 1e-9, "{:?}", p(*center));
+  let mut ends = [p(*start), p(*end)];
+  ends.sort_by(|a, b| a[0].total_cmp(&b[0]));
+  assert!((ends[0][0]).abs() < 1e-9 && (ends[1][0] - 20.0).abs() < 1e-9, "{ends:?}");
+}

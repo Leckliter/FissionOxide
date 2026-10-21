@@ -91,7 +91,7 @@ cmds! {
   "sketch.rect" => "Two-point rectangle, centre rectangle, or 3-point (rotated) rectangle", "{corner1, corner2} | {center, corner} | {points: [a, b, c]}";
   "sketch.circle" => "Circle: centre and size, through 2 points (a diameter) or 3 points", "{center: [x,y], radius | diameter} | {through: [[x,y], [x,y], [x,y]?]}";
   "sketch.arc" => "Arc through three points, around a centre, or tangent to a curve's end", "{start, mid, end} | {center, start, end, clockwise?: bool} | {center, start, sweep: angle (negative = clockwise)} | {tangent: curve, start, end}";
-  "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides}";
+  "sketch.polygon" => "Regular polygon: inscribed (vertex), circumscribed (edge midpoint) or from one edge (on the side of the edge 'side' is on; its left by default)", "{center, vertex, sides, circumscribed?} | {edge: [a, b], sides, side?: [x, y]}";
   "sketch.slot" => "Slot: centre to centre, overall, centre point, or along an arc", "{start, end, width, kind?: center_to_center|overall|center_point} | {center, end, width} | {arc_center, start, end, width, ccw?: bool (default: the shorter arc)} | {start, mid, end, width}";
   "sketch.point" => "Sketch point", "{at: [x,y]}";
   "sketch.constrain" => "Add a geometric constraint", "{type: coincident|horizontal|vertical|parallel|perpendicular|collinear|equal|tangent|concentric|midpoint|point_on_curve|symmetric|fix|curvature|polygon, points?: [id], curves?: [id]} (symmetric: points [a, b] + curves [axis], or curves [a, b, axis] for two lines or circles/arcs; fix takes a point or curves; delete its constraints to unfix) (polygon: lines already forming a regular polygon; returns its centre point)";
@@ -3046,7 +3046,13 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           let side = dx.hypot(dy);
           let apothem = side / (2.0 * (std::f64::consts::PI / n).tan());
           let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
-          ([m[0] - dy / side * apothem, m[1] + dx / side * apothem], *a)
+          // Fusion's third click puts the polygon on the side of the edge the cursor is on
+          let flipped = opt_pt(&p, "side")?.is_some_and(|q| dx * (q[1] - a[1]) - dy * (q[0] - a[0]) < 0.0);
+          if flipped {
+            ([m[0] + dy / side * apothem, m[1] - dx / side * apothem], *b)
+          } else {
+            ([m[0] - dy / side * apothem, m[1] + dx / side * apothem], *a)
+          }
         } else {
           let c = req_pt(&p, "center")?;
           let v = req_pt(&p, "vertex")?;
@@ -3130,7 +3136,13 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           }
           _ => (req_pt(&p, "start")?, req_pt(&p, "end")?),
         };
-        sketch.add_slot(a, b, w)?;
+        let made = sketch.add_slot(a, b, w)?;
+        // a centre point slot keeps its centre on the middle of the centreline (Fusion's midpoint glyph)
+        if let (Some(c), Some(&axis)) = (opt_pt(&p, "center")?, made.get(4)) {
+          let cs = snap(sketch, c);
+          let center = sketch.resolve(cs)?;
+          sketch.add_constraint(ConstraintKind::Midpoint { p: center, line: axis })?;
+        }
       }
       "sketch.ellipse" => {
         let c = req_pt(&p, "center")?;
@@ -3146,6 +3158,7 @@ fn draw(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         let center = sketch.resolve(cs)?;
         let major = sketch.add_point(m[0], m[1]);
         sketch.add_curve(CurveKind::Ellipse { center, major, minor })?;
+        add_ellipse_axes(sketch, center, major, minor)?;
       }
       "sketch.control_spline" => {
         let pts = pts_of(&p, "points")?;
@@ -3231,6 +3244,33 @@ fn add_arc_slot(sketch: &mut Sketch, c: [f64; 2], from: [f64; 2], to: [f64; 2], 
     sketch.add_constraint(ConstraintKind::Tangent { a, b })?;
   }
   sketch.add_constraint(ConstraintKind::Concentric { a: outer, b: inner })?;
+  // the dashed arc centreline between the cap centres, as Fusion draws it
+  let axis = sketch.add_curve(CurveKind::Arc { center: cc, start: c0, end: c1 })?;
+  sketch.set_construction(axis, true)?;
+  Ok(())
+}
+
+/// Fusion's ellipse keeps dashed construction major and minor axes through its centre: the major
+/// axis ends on the major point, both are halved by the centre, the minor is perpendicular; a
+/// horizontal or vertical major axis gets the matching constraint (and glyph).
+fn add_ellipse_axes(sketch: &mut Sketch, center: PointId, major: PointId, minor: f64) -> Result<(), CmdError> {
+  let (Some(c), Some(m)) = (sketch.pos(center), sketch.pos(major)) else { return Ok(()) };
+  let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+  let l = dx.hypot(dy);
+  if l < 1e-12 {
+    return Ok(());
+  }
+  let far = sketch.add_point(2.0 * c[0] - m[0], 2.0 * c[1] - m[1]);
+  let (nx, ny) = (-dy / l * minor, dx / l * minor);
+  let (m0, m1) = (sketch.add_point(c[0] - nx, c[1] - ny), sketch.add_point(c[0] + nx, c[1] + ny));
+  let major_axis = sketch.add_curve(CurveKind::Line { a: far, b: major })?;
+  let minor_axis = sketch.add_curve(CurveKind::Line { a: m0, b: m1 })?;
+  sketch.set_construction(major_axis, true)?;
+  sketch.set_construction(minor_axis, true)?;
+  sketch.add_constraint(ConstraintKind::Midpoint { p: center, line: major_axis })?;
+  sketch.add_constraint(ConstraintKind::Midpoint { p: center, line: minor_axis })?;
+  sketch.add_constraint(ConstraintKind::Perpendicular { a: major_axis, b: minor_axis })?;
+  auto_hv(sketch, major_axis);
   Ok(())
 }
 

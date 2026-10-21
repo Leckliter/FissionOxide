@@ -605,11 +605,11 @@ fn dxf_sketch_round_trip() {
   run(&mut s, "sketch.finish", json!({}));
   let path = dir.join("slot.dxf");
   let r = run(&mut s, "export", json!({"path": path}));
-  assert_eq!(r["entities"], 5, "{r}");
+  assert_eq!(r["entities"], 6, "the slot's outline and centreline, and the circle: {r}");
   // reading it back makes a sketch whose profiles extrude
   let mut t = Session::default();
   let r = run(&mut t, "import", json!({"path": path}));
-  assert_eq!(r["curves"], 5, "{r}");
+  assert_eq!(r["curves"], 6, "{r}");
   assert_eq!(r["profiles"], 2, "endpoints were joined into closed profiles: {r}");
   assert!(t.can_undo());
   run(&mut t, "extrude", json!({"distance": 3}));

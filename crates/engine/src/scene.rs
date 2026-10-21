@@ -45,7 +45,8 @@ pub const PROFILE_OUTLINE_SELECTED: [u8; 4] = [220, 40, 40, 255];
 pub const SKETCH_HOVER: [u8; 4] = [24, 96, 200, 255];
 pub const SKETCH_FREE: [u8; 4] = [30, 110, 235, 255];
 pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
-pub const SKETCH_CONSTRUCTION: [u8; 4] = [225, 130, 40, 255];
+/// Construction geometry: grey dashed, as Fusion draws it.
+pub const SKETCH_CONSTRUCTION: [u8; 4] = [128, 128, 132, 255];
 pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
 /// The origin axes' colours (X red, Y green, Z blue), shared with the viewport's axis triad.
 pub const ORIGIN_X_COLOR: [u8; 4] = [232, 96, 92, 255];
@@ -188,6 +189,9 @@ pub struct ViewOptions {
   pub hide_planes: Vec<FeatureId>,
   /// Bodies' exploded-view offsets; `None` = the design's exploded view (`view.explode`).
   pub explode: Option<HashMap<BodyId, DVec3>>,
+  /// Sketch curves and points also drawn in the hover colour: what a hovered constraint glyph
+  /// constrains.
+  pub hover_more: Vec<Pick>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -415,7 +419,18 @@ impl SceneBuilder {
       // a sketch shown only because it is peeked at isn't under the pointer
       let pickable = is_edit || !opts.hide_sketches && f.visible.unwrap_or(auto);
       sketch_lines(
-        &mut scene, &mut picks, f.id, &r.sketch, &r.plane, is_edit, &r.report, &selected, opts.hover, peeked, pickable,
+        &mut scene,
+        &mut picks,
+        f.id,
+        &r.sketch,
+        &r.plane,
+        is_edit,
+        &r.report,
+        &selected,
+        opts.hover,
+        peeked,
+        pickable,
+        &opts.hover_more,
       );
     }
 
@@ -656,6 +671,7 @@ fn sketch_lines(
   hover: Option<Pick>,
   peeked: bool,
   pickable: bool,
+  hover_more: &[Pick],
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
   // a curve's colour and width: selected curves draw bright blue (over a halo outside the
@@ -666,7 +682,7 @@ fn sketch_lines(
       (EDGE_SELECT_COLOR, if editing { 2.0 } else { 1.0 }, !editing)
     } else if hover == Some(pick) && !editing {
       (SKETCH_HOVER, 2.0, false)
-    } else if hover == Some(pick) || peeked {
+    } else if hover == Some(pick) || peeked || hover_more.contains(&pick) {
       (HOVER_COLOR, if editing { 2.0 } else { 1.0 }, false)
     } else if !editing {
       (SKETCH_IDLE, 1.0, false)
@@ -740,7 +756,7 @@ fn sketch_lines(
       let pick = Pick::SketchPoint { sketch: sid, point: p.id };
       let color = if selected.contains(&pick) {
         EDGE_SELECT_COLOR
-      } else if hover == Some(pick) {
+      } else if hover == Some(pick) || hover_more.contains(&pick) {
         HOVER_COLOR
       } else if p.id == fox_sketch::ORIGIN {
         [200, 60, 40, 255]

@@ -11,7 +11,6 @@ use fox_engine::scene::{Pick, ViewOptions};
 use fox_engine::sketch::{ConstraintKind, CurveKind, Ellipse2, PointId, Sketch};
 use serde_json::json;
 
-use crate::icons::{self, Icon};
 use crate::preferences::NavAction;
 use crate::{App, RenderKey};
 
@@ -364,6 +363,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
       grid_labels(app, &painter, &view);
     }
     consumed |= sketch_overlay(app, ui, &painter, &view);
+  } else {
+    app.glyph_hover.clear();
   }
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
@@ -676,6 +677,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     opacity: app.ctx_menu.opacity.clone(),
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
+    hover_more: app.glyph_hover.clone(),
     ..analysis
   }
 }
@@ -704,6 +706,7 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
     opacity: app.ctx_menu.opacity.iter().map(|(b, a)| (b.0, *a)).collect(),
     peek_faces: app.ctx_menu.peek_faces.iter().map(|(b, f)| (b.0, *f)).collect(),
     peek_sketches: app.ctx_menu.peek_sketches.iter().map(|s| s.0).collect(),
+    glyph_hover: app.glyph_hover.clone(),
   };
   if crate::gpu::active(app) && !crate::gpu::scene_changed(app, &key) {
     return;
@@ -1415,6 +1418,38 @@ fn edge_polygon_points(a: [f64; 2], b: [f64; 2], n: usize) -> Vec<[f64; 2]> {
   polygon_points(c, side / (2.0 * half.sin()), (a[1] - c[1]).atan2(a[0] - c[0]), n)
 }
 
+/// The outline of a slot between the end centres `a` and `b`, `w` wide: two lines and two round
+/// caps, as one closed polyline.
+fn slot_outline(a: [f64; 2], b: [f64; 2], w: f64) -> Vec<[f64; 2]> {
+  let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+  if l < 1e-12 || w <= 0.0 {
+    return Vec::new();
+  }
+  let r = w / 2.0;
+  let n = [-(b[1] - a[1]) / l, (b[0] - a[0]) / l];
+  let an = n[1].atan2(n[0]);
+  let pi = std::f64::consts::PI;
+  let mut out = vec![[a[0] - n[0] * r, a[1] - n[1] * r]];
+  // the end cap round the far side, back along the other line, the start cap round the near side
+  out.extend(arc_points(b, r, an - pi, pi));
+  out.extend(arc_points(a, r, an, pi));
+  out
+}
+
+/// The outline of a slot `w` wide along the arc about `c` of radius `r` from `a0` sweeping
+/// `sweep`: outer and inner arcs joined by round caps, as one closed polyline.
+fn arc_slot_outline(c: [f64; 2], r: f64, a0: f64, sweep: f64, w: f64) -> Vec<[f64; 2]> {
+  let (ro, ri) = (r + w / 2.0, (r - w / 2.0).max(0.0));
+  let pi = std::f64::consts::PI.copysign(sweep);
+  let a1 = a0 + sweep;
+  let cap = |ang: f64, from: f64| arc_points([c[0] + r * ang.cos(), c[1] + r * ang.sin()], w / 2.0, from, pi);
+  let mut out = arc_points(c, ro, a0, sweep);
+  out.extend(cap(a1, a1));
+  out.extend(arc_points(c, ri, a1, -sweep));
+  out.extend(cap(a0, a0 + std::f64::consts::PI));
+  out
+}
+
 /// The number of sides the polygon being drawn will have: what its heads-up box holds, else 6.
 fn hud_sides_live(app: &App) -> usize {
   let i = hud_fields(app.tool, app.tstate.pts.len()).iter().position(|f| *f == Field::Sides);
@@ -1490,12 +1525,16 @@ fn lock_typed(
 
 /// Locks a polygon's typed radius as Fusion dimensions it: centre to the first vertex (inscribed)
 /// or centre to the first side (circumscribed); an edge polygon's typed length dimensions its first
-/// side. `curves` is `sketch.polygon`'s result: the construction circle, then the sides.
+/// side. `curves` is `sketch.polygon`'s result, the sides; the centre is its Polygon constraint's.
 fn lock_polygon(app: &mut App, sk: FeatureId, curves: &[u32], locks: &[(Field, String)]) {
-  let (Some(&circle), Some(&side)) = (curves.first(), curves.get(1)) else { return };
+  let Some(&side) = curves.first() else { return };
   let Ok(sketch) = app.s.design.sketch(sk) else { return };
-  let point = |c: u32| sketch.curve_points(fox_engine::sketch::CurveId(c)).first().copied();
-  let (Some(center), Some(vertex)) = (point(circle), point(side)) else { return };
+  let side_id = fox_engine::sketch::CurveId(side);
+  let center = sketch.constraints.iter().find_map(|c| match &c.kind {
+    ConstraintKind::Polygon { center, lines } if lines.contains(&side_id) => Some(*center),
+    _ => None,
+  });
+  let (Some(center), Some(vertex)) = (center, sketch.curve_points(side_id).first().copied()) else { return };
   for (field, text) in locks {
     let mut params = match (app.tool, field) {
       (Tool::Polygon, Field::Radius) => json!({"type": "distance", "points": [center.0, vertex.0], "value": text}),
@@ -2410,6 +2449,7 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
   let mut consumed = false;
   let font = egui::FontId::proportional(12.0);
   let mut glyph_count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+  let mut hovered_items: Vec<Pick> = Vec::new();
   for c in &sketch.constraints {
     if c.kind.dim().is_some() && !app.show_dims || c.kind.dim().is_none() && !app.show_constraints {
       continue;
@@ -2457,23 +2497,22 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       }
       continue;
     }
-    // geometric constraint glyph near its first curve (or point)
+    // geometric constraint glyph: Fusion's small grey line-art symbol beside its geometry, in a
+    // row with the others on the same curve or point
     let Some((anchor, key)) = glyph_anchor(&sketch, &c.kind) else { continue };
     let k = glyph_count.entry(key).or_default();
     let Some(at) = to_screen(anchor) else { continue };
-    let at = at + Vec2::new(10.0 + 14.0 * *k as f32, -12.0);
+    let at = at + Vec2::new(10.0 + 14.0 * *k as f32, -10.0);
     *k += 1;
-    let r = Rect::from_center_size(at, Vec2::splat(15.0));
+    let r = Rect::from_center_size(at, Vec2::splat(2.0 * crate::glyphs::HALF + 3.0));
     let resp = ui.interact(r, ui.id().with(("glyph", c.id.0)), Sense::click());
-    let (bg, edge) = if selected {
-      (crate::theme::SELECTED, crate::theme::ACCENT)
-    } else if resp.hovered() {
-      (crate::theme::HOVER, crate::theme::ACCENT)
-    } else {
-      (Color32::from_rgba_unmultiplied(255, 255, 255, 230), Color32::from_gray(170))
-    };
-    painter.rect(r, 1.0, bg, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    icons::draw_color(painter, r.shrink(2.0), glyph(&c.kind));
+    let col = if selected || resp.hovered() { crate::theme::ACCENT } else { GLYPH_INK };
+    if resp.hovered() {
+      // a hovered glyph highlights what it constrains
+      hovered_items.extend(c.kind.curves().into_iter().map(|curve| Pick::SketchCurve { sketch: sk, curve }));
+      hovered_items.extend(c.kind.points().into_iter().map(|point| Pick::SketchPoint { sketch: sk, point }));
+    }
+    crate::glyphs::paint(painter, at, &c.kind, col);
     if resp.clicked() {
       let add = ui.input(|i| i.modifiers.shift);
       crate::panels::toggle_sel(&mut app.s, Sel::SketchConstraint { sketch: sk, constraint: c.id }, add);
@@ -2481,8 +2520,12 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     }
     resp.on_hover_text(format!("{} (click to select, Del to remove)", c.kind.name()));
   }
+  app.glyph_hover = hovered_items;
   consumed
 }
+
+/// Constraint glyph ink: Fusion's grey.
+const GLYPH_INK: Color32 = Color32::from_rgb(105, 105, 110);
 
 /// A dimension's value as drawn. The font has no ⌀ (U+2300), so a diameter's glyph is painted
 /// the way Fusion draws it, a circle with a slash, in front of the number.
@@ -2859,28 +2902,18 @@ fn sketch_center(s: &Sketch) -> Option<[f64; 2]> {
   Some([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0])
 }
 
-fn glyph(k: &ConstraintKind) -> Icon {
-  match k {
-    ConstraintKind::Coincident { .. } | ConstraintKind::PointOnCurve { .. } => Icon::Coincident,
-    ConstraintKind::Fix { .. } => Icon::Fix,
-    ConstraintKind::Horizontal { .. } | ConstraintKind::HorizontalPoints { .. } => Icon::Horizontal,
-    ConstraintKind::Vertical { .. } | ConstraintKind::VerticalPoints { .. } => Icon::Vertical,
-    ConstraintKind::Parallel { .. } => Icon::Parallel,
-    ConstraintKind::Perpendicular { .. } => Icon::Perpendicular,
-    ConstraintKind::Collinear { .. } => Icon::Collinear,
-    ConstraintKind::Equal { .. } => Icon::Equal,
-    ConstraintKind::Tangent { .. } => Icon::Tangent,
-    ConstraintKind::Concentric { .. } => Icon::Concentric,
-    ConstraintKind::Midpoint { .. } => Icon::Midpoint,
-    ConstraintKind::Symmetric { .. } | ConstraintKind::SymmetricCurves { .. } => Icon::Symmetric,
-    ConstraintKind::Curvature { .. } => Icon::Curvature,
-    ConstraintKind::Polygon { .. } => Icon::Equal,
-    _ => Icon::Fix,
-  }
-}
-
 /// Where a geometric constraint's glyph goes, and a key grouping glyphs on the same curve/point.
 fn glyph_anchor(s: &Sketch, k: &ConstraintKind) -> Option<([f64; 2], u32)> {
+  // a polygon's glyph sits by its centre point
+  if let ConstraintKind::Polygon { center, .. } = k {
+    return Some((s.pos(*center)?, center.0 | 0x8000_0000));
+  }
+  // perpendicular and tangent glyphs sit at the corner or junction the two curves share
+  if let ConstraintKind::Perpendicular { a, b } | ConstraintKind::Tangent { a, b } = k
+    && let Some(p) = s.curve_points(*a).iter().find(|p| s.curve_points(*b).contains(p))
+  {
+    return Some((s.pos(*p)?, p.0 | 0x8000_0000));
+  }
   if let Some(c) = k.curves().first() {
     let curve = s.curve(*c)?;
     let pts = fox_engine::scene::curve_polyline(s, &curve.kind);
@@ -2919,6 +2952,13 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     if closed && pts.len() > 2 {
       line(pts[pts.len() - 1], pts[0]);
+    }
+  };
+  // construction geometry the tool will keep: grey dashed, as Fusion previews it
+  let dashed = |pts: &[[f64; 2]]| {
+    let v: Vec<Pos2> = pts.iter().filter_map(|p| s(*p)).collect();
+    if v.len() >= 2 {
+      painter.extend(egui::Shape::dashed_line(&v, Stroke::new(1.0, Color32::from_gray(128)), 6.0, 4.0));
     }
   };
   let circle = |c: [f64; 2], r: f64| {
@@ -2991,13 +3031,10 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
         Some((*a, r, a0, ((m[1] - a[1]).atan2(m[0] - a[0]) - a0).rem_euclid(std::f64::consts::TAU)))
       };
       if let Some((c, r, a0, sweep)) = geo {
-        let half = ((cur[0] - c[0]).hypot(cur[1] - c[1]) - r).abs();
-        poly(&arc_points(c, r, a0, sweep), false);
-        for rr in [r - half, r + half] {
-          if rr > 1e-9 {
-            poly(&arc_points(c, rr, a0, sweep), false);
-          }
-        }
+        // the finished outline (concentric arcs and round caps) about the dashed centreline
+        let w = 2.0 * ((cur[0] - c[0]).hypot(cur[1] - c[1]) - r).abs();
+        dashed(&arc_points(c, r, a0, sweep));
+        poly(&arc_slot_outline(c, r, a0, sweep, w), true);
       }
     }
     (Tool::Rect3, [a]) => line(*a, cur),
@@ -3032,38 +3069,58 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     (Tool::EdgePolygon, [a]) => poly(&edge_polygon_points(*a, cur, hud_sides_live(app)), true),
     (Tool::EdgePolygon, [a, b]) => {
-      // the polygon on the cursor's side of the edge
+      // the polygon on whichever side of the edge the cursor is, until the click fixes it
+      let n = hud_sides_live(app);
       let left = (b[0] - a[0]) * (cur[1] - a[1]) - (b[1] - a[1]) * (cur[0] - a[0]) >= 0.0;
-      let (p, q) = if left { (*a, *b) } else { (*b, *a) };
-      poly(&edge_polygon_points(p, q, hud_sides_live(app)), true);
+      poly(&if left { edge_polygon_points(*a, *b, n) } else { edge_polygon_points(*b, *a, n) }, true);
     }
-    (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
-    (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
-      line(*a, *b);
-      let w = point_line_dist(cur, *a, *b);
-      if app.tool == Tool::Ellipse {
-        // through the cursor; off the ends of the axis, as far from it as the cursor
-        let w = Ellipse2::minor_through(*a, *b, cur).unwrap_or(w);
-        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-        let r = dx.hypot(dy).max(1e-12);
-        let (c, s) = (dx / r, dy / r);
-        let pts: Vec<[f64; 2]> = (0..=64)
-          .map(|i| {
-            let t = std::f64::consts::TAU * i as f64 / 64.0;
-            let (x, y) = (r * t.cos(), w * t.sin());
-            [a[0] + x * c - y * s, a[1] + x * s + y * c]
-          })
-          .collect();
-        poly(&pts, false);
+    (Tool::OverallSlot | Tool::CenterSlot, [a]) => line(*a, cur),
+    // the ellipse's major axis, kept as construction
+    (Tool::Ellipse, [a]) => dashed(&[*a, cur]),
+    (Tool::Ellipse, [a, b]) => {
+      // through the cursor; off the ends of the axis, as far from it as the cursor
+      let w = Ellipse2::minor_through(*a, *b, cur).unwrap_or(point_line_dist(cur, *a, *b));
+      let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+      let r = dx.hypot(dy).max(1e-12);
+      let (c, s) = (dx / r, dy / r);
+      let pts: Vec<[f64; 2]> = (0..=64)
+        .map(|i| {
+          let t = std::f64::consts::TAU * i as f64 / 64.0;
+          let (x, y) = (r * t.cos(), w * t.sin());
+          [a[0] + x * c - y * s, a[1] + x * s + y * c]
+        })
+        .collect();
+      poly(&pts, false);
+      dashed(&[[2.0 * a[0] - b[0], 2.0 * a[1] - b[1]], *b]);
+      dashed(&[[a[0] + w * s, a[1] - w * c], [a[0] - w * s, a[1] + w * c]]);
+    }
+    (Tool::OverallSlot, [a, b]) => {
+      // the round ends fit inside the overall length
+      let w = 2.0 * point_line_dist(cur, *a, *b);
+      let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+      if l > w {
+        let k = w / 2.0 / l;
+        let d = [(b[0] - a[0]) * k, (b[1] - a[1]) * k];
+        let (c1, c2) = ([a[0] + d[0], a[1] + d[1]], [b[0] - d[0], b[1] - d[1]]);
+        dashed(&[c1, c2]);
+        poly(&slot_outline(c1, c2, w), true);
       } else {
-        circle(*a, w);
-        circle(*b, w);
+        line(*a, *b);
       }
+    }
+    (Tool::CenterSlot, [c, e]) => {
+      let o = [2.0 * c[0] - e[0], 2.0 * c[1] - e[1]];
+      let w = 2.0 * point_line_dist(cur, o, *e);
+      dashed(&[o, *e]);
+      poly(&slot_outline(o, *e, w), true);
     }
     (Tool::Rect, [a]) => poly(&[*a, [cur[0], a[1]], cur, [a[0], cur[1]]], true),
     (Tool::CenterRect, [c]) => {
       let o = [2.0 * c[0] - cur[0], 2.0 * c[1] - cur[1]];
       poly(&[o, [cur[0], o[1]], cur, [o[0], cur[1]]], true);
+      // the two construction diagonals the rectangle keeps
+      dashed(&[o, cur]);
+      dashed(&[[cur[0], o[1]], [o[0], cur[1]]]);
     }
     (Tool::Circle, [c]) => circle(*c, (cur[0] - c[0]).hypot(cur[1] - c[1])),
     (Tool::Arc3 | Tool::CenterArc | Tool::Slot, [a]) => line(*a, cur),
@@ -3090,10 +3147,10 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       }
     }
     (Tool::Slot, [a, b]) => {
-      let w = point_line_dist(cur, *a, *b);
-      circle(*a, w);
-      circle(*b, w);
-      line(*a, *b);
+      // the finished outline while the width is set, and the centreline it keeps
+      let w = 2.0 * point_line_dist(cur, *a, *b);
+      dashed(&[*a, *b]);
+      poly(&slot_outline(*a, *b, w), true);
     }
     _ => {}
   }
@@ -4503,12 +4560,14 @@ mod tests {
     let s = app.s.design.sketch(sk).unwrap();
     let arcs: Vec<_> = s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).collect();
     assert!(!arcs.is_empty());
-    // the slot's long arcs are about the origin (the circle through the three clicks)
+    // the slot's long arcs are about the origin (the circle through the three clicks), as is its
+    // construction arc centreline
     let about_origin = arcs.iter().filter(|c| {
       let centre = s.pos(s.curve_points(c.id)[0]).unwrap();
       centre[0].abs() < 1e-6 && centre[1].abs() < 1e-6
     });
-    assert_eq!(about_origin.count(), 2);
+    assert_eq!(about_origin.clone().filter(|c| !c.construction).count(), 2);
+    assert_eq!(about_origin.filter(|c| c.construction).count(), 1);
   }
 
   /// The Dimension tool: a pick starts a preview that follows the cursor, the placing click opens
@@ -5116,5 +5175,98 @@ mod tests {
     let lone = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 20], [8, 20]]})));
     let all = trim_piece(app.s.design.sketch(sk).unwrap(), lone, [4.0, 20.0]);
     assert!(all.len() == 1 && all[0].first() == Some(&[0.0, 20.0]) && all[0].last() == Some(&[8.0, 20.0]), "{all:?}");
+  }
+
+  #[test]
+  fn three_point_arc_slot_takes_start_end_then_a_point_on_the_arc() {
+    // Fusion's clicks: start centre, end centre, a point on the arc, then the width
+    let (mut app, sk) = sketching(Tool::ArcSlot3);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [20.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 5.0], None);
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty(), "nothing drawn until the width");
+    place_point(&mut app, sk, [10.0, 7.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(app.tstate.pts.is_empty());
+    // a small arc slot (not a three-quarter ring): the arc's R12.5 centre is below the chord
+    let pts: Vec<[f64; 2]> = s.curves.iter().flat_map(|c| fox_engine::scene::curve_polyline(s, &c.kind)).collect();
+    let lo = pts.iter().fold([f64::MAX; 2], |m, p| [m[0].min(p[0]), m[1].min(p[1])]);
+    let hi = pts.iter().fold([f64::MIN; 2], |m, p| [m[0].max(p[0]), m[1].max(p[1])]);
+    assert!(lo[0] > -3.0 && hi[0] < 23.0 && lo[1] > -3.0 && hi[1] < 10.0, "{lo:?} {hi:?}");
+    assert_eq!(s.curves.iter().filter(|c| c.construction).count(), 1, "the arc centreline");
+    let axis = s.curves.iter().find(|c| c.construction).unwrap();
+    let CurveKind::Arc { center, .. } = axis.kind else { panic!("{axis:?}") };
+    let c = s.pos(center).unwrap();
+    assert!((c[0] - 10.0).abs() < 1e-6 && (c[1] + 7.5).abs() < 1e-6, "{c:?}");
+    assert!(app.status.as_ref().is_none_or(|(_, err)| !*err), "{:?}", app.status);
+  }
+
+  #[test]
+  fn edge_polygon_third_click_picks_the_side() {
+    let (mut app, sk) = sketching(Tool::EdgePolygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["10", "4"]);
+    place_point(&mut app, sk, [1.0, 0.0], None);
+    // the second click only fixes the edge; the side comes next
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+    assert_eq!(app.tstate.pts.len(), 2);
+    place_point(&mut app, sk, [5.0, -1.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.len(), 4);
+    assert!(s.points.iter().all(|p| p.y <= 1e-9), "below the edge: {:?}", s.points);
+    assert_eq!(dims(&app, sk), vec![10.0], "the typed length still sizes the edge");
+    assert!(app.tstate.pts.is_empty());
+    // the other way, above
+    let (mut app, sk) = sketching(Tool::EdgePolygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    place_point(&mut app, sk, [5.0, 3.0], None);
+    assert!(app.s.design.sketch(sk).unwrap().points.iter().all(|p| p.y >= -1e-9));
+  }
+
+  #[test]
+  fn slot_previews_are_the_finished_outline() {
+    let extent = |pts: &[[f64; 2]]| {
+      let lo = pts.iter().fold([f64::MAX; 2], |m, p| [m[0].min(p[0]), m[1].min(p[1])]);
+      let hi = pts.iter().fold([f64::MIN; 2], |m, p| [m[0].max(p[0]), m[1].max(p[1])]);
+      (lo, hi)
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    // a straight slot: the caps reach half the width past the centres
+    let o = slot_outline([0.0, 0.0], [20.0, 0.0], 10.0);
+    let (lo, hi) = extent(&o);
+    assert!(near(lo, [-5.0, -5.0]) && near(hi, [25.0, 5.0]), "{lo:?} {hi:?}");
+    assert!(slot_outline([0.0, 0.0], [0.0, 0.0], 10.0).is_empty());
+    // the arc through start, a point on it and end runs clockwise below the chord's middle point
+    let (c, r, a0, sweep) = arc_through([0.0, 0.0], [10.0, 5.0], [20.0, 0.0]).unwrap();
+    assert!(near(c, [10.0, -7.5]) && (r - 12.5).abs() < 1e-9, "{c:?} {r}");
+    assert!(sweep < 0.0 && sweep.abs() < std::f64::consts::PI, "{sweep}");
+    let arc = arc_points(c, r, a0, sweep);
+    let mid = arc[arc.len() / 2];
+    assert!(near(mid, [10.0, 5.0]), "{mid:?}");
+    assert!(arc_through([0.0, 0.0], [10.0, 0.0], [20.0, 0.0]).is_none());
+    // its slot outline stays near the arc
+    let (lo, hi) = extent(&arc_slot_outline(c, r, a0, sweep, 4.0));
+    assert!(lo[0] > -3.0 && hi[0] < 23.0 && lo[1] > -3.0 && hi[1] < 8.0, "{lo:?} {hi:?}");
+  }
+
+  #[test]
+  fn glyphs_sit_at_junctions_and_polygon_centres() {
+    let (mut app, sk) = sketching(Tool::Select);
+    app.run("sketch.slot", json!({"sketch": sk.0, "start": [0, 0], "end": [20, 0], "width": 10})).unwrap();
+    app.run("sketch.polygon", json!({"sketch": sk.0, "center": [50, 0], "vertex": [60, 0], "sides": 5})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    for c in &s.constraints {
+      let Some((at, _)) = glyph_anchor(s, &c.kind) else { continue };
+      match &c.kind {
+        // a tangent glyph at the point the line and the arc share: a slot corner
+        ConstraintKind::Tangent { .. } => {
+          assert!((at[0].abs() < 1e-9 || (at[0] - 20.0).abs() < 1e-9) && (at[1].abs() - 5.0).abs() < 1e-9, "{at:?}");
+        }
+        ConstraintKind::Polygon { .. } => assert_eq!(at, [50.0, 0.0]),
+        _ => {}
+      }
+    }
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Polygon { .. })));
   }
 }

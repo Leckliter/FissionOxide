@@ -38,10 +38,10 @@ fn dxf_keeps_splines_and_ellipses_as_curves() {
   let before = curve_kinds(&s);
   let path = dir.join("curves.dxf");
   let r = run(&mut s, "export", json!({"path": path}));
-  assert_eq!(r["entities"], 4, "{r}");
+  assert_eq!(r["entities"], 6, "the ellipse keeps its two construction axes: {r}");
   let text = std::fs::read_to_string(&path).unwrap();
   assert!(text.contains("SPLINE") && text.contains("ELLIPSE"), "real entities, not line chains");
-  assert!(text.matches("\nLINE\n").count() == 1, "only the line is a LINE");
+  assert!(text.matches("\nLINE\n").count() == 3, "only the line and the ellipse's axes are LINEs");
 
   let mut t = Session::default();
   run(&mut t, "import", json!({"path": path}));
@@ -55,7 +55,8 @@ fn dxf_keeps_splines_and_ellipses_as_curves() {
   }
   // the spline's ends are joined to the line, as before
   let sk = &t.model.sketches[&t.design.features[0].id].sketch;
-  let line = sk.curves.iter().find(|c| matches!(c.kind, fox_sketch::CurveKind::Line { .. })).unwrap();
+  // the drawn line, not the ellipse's construction axes
+  let line = sk.curves.iter().find(|c| !c.construction && matches!(c.kind, fox_sketch::CurveKind::Line { .. })).unwrap();
   let fox_sketch::CurveKind::Line { a: la, .. } = line.kind else { panic!("not a line") };
   let fit = sk.curves.iter().find_map(|c| match &c.kind {
     fox_sketch::CurveKind::Spline { points, .. } => Some(points.clone()),

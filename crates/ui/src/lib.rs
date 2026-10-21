@@ -22,6 +22,7 @@ mod explode_ui;
 mod form_ui;
 mod forms;
 mod gen_ui;
+mod glyphs;
 mod gpu;
 mod handles;
 mod help;
@@ -83,6 +84,8 @@ pub struct App {
   tex: Option<TextureHandle>,
   render_key: Option<RenderKey>,
   pub hover: Option<Pick>,
+  /// What the hovered constraint glyph constrains, drawn in the hover colour.
+  pub glyph_hover: Vec<Pick>,
   pub tool: Tool,
   pub dialog: Option<Dialog>,
   /// Status-bar message: (text, is_error).
@@ -295,6 +298,8 @@ struct RenderKey {
   /// Faces and sketches highlighted from the timeline.
   peek_faces: Vec<(u32, u32)>,
   peek_sketches: Vec<u32>,
+  /// Sketch items a hovered constraint glyph highlights.
+  glyph_hover: Vec<Pick>,
 }
 
 impl App {
@@ -378,6 +383,7 @@ impl App {
       tex: None,
       render_key: None,
       hover: None,
+      glyph_hover: Vec::new(),
       tool: Tool::Select,
       dialog: None,
       status: None,

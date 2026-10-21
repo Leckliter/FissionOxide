@@ -130,25 +130,33 @@ impl Sketch {
     Ok(lines)
   }
 
-  /// Rectangle from its centre and a corner, with a construction diagonal whose midpoint is the
-  /// centre (so moving the centre moves the rectangle, as in Fusion).
+  /// Rectangle from its centre and a corner, with two construction diagonals crossing at the
+  /// centre: the centre is the midpoint of one and the diagonals are equal (so moving the centre
+  /// moves the rectangle, as in Fusion). Returns the sides bottom, right, top, left.
   pub fn add_center_rectangle(&mut self, center: PtSpec, corner: [f64; 2]) -> Result<[CurveId; 4], SketchError> {
     let c = self.spec_pos(center)?;
     let other = [2.0 * c[0] - corner[0], 2.0 * c[1] - corner[1]];
     let lines = self.add_rectangle(other, corner)?;
     let center = self.resolve(center)?;
-    // diagonal from the bottom-left to the top-right corner
+    // diagonals from the bottom-left to the top-right corner and from the bottom-right to the top-left
     let bl = self.curve_points(lines[0]).first().copied();
+    let br = self.curve_points(lines[0]).get(1).copied();
     let tr = self.curve_points(lines[1]).get(1).copied();
-    if let (Some(bl), Some(tr)) = (bl, tr) {
+    let tl = self.curve_points(lines[3]).first().copied();
+    if let (Some(bl), Some(br), Some(tr), Some(tl)) = (bl, br, tr, tl) {
       let diag = self.add_curve(CurveKind::Line { a: bl, b: tr })?;
       self.set_construction(diag, true)?;
+      let other = self.add_curve(CurveKind::Line { a: br, b: tl })?;
+      self.set_construction(other, true)?;
       self.add_constraint(ConstraintKind::Midpoint { p: center, line: diag })?;
+      self.add_constraint(ConstraintKind::Equal { a: diag, b: other })?;
     }
     Ok(lines)
   }
 
-  /// Regular polygon inscribed in a construction circle; `first` is the first vertex.
+  /// Regular polygon about `center`; `first` is the first vertex. The sides are kept regular by one
+  /// [`ConstraintKind::Polygon`] on the centre (Fusion's polygon glyph): no construction circle.
+  /// Returns the sides, the first from `first` counter-clockwise.
   pub fn add_polygon(&mut self, center: PtSpec, first: [f64; 2], sides: usize) -> Result<Vec<CurveId>, SketchError> {
     if !(3..=256).contains(&sides) {
       return Err(SketchError::InvalidValue(format!("{sides} sides (3–256)")));
@@ -159,8 +167,6 @@ impl Sketch {
       return Err(SketchError::InvalidValue("zero-size polygon".into()));
     }
     let center = self.resolve(center)?;
-    let circle = self.add_curve(CurveKind::Circle { center, radius: r })?;
-    self.set_construction(circle, true)?;
     let a0 = angle_of(c, first);
     let pts: Vec<PointId> = (0..sides)
       .map(|i| {
@@ -172,11 +178,8 @@ impl Sketch {
     for i in 0..sides {
       let (a, b) = (pts[i], pts[(i + 1) % sides]);
       lines.push(self.add_curve(CurveKind::Line { a, b })?);
-      self.add_constraint(ConstraintKind::PointOnCurve { p: a, curve: circle })?;
     }
-    for w in lines.windows(2) {
-      self.add_constraint(ConstraintKind::Equal { a: w[0], b: w[1] })?;
-    }
+    self.add_constraint(ConstraintKind::Polygon { center, lines: lines.clone() })?;
     Ok(lines)
   }
 
@@ -243,7 +246,9 @@ impl Sketch {
     (at == first).then_some(corners)
   }
 
-  /// Centre-to-centre slot of overall `width`: two lines and two tangent end arcs.
+  /// Centre-to-centre slot of overall `width`: two parallel lines and two equal tangent end arcs,
+  /// with a construction centreline between the arc centres (as Fusion draws a slot). Returns the
+  /// outline (line, end arc, line, start arc) and then the centreline.
   pub fn add_slot(&mut self, c1: [f64; 2], c2: [f64; 2], width: f64) -> Result<Vec<CurveId>, SketchError> {
     let len = dist(c1, c2);
     if !(len > 1e-9 && width.is_finite() && width > 1e-9) {
@@ -271,7 +276,10 @@ impl Sketch {
       self.add_constraint(ConstraintKind::Tangent { a: l, b: a })?;
     }
     self.add_constraint(ConstraintKind::Equal { a: a1, b: a2 })?;
-    Ok(vec![l1, a2, l2, a1])
+    self.add_constraint(ConstraintKind::Parallel { a: l1, b: l2 })?;
+    let axis = self.add_curve(CurveKind::Line { a: ce1, b: ce2 })?;
+    self.set_construction(axis, true)?;
+    Ok(vec![l1, a2, l2, a1, axis])
   }
 }
 
@@ -319,6 +327,63 @@ mod tests {
     assert!(s.add_polygon(PtSpec::At(0.0, 0.0), [1.0, 0.0], 2).is_err());
     assert!(s.add_slot([0.0, 0.0], [0.0, 0.0], 1.0).is_err());
     assert!(s.add_rectangle([0.0, 0.0], [0.0, 5.0]).is_err());
+  }
+
+  #[test]
+  fn shapes_keep_fusions_construction_and_constraints() {
+    // a centre rectangle: two construction diagonals, the centre on the middle of one, equal
+    let mut s = Sketch::new();
+    let lines = s.add_center_rectangle(PtSpec::Point(crate::ORIGIN), [10.0, 5.0]).unwrap();
+    let diagonals: Vec<CurveId> = s.curves.iter().filter(|c| c.construction).map(|c| c.id).collect();
+    assert_eq!(diagonals.len(), 2);
+    assert!(
+      s.constraints
+        .iter()
+        .any(|c| matches!(c.kind, ConstraintKind::Midpoint { p, line } if p == crate::ORIGIN && line == diagonals[0]))
+    );
+    assert!(
+      s.constraints
+        .iter()
+        .any(|c| matches!(c.kind, ConstraintKind::Equal { a, b } if a == diagonals[0] && b == diagonals[1]))
+    );
+    // dragging a corner keeps it a rectangle about the origin
+    let tr = s.curve_points(lines[1])[1];
+    assert!(s.drag(tr, [12.0, 8.0]).ok());
+    let bl = s.curve_points(lines[0])[0];
+    let p = s.pos(bl).unwrap();
+    assert!((p[0] + 12.0).abs() < 1e-6 && (p[1] + 8.0).abs() < 1e-6, "{p:?}");
+
+    // a polygon: its sides and one Polygon constraint, no construction circle
+    let mut s = Sketch::new();
+    let sides = s.add_polygon(PtSpec::At(50.0, 0.0), [60.0, 0.0], 6).unwrap();
+    assert_eq!(s.curves.len(), 6);
+    assert!(s.curves.iter().all(|c| !c.construction && matches!(c.kind, CurveKind::Line { .. })));
+    let polygon: Vec<&crate::Constraint> =
+      s.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Polygon { .. })).collect();
+    assert_eq!(polygon.len(), 1);
+    assert_eq!(s.constraints.len(), 1, "no equal or point-on-curve constraints: {:?}", s.constraints);
+    let ConstraintKind::Polygon { center, lines } = &polygon[0].kind else { panic!() };
+    assert_eq!(s.pos(*center).unwrap(), [50.0, 0.0]);
+    assert_eq!(*lines, sides);
+    // the first side runs counter-clockwise from the first vertex
+    let [a, b] = s.curve_points(sides[0])[..] else { panic!() };
+    assert_eq!(s.pos(a).unwrap(), [60.0, 0.0]);
+    assert!(s.pos(b).unwrap()[1] > 0.0);
+
+    // a slot: the outline, then a construction centreline between the arc centres; the lines
+    // parallel, the arcs equal and tangent to both lines
+    let mut s = Sketch::new();
+    let made = s.add_slot([0.0, 30.0], [20.0, 30.0], 6.0).unwrap();
+    assert_eq!(made.len(), 5);
+    let axis = s.curve(made[4]).unwrap();
+    assert!(axis.construction);
+    let CurveKind::Line { a, b } = axis.kind else { panic!("{axis:?}") };
+    assert_eq!((s.pos(a).unwrap(), s.pos(b).unwrap()), ([0.0, 30.0], [20.0, 30.0]));
+    let count = |f: &dyn Fn(&ConstraintKind) -> bool| s.constraints.iter().filter(|c| f(&c.kind)).count();
+    assert_eq!(count(&|k| matches!(k, ConstraintKind::Tangent { .. })), 4);
+    assert_eq!(count(&|k| matches!(k, ConstraintKind::Equal { .. })), 1);
+    assert_eq!(count(&|k| matches!(k, ConstraintKind::Parallel { a, b } if *a == made[0] && *b == made[2])), 1);
+    assert!(s.solve().ok());
   }
 
   /// A closed loop of lines through `pts`, starting at the origin when the first point is (0, 0).

@@ -54,7 +54,7 @@ fn remove_duplicates_keeps_corners_and_the_first_copy() {
   run(&mut s, "sketch.ellipse", json!({"center": [60, 0], "major": [66, 0], "minor": 3}));
   run(&mut s, "sketch.ellipse", json!({"center": [60, 0], "major": [54, 0], "minor": 3}));
   let before = s.design.sketch(sk).unwrap().curves.len();
-  assert_eq!(lines(&s, sk), 10);
+  assert_eq!(lines(&s, sk), 14, "10 lines and the ellipses' construction axes");
 
   // the dry run only reports
   let dry = run(&mut s, "sketch.remove_duplicates", json!({"dry_run": true}));
@@ -74,7 +74,7 @@ fn remove_duplicates_keeps_corners_and_the_first_copy() {
   let done = run(&mut s, "sketch.remove_duplicates", json!({}));
   assert_eq!(done["removed"], 7, "{done}");
   assert_eq!(s.design.sketch(sk).unwrap().curves.len(), before - 7);
-  assert_eq!(lines(&s, sk), 7);
+  assert_eq!(lines(&s, sk), 11);
   // the overlapping line now runs from the square's corner up
   let trimmed = done["trimmed"][0].as_u64().unwrap() as u32;
   let sketch = s.design.sketch(sk).unwrap();
