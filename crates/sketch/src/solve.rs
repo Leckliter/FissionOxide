@@ -66,7 +66,59 @@ impl Sketch {
   /// Solves all constraints, moving geometry as little as possible. Positions are written back
   /// when the solve succeeds; on failure the best attempt is kept only if `keep_on_failure`.
   pub fn solve(&mut self) -> SolveReport {
+    self.turn_lines_about_held_ends();
     self.solve_inner(None, true)
+  }
+
+  /// Before a solve, a line that a Horizontal or Vertical constraint has yet to straighten turns
+  /// about the end something else holds (fixed, named by another constraint, or shared with
+  /// another curve), keeping its length, when its other end is held by nothing. That is where
+  /// Fusion puts it: making a line horizontal when one end lies on a circle swings the free end
+  /// round that end, leaving the circle alone. From the drawn geometry the minimum-norm step
+  /// would instead drag the circle and both ends about, and turn a vertical line being made
+  /// horizontal into a point. A line with both ends free or both held is left to the solver, and
+  /// a line that is already straight is untouched, so a sketch read from a file solves as saved.
+  fn turn_lines_about_held_ends(&mut self) {
+    let mut moves: Vec<(PointId, [f64; 2])> = Vec::new();
+    for c in &self.constraints {
+      let (line, horizontal) = match c.kind {
+        ConstraintKind::Horizontal { line } => (line, true),
+        ConstraintKind::Vertical { line } => (line, false),
+        _ => continue,
+      };
+      let Some(CurveKind::Line { a, b }) = self.curve(line).map(|c| &c.kind) else { continue };
+      let (a, b) = (*a, *b);
+      let (Some(pa), Some(pb)) = (self.pos(a), self.pos(b)) else { continue };
+      let axis = usize::from(horizontal);
+      if (pa[axis] - pb[axis]).abs() < 1e-9 {
+        continue;
+      }
+      let (held, free, pf) = match (self.point_held(a, line), self.point_held(b, line)) {
+        (true, false) => (pa, b, pb),
+        (false, true) => (pb, a, pa),
+        _ => continue,
+      };
+      let len = crate::dist(held, pf);
+      // the line keeps leaning the way it did
+      let lean = if pf[1 - axis] < held[1 - axis] { -len } else { len };
+      let mut to = held;
+      to[1 - axis] += lean;
+      moves.push((free, to));
+    }
+    for (p, to) in moves {
+      if let Some(pt) = self.point_mut(p) {
+        pt.x = to[0];
+        pt.y = to[1];
+      }
+    }
+  }
+
+  /// Whether anything but `line` itself holds point `p`: it is fixed, a constraint names it, or
+  /// another curve uses it.
+  fn point_held(&self, p: PointId, line: CurveId) -> bool {
+    self.point(p).is_none_or(|pt| pt.fixed)
+      || self.constraints.iter().any(|c| c.kind.points().contains(&p))
+      || self.curves.iter().any(|c| c.id != line && crate::curve_points(&c.kind).contains(&p))
   }
 
   /// Moves `point` towards `to` and re-solves with it held there; if that conflicts with the
@@ -1447,5 +1499,67 @@ mod tests {
     // circles have no midpoint
     let c = s.add_circle(PtSpec::At(30.0, 0.0), 5.0).unwrap();
     assert!(s.add_constraint(ConstraintKind::Midpoint { p: m, line: c }).is_err());
+  }
+
+  /// Trims a line from inside the circle out, leaving its one end on the circle (`ui:sketch:horizontal-conflict`).
+  fn line_trimmed_to_circle(far: [f64; 2]) -> (Sketch, CurveId, CurveId) {
+    let mut s = Sketch::new();
+    let c = s.add_circle(PtSpec::At(5.0, 5.0), 10.0).unwrap();
+    let (l, _) = s.add_line(PtSpec::At(6.0, 5.5), PtSpec::At(far[0], far[1])).unwrap();
+    s.trim(l, [6.3, 5.7]).unwrap();
+    let r = s.solve();
+    assert!(r.ok() && r.dof == 6, "{r:?}");
+    (s, l, c)
+  }
+
+  #[test]
+  fn horizontal_on_a_line_with_one_end_on_a_circle_turns_it_about_that_end() {
+    for (far, kind) in [
+      ([35.0, 25.0], "h"),
+      ([25.0, 35.0], "v"),
+      ([-30.0, 20.0], "h"),
+      // an exactly vertical line made horizontal, and the other way round
+      ([6.0, 40.0], "h"),
+      ([40.0, 5.5], "v"),
+    ] {
+      let (mut s, l, c) = line_trimmed_to_circle(far);
+      let [on_circle, free] = [s.curve_points(l)[0], s.curve_points(l)[1]];
+      let (p0, q0) = (s.pos(on_circle).unwrap(), s.pos(free).unwrap());
+      let len = dist(p0, q0);
+      let circle = (s.pos(s.curve_points(c)[0]).unwrap(), s.radius(c).unwrap());
+      let constraint =
+        if kind == "h" { ConstraintKind::Horizontal { line: l } } else { ConstraintKind::Vertical { line: l } };
+      s.add_constraint(constraint).unwrap();
+      let r = s.solve();
+      assert!(r.ok() && r.dof == 5, "{kind} to {far:?}: {r:?}");
+      let (p, q) = (s.pos(on_circle).unwrap(), s.pos(free).unwrap());
+      assert!(dist(p, p0) < 1e-9, "{kind} to {far:?}: the end on the circle stays, moved to {p:?}");
+      let after = (s.pos(s.curve_points(c)[0]).unwrap(), s.radius(c).unwrap());
+      assert_eq!(after, circle, "{kind} to {far:?}: the circle stays");
+      assert!((dist(p, q) - len).abs() < 1e-9, "{kind} to {far:?}: the line keeps its length");
+      let axis = usize::from(kind == "h");
+      assert!((p[axis] - q[axis]).abs() < 1e-9, "{kind} to {far:?}: the line is straight: {p:?} {q:?}");
+      // leaning the way it was drawn
+      assert_eq!((q[1 - axis] - p[1 - axis]).signum(), (q0[1 - axis] - p0[1 - axis]).signum());
+    }
+  }
+
+  #[test]
+  fn a_line_with_both_ends_free_or_held_solves_as_before() {
+    // free: both ends move
+    let mut s = Sketch::new();
+    let (l, [a, b]) = s.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(10.0, 4.0)).unwrap();
+    s.add_constraint(ConstraintKind::Horizontal { line: l }).unwrap();
+    assert!(s.solve().ok());
+    assert!((s.pos(a).unwrap()[1] - 2.0).abs() < 1e-6 && (s.pos(b).unwrap()[1] - 2.0).abs() < 1e-6);
+    // both held (one fixed, one on a circle): the solver finds a place, moving the circle
+    let (mut s, l, c) = line_trimmed_to_circle([35.0, 25.0]);
+    let free = s.curve_points(l)[1];
+    let q = s.pos(free).unwrap();
+    s.add_constraint(ConstraintKind::Fix { p: free, x: q[0], y: q[1] }).unwrap();
+    s.add_constraint(ConstraintKind::Horizontal { line: l }).unwrap();
+    let r = s.solve();
+    assert!(r.ok() && r.dof == 3, "{r:?}");
+    assert!(s.pos(free).unwrap() == q && s.radius(c).unwrap() > 0.0);
   }
 }

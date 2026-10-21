@@ -2116,6 +2116,34 @@ mod tests {
     assert_eq!(panels::palette_pos(canvas, Some(moved)), home);
   }
 
+  /// `ui:sketch:horizontal-conflict`: the palette's Horizontal/Vertical on a line trimmed onto a
+  /// circle applies (Fusion turns the line about the end on the circle) instead of reporting a
+  /// conflict.
+  #[test]
+  fn horizontal_vertical_applies_to_a_line_trimmed_to_a_circle() {
+    let mut app = App::with_session(Session::default());
+    app.create_sketch(json!("xy"));
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.circle", json!({"sketch": sk.0, "center": [5, 5], "radius": 10})).unwrap();
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[6, 5.5], [35, 25]]})).unwrap();
+    let line = fox_engine::sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+    app.run("sketch.trim", json!({"sketch": sk.0, "curve": line.0, "at": [6.3, 5.7]})).unwrap();
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: line }];
+    panels::Cmd::Constraint("hv").run(&mut app);
+    assert!(app.status.as_ref().is_none_or(|s| !s.1), "{:?}", app.status);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(
+      s.constraints
+        .iter()
+        .any(|c| matches!(c.kind, fox_engine::sketch::ConstraintKind::Horizontal { line: l } if l == line)),
+      "{:?}",
+      s.constraints
+    );
+    let [a, b] = [s.curve_points(line)[0], s.curve_points(line)[1]];
+    assert!((s.pos(a).unwrap()[1] - s.pos(b).unwrap()[1]).abs() < 1e-9);
+    assert!(app.s.selection.is_empty(), "the selection clears once the constraint is on");
+  }
+
   #[test]
   fn a_tool_hint_clears_when_the_tool_ends() {
     let mut app = App::with_session(Session::default());

@@ -109,6 +109,66 @@ fn sketch_constraints_and_dimensions() {
   assert!((total_volume(&s) - expected).abs() < 1e-6, "{}", total_volume(&s));
 }
 
+/// `ui:sketch:horizontal-conflict`: Horizontal on a line whose one end was trimmed onto a circle
+/// applies, and turns the line about that end as Fusion does, leaving the circle where it was.
+#[test]
+fn horizontal_on_a_line_trimmed_to_a_circle_turns_it_about_the_end_on_the_circle() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.circle", json!({"center": [5, 5], "radius": 10}));
+  let circle = sketch::CurveId(r["curves"][0].as_u64().unwrap() as u32);
+  let r = run(&mut s, "sketch.line", json!({"points": [[6, 5.5], [35, 25]]}));
+  let line = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.trim", json!({"curve": line, "at": [6.3, 5.7]}));
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["dof"], 6, "{info}");
+  let sk = s.edit_sketch.unwrap();
+  let sketch = s.design.sketch(sk).unwrap();
+  let ends = sketch.curve_points(sketch::CurveId(line as u32));
+  let (on_circle, free) = (sketch.pos(ends[0]).unwrap(), sketch.pos(ends[1]).unwrap());
+  let centre = sketch.pos(sketch.curve_points(circle)[0]).unwrap();
+  assert!(((on_circle[0] - 5.0).hypot(on_circle[1] - 5.0) - 10.0).abs() < 1e-9, "trimmed onto the circle");
+  let len = (free[0] - on_circle[0]).hypot(free[1] - on_circle[1]);
+  let r = run(&mut s, "sketch.constrain", json!({"type": "horizontal", "curves": [line]}));
+  assert_eq!(r["dof"], 5, "{r}");
+  let sketch = s.design.sketch(sk).unwrap();
+  let (p, q) = (sketch.pos(ends[0]).unwrap(), sketch.pos(ends[1]).unwrap());
+  assert_eq!(p, on_circle, "the end on the circle stays");
+  assert!((q[1] - p[1]).abs() < 1e-9 && q[0] > p[0], "the free end swings round to the right: {q:?}");
+  assert!(((q[0] - p[0]).hypot(q[1] - p[1]) - len).abs() < 1e-9, "the line keeps its length");
+  assert_eq!(sketch.pos(sketch.curve_points(circle)[0]).unwrap(), centre);
+  assert!((sketch.radius(circle).unwrap() - 10.0).abs() < 1e-9);
+}
+
+/// The prober's steps behind `ui:sketch:horizontal-conflict`, on a body's top face: a circle
+/// with a typed diameter, the diameter edited, a line, Trim, Offset, then Horizontal on the
+/// trimmed line.
+#[test]
+fn horizontal_after_trim_and_offset_on_a_face_sketch() {
+  let mut s = Session::default();
+  plate(&mut s);
+  let b = &s.model.bodies[0];
+  let top = b.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  let body = b.id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"body": body, "face": top}}));
+  let r = run(&mut s, "sketch.circle", json!({"center": [20, 20], "diameter": "12"}));
+  let circle = r["curves"][0].as_u64().unwrap();
+  let dim = s.design.sketch(s.edit_sketch.unwrap()).unwrap().constraints.last().unwrap().id.0;
+  run(&mut s, "sketch.set_dimension", json!({"constraint": dim, "value": "10"}));
+  let r = run(&mut s, "sketch.line", json!({"points": [[21, 20.5], [60, 45]]}));
+  let line = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.trim", json!({"curve": line, "at": [21.3, 20.7]}));
+  run(&mut s, "sketch.offset", json!({"curves": [circle], "distance": 2}));
+  let info = run(&mut s, "sketch.info", json!({}));
+  assert_eq!(info["dof"], 6, "{info}");
+  let r = run(&mut s, "sketch.constrain", json!({"type": "horizontal", "curves": [line]}));
+  assert_eq!(r["dof"], 5, "{r}");
+  let sketch = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
+  let ends = sketch.curve_points(sketch::CurveId(line as u32));
+  let (p, q) = (sketch.pos(ends[0]).unwrap(), sketch.pos(ends[1]).unwrap());
+  assert!((p[1] - q[1]).abs() < 1e-9 && ((p[0] - 20.0).hypot(p[1] - 20.0) - 5.0).abs() < 1e-9, "{p:?} {q:?}");
+}
+
 #[test]
 fn revolve_patterns_and_feature_edits() {
   let mut s = Session::default();
