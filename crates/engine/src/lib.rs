@@ -41,6 +41,7 @@ mod subassembly;
 mod surfaces;
 mod trace;
 mod views;
+pub mod explode;
 
 use std::path::PathBuf;
 
@@ -625,3 +626,5 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
+#[cfg(test)]
+mod tests_explode;

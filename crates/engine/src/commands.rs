@@ -34,7 +34,7 @@ cmds! {
   "new" => "Start a new design", "{name?}";
   "open" => "Open a design (.fox, .foxz) or any importable file as a new design", "{path}";
   "save" => "Save the design to a file (.fox JSON, or .foxz archive)", "{path?}";
-  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool}";
+  "export" => "Export by extension: .step .iges .brep (exact), .stl .obj .3mf .ply .glb .usdz (mesh), .dxf .svg (sketch), .fox .foxz", "{path, bodies?: [id], sketch?, ascii?: bool, explode?: bool | {direction?, factor?, ...} (mesh formats: the exploded view's positions)}";
   "import" => "Import into this design: STEP, IGES, BRep, STL, OBJ, 3MF, PLY (bodies), DXF, SVG (new sketch), .fox/.foxz (their bodies)", "{path, merge_coplanar?: bool, units?: mm|cm|m|in|ft (STL, OBJ, PLY), plane?}";
   "formats" => "Every file format with import/export support", "{}";
   "form.insert_tsm" => "Insert T-Spline: a T-Spline Mesh (.tsm) control cage becomes a smooth body (its Catmull-Clark limit surface, one face per region between star points)", "{path? | text?: the file's contents, name?}";
@@ -210,7 +210,7 @@ cmds! {
   "attribute.get" => "Attributes on a target", "{target?, group?, name?}";
   "attribute.find" => "Attributes anywhere in the design, by group, name and/or value (only on things that still exist)", "{group?, name?, value?}";
   "attribute.delete" => "Remove attributes from a target (no name = the whole group)", "{target?, group, name?}";
-  "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked; style picks a visual style, the line drawings (hidden_line: visible edges and silhouettes solid, hidden ones dashed; visible_line: only what can be seen) included", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, style?: shaded|shaded_visible_edges|shaded_hidden_edges|wireframe|wireframe_hidden_edges|wireframe_visible_edges|hidden_line|visible_line, background?: \"#rrggbb\"}";
+  "view.render" => "Render the model to a PNG file: a standard view or yaw/pitch, ortho or perspective, fitted to the bodies shown; sketches and grid off unless asked; style picks a visual style, the line drawings (hidden_line: visible edges and silhouettes solid, hidden ones dashed; visible_line: only what can be seen) included", "{path, width?, height?, view?: home|top|bottom|front|back|left|right, yaw?, pitch?, fov?, ortho?, target?: [x,y,z], distance?, bodies?: [id] (only these), sketches?, grid?, edges?, style?: shaded|shaded_visible_edges|shaded_hidden_edges|wireframe|wireframe_hidden_edges|wireframe_visible_edges|hidden_line|visible_line, background?: \"#rrggbb\", camera?: named view (its whole camera), explode?: bool | {direction?, factor?, components?, order?} (default: the design's exploded view)}";
   "view.named.save" => "Save a camera as a named view (an existing name is replaced)", "{name? (default Named View N), target: [x,y,z], yaw, pitch, distance, fov?, ortho?}";
   "view.named.list" => "The design's named views", "{}";
   "view.named.get" => "One named view's camera", "{name}";
@@ -457,6 +457,8 @@ cmds! {
   "sketch.library.insert" => "Insert a sketch library part: its curves copied into the sketch with the part's origin at a point, turned and scaled", "{sketch?, part: pack/name | name | path, at: [x, y], angle?, scale?, folders?: [path]}";
   "sketch.remove_duplicates" => "Remove Duplicates: delete curves lying on another of the same kind, keeping the first: lines with matching ends or overlapping on one line (an overlap part way cuts the second back; a shared corner is never a duplicate), arcs and circles with the same centre, radius and ends, splines with the same points, ellipses likewise; distances within tolerance; dry_run only reports", "{sketch?, tolerance? (default 0.001 in), include_construction?: bool, dry_run?: bool}";
   "sketch.cleanup" => "Clean Up an imported or projected sketch for DXF: break projection links, delete constraints (on projected geometry, all, or none) and dimensions, delete points no curve uses, construction to normal, close gaps between curve ends (moved together and made coincident), splines to lines or arcs", "{sketch?, break_links?: bool (true), delete_constraints?: projected|all|none, delete_dimensions?: bool, purge_points?: bool (true), construction_to_normal?: bool, merge_gaps?: null|true|tolerance, gap_tolerance?, splines_to?: null|lines|arcs, segments?: 4..512 (64, lines), spline_tolerance? (0.001 in, arcs)}";
+  "view.explode" => "Exploded view (display only: no timeline feature, joints and the design stay put; saved with the design): components sorted by their centre along the direction, the i-th of N moved i x range x factor / N (range = the assembly's extent that way); components below another move with it only. Fields not given keep the current view's; off clears it", "{off?: true, components?: [id | name] (default every top-level one), direction?: x|y|z|-x|-y|-z|auto|[x,y,z] (default z), factor? (default 1), order?: position|browser, name?}";
+  "view.render_components" => "Batch render: one square PNG per component (with those below it) on its own, others left out (visibility untouched), plus a manifest .json and .csv with index, component, leading number (01 - Letters -> 01), name, area in2 and mm2 (powder coat), appearance and image path", "{folder, size? (default 1080), camera?: {yaw, pitch} (default 15, 20 degrees) | named or standard view, style?: shaded|shaded_edges, ortho? (default true), components?: [id | name] (default every top-level one), label? (default the design name), name_pattern? (default \"{label} - {component}\"; also {number}, {index}), manifest? (default \"{label} - Part Data\"), background?}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -516,6 +518,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::properties::run(s, name, p) {
+  if let Some(r) = crate::explode::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::newcomp::run(s, name, p) {

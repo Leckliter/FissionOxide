@@ -143,6 +143,8 @@ pub struct ViewOptions {
   /// Construction planes left out (the one an Offset Plane dialog previews, which the UI fills
   /// itself).
   pub hide_planes: Vec<FeatureId>,
+  /// Bodies' exploded-view offsets; `None` = the design's exploded view (`view.explode`).
+  pub explode: Option<HashMap<BodyId, DVec3>>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -154,6 +156,8 @@ pub struct SceneBuilder {
   /// Section caps per body, for the plane they were cut with.
   caps: HashMap<BodyId, (Plane, Option<TriMesh>)>,
   curvature: HashMap<BodyId, Vec<[u8; 4]>>,
+  /// The design's exploded view and its offsets, for the revision they were worked out at.
+  explode: Option<(u64, fox_model::explode::ExplodedView, HashMap<BodyId, DVec3>)>,
 }
 
 impl SceneBuilder {
@@ -172,6 +176,7 @@ impl SceneBuilder {
     let selected_bodies: Vec<BodyId> =
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
     let editing = s.edit_sketch.is_some();
+    let offsets = self.explode_offsets(s, opts);
 
     // a version comparison replaces the bodies
     if let Some(d) = &s.diff {
@@ -261,6 +266,15 @@ impl SceneBuilder {
           scene.meshes.push(mesh);
         }
       }
+      let offset = offsets.get(&body.id).copied().filter(|o| *o != DVec3::ZERO);
+      if let Some(o) = offset {
+        let o = o.as_vec3();
+        for mesh in &mut scene.meshes[first..] {
+          for p in mesh.positions.iter_mut() {
+            *p = (fox_kernel::glam::Vec3::from(*p) + o).to_array();
+          }
+        }
+      }
       if !opts.hide_edges {
         let edges = self.edges.entry(body.id).or_insert_with(|| {
           let tol = (body.diagonal() * 0.001).clamp(0.002, 0.5);
@@ -277,6 +291,10 @@ impl SceneBuilder {
               kept.iter().map(|p| p.as_vec3().to_array()).collect()
             }
             None => e.points.iter().map(|p| p.as_vec3().to_array()).collect(),
+          };
+          let points = match offset {
+            Some(o) => points.into_iter().map(|p| (fox_kernel::glam::Vec3::from(p) + o.as_vec3()).to_array()).collect(),
+            None => points,
           };
           let (color, width) = if selected.contains(&pick) {
             (SELECT_COLOR, 3.0)
@@ -434,6 +452,25 @@ impl SceneBuilder {
     }
     scene.analysis = opts.analysis;
     (scene, picks)
+  }
+
+  /// The exploded-view offsets to draw with: the options' own, else the design's (cached).
+  fn explode_offsets(&mut self, s: &Session, opts: &ViewOptions) -> HashMap<BodyId, DVec3> {
+    if let Some(o) = &opts.explode {
+      return o.clone();
+    }
+    let Some(view) = &s.design.exploded_view else {
+      self.explode = None;
+      return HashMap::new();
+    };
+    match &self.explode {
+      Some((rev, v, o)) if *rev == s.revision && v == view => o.clone(),
+      _ => {
+        let o = crate::explode::offsets_of(s, view);
+        self.explode = Some((s.revision, view.clone(), o.clone()));
+        o
+      }
+    }
   }
 }
 
@@ -950,16 +987,29 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     Some(o) => o.contains(&id),
     None => s.body_visible(id),
   };
+  let offsets = crate::explode::requested(s, p)?;
   let mut bounds: Option<(DVec3, DVec3)> = None;
   for b in s.model.bodies.iter().filter(|b| shown(b.id)) {
     if let Ok(m) = b.shape.mass() {
-      let (lo, hi) = bounds.get_or_insert((m.bbox_min, m.bbox_max));
-      *lo = lo.min(m.bbox_min);
-      *hi = hi.max(m.bbox_max);
+      let o = offsets.get(&b.id).copied().unwrap_or(DVec3::ZERO);
+      let (lo, hi) = bounds.get_or_insert((m.bbox_min + o, m.bbox_max + o));
+      *lo = lo.min(m.bbox_min + o);
+      *hi = hi.max(m.bbox_max + o);
     }
   }
   let (lo, hi) = bounds.or_else(|| s.model.bounds()).unwrap_or((DVec3::splat(-50.0), DVec3::splat(50.0)));
   cam.fit(lo, hi, w as f64 / h as f64);
+  // a named view's whole camera
+  if let Some(name) = p.get("camera").and_then(Value::as_str) {
+    let v = s
+      .design
+      .named_views
+      .iter()
+      .find(|v| v.name.eq_ignore_ascii_case(name))
+      .ok_or_else(|| CmdError::new(format!("no named view '{name}'")))?;
+    (cam.target, cam.yaw, cam.pitch, cam.distance, cam.fov, cam.ortho, cam.roll) =
+      (v.target, v.yaw, v.pitch, v.distance, v.fov, v.ortho, 0.0);
+  }
   if p.get("target").is_some() {
     cam.target = crate::commands::req_vec3(p, "target")?;
   }
@@ -978,6 +1028,7 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
     hide_grid: !flag("grid", false),
     hide_edges: !flag("edges", style.edges()),
     only_bodies: only,
+    explode: Some(offsets),
     ..view_options(s, p).map_err(CmdError::new)?
   };
   let (mut scene, _) = SceneBuilder::default().build(s, &opts);

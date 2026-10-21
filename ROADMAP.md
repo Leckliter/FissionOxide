@@ -16,7 +16,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
 | Fabrication | Cut-service checks with shop profiles (SendCutSend, OSH Cut, Ponoko); cut estimate (area, cut length, pierces); every part's flat pattern on one sheet / DXF |
-| View      | Exploded views; batch render one image per component |
 
 ## Files and data
 

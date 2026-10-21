@@ -720,7 +720,10 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
     FormatKind::Mesh => {
       let bodies = export_bodies(s, p)?;
       let weld = matches!(fmt.id, "stl" | "3mf" | "ply");
-      let meshes = body_meshes(s, &bodies, weld);
+      let meshes = match p.get("explode") {
+        Some(_) => crate::explode::exploded_meshes(s, p, &bodies, weld)?,
+        None => body_meshes(s, &bodies, weld),
+      };
       let bytes = match fmt.id {
         "stl" if p.get("ascii").and_then(Value::as_bool).unwrap_or(false) => {
           fox_exchange::write_stl_ascii(&meshes).into_bytes()

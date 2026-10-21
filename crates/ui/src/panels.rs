@@ -283,6 +283,7 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.checkbox(&mut app.show_comments, "Show Comments");
     ui.checkbox(&mut app.show_navbar, "Show Navigation Bar");
     ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
+    crate::explode_ui::view_menu(app, ui);
   });
   ui.separator();
   if ui.button("Plugins...").on_hover_text("Install, update and manage plugins (.foxplugin)").clicked() {

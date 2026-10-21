@@ -48,6 +48,7 @@ mod units;
 mod updates;
 mod viewcube;
 mod viewport;
+mod explode_ui;
 
 use std::path::PathBuf;
 
@@ -227,6 +228,8 @@ pub struct App {
   pub(crate) plugins: plugins_ui::PluginsUi,
   /// Insert > Sketch Library: the part picker and placing parts with clicks.
   pub(crate) library_ui: library_ui::LibraryUi,
+  /// View ▸ Render Components….
+  pub(crate) render_components: explode_ui::RenderComponents,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -426,6 +429,7 @@ impl App {
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
       library_ui: library_ui::LibraryUi::default(),
+      render_components: explode_ui::RenderComponents::default(),
     }
   }
 
@@ -1586,6 +1590,7 @@ impl App {
     library_ui::window(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
+    explode_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
       egui::Popup::close_all(&ctx);
     }

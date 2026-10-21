@@ -217,6 +217,12 @@ change a parameter and watch the whole history rebuild.
   new component (inside the active one, if any) that the feature keeps rebuilding it in, as in
   Fusion. `component.next_number` gives the smallest unused leading number among top-level
   component names (`01`, `02 - Letters`, …) for tools that number their parts or layers.
+- **Exploded views and batch renders.** View → Explode pulls the components apart along Z (a
+  spacing slider sets how far), for display only: no timeline feature, joints and the design
+  stay put, and the view is saved with the design. Renders and mesh exports can show it.
+  View → Render Components… writes one image per component on its own and a part list (`.json`
+  and `.csv`) with each part's number, area in in² and mm² (for powder coat) and appearance.
+  Commands `view.explode` and `view.render_components`.
 
 ## Install
 
@@ -894,6 +900,10 @@ These exist so code driving the engine can inspect and tag what it builds (see
 - `sketch.transform` (move, rotate, scale) and `sketch.insert` (copy curves from a sketch, a
   DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
+- `view.render` also takes a named view's camera (`camera`) and an exploded view (`explode`):
+  `{"view": "top", "ortho": true}` for a top view, `{"yaw": 45, "pitch": 30, "ortho": true,
+  "explode": {"factor": 20}}` for an exploded one; `view.render_components` renders each
+  component on its own into a folder with a part list.
 - Anywhere a plane is taken, `{"origin": [x,y,z], "normal": [x,y,z]}` is a free plane.
 
 ## Plugins

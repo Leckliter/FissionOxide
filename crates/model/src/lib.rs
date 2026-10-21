@@ -39,6 +39,7 @@ pub mod subassembly;
 pub mod surface;
 pub mod thread;
 pub mod units;
+pub mod explode;
 
 use serde::{Deserialize, Serialize};
 
@@ -151,6 +152,9 @@ pub struct Design {
   /// The Electronics workspace's design: schematic, board and libraries (see `fox_ecad`).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub electronics: Option<Box<fox_ecad::Project>>,
+  /// The exploded view shown (`view.explode`): display only, never in the timeline.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub exploded_view: Option<explode::ExplodedView>,
   #[serde(default)]
   next_id: u32,
 }
@@ -2181,6 +2185,7 @@ impl Design {
       face_appearances: Vec::new(),
       timeline_groups: Vec::new(),
       electronics: None,
+      exploded_view: None,
       next_id: 1,
     }
   }
