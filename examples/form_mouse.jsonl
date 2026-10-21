@@ -1,0 +1,19 @@
+# A computer mouse sculpted in the Form workspace: a T-spline box cage kept mirror-symmetric
+# left to right, its back pulled up into a hump and its nose narrowed, an edge loop added near
+# the base, the base's edges creased so it sits flat, and a thumb rest pushed in on one side
+# (mirrored onto the other). The form is one timeline feature whose body is the cage's smooth
+# limit surface as exact B-spline faces.
+{"cmd": "new", "name": "Mouse"}
+{"cmd": "form.box", "length": 110, "width": 64, "height": 30, "length_faces": 4, "width_faces": 3, "height_faces": 1}
+{"cmd": "form.symmetry", "mirror": "xz"}
+# the hump: the top's back faces up, dragging their surroundings softly
+{"cmd": "form.edit", "faces": [[-13.75, 0, 30], [-41.25, 0, 30]], "move": [0, 0, 14], "soft": 45}
+# a narrower, lower nose
+{"cmd": "form.edit", "faces": [[55, -21.3333, 15], [55, 0, 15], [55, 21.3333, 15]], "scale": [1, 0.7, 0.7], "move": [0, 0, -4]}
+# a loop of edges near the base keeps the sides upright
+{"cmd": "form.insert_edge", "edges": [[55, 10.6667, 15]], "t": 0.2}
+{"cmd": "form.crease", "faces": [[-41.25, -21.3333, 0], [-41.25, 0, 0], [-41.25, 21.3333, 0], [-13.75, -21.3333, 0], [-13.75, 0, 0], [-13.75, 21.3333, 0], [13.75, -21.3333, 0], [13.75, 0, 0], [13.75, 21.3333, 0], [41.25, -21.3333, 0], [41.25, 0, 0], [41.25, 21.3333, 0]]}
+# thumb rests on both sides
+{"cmd": "form.edit", "faces": [[-13.75, 32, 15]], "move": [0, -5, 0], "soft": 20}
+{"cmd": "form.display", "mode": "control_frame"}
+{"cmd": "form.info"}

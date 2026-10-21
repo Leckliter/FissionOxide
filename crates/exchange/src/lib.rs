@@ -91,7 +91,7 @@ formats! {
   "fox", "FissionOxide design", ["fox", "clf"], Design, true, true, "Native parametric design (JSON): timeline, sketches, parameters";
   "foxz", "FissionOxide archive", ["foxz", "clfz"], Archive, true, true, "Design + thumbnail + optional version history in one zip (FissionOxide's .f3d/.f3z)";
   "f3d", "Autodesk Fusion archive", ["f3d", "f3z"], Archive, true, false, "Stored in the data panel with its thumbnail; geometry is Fusion's proprietary ShapeManager B-rep and can't be read - export STEP from Fusion for geometry";
-  "step", "STEP", ["step", "stp"], Brep, true, true, "AP214 solids";
+  "step", "STEP", ["step", "stp"], Brep, true, true, "AP214 assemblies with instances, names and face colours";
   "iges", "IGES", ["iges", "igs"], Brep, true, true, "Trimmed surfaces / solids";
   "brep", "OpenCASCADE BRep", ["brep"], Brep, true, true, "Lossless OCCT text B-rep";
   "stl", "STL mesh", ["stl"], Mesh, true, true, "Binary or ASCII; imported meshes become faceted bodies";

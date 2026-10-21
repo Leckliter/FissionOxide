@@ -1,0 +1,16 @@
+[package]
+name = "fox-form"
+description = "Form (T-spline style) bodies: control cages, sculpting edits, Catmull-Clark limit surfaces as B-spline patches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

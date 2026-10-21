@@ -70,6 +70,7 @@ pub fn sections(prefs: &Prefs, filter: &str) -> Vec<Section> {
     ("Sketch", Scope::Sketch),
     ("Drawing", Scope::Drawing),
     ("Manufacture", Scope::Manufacture),
+    ("Form", Scope::Form),
   ] {
     let mut rows: Vec<(String, String)> = menus::bindings()
       .iter()

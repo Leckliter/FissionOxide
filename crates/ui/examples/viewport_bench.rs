@@ -75,6 +75,32 @@ fn main() -> Result<(), String> {
   }
   let gpu = ms(t) / frames as f64;
   let t = Instant::now();
+  for k in 0..frames {
+    let mut c = cam;
+    c.orbit(0.02 * k as f64, 0.0);
+    r.draw_navigating(gl, &c, w, h)?;
+    hx.finish();
+  }
+  let navigating = ms(t) / frames as f64;
+  let coarse = r.stats();
+  let mut lined = scene.clone();
+  lined.style = fox_engine::render::VisualStyle::HiddenLine;
+  let t = Instant::now();
+  r.set_scene(gl, &lined, true)?;
+  r.draw(gl, &cam, w, h)?;
+  hx.finish();
+  let lined_switch = ms(t);
+  let t = Instant::now();
+  for k in 0..frames {
+    let mut c = cam;
+    c.orbit(0.02 * k as f64, 0.0);
+    r.draw(gl, &c, w, h)?;
+    hx.finish();
+  }
+  let lined_gpu = ms(t) / frames as f64;
+  r.set_scene(gl, &scene, true)?;
+  r.draw(gl, &cam, w, h)?;
+  let t = Instant::now();
   let ids = r.read_ids(gl).ok_or("no ids")?;
   let readback = ms(t);
   println!("bracket × {n}×{n}: {tris} triangles, {segs} edge segments, {w}×{h} px; OpenGL: {name}");
@@ -83,6 +109,11 @@ fn main() -> Result<(), String> {
   println!("GPU path first frame (upload + draw):               {upload:8.1} ms");
   println!("GPU path per orbit frame (draw):                    {gpu:8.1} ms");
   println!("GPU id readback when the view settles:              {readback:8.1} ms ({} px)", ids.ids.len());
+  println!(
+    "GPU path per orbit frame, navigating (LOD):         {navigating:8.1} ms ({} of {} chunks coarse, {} tris)",
+    coarse.coarse, coarse.chunks, coarse.triangles
+  );
+  println!("GPU Hidden Line: switch {lined_switch:.1} ms, per orbit frame {lined_gpu:8.1} ms");
   r.destroy(gl);
   Ok(())
 }

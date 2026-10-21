@@ -84,7 +84,15 @@ pub struct CutParams {
   pub small_hole_feed: f64,
   /// Material number for controls with a material table (QtPlasmaC M190 Pn; 0 = none).
   pub material: u32,
+  /// Where lead-ins start, picked per contour: each point goes to the nearest contour (within
+  /// [`LEAD_SNAP`]), which then starts at its closest point instead of the one nearest the
+  /// previous cut.
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub lead_points: Vec<P>,
 }
+
+/// How far a lead point may be from its contour (mm); farther ones are ignored with a warning.
+pub const LEAD_SNAP: f64 = 10.0;
 
 impl Default for CutParams {
   fn default() -> Self {
@@ -107,6 +115,7 @@ impl Default for CutParams {
       small_hole_diameter: 0.0,
       small_hole_feed: 0.6,
       material: 0,
+      lead_points: Vec::new(),
     }
   }
 }
@@ -148,6 +157,10 @@ pub struct Plan {
   pub paths: Vec<(Contour, bool)>,
   /// Things the user should know (holes smaller than the kerf, leads that didn't fit).
   pub warnings: Vec<String>,
+  /// The sheet the parts are cut from (lower-left and upper-right corners), when nested; drawn
+  /// on its own layer in a DXF.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub sheet: Option<(P, P)>,
 }
 
 impl Plan {
@@ -238,6 +251,23 @@ pub fn plan(contours: &[Contour], params: &CutParams) -> Plan {
     }
   }
 
+  // lead positions picked by the user: the closest point to each contour
+  let mut wanted: Vec<Option<(P, f64)>> = vec![None; contours.len()];
+  for &q in &params.lead_points {
+    let best = contours.iter().enumerate().map(|(i, c)| (i, c.closest(q).2)).min_by(|a, b| a.1.total_cmp(&b.1));
+    match best {
+      Some((i, d)) if d <= LEAD_SNAP => {
+        if wanted[i].is_none_or(|w| d < w.1) {
+          wanted[i] = Some((q, d));
+        }
+      }
+      _ => warnings.push(format!(
+        "the lead point ({:.1}, {:.1}) is more than {LEAD_SNAP} mm from every contour; ignored",
+        q[0], q[1]
+      )),
+    }
+  }
+
   // contours that must be cut before each one: everything inside it
   let src: Vec<Contour> = paths.iter().map(|p| p.0.clone()).collect();
   let (_, parent) = nesting(&src);
@@ -256,11 +286,17 @@ pub fn plan(contours: &[Contour], params: &CutParams) -> Plan {
   let mut ordered = Vec::new();
   for _ in 0..paths.len() {
     let mut best: Option<(usize, usize, f64, f64)> = None;
-    for (i, (c, _, _)) in paths.iter().enumerate() {
+    for (i, (c, _, src)) in paths.iter().enumerate() {
       if done[i] || waiting[i] > 0 {
         continue;
       }
-      let (k, f, d) = start_point(c, at);
+      let (k, f, d) = match wanted[*src] {
+        Some((q, _)) => {
+          let (k, f, _) = c.closest(q);
+          (k, f, dist(at, c.segs[k].at(f)))
+        }
+        None => start_point(c, at),
+      };
       if best.is_none_or(|b| d < b.3) {
         best = Some((i, k, f, d));
       }
@@ -282,7 +318,7 @@ pub fn plan(contours: &[Contour], params: &CutParams) -> Plan {
     passes.append(&mut ps);
     ordered.push((c, *hole));
   }
-  Plan { passes, paths: ordered, warnings }
+  Plan { passes, paths: ordered, warnings, sheet: None }
 }
 
 /// Where to start a contour coming from `at`: the closest point, unless that is a sharp corner

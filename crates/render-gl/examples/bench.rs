@@ -158,6 +158,52 @@ fn main() -> Result<(), String> {
   println!("GPU per orbit frame (draw only):          {orbit:8.1} ms");
   println!("GPU id readback (once the view settles):  {readback:8.1} ms ({} px)", ids.ids.len());
   println!("GPU hover change (lines + draw):          {hover:8.1} ms");
+
+  // culling and levels of detail: per frame, with each off and on
+  let orbit_ms = |r: &mut Renderer, c: &Camera, navigating: bool| -> Result<(f64, usize), String> {
+    let t = Instant::now();
+    for k in 0..frames {
+      let mut c = *c;
+      c.orbit(0.02 * k as f64, 0.0);
+      if navigating {
+        r.draw_navigating(gl, &c, w, h)?
+      } else {
+        r.draw(gl, &c, w, h)?
+      }
+      hx.finish();
+    }
+    Ok((ms(t) / frames as f64, r.stats().triangles))
+  };
+  let close = Camera { target: [-200.0, -200.0, 6.0], distance: cam.distance / 6.0, ..cam };
+  let far = Camera { distance: cam.distance * 3.0, ..cam };
+  for (name, c, navigating) in
+    [("fitted, navigating", cam, true), ("close-up (corner)", close, false), ("far (whole part small)", far, true)]
+  {
+    r.culling = false;
+    let (before, tris_before) = orbit_ms(&mut r, &c, false)?;
+    r.culling = true;
+    let (after, tris_after) = orbit_ms(&mut r, &c, navigating)?;
+    let how = if navigating { "culling + LOD" } else { "culling" };
+    println!(
+      "GPU per frame, {name:23} {before:8.1} ms ({tris_before} tris) → {how}: {after:8.1} ms ({tris_after} tris)"
+    );
+  }
+
+  // the hidden-line style: fold edges built once, silhouettes found on the GPU every frame
+  let t = Instant::now();
+  let lined = fox_render::Scene { style: fox_render::VisualStyle::HiddenLine, ..scene.clone() };
+  r.set_scene(gl, &lined, true)?;
+  r.draw(gl, &cam, w, h)?;
+  hx.finish();
+  let fold_upload = ms(t);
+  let (hl, _) = orbit_ms(&mut r, &cam, false)?;
+  let (hl_nav, _) = orbit_ms(&mut r, &cam, true)?;
+  println!(
+    "GPU Hidden Line: switch (fold edges + draw) {fold_upload:8.1} ms; per frame {hl:8.1} ms, navigating {hl_nav:8.1} ms"
+  );
+  let t = Instant::now();
+  std::hint::black_box(fox_render::render(&lined, &cam, w, h));
+  println!("CPU Hidden Line frame:                    {:8.1} ms", ms(t));
   r.destroy(gl);
   Ok(())
 }

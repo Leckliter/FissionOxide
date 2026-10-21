@@ -279,10 +279,30 @@ fn run(args: &[String]) -> Result<(), String> {
       if let Some(target) = rest.get(1).filter(|a| !a.starts_with("--") && !a.trim_start().starts_with('{')) {
         params["path"] = json!(target);
       }
-      for k in ["machine", "process", "units"] {
+      for k in ["machine", "process", "units", "sheet"] {
         if let Some(v) = flag(rest, &format!("--{k}")) {
           params[k] = json!(v);
         }
+      }
+      if let Some(j) = flag(rest, "--job") {
+        params["job"] = j.parse::<u64>().map(|n| json!(n)).unwrap_or(json!(j));
+      }
+      // nesting: --nest WxH [--quantity N] [--spacing MM] [--margin MM] [--rotations N] [--mirror]
+      if let Some(sheet) = flag(rest, "--nest") {
+        let mut n = params.get("nest").filter(|n| n.is_object()).cloned().unwrap_or(json!({}));
+        n["sheet"] = json!(sheet);
+        for k in ["spacing", "margin", "rotations", "max_sheets"] {
+          if let Some(v) = flag(rest, &format!("--{}", k.replace('_', "-"))) {
+            n[k] = json!(v);
+          }
+        }
+        if rest.iter().any(|a| a == "--mirror") {
+          n["mirror"] = json!(true);
+        }
+        params["nest"] = n;
+      }
+      if let Some(q) = flag(rest, "--quantity") {
+        params["quantity"] = json!(q);
       }
       out(&exec(&mut s, "cut.gcode", &params)?);
       Ok(())
@@ -367,7 +387,7 @@ fn plugin(rest: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | check-dxf F.dxf|F.fox | plugin list|install|uninstall|enable|disable|update|check|pack|publish|run|log ...  (all take --hub DIR|URL [--token T]; export, convert, render, info and run take --configuration NAME)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [--job ID|NAME] [--nest WxH [--quantity N] [--spacing MM] [--margin MM] [--rotations N] [--mirror] [--sheet K]] [JSON] | cut machines | check-dxf F.dxf|F.fox | plugin list|install|uninstall|enable|disable|update|check|pack|publish|run|log ...  (all take --hub DIR|URL [--token T]; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {

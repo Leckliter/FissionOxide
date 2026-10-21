@@ -65,6 +65,10 @@ change a parameter and watch the whole history rebuild.
   untrimmed boundary), extend open edges (natural, tangent or perpendicular), stitch surfaces
   into a solid, unstitch, reverse normals, and thicken faces or surfaces into solids
   (`examples/surface_shroud.jsonl`).
+- **Form (T-spline sculpting).** Box, plane, cylinder, sphere, torus, quadball and face
+  primitives; Edit Form with a triad and soft modification; insert/delete edges, insert point,
+  subdivide, extrude, bridge, fill hole, crease, mirror and circular symmetry, pull onto a body,
+  Make Uniform, box/frame/smooth display. The body is an exact B-rep. See [Form](#form).
 - **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
   clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
@@ -173,6 +177,13 @@ change a parameter and watch the whole history rebuild.
 - **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
   DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
   machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
+- **Properties panel.** Inspect → Properties docks a panel, as in Fusion, that follows the
+  selection: type, id, parent component and geometry of faces (area, surface, normal at the
+  centre, box), edges (length, curve, ends), vertices, bodies (solid or sheet metal, volume, area,
+  mass with a material, box), components, sketches and sketch curves (ends, centre, radius,
+  length, plane), plus the overall width, height and thickness of the selected (or all visible)
+  bodies, measured across their largest flat face. Copy it, or export JSON, TXT or CSV
+  (`inspect.properties`, `inspect.overall_size`).
 
 ## Install
 
@@ -264,6 +275,45 @@ after it was extruded (`sketch.text_edit`): the letters regenerate and the extru
 Text stays a text entity in the sketch (string, font, height, angle and an anchor point you can
 dimension or drag); `sketch.text_explode` turns it into plain curves, and older files with
 exploded text open unchanged.
+
+## Form
+
+**Create Form** (SOLID ▸ CREATE) opens the **FORM** tab, as in Fusion. Its primitives add a form
+body, which is a polygon control cage whose smooth Catmull-Clark limit surface is the body. You
+pick the cage's vertices, edges and faces in the viewport (Shift adds to the picks, and the FORM
+panel can limit picks to one kind) and edit them:
+
+| Tool | What it does |
+|------|--------------|
+| Box, Plane, Cylinder, Sphere, Torus, Quadball, Face | New form bodies. Plane, Face and uncapped cylinders are open and make surface bodies |
+| Edit Form | A triad at the picks: arrows move them, rings rotate them, the centre scales them. A soft radius drags nearby vertices part of the way |
+| Insert Edge / Insert Point | A new edge loop across the quads through an edge, or points on edges joined across faces |
+| Subdivide | Picked faces split into quads, with T-points on their neighbours. *Exact* subdivides the whole cage and keeps the shape |
+| Delete | Faces leave holes. Deleting edges joins the faces on each side, so deleting an inserted loop gives the old faces back. Deleting vertices joins the faces around them |
+| Extrude, Bridge, Fill Hole | Push faces out with a wall around them or grow faces off open edges, join two chains of open edges, close a hole with a star point or one face |
+| Crease / UnCrease | Sharp edges in the smooth body (the limit follows the crease as a B-spline curve) |
+| Mirror / Circular, Internal or Duplicate | Symmetry kept on the body. Edits on one side are copied to the others, and vertices on a mirror plane stay on it. *Duplicate* adds the mirrored or rotated copies, welded together |
+| Pull | Snaps the smooth surface (or the control points) over picked vertices onto another body |
+| Make Uniform, Weld Vertices, Reverse Normal | Even out control-point spacing, merge touching points, turn the form inside out |
+| Box / Control Frame / Smooth display | **Alt+1 / 2 / 3** |
+
+**Finish Form** goes back to the timeline. There the form is one feature (double-click it to edit
+it again), and its body is an exact B-rep. The limit surface is split into faces along the star
+lines, creases and open edges, as Fusion splits a T-spline body (a box cage gives six faces).
+Each face is a bicubic B-spline through exact limit points. Neighbouring faces share whole sides,
+so they sew watertight into a valid OpenCASCADE solid, and they are tangent across seams. Fillets,
+booleans, STEP export and the rest work on the body like on any other. The cage, its creases,
+symmetry and display mode are saved in the `.fox` file, and every tool is a `form.*` command for
+scripts, the CLI and MCP agents (`fissionoxide-cli help`):
+
+```sh
+fissionoxide-cli run examples/form_mouse.jsonl --save mouse.fox --png mouse.png
+```
+
+The cage geometry, edits and patch fitting are in the pure-Rust `fox-form` crate.
+Simplifications compared with Fusion: knot intervals are always uniform. Make Uniform evens out
+vertex spacing rather than knot intervals, and creases are fully sharp, with no partial
+sharpness.
 
 ## Sheet metal
 
@@ -419,7 +469,7 @@ fissionoxide-cli exec link_bar.fox '{"cmd": "drawing.export", "path": "link_bar.
 |---------------------------------|:-------------:|:------:|-----------------------------------------------------------------|
 | FissionOxide design `.fox`          | ✓             | ✓      | The parametric design as JSON                                   |
 | FissionOxide archive `.foxz`        | ✓             | ✓      | Design + thumbnail, optionally its whole version history        |
-| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies: components, body names and colours both ways; surface-only files are sewn into shells/solids |
+| STEP `.step` `.stp`             | ✓             | ✓      | AP214 assemblies both ways: nested sub-assemblies as nested components, parts and sub-assemblies placed more than once as linked component copies (written back as instances), body names, body and face colours; surface-only files are sewn into shells/solids |
 | IGES `.iges` `.igs`             | ✓             | ✓      | Faces are sewn; closed shells become solids                     |
 | OpenCASCADE BRep `.brep`        | ✓             | ✓      | Lossless kernel format                                          |
 | STL `.stl` (binary / ASCII)     | ✓             | ✓      | Imported meshes become faceted bodies (≤ 250k triangles)        |
@@ -589,10 +639,30 @@ scrap side. Micro-joints (tabs) keep parts in the sheet, and small holes can run
 feed. The part is on the right of the cut by default (outlines clockwise), the good side of a
 clockwise-swirl plasma torch.
 
+**Lead positions** can be picked per contour: with *Pick lead positions* on, a click on the
+previewed cut moves the nearest contour's lead-in there (`cut.job.lead`, or `lead_points` in
+`cut.gcode`); the pick is kept as a point of the model, so it stays on its contour when the
+design changes, and on a nest every copy of the part starts at the same place.
+
+**Nesting** (`nest`, or *Nest on sheets* in the window) lays copies out on sheets with
+[jagua-rs](https://github.com/JeroenGar/jagua-rs) doing the geometry: sheet size, spacing between
+parts (3 mm or two kerfs by default), margin, the rotations a part may take (as drawn, 180°,
+every 90° or every 45°), mirroring, a quantity per part, other parts from other sketches, faces
+or bodies (`parts`), and as many sheets as it takes. Parts go largest first, each at the lowest,
+then leftmost, spot where it fits; `cut.nest` reports every sheet's placements and utilisation
+and what didn't fit, and `cut.gcode` writes one program (or DXF, with the sheet outline on its
+own layer) per sheet. Parts aren't placed inside other parts' holes.
+
+**Cut jobs kept in the design**: *Keep in design* (`cut.job.create`) stores the cut's source,
+machine, process, overrides, lead positions and nesting with the design. The cut is planned again
+whenever the design changes, and in the Manufacture workspace its toolpath is drawn in the
+viewport (outlines blue, holes purple, leads green, rapids dashed orange, a nest's sheets side by
+side); `cut.gcode {"job": …}` posts it.
+
 Machine profiles: GRBL and FluidNC lasers (M4 power that follows the speed), LinuxCNC
 QtPlasmaC (`M3 $0`, material table via `M190`), plasma with torch heights in the G-code
-(Mach-style), Wazer-style waterjet (lines only) and R12 DXF of the part geometry for OMAX-style
-software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
+(Mach-style), Langmuir FireControl (untested), Wazer-style waterjet (lines only) and R12 DXF of
+the part geometry for OMAX-style software. Each is a set of G-code templates plus any number of processes (kerf, feed, power,
 pierce delay and heights per material); add your own with `cut.machine.add` (kept in the hub's
 `machines.json`). Rapids are real rapids and there is no limit on processes.
 
@@ -601,10 +671,13 @@ fissionoxide-cli cut machines
 fissionoxide-cli cut bracket.fox bracket.ngc --machine qtplasmac --process "3 mm mild steel, 45 A"
 fissionoxide-cli cut bracket.fox bracket.gcode --machine grbl_laser '{"kerf": 0.15, "tabs": 2, "lead_in": "line"}'
 fissionoxide-cli exec plate.fox '{"cmd": "cut.gcode", "sketch": 1, "machine": "dxf", "path": "plate.dxf"}'
+fissionoxide-cli cut bracket.fox bracket.gcode --nest 1250x2500 --quantity 40 --spacing 4   # bracket-sheet1.gcode, …
+fissionoxide-cli exec plate.fox '{"cmd": "cut.job.create", "name": "Plate", "sketch": 1, "machine": "qtplasmac"}' --save plate.fox
+fissionoxide-cli cut plate.fox plate.ngc --job Plate
 ```
 
 The machine dialects were written from their documentation, not run on the machines: check a
-program in your control's preview (and on scrap) before cutting parts. Nesting is not there yet.
+program in your control's preview (and on scrap) before cutting parts.
 
 ## Electronics
 
@@ -803,6 +876,19 @@ smooth. It draws the same scene as the CPU rasterizer (`fox-render`) with the sa
 analysis shading, edges, sketch overlays, toolpaths, stock and transparency. Picking stays
 exact: each pixel's pick id is drawn into a second buffer and read back when the view settles.
 
+Huge assemblies stay interactive: meshes, edges and markers are cut into spatial chunks when
+they're uploaded, and chunks outside the view are left out of every draw (which never changes the
+picture). While the view moves, distant chunks are drawn from coarser levels of detail whose cells
+look at most 1.5 pixels wide; the settled image, and the pick ids read from it, are always drawn at
+full detail.
+
+Display Settings → Visual Style has Fusion's six styles plus two line drawings: **Hidden Line**
+(plain white surfaces, visible edges and silhouettes solid, hidden ones dashed) and **Visible
+Lines Only**. Every style that doesn't shade the surfaces (the wireframes and line drawings) also
+draws the silhouettes of curved faces, so a cylinder keeps its outline; the GPU finds them every
+frame from fold edges uploaded once, the CPU rasterizer from the same fold edges.
+`view.render` takes the same styles (`"style": "hidden_line"`, `"visible_line"`, ...).
+
 Display Settings (navigation bar) → GPU Renderer switches to the CPU rasterizer, which also
 takes over by itself when OpenGL can't start; `FOX_RENDERER=cpu` starts with it. The CLI and the
 MCP server always render on the CPU. Benchmarks: `cargo run --release -p fox-ui --example
@@ -837,6 +923,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `fox-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
 | `fox-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
 | `fox-model`         | The design document, feature timeline, regeneration and references     |
+| `fox-form`          | Form (T-spline) cages: primitives, sculpting edits, symmetry, Catmull-Clark limit surfaces as B-spline patches |
 | `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
 | `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
 | `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash, edit locks, presence; safe sharing through sync folders; the hub server client |

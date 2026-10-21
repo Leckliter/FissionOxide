@@ -256,6 +256,8 @@ pub enum Icon {
   DatumId,
   SurfaceTexture,
   Balloon,
+  /// Inspect > Properties: a sheet of key/value rows.
+  Properties,
 }
 
 #[derive(Clone, Copy)]
@@ -1938,6 +1940,14 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.text((0.62, 0.36), "1", 0.3, Ink);
       k.line((0.44, 0.55), (0.16, 0.84), Blue);
       k.dot((0.16, 0.84), Blue);
+    }
+    Icon::Properties => {
+      k.solid(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], White);
+      k.closed(&[(0.14, 0.06), (0.86, 0.06), (0.86, 0.94), (0.14, 0.94)], Ink);
+      for y in [0.28, 0.5, 0.72] {
+        k.dot((0.28, y), Blue);
+        k.line((0.42, y), (0.74, y), Ink);
+      }
     }
   }
 }

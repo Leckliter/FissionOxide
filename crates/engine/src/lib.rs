@@ -14,6 +14,7 @@ pub mod canvas;
 mod commands;
 pub mod config;
 mod cut;
+pub use cut::{CutLine, CutLineKind, CutPreview};
 pub mod diff;
 mod drag;
 mod drawings;
@@ -28,9 +29,11 @@ pub mod hub;
 mod inspect;
 mod mates;
 mod params;
+pub mod properties;
 pub mod scene;
 mod sheet2;
 mod solid;
+mod step;
 mod subassembly;
 mod surfaces;
 mod trace;
@@ -176,6 +179,8 @@ pub struct Session {
   pub toolpaths_of: Option<(u32, u64)>,
   /// The last stock simulation (`cam.simulate`): its setup, design revision and result.
   pub simulation: Option<(u32, u64, fox_model::cam::sim::Simulation)>,
+  /// The last previewed 2D cut job (`cut.job.preview`), drawn in the viewport.
+  pub cut_preview: Option<cut::CutPreview>,
   /// A comparison of two hub versions (`hub.diff`), drawn instead of the bodies while set.
   pub diff: Option<diff::DiffView>,
   /// The drawing sheet being worked on, (drawing, sheet): where new views and notes go when a
@@ -213,6 +218,7 @@ impl Session {
       toolpaths: Vec::new(),
       toolpaths_of: None,
       simulation: None,
+      cut_preview: None,
       diff: None,
       drawing_sheet: None,
       active_component: None,
@@ -579,6 +585,8 @@ mod tests_mechanism;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
+mod tests_properties;
+#[cfg(test)]
 mod tests_scene;
 #[cfg(test)]
 mod tests_sheet2;
@@ -592,6 +600,8 @@ mod tests_sketch;
 mod tests_sketch_curves;
 #[cfg(test)]
 mod tests_solid;
+#[cfg(test)]
+mod tests_step;
 #[cfg(test)]
 mod tests_subassembly;
 #[cfg(test)]

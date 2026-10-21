@@ -9,6 +9,8 @@ pub(crate) enum Scope {
   Sketch,
   Drawing,
   Manufacture,
+  /// The Form workspace's FORM tab.
+  Form,
 }
 
 /// A command's tooltip text.
@@ -23,6 +25,10 @@ pub(crate) struct Tip {
 /// The tooltip for the command `label` on the `scope` toolbar.
 pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
   use Scope::*;
+  if scope == Form {
+    let (line, more) = crate::form_ui::tip(label)?;
+    return Some(Tip { line, more });
+  }
   let (line, more) = match (scope, label) {
     // SKETCH CREATE
     (_, "Line") => (
@@ -1606,6 +1612,14 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Browses an online store of add-ins and content.",
       "Find, install and update add-ins, libraries and content made by other developers. Installed \
        add-ins are then managed with Scripts and Add-Ins.",
+    ),
+
+    // INSPECT > Properties
+    (_, "Properties") => (
+      "Shows a panel with the properties of what is selected.",
+      "Docks on the right and follows the selection: type, id, component and geometry (area, length, \
+       normal, box, volume, mass, sketch plane), and the overall width, height and thickness of the \
+       selected bodies, or of all of them when nothing is selected. Copy or export them as JSON, text or CSV.",
     ),
     _ => return None,
   };

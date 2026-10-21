@@ -257,15 +257,31 @@ fn fill(t: &str, vars: &[(&str, String)]) -> Option<String> {
 }
 
 /// The plan's paths as an R12 DXF (LINE and ARC entities, millimetres): layer OUTER for part
-/// outlines, INNER for holes, LEAD for lead-ins and lead-outs.
+/// outlines, INNER for holes, LEAD for lead-ins and lead-outs, SHEET for the sheet of a nest.
 pub fn dxf(plan: &Plan) -> String {
   let mut s = String::from("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n");
-  s.push_str("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n");
-  for (name, color) in [("OUTER", 7), ("INNER", 1), ("LEAD", 3)] {
+  let all = [("OUTER", 7), ("INNER", 1), ("LEAD", 3), ("SHEET", 8)];
+  let layers = if plan.sheet.is_some() { &all[..] } else { &all[..3] };
+  let _ = write!(s, "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n{}\n", layers.len());
+  for (name, color) in layers {
     let _ = write!(s, "0\nLAYER\n2\n{name}\n70\n0\n62\n{color}\n6\nCONTINUOUS\n");
   }
   s.push_str("0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n");
   let f = |v: f64| fmt(v, 6);
+  if let Some((lo, hi)) = plan.sheet {
+    let c = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]];
+    for i in 0..4 {
+      let (a, b) = (c[i], c[(i + 1) % 4]);
+      let _ = write!(
+        s,
+        "0\nLINE\n8\nSHEET\n10\n{}\n20\n{}\n30\n0\n11\n{}\n21\n{}\n31\n0\n",
+        f(a[0]),
+        f(a[1]),
+        f(b[0]),
+        f(b[1])
+      );
+    }
+  }
   for pass in &plan.passes {
     for (seg, kind) in &pass.segs {
       let layer = match (kind, pass.hole) {
@@ -430,6 +446,34 @@ pub fn builtin_machines() -> Vec<Machine> {
       header: lines(&["({name})", "{units} G90 G17 G40", "G0 Z{safe_height}"]),
       pierce: lines(&["G0 Z{pierce_height}", "M3", "?pierce_delay G4 P{pierce_delay}", "G1 Z{cut_height} F{feed}"]),
       off: lines(&["M5", "G0 Z{safe_height}"]),
+      footer: lines(&["G0 X0 Y0", "M30"]),
+      rapid: rapid_t(),
+      line: line_t(),
+      arc_cw: cw_t(),
+      arc_ccw: ccw_t(),
+      processes: plasma_processes.clone(),
+    },
+    // written from Langmuir's published post output, not run on a Crossfire table yet
+    Machine {
+      id: "firecontrol".into(),
+      name: "Langmuir FireControl plasma (Crossfire; untested)".into(),
+      kind: MachineKind::Plasma,
+      extension: "nc".into(),
+      arcs: true,
+      arc_tolerance: arc_tol(),
+      max_power: 1.0,
+      rapid_rate: 10000.0,
+      decimals: 4,
+      // pierce height, cut height and torch height control are set in FireControl itself
+      header: lines(&[
+        "({name})",
+        "(FireControl: heights and THC from the FireControl settings; untested)",
+        "G90 G94",
+        "G17",
+        "{units}",
+      ]),
+      pierce: lines(&["M3", "?pierce_delay G4 P{pierce_delay}"]),
+      off: lines(&["M5"]),
       footer: lines(&["G0 X0 Y0", "M30"]),
       rapid: rapid_t(),
       line: line_t(),

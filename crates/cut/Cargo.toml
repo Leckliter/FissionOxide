@@ -1,12 +1,13 @@
 [package]
 name = "fox-cut"
-description = "2D cutting for lasers, plasma and waterjets: kerf, leads, tabs, cut order, machine posts"
+description = "2D cutting for lasers, plasma and waterjets: kerf, leads, tabs, cut order, nesting, machine posts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 cavalier_contours.workspace = true
+jagua-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

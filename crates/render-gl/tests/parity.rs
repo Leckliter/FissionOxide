@@ -188,3 +188,140 @@ fn picks_are_exact_and_hover_reuses_meshes() {
   assert!(same.count() as f64 / (400.0 * 300.0) > 0.97);
   r.destroy(&h.gl);
 }
+
+/// An assembly-like scene: `n` × `n` spheres, each its own body with edges around its equator.
+fn assembly(n: u32) -> Scene {
+  let mut s = Scene { background_top: [250, 250, 251, 255], background_bottom: [234, 236, 239, 255], ..scene() };
+  s.meshes.clear();
+  s.lines.clear();
+  s.markers.clear();
+  for i in 0..n {
+    for j in 0..n {
+      let c = [i as f32 * 30.0, j as f32 * 30.0, 10.0];
+      let id = 1000 + (i * n + j) * 10;
+      let mut m = sphere(c, 10.0, 24, id, [186, 190, 196, 255]);
+      m.colors.clear();
+      s.meshes.push(m);
+      let ring = (0..=48)
+        .map(|k| {
+          let a = std::f32::consts::TAU * k as f32 / 48.0;
+          [c[0] + 10.0 * a.cos(), c[1] + 10.0 * a.sin(), c[2]]
+        })
+        .collect();
+      s.lines.push(line(ring, id + 9, 1.0, false, false));
+    }
+  }
+  s
+}
+
+fn frame_of(r: &mut Renderer, gl: &fox_render_gl::glow::Context) -> Frame {
+  let mut f = r.read_ids(gl).expect("ids");
+  f.rgba = r.read_rgba(gl).expect("rgba");
+  f
+}
+
+#[test]
+fn culling_leaves_out_what_is_off_screen_and_changes_nothing() {
+  let Ok(h) = fox_render_gl::headless::context() else { return };
+  let Ok(mut r) = Renderer::new(&h.gl) else { return };
+  let s = assembly(10);
+  r.set_scene(&h.gl, &s, false).expect("set");
+  // close in on one corner of the assembly
+  let cam = Camera { target: [0.0, 0.0, 10.0], distance: 60.0, ..Camera::default() };
+  for style in [VisualStyle::ShadedVisibleEdges, VisualStyle::HiddenLine] {
+    r.set_scene(&h.gl, &Scene { style, ..s.clone() }, true).expect("set");
+    r.culling = false;
+    r.draw(&h.gl, &cam, 320, 240).expect("draw");
+    let all = r.stats();
+    let whole = frame_of(&mut r, &h.gl);
+    r.culling = true;
+    r.draw(&h.gl, &cam, 320, 240).expect("draw");
+    let culled = r.stats();
+    let part = frame_of(&mut r, &h.gl);
+    eprintln!("{style:?}: {all:?} → {culled:?}");
+    assert_eq!(all.culled, 0);
+    assert!(culled.culled > 50 && culled.triangles * 4 < all.triangles, "{culled:?}");
+    assert!(culled.segments < all.segments);
+    assert_eq!(whole.ids, part.ids, "{style:?}: the same picks");
+    assert_eq!(whole.rgba, part.rgba, "{style:?}: the same picture");
+  }
+  // looking away from everything: nothing is drawn
+  let mut away = Camera { target: [-500.0, -500.0, 10.0], distance: 50.0, ..Camera::default() };
+  away.set_view(StandardView::Front);
+  r.draw(&h.gl, &away, 320, 240).expect("draw");
+  assert_eq!((r.stats().triangles, r.stats().chunks), (0, 0));
+  r.destroy(&h.gl);
+}
+
+#[test]
+fn levels_of_detail_while_navigating_and_exact_picks_after() {
+  let Ok(h) = fox_render_gl::headless::context() else { return };
+  let Ok(mut r) = Renderer::new(&h.gl) else { return };
+  let s = assembly(10);
+  r.set_scene(&h.gl, &s, false).expect("set");
+  let mut cam = Camera::default();
+  cam.fit(glam::DVec3::new(-10.0, -10.0, 0.0), glam::DVec3::new(280.0, 280.0, 20.0), 4.0 / 3.0);
+  // far enough that each sphere is a few pixels across, its triangles well under one
+  cam.distance *= 3.0;
+  r.draw(&h.gl, &cam, 400, 300).expect("draw");
+  let full = r.stats();
+  let mut exact = r.read_ids(&h.gl).expect("ids");
+  exact.rgba = r.read_rgba(&h.gl).expect("rgba");
+  assert_eq!(full.coarse, 0);
+  r.draw_navigating(&h.gl, &cam, 400, 300).expect("draw");
+  let moving = r.stats();
+  let rgba = r.read_rgba(&h.gl).expect("rgba");
+  eprintln!("full {full:?}, navigating {moving:?}");
+  assert!(moving.coarse > 50 && moving.triangles * 2 < full.triangles, "{moving:?}");
+  // the coarse picture is close to the full one
+  let n = exact.ids.len();
+  let off = (0..n).filter(|&i| (0..3).any(|k| rgba[i * 4 + k].abs_diff(exact.rgba[i * 4 + k]) > 24)).count();
+  assert!((off as f64) < n as f64 * 0.03, "{:.2}% differ", off as f64 * 100.0 / n as f64);
+  // reading the ids redraws at full detail: the picks are the exact ones
+  let ids = r.read_ids(&h.gl).expect("ids");
+  assert_eq!(ids.ids, exact.ids);
+  assert_eq!(r.stats(), full);
+  // close up, every chunk in view is at full detail even while navigating
+  let near = Camera { target: [0.0, 0.0, 10.0], distance: 40.0, ..Camera::default() };
+  r.draw_navigating(&h.gl, &near, 400, 300).expect("draw");
+  let close = r.stats();
+  assert!(close.chunks > 0);
+  assert!(close.coarse < close.chunks, "{close:?}");
+  r.destroy(&h.gl);
+}
+
+#[test]
+fn hidden_curves_are_dashed_along_their_whole_length() {
+  let Ok(h) = fox_render_gl::headless::context() else { return };
+  let Ok(mut r) = Renderer::new(&h.gl) else { return };
+  // a ring of short segments under a face: hidden, it must show gaps, not one dash per segment
+  let ring: Vec<[f32; 3]> = (0..=192)
+    .map(|k| {
+      let a = std::f32::consts::TAU * k as f32 / 192.0;
+      [20.0 * a.cos(), 20.0 * a.sin(), 0.0]
+    })
+    .collect();
+  let mut cam = Camera { distance: 120.0, ortho: true, ..Camera::default() };
+  cam.set_view(StandardView::Top);
+  let ink = |r: &mut Renderer, style| {
+    let s = Scene {
+      meshes: vec![quad(5.0, 30.0, [200, 200, 200, 255], 7)],
+      lines: vec![line(ring.clone(), 9, 1.0, false, false)],
+      background_top: [255; 4],
+      background_bottom: [255; 4],
+      style,
+      ..Default::default()
+    };
+    let gpu = r.render(&h.gl, &s, &cam, 300, 300).expect("render");
+    let cpu = fox_render::render(&s, &cam, 300, 300);
+    let count = |f: &Frame| f.rgba.chunks_exact(4).filter(|p| p[0] < 200).count();
+    (count(&gpu), count(&cpu))
+  };
+  let (solid, _) = ink(&mut r, VisualStyle::Wireframe);
+  let (dashed, cpu_dashed) = ink(&mut r, VisualStyle::HiddenLine);
+  let ratio = dashed as f64 / solid as f64;
+  eprintln!("solid {solid}, dashed {dashed} (CPU {cpu_dashed})");
+  assert!((0.3..0.7).contains(&ratio), "dashed / solid = {ratio:.2}");
+  assert!((dashed as f64 - cpu_dashed as f64).abs() < solid as f64 * 0.15);
+  r.destroy(&h.gl);
+}

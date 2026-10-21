@@ -120,7 +120,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       };
       let name = opt_str(p, "name").map(str::to_string);
       let (fid, cid) = s.edit(|d| {
-        let fid = d.add_feature(FeatureKind::CopyComponent { source, translate: t })?;
+        let fid =
+          d.add_feature(FeatureKind::CopyComponent { source, translate: t, transform: None, component: None })?;
         // the copies' body ids are fixed by the feature (see `new_body`)
         let n = d.component(source).map(|c| c.bodies.len()).unwrap_or(0) as u32;
         let bodies = (0..n).map(|k| BodyId(fid.0 * 1000 + k)).collect();
@@ -133,6 +134,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         let cid = d.add_component(&name.unwrap_or_else(|| format!("{base}:{}", count + 1)), bodies)?;
         if let (Some(src), Some(c)) = (d.component(source).map(|c| c.material.clone()), d.component_mut(cid)) {
           c.material = src;
+        }
+        if let Some(FeatureKind::CopyComponent { component, .. }) = d.feature_mut(fid).map(|f| &mut f.kind) {
+          *component = Some(cid);
         }
         Ok((fid, cid))
       })?;

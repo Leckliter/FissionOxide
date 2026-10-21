@@ -26,6 +26,8 @@ fox-desktop = { path = "crates/desktop" }
 fox-hub-server = { path = "crates/hub-server" }
 fox-ecad = { path = "crates/ecad" }
 fox-plugin = { path = "crates/plugin" }
+fox-sim = { path = "crates/sim" }
+fox-form = { path = "crates/form" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -45,6 +47,7 @@ quick-xml = "0.42"
 ttf-parser = "0.25"
 epaint_default_fonts = "0.36"
 cavalier_contours = "0.9"
+jagua-rs = { version = "1.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

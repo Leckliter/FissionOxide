@@ -20,7 +20,7 @@ mod gl;
 pub mod headless;
 mod pack;
 
-pub use gl::Renderer;
+pub use gl::{DrawStats, LOD_PIXELS, Renderer};
 pub use glow;
 
 /// Ids at or above this don't fit the id attachment (24 bits) and read back as `id & MAX_ID - 1`.

@@ -16,6 +16,7 @@ mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod ecad_ui;
+mod form_ui;
 mod forms;
 mod gpu;
 mod help;
@@ -32,6 +33,7 @@ mod params_ui;
 mod plugins_ui;
 mod preferences;
 mod preview;
+mod props_ui;
 mod select;
 mod sheet;
 mod theme;
@@ -176,6 +178,8 @@ pub struct App {
   pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
   /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
   pub manufacture: bool,
+  /// The Form workspace's FORM tab, while open.
+  pub form: form_ui::FormEdit,
   /// The tool library window, while open.
   pub tool_library: Option<cam_ui::ToolLibrary>,
   /// The GPU viewport renderer and its setting.
@@ -192,6 +196,8 @@ pub struct App {
   pub cut_window: Option<cut_ui::CutWindow>,
   /// The Electronics workspace, while it is open (in place of the Design workspace).
   pub electronics: Option<ecad_ui::EcadView>,
+  /// A cut job whose preview failed at this design revision (not retried every frame).
+  pub cut_preview_failed: Option<(u32, u64)>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -387,6 +393,7 @@ impl App {
       analysis: None,
       rebuild: None,
       manufacture: false,
+      form: form_ui::FormEdit::default(),
       tool_library: None,
       gpu: gpu::Gpu::new(None),
       sel_mode: select::Mode::default(),
@@ -395,6 +402,7 @@ impl App {
       ghost: preview::Ghost::default(),
       cut_window: None,
       electronics: None,
+      cut_preview_failed: None,
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -1480,6 +1488,8 @@ impl App {
       self.cam_generate(false);
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
+    // and its 2D cut preview
+    self.refresh_cut_preview();
     self.dropped_files(&ctx);
     plugins_ui::sync(self);
     panels::app_bar(self, ui);
@@ -1489,6 +1499,9 @@ impl App {
     }
     data_panel::heartbeat(self, &ctx);
     data_panel::show(self, ui);
+    if self.drawing.is_none() {
+      props_ui::show(self, ui);
+    }
     if self.step_cam_move(now()) {
       ctx.request_repaint();
     }
@@ -1509,6 +1522,7 @@ impl App {
         panels::comments(self, &ctx);
       }
       panels::browser(self, &ctx);
+      form_ui::panel(self, &ctx);
       panels::isolate_banner(self, &ctx);
       if self.show_navbar {
         panels::nav_bar(self, &ctx);

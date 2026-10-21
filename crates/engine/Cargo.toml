@@ -10,6 +10,7 @@ fox-expr.workspace = true
 fox-sketch.workspace = true
 fox-kernel.workspace = true
 fox-model.workspace = true
+fox-form.workspace = true
 fox-render.workspace = true
 fox-exchange.workspace = true
 fox-store.workspace = true

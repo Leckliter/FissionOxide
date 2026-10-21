@@ -338,10 +338,12 @@ pub struct Marker {
 }
 
 /// Fusion's visual styles (Display Settings ▸ Visual Style): how body surfaces and their edges
-/// are drawn.
+/// are drawn, plus two line-drawing styles.
 ///
 /// Body surfaces are the meshes marked [`Mesh::analyze`]; their edges are the depth-tested lines
 /// with a pick id (sketch profiles, the grid and construction geometry draw as they always do).
+/// The styles that don't shade the surfaces also draw their silhouettes (see [`fold_edges`]), so
+/// curved faces keep their outline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VisualStyle {
@@ -353,19 +355,25 @@ pub enum VisualStyle {
   Wireframe,
   WireframeHiddenEdges,
   WireframeVisibleEdges,
+  /// A line drawing: plain white surfaces, visible edges and silhouettes solid, hidden ones dashed.
+  HiddenLine,
+  /// A line drawing with only what can be seen: plain white surfaces, visible edges and silhouettes.
+  VisibleLine,
 }
 
 impl VisualStyle {
-  pub const ALL: [VisualStyle; 6] = [
+  pub const ALL: [VisualStyle; 8] = [
     VisualStyle::Shaded,
     VisualStyle::ShadedVisibleEdges,
     VisualStyle::ShadedHiddenEdges,
     VisualStyle::Wireframe,
     VisualStyle::WireframeHiddenEdges,
     VisualStyle::WireframeVisibleEdges,
+    VisualStyle::HiddenLine,
+    VisualStyle::VisibleLine,
   ];
 
-  /// The name in Fusion's menu.
+  /// The name in the menu (Fusion's, for the styles Fusion has).
   pub fn label(self) -> &'static str {
     match self {
       VisualStyle::Shaded => "Shaded",
@@ -374,7 +382,27 @@ impl VisualStyle {
       VisualStyle::Wireframe => "Wireframe",
       VisualStyle::WireframeHiddenEdges => "Wireframe with Hidden Edges",
       VisualStyle::WireframeVisibleEdges => "Wireframe with Visible Edges Only",
+      VisualStyle::HiddenLine => "Hidden Line",
+      VisualStyle::VisibleLine => "Visible Lines Only",
     }
+  }
+
+  /// The `snake_case` name, as it serializes and as `view.render` takes it.
+  pub fn name(self) -> &'static str {
+    match self {
+      VisualStyle::Shaded => "shaded",
+      VisualStyle::ShadedVisibleEdges => "shaded_visible_edges",
+      VisualStyle::ShadedHiddenEdges => "shaded_hidden_edges",
+      VisualStyle::Wireframe => "wireframe",
+      VisualStyle::WireframeHiddenEdges => "wireframe_hidden_edges",
+      VisualStyle::WireframeVisibleEdges => "wireframe_visible_edges",
+      VisualStyle::HiddenLine => "hidden_line",
+      VisualStyle::VisibleLine => "visible_line",
+    }
+  }
+
+  pub fn parse(s: &str) -> Option<Self> {
+    VisualStyle::ALL.into_iter().find(|v| v.name().eq_ignore_ascii_case(s.trim()))
   }
 
   /// Body surfaces are shaded (else they only hide what's behind them, or nothing).
@@ -382,14 +410,30 @@ impl VisualStyle {
     matches!(self, VisualStyle::Shaded | VisualStyle::ShadedVisibleEdges | VisualStyle::ShadedHiddenEdges)
   }
 
+  /// Body surfaces are filled plain white, unlit, and pick like shaded ones (the line drawings).
+  pub fn line_drawing(self) -> bool {
+    matches!(self, VisualStyle::HiddenLine | VisualStyle::VisibleLine)
+  }
+
   /// Body edges are drawn.
   pub fn edges(self) -> bool {
     self != VisualStyle::Shaded
   }
 
-  /// Edges behind the surfaces show, faint and dashed.
+  /// Body silhouettes are drawn as edges: in every style that doesn't shade the surfaces.
+  pub fn silhouettes(self) -> bool {
+    !self.shaded()
+  }
+
+  /// Edges behind the surfaces show, dashed.
   pub fn hidden_edges(self) -> bool {
-    matches!(self, VisualStyle::ShadedHiddenEdges | VisualStyle::WireframeHiddenEdges)
+    matches!(self, VisualStyle::ShadedHiddenEdges | VisualStyle::WireframeHiddenEdges | VisualStyle::HiddenLine)
+  }
+
+  /// The opacity hidden edges are drawn at: faint over shading and wireframes, firm in a line
+  /// drawing, where the dashes alone set them apart.
+  pub fn hidden_alpha(self) -> f32 {
+    if self.line_drawing() { HIDDEN_LINE_ALPHA } else { HIDDEN_EDGE_ALPHA }
   }
 
   /// Body surfaces hide what's behind them (all but plain Wireframe).
@@ -400,6 +444,152 @@ impl VisualStyle {
 
 /// How a hidden edge is drawn: its colour at this opacity, dashed.
 pub const HIDDEN_EDGE_ALPHA: f32 = 0.45;
+/// A hidden edge's opacity in [`VisualStyle::HiddenLine`].
+pub const HIDDEN_LINE_ALPHA: f32 = 0.8;
+/// The fill of body surfaces in the line-drawing styles.
+pub const PAPER: [u8; 4] = [255, 255, 255, 255];
+/// The colour silhouettes are drawn in (the scene builder's edge colour).
+pub const SILHOUETTE_COLOR: [u8; 4] = [35, 38, 44, 255];
+
+/// A mesh edge shared by exactly two triangles that don't lie in one plane: part of the
+/// silhouette whenever one of them faces the eye and the other faces away. Built once per mesh
+/// by [`fold_edges`]; which ones are silhouettes depends on the camera ([`FoldEdge::silhouette`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FoldEdge {
+  pub a: [f32; 3],
+  pub b: [f32; 3],
+  /// The two triangles' normals, turned to the side their vertex normals face.
+  pub normals: [[f32; 3]; 2],
+  /// The two triangles' pick ids.
+  pub ids: [u32; 2],
+}
+
+/// Where the eye is, for which way a triangle faces.
+#[derive(Debug, Clone, Copy)]
+pub enum Eye {
+  /// Perspective: the eye point.
+  Point(Vec3),
+  /// Orthographic: the direction towards the eye.
+  Toward(Vec3),
+}
+
+impl Eye {
+  pub fn of(cam: &Camera) -> Eye {
+    if cam.ortho { Eye::Toward(cam.basis().2.as_vec3()) } else { Eye::Point(cam.eye().as_vec3()) }
+  }
+
+  /// Whether a plane through `at` with normal `n` faces the eye.
+  pub fn faces(self, n: Vec3, at: Vec3) -> bool {
+    match self {
+      Eye::Point(e) => n.dot(e - at) > 0.0,
+      Eye::Toward(d) => n.dot(d) > 0.0,
+    }
+  }
+}
+
+impl FoldEdge {
+  /// The pick id of the triangle facing the eye when this edge is on the silhouette.
+  pub fn silhouette(&self, eye: Eye) -> Option<u32> {
+    let a = Vec3::from(self.a);
+    let f = self.normals.map(|n| eye.faces(Vec3::from(n), a));
+    (f[0] != f[1]).then(|| if f[0] { self.ids[0] } else { self.ids[1] })
+  }
+}
+
+/// The edges of a mesh that can be on its silhouette. Vertices at the same position are joined
+/// first (tessellations are per face, so faces meet at copies of the same points); edges with one
+/// triangle or more than two, and edges inside a plane, are left out.
+pub fn fold_edges(m: &Mesh) -> Vec<FoldEdge> {
+  // sorting, not hashing: a few times faster on meshes of millions of triangles
+  let n = m.positions.len();
+  let key = |p: [f32; 3]| p.map(|c| if c == 0.0 { 0 } else { c.to_bits() });
+  let mut by_pos: Vec<([u32; 3], u32)> = m.positions.iter().enumerate().map(|(i, p)| (key(*p), i as u32)).collect();
+  by_pos.sort_unstable();
+  let mut canon = vec![0u32; n];
+  for run in by_pos.chunk_by(|a, b| a.0 == b.0) {
+    for &(_, i) in run {
+      canon[i as usize] = run[0].1;
+    }
+  }
+  drop(by_pos);
+  let tris = m.indices.len() / 3;
+  let mut normals: Vec<Vec3> = Vec::with_capacity(tris);
+  // (low vertex, high vertex) and the triangle, for every triangle side
+  let mut sides: Vec<(u64, u32)> = Vec::with_capacity(tris * 3);
+  for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+    if tri.iter().any(|&i| i as usize >= n) {
+      normals.push(Vec3::ZERO);
+      continue;
+    }
+    let p = [tri[0], tri[1], tri[2]].map(|i| Vec3::from(m.positions[i as usize]));
+    let mut nr = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+    let vn: Vec3 = tri.iter().filter_map(|&i| m.normals.get(i as usize)).map(|v| Vec3::from(*v)).sum();
+    if nr.dot(vn) < 0.0 {
+      nr = -nr;
+    }
+    normals.push(nr);
+    if nr == Vec3::ZERO {
+      continue;
+    }
+    for k in 0..3 {
+      let (a, b) = (canon[tri[k] as usize], canon[tri[(k + 1) % 3] as usize]);
+      if a != b {
+        sides.push(((a.min(b) as u64) << 32 | a.max(b) as u64, t as u32));
+      }
+    }
+  }
+  sides.sort_unstable();
+  let id = |t: u32| m.tri_ids.get(t as usize).copied().unwrap_or(m.id);
+  let mut out = Vec::new();
+  for run in sides.chunk_by(|x, y| x.0 == y.0) {
+    let [(edge, t0), (_, t1)] = run else { continue };
+    let (n0, n1) = (normals[*t0 as usize], normals[*t1 as usize]);
+    if t0 == t1 || n0.dot(n1) >= 1.0 - 1e-6 {
+      continue;
+    }
+    let (a, b) = ((edge >> 32) as usize, (edge & 0xffff_ffff) as usize);
+    out.push(FoldEdge {
+      a: m.positions[a],
+      b: m.positions[b],
+      normals: [n0.to_array(), n1.to_array()],
+      ids: [id(*t0), id(*t1)],
+    });
+  }
+  out
+}
+
+/// [`fold_edges`], remembered for the meshes of the last few renders (keyed by their content), so
+/// the CPU rasterizer doesn't rebuild them every frame.
+pub fn fold_edges_cached(m: &Mesh) -> std::sync::Arc<Vec<FoldEdge>> {
+  use std::hash::Hasher;
+  use std::sync::{Arc, Mutex};
+  static CACHE: Mutex<Vec<(u64, Arc<Vec<FoldEdge>>)>> = Mutex::new(Vec::new());
+  let mut h = std::collections::hash_map::DefaultHasher::new();
+  let mix =
+    |v: &[u32]| v.iter().fold(0u64, |acc, &x| acc.rotate_left(5) ^ x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+  let flat: Vec<u32> = m.positions.iter().flat_map(|p| p.map(f32::to_bits)).collect();
+  h.write_u64(mix(&flat));
+  h.write_u64(mix(&m.indices));
+  h.write_u64(mix(&m.tri_ids));
+  h.write_usize(flat.len() ^ m.indices.len() << 1 ^ m.tri_ids.len() << 2);
+  h.write_u32(m.id);
+  let normals: Vec<u32> = m.normals.iter().flat_map(|p| p.map(f32::to_bits)).collect();
+  h.write_u64(mix(&normals));
+  let key = h.finish();
+  if let Ok(c) = CACHE.lock()
+    && let Some((_, f)) = c.iter().find(|(k, _)| *k == key)
+  {
+    return f.clone();
+  }
+  let f = Arc::new(fold_edges(m));
+  if let Ok(mut c) = CACHE.lock() {
+    if c.len() >= 64 {
+      c.remove(0);
+    }
+    c.push((key, f.clone()));
+  }
+  f
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Scene {
@@ -598,30 +788,39 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
   let head = back.as_vec3();
   let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
   let style = scene.style;
+  let lights = [key, head, fill];
+  let shade_of = |m: &Mesh| Shade {
+    vertex_colors: false,
+    analysis: scene.analysis.filter(|_| m.analyze),
+    paper: m.analyze && style.line_drawing(),
+  };
   for m in scene.meshes.iter().filter(|m| !m.transparent()) {
-    if m.analyze && !style.shaded() {
+    if m.analyze && !style.shaded() && !style.line_drawing() {
       if style.occludes() {
         draw_depth(&mut f, m, &vp);
       }
       continue;
     }
-    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
+    draw_mesh(&mut f, m, &vp, cam, eye, lights, shade_of(m));
   }
+  let silhouettes = if style.silhouettes() { silhouette_lines(scene, cam, h) } else { Vec::new() };
+  let edges = || scene.lines.iter().filter(|l| is_edge(l)).chain(&silhouettes);
   if style.hidden_edges() {
     // before any line writes depth, so only the surfaces hide them
-    for l in scene.lines.iter().filter(|l| is_edge(l)) {
-      draw_hidden(&mut f, l, &vp);
+    for l in edges() {
+      draw_hidden(&mut f, l, &vp, style.hidden_alpha());
     }
   }
-  for l in scene.lines.iter().filter(|l| !l.on_top) {
+  for l in scene.lines.iter().filter(|l| !l.on_top).chain(&silhouettes) {
     draw_polyline(&mut f, l, &vp);
   }
   for mk in scene.markers.iter().filter(|m| !m.on_top) {
     draw_marker(&mut f, mk, &vp);
   }
   // transparent meshes blend over everything behind them, edges included, and hide nothing
-  for m in scene.meshes.iter().filter(|m| m.transparent() && (style.shaded() || !m.analyze)) {
-    draw_mesh(&mut f, m, &vp, cam, eye, [key, head, fill], scene.analysis.filter(|_| m.analyze));
+  let see_through = |m: &&Mesh| m.transparent() && (style.shaded() || style.line_drawing() || !m.analyze);
+  for m in scene.meshes.iter().filter(see_through) {
+    draw_mesh(&mut f, m, &vp, cam, eye, lights, shade_of(m));
   }
   for l in scene.lines.iter().filter(|l| l.on_top) {
     draw_polyline(&mut f, l, &vp);
@@ -630,6 +829,45 @@ pub fn render(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Frame {
     draw_marker(&mut f, mk, &vp);
   }
   f
+}
+
+/// How far (pixels) a silhouette is moved off the surface it outlines. Next to its outline a
+/// curved surface turns towards the eye so fast that, drawn on the edge itself, the line would
+/// lose the depth test to its own surface; just outside, only what's in front of it hides it.
+pub const SILHOUETTE_NUDGE_PX: f32 = 0.75;
+
+/// The body surfaces' silhouettes from a camera, for a picture `height` pixels high, as edges:
+/// one segment per fold edge on the outline (nudged [`SILHOUETTE_NUDGE_PX`] outwards), picking
+/// as the triangle that faces the eye.
+pub fn silhouette_lines(scene: &Scene, cam: &Camera, height: u32) -> Vec<Polyline> {
+  let eye = Eye::of(cam);
+  let per_px = cam.view_height() as f32 / cam.distance as f32 / height.max(1) as f32;
+  let nudge = |p: [f32; 3], out: Vec3| {
+    let p = Vec3::from(p);
+    let world_px = match eye {
+      Eye::Point(e) => per_px * p.distance(e),
+      Eye::Toward(_) => per_px * cam.distance as f32,
+    };
+    (p + out * world_px * SILHOUETTE_NUDGE_PX).to_array()
+  };
+  let mut out = Vec::new();
+  for m in scene.meshes.iter().filter(|m| m.analyze) {
+    for e in fold_edges_cached(m).iter() {
+      if let Some(id) = e.silhouette(eye) {
+        let n = (Vec3::from(e.normals[0]) + Vec3::from(e.normals[1])).normalize_or_zero();
+        out.push(Polyline {
+          points: vec![nudge(e.a, n), nudge(e.b, n)],
+          color: SILHOUETTE_COLOR,
+          width: 1.0,
+          id,
+          on_top: false,
+          dashed: false,
+          behind: false,
+        });
+      }
+    }
+  }
+  out
 }
 
 /// A body edge, for the visual styles: depth-tested and pickable.
@@ -689,9 +927,9 @@ fn draw_depth(f: &mut Frame, m: &Mesh, vp: &DMat4) {
 }
 
 /// The parts of an edge behind the surfaces, faint, thin and dashed; depth and ids are left alone.
-fn draw_hidden(f: &mut Frame, l: &Polyline, vp: &DMat4) {
+fn draw_hidden(f: &mut Frame, l: &Polyline, vp: &DMat4, opacity: f32) {
   let ghost = Polyline { width: 1.0, dashed: true, ..l.clone() };
-  let alpha = (l.color[3] as f32 * HIDDEN_EDGE_ALPHA) as u32;
+  let alpha = (l.color[3] as f32 * opacity) as u32;
   let mut hidden: Vec<usize> = Vec::new();
   let (w, h) = (f.width as i64, f.height as i64);
   rasterize_line(&ghost, vp, f.width, f.height, &mut |x, y, z| {
@@ -731,15 +969,7 @@ struct CV {
   col: Vec3,
 }
 
-fn draw_mesh(
-  f: &mut Frame,
-  m: &Mesh,
-  vp: &DMat4,
-  cam: &Camera,
-  eye: DVec3,
-  lights: [Vec3; 3],
-  analysis: Option<Analysis>,
-) {
+fn draw_mesh(f: &mut Frame, m: &Mesh, vp: &DMat4, cam: &Camera, eye: DVec3, lights: [Vec3; 3], shade: Shade) {
   let tris = m.indices.len() / 3;
   let rgb = |c: [u8; 4]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
   let per_vertex = !m.colors.is_empty();
@@ -761,7 +991,8 @@ fn draw_mesh(
       continue;
     }
     let id = m.tri_ids.get(t).copied().unwrap_or(m.id);
-    let color = if m.highlight == Some(id) { m.highlight_color } else { m.color };
+    let fill = if shade.paper { [PAPER[0], PAPER[1], PAPER[2], m.color[3]] } else { m.color };
+    let color = if m.highlight == Some(id) { m.highlight_color } else { fill };
     let color = if m.transparent() { color } else { [color[0], color[1], color[2], 255] };
     // near-plane clipping (z > -w in GL clip space)
     let poly = clip_near(&v);
@@ -769,7 +1000,7 @@ fn draw_mesh(
       continue;
     }
     // a highlighted (hovered) triangle shows its highlight, not the vertex colours
-    let shade = Shade { vertex_colors: per_vertex && m.highlight != Some(id), analysis };
+    let shade = Shade { vertex_colors: per_vertex && !shade.paper && m.highlight != Some(id), ..shade };
     for i in 1..poly.len() - 1 {
       raster_tri(f, [poly[0], poly[i], poly[i + 1]], id, color, cam, eye, lights, shade);
     }
@@ -809,6 +1040,8 @@ fn clip_near(v: &[CV; 3]) -> Vec<CV> {
 struct Shade {
   vertex_colors: bool,
   analysis: Option<Analysis>,
+  /// Flat and unlit (the line-drawing styles' surfaces).
+  paper: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -898,6 +1131,7 @@ fn raster_tri(
       let base =
         if shade.vertex_colors { v[0].col * b0 as f32 + v[1].col * b1 as f32 + v[2].col * b2 as f32 } else { base };
       let c = match shade.analysis {
+        _ if shade.paper => base,
         None => base * (0.38 + diff) + Vec3::splat(spec),
         Some(Analysis::Zebra { stripes }) => {
           // stripes of a striped environment reflected in the surface
@@ -1184,6 +1418,136 @@ mod tests {
     assert!(row.iter().all(|c| !dark(c)));
   }
 
+  /// A closed cylinder standing on the XY plane: side and caps as separate faces (ids 1, 2, 3)
+  /// with their own copies of the rim points, as a B-rep tessellation has them.
+  fn cylinder(r: f32, h: f32, seg: u32) -> Mesh {
+    let mut m = Mesh { color: [200, 0, 0, 255], analyze: true, ..Default::default() };
+    let ring = |k: u32| {
+      let a = std::f32::consts::TAU * (k % seg) as f32 / seg as f32;
+      (a.cos(), a.sin())
+    };
+    for k in 0..seg {
+      let (c, s) = ring(k);
+      m.positions.extend_from_slice(&[[r * c, r * s, 0.0], [r * c, r * s, h]]);
+      m.normals.extend_from_slice(&[[c, s, 0.0], [c, s, 0.0]]);
+    }
+    for k in 0..seg {
+      let (i, j) = (k * 2, (k + 1) % seg * 2);
+      m.indices.extend_from_slice(&[i, j, i + 1, i + 1, j, j + 1]);
+      m.tri_ids.extend_from_slice(&[1, 1]);
+    }
+    for (z, nz, id) in [(0.0, -1.0, 2), (h, 1.0, 3)] {
+      let c0 = m.positions.len() as u32;
+      m.positions.push([0.0, 0.0, z]);
+      m.normals.push([0.0, 0.0, nz]);
+      for k in 0..seg {
+        let (c, s) = ring(k);
+        m.positions.push([r * c, r * s, z]);
+        m.normals.push([0.0, 0.0, nz]);
+      }
+      for k in 0..seg {
+        m.indices.extend_from_slice(&[c0, c0 + 1 + k, c0 + 1 + (k + 1) % seg]);
+        m.tri_ids.push(id);
+      }
+    }
+    m
+  }
+
+  #[test]
+  fn fold_edges_and_silhouettes_of_a_cylinder() {
+    let m = cylinder(10.0, 20.0, 32);
+    let folds = fold_edges(&m);
+    // the side's 32 generators and the 64 rim edges; the caps' spokes lie in their planes
+    assert_eq!(folds.len(), 96);
+    assert!(folds.iter().all(|e| e.ids.contains(&1)));
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Front);
+    cam.target = [0.0, 0.0, 10.0];
+    for ortho in [true, false] {
+      cam.ortho = ortho;
+      let sil: Vec<(FoldEdge, u32)> =
+        folds.iter().filter_map(|e| e.silhouette(Eye::of(&cam)).map(|id| (*e, id))).collect();
+      // the two outermost generators, picking as the side
+      let generators: Vec<_> = sil.iter().filter(|(e, _)| e.a[2] != e.b[2]).collect();
+      assert_eq!(generators.len(), 2, "ortho {ortho}");
+      assert!(generators.iter().all(|(e, id)| e.a[0].abs() > 9.9 && *id == 1));
+      if ortho {
+        // edge-on, both caps face away: their front rims are outline
+        assert!(sil.iter().filter(|(e, _)| e.a[2] == e.b[2]).all(|(e, id)| e.a[1] <= 0.0 && *id == 1));
+      }
+    }
+    let scene = Scene { meshes: vec![m.clone()], style: VisualStyle::Wireframe, ..Default::default() };
+    let lines = silhouette_lines(&scene, &cam, 100);
+    assert!(lines.iter().all(|l| l.points.len() == 2 && l.color == SILHOUETTE_COLOR && is_edge(l)));
+    // nudged off the side, outwards
+    let mut sides = lines.iter().filter(|l| (l.points[0][2] - l.points[1][2]).abs() > 1.0);
+    assert!(sides.clone().count() == 2 && sides.all(|l| l.points[0][0].abs() > 10.0), "{lines:?}");
+    assert!(silhouette_lines(&Scene { meshes: vec![Mesh { analyze: false, ..m }], ..scene }, &cam, 100).is_empty());
+  }
+
+  #[test]
+  fn line_drawings_outline_curved_faces_and_dash_what_is_hidden() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Front);
+    cam.target = [0.0, 0.0, 10.0];
+    cam.ortho = true;
+    cam.distance = 60.0;
+    let draw = |style| {
+      let scene = Scene {
+        meshes: vec![cylinder(10.0, 20.0, 48)],
+        background_top: [200; 4],
+        background_bottom: [200; 4],
+        style,
+        ..Default::default()
+      };
+      render(&scene, &cam, 200, 200)
+    };
+    // the cylinder spans x ±10 mm: its outline is where the side's silhouette is drawn
+    let ink = |f: &Frame, x: u32| (60..140).filter(|&y| f.rgba[((y * 200 + x) * 4) as usize] < 120).count();
+    let outline = |f: &Frame| {
+      let (l, r) = cam
+        .project(DVec3::new(-10.0, 0.0, 10.0), 200, 200)
+        .zip(cam.project(DVec3::new(10.0, 0.0, 10.0), 200, 200))
+        .unwrap();
+      let near = |x: f64| ((x - 1.0) as u32..=(x + 1.0) as u32).map(|x| ink(f, x)).max().unwrap_or(0);
+      (near(l.0), near(r.0))
+    };
+    for style in
+      [VisualStyle::Wireframe, VisualStyle::WireframeVisibleEdges, VisualStyle::HiddenLine, VisualStyle::VisibleLine]
+    {
+      let f = draw(style);
+      let (l, r) = outline(&f);
+      assert!(l > 60 && r > 60, "{style:?}: the outline is drawn ({l}, {r})");
+    }
+    // shaded styles leave the outline to the shading
+    let f = draw(VisualStyle::ShadedVisibleEdges);
+    assert!(f.rgba[((100 * 200 + 100) * 4) as usize] > 120, "red, not ink, in the middle");
+    // line drawings: plain white surfaces that pick as the face under them
+    for style in [VisualStyle::HiddenLine, VisualStyle::VisibleLine] {
+      let f = draw(style);
+      assert_eq!(&f.rgba[(100 * 200 + 100) * 4..(100 * 200 + 100) * 4 + 3], &[255, 255, 255], "{style:?}");
+      assert_eq!(f.pick(100.0, 100.0, 0, |_| true), 1);
+    }
+  }
+
+  #[test]
+  fn hidden_line_dashes_hidden_edges_firmly() {
+    let white = |c: &[u8; 3]| *c == [255, 255, 255];
+    // the face is paper, the edge under it shows dashed
+    let f = styled(VisualStyle::HiddenLine);
+    let (row, face) = row_and_face(&f);
+    assert_eq!(face, [255, 255, 255]);
+    assert!(row.iter().any(white) && row.iter().any(|c| !white(c)), "dashed: {row:?}");
+    // firmer than the faint hidden edges of the other styles
+    let darkest = |row: &[[u8; 3]]| row.iter().map(|c| c[0]).min().unwrap_or(255);
+    let (faint, _) = row_and_face(&styled(VisualStyle::WireframeHiddenEdges));
+    assert!(darkest(&row) + 40 < darkest(&faint), "{} vs {}", darkest(&row), darkest(&faint));
+    assert_eq!(f.pick(100.0, 40.0, 0, |_| true), 1, "the face picks");
+    // visible lines only: nothing of the edge shows
+    let (row, face) = row_and_face(&styled(VisualStyle::VisibleLine));
+    assert!(white(&face) && row.iter().all(white), "{row:?}");
+  }
+
   #[test]
   fn the_style_flags_match_the_menu() {
     for s in VisualStyle::ALL {
@@ -1192,6 +1556,13 @@ mod tests {
     }
     assert!(!VisualStyle::Shaded.edges() && !VisualStyle::Wireframe.occludes());
     assert_eq!(VisualStyle::default(), VisualStyle::ShadedVisibleEdges);
+    for s in VisualStyle::ALL {
+      assert_eq!(VisualStyle::parse(s.name()), Some(s));
+      assert_eq!(s.silhouettes(), !s.shaded());
+      assert!(!(s.shaded() && s.line_drawing()));
+    }
+    assert_eq!(VisualStyle::parse("Hidden_Line"), Some(VisualStyle::HiddenLine));
+    assert_eq!(VisualStyle::parse("sketchy"), None);
   }
 
   #[test]

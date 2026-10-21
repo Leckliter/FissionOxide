@@ -128,6 +128,8 @@ pub struct ViewOptions {
   pub curvature: bool,
   /// Draw the generated toolpaths and their setup's stock (the Manufacture workspace).
   pub toolpaths: bool,
+  /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
+  pub cut: bool,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
@@ -426,6 +428,9 @@ impl SceneBuilder {
     if opts.toolpaths {
       toolpath_lines(&mut scene, s);
       simulated_stock(&mut scene, s);
+    }
+    if opts.cut {
+      cut_lines(&mut scene, s);
     }
     scene.analysis = opts.analysis;
     (scene, picks)
@@ -901,7 +906,7 @@ pub fn to_sketch(plane: &Plane, p: DVec3) -> [f64; 2] {
 }
 
 /// Renders the design to a PNG for `view.render`: `{width?, height?, view?, yaw?, pitch?,
-/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, background?}` plus the
+/// target?, distance?, ortho?, fov?, bodies?, sketches?, grid?, edges?, style?, background?}` plus the
 /// section and analysis options of [`view_options`]. Without
 /// `distance` the camera fits the bodies shown.
 pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::CmdError> {
@@ -961,14 +966,22 @@ pub fn render_png(s: &Session, p: &serde_json::Value) -> Result<Vec<u8>, crate::
   if let Some(d) = crate::commands::opt_expr(p, "distance") {
     cam.distance = fox_expr::eval(&d, fox_expr::Kind::Length, &scope)?.max(1e-3);
   }
+  let style = match p.get("style").and_then(Value::as_str) {
+    Some(name) => fox_render::VisualStyle::parse(name).ok_or_else(|| {
+      let names: Vec<&str> = fox_render::VisualStyle::ALL.iter().map(|v| v.name()).collect();
+      CmdError::new(format!("unknown style '{name}' ({})", names.join(", ")))
+    })?,
+    None => fox_render::VisualStyle::default(),
+  };
   let opts = ViewOptions {
     hide_sketches: !flag("sketches", false),
     hide_grid: !flag("grid", false),
-    hide_edges: !flag("edges", true),
+    hide_edges: !flag("edges", style.edges()),
     only_bodies: only,
     ..view_options(s, p).map_err(CmdError::new)?
   };
   let (mut scene, _) = SceneBuilder::default().build(s, &opts);
+  scene.style = style;
   if let Some(bg) = p.get("background") {
     let c = crate::commands::parse_color(bg)?;
     scene.background_top = [c[0], c[1], c[2], 255];
@@ -1057,6 +1070,7 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
     o.section = Some(view_plane(s, &plane, offset, flip)?);
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
+  o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   let pull = match p.get("pull") {
     Some(serde_json::Value::String(a)) => match a.as_str() {
       "x" => [1.0, 0.0, 0.0],
@@ -1126,6 +1140,26 @@ fn toolpath_lines(scene: &mut Scene, s: &Session) {
       let color = if rapid { [235, 150, 40, 255] } else { [30, 100, 230, 255] };
       line(scene, run, color, rapid, if rapid { 1.0 } else { 1.5 });
     }
+  }
+}
+
+/// The previewed cut job: outlines blue, holes purple, leads green, rapids dashed orange, the
+/// sheets of a nest dashed grey.
+fn cut_lines(scene: &mut Scene, s: &Session) {
+  let Some(cp) = &s.cut_preview else { return };
+  if cp.revision != s.revision {
+    return;
+  }
+  for l in &cp.lines {
+    let (color, dashed, width) = match l.kind {
+      crate::CutLineKind::Outline => ([30, 100, 230, 255], false, 1.5),
+      crate::CutLineKind::Hole => ([150, 70, 210, 255], false, 1.5),
+      crate::CutLineKind::Lead => ([40, 170, 80, 255], false, 1.5),
+      crate::CutLineKind::Rapid => ([235, 150, 40, 255], true, 1.0),
+      crate::CutLineKind::Sheet => ([120, 130, 150, 255], true, 1.0),
+    };
+    let points = l.points.iter().map(|p| p.as_vec3().to_array()).collect();
+    scene.lines.push(Polyline { points, color, width, id: 0, on_top: false, dashed, behind: false });
   }
 }
 
