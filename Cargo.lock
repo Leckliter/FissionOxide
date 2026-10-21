@@ -1350,6 +1350,7 @@ dependencies = [
  "fox-ecad",
  "fox-exchange",
  "fox-expr",
+ "fox-form",
  "fox-hub-server",
  "fox-kernel",
  "fox-model",
@@ -1382,6 +1383,15 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-form"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1419,6 +1429,7 @@ version = "0.1.0"
 dependencies = [
  "fox-ecad",
  "fox-expr",
+ "fox-form",
  "fox-kernel",
  "fox-sketch",
  "log",

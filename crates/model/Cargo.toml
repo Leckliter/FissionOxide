@@ -10,6 +10,7 @@ fox-expr.workspace = true
 fox-sketch.workspace = true
 fox-kernel.workspace = true
 fox-ecad.workspace = true
+fox-form.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

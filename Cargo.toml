@@ -26,6 +26,7 @@ fox-desktop = { path = "crates/desktop" }
 fox-hub-server = { path = "crates/hub-server" }
 fox-ecad = { path = "crates/ecad" }
 fox-sim = { path = "crates/sim" }
+fox-form = { path = "crates/form" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
