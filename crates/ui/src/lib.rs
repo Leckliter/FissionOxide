@@ -42,6 +42,7 @@ mod scale_to_ui;
 mod render_ui;
 mod select;
 mod sheet;
+mod sim_ui;
 mod theme;
 mod tips;
 mod toolbox;
@@ -208,6 +209,8 @@ pub struct App {
   pub generative: bool,
   /// The generative study window and its background solves.
   pub(crate) gd: gen_ui::GenState,
+  /// The Simulation workspace, while it is open: the study shown, result display, probes.
+  pub simulation: Option<sim_ui::SimUi>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -421,6 +424,7 @@ impl App {
       cut_preview_failed: None,
       generative: false,
       gd: gen_ui::GenState::default(),
+      simulation: None,
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -1565,6 +1569,7 @@ impl App {
       panels::assistant_tab(self, &ctx);
       panels::sketch_palette(self, &ctx);
       marking::show(self, &ctx);
+      sim_ui::show(self, &ctx);
     }
     toolbox::show(self, &ctx);
     panels::canvas_status(self, &ctx);

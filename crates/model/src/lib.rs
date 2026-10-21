@@ -37,6 +37,7 @@ pub mod render;
 pub mod sheet;
 pub mod sheet2;
 pub mod sheet3;
+pub mod sim;
 pub mod subassembly;
 pub mod surface;
 pub mod thread;
@@ -159,6 +160,9 @@ pub struct Design {
   /// The Render workspace: materials, environment, camera, settings and the render gallery.
   #[serde(default, skip_serializing_if = "render::RenderDoc::is_empty")]
   pub render: render::RenderDoc,
+  /// Simulation studies (the Simulation workspace).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub sim: Vec<sim::Study>,
   #[serde(default)]
   next_id: u32,
 }
@@ -2191,6 +2195,7 @@ impl Design {
       electronics: None,
       exploded_view: None,
       render: render::RenderDoc::default(),
+      sim: Vec::new(),
       next_id: 1,
     }
   }

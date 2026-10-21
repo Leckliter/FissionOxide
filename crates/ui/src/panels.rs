@@ -844,6 +844,10 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
             crate::ecad_ui::toolbar(app, ui);
             return;
           }
+          if app.simulation.is_some() {
+            crate::sim_ui::toolbar(app, ui);
+            return;
+          }
           tab_row(app, ui, sketching);
           egui::ScrollArea::horizontal()
             .id_salt("tools")
@@ -892,10 +896,12 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
         "RENDER"
       } else if app.manufacture {
         "MANUFACTURE"
+      } else if app.simulation.is_some() {
+        "SIMULATION"
       } else {
         "DESIGN"
       },
-      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() || app.generative {
+      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() || app.generative || app.simulation.is_some() {
         10.0
       } else if app.drawing.is_some() {
         12.5
@@ -917,10 +923,13 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
           "Electronics" => ecad,
           "Generative Design" => app.generative && !drawing && !ecad,
           "Render" => app.render.active && !drawing && !ecad,
-          _ => i == 0 && !drawing && !app.manufacture && !ecad && !app.generative && !app.render.active,
+          "Simulation" => app.simulation.is_some() && !drawing && !ecad,
+          _ => {
+            i == 0 && !drawing && !app.manufacture && !ecad && !app.generative && !app.render.active && app.simulation.is_none()
+          }
         };
         let r = ui.add_enabled(
-          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design" | "Render"),
+          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design" | "Render" | "Simulation"),
           egui::Button::selectable(current, *w),
         );
         if r.clicked() {
@@ -942,10 +951,21 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
     }
     app.manufacture = false;
     app.generative = false;
+    app.simulation = None;
     app.open_electronics();
     return;
   }
   app.electronics = None;
+  if w == "Simulation" {
+    if drawing {
+      app.close_drawing();
+    }
+    app.manufacture = false;
+    app.generative = false;
+    app.open_simulation();
+    return;
+  }
+  app.simulation = None;
   match w {
     "Render" => {
       app.manufacture = false;

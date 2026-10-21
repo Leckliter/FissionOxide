@@ -215,7 +215,7 @@ pub fn step_label(before: &Design, after: &Design) -> String {
       };
     }
   }
-  let parts: [(bool, &str); 10] = [
+  let parts: [(bool, &str); 11] = [
     (before.units != after.units, "Change Units"),
     (before.timeline_groups != after.timeline_groups, "Edit Groups"),
     (before.bodies != after.bodies, "Change Body Display"),
@@ -223,6 +223,7 @@ pub fn step_label(before: &Design, after: &Design) -> String {
     (before.drawings != after.drawings, "Edit Drawing"),
     (before.configurations != after.configurations, "Edit Configurations"),
     (before.cam != after.cam, "Edit Manufacture Setup"),
+    (before.sim != after.sim, "Edit Simulation Study"),
     (before.sheet_metal_rules != after.sheet_metal_rules, "Edit Sheet Metal Rules"),
     (before.contact_sets != after.contact_sets, "Edit Contact Sets"),
     (before.name != after.name, "Rename Design"),

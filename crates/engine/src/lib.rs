@@ -37,6 +37,7 @@ pub mod properties;
 pub mod rendering;
 pub mod scene;
 mod sheet2;
+pub mod sim;
 mod solid;
 mod step;
 mod subassembly;
@@ -58,6 +59,7 @@ pub use fox_expr as expr;
 pub use fox_kernel as kernel;
 pub use fox_model as model;
 pub use fox_render as render;
+pub use fox_sim as simulation;
 pub use fox_sketch as sketch;
 pub use fox_store as store;
 pub use hub::HubLink;
@@ -194,6 +196,8 @@ pub struct Session {
   /// The active component (`component.activate`): bodies that later features make go into it,
   /// as in Fusion. `None` = the top level.
   pub active_component: Option<fox_model::ComponentId>,
+  /// Simulation studies meshed (and solved) in this session: their meshes and results.
+  pub sim_runs: Vec<sim::SimRun>,
 }
 
 impl Default for Session {
@@ -227,6 +231,7 @@ impl Session {
       diff: None,
       drawing_sheet: None,
       active_component: None,
+      sim_runs: Vec::new(),
     };
     s.rebuild();
     s
@@ -613,6 +618,8 @@ mod tests_sheet3;
 mod tests_sheet4;
 #[cfg(test)]
 mod tests_sheet5;
+#[cfg(test)]
+mod tests_sim;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]

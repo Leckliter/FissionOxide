@@ -617,6 +617,9 @@ fn view_params(app: &App) -> serde_json::Value {
   if app.manufacture || app.cut_window.is_some() {
     v["cut"] = json!(app.s.cut_preview.as_ref().map(|c| [c.job as u64, c.revision]));
   }
+  if let Some(sim) = crate::sim_ui::view_json(app) {
+    v["sim"] = sim;
+  }
   if let Some(sec) = &app.section {
     v["section"] = sec.clone();
   }

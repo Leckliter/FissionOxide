@@ -474,6 +474,22 @@ cmds! {
   "sketch.cleanup" => "Clean Up an imported or projected sketch for DXF: break projection links, delete constraints (on projected geometry, all, or none) and dimensions, delete points no curve uses, construction to normal, close gaps between curve ends (moved together and made coincident), splines to lines or arcs", "{sketch?, break_links?: bool (true), delete_constraints?: projected|all|none, delete_dimensions?: bool, purge_points?: bool (true), construction_to_normal?: bool, merge_gaps?: null|true|tolerance, gap_tolerance?, splines_to?: null|lines|arcs, segments?: 4..512 (64, lines), spline_tolerance? (0.001 in, arcs)}";
   "view.explode" => "Exploded view (display only: no timeline feature, joints and the design stay put; saved with the design): components sorted by their centre along the direction, the i-th of N moved i x range x factor / N (range = the assembly's extent that way); components below another move with it only. Fields not given keep the current view's; off clears it", "{off?: true, components?: [id | name] (default every top-level one), direction?: x|y|z|-x|-y|-z|auto|[x,y,z] (default z), factor? (default 1), order?: position|browser, name?}";
   "view.render_components" => "Batch render: one square PNG per component (with those below it) on its own, others left out (visibility untouched), plus a manifest .json and .csv with index, component, leading number (01 - Letters -> 01), name, area in2 and mm2 (powder coat), appearance and image path", "{folder, size? (default 1080), camera?: {yaw, pitch} (default 15, 20 degrees) | named or standard view, style?: shaded|shaded_edges, ortho? (default true), components?: [id | name] (default every top-level one), label? (default the design name), name_pattern? (default \"{label} - {component}\"; also {number}, {index}), manifest? (default \"{label} - Part Data\"), background?}";
+  "sim.study" => "Simulation: a new study (static stress, modal frequencies or steady-state thermal) of some bodies (default every visible solid); later sim commands work on the last study unless given one", "{type?: static|modal|thermal, name?, bodies?: [id | name], modes? (modal, default 8), gravity?: bool}";
+  "sim.edit" => "Change a study's name, type, bodies or mode count", "{study?: id | name, name?, type?, bodies?, modes?}";
+  "sim.delete" => "Delete a study", "{study?}";
+  "sim.list" => "Simulation studies with their bodies, materials, constraints, loads and whether their results are current", "{}";
+  "sim.info" => "One study's setup", "{study?}";
+  "sim.materials" => "The simulation material library: Young's modulus (MPa), Poisson's ratio, density (g/cm³), yield and tensile strength (MPa), conductivity (W/(m·K)), expansion, specific heat", "{}";
+  "sim.material" => "A study's material for bodies (default all of them), over their components' physical material: a library name and/or own values; nothing clears it", "{study?, bodies?: [id | name], material?, youngs?: MPa, poisson?, density?: g/cm³, yield?: MPa, conductivity?: W/(m·K)}";
+  "sim.constraint" => "Structural constraint on faces: fixed (optionally only x, y or z), pin (cylindrical faces: radial, axial, tangential) or frictionless (no motion along the normal)", "{study?, type?: fixed|pin|frictionless, faces: [face], x?, y?, z?: bool, radial?, axial?, tangential?: bool}";
+  "sim.load" => "Load: force, bearing (N; a vector, or magnitude along direction: [x,y,z] | x|-x|.. | normal, default into the face), pressure (MPa, into the faces), moment (N·mm vector), gravity (mm/s², default -Z 9806.65); thermal: temperature (°C), heat_flux (W/m²), heat (W), convection (W/(m²·K) to ambient °C), internal_heat (W in a body)", "{study?, type: force|pressure|bearing|moment|gravity|temperature|heat_flux|heat|convection|internal_heat, faces?, force? | magnitude? + direction?, pressure?, moment?, acceleration?, temperature?, flux?, power?, coefficient?, ambient?, body?}";
+  "sim.remove" => "Remove a constraint, load or mesh refinement from a study (by index, as sim.info lists them)", "{study?, constraint? | load? | refinement?}";
+  "sim.contact" => "Contacts between bodies: automatic (bond every touching pair, the default) or manual bonded pairs", "{study?, mode?: automatic|manual, bond?: [body, body], unbond?: [body, body]}";
+  "sim.mesh" => "Mesh a study's bodies into quadratic tetrahedra: element size (mm, or auto from each body's size) and local refinement on faces; returns nodes, elements and quality", "{study?, size?: mm | \"auto\", refine?: [{faces, size}], clear_refine?: bool}";
+  "sim.solve" => "Solve a study (meshing it first if need be): displacement, von Mises stress, safety factor and reactions (static); natural frequencies, mode shapes and effective mass (modal); temperature and heat flux (thermal)", "{study?}";
+  "sim.results" => "A result field's range and where its extremes are (fields: von_mises, displacement, safety_factor, ux, uy, uz, p1, p3, sxx ... szx; mode; temperature, heat_flux, flux_x ...)", "{study?, field?, mode?: n (modal)}";
+  "sim.probe" => "A result field's value at points (interpolated in the mesh)", "{study?, field?, mode?, point: [x, y, z] | points: [[x, y, z]]}";
+  "sim.report" => "The study's report (setup, mesh, results): HTML, or Markdown (format md or a .md path); written to path or returned", "{study?, path?, format?: html|md}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -497,6 +513,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::features::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::sim::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::cam::run(s, name, p) {

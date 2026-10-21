@@ -1564,6 +1564,7 @@ dependencies = [
  "fox-model",
  "fox-raytrace",
  "fox-render",
+ "fox-sim",
  "fox-sketch",
  "fox-store",
  "fox-trace",

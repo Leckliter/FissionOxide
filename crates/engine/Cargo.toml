@@ -16,6 +16,7 @@ fox-exchange.workspace = true
 fox-store.workspace = true
 fox-trace.workspace = true
 fox-cut.workspace = true
+fox-sim.workspace = true
 fox-ecad.workspace = true
 fox-gen.workspace = true
 fox-raytrace.workspace = true

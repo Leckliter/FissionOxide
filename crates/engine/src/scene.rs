@@ -85,7 +85,7 @@ pub struct PickTable {
 }
 
 impl PickTable {
-  fn id(&mut self, p: Pick) -> u32 {
+  pub(crate) fn id(&mut self, p: Pick) -> u32 {
     if let Some(i) = self.index.get(&p) {
       return *i;
     }
@@ -130,6 +130,9 @@ pub struct ViewOptions {
   pub toolpaths: bool,
   /// Draw the previewed 2D cut job (`cut.job.preview`) while it matches the design.
   pub cut: bool,
+  /// Draw a simulation study's results (or mesh) instead of its bodies (the Simulation
+  /// workspace).
+  pub sim: Option<crate::sim::SimView>,
   /// Draw body vertices as pickable dots (the Vertices selection filter).
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
@@ -183,9 +186,10 @@ impl SceneBuilder {
       crate::diff::draw(d, &mut scene);
     }
 
-    // bodies
+    // bodies (a simulation view draws its own)
+    let sim_bodies = opts.sim.as_ref().map(|v| crate::sim::view_bodies(s, v)).unwrap_or_default();
     for body in &s.model.bodies {
-      if s.diff.is_some() {
+      if s.diff.is_some() || sim_bodies.contains(&body.id) {
         continue;
       }
       let shown = match &opts.only_bodies {
@@ -449,6 +453,9 @@ impl SceneBuilder {
     }
     if opts.cut {
       cut_lines(&mut scene, s);
+    }
+    if let Some(v) = &opts.sim {
+      crate::sim::draw(&mut scene, &mut picks, s, v);
     }
     scene.analysis = opts.analysis;
     (scene, picks)
@@ -1122,6 +1129,9 @@ pub fn view_options(s: &Session, p: &serde_json::Value) -> Result<ViewOptions, S
   }
   o.toolpaths = p.get("toolpaths").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
   o.cut = p.get("cut").is_some_and(|t| !t.is_null() && t != &serde_json::json!(false));
+  if let Some(v) = p.get("sim").filter(|v| !v.is_null()) {
+    o.sim = Some(crate::sim::view_of(s, v)?);
+  }
   let pull = match p.get("pull") {
     Some(serde_json::Value::String(a)) => match a.as_str() {
       "x" => [1.0, 0.0, 0.0],

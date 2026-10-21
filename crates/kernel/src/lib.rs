@@ -859,6 +859,17 @@ impl Shape {
     Ok(TriMesh { positions, normals, indices: m.triangles, tri_face: m.tri_face })
   }
 
+  /// Triangulates with a chordal deviation (mm) and an angular deviation (radians) between
+  /// neighbouring triangles: finer curved faces than [`Shape::tessellate`] (simulation meshes).
+  pub fn tessellate_fine(&self, tolerance: f64, angle: f64) -> Result<TriMesh> {
+    let tol = if tolerance.is_finite() { tolerance.clamp(1e-4, 100.0) } else { 0.1 };
+    let angle = if angle.is_finite() { angle.clamp(0.02, 1.0) } else { 0.35 };
+    let m = sys::mesh_shape(self.get()?, tol, angle)?;
+    let positions = m.positions.chunks_exact(3).map(|c| [c[0] as f32, c[1] as f32, c[2] as f32]).collect();
+    let normals = m.normals.chunks_exact(3).map(|c| [c[0] as f32, c[1] as f32, c[2] as f32]).collect();
+    Ok(TriMesh { positions, normals, indices: m.triangles, tri_face: m.tri_face })
+  }
+
   /// Edge polylines for display and picking.
   pub fn edge_lines(&self, deflection: f64) -> Result<Vec<EdgeLine>> {
     let d = sys::edge_polylines(self.get()?, deflection.clamp(1e-4, 100.0))?;
