@@ -463,6 +463,8 @@ pub(crate) enum Cmd {
   SketchLibrary,
   /// The Render workspace's commands.
   Render(crate::render_ui::RenderCmd),
+  /// Fabrication: check a cut file for a cutting service, with the cut estimate.
+  CutCheck,
 }
 
 impl Cmd {
@@ -645,6 +647,11 @@ impl Cmd {
         (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
       }
       Cmd::Render(r) => r.info(),
+      Cmd::CutCheck => (
+        Icon::Interference,
+        "Cut Service Check",
+        "Check a sketch, flat pattern or DXF for SendCutSend, OSH Cut, Ponoko or your shop, with a cut estimate",
+      ),
     }
   }
 
@@ -776,6 +783,7 @@ impl Cmd {
       Cmd::Properties => crate::props_ui::toggle(),
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),
+      Cmd::CutCheck => crate::service_ui::open(app),
     }
   }
 }

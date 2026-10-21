@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unreachable)]
 
 pub mod archive;
+pub mod cutservice;
 pub mod dxf;
 pub mod flatcheck;
 mod glb;

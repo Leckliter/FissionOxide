@@ -232,6 +232,16 @@ change a parameter and watch the whole history rebuild.
   View → Render Components… writes one image per component on its own and a part list (`.json`
   and `.csv`) with each part's number, area in in² and mm² (for powder coat) and appearance.
   Commands `view.explode` and `view.render_components`.
+- **Cut-service checks and cut estimates.** `cut.service.check` checks a sketch, a flat pattern or
+  a DXF for SendCutSend, OSH Cut, Ponoko (approximate limits) or your own shop
+  (`cut.service.add`, kept in the hub's `cut_services.json`): text that isn't outlines, open
+  contours, duplicate or overlapping cuts (holes in a part are fine), features under the
+  service's minimum (laser 0.5 × thickness, waterjet 0.070", router 0.125"), parts too big or
+  too small and wrong units, as PASS / WARNINGS / ERRORS with a Zoom to each issue
+  (Manufacture ▸ ACTIONS or Sheet Metal ▸ CREATE ▸ Cut Service Check). `cut.estimate` gives
+  area, cut length, pierces, pieces, holes and size per part and in total, as JSON or CSV for
+  quoting. `sheet.collect_flat` (All Flat Patterns on One Sheet) lays every sheet metal body's
+  flat pattern out in one `Cut File` sketch or DXF, in rows that wrap at the sheet width.
 
 ## Install
 

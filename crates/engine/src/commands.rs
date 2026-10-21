@@ -490,6 +490,12 @@ cmds! {
   "sim.results" => "A result field's range and where its extremes are (fields: von_mises, displacement, safety_factor, ux, uy, uz, p1, p3, sxx ... szx; mode; temperature, heat_flux, flux_x ...)", "{study?, field?, mode?: n (modal)}";
   "sim.probe" => "A result field's value at points (interpolated in the mesh)", "{study?, field?, mode?, point: [x, y, z] | points: [[x, y, z]]}";
   "sim.report" => "The study's report (setup, mesh, results): HTML, or Markdown (format md or a .md path); written to path or returned", "{study?, path?, format?: html|md}";
+  "cut.service.list" => "Cutting services (SendCutSend, OSH Cut, Ponoko built in, approximate limits; and the hub's cut_services.json): processes, minimum feature, part sizes, materials", "{}";
+  "cut.service.add" => "Add or replace a cutting service profile in the hub", "{service: {id, name, url?, notes?, approximate?, one_part_per_file?, processes: [{name?, process?: laser|waterjet|router|plasma, min_feature_ratio? (× thickness), min_feature? (mm), max_part?: [w, h] mm, min_part?: [w, h] mm, materials?: [word]}]}}";
+  "cut.service.delete" => "Delete a cutting service profile from the hub", "{id}";
+  "cut.service.check" => "Check a cut file for a cutting service: text not outlined, open contours, duplicate or overlapping cuts (holes inside a part are fine), features under the service's minimum (laser 0.5 × thickness, waterjet 0.070\", router 0.125\"), parts too big or small, wrong units; PASS / WARNINGS / ERRORS with locations, and the cut estimate", "{sketch? | body? | dxf?: path (default: the sketch being edited, else the sheet metal body), service? (default sendcutsend), process?, material?, thickness?, export?: .json|.csv}";
+  "cut.estimate" => "Cut estimate for quoting, per part and in total: area (in² and mm²), cut length, pierces (closed contours), pieces (outer contours), holes, bounding box", "{sketch? | body? | dxf?: path, export?: .csv|.json}";
+  "sheet.collect_flat" => "All flat patterns on one sheet: every sheet metal body's flat pattern outline (bend lines as construction) in one new sketch, or one DXF, in rows that wrap before a part runs past max_width", "{bodies?: [body] (default every sheet metal body), max_width? (default 48 in), gap? (default 0.25 in), sketch_name? (default \"Cut File\"), path?: .dxf}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -567,6 +573,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = sketch_cleanup::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::cut_service::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::collect_flat::run(s, name, p) {
     return r;
   }
   match name {

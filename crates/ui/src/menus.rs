@@ -425,6 +425,8 @@ const SHEET_CREATE: &[E] = &[
   c("Create Flat Pattern", Icon::FlatPattern, D(Kind::FlatPattern)),
   c("Flat Pattern Sketch", Icon::FlatPattern, D(Kind::Form(&forms::FLAT_SKETCH))),
   c("Joint Origin", Icon::JointOrigin, D(Kind::Form(&assembly_forms::JOINT_ORIGIN))),
+  c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
+  c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
 ];
 
 const SHEET_MODIFY: &[E] = &[
@@ -827,6 +829,8 @@ const CAM_ACTIONS: &[E] = &[
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
   c("Delete Setup", Icon::Remove, Cmd::CamDelete),
   c("2D Cut (Laser, Plasma, Waterjet)", Icon::ExportDxf, Cmd::Cut2d),
+  c("Cut Service Check", Icon::Interference, Cmd::CutCheck),
+  c("All Flat Patterns on One Sheet", Icon::FlatPattern, D(Kind::Form(&forms::COLLECT_FLAT))),
 ];
 
 const GEN_DEFINE: &[E] = &[

@@ -219,7 +219,7 @@ pub fn check_dxf(bytes: &[u8], rules: Option<Rules>) -> Result<Report> {
 
 // ---------------------------------------------------------------- geometry
 
-type P2 = [f64; 2];
+pub type P2 = [f64; 2];
 
 fn dist(a: P2, b: P2) -> f64 {
   (a[0] - b[0]).hypot(a[1] - b[1])
@@ -250,7 +250,7 @@ fn seg_seg(a: P2, b: P2, c: P2, d: P2) -> f64 {
 }
 
 /// Least distance between two polylines (and the point on `a` where it is).
-fn poly_poly(a: &[P2], b: &[P2]) -> (f64, P2) {
+pub fn poly_poly(a: &[P2], b: &[P2]) -> (f64, P2) {
   let mut best = (f64::INFINITY, a.first().copied().unwrap_or([0.0, 0.0]));
   for wa in a.windows(2) {
     for wb in b.windows(2) {
@@ -263,7 +263,8 @@ fn poly_poly(a: &[P2], b: &[P2]) -> (f64, P2) {
   best
 }
 
-fn inside(poly: &[P2], p: P2) -> bool {
+/// Whether `p` is inside the closed polygon (even-odd).
+pub fn inside(poly: &[P2], p: P2) -> bool {
   let mut c = false;
   let n = poly.len();
   for i in 0..n {
@@ -275,13 +276,14 @@ fn inside(poly: &[P2], p: P2) -> bool {
   c
 }
 
-fn area(poly: &[P2]) -> f64 {
+/// Area of a closed polygon.
+pub fn area(poly: &[P2]) -> f64 {
   let n = poly.len();
   (0..n).map(|i| poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1]).sum::<f64>().abs() / 2.0
 }
 
 /// The least width of a point set over all directions (1° steps, then refined).
-fn min_width(pts: &[P2]) -> f64 {
+pub fn min_width(pts: &[P2]) -> f64 {
   let width = |a: f64| {
     let (c, s) = (a.cos(), a.sin());
     let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
@@ -394,6 +396,104 @@ fn overlap(x: &Entity, y: &Entity, tol: f64) -> Option<P2> {
   }
 }
 
+/// The closed loops that cut entities form, as points along them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Loops {
+  pub loops: Vec<Vec<P2>>,
+  /// Loose ends of contours that don't close.
+  pub open: Vec<P2>,
+  /// Points where more than two entities meet, with how many do.
+  pub branches: Vec<(P2, usize)>,
+  /// Length of the entities in no closed loop.
+  pub open_length: f64,
+}
+
+fn poly_length(pts: &[P2]) -> f64 {
+  pts.windows(2).map(|w| dist(w[0], w[1])).sum()
+}
+
+/// Joins the ends of cut entities (points closer than `tol` meet) into closed loops.
+pub fn cut_loops(cut: &[&Entity], tol: f64) -> Loops {
+  let pieces: Vec<Piece> = cut.iter().filter_map(|e| piece(e)).collect();
+  let mut nodes: Vec<P2> = Vec::new();
+  let mut node = |p: P2| -> usize {
+    match nodes.iter().position(|q| dist(*q, p) <= tol) {
+      Some(i) => i,
+      None => {
+        nodes.push(p);
+        nodes.len() - 1
+      }
+    }
+  };
+  let ends: Vec<Option<(usize, usize)>> = pieces.iter().map(|p| p.ends.map(|(a, b)| (node(a), node(b)))).collect();
+  let mut degree = vec![0usize; nodes.len()];
+  for (a, b) in ends.iter().flatten() {
+    degree[*a] += 1;
+    degree[*b] += 1;
+  }
+  let mut out = Loops::default();
+  for (i, d) in degree.iter().enumerate() {
+    if *d == 1 {
+      out.open.push(nodes[i]);
+    } else if *d > 2 {
+      out.branches.push((nodes[i], *d));
+    }
+  }
+  // walk the closed loops
+  out.loops = pieces.iter().filter(|p| p.ends.is_none()).map(|p| p.pts.clone()).collect();
+  let mut used = vec![false; pieces.len()];
+  let mut in_loop: Vec<bool> = pieces.iter().map(|p| p.ends.is_none()).collect();
+  for start in 0..pieces.len() {
+    let Some((first, mut at)) = ends[start] else { continue };
+    if used[start] || degree[first] != 2 {
+      continue;
+    }
+    let mut pts = pieces[start].pts.clone();
+    let mut chain = vec![start];
+    used[start] = true;
+    let mut closed = false;
+    while degree[at] == 2 {
+      if at == first {
+        closed = true;
+        break;
+      }
+      let Some(k) = (0..pieces.len()).find(|&k| !used[k] && ends[k].is_some_and(|(a, b)| a == at || b == at)) else {
+        break;
+      };
+      let Some((a, b)) = ends[k] else { break };
+      used[k] = true;
+      chain.push(k);
+      if a == at {
+        pts.extend(pieces[k].pts.iter().skip(1));
+        at = b;
+      } else {
+        pts.extend(pieces[k].pts.iter().rev().skip(1));
+        at = a;
+      }
+    }
+    if closed {
+      out.loops.push(pts);
+      for k in chain {
+        in_loop[k] = true;
+      }
+    }
+  }
+  out.open_length = pieces.iter().zip(&in_loop).filter(|(_, l)| !**l).map(|(p, _)| poly_length(&p.pts)).sum();
+  out
+}
+
+/// Nesting depth of each loop: how many others enclose it (even = a part outline, odd = a hole).
+pub fn depths(loops: &[Vec<P2>]) -> Vec<usize> {
+  let areas: Vec<f64> = loops.iter().map(|l| area(l)).collect();
+  (0..loops.len())
+    .map(|i| {
+      (0..loops.len())
+        .filter(|&j| j != i && areas[j] > areas[i] && loops[i].iter().all(|p| inside(&loops[j], *p)))
+        .count()
+    })
+    .collect()
+}
+
 /// Checks layered flat-pattern geometry against `rules`.
 pub fn check(layered: &Layered, rules: Rules) -> Report {
   let tol = rules.tol;
@@ -426,78 +526,17 @@ pub fn check(layered: &Layered, rules: Rules) -> Report {
     }
   }
 
-  // contours: join the pieces' ends
-  let pieces: Vec<Piece> = cut.iter().filter_map(|e| piece(e)).collect();
-  let mut nodes: Vec<P2> = Vec::new();
-  let mut node = |p: P2| -> usize {
-    match nodes.iter().position(|q| dist(*q, p) <= tol) {
-      Some(i) => i,
-      None => {
-        nodes.push(p);
-        nodes.len() - 1
-      }
-    }
-  };
-  let ends: Vec<Option<(usize, usize)>> = pieces.iter().map(|p| p.ends.map(|(a, b)| (node(a), node(b)))).collect();
-  let mut degree = vec![0usize; nodes.len()];
-  for (a, b) in ends.iter().flatten() {
-    degree[*a] += 1;
-    degree[*b] += 1;
+  let Loops { loops, open, branches, .. } = cut_loops(&cut, tol);
+  for at in open {
+    issues.push(Issue { kind: IssueKind::OpenContour, at, message: "a cut contour is open here".into() });
   }
-  for (i, d) in degree.iter().enumerate() {
-    if *d == 1 {
-      issues.push(Issue { kind: IssueKind::OpenContour, at: nodes[i], message: "a cut contour is open here".into() });
-    } else if *d > 2 {
-      issues.push(Issue { kind: IssueKind::Branch, at: nodes[i], message: format!("{d} cut entities meet here") });
-    }
-  }
-  // walk the closed loops
-  let mut loops: Vec<Vec<P2>> = pieces.iter().filter(|p| p.ends.is_none()).map(|p| p.pts.clone()).collect();
-  let mut used = vec![false; pieces.len()];
-  for start in 0..pieces.len() {
-    let Some((first, mut at)) = ends[start] else { continue };
-    if used[start] || degree[first] != 2 {
-      continue;
-    }
-    let mut pts = pieces[start].pts.clone();
-    let mut chain = vec![start];
-    used[start] = true;
-    let mut closed = false;
-    while degree[at] == 2 {
-      if at == first {
-        closed = true;
-        break;
-      }
-      let Some(k) = (0..pieces.len()).find(|&k| !used[k] && ends[k].is_some_and(|(a, b)| a == at || b == at)) else {
-        break;
-      };
-      let Some((a, b)) = ends[k] else { break };
-      used[k] = true;
-      chain.push(k);
-      if a == at {
-        pts.extend(pieces[k].pts.iter().skip(1));
-        at = b;
-      } else {
-        pts.extend(pieces[k].pts.iter().rev().skip(1));
-        at = a;
-      }
-    }
-    if closed {
-      loops.push(pts);
-    }
+  for (at, d) in branches {
+    issues.push(Issue { kind: IssueKind::Branch, at, message: format!("{d} cut entities meet here") });
   }
   if loops.is_empty() {
     issues.push(Issue { kind: IssueKind::NoOutline, at: [0.0, 0.0], message: "no closed cut contour".into() });
   }
-  // nesting: an even depth is a part outline, an odd one a hole
-  let areas: Vec<f64> = loops.iter().map(|l| area(l)).collect();
-  let depth: Vec<usize> = (0..loops.len())
-    .map(|i| {
-      (0..loops.len())
-        .filter(|&j| j != i && areas[j] > areas[i] && loops[i].iter().all(|p| inside(&loops[j], *p)))
-        .count()
-    })
-    .collect();
+  let depth = depths(&loops);
   let parts = depth.iter().filter(|d| **d % 2 == 0).count();
   if parts > 1 {
     let at = loops.iter().zip(&depth).filter(|(_, d)| **d % 2 == 0).nth(1).map(|(l, _)| l[0]).unwrap_or([0.0, 0.0]);

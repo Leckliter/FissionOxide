@@ -38,9 +38,10 @@ mod plugins_ui;
 mod preferences;
 mod preview;
 mod props_ui;
-mod scale_to_ui;
 mod render_ui;
+mod scale_to_ui;
 mod select;
+mod service_ui;
 mod sheet;
 mod sim_ui;
 mod theme;
@@ -1601,6 +1602,7 @@ impl App {
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
     explode_ui::window(self, &ctx);
+    service_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
       egui::Popup::close_all(&ctx);
     }

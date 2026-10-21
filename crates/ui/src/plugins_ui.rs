@@ -118,7 +118,8 @@ fn offer(app: &mut App, pkg: Package, source: String) {
 }
 
 fn pick_file(app: &mut App) {
-  if let Some(p) = rfd::FileDialog::new().set_title("Install plugin").add_filter("FissionOxide plugin", &["foxplugin"]).pick_file()
+  if let Some(p) =
+    rfd::FileDialog::new().set_title("Install plugin").add_filter("FissionOxide plugin", &["foxplugin"]).pick_file()
   {
     offer_file(app, &p);
   }
@@ -163,7 +164,9 @@ fn install_window(app: &mut App, ctx: &egui::Context) {
         for (p, on) in &mut pending.grant {
           ui.checkbox(on, p.describe()).on_hover_text(p.id());
         }
-        ui.label(RichText::new("Untick what you don't want to allow; commands that need it will fail.").color(theme::MUTED));
+        ui.label(
+          RichText::new("Untick what you don't want to allow; commands that need it will fail.").color(theme::MUTED),
+        );
       }
       if let Some(readme) = pending.pkg.readme() {
         ui.collapsing("Read me", |ui| {
@@ -232,101 +235,111 @@ pub(crate) fn window(app: &mut App, ctx: &egui::Context) {
   {
     let ui_state = &mut app.plugins;
     let reg = ui_state.registry(&hub);
-    let list: Vec<(fox_plugin::Installed, String)> = reg.list.iter().map(|p| (p.clone(), reg.log(&p.record.id))).collect();
-    egui::Window::new("Plugins").open(&mut open).collapsible(false).resizable(true).default_width(560.0).show(ctx, |ui| {
-      ui.horizontal(|ui| {
-        if ui.button("Install from file…").on_hover_text("Install or update a plugin from a .foxplugin file").clicked() {
-          act = Some(Act::PickFile);
+    let list: Vec<(fox_plugin::Installed, String)> =
+      reg.list.iter().map(|p| (p.clone(), reg.log(&p.record.id))).collect();
+    egui::Window::new("Plugins").open(&mut open).collapsible(false).resizable(true).default_width(560.0).show(
+      ctx,
+      |ui| {
+        ui.horizontal(|ui| {
+          if ui
+            .button("Install from file…")
+            .on_hover_text("Install or update a plugin from a .foxplugin file")
+            .clicked()
+          {
+            act = Some(Act::PickFile);
+          }
+          if ui
+            .button("Data hub…")
+            .on_hover_text("Plugins shared in your data hub: install them or get updates")
+            .clicked()
+          {
+            act = Some(Act::Hub);
+          }
+        });
+        ui.label(RichText::new("You can also drop a .foxplugin file on the window.").color(theme::MUTED).size(11.5));
+        if let Some((m, err)) = &ui_state.message {
+          ui.colored_label(if *err { Color32::from_rgb(200, 40, 40) } else { theme::ACCENT }, m);
         }
-        if ui.button("Data hub…").on_hover_text("Plugins shared in your data hub: install them or get updates").clicked() {
-          act = Some(Act::Hub);
-        }
-      });
-      ui.label(
-        RichText::new("You can also drop a .foxplugin file on the window.").color(theme::MUTED).size(11.5),
-      );
-      if let Some((m, err)) = &ui_state.message {
-        ui.colored_label(if *err { Color32::from_rgb(200, 40, 40) } else { theme::ACCENT }, m);
-      }
-      ui.separator();
-      egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-        if list.is_empty() {
-          ui.label(RichText::new("No plugins installed.").color(theme::MUTED));
-        }
-        for (p, log) in &list {
-          let id = p.record.id.clone();
-          ui.horizontal(|ui| {
-            let mut on = p.record.enabled;
-            if ui.checkbox(&mut on, "").on_hover_text("Turn the plugin on or off").changed() {
-              act = Some(Act::Enable(id.clone(), on));
-            }
-            ui.label(RichText::new(p.name()).strong());
-            ui.label(RichText::new(&p.record.version).color(theme::MUTED));
-            if p.bundled {
-              ui.label(RichText::new("built in").color(theme::MUTED).size(11.0));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-              if !p.bundled && ui.button("Remove").clicked() {
-                act = Some(Act::Remove(id.clone()));
+        ui.separator();
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+          if list.is_empty() {
+            ui.label(RichText::new("No plugins installed.").color(theme::MUTED));
+          }
+          for (p, log) in &list {
+            let id = p.record.id.clone();
+            ui.horizontal(|ui| {
+              let mut on = p.record.enabled;
+              if ui.checkbox(&mut on, "").on_hover_text("Turn the plugin on or off").changed() {
+                act = Some(Act::Enable(id.clone(), on));
               }
-              let shown = ui_state.expanded.as_deref() == Some(id.as_str());
-              if ui.button(if shown { "Hide" } else { "Details" }).clicked() {
-                ui_state.expanded = if shown { None } else { Some(id.clone()) };
+              ui.label(RichText::new(p.name()).strong());
+              ui.label(RichText::new(&p.record.version).color(theme::MUTED));
+              if p.bundled {
+                ui.label(RichText::new("built in").color(theme::MUTED).size(11.0));
               }
+              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !p.bundled && ui.button("Remove").clicked() {
+                  act = Some(Act::Remove(id.clone()));
+                }
+                let shown = ui_state.expanded.as_deref() == Some(id.as_str());
+                if ui.button(if shown { "Hide" } else { "Details" }).clicked() {
+                  ui_state.expanded = if shown { None } else { Some(id.clone()) };
+                }
+              });
             });
-          });
-          if let Some(e) = &p.error {
-            ui.colored_label(Color32::from_rgb(200, 40, 40), format!("Not loaded: {e}"));
-          }
-          if ui_state.expanded.as_deref() == Some(id.as_str()) {
-            details(ui, p, log, &mut act);
-          }
-          ui.separator();
-        }
-        if let Some(h) = &ui_state.hub {
-          ui.label(RichText::new("In the data hub").strong());
-          match h {
-            Err(e) => {
-              ui.colored_label(Color32::from_rgb(200, 40, 40), e);
+            if let Some(e) = &p.error {
+              ui.colored_label(Color32::from_rgb(200, 40, 40), format!("Not loaded: {e}"));
             }
-            Ok(list) if list.is_empty() => {
-              ui.label(
-                RichText::new("No plugins in the data hub. Publish one with: fissionoxide-cli plugin publish FILE")
-                  .color(theme::MUTED),
-              );
+            if ui_state.expanded.as_deref() == Some(id.as_str()) {
+              details(ui, p, log, &mut act);
             }
-            Ok(list) => {
-              for h in list {
-                ui.horizontal(|ui| {
-                  ui.label(RichText::new(&h.name).strong());
-                  ui.label(RichText::new(&h.version).color(theme::MUTED));
-                  ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = match (&h.installed, h.update) {
-                      (None, _) => Some("Install"),
-                      (Some(_), true) => Some("Update"),
-                      (Some(_), false) => None,
-                    };
-                    match label {
-                      Some(l) => {
-                        if ui.button(l).clicked() {
-                          act = Some(Act::FromHub(h.item.clone(), h.hub_version));
+            ui.separator();
+          }
+          if let Some(h) = &ui_state.hub {
+            ui.label(RichText::new("In the data hub").strong());
+            match h {
+              Err(e) => {
+                ui.colored_label(Color32::from_rgb(200, 40, 40), e);
+              }
+              Ok(list) if list.is_empty() => {
+                ui.label(
+                  RichText::new("No plugins in the data hub. Publish one with: fissionoxide-cli plugin publish FILE")
+                    .color(theme::MUTED),
+                );
+              }
+              Ok(list) => {
+                for h in list {
+                  ui.horizontal(|ui| {
+                    ui.label(RichText::new(&h.name).strong());
+                    ui.label(RichText::new(&h.version).color(theme::MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                      let label = match (&h.installed, h.update) {
+                        (None, _) => Some("Install"),
+                        (Some(_), true) => Some("Update"),
+                        (Some(_), false) => None,
+                      };
+                      match label {
+                        Some(l) => {
+                          if ui.button(l).clicked() {
+                            act = Some(Act::FromHub(h.item.clone(), h.hub_version));
+                          }
+                        }
+                        None => {
+                          ui.label(RichText::new("installed").color(theme::MUTED));
                         }
                       }
-                      None => {
-                        ui.label(RichText::new("installed").color(theme::MUTED));
-                      }
-                    }
+                    });
                   });
-                });
-                if !h.description.is_empty() {
-                  ui.label(RichText::new(&h.description).color(theme::MUTED).size(11.5));
+                  if !h.description.is_empty() {
+                    ui.label(RichText::new(&h.description).color(theme::MUTED).size(11.5));
+                  }
                 }
               }
             }
           }
-        }
-      });
-    });
+        });
+      },
+    );
   }
   if !open {
     app.plugins.open = false;
@@ -367,7 +380,11 @@ fn details(ui: &mut egui::Ui, p: &fox_plugin::Installed, log: &str, act: &mut Op
     ui.label(RichText::new("Commands").strong());
     for c in &m.commands {
       let (tab, panel) = m.placement(c);
-      ui.label(format!("• {} ({tab} → {panel}){}", c.label(), if c.tooltip.is_empty() { String::new() } else { format!(": {}", c.tooltip) }));
+      ui.label(format!(
+        "• {} ({tab} → {panel}){}",
+        c.label(),
+        if c.tooltip.is_empty() { String::new() } else { format!(": {}", c.tooltip) }
+      ));
     }
     if !m.permissions.is_empty() {
       ui.label(RichText::new("Permissions").strong());
@@ -545,7 +562,13 @@ fn tool_button(app: &mut App, ui: &mut egui::Ui, c: &CommandRef, active: bool) -
   if let Some(n) = c.command.step {
     let badge = egui::Rect::from_min_size(rect.left_top() + vec2(1.0, 1.0), vec2(13.0, 13.0));
     ui.painter().rect_filled(badge, 3.0, Color32::from_rgb(250, 204, 21));
-    ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, n.to_string(), egui::FontId::proportional(9.5), Color32::from_gray(40));
+    ui.painter().text(
+      badge.center(),
+      egui::Align2::CENTER_CENTER,
+      n.to_string(),
+      egui::FontId::proportional(9.5),
+      Color32::from_gray(40),
+    );
   }
   let tip = if c.command.tooltip.is_empty() {
     format!("{}\n({})", c.command.label(), c.plugin_name)
@@ -562,8 +585,7 @@ fn icon(app: &mut App, ctx: &egui::Context, path: &Path) -> Option<TextureHandle
     .entry(path.to_path_buf())
     .or_insert_with(|| {
       let img = image::open(path).ok()?.to_rgba8();
-      let color =
-        egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+      let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
       Some(ctx.load_texture(path.to_string_lossy(), color, egui::TextureOptions::LINEAR))
     })
     .clone()
@@ -575,7 +597,8 @@ fn icon(app: &mut App, ctx: &egui::Context, path: &Path) -> Option<TextureHandle
 fn start(app: &mut App, cmd: CommandRef) {
   app.cancel_dialog();
   if cmd.command.builtin.is_some() && cmd.command.inputs.is_empty() {
-    app.plugins.dialog = Some(CommandDialog { cmd, values: Map::new(), over: HashMap::new(), active_sel: None, error: None });
+    app.plugins.dialog =
+      Some(CommandDialog { cmd, values: Map::new(), over: HashMap::new(), active_sel: None, error: None });
     run(app);
     if app.plugins.dialog.as_ref().is_some_and(|d| d.cmd.command.inputs.is_empty() && d.cmd.command.builtin.is_some()) {
       // a failed run shows its error in the status bar, not an empty dialog
@@ -690,7 +713,8 @@ fn command_dialog(app: &mut App, ctx: &egui::Context) {
       });
       if d.cmd.uses_files {
         ui.horizontal(|ui| {
-          let folder = app.plugins.folder.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "(not chosen)".into());
+          let folder =
+            app.plugins.folder.as_ref().map(|f| f.display().to_string()).unwrap_or_else(|| "(not chosen)".into());
           ui.label("Folder").on_hover_text("Where the plugin reads and writes files");
           ui.label(RichText::new(folder).color(theme::MUTED));
           if ui.small_button("Choose…").clicked() {
@@ -727,9 +751,15 @@ fn command_dialog(app: &mut App, ctx: &egui::Context) {
 
 fn shown(d: &CommandDialog, i: &Input) -> bool {
   let o = d.over.get(&i.id);
-  o.and_then(|o| o.visible).unwrap_or(true) && condition_holds(i.visible_when.as_ref(), &d.values)
+  o.and_then(|o| o.visible).unwrap_or(true)
+    && condition_holds(i.visible_when.as_ref(), &d.values)
     && i.group.as_ref().is_none_or(|g| {
-      d.cmd.command.inputs.iter().find(|x| &x.id == g).is_none_or(|g| condition_holds(g.visible_when.as_ref(), &d.values))
+      d.cmd
+        .command
+        .inputs
+        .iter()
+        .find(|x| &x.id == g)
+        .is_none_or(|g| condition_holds(g.visible_when.as_ref(), &d.values))
     })
 }
 
@@ -742,7 +772,8 @@ fn row(ui: &mut egui::Ui, d: &mut CommandDialog, i: &Input, edited: &mut Option<
   if !shown(d, i) {
     return;
   }
-  let enabled = d.over.get(&i.id).and_then(|o| o.enabled).unwrap_or(true) && condition_holds(i.enabled_when.as_ref(), &d.values);
+  let enabled =
+    d.over.get(&i.id).and_then(|o| o.enabled).unwrap_or(true) && condition_holds(i.enabled_when.as_ref(), &d.values);
   let label = label_of(d, i);
   let resp = ui.label(&label);
   if !i.prompt.is_empty() {
@@ -755,7 +786,13 @@ fn row(ui: &mut egui::Ui, d: &mut CommandDialog, i: &Input, edited: &mut Option<
       let active = d.active_sel.as_deref() == Some(i.id.as_str());
       ui.horizontal(|ui| {
         let text = match n {
-          0 => if i.prompt.is_empty() { "Select".to_string() } else { i.prompt.clone() },
+          0 => {
+            if i.prompt.is_empty() {
+              "Select".to_string()
+            } else {
+              i.prompt.clone()
+            }
+          }
           n => format!("{n} selected"),
         };
         if ui.selectable_label(active, text).on_hover_text("Pick in the viewport while this is highlighted").clicked() {
@@ -821,9 +858,11 @@ fn row(ui: &mut egui::Ui, d: &mut CommandDialog, i: &Input, edited: &mut Option<
       }
     }
     InputKind::Label => {
-      let text = d.over.get(&i.id).and_then(|o| o.text.clone()).unwrap_or_else(|| {
-        i.default.as_ref().and_then(Value::as_str).unwrap_or_default().to_string()
-      });
+      let text = d
+        .over
+        .get(&i.id)
+        .and_then(|o| o.text.clone())
+        .unwrap_or_else(|| i.default.as_ref().and_then(Value::as_str).unwrap_or_default().to_string());
       ui.label(RichText::new(text).color(theme::MUTED));
     }
     InputKind::Group => {}
@@ -911,7 +950,10 @@ mod tests {
       d.values.insert("holes".into(), json!(4));
     }
     changed(&mut app, "holes");
-    assert_eq!(app.plugins.dialog.as_ref().and_then(|d| d.over["spacing"].text.clone()).as_deref(), Some("A hole every 90°"));
+    assert_eq!(
+      app.plugins.dialog.as_ref().and_then(|d| d.over["spacing"].text.clone()).as_deref(),
+      Some("A hole every 90°")
+    );
     run(&mut app);
     assert_eq!(app.s.model.bodies.len(), 1, "{:?}", app.status);
     assert!(app.plugins.dialog.is_some(), "Bolt Flange is repeatable");

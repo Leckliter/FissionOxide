@@ -11,10 +11,12 @@ mod arrange;
 mod assembly;
 mod cam;
 pub mod canvas;
+mod collect_flat;
 mod commands;
 pub mod config;
 mod cut;
 pub use cut::{CutLine, CutLineKind, CutPreview};
+mod cut_service;
 pub mod diff;
 mod drag;
 mod drawings;
@@ -583,6 +585,8 @@ mod tests_curves3d;
 #[cfg(test)]
 mod tests_cut;
 #[cfg(test)]
+mod tests_cut_service;
+#[cfg(test)]
 mod tests_ecad;
 #[cfg(test)]
 mod tests_explode;
@@ -603,9 +607,9 @@ mod tests_mechanism;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
-mod tests_properties;
-#[cfg(test)]
 mod tests_newcomp;
+#[cfg(test)]
+mod tests_properties;
 #[cfg(test)]
 mod tests_render;
 #[cfg(test)]

@@ -173,7 +173,10 @@ fn a_run_is_one_undo_step_and_failures_roll_back() {
   let mut p = Plugins::open(&dir.join("plugins"), vec![]);
   let mut w = Wat::default();
   let (b, params) = (w.s("box"), w.s(r#"{"width": 10, "depth": 10, "height": 10}"#));
-  let body = format!("(drop (call $execute {b} {params})) (drop (call $execute {b} {params})) (call $str {})", w.s(r#"{"ok": {"made": 2}}"#));
+  let body = format!(
+    "(drop (call $execute {b} {params})) (drop (call $execute {b} {params})) (call $str {})",
+    w.s(r#"{"ok": {"made": 2}}"#)
+  );
   let id = install(&mut p, "good", &[], &w, &body);
   let r = p.run(&mut s, &id, &json!({}), RunOptions::default()).unwrap();
   assert_eq!(r.result, json!({"made": 2}));
@@ -195,7 +198,8 @@ fn a_run_is_one_undo_step_and_failures_roll_back() {
 
   // so does a trap, and running forever
   let mut w = Wat::default();
-  let body = format!("(drop (call $execute {} {})) (unreachable)", w.s("box"), w.s(r#"{"width": 1, "depth": 1, "height": 1}"#));
+  let body =
+    format!("(drop (call $execute {} {})) (unreachable)", w.s("box"), w.s(r#"{"width": 1, "depth": 1, "height": 1}"#));
   let id = install(&mut p, "trap", &[], &w, &body);
   assert!(p.run(&mut s, &id, &json!({}), RunOptions::default()).unwrap_err().contains("crashed"));
   assert_eq!(bodies(&s), 0);
@@ -219,13 +223,14 @@ fn commands_are_sandboxed() {
   let mut s = session(&dir);
   let mut p = Plugins::open(&dir.join("plugins"), vec![]);
   // the plugin passes the host's reply straight back, so its error is the run's error
-  let forward = |p: &mut Plugins, s: &mut Session, name: &str, perms: &[&str], cmd: &str, params: Value, folder: Option<&Path>| {
-    let mut w = Wat::default();
-    let body = format!("(call $execute {} {})", w.s(cmd), w.s(&params.to_string()));
-    let id = install(p, name, perms, &w, &body);
-    let opts = RunOptions { folder: folder.map(Path::to_path_buf), ..Default::default() };
-    p.run(s, &id, &json!({}), opts)
-  };
+  let forward =
+    |p: &mut Plugins, s: &mut Session, name: &str, perms: &[&str], cmd: &str, params: Value, folder: Option<&Path>| {
+      let mut w = Wat::default();
+      let body = format!("(call $execute {} {})", w.s(cmd), w.s(&params.to_string()));
+      let id = install(p, name, perms, &w, &body);
+      let opts = RunOptions { folder: folder.map(Path::to_path_buf), ..Default::default() };
+      p.run(s, &id, &json!({}), opts)
+    };
   for cmd in ["open", "new", "save", "undo", "transaction.commit", "hub.open"] {
     let e = forward(&mut p, &mut s, "refused", &[], cmd, json!({"path": "x.fox"}), None).unwrap_err();
     assert!(e.contains("plugins can't run"), "{cmd}: {e}");
@@ -235,13 +240,16 @@ fn commands_are_sandboxed() {
   assert!(e.contains("'write-files' permission"), "{e}");
   let e = forward(&mut p, &mut s, "hub", &[], "hub.projects", json!({}), None).unwrap_err();
   assert!(e.contains("'hub' permission"), "{e}");
-  let e = forward(&mut p, &mut s, "render", &["write-files"], "view.render", json!({"path": "a.png"}), Some(&out)).unwrap_err();
+  let e = forward(&mut p, &mut s, "render", &["write-files"], "view.render", json!({"path": "a.png"}), Some(&out))
+    .unwrap_err();
   assert!(e.contains("'render' permission"), "{e}");
   let e = forward(&mut p, &mut s, "nofolder", &["write-files"], "export", json!({"path": "a.step"}), None).unwrap_err();
   assert!(e.contains("pick a folder"), "{e}");
-  let e = forward(&mut p, &mut s, "escape", &["write-files"], "export", json!({"path": "../a.step"}), Some(&out)).unwrap_err();
+  let e = forward(&mut p, &mut s, "escape", &["write-files"], "export", json!({"path": "../a.step"}), Some(&out))
+    .unwrap_err();
   assert!(e.contains("without '..'"), "{e}");
-  let e = forward(&mut p, &mut s, "abs", &["write-files"], "export", json!({"path": "/tmp/a.step"}), Some(&out)).unwrap_err();
+  let e =
+    forward(&mut p, &mut s, "abs", &["write-files"], "export", json!({"path": "/tmp/a.step"}), Some(&out)).unwrap_err();
   assert!(e.contains("relative"), "{e}");
   // granted: the path lands in the run's folder
   s.execute("box", &json!({"width": 5, "depth": 5, "height": 5})).unwrap();
@@ -468,10 +476,10 @@ fn the_example_plugin_works() {
   let pkg = Package::read(&pkg.to_bytes().unwrap()).unwrap();
   p.install(&pkg, InstallOptions::default()).unwrap();
   let cmds = p.commands();
-  assert_eq!(cmds.iter().map(|c| c.full_id.as_str()).collect::<Vec<_>>(), [
-    "org.fissionoxide.examples.flange/flange",
-    "org.fissionoxide.examples.flange/report"
-  ]);
+  assert_eq!(
+    cmds.iter().map(|c| c.full_id.as_str()).collect::<Vec<_>>(),
+    ["org.fissionoxide.examples.flange/flange", "org.fissionoxide.examples.flange/report"]
+  );
   assert_eq!((cmds[0].tab.as_str(), cmds[0].panel.as_str()), ("Flange Tools", "FLANGES"));
   assert!(cmds[0].icon.as_ref().unwrap().is_file());
 
@@ -482,7 +490,14 @@ fn the_example_plugin_works() {
   assert_eq!(u["pitch"]["value"], "60 mm");
   assert_eq!(bodies(&s), 0);
 
-  let r = p.run(&mut s, flange, &json!({"outer": "100 mm", "bore": 30, "thickness": 10, "holes": 6, "hole": 8}), RunOptions::default()).unwrap();
+  let r = p
+    .run(
+      &mut s,
+      flange,
+      &json!({"outer": "100 mm", "bore": 30, "thickness": 10, "holes": 6, "hole": 8}),
+      RunOptions::default(),
+    )
+    .unwrap();
   assert_eq!(r.result["flanges_made"], 1);
   assert_eq!(bodies(&s), 1);
   let info = s.execute("info", &json!({})).unwrap();
@@ -560,12 +575,24 @@ fn plugins_through_the_data_hub() {
   assert_eq!(cmds.as_array().unwrap().len(), 3);
   run(&mut p, &mut s, "plugin.enable", json!({"id": "com.test.shared", "enabled": false})).unwrap();
   assert_eq!(run(&mut p, &mut s, "plugin.commands", json!({})).unwrap().as_array().unwrap().len(), 2);
-  let r = run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["hub", "render"]})).unwrap();
+  let r =
+    run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["hub", "render"]})).unwrap();
   assert_eq!(r["granted"], json!(["hub"]), "only what it asks for");
   assert!(run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["root"]})).is_err());
-  let r = run(&mut p, &mut s, "plugin.run", json!({"command": "org.fissionoxide.examples.flange/flange", "inputs": {"holes": 3}})).unwrap();
+  let r = run(
+    &mut p,
+    &mut s,
+    "plugin.run",
+    json!({"command": "org.fissionoxide.examples.flange/flange", "inputs": {"holes": 3}}),
+  )
+  .unwrap();
   assert_eq!(r["changed"], true);
-  assert!(run(&mut p, &mut s, "plugin.log", json!({"id": "org.fissionoxide.examples.flange"})).unwrap()["log"].as_str().unwrap().contains("Bolt Flange: done"));
+  assert!(
+    run(&mut p, &mut s, "plugin.log", json!({"id": "org.fissionoxide.examples.flange"})).unwrap()["log"]
+      .as_str()
+      .unwrap()
+      .contains("Bolt Flange: done")
+  );
   run(&mut p, &mut s, "plugin.uninstall", json!({"id": "com.test.shared"})).unwrap();
   assert_eq!(run(&mut p, &mut s, "plugin.list", json!({})).unwrap().as_array().unwrap().len(), 1);
 }
@@ -644,7 +671,11 @@ step = 2
     let id = format!("{}/{}", pkg.manifest.id, pkg.manifest.commands[1].key());
     assert!(p.run(&mut s, &id, &json!({}), RunOptions::default()).is_err(), "{id}");
   }
-  for bad in ["[[commands]]\nbuiltin = \"box\"\nid = \"x\"\n", "[[commands]]\nbuiltin = \"Box!\"\n", "[[commands]]\nid = \"nolabel\"\n"] {
+  for bad in [
+    "[[commands]]\nbuiltin = \"box\"\nid = \"x\"\n",
+    "[[commands]]\nbuiltin = \"Box!\"\n",
+    "[[commands]]\nid = \"nolabel\"\n",
+  ] {
     assert!(Manifest::parse(&format!("{}{bad}", manifest("com.test.bad", "1.0.0", &[]))).is_err(), "{bad}");
   }
 }

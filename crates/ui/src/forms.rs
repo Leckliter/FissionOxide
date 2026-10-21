@@ -1274,7 +1274,8 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
       let bodies: Vec<Value> =
         p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter(|b| **b != tool).cloned().collect();
-      let mut q = json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))});
+      let mut q =
+        json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))});
       if let Some(r) = p.get("remove") {
         q["remove"] = r.clone();
       }
@@ -2397,6 +2398,22 @@ pub static SK_CLEANUP: Form = Form {
     Input::Choice { key: "splines_to", label: "Splines to", options: CLEANUP_SPLINES },
     Input::Expr { key: "segments", label: "Segments (lines)", default: "64" },
     Input::Expr { key: "spline_tolerance", label: "Tolerance (arcs)", default: "0.001 in" },
+  ],
+  picks_model: false,
+};
+
+pub static COLLECT_FLAT: Form = Form {
+  title: "ALL FLAT PATTERNS ON ONE SHEET",
+  name: "All Flat Patterns on One Sheet",
+  hint: "Every sheet metal body's flat pattern in one Cut File sketch, in rows that wrap at the sheet width",
+  icon: Icon::FlatPattern,
+  cmd: "sheet.collect_flat",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Bodies (default every sheet metal body)", required: false },
+    Input::Expr { key: "max_width", label: "Sheet width", default: "48 in" },
+    Input::Expr { key: "gap", label: "Gap", default: "0.25 in" },
+    Input::Text { key: "sketch_name", label: "Sketch name", default: "Cut File" },
   ],
   picks_model: false,
 };

@@ -556,7 +556,7 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// Sketch geometry as DXF entities (sketch coordinates); `exact` gives splines and ellipses as
 /// Bézier pieces (SVG) instead of SPLINE and ELLIPSE entities (DXF).
-fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
+pub(crate) fn sketch_entities(sk: &Sketch, exact: bool) -> Vec<(Entity, bool)> {
   let pos = |id| sk.pos(id).unwrap_or([0.0, 0.0]);
   let mut out = Vec::new();
   let mut on_curve = std::collections::HashSet::new();
