@@ -53,7 +53,7 @@ fn service_profiles_built_in_and_in_the_hub() {
 fn check_a_sketch_for_sendcutsend_and_estimate_it() {
   let dir = hub("sketch");
   let mut s = Session { store_root: Some(dir.clone()), ..Default::default() };
-  let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["feature"].as_u64().unwrap();
+  let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap();
   run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [100, 50]}));
   run(&mut s, "sketch.circle", json!({"center": [20, 25], "radius": 3}));
   run(&mut s, "sketch.circle", json!({"center": [80, 25], "radius": 3}));
@@ -94,9 +94,12 @@ fn check_a_sketch_for_sendcutsend_and_estimate_it() {
 fn plate(s: &mut Session, at: [f64; 2], w: f64, h: f64) -> u64 {
   run(s, "sketch.create", json!({"plane": "xy"}));
   run(s, "sketch.rect", json!({"corner1": at, "corner2": [at[0] + w, at[1] + h]}));
-  run(s, "sketch.circle", json!({"center": [at[0] + w / 2.0, at[1] + h / 2.0], "radius": 5}));
   let r = run(s, "sheet.flange", json!({}));
-  r["result_bodies"][0].as_u64().unwrap()
+  let body = r["result_bodies"][0].as_u64().unwrap();
+  run(s, "sketch.create", json!({"plane": "xy"}));
+  run(s, "sketch.circle", json!({"center": [at[0] + w / 2.0, at[1] + h / 2.0], "radius": 5}));
+  run(s, "extrude", json!({"distance": 10, "extent": "symmetric", "operation": "cut", "targets": [body]}));
+  body
 }
 
 #[test]
@@ -110,7 +113,7 @@ fn flat_patterns_collected_on_one_sheet() {
   let r = run(&mut s, "cut.service.check", json!({"body": a}));
   assert_ne!(r["status"], "errors", "{r}");
   assert_eq!(r["thickness"], 2.0);
-  assert_eq!(r["estimate"]["holes"], 1);
+  assert_eq!(r["estimate"]["holes"], 1, "{r}");
   // 100 + 10 + 60 = 170: wraps under 170, not over it
   let r = run(
     &mut s,

@@ -50,11 +50,11 @@ impl CutCheckWindow {
     let svc = self.services.get(self.service);
     if let Some(svc) = svc {
       p["service"] = svc["id"].clone();
-      if self.process > 0 {
-        if let Some(pr) = svc["processes"].get(self.process - 1) {
-          let name = pr["name"].as_str().filter(|n| !n.is_empty()).map(|n| json!(n)).unwrap_or(pr["process"].clone());
-          p["process"] = name;
-        }
+      if self.process > 0
+        && let Some(pr) = svc["processes"].get(self.process - 1)
+      {
+        let name = pr["name"].as_str().filter(|n| !n.is_empty()).map(|n| json!(n)).unwrap_or(pr["process"].clone());
+        p["process"] = name;
       }
     }
     if !self.material.trim().is_empty() {
@@ -221,10 +221,9 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
               if let Some(at) = i["world"]
                 .as_array()
                 .and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?]))
+                && ui.small_button("Zoom").clicked()
               {
-                if ui.small_button("Zoom").clicked() {
-                  zoom = Some(at);
-                }
+                zoom = Some(at);
               }
             });
           }
@@ -248,30 +247,27 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
       None => {}
     }
   });
-  if pick_dxf {
-    if let Some(f) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).pick_file() {
-      w.dxf = Some(f);
-      run = true;
-    }
+  if pick_dxf && let Some(f) = rfd::FileDialog::new().add_filter("DXF", &["dxf"]).pick_file() {
+    w.dxf = Some(f);
+    run = true;
   }
   if run {
     w.result = Some(app.s.execute("cut.service.check", &w.params(app)).map_err(|e| e.0));
   }
-  if let Some(ext) = export {
-    if let Some(path) = rfd::FileDialog::new()
+  if let Some(ext) = export
+    && let Some(path) = rfd::FileDialog::new()
       .add_filter(if ext == "csv" { "CSV" } else { "JSON" }, &[ext])
       .set_file_name(format!("{} - cut estimate.{ext}", app.s.design.name))
       .save_file()
-    {
-      let mut p = w.params(app);
-      p["export"] = json!(path);
-      match app.s.execute("cut.service.check", &p) {
-        Ok(r) => {
-          app.status = Some((format!("Wrote {}", path.display()), false));
-          w.result = Some(Ok(r));
-        }
-        Err(e) => w.result = Some(Err(e.0)),
+  {
+    let mut p = w.params(app);
+    p["export"] = json!(path);
+    match app.s.execute("cut.service.check", &p) {
+      Ok(r) => {
+        app.status = Some((format!("Wrote {}", path.display()), false));
+        w.result = Some(Ok(r));
       }
+      Err(e) => w.result = Some(Err(e.0)),
     }
   }
   if let Some(at) = zoom {

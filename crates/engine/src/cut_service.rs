@@ -255,14 +255,14 @@ fn add_world(src: &Source, v: &mut Value) {
       }
     }
   }
-  let parts = v.get_mut("parts").or_else(|| v.get_mut("estimate").and_then(|e| e.get_mut("parts")));
+  let parts =
+    if v.get("parts").is_some() { v.get_mut("parts") } else { v.get_mut("estimate").and_then(|e| e.get_mut("parts")) };
   if let Some(parts) = parts.and_then(Value::as_array_mut) {
     for part in parts {
       let pt = |k: &str| part.get(k).and_then(|a| Some([a.get(0)?.as_f64()?, a.get(1)?.as_f64()?]));
-      if let (Some(lo), Some(hi)) = (pt("min"), pt("max")) {
-        if let Some(w) = src.world([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]) {
-          part["world_center"] = json!(w);
-        }
+      let center = pt("min").zip(pt("max")).map(|(lo, hi)| [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]);
+      if let Some(w) = center.and_then(|c| src.world(c)) {
+        part["world_center"] = json!(w);
       }
     }
   }
