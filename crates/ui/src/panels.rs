@@ -33,6 +33,8 @@ pub enum Tab {
   Milling,
   /// The Form workspace's contextual tab (T-spline sculpting).
   Form,
+  /// The Generative Design workspace's tab.
+  Generative,
 }
 
 impl Tab {
@@ -52,6 +54,7 @@ impl Tab {
       Tab::Drawing => "DRAWING",
       Tab::Milling => "MILLING",
       Tab::Form => "FORM",
+      Tab::Generative => "GENERATIVE",
     }
   }
 }
@@ -438,6 +441,9 @@ pub(crate) enum Cmd {
   Properties,
   /// A Form workspace command (see [`crate::form_ui`]).
   Form(crate::form_ui::Act),
+  /// Generative Design: study, preserve, obstacle, start, load, constraint, criteria,
+  /// precheck, generate, explore.
+  Gen(&'static str),
 }
 
 impl Cmd {
@@ -588,6 +594,20 @@ impl Cmd {
         "Freeform Selection",
         "Drag a loop: setting off to the right selects what's inside, to the left what it touches",
       ),
+      Cmd::Gen(w) => match w {
+        "study" => (Icon::Plus, "New Generative Study", "A new generative design study"),
+        "preserve" => (Icon::Fix, "Preserve Geometry", "Bodies the outcomes must keep (select them first)"),
+        "obstacle" => (Icon::Remove, "Obstacle Geometry", "Bodies the outcomes must stay out of (select them first)"),
+        "start" => (Icon::Body, "Starting Shape", "The body the optimisation starts from (select it first)"),
+        "load" => (Icon::Move, "Structural Loads", "A force or pressure on the selected faces"),
+        "constraint" => (Icon::Fix, "Structural Constraints", "Hold the selected faces fixed"),
+        "precheck" => (Icon::Interference, "Pre-check", "Check the study is ready to generate"),
+        "generate" => (Icon::Play, "Generate", "Generate the outcomes in the background"),
+        "explore" => {
+          (Icon::Views, "Explore", "The outcomes: mass, stiffness, safety factor; insert one into the design")
+        }
+        _ => (Icon::Gauge, "Study Settings", "Objectives, limits, materials and manufacturing methods"),
+      },
       Cmd::Cut2d => (
         Icon::ExportDxf,
         "2D Cut",
@@ -725,6 +745,7 @@ impl Cmd {
         app.hint(Cmd::SelectMode(m).info().2);
       }
       Cmd::Cut2d => app.open_cut_window(),
+      Cmd::Gen(w) => app.gen_command(w),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
       Cmd::Properties => crate::props_ui::toggle(),
     }
@@ -836,12 +857,14 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
         "ELECTRONICS"
       } else if app.drawing.is_some() {
         "DRAWING"
+      } else if app.generative {
+        "GENERATIVE"
       } else if app.manufacture {
         "MANUFACTURE"
       } else {
         "DESIGN"
       },
-      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() {
+      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() || app.generative {
         10.0
       } else if app.drawing.is_some() {
         12.5
@@ -861,10 +884,11 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
           "Drawing" => drawing && !ecad,
           "Manufacture" => app.manufacture && !drawing && !ecad,
           "Electronics" => ecad,
-          _ => i == 0 && !drawing && !app.manufacture && !ecad,
+          "Generative Design" => app.generative && !drawing && !ecad,
+          _ => i == 0 && !drawing && !app.manufacture && !ecad && !app.generative,
         };
         let r = ui.add_enabled(
-          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics"),
+          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design"),
           egui::Button::selectable(current, *w),
         );
         if r.clicked() {
@@ -884,6 +908,7 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
       app.close_drawing();
     }
     app.manufacture = false;
+    app.generative = false;
     app.open_electronics();
     return;
   }
@@ -891,10 +916,12 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   match w {
     "Drawing" if !drawing => {
       app.manufacture = false;
+      app.generative = false;
       app.open_drawing_workspace();
     }
     "Design" => {
       app.manufacture = false;
+      app.generative = false;
       if drawing {
         app.close_drawing();
       }
@@ -907,7 +934,20 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
       if app.s.edit_sketch.is_some() {
         app.finish_sketch();
       }
+      app.generative = false;
       app.manufacture = true;
+    }
+    "Generative Design" => {
+      if drawing {
+        app.close_drawing();
+      }
+      app.cancel_dialog();
+      if app.s.edit_sketch.is_some() {
+        app.finish_sketch();
+      }
+      app.manufacture = false;
+      app.generative = true;
+      app.gd.open = true;
     }
     _ => {}
   }
@@ -920,10 +960,13 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.drawing.is_some() {
       tabs = vec![Tab::Drawing];
       app.tab = Tab::Drawing;
+    } else if app.generative {
+      tabs = vec![Tab::Generative];
+      app.tab = Tab::Generative;
     } else if app.manufacture {
       tabs = vec![Tab::Milling];
       app.tab = Tab::Milling;
-    } else if matches!(app.tab, Tab::Drawing | Tab::Milling) {
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Generative) {
       app.tab = Tab::Solid;
     }
     if sketching {
