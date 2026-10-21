@@ -1,6 +1,6 @@
 //! Regeneration of base features: frozen bodies, then direct edits in order.
 
-use fox_kernel::glam::DVec3;
+use fox_kernel::glam::{DMat4, DVec3};
 use fox_kernel::{Shape, SurfaceKind};
 
 use super::{Body, Ctx, FResult, ke};
@@ -65,33 +65,36 @@ impl Ctx<'_> {
         }
         r
       }
-      DirectEdit::MoveFaces { faces, translate } => {
+      DirectEdit::MoveFaces { faces, translate, rotate } => {
         if faces.is_empty() {
           return Err("select faces to move".into());
         }
         let v = DVec3::from(*translate);
+        let turn = match rotate {
+          Some(r) if r.angle.abs() > 1e-9 => Some(r.matrix().ok_or("the rotation axis has no direction")?),
+          _ => None,
+        };
+        let mut flat = true;
+        for fr in faces.iter_mut() {
+          flat &= self.face_info(fr)?.1.kind == SurfaceKind::Plane;
+        }
+        if turn.is_some() || !flat {
+          let m = DMat4::from_translation(v) * turn.unwrap_or(DMat4::IDENTITY);
+          if turn.is_none() && v.length() < 1e-9 {
+            return Ok(Some("the faces don't move".into()));
+          }
+          for (bi, fids) in self.faces_by_body(faces)? {
+            let shape = self.state.bodies[bi].shape.move_faces(&fids, m).map_err(ke)?;
+            self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
+          }
+          // (the references stay on the faces as they were before the move, where replaying finds them)
+          return Ok(None);
+        }
         // each flat face moves by the part of the vector along its normal
         let mut moves = Vec::new();
         for fr in faces.iter_mut() {
           let (_, info) = self.face_info(fr)?;
-          if info.kind != SurfaceKind::Plane {
-            return Err("move face works on flat faces (offset curved faces with press-pull)".into());
-          }
           moves.push(v.dot(info.normal));
-        }
-        let mut still = 0;
-        for (fr, d) in faces.iter_mut().zip(moves) {
-          if d.abs() < 1e-9 {
-            still += 1;
-            continue;
-          }
-          let mut k = FeatureKind::OffsetFaces { faces: vec![fr.clone()], distance: mm(d) };
-          self.apply(id, &mut k)?;
-          if let FeatureKind::OffsetFaces { faces: mut f, .. } = k
-            && let Some(r) = f.pop()
-          {
-            *fr = r;
-          }
         }
         Ok((still > 0).then(|| format!("{still} face(s) only slide within their own plane and don't change")))
       }

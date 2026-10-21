@@ -147,10 +147,12 @@ change a parameter and watch the whole history rebuild.
   scripts all drive the same engine — and `fissionoxide-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
 - **Configurations and base features.** A configuration table of named variants that override
-  parameters, feature suppression, appearances and joint values; switch the active one from the
-  browser, edit them in a table, export any of them. Turn design history off (the timeline
-  becomes a base feature) or keep it on, and make direct edits — move face, press-pull, delete
-  face — that collect in a Base Feature in the timeline. See
+  parameters, feature suppression, appearances and joint values, with rules that drive a column
+  from each row's other values; switch the active one from the browser, edit them in a table,
+  export any of them, and pick one for each component inserted from a configured design. Turn
+  design history off (the timeline becomes a base feature) or keep it on, and make direct
+  edits — move or turn faces (flat or curved), press-pull, delete face — that collect in a Base
+  Feature in the timeline. See
   [Configurations](#configurations-and-base-features).
 - **Elliptical arcs and fit-point splines through the modify tools.** Trimming or breaking an
   ellipse leaves elliptical arcs (their own curve, also drawn with `sketch.elliptical_arc`) that
@@ -332,7 +334,9 @@ instead, `angle` and `offset` adjust the placement, and the joint's motion (`rot
 - **Insert Component** (`component.insert`, or right-click a design in the data panel) brings a
   hub design in as a component. Its bodies are stored in the design, so it opens without the
   hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
-  gets it, and `component.break_link` keeps a local copy.
+  gets it, and `component.break_link` keeps a local copy. A configured source inserts the
+  configuration you name, and `component.configuration` (or the component's right-click
+  Configuration menu under Inserted Components) switches it later.
 - **Screw joints** (`"kind": "screw"` with a `lead`) slide along their axis by the lead for every
   turn of rotation (a negative lead is left-handed); motion links can turn them but not slide them.
 - **Cam followers** (`cam_follower`) set a sliding joint's slide so its component stays in contact
@@ -645,20 +649,30 @@ headless --example bench` (a synthetic part of several million triangles).
 A configuration is a named row of overrides: parameter expressions, suppressed or unsuppressed
 features, body appearances and joint motion values; anything it doesn't override keeps the
 design's own value. The browser's Configurations folder switches between them (click a row),
-and Solid → Configure → Display Configuration Table edits every cell. Exports can pick a
-configuration without switching to it:
+and Solid → Configure → Display Configuration Table edits every cell. A rule (`config.rule`, or
+the table's Rules section) drives a column from each row's parameters — `if(width > 100 mm, 8 mm,
+5 mm)` for a parameter, `width < 50 mm` to suppress a feature, a condition picking one of two
+colours for an appearance — and is evaluated whenever a configuration is activated or exported.
+Exports can pick a configuration without switching to it:
 
 ```sh
 fissionoxide-cli run examples/configurations.jsonl --save plate.fox
 fissionoxide-cli export plate.fox plate-large.step --configuration Large
 fissionoxide-cli render plate.fox plain.png --configuration Plain
+fissionoxide-cli run examples/configured_assembly.jsonl --hub /tmp/fox-example-hub
 ```
+
+An assembly can use a configured design: `component.insert` takes a `configuration`, and
+`component.configuration` switches an inserted component to another one (its bodies are rebuilt
+from the source in that configuration; updating to a newer version keeps the choice).
 
 Direct edits (Solid → Modify → Direct Edit, or `direct.move_face`, `direct.press_pull`,
 `direct.delete_face`) don't record parameters: they go into a Base Feature in the timeline,
-replayed on whatever the features before it build. Capture Design History off collapses the
-timeline into one base feature holding the bodies as they are (Undo brings the history back);
-on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](docs/CONFIGURATIONS.md).
+replayed on whatever the features before it build. Move Face slides and turns faces, flat or
+curved: a single flat face tilts onto its new plane with its neighbours extending to meet it,
+and a hole, boss or other group of faces moves as one (`examples/move_face.jsonl`). Capture
+Design History off collapses the timeline into one base feature holding the bodies as they are
+(Undo brings the history back); on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](docs/CONFIGURATIONS.md).
 
 ## Architecture
 

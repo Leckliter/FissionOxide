@@ -1127,3 +1127,6 @@ mod tests_spun;
 mod offsetfaces;
 #[cfg(test)]
 mod tests_offsetfaces;
+mod movefaces;
+#[cfg(test)]
+mod tests_movefaces;

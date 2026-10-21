@@ -3,8 +3,8 @@
 //! `docs/CONFIGURATIONS.md`.
 
 use fox_model::assembly::MotionAxis;
-use fox_model::config::{Column, Configuration, MAX_CONFIGURATIONS, Override};
-use fox_model::direct::{BaseBody, DirectEdit};
+use fox_model::config::{Column, Configuration, MAX_CONFIGURATIONS, Override, Rule};
+use fox_model::direct::{BaseBody, DirectEdit, Rotation};
 use fox_model::{BodyId, Design, FaceRef, FeatureId, FeatureKind};
 use serde_json::{Value, json};
 
@@ -49,9 +49,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         d.configurations.active = n.clone();
         Ok(())
       })?;
-      Ok(json!({"active": n, "errors": s.model.errors(), "bodies": s.model.bodies.len()}))
+      let rules = s.design.active_overrides().map(|r| rule_errors(&s.design, &r.errors)).unwrap_or_default();
+      Ok(json!({"active": n, "errors": s.model.errors(), "rule_errors": rules, "bodies": s.model.bodies.len()}))
     })(),
     "config.set" => set(s, p),
+    "config.rule" => rule(s, p),
     "config.table" => Ok(table(&s.design)),
     // export one configuration without switching the session's
     "export" if p.get("configuration").is_some() => export(s, p),
@@ -82,8 +84,18 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "direct.move_face" => (|| {
       let faces = faces(s, p)?;
-      let translate = lengths3(s, p, "translate")?;
-      direct(s, DirectEdit::MoveFaces { faces, translate })
+      let translate = if p.get("translate").is_some() { lengths3(s, p, "translate")? } else { [0.0; 3] };
+      // `rotate: {axis, origin?, angle}`, or the same keys at the top (the dialog's form)
+      let rotate = match p.get("rotate") {
+        None | Some(Value::Null) if p.get("angle").is_some() => Some(rotation(s, p)?),
+        None | Some(Value::Null) => None,
+        Some(r) => Some(rotation(s, r)?),
+      };
+      if rotate.is_none() && p.get("translate").is_none() {
+        return Err(CmdError::new("pass 'translate' and/or 'rotate'"));
+      }
+      let rotate = rotate.filter(|r| r.angle.abs() > 1e-9);
+      direct(s, DirectEdit::MoveFaces { faces, translate, rotate })
     })(),
     "direct.press_pull" => (|| {
       let faces = faces(s, p)?;
@@ -106,24 +118,41 @@ fn list(s: &Session) -> Value {
   json!({
     "active": t.active,
     "configurations": t.list,
+    "rules": t.rules,
     "history": !s.design.history_off,
   })
 }
 
 /// The table as the dialog shows it: one row per configuration, one column per override target,
-/// cells as text (`null` = the design's own value).
+/// cells as text (`null` = the design's own value). Driven columns show each row's computed
+/// value, and a rule that fails for a row is listed in that row's `errors`.
 pub fn table(d: &Design) -> Value {
   let t = &d.configurations;
   let cols = t.columns();
   json!({
     "active": t.active,
-    "columns": cols.iter().map(|c| json!({"column": c, "label": c.label(d), "default": default_text(d, c)})).collect::<Vec<_>>(),
-    "rows": t.list.iter().map(|r| json!({
-      "name": r.name,
-      "active": t.active.as_deref() == Some(r.name.as_str()),
-      "cells": cols.iter().map(|c| r.cell(c).map(Override::value_text)).collect::<Vec<_>>(),
+    "columns": cols.iter().map(|c| json!({
+      "column": c,
+      "label": c.label(d),
+      "default": default_text(d, c),
+      "rule": t.rule(c),
     })).collect::<Vec<_>>(),
+    "rows": t.list.iter().map(|r| {
+      let res = d.resolve_configuration(r);
+      let cell = |c: &Column| res.overrides.iter().find(|o| o.column() == *c).map(Override::value_text);
+      json!({
+        "name": r.name,
+        "active": t.active.as_deref() == Some(r.name.as_str()),
+        "cells": cols.iter().map(cell).collect::<Vec<_>>(),
+        "errors": rule_errors(d, &res.errors),
+      })
+    }).collect::<Vec<_>>(),
   })
+}
+
+/// Failed rules as `{column, label, error}`.
+fn rule_errors(d: &Design, errors: &[(Column, String)]) -> Vec<Value> {
+  errors.iter().map(|(c, e)| json!({"column": c, "label": c.label(d), "error": e})).collect()
 }
 
 /// The design's own value for a column, as text.
@@ -258,12 +287,120 @@ fn set(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 fn set_cell(s: &mut Session, row: &str, col: Column, cell: Option<Override>) -> CmdResult {
+  if cell.is_some() && s.design.configurations.rule(&col).is_some() {
+    return Err(CmdError::new(format!(
+      "{} is driven by a rule; change the rule (config.rule) or remove it first",
+      col.label(&s.design)
+    )));
+  }
   s.edit(|d| {
     let c = d.configurations.get_mut(row).ok_or(CmdError::new(format!("no configuration '{row}'")))?;
     match cell {
       Some(o) => c.set(o),
       None => {
         c.clear(&col);
+      }
+    }
+    Ok(())
+  })?;
+  let mut out = table(&s.design);
+  out["errors"] = json!(s.model.errors());
+  Ok(out)
+}
+
+/// The column a `config.rule` names: `parameter`, `feature` (suppression), `body` (appearance)
+/// or `joint` (+ `motion`).
+fn rule_column(s: &Session, p: &Value) -> Result<Column, CmdError> {
+  if let Some(name) = opt_str(p, "parameter") {
+    s.design.parameter(name).ok_or(CmdError::new(format!("no parameter '{name}'")))?;
+    return Ok(Column::Parameter { name: name.to_string() });
+  }
+  if p.get("feature").is_some() {
+    let feature = FeatureId(req_u32(p, "feature")?);
+    s.design.feature(feature).ok_or(CmdError::new(format!("no feature {}", feature.0)))?;
+    return Ok(Column::Suppress { feature });
+  }
+  if p.get("body").is_some() {
+    let body = BodyId(req_u32(p, "body")?);
+    if s.model.body(body).is_none() && s.design.body_settings(body).is_none() {
+      return Err(CmdError::new(format!("no body {}", body.0)));
+    }
+    return Ok(Column::Appearance { body });
+  }
+  if p.get("joint").is_some() {
+    let joint = FeatureId(req_u32(p, "joint")?);
+    let kind = match s.design.feature(joint).map(|f| &f.kind) {
+      Some(FeatureKind::Joint { kind, .. }) => *kind,
+      _ => return Err(CmdError::new("that feature is not a joint")),
+    };
+    let motion = match opt_str(p, "motion") {
+      Some(m) => {
+        MotionAxis::parse(m).ok_or(CmdError::new(format!("unknown motion '{m}' (rotation, slide, slide2, pitch)")))?
+      }
+      None => MotionAxis::first(kind).ok_or(CmdError::new("a rigid joint has no motion"))?,
+    };
+    if !motion.allowed(kind) {
+      return Err(CmdError::new(format!("this joint has no {} motion", motion.name())));
+    }
+    return Ok(Column::Joint { joint, motion });
+  }
+  Err(CmdError::new("pass 'parameter', 'feature', 'body' or 'joint'"))
+}
+
+/// A colour given as an appearance name or `[r, g, b]` / `#rrggbb`.
+fn color_of(v: &Value) -> Result<Option<[u8; 3]>, CmdError> {
+  match v {
+    Value::Null => Ok(None),
+    Value::String(name) if !name.starts_with('#') => Ok(Some(
+      crate::features::APPEARANCES
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, c)| *c)
+        .ok_or_else(|| CmdError::new(format!("unknown appearance '{name}' (see 'appearances')")))?,
+    )),
+    c => Ok(Some(parse_color(c)?)),
+  }
+}
+
+/// Makes a column driven by a rule (`expr`), or (`expr: null`) back to a plain column.
+fn rule(s: &mut Session, p: &Value) -> CmdResult {
+  let column = rule_column(s, p)?;
+  let r = match p.get("expr") {
+    None | Some(Value::Null) => None,
+    Some(e) => {
+      let expr = expr_of(e)?;
+      // a syntax check now (values are only known per row): every name stands for 1
+      struct Any;
+      impl fox_expr::Scope for Any {
+        fn get(&self, _: &str) -> Option<f64> {
+          Some(1.0)
+        }
+      }
+      match fox_expr::eval(&expr, fox_expr::Kind::Unitless, &Any) {
+        Ok(_) | Err(fox_expr::ExprError::NotFinite) => {}
+        Err(e) => return Err(CmdError::new(format!("rule '{expr}': {e}"))),
+      }
+      let (color, otherwise) = match column {
+        Column::Appearance { .. } => {
+          let c = color_of(p.get("color").or(p.get("appearance")).unwrap_or(&Value::Null))?;
+          (c, color_of(p.get("otherwise").unwrap_or(&Value::Null))?)
+        }
+        _ => (None, None),
+      };
+      Some(Rule { column: column.clone(), expr, color, otherwise })
+    }
+  };
+  s.edit(|d| {
+    match r {
+      Some(r) => {
+        // a driven column's own cells would never be used
+        for c in &mut d.configurations.list {
+          c.clear(&r.column);
+        }
+        d.configurations.set_rule(r);
+      }
+      None => {
+        d.configurations.clear_rule(&column);
       }
     }
     Ok(())
@@ -339,6 +476,22 @@ fn lengths3(s: &Session, p: &Value, k: &str) -> Result<[f64; 3], CmdError> {
     if v.is_finite() { Ok(v) } else { Err(CmdError::new(format!("'{k}' must be finite"))) }
   };
   Ok([len(&a[0])?, len(&a[1])?, len(&a[2])?])
+}
+
+/// `{axis: [x,y,z], origin?: [x,y,z], angle}`: the angle a number (degrees) or an angle
+/// expression, the origin numbers or length expressions.
+fn rotation(s: &Session, r: &Value) -> Result<Rotation, CmdError> {
+  let axis = req_vec3(r, "axis")?;
+  if axis.iter().map(|v| v * v).sum::<f64>() < 1e-18 {
+    return Err(CmdError::new("the rotation axis has no direction"));
+  }
+  let origin = if r.get("origin").is_some() { lengths3(s, r, "origin")? } else { [0.0; 3] };
+  let e = expr_of(r.get("angle").ok_or(CmdError::new("the rotation needs an 'angle'"))?)?;
+  let angle = fox_expr::eval(&e, fox_expr::Kind::Angle, &s.model.params)?.to_degrees();
+  if !angle.is_finite() {
+    return Err(CmdError::new("the angle must be finite"));
+  }
+  Ok(Rotation { origin, axis, angle })
 }
 
 /// Adds a direct edit to the open base feature (or a new one) and reports its status.

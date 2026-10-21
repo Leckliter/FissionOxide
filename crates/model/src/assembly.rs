@@ -347,6 +347,9 @@ pub struct HubSource {
   /// Hub item id.
   pub item: String,
   pub version: u32,
+  /// The source's configuration the component shows (`None`: the source as modelled).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub configuration: Option<String>,
 }
 
 /// Components whose bodies can't pass through each other while joints are driven: driving
