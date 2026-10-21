@@ -1,0 +1,16 @@
+[package]
+name = "fox-raytrace"
+description = "The Render workspace's materials, environments and offline path tracer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fox-render.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image = { workspace = true, features = ["hdr"] }
+
+[lints]
+workspace = true

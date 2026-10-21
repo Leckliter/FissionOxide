@@ -1052,6 +1052,7 @@ dependencies = [
  "fox-expr",
  "fox-kernel",
  "fox-model",
+ "fox-raytrace",
  "fox-render",
  "fox-sketch",
  "fox-store",
@@ -1102,11 +1103,23 @@ version = "0.1.0"
 dependencies = [
  "fox-expr",
  "fox-kernel",
+ "fox-raytrace",
  "fox-sketch",
  "log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fox-raytrace"
+version = "0.1.0"
+dependencies = [
+ "fox-render",
+ "glam",
+ "image",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
