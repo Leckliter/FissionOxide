@@ -29,6 +29,7 @@ mod params;
 pub mod scene;
 mod sheet2;
 mod solid;
+mod step;
 mod subassembly;
 mod surfaces;
 mod trace;
@@ -566,6 +567,8 @@ mod tests_sketch;
 mod tests_sketch_curves;
 #[cfg(test)]
 mod tests_solid;
+#[cfg(test)]
+mod tests_step;
 #[cfg(test)]
 mod tests_subassembly;
 #[cfg(test)]

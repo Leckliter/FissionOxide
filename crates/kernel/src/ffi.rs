@@ -211,14 +211,22 @@ pub(crate) mod ffi {
     include!("fox-kernel/cpp/xcaf.hxx");
     type StepDoc;
     fn step_doc_new(name: &str) -> Result<UniquePtr<StepDoc>>;
-    fn step_doc_add(d: Pin<&mut StepDoc>, component: &str, name: &str, s: &Shape, color: &[f64]) -> Result<()>;
+    fn step_doc_assembly(d: Pin<&mut StepDoc>, name: &str) -> Result<usize>;
+    fn step_doc_part(d: Pin<&mut StepDoc>, name: &str, s: &Shape, color: &[f64], face_colors: &[f64]) -> Result<usize>;
+    fn step_doc_place(d: Pin<&mut StepDoc>, parent: usize, child: usize, name: &str, at: &[f64]) -> Result<()>;
     fn step_doc_write(d: Pin<&mut StepDoc>, path: &str) -> Result<()>;
     fn step_doc_read(path: &str) -> Result<UniquePtr<StepDoc>>;
     fn step_doc_len(d: &StepDoc) -> usize;
+    fn step_doc_parent(d: &StepDoc, i: usize) -> i64;
+    fn step_doc_is_assembly(d: &StepDoc, i: usize) -> bool;
     fn step_doc_name(d: &StepDoc, i: usize) -> String;
-    fn step_doc_component(d: &StepDoc, i: usize) -> String;
+    fn step_doc_instance(d: &StepDoc, i: usize) -> String;
+    fn step_doc_proto(d: &StepDoc, i: usize) -> usize;
+    fn step_doc_uses(d: &StepDoc, i: usize) -> usize;
+    fn step_doc_placement(d: &StepDoc, i: usize) -> Vec<f64>;
     fn step_doc_color(d: &StepDoc, i: usize) -> Vec<f64>;
     fn step_doc_shape(d: &StepDoc, i: usize) -> Result<UniquePtr<Shape>>;
+    fn step_doc_face_colors(d: &StepDoc, i: usize, body: &Shape) -> Result<Vec<f64>>;
 
     // fillets with a radius law, merging split hole walls (cpp/refparts.cpp)
     include!("fox-kernel/cpp/refparts.hxx");

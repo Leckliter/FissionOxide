@@ -100,7 +100,7 @@ pub fn import(s: &mut Session, path: &Path, p: &Value) -> CmdResult {
   }
   let name = file_name(path);
   match fmt.id {
-    "step" => import_step(s, path, name),
+    "step" => crate::step::import(s, path, name),
     "iges" | "brep" => {
       let shapes = match fmt.id {
         "iges" => fox_kernel::read_iges(path)?,
@@ -210,75 +210,8 @@ fn import_meshes(s: &mut Session, file_name: String, meshes: Vec<Mesh>, p: &Valu
   add_import(s, FeatureKind::Import { file_name, breps: Vec::new(), meshes })
 }
 
-/// A STEP file's bodies with their names and colours; its sub-assemblies become components.
-/// Files whose structure can't be read come in as plain bodies.
-fn import_step(s: &mut Session, path: &Path, file_name: String) -> CmdResult {
-  let parts = match fox_kernel::read_step_assembly(path) {
-    Ok(p) => p,
-    Err(_) => fox_kernel::read_step(path)?
-      .into_iter()
-      .map(|shape| fox_kernel::StepBody { name: String::new(), component: String::new(), color: None, shape })
-      .collect(),
-  };
-  let breps = parts.iter().map(|p| p.shape.to_brep()).collect::<Result<Vec<_>, _>>()?;
-  let mut out = add_import(s, FeatureKind::Import { file_name, breps, meshes: Vec::new() })?;
-  let bodies: Vec<fox_model::BodyId> = out["bodies"]
-    .as_array()
-    .map(|a| a.iter().filter_map(Value::as_u64).map(|v| fox_model::BodyId(v as u32)).collect())
-    .unwrap_or_default();
-  let named = parts.iter().any(|p| !p.name.is_empty() || p.color.is_some() || !p.component.is_empty());
-  if bodies.len() != parts.len() || !named {
-    return Ok(out);
-  }
-  let components = s.edit(|d| {
-    let mut groups: Vec<(String, Vec<fox_model::BodyId>)> = Vec::new();
-    for (b, part) in bodies.iter().zip(&parts) {
-      let set = d.body_settings_mut(*b);
-      if !part.name.trim().is_empty() {
-        set.name = Some(part.name.trim().to_string());
-      }
-      set.color = part.color;
-      if !part.component.is_empty() {
-        match groups.iter_mut().find(|g| g.0 == part.component) {
-          Some(g) => g.1.push(*b),
-          None => groups.push((part.component.clone(), vec![*b])),
-        }
-      }
-    }
-    let mut ids = Vec::new();
-    for (name, members) in groups {
-      ids.push(d.add_component(&name, members)?.0);
-    }
-    Ok(ids)
-  });
-  // one undo step with the import
-  if let Ok(ids) = components {
-    s.undo.pop();
-    out["components"] = json!(ids);
-  }
-  Ok(out)
-}
-
-/// Writes bodies as a STEP assembly: components as sub-assemblies, bodies as named, coloured
-/// parts.
-fn write_step(s: &Session, bodies: &[&fox_model::regen::Body], path: &Path) -> Result<(), CmdError> {
-  let info: Vec<(String, String, Option<[u8; 3]>)> = bodies
-    .iter()
-    .map(|b| {
-      let component = s.design.component_of(b.id).map(|c| c.name.clone()).unwrap_or_default();
-      (s.body_name(b.id), component, s.design.body_settings(b.id).and_then(|x| x.color))
-    })
-    .collect();
-  let parts: Vec<fox_kernel::StepPart> = bodies
-    .iter()
-    .zip(&info)
-    .map(|(b, (name, component, color))| fox_kernel::StepPart { name, component, color: *color, shape: &b.shape })
-    .collect();
-  Ok(fox_kernel::write_step_assembly(&s.design.name, &parts, path)?)
-}
-
 /// Adds an import feature; if it fails to build, nothing is added.
-fn add_import(s: &mut Session, kind: FeatureKind) -> CmdResult {
+pub(crate) fn add_import(s: &mut Session, kind: FeatureKind) -> CmdResult {
   let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   if let Some(e) = s.model.status(id).and_then(|st| st.error.clone()) {
     s.undo();
@@ -778,7 +711,7 @@ pub fn export(s: &Session, p: &Value) -> CmdResult {
       let bodies = export_bodies(s, p)?;
       let shapes = bodies.iter().map(|b| &b.shape);
       match fmt.id {
-        "step" => write_step(s, &bodies, &path)?,
+        "step" => crate::step::write(s, &bodies, &path)?,
         "iges" => fox_kernel::write_iges(shapes, &path)?,
         _ => fox_kernel::write_brep_file(shapes, &path)?,
       }

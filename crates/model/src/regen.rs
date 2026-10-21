@@ -1515,15 +1515,23 @@ impl Ctx<'_> {
         );
         self.move_component(id, *moving, *fixed, m)
       }
-      FeatureKind::CopyComponent { source, translate } => {
+      FeatureKind::CopyComponent { source, translate, transform, .. } => {
         let comp = self.components.iter().find(|c| c.id == *source).ok_or("the source component no longer exists")?;
         let v = DVec3::new(self.len(&translate[0])?, self.len(&translate[1])?, self.len(&translate[2])?);
+        let m = DMat4::from_translation(v) * transform.map(|t| DMat4::from_cols_array(&t)).unwrap_or(DMat4::IDENTITY);
+        if !fox_kernel::is_rigid(m) {
+          return Err("a copy can only be moved and rotated".into());
+        }
         let src: Vec<usize> = comp.bodies.iter().filter_map(|b| self.body_index(*b).ok()).collect();
         if src.is_empty() {
+          // a sub-assembly's copy is its sub-components' copies
+          if self.components.iter().any(|c| c.parent == Some(*source)) {
+            return Ok(None);
+          }
           return Err(format!("{} has no bodies", comp.name));
         }
         for bi in src {
-          let shape = self.state.bodies[bi].shape.translated(v).map_err(ke)?;
+          let shape = self.state.bodies[bi].shape.transformed(m).map_err(ke)?;
           let sheet = self.state.bodies[bi].sheet.clone();
           let nid = self.new_body(id, shape);
           self.set_sheet(nid, sheet);
