@@ -135,6 +135,12 @@ pub enum Input {
     label: &'static str,
     tools: &'static str,
   },
+  /// Pieces of the trimmed surfaces to remove, clicked in the viewport while picking them is
+  /// switched on: points on them (left out when none: the tool's side decides).
+  Pieces {
+    key: &'static str,
+    label: &'static str,
+  },
 }
 
 impl Input {
@@ -160,7 +166,8 @@ impl Input {
       | Input::Profiles { key, .. }
       | Input::FaceOther { key, .. }
       | Input::PlaneOpt { key, .. }
-      | Input::Cells { key, .. } => key,
+      | Input::Cells { key, .. }
+      | Input::Pieces { key, .. } => key,
     }
   }
 }
@@ -181,6 +188,8 @@ pub struct State {
   pub cells_for: Value,
   /// Model points picked on the drawing sheet so far (see [`State::sheet_pick`]).
   picks: usize,
+  /// Viewport clicks on the trimmed surfaces pick pieces to remove.
+  pub picking_pieces: bool,
 }
 
 impl State {
@@ -199,7 +208,8 @@ impl State {
         | Input::Bodies { .. }
         | Input::Curves { .. }
         | Input::Profiles { .. }
-        | Input::Cells { .. } => {
+        | Input::Cells { .. }
+        | Input::Pieces { .. } => {
           json!([])
         }
         Input::Plane { .. } => json!("xy"),
@@ -215,6 +225,7 @@ impl State {
       cells: Vec::new(),
       cells_for: Value::Null,
       picks: 0,
+      picking_pieces: false,
     }
   }
 
@@ -395,6 +406,62 @@ impl State {
     }
   }
 
+  /// The model picks behind the form's values, as a selection that [`State::sync`] reads back
+  /// the same: put back when a preview is withdrawn, so a viewport click adds to the picks.
+  pub fn selection(&self, form: &Form) -> Vec<Sel> {
+    let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
+    let mut out: Vec<Sel> = Vec::new();
+    let mut bodies: Vec<u32> = Vec::new();
+    let mut curves: Vec<u32> = Vec::new();
+    let mut sketch: Option<FeatureId> = None;
+    for (input, v) in form.inputs.iter().zip(&self.values) {
+      let picks: Vec<&Value> = match v {
+        Value::Array(a) => a.iter().collect(),
+        Value::Null => Vec::new(),
+        x => vec![x],
+      };
+      match input {
+        Input::Faces { .. }
+        | Input::FacesOpt { .. }
+        | Input::Face { .. }
+        | Input::FaceOther { .. }
+        | Input::Edges { .. }
+        | Input::Edge { .. }
+        | Input::Plane { .. }
+        | Input::Axis { .. } => {
+          for x in picks {
+            let sel = match (get(x, "body"), get(x, "face"), get(x, "edge")) {
+              (Some(b), Some(f), _) => Sel::Face { body: BodyId(b), face: f },
+              (Some(b), _, Some(e)) => Sel::Edge { body: BodyId(b), edge: e },
+              _ => continue,
+            };
+            if !out.contains(&sel) {
+              out.push(sel);
+            }
+          }
+        }
+        Input::Bodies { .. } => bodies.extend(picks.iter().filter_map(|x| x.as_u64()).map(|b| b as u32)),
+        Input::Curves { .. } => curves.extend(picks.iter().filter_map(|x| x.as_u64()).map(|c| c as u32)),
+        Input::Sketch { .. } if sketch.is_none() => sketch = v.as_u64().map(|f| FeatureId(f as u32)),
+        _ => {}
+      }
+    }
+    let picked = |b: u32, out: &[Sel]| {
+      out.iter().any(|x| matches!(x, Sel::Face { body, .. } | Sel::Edge { body, .. } if body.0 == b))
+    };
+    let mut lead = Vec::new();
+    for b in bodies {
+      if !picked(b, &out) && !lead.contains(&Sel::Body { body: BodyId(b) }) {
+        lead.push(Sel::Body { body: BodyId(b) });
+      }
+    }
+    if let Some(sk) = sketch {
+      lead.extend(curves.into_iter().map(|c| Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(c) }));
+    }
+    lead.extend(out);
+    lead
+  }
+
   /// Is everything the command needs there?
   pub fn missing(&self, form: &Form) -> Option<&'static str> {
     for (input, v) in form.inputs.iter().zip(&self.values) {
@@ -410,6 +477,8 @@ impl State {
         }
         Input::Bodies { label, required: true, .. } | Input::Sketch { label, .. } if empty => return Some(label),
         Input::DrawingView { label, .. } | Input::Component { label, .. } if empty => return Some(label),
+        // picking pieces: nothing to preview until one is clicked
+        Input::Pieces { label, .. } if self.picking_pieces && empty => return Some(label),
         _ => {}
       }
     }
@@ -439,6 +508,8 @@ impl State {
           continue;
         }
         Input::Bodies { required: false, .. } if v.as_array().is_some_and(Vec::is_empty) => continue,
+        // picked pieces count only while picking them is on
+        Input::Pieces { .. } if !self.picking_pieces || v.as_array().is_none_or(Vec::is_empty) => continue,
         Input::Expr { .. } | Input::Text { .. } if v.as_str().is_some_and(|t| t.trim().is_empty()) => continue,
         Input::Face { near: Some(n), .. } => {
           if let Some(c) = self.near[i] {
@@ -1203,17 +1274,19 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       let tool = p.pointer("/tool/body").cloned().unwrap_or(Value::Null);
       let bodies: Vec<Value> =
         p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter(|b| **b != tool).cloned().collect();
-      (
-        "surface.trim",
-        json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
-      )
+      let mut q = json!({"bodies": bodies, "tool": {"body": tool}, "flip": p.get("flip").cloned().unwrap_or(json!(false))});
+      if let Some(r) = p.get("remove") {
+        q["remove"] = r.clone();
+      }
+      ("surface.trim", q)
     }
     "surface.trim.sketch" => {
       let tool = json!({"sketch": p.get("sketch").cloned().unwrap_or(Value::Null), "curves": p.get("curves").cloned().unwrap_or(json!([]))});
-      (
-        "surface.trim",
-        json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "tool": tool, "flip": p.get("flip").cloned().unwrap_or(json!(false))}),
-      )
+      let mut q = json!({"bodies": p.get("bodies").cloned().unwrap_or(json!([])), "tool": tool, "flip": p.get("flip").cloned().unwrap_or(json!(false))});
+      if let Some(r) = p.get("remove") {
+        q["remove"] = r.clone();
+      }
+      ("surface.trim", q)
     }
     "surface.offset.variable" => {
       let d2 = p.get("distance2").cloned().unwrap_or(json!("0"));
@@ -1306,7 +1379,7 @@ pub static SURFACE_OFFSET: Form = Form {
 pub static TRIM: Form = Form {
   title: "TRIM",
   name: "Trim",
-  hint: "Trim surface bodies with a plane",
+  hint: "Trim surface bodies with a plane, or click the pieces to remove",
   icon: Icon::Trim,
   cmd: "surface.trim",
   fixed: &[],
@@ -1314,6 +1387,7 @@ pub static TRIM: Form = Form {
     Input::Bodies { key: "bodies", label: "Surfaces", required: true },
     Input::Plane { key: "tool", label: "Trimming tool" },
     Input::Check { key: "flip", label: "Keep the other side" },
+    Input::Pieces { key: "remove", label: "Pieces to remove" },
   ],
   picks_model: true,
 };
@@ -1730,6 +1804,7 @@ pub static EXTEND: Form = Form {
       label: "Extend type",
       options: &[("natural", "Natural"), ("tangent", "Tangent"), ("perpendicular", "Perpendicular")],
     },
+    Input::Check { key: "close_corners", label: "Close corners" },
   ],
   picks_model: true,
 };
@@ -1748,6 +1823,7 @@ pub static UNTRIM: Form = Form {
       label: "Loop type",
       options: &[("all", "All loops"), ("inner", "Internal loops"), ("outer", "External loops")],
     },
+    Input::Expr { key: "extension", label: "Extension", default: "0 mm" },
   ],
   picks_model: true,
 };
@@ -1763,6 +1839,7 @@ pub static TRIM_BODY: Form = Form {
     Input::Bodies { key: "bodies", label: "Surfaces", required: true },
     Input::Face { key: "tool", label: "Trimming tool (one of its faces)", near: None },
     Input::Check { key: "flip", label: "Keep the other side" },
+    Input::Pieces { key: "remove", label: "Pieces to remove" },
   ],
   picks_model: true,
 };
@@ -1779,6 +1856,7 @@ pub static TRIM_SKETCH: Form = Form {
     Input::Sketch { key: "sketch", label: "Sketch" },
     Input::Curves { key: "curves", label: "Curves (default the profiles)" },
     Input::Check { key: "flip", label: "Keep the other side" },
+    Input::Pieces { key: "remove", label: "Pieces to remove" },
   ],
   picks_model: true,
 };

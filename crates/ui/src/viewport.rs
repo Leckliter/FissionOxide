@@ -814,6 +814,18 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     open_select_other(app, view, pos);
     return;
   }
+  // Trim picking pieces: a click on a trimmed surface marks the piece under the cursor to remove
+  if let Some(Pick::Face { body, .. }) = app.hover
+    && let Some(d) = app.dialog.as_mut()
+    && d.picks_piece_of(body)
+  {
+    let (o, dir) = view.ray(&app.cam, pos);
+    let hits = fox_engine::scene::ray_hits(&app.s, o, dir);
+    if let Some((t, _)) = hits.iter().find(|(_, p)| matches!(p, Pick::Face { body: b, .. } if *b == body)) {
+      d.add_piece((o + dir * *t).to_array());
+    }
+    return;
+  }
   if let Some(d) = app.dialog.as_mut()
     && d.previewing_model()
   {

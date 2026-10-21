@@ -437,7 +437,7 @@ impl Ctx<'_> {
         Ok(None)
       }
       FeatureKind::SurfaceOffset { .. } => self.apply_surface(id, kind),
-      FeatureKind::Trim { bodies, tool, flip } => {
+      FeatureKind::Trim { bodies, tool, flip, keep, remove } => {
         let pl = self.resolve_plane(tool)?;
         let n = pl.normal() * if *flip { -1.0 } else { 1.0 };
         let size = self.through_all(&pl);
@@ -451,20 +451,29 @@ impl Ctx<'_> {
           src: Vec::new(),
         };
         let cutter = Shape::face(&pl, &Profile { outer: sq, holes: vec![] }).map_err(ke)?;
+        let mut pieces = Vec::new();
+        let mut centers = Vec::new();
         for b in bodies.iter() {
           let bi = self.body_index(*b)?;
           let split = self.state.bodies[bi].shape.split_raw(&cutter).map_err(ke)?;
-          // keep the faces behind the plane
-          let mut keep = Vec::new();
-          for f in split.faces().map_err(ke)? {
-            if (f.center - pl.origin).dot(n) < 0.0 {
-              keep.push(split.face_shape(f.id).map_err(ke)?);
+          let faces = split.faces().map_err(ke)?;
+          centers.push(faces.iter().map(|f| f.center).collect::<Vec<_>>());
+          pieces.push((bi, split, faces.iter().map(|f| (f.id, Some(f.center))).collect::<Vec<_>>()));
+        }
+        // by default the faces behind the plane stay
+        let chosen =
+          super::surface::pick_pieces(&pieces, keep, remove, |k, j| Ok((centers[k][j] - pl.origin).dot(n) < 0.0))?;
+        for (k, (bi, split, faces)) in pieces.into_iter().enumerate() {
+          let mut kept = Vec::new();
+          for (j, (fid, _)) in faces.iter().enumerate() {
+            if chosen[k][j] {
+              kept.push(split.face_shape(*fid).map_err(ke)?);
             }
           }
-          if keep.is_empty() {
+          if kept.is_empty() {
             return Err("nothing is left behind the plane (try Flip)".into());
           }
-          let skin = Shape::compound(keep.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
+          let skin = Shape::compound(kept.iter()).map_err(ke)?.sewn(1e-6).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(skin, id);
         }
         Ok(None)

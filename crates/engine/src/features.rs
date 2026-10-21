@@ -250,7 +250,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "surface.trim" => (|| {
       let bodies = body_list(s, p)?;
       let tool = plane_of(s, p, "tool")?;
-      add_feature(s, FeatureKind::Trim { bodies, tool, flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false) })
+      let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
+      let (keep, remove) = (crate::surfaces::points(p, "keep")?, crate::surfaces::points(p, "remove")?);
+      add_feature(s, FeatureKind::Trim { bodies, tool, flip, keep, remove })
     })(),
     "surface.reverse" => (|| {
       let bodies = body_list(s, p)?;

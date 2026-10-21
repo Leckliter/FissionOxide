@@ -1445,18 +1445,21 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Trim with Sketch") => (
       "Trims surface bodies with sketch curves projected onto them.",
-      "Pick the surfaces and the curves; the curves are projected onto the surfaces to cut them. Use it \
-       for openings and outlines on curved surfaces.",
+      "Pick the surfaces and the curves; the curves are projected onto the surfaces to cut them, or \
+       switch on picking and click the pieces to remove. Use it for openings and outlines on curved \
+       surfaces.",
     ),
     (_, "Untrim") => (
       "Removes holes from faces or restores their original boundary.",
-      "Pick a face and the loops to remove, or untrim the face completely back to its full shape. Use \
-       it to start a face's outline again, or to close holes in a surface.",
+      "Pick a face and the loops to remove, or untrim the face completely back to its full shape; an \
+       extension grows the restored boundary outward. Use it to start a face's outline again, or to \
+       close holes in a surface.",
     ),
     (_, "Extend") => (
       "Extends open surface edges by a distance.",
       "Pick the edges, set the distance and choose whether the extension continues the curvature or \
-       goes straight. Use it so surfaces overlap before trimming.",
+       goes straight; Close corners fills the gap where two extended edges meet. Use it so surfaces \
+       overlap before trimming.",
     ),
     (_, "Stitch") => (
       "Sews surface bodies together along their edges.",

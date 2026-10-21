@@ -6,7 +6,7 @@ use fox_kernel::{Plane, Shape};
 use fox_sketch::{Profile, Seg};
 
 use super::{Ctx, FResult, ke};
-use crate::surface::{FaceDistance, TrimTool};
+use crate::surface::{FaceDistance, TrimTool, UntrimLoops};
 use crate::{BodyId, FaceRef, FeatureId, FeatureKind};
 
 /// Which side of a trimming tool a point of the trimmed surface is on: > 0 is cut away by
@@ -57,7 +57,7 @@ impl Ctx<'_> {
   /// Surface features of the second pass (see the module docs).
   pub(super) fn apply_surface(&mut self, id: FeatureId, kind: &mut FeatureKind) -> FResult {
     match kind {
-      FeatureKind::SurfaceExtend { edges, distance, mode } => {
+      FeatureKind::SurfaceExtend { edges, distance, mode, close_corners } => {
         let d = self.len(distance)?;
         if !(d > 0.0) {
           return Err("the distance must be positive".into());
@@ -77,12 +77,20 @@ impl Ctx<'_> {
           }
         }
         for (bi, ids) in by_body {
-          let shape = self.state.bodies[bi].shape.extend_edges(&ids, d, mode.kernel()).map_err(ke)?;
+          let shape =
+            self.state.bodies[bi].shape.extend_edges_with(&ids, d, mode.kernel(), *close_corners).map_err(ke)?;
           self.state.bodies[bi] = self.state.bodies[bi].with_shape(shape, id);
         }
         Ok(None)
       }
-      FeatureKind::Untrim { faces, bodies, loops } => {
+      FeatureKind::Untrim { faces, bodies, loops, extension } => {
+        let grow = if extension.trim().is_empty() { 0.0 } else { self.len(extension)? };
+        if grow < 0.0 {
+          return Err("the extension can't be negative".into());
+        }
+        if grow > 0.0 && *loops == UntrimLoops::Inner {
+          return Err("an extension grows the outer boundary: untrim all or external loops".into());
+        }
         let mut by_body = self.face_ids(faces)?;
         for b in bodies.iter() {
           let bi = self.body_index(*b)?;
@@ -98,7 +106,7 @@ impl Ctx<'_> {
         let mut changed = false;
         for (bi, ids) in by_body {
           let body = &self.state.bodies[bi];
-          let shape = body.shape.untrim(&ids, loops.kernel()).map_err(ke)?;
+          let shape = body.shape.untrim_extended(&ids, loops.kernel(), grow).map_err(ke)?;
           let shape = if ids.len() < body.faces().len() { shape.sewn(1e-6).map_err(ke)? } else { shape };
           let area = |s: &Shape| s.mass().map(|m| m.area).unwrap_or(0.0);
           changed |= (area(&shape) - area(&body.shape)).abs() > 1e-9;
@@ -106,7 +114,9 @@ impl Ctx<'_> {
         }
         Ok((!changed).then(|| "the faces have no trims to remove".to_string()))
       }
-      FeatureKind::TrimWith { bodies, tool, flip, keep } => self.trim_with(id, bodies, tool, *flip, keep),
+      FeatureKind::TrimWith { bodies, tool, flip, keep, remove } => {
+        self.trim_with(id, bodies, tool, *flip, keep, remove)
+      }
       FeatureKind::SurfaceOffset { faces, bodies, distance, face_distances } => {
         self.surface_offset(id, faces, bodies, distance, face_distances)
       }
@@ -135,6 +145,7 @@ impl Ctx<'_> {
     tool: &mut TrimTool,
     flip: bool,
     keep: &[[f64; 3]],
+    remove: &[[f64; 3]],
   ) -> FResult {
     if bodies.is_empty() {
       return Err("select the surface bodies to trim".into());
@@ -190,34 +201,13 @@ impl Ctx<'_> {
       let pts = face_points(&split)?;
       pieces.push((bi, split, pts));
     }
-    let mut chosen: Vec<Vec<bool>> = pieces.iter().map(|p| vec![false; p.2.len()]).collect();
-    if keep.is_empty() {
-      for (k, (_, _, pts)) in pieces.iter().enumerate() {
-        for (j, (_, p)) in pts.iter().enumerate() {
-          if let Some(p) = p {
-            let s = side.of(*p)?;
-            chosen[k][j] = if flip { s > 0.0 } else { s <= 0.0 };
-          }
-        }
+    let chosen = pick_pieces(&pieces, keep, remove, |k, j| match pieces[k].2[j].1 {
+      Some(p) => {
+        let s = side.of(p)?;
+        Ok(if flip { s > 0.0 } else { s <= 0.0 })
       }
-    } else {
-      // the piece nearest each picked point stays
-      for at in keep {
-        let v = Shape::vertex(DVec3::from(*at)).map_err(ke)?;
-        let mut best: Option<(f64, usize, usize)> = None;
-        for (k, (_, split, pts)) in pieces.iter().enumerate() {
-          for (j, (fid, _)) in pts.iter().enumerate() {
-            let d = split.face_shape(*fid).map_err(ke)?.distance_to(&v).map_err(ke)?.0;
-            if best.is_none_or(|b| d < b.0) {
-              best = Some((d, k, j));
-            }
-          }
-        }
-        if let Some((_, k, j)) = best {
-          chosen[k][j] = true;
-        }
-      }
-    }
+      None => Ok(false),
+    })?;
     let mut removed = false;
     for (k, (bi, split, pts)) in pieces.into_iter().enumerate() {
       let mut kept = Vec::new();
@@ -290,6 +280,51 @@ impl Ctx<'_> {
   }
 }
 
+/// Which faces of split bodies (body index, split shape, faces with a point inside) stay: with
+/// `keep` points only the pieces nearest them, else every piece when there are `remove` points,
+/// else those `by_side` (body, face index) keeps; then the pieces nearest the `remove` points go.
+pub(super) fn pick_pieces(
+  pieces: &[(usize, Shape, Vec<(u32, Option<DVec3>)>)],
+  keep: &[[f64; 3]],
+  remove: &[[f64; 3]],
+  mut by_side: impl FnMut(usize, usize) -> Result<bool, String>,
+) -> Result<Vec<Vec<bool>>, String> {
+  let nearest = |at: &[f64; 3]| -> Result<Option<(usize, usize)>, String> {
+    let v = Shape::vertex(DVec3::from(*at)).map_err(ke)?;
+    let mut best: Option<(f64, usize, usize)> = None;
+    for (k, (_, split, pts)) in pieces.iter().enumerate() {
+      for (j, (fid, _)) in pts.iter().enumerate() {
+        let d = split.face_shape(*fid).map_err(ke)?.distance_to(&v).map_err(ke)?.0;
+        if best.is_none_or(|b| d < b.0) {
+          best = Some((d, k, j));
+        }
+      }
+    }
+    Ok(best.map(|b| (b.1, b.2)))
+  };
+  let mut chosen: Vec<Vec<bool>> = pieces.iter().map(|p| vec![!remove.is_empty(); p.2.len()]).collect();
+  if !keep.is_empty() {
+    chosen.iter_mut().for_each(|c| c.fill(false));
+    for at in keep {
+      if let Some((k, j)) = nearest(at)? {
+        chosen[k][j] = true;
+      }
+    }
+  } else if remove.is_empty() {
+    for (k, c) in chosen.iter_mut().enumerate() {
+      for (j, x) in c.iter_mut().enumerate() {
+        *x = by_side(k, j)?;
+      }
+    }
+  }
+  for at in remove {
+    if let Some((k, j)) = nearest(at)? {
+      chosen[k][j] = false;
+    }
+  }
+  Ok(chosen)
+}
+
 /// A segment as a polyline, end point included.
 fn seg_points(seg: &Seg) -> Vec<[f64; 2]> {
   let mut pts = Vec::new();
@@ -303,7 +338,7 @@ fn seg_points(seg: &Seg) -> Vec<[f64; 2]> {
 
 /// Every face of a shape with a point well inside it (the centre of its largest display
 /// triangle), or `None` for faces too small to tessellate.
-fn face_points(shape: &Shape) -> Result<Vec<(u32, Option<DVec3>)>, String> {
+pub(super) fn face_points(shape: &Shape) -> Result<Vec<(u32, Option<DVec3>)>, String> {
   let diag = shape.mass().map(|m| (m.bbox_max - m.bbox_min).length()).unwrap_or(1.0);
   let mesh = shape.tessellate((diag * 0.0015).clamp(0.005, 0.5)).map_err(ke)?;
   let mut best: std::collections::HashMap<u32, (f64, DVec3)> = std::collections::HashMap::new();
@@ -352,7 +387,12 @@ mod tests {
     let e = b.edges().iter().find(|e| (e.mid - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-6).unwrap();
     let edge = b.edge_ref(e, [0; 2]);
     let ext = d
-      .add_feature(FeatureKind::SurfaceExtend { edges: vec![edge], distance: "ext".into(), mode: ExtendMode::Natural })
+      .add_feature(FeatureKind::SurfaceExtend {
+        edges: vec![edge],
+        distance: "ext".into(),
+        mode: ExtendMode::Natural,
+        close_corners: false,
+      })
       .unwrap();
     let m = regenerate(&mut d);
     assert!(m.errors().is_empty(), "{:?}", m.errors());
@@ -374,13 +414,20 @@ mod tests {
         tool: TrimTool::Sketch { sketch: cs, curves: vec![] },
         flip: false,
         keep: vec![],
+        remove: vec![],
       })
       .unwrap();
     assert_eq!(d.feature(tw).map(|f| f.kind.depends_on()), Some(vec![cs]));
     let m = regenerate(&mut d);
     assert!(m.errors().is_empty(), "{:?}", m.errors());
     assert!((area(&m) - (180.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-6, "{}", area(&m));
-    d.add_feature(FeatureKind::Untrim { faces: vec![], bodies: vec![body], loops: UntrimLoops::Inner }).unwrap();
+    d.add_feature(FeatureKind::Untrim {
+      faces: vec![],
+      bodies: vec![body],
+      loops: UntrimLoops::Inner,
+      extension: String::new(),
+    })
+    .unwrap();
     let m = regenerate(&mut d);
     assert!(m.errors().is_empty(), "{:?}", m.errors());
     assert!((area(&m) - 180.0).abs() < 1e-6, "{}", area(&m));
@@ -402,6 +449,18 @@ mod tests {
     assert!(matches!(u, FeatureKind::Untrim { loops: UntrimLoops::All, .. }));
     let t: FeatureKind = serde_json::from_str(r#"{"type": "trim_with", "bodies": [3], "tool": {"body": 4}}"#).unwrap();
     assert!(matches!(t, FeatureKind::TrimWith { tool: TrimTool::Body { body: BodyId(4) }, flip: false, .. }));
+    // extend without corner closing, untrim without an extension, trims without removed pieces
+    let e: FeatureKind =
+      serde_json::from_str(r#"{"type": "surface_extend", "edges": [], "distance": "2 mm"}"#).unwrap();
+    assert!(matches!(e, FeatureKind::SurfaceExtend { close_corners: false, .. }));
+    assert!(!serde_json::to_string(&e).unwrap().contains("close_corners"));
+    assert!(matches!(u, FeatureKind::Untrim { ref extension, .. } if extension.is_empty()));
+    assert!(!serde_json::to_string(&u).unwrap().contains("extension"));
+    assert!(matches!(t, FeatureKind::TrimWith { ref remove, .. } if remove.is_empty()));
+    assert!(!serde_json::to_string(&t).unwrap().contains("remove"));
+    let p: FeatureKind =
+      serde_json::from_str(r#"{"type": "trim", "bodies": [3], "tool": {"type": "origin", "plane": "yz"}}"#).unwrap();
+    assert!(matches!(p, FeatureKind::Trim { ref keep, ref remove, .. } if keep.is_empty() && remove.is_empty()));
   }
 
   #[test]

@@ -32,6 +32,13 @@ pub enum Untrim {
 impl Shape {
   /// Extends free (boundary) edges (1-based edge ids) by `distance`, sewing the extensions on.
   pub fn extend_edges(&self, edges: &[u32], distance: f64, how: Extension) -> Result<Shape> {
+    self.extend_edges_with(edges, distance, how, false)
+  }
+
+  /// [`Shape::extend_edges`], with `close_corners`: where two extended edges meet at a corner,
+  /// the gap between their extensions is closed with a patch (on a plane the extensions and the
+  /// corner make one bigger face).
+  pub fn extend_edges_with(&self, edges: &[u32], distance: f64, how: Extension, close_corners: bool) -> Result<Shape> {
     if !(distance > 0.0 && distance.is_finite()) {
       return Err(KernelError::Input("the extension distance must be positive".into()));
     }
@@ -43,18 +50,31 @@ impl Shape {
       Extension::Tangent => 1,
       Extension::Perpendicular => 2,
     };
-    Shape::wrap(sys::extend_edges(self.get()?, edges, distance, mode)?)
+    Shape::wrap(sys::extend_edges(self.get()?, edges, distance, mode, close_corners)?)
   }
 
   /// Untrims faces (1-based face ids): removes their holes and/or restores the untrimmed outer
   /// boundary of their surface (a plane's or extrusion's open directions keep the face's extent).
   pub fn untrim(&self, faces: &[u32], loops: Untrim) -> Result<Shape> {
+    self.untrim_extended(faces, loops, 0.0)
+  }
+
+  /// [`Shape::untrim`], then the restored outer boundary grown outward by `extension` (a length
+  /// along the surface; sides where the surface closes on itself stay). Holes-only untrims keep
+  /// their boundary, so they take no extension.
+  pub fn untrim_extended(&self, faces: &[u32], loops: Untrim, extension: f64) -> Result<Shape> {
+    if !(extension >= 0.0 && extension.is_finite()) {
+      return Err(KernelError::Input("the untrim extension can't be negative".into()));
+    }
+    if extension > 0.0 && loops == Untrim::Inner {
+      return Err(KernelError::Input("an extension grows the outer boundary: untrim all or external loops".into()));
+    }
     let mode = match loops {
       Untrim::All => 0,
       Untrim::Inner => 1,
       Untrim::Outer => 2,
     };
-    Shape::wrap(sys::untrim_faces(self.get()?, faces, mode)?)
+    Shape::wrap(sys::untrim_faces(self.get()?, faces, mode, extension)?)
   }
 
   /// Which side of this trimming tool `p` is on. A solid gives +1 inside, -1 outside and 0 on

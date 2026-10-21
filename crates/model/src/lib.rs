@@ -1409,6 +1409,12 @@ pub enum FeatureKind {
     tool: PlaneRef,
     #[serde(default)]
     flip: bool,
+    /// Points picking the pieces to keep (instead of a side).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    keep: Vec<[f64; 3]>,
+    /// Points picking the pieces to remove (everything else stays).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remove: Vec<[f64; 3]>,
   },
   /// Flips the normals of surface bodies.
   ReverseNormal {
@@ -1484,8 +1490,12 @@ pub enum FeatureKind {
     distance: String,
     #[serde(default)]
     mode: surface::ExtendMode,
+    /// Close the gap between the extensions of edges meeting at a corner.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    close_corners: bool,
   },
-  /// Removes holes from faces and/or restores their untrimmed outer boundary.
+  /// Removes holes from faces and/or restores their untrimmed outer boundary, optionally grown
+  /// outward by an extension.
   Untrim {
     #[serde(default)]
     faces: Vec<FaceRef>,
@@ -1493,6 +1503,9 @@ pub enum FeatureKind {
     bodies: Vec<BodyId>,
     #[serde(default)]
     loops: surface::UntrimLoops,
+    /// How far the restored outer boundary grows outward (empty: not at all).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    extension: String,
   },
   /// Trims surface bodies with another body or with sketch curves projected onto them.
   TrimWith {
@@ -1504,6 +1517,9 @@ pub enum FeatureKind {
     /// Points picking the pieces to keep (instead of a side).
     #[serde(default)]
     keep: Vec<[f64; 3]>,
+    /// Points picking the pieces to remove (everything else stays).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remove: Vec<[f64; 3]>,
   },
   /// Sheet metal lofted flange: a sheet between two profiles (closed profiles are opened by the
   /// rule's gap so the flange unfolds). The profiles are one face of the sheet.
@@ -2904,7 +2920,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::BoundaryFill { .. } | FeatureKind::ReplaceFace { .. } => {}
     FeatureKind::SurfaceExtend { distance, .. } => f(distance),
-    FeatureKind::Untrim { .. } | FeatureKind::TrimWith { .. } => {}
+    FeatureKind::Untrim { extension, .. } => {
+      if !extension.is_empty() {
+        f(extension);
+      }
+    }
+    FeatureKind::TrimWith { .. } => {}
     FeatureKind::LoftedFlange { bends, .. } => f(bends),
     FeatureKind::MiterFlange { .. } => {}
     FeatureKind::JoinByBend { bend_radius, .. } => {

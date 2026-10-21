@@ -6,8 +6,10 @@
 
 namespace fox {
 
-std::unique_ptr<Shape> extend_edges(const Shape &s, rust::Slice<const uint32_t> edges, double d, int32_t mode);
-std::unique_ptr<Shape> untrim_faces(const Shape &s, rust::Slice<const uint32_t> faces, int32_t loops);
+std::unique_ptr<Shape> extend_edges(const Shape &s, rust::Slice<const uint32_t> edges, double d, int32_t mode,
+                                    bool corners);
+std::unique_ptr<Shape> untrim_faces(const Shape &s, rust::Slice<const uint32_t> faces, int32_t loops,
+                                    double extend);
 double classify_point(const Shape &tool, double x, double y, double z);
 std::unique_ptr<Shape> offset_variable(const Shape &s, double d, rust::Slice<const uint32_t> faces,
                                        rust::Slice<const double> dists);

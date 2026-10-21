@@ -1,0 +1,21 @@
+# A cover panel built in the Surface workspace: a sheet with a vent hole, untrimmed back out to
+# its edge and grown by a margin all round (the hole stays), two edges extended with the corner
+# between them closed, a notch cut by a sketch outline whose strip is picked to remove (as a
+# click on it in the viewport does), and the result thickened into a 2 mm plate.
+{"cmd": "new", "name": "Panel"}
+{"cmd": "param.add", "name": "margin", "expr": "4 mm", "comment": "how far untrim grows the panel all round"}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [60, 40]}
+{"cmd": "surface.patch", "sketch": 1}
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.circle", "center": [20, 20], "radius": 6}
+{"cmd": "surface.trim", "bodies": [2000], "tool": {"sketch": 3}}
+# the outer boundary back, 4 mm further out: 68 x 48 from (-4, -4)
+{"cmd": "surface.untrim", "bodies": [2000], "loops": "outer", "extension": "margin"}
+# the right and top edges 10 mm further, the corner at (64, 44) closed: 78 x 58
+{"cmd": "surface.extend", "edges": [{"point": [64, 20, 0]}, {"point": [30, 44, 0]}], "distance": "10 mm", "close_corners": true}
+# a U from the top edge down to y = 10; the strip inside it is the piece removed
+{"cmd": "sketch.create", "plane": "xy"}
+{"cmd": "sketch.line", "points": [[50, 60], [50, 10], [56, 10], [56, 60]]}
+{"cmd": "surface.trim", "bodies": [2000], "tool": {"sketch": 7}, "remove": [[53, 40, 0]]}
+{"cmd": "thicken", "bodies": [2000], "thickness": "2 mm"}

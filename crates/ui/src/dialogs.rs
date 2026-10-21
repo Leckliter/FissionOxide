@@ -18,6 +18,7 @@ mod hole_pattern;
 mod live;
 mod manip;
 mod move_copy;
+mod pieces;
 pub(crate) use move_copy::Paste;
 mod newcomp;
 mod solid;
@@ -1639,6 +1640,9 @@ impl Dialog {
   }
 
   fn picked_selection(&self) -> Vec<Sel> {
+    if let Kind::Form(f) = self.kind {
+      return self.form.selection(f);
+    }
     let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
     let mut out = Vec::new();
     for e in &self.edges {
@@ -2541,6 +2545,7 @@ impl Dialog {
         Input::Profiles { .. } | Input::FaceOther { .. } | Input::PlaneOpt { .. } | Input::Cells { .. } => {
           self.solid_form_field(f, i, app, ui, dirty);
         }
+        Input::Pieces { label, .. } => self.pieces_field(i, label, ui, dirty),
       }
     }
     if crate::forms::takes_sheet_points(f) {

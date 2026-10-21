@@ -208,8 +208,8 @@ pub(crate) mod ffi {
     fn loft_point_tangent(profile: &Shape, apex: &Shape, axis: &[f64], weight: f64) -> Result<UniquePtr<Shape>>;
     // surface workspace (cpp/surface2.cpp)
     include!("fox-kernel/cpp/surface2.hxx");
-    fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32) -> Result<UniquePtr<Shape>>;
-    fn untrim_faces(s: &Shape, faces: &[u32], loops: i32) -> Result<UniquePtr<Shape>>;
+    fn extend_edges(s: &Shape, edges: &[u32], d: f64, mode: i32, corners: bool) -> Result<UniquePtr<Shape>>;
+    fn untrim_faces(s: &Shape, faces: &[u32], loops: i32, extend: f64) -> Result<UniquePtr<Shape>>;
     fn classify_point(tool: &Shape, x: f64, y: f64, z: f64) -> Result<f64>;
     fn offset_variable(s: &Shape, d: f64, faces: &[u32], dists: &[f64]) -> Result<UniquePtr<Shape>>;
     fn offset_joined(s: &Shape, d: f64, round: bool, thicken: bool) -> Result<UniquePtr<Shape>>;

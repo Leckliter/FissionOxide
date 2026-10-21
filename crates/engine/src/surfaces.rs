@@ -6,7 +6,7 @@ use fox_model::{BodyId, FeatureId, FeatureKind};
 use fox_sketch::CurveId;
 use serde_json::Value;
 
-use crate::commands::{add_feature, edge_ref_of, expr_of, face_ref, ids, opt_str, req_expr, req_u32};
+use crate::commands::{add_feature, edge_ref_of, expr_of, face_ref, ids, opt_expr, opt_str, req_expr, req_u32};
 use crate::{CmdError, CmdResult, Session};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -25,7 +25,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         "perpendicular" | "normal" => ExtendMode::Perpendicular,
         o => return Err(CmdError::new(format!("unknown mode '{o}' (natural, tangent, perpendicular)"))),
       };
-      add_feature(s, FeatureKind::SurfaceExtend { edges, distance: req_expr(p, "distance")?, mode })
+      let close_corners = p.get("close_corners").and_then(Value::as_bool).unwrap_or(false);
+      add_feature(s, FeatureKind::SurfaceExtend { edges, distance: req_expr(p, "distance")?, mode, close_corners })
     })(),
     "surface.untrim" => (|| {
       let mut faces = Vec::new();
@@ -42,7 +43,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         "outer" => UntrimLoops::Outer,
         o => return Err(CmdError::new(format!("unknown loops '{o}' (all, inner, outer)"))),
       };
-      add_feature(s, FeatureKind::Untrim { faces, bodies, loops })
+      let extension = opt_expr(p, "extension").unwrap_or_default();
+      add_feature(s, FeatureKind::Untrim { faces, bodies, loops, extension })
     })(),
     // a plane tool stays with the plane trim (features.rs)
     "surface.trim" if trim_tool_kind(p).is_some() => trim_with(s, p),
@@ -83,12 +85,9 @@ fn trim_with(s: &mut Session, p: &Value) -> CmdResult {
     }
     TrimTool::Body { body }
   };
-  let mut keep = Vec::new();
-  for k in p.get("keep").and_then(Value::as_array).into_iter().flatten() {
-    keep.push(point(k)?);
-  }
+  let (keep, remove) = (points(p, "keep")?, points(p, "remove")?);
   let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-  add_feature(s, FeatureKind::TrimWith { bodies: targets, tool, flip, keep })
+  add_feature(s, FeatureKind::TrimWith { bodies: targets, tool, flip, keep, remove })
 }
 
 /// `face_distances`: [{face, distance}] for a variable offset.
@@ -112,10 +111,15 @@ fn bodies(s: &Session, p: &Value, k: &str) -> Result<Vec<BodyId>, CmdError> {
   Ok(out)
 }
 
-fn point(v: &Value) -> Result<[f64; 3], CmdError> {
-  let nums: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-  match nums.as_slice() {
-    [x, y, z] if nums.iter().all(|c| c.is_finite()) => Ok([*x, *y, *z]),
-    _ => Err(CmdError::new("'keep' points must be [x, y, z]")),
+/// `[[x, y, z], ...]` under `k` (none: empty).
+pub(crate) fn points(p: &Value, k: &str) -> Result<Vec<[f64; 3]>, CmdError> {
+  let mut out = Vec::new();
+  for v in p.get(k).and_then(Value::as_array).into_iter().flatten() {
+    let nums: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+    match nums.as_slice() {
+      [x, y, z] if nums.iter().all(|c| c.is_finite()) => out.push([*x, *y, *z]),
+      _ => return Err(CmdError::new(format!("'{k}' points must be [x, y, z]"))),
+    }
   }
+  Ok(out)
 }

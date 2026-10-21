@@ -67,10 +67,12 @@ change a parameter and watch the whole history rebuild.
 - **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
   sketch, ruled surfaces between edges, offset surfaces (with per-face distances for a variable
   offset), trim with a plane, a solid, another surface or sketch curves projected onto them
-  (keep either side, or pick the pieces to keep), untrim (remove holes and/or restore the
-  untrimmed boundary), extend open edges (natural, tangent or perpendicular), stitch surfaces
+  (keep either side, pick the pieces to keep, or click the pieces to remove in the viewport),
+  untrim (remove holes and/or restore the untrimmed boundary, optionally grown outward by an
+  extension), extend open edges (natural, tangent or perpendicular, with the corners between
+  adjacent extended edges closed), stitch surfaces
   into a solid, unstitch, reverse normals, and thicken faces or surfaces into solids
-  (`examples/surface_shroud.jsonl`).
+  (`examples/surface_shroud.jsonl`, `examples/surface_panel.jsonl`).
 - **Form (T-spline sculpting).** Box, plane, cylinder, sphere, torus, quadball and face
   primitives; Edit Form with a triad and soft modification; insert/delete edges, insert point,
   subdivide, extrude, bridge, fill hole, crease, mirror and circular symmetry, pull onto a body,

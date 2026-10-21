@@ -161,7 +161,7 @@ cmds! {
   "surface.reverse" => "Flip surface normals", "{bodies}";
   "surface.ruled" => "Ruled surface between two edges", "{a: edge, b: edge}";
   "surface.offset" => "New surfaces offset from faces or bodies; face_distances give faces distances of their own (variable offset)", "{faces? | bodies?, distance, face_distances?: [{face, distance}]}";
-  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]]}";
+  "surface.trim" => "Trim surface bodies with a plane (keeps the side behind it), a body (keeps what's outside a solid or behind a surface) or a sketch projected onto them (cuts its profiles away, or keeps the right of its curves); flip keeps the other side, keep points pick the pieces to keep, remove points the pieces to remove (the rest stays)", "{bodies, tool: plane | {body} | {sketch, curves?}, flip?, keep?: [[x,y,z]], remove?: [[x,y,z]]}";
   "mesh.reduce" => "Fewer triangles on mesh bodies", "{bodies, keep?: 0.05..1}";
   "mesh.smooth" => "Smooth mesh bodies", "{bodies, passes?}";
   "mesh.convert" => "Mesh bodies to clean B-rep (coplanar triangles merged into faces)", "{bodies}";
@@ -278,8 +278,8 @@ cmds! {
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
   "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
   "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
-  "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular", "{edges, distance, mode?: natural|tangent|perpendicular}";
-  "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
+  "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular; close_corners fills the gap between extensions meeting at a corner", "{edges, distance, mode?: natural|tangent|perpendicular, close_corners?: bool}";
+  "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all); extension grows the restored boundary outward by a distance", "{faces? | bodies?, loops?: all|inner|outer, extension?}";
   "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
   "sheet.flat_sketch" => "The flat pattern as a sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin; it follows the body as the model changes unless follow is false", "{body?, face?, on?: face|xy, follow?: bool, curves?: follow|once}";
