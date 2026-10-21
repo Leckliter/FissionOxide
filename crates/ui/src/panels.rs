@@ -686,6 +686,8 @@ impl Cmd {
       Cmd::Select => false,
       Cmd::Params => app.show_params,
       Cmd::Dialog(k) => app.dialog.as_ref().is_some_and(|d| d.kind == k),
+      // Create Sketch stays pressed while it waits for a plane (it has no dialog)
+      Cmd::NewSketch => app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane),
       Cmd::Priority(p) => app.sel_priority == p,
       Cmd::Filter(f) => app.sel_filter.get(f),
       Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
@@ -3010,7 +3012,8 @@ pub fn timeline(app: &mut App, ui: &mut egui::Ui) {
           });
           ui.add_space(6.0);
           ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            timeline_items(app, ui, n, active);
+            let hidden = hidden_preview(app, active);
+            timeline_items(app, ui, hidden.shown(n), hidden.shown(active), hidden);
           });
         });
       });
@@ -3026,7 +3029,53 @@ enum TimelineDrag {
   Feature { id: FeatureId, from: usize, gap: usize },
 }
 
-fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
+/// Features a dialog's preview added, left out of the timeline until OK as in Fusion: the run
+/// of `len` features at `from`, just before the marker, where a command inserts. Timeline items
+/// are numbered without them (`shown`); the design's own numbering is `real`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Hidden {
+  from: usize,
+  len: usize,
+}
+
+impl Hidden {
+  const NONE: Hidden = Hidden { from: usize::MAX, len: 0 };
+
+  /// The run of features at `active - ids.len() .. active` when those are exactly `ids`; a
+  /// preview that landed anywhere else stays shown rather than mis-numbering the timeline.
+  pub(crate) fn of(features: &[FeatureId], ids: &[FeatureId], active: usize) -> Hidden {
+    let len = ids.len();
+    if len == 0 || active < len || active > features.len() {
+      return Hidden::NONE;
+    }
+    let from = active - len;
+    let run = &features[from..active];
+    if run.iter().all(|f| ids.contains(f)) { Hidden { from, len } } else { Hidden::NONE }
+  }
+
+  fn hides(&self, real: usize) -> bool {
+    real >= self.from && real < self.from + self.len
+  }
+
+  /// A design index or count as the timeline numbers it.
+  pub(crate) fn shown(&self, real: usize) -> usize {
+    if real >= self.from + self.len { real - self.len } else { real.min(self.from) }
+  }
+
+  /// A timeline index or slot as the design numbers it (a slot at the hidden run is after it).
+  pub(crate) fn real(&self, shown: usize) -> usize {
+    if shown >= self.from { shown + self.len } else { shown }
+  }
+}
+
+fn hidden_preview(app: &App, active: usize) -> Hidden {
+  let Some(d) = app.dialog.as_ref() else { return Hidden::NONE };
+  let ids = d.preview_features(&app.s);
+  let features: Vec<FeatureId> = app.s.design.features.iter().map(|f| f.id).collect();
+  Hidden::of(&features, &ids, active)
+}
+
+fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize, hidden: Hidden) {
   let key = egui::Id::new("timeline_drag");
   let mut drag: Option<TimelineDrag> = ui.data(|d| d.get_temp(key));
   egui::ScrollArea::horizontal()
@@ -3036,10 +3085,18 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
     .show(ui, |ui| {
       ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
-        let features: Vec<(FeatureId, String, Icon, bool)> =
-          app.s.design.features.iter().map(|f| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed)).collect();
+        let features: Vec<(FeatureId, String, Icon, bool)> = app
+          .s
+          .design
+          .features
+          .iter()
+          .enumerate()
+          .filter(|(i, _)| !hidden.hides(*i))
+          .map(|(_, f)| (f.id, f.name.clone(), feature_icon(&f.kind), f.suppressed))
+          .collect();
         let mut rects = Vec::with_capacity(features.len());
         let marker_dragged = matches!(drag, Some(TimelineDrag::Marker { .. }));
+        // groups keep the design's numbering (their menus act on it); the timeline's is `shown`
         let groups = timeline_groups::shown(app);
         // a collapsed group's icon stands for each of its features (drag slots skip over it)
         let mut collapsed: Option<(Rect, usize)> = None;
@@ -3056,20 +3113,21 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if i == active && marker(ui, marker_dragged).drag_started() {
             drag = Some(TimelineDrag::Marker { gap: active });
           }
-          if let Some(g) = groups.iter().find(|g| g.first == i) {
+          if let Some(g) = groups.iter().find(|g| hidden.shown(g.first) == i) {
             let open = timeline_groups::is_open(ui, g.id);
             let rolled_back = match drag {
               Some(TimelineDrag::Marker { gap }) => i >= gap,
               _ => i >= active,
             };
             let rect = timeline_groups::group_icon(app, ui, g, open, rolled_back);
+            let last = hidden.shown(g.last);
             if open {
-              brackets.push((rect, g.last));
+              brackets.push((rect, last));
             } else {
               rects.push(rect);
-              collapsed = Some((rect, g.last));
+              collapsed = Some((rect, last));
               // the marker inside a collapsed group shows just after it
-              if active > i && active <= g.last && marker(ui, marker_dragged).drag_started() {
+              if active > i && active <= last && marker(ui, marker_dragged).drag_started() {
                 drag = Some(TimelineDrag::Marker { gap: active });
               }
               continue;
@@ -3148,7 +3206,7 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           if r.hovered() && drag.is_none() {
             marking::peek_feature(app, id, name.clone());
           }
-          r.context_menu(|ui| timeline_menu(app, ui, i, id, &name, icon, suppressed));
+          r.context_menu(|ui| timeline_menu(app, ui, hidden.real(i), id, &name, icon, suppressed));
         }
         for (open, last) in brackets {
           if let Some(end) = rects.get(last) {
@@ -3159,9 +3217,9 @@ fn timeline_items(app: &mut App, ui: &mut egui::Ui, n: usize, active: usize) {
           drag = Some(TimelineDrag::Marker { gap: active });
         }
         if let Some(d) = drag.as_mut() {
-          timeline_drag(app, ui, d, &rects, active);
+          timeline_drag(app, ui, d, &rects, active, hidden);
           if !ui.input(|i| i.pointer.primary_down()) {
-            timeline_drop(app, *d, n, active);
+            timeline_drop(app, *d, n, active, hidden);
             drag = None;
           }
         }
@@ -3180,7 +3238,7 @@ fn moved_to(from: usize, gap: usize) -> usize {
 
 /// Follows the pointer during a timeline drag: snaps to the slot between icons and draws the
 /// marker there, or the insertion line (red where the feature can't go).
-fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize) {
+fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect], active: usize, hidden: Hidden) {
   let (Some(first), Some(last)) = (rects.first(), rects.last()) else { return };
   if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
     let gap = rects.iter().filter(|r| r.center().x < pos.x).count();
@@ -3199,7 +3257,7 @@ fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect],
   match *d {
     TimelineDrag::Marker { gap } if gap != active => paint_marker(p, x(gap), top, bottom, Color32::from_gray(55)),
     TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
-      let ok = app.s.design.check_move(id, moved_to(from, gap)).is_ok();
+      let ok = app.s.design.check_move(id, hidden.real(moved_to(from, gap))).is_ok();
       let c = if ok { theme::ACCENT } else { theme::ERROR };
       let x = x(gap);
       p.line_segment([pos2(x, top + 2.0), pos2(x, bottom - 2.0)], Stroke::new(2.0, c));
@@ -3215,14 +3273,14 @@ fn timeline_drag(app: &App, ui: &egui::Ui, d: &mut TimelineDrag, rects: &[Rect],
 }
 
 /// Finishes a timeline drag: rolls the marker or moves the feature.
-fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize) {
+fn timeline_drop(app: &mut App, d: TimelineDrag, n: usize, active: usize, hidden: Hidden) {
   match d {
     TimelineDrag::Marker { gap } if gap != active => {
-      let at = if gap >= n { Value::Null } else { json!(gap) };
+      let at = if gap >= n { Value::Null } else { json!(hidden.real(gap)) };
       app.run("timeline.marker", json!({ "at": at }));
     }
     TimelineDrag::Feature { id, from, gap } if moved_to(from, gap) != from => {
-      let to = moved_to(from, gap);
+      let to = hidden.real(moved_to(from, gap));
       match app.s.design.check_move(id, to) {
         Ok(()) => {
           app.run("feature.move", json!({"feature": id.0, "to": to}));
@@ -3804,5 +3862,30 @@ mod chrome_tests {
     assert_eq!(names, ["Extrude", "Finish Sketch", "2-Point Rectangle", "Create Sketch"]);
     let icons: Vec<Icon> = names.iter().map(|n| step_icon(n)).collect();
     assert_eq!(icons, [Icon::Extrude, Icon::Finish, Icon::Rect, Icon::Sketch]);
+  }
+}
+
+#[cfg(test)]
+mod timeline_preview_tests {
+  use fox_engine::model::FeatureId;
+
+  use super::Hidden;
+
+  #[test]
+  fn a_previewed_feature_is_left_out_of_the_timeline_numbering() {
+    let f: Vec<FeatureId> = (1..=5).map(FeatureId).collect();
+    // the preview added feature 4 (at index 3), the marker sits after it
+    let h = Hidden::of(&f, &[FeatureId(4)], 4);
+    assert_eq!(h, Hidden { from: 3, len: 1 });
+    assert_eq!((0..=5).map(|i| h.shown(i)).collect::<Vec<_>>(), vec![0, 1, 2, 3, 3, 4]);
+    assert_eq!((0..=4).map(|i| h.real(i)).collect::<Vec<_>>(), vec![0, 1, 2, 4, 5]);
+    // nothing previewed, or a preview that didn't land just before the marker: all shown
+    assert_eq!(Hidden::of(&f, &[], 5), Hidden::NONE);
+    assert_eq!(Hidden::of(&f, &[FeatureId(2)], 5), Hidden::NONE);
+    assert_eq!(Hidden::NONE.shown(3), 3);
+    assert_eq!(Hidden::NONE.real(3), 3);
+    // two features added at the end
+    let h = Hidden::of(&f, &[FeatureId(4), FeatureId(5)], 5);
+    assert_eq!((h.shown(5), h.shown(3), h.real(3)), (3, 3, 5));
   }
 }

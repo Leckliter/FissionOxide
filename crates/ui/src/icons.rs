@@ -289,6 +289,27 @@ pub enum Icon {
   TapTaper,
   DrillAngle,
   DrillFlat,
+  // Extrude dialog values (see `dialogs::choice`): Type toggles, Start, Direction, Extent Type,
+  // Wall Location and Operation
+  ExtrudeSolid,
+  ExtrudeThin,
+  ProfilePlane,
+  StartOffset,
+  StartObject,
+  OneSide,
+  TwoSides,
+  SymmetricExtent,
+  ExtentDistance,
+  ToObject,
+  ThroughAll,
+  WallSide1,
+  WallSide2,
+  WallCenter,
+  OpJoin,
+  OpCut,
+  OpIntersect,
+  OpNewBody,
+  OpNewComponent,
 }
 
 #[derive(Clone, Copy)]
@@ -2181,6 +2202,114 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
       k.solid(&[(0.36, 0.1), (0.64, 0.1), (0.64, 0.78), (0.36, 0.78)], White);
       k.path(&[(0.36, 0.1), (0.36, 0.78), (0.64, 0.78), (0.64, 0.1)], Blue);
+    }
+    // Extrude dialog values: small line drawings that sit before a dropdown value's text
+    Icon::ExtrudeSolid => {
+      k.block(0.14, 0.42, 0.62, 0.92, 0.24, BlueLight, Blue, BlueDark);
+      k.thick((0.38, 0.36), (0.38, 0.1), Ink, 1.0);
+      k.arrow_head((0.38, 0.04), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::ExtrudeThin => {
+      k.block(0.14, 0.42, 0.62, 0.92, 0.24, BlueDark, Blue, BlueDark);
+      k.solid(&[(0.24, 0.52), (0.52, 0.52), (0.52, 0.82), (0.24, 0.82)], White);
+      k.thick((0.38, 0.36), (0.38, 0.1), Ink, 1.0);
+      k.arrow_head((0.38, 0.04), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::ProfilePlane => {
+      k.solid(&[(0.06, 0.78), (0.34, 0.42), (0.94, 0.42), (0.66, 0.78)], Light);
+      k.circle((0.5, 0.6), 0.12, Some(BlueLight), Some(Blue));
+      k.thick((0.5, 0.42), (0.5, 0.14), Ink, 1.0);
+      k.arrow_head((0.5, 0.08), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::StartOffset => {
+      k.solid(&[(0.06, 0.9), (0.34, 0.6), (0.94, 0.6), (0.66, 0.9)], Light);
+      k.closed(&[(0.06, 0.48), (0.34, 0.18), (0.94, 0.18), (0.66, 0.48)], Blue);
+      k.dashed((0.2, 0.75), (0.2, 0.33), Ink);
+      k.arrow_head((0.2, 0.3), (0.0, -1.0), 0.11, Ink);
+    }
+    Icon::StartObject => {
+      k.block(0.1, 0.5, 0.6, 0.92, 0.3, Dark, Fill, Dark);
+      k.closed(&[(0.1, 0.5), (0.4, 0.29), (0.9, 0.29), (0.6, 0.5)], Blue);
+      k.thick((0.5, 0.36), (0.5, 0.1), Ink, 1.0);
+      k.arrow_head((0.5, 0.04), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::OneSide => {
+      k.thick((0.3, 0.1), (0.3, 0.9), Slate, 1.2);
+      k.solid(&[(0.3, 0.3), (0.72, 0.3), (0.72, 0.7), (0.3, 0.7)], BlueLight);
+      k.thick((0.72, 0.5), (0.86, 0.5), Ink, 1.0);
+      k.arrow_head((0.94, 0.5), (1.0, 0.0), 0.13, Ink);
+    }
+    Icon::TwoSides => {
+      k.thick((0.42, 0.1), (0.42, 0.9), Slate, 1.2);
+      k.solid(&[(0.16, 0.3), (0.42, 0.3), (0.42, 0.7), (0.16, 0.7)], BlueDark);
+      k.solid(&[(0.42, 0.3), (0.8, 0.3), (0.8, 0.7), (0.42, 0.7)], BlueLight);
+      k.arrow_head((0.06, 0.5), (-1.0, 0.0), 0.11, Ink);
+      k.arrow_head((0.94, 0.5), (1.0, 0.0), 0.11, Ink);
+    }
+    Icon::SymmetricExtent => {
+      k.dashed((0.5, 0.06), (0.5, 0.94), Slate);
+      k.solid(&[(0.22, 0.3), (0.5, 0.3), (0.5, 0.7), (0.22, 0.7)], BlueLight);
+      k.solid(&[(0.5, 0.3), (0.78, 0.3), (0.78, 0.7), (0.5, 0.7)], BlueLight);
+      k.arrow_head((0.08, 0.5), (-1.0, 0.0), 0.11, Ink);
+      k.arrow_head((0.92, 0.5), (1.0, 0.0), 0.11, Ink);
+    }
+    Icon::ExtentDistance => {
+      k.solid(&[(0.1, 0.22), (0.56, 0.22), (0.56, 0.78), (0.1, 0.78)], BlueLight);
+      k.thick((0.78, 0.26), (0.78, 0.74), Ink, 1.0);
+      k.arrow_head((0.78, 0.18), (0.0, -1.0), 0.11, Ink);
+      k.arrow_head((0.78, 0.82), (0.0, 1.0), 0.11, Ink);
+      k.line((0.6, 0.22), (0.92, 0.22), Slate);
+      k.line((0.6, 0.78), (0.92, 0.78), Slate);
+    }
+    Icon::ToObject => {
+      k.solid(&[(0.08, 0.08), (0.92, 0.08), (0.92, 0.34), (0.08, 0.34)], Fill);
+      k.solid(&[(0.3, 0.7), (0.7, 0.7), (0.7, 0.92), (0.3, 0.92)], BlueLight);
+      k.thick((0.5, 0.7), (0.5, 0.46), Ink, 1.0);
+      k.arrow_head((0.5, 0.38), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::ThroughAll => {
+      k.solid(&[(0.08, 0.28), (0.92, 0.28), (0.92, 0.72), (0.08, 0.72)], Fill);
+      k.solid(&[(0.38, 0.06), (0.62, 0.06), (0.62, 0.94), (0.38, 0.94)], BlueLight);
+      k.arrow_head((0.5, 0.02), (0.0, -1.0), 0.13, Ink);
+    }
+    Icon::WallSide1 => {
+      k.thick((0.5, 0.08), (0.5, 0.92), Slate, 1.2);
+      k.solid(&[(0.26, 0.2), (0.5, 0.2), (0.5, 0.8), (0.26, 0.8)], BlueLight);
+    }
+    Icon::WallSide2 => {
+      k.thick((0.5, 0.08), (0.5, 0.92), Slate, 1.2);
+      k.solid(&[(0.5, 0.2), (0.74, 0.2), (0.74, 0.8), (0.5, 0.8)], BlueLight);
+    }
+    Icon::WallCenter => {
+      k.solid(&[(0.38, 0.2), (0.62, 0.2), (0.62, 0.8), (0.38, 0.8)], BlueLight);
+      k.dashed((0.5, 0.08), (0.5, 0.92), Slate);
+    }
+    Icon::OpJoin => {
+      k.fill(&[(0.08, 0.08), (0.6, 0.08), (0.6, 0.6), (0.08, 0.6)], BlueLight);
+      k.fill(&[(0.4, 0.4), (0.92, 0.4), (0.92, 0.92), (0.4, 0.92)], BlueLight);
+      k.path(&[(0.6, 0.4), (0.6, 0.08), (0.08, 0.08), (0.08, 0.6), (0.4, 0.6)], Blue);
+      k.path(&[(0.4, 0.6), (0.4, 0.92), (0.92, 0.92), (0.92, 0.4), (0.6, 0.4)], Blue);
+    }
+    Icon::OpCut => {
+      k.solid(&[(0.08, 0.08), (0.6, 0.08), (0.6, 0.6), (0.08, 0.6)], BlueLight);
+      k.solid(&[(0.4, 0.4), (0.92, 0.4), (0.92, 0.92), (0.4, 0.92)], White);
+      k.closed(&[(0.4, 0.4), (0.92, 0.4), (0.92, 0.92), (0.4, 0.92)], Red);
+    }
+    Icon::OpIntersect => {
+      k.closed(&[(0.08, 0.08), (0.6, 0.08), (0.6, 0.6), (0.08, 0.6)], Slate);
+      k.closed(&[(0.4, 0.4), (0.92, 0.4), (0.92, 0.92), (0.4, 0.92)], Slate);
+      k.solid(&[(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)], Blue);
+    }
+    Icon::OpNewBody => {
+      k.block(0.1, 0.4, 0.56, 0.9, 0.26, BlueLight, Blue, BlueDark);
+      k.thick((0.8, 0.08), (0.8, 0.36), Ink, 1.2);
+      k.thick((0.66, 0.22), (0.94, 0.22), Ink, 1.2);
+    }
+    Icon::OpNewComponent => {
+      k.block(0.08, 0.5, 0.48, 0.9, 0.2, Dark, Fill, Dark);
+      k.block(0.5, 0.56, 0.74, 0.9, 0.16, BlueLight, Blue, BlueDark);
+      k.thick((0.8, 0.08), (0.8, 0.36), Ink, 1.2);
+      k.thick((0.66, 0.22), (0.94, 0.22), Ink, 1.2);
     }
   }
 }

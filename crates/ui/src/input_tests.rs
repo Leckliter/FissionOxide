@@ -30,9 +30,14 @@ impl Harness {
   }
 
   fn frame(&mut self, events: Vec<Event>) {
+    self.frame_in(vec2(self.width, 900.0), events);
+  }
+
+  /// A frame in a window of `size` (the window was resized or maximised).
+  fn frame_in(&mut self, size: egui::Vec2, events: Vec<Event>) {
     self.time += 1.0 / 60.0;
     let input = RawInput {
-      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
       time: Some(self.time),
       events,
       ..Default::default()
@@ -75,12 +80,18 @@ impl Harness {
     self.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).expect("the dialog is open")
   }
 
-  fn open_create_sketch(&mut self) {
-    self.app.new_sketch();
+  /// Opens a command dialog (Box: it needs no picks) and lets it settle.
+  fn open_dialog(&mut self) {
+    self.app.start(crate::dialogs::Kind::Box);
     for _ in 0..3 {
       self.frame(vec![]);
     }
     assert!(self.app.dialog.is_some());
+  }
+
+  /// Where the dialog docks: the canvas's top-right corner (`Dialog::show`).
+  fn dock(&self) -> Pos2 {
+    self.app.canvas.right_top() + vec2(-34.0, 190.0)
   }
 }
 
@@ -94,13 +105,26 @@ fn cancel_pos(dialog: Rect) -> Pos2 {
 #[test]
 fn the_cursor_prompt_follows_the_pointer_and_hides_over_the_dialog() {
   let mut h = Harness::new();
-  h.open_create_sketch();
-  let r = h.dialog_rect();
   let c = h.app.canvas.center();
-  // the dialog's own label says the same thing: the prompt is the copy just below-right of the pointer
+  // Create Sketch has no dialog: the prompt just below-right of the pointer is all that asks
+  h.app.new_sketch();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
   assert!(h.prompt_at(c, crate::dialogs::PICK_PLANE_HINT));
-  assert!(!h.prompt_at(r.center(), crate::dialogs::PICK_PLANE_HINT), "hidden over the dialog");
+  h.app.new_sketch(); // the ribbon button cancels the pick
+  // a selecting dialog's prompt hides over the dialog
+  h.app.run("box", serde_json::json!({"width": 10, "depth": 10, "height": 10}));
+  h.app.start(crate::dialogs::Kind::Fillet);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let r = h.dialog_rect();
+  let select = "Select edges, faces, or features to fillet";
+  assert!(h.prompt_at(c, select));
+  assert!(!h.prompt_at(r.center(), select), "hidden over the dialog");
   h.move_then_click(cancel_pos(r));
+  assert!(h.app.dialog.is_none());
 
   h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
   h.app.set_tool(crate::viewport::Tool::Rect);
@@ -121,9 +145,9 @@ impl Harness {
 }
 
 #[test]
-fn the_create_sketch_dialog_takes_clicks_where_it_opens() {
+fn a_dialog_takes_clicks_where_it_opens() {
   let mut h = Harness::new();
-  h.open_create_sketch();
+  h.open_dialog();
   let r = h.dialog_rect();
   assert!(r.right() > h.app.canvas.right() - 60.0, "the dialog opens on the right of the canvas: {r:?}");
   h.move_then_click(cancel_pos(r));
@@ -160,10 +184,56 @@ fn tab_then_enter_leaves_the_data_panel_alone() {
 #[test]
 fn a_click_right_after_a_jump_lands() {
   let mut h = Harness::new();
-  h.open_create_sketch();
+  h.open_dialog();
   let r = h.dialog_rect();
   h.jump_and_click(cancel_pos(r));
   assert!(h.app.dialog.is_none(), "Cancel closes the dialog");
+}
+
+#[test]
+fn create_sketch_has_no_dialog() {
+  let mut h = Harness::new();
+  h.app.new_sketch();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!(h.app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane));
+  assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("feature-dialog"))).is_none(), "only the cursor hint asks");
+  assert!(crate::panels::Cmd::NewSketch.active(&h.app), "the ribbon button stays pressed");
+  // the button cancels
+  h.app.new_sketch();
+  assert!(h.app.dialog.is_none());
+  assert!(!crate::panels::Cmd::NewSketch.active(&h.app));
+}
+
+#[test]
+fn a_dialog_docks_top_right_when_it_opens_and_after_a_resize() {
+  let mut h = Harness::new();
+  h.open_dialog();
+  let r = h.dialog_rect();
+  assert!((r.right_top() - h.dock()).length() < 1.0, "docked at {:?}, canvas {:?}", r, h.app.canvas);
+  // dragged by its title bar, it stays where it was dropped for this command
+  let grab = r.left_top() + vec2(90.0, 15.0);
+  h.drag(grab, grab + vec2(-300.0, 120.0));
+  let moved = h.dialog_rect();
+  assert!((moved.left_top() - (r.left_top() + vec2(-300.0, 120.0))).length() < 2.0, "{moved:?} after {r:?}");
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  assert!((h.dialog_rect().left_top() - moved.left_top()).length() < 1.0, "it keeps its dragged position");
+  // the next command opens docked again, not where the last one was dragged
+  h.move_then_click(cancel_pos(moved));
+  assert!(h.app.dialog.is_none());
+  h.open_dialog();
+  let r = h.dialog_rect();
+  assert!((r.right_top() - h.dock()).length() < 1.0, "re-docked at {r:?}, not {moved:?}");
+  // maximising the window moves the canvas's corner: the open dialog follows it
+  for _ in 0..4 {
+    h.frame_in(vec2(1920.0, 1080.0), vec![]);
+  }
+  let r = h.dialog_rect();
+  assert!(h.app.canvas.right() > 1600.0, "the canvas grew: {:?}", h.app.canvas);
+  assert!((r.right_top() - h.dock()).length() < 1.0, "docked to the new corner: {r:?}, canvas {:?}", h.app.canvas);
 }
 
 #[test]
@@ -196,7 +266,7 @@ fn dragging_the_viewcube_orbits() {
 #[test]
 fn a_dialog_over_the_viewcube_takes_the_click() {
   let mut h = Harness::new();
-  h.open_create_sketch();
+  h.open_dialog();
   let center = h.app.canvas.right_top() + vec2(-92.0, 80.0);
   // drag the dialog by its header until its body covers the cube
   let r = h.dialog_rect();

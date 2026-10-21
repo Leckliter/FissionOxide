@@ -1278,6 +1278,11 @@ impl App {
   /// show in the viewport to click, as in Fusion.
   pub fn new_sketch(&mut self) {
     self.note_cmd(panels::Cmd::NewSketch);
+    // the pressed ribbon button cancels the pick, as in Fusion
+    if self.dialog.as_ref().is_some_and(|d| d.kind == dialogs::Kind::PickPlane) {
+      self.cancel_dialog();
+      return;
+    }
     self.cancel_dialog();
     if let Some(plane) = self.preselected_plane() {
       self.create_sketch(plane);

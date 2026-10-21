@@ -752,6 +752,7 @@ mod tests {
     run(&mut s, "sketch.finish", json!({}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = Some(sk);
+    d.profiles = vec![s.model.sketches[&sk].profiles[0].interior_point()];
     d.distance = "5 mm".into();
     let m = d.manipulator(&s).unwrap();
     let h = d.handles(&s);

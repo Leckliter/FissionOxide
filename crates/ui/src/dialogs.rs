@@ -13,6 +13,7 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::{App, panels};
 
+mod choice;
 mod extrude;
 mod hole_pattern;
 mod icon_row;
@@ -538,6 +539,9 @@ pub struct Dialog {
   summary: Option<String>,
   /// The sketch curves the previewed command made (Offset's dimension measures to them).
   made: Vec<u32>,
+  /// The canvas the dialog was last docked to (its top-right corner): None until the first
+  /// frame, so a dialog opens docked and docks again when the window is resized, as in Fusion.
+  docked: Option<egui::Rect>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -656,6 +660,7 @@ impl Dialog {
       comp_name: String::new(),
       summary: None,
       made: Vec::new(),
+      docked: None,
     }
   }
 
@@ -701,8 +706,11 @@ impl Dialog {
     if matches!(kind, Kind::Extrude | Kind::Revolve | Kind::Sweep | Kind::Hole | Kind::Flange | Kind::Fold)
       && d.sketch.is_none()
     {
+      // the newest sketch's profiles are the ones to pick; Extrude takes only a picked one (as
+      // in Fusion, E opens with Profiles: Select and no preview)
       d.sketch = s.edit_sketch.or(app.last_sketch).or_else(|| last_unconsumed_sketch(s));
-      if let Some(sk) = d.sketch
+      if kind != Kind::Extrude
+        && let Some(sk) = d.sketch
         && let Some(r) = s.model.sketches.get(&sk)
         && r.profiles.len() == 1
       {
@@ -1034,9 +1042,10 @@ impl Dialog {
       FeatureKind::Extrude { sketch, extent, operation, .. } => {
         let mut d = Dialog::blank(Kind::Extrude);
         d.sketch = Some(*sketch);
-        d.distance = extent.distance.clone();
+        // a flipped extrude shows a negative distance, as in Fusion (`extrude::split_sign`)
+        d.distance = if extent.flip { extrude::negate(&extent.distance) } else { extent.distance.clone() };
         d.distance2 = extent.distance2.clone();
-        d.flip = extent.flip;
+        d.flip = false;
         d.extent = match extent.kind {
           ExtentKind::OneSide => "one_side",
           ExtentKind::Symmetric => "symmetric",
@@ -1460,13 +1469,16 @@ impl Dialog {
         }
         ("sketch.project", p)
       }
-      Kind::Extrude => (
-        "extrude",
-        self.with_extrude_rows(self.with_object(json!({
-          "sketch": self.sketch?.0, "profiles": self.profiles, "distance": self.distance, "distance2": self.distance2,
-          "extent": self.extent, "flip": self.flip, "operation": op,
-        }))?)?,
-      ),
+      Kind::Extrude => {
+        let (distance, flip) = self.extrude_distance();
+        (
+          "extrude",
+          self.with_extrude_rows(self.with_object(json!({
+            "sketch": self.sketch?.0, "profiles": self.profiles, "distance": distance, "distance2": self.distance2,
+            "extent": self.extent, "flip": flip, "operation": op,
+          }))?)?,
+        )
+      }
       Kind::Revolve => {
         let (axis, angle) = (self.revolve_axis()?, self.revolve_angle());
         (
@@ -1517,12 +1529,15 @@ impl Dialog {
   /// Fields for `feature.edit` when editing an existing feature.
   fn edit_set(&self) -> Option<Value> {
     Some(match self.kind {
-      Kind::Extrude => json!({
-        "extent": self.edit_extrude_rows(self.edit_extent(
-          json!({"kind": self.extent, "distance": self.distance, "distance2": self.distance2, "flip": self.flip}),
-        )),
-        "operation": self.op,
-      }),
+      Kind::Extrude => {
+        let (distance, flip) = self.extrude_distance();
+        json!({
+          "extent": self.edit_extrude_rows(self.edit_extent(
+            json!({"kind": self.extent, "distance": distance, "distance2": self.distance2, "flip": flip}),
+          )),
+          "operation": self.op,
+        })
+      }
       Kind::Revolve => {
         let two = self.extent == "two_sides";
         json!({"angle": self.revolve_angle(), "symmetric": self.extent == "symmetric",
@@ -1618,7 +1633,8 @@ impl Dialog {
     }
     match self.kind {
       Kind::Form(f) => self.form.missing(f).is_none(),
-      Kind::Extrude | Kind::Revolve => self.sketch.is_some(),
+      Kind::Extrude => self.sketch.is_some() && !self.profiles.is_empty(),
+      Kind::Revolve => self.sketch.is_some(),
       Kind::Fillet => self.fillet_ready(),
       Kind::Chamfer => !self.edges.is_empty(),
       Kind::Shell => !self.faces.is_empty() || !self.bodies.is_empty(),
@@ -1756,8 +1772,9 @@ impl Dialog {
           Some(p) => *p,
           None => r.profiles.first()?.interior_point(),
         };
-        let sign = if self.flip { -1.0 } else { 1.0 };
-        Some(Manipulator { origin: r.plane.to_world(at), dir: r.plane.normal(), value: sign * len(&self.distance)? })
+        let (distance, flip) = self.extrude_distance();
+        let sign = if flip { -1.0 } else { 1.0 };
+        Some(Manipulator { origin: r.plane.to_world(at), dir: r.plane.normal(), value: sign * len(&distance)? })
       }
       Kind::OffsetPlane => {
         let (base, centre) = self.offset_base(s)?;
@@ -1771,9 +1788,10 @@ impl Dialog {
   pub fn set_manipulator(&mut self, value: f64, step: f64) {
     let v = if step > 0.0 { (value / step).round() * step } else { value };
     match self.kind {
+      // dragged back past the profile, the arrow writes a negative distance (no Flip row)
       Kind::Extrude => {
-        self.flip = v < 0.0;
-        self.distance = manip::mm(self.unit, v.abs());
+        self.flip = false;
+        self.distance = manip::mm(self.unit, v);
       }
       Kind::OffsetPlane => self.distance = manip::mm(self.unit, v),
       _ => {
@@ -1999,14 +2017,20 @@ impl Dialog {
       app.status = Some(("Pick a planar face".into(), true));
       app.s.selection.clear();
     }
+    if self.kind == Kind::PickPlane {
+      // no dialog, as in Fusion: the ribbon button stays pressed, the planes show and the cursor
+      // hint asks; Escape or the button cancels
+      return !self.closed;
+    }
     let mut keep = true;
     // Enter is OK, from one of the dialog's boxes or with nothing focused (as in Fusion); OK can
     // also come from the marking menu
     let dialog_layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("feature-dialog"));
+    let ok_enabled = self.ok_enabled();
     let mut ok = std::mem::take(&mut self.ok_requested)
-      || ctx.input(|i| i.key_pressed(egui::Key::Enter))
+      || ok_enabled
+        && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         && !self.kind.reports()
-        && self.kind != Kind::PickPlane
         && match ctx.memory(|m| m.focused()) {
           None => true,
           Some(id) => {
@@ -2023,68 +2047,74 @@ impl Dialog {
     let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
     // FILLET's selection table needs the extra width, as in Fusion
     let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
-    egui::Area::new(egui::Id::new("feature-dialog"))
-      .default_pos(app.canvas.right_top() + egui::vec2(-34.0, 190.0))
+    // docked at the canvas's top-right corner when it opens and again after the window is
+    // resized; in between it stays where it was dragged
+    let dock = app.canvas.right_top() + egui::vec2(-34.0, 190.0);
+    let area = egui::Area::new(egui::Id::new("feature-dialog"))
       .pivot(egui::Align2::RIGHT_TOP)
       .constrain(true)
-      .order(egui::Order::Foreground)
-      .show(ctx, |ui| {
-        panels::dialog_frame().show(ui, |ui| {
-          ui.set_width(width);
-          ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-          panels::dialog_header(ui, self.kind.icon(), &title, width);
-          egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-            egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
-              self.fields(app, ui);
-            });
-            if let Some(e) = &self.error {
-              ui.add_space(6.0);
-              ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
-            } else if let Some(n) = self.summary.as_ref().filter(|_| self.applied) {
-              ui.add_space(6.0);
-              ui.label(RichText::new(n).color(theme::MUTED));
-            }
+      .order(egui::Order::Foreground);
+    let area = if self.docked == Some(app.canvas) {
+      area.default_pos(dock)
+    } else {
+      self.docked = Some(app.canvas);
+      area.current_pos(dock)
+    };
+    area.show(ctx, |ui| {
+      panels::dialog_frame().show(ui, |ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        panels::dialog_header(ui, self.kind.icon(), &title, width);
+        egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 10, top: 10, bottom: 8 }).show(ui, |ui| {
+          ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+          egui::Grid::new("dlg").num_columns(2).min_col_width(96.0).spacing([10.0, 7.0]).show(ui, |ui| {
+            self.fields(app, ui);
           });
-          let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
-          ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
-          egui::Frame::new().fill(theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-              ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
-              let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 24.0), egui::Sense::hover());
-              ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme::GROUP_LABEL));
-              ui.painter().text(
-                r.center(),
-                egui::Align2::CENTER_CENTER,
-                "i",
-                egui::FontId::proportional(11.0),
-                theme::GROUP_LABEL,
-              );
-              if self.kind != Kind::PickPlane && !self.kind.reports() {
-                if self.picks() && self.editing.is_none() {
-                  self.live_checkbox(ui, &mut app.s);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                  if panels::secondary_button(ui, "Cancel").clicked() {
-                    cancel = true;
-                  }
-                  if panels::primary_button(ui, "OK", self.accent()).clicked() {
-                    ok = true;
-                  }
-                });
-              } else {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                  if panels::secondary_button(ui, if self.kind == Kind::PickPlane { "Cancel" } else { "Close" })
-                    .clicked()
-                  {
-                    cancel = true;
-                  }
-                });
+          if let Some(e) = &self.error {
+            ui.add_space(6.0);
+            ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
+          } else if let Some(n) = self.summary.as_ref().filter(|_| self.applied) {
+            ui.add_space(6.0);
+            ui.label(RichText::new(n).color(theme::MUTED));
+          }
+        });
+        let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
+        ui.painter().rect_filled(sep, 0.0, theme::SEPARATOR);
+        egui::Frame::new().fill(theme::DIALOG_BODY).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+            let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 24.0), egui::Sense::hover());
+            ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme::GROUP_LABEL));
+            ui.painter().text(
+              r.center(),
+              egui::Align2::CENTER_CENTER,
+              "i",
+              egui::FontId::proportional(11.0),
+              theme::GROUP_LABEL,
+            );
+            if !self.kind.reports() {
+              if self.picks() && self.editing.is_none() {
+                self.live_checkbox(ui, &mut app.s);
               }
-            });
+              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if panels::secondary_button(ui, "Cancel").clicked() {
+                  cancel = true;
+                }
+                if ok_button(ui, self.accent(), ok_enabled).clicked() {
+                  ok = true;
+                }
+              });
+            } else {
+              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if panels::secondary_button(ui, "Close").clicked() {
+                  cancel = true;
+                }
+              });
+            }
           });
         });
       });
+    });
     // typing no value box took (a dialog without one) is dropped
     ctx.data_mut(|d| d.remove::<String>(egui::Id::new(TYPING)));
     self.live_check();
@@ -2216,6 +2246,14 @@ impl Dialog {
       )
   }
 
+  /// Is OK live? Extrude greys it until a profile is picked, as in Fusion.
+  fn ok_enabled(&self) -> bool {
+    match self.kind {
+      Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
+      _ => true,
+    }
+  }
+
   fn missing_input(&self) -> &'static str {
     match self.kind {
       Kind::Form(f) => self.form.missing(f).unwrap_or("missing input"),
@@ -2259,11 +2297,9 @@ impl Dialog {
   fn fields(&mut self, app: &mut App, ui: &mut egui::Ui) {
     let creating = self.editing.is_none();
     match self.kind {
-      // the planes to pick are drawn in the viewport (`viewport::plane_picker`)
-      Kind::PickPlane => {
-        ui.label(PICK_PLANE_HINT);
-        ui.end_row();
-      }
+      // Create Sketch has no dialog (`show` returns before drawing one): the planes to pick are
+      // drawn in the viewport (`viewport::plane_picker`) with the cursor hint
+      Kind::PickPlane => {}
       Kind::Extrude => self.extrude_rows(ui),
       Kind::Revolve => {
         ui.label("Profiles");
@@ -3807,21 +3843,23 @@ impl Dialog {
     p
   }
 
+  /// The extent or operation dropdown: every value with its icon before the text, as in Fusion.
   fn combo(&mut self, ui: &mut egui::Ui, id: &str, items: &[(&'static str, &'static str)], extent: bool) {
-    let cur = if extent { self.extent } else { self.op };
-    let label = items.iter().find(|(k, _)| *k == cur).map(|(_, l)| *l).unwrap_or(cur);
-    egui::ComboBox::from_id_salt(id).selected_text(label).width(140.0).show_ui(ui, |ui| {
-      for (k, l) in items {
-        if ui.selectable_label(cur == *k, *l).clicked() {
-          if extent {
-            self.extent = k;
-          } else {
-            self.op = k;
-          }
-          self.dirty = true;
-        }
+    let mut cur = if extent { self.extent } else { self.op };
+    if choice::combo(ui, id, items, &mut cur, choice::extrude_icon) {
+      if extent {
+        self.extent = cur;
+      } else {
+        self.op = cur;
       }
-    });
+      self.dirty = true;
+    }
+  }
+
+  /// Extrude's distance for the engine: its magnitude and the flip its sign (or the arrow) implies.
+  fn extrude_distance(&self) -> (String, bool) {
+    let (distance, negative) = extrude::split_sign(&self.distance);
+    (distance, self.flip != negative)
   }
 
   fn axis_combo(&mut self, ui: &mut egui::Ui, id: &str, first: bool, axes: &[u32]) {
@@ -4774,6 +4812,22 @@ pub(super) fn value_edit_w(ui: &mut egui::Ui, text: &mut String, width: f32) -> 
   r
 }
 
+/// The OK button: the primary button, greyed while the dialog lacks its input (see
+/// [`Dialog::ok_enabled`]).
+fn ok_button(ui: &mut egui::Ui, accent: egui::Color32, enabled: bool) -> egui::Response {
+  if enabled {
+    return panels::primary_button(ui, "OK", accent);
+  }
+  ui.add_enabled(
+    false,
+    egui::Button::new(RichText::new("OK").color(theme::MUTED))
+      .fill(egui::Color32::from_gray(240))
+      .stroke(egui::Stroke::new(1.0, theme::BORDER))
+      .corner_radius(3)
+      .min_size(egui::vec2(72.0, 24.0)),
+  )
+}
+
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
@@ -5505,6 +5559,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     run(&mut s, "sketch.finish", json!({}));
     d.localize(fox_engine::model::LengthUnit::In);
     assert_eq!(d.distance, "0.393701 in", "the 10 mm default, in inches");
@@ -5523,14 +5578,67 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     run(&mut s, "sketch.finish", json!({}));
     let m = d.manipulator(&s).unwrap();
     assert!((m.value - 10.0).abs() < 1e-9 && m.dir.z > 0.99);
     d.set_manipulator(-7.26, 0.5);
-    assert!(d.flip && d.distance == "7.5 mm", "{} {}", d.flip, d.distance);
+    // no Flip row: dragged back past the profile, the value box shows the distance negative
+    assert!(!d.flip && d.distance == "-7.5 mm", "{} {}", d.flip, d.distance);
+    assert_eq!(d.extrude_distance(), ("7.5 mm".to_string(), true));
+    let m = d.manipulator(&s).unwrap();
+    assert!((m.value + 7.5).abs() < 1e-9);
     apply(&mut s, &mut d);
     let bb = s.model.bodies[0].shape.mass().unwrap();
     assert!((bb.bbox_min.z + 7.5).abs() < 1e-6, "{bb:?}");
+    // typing a negative distance flips too; a flipped extrude is edited with its distance negative
+    d.withdraw(&mut s);
+    d.distance = "-4 mm".into();
+    apply(&mut s, &mut d);
+    let id = s.design.features.last().unwrap().id;
+    let FeatureKind::Extrude { extent, .. } = &s.design.feature(id).unwrap().kind else { panic!() };
+    assert!(extent.flip && extent.distance == "4 mm", "{extent:?}");
+    let mut app = App::with_session(s);
+    let e = Dialog::edit(&app, id).unwrap();
+    assert!(!e.flip && e.distance == "-4 mm", "{} {}", e.flip, e.distance);
+    assert_eq!(e.edit_set().unwrap()["extent"]["flip"], json!(true));
+    assert_eq!(e.edit_set().unwrap()["extent"]["distance"], json!("4 mm"));
+    app.s.undo();
+  }
+
+  #[test]
+  fn extrude_waits_for_a_picked_profile() {
+    // Sketch1 finished and still selected in the browser: E opens with Profiles: Select, no
+    // preview and OK greyed, as in Fusion
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"}));
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = app.s.edit_sketch.unwrap();
+    app.run("sketch.finish", json!({}));
+    app.s.selection = vec![Sel::Feature { feature: sk }];
+    app.start(Kind::Extrude);
+    let d = app.dialog.as_ref().unwrap();
+    assert_eq!(d.sketch, Some(sk), "the sketch's profiles are the ones to pick");
+    assert!(d.profiles.is_empty() && !d.ready() && !d.applied && !d.ok_enabled());
+    assert!(app.s.model.bodies.is_empty(), "no preview body");
+    assert!(d.preview_features(&app.s).is_empty());
+    // a picked profile fills the row, previews and enables OK; the preview's feature stays out
+    // of the timeline until OK
+    app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    let mut d = app.dialog.take().unwrap();
+    d.sync_selection(&app.s);
+    assert!(d.ready() && d.ok_enabled());
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none());
+    assert_eq!(app.s.model.bodies.len(), 1);
+    let previewed = d.preview_features(&app.s);
+    assert_eq!(previewed, vec![app.s.design.features.last().unwrap().id]);
+    // a profile selected before E is taken as the pick
+    d.cancel(&mut app.s);
+    app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    let d = Dialog::open(&mut app, Kind::Extrude);
+    assert_eq!((d.sketch, d.profiles.len()), (Some(sk), 1));
+    assert!(d.ready());
   }
 
   #[test]

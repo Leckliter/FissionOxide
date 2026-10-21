@@ -7,7 +7,8 @@ use fox_engine::Session;
 use fox_engine::model::{Extent, ThinSide};
 use serde_json::{Value, json};
 
-use super::{Dialog, OPS, sel_chip};
+use super::{Dialog, OPS, choice, sel_chip};
+use crate::icons::Icon;
 
 /// Extrude values beyond the extent, distances and operation.
 #[derive(Debug, Clone, Default)]
@@ -77,11 +78,13 @@ impl Dialog {
     let creating = self.editing.is_none();
     let mut dirty = false;
     let ext = &mut self.solid.ext;
+    // Type: Fusion's pair of icon toggles
     ui.label("Type");
-    ui.horizontal(|ui| {
-      dirty |= ui.radio_value(&mut ext.thin, false, "Solid").changed();
-      dirty |= ui.radio_value(&mut ext.thin, true, "Thin").changed();
-    });
+    let mut kind = usize::from(ext.thin);
+    if choice::toggles(ui, &[(Icon::ExtrudeSolid, "Solid"), (Icon::ExtrudeThin, "Thin")], &mut kind) {
+      ext.thin = kind == 1;
+      dirty = true;
+    }
     ui.end_row();
 
     ui.label("Profiles");
@@ -89,11 +92,13 @@ impl Dialog {
     if !creating {
       ui.label("(unchanged)");
     } else if n == 0 {
-      sel_chip(ui, self.accent(), "Select (all regions)", false);
+      sel_chip(ui, self.accent(), "Select", false);
     } else {
       sel_chip(ui, self.accent(), &format!("{n} selected"), true);
     }
     ui.end_row();
+    // the value rows wait for a profile, as in Fusion
+    let has_profile = !creating || n > 0;
 
     let ext = &mut self.solid.ext;
     dirty |= pick(ui, "Start", "ext-start", &STARTS, &mut ext.start);
@@ -128,7 +133,9 @@ impl Dialog {
     if self.extent == "to_object" {
       self.object_row(ui);
     }
+    // no Flip row: a negative distance, typed or dragged, extrudes the other way (`split_sign`)
     match self.extent {
+      _ if !has_profile => {}
       "through_all" | "through_all_both" => {}
       "two_sides" => {
         ui.label("Distance 1");
@@ -146,20 +153,19 @@ impl Dialog {
         ui.end_row();
       }
     }
-    ui.label("Flip");
-    dirty |= ui.checkbox(&mut self.flip, "").changed();
-    ui.end_row();
 
     let two_sides = self.extent == "two_sides";
     let ext = &mut self.solid.ext;
-    ui.label(if two_sides { "Taper angle 1" } else { "Taper angle" });
-    dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text("0 deg").desired_width(140.0)).changed();
-    ui.end_row();
-    if two_sides {
-      ui.label("Taper angle 2");
-      let hint = if ext.taper.trim().is_empty() { "0 deg".to_string() } else { ext.taper.trim().to_string() };
-      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(hint).desired_width(140.0)).changed();
+    if has_profile {
+      ui.label(if two_sides { "Taper angle 1" } else { "Taper angle" });
+      dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper).hint_text("0 deg").desired_width(140.0)).changed();
       ui.end_row();
+      if two_sides {
+        ui.label("Taper angle 2");
+        let hint = if ext.taper.trim().is_empty() { "0 deg".to_string() } else { ext.taper.trim().to_string() };
+        dirty |= ui.add(egui::TextEdit::singleline(&mut ext.taper2).hint_text(hint).desired_width(140.0)).changed();
+        ui.end_row();
+      }
     }
     if ext.thin {
       if ext.thin_side.is_empty() {
@@ -263,18 +269,60 @@ impl Dialog {
   }
 }
 
+/// An Extrude dropdown: every value with its icon before the text, as in Fusion.
 fn combo(ui: &mut egui::Ui, id: &str, items: &[(&'static str, &'static str)], cur: &mut &'static str) -> bool {
-  let label = items.iter().find(|(k, _)| k == cur).map(|(_, l)| *l).unwrap_or(cur);
-  let mut changed = false;
-  egui::ComboBox::from_id_salt(id).selected_text(label).width(140.0).show_ui(ui, |ui| {
-    for (k, l) in items {
-      if ui.selectable_label(cur == k, *l).clicked() && cur != k {
-        *cur = k;
-        changed = true;
-      }
+  choice::combo(ui, id, items, cur, choice::extrude_icon)
+}
+
+/// Extrude's distance as the engine takes it: the magnitude and whether the sign flips the
+/// direction. A value typed with a leading minus ("-10 mm", "-d1", "-(a + b)") or one that
+/// works out negative extrudes the other way, as in Fusion, where there is no Flip row.
+pub(super) fn split_sign(expr: &str) -> (String, bool) {
+  let t = expr.trim();
+  if let Some(rest) = t.strip_prefix('-') {
+    let rest = rest.trim_start();
+    if wrapped(rest) {
+      return (rest[1..rest.len() - 1].trim().to_string(), true);
     }
-  });
-  changed
+    if !rest.contains(['+', '-']) {
+      return (rest.to_string(), true);
+    }
+  }
+  // a sum that comes out negative; one with parameters is the engine's to evaluate
+  match fox_engine::expr::eval(t, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty) {
+    Ok(v) if v < 0.0 => (format!("-({t})"), true),
+    _ => (t.to_string(), false),
+  }
+}
+
+/// Is `expr` one parenthesised term, "(…)"?
+fn wrapped(expr: &str) -> bool {
+  if !expr.starts_with('(') || !expr.ends_with(')') {
+    return false;
+  }
+  let mut depth = 0usize;
+  for (i, c) in expr.char_indices() {
+    match c {
+      '(' => depth += 1,
+      ')' => {
+        depth = depth.saturating_sub(1);
+        if depth == 0 && i + 1 < expr.len() {
+          return false;
+        }
+      }
+      _ => {}
+    }
+  }
+  true
+}
+
+/// `expr` the other way round, as a value box shows a flipped extrude's distance.
+pub(super) fn negate(expr: &str) -> String {
+  let t = expr.trim();
+  if let Some(rest) = t.strip_prefix('-') {
+    return rest.trim_start().to_string();
+  }
+  if t.contains(['+', '-']) { format!("-({t})") } else { format!("-{t}") }
 }
 
 fn pick(
@@ -414,9 +462,29 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [2, 2], "corner2": [8, 8]}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     d.op = "cut";
     d.extent = extent_of("symmetric", "all");
     apply(&mut s, &mut d);
     assert!((s.model.bodies[0].shape.mass().unwrap().volume - (8000.0 - 36.0 * 20.0)).abs() < 1e-6);
+  }
+
+  #[test]
+  fn a_negative_distance_flips_the_extrude() {
+    use super::{negate, split_sign};
+    assert_eq!(split_sign("10 mm"), ("10 mm".into(), false));
+    assert_eq!(split_sign(" -10 mm "), ("10 mm".into(), true));
+    assert_eq!(split_sign("-d1 * 2"), ("d1 * 2".into(), true));
+    assert_eq!(split_sign("-(d1 + 2 mm)"), ("d1 + 2 mm".into(), true));
+    assert_eq!(split_sign("-(a) * (b)"), ("(a) * (b)".into(), true));
+    assert_eq!(split_sign("-(a) + (b)"), ("-(a) + (b)".into(), false));
+    // a sum that works out negative; one with parameters is left to the engine
+    assert_eq!(split_sign("2 mm - 12 mm"), ("-(2 mm - 12 mm)".into(), true));
+    assert_eq!(split_sign("-2 mm + 12 mm"), ("-2 mm + 12 mm".into(), false));
+    assert_eq!(split_sign("d1 - 12 mm"), ("d1 - 12 mm".into(), false));
+    assert_eq!(negate("10 mm"), "-10 mm");
+    assert_eq!(negate("-10 mm"), "10 mm");
+    assert_eq!(negate("d1 + 2 mm"), "-(d1 + 2 mm)");
+    assert_eq!(split_sign(&negate("d1 + 2 mm")), ("d1 + 2 mm".into(), true));
   }
 }

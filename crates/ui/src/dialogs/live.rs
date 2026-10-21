@@ -4,7 +4,7 @@
 //! adds stay out of the browser until OK.
 
 use fox_engine::kernel::{EdgeInfo, FaceInfo};
-use fox_engine::model::BodyId;
+use fox_engine::model::{BodyId, FeatureId};
 use fox_engine::scene::Pick;
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
@@ -21,11 +21,13 @@ pub(super) struct Live {
   before: Vec<BodyId>,
   /// The picked faces and edges as they were before the preview, to find them again on it.
   picked: Vec<Was>,
+  /// The features before the preview: the ones it adds stay out of the timeline until OK.
+  before_features: Vec<FeatureId>,
 }
 
 impl Default for Live {
   fn default() -> Live {
-    Live { on: true, tried: None, before: Vec::new(), picked: Vec::new() }
+    Live { on: true, tried: None, before: Vec::new(), picked: Vec::new(), before_features: Vec::new() }
   }
 }
 
@@ -132,6 +134,7 @@ impl Dialog {
         }
       }
     }
+    self.live.before_features = s.design.features.iter().map(|f| f.id).collect();
   }
 
   /// After a preview, the picked faces (and the picked edges it kept) are selected again on the
@@ -175,6 +178,15 @@ impl Dialog {
       return Vec::new();
     }
     s.model.bodies.iter().map(|b| b.id).filter(|b| !self.live.before.contains(b)).collect()
+  }
+
+  /// Features the showing preview added, in timeline order (the timeline leaves them out until
+  /// OK, as in Fusion, where a feature's icon appears only when its command finishes).
+  pub fn preview_features(&self, s: &Session) -> Vec<FeatureId> {
+    if !self.applied || self.editing.is_some() {
+      return Vec::new();
+    }
+    s.design.features.iter().map(|f| f.id).filter(|f| !self.live.before_features.contains(f)).collect()
   }
 
   /// Withdraws a model-picking dialog's preview for a viewport click, and finds what was under

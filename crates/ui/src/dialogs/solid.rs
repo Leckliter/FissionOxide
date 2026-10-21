@@ -1702,6 +1702,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [10, -5], "corner2": [30, 5]}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     run(&mut s, "sketch.finish", json!({}));
     d.extent = "to_object";
     assert!(d.command().is_none(), "nothing picked yet");
@@ -1772,6 +1773,7 @@ mod tests {
     run(&mut s, "sketch.rect", json!({"corner1": [30, 0], "corner2": [40, 10]}));
     let mut d = Dialog::blank(Kind::Extrude);
     d.sketch = s.edit_sketch;
+    d.profiles = vec![s.model.sketches[&d.sketch.unwrap()].profiles[0].interior_point()];
     run(&mut s, "sketch.finish", json!({}));
     d.op = "new_body";
     d.extent = "to_object";
