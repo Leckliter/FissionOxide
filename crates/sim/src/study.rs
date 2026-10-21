@@ -12,6 +12,8 @@
 //! one part's contact surface tied to the other part's surface) are imposed with stiff penalty
 //! springs.
 
+
+
 use serde::{Deserialize, Serialize};
 
 use crate::fem::{self, Geo};
@@ -268,11 +270,9 @@ impl Model {
   pub fn ties(&self) -> Vec<Tie> {
     let pairs: Vec<(usize, usize, Option<f64>)> = match &self.contacts {
       Contacts::None => Vec::new(),
-      Contacts::Bonded { pairs, tolerance } => pairs
-        .iter()
-        .filter(|(a, b)| a != b && *a < self.parts.len() && *b < self.parts.len())
-        .map(|&(a, b)| (a, b, *tolerance))
-        .collect(),
+      Contacts::Bonded { pairs, tolerance } => {
+        pairs.iter().filter(|(a, b)| a != b && *a < self.parts.len() && *b < self.parts.len()).map(|&(a, b)| (a, b, *tolerance)).collect()
+      }
       Contacts::Automatic => {
         let mut v = Vec::new();
         for a in 0..self.parts.len() {
@@ -654,8 +654,7 @@ impl<'a> StaticProblem<'a> {
       self.sys.add(&mut k, None, &[nd], &|a, b| alpha * m[a][b]);
     }
     for tie in &self.ties {
-      let own =
-        (0..3).filter_map(|c| self.sys.dof[tie.node as usize * 3 + c]).map(|d| diag[d as usize]).fold(0.0, f64::max);
+      let own = (0..3).filter_map(|c| self.sys.dof[tie.node as usize * 3 + c]).map(|d| diag[d as usize]).fold(0.0, f64::max);
       let alpha = TIE * if own > 0.0 { own } else { kmax };
       let mut nodes = vec![tie.node];
       nodes.extend(tie.master);
@@ -725,11 +724,8 @@ impl<'a> StaticProblem<'a> {
     }
     let von_mises: Vec<f64> = stress.iter().map(|s| fem::von_mises(*s)).collect();
     let part = model.node_part();
-    let safety_factor = von_mises
-      .iter()
-      .zip(&part)
-      .map(|(v, p)| (model.parts[*p].material.yield_strength / v.max(1e-300)).min(15.0))
-      .collect();
+    let safety_factor =
+      von_mises.iter().zip(&part).map(|(v, p)| (model.parts[*p].material.yield_strength / v.max(1e-300)).min(15.0)).collect();
     let reactions = self
       .fixed_by
       .iter()
@@ -991,11 +987,7 @@ pub fn solve_thermal(model: &Model, options: SolveOptions) -> Result<ThermalSolu
   let ties = model.ties();
   let sys = System::new(model, 1, &fixed, &ties);
   if sys.free == 0 {
-    return Ok(ThermalSolution {
-      temperature: known,
-      flux: vec![[0.0; 3]; n],
-      heat_flow: vec![0.0; model.thermal.len()],
-    });
+    return Ok(ThermalSolution { temperature: known, flux: vec![[0.0; 3]; n], heat_flow: vec![0.0; model.thermal.len()] });
   }
   let mut k = sys.pattern.clone();
   let mut f = vec![0.0; sys.free];

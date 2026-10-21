@@ -199,7 +199,8 @@ impl Delaunay {
       }
     }
     // link the new tetrahedra to each other across the faces through the new point
-    let mut open: Map<(u32, u32), (u32, usize)> = Map::with_capacity_and_hasher(ids.len() * 3, Default::default());
+    let mut open: Map<(u32, u32), (u32, usize)> =
+      Map::with_capacity_and_hasher(ids.len() * 3, Default::default());
     for (k, &(v, i, _)) in made.iter().enumerate() {
       let id = ids[k];
       for j in 0..4 {
@@ -233,12 +234,7 @@ impl Delaunay {
 
   /// Live tetrahedra not touching the super tetrahedron.
   pub fn tets(&self) -> impl Iterator<Item = (u32, [u32; 4])> + '_ {
-    self
-      .tets
-      .iter()
-      .enumerate()
-      .filter(move |(t, v)| !self.dead[*t] && v.iter().all(|&x| x >= 4))
-      .map(|(t, v)| (t as u32, *v))
+    self.tets.iter().enumerate().filter(move |(t, v)| !self.dead[*t] && v.iter().all(|&x| x >= 4)).map(|(t, v)| (t as u32, *v))
   }
 
   /// Checks the neighbour links and orientations (for tests).

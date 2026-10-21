@@ -76,8 +76,7 @@ fn meshes_a_box_exactly() {
   assert!(stats.mean_quality > 0.6, "{stats:?}");
   assert_eq!(m.faces(), vec![1, 2, 3, 4, 5, 6]);
   // each face's triangles cover its area
-  let area: f64 =
-    m.face_tris(&[1]).iter().map(|&t| fem::tri_geo([0, 1, 2].map(|k| m.nodes[m.boundary[t][k] as usize])).0).sum();
+  let area: f64 = m.face_tris(&[1]).iter().map(|&t| fem::tri_geo([0, 1, 2].map(|k| m.nodes[m.boundary[t][k] as usize])).0).sum();
   assert!(close(area, 200.0, 1e-9));
 }
 

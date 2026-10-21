@@ -114,11 +114,7 @@ impl SurfaceMesh {
   }
 
   pub fn area(&self) -> f64 {
-    self
-      .tris
-      .iter()
-      .map(|t| tri_area(self.points[t[0] as usize], self.points[t[1] as usize], self.points[t[2] as usize]))
-      .sum()
+    self.tris.iter().map(|t| tri_area(self.points[t[0] as usize], self.points[t[1] as usize], self.points[t[2] as usize])).sum()
   }
 
   fn edges(&self) -> Edges {
@@ -519,13 +515,7 @@ impl SurfaceMesh {
           break;
         }
         if let Some((c2, d2)) = self.try_flip(&mut edges, x, y, cos_max) {
-          let other = if c2 == m {
-            d2
-          } else if d2 == m {
-            c2
-          } else {
-            continue;
-          };
+          let other = if c2 == m { d2 } else if d2 == m { c2 } else { continue };
           stack.push((x, other));
           stack.push((other, y));
         }
@@ -592,13 +582,7 @@ impl SurfaceMesh {
             break;
           }
           if let Some((c2, d2)) = self.try_flip(&mut edges, x, y, cos_max) {
-            let other = if c2 == m {
-              d2
-            } else if d2 == m {
-              c2
-            } else {
-              continue;
-            };
+            let other = if c2 == m { d2 } else if d2 == m { c2 } else { continue };
             stack.push((x, other));
             stack.push((other, y));
           }
@@ -629,7 +613,11 @@ impl SurfaceMesh {
         return Walk::Lost;
       }
       // barycentric coordinates of p projected onto the triangle's plane
-      let l = [dot(tri_normal(b, c, p), n) / nn, dot(tri_normal(c, a, p), n) / nn, dot(tri_normal(a, b, p), n) / nn];
+      let l = [
+        dot(tri_normal(b, c, p), n) / nn,
+        dot(tri_normal(c, a, p), n) / nn,
+        dot(tri_normal(a, b, p), n) / nn,
+      ];
       let (k, lo) = (0..3).map(|k| (k, l[k])).fold((0, f64::INFINITY), |m, x| if x.1 < m.1 { x } else { m });
       if lo >= 1e-3 {
         let q = add(add(scale(a, l[0]), scale(b, l[1])), scale(c, l[2]));
@@ -686,8 +674,7 @@ impl SurfaceMesh {
         if normals.iter().any(|m| dot(unit(*m), n) < flat) {
           continue;
         }
-        let c =
-          scale(ring[v].iter().fold([0.0; 3], |s, &w| add(s, self.points[w as usize])), 1.0 / ring[v].len() as f64);
+        let c = scale(ring[v].iter().fold([0.0; 3], |s, &w| add(s, self.points[w as usize])), 1.0 / ring[v].len() as f64);
         let old = self.points[v];
         let d = sub(c, old);
         let moved = add(old, sub(d, scale(n, dot(d, n))));
@@ -753,17 +740,17 @@ fn replace(edges: &mut Edges, k: (u32, u32), from: u32, to: u32) {
 
 /// A box's surface (two triangles per side), faces numbered 1–6: −X, +X, −Y, +Y, −Z, +Z.
 pub fn box_surface(lo: V3, hi: V3) -> SurfaceMesh {
-  let p = |i: usize| {
-    [
-      if i & 1 == 0 { lo[0] } else { hi[0] },
-      if i & 2 == 0 { lo[1] } else { hi[1] },
-      if i & 4 == 0 { lo[2] } else { hi[2] },
-    ]
-  };
+  let p = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
   let points: Vec<V3> = (0..8).map(p).collect();
   // quads counter-clockwise from outside
-  let quads: [([u32; 4], u32); 6] =
-    [([0, 4, 6, 2], 1), ([1, 3, 7, 5], 2), ([0, 1, 5, 4], 3), ([2, 6, 7, 3], 4), ([0, 2, 3, 1], 5), ([4, 5, 7, 6], 6)];
+  let quads: [([u32; 4], u32); 6] = [
+    ([0, 4, 6, 2], 1),
+    ([1, 3, 7, 5], 2),
+    ([0, 1, 5, 4], 3),
+    ([2, 6, 7, 3], 4),
+    ([0, 2, 3, 1], 5),
+    ([4, 5, 7, 6], 6),
+  ];
   let mut tris = Vec::new();
   let mut tri_face = Vec::new();
   for (q, f) in quads {
