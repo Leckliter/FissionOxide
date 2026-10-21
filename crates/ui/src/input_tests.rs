@@ -9,13 +9,19 @@ struct Harness {
   ctx: egui::Context,
   app: App,
   time: f64,
+  /// The window width (1440 unless a test narrows it).
+  width: f32,
 }
 
 impl Harness {
   fn new() -> Harness {
+    Harness::with_width(1440.0)
+  }
+
+  fn with_width(width: f32) -> Harness {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
-    let mut h = Harness { ctx, app: App::with_session(Session::default()), time: 0.0 };
+    let mut h = Harness { ctx, app: App::with_session(Session::default()), time: 0.0, width };
     for _ in 0..3 {
       h.frame(vec![]);
     }
@@ -25,7 +31,7 @@ impl Harness {
   fn frame(&mut self, events: Vec<Event>) {
     self.time += 1.0 / 60.0;
     let input = RawInput {
-      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
       time: Some(self.time),
       events,
       ..Default::default()
@@ -168,7 +174,7 @@ impl Harness {
   fn frame_texts(&mut self, dt: f64, events: Vec<Event>) -> Vec<(Rect, String)> {
     self.time += dt;
     let input = RawInput {
-      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
       time: Some(self.time),
       events,
       ..Default::default()
@@ -488,4 +494,68 @@ fn dragging_a_jointed_component_stops_at_its_contact_set() {
   // the whole drag is one undo, and the status says why it stopped
   assert_eq!(h.app.s.undo_history().len(), undo_depth + 1);
   assert!(h.app.status.as_ref().is_some_and(|(m, _)| m.contains("contact")), "{:?}", h.app.status);
+}
+
+/// Where the toolbar panel named `label` has its name drawn.
+fn panel_label(texts: &[(Rect, String)], label: &str) -> Option<Rect> {
+  texts.iter().find(|(r, t)| t == label && r.top() < 140.0).map(|(r, _)| *r)
+}
+
+/// Fusion's ribbon at a narrow window: panels give up icons from the right until every panel
+/// through SELECT is on screen.
+#[test]
+fn a_narrow_window_keeps_every_panel_through_select_on_screen() {
+  let mut h = Harness::with_width(920.0);
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  for name in ["CREATE", "MODIFY", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "ASSEMBLE", "SELECT"] {
+    let r = panel_label(&all, name).unwrap_or_else(|| panic!("{name} is on the toolbar: {all:?}"));
+    assert!(r.right() <= 920.0, "{name} is on screen at 920 px: {r:?}");
+  }
+  // and CREATE's menu still lists everything that lost its icon
+  let label = h.create_label();
+  h.move_then_click(label.center());
+  assert!(h.find(vec![], "Create Form").is_some(), "Create Form stays in the CREATE menu");
+}
+
+/// The big FINISH SKETCH button is clickable across the whole panel, not only on its icon,
+/// and the contextual SKETCH tab is drawn like the others (bold black, no blue box).
+#[test]
+fn finish_sketch_takes_a_click_beside_its_icon() {
+  let mut h = Harness::new();
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  assert!(h.app.s.edit_sketch.is_some());
+  h.app.tab = crate::panels::Tab::Sketch;
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  assert_eq!(all.iter().filter(|(r, t)| t == "SKETCH" && r.top() < 60.0).count(), 2, "the active tab is bold");
+  let label = panel_label(&all, "FINISH SKETCH").expect("the FINISH SKETCH panel");
+  // just above the panel name and well left of the icon's centre
+  let at = Pos2::new(label.left() + 4.0, label.top() - 14.0);
+  h.move_then_click(at);
+  assert!(h.app.s.edit_sketch.is_none(), "the click beside the icon finishes the sketch");
+}
+
+/// The DESIGN switcher lists Fusion's workspaces in upper case, with submenus for the
+/// documents DRAWING and ELECTRONICS create, and says "Change Workspace" on hover.
+#[test]
+fn the_workspace_menu_lists_fusions_workspaces() {
+  let mut h = Harness::new();
+  let switcher = h.find(vec![], "DESIGN").expect("the switcher");
+  let shown = h.rest(switcher.center(), 1.0);
+  assert!(shown.iter().any(|t| t == "Change Workspace"), "{shown:?}");
+  h.move_then_click(switcher.center());
+  let all = h.frame_texts(1.0 / 60.0, vec![]);
+  let names: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+  for w in ["GENERATIVE DESIGN", "RENDER", "ANIMATION", "SIMULATION", "MANUFACTURE", "DRAWING", "ELECTRONICS"] {
+    assert!(names.contains(&w), "{w} is in the menu: {names:?}");
+  }
+  assert!(!names.contains(&"Generative Design"), "no title-case entries: {names:?}");
+  let drawing = all.iter().find(|(_, t)| t == "DRAWING").map(|(r, _)| *r).unwrap();
+  h.frame(vec![Event::PointerMoved(drawing.center())]);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let from_design = h.find(vec![], "From Design").expect("DRAWING ▸ opens its submenu");
+  assert!(h.find(vec![], "From Animation").is_some());
+  h.move_then_click(from_design.center());
+  assert!(h.app.drawing.is_some() || h.app.dialog.is_some(), "From Design opens the Drawing workspace");
 }

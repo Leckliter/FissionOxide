@@ -94,7 +94,8 @@ impl E {
 }
 
 /// Most commands a group shows on the toolbar; every command stays in the group's menu.
-const MAX_QUICK: usize = 8;
+/// Fusion's SKETCH > CONSTRAINTS panel shows all twelve constraints, the widest default.
+const MAX_QUICK: usize = 12;
 
 pub(crate) struct Group {
   label: &'static str,
@@ -676,10 +677,18 @@ const FINISH: &[E] =
 const SKETCH: [Group; 9] = [
   Group {
     label: "CREATE",
-    quick: &["Line", "2-Point Rectangle", "Center Diameter Circle", "Fit Point Spline", "Mirror", "Sketch Dimension"],
+    quick: &[
+      "Line",
+      "2-Point Rectangle",
+      "Center Diameter Circle",
+      "3-Point Arc",
+      "Fit Point Spline",
+      "Mirror",
+      "Sketch Dimension",
+    ],
     menu: SKETCH_CREATE,
   },
-  Group { label: "MODIFY", quick: &["Fillet", "Trim", "Offset", "Blend Curve"], menu: SKETCH_MODIFY },
+  Group { label: "MODIFY", quick: &["Fillet", "Trim", "Extend", "Offset", "Blend Curve"], menu: SKETCH_MODIFY },
   Group {
     label: "CONSTRAINTS",
     quick: &[
@@ -1265,13 +1274,29 @@ pub(crate) fn offers(tab: Tab, cmd: Cmd) -> bool {
   commands(&[tab]).iter().any(|e| e.cmd == cmd)
 }
 
-/// Draws the tool groups of `tab`. Returns false for tabs without a layout yet.
-pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab) -> bool {
+/// Draws the tool groups of `tab` in `width` pixels. Returns false for tabs without a layout yet.
+///
+/// Like Fusion's ribbon, a row that doesn't fit drops icons from the right of its panels
+/// (widest panel first, down to one icon each) until every panel is on screen; the panel menus
+/// still list everything.
+pub fn tab_toolbar(app: &mut App, ui: &mut egui::Ui, tab: Tab, width: f32) -> bool {
   let (own, shared) = groups(tab);
   let mut pick: Option<Item> = None;
   let mut act: Option<Action> = None;
-  for g in own.iter().chain(shared.iter()) {
-    show_group(app, ui, tab, g, &mut pick, &mut act);
+  let all: Vec<&Group> = own.iter().chain(shared.iter()).collect();
+  let items: Vec<Vec<Item>> = all.iter().map(|g| quick_items(&app.prefs, tab, g)).collect();
+  let font = egui::FontId::proportional(12.0);
+  let panels: Vec<PanelSize> = all
+    .iter()
+    .zip(&items)
+    .map(|(g, its)| PanelSize {
+      label: ui.painter().layout_no_wrap(g.label.to_string(), font.clone(), Color32::BLACK).size().x + 22.0,
+      icons: its.len(),
+    })
+    .collect();
+  let counts = fit_counts(&panels, width);
+  for ((g, its), n) in all.iter().zip(items).zip(counts) {
+    show_group(app, ui, tab, g, &its[..n], &mut pick, &mut act);
   }
   if let Some(it) = pick {
     match it.cmd {
@@ -1338,27 +1363,87 @@ fn quick_items(prefs: &Prefs, tab: Tab, g: &Group) -> Vec<Item> {
   out
 }
 
-fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Option<Item>, act: &mut Option<Action>) {
+/// What decides a panel's width on the toolbar: its name (with the chevron) and its icons.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PanelSize {
+  /// The minimum width of its name row.
+  pub label: f32,
+  /// How many icons it would show.
+  pub icons: usize,
+}
+
+/// A toolbar icon's cell and the gap after it ([`icons::tool_button_bare`]).
+const ICON_W: f32 = icons::TOOL_BUTTON_W + 1.0;
+/// The separator after each panel ([`panels::separator`]).
+const SEPARATOR_W: f32 = 7.0;
+
+fn panel_width(p: &PanelSize, icons: usize) -> f32 {
+  (icons as f32 * ICON_W - 1.0).max(p.label) + SEPARATOR_W
+}
+
+/// How many icons each panel shows so the row fits `width`: all of them when there is room,
+/// else icons come off the right of the widest panel first, never below one per panel.
+pub(crate) fn fit_counts(panels: &[PanelSize], width: f32) -> Vec<usize> {
+  let mut counts: Vec<usize> = panels.iter().map(|p| p.icons).collect();
+  loop {
+    let total: f32 = panels.iter().zip(&counts).map(|(p, n)| panel_width(p, *n)).sum();
+    if total <= width {
+      return counts;
+    }
+    // only a panel whose icons (not its name) set its width can get narrower
+    let widest = panels
+      .iter()
+      .zip(&counts)
+      .enumerate()
+      .filter(|(_, (p, n))| **n > 1 && panel_width(p, **n - 1) < panel_width(p, **n))
+      .map(|(i, (p, n))| (i, panel_width(p, *n)))
+      .fold(None, |best: Option<(usize, f32)>, (i, w)| match best {
+        Some((_, bw)) if bw >= w => best,
+        _ => Some((i, w)),
+      });
+    match widest {
+      Some((i, _)) => counts[i] -= 1,
+      None => return counts,
+    }
+  }
+}
+
+fn show_group(
+  app: &App,
+  ui: &mut egui::Ui,
+  tab: Tab,
+  g: &Group,
+  quick: &[Item],
+  pick: &mut Option<Item>,
+  act: &mut Option<Action>,
+) {
   let at = At { prefs: &app.prefs, tab, group: g.label, quick: g.quick };
   let popup_id = egui::Id::new(("toolbar-menu", tab, g.label));
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   // FINISH SKETCH sits on light blue, like the contextual SKETCH tab
   let bg = ui.painter().add(egui::Shape::Noop);
+  let finish = matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING");
   let inner = ui.vertical(|ui| {
     ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
     ui.add_space(2.0);
     ui.horizontal(|ui| {
       // like Fusion, a group shows a handful of its commands (and the ones pinned to it); the
       // rest live in its menu
-      for it in quick_items(&app.prefs, tab, g) {
+      for it in quick {
         let active = it.cmd.is_some_and(|c| c.active(app));
-        let resp = icons::tool_button_bare(ui, it.icon, it.tint, active);
-        let resp = rich_tip(resp, at.scope(), &it, at.key(&it));
+        // the big FINISH button is clickable across the whole panel, not just its icon
+        let resp = if finish {
+          let w = ui.painter().layout_no_wrap(g.label.to_string(), egui::FontId::proportional(12.0), Color32::BLACK);
+          icons::tool_button_wide(ui, it.icon, it.tint, active, w.size().x + 22.0)
+        } else {
+          icons::tool_button_bare(ui, it.icon, it.tint, active)
+        };
+        let resp = rich_tip(resp, at.scope(), it, at.key(it));
         if it.cmd.is_some() {
-          resp.context_menu(|ui| at.options(ui, &it, act));
+          resp.context_menu(|ui| at.options(ui, it, act));
         }
         if resp.clicked() {
-          *pick = Some(it);
+          *pick = Some(*it);
         }
       }
     });
@@ -1370,7 +1455,7 @@ fn show_group(app: &App, ui: &mut egui::Ui, tab: Tab, g: &Group, pick: &mut Opti
   let on: Vec<&'static str> =
     toggles(g.menu).into_iter().filter(|i| i.cmd.is_some_and(|c| c.active(app))).map(|i| i.label).collect();
   egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| entries(ui, &at, g.menu, pick, act, &on));
-  if matches!(g.label, "FINISH SKETCH" | "FINISH DRAWING") {
+  if finish {
     ui.painter()
       .set(bg, egui::Shape::rect_filled(inner.response.rect.expand2(vec2(4.0, 2.0)), 2.0, theme::CONTEXT_TAB));
   }
@@ -1651,5 +1736,47 @@ mod tests {
     assert!(!after.contains(&"Extrude"));
     // PLASTIC shares the menu but not the pins
     assert!(!quick_items(&prefs, Tab::Plastic, &PLASTIC[0]).iter().any(|i| i.label == "Torus"));
+  }
+
+  /// Fusion's SKETCH tab at full width: CREATE 7, MODIFY 5 and all twelve constraints.
+  #[test]
+  fn sketch_panels_show_fusions_icon_counts() {
+    let prefs = Prefs::default();
+    let counts: Vec<(&str, usize)> =
+      SKETCH.iter().map(|g| (g.label, quick_items(&prefs, Tab::Sketch, g).len())).collect();
+    assert_eq!(counts[0], ("CREATE", 7));
+    assert_eq!(counts[1], ("MODIFY", 5));
+    assert_eq!(counts[2], ("CONSTRAINTS", 12));
+    let names: Vec<&str> = quick_items(&prefs, Tab::Sketch, &SKETCH[2]).iter().map(|i| i.label).collect();
+    assert!(!names.contains(&"Polygon"), "Polygon is in the menu only: {names:?}");
+  }
+
+  #[test]
+  fn a_wide_toolbar_keeps_every_icon() {
+    let panels =
+      [PanelSize { label: 70.0, icons: 6 }, PanelSize { label: 70.0, icons: 7 }, PanelSize { label: 64.0, icons: 1 }];
+    assert_eq!(fit_counts(&panels, 2000.0), vec![6, 7, 1]);
+  }
+
+  /// Icons come off the right of the widest panel first, and a panel never loses its last one
+  /// or shrinks below its name.
+  #[test]
+  fn a_narrow_toolbar_drops_icons_from_the_widest_panel() {
+    let create = PanelSize { label: 70.0, icons: 6 };
+    let modify = PanelSize { label: 70.0, icons: 7 };
+    let select = PanelSize { label: 64.0, icons: 1 };
+    let panels = [create, modify, select];
+    let full: f32 = panels.iter().map(|p| panel_width(p, p.icons)).sum();
+    // one icon too many: MODIFY (the widest) gives one up
+    assert_eq!(fit_counts(&panels, full - 1.0), vec![6, 6, 1]);
+    // then the two trade off: CREATE is the widest once MODIFY is down to five
+    assert_eq!(fit_counts(&panels, full - ICON_W * 3.0), vec![5, 5, 1]);
+    // far too narrow: each panel keeps one icon (or its name's width) and the row overflows
+    let counts = fit_counts(&panels, 10.0);
+    assert_eq!(counts, vec![1, 1, 1]);
+    // a panel whose name is wider than its icons isn't asked to give any up
+    let named = [PanelSize { label: 200.0, icons: 3 }, PanelSize { label: 40.0, icons: 4 }];
+    let two_icons = ICON_W * 2.0 - 1.0 + SEPARATOR_W;
+    assert_eq!(fit_counts(&named, 200.0 + SEPARATOR_W + two_icons), vec![3, 2]);
   }
 }

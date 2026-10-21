@@ -69,7 +69,7 @@ impl Tab {
 }
 
 const WORKSPACES: [&str; 8] =
-  ["Design", "Generative Design", "Render", "Animation", "Simulation", "Manufacture", "Electronics", "Drawing"];
+  ["Design", "Generative Design", "Render", "Animation", "Simulation", "Manufacture", "Drawing", "Electronics"];
 
 // ---------------------------------------------------------------- application bar
 
@@ -860,6 +860,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
             return;
           }
           tab_row(app, ui, sketching);
+          let width = ui.available_width();
           egui::ScrollArea::horizontal()
             .id_salt("tools")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -869,7 +870,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
                 let tab = app.tab;
                 match tab {
                   Tab::Plugin(i) => crate::plugins_ui::toolbar(app, ui, i),
-                  other if crate::menus::tab_toolbar(app, ui, other) => {}
+                  other if crate::menus::tab_toolbar(app, ui, other, width) => {}
                   other => {
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
@@ -912,44 +913,128 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       } else {
         "DESIGN"
       },
-      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() || app.generative || app.simulation.is_some() {
-        10.0
-      } else if app.drawing.is_some() {
-        12.5
-      } else {
-        13.5
-      }),
+      egui::FontId::proportional(
+        if app.manufacture || app.electronics.is_some() || app.generative || app.simulation.is_some() {
+          10.0
+        } else if app.drawing.is_some() {
+          12.5
+        } else {
+          13.5
+        },
+      ),
       Color32::from_gray(30),
     );
     icons::chevron(ui.painter(), rect.center() + vec2(32.0, 0.0), Color32::from_gray(30));
-    egui::Popup::menu(&resp).show(|ui| {
-      ui.set_min_width(180.0);
-      let drawing = app.drawing.is_some();
-      for (i, w) in WORKSPACES.iter().enumerate() {
-        // Design and Drawing are FissionOxide's workspaces
-        let ecad = app.electronics.is_some();
-        let current = match *w {
-          "Drawing" => drawing && !ecad,
-          "Manufacture" => app.manufacture && !drawing && !ecad,
-          "Electronics" => ecad,
-          "Generative Design" => app.generative && !drawing && !ecad,
-          "Render" => app.render.active && !drawing && !ecad,
-          "Simulation" => app.simulation.is_some() && !drawing && !ecad,
-          _ => {
-            i == 0 && !drawing && !app.manufacture && !ecad && !app.generative && !app.render.active && app.simulation.is_none()
-          }
-        };
-        let r = ui.add_enabled(
-          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design" | "Render" | "Simulation"),
-          egui::Button::selectable(current, *w),
-        );
-        if r.clicked() {
-          ui.close();
+    let resp = resp.on_hover_text("Change Workspace");
+    egui::Popup::menu(&resp).show(|ui| workspace_menu(app, ui));
+  });
+}
+
+/// Fusion's workspace list: upper-case names, a padlock on the workspaces that need an
+/// extension, and DRAWING ▸ and ELECTRONICS ▸ submenus for the documents they create.
+fn workspace_menu(app: &mut App, ui: &mut egui::Ui) {
+  const WIDTH: f32 = 200.0;
+  ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+  ui.set_min_width(WIDTH);
+  let drawing = app.drawing.is_some();
+  let ecad = app.electronics.is_some();
+  let plain = !drawing && !ecad;
+  for w in WORKSPACES {
+    let current = match w {
+      "Drawing" => drawing && !ecad,
+      "Manufacture" => app.manufacture && plain,
+      "Electronics" => ecad,
+      "Generative Design" => app.generative && plain,
+      "Render" => app.render.active && plain,
+      "Simulation" => app.simulation.is_some() && plain,
+      "Animation" => false,
+      _ => plain && !app.manufacture && !app.generative && !app.render.active && app.simulation.is_none(),
+    };
+    let lock = matches!(w, "Generative Design" | "Simulation");
+    let sub: &[&str] = match w {
+      "Drawing" => &["From Design", "From Animation"],
+      "Electronics" => &["New Electronics Design", "New Schematic", "New PCB", "New Electronics Library", "New 3D PCB"],
+      _ => &[],
+    };
+    let r = workspace_row(ui, WIDTH, &w.to_uppercase(), current, lock, !sub.is_empty());
+    if sub.is_empty() {
+      if r.clicked() {
+        ui.close();
+        if w == "Animation" {
+          app.status = Some(("Animation isn't in FissionOxide yet".into(), false));
+        } else {
           switch_workspace(app, w);
         }
       }
+      continue;
+    }
+    egui::containers::menu::SubMenu::new().show(ui, &r, |ui| {
+      ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+      ui.set_min_width(WIDTH);
+      for item in sub {
+        if workspace_row(ui, WIDTH, item, false, false, false).clicked() {
+          ui.close();
+          open_workspace_document(app, w, item);
+        }
+      }
     });
-  });
+  }
+}
+
+/// One row of the workspace menu (or of its submenus): the name, a padlock, or a ▸ arrow.
+fn workspace_row(ui: &mut egui::Ui, width: f32, label: &str, current: bool, lock: bool, sub: bool) -> egui::Response {
+  let (rect, resp) = ui.allocate_exact_size(vec2(width, 24.0), egui::Sense::click());
+  let p = ui.painter();
+  if current {
+    p.rect_filled(rect, 0.0, theme::SELECTED);
+  } else if resp.hovered() {
+    p.rect_filled(rect, 0.0, theme::HOVER);
+  }
+  p.text(
+    rect.left_center() + vec2(10.0, 0.0),
+    egui::Align2::LEFT_CENTER,
+    label,
+    egui::FontId::proportional(12.5),
+    theme::TEXT,
+  );
+  let ink = Color32::from_gray(80);
+  if lock {
+    // a padlock: the shackle over the body
+    let c = rect.right_center() - vec2(16.0, 1.0);
+    p.rect_filled(Rect::from_min_max(c + vec2(-5.0, -1.0), c + vec2(5.0, 6.0)), 1.0, ink);
+    let arc: Vec<Pos2> = (0..=8)
+      .map(|i| {
+        let a = std::f32::consts::PI * (1.0 + i as f32 / 8.0);
+        c + vec2(3.5 * a.cos(), 3.5 * a.sin())
+      })
+      .collect();
+    p.add(egui::Shape::line(arc, Stroke::new(1.5, ink)));
+    p.line_segment([c + vec2(-3.5, -1.0), c + vec2(-3.5, -3.0)], Stroke::new(1.5, ink));
+    p.line_segment([c + vec2(3.5, -1.0), c + vec2(3.5, -3.0)], Stroke::new(1.5, ink));
+  }
+  if sub {
+    let c = rect.right_center() - vec2(12.0, 0.0);
+    p.add(egui::Shape::convex_polygon(
+      vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)],
+      ink,
+      Stroke::NONE,
+    ));
+  }
+  resp
+}
+
+/// A DRAWING ▸ or ELECTRONICS ▸ submenu entry: opens that workspace on the document it names.
+pub(crate) fn open_workspace_document(app: &mut App, workspace: &str, item: &str) {
+  match (workspace, item) {
+    ("Drawing", "From Design") => switch_workspace(app, "Drawing"),
+    ("Electronics", "New Electronics Design" | "New Schematic" | "New PCB") => {
+      switch_workspace(app, "Electronics");
+      if let Some(e) = app.electronics.as_mut() {
+        e.sheet = if item == "New PCB" { crate::ecad_ui::Sheet::Board } else { crate::ecad_ui::Sheet::Schematic };
+      }
+    }
+    _ => app.status = Some((format!("{item} isn't in FissionOxide yet"), false)),
+  }
 }
 
 /// Switches to the Design, Render, Manufacture or Drawing workspace.
@@ -1066,7 +1151,9 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
-      let color = if active { theme::ACCENT } else { Color32::from_gray(45) };
+      // Fusion: the active tab (the contextual SKETCH tab too) is bold black with a black
+      // underline; the others plain dark grey
+      let color = if active { theme::TAB_ACTIVE } else { Color32::from_gray(45) };
       let label = match t {
         Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
         _ => t.label().to_string(),
@@ -1074,20 +1161,19 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
       let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
       let pill = rect.shrink2(vec2(0.0, 3.0));
-      if matches!(t, Tab::Sketch | Tab::Form) {
-        // the contextual tab keeps its light blue background
-        ui.painter().rect_filled(pill, 2.0, theme::CONTEXT_TAB);
-      } else if resp.hovered() && !active {
+      if resp.hovered() && !active {
         ui.painter().rect_filled(pill, 2.0, theme::HOVER);
       }
-      ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, color);
-      if active && !matches!(t, Tab::Sketch | Tab::Form) {
+      ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label.clone(), font.clone(), color);
+      if active {
+        // the font has no bold face: a second pass half a pixel over gives the weight
+        ui.painter().text(rect.center() + vec2(0.6, 0.0), egui::Align2::CENTER_CENTER, label, font, color);
         ui.painter().line_segment(
           [
             pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
             pos2(rect.center().x + tw / 2.0 + 4.0, rect.bottom() - 2.0),
           ],
-          Stroke::new(3.0, theme::ACCENT),
+          Stroke::new(3.0, theme::TAB_ACTIVE),
         );
       }
       if resp.clicked() {

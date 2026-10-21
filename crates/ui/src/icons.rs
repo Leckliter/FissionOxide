@@ -2002,9 +2002,18 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
 /// A large toolbar icon (Fusion shows toolbar commands as icons only; the name is the tooltip),
 /// its solids in the `tint` family. The caller adds the tooltip.
 pub fn tool_button_bare(ui: &mut egui::Ui, icon: Icon, tint: Tint, active: bool) -> egui::Response {
-  let size = vec2(35.0, 38.0);
+  tool_button_wide(ui, icon, tint, active, TOOL_BUTTON_W)
+}
+
+/// A toolbar icon cell: Fusion's 32 px icon in a 40 px cell.
+pub const TOOL_BUTTON_W: f32 = 40.0;
+
+/// [`tool_button_bare`] stretched to `width`, the icon centred: the big FINISH SKETCH button,
+/// which Fusion makes clickable across the whole panel.
+pub fn tool_button_wide(ui: &mut egui::Ui, icon: Icon, tint: Tint, active: bool, width: f32) -> egui::Response {
+  let size = vec2(width.max(TOOL_BUTTON_W), 40.0);
   let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-  let ic = Rect::from_center_size(rect.center(), Vec2::splat(27.0));
+  let ic = Rect::from_center_size(rect.center(), Vec2::splat(32.0));
   if active {
     // Fusion shows the running tool as a white icon on solid blue
     ui.painter().rect_filled(rect, 2.0, theme::ACCENT);
