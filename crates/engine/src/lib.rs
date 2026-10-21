@@ -28,6 +28,7 @@ mod groups;
 pub mod history;
 pub mod hub;
 mod inspect;
+pub mod library;
 mod mates;
 mod newcomp;
 mod params;
@@ -610,6 +611,8 @@ mod tests_sheet5;
 mod tests_sketch;
 #[cfg(test)]
 mod tests_sketch_curves;
+#[cfg(test)]
+mod tests_sketch_fit;
 #[cfg(test)]
 mod tests_solid;
 #[cfg(test)]

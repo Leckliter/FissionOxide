@@ -1273,6 +1273,7 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       ("align", q)
     }
+    "sketch.scale_to.form" => crate::scale_to_ui::params(&p),
     _ => (form.cmd, p),
   }
 }
@@ -2221,4 +2222,27 @@ pub static ALIGN: Form = Form {
     Input::Check { key: "flip", label: "Flip" },
   ],
   picks_model: true,
+};
+
+pub static SK_SCALE_TO: Form = Form {
+  title: "SCALE TO SIZE",
+  name: "Scale to Size",
+  hint: "Scale sketch curves to a width or height, or to fit in a box (turned to fit best)",
+  icon: Icon::SkScaleTo,
+  cmd: "sketch.scale_to.form",
+  fixed: &[],
+  inputs: &[
+    Input::Curves { key: "curves", label: "Entities (default all)" },
+    Input::Choice { key: "mode", label: "Scale to", options: crate::scale_to_ui::MODES },
+    Input::Expr { key: "width", label: "Width", default: "36 in" },
+    Input::Expr { key: "height", label: "Height", default: "18 in" },
+    Input::Choice { key: "preset", label: "Box", options: crate::scale_to_ui::PRESETS },
+    Input::Expr { key: "box_width", label: "Custom box width", default: "20 in" },
+    Input::Expr { key: "box_height", label: "Custom box height", default: "20 in" },
+    Input::Check { key: "margin_mode", label: "Margin mode (the box is the outer size)" },
+    Input::Expr { key: "padding", label: "Padding", default: "0.25 in" },
+    Input::Choice { key: "anchor", label: "Anchor", options: crate::scale_to_ui::ANCHORS },
+    Input::Check { key: "rotate", label: "Rotate to fit (box)" },
+  ],
+  picks_model: false,
 };

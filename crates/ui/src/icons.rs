@@ -258,6 +258,10 @@ pub enum Icon {
   Balloon,
   /// Inspect > Properties: a sheet of key/value rows.
   Properties,
+  /// Sketch Scale to Size / Fit in Box.
+  SkScaleTo,
+  /// Insert > Sketch Library.
+  SketchLibrary,
 }
 
 #[derive(Clone, Copy)]
@@ -1948,6 +1952,28 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
         k.dot((0.28, y), Blue);
         k.line((0.42, y), (0.74, y), Ink);
       }
+    }
+    Icon::SkScaleTo => {
+      // a shape grown to touch its box, with arrows out to the corners
+      k.dashed((0.04, 0.04), (0.96, 0.04), Coral);
+      k.dashed((0.96, 0.04), (0.96, 0.96), Coral);
+      k.dashed((0.96, 0.96), (0.04, 0.96), Coral);
+      k.dashed((0.04, 0.96), (0.04, 0.04), Coral);
+      k.skc(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)], Slate);
+      k.line((0.7, 0.3), (0.86, 0.14), Coral);
+      k.arrow_head((0.9, 0.1), (0.7, -0.7), 0.12, Coral);
+      k.line((0.3, 0.7), (0.14, 0.86), Coral);
+      k.arrow_head((0.1, 0.9), (-0.7, 0.7), 0.12, Coral);
+    }
+    Icon::SketchLibrary => {
+      // a drawer of parts: a keyhole and a stud on a sheet
+      k.solid(&[(0.06, 0.1), (0.94, 0.1), (0.94, 0.9), (0.06, 0.9)], White);
+      k.circle((0.32, 0.36), 0.1, None, Some(Slate));
+      k.sk(&[(0.32, 0.46), (0.32, 0.72)], Slate);
+      k.circle((0.68, 0.36), 0.12, None, Some(Teal));
+      k.circle((0.68, 0.36), 0.05, Some(Teal), None);
+      k.sk(&[(0.56, 0.7), (0.8, 0.7)], Teal);
+      k.vtx((0.32, 0.72));
     }
   }
 }

@@ -278,6 +278,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   shown_dims_overlay(app, &painter, &view);
   consumed |= crate::canvas_ui::calibrate_clicks(app, &resp, &|p| view.ray(&cam, p));
   consumed |= crate::cut_ui::lead_clicks(app, &resp, &|p| view.ray(&cam, p));
+  consumed |=
+    crate::library_ui::place_clicks(app, &resp, &painter, &|p| view.to_screen(&cam, p), &|p| view.ray(&cam, p));
   if app.s.edit_sketch.is_some() {
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }

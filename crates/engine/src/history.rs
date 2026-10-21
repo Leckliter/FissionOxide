@@ -114,6 +114,8 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
     "sketch.drag" => "Drag",
     "sketch.transform" => "Move/Copy",
     "sketch.insert" => "Insert",
+    "sketch.scale_to" => "Scale to Size",
+    "sketch.library.insert" => "Sketch Library",
     "sketch.trace" => "Trace Image",
     "sketch.fillet" => "Fillet",
     "sketch.chamfer" => "Chamfer",

@@ -29,6 +29,12 @@ change a parameter and watch the whole history rebuild.
   which grow tangent handles); driving dimensions (distance, horizontal/vertical,
   radius, diameter, angle, point-to-line). The solver reports degrees of freedom, colours
   free geometry blue, and you can drag points.
+- **Scale to Size and the sketch library.** Sketch > Modify > Scale to Size scales curves to a
+  width or height, or fits them in a box (presets, or a margin inside an outer box), measured on
+  their true outline (arcs, splines, ellipses and text included); Rotate to fit turns them to the
+  angle that fits largest. Insert > Sketch Library… places DXF, SVG and `.fox` parts where you
+  click, turned and scaled; packs come from the hub's `library/` folder, folders in settings and
+  add-ins (`sketch.scale_to`, `sketch.library.list`, `sketch.library.insert`).
 - **Profiles.** Closed regions are found automatically, including holes and islands, so a
   rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
   split each other, so two overlapping rectangles give three regions without trimming.

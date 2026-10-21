@@ -1680,6 +1680,18 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        normal, box, volume, mass, sketch plane), and the overall width, height and thickness of the \
        selected bodies, or of all of them when nothing is selected. Copy or export them as JSON, text or CSV.",
     ),
+
+    // FissionOxide's own sketch tools
+    (_, "Scale to Size") => (
+      "Scales sketch geometry to a width or height, or to fit in a box.",
+      "The size is the curves' real outline, arcs and splines included. In a box, Rotate to fit turns the \
+       shape to the angle that lets it grow most; a margin keeps it that far inside each side.",
+    ),
+    (_, "Sketch Library...") => (
+      "Places standard parts from the sketch library into the sketch.",
+      "Pick a part, set its angle, then click in the sketch to drop it there, as often as you like. Parts \
+       are DXF, SVG or .fox files in the hub's library folder, folders from settings or an add-in's pack.",
+    ),
     _ => return None,
   };
   Some(Tip { line, more })

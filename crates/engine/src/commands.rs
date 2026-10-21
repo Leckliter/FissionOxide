@@ -452,6 +452,9 @@ cmds! {
   "inspect.properties" => "Properties of entities (default the selection): type, id, parent component and geometry (face area, surface, normal at centre, box; edge length, curve, ends; vertex point; body kind, volume, area, mass with a material, box; component totals; sketch plane; sketch curve ends, centre, radius, length); export writes .json or .txt", "{items?: [selection item | {type: component, component} | {type: sketch, sketch}], export?: path}";
   "inspect.overall_size" => "Overall width, height and thickness of bodies (default every visible one): in the frame of the largest planar face (thickness along its normal; mode planar), else the box extents largest first (mode box); export writes .json, .csv or .txt in units (default the design's)", "{bodies?: [id], components?: [id], export?: path, units?: mm|cm|m|in|ft}";
   "component.next_number" => "The smallest unused leading number among top-level component names (01, 02 - Letters, …; fills gaps), for tools that number their components", "{prefix_digits?: (default 2)}";
+  "sketch.scale_to" => "Scale to Size / Fit in Box: scale sketch curves uniformly about an anchor so their bounding box (the curves' true extent) gets a width or height or fits in a box less a margin on every side; in box mode, rotate tries 0-90 deg and applies the turn that fits largest", "{sketch?, curves?: [id] (default all), mode: width|height|box, width?, height?, box?: [w, h], margin? (taken off every side), anchor?: centroid|origin|corner, rotate?: bool}";
+  "sketch.library.list" => "Sketch library: the DXF, SVG and .fox parts in the library folders (the hub's library/, FOX_LIBRARY_PATH, the app's and add-ins' folders), each sub-folder a pack, with size and a thumbnail outline", "{folders?: [path], outline?: bool}";
+  "sketch.library.insert" => "Insert a sketch library part: its curves copied into the sketch with the part's origin at a point, turned and scaled", "{sketch?, part: pack/name | name | path, at: [x, y], angle?, scale?, folders?: [path]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -514,6 +517,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::newcomp::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::library::run(s, name, p) {
     return r;
   }
   match name {
@@ -1482,6 +1488,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     "sketch.include" => sketch_include::include(s, p),
     "canvas.insert" | "canvas.edit" | "canvas.calibrate" => crate::canvas::run(s, name, p),
+    "sketch.scale_to" => sketch_fit::scale_to(s, p),
     _ => Err(CmdError::new(format!("unknown command '{name}' (try 'help')"))),
   }
 }
@@ -1721,7 +1728,7 @@ fn xform(s: &Session, p: &Value) -> Result<fox_sketch::Xform2, CmdError> {
 }
 
 /// The sketch `sketch.insert` copies from.
-fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), CmdError> {
+pub(crate) fn insert_source(s: &Session, from: &Value) -> Result<(Sketch, Option<String>), CmdError> {
   let Some(path) = opt_str(from, "path") else {
     let id = FeatureId(req_u32(from, "sketch")?);
     let sk = s.model.sketches.get(&id).map(|r| r.sketch.clone());
@@ -3498,3 +3505,5 @@ mod sketch_tools;
 mod sketch_curves;
 
 mod sketch_include;
+
+mod sketch_fit;

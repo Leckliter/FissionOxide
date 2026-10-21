@@ -25,6 +25,7 @@ mod help;
 mod icons;
 #[cfg(test)]
 mod input_tests;
+mod library_ui;
 mod logo;
 mod manipulators;
 mod marking;
@@ -36,6 +37,7 @@ mod plugins_ui;
 mod preferences;
 mod preview;
 mod props_ui;
+mod scale_to_ui;
 mod select;
 mod sheet;
 mod theme;
@@ -223,6 +225,8 @@ pub struct App {
   pub(crate) clipboard: Option<clipboard::Clip>,
   /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
   pub(crate) plugins: plugins_ui::PluginsUi,
+  /// Insert > Sketch Library: the part picker and placing parts with clicks.
+  pub(crate) library_ui: library_ui::LibraryUi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -421,6 +425,7 @@ impl App {
       close_menus: false,
       clipboard: None,
       plugins: plugins_ui::PluginsUi::default(),
+      library_ui: library_ui::LibraryUi::default(),
     }
   }
 
@@ -874,7 +879,7 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.canvas_ui.cancel() {
+      if self.canvas_ui.cancel() || self.library_ui.cancel() {
       } else if self.marking.is_some() {
         self.marking = None;
       } else if self.dim_edit.is_some() {
@@ -1578,6 +1583,7 @@ impl App {
     cut_ui::cut_window(self, &ctx);
     gen_ui::window(self, &ctx);
     canvas_ui::windows(self, &ctx);
+    library_ui::window(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {

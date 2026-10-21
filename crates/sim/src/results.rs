@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fem::{self, Geo};
 use crate::geom::*;
-use crate::study::{Model, ModalSolution, StaticSolution, ThermalSolution};
+use crate::study::{ModalSolution, Model, StaticSolution, ThermalSolution};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "study", rename_all = "snake_case")]
@@ -189,8 +189,7 @@ pub fn probe(model: &Model, values: &[f64], p: V3) -> Option<f64> {
 /// The contour colour of `t` in 0–1: blue, cyan, green, yellow, red (Fusion's rainbow).
 pub fn colormap(t: f64) -> [u8; 4] {
   let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
-  const STOPS: [[f64; 3]; 5] =
-    [[0.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+  const STOPS: [[f64; 3]; 5] = [[0.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
   let x = t * 4.0;
   let i = (x.floor() as usize).min(3);
   let f = x - i as f64;
@@ -247,7 +246,11 @@ fn g(v: f64) -> String {
     return format!("{v}");
   }
   let a = v.abs();
-  if !(1e-3..1e6).contains(&a) { format!("{v:.4e}") } else { format!("{:.5}", v).trim_end_matches('0').trim_end_matches('.').to_string() }
+  if !(1e-3..1e6).contains(&a) {
+    format!("{v:.4e}")
+  } else {
+    format!("{:.5}", v).trim_end_matches('0').trim_end_matches('.').to_string()
+  }
 }
 
 fn p3(p: V3) -> String {
@@ -266,7 +269,10 @@ pub fn summary(model: &Model, sol: &Solution) -> Vec<(String, String)> {
         if id == "safety_factor" {
           rows.push((format!("Minimum {}", info.label.to_lowercase()), format!("{} at {}", g(r.min), p3(r.min_at))));
         } else {
-          rows.push((format!("Maximum {}", info.label.to_lowercase()), format!("{} {} at {}", g(r.max), info.unit, p3(r.max_at))));
+          rows.push((
+            format!("Maximum {}", info.label.to_lowercase()),
+            format!("{} {} at {}", g(r.max), info.unit, p3(r.max_at)),
+          ));
         }
       }
       for (i, r) in s.reactions.iter().enumerate() {
@@ -311,7 +317,10 @@ pub fn report(input: &ReportInput, model: &Model, sol: &Solution, markdown: bool
   let bodies: Vec<[String; 4]> =
     input.bodies.iter().map(|(b, m, n, e)| [b.clone(), m.clone(), n.to_string(), e.to_string()]).collect();
   if markdown {
-    let mut s = format!("# {}\n\n**Study:** {}\n\n## Bodies\n\n| Body | Material | Nodes | Elements |\n|---|---|---|---|\n", input.title, input.study);
+    let mut s = format!(
+      "# {}\n\n**Study:** {}\n\n## Bodies\n\n| Body | Material | Nodes | Elements |\n|---|---|---|---|\n",
+      input.title, input.study
+    );
     for b in &bodies {
       s += &format!("| {} | {} | {} | {} |\n", b[0], b[1], b[2], b[3]);
     }

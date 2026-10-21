@@ -455,6 +455,8 @@ pub(crate) enum Cmd {
   /// Generative Design: study, preserve, obstacle, start, load, constraint, criteria,
   /// precheck, generate, explore.
   Gen(&'static str),
+  /// INSERT > Sketch Library: pick a part, then click in the sketch to place it.
+  SketchLibrary,
 }
 
 impl Cmd {
@@ -633,6 +635,9 @@ impl Cmd {
         "Properties",
         "A panel with the type, geometry and overall size of the selection (or of the whole design)",
       ),
+      Cmd::SketchLibrary => {
+        (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
+      }
     }
   }
 
@@ -761,6 +766,7 @@ impl Cmd {
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
       Cmd::Plugins => crate::plugins_ui::open_window(app),
       Cmd::Properties => crate::props_ui::toggle(),
+      Cmd::SketchLibrary => crate::library_ui::open(app),
     }
   }
 }
