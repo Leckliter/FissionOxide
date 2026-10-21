@@ -169,6 +169,11 @@ pub struct App {
   /// The browser's Origin folder is shown (its light bulb): the origin planes and short axes
   /// draw at the origin. Off by default, as in Fusion.
   pub(crate) origin_shown: bool,
+  /// A pending open/closed state for the browser's Sketches folder: Edit Sketch opens it,
+  /// Finish Sketch collapses it (the browser applies and clears it).
+  pub(crate) browser_sketches: Option<bool>,
+  /// The format picked in the root row's Export... sub-menu, run once the menu closes.
+  pub(crate) pending_export: Option<&'static str>,
   /// Sketches whose profiles the browser's Hide Profile turned off.
   pub(crate) hidden_profiles: Vec<fox_engine::model::FeatureId>,
   /// Sketches whose dimensions show outside Edit Sketch (the browser's Show Dimensions).
@@ -424,6 +429,8 @@ impl App {
       picked_plane: None,
       shown_planes: Vec::new(),
       origin_shown: false,
+      browser_sketches: None,
+      pending_export: None,
       hidden_profiles: Vec::new(),
       shown_dims: Vec::new(),
       data: data_panel::DataPanel::default(),
@@ -669,16 +676,10 @@ impl App {
     self.s.store_root.clone().unwrap_or_else(fox_engine::store::Store::default_root)
   }
 
-  /// The window title: the design's name and version, and • when it has unsaved changes.
+  /// The window title, as Fusion's: "Untitled* (user) - FissionOxide" until the design is
+  /// saved, then its name and version, starred while it has unsaved changes.
   pub fn title(&self) -> String {
-    let name = match (&self.s.hub, &self.s.path) {
-      (Some(h), _) => format!("{} v{}", self.s.design.name, h.version),
-      (None, Some(p)) => {
-        p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| self.s.design.name.clone())
-      }
-      (None, None) => self.s.design.name.clone(),
-    };
-    format!("{}{} — FissionOxide", name, if self.s.dirty { " •" } else { "" })
+    panels::window_title(self)
   }
 
   // ---- file actions ----
@@ -1320,6 +1321,7 @@ impl App {
       self.picked_plane = None;
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
+      self.browser_sketches = Some(true);
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
       self.hint(SKETCHING);
@@ -1336,10 +1338,13 @@ impl App {
       }
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
+      self.browser_sketches = Some(true);
       self.tool = Tool::Select;
     }
   }
 
+  /// Finish Sketch: back to the 3D view with nothing selected and the browser's Sketches folder
+  /// collapsed, as in Fusion.
   pub fn finish_sketch(&mut self) {
     self.end_hint();
     self.last_sketch = self.s.edit_sketch;
@@ -1347,6 +1352,7 @@ impl App {
     self.run("sketch.finish", json!({}));
     self.tool = Tool::Select;
     self.s.selection.clear();
+    self.browser_sketches = Some(false);
   }
 
   /// When the open sketch is finished: back to the 3D view from before it, without the

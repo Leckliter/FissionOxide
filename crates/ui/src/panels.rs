@@ -384,14 +384,8 @@ fn avatar(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
-  let name = app
-    .s
-    .path
-    .as_ref()
-    .and_then(|p| p.file_stem())
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| app.s.design.name.clone());
-  let label = if app.s.dirty { format!("{name} v1*") } else { format!("{name} v1") };
+  let label = browser_rows::tab_label(app);
+  let unsaved = browser_rows::unsaved(app);
   let font = egui::FontId::proportional(13.5);
   let full = ui.max_rect();
   let (slot, _) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::hover());
@@ -402,7 +396,12 @@ fn document_tab(app: &mut App, ui: &mut egui::Ui, w: f32) {
   let galley = p.layout_no_wrap(label, font, theme::TEXT);
   let tx = rect.center().x - galley.size().x / 2.0 + 11.0;
   icons::draw_color(p, Rect::from_center_size(pos2(tx - 14.0, rect.center().y), Vec2::splat(17.0)), Icon::Component);
+  let text_w = galley.size().x;
   p.galley(pos2(tx, rect.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+  if unsaved {
+    // an unsaved design's tab carries a lock after its name, as in Fusion
+    browser_rows::lock_glyph(p, pos2(tx + text_w + 11.0, rect.center().y), theme::GROUP_LABEL);
+  }
   let close = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), Vec2::splat(18.0));
   let cr = ui.interact(close, ui.id().with("doc-close"), egui::Sense::click());
   if cr.hovered() {
@@ -1399,31 +1398,55 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
       }
     });
   }
-  let name = app
-    .s
-    .path
-    .as_ref()
-    .and_then(|p| p.file_stem())
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| app.s.design.name.clone());
-  tree_row(ui, root, 0, Some(true), None, Icon::Component, &format!("{name} v1"), false, theme::TEXT);
+  // the root row: "(Unsaved)" until saved, an eye for the whole component, Fusion's menu
+  let root_label = browser_rows::root_label(app);
+  let root_visible = browser_rows::root_visible(app);
+  let ev = tree_row(ui, root, 0, Some(true), Some(root_visible), Icon::Component, &root_label, false, theme::TEXT);
+  if ev.eye {
+    browser_rows::root_show_hide(app);
+  }
+  if let Some(r) = ev.response {
+    if r.hovered() {
+      marking::peek(app, Vec::new(), root_label.clone());
+    }
+    r.context_menu(|ui| browser_rows::root_context_menu(app, ui));
+  }
   if !is_open(ui, root, true) {
     return;
   }
-  // Document Settings
+  // Document Settings: expanded to start, with the units and the design type, as in Fusion
   let ds = egui::Id::new("tree-docsettings");
-  tree_row(ui, ds, 1, Some(false), None, Icon::Gear, "Document Settings", false, theme::TEXT);
-  if is_open(ui, ds, false) {
+  let ev = tree_row(ui, ds, 1, Some(true), None, Icon::Gear, "Document Settings", false, theme::TEXT);
+  if ev.response.is_some_and(|r| r.hovered()) {
+    marking::peek(app, Vec::new(), "Document Settings".into());
+  }
+  if is_open(ui, ds, true) {
     let label = format!("Units: {}", app.s.design.units.symbol());
     let ev = tree_row(ui, ds.with(1), 2, None, None, Icon::Measure, &label, false, theme::TEXT);
     if let Some(r) = &ev.response {
       crate::units::settings_row(app, ui, r, 2);
+      if r.hovered() {
+        marking::peek(app, Vec::new(), label.clone());
+      }
+      r.context_menu(|ui| {
+        let ctx = ui.ctx().clone();
+        browser_rows::folder_context_menu(ui, &browser_rows::units_menu(), |cmd| {
+          browser_rows::run_units_cmd(&ctx, cmd)
+        });
+      });
+    }
+    let ev = tree_row(ui, ds.with(2), 2, None, None, Icon::Component, "Part Design", false, theme::TEXT);
+    if ev.response.is_some_and(|r| r.hovered()) {
+      marking::peek(app, Vec::new(), "Part Design".into());
     }
   }
   // Named Views
   let nv = egui::Id::new("tree-views");
   let ev = tree_row(ui, nv, 1, Some(false), None, Icon::Folder, "Named Views", false, theme::TEXT);
   if let Some(r) = ev.response {
+    if r.hovered() {
+      marking::peek(app, Vec::new(), "Named Views".into());
+    }
     r.context_menu(|ui| {
       if menu_item(ui, Icon::Views, "New Named View", None).clicked() {
         ui.close();
@@ -1466,10 +1489,22 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   // the folder's light bulb shows the origin planes and short axes in the canvas (off by default)
   let ev = tree_row(ui, og, 1, Some(false), Some(app.origin_shown), Icon::Folder, "Origin", false, theme::TEXT);
   if ev.eye {
-    app.origin_shown = !app.origin_shown;
+    browser_rows::origin_show_hide(app);
+  }
+  if let Some(r) = ev.response {
+    if r.hovered() {
+      marking::peek(app, Vec::new(), "Origin".into());
+    }
+    r.context_menu(|ui| {
+      let items = browser_rows::origin_folder_menu(app);
+      browser_rows::folder_context_menu(ui, &items, |cmd| browser_rows::run_origin_folder_cmd(app, cmd));
+    });
   }
   if is_open(ui, og, false) {
-    tree_row(ui, og.with("o"), 2, None, None, Icon::Origin, "O", false, theme::TEXT);
+    let ev = tree_row(ui, og.with("o"), 2, None, None, Icon::Origin, "O", false, theme::TEXT);
+    if ev.response.is_some_and(|r| r.hovered()) {
+      marking::peek(app, Vec::new(), "Origin point".into());
+    }
     for (label, plane) in [("XY", "xy"), ("XZ", "xz"), ("YZ", "yz")] {
       let picked = app.picked_plane.as_ref().is_some_and(|p| p == plane);
       let ev = tree_row(ui, og.with(label), 2, None, None, Icon::Plane, label, picked, theme::TEXT);
@@ -1884,6 +1919,15 @@ fn bodies_section(app: &mut App, ui: &mut egui::Ui) {
       app.run("body.visible", json!({"body": b.0, "visible": !all_visible}));
     }
   }
+  if let Some(r) = &ev.response {
+    if r.hovered() {
+      marking::peek(app, Vec::new(), "Bodies".into());
+    }
+    r.context_menu(|ui| {
+      let items = browser_rows::bodies_folder_menu(app);
+      browser_rows::folder_context_menu(ui, &items, |cmd| browser_rows::run_bodies_folder_cmd(app, cmd));
+    });
+  }
   if !is_open(ui, id, true) {
     return;
   }
@@ -2074,6 +2118,24 @@ pub(crate) enum RowCmd {
   OffsetPlane,
   /// Listed, greyed, as Fusion has it but FissionOxide doesn't yet.
   NotYet,
+  // the root, Bodies, Origin and Units rows (see browser_rows)
+  CreateDrawing,
+  Configure,
+  PhysicalMaterial,
+  Appearance,
+  Properties,
+  Export,
+  SaveCopyAs,
+  SaveAsMesh,
+  ShowAllComponents,
+  ShowAllBodies,
+  Opacity,
+  DirectModeling,
+  ShowAll,
+  Selectable,
+  ShowHidePlanes,
+  ShowHideAxes,
+  ChangeUnits,
 }
 
 /// One row of a browser context menu.
@@ -2179,7 +2241,7 @@ pub(crate) fn run_sketch_cmd(app: &mut App, fid: FeatureId, name: &str, cmd: Row
     RowCmd::Delete => {
       app.run("feature.delete", json!({"feature": fid.0}));
     }
-    RowCmd::CreateSketch | RowCmd::OffsetPlane | RowCmd::NotYet => {}
+    _ => {}
   }
 }
 
@@ -2228,8 +2290,15 @@ fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
     return;
   }
   let id = egui::Id::new("tree-sketches");
-  tree_row(ui, id, 1, Some(true), None, Icon::Folder, "Sketches", false, theme::TEXT);
-  if !is_open(ui, id, true) {
+  // the folder starts collapsed, opens on the sketch being edited and closes on Finish Sketch
+  if let Some(open) = app.browser_sketches.take() {
+    ui.data_mut(|d| d.insert_temp(id.with("open"), open));
+  }
+  let ev = tree_row(ui, id, 1, Some(false), None, Icon::Folder, "Sketches", false, theme::TEXT);
+  if ev.response.is_some_and(|r| r.hovered()) {
+    marking::peek(app, Vec::new(), "Sketches".into());
+  }
+  if !is_open(ui, id, false) {
     return;
   }
   for (fid, name) in sketches {
@@ -3530,7 +3599,10 @@ mod browser_assembly;
 mod browser_canvas;
 mod browser_config;
 mod browser_edit;
+mod browser_rows;
 mod timeline_groups;
+
+pub(crate) use browser_rows::window_title;
 
 #[cfg(test)]
 mod row_menu_tests {

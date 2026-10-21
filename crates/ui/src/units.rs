@@ -60,7 +60,7 @@ pub fn pin(ui: &egui::Ui, r: &mut egui::Response, text: &mut String) {
 /// The Units row of Document Settings: hovering shows a pencil that picks the design's unit.
 pub fn settings_row(app: &mut App, ui: &mut egui::Ui, row: &egui::Response, depth: usize) {
   let unit = app.s.design.units;
-  let popup_id = egui::Id::new("units-popup");
+  let popup_id = popup_id();
   let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
   let rect = row.rect;
   let x = rect.min.x + 8.0 + depth as f32 * 16.0 + 44.0;
@@ -92,6 +92,11 @@ pub fn settings_row(app: &mut App, ui: &mut egui::Ui, row: &egui::Response, dept
       }
     }
   });
+}
+
+/// The Change Active Units popup's id (the Units row's context menu opens it too).
+pub(crate) fn popup_id() -> egui::Id {
+  egui::Id::new("units-popup")
 }
 
 /// A small pencil: a slanted body with a tip, as Fusion's edit glyph.

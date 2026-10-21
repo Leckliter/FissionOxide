@@ -642,6 +642,38 @@ fn the_workspace_menu_lists_fusions_workspaces() {
   assert!(h.find(vec![], "From Animation").is_some());
   h.move_then_click(from_design.center());
   assert!(h.app.drawing.is_some() || h.app.dialog.is_some(), "From Design opens the Drawing workspace");
+
+/// The browser's root row and Origin folder have eye toggles, Document Settings starts expanded
+/// (its Units and Part Design rows push Origin down), and hovering a row names it in the status
+/// readout.
+#[test]
+fn browser_root_and_origin_eyes() {
+  let mut h = Harness::new();
+  h.app.run("box", serde_json::json!({"width": 10, "depth": 10, "height": 10}));
+  let body = h.app.s.model.bodies[0].id;
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("browser"))).expect("the browser is shown");
+  // the header is 26 tall, then 4 of space and 25 per row; the eye sits 24 right of the row's
+  // indent (8 + 16 per level)
+  let row = |i: f32| area.min.y + 30.0 + 25.0 * i + 12.5;
+  let root_eye = egui::pos2(area.min.x + 8.0 + 24.0, row(0.0));
+  h.frame(vec![Event::PointerMoved(root_eye)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.ctx_menu.peek_label.as_deref(), Some("(Unsaved)"), "hovering the root names it");
+  assert!(h.app.s.body_visible(body));
+  h.move_then_click(root_eye);
+  assert!(!h.app.s.body_visible(body), "the root eye hides the component's bodies");
+  h.move_then_click(root_eye);
+  assert!(h.app.s.body_visible(body));
+  // root, Document Settings, Units, Part Design, Named Views, then Origin
+  let origin_eye = egui::pos2(area.min.x + 8.0 + 16.0 + 24.0, row(5.0));
+  assert!(!h.app.origin_shown);
+  h.move_then_click(origin_eye);
+  assert!(h.app.origin_shown, "the Origin folder's eye shows the origin planes");
+  h.move_then_click(origin_eye);
+  assert!(!h.app.origin_shown);
 }
 
 // ---------------------------------------------------------------- preferences
