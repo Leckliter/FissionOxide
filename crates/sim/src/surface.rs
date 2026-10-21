@@ -328,17 +328,19 @@ impl SurfaceMesh {
     let mut edges = self.edges();
     let cos_max = max_dihedral_deg.to_radians().cos();
     let mut flips = 0;
-    for _ in 0..8 {
-      let mut changed = 0;
-      let keys: Vec<(u32, u32)> = edges.keys().copied().collect();
-      for (a, b) in keys {
-        if self.try_flip(&mut edges, a, b, cos_max).is_some() {
-          changed += 1;
-        }
-      }
-      flips += changed;
-      if changed == 0 {
+    // Lawson's algorithm: every flip may make the four edges around it non-Delaunay
+    let mut stack: Vec<(u32, u32)> = edges.keys().copied().collect();
+    stack.sort_unstable();
+    let limit = 100 * stack.len() + 1000;
+    let mut steps = 0;
+    while let Some((a, b)) = stack.pop() {
+      steps += 1;
+      if steps > limit {
         break;
+      }
+      if let Some((c, d)) = self.try_flip(&mut edges, a, b, cos_max) {
+        flips += 1;
+        stack.extend([(a, c), (c, b), (b, d), (d, a)]);
       }
     }
     flips
@@ -478,7 +480,7 @@ impl SurfaceMesh {
           match near {
             Some((x, y)) => {
               let (px, py) = (self.points[x as usize], self.points[y as usize]);
-              if dist(px, py) > 0.3 * size(mid(px, py)) { self.split(&mut edges, x, y, None) } else { None }
+              if dist(px, py) > 0.6 * size(mid(px, py)) { self.split(&mut edges, x, y, None) } else { None }
             }
             None => Some(self.split_tri(&mut edges, tt, p)),
           }
@@ -564,7 +566,7 @@ impl SurfaceMesh {
           continue;
         }
         let obtuse = angle(pc, pa, pb).max(angle(pd, pa, pb)) > std::f64::consts::FRAC_PI_2 + 1e-9;
-        if obtuse && dist(pa, pb) > 0.1 * size(mid(pa, pb)) {
+        if obtuse && dist(pa, pb) > 0.4 * size(mid(pa, pb)) {
           todo.push((a, b));
         }
       }
@@ -645,7 +647,11 @@ impl SurfaceMesh {
       }
       let Some(pair) = edges.get(&key(x, y)) else { return Walk::Lost };
       let next = if pair[0] == t { pair[1] } else { pair[0] };
-      if next == u32::MAX || self.tri_face[next as usize] != face {
+      // a fold of a curved face counts as a boundary too (points stay on their facet)
+      if next == u32::MAX
+        || self.tri_face[next as usize] != face
+        || dot(unit(self.normal(t)), unit(self.normal(next))) < FLAT_DEG.to_radians().cos()
+      {
         return Walk::Blocked(x, y);
       }
       if next == prev {

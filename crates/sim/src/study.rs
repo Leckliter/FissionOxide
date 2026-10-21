@@ -467,6 +467,46 @@ fn add_dir(p: &mut Penalties, node: u32, d: V3) {
   }
 }
 
+/// Every group of parts joined by bonded contacts must be held by some face in `held` (else it
+/// floats free, and the matrix is singular).
+fn check_held(model: &Model, ties: &[Tie], held: &[Vec<FaceSel>], what: &str) -> Result<(), String> {
+  let n = model.parts.len();
+  let part = model.node_part();
+  let mut group: Vec<usize> = (0..n).collect();
+  fn find(g: &mut [usize], x: usize) -> usize {
+    let mut x = x;
+    while g[x] != x {
+      g[x] = g[g[x]];
+      x = g[x];
+    }
+    x
+  }
+  for t in ties {
+    let (a, b) = (part[t.node as usize], part[t.master[0] as usize]);
+    let (ra, rb) = (find(&mut group, a), find(&mut group, b));
+    group[ra] = rb;
+  }
+  let mut ok = vec![false; n];
+  for faces in held {
+    for f in faces {
+      if f.part < n {
+        let r = find(&mut group, f.part);
+        ok[r] = true;
+      }
+    }
+  }
+  for p in 0..n {
+    let r = find(&mut group, p);
+    if !ok[r] {
+      return Err(format!(
+        "{} isn't {what}: it can move freely (add a constraint, or bond it to a part that is)",
+        model.parts[p].name
+      ));
+    }
+  }
+  Ok(())
+}
+
 /// Fits a cylinder axis (point, unit direction) to boundary triangles' centroids and normals.
 pub fn fit_axis(tris: &[(V3, V3, f64)]) -> Option<(V3, V3)> {
   let mut s = [[0.0; 3]; 3];
@@ -543,6 +583,12 @@ const TIE: f64 = 1e4;
 
 impl<'a> StaticProblem<'a> {
   pub fn new(model: &'a Model, options: SolveOptions) -> Result<StaticProblem<'a>, String> {
+    Self::build(model, options, true)
+  }
+
+  /// `held`: check every part is constrained (a free body has no static solution, though it
+  /// still vibrates).
+  fn build(model: &'a Model, options: SolveOptions, held: bool) -> Result<StaticProblem<'a>, String> {
     model.check()?;
     let n = model.node_count();
     let off = model.offsets();
@@ -617,6 +663,14 @@ impl<'a> StaticProblem<'a> {
       }
     }
     let ties = model.ties();
+    if held {
+      check_held(
+        model,
+        &ties,
+        &model.constraints.iter().map(|c| c.faces().to_vec()).collect::<Vec<_>>(),
+        "constrained",
+      )?;
+    }
     let sys = System::new(model, 3, &fixed, &ties);
     let force = load_vector(model)?;
     Ok(StaticProblem { model, sys, ties, penalties, force, fixed_by, options })
@@ -896,7 +950,7 @@ pub struct ModalSolution {
 pub fn solve_modal(model: &Model, options: SolveOptions) -> Result<ModalSolution, String> {
   let mut quiet = model.clone();
   quiet.loads.clear();
-  let prob = StaticProblem::new(&quiet, options)?;
+  let prob = StaticProblem::build(&quiet, options, false)?;
   if prob.sys.free == 0 {
     return Err("every node is fixed: there is nothing to vibrate".into());
   }
@@ -989,6 +1043,13 @@ pub fn solve_thermal(model: &Model, options: SolveOptions) -> Result<ThermalSolu
     return Err("the temperature can't settle: add a temperature or convection condition".into());
   }
   let ties = model.ties();
+  let anchors: Vec<Vec<FaceSel>> = model
+    .thermal
+    .iter()
+    .filter(|l| matches!(l, ThermalLoad::Temperature { .. } | ThermalLoad::Convection { .. }))
+    .map(|l| l.faces().to_vec())
+    .collect();
+  check_held(model, &ties, &anchors, "held at a temperature or cooled")?;
   let sys = System::new(model, 1, &fixed, &ties);
   if sys.free == 0 {
     return Ok(ThermalSolution {

@@ -535,9 +535,14 @@ pub fn mesh_solid(surface: &SurfaceMesh, opts: &MeshOptions) -> Result<(TetMesh,
       let (vc, vd) = (vert[ac as usize], vert[ad as usize]);
       vc != u32::MAX && vd != u32::MAX && edges.contains(&if vc < vd { (vc, vd) } else { (vd, vc) })
     };
-    let made = surf.flip_or_split(&split, &has);
-    for m in made {
-      let p = surf.points[m as usize];
+    let before = surf.points.len();
+    surf.flip_or_split(&split, &has);
+    // splits leave skinny triangles on the faces next to them, whose big circumspheres would go
+    // missing next: refine those too
+    surf.refine_delaunay(&|p| size.at(p));
+    surf.split_encroached(&|p| size.at(p));
+    for m in before..surf.points.len() {
+      let p = surf.points[m];
       all.push(p);
       let ai = all.len() as u32 - 1;
       surf_all.push(ai);
