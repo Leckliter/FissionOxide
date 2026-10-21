@@ -764,6 +764,19 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the outlines to cut; the beam follows them with a kerf offset and lead-ins. Inner cuts are \
        done before the outside so the part stays in place.",
     ),
+    (_, "Cut Service Check") => (
+      "Checks a cut file for SendCutSend, OSH Cut, Ponoko or your own shop.",
+      "Checks the sketch being edited, the sheet metal body's flat pattern or a DXF against the \
+       service's rules: text not outlined, open contours, duplicate or overlapping cuts, features under \
+       its minimum and parts it can't take. Zoom shows each issue; the cut estimate (area, cut length, \
+       pierces) exports as CSV or JSON for a quote.",
+    ),
+    (_, "All Flat Patterns on One Sheet") => (
+      "Lays every sheet metal part's flat pattern out in one Cut File sketch.",
+      "Each flat pattern's outline, with its bend lines as construction, goes into a new sketch on XY, \
+       in rows a gap apart that wrap before a part would run past the sheet width. Save the sketch as a \
+       DXF to send all the parts in one file.",
+    ),
 
     // SOLID CREATE
     (_, "Create Sketch") => (
