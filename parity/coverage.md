@@ -17,7 +17,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Design workspace: canvas
 - [done (2026-10-21)] ViewCube (faces, edges, corners, arrows, menu, home, fade, compass), navigation bar flyouts
 - [todo] Camera: orbit/pan/zoom with every mouse preset, Fit, Look At, zoom-to-cursor, animation timing, orthographic/perspective switch
-- [in progress (2026-10-21, prober 2)] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
+- [done (2026-10-21), remainder todo: vertex, construction plane/axis, sketch point, in-sketch hover, selection filters, window/crossing colours, Select Other] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [todo] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
 - [todo] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move

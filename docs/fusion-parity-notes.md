@@ -263,3 +263,11 @@ Trim, Offset, Horizontal, polygon) and Chamfer, Shell, Press Pull, Move and Hole
 (2 P1: the polygon tool creates nothing, and Horizontal refuses a line touching a circle) in
 three batches (`map-wave5.json`). Report:
 [parity/reports/2026-10-21-sketch-and-modify.md](../parity/reports/2026-10-21-sketch-and-modify.md).
+
+### Third pass, 2026-10-21 (selection and hover colours)
+
+Pixel-sampled hover, selected and command-pick colours for faces, edges, bodies and sketch
+curves in both apps: Fusion lightens a hovered face and draws a hovered edge black, FissionOxide
+tints both blue; sketch curves on a face are not pickable over the face. Eight rows in
+`ui-selection-colors` (`map-wave6.json`). Report:
+[parity/reports/2026-10-21-selection-colors.md](../parity/reports/2026-10-21-selection-colors.md).

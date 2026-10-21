@@ -29,3 +29,4 @@
 {"name": "ui-feature-dialogs-2", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_908f51b6 (requested 2026-10-21)"}
 {"name": "ui-sketch-solver", "items": 1, "status": "fixing", "pr": null, "fixer": "cloud task_b1920999 (requested 2026-10-21)"}
 {"name": "ui-sketch-tools-2", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_b959d416 (requested 2026-10-21)"}
+{"name": "ui-selection-colors", "items": 8, "status": "ready", "pr": null}

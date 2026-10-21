@@ -1,31 +1,35 @@
 # Prober progress
 
-## Last stop: 2026-10-21, 09:00, session "parity hands-on" (the first prober)
+## Last stop: 2026-10-21, 10:30, session "parity hands-on" (first prober, third pass)
 
-Finished: chrome, toolbar at full and narrow width, ViewCube and navigation bar, marking menus
-on canvas/face/edge, browser rows and their menus, timeline menu, Preferences layout, the basic
-sketch flow (rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal), and
-the Extrude, Fillet, Chamfer, Shell, Press Pull, Move and Hole dialogs. Reports:
-`parity/reports/2026-10-21.md` and `parity/reports/2026-10-21-sketch-and-modify.md`.
-Batches: waves 4 and 5 (`map-wave4.json`, `map-wave5.json`), 12 batches, 56 rows.
+Finished: chrome, toolbar, ViewCube and navigation bar, marking menus, browser and timeline
+menus, Preferences layout, the basic sketch flow, Extrude/Fillet/Chamfer/Shell/Press
+Pull/Move/Hole dialogs, and the selection and hover colours (face, edge, body, sketch curve on
+a face, Fillet and Extrude pick states). Reports: `parity/reports/2026-10-21.md`,
+`2026-10-21-sketch-and-modify.md`, `2026-10-21-selection-colors.md`. Batches: waves 4, 5 and 6
+(13 batches, 64 rows); twelve cloud fixers are running on waves 4-5 and one is requested for
+wave 6.
 
 ## Next prober: start here
 
-1. Take "Selection: hover/selected colours ..." under *Design workspace: canvas* in
-   `parity/coverage.md`. The owner asked for hover features, colour changes on selection,
-   hover and action states to be covered as carefully as commands. Sample the colours on screen
-   (zoom, read the pixel values) for face, edge, vertex, body, sketch curve, sketch point and
-   construction plane in both apps, hovered and selected, and in a command's selection mode.
-2. Then "Every CREATE tool" under *sketch*.
-3. Re-verify in the app any key in `ui-features.jsonl` marked `fixing-merged` when a fixer
-   has pushed (check `parity/batches/index.jsonl`).
+1. "Every CREATE tool" under *Design workspace: sketch* in `parity/coverage.md`: each tool's
+   heads-up boxes, cursor prompt, preview, glyphs, Feature Options and the created geometry's
+   dimensions, in both apps.
+2. Then the selection remainder listed on the coverage line: vertex hover/selection,
+   construction planes and axes, sketch points, in-sketch hover colours, selection filters,
+   window/crossing box colours, Select Other.
+3. Re-verify in the app any key marked `fixing-merged` once fixers have pushed
+   (`parity/batches/index.jsonl`).
 
 ## Traps
-- The Claude overlay window on the right of the screen (see `LOOP.md`, Setup 2).
+- The Claude overlay window on the right of the screen (see `LOOP.md`, Setup 2). Keep each app
+  window inside x < 1370 screen pixels (restore and drag, or `Win+Left`).
 - Clicking the taskbar button of the active window minimises it.
 - FissionOxide's dialogs remember their last position; drag them left if they open under the
   overlay, or use Enter/Escape.
-- Fusion in this account is in inches with Layout Grid off in 3D; FissionOxide is in mm.
-- Fusion's running document has a chamfer-less test body with Sketch1-3; FissionOxide's has
-  its own. Make a new design in each when a clean start matters (Ctrl+N in FissionOxide, the
-  `+` tab in Fusion).
+- Fusion is in inches with Layout Grid off in 3D; FissionOxide is in mm.
+- To read colours, rest the pointer two seconds and sample pixels (`System.Drawing`
+  `CopyFromScreen`/`GetPixel` from PowerShell); Fusion's hover lightening is invisible in a
+  scaled screenshot.
+- Fusion's current document has Sketch1-3 and a body with fillets; FissionOxide's has a box with
+  a circle/offset/line sketch on top. Start a new design in each when a clean body matters.

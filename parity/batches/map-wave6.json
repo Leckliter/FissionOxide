@@ -1,0 +1,10 @@
+{
+  "ui:canvas:face-hover-color": "ui-selection-colors",
+  "ui:canvas:face-selected-color": "ui-selection-colors",
+  "ui:canvas:edge-hover-color": "ui-selection-colors",
+  "ui:canvas:edge-selected-color": "ui-selection-colors",
+  "ui:canvas:body-selected-color": "ui-selection-colors",
+  "ui:canvas:sketch-curve-priority": "ui-selection-colors",
+  "ui:canvas:command-pick-colors": "ui-selection-colors",
+  "ui:dialogs:extrude-all-regions": "ui-selection-colors"
+}
