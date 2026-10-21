@@ -3511,5 +3511,5 @@ mod sketch_curves;
 
 mod sketch_include;
 
-mod sketch_fit;
 mod sketch_cleanup;
+mod sketch_fit;
