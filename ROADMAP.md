@@ -25,4 +25,3 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 ## Later
 
-- Simulation (FEA)

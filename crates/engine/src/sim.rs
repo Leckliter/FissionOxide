@@ -966,9 +966,7 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
   });
   if v.mesh || values.is_none() {
     // element edges of the boundary
-    for (k, part) in run.model.parts.iter().enumerate() {
-      let off = run.model.offsets()[k];
-      let _ = off;
+    for part in &run.model.parts {
       for b in &part.mesh.boundary {
         let p = |i: usize| part.mesh.nodes[b[i] as usize].map(|x| x as f32);
         scene.lines.push(fox_render::Polyline {
@@ -983,7 +981,6 @@ pub fn draw(scene: &mut fox_render::Scene, picks: &mut crate::scene::PickTable, 
       }
     }
   }
-  // undeformed outline of the boundary edges between CAD faces stays readable: skip
 }
 
 /// A view from JSON (`view.render`'s `sim`): `{study?, field?, mode?, scale?: number | "adjusted" |

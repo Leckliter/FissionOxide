@@ -141,6 +141,12 @@ change a parameter and watch the whole history rebuild.
   or 2.5-axis milling outcomes with symmetry planes and a minimum member size. Topology
   optimisation (SIMP) on a voxel grid, smoothed into outcomes you compare and insert as mesh or
   B-rep bodies. See [Generative design](#generative-design).
+- **Simulation.** A Simulation workspace: linear static stress, modal frequencies and
+  steady-state thermal studies on quadratic tetrahedral meshes (own Delaunay mesher with local
+  refinement), with the components' materials, fixed/pin/frictionless constraints, forces,
+  pressures, bearing loads, moments, gravity, temperatures, heat flux, heat sources and
+  convection, and bonded contacts between bodies. Contours with a legend, probes, animated
+  mode shapes and an HTML report. See [Simulation](#simulation).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
@@ -836,6 +842,53 @@ fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.insert", "outcome": 3, "reduc
 The analysis is linear static on a voxel model, a guide to the shape and not a validation:
 check the inserted part with a proper simulation before trusting its safety factor.
 
+## Simulation
+
+Switch the workspace to **Simulation** (or script the `sim.*` commands). The SETUP toolbar
+makes a **Static Stress**, **Modal** or **Thermal** study of the visible bodies (or the selected
+ones); the study browser on the right lists its materials, constraints, loads, contacts, mesh
+and results. Constraints and loads go on the faces selected in the viewport; studies are saved
+with the design and their faces follow edits.
+
+- **Materials**: each body starts with its component's physical material (steel when it has
+  none); a study can pick another or set its own Young's modulus, Poisson's ratio, density,
+  yield strength and conductivity (`sim.materials` lists the library).
+- **Constraints**: fixed (all of X, Y, Z or some), pin (cylindrical faces held radially,
+  axially and/or tangentially about their fitted axis) and frictionless (no motion along the
+  normal).
+- **Loads**: force and bearing load (N, a vector or a magnitude along an axis or into the face),
+  pressure (MPa), moment (N·mm, spread as a twist about the faces' centroid), gravity; for
+  thermal studies, temperature (°C), heat flux (W/m²), heat source (W), convection (W/(m²·K) to
+  an ambient temperature) and heat generated inside a body (W).
+- **Contacts**: touching bodies are bonded automatically, or only the pairs you bond.
+- **Mesh**: 10-node (quadratic) tetrahedra. The element size is automatic from each body's
+  size, or yours; **Local Mesh Control** sets a finer size on faces, grading back out.
+- **Results**: displacement (and X, Y, Z), von Mises stress, principal and component stresses,
+  safety factor (yield over von Mises, capped at 15), reaction forces; natural frequencies with
+  effective mass in X, Y and Z, and animated mode shapes; temperature and heat flux, and the heat
+  flowing through each temperature or convection condition. Contours with a legend on the
+  (adjusted, true or undeformed) shape, probes where you click, and **Report** writes the
+  setup, mesh and results as HTML (or Markdown with `sim.report`).
+
+```sh
+fissionoxide-cli run examples/simulation_plate.jsonl --save plate_sim.fox
+fissionoxide-cli exec plate_sim.fox '{"cmd": "sim.solve", "study": "Tension"}'
+fissionoxide-cli exec plate_sim.fox '{"cmd": "view.render", "path": "stress.png", "view": "top", "sim": {"study": "Tension", "field": "von_mises"}}'
+```
+
+The meshing and solving are pure Rust (`fox-sim`). Each body's OCCT tessellation is welded
+into a closed surface tagged by face and remeshed to the size field (Delaunay refinement inside
+faces, feature edges and facet folds kept); interior points come from an octree whose leaves
+make a body-centred cubic lattice; a Bowyer–Watson tetrahedralization with exact predicates
+recovers the surface (conforming Delaunay), flips and smoothing improve the worst elements, and
+the edges get mid-side nodes. Element matrices are integrated exactly in barycentric
+coordinates; fixed supports are eliminated, pins, frictionless supports and bonded ties are
+stiff penalties. Static and thermal systems are solved by sparse Cholesky (`faer`; Jacobi
+conjugate gradients beyond 400 000 unknowns) and modes by shift-invert Lanczos. The tests check
+it against closed-form answers: cantilever tip deflection and bending stress (within 3 % and
+5 %), the stress concentration of a hole in a plate (within 7 % of Heywood's), a cantilever's
+first natural frequencies (within 3 %), and one-dimensional conduction (exact).
+
 ## Headless CLI and scripting
 
 ```sh
@@ -1101,6 +1154,7 @@ Design History off collapses the timeline into one base feature holding the bodi
 | `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 | `fox-ecad`          | Electronics: library format, KiCad import, schematics and ERC, PCB layout, DRC, autorouter, Gerber/Excellon/BOM/pick-and-place |
 | `fox-gen`           | Generative design: SIMP topology optimisation on a voxel grid (threaded matrix-free FE), milling and symmetry constraints, iso-surfaces |
+| `fox-sim`           | Simulation: tetrahedral meshing (conforming Delaunay), quadratic-tetrahedron FEM, static stress, modal (Lanczos), steady-state thermal |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).

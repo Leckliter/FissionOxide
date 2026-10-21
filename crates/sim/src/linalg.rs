@@ -163,7 +163,7 @@ pub fn pcg(a: &SymMatrix, b: &[f64], tol: f64, max_iter: usize) -> Result<(Vec<f
 
 /// Solves `a x = b`: sparse Cholesky up to `direct_limit` unknowns, conjugate gradients above.
 pub fn solve(a: &SymMatrix, b: &[f64], direct_limit: usize) -> Result<Vec<f64>, String> {
-  if a.n <= direct_limit { Ok(Factor::new(a)?.solve(b)) } else { pcg(a, b, 1e-10, 20 * a.n.max(1000)).map(|r| r.0) }
+  if a.n <= direct_limit { Ok(Factor::new(a)?.solve(b)) } else { pcg(a, b, 1e-10, 20_000).map(|r| r.0) }
 }
 
 /// The lowest `count` eigenpairs of `K φ = λ M φ` (K symmetric semi-definite, M positive definite):

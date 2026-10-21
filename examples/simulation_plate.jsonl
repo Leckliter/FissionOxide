@@ -1,0 +1,18 @@
+# A plate with a hole in tension, its modes and a steady-state heat study.
+# fissionoxide-cli run examples/simulation_plate.jsonl --save plate_sim.fox
+{"cmd": "box", "width": 40, "depth": 120, "height": 4}
+{"cmd": "cylinder", "radius": 6, "height": 4, "operation": "cut"}
+{"cmd": "sim.study", "type": "static", "name": "Tension"}
+{"cmd": "sim.material", "material": "Aluminum"}
+{"cmd": "sim.constraint", "type": "fixed", "faces": [{"point": [0, -60, 2]}]}
+{"cmd": "sim.load", "type": "pressure", "faces": [{"point": [0, 60, 2]}], "pressure": -10}
+{"cmd": "sim.mesh", "size": 4, "refine": [{"faces": [{"point": [6, 0, 2]}], "size": 0.8}]}
+{"cmd": "sim.solve"}
+{"cmd": "sim.probe", "field": "syy", "points": [[6, 0, 2], [0, 40, 2]]}
+{"cmd": "sim.study", "type": "modal", "name": "Modes", "modes": 6}
+{"cmd": "sim.constraint", "type": "fixed", "faces": [{"point": [0, -60, 2]}]}
+{"cmd": "sim.solve"}
+{"cmd": "sim.study", "type": "thermal", "name": "Heat"}
+{"cmd": "sim.load", "type": "heat", "faces": [{"point": [6, 0, 2]}], "power": 5}
+{"cmd": "sim.load", "type": "convection", "faces": [{"point": [10, 0, 4]}, {"point": [10, 0, 0]}], "coefficient": 15, "ambient": 20}
+{"cmd": "sim.solve"}
