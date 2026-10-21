@@ -628,6 +628,9 @@ const SKETCH_MODIFY: &[E] = &[
   E::Sep,
   c("Edit Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EDIT))),
   c("Explode Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EXPLODE))),
+  E::Sep,
+  c("Remove Duplicates", Icon::SkRemoveDuplicates, D(Kind::Form(&forms::SK_REMOVE_DUPLICATES))),
+  c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
 
 const SKETCH_CONSTRAINTS: &[E] = &[
@@ -1519,6 +1522,8 @@ mod tests {
       (Tab::SheetMetal, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::Solid, "CREATE", "Create Base Feature", D(Kind::Form(&config_ui::BASE_START))),
       (Tab::Solid, "SELECT", "Construction", Cmd::Filter("construction")),
+      (Tab::Sketch, "MODIFY", "Remove Duplicates", D(Kind::Form(&forms::SK_REMOVE_DUPLICATES))),
+      (Tab::Sketch, "MODIFY", "Clean Up", D(Kind::Form(&forms::SK_CLEANUP))),
     ];
     for (tab, group, label, cmd) in wired {
       assert_eq!(cmd_of(tab, group, label), Some(cmd), "{tab:?} {group} > {label}");

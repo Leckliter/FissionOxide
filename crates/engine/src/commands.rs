@@ -455,6 +455,8 @@ cmds! {
   "sketch.scale_to" => "Scale to Size / Fit in Box: scale sketch curves uniformly about an anchor so their bounding box (the curves' true extent) gets a width or height or fits in a box less a margin on every side; in box mode, rotate tries 0-90 deg and applies the turn that fits largest", "{sketch?, curves?: [id] (default all), mode: width|height|box, width?, height?, box?: [w, h], margin? (taken off every side), anchor?: centroid|origin|corner, rotate?: bool}";
   "sketch.library.list" => "Sketch library: the DXF, SVG and .fox parts in the library folders (the hub's library/, FOX_LIBRARY_PATH, the app's and add-ins' folders), each sub-folder a pack, with size and a thumbnail outline", "{folders?: [path], outline?: bool}";
   "sketch.library.insert" => "Insert a sketch library part: its curves copied into the sketch with the part's origin at a point, turned and scaled", "{sketch?, part: pack/name | name | path, at: [x, y], angle?, scale?, folders?: [path]}";
+  "sketch.remove_duplicates" => "Remove Duplicates: delete curves lying on another of the same kind, keeping the first: lines with matching ends or overlapping on one line (an overlap part way cuts the second back; a shared corner is never a duplicate), arcs and circles with the same centre, radius and ends, splines with the same points, ellipses likewise; distances within tolerance; dry_run only reports", "{sketch?, tolerance? (default 0.001 in), include_construction?: bool, dry_run?: bool}";
+  "sketch.cleanup" => "Clean Up an imported or projected sketch for DXF: break projection links, delete constraints (on projected geometry, all, or none) and dimensions, delete points no curve uses, construction to normal, close gaps between curve ends (moved together and made coincident), splines to lines or arcs", "{sketch?, break_links?: bool (true), delete_constraints?: projected|all|none, delete_dimensions?: bool, purge_points?: bool (true), construction_to_normal?: bool, merge_gaps?: null|true|tolerance, gap_tolerance?, splines_to?: null|lines|arcs, segments?: 4..512 (64, lines), spline_tolerance? (0.001 in, arcs)}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -520,6 +522,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::library::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = sketch_cleanup::run(s, name, p) {
     return r;
   }
   match name {
@@ -3507,3 +3512,4 @@ mod sketch_curves;
 mod sketch_include;
 
 mod sketch_fit;
+mod sketch_cleanup;

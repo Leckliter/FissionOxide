@@ -251,6 +251,8 @@ const ALL: &[Icon] = &[
   Icon::Properties,
   Icon::SkScaleTo,
   Icon::SketchLibrary,
+  Icon::SkRemoveDuplicates,
+  Icon::SkCleanup,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

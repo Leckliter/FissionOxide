@@ -149,6 +149,12 @@ change a parameter and watch the whole history rebuild.
   they turn about an axis, drawn on one side of it; it also follows the bodies). Trim, break, extend and offset work on splines and
   ellipses too; what is left of an ellipse is an elliptical arc, of a fit-point spline a
   fit-point spline, and of other splines an exact Bézier chain with draggable handles.
+- **Sketch clean-up.** Remove Duplicates (`sketch.remove_duplicates`) deletes curves lying on
+  another of the same kind within a tolerance (Exact to Loose 0.01", or your own), cuts back
+  lines that overlap part way and never treats a shared corner as a duplicate; the dialog says
+  what goes. Clean Up (`sketch.cleanup`) makes an imported or projected sketch DXF-clean:
+  projection links broken, constraints and dimensions deleted, stray points purged,
+  construction to normal, gaps between curve ends closed, splines turned into arcs or lines.
 - **Sketch on faces.** Sketches and features follow the faces and edges they were built on
   when the model changes: make the block taller and the hole on its top face moves up.
 - **Files, like Fusion.** Open, insert and export STEP, IGES, BRep, STL, OBJ, 3MF, PLY and DXF;

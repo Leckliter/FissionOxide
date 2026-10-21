@@ -623,3 +623,5 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
+#[cfg(test)]
+mod tests_sketch_cleanup;

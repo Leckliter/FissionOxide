@@ -1347,6 +1347,31 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       ("align", q)
     }
     "sketch.scale_to.form" => crate::scale_to_ui::params(&p),
+    "sketch.remove_duplicates.form" => {
+      // a preset tolerance, or the custom one
+      let mut q = p.clone();
+      if let Some(m) = q.as_object_mut() {
+        let custom = m.remove("custom");
+        if m.get("tolerance").and_then(Value::as_str) == Some("custom") {
+          match custom {
+            Some(c) => m.insert("tolerance".into(), c),
+            None => m.remove("tolerance"),
+          };
+        }
+      }
+      ("sketch.remove_duplicates", q)
+    }
+    "sketch.cleanup.form" => {
+      // the form's ticks keep links and points; the command's flags remove them
+      let mut q = p.clone();
+      if let Some(m) = q.as_object_mut() {
+        let keep_links = m.remove("keep_links").and_then(|v| v.as_bool()).unwrap_or(false);
+        let keep_points = m.remove("keep_points").and_then(|v| v.as_bool()).unwrap_or(false);
+        m.insert("break_links".into(), json!(!keep_links));
+        m.insert("purge_points".into(), json!(!keep_points));
+      }
+      ("sketch.cleanup", q)
+    }
     _ => (form.cmd, p),
   }
 }
@@ -2321,6 +2346,57 @@ pub static SK_SCALE_TO: Form = Form {
     Input::Expr { key: "padding", label: "Padding", default: "0.25 in" },
     Input::Choice { key: "anchor", label: "Anchor", options: crate::scale_to_ui::ANCHORS },
     Input::Check { key: "rotate", label: "Rotate to fit (box)" },
+  ],
+  picks_model: false,
+};
+
+const DUPLICATE_TOLERANCES: &[(&str, &str)] = &[
+  ("0.001 in", "Standard 0.001\""),
+  ("0.00001 in", "Exact"),
+  ("0.0001 in", "Tight 0.0001\""),
+  ("0.01 in", "Loose 0.01\""),
+  ("custom", "Custom"),
+];
+
+pub static SK_REMOVE_DUPLICATES: Form = Form {
+  title: "REMOVE DUPLICATES",
+  name: "Remove Duplicates",
+  hint: "Delete curves lying on another of the same kind (the first stays); overlapping lines are cut back",
+  icon: Icon::SkRemoveDuplicates,
+  cmd: "sketch.remove_duplicates.form",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Choice { key: "tolerance", label: "Tolerance", options: DUPLICATE_TOLERANCES },
+    Input::Expr { key: "custom", label: "Custom tolerance", default: "0.001 in" },
+    Input::Check { key: "include_construction", label: "Include construction" },
+  ],
+  picks_model: false,
+};
+
+const CLEANUP_CONSTRAINTS: &[(&str, &str)] =
+  &[("projected", "On projected geometry"), ("all", "All"), ("none", "None")];
+const CLEANUP_SPLINES: &[(&str, &str)] = &[("none", "Keep"), ("arcs", "Arcs and lines"), ("lines", "Lines")];
+
+pub static SK_CLEANUP: Form = Form {
+  title: "CLEAN UP",
+  name: "Clean Up",
+  hint: "Make an imported or projected sketch DXF-clean: links broken, constraints and stray points gone, gaps closed, splines to arcs or lines",
+  icon: Icon::SkCleanup,
+  cmd: "sketch.cleanup.form",
+  fixed: &[],
+  inputs: &[
+    Input::Sketch { key: "sketch", label: "Sketch" },
+    Input::Check { key: "keep_links", label: "Keep projection links" },
+    Input::Choice { key: "delete_constraints", label: "Delete constraints", options: CLEANUP_CONSTRAINTS },
+    Input::Check { key: "delete_dimensions", label: "Delete dimensions" },
+    Input::Check { key: "keep_points", label: "Keep unattached points" },
+    Input::Check { key: "construction_to_normal", label: "Construction to normal" },
+    Input::Check { key: "merge_gaps", label: "Merge gaps" },
+    Input::Expr { key: "gap_tolerance", label: "Gap tolerance", default: "0.001 in" },
+    Input::Choice { key: "splines_to", label: "Splines to", options: CLEANUP_SPLINES },
+    Input::Expr { key: "segments", label: "Segments (lines)", default: "64" },
+    Input::Expr { key: "spline_tolerance", label: "Tolerance (arcs)", default: "0.001 in" },
   ],
   picks_model: false,
 };

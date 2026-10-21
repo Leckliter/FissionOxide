@@ -262,6 +262,9 @@ pub enum Icon {
   SkScaleTo,
   /// Insert > Sketch Library.
   SketchLibrary,
+  // sketch clean-up
+  SkRemoveDuplicates,
+  SkCleanup,
 }
 
 #[derive(Clone, Copy)]
@@ -1974,6 +1977,24 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.circle((0.68, 0.36), 0.05, Some(Teal), None);
       k.sk(&[(0.56, 0.7), (0.8, 0.7)], Teal);
       k.vtx((0.32, 0.72));
+    }
+    Icon::SkRemoveDuplicates => {
+      // a line with a copy lying on it, the copy crossed out
+      k.sk(&[(0.06, 0.36), (0.94, 0.36)], Slate);
+      k.dashed((0.06, 0.5), (0.94, 0.5), Coral);
+      k.vtx((0.06, 0.36));
+      k.vtx((0.94, 0.36));
+      k.thick((0.56, 0.64), (0.84, 0.92), Coral, 1.2);
+      k.thick((0.84, 0.64), (0.56, 0.92), Coral, 1.2);
+    }
+    Icon::SkCleanup => {
+      // an outline with its gap closed, and a sparkle
+      k.sk(&[(0.5, 0.94), (0.06, 0.94), (0.06, 0.4), (0.5, 0.4)], Slate);
+      k.sk(&[(0.5, 0.4), (0.62, 0.4), (0.62, 0.94), (0.5, 0.94)], Coral);
+      k.dot((0.5, 0.4), Coral);
+      k.dot((0.5, 0.94), Coral);
+      k.thick((0.8, 0.06), (0.8, 0.38), Coral, 1.0);
+      k.thick((0.64, 0.22), (0.96, 0.22), Coral, 1.0);
     }
   }
 }

@@ -532,6 +532,8 @@ pub struct Dialog {
   sheet_picks: usize,
   /// New Component operation: the new component's name (empty = the next default name).
   comp_name: String,
+  /// What the previewed command reports it did (Remove Duplicates' counts).
+  summary: Option<String>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -648,6 +650,7 @@ impl Dialog {
       follow: false,
       sheet_picks: 0,
       comp_name: String::new(),
+      summary: None,
     }
   }
 
@@ -1570,8 +1573,12 @@ impl Dialog {
         self.applied = true;
         self.note_preview(&v);
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
+        self.summary = v.get("summary").and_then(Value::as_str).map(str::to_string);
       }
-      Err(e) => self.error = Some(e.0),
+      Err(e) => {
+        self.error = Some(e.0);
+        self.summary = None;
+      }
     }
     if !self.picks() {
       s.selection = selection;
@@ -2002,6 +2009,9 @@ impl Dialog {
             if let Some(e) = &self.error {
               ui.add_space(6.0);
               ui.label(RichText::new(format!("⚠ {e}")).color(theme::ERROR));
+            } else if let Some(n) = self.summary.as_ref().filter(|_| self.applied) {
+              ui.add_space(6.0);
+              ui.label(RichText::new(n).color(theme::MUTED));
             }
           });
           let sep = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover()).0;
@@ -5739,5 +5749,45 @@ mod tests {
     assert!((d.manipulator(&s).unwrap().origin.x - 5.0).abs() < 1e-9);
     let ok = d.command().unwrap();
     assert_eq!(ok.1["plane"], json!({"feature": pl.0}));
+  }
+
+  #[test]
+  fn remove_duplicates_and_clean_up_forms() {
+    use crate::forms::*;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0.01], [0, 0]]}));
+    let sk = s.edit_sketch.unwrap();
+    // a custom tolerance under the 0.01 mm offset keeps both lines
+    let set = [("tolerance", json!("custom")), ("custom", json!("0.001 mm"))];
+    let mut d = form(&mut s, &SK_REMOVE_DUPLICATES, vec![], &set);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["tolerance"]), ("sketch.remove_duplicates", &json!("0.001 mm")));
+    assert!(p.get("custom").is_none());
+    apply(&mut s, &mut d);
+    assert_eq!(d.summary.as_deref(), Some("No duplicates"));
+    d.unpreview(&mut s);
+    // the standard 0.001" takes the copy, and the dialog says so
+    let mut d = form(&mut s, &SK_REMOVE_DUPLICATES, vec![], &[]);
+    assert_eq!(d.command().unwrap().1["tolerance"], "0.001 in");
+    apply(&mut s, &mut d);
+    assert_eq!(d.summary.as_deref(), Some("1 line removed"));
+    assert_eq!(s.design.sketch(sk).unwrap().curves.len(), 1);
+
+    // Clean Up: links break and stray points go unless kept
+    run(&mut s, "sketch.point", json!({"at": [5, 5]}));
+    let mut d = form(&mut s, &SK_CLEANUP, vec![], &[("keep_points", json!(true))]);
+    let p = d.command().unwrap().1;
+    assert_eq!((p["break_links"].clone(), p["purge_points"].clone()), (json!(true), json!(false)));
+    assert_eq!(p["delete_constraints"], "projected");
+    assert_eq!(p["splines_to"], "none");
+    let points = s.design.sketch(sk).unwrap().points.len();
+    apply(&mut s, &mut d);
+    assert_eq!(s.design.sketch(sk).unwrap().points.len(), points);
+    d.unpreview(&mut s);
+    let mut d = form(&mut s, &SK_CLEANUP, vec![], &[]);
+    apply(&mut s, &mut d);
+    assert_eq!(s.design.sketch(sk).unwrap().points.len(), points - 1);
   }
 }
