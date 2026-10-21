@@ -4,12 +4,17 @@
 //! heightfield); the clearing grows in from the open air around the stock, or from a helix in
 //! closed areas, by the step-over each pass (see [`super::adaptive`]), so the tool's
 //! engagement stays about constant.
+//!
+//! Rest roughing runs the setup's earlier toolpaths through the stock first (see
+//! [`super::rest`]): at each level, wherever the tool would find no material left it counts
+//! as open air, so the clearing only grows into what a larger tool left.
 
 use fox_kernel::SurfaceKind;
 use fox_kernel::glam::DVec2;
 
 use super::adaptive::{Walls, helix_radius, plan_on, replay};
 use super::region::Grid;
+use super::rest::LEFT;
 use super::sim::Heightfield;
 use super::{Operation, Path, Setup, Tool, ToolKind};
 use crate::regen::Model;
@@ -33,7 +38,14 @@ fn grown(tool: &Tool, extra: f64) -> Tool {
   t
 }
 
-pub(super) fn rough(p: &mut Path, setup: &Setup, model: &Model, op: &Operation) -> Result<(), String> {
+/// `left`: the stock the earlier operations left, for rest roughing.
+pub(super) fn rough(
+  p: &mut Path,
+  setup: &Setup,
+  model: &Model,
+  op: &Operation,
+  left: Option<&Heightfield>,
+) -> Result<(), String> {
   let (slo, shi) = super::stock(setup, model)?;
   let (plo, _) = super::part_box(setup, model)?;
   let r = op.tool.radius();
@@ -84,8 +96,15 @@ pub(super) fn rough(p: &mut Path, setup: &Setup, model: &Model, op: &Operation) 
   let cap = wall + helix_radius(op).max(s) + 4.0 * h;
   let mut above = shi.z;
   let mut any = false;
+  // columns well inside the tool only, so the wall beside a tangent pass doesn't count
+  let reach = left.map_or(0.0, |l| (r - l.h * 0.5).max(l.h * 0.5));
   for z in zs {
     let blocked: Vec<bool> = low.iter().map(|d| *d > z + 1e-9).collect();
+    // rest roughing: nothing left under the tool counts as air
+    let air: Vec<bool> = match left {
+      Some(l) => (0..n).map(|i| air[i] || (!blocked[i] && !l.material_above(grid.node(i), reach, z, LEFT))).collect(),
+      None => air.clone(),
+    };
     // anything to cut at this level?
     if !(0..n).any(|i| !air[i] && !blocked[i]) {
       continue;
@@ -98,7 +117,7 @@ pub(super) fn rough(p: &mut Path, setup: &Setup, model: &Model, op: &Operation) 
       grid.v[i] = d.clamp(-cap, cap);
     }
     let walls = Field(grid.clone());
-    let plan = match plan_on(grid.clone(), &walls, wall, cap, op, air.clone()) {
+    let plan = match plan_on(grid.clone(), &walls, wall, cap, op, air) {
       Ok(plan) => plan,
       // nowhere the tool fits at this level
       Err(e) if e.contains("doesn't fit") => continue,
@@ -112,7 +131,11 @@ pub(super) fn rough(p: &mut Path, setup: &Setup, model: &Model, op: &Operation) 
     above = z;
   }
   if !any {
-    return Err("there is no stock around the part the tool can reach".into());
+    return Err(if left.is_some() {
+      "the earlier operations left nothing this tool can reach".into()
+    } else {
+      "there is no stock around the part the tool can reach".into()
+    });
   }
   Ok(())
 }

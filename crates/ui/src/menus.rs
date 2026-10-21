@@ -786,6 +786,7 @@ const DRAWING: [Group; 8] = [
 
 const CAM_SETUP: &[E] = &[
   c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP))),
+  c("Fixtures", Icon::Component, D(Kind::Form(&forms::CAM_FIXTURES))),
   E::Sep,
   c("Tool Library", Icon::Configure, Cmd::CamTools),
 ];

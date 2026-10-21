@@ -15,6 +15,7 @@ use crate::{BodyId, FaceRef};
 pub mod adaptive;
 pub mod adaptive3d;
 pub mod arcs;
+pub mod collide;
 pub mod finish3d;
 pub mod post;
 pub mod region;
@@ -23,7 +24,7 @@ pub mod sim;
 pub mod surface;
 pub mod tools;
 
-pub use tools::{Library, ToolKind};
+pub use tools::{HolderStep, Library, ToolKind};
 
 /// Clearance above the stock for rapid moves between operations (mm).
 pub(crate) const CLEARANCE: f64 = 10.0;
@@ -58,6 +59,10 @@ pub struct Setup {
   /// How far an arc may stray from the moves it replaces (mm; 0 = 0.01).
   #[serde(default)]
   pub arc_tolerance: f64,
+  /// Bodies that hold the part (vise jaws, clamps, a fixture plate): never machined, and
+  /// checked for collisions with the tool and its holder.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub fixtures: Vec<BodyId>,
 }
 
 fn one() -> f64 {
@@ -102,12 +107,16 @@ pub struct Tool {
   pub flute_length: f64,
   #[serde(default)]
   pub flutes: u32,
-  /// Diameter of the tool holder (mm; 0 = no holder checks).
+  /// Diameter of the tool holder (mm; 0 = no holder checks): a plain cylinder, when it has no
+  /// `holder` steps.
   #[serde(default)]
   pub holder_diameter: f64,
   /// How far the tool sticks out of its holder, tip to holder face (mm).
   #[serde(default)]
   pub stickout: f64,
+  /// A stepped holder: cylinders from its face up (the last runs up to the spindle).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub holder: Vec<tools::HolderStep>,
 }
 
 fn tip_angle() -> f64 {
@@ -257,13 +266,20 @@ pub enum OpKind {
   },
   /// 3D adaptive roughing: the stock around the part cleared level by level, each level grown
   /// in from the open side (or a helix in closed areas) by the step-over so the engagement
-  /// stays about constant; flat areas of the part get a level of their own.
-  Adaptive3d,
+  /// stays about constant; flat areas of the part get a level of their own. `rest` only cuts
+  /// what the setup's earlier operations left (the corners a larger tool couldn't reach).
+  Adaptive3d {
+    #[serde(default)]
+    rest: bool,
+  },
   /// 3D pencil finishing: one pass along each concave corner and fillet tighter than the tool,
-  /// where it touches the part on two sides at once.
+  /// where it touches the part on two sides at once, and `passes` more either side of it a
+  /// step-over apart.
   Pencil {
     #[serde(default)]
     faces: Vec<FaceRef>,
+    #[serde(default)]
+    passes: u32,
   },
   /// 3D steep and shallow finishing: contour (waterline) passes a step-down apart where the
   /// part is steeper than `threshold` degrees, parallel rows a step-over apart where it isn't.
@@ -339,8 +355,14 @@ pub fn origin(setup: &Setup, model: &Model) -> Result<DVec3, String> {
   Ok(DVec3::new(lo.x, lo.y, hi.z))
 }
 
+/// The bodies to machine: the setup's part, or every body but the fixtures.
 pub(crate) fn bodies<'a>(setup: &Setup, model: &'a Model) -> Vec<&'a Body> {
-  model.bodies.iter().filter(|b| setup.body.is_none_or(|id| id == b.id)).collect()
+  model.bodies.iter().filter(|b| setup.body.is_none_or(|id| id == b.id) && !setup.fixtures.contains(&b.id)).collect()
+}
+
+/// The setup's fixtures that still exist.
+pub(crate) fn fixtures<'a>(setup: &Setup, model: &'a Model) -> Vec<&'a Body> {
+  model.bodies.iter().filter(|b| setup.fixtures.contains(&b.id)).collect()
 }
 
 fn part_box(setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
@@ -577,8 +599,11 @@ fn toolpath(setup: &Setup, op: &Operation, model: &Model, previous: &[Toolpath])
     }
     OpKind::Parallel { faces, angle } => surface::parallel(&mut p, setup, model, op, faces, *angle)?,
     OpKind::Scallop { faces } => surface::scallop(&mut p, setup, model, op, faces)?,
-    OpKind::Adaptive3d => adaptive3d::rough(&mut p, setup, model, op)?,
-    OpKind::Pencil { faces } => finish3d::pencil(&mut p, setup, model, op, faces)?,
+    OpKind::Adaptive3d { rest } => {
+      let left = if *rest { Some(rest::remaining(setup, model, previous, &op.tool)?) } else { None };
+      adaptive3d::rough(&mut p, setup, model, op, left.as_ref())?
+    }
+    OpKind::Pencil { faces, passes } => finish3d::pencil(&mut p, setup, model, op, faces, *passes)?,
     OpKind::SteepShallow { faces, threshold } => finish3d::steep_shallow(&mut p, setup, model, op, faces, *threshold)?,
     OpKind::Contour3d { faces, min_slope } => finish3d::contour(&mut p, setup, model, op, faces, *min_slope)?,
     OpKind::Drill { holes, peck } => {

@@ -728,10 +728,22 @@ impl App {
       Ok(r) if report => {
         let ops = r["operations"].as_array().map(Vec::len).unwrap_or(0);
         let min = r["minutes"].as_f64().unwrap_or(0.0);
-        self.status = Some((
-          format!("{ops} operation(s) · about {:.0} min {:.0} s machining", min.floor(), (min.fract() * 60.0).round()),
-          false,
-        ));
+        let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+        let time =
+          format!("{ops} operation(s) · about {:.0} min {:.0} s machining", min.floor(), (min.fract() * 60.0).round());
+        // holder and fixture collisions
+        self.status = Some(match warnings.first() {
+          None => (time, false),
+          Some(w) => (
+            format!(
+              "{time} · {} warning(s): {}{}",
+              warnings.len(),
+              w["message"].as_str().unwrap_or(""),
+              if warnings.len() > 1 { " …" } else { "" }
+            ),
+            true,
+          ),
+        });
       }
       Ok(_) => {}
       Err(e) => {
