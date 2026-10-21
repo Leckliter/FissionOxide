@@ -42,7 +42,7 @@ entry names either the add-in's own command or a built-in one:
 [[commands]]
 builtin = "sketch.remove_duplicates"   # a built-in command, shown in this tab too
 label = "Clean Duplicate Lines"        # optional: the tab's own label and tooltip
-icon = "icons/01-line-cleaner.svg"     # optional: the add-in's own icon for it
+icon = "icons/01-line-cleaner.png"     # optional: the add-in's own icon for it
 panel = "prepare"
 step = 1                               # optional: order in the workflow, drawn on the icon
 ```
@@ -51,6 +51,15 @@ The built-in command stays where it always was in the app's own tabs, with its o
 add-in's tab only shows it again, in its own style. Switching the add-in off removes its tab and
 leaves the built-in commands alone. `step` numbers the commands in the order they are used from
 start to finish; the add-in's icons carry the number, and the tab is laid out in step order.
+
+The manifest code (`fox_plugin::Manifest`) and the toolbar tabs already handle this, for plugins
+as well as add-ins. A `builtin` entry takes no `id`; its label defaults to the command's id. Its
+`inputs`, if any, open a dialog like a plugin command's, and their values become the command's
+parameters. A selection limited to one pick passes the pick itself: a body or feature as its
+id, a face or edge as `{"body", "face"}` and so on. Without inputs, the command runs straight
+away. It runs under the same rules as a plugin's own `execute` calls (see below) and is one undo
+step named after the entry. Built-in ids are not checked against the engine at install time, so
+a tab can name commands the app is still gaining.
 
 ## Goals
 
