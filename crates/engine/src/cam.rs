@@ -2,7 +2,7 @@
 //! simulation and G-code.
 
 use fox_model::BodyId;
-use fox_model::cam::{self, Entry, Library, OpKind, Operation, Setup, Tabs, Tool, ToolKind};
+use fox_model::cam::{self, Entry, HolderStep, Library, OpKind, Operation, Setup, Tabs, Tool, ToolKind};
 use serde_json::{Value, json};
 
 use crate::commands::{face_ref, opt_str, req_str};
@@ -16,6 +16,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     }
     "cam.adaptive3d" | "cam.pencil" | "cam.steep_shallow" | "cam.contour3d" => operation(s, name, p),
     "cam.generate" => generate(s, p),
+    "cam.fixtures" => set_fixtures(s, p),
     "cam.post" => post(s, p),
     "cam.list" => Ok(json!(
       s.design
@@ -24,6 +25,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         .map(|st| json!({
           "setup": st.id, "name": st.name, "body": st.body.map(|b| b.0),
           "post": cam::post::find(&st.post).map(|p| p.id), "units": if st.imperial { "inch" } else { "mm" },
+          "fixtures": st.fixtures.iter().map(|b| b.0).collect::<Vec<_>>(),
           "operations": st.operations.iter().map(|o| json!({
             "name": o.name, "tool": o.tool.number, "diameter": o.tool.diameter, "kind": o.tool.kind.id(),
           })).collect::<Vec<_>>(),
@@ -118,6 +120,7 @@ fn setup(s: &mut Session, p: &Value) -> CmdResult {
     imperial: imperial_of(p)?.unwrap_or(false),
     straight: p.get("arcs").is_some() && !flag(p, "arcs"),
     arc_tolerance: num(p, "arc_tolerance", 0.0).max(0.0),
+    fixtures: fixtures_of(s, p, body)?,
   };
   let (lo, hi) = cam::stock(&st, &s.model).map_err(CmdError::new)?;
   s.edit(|d| {
@@ -125,6 +128,75 @@ fn setup(s: &mut Session, p: &Value) -> CmdResult {
     Ok(())
   })?;
   Ok(json!({"setup": id, "stock": [lo.to_array(), hi.to_array()]}))
+}
+
+/// The fixture bodies a command names: `fixtures` (body ids) and the bodies of `components`
+/// (component ids), never the part itself.
+fn fixtures_of(s: &Session, p: &Value, part: Option<BodyId>) -> Result<Vec<BodyId>, CmdError> {
+  let ids = |k: &str| -> Result<Vec<u32>, CmdError> {
+    let mut out = Vec::new();
+    for v in p.get(k).and_then(Value::as_array).into_iter().flatten() {
+      let id = v
+        .as_u64()
+        .or_else(|| v.get("id").and_then(Value::as_u64))
+        .ok_or_else(|| CmdError::new(format!("'{k}' takes ids")))?;
+      out.push(id as u32);
+    }
+    Ok(out)
+  };
+  let mut out: Vec<BodyId> = Vec::new();
+  for b in ids("fixtures")? {
+    if s.model.body(BodyId(b)).is_none() {
+      return Err(CmdError::new(format!("no body {b}")));
+    }
+    out.push(BodyId(b));
+  }
+  for c in ids("components")? {
+    let comp =
+      s.design.components.iter().find(|x| x.id.0 == c).ok_or_else(|| CmdError::new(format!("no component {c}")))?;
+    out.extend(comp.bodies.iter().copied().filter(|b| s.model.body(*b).is_some()));
+  }
+  out.sort();
+  out.dedup();
+  if part.is_some_and(|b| out.contains(&b)) {
+    return Err(CmdError::new("the part can't be a fixture of its own setup"));
+  }
+  if part.is_none() && !out.is_empty() && s.model.bodies.iter().all(|b| out.contains(&b.id)) {
+    return Err(CmdError::new("every body is a fixture: there is nothing left to machine"));
+  }
+  Ok(out)
+}
+
+/// Sets the fixtures of a setup (the bodies holding the part, checked for collisions).
+fn set_fixtures(s: &mut Session, p: &Value) -> CmdResult {
+  let i = setup_index(s, p)?;
+  let fixtures = fixtures_of(s, p, s.design.cam[i].body)?;
+  let mut probe = s.design.cam[i].clone();
+  probe.fixtures = fixtures.clone();
+  let paths = cam::toolpaths(&probe, &s.model).map_err(CmdError::new)?;
+  let warnings = cam::collide::check(&probe, &s.model, &paths).map_err(CmdError::new)?;
+  let id = probe.id;
+  s.edit(|d| {
+    d.cam[i].fixtures = fixtures.clone();
+    Ok(())
+  })?;
+  s.toolpaths.clear();
+  s.toolpaths_of = None;
+  s.simulation = None;
+  Ok(
+    json!({"setup": id, "fixtures": fixtures.iter().map(|b| b.0).collect::<Vec<_>>(), "warnings": warnings_json(&warnings)}),
+  )
+}
+
+fn warnings_json(w: &[cam::sim::Warning]) -> Vec<Value> {
+  w.iter()
+    .map(|w| {
+      json!({
+        "operation": w.operation, "kind": w.kind.id(), "message": w.message(), "at": w.at.to_array(),
+        "depth": w.depth, "moves": w.moves,
+      })
+    })
+    .collect()
 }
 
 fn faces_of(s: &Session, p: &Value, k: &str) -> Result<Vec<fox_model::FaceRef>, CmdError> {
@@ -146,6 +218,8 @@ fn tool_json(t: &Tool) -> Value {
     "corner_radius": t.corner_radius, "angle": t.angle, "tip_diameter": t.tip_diameter,
     "flute_length": t.flute_length, "flutes": t.flutes, "rpm": t.rpm, "feed": t.feed, "plunge": t.plunge,
     "holder_diameter": t.holder_diameter, "stickout": t.stickout,
+    "holder": t.holder.iter().map(|h| json!({"diameter": h.diameter, "length": h.length})).collect::<Vec<_>>(),
+    "holder_text": HolderStep::format_list(&t.holder),
     "description": t.describe(),
   })
 }
@@ -175,10 +249,35 @@ fn tool_fields(t: &Value, base: Tool) -> Result<Tool, CmdError> {
     plunge: num(t, "plunge", base.plunge),
     holder_diameter: num(t, "holder_diameter", base.holder_diameter),
     stickout: num(t, "stickout", base.stickout),
+    holder: match t.get("holder") {
+      Some(h) => holder_of(h)?,
+      None => base.holder.clone(),
+    },
     ..base
   };
   tool.check().map_err(CmdError::new)?;
   Ok(tool)
+}
+
+/// Holder steps: `[{diameter, length}]`, `[[diameter, length]]` or "Ø×length, …".
+fn holder_of(h: &Value) -> Result<Vec<HolderStep>, CmdError> {
+  match h {
+    Value::Null => Ok(Vec::new()),
+    Value::String(t) => HolderStep::parse_list(t).map_err(CmdError::new),
+    Value::Array(items) => items
+      .iter()
+      .map(|v| match v {
+        Value::Array(pair) => Ok(HolderStep {
+          diameter: pair.first().and_then(Value::as_f64).unwrap_or(0.0),
+          length: pair.get(1).and_then(Value::as_f64).unwrap_or(0.0),
+        }),
+        Value::Object(_) => Ok(HolderStep { diameter: num(v, "diameter", 0.0), length: num(v, "length", 0.0) }),
+        Value::Number(d) => Ok(HolderStep { diameter: d.as_f64().unwrap_or(0.0), length: 0.0 }),
+        _ => Err(CmdError::new("a holder step is {diameter, length}")),
+      })
+      .collect(),
+    _ => Err(CmdError::new("'holder' is a list of steps ({diameter, length}) or \"Ø×length, …\"")),
+  }
 }
 
 fn tool_add(s: &mut Session, p: &Value) -> CmdResult {
@@ -308,8 +407,14 @@ fn operation(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "cam.parallel" => OpKind::Parallel { faces: faces_of(s, p, "faces")?, angle: num(p, "angle", 0.0) },
     "cam.scallop" => OpKind::Scallop { faces: faces_of(s, p, "faces")? },
-    "cam.adaptive3d" => OpKind::Adaptive3d,
-    "cam.pencil" => OpKind::Pencil { faces: faces_of(s, p, "faces")? },
+    "cam.adaptive3d" => OpKind::Adaptive3d { rest: flag(p, "rest") },
+    "cam.pencil" => {
+      let passes = num(p, "passes", 0.0);
+      if !(passes >= 0.0 && passes.fract() == 0.0) {
+        return Err(CmdError::new("the pencil passes are a whole number either side"));
+      }
+      OpKind::Pencil { faces: faces_of(s, p, "faces")?, passes: passes as u32 }
+    }
     "cam.steep_shallow" => {
       OpKind::SteepShallow { faces: faces_of(s, p, "faces")?, threshold: num(p, "threshold", 45.0) }
     }
@@ -360,16 +465,26 @@ fn operation(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   probe.operations.push(op.clone());
   let paths = cam::toolpaths(&probe, &s.model).map_err(CmdError::new)?;
   let moves = paths.last().map(|t| t.moves.len()).unwrap_or(0);
+  // collisions of this operation's tool and holder with the part and the fixtures
+  let warnings = match paths.last() {
+    Some(last) => {
+      let mut w = cam::collide::check(&probe, &s.model, &paths).map_err(CmdError::new)?;
+      w.retain(|w| w.operation == last.name);
+      w
+    }
+    None => Vec::new(),
+  };
   let opname = op.name.clone();
   let number = op.tool.number;
   s.edit(|d| {
     d.cam[i].operations.push(op);
     Ok(())
   })?;
-  Ok(json!({"operation": opname, "moves": moves, "tool": number}))
+  Ok(json!({"operation": opname, "moves": moves, "tool": number, "warnings": warnings_json(&warnings)}))
 }
 
-/// Computes the toolpaths of a setup (shown in the viewport) and reports their length and time.
+/// Computes the toolpaths of a setup (shown in the viewport) and reports their length and
+/// time, and collisions of the holders with the part and of tools and holders with fixtures.
 fn generate(s: &mut Session, p: &Value) -> CmdResult {
   let i = setup_index(s, p)?;
   let st = &s.design.cam[i];
@@ -386,10 +501,11 @@ fn generate(s: &mut Session, p: &Value) -> CmdResult {
       "cutting_mm": cut, "rapid_mm": rapid, "minutes": time,
     }));
   }
+  let warnings = cam::collide::check(st, &s.model, &paths).map_err(CmdError::new)?;
   let id = st.id;
   s.toolpaths = paths;
   s.toolpaths_of = Some((id, s.revision));
-  Ok(json!({"setup": id, "operations": report, "minutes": total}))
+  Ok(json!({"setup": id, "operations": report, "minutes": total, "warnings": warnings_json(&warnings)}))
 }
 
 /// Writes a setup's G-code with its post-processor (or `post`/`units`); returns it when no
@@ -431,7 +547,8 @@ fn post(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 /// Runs a setup's toolpaths through its stock: removed volume and warnings (gouges, rapids
-/// into the stock, cuts deeper than the flutes). The result is drawn in the viewport.
+/// into the stock, cuts deeper than the flutes, holders into the material, tools or holders
+/// into the fixtures). The result is drawn in the viewport.
 fn simulate(s: &mut Session, p: &Value) -> CmdResult {
   let i = setup_index(s, p)?;
   let st = &s.design.cam[i];
@@ -440,16 +557,7 @@ fn simulate(s: &mut Session, p: &Value) -> CmdResult {
     return Err(CmdError::new("the setup has no operations"));
   }
   let sim = cam::sim::simulate(st, &s.model, &paths).map_err(CmdError::new)?;
-  let warnings: Vec<Value> = sim
-    .warnings
-    .iter()
-    .map(|w| {
-      json!({
-        "operation": w.operation, "kind": w.kind.id(), "message": w.message(), "at": w.at.to_array(),
-        "depth": w.depth, "moves": w.moves,
-      })
-    })
-    .collect();
+  let warnings = warnings_json(&sim.warnings);
   let out = json!({
     "setup": st.id,
     "cell": sim.stock.h,

@@ -540,6 +540,12 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the part, size the stock around it and set the work coordinate system that matches how the \
        part sits on the machine. Every operation belongs to a setup.",
     ),
+    (_, "Fixtures") => (
+      "Picks the bodies that hold the part: vise jaws, clamps, a fixture plate.",
+      "Fixtures are never machined and don't count for the stock. Tools and their holders are \
+       checked against them while toolpaths are generated and in Simulate, with a warning where they \
+       would run into one. Pick nothing to clear them.",
+    ),
     (_, "Tool Library") => (
       "Opens the cutting tools with their sizes, feeds and speeds.",
       "Browse, add and edit tools. Operations pick their tool from here, and its feeds and speeds \
@@ -608,7 +614,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     (_, "Adaptive Clearing") => (
       "Roughs the stock away around the part with a light, constant engagement.",
       "Pick a tool and the stock to leave; the stock is removed level by level while the cutter's load \
-       stays steady. Usually the first 3D operation, followed by finishing passes.",
+       stays steady. Usually the first 3D operation, followed by finishing passes. Rest machining cuts \
+       only what earlier, larger tools left.",
     ),
     (_, "Steep and Shallow") => (
       "Finishes steep areas with level passes and shallow areas with rows.",
@@ -622,8 +629,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Pencil") => (
       "Cleans out concave corners and fillets tighter than the tool.",
-      "Pick the area and a tool; the tool runs along the inside corners left by earlier passes. Use it \
-       as the last finishing step.",
+      "Pick the area and a tool; the tool runs along the inside corners left by earlier passes, and \
+       more passes either side a step-over apart if asked. Use it as the last finishing step.",
     ),
 
     // MANUFACTURE DRILLING

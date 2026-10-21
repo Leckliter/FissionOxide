@@ -163,9 +163,10 @@ change a parameter and watch the whole history rebuild.
   arcs. A fit-point spline stays a fit-point spline after Trim, Break and Extend (through the
   fit points it keeps, its new ends holding their direction). Sketch text takes fonts from
   disk: a font file's path or the name of one in the system's font folders (`sketch.fonts`).
-- **3D milling and arcs.** 3D adaptive roughing of the stock around the part, pencil,
-  steep-and-shallow and contour (waterline) finishing, and G2/G3 arcs (helical too) fitted to
-  the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
+- **3D milling and arcs.** 3D adaptive roughing of the stock around the part (and rest roughing
+  after a larger tool), pencil (with more passes either side of the corner), steep-and-shallow
+  and contour (waterline) finishing, stepped tool holders and fixtures checked for collisions,
+  and G2/G3 arcs (helical too) fitted to the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
 - **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
   DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
   machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
@@ -544,23 +545,39 @@ operations:
 - **Adaptive Clearing** (3D) roughs the stock around the whole part in levels a step-down apart,
   plus a level on each flat area: at each level the cut grows in from the open air around the
   stock (or from a helix in closed areas) by the optimal load, so the engagement stays about
-  constant, keeping the stock to leave (0.3 mm by default) off the part.
+  constant, keeping the stock to leave (0.3 mm by default) off the part. **Rest machining**
+  roughs only what the setup's earlier operations left, such as the corners a larger tool
+  couldn't reach: their toolpaths are run through the stock first, and wherever the tool would
+  find no material left it counts as open air.
 - **Contour** (3D) finishes steep areas in waterline passes at constant heights a step-down
   apart (only where the part is at least the minimum slope steep); **Steep and Shallow** adds
   parallel rows on the areas below the threshold angle; **Pencil** runs one pass along each
-  concave corner or fillet tighter than the tool, where it touches the part on two sides.
+  concave corner or fillet tighter than the tool, where it touches the part on two sides, and
+  **passes** more either side of it a step-over apart, inside out, riding the faces that meet
+  there (pieces the tool could only reach by jumping a cliff, such as up a vertical wall, are
+  left out).
 
 Pockets and contours enter by plunging, **ramping** along the cut, or down a **helix**, at the
 ramp angle.
 
 The **Tool Library** (SETUP ▸ Tool Library) is `tools.json` in the data hub; a hub without one
 starts with a standard set. Operations take a tool by number (`tool_number`) or by diameter,
-and keep a copy of it, so a design machines the same on another computer.
+and keep a copy of it, so a design machines the same on another computer. A tool's **holder**
+is its stickout (tip to holder face) and stepped cylinders from the face up, written
+`Ø×length, …` (`"16x20, 25x10, 40"`: the last runs up to the spindle).
+
+**Fixtures** (New Setup, or SETUP ▸ Fixtures, `cam.fixtures`) are the bodies or components
+holding the part — vise jaws, clamps, a fixture plate. They are never machined and don't count
+for the stock. While toolpaths are generated (each new operation, and **Generate**), holders
+running into the part and tools or holders running into a fixture are reported with where it
+first happens and how deep; **Simulate** checks the holder steps against the stock as it is
+cut, and the fixtures again.
 
 Toolpaths (cutting moves blue, rapids dashed orange) are drawn with the stock and follow design
 changes; **Generate** reports the machining time. **Simulate** cuts the stock with the
 toolpaths on a heightfield, shows what's left in the view (gouges in red) and warns about
-gouges, rapids into the stock and cuts deeper than the flutes. **Post Process** writes the
+gouges, rapids into the stock, cuts deeper than the flutes, holders into the material and
+tools or holders into the fixtures. **Post Process** writes the
 G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`.nc`), GRBL
 (`.gcode`, no tool changer: it stops for each tool, drilling written out), LinuxCNC (`.ngc`)
 or Mach3/4 (`.tap`), in mm or inches.
@@ -577,7 +594,8 @@ fissionoxide-cli exec part.fox '{"cmd": "cam.post", "path": "part.nc", "units": 
 fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, start to finish
 ```
 
-The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
+The simulation is a heightfield seen from above (no undercuts; holders and fixtures are checked
+from above too, so a fixture counts as solid down to the table), and there
 are no 4/5-axis or turning toolpaths yet: check the G-code against your machine before running
 it.
 

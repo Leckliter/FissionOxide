@@ -5172,6 +5172,10 @@ mod tests {
     assert_eq!(s.design.cam[0].operations[0].tool.diameter, 8.0);
     run(&mut s, "cam.generate", json!({}));
     assert_eq!(s.toolpaths.len(), 2);
+    // the fixtures form with nothing picked clears them
+    let mut d = form(&mut s, &CAM_FIXTURES, vec![], &[]);
+    apply(&mut s, &mut d);
+    assert!(s.design.cam[0].fixtures.is_empty());
   }
 
   #[test]

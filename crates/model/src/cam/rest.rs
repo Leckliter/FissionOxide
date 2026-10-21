@@ -10,7 +10,7 @@ use super::{Entry, Operation, Path, Setup, Tool, Toolpath, oriented};
 use crate::regen::Model;
 
 /// Material a column must stand above the cutting level to count (mm).
-const LEFT: f64 = 0.02;
+pub(super) const LEFT: f64 = 0.02;
 
 /// The stock after `previous`, on a grid fine enough for `tool`.
 pub(super) fn remaining(
