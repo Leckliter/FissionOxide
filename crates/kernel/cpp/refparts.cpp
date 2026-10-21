@@ -2,6 +2,7 @@
 // variable-radius fillet, with radii at points along the edge, down to nothing), and merging hole
 // walls that a tangent neighbour split in two.
 #include "fox-kernel/cpp/refparts.hxx"
+#include "fox-kernel/cpp/history.hxx"
 #include "fox-kernel/src/ffi.rs.h"
 
 #include <algorithm>
@@ -115,7 +116,11 @@ std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> ed
     if (added == 0) throw std::runtime_error("no edges to fillet");
     mk.Build();
     if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
-    return valid_shape(mk.Shape(), "fillet");
+    auto out = valid_shape(mk.Shape(), "fillet");
+    Track t({&s});
+    t.step(s.s, mk);
+    if (out->s.IsSame(mk.Shape())) t.attach(*out);
+    return out;
   } catch (...) {
     fail("variable fillet");
   }
@@ -129,6 +134,7 @@ std::unique_ptr<Shape> fillet_law(const Shape &s, rust::Slice<const uint32_t> ed
 std::unique_ptr<Shape> unify_faces_internal(const Shape &s) {
   auto out = std::make_unique<Shape>();
   out->s = s.s;
+  out->prov = s.prov;
   try {
     TopTools_IndexedDataMapOfShapeListOfShape ef;
     TopExp::MapShapesAndUniqueAncestors(s.s, TopAbs_EDGE, TopAbs_FACE, ef);
@@ -163,7 +169,13 @@ std::unique_ptr<Shape> unify_faces_internal(const Shape &s) {
       changed = true;
     }
     if (changed) merged = reshape.Apply(merged);
-    if (BRepCheck_Analyzer(merged).IsValid()) out->s = merged;
+    if (BRepCheck_Analyzer(merged).IsValid()) {
+      Track t({&s});
+      t.step(u.History());
+      if (changed) t.step(reshape.History());
+      out->s = merged;
+      t.attach(*out);
+    }
   } catch (...) {
     // keep the shape as it was
   }

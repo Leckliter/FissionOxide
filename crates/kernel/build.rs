@@ -61,6 +61,8 @@ fn main() {
   println!("cargo:rerun-if-changed=cpp/silhouette.hxx");
   println!("cargo:rerun-if-changed=cpp/offsetfaces.cpp");
   println!("cargo:rerun-if-changed=cpp/offsetfaces.hxx");
+  println!("cargo:rerun-if-changed=cpp/history.cpp");
+  println!("cargo:rerun-if-changed=cpp/history.hxx");
   let root = match std::env::var_os("FOX_OCCT_DIR") {
     Some(d) if !d.is_empty() => {
       let root = std::path::PathBuf::from(d);
@@ -116,6 +118,7 @@ fn main() {
     .file("cpp/curves3d.cpp")
     .file("cpp/silhouette.cpp")
     .file("cpp/offsetfaces.cpp")
+    .file("cpp/history.cpp")
     .std("c++17")
     .define("_USE_MATH_DEFINES", "TRUE")
     .include(&include)

@@ -2,6 +2,7 @@
 #include "fox-kernel/cpp/kernel.hxx"
 #include "fox-kernel/src/ffi.rs.h"
 #include "fox-kernel/cpp/threads.hxx"
+#include "fox-kernel/cpp/history.hxx"
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,13 @@ std::unique_ptr<Shape> wrap(const TopoDS_Shape &s) {
   return out;
 }
 
+// `wrap`, with the history `t` followed.
+std::unique_ptr<Shape> wrap(const TopoDS_Shape &s, const Track &t) {
+  auto out = wrap(s);
+  t.attach(*out);
+  return out;
+}
+
 gp_Pnt pnt(rust::Slice<const double> v, size_t i) { return gp_Pnt(v[i], v[i + 1], v[i + 2]); }
 gp_Dir dir(rust::Slice<const double> v, size_t i) { return gp_Dir(v[i], v[i + 1], v[i + 2]); }
 
@@ -197,8 +205,8 @@ void need(rust::Slice<const double> v, size_t n, const char *what) {
   }
 }
 
-// Validates a result; tries ShapeFix once if invalid.
-TopoDS_Shape checked(const TopoDS_Shape &s, const char *what) {
+// Validates a result; tries ShapeFix once if invalid (following the fix in `t`'s history).
+TopoDS_Shape checked(const TopoDS_Shape &s, const char *what, Track *t = nullptr) {
   if (s.IsNull()) {
     throw std::runtime_error(std::string(what) + " produced nothing");
   }
@@ -208,8 +216,11 @@ TopoDS_Shape checked(const TopoDS_Shape &s, const char *what) {
   }
   // ShapeFix can change sub-shapes in place, and `s` shares untouched ones with the operation's
   // input, which the regeneration cache still holds: fix a copy.
-  ShapeFix_Shape fix(BRepBuilderAPI_Copy(s).Shape());
+  BRepBuilderAPI_Copy copy(s);
+  if (t) t->step(s, copy);
+  ShapeFix_Shape fix(copy.Shape());
   fix.Perform();
+  if (t) t->step(fix.Context()->History());
   TopoDS_Shape f = fix.Shape();
   BRepCheck_Analyzer an2(f);
   if (!an2.IsValid()) {
@@ -229,6 +240,7 @@ std::array<double, 3> arr(const gp_XYZ &p) { return {p.X(), p.Y(), p.Z()}; }
 std::unique_ptr<Shape> shape_clone(const Shape &s) {
   auto out = std::make_unique<Shape>();
   out->s = s.s;
+  out->prov = s.prov;
   return out;
 }
 
@@ -597,10 +609,15 @@ std::unique_ptr<Shape> make_face(rust::Slice<const double> plane, rust::Slice<co
 
 std::unique_ptr<Shape> make_prism(const Shape &face, double dx, double dy, double dz) {
   FOX_TRY
+  Track t({&face});
   BRepPrimAPI_MakePrism mk(face.s, gp_Vec(dx, dy, dz), Standard_True);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("extrusion failed");
-  return wrap(checked(mk.Shape(), "extrusion"));
+  t.step(face.s, mk);
+  // the start cap stands for the profile face, the end cap is made from it
+  t.relate(face.s, mk.FirstShape(), false);
+  t.relate(face.s, mk.LastShape(), true);
+  return wrap(checked(mk.Shape(), "extrusion", &t), t);
   FOX_CATCH("extrude")
 }
 
@@ -608,10 +625,14 @@ std::unique_ptr<Shape> make_prism(const Shape &face, double dx, double dy, doubl
 std::unique_ptr<Shape> make_revol(const Shape &face, rust::Slice<const double> axis, double angle) {
   FOX_TRY
   need(axis, 6, "revolve axis");
+  Track t({&face});
   BRepPrimAPI_MakeRevol mk(face.s, gp_Ax1(pnt(axis, 0), dir(axis, 3)), angle, Standard_True);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("revolve failed");
-  return wrap(checked(mk.Shape(), "revolve"));
+  t.step(face.s, mk);
+  t.relate(face.s, mk.FirstShape(), false);
+  t.relate(face.s, mk.LastShape(), true);
+  return wrap(checked(mk.Shape(), "revolve", &t), t);
   FOX_CATCH("revolve")
 }
 
@@ -646,14 +667,18 @@ std::unique_ptr<Shape> make_torus(rust::Slice<const double> axis, double major, 
 }
 
 namespace {
-template <typename Op> TopoDS_Shape run_boolean(const TopoDS_Shape &a, const TopoDS_Shape &b, double fuzzy) {
+template <typename Op>
+TopoDS_Shape run_boolean(const TopoDS_Shape &a, const TopoDS_Shape &b, double fuzzy, Track &t) {
   Op op;
   TopTools_ListOfShape args, tools;
   // Even non-destructive, the result shares sub-shapes with the arguments and the simplification
   // below can change those in place, corrupting the arguments (bodies the regeneration cache and
   // undo still hold). Work on copies of the topology; the geometry is shared and stays untouched.
-  args.Append(BRepBuilderAPI_Copy(a, Standard_False).Shape());
-  tools.Append(BRepBuilderAPI_Copy(b, Standard_False).Shape());
+  BRepBuilderAPI_Copy ca(a, Standard_False), cb(b, Standard_False);
+  t.step(a, ca);
+  t.step(b, cb);
+  args.Append(ca.Shape());
+  tools.Append(cb.Shape());
   op.SetArguments(args);
   op.SetTools(tools);
   if (fuzzy > 0.0) op.SetFuzzyValue(fuzzy);
@@ -661,6 +686,7 @@ template <typename Op> TopoDS_Shape run_boolean(const TopoDS_Shape &a, const Top
   op.Build();
   if (!op.IsDone() || op.HasErrors()) throw std::runtime_error("boolean operation failed");
   op.SimplifyResult(Standard_True, Standard_True);
+  t.step(op.History());
   return op.Shape();
 }
 } // namespace
@@ -669,14 +695,16 @@ template <typename Op> TopoDS_Shape run_boolean(const TopoDS_Shape &a, const Top
 std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, int32_t op, double fuzzy) {
   FOX_TRY
   TopoDS_Shape r;
+  Track t({&a, &b});
   switch (op) {
-  case 0: r = run_boolean<BRepAlgoAPI_Fuse>(a.s, b.s, fuzzy); break;
-  case 1: r = run_boolean<BRepAlgoAPI_Cut>(a.s, b.s, fuzzy); break;
-  case 2: r = run_boolean<BRepAlgoAPI_Common>(a.s, b.s, fuzzy); break;
+  case 0: r = run_boolean<BRepAlgoAPI_Fuse>(a.s, b.s, fuzzy, t); break;
+  case 1: r = run_boolean<BRepAlgoAPI_Cut>(a.s, b.s, fuzzy, t); break;
+  case 2: r = run_boolean<BRepAlgoAPI_Common>(a.s, b.s, fuzzy, t); break;
   default: throw std::runtime_error("unknown boolean operation");
   }
   auto out = std::make_unique<Shape>();
-  out->s = r.IsNull() ? r : checked(r, "boolean");
+  out->s = r.IsNull() ? r : checked(r, "boolean", &t);
+  if (!r.IsNull()) t.attach(*out);
   return out;
   FOX_CATCH("boolean")
 }
@@ -696,7 +724,9 @@ std::unique_ptr<Shape> fillet(const Shape &s, rust::Slice<const uint32_t> edges,
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
-  return wrap(checked(mk.Shape(), "fillet"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "fillet", &t), t);
   FOX_CATCH("fillet")
 }
 
@@ -715,7 +745,9 @@ std::unique_ptr<Shape> chamfer(const Shape &s, rust::Slice<const uint32_t> edges
   if (added == 0) throw std::runtime_error("no edges to chamfer");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (distance too large?)");
-  return wrap(checked(mk.Shape(), "chamfer"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "chamfer", &t), t);
   FOX_CATCH("chamfer")
 }
 
@@ -734,7 +766,9 @@ std::unique_ptr<Shape> shell(const Shape &s, rust::Slice<const uint32_t> faces, 
                           round ? GeomAbs_Arc : GeomAbs_Intersection);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("shell failed (thickness too large for the geometry?)");
-  return wrap(checked(mk.Shape(), "shell"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "shell", &t), t);
   FOX_CATCH("shell")
 }
 
@@ -746,7 +780,9 @@ std::unique_ptr<Shape> transform(const Shape &s, rust::Slice<const double> m) {
   t.SetValues(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11]);
   BRepBuilderAPI_Transform mk(s.s, t, Standard_True);
   if (!mk.IsDone()) throw std::runtime_error("transform failed");
-  return wrap(mk.Shape());
+  Track h({&s});
+  h.step(s.s, mk);
+  return wrap(mk.Shape(), h);
   FOX_CATCH("transform")
 }
 
@@ -758,7 +794,9 @@ std::unique_ptr<Shape> mirror(const Shape &s, rust::Slice<const double> plane) {
   t.SetMirror(gp_Ax2(pnt(plane, 0), dir(plane, 3)));
   BRepBuilderAPI_Transform mk(s.s, t, Standard_True);
   if (!mk.IsDone()) throw std::runtime_error("mirror failed");
-  return wrap(mk.Shape());
+  Track h({&s});
+  h.step(s.s, mk);
+  return wrap(mk.Shape(), h);
   FOX_CATCH("mirror")
 }
 
@@ -766,7 +804,9 @@ std::unique_ptr<Shape> unify(const Shape &s) {
   FOX_TRY
   ShapeUpgrade_UnifySameDomain u(s.s, Standard_True, Standard_True, Standard_False);
   u.Build();
-  return wrap(u.Shape());
+  Track t({&s});
+  t.step(u.History());
+  return wrap(u.Shape(), t);
   FOX_CATCH("unify")
 }
 
@@ -781,7 +821,11 @@ std::unique_ptr<Shape> solid_at(const Shape &s, uint32_t i) {
   FOX_TRY
   uint32_t n = 0;
   for (TopExp_Explorer ex(s.s, TopAbs_SOLID); ex.More(); ex.Next(), ++n) {
-    if (n == i) return wrap(ex.Current());
+    if (n == i) {
+      auto out = wrap(ex.Current());
+      keep_history(*out, s);
+      return out;
+    }
   }
   throw std::runtime_error("no such solid");
   FOX_CATCH("solid")
@@ -1247,7 +1291,11 @@ std::unique_ptr<Shape> make_pipe(const Shape &face, const Shape &spine) {
   BRepOffsetAPI_MakePipe mk(path, face.s, GeomFill_IsCorrectedFrenet, Standard_False);
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the sweep failed");
-  return wrap(checked(mk.Shape(), "sweep"));
+  Track t({&face});
+  t.step(face.s, mk);
+  t.relate(face.s, mk.FirstShape(), false);
+  t.relate(face.s, mk.LastShape(), true);
+  return wrap(checked(mk.Shape(), "sweep", &t), t);
   FOX_CATCH("sweep")
 }
 
@@ -1302,7 +1350,9 @@ std::unique_ptr<Shape> split_by_plane(const Shape &s, rust::Slice<const double> 
   sp.SetFuzzyValue(1e-6);
   sp.Build();
   if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
-  return wrap(sp.Shape());
+  Track t({&s});
+  t.step(sp.History());
+  return wrap(sp.Shape(), t);
   FOX_CATCH("split")
 }
 
@@ -1327,7 +1377,9 @@ std::unique_ptr<Shape> draft(const Shape &s, rust::Slice<const uint32_t> faces, 
   if (added == 0) throw std::runtime_error("no faces to draft");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the draft failed");
-  return wrap(checked(mk.Shape(), "draft"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "draft", &t), t);
   FOX_CATCH("draft")
 }
 
@@ -1899,7 +1951,9 @@ std::unique_ptr<Shape> fillet_radii(const Shape &s, rust::Slice<const uint32_t> 
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
-  return wrap(checked(mk.Shape(), "fillet"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "fillet", &t), t);
   FOX_CATCH("fillet")
 }
 
@@ -2088,7 +2142,21 @@ std::unique_ptr<Shape> draft_prism(const Shape &face, double height, double angl
   LocOpe_DPrism dp(TopoDS::Face(face.s), height, angle);
   TopoDS_Shape r = dp.Shape();
   if (r.IsNull()) throw std::runtime_error("the tapered extrusion failed (taper too steep for the height?)");
-  return wrap(checked(r, "tapered extrusion"));
+  // LocOpe keeps its own record: the faces made from each profile edge, and the two caps
+  struct Sides {
+    LocOpe_DPrism &dp;
+    TopTools_ListOfShape none;
+    bool IsDeleted(const TopoDS_Shape &) { return false; }
+    const TopTools_ListOfShape &Modified(const TopoDS_Shape &) { return none; }
+    const TopTools_ListOfShape &Generated(const TopoDS_Shape &e) {
+      return e.ShapeType() == TopAbs_EDGE ? dp.Shapes(e) : none;
+    }
+  } sides{dp, {}};
+  Track t({&face});
+  t.step(face.s, sides);
+  t.relate(face.s, dp.FirstShape(), false);
+  t.relate(face.s, dp.LastShape(), true);
+  return wrap(checked(r, "tapered extrusion", &t), t);
   FOX_CATCH("tapered extrude")
 }
 
@@ -2176,7 +2244,9 @@ std::unique_ptr<Shape> chamfer2(const Shape &s, rust::Slice<const uint32_t> edge
   if (added == 0) throw std::runtime_error("no edges to chamfer");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the chamfer could not be computed (too large?)");
-  return wrap(checked(mk.Shape(), "chamfer"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "chamfer", &t), t);
   FOX_CATCH("chamfer")
 }
 
@@ -2196,7 +2266,9 @@ std::unique_ptr<Shape> fillet_var(const Shape &s, rust::Slice<const uint32_t> ed
   if (added == 0) throw std::runtime_error("no edges to fillet");
   mk.Build();
   if (!mk.IsDone()) throw std::runtime_error("the fillet could not be computed (radius too large?)");
-  return wrap(checked(mk.Shape(), "fillet"));
+  Track t({&s});
+  t.step(s.s, mk);
+  return wrap(checked(mk.Shape(), "fillet", &t), t);
   FOX_CATCH("fillet")
 }
 
@@ -2212,7 +2284,9 @@ std::unique_ptr<Shape> split_by_shape(const Shape &s, const Shape &tool) {
   sp.SetFuzzyValue(1e-6);
   sp.Build();
   if (!sp.IsDone() || sp.HasErrors()) throw std::runtime_error("the split failed");
-  return wrap(sp.Shape());
+  Track t({&s, &tool});
+  t.step(sp.History());
+  return wrap(sp.Shape(), t);
   FOX_CATCH("split")
 }
 
@@ -2348,7 +2422,9 @@ std::unique_ptr<Shape> scale(const Shape &s, double cx, double cy, double cz, do
     gp_Trsf t;
     t.SetScale(gp_Pnt(cx, cy, cz), sx);
     BRepBuilderAPI_Transform tr(s.s, t, Standard_True);
-    return wrap(tr.Shape());
+    Track h({&s});
+    h.step(s.s, tr);
+    return wrap(tr.Shape(), h);
   }
   gp_GTrsf g;
   g.SetValue(1, 1, sx);
@@ -2379,7 +2455,9 @@ std::unique_ptr<Shape> remove_faces(const Shape &s, rust::Slice<const uint32_t> 
   df.SetRunParallel(Standard_False);
   df.Build();
   if (!df.IsDone() || df.HasErrors()) throw std::runtime_error("the faces could not be removed");
-  return wrap(checked(df.Shape(), "remove faces"));
+  Track t({&s});
+  t.step(df.History());
+  return wrap(checked(df.Shape(), "remove faces", &t), t);
   FOX_CATCH("remove faces")
 }
 
@@ -2406,7 +2484,9 @@ std::unique_ptr<Shape> split_faces(const Shape &s, rust::Slice<const uint32_t> f
   if (n == 0) throw std::runtime_error("the tool does not cross the faces");
   ss.Build();
   if (!ss.IsDone()) throw std::runtime_error("the faces could not be split");
-  return wrap(ss.Shape());
+  Track t({&s});
+  t.step(s.s, ss);
+  return wrap(ss.Shape(), t);
   FOX_CATCH("split face")
 }
 
@@ -2551,7 +2631,9 @@ std::unique_ptr<Shape> make_vertex(double x, double y, double z) {
 
 std::unique_ptr<Shape> reversed(const Shape &s) {
   FOX_TRY
-  return wrap(s.s.Reversed());
+  auto out = wrap(s.s.Reversed());
+  keep_history(*out, s);
+  return out;
   FOX_CATCH("reverse")
 }
 

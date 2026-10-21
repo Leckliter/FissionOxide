@@ -63,6 +63,15 @@ pub(crate) mod ffi {
     circles: Vec<f64>,
   }
 
+  /// Per face of a shape (1-based face k spans `offsets[k-1]..offsets[k]`), the labels its history
+  /// traces it to, each flagged when the face was generated from the labelled shape rather than
+  /// modified from it.
+  struct LabelData {
+    offsets: Vec<u32>,
+    labels: Vec<u64>,
+    generated: Vec<u8>,
+  }
+
   unsafe extern "C++" {
     include!("fox-kernel/cpp/kernel.hxx");
 
@@ -272,6 +281,12 @@ pub(crate) mod ffi {
     // offsetting chosen faces of a solid, neighbours extending to meet them (cpp/offsetfaces.cpp)
     include!("fox-kernel/cpp/offsetfaces.hxx");
     fn offset_faces(s: &Shape, faces: &[u32], d: f64) -> Result<UniquePtr<Shape>>;
+    // modification history: labels followed through kernel calls (cpp/history.cpp)
+    include!("fox-kernel/cpp/history.hxx");
+    fn set_labels(s: Pin<&mut Shape>, face_ids: &[u32], face_labels: &[u64], edges: &[u64]) -> Result<()>;
+    fn has_labels(s: &Shape) -> bool;
+    fn face_labels(s: &Shape) -> Result<LabelData>;
+    fn same_faces(now: &Shape, before: &Shape) -> Result<Vec<u32>>;
   }
 }
 

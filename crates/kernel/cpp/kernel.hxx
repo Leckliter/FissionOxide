@@ -27,8 +27,12 @@ inline void catch_signals() {
   std::call_once(once, [] { OSD::SetSignal(Standard_False); });
 }
 
+struct Prov;
+
 struct Shape {
   TopoDS_Shape s;
+  // Labelled faces and edges this shape came from (history.hxx); none for most shapes.
+  std::shared_ptr<const Prov> prov;
 };
 
 struct MeshData;

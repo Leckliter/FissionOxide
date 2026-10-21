@@ -1124,6 +1124,10 @@ pub use spun::AxialEvents;
 #[cfg(test)]
 mod tests_spun;
 
+mod history;
 mod offsetfaces;
 #[cfg(test)]
 mod tests_offsetfaces;
+pub use history::FaceLabels;
+#[cfg(test)]
+mod tests_history;
