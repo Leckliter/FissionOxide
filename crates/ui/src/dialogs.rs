@@ -2098,7 +2098,6 @@ impl Dialog {
       if self.applied && self.error.is_none() {
         keep = false;
         app.s.selection.clear();
-        app.status = Some((format!("{} done", self.kind.title().to_lowercase()), false));
         // select the traced shapes (not their holes), ready to extrude
         if let (Some(r), Some(sketch)) = (self.trace.as_ref().and_then(|t| t.result.as_ref()), app.s.edit_sketch) {
           let ink = r["ink_profiles"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>());
@@ -2140,6 +2139,51 @@ impl Dialog {
   /// The command family's accent colour, used by this dialog's chips and OK button.
   fn accent(&self) -> egui::Color32 {
     crate::icons::accent_of(self.kind.icon())
+  }
+
+  /// Fusion's cursor prompt for the dialog's current step: what to select while input is
+  /// missing, then the values to specify. `hovering`: the pointer is over something selectable,
+  /// when Fusion says how to change the selection instead.
+  pub(crate) fn prompt(&self, hovering: bool) -> Option<String> {
+    if self.kind == Kind::PickPlane {
+      return Some(PICK_PLANE_HINT.into());
+    }
+    if !self.ready() {
+      return Some(match self.kind {
+        Kind::Extrude => "Select sketch profiles or planar faces to extrude".into(),
+        Kind::Revolve => "Select sketch profiles or planar faces to revolve".into(),
+        Kind::Fillet => "Select edges, faces, or features to fillet".into(),
+        Kind::Chamfer => "Select edges or faces to chamfer".into(),
+        Kind::Shell => "Select faces to remove or bodies to shell".into(),
+        Kind::Loft => "Select profiles or planar faces".into(),
+        Kind::Sweep if self.sketch.is_none() => "Select sketch profiles or planar faces to sweep".into(),
+        Kind::Sweep => "Select path".into(),
+        Kind::Combine if self.bodies.is_empty() => "Select target body".into(),
+        Kind::Combine => "Select tool bodies".into(),
+        Kind::PressPull => "Select faces, edges, or sketch profiles".into(),
+        Kind::Draft => "Select faces to draft".into(),
+        _ => sentence(self.missing_input()),
+      });
+    }
+    if hovering && self.picks() {
+      return Some("Hold Ctrl to modify selection".into());
+    }
+    let specify = match self.kind {
+      Kind::Extrude => "Specify distance and taper angle",
+      Kind::Revolve => "Specify angle",
+      Kind::Fillet => "Specify fillet radius",
+      Kind::Chamfer => "Specify chamfer distance",
+      Kind::Shell => "Specify thickness",
+      Kind::OffsetPlane => "Specify offset distance",
+      Kind::Hole => "Specify hole diameter and depth",
+      Kind::Draft => "Specify draft angle",
+      Kind::PressPull => "Specify distance",
+      Kind::Loft | Kind::Sweep | Kind::Combine => "Specify operation",
+      Kind::RectPattern | Kind::CircPattern => "Specify quantity and distance",
+      Kind::Move => "Specify distance or angle",
+      _ => return None,
+    };
+    Some(specify.into())
   }
 
   fn missing_input(&self) -> &'static str {
@@ -4334,6 +4378,15 @@ fn analysis_fields(app: &mut App, ui: &mut egui::Ui, kind: &'static str) {
   app.analysis = on.then_some(a);
 }
 
+/// `s` with its first letter capitalised, as a cursor prompt is written.
+fn sentence(s: &str) -> String {
+  let mut c = s.chars();
+  match c.next() {
+    Some(f) => f.to_uppercase().chain(c).collect(),
+    None => String::new(),
+  }
+}
+
 /// A stored axis as the dialogs' axis choice names it ("x", "line:3", "axis:7").
 fn axis_key(axis: &AxisRef) -> String {
   match axis {
@@ -4757,6 +4810,30 @@ pub(crate) fn offset_dimension(app: &mut App, sources: &[u32], made: &[u32], dis
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The cursor prompt follows the command's step: select, then specify, and how to change the
+  /// selection while the pointer is over something selectable.
+  #[test]
+  fn the_cursor_prompt_follows_the_dialogs_step() {
+    let mut d = Dialog::blank(Kind::Extrude);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select sketch profiles or planar faces to extrude"));
+    assert_eq!(d.prompt(true).as_deref(), Some("Select sketch profiles or planar faces to extrude"));
+    d.sketch = Some(FeatureId(1));
+    d.profiles.push([0.0, 0.0]);
+    assert_eq!(d.prompt(false).as_deref(), Some("Specify distance and taper angle"));
+    assert_eq!(d.prompt(true).as_deref(), Some("Hold Ctrl to modify selection"));
+
+    let mut d = Dialog::blank(Kind::Fillet);
+    assert_eq!(d.prompt(false).as_deref(), Some("Select edges, faces, or features to fillet"));
+    d.edges.push(json!({"body": 1, "edge": 1}));
+    assert_eq!(d.prompt(false).as_deref(), Some("Specify fillet radius"));
+
+    assert_eq!(Dialog::blank(Kind::PickPlane).prompt(false).as_deref(), Some(PICK_PLANE_HINT));
+    // a command without its own wording asks for its missing input as a sentence
+    assert_eq!(Dialog::blank(Kind::Hem).prompt(false).as_deref(), Some("Select edges"));
+    // one with nothing to select or specify has no prompt
+    assert_eq!(Dialog::blank(Kind::Inspect).prompt(false), None);
+  }
 
   #[test]
   fn offset_commits_with_a_dimension_to_its_source() {

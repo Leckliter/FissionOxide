@@ -329,6 +329,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
   hud(app, &painter, &resp, &view);
+  cursor_prompt(app, &resp);
   if let Some(Drag::Box { start, now, .. }) = app.drag {
     let r = Rect::from_two_pos(start, now);
     // left to right: window (blue, solid); right to left: crossing (green)
@@ -2884,6 +2885,187 @@ fn pivot_marker(painter: &egui::Painter, at: Pos2) {
   }
 }
 
+/// Fusion's cursor prompt for a sketch tool at its current step (`state`: what it has
+/// collected so far), or None for a tool without one.
+pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static str> {
+  let n = state.pts.len();
+  let picked = state.curves.len();
+  Some(match tool {
+    Tool::Select => return None,
+    Tool::Line | Tool::Spline | Tool::ControlSpline => {
+      if n == 0 {
+        "Place first point"
+      } else {
+        "Place next point"
+      }
+    }
+    Tool::Rect => {
+      if n == 0 {
+        "Place first corner"
+      } else {
+        "Specify size of rectangle"
+      }
+    }
+    Tool::CenterRect => {
+      if n == 0 {
+        "Place center point"
+      } else {
+        "Specify size of rectangle"
+      }
+    }
+    Tool::Rect3 => match n {
+      0 => "Place first corner",
+      1 => "Place second corner",
+      _ => "Specify height of rectangle",
+    },
+    Tool::Circle => {
+      if n == 0 {
+        "Place center point"
+      } else {
+        "Specify diameter"
+      }
+    }
+    Tool::Circle2P => {
+      if n == 0 {
+        "Place first point"
+      } else {
+        "Specify diameter"
+      }
+    }
+    Tool::Circle3P => match n {
+      0 => "Place first point",
+      1 => "Place second point",
+      _ => "Place third point",
+    },
+    Tool::Circle2T => {
+      if picked < 2 {
+        "Select line, circle, or arc"
+      } else {
+        "Specify diameter"
+      }
+    }
+    Tool::Circle3T => "Select line, circle, or arc",
+    Tool::Arc3 => match n {
+      0 => "Place start point",
+      1 => "Place end point",
+      _ => "Specify radius",
+    },
+    Tool::CenterArc => match n {
+      0 => "Place center point",
+      1 => "Place start point",
+      _ => "Specify angle",
+    },
+    Tool::TangentArc => {
+      if n == 0 {
+        "Select end of line or arc"
+      } else {
+        "Place end point"
+      }
+    }
+    Tool::Polygon | Tool::CircPolygon => {
+      if n == 0 {
+        "Place center point"
+      } else {
+        "Specify radius"
+      }
+    }
+    Tool::EdgePolygon => {
+      if n == 0 {
+        "Place first point"
+      } else {
+        "Specify edge length"
+      }
+    }
+    Tool::Slot => match n {
+      0 => "Place first center point",
+      1 => "Place second center point",
+      _ => "Specify width",
+    },
+    Tool::OverallSlot => match n {
+      0 => "Place first point",
+      1 => "Place second point",
+      _ => "Specify width",
+    },
+    Tool::CenterSlot => match n {
+      0 => "Place center point",
+      1 => "Place end point",
+      _ => "Specify width",
+    },
+    Tool::ArcSlot3 => match n {
+      0 => "Place start point",
+      1 => "Place point on arc",
+      2 => "Place end point",
+      _ => "Specify width",
+    },
+    Tool::ArcSlotCenter => match n {
+      0 => "Place arc center point",
+      1 => "Place start point",
+      2 => "Place end point",
+      _ => "Specify width",
+    },
+    Tool::Point => "Place point",
+    Tool::Ellipse => match n {
+      0 => "Place center point",
+      1 => "Specify major axis",
+      _ => "Specify minor axis",
+    },
+    Tool::Conic => match n {
+      0 => "Place start point",
+      1 => "Place end point",
+      _ => "Specify apex",
+    },
+    Tool::MidpointLine => {
+      if n == 0 {
+        "Place midpoint"
+      } else {
+        "Place end point"
+      }
+    }
+    Tool::Dimension => {
+      if state.dim_first.is_none() {
+        "Select geometry to dimension"
+      } else {
+        "Place dimension"
+      }
+    }
+    Tool::Trim => "Select curve to trim",
+    Tool::Extend => "Select curve to extend",
+    Tool::Break => "Select curve to break",
+    Tool::Blend => {
+      if picked == 0 {
+        "Select first curve"
+      } else {
+        "Select second curve"
+      }
+    }
+  })
+}
+
+/// Fusion's cursor prompt: the current step of the open command or sketch tool, in a small
+/// tooltip just below-right of the pointer. It hides while the pointer is over a dialog or
+/// panel, and during a drag.
+fn cursor_prompt(app: &App, resp: &egui::Response) {
+  let prompt = match &app.dialog {
+    Some(d) => d.prompt(app.hover.is_some()),
+    None if app.s.edit_sketch.is_some() => sketch_prompt(app.tool, &app.tstate).map(String::from),
+    None => None,
+  };
+  let Some(prompt) = prompt else { return };
+  if !resp.contains_pointer() || app.drag.is_some() {
+    return;
+  }
+  egui::Tooltip::always_open(
+    resp.ctx.clone(),
+    resp.layer_id,
+    egui::Id::new("cursor-prompt"),
+    egui::PopupAnchor::Pointer,
+  )
+  .gap(14.0)
+  .show(|ui| {
+    ui.label(prompt);
+  });
+}
+
 /// Hints in the corner of the viewport.
 fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) {
   let hint = match (app.s.edit_sketch.is_some(), app.tool) {
@@ -3080,9 +3262,6 @@ fn sketch_planes_overlay(
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));
-  }
-  if picking {
-    resp.clone().on_hover_text_at_pointer(crate::dialogs::PICK_PLANE_HINT);
   }
   planes.into_iter().nth(hot?).map(|(p, _)| p)
 }
@@ -3317,6 +3496,20 @@ mod tests {
     assert_eq!(grid_label_positions(10.0, 100.0), vec![-100.0, -50.0, 0.0, 50.0, 100.0]);
     // a tiny model still gets a 2-step grid: only the origin is a major line
     assert_eq!(grid_label_positions(10.0, 1.0), vec![0.0]);
+  }
+
+  /// Fusion's prompts for Rectangle, and the curve-picking tools count picks, not points.
+  #[test]
+  fn the_sketch_prompt_follows_the_tools_step() {
+    let mut st = ToolState::default();
+    assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Place first corner"));
+    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Select line, circle, or arc"));
+    assert_eq!(sketch_prompt(Tool::Select, &st), None);
+    st.pts.push([0.0, 0.0]);
+    assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Specify size of rectangle"));
+    assert_eq!(sketch_prompt(Tool::Circle, &st), Some("Specify diameter"));
+    st.curves = vec![(1, [0.0, 0.0]), (2, [1.0, 0.0])];
+    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Specify diameter"));
   }
 
   #[test]

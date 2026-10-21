@@ -89,6 +89,30 @@ fn cancel_pos(dialog: Rect) -> Pos2 {
   dialog.right_bottom() + vec2(-10.0 - 36.0, -7.0 - 12.0)
 }
 
+/// Fusion's cursor prompt: the command's step follows the pointer over the canvas and hides
+/// over the dialog; a sketch tool's step too, with nothing written in the canvas corner.
+#[test]
+fn the_cursor_prompt_follows_the_pointer_and_hides_over_the_dialog() {
+  let mut h = Harness::new();
+  h.open_create_sketch();
+  let r = h.dialog_rect();
+  let c = h.app.canvas.center();
+  let shown = h.rest(c, 0.1);
+  assert!(shown.iter().any(|t| t == crate::dialogs::PICK_PLANE_HINT), "{shown:?}");
+  let shown = h.rest(r.center(), 0.1);
+  assert!(!shown.iter().any(|t| t == crate::dialogs::PICK_PLANE_HINT), "{shown:?}");
+  h.move_then_click(cancel_pos(r));
+
+  h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+  h.app.set_tool(crate::viewport::Tool::Rect);
+  let shown = h.rest(c, 0.1);
+  assert!(shown.iter().any(|t| t == "Place first corner"), "{shown:?}");
+  assert!(!shown.iter().any(|t| t.starts_with("Sketching")), "{shown:?}");
+  h.move_then_click(c);
+  let shown = h.rest(c + vec2(60.0, -40.0), 0.1);
+  assert!(shown.iter().any(|t| t == "Specify size of rectangle"), "{shown:?}");
+}
+
 #[test]
 fn the_create_sketch_dialog_takes_clicks_where_it_opens() {
   let mut h = Harness::new();

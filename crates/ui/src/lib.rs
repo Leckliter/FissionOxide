@@ -1324,7 +1324,6 @@ impl App {
       self.browser_sketches = Some(true);
       // as in Fusion, no tool is active until one is picked
       self.set_tool(Tool::Select);
-      self.hint(SKETCHING);
     }
   }
 
@@ -1355,12 +1354,8 @@ impl App {
     self.browser_sketches = Some(false);
   }
 
-  /// When the open sketch is finished: back to the 3D view from before it, without the
-  /// "Sketching" hint.
+  /// When the open sketch is finished: back to the 3D view from before it.
   pub(crate) fn left_sketch(&mut self) {
-    if self.status.as_ref().is_some_and(|(t, _)| t == SKETCHING) {
-      self.status = None;
-    }
     if let Some(c) = self.pre_sketch_cam.take() {
       self.fly_to(c);
     }
@@ -1715,9 +1710,6 @@ impl App {
   }
 }
 
-/// The status hint while a new sketch is open.
-const SKETCHING: &str = "Sketching — draw with the Create tools; Finish Sketch when done";
-
 /// How long a camera move takes (ViewCube, Home, Fit, Look At, a sketch opening and closing).
 const CAM_MOVE_SECS: f64 = 0.3;
 
@@ -1856,11 +1848,12 @@ mod tests {
     app.create_sketch(json!("xz"));
     settle_camera(&mut app);
     assert!(app.cam.pitch.abs() < 1e-6, "looks at the XZ plane: {:?}", app.cam);
-    assert!(app.status.is_some());
+    // Fusion writes nothing in the canvas corner while sketching
+    assert!(app.status.is_none(), "no Sketching hint: {:?}", app.status);
     app.finish_sketch();
     settle_camera(&mut app);
     assert_eq!(app.cam, before);
-    assert!(app.status.is_none(), "no stale Sketching hint: {:?}", app.status);
+    assert!(app.status.is_none(), "{:?}", app.status);
   }
 
   #[test]
