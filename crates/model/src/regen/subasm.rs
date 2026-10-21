@@ -30,16 +30,33 @@ impl Ctx<'_> {
         self.new_body(id, body);
       }
     }
+    // the sub-assembly's own motion links and cam followers act on its joints
+    let mates = {
+      let entries: Vec<(FeatureId, &str, &FeatureKind)> =
+        sub.mates.iter().enumerate().map(|(k, m)| (SubAssembly::origin_id(id, k), m.name.as_str(), &m.kind)).collect();
+      let component = |c: crate::ComponentId| self.components.iter().find(|x| x.id == c).map(|x| x.name.clone());
+      super::assemble::gather(&entries, &component, self.params)
+    };
+    let mut ctx = Ctx {
+      params: self.params,
+      rules: self.rules,
+      components: self.components,
+      targets: self.targets,
+      state: &mut *self.state,
+      mates: &mates,
+      behaviours: self.behaviours,
+    };
     let mut problems = Vec::new();
     for (k, m) in sub.mates.iter_mut().enumerate() {
-      let origin = matches!(m.kind, FeatureKind::JointOrigin { .. });
-      let joint = matches!(m.kind, FeatureKind::Joint { .. });
-      let r = if origin {
-        self.apply_assembly(SubAssembly::origin_id(id, k), &mut m.kind)
-      } else if joint {
-        self.apply(id, &mut m.kind)
-      } else {
-        Ok(None)
+      let key = SubAssembly::origin_id(id, k);
+      let r = match m.kind {
+        FeatureKind::JointOrigin { .. } => ctx.apply_assembly(key, &mut m.kind),
+        FeatureKind::Joint { .. } => ctx.joint(id, key, &mut m.kind),
+        FeatureKind::MotionLink { .. } | FeatureKind::CamFollower { .. } => match mates.errors.get(&key) {
+          Some(e) => Err(e.clone()),
+          None => Ok(None),
+        },
+        _ => Ok(None),
       };
       if let Err(e) = r {
         problems.push(format!("{}: {e}", m.name));

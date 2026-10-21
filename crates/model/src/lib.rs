@@ -1626,6 +1626,18 @@ pub enum FeatureKind {
     /// Gap kept between the follower and the cam (a roller's radius, or clearance).
     #[serde(default = "zero")]
     clearance: String,
+    /// The follower's motion the cam sets: its slide (a straight push, the default), slide2 or
+    /// rotation (a rocker arm whose tip swings along an arc, or a screw's helix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    motion: Option<assembly::MotionAxis>,
+    /// Where the follower touches the cam, on the follower: a point, face, edge or saved joint
+    /// origin; `None` = the joint's moving origin. A cylindrical or spherical face is a roller
+    /// (its radius and, for a cylinder, its axis and width).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tip: Option<assembly::JointGeometry>,
+    /// A ball roller's radius on the tip (empty = none, or the tip face's own radius).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    roller: String,
   },
   /// Create Form: a T-spline body, the smooth limit surface of a quad control cage given in the
   /// plane's coordinates (see [`form`]). History-free: form edits change the cage itself.
@@ -2035,7 +2047,9 @@ impl FeatureKind {
       }
       FeatureKind::JointOrigin { geometry, .. } => geometry.origin().into_iter().collect(),
       FeatureKind::MotionLink { leader, follower, .. } => vec![*leader, *follower],
-      FeatureKind::CamFollower { follower, .. } => vec![*follower],
+      FeatureKind::CamFollower { follower, tip, .. } => {
+        std::iter::once(*follower).chain(tip.as_ref().and_then(assembly::JointGeometry::origin)).collect()
+      }
       FeatureKind::Form { plane, .. } => plane_dep(plane),
       FeatureKind::AlignConstraint { moving_geometry, fixed_geometry, .. } => {
         [moving_geometry, fixed_geometry].into_iter().filter_map(assembly::JointGeometry::origin).collect()
@@ -2880,7 +2894,12 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     }
     FeatureKind::RigidGroup { .. } => {}
     FeatureKind::BaseFeature { .. } => {}
-    FeatureKind::CamFollower { clearance, .. } => f(clearance),
+    FeatureKind::CamFollower { clearance, roller, .. } => {
+      f(clearance);
+      if !roller.is_empty() {
+        f(roller);
+      }
+    }
     FeatureKind::Form { .. } => {}
     FeatureKind::AlignConstraint { offset, .. } => f(offset),
     FeatureKind::PlaneConstraint { offset, .. } => f(offset),

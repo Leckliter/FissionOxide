@@ -19,8 +19,9 @@ pub struct SubAssembly {
   /// empty when the source has no joints.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub free_breps: Vec<String>,
-  /// The source's joint origins and joints, in timeline order, with components, bodies and
-  /// joint origins renamed to the host's (joint origins get the ids [`SubAssembly::origin_id`]).
+  /// The source's joint origins and joints (in timeline order), then its motion links and cam
+  /// followers, with components, bodies, joints and joint origins renamed to the host's (joint
+  /// origins and joints get the ids [`SubAssembly::origin_id`]).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub mates: Vec<SubMate>,
   /// Solve the joints in the host (true) or keep the source's solved positions (false).

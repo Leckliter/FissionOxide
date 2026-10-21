@@ -109,7 +109,16 @@ fn cam_design(flat: bool) -> (Design, FeatureId, BodyId, FeatureId) {
   assert!(fhi.z > 2.5 && flo.z < 2.5);
   let rev = d.add_feature(joint(cam, JointKind::Revolute, DVec3::ZERO, DVec3::Z)).unwrap();
   let j = d.add_feature(joint(slider, JointKind::Slider, tip, DVec3::X)).unwrap();
-  d.add_feature(FeatureKind::CamFollower { cam, follower: j, flat, clearance: "0 mm".into() }).unwrap();
+  d.add_feature(FeatureKind::CamFollower {
+    cam,
+    follower: j,
+    flat,
+    clearance: "0 mm".into(),
+    motion: None,
+    tip: None,
+    roller: String::new(),
+  })
+  .unwrap();
   (d, rev, follower, j)
 }
 
@@ -148,14 +157,33 @@ fn cam_followers_report_bad_setups() {
   let (cam, slider) = (d.components[0].id, d.components[1].id);
   // the cam's own (revolute) joint doesn't slide, and a follower can't be its own cam
   for (c, f, why) in [(cam, rev, "doesn't slide"), (slider, j, "follow itself")] {
-    let bad =
-      d.add_feature(FeatureKind::CamFollower { cam: c, follower: f, flat: false, clearance: "0".into() }).unwrap();
+    let bad = d
+      .add_feature(FeatureKind::CamFollower {
+        cam: c,
+        follower: f,
+        flat: false,
+        clearance: "0".into(),
+        motion: None,
+        tip: None,
+        roller: String::new(),
+      })
+      .unwrap();
     let m = regenerate(&mut d);
     assert!(m.status(bad).unwrap().error.as_deref().unwrap().contains(why), "{:?}", m.status(bad));
     d.features.retain(|f| f.id != bad);
   }
   // two cams on one joint
-  let twice = d.add_feature(FeatureKind::CamFollower { cam, follower: j, flat: true, clearance: "0".into() }).unwrap();
+  let twice = d
+    .add_feature(FeatureKind::CamFollower {
+      cam,
+      follower: j,
+      flat: true,
+      clearance: "0".into(),
+      motion: None,
+      tip: None,
+      roller: String::new(),
+    })
+    .unwrap();
   let m = regenerate(&mut d);
   assert!(m.status(twice).unwrap().error.as_deref().unwrap().contains("already follows"));
   d.features.retain(|f| f.id != twice);

@@ -13,6 +13,7 @@ use fox_kernel::glam::{DMat4, DQuat, DVec3};
 
 use super::{Ctx, FResult, ke};
 use crate::assembly::{self, MotionAxis};
+use crate::mechanism::Roller;
 use crate::{ComponentId, Design, FeatureId, FeatureKind};
 
 /// What motion links do to the joints, worked out before the replay.
@@ -21,7 +22,7 @@ pub(super) struct Mates {
   /// Joint motions set by motion links: joint → (motion, value in mm / rad).
   driven: BTreeMap<FeatureId, Vec<(MotionAxis, f64)>>,
   /// Why a motion link doesn't work, by link.
-  errors: BTreeMap<FeatureId, String>,
+  pub(super) errors: BTreeMap<FeatureId, String>,
   /// Cam followers: follower joint → cam.
   cams: BTreeMap<FeatureId, Cam>,
 }
@@ -33,6 +34,11 @@ pub(super) struct Cam {
   cam: ComponentId,
   flat: bool,
   clearance: f64,
+  /// The motion the cam sets.
+  motion: MotionAxis,
+  tip: Option<assembly::JointGeometry>,
+  /// A ball roller's radius (0 = none, or the tip face's).
+  roller: f64,
 }
 
 impl Mates {
@@ -104,14 +110,26 @@ struct Link {
   ratio: f64,
 }
 
-/// Gathers the active motion links of a design.
+/// Gathers the active motion links and cam followers of a design.
 pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
-  let mut out = Mates::default();
   let active = &design.features[..design.active_len()];
+  let entries: Vec<(FeatureId, &str, &FeatureKind)> =
+    active.iter().filter(|f| !f.suppressed).map(|f| (f.id, f.name.as_str(), &f.kind)).collect();
+  gather(&entries, &|c| design.component(c).map(|c| c.name.clone()), params)
+}
+
+/// Gathers the motion links and cam followers among `entries` (id, name, kind), whose joints
+/// are among them too: a design's features, or a flexible sub-assembly's joints and links.
+pub(super) fn gather(
+  entries: &[(FeatureId, &str, &FeatureKind)],
+  component: &dyn Fn(ComponentId) -> Option<String>,
+  params: &HashMap<String, f64>,
+) -> Mates {
+  let mut out = Mates::default();
   let joint = |id: FeatureId| {
-    active.iter().find(|f| f.id == id && !f.suppressed).and_then(|f| match &f.kind {
+    entries.iter().find(|(f, ..)| *f == id).and_then(|(_, name, kind)| match kind {
       FeatureKind::Joint { kind, rotation, slide, slide2, pitch, .. } => {
-        Some((f.name.clone(), *kind, [rotation.clone(), slide.clone(), slide2.clone(), pitch.clone()]))
+        Some((name.to_string(), *kind, [rotation.clone(), slide.clone(), slide2.clone(), pitch.clone()]))
       }
       _ => None,
     })
@@ -122,7 +140,7 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
   };
   // follower (joint, motion) → link
   let mut links: BTreeMap<(FeatureId, MotionAxis), Link> = BTreeMap::new();
-  for f in active.iter().filter(|f| !f.suppressed) {
+  for (id, name, kind) in entries {
     if let FeatureKind::MotionLink {
       leader,
       leader_motion,
@@ -131,7 +149,7 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
       leader_value,
       follower_value,
       reverse,
-    } = &f.kind
+    } = kind
     {
       let r = (|| {
         let (lname, lkind, _) = joint(*leader).ok_or("the leading joint no longer exists")?;
@@ -154,14 +172,14 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
           return Err("the leading joint's value can't be zero".into());
         }
         let sign = if *reverse { -1.0 } else { 1.0 };
-        Ok(Link { id: f.id, name: f.name.clone(), leader: (*leader, *leader_motion), ratio: sign * b / a })
+        Ok(Link { id: *id, name: name.to_string(), leader: (*leader, *leader_motion), ratio: sign * b / a })
       })();
       match r {
         Ok(l) => {
           links.insert((*follower, *follower_motion), l);
         }
         Err(e) => {
-          out.errors.insert(f.id, e);
+          out.errors.insert(*id, e);
         }
       }
     }
@@ -191,49 +209,169 @@ pub(super) fn mates(design: &Design, params: &HashMap<String, f64>) -> Mates {
       }
     }
   }
-  cams(design, active, &links, &eval, &mut out);
+  cams(entries, component, &links, &eval, &mut out);
   out
 }
 
-/// Gathers the active cam followers.
+/// Gathers the cam followers among `entries`.
 fn cams(
-  design: &Design,
-  active: &[crate::Feature],
+  entries: &[(FeatureId, &str, &FeatureKind)],
+  component: &dyn Fn(ComponentId) -> Option<String>,
   links: &BTreeMap<(FeatureId, MotionAxis), Link>,
   eval: &dyn Fn(&str, bool) -> Result<f64, String>,
   out: &mut Mates,
 ) {
-  for f in active.iter().filter(|f| !f.suppressed) {
-    let FeatureKind::CamFollower { cam, follower, flat, clearance } = &f.kind else { continue };
+  for (id, name, kind) in entries {
+    let FeatureKind::CamFollower { cam, follower, flat, clearance, motion, tip, roller } = kind else { continue };
     let r = (|| {
-      let joint =
-        active.iter().find(|j| j.id == *follower && !j.suppressed).ok_or("the follower's joint no longer exists")?;
-      let FeatureKind::Joint { kind, moving, .. } = &joint.kind else {
+      let (jname, jkind) = entries
+        .iter()
+        .find(|(j, ..)| j == follower)
+        .ok_or("the follower's joint no longer exists")
+        .map(|(_, n, k)| (n.to_string(), k))?;
+      let FeatureKind::Joint { kind, moving, .. } = jkind else {
         return Err("the follower must be a joint".to_string());
       };
-      if !MotionAxis::Slide.allowed(*kind) {
-        return Err(format!("{} doesn't slide", joint.name));
+      let motion = motion.unwrap_or(MotionAxis::Slide);
+      if motion == MotionAxis::Pitch {
+        return Err("a cam sets a follower's slide, slide2 or rotation".into());
       }
-      let c = design.component(*cam).ok_or("the cam component no longer exists")?;
-      if c.id == *moving {
-        return Err(format!("{} can't follow itself", c.name));
+      if !motion.allowed(*kind) {
+        return Err(match motion {
+          MotionAxis::Slide => format!("{jname} doesn't slide"),
+          m => format!("{jname} has no {} motion", m.name()),
+        });
       }
-      if let Some(l) = links.get(&(*follower, MotionAxis::Slide)) {
-        return Err(format!("{}'s slide is already driven by {}", joint.name, l.name));
+      let cname = component(*cam).ok_or("the cam component no longer exists")?;
+      if *cam == *moving {
+        return Err(format!("{cname} can't follow itself"));
+      }
+      if let Some(l) = links.get(&(*follower, motion)) {
+        return Err(format!("{jname}'s {} is already driven by {}", motion.name(), l.name));
       }
       if let Some(other) = out.cams.get(follower) {
-        return Err(format!("{} already follows {}", joint.name, other.name));
+        return Err(format!("{jname} already follows {}", other.name));
       }
-      Ok(Cam { name: f.name.clone(), cam: *cam, flat: *flat, clearance: eval(clearance, false)? })
+      let roller = if roller.is_empty() { 0.0 } else { eval(roller, false)? };
+      if roller < 0.0 {
+        return Err("the roller's radius can't be negative".into());
+      }
+      if *flat && (roller > 0.0 || tip.is_some()) {
+        return Err("a flat follower has no roller or tip".into());
+      }
+      if *flat && motion == MotionAxis::Rotation {
+        return Err("a flat follower needs a straight slide".into());
+      }
+      Ok(Cam {
+        name: name.to_string(),
+        cam: *cam,
+        flat: *flat,
+        clearance: eval(clearance, false)?,
+        motion,
+        tip: tip.clone(),
+        roller,
+      })
     })();
     match r {
       Ok(c) => {
         out.cams.insert(*follower, c);
       }
       Err(e) => {
-        out.errors.insert(f.id, e);
+        out.errors.insert(*id, e);
       }
     }
+  }
+}
+
+impl Ctx<'_> {
+  /// Solves a joint and moves its component: `key` is the joint as motion links and cam
+  /// followers name it (its feature, or a flexible sub-assembly's joint within insert `id`).
+  pub(super) fn joint(&mut self, id: FeatureId, key: FeatureId, kind: &mut FeatureKind) -> FResult {
+    let FeatureKind::Joint {
+      moving,
+      moving_origin,
+      fixed,
+      fixed_origin,
+      kind: joint_kind,
+      angle,
+      offset,
+      flip,
+      as_built,
+      rotation,
+      slide,
+      slide2,
+      pitch,
+      limits,
+      lead,
+    } = kind
+    else {
+      return Err("not a joint".into());
+    };
+    let comp = self.components.iter().find(|c| c.id == *moving).ok_or("the moving component no longer exists")?;
+    if comp.grounded {
+      return Err(format!("{} is grounded", comp.name));
+    }
+    if let Some(f) = fixed
+      && !self.components.iter().any(|c| c.id == *f)
+    {
+      return Err("the fixed component no longer exists".into());
+    }
+    // designs from before FUSION_JOINT_AXES face the Z axes unless flipped: the opposite mate
+    let flip = if self.behaviours.has(fox_sketch::behaviour::FUSION_JOINT_AXES) { *flip } else { !*flip };
+    let mut motion = assembly::Motion {
+      rotation: self.angle(rotation)?,
+      slide: self.len(slide)?,
+      slide2: self.len(slide2)?,
+      pitch: self.angle(pitch)?,
+    };
+    self.mates.drive(key, &mut motion);
+    let lead = if *joint_kind == assembly::JointKind::Screw { Some(self.len(lead)?) } else { None };
+    // a screw's slide follows its rotation
+    let screw = |mut m: assembly::Motion| {
+      if let Some(l) = lead {
+        m.slide = assembly::screw_slide(m.rotation, l);
+      }
+      m
+    };
+    if self.mates.cam(key).is_some() {
+      let (fixed_frame, moving_frame) = (self.joint_frame(fixed_origin)?, self.joint_frame(moving_origin)?);
+      let (kind, a, o, fl, ab) = (*joint_kind, self.angle(angle)?, self.len(offset)?, flip, *as_built);
+      let place =
+        |m: assembly::Motion| assembly::joint_transform(fixed_frame, moving_frame, kind, a, o, fl, ab, screw(m));
+      let (axis, v) = self.cam_motion(key, moving_frame, &place, motion)?;
+      axis.set(&mut motion, v);
+    }
+    motion = screw(motion);
+    if let Some((lo, hi)) = &limits.rotation {
+      let (lo, hi) = (self.angle(lo)?, self.angle(hi)?);
+      if !(lo - 1e-9..=hi + 1e-9).contains(&motion.rotation) {
+        return Err(format!(
+          "rotation {:.2}° is outside the joint's limits ({:.2}° to {:.2}°)",
+          motion.rotation.to_degrees(),
+          lo.to_degrees(),
+          hi.to_degrees()
+        ));
+      }
+    }
+    if let Some((lo, hi)) = &limits.slide {
+      let (lo, hi) = (self.len(lo)?, self.len(hi)?);
+      if !(lo - 1e-9..=hi + 1e-9).contains(&motion.slide) {
+        return Err(format!("slide {:.3} mm is outside the joint's limits ({lo:.3} to {hi:.3} mm)", motion.slide));
+      }
+    }
+    let fixed_frame = self.joint_frame(fixed_origin)?;
+    let moving_frame = self.joint_frame(moving_origin)?;
+    let m = assembly::joint_transform(
+      fixed_frame,
+      moving_frame,
+      *joint_kind,
+      self.angle(angle)?,
+      self.len(offset)?,
+      flip,
+      *as_built,
+      motion,
+    );
+    self.move_component(id, *moving, *fixed, m)
   }
 }
 
@@ -422,15 +560,15 @@ impl Ctx<'_> {
     Ok(None)
   }
 
-  /// The slide that keeps a cam follower's joint in contact with its cam: `place` is where the
-  /// joint puts the follower for a motion.
-  pub(super) fn cam_slide(
+  /// The motion (slide, slide2 or rotation) that keeps a cam follower's joint in contact with
+  /// its cam: `place` is where the joint puts the follower for a motion.
+  pub(super) fn cam_motion(
     &self,
     joint: FeatureId,
     moving_frame: DMat4,
     place: &dyn Fn(assembly::Motion) -> DMat4,
     motion: assembly::Motion,
-  ) -> Result<f64, String> {
+  ) -> Result<(MotionAxis, f64), String> {
     let cam = self.mates.cam(joint).ok_or("no cam")?;
     let comps = self.with_children(vec![cam.cam]);
     let mut tris = Vec::new();
@@ -443,11 +581,70 @@ impl Ctx<'_> {
         tris.extend(crate::mechanism::triangles(&mesh.positions, &mesh.indices));
       }
     }
-    let o = moving_frame.w_axis.truncate();
-    let at = |s: f64| place(assembly::Motion { slide: s, ..motion }).transform_point3(o);
-    let tip = at(0.0);
-    crate::mechanism::cam_contact(&tris, tip, at(1.0) - tip, cam.flat, cam.clearance)
-      .map_err(|e| format!("{}: {e}", cam.name))
+    let named = |e: String| format!("{}: {e}", cam.name);
+    let (tip, face_roller) = match cam.tip.clone() {
+      Some(mut g) => {
+        let f = self.joint_frame(&mut g).map_err(|e| named(format!("its tip: {e}")))?;
+        (f.w_axis.truncate(), self.tip_roller(&g))
+      }
+      None => (moving_frame.w_axis.truncate(), None),
+    };
+    let roller = match face_roller {
+      _ if cam.roller > 0.0 => Some(Roller { radius: cam.roller, axis: None }),
+      r => r,
+    };
+    let axis = cam.motion;
+    let at = |v: f64| {
+      let mut m = motion;
+      axis.set(&mut m, v);
+      place(m)
+    };
+    let v = if axis == MotionAxis::Rotation {
+      let path = |v: f64| {
+        let m = at(v);
+        (m.transform_point3(tip), roller.and_then(|r| r.axis).map_or(DVec3::Z, |(a, _)| m.transform_vector3(a)))
+      };
+      crate::mechanism::path_contact(&tris, &path, roller, cam.clearance)
+    } else {
+      let m0 = at(0.0);
+      let o = m0.transform_point3(tip);
+      let dir = at(1.0).transform_point3(tip) - o;
+      match roller {
+        Some(r) => {
+          let r = Roller { axis: r.axis.map(|(a, w)| (m0.transform_vector3(a).normalize(), w)), ..r };
+          crate::mechanism::roller_contact(&tris, o, dir, r, cam.clearance)
+        }
+        None => crate::mechanism::cam_contact(&tris, o, dir, cam.flat, cam.clearance),
+      }
+    };
+    Ok((axis, v.map_err(named)?))
+  }
+
+  /// The roller a cam follower's tip face is: a cylinder (its radius, axis and width) or a
+  /// sphere (a ball). Call after [`Ctx::joint_frame`] has refreshed the reference.
+  fn tip_roller(&self, g: &assembly::JointGeometry) -> Option<Roller> {
+    use fox_kernel::{CurveKind, SurfaceKind};
+    let assembly::JointGeometry::Face { face } = g else { return None };
+    let body = &self.state.bodies[self.body_index(face.body).ok()?];
+    let fid = face.resolve(body.faces(), body.mesh(), body.diagonal())?;
+    let info = body.faces().iter().find(|f| f.id == fid)?;
+    match info.kind {
+      SurfaceKind::Sphere => Some(Roller { radius: info.radius, axis: None }),
+      SurfaceKind::Cylinder => {
+        let a = info.normal.try_normalize()?;
+        // the width: between the circular edges bounding the face
+        let along: Vec<f64> = body
+          .edges()
+          .iter()
+          .filter(|e| e.kind == CurveKind::Circle && e.faces.contains(&fid))
+          .map(|e| (e.center - info.center).dot(a))
+          .collect();
+        let half = along.iter().fold(0.0_f64, |m, t| m.max(t.abs()));
+        let axis = (along.len() >= 2 && half > 1e-9).then_some((a, half));
+        Some(Roller { radius: info.radius, axis })
+      }
+      _ => None,
+    }
   }
 
   /// How far joints have moved a component.
