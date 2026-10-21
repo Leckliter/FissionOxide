@@ -31,6 +31,8 @@ pub enum Tab {
   Drawing,
   /// The Manufacture workspace's milling tab.
   Milling,
+  /// The Render workspace's tab.
+  Render,
 }
 
 impl Tab {
@@ -49,6 +51,7 @@ impl Tab {
       Tab::Sketch => "SKETCH",
       Tab::Drawing => "DRAWING",
       Tab::Milling => "MILLING",
+      Tab::Render => "RENDER",
     }
   }
 }
@@ -431,6 +434,8 @@ pub(crate) enum Cmd {
   Cut2d,
   /// INSERT > Canvas: a reference image on a plane.
   Canvas,
+  /// The Render workspace's commands.
+  Render(crate::render_ui::RenderCmd),
 }
 
 impl Cmd {
@@ -588,6 +593,7 @@ impl Cmd {
       Cmd::Canvas => {
         (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
       }
+      Cmd::Render(r) => r.info(),
     }
   }
 
@@ -601,6 +607,7 @@ impl Cmd {
       Cmd::Filter(f) => app.sel_filter.get(f),
       Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
       Cmd::SelectMode(m) => app.sel_mode == m,
+      Cmd::Render(r) => r.active(app),
       _ => false,
     }
   }
@@ -711,6 +718,7 @@ impl Cmd {
       }
       Cmd::Cut2d => app.open_cut_window(),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
+      Cmd::Render(r) => r.run(app),
     }
   }
 }
@@ -811,6 +819,8 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       egui::Align2::CENTER_CENTER,
       if app.drawing.is_some() {
         "DRAWING"
+      } else if app.render.active {
+        "RENDER"
       } else if app.manufacture {
         "MANUFACTURE"
       } else {
@@ -834,10 +844,13 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
         let current = match *w {
           "Drawing" => drawing,
           "Manufacture" => app.manufacture && !drawing,
-          _ => i == 0 && !drawing && !app.manufacture,
+          "Render" => app.render.active && !drawing,
+          _ => i == 0 && !drawing && !app.manufacture && !app.render.active,
         };
-        let r =
-          ui.add_enabled(matches!(*w, "Design" | "Drawing" | "Manufacture"), egui::Button::selectable(current, *w));
+        let r = ui.add_enabled(
+          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Render"),
+          egui::Button::selectable(current, *w),
+        );
         if r.clicked() {
           ui.close();
           switch_workspace(app, w);
@@ -847,10 +860,21 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-/// Switches to the Design, Manufacture or Drawing workspace.
+/// Switches to the Design, Render, Manufacture or Drawing workspace.
 pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   let drawing = app.drawing.is_some();
+  app.render.active = w == "Render";
   match w {
+    "Render" => {
+      app.manufacture = false;
+      if drawing {
+        app.close_drawing();
+      }
+      app.cancel_dialog();
+      if app.s.edit_sketch.is_some() {
+        app.finish_sketch();
+      }
+    }
     "Drawing" if !drawing => {
       app.manufacture = false;
       app.open_drawing_workspace();
@@ -882,10 +906,13 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.drawing.is_some() {
       tabs = vec![Tab::Drawing];
       app.tab = Tab::Drawing;
+    } else if app.render.active {
+      tabs = vec![Tab::Render];
+      app.tab = Tab::Render;
     } else if app.manufacture {
       tabs = vec![Tab::Milling];
       app.tab = Tab::Milling;
-    } else if matches!(app.tab, Tab::Drawing | Tab::Milling) {
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Render) {
       app.tab = Tab::Solid;
     }
     if sketching {

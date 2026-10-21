@@ -581,6 +581,9 @@ fn render_if_needed(app: &mut App, view: &View, ctx: &egui::Context) {
   scene.style = app.visual_style;
   app.effects.apply(&mut scene);
   if crate::gpu::active(app) {
+    // the Render workspace shades the bodies with their materials
+    let look = crate::render_ui::viewport_look(app, &mut scene, &picks);
+    crate::gpu::set_look(app, look);
     crate::gpu::set_scene(app, scene, picks, key);
     return;
   }
@@ -603,6 +606,9 @@ fn view_params(app: &App) -> serde_json::Value {
   }
   if let Some(sec) = &app.section {
     v["section"] = sec.clone();
+  }
+  if crate::render_ui::shading(app) {
+    v["render_look"] = crate::render_ui::look_key(app);
   }
   v
 }

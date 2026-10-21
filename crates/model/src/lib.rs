@@ -28,6 +28,7 @@ pub mod pathpattern;
 pub mod plot;
 pub mod refs;
 pub mod regen;
+pub mod render;
 pub mod sheet;
 pub mod sheet2;
 pub mod sheet3;
@@ -127,6 +128,9 @@ pub struct Design {
   /// Timeline groups (Create Group): how the timeline shows its features; never what they build.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub timeline_groups: Vec<TimelineGroup>,
+  /// The Render workspace: materials, environment, camera, settings and the render gallery.
+  #[serde(default, skip_serializing_if = "render::RenderDoc::is_empty")]
+  pub render: render::RenderDoc,
   #[serde(default)]
   next_id: u32,
 }
@@ -2089,6 +2093,7 @@ impl Design {
       named_views: Vec::new(),
       face_appearances: Vec::new(),
       timeline_groups: Vec::new(),
+      render: render::RenderDoc::default(),
       next_id: 1,
     }
   }

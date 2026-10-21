@@ -35,5 +35,4 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 ## Later
 
 - Form workspace (T-spline sculpting)
-- Render workspace (materials beyond flat appearance colours, ray tracing)
 - Simulation (FEA), generative design, electronics

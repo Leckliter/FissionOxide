@@ -36,6 +36,9 @@ pub(crate) fn workspace_tabs(app: &App) -> Vec<Tab> {
   if app.drawing.is_some() {
     return vec![Tab::Drawing];
   }
+  if app.render.active {
+    return vec![Tab::Render];
+  }
   if app.manufacture {
     return vec![Tab::Milling];
   }

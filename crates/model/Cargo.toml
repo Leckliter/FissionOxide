@@ -9,6 +9,7 @@ license.workspace = true
 fox-expr.workspace = true
 fox-sketch.workspace = true
 fox-kernel.workspace = true
+fox-raytrace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

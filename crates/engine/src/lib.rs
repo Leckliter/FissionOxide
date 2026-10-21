@@ -26,6 +26,7 @@ pub mod hub;
 mod inspect;
 mod mates;
 mod params;
+pub mod rendering;
 pub mod scene;
 mod sheet2;
 mod solid;
@@ -552,6 +553,8 @@ mod tests_form;
 mod tests_include;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_render;
 #[cfg(test)]
 mod tests_scene;
 #[cfg(test)]

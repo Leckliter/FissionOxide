@@ -29,6 +29,7 @@ mod panels;
 mod params_ui;
 mod preferences;
 mod preview;
+mod render_ui;
 mod select;
 mod sheet;
 mod theme;
@@ -197,6 +198,8 @@ pub struct App {
   close_menus: bool,
   /// What Ctrl+C copied, for Ctrl+V.
   pub(crate) clipboard: Option<clipboard::Clip>,
+  /// The Render workspace.
+  pub render: render_ui::RenderUi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -380,6 +383,7 @@ impl App {
       help: help::Help::default(),
       close_menus: false,
       clipboard: None,
+      render: render_ui::RenderUi::default(),
     }
   }
 
@@ -1470,6 +1474,7 @@ impl App {
     config_ui::table_window(self, &ctx);
     preferences::window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
+    render_ui::windows(self, &ctx);
     canvas_ui::windows(self, &ctx);
     help::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {

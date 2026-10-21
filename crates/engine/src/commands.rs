@@ -168,6 +168,21 @@ cmds! {
   "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
   "face.appearance" => "Set the appearance of single faces, over their body's (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{faces: [{body, face} | {point}], appearance? | color?}";
+  "render.materials" => "Render workspace: the physically based material library (the appearances and more) and the design's own materials", "{category?, query?}";
+  "render.material" => "One material's settings", "{name}";
+  "render.material.define" => "Make or change one of the design's materials, starting from a library one: colours sRGB, values 0-1; a texture is an image or a pattern (checker, wood, brushed, carbon, noise, grid, knurl) projected box|planar|cylindrical|spherical, scale = mm per repeat", "{name, from?, category?, color?, metallic?, roughness?, clearcoat?, clearcoat_roughness?, transmission?, ior?, emission?, emission_strength?, texture?: null | {image?: path, pattern?, color2?, projection?, axis?: x|y|z, scale?, rotation?: deg, offset?: [u, v], roughness_variation?}}";
+  "render.material.delete" => "Delete one of the design's materials", "{name}";
+  "render.material.apply" => "Put a render material on bodies or single faces (no material takes it off: they render as their appearance)", "{material?, body? | bodies? | component? | faces?: [{body, face} | {point}]}";
+  "render.assignments" => "What every body and face renders as", "{}";
+  "render.environment" => "Scene settings: lighting environment (a preset or an HDRI image), background, ground plane with shadows and reflections; returns them", "{preset?: studio|soft|sky|sunset|dark|white, hdri?: path | null, intensity?, rotation?: deg, background?: environment|color|gradient|transparent, background_color?, background_color2?, ground?: bool, shadows?: bool, ground_reflection?: 0-1, ground_offset?: mm}";
+  "render.camera" => "The render camera: framing (a named or standard view, or target/yaw/pitch/distance in degrees and mm), perspective or orthographic, depth of field (f-stop, focus distance), exposure (stops) and tone mapping; reset goes back to the viewport framing", "{view?, target?, yaw?, pitch?, roll?, distance?, fov?: deg | focal_length?: mm, ortho?, fstop?: 0 = no depth of field, focus_distance?: mm | null, exposure?, tone_map?: aces|reinhard|linear, reset?: bool}";
+  "render.settings" => "Final render settings: resolution, samples per pixel, bounces, denoiser, seed", "{resolution?: 720p|1080p|4k|square|WxH, width?, height?, samples?, max_bounces?, denoise?: bool, seed?}";
+  "render.image" => "Final render with the path tracer (CPU, every core, denoised): writes a PNG when given a path and keeps it in the render gallery unless gallery is false; settings and camera fields override the stored ones for this render", "{path?, name?, gallery?: bool, resolution? | width?, height?, samples?, max_bounces?, denoise?, seed?, threads?, bodies?: [id], view?, yaw?, pitch?, distance?, fov?, ortho?, fstop?, focus_distance?, exposure?, tone_map?}";
+  "render.gallery" => "The render gallery stored with the design", "{}";
+  "render.gallery.add" => "Keep an image file in the render gallery", "{path, name?, samples?, seconds?}";
+  "render.gallery.export" => "Write a gallery render to a PNG file", "{id, path}";
+  "render.gallery.rename" => "Rename a gallery render", "{id, name}";
+  "render.gallery.delete" => "Delete a gallery render", "{id}";
   "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner; post-processor and units for its G-code", "{name?, body?, stock_side?, stock_top?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch}";
   "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool_number? (library) | tool: {diameter, number?, kind?, rpm?, feed?, plunge?, ...} | tool_diameter, stepover?: fraction, stepdown?}";
   "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands); rest: only what earlier operations left", "{setup?, floors: [face], tool_number? | tool | tool_diameter, stepover?, stepdown?, stock_to_leave?, rest?, entry?: plunge|ramp|helix, ramp_angle?, helix_diameter?}";
@@ -394,6 +409,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cut::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::rendering::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::form::run(s, name, p) {
