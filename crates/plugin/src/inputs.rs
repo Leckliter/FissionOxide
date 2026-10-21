@@ -21,7 +21,7 @@ pub fn resolve(cmd: &Command, given: &Value, s: &Session) -> Result<Value, Strin
     _ => return Err("inputs must be a JSON object".into()),
   };
   if let Some(k) = given.keys().find(|k| !cmd.inputs.iter().any(|i| &i.id == *k && i.kind.has_value())) {
-    return Err(format!("'{}' has no input '{k}'", cmd.label));
+    return Err(format!("'{}' has no input '{k}'", cmd.label()));
   }
   let mut out = Map::new();
   for i in cmd.inputs.iter().filter(|i| i.kind.has_value()) {
@@ -166,4 +166,33 @@ pub fn accepts(i: &Input, p: &Sel, s: &Session) -> bool {
     return f != "constraint";
   }
   i.filter.iter().any(|w| w == f || (w == "feature" && f == "sketch"))
+}
+
+/// Resolved values as a built-in command's parameters: a selection limited to one pick passes
+/// the pick itself (a body, sketch or feature as its id; a face, edge ... as `{body, face}` and
+/// so on), others a list of them.
+pub fn as_params(cmd: &Command, values: &Value) -> Value {
+  let mut out = values.as_object().cloned().unwrap_or_default();
+  for i in cmd.inputs.iter().filter(|i| i.kind == InputKind::Selection) {
+    let Some(Value::Array(picks)) = out.get(&i.id).cloned() else { continue };
+    let picks: Vec<Value> = picks.into_iter().map(pick_param).collect();
+    let v = match (i.max_count(), picks.as_slice()) {
+      (Some(1), [one]) => one.clone(),
+      (Some(1), []) => Value::Null,
+      _ => Value::Array(picks),
+    };
+    out.insert(i.id.clone(), v);
+  }
+  out.retain(|_, v| !v.is_null());
+  Value::Object(out)
+}
+
+fn pick_param(p: Value) -> Value {
+  let Value::Object(mut m) = p else { return p };
+  let ty = m.remove("type");
+  match (ty.as_ref().and_then(Value::as_str), m.len()) {
+    (Some("body"), 1) => m.remove("body").unwrap_or(Value::Null),
+    (Some("feature"), 1) => m.remove("feature").unwrap_or(Value::Null),
+    _ => Value::Object(m),
+  }
 }

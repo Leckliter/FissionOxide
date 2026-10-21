@@ -569,3 +569,82 @@ fn plugins_through_the_data_hub() {
   run(&mut p, &mut s, "plugin.uninstall", json!({"id": "com.test.shared"})).unwrap();
   assert_eq!(run(&mut p, &mut s, "plugin.list", json!({})).unwrap().as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn a_tab_can_hold_builtin_commands_in_step_order() {
+  let dir = scratch("builtin");
+  let mut s = session(&dir);
+  let mut p = Plugins::open(&dir.join("plugins"), vec![]);
+  let text = format!(
+    "{}{}",
+    manifest("com.test.flow", "1.0.0", &[]),
+    r#"step = 3
+
+[[commands]]
+builtin = "box"
+label = "Make the Blank"
+step = 1
+
+  [[commands.inputs]]
+  id = "width"
+  type = "value"
+  default = "20 mm"
+
+  [[commands.inputs]]
+  id = "depth"
+  type = "value"
+  default = 10
+
+  [[commands.inputs]]
+  id = "height"
+  type = "value"
+  default = "0.5 in"
+
+[[commands]]
+builtin = "body.rename"
+step = 2
+
+  [[commands.inputs]]
+  id = "body"
+  type = "selection"
+  filter = ["body"]
+  max = 1
+
+  [[commands.inputs]]
+  id = "name"
+  type = "text"
+  default = "Blank"
+"#
+  );
+  let m = Manifest::parse(&text).unwrap();
+  assert_eq!(m.command("box").unwrap().label(), "Make the Blank");
+  assert_eq!(m.command("body.rename").unwrap().label(), "body.rename");
+  let pkg = package(&text, &Wat::default().module("(call $str (i32.const 0) (i32.const 0))"));
+  p.install(&pkg, InstallOptions::default()).unwrap();
+  let ids: Vec<String> = p.commands().into_iter().map(|c| c.full_id).collect();
+  assert_eq!(ids, ["com.test.flow/box", "com.test.flow/body.rename", "com.test.flow/go"], "in step order");
+  let r = p.run(&mut s, "com.test.flow/box", &json!({}), RunOptions::default()).unwrap();
+  assert!(r.changed);
+  let bb = s.model.bodies[0].id;
+  let info = s.execute("info", &json!({})).unwrap();
+  let size = &info["bodies"][0]["bbox"];
+  let dz = size[1][2].as_f64().unwrap() - size[0][2].as_f64().unwrap();
+  assert!((dz - 12.7).abs() < 1e-6, "{size}");
+  assert_eq!(s.undo_history()[0], "Make the Blank");
+  s.selection = vec![Sel::Body { body: bb }];
+  p.run(&mut s, "com.test.flow/body.rename", &json!({}), RunOptions::default()).unwrap();
+  assert_eq!(s.body_name(bb), "Blank");
+  // the same rules as a plugin's own calls
+  for bad in [
+    format!("{}[[commands]]\nbuiltin = \"open\"\n", manifest("com.test.open", "1.0.0", &[])),
+    format!("{}[[commands]]\nbuiltin = \"hub.item.purge\"\n", manifest("com.test.purge", "1.0.0", &[])),
+  ] {
+    let pkg = package(&bad, &Wat::default().module("(i64.const 0)"));
+    p.install(&pkg, InstallOptions::default()).unwrap();
+    let id = format!("{}/{}", pkg.manifest.id, pkg.manifest.commands[1].key());
+    assert!(p.run(&mut s, &id, &json!({}), RunOptions::default()).is_err(), "{id}");
+  }
+  for bad in ["[[commands]]\nbuiltin = \"box\"\nid = \"x\"\n", "[[commands]]\nbuiltin = \"Box!\"\n", "[[commands]]\nid = \"nolabel\"\n"] {
+    assert!(Manifest::parse(&format!("{}{bad}", manifest("com.test.bad", "1.0.0", &[]))).is_err(), "{bad}");
+  }
+}

@@ -153,7 +153,7 @@ fn install_window(app: &mut App, ctx: &egui::Context) {
       ui.label(RichText::new("Adds").strong());
       for c in &m.commands {
         let (tab, panel) = m.placement(c);
-        ui.label(format!("• {}   ({tab} → {panel})", c.label));
+        ui.label(format!("• {}   ({tab} → {panel})", c.label()));
       }
       ui.add_space(6.0);
       if pending.grant.is_empty() {
@@ -367,7 +367,7 @@ fn details(ui: &mut egui::Ui, p: &fox_plugin::Installed, log: &str, act: &mut Op
     ui.label(RichText::new("Commands").strong());
     for c in &m.commands {
       let (tab, panel) = m.placement(c);
-      ui.label(format!("• {} ({tab} → {panel}){}", c.label, if c.tooltip.is_empty() { String::new() } else { format!(": {}", c.tooltip) }));
+      ui.label(format!("• {} ({tab} → {panel}){}", c.label(), if c.tooltip.is_empty() { String::new() } else { format!(": {}", c.tooltip) }));
     }
     if !m.permissions.is_empty() {
       ui.label(RichText::new("Permissions").strong());
@@ -498,7 +498,7 @@ pub(crate) fn toolbar(app: &mut App, ui: &mut egui::Ui, i: u8) {
     });
     egui::Popup::menu(&inner.inner).id(popup_id).show(|ui| {
       for c in &group {
-        if ui.button(&c.command.label).on_hover_text(&c.command.tooltip).clicked() {
+        if ui.button(c.command.label()).on_hover_text(&c.command.tooltip).clicked() {
           pick = Some((*c).clone());
         }
       }
@@ -536,15 +536,21 @@ fn tool_button(app: &mut App, ui: &mut egui::Ui, c: &CommandRef, active: bool) -
     None => {
       // no icon: the label's first letter on a badge
       ui.painter().rect_filled(ic.shrink(2.0), 4.0, if active { Color32::WHITE } else { theme::ACCENT });
-      let letter: String = c.command.label.chars().take(1).collect();
+      let letter: String = c.command.label().chars().take(1).collect();
       let color = if active { theme::ACCENT } else { Color32::WHITE };
       ui.painter().text(ic.center(), egui::Align2::CENTER_CENTER, letter, egui::FontId::proportional(15.0), color);
     }
   }
+  // a workflow step carries its number
+  if let Some(n) = c.command.step {
+    let badge = egui::Rect::from_min_size(rect.left_top() + vec2(1.0, 1.0), vec2(13.0, 13.0));
+    ui.painter().rect_filled(badge, 3.0, Color32::from_rgb(250, 204, 21));
+    ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, n.to_string(), egui::FontId::proportional(9.5), Color32::from_gray(40));
+  }
   let tip = if c.command.tooltip.is_empty() {
-    format!("{}\n({})", c.command.label, c.plugin_name)
+    format!("{}\n({})", c.command.label(), c.plugin_name)
   } else {
-    format!("{}\n{}\n({})", c.command.label, c.command.tooltip, c.plugin_name)
+    format!("{}\n{}\n({})", c.command.label(), c.command.tooltip, c.plugin_name)
   };
   resp.on_hover_text(tip)
 }
@@ -565,9 +571,18 @@ fn icon(app: &mut App, ctx: &egui::Context, path: &Path) -> Option<TextureHandle
 
 // ---------------------------------------------------------------- command dialogs
 
-/// Opens a plugin command's dialog.
+/// Opens a plugin command's dialog; a built-in command without inputs just runs.
 fn start(app: &mut App, cmd: CommandRef) {
   app.cancel_dialog();
+  if cmd.command.builtin.is_some() && cmd.command.inputs.is_empty() {
+    app.plugins.dialog = Some(CommandDialog { cmd, values: Map::new(), over: HashMap::new(), active_sel: None, error: None });
+    run(app);
+    if app.plugins.dialog.as_ref().is_some_and(|d| d.cmd.command.inputs.is_empty() && d.cmd.command.builtin.is_some()) {
+      // a failed run shows its error in the status bar, not an empty dialog
+      app.plugins.dialog = None;
+    }
+    return;
+  }
   let mut values = Map::new();
   for i in cmd.command.inputs.iter().filter(|i| i.kind.has_value()) {
     let v = fox_plugin::inputs::initial(i);
@@ -648,7 +663,7 @@ fn command_dialog(app: &mut App, ctx: &egui::Context) {
   let mut ok = false;
   let mut edited: Option<String> = sel_changed;
   let mut pick_folder = false;
-  let title = d.cmd.command.label.clone();
+  let title = d.cmd.command.label().to_string();
   egui::Window::new(&title)
     .id(egui::Id::new(("plugin-dialog", &d.cmd.full_id)))
     .collapsible(false)
@@ -827,22 +842,21 @@ fn run(app: &mut App) {
     app.plugins.dialog = Some(d);
     return;
   }
-  if d.cmd.uses_files && app.plugins.folder.is_none() {
-    match rfd::FileDialog::new().set_title("Folder for the plugin's files").pick_folder() {
-      Some(f) => app.plugins.folder = Some(f),
-      None => {
-        app.plugins.dialog = Some(d);
-        return;
-      }
-    }
-  }
   let hub = app.hub_root();
-  let folder = if d.cmd.uses_files { app.plugins.folder.clone() } else { None };
-  let opts = RunOptions { folder, ..Default::default() };
-  let r = app.plugins.registry(&hub).run(&mut app.s, &d.cmd.full_id, &Value::Object(d.values.clone()), opts);
+  let values = Value::Object(d.values.clone());
+  let opts = RunOptions { folder: app.plugins.folder.clone(), ..Default::default() };
+  let mut r = app.plugins.registry(&hub).run(&mut app.s, &d.cmd.full_id, &values, opts);
+  // it wants files and no folder is chosen yet: ask, and run again (the failed run was undone)
+  if matches!(&r, Err(e) if e.contains(fox_plugin::sandbox::NO_FOLDER))
+    && let Some(f) = rfd::FileDialog::new().set_title("Folder for the plugin's files").pick_folder()
+  {
+    app.plugins.folder = Some(f);
+    let opts = RunOptions { folder: app.plugins.folder.clone(), ..Default::default() };
+    r = app.plugins.registry(&hub).run(&mut app.s, &d.cmd.full_id, &values, opts);
+  }
   match r {
     Ok(r) => {
-      let mut msg = format!("{} done", d.cmd.command.label);
+      let mut msg = format!("{} done", d.cmd.command.label());
       if let Some(m) = r.result.get("message").and_then(Value::as_str) {
         msg = format!("{msg}: {m}");
       }
@@ -856,7 +870,7 @@ fn run(app: &mut App) {
       }
     }
     Err(e) => {
-      app.status = Some((format!("{}: {e}", d.cmd.command.label), true));
+      app.status = Some((format!("{}: {e}", d.cmd.command.label()), true));
       d.error = Some(e);
       app.plugins.dialog = Some(d);
     }

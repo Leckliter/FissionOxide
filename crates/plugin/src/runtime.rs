@@ -62,6 +62,9 @@ pub fn engine() -> &'static Engine {
   ENGINE.get_or_init(|| {
     let mut c = wasmtime::Config::new();
     c.consume_fuel(true);
+    // OpenCASCADE installs its own SIGSEGV/SIGILL handlers, which would take wasm traps for
+    // crashes of the app: compile explicit bounds checks and traps instead
+    c.signals_based_traps(false);
     Engine::new(&c).expect("the plugin engine configuration is valid")
   })
 }

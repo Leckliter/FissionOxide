@@ -99,9 +99,21 @@ pub struct Panel {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Command {
-  /// Unique within the plugin; the full id is `<plugin id>/<command id>`.
+  /// Unique within the plugin; the full id is `<plugin id>/<command id>`. Empty for a
+  /// built-in command shown on the plugin's tab.
+  #[serde(default)]
   pub id: String,
+  /// A built-in engine command shown on the plugin's tab too (`"sketch.remove_duplicates"`),
+  /// instead of one of the plugin's own; it keeps its place elsewhere in the app. Its inputs, if
+  /// any, become its parameters.
+  #[serde(default)]
+  pub builtin: Option<String>,
+  /// Default for a built-in command: its id.
+  #[serde(default)]
   pub label: String,
+  /// Where it comes in the workflow: the tab is laid out in step order and the icon shows it.
+  #[serde(default)]
+  pub step: Option<u32>,
   #[serde(default)]
   pub tooltip: String,
   /// Path of a PNG in the package (32×32 or larger, square).
@@ -155,7 +167,7 @@ pub enum Unit {
 pub const SELECTION_FILTERS: [&str; 9] =
   ["sketch", "curve", "point", "profile", "body", "face", "edge", "vertex", "feature"];
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Input {
   pub id: String,
@@ -196,6 +208,17 @@ pub struct Input {
   /// Editable only while the other inputs have these values.
   #[serde(default)]
   pub enabled_when: Option<Map<String, Value>>,
+}
+
+impl Command {
+  /// Its id within the plugin: its own id, or the built-in command's.
+  pub fn key(&self) -> &str {
+    self.builtin.as_deref().unwrap_or(&self.id)
+  }
+
+  pub fn label(&self) -> &str {
+    if self.label.is_empty() { self.key() } else { &self.label }
+  }
 }
 
 impl Input {
@@ -250,7 +273,7 @@ impl Manifest {
   }
 
   pub fn command(&self, id: &str) -> Option<&Command> {
-    self.commands.iter().find(|c| c.id == id)
+    self.commands.iter().find(|c| c.key() == id)
   }
 
   /// Checks everything that doesn't need the package's other files.
@@ -280,15 +303,28 @@ impl Manifest {
     }
     let mut seen = HashSet::new();
     for c in &self.commands {
-      if !is_id(&c.id) || !seen.insert(c.id.as_str()) {
-        return Err(format!("command id '{}' is invalid or repeated", c.id));
+      match &c.builtin {
+        Some(b) => {
+          let ok = !b.is_empty() && b.split('.').all(is_id) && c.id.is_empty();
+          if !ok || !seen.insert(b.as_str()) {
+            return Err(format!("builtin command '{b}' is invalid or repeated (and takes no id)"));
+          }
+        }
+        None => {
+          if !is_id(&c.id) || !seen.insert(c.id.as_str()) {
+            return Err(format!("command id '{}' is invalid or repeated", c.id));
+          }
+          if c.label.trim().is_empty() {
+            return Err(format!("command '{}' has no label", c.id));
+          }
+        }
       }
       if let Some(p) = &c.panel
         && !self.panels.iter().any(|q| &q.id == p)
       {
-        return Err(format!("command '{}': no panel '{p}'", c.id));
+        return Err(format!("command '{}': no panel '{p}'", c.key()));
       }
-      validate_inputs(c).map_err(|e| format!("command '{}': {e}", c.id))?;
+      validate_inputs(c).map_err(|e| format!("command '{}': {e}", c.key()))?;
     }
     Ok(())
   }

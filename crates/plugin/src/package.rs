@@ -46,7 +46,7 @@ impl Package {
       if f.is_dir() {
         continue;
       }
-      let name = f.name().to_string();
+      let name = f.name().map_err(|e| e.to_string())?.to_string();
       check_path(&name)?;
       total += f.size();
       if total > MAX_TOTAL {
@@ -70,10 +70,10 @@ impl Package {
       if let Some(icon) = &c.icon {
         let ext = Path::new(icon).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
         if ext.as_deref() != Some("png") {
-          return Err(format!("command '{}': the icon must be a .png", c.id));
+          return Err(format!("command '{}': the icon must be a .png", c.key()));
         }
         if !files.contains_key(icon.as_str()) {
-          return Err(format!("command '{}': the package has no icon '{icon}'", c.id));
+          return Err(format!("command '{}': the package has no icon '{icon}'", c.key()));
         }
       }
     }

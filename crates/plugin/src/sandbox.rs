@@ -43,6 +43,9 @@ const FILES: [(&str, &str, Access); 17] = [
 /// Keys that hold file paths in commands not listed in [`FILES`].
 const PATH_KEYS: [&str; 6] = ["path", "image", "file", "dir", "folder", "font"];
 
+/// The error of a run that needs a folder and wasn't given one (the UI then asks for one).
+pub const NO_FOLDER: &str = "this command uses files: pick a folder for the run first";
+
 /// What one plugin run may touch.
 #[derive(Debug, Clone)]
 pub struct Context {
@@ -68,7 +71,7 @@ impl Context {
 
   /// A path inside the run's folder.
   pub fn in_folder(&self, rel: &str, write: bool) -> Result<PathBuf, String> {
-    let base = self.folder.as_ref().ok_or("this command uses files: pick a folder for the run first")?;
+    let base = self.folder.as_ref().ok_or(NO_FOLDER)?;
     let p = confine(base, rel)?;
     if write && let Some(parent) = p.parent() {
       std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;

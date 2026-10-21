@@ -91,8 +91,10 @@ impl Installed {
       "installed": self.record.installed,
       "source": self.record.source,
       "commands": m.map(|m| m.commands.iter().map(|c| json!({
-        "id": format!("{}/{}", m.id, c.id),
-        "label": c.label,
+        "id": format!("{}/{}", m.id, c.key()),
+        "label": c.label(),
+        "builtin": c.builtin,
+        "step": c.step,
         "tooltip": c.tooltip,
         "inputs": c.inputs,
       })).collect::<Vec<_>>()),
@@ -407,10 +409,13 @@ impl Plugins {
     for p in self.list.iter().filter(|p| p.usable()) {
       let m = p.manifest.as_ref().expect("usable plugins have a manifest");
       let uses_files = m.permissions.iter().any(|p| matches!(p, Permission::ReadFiles | Permission::WriteFiles | Permission::Render));
-      for c in &m.commands {
+      // the tab is laid out in workflow order: numbered steps first
+      let mut cmds: Vec<&Command> = m.commands.iter().collect();
+      cmds.sort_by_key(|c| c.step.unwrap_or(u32::MAX));
+      for c in cmds {
         let (tab, panel) = m.placement(c);
         out.push(CommandRef {
-          full_id: format!("{}/{}", m.id, c.id),
+          full_id: format!("{}/{}", m.id, c.key()),
           plugin: m.id.clone(),
           plugin_name: m.name.clone(),
           command: c.clone(),
@@ -457,6 +462,9 @@ impl Plugins {
   pub fn run(&mut self, session: &mut Session, full_id: &str, given: &Value, opts: RunOptions) -> Result<RunResult, String> {
     let cmd = self.command(full_id)?;
     let values = inputs::resolve(&cmd.command, given, session)?;
+    if let Some(b) = &cmd.command.builtin {
+      return self.run_builtin(session, &cmd, b, &values, opts.folder);
+    }
     let dir = self.find(&cmd.plugin)?.dir.clone();
     let module = self.module(&dir)?;
     session.begin_transaction().map_err(|e| e.0)?;
@@ -468,13 +476,13 @@ impl Plugins {
     let mut text: Vec<String> = host.log.iter().map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message)).collect();
     let out = match result {
       Ok(result) => {
-        let changed = session.commit_transaction_named(&cmd.command.label).map_err(|e| e.0)?;
-        text.push(format!("{}: done ({} commands)", cmd.command.label, host.commands));
+        let changed = session.commit_transaction_named(&cmd.command.label()).map_err(|e| e.0)?;
+        text.push(format!("{}: done ({} commands)", cmd.command.label(), host.commands));
         Ok(RunResult { result, changed, commands: host.commands, log: host.log, files: host.written })
       }
       Err(e) => {
         session.rollback_transaction().map_err(|e| e.0)?;
-        text.push(format!("{}: failed: {e}", cmd.command.label));
+        text.push(format!("{}: failed: {e}", cmd.command.label()));
         Err(e)
       }
     };
@@ -482,11 +490,45 @@ impl Plugins {
     out
   }
 
+  /// A built-in command on a plugin's tab: run with its inputs as parameters (single picks as
+  /// ids), under the same rules as the plugin's own `execute` calls.
+  fn run_builtin(
+    &mut self,
+    session: &mut Session,
+    cmd: &CommandRef,
+    builtin: &str,
+    values: &Value,
+    folder: Option<PathBuf>,
+  ) -> Result<RunResult, String> {
+    let p = self.find(&cmd.plugin)?;
+    let ctx = sandbox::Context { granted: p.record.granted.clone(), folder, resources: p.dir.join("resources") };
+    let params = ctx.prepare(builtin, &inputs::as_params(&cmd.command, values))?;
+    session.begin_transaction().map_err(|e| e.0)?;
+    let result = session.execute(builtin, &params).map_err(|e| e.0).and_then(|v| match v.get("error").and_then(Value::as_str) {
+      Some(e) => Err(e.to_string()),
+      None => Ok(v),
+    });
+    match result {
+      Ok(result) => {
+        let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
+        Ok(RunResult { result, changed, commands: 1, log: Vec::new(), files: Vec::new() })
+      }
+      Err(e) => {
+        session.rollback_transaction().map_err(|e| e.0)?;
+        self.append_log(&cmd.plugin, &format!("{}: failed: {e}", cmd.command.label()));
+        Err(e)
+      }
+    }
+  }
+
   /// An input changed while the dialog is open: the plugin returns updates for other inputs
   /// (`{"<input>": {"value"?, "visible"?, "enabled"?, "text"?, "options"?}}`). Anything it does
   /// to the design is rolled back.
   pub fn input_changed(&mut self, session: &mut Session, full_id: &str, input: &str, given: &Value) -> Result<Value, String> {
     let cmd = self.command(full_id)?;
+    if cmd.command.builtin.is_some() {
+      return Ok(json!({}));
+    }
     let values = inputs::resolve_partial(&cmd.command, given, session);
     let dir = self.find(&cmd.plugin)?.dir.clone();
     let module = self.module(&dir)?;

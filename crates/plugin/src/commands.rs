@@ -65,7 +65,7 @@ pub fn package_json(pkg: &Package) -> Value {
     "description": m.description,
     "permissions": m.permissions,
     "panels": m.panels,
-    "commands": m.commands.iter().map(|c| json!({"id": format!("{}/{}", m.id, c.id), "label": c.label, "inputs": c.inputs.len()})).collect::<Vec<_>>(),
+    "commands": m.commands.iter().map(|c| json!({"id": format!("{}/{}", m.id, c.key()), "label": c.label(), "builtin": c.builtin, "step": c.step, "inputs": c.inputs.len()})).collect::<Vec<_>>(),
     "files": pkg.files.len(),
   })
 }
@@ -80,7 +80,9 @@ pub fn run(plugins: &mut Plugins, s: &mut Session, name: &str, p: &Value) -> Res
         .iter()
         .map(|c| json!({
           "command": c.full_id,
-          "label": c.command.label,
+          "label": c.command.label(),
+          "builtin": c.command.builtin,
+          "step": c.command.step,
           "tooltip": c.command.tooltip,
           "tab": c.tab,
           "panel": c.panel,
