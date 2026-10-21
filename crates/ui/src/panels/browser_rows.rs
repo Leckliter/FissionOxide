@@ -504,12 +504,9 @@ mod tests {
         "Change to Direct Modeling",
       ]
     );
-    let cloud: Vec<&str> = root_menu(&app)
-      .iter()
-      .flatten()
-      .filter(|i| i.cmd == RowCmd::NotYet)
-      .map(|i| i.label.as_str())
-      .collect::<Vec<_>>();
+    let items = root_menu(&app);
+    let cloud: Vec<&str> =
+      items.iter().flatten().filter(|i| i.cmd == RowCmd::NotYet).map(|i| i.label.as_str()).collect();
     assert_eq!(
       cloud,
       ["Add To Assembly", "Create Selection Set", "Texture Map Controls", "History", "Display Detail Control"]
@@ -551,7 +548,11 @@ mod tests {
     run_root_cmd(&mut app, RowCmd::ShowAllComponents);
     assert!(app.s.body_visible(body));
     run_root_cmd(&mut app, RowCmd::Appearance);
-    assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Form(&crate::forms::APPEARANCE)));
+    assert!(
+      app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Appearance),
+      "{:?}",
+      app.dialog.as_ref().map(|d| d.kind)
+    );
     run_root_cmd(&mut app, RowCmd::Properties);
     assert!(app.dialog.as_ref().is_some_and(|d| d.kind == Kind::Inspect));
     run_root_cmd(&mut app, RowCmd::PhysicalMaterial);
