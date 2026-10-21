@@ -574,6 +574,7 @@ mod tests_cam;
 mod tests_cam3d;
 #[cfg(test)]
 mod tests_cam_checks;
+#[cfg(test)]
 mod tests_cam5;
 #[cfg(test)]
 mod tests_canvas;
