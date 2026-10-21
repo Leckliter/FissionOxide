@@ -73,7 +73,12 @@ pub fn autoroute(pr: &mut Project, nets: &[String], step: f64) -> RouteReport {
     return report;
   }
   let lo = [(lo[0] / step).floor() * step, (lo[1] / step).floor() * step];
-  let grid = Grid { lo, step, nx: ((hi[0] - lo[0]) / step).ceil() as usize + 1, ny: ((hi[1] - lo[1]) / step).ceil() as usize + 1 };
+  let grid = Grid {
+    lo,
+    step,
+    nx: ((hi[0] - lo[0]) / step).ceil() as usize + 1,
+    ny: ((hi[1] - lo[1]) / step).ceil() as usize + 1,
+  };
   if grid.nx * grid.ny > 4_000_000 {
     return report;
   }
@@ -98,7 +103,10 @@ pub fn autoroute(pr: &mut Project, nets: &[String], step: f64) -> RouteReport {
   loop {
     let pads: Vec<BoardPad> = pr.pads();
     let mut air: Vec<_> = pr.board.ratsnest(&pads);
-    air.retain(|a| (nets.is_empty() || nets.contains(&a.net)) && !failed.iter().any(|f| f.0 == a.net && crate::geom::near(f.1, a.a) && crate::geom::near(f.2, a.b)));
+    air.retain(|a| {
+      (nets.is_empty() || nets.contains(&a.net))
+        && !failed.iter().any(|f| f.0 == a.net && crate::geom::near(f.1, a.a) && crate::geom::near(f.2, a.b))
+    });
     air.sort_by(|a, b| crate::geom::dist(a.a, a.b).total_cmp(&crate::geom::dist(b.a, b.b)));
     let Some(job) = air.first().cloned() else { break };
     let cu = pr.board.copper(&pads);

@@ -217,7 +217,9 @@ pub fn silk_strokes(pr: &Project, side: Side) -> Vec<(f64, Vec<P>)> {
   for pl in pr.board.placements.iter().filter(|p| p.side == side) {
     let Some(part) = pr.schematic.parts.iter().find(|p| p.refdes == pl.refdes) else { continue };
     let Some(dev) = libs.device(&part.device) else { continue };
-    let Some(fp) = libs.footprint(if pl.footprint.is_empty() { &dev.footprint } else { &pl.footprint }) else { continue };
+    let Some(fp) = libs.footprint(if pl.footprint.is_empty() { &dev.footprint } else { &pl.footprint }) else {
+      continue;
+    };
     let xf = pl.xf();
     for g in fp.gfx.iter().filter(|g| g.layer == FpLayer::Silk) {
       let w = g.gfx.width().max(0.12);
@@ -234,8 +236,15 @@ pub fn silk_strokes(pr: &Project, side: Side) -> Vec<(f64, Vec<P>)> {
     let size = 1.0;
     let x0 = (lo[0] + hi[0]) / 2.0 - crate::font::width(&pl.refdes, size) / 2.0;
     let base = [x0, hi[1] + 0.3];
+    // upside-down text is turned round about its middle so it reads from the board's bottom edge
+    let flip = {
+      let r = pl.rot.rem_euclid(360.0);
+      r > 90.0 + 1e-9 && r <= 270.0 + 1e-9
+    };
+    let mid = [(lo[0] + hi[0]) / 2.0, hi[1] + 0.3 + size / 2.0];
+    let turn = |p: P| if flip { [2.0 * mid[0] - p[0], 2.0 * mid[1] - p[1]] } else { p };
     for (a, b) in crate::font::strokes(&pl.refdes, size) {
-      out.push((0.15, vec![xf.apply(add(a, base)), xf.apply(add(b, base))]));
+      out.push((0.15, vec![xf.apply(turn(add(a, base))), xf.apply(turn(add(b, base)))]));
     }
   }
   out
@@ -272,7 +281,13 @@ pub fn drill(pr: &Project, pads: &[BoardPad], plated: bool) -> String {
   let mut s = String::from("M48\n");
   let _ = writeln!(s, "; DRILL file {{FissionOxide fox-ecad}}");
   let _ = writeln!(s, "; FORMAT={{-:-/ absolute / metric / decimal}}");
-  let _ = writeln!(s, "; #@! TF.FileFunction,{},1,{},{}", if plated { "Plated" } else { "NonPlated" }, pr.board.layers.max(2), if plated { "PTH" } else { "NPTH" });
+  let _ = writeln!(
+    s,
+    "; #@! TF.FileFunction,{},1,{},{}",
+    if plated { "Plated" } else { "NonPlated" },
+    pr.board.layers.max(2),
+    if plated { "PTH" } else { "NPTH" }
+  );
   s.push_str("FMAT,2\nMETRIC\n");
   for (i, d) in sizes.iter().enumerate() {
     let _ = writeln!(s, "T{}C{d:.3}", i + 1);
@@ -301,15 +316,39 @@ pub fn bom(pr: &Project) -> String {
     if dev.footprint.is_empty() {
       continue;
     }
-    let fp = pr.board.placement(&part.refdes).map(|p| p.footprint.clone()).filter(|f| !f.is_empty()).unwrap_or(dev.footprint.clone());
+    let fp = pr
+      .board
+      .placement(&part.refdes)
+      .map(|p| p.footprint.clone())
+      .filter(|f| !f.is_empty())
+      .unwrap_or(dev.footprint.clone());
     match rows.iter_mut().find(|r| r.0 == dev.name && r.1 == part.value && r.2 == fp) {
       Some(r) => r.3.push(part.refdes.clone()),
-      None => rows.push((dev.name.clone(), part.value.clone(), fp, vec![part.refdes.clone()], dev.manufacturer.clone(), dev.mpn.clone(), dev.description.clone())),
+      None => rows.push((
+        dev.name.clone(),
+        part.value.clone(),
+        fp,
+        vec![part.refdes.clone()],
+        dev.manufacturer.clone(),
+        dev.mpn.clone(),
+        dev.description.clone(),
+      )),
     }
   }
   let mut s = String::from("Qty,References,Value,Device,Footprint,Manufacturer,MPN,Description\n");
   for r in rows {
-    let _ = writeln!(s, "{},{},{},{},{},{},{},{}", r.3.len(), csv(&r.3.join(" ")), csv(&r.1), csv(&r.0), csv(&r.2), csv(&r.4), csv(&r.5), csv(&r.6));
+    let _ = writeln!(
+      s,
+      "{},{},{},{},{},{},{},{}",
+      r.3.len(),
+      csv(&r.3.join(" ")),
+      csv(&r.1),
+      csv(&r.0),
+      csv(&r.2),
+      csv(&r.4),
+      csv(&r.5),
+      csv(&r.6)
+    );
   }
   s
 }
@@ -342,7 +381,8 @@ pub fn pick_and_place(pr: &Project) -> String {
 /// Every fab file, named after the project: (file name, contents).
 pub fn fab_files(pr: &Project) -> Vec<(String, String)> {
   let pads = pr.pads();
-  let base: String = pr.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+  let base: String =
+    pr.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
   let mut out = Vec::new();
   for l in pr.board.copper_layers() {
     out.push((format!("{base}-{}.gbr", layer_file(l)), copper(pr, &pads, l)));

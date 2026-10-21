@@ -45,7 +45,15 @@ fn schematic_netlist_and_erc() {
   led_board(&mut s);
   let nets = run(&mut s, "ecad.netlist", json!({}));
   let net_of = |r: &str, p: &str| -> String {
-    nets.as_array().unwrap().iter().find(|n| n["pins"].as_array().unwrap().iter().any(|x| x["refdes"] == r && x["pin"] == p)).unwrap()["name"].as_str().unwrap().to_string()
+    nets
+      .as_array()
+      .unwrap()
+      .iter()
+      .find(|n| n["pins"].as_array().unwrap().iter().any(|x| x["refdes"] == r && x["pin"] == p))
+      .unwrap()["name"]
+      .as_str()
+      .unwrap()
+      .to_string()
   };
   assert_eq!(net_of("J1", "1"), "+5V");
   assert_eq!(net_of("R1", "1"), "+5V");
@@ -109,7 +117,11 @@ fn board_from_sketch_routing_drc_and_3d() {
   let board = s.model.bodies.iter().find(|b| b.name == "PCB Untitled").unwrap();
   let drilled = 30.0 * 20.0 * 1.6 - 2.0 * std::f64::consts::PI * 0.25 * 1.6;
   let via_vol = vias as f64 * std::f64::consts::PI * 0.15f64.powi(2) * 1.6;
-  assert!((board.shape.mass().unwrap().volume - (drilled - via_vol)).abs() < 1e-3, "{}", board.shape.mass().unwrap().volume);
+  assert!(
+    (board.shape.mass().unwrap().volume - (drilled - via_vol)).abs() < 1e-3,
+    "{}",
+    board.shape.mass().unwrap().volume
+  );
   let (rlo, rhi) = bbox(&s, "R1");
   assert!((rlo.z - 1.6).abs() < 1e-6 && (rhi.z - 2.1).abs() < 1e-6, "R1 sits on the board: {rlo} {rhi}");
   assert!(((rlo.x + rhi.x) / 2.0 - 15.0).abs() < 1e-6);
@@ -122,7 +134,8 @@ fn board_from_sketch_routing_drc_and_3d() {
   assert!(s.model.status(fox_model::FeatureId(feature as u32)).and_then(|x| x.error.clone()).is_none());
 
   // an enclosure lid resting on the parts shows up as interference with the board's component
-  let lid = run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 3, "at": [15, 10]}))["feature"].as_u64().unwrap();
+  let lid =
+    run(&mut s, "box", json!({"width": 40, "depth": 30, "height": 3, "at": [15, 10]}))["feature"].as_u64().unwrap();
   let body = s.model.bodies.iter().find(|b| b.feature.0 == lid as u32).unwrap().id.0;
   run(&mut s, "component.create", json!({"name": "Lid", "bodies": [body]}));
   let clash = run(&mut s, "assembly.interference", json!({}));

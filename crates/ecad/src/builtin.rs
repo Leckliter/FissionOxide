@@ -2,7 +2,7 @@
 //! MCU, and power symbols. Footprints follow the IPC/KiCad nominal land patterns.
 
 use crate::geom::P;
-use crate::library::{Device, FpGfx, FpLayer, Footprint, Gfx, Library, Model3d, Pad, PadShape, Pin, PinType, Symbol};
+use crate::library::{Device, Footprint, FpGfx, FpLayer, Gfx, Library, Model3d, Pad, PadShape, Pin, PinType, Symbol};
 
 pub const NAME: &str = "fox";
 
@@ -34,7 +34,12 @@ fn capacitor_sym() -> Symbol {
   two_pin(
     "C",
     ["~", "~"],
-    vec![line([-1.5, 0.5], [1.5, 0.5]), line([-1.5, -0.5], [1.5, -0.5]), line([0.0, G], [0.0, 0.5]), line([0.0, -G], [0.0, -0.5])],
+    vec![
+      line([-1.5, 0.5], [1.5, 0.5]),
+      line([-1.5, -0.5], [1.5, -0.5]),
+      line([0.0, G], [0.0, 0.5]),
+      line([0.0, -G], [0.0, -0.5]),
+    ],
     PinType::Passive,
   )
 }
@@ -83,7 +88,8 @@ fn ic_sym(name: &str, left: &[(&str, &str, PinType)], right: &[(&str, &str, PinT
 }
 
 fn header_sym(n: usize) -> Symbol {
-  let pins = (0..n).map(|i| pin(&(i + 1).to_string(), &format!("Pin_{}", i + 1), [-2.0 * G, -(i as f64) * G], 0.0, PinType::Passive));
+  let pins = (0..n)
+    .map(|i| pin(&(i + 1).to_string(), &format!("Pin_{}", i + 1), [-2.0 * G, -(i as f64) * G], 0.0, PinType::Passive));
   Symbol {
     name: format!("Conn_01x{n:02}"),
     pins: pins.collect(),
@@ -94,13 +100,26 @@ fn header_sym(n: usize) -> Symbol {
 
 fn power_sym(name: &str, ground: bool) -> Symbol {
   let gfx = if ground {
-    vec![line([0.0, 0.0], [0.0, -1.27]), line([-1.27, -1.27], [1.27, -1.27]), line([-0.8, -1.8], [0.8, -1.8]), line([-0.3, -2.3], [0.3, -2.3])]
+    vec![
+      line([0.0, 0.0], [0.0, -1.27]),
+      line([-1.27, -1.27], [1.27, -1.27]),
+      line([-0.8, -1.8], [0.8, -1.8]),
+      line([-0.3, -2.3], [0.3, -2.3]),
+    ]
   } else {
     vec![line([0.0, 0.0], [0.0, 1.27]), line([-1.27, 1.27], [1.27, 1.27])]
   };
   Symbol {
     name: name.into(),
-    pins: vec![Pin { number: "1".into(), name: name.into(), at: [0.0, 0.0], dir: 90.0, length: 0.0, kind: PinType::PowerOut, hidden: false }],
+    pins: vec![Pin {
+      number: "1".into(),
+      name: name.into(),
+      at: [0.0, 0.0],
+      dir: 90.0,
+      length: 0.0,
+      kind: PinType::PowerOut,
+      hidden: false,
+    }],
     gfx,
     power: true,
   }
@@ -147,8 +166,14 @@ fn chip(name: &str, x: f64, size: P, body: [f64; 3], color: [f32; 3]) -> Footpri
     name: name.into(),
     pads: vec![smd("1", [-x, 0.0], size), smd("2", [x, 0.0], size)],
     gfx: vec![
-      FpGfx { layer: FpLayer::Silk, gfx: Gfx::Line { a: [-bl * 0.3, bw + 0.15], b: [bl * 0.3, bw + 0.15], width: 0.12 } },
-      FpGfx { layer: FpLayer::Silk, gfx: Gfx::Line { a: [-bl * 0.3, -bw - 0.15], b: [bl * 0.3, -bw - 0.15], width: 0.12 } },
+      FpGfx {
+        layer: FpLayer::Silk,
+        gfx: Gfx::Line { a: [-bl * 0.3, bw + 0.15], b: [bl * 0.3, bw + 0.15], width: 0.12 },
+      },
+      FpGfx {
+        layer: FpLayer::Silk,
+        gfx: Gfx::Line { a: [-bl * 0.3, -bw - 0.15], b: [bl * 0.3, -bw - 0.15], width: 0.12 },
+      },
       courtyard([-cx, -cy], [cx, cy]),
     ],
     model: Some(Model3d::Box { size: body, offset: [0.0, 0.0], color: Some(color) }),
@@ -171,7 +196,8 @@ fn header_fp(n: usize) -> Footprint {
   Footprint {
     name: format!("PinHeader_1x{n:02}_P2.54mm_Vertical"),
     pads,
-    gfx: [silk_rect([-1.33, -len + 1.27 - 0.06], [1.33, 1.33]), vec![courtyard([-1.8, -len + 1.27 - 0.5], [1.8, 1.8])]].concat(),
+    gfx: [silk_rect([-1.33, -len + 1.27 - 0.06], [1.33, 1.33]), vec![courtyard([-1.8, -len + 1.27 - 0.5], [1.8, 1.8])]]
+      .concat(),
     model: Some(Model3d::Box { size: [G, len, 8.5], offset: [0.0, -(len - G) / 2.0], color: Some([0.1, 0.1, 0.1]) }),
   }
 }
@@ -189,10 +215,18 @@ fn dual_row(name: &str, n: usize, pitch: f64, x: f64, pad: P, body: [f64; 3]) ->
   }
   let (bx, by) = (body[0] / 2.0, body[1] / 2.0);
   let mut gfx = silk_rect([-bx, -by], [bx, by]);
-  gfx.push(FpGfx { layer: FpLayer::Silk, gfx: Gfx::Circle { c: [-x - pad[0] / 2.0, top + pad[1] + 0.3], r: 0.15, width: 0.12, fill: true } });
+  gfx.push(FpGfx {
+    layer: FpLayer::Silk,
+    gfx: Gfx::Circle { c: [-x - pad[0] / 2.0, top + pad[1] + 0.3], r: 0.15, width: 0.12, fill: true },
+  });
   let (cx, cy) = (x + pad[0] / 2.0 + 0.25, by.max(top + pad[1] / 2.0) + 0.25);
   gfx.push(courtyard([-cx, -cy], [cx, cy]));
-  Footprint { name: name.into(), pads, gfx, model: Some(Model3d::Box { size: body, offset: [0.0, 0.0], color: Some([0.12, 0.12, 0.12]) }) }
+  Footprint {
+    name: name.into(),
+    pads,
+    gfx,
+    model: Some(Model3d::Box { size: body, offset: [0.0, 0.0], color: Some([0.12, 0.12, 0.12]) }),
+  }
 }
 
 fn sot23() -> Footprint {
@@ -236,12 +270,22 @@ fn qfn(name: &str, n: usize, pitch: f64, size: f64, ep: f64) -> Footprint {
   for (a, b) in [([-h, h - 0.6], [-h, h]), ([-h, h], [-h + 0.6, h]), ([h - 0.6, h], [h, h]), ([h, h], [h, h - 0.6])] {
     gfx.push(FpGfx { layer: FpLayer::Silk, gfx: Gfx::Line { a, b, width: 0.12 } });
   }
-  for (a, b) in [([-h, -h + 0.6], [-h, -h]), ([-h, -h], [-h + 0.6, -h]), ([h - 0.6, -h], [h, -h]), ([h, -h], [h, -h + 0.6])] {
+  for (a, b) in
+    [([-h, -h + 0.6], [-h, -h]), ([-h, -h], [-h + 0.6, -h]), ([h - 0.6, -h], [h, -h]), ([h, -h], [h, -h + 0.6])]
+  {
     gfx.push(FpGfx { layer: FpLayer::Silk, gfx: Gfx::Line { a, b, width: 0.12 } });
   }
-  gfx.push(FpGfx { layer: FpLayer::Silk, gfx: Gfx::Circle { c: [-h - 0.5, h + 0.5], r: 0.15, width: 0.12, fill: true } });
+  gfx.push(FpGfx {
+    layer: FpLayer::Silk,
+    gfx: Gfx::Circle { c: [-h - 0.5, h + 0.5], r: 0.15, width: 0.12, fill: true },
+  });
   gfx.push(courtyard([-h - 0.6, -h - 0.6], [h + 0.6, h + 0.6]));
-  Footprint { name: name.into(), pads, gfx, model: Some(Model3d::Box { size: [size, size, 0.9], offset: [0.0, 0.0], color: Some([0.12, 0.12, 0.12]) }) }
+  Footprint {
+    name: name.into(),
+    pads,
+    gfx,
+    model: Some(Model3d::Box { size: [size, size, 0.9], offset: [0.0, 0.0], color: Some([0.12, 0.12, 0.12]) }),
+  }
 }
 
 fn usb_c_fp() -> Footprint {
@@ -261,13 +305,37 @@ fn usb_c_fp() -> Footprint {
     ("B4A9", 2.45, 0.6),
     ("B1A12", 3.25, 0.6),
   ] {
-    pads.push(Pad { number: num.into(), shape: PadShape::Rect, at: [x, y], size: [w, 1.3], rot: 0.0, drill: None, npth: false });
+    pads.push(Pad {
+      number: num.into(),
+      shape: PadShape::Rect,
+      at: [x, y],
+      size: [w, 1.3],
+      rot: 0.0,
+      drill: None,
+      npth: false,
+    });
   }
   for (x, yy, h) in [(-4.32, 1.95, 2.1), (4.32, 1.95, 2.1), (-4.32, -2.2, 1.8), (4.32, -2.2, 1.8)] {
-    pads.push(Pad { number: "S1".into(), shape: PadShape::Oval, at: [x, yy], size: [1.0, h], rot: 0.0, drill: Some(0.65), npth: false });
+    pads.push(Pad {
+      number: "S1".into(),
+      shape: PadShape::Oval,
+      at: [x, yy],
+      size: [1.0, h],
+      rot: 0.0,
+      drill: Some(0.65),
+      npth: false,
+    });
   }
   for x in [-2.89, 2.89] {
-    pads.push(Pad { number: String::new(), shape: PadShape::Circle, at: [x, 1.45], size: [0.65, 0.65], rot: 0.0, drill: Some(0.65), npth: true });
+    pads.push(Pad {
+      number: String::new(),
+      shape: PadShape::Circle,
+      at: [x, 1.45],
+      size: [0.65, 0.65],
+      rot: 0.0,
+      drill: Some(0.65),
+      npth: true,
+    });
   }
   Footprint {
     name: "USB_C_Receptacle_HRO_TYPE-C-31-M-12".into(),
@@ -284,8 +352,24 @@ fn led_tht_fp() -> Footprint {
   Footprint {
     name: "LED_D5.0mm".into(),
     pads: vec![
-      Pad { number: "1".into(), shape: PadShape::Rect, at: [0.0, 0.0], size: [1.8, 1.8], rot: 0.0, drill: Some(0.9), npth: false },
-      Pad { number: "2".into(), shape: PadShape::Circle, at: [G, 0.0], size: [1.8, 1.8], rot: 0.0, drill: Some(0.9), npth: false },
+      Pad {
+        number: "1".into(),
+        shape: PadShape::Rect,
+        at: [0.0, 0.0],
+        size: [1.8, 1.8],
+        rot: 0.0,
+        drill: Some(0.9),
+        npth: false,
+      },
+      Pad {
+        number: "2".into(),
+        shape: PadShape::Circle,
+        at: [G, 0.0],
+        size: [1.8, 1.8],
+        rot: 0.0,
+        drill: Some(0.9),
+        npth: false,
+      },
     ],
     gfx: vec![
       FpGfx { layer: FpLayer::Silk, gfx: Gfx::Arc { c: [1.27, 0.0], r: 3.0, start: 30.0, end: 330.0, width: 0.12 } },
@@ -330,10 +414,25 @@ pub fn library() -> Library {
     &[("8", "VCC", PowerIn), ("3", "Q", Output), ("7", "DIS", OpenCollector), ("1", "GND", PowerIn)],
     10.16,
   ));
-  symbols.push(ic_sym("LDO_GND_OUT_IN", &[("3", "VIN", PowerIn), ("1", "GND", PowerIn)], &[("2", "VOUT", PowerOut)], 7.62));
+  symbols.push(ic_sym(
+    "LDO_GND_OUT_IN",
+    &[("3", "VIN", PowerIn), ("1", "GND", PowerIn)],
+    &[("2", "VOUT", PowerOut)],
+    7.62,
+  ));
   symbols.push(ic_sym(
     "USB_C_Receptacle_USB2.0",
-    &[("VBUS", "VBUS", Passive), ("CC1", "CC1", Bidirectional), ("CC2", "CC2", Bidirectional), ("D+", "D+", Bidirectional), ("D-", "D-", Bidirectional), ("SBU1", "SBU1", Bidirectional), ("SBU2", "SBU2", Bidirectional), ("GND", "GND", Passive), ("SHIELD", "SHIELD", Passive)],
+    &[
+      ("VBUS", "VBUS", Passive),
+      ("CC1", "CC1", Bidirectional),
+      ("CC2", "CC2", Bidirectional),
+      ("D+", "D+", Bidirectional),
+      ("D-", "D-", Bidirectional),
+      ("SBU1", "SBU1", Bidirectional),
+      ("SBU2", "SBU2", Bidirectional),
+      ("GND", "GND", Passive),
+      ("SHIELD", "SHIELD", Passive),
+    ],
     &[],
     10.16,
   ));
@@ -407,14 +506,33 @@ pub fn library() -> Library {
     dev("C_1206", "Ceramic capacitor, 1206", "C", "10u", "C", "C_1206_3216Metric"),
     dev("LED_0603", "LED, 0603", "D", "red", "LED", "LED_0603_1608Metric"),
     dev("LED_5mm", "LED, 5 mm through-hole", "D", "red", "LED", "LED_D5.0mm"),
-    Device { mpn: "NE555DR".into(), manufacturer: "Texas Instruments".into(), ..dev("NE555D", "555 timer, SOIC-8", "U", "NE555D", "NE555", "SOIC-8_3.9x4.9mm_P1.27mm") },
-    Device { mpn: "XC6206P332MR".into(), manufacturer: "Torex".into(), ..dev("XC6206P332MR", "3.3 V 200 mA LDO regulator, SOT-23", "U", "XC6206-3.3", "LDO_GND_OUT_IN", "SOT-23") },
-    Device { mpn: "MMBT3904".into(), manufacturer: "onsemi".into(), ..dev("MMBT3904", "NPN transistor, SOT-23", "Q", "MMBT3904", "Q_NPN_BEC", "SOT-23") },
+    Device {
+      mpn: "NE555DR".into(),
+      manufacturer: "Texas Instruments".into(),
+      ..dev("NE555D", "555 timer, SOIC-8", "U", "NE555D", "NE555", "SOIC-8_3.9x4.9mm_P1.27mm")
+    },
+    Device {
+      mpn: "XC6206P332MR".into(),
+      manufacturer: "Torex".into(),
+      ..dev("XC6206P332MR", "3.3 V 200 mA LDO regulator, SOT-23", "U", "XC6206-3.3", "LDO_GND_OUT_IN", "SOT-23")
+    },
+    Device {
+      mpn: "MMBT3904".into(),
+      manufacturer: "onsemi".into(),
+      ..dev("MMBT3904", "NPN transistor, SOT-23", "Q", "MMBT3904", "Q_NPN_BEC", "SOT-23")
+    },
     Device {
       pinmap: map(&[("21", "21"), ("21", "33")]),
       mpn: "ATMEGA328P-MU".into(),
       manufacturer: "Microchip".into(),
-      ..dev("ATmega328P-MU", "8-bit AVR MCU, 32 KB flash, QFN-32", "U", "ATmega328P", "ATmega328P-M", "QFN-32-1EP_5x5mm_P0.5mm")
+      ..dev(
+        "ATmega328P-MU",
+        "8-bit AVR MCU, 32 KB flash, QFN-32",
+        "U",
+        "ATmega328P",
+        "ATmega328P-M",
+        "QFN-32-1EP_5x5mm_P0.5mm",
+      )
     },
     Device {
       pinmap: map(&[
@@ -434,11 +552,25 @@ pub fn library() -> Library {
       ]),
       mpn: "TYPE-C-31-M-12".into(),
       manufacturer: "Korean Hroparts".into(),
-      ..dev("USB_C_Receptacle", "USB 2.0 Type-C receptacle, SMD", "J", "USB-C", "USB_C_Receptacle_USB2.0", "USB_C_Receptacle_HRO_TYPE-C-31-M-12")
+      ..dev(
+        "USB_C_Receptacle",
+        "USB 2.0 Type-C receptacle, SMD",
+        "J",
+        "USB-C",
+        "USB_C_Receptacle_USB2.0",
+        "USB_C_Receptacle_HRO_TYPE-C-31-M-12",
+      )
     },
   ];
   for n in 1..=10 {
-    devices.push(dev(&format!("PinHeader_1x{n:02}"), &format!("Pin header, 1x{n}, 2.54 mm"), "J", &format!("Conn_01x{n:02}"), &format!("Conn_01x{n:02}"), &format!("PinHeader_1x{n:02}_P2.54mm_Vertical")));
+    devices.push(dev(
+      &format!("PinHeader_1x{n:02}"),
+      &format!("Pin header, 1x{n}, 2.54 mm"),
+      "J",
+      &format!("Conn_01x{n:02}"),
+      &format!("Conn_01x{n:02}"),
+      &format!("PinHeader_1x{n:02}_P2.54mm_Vertical"),
+    ));
   }
   for (n, _) in [("GND", 0), ("VCC", 0), ("+5V", 0), ("+3V3", 0), ("VBUS", 0)] {
     devices.push(dev(n, &format!("Power symbol: names its net {n}"), "#PWR", n, n, ""));

@@ -38,7 +38,17 @@ fn starter_library_is_consistent() {
     }
     assert!(fp.model.is_some(), "{} has no 3D model", fp.name);
   }
-  for name in ["R_0603", "C_0805", "LED_0603", "PinHeader_1x04", "NE555D", "ATmega328P-MU", "XC6206P332MR", "MMBT3904", "USB_C_Receptacle"] {
+  for name in [
+    "R_0603",
+    "C_0805",
+    "LED_0603",
+    "PinHeader_1x04",
+    "NE555D",
+    "ATmega328P-MU",
+    "XC6206P332MR",
+    "MMBT3904",
+    "USB_C_Receptacle",
+  ] {
     assert!(lib.device(name).is_some(), "{name}");
   }
   for name in ["SOIC-8_3.9x4.9mm_P1.27mm", "QFN-32-1EP_5x5mm_P0.5mm", "SOT-23"] {
@@ -229,7 +239,13 @@ fn drc_catches_violations() {
   pr.board.tracks.push(Track { layer: Layer::Bottom, a: [10.0, 1.0], b: [10.0, 9.0], width: 0.25, net: "A".into() });
   pr.board.tracks.push(Track { layer: Layer::Bottom, a: [8.0, 6.0], b: [12.0, 6.0], width: 0.25, net: "B".into() });
   // too narrow, too close to the edge, outside the board
-  pr.board.tracks.push(Track { layer: Layer::Bottom, a: [2.0, 2.0], b: [3.0, 2.0], width: r.min_track / 2.0, net: "A".into() });
+  pr.board.tracks.push(Track {
+    layer: Layer::Bottom,
+    a: [2.0, 2.0],
+    b: [3.0, 2.0],
+    width: r.min_track / 2.0,
+    net: "A".into(),
+  });
   pr.board.tracks.push(Track { layer: Layer::Bottom, a: [2.0, 0.2], b: [6.0, 0.2], width: 0.2, net: "A".into() });
   pr.board.tracks.push(Track { layer: Layer::Bottom, a: [30.0, 5.0], b: [31.0, 5.0], width: 0.2, net: "A".into() });
   // a via with a thin annular ring, and a hole crowding it
@@ -237,7 +253,16 @@ fn drc_catches_violations() {
   pr.board.holes.push(Hole { at: [17.5, 2.0], drill: 0.5 });
   let c = pr.drc();
   let cs = codes(&c);
-  for want in ["clearance", "short", "track_width", "edge_clearance", "outside_board", "annular_ring", "hole_clearance", "unrouted"] {
+  for want in [
+    "clearance",
+    "short",
+    "track_width",
+    "edge_clearance",
+    "outside_board",
+    "annular_ring",
+    "hole_clearance",
+    "unrouted",
+  ] {
     assert!(cs.contains(&want), "{want} missing: {c:#?}");
   }
   // overlapping parts

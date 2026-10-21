@@ -593,6 +593,54 @@ fissionoxide-cli exec plate.fox '{"cmd": "cut.gcode", "sketch": 1, "machine": "d
 The machine dialects were written from their documentation, not run on the machines: check a
 program in your control's preview (and on scrap) before cutting parts. Nesting is not there yet.
 
+## Electronics
+
+The **Electronics** workspace (workspace switcher ▸ Electronics, or the `ecad.*` commands) is a
+schematic and board editor in the spirit of Fusion's EAGLE-based one, kept in the design file
+with everything else.
+
+- **Libraries.** A device ties a schematic symbol (pins with electrical types), a footprint
+  (SMD and plated or bare through-hole pads, silkscreen, courtyard) and a 3D model (a simple
+  body or a STEP file) together, with a pin-to-pad map. The starter library has 0603/0805/1206
+  resistors and capacitors, 0603 and 5 mm LEDs, 1×1 to 1×10 pin headers, an NE555 (SOIC-8),
+  an MMBT3904 and an XC6206 3.3 V regulator (SOT-23), the ATmega328P (QFN-32), a USB-C
+  receptacle and the GND/VCC/+5V/+3V3/VBUS power symbols. **KiCad libraries import**:
+  `.kicad_sym` symbol libraries (multi-unit symbols get their units side by side, the Footprint
+  property picks the footprint), `.kicad_mod` footprints and whole `.pretty` folders.
+  `ecad.library.export` writes a library in this app's JSON format.
+- **Schematic.** Parts, wires (T-junctions connect, crossings don't), net labels (same name,
+  same net), power symbols, buses (`D[0..7]`, `SDA,SCL`) and no-connect markers. `ecad.connect`
+  puts a pin on a net the EAGLE way: a stub with a label or a power symbol. The **ERC** finds
+  unconnected pins, outputs driving each other, power pins with no source, undriven inputs,
+  dangling wires, nets with two names, wires leaving a bus without naming a signal and duplicate
+  designators.
+- **Board.** The outline is a sketch's closed region or a planar face in the design (it follows
+  them as they change) or drawn points; two or four copper layers. Footprints arrive from the
+  schematic with their ratsnest; route by hand with vias (L changes layer), pour copper for a
+  net (cleared around other nets and the edge), add mounting holes, or let the maze autorouter
+  finish the job. The **DRC** checks clearances and shorts, track widths, drills and annular
+  rings, copper to the board edge, hole spacing, overlapping courtyards and what's unrouted,
+  against editable design rules.
+- **3D.** **Push to 3D** (`ecad.push3d`) adds a PCB feature to the timeline: the board body,
+  drilled, with every part's 3D model on its side of the board, in a component of its own. It
+  updates whenever the layout or the outline's sketch changes, so the board takes part in
+  joints, interference checks and drawings like any other component.
+- **Fab output.** Gerber RS-274X with X2 attributes (copper, mask, paste, silkscreen with
+  reference designators, outline), Excellon drill files (plated and unplated), a BOM and a
+  pick-and-place CSV.
+
+```sh
+fissionoxide-cli run examples/electronics_blinky.jsonl --save blinky.fox   # 555 blinker to Gerbers
+fissionoxide-cli exec blinky.fox '{"cmd": "ecad.drc"}'
+fissionoxide-cli exec blinky.fox '{"cmd": "ecad.export", "dir": "fab"}'
+fissionoxide-cli exec blinky.fox '{"cmd": "ecad.svg", "view": "schematic", "path": "blinky.svg"}'
+```
+
+`ecad.new {"example": true}` opens a finished board: a USB-C powered ATmega328P with a 3.3 V
+regulator, an LED and a programming header, routed with ground pours. Not there yet: multiple
+schematic sheets, differential pairs and length tuning, thermal reliefs on pours (pads join
+them solidly), push-and-shove routing, and board cutouts in the fab outline.
+
 ## Headless CLI and scripting
 
 ```sh
@@ -756,6 +804,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 | `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
+| `fox-ecad`          | Electronics: library format, KiCad import, schematics and ERC, PCB layout, DRC, autorouter, Gerber/Excellon/BOM/pick-and-place |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::{Board, BoardPad, Placement, Side};
 use crate::geom::P;
-use crate::library::{Device, Libs, Library};
+use crate::library::{Device, Library, Libs};
 use crate::schematic::{Netlist, SchPart, Schematic, natural};
 use crate::{Violation, builtin};
 
@@ -35,7 +35,13 @@ pub fn starter() -> &'static Library {
 
 impl Project {
   pub fn new(name: &str) -> Project {
-    Project { name: name.into(), schematic: Schematic::default(), board: Board::default(), libraries: Vec::new(), outline_from: None }
+    Project {
+      name: name.into(),
+      schematic: Schematic::default(),
+      board: Board::default(),
+      libraries: Vec::new(),
+      outline_from: None,
+    }
   }
 
   pub fn libs(&self) -> Libs<'_> {
@@ -115,11 +121,18 @@ impl Project {
     let _ = hi;
     for r in wanted {
       if self.board.placement(&r).is_none() {
-        let taken = |x: f64| self.board.placements.iter().any(|p| (p.at[0] - x).abs() < 4.0 && (p.at[1] - y).abs() < 4.0);
+        let taken =
+          |x: f64| self.board.placements.iter().any(|p| (p.at[0] - x).abs() < 4.0 && (p.at[1] - y).abs() < 4.0);
         while taken(x) {
           x += 6.0;
         }
-        self.board.placements.push(Placement { refdes: r, footprint: String::new(), at: [x, y], rot: 0.0, side: Side::Top });
+        self.board.placements.push(Placement {
+          refdes: r,
+          footprint: String::new(),
+          at: [x, y],
+          rot: 0.0,
+          side: Side::Top,
+        });
       }
     }
   }

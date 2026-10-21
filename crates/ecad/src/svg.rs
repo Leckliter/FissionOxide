@@ -43,13 +43,23 @@ impl Svg {
   fn circle(&mut self, c: P, r: f64, stroke: &str, width: f64, fill: Option<&str>) {
     self.grow([c[0] - r, c[1] - r]);
     self.grow([c[0] + r, c[1] + r]);
-    let _ = writeln!(self.body, r#"<circle cx="{:.3}" cy="{:.3}" r="{r:.3}" fill="{}" stroke="{stroke}" stroke-width="{width:.3}"/>"#, c[0], -c[1], fill.unwrap_or("none"));
+    let _ = writeln!(
+      self.body,
+      r#"<circle cx="{:.3}" cy="{:.3}" r="{r:.3}" fill="{}" stroke="{stroke}" stroke-width="{width:.3}"/>"#,
+      c[0],
+      -c[1],
+      fill.unwrap_or("none")
+    );
   }
 
   fn text(&mut self, at: P, s: &str, size: f64, color: &str, anchor: &str) {
     self.grow(at);
     let esc = s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let _ = writeln!(self.body, r#"<text x="{:.3}" y="{:.3}" font-size="{size:.2}" font-family="sans-serif" fill="{color}" text-anchor="{anchor}">{esc}</text>"#, at[0], -at[1]);
+    let _ = writeln!(
+      self.body,
+      r#"<text x="{:.3}" y="{:.3}" font-size="{size:.2}" font-family="sans-serif" fill="{color}" text-anchor="{anchor}">{esc}</text>"#,
+      at[0], -at[1]
+    );
   }
 
   fn finish(self, background: &str) -> String {
@@ -102,11 +112,19 @@ pub fn schematic(pr: &Project) -> String {
       if !p.name.is_empty() && !sym.power && p.name != "~" && sym.pins.len() > 2 {
         let inward = xf.angle(p.dir);
         let at = add(b, rot([0.6, 0.0], inward));
-        let anchor = if inward.cos() < -0.5 { "end" } else if inward.cos() > 0.5 { "start" } else { "middle" };
+        let anchor = if inward.cos() < -0.5 {
+          "end"
+        } else if inward.cos() > 0.5 {
+          "start"
+        } else {
+          "middle"
+        };
         svg.text([at[0], at[1] - 0.4], &p.name, 1.1, "#333", anchor);
       }
     }
-    let (lo, hi) = crate::geom::bounds(sym.gfx.iter().flat_map(|g| g.polylines().into_iter().flatten()).map(|p| xf.apply(p))).unwrap_or((part.at, part.at));
+    let (lo, hi) =
+      crate::geom::bounds(sym.gfx.iter().flat_map(|g| g.polylines().into_iter().flatten()).map(|p| xf.apply(p)))
+        .unwrap_or((part.at, part.at));
     if sym.power {
       let ground = sym.gfx.iter().flat_map(|g| g.polylines().into_iter().flatten()).any(|p| p[1] < -0.5);
       let at = xf.apply(if ground { [0.0, -3.6] } else { [0.0, 2.2] });
@@ -123,7 +141,11 @@ pub fn schematic(pr: &Project) -> String {
   for w in &pr.schematic.wires {
     for e in [w.a, w.b] {
       let touching = pr.schematic.wires.iter().filter(|o| crate::geom::point_seg_dist(e, o.a, o.b) < 1e-4).count();
-      if touching >= 3 || pr.schematic.wires.iter().any(|o| crate::geom::point_seg_dist(e, o.a, o.b) < 1e-4 && !crate::geom::near(e, o.a) && !crate::geom::near(e, o.b)) {
+      if touching >= 3
+        || pr.schematic.wires.iter().any(|o| {
+          crate::geom::point_seg_dist(e, o.a, o.b) < 1e-4 && !crate::geom::near(e, o.a) && !crate::geom::near(e, o.b)
+        })
+      {
         svg.circle(e, 0.5, wire_c, 0.0, Some(wire_c));
       }
     }
@@ -188,7 +210,13 @@ pub fn board(pr: &Project) -> String {
     }
   }
   for p in &pads {
-    let color = if p.drill.is_some() { "#c8a832" } else if p.side == Side::Top { "#c83232" } else { "#3264c8" };
+    let color = if p.drill.is_some() {
+      "#c8a832"
+    } else if p.side == Side::Top {
+      "#c83232"
+    } else {
+      "#3264c8"
+    };
     match p.shape2(0.0) {
       crate::geom::Shape2::Poly(pts) => svg.poly(&pts, color, 0.01, Some(color), 1.0),
       crate::geom::Shape2::Capsule { a, b, r } => {
@@ -220,7 +248,12 @@ pub fn board(pr: &Project) -> String {
   // parts off the board still show where they are
   for pl in &b.placements {
     let Some(part) = pr.schematic.parts.iter().find(|p| p.refdes == pl.refdes) else { continue };
-    let Some(fp) = libs.device(&part.device).and_then(|d| libs.footprint(if pl.footprint.is_empty() { &d.footprint } else { &pl.footprint })) else { continue };
+    let Some(fp) = libs
+      .device(&part.device)
+      .and_then(|d| libs.footprint(if pl.footprint.is_empty() { &d.footprint } else { &pl.footprint }))
+    else {
+      continue;
+    };
     let xf = pl.xf();
     for g in fp.gfx.iter().filter(|g| g.layer == FpLayer::Courtyard) {
       gfx(&mut svg, &g.gfx, &xf, "#808080", "none");

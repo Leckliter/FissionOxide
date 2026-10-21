@@ -3,7 +3,7 @@
 //! down, so they are flipped into this crate's Y-up coordinates.
 
 use crate::geom::{P, arc3_angles, circle3};
-use crate::library::{Device, FpGfx, FpLayer, Footprint, Gfx, Library, Model3d, Pad, PadShape, Pin, PinType, Symbol};
+use crate::library::{Device, Footprint, FpGfx, FpLayer, Gfx, Library, Model3d, Pad, PadShape, Pin, PinType, Symbol};
 
 /// An S-expression.
 #[derive(Debug, Clone, PartialEq)]
@@ -131,7 +131,11 @@ pub fn parse(text: &str) -> Result<Sx, String> {
 }
 
 fn width(s: &Sx) -> f64 {
-  s.child("stroke").and_then(|st| st.child("width")).and_then(|w| w.num(1)).or_else(|| s.child("width").and_then(|w| w.num(1))).unwrap_or(0.0)
+  s.child("stroke")
+    .and_then(|st| st.child("width"))
+    .and_then(|w| w.num(1))
+    .or_else(|| s.child("width").and_then(|w| w.num(1)))
+    .unwrap_or(0.0)
 }
 
 fn filled(s: &Sx) -> bool {
@@ -146,7 +150,11 @@ fn sym_gfx(s: &Sx, off: P) -> Option<Gfx> {
     "circle" => Gfx::Circle { c: o(s.xy("center")?), r: s.child("radius")?.num(1)?, width: width(s), fill: filled(s) },
     "polyline" => {
       let pts: Vec<P> = s.child("pts")?.all("xy").filter_map(|p| Some(o([p.num(1)?, p.num(2)?]))).collect();
-      if pts.len() == 2 { Gfx::Line { a: pts[0], b: pts[1], width: width(s) } } else { Gfx::Poly { pts, width: width(s), fill: filled(s) } }
+      if pts.len() == 2 {
+        Gfx::Line { a: pts[0], b: pts[1], width: width(s) }
+      } else {
+        Gfx::Poly { pts, width: width(s), fill: filled(s) }
+      }
     }
     "arc" => {
       let (a, b) = (o(s.xy("start")?), o(s.xy("end")?));
@@ -306,7 +314,9 @@ pub fn import_footprint(text: &str) -> Result<Footprint, String> {
         let w = width(it);
         let g = match h {
           "fp_line" => (|| Some(Gfx::Line { a: flip(it.xy("start")?), b: flip(it.xy("end")?), width: w }))(),
-          "fp_rect" => (|| Some(Gfx::Rect { a: flip(it.xy("start")?), b: flip(it.xy("end")?), width: w, fill: filled(it) }))(),
+          "fp_rect" => {
+            (|| Some(Gfx::Rect { a: flip(it.xy("start")?), b: flip(it.xy("end")?), width: w, fill: filled(it) }))()
+          }
           "fp_circle" => (|| {
             let c = flip(it.xy("center")?);
             let e = flip(it.xy("end")?);
@@ -331,11 +341,19 @@ pub fn import_footprint(text: &str) -> Result<Footprint, String> {
       }
       Some("model") => {
         let xyz = |head: &str, def: f64| -> [f64; 3] {
-          it.child(head).and_then(|c| c.child("xyz")).map(|x| [x.num(1).unwrap_or(def), x.num(2).unwrap_or(def), x.num(3).unwrap_or(def)]).unwrap_or([def; 3])
+          it.child(head)
+            .and_then(|c| c.child("xyz"))
+            .map(|x| [x.num(1).unwrap_or(def), x.num(2).unwrap_or(def), x.num(3).unwrap_or(def)])
+            .unwrap_or([def; 3])
         };
         if let Some(path) = it.arg(1) {
           let off = xyz("offset", 0.0);
-          model = Some(Model3d::File { path: path.to_string(), offset: [off[0], off[1], off[2]], rotate: xyz("rotate", 0.0), scale: xyz("scale", 1.0) });
+          model = Some(Model3d::File {
+            path: path.to_string(),
+            offset: [off[0], off[1], off[2]],
+            rotate: xyz("rotate", 0.0),
+            scale: xyz("scale", 1.0),
+          });
         }
       }
       _ => {}
@@ -347,7 +365,11 @@ pub fn import_footprint(text: &str) -> Result<Footprint, String> {
 /// A `.pretty` folder (or any folder) of `.kicad_mod` files as one library.
 pub fn import_footprint_dir(dir: &std::path::Path, lib_name: &str) -> Result<Library, String> {
   let mut lib = Library { name: lib_name.into(), ..Default::default() };
-  let mut entries: Vec<_> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(Result::ok).map(|e| e.path()).collect();
+  let mut entries: Vec<_> = std::fs::read_dir(dir)
+    .map_err(|e| format!("{}: {e}", dir.display()))?
+    .filter_map(Result::ok)
+    .map(|e| e.path())
+    .collect();
   entries.sort();
   for p in entries.into_iter().filter(|p| p.extension().is_some_and(|e| e == "kicad_mod")) {
     let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;

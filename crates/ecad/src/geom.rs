@@ -217,7 +217,9 @@ impl Shape2 {
 /// Gap between two shapes' edges; 0 when they touch or overlap.
 pub fn gap(s: &Shape2, t: &Shape2) -> f64 {
   match (s, t) {
-    (Shape2::Capsule { a, b, r }, Shape2::Capsule { a: c, b: d, r: r2 }) => (seg_seg_dist(*a, *b, *c, *d) - r - r2).max(0.0),
+    (Shape2::Capsule { a, b, r }, Shape2::Capsule { a: c, b: d, r: r2 }) => {
+      (seg_seg_dist(*a, *b, *c, *d) - r - r2).max(0.0)
+    }
     (Shape2::Capsule { a, b, r }, Shape2::Poly(p)) | (Shape2::Poly(p), Shape2::Capsule { a, b, r }) => {
       if point_in_poly(*a, p) || point_in_poly(*b, p) {
         return 0.0;
@@ -244,7 +246,9 @@ pub fn gap(s: &Shape2, t: &Shape2) -> f64 {
 pub fn gap_to_outline(s: &Shape2, outline: &[P]) -> (f64, bool) {
   let inside = point_in_poly(s.anchor(), outline);
   let d = match s {
-    Shape2::Capsule { a, b, r } => edges(outline).map(|(c, d)| seg_seg_dist(*a, *b, c, d)).fold(f64::INFINITY, f64::min) - r,
+    Shape2::Capsule { a, b, r } => {
+      edges(outline).map(|(c, d)| seg_seg_dist(*a, *b, c, d)).fold(f64::INFINITY, f64::min) - r
+    }
     Shape2::Poly(p) => {
       let mut m = f64::INFINITY;
       for (a, b) in edges(p) {

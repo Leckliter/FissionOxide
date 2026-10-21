@@ -376,7 +376,12 @@ pub fn erc(sch: &Schematic, libs: &Libs) -> Vec<Violation> {
   for p in &sch.parts {
     *seen.entry(p.refdes.as_str()).or_default() += 1;
     if libs.device(&p.device).is_none() {
-      out.push(v("unknown_device", Severity::Error, format!("{}: no device '{}' in the libraries", p.refdes, p.device), Some(p.at)));
+      out.push(v(
+        "unknown_device",
+        Severity::Error,
+        format!("{}: no device '{}' in the libraries", p.refdes, p.device),
+        Some(p.at),
+      ));
     }
   }
   let mut dups: Vec<_> = seen.into_iter().filter(|(_, n)| *n > 1).collect();
@@ -401,7 +406,12 @@ pub fn erc(sch: &Schematic, libs: &Libs) -> Vec<Violation> {
     let powered = pins.iter().any(|p| p.power);
     let name = &c.names[g];
     if c.given[g].len() > 1 {
-      out.push(v("label_conflict", Severity::Warning, format!("one net has several names: {}", c.given[g].join(", ")), None));
+      out.push(v(
+        "label_conflict",
+        Severity::Warning,
+        format!("one net has several names: {}", c.given[g].join(", ")),
+        None,
+      ));
     }
     if real.len() == 1 && !powered {
       let p = real[0];
@@ -417,25 +427,48 @@ pub fn erc(sch: &Schematic, libs: &Libs) -> Vec<Violation> {
     if real.len() > 1 {
       for p in &real {
         if p.kind == NoConnect || nc_at(p.at) {
-          out.push(v("nc_connected", Severity::Warning, format!("{} pin {} is marked no-connect but is on net {name}", p.refdes, p.number), Some(p.at)));
+          out.push(v(
+            "nc_connected",
+            Severity::Warning,
+            format!("{} pin {} is marked no-connect but is on net {name}", p.refdes, p.number),
+            Some(p.at),
+          ));
         }
       }
     }
     let outputs: Vec<&&PlacedPin> = real.iter().filter(|p| matches!(p.kind, Output | PowerOut)).collect();
     if outputs.len() > 1 {
       let who: Vec<String> = outputs.iter().map(|p| format!("{}.{}", p.refdes, p.number)).collect();
-      out.push(v("output_conflict", Severity::Error, format!("net {name}: outputs drive each other ({})", who.join(", ")), Some(outputs[0].at)));
+      out.push(v(
+        "output_conflict",
+        Severity::Error,
+        format!("net {name}: outputs drive each other ({})", who.join(", ")),
+        Some(outputs[0].at),
+      ));
     }
     let has_power_out = powered || real.iter().any(|p| p.kind == PowerOut);
     for p in real.iter().filter(|p| p.kind == PowerIn) {
       if !has_power_out {
-        out.push(v("power_not_driven", Severity::Error, format!("{} pin {} ({}) needs power but net {name} has no power source or power symbol", p.refdes, p.number, p.name), Some(p.at)));
+        out.push(v(
+          "power_not_driven",
+          Severity::Error,
+          format!(
+            "{} pin {} ({}) needs power but net {name} has no power source or power symbol",
+            p.refdes, p.number, p.name
+          ),
+          Some(p.at),
+        ));
       }
     }
     let driven = powered || real.iter().any(|p| p.kind.drives());
     for p in real.iter().filter(|p| p.kind == Input) {
       if !driven && real.len() > 1 {
-        out.push(v("input_not_driven", Severity::Error, format!("{} pin {} ({}) on net {name} has nothing driving it", p.refdes, p.number, p.name), Some(p.at)));
+        out.push(v(
+          "input_not_driven",
+          Severity::Error,
+          format!("{} pin {} ({}) on net {name} has nothing driving it", p.refdes, p.number, p.name),
+          Some(p.at),
+        ));
       }
     }
   }
@@ -447,7 +480,12 @@ pub fn erc(sch: &Schematic, libs: &Libs) -> Vec<Violation> {
       let label = sch.labels.iter().any(|l| near(l.at, end));
       let bus = sch.buses.iter().any(|b| b.touches(end));
       if !(other_wire || pin || label || bus || nc_at(end)) {
-        out.push(v("dangling_wire", Severity::Warning, format!("wire end at ({:.2}, {:.2}) is not connected", end[0], end[1]), Some(end)));
+        out.push(v(
+          "dangling_wire",
+          Severity::Warning,
+          format!("wire end at ({:.2}, {:.2}) is not connected", end[0], end[1]),
+          Some(end),
+        ));
       }
     }
   }
@@ -458,7 +496,12 @@ pub fn erc(sch: &Schematic, libs: &Libs) -> Vec<Violation> {
       if let Some(end) = [w.a, w.b].into_iter().find(|e| bus.touches(*e)) {
         let g = c.wire_group[i];
         if !c.given[g].iter().any(|n| members.contains(n)) {
-          out.push(v("bus_entry_unnamed", Severity::Warning, format!("a wire leaves bus {} without a label naming one of its signals", bus.name), Some(end)));
+          out.push(v(
+            "bus_entry_unnamed",
+            Severity::Warning,
+            format!("a wire leaves bus {} without a label naming one of its signals", bus.name),
+            Some(end),
+          ));
         }
       }
     }

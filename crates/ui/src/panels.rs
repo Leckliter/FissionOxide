@@ -53,8 +53,8 @@ impl Tab {
   }
 }
 
-const WORKSPACES: [&str; 7] =
-  ["Design", "Generative Design", "Render", "Animation", "Simulation", "Manufacture", "Drawing"];
+const WORKSPACES: [&str; 8] =
+  ["Design", "Generative Design", "Render", "Animation", "Simulation", "Manufacture", "Electronics", "Drawing"];
 
 // ---------------------------------------------------------------- application bar
 
@@ -772,6 +772,10 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.vertical(|ui| {
           ui.spacing_mut().item_spacing.y = 0.0;
+          if app.electronics.is_some() {
+            crate::ecad_ui::toolbar(app, ui);
+            return;
+          }
           tab_row(app, ui, sketching);
           egui::ScrollArea::horizontal()
             .id_salt("tools")
@@ -809,14 +813,16 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
     ui.painter().text(
       rect.center() - vec2(8.0, 0.0),
       egui::Align2::CENTER_CENTER,
-      if app.drawing.is_some() {
+      if app.electronics.is_some() {
+        "ELECTRONICS"
+      } else if app.drawing.is_some() {
         "DRAWING"
       } else if app.manufacture {
         "MANUFACTURE"
       } else {
         "DESIGN"
       },
-      egui::FontId::proportional(if app.manufacture {
+      egui::FontId::proportional(if app.manufacture || app.electronics.is_some() {
         10.0
       } else if app.drawing.is_some() {
         12.5
@@ -831,13 +837,17 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
       let drawing = app.drawing.is_some();
       for (i, w) in WORKSPACES.iter().enumerate() {
         // Design and Drawing are FissionOxide's workspaces
+        let ecad = app.electronics.is_some();
         let current = match *w {
-          "Drawing" => drawing,
-          "Manufacture" => app.manufacture && !drawing,
-          _ => i == 0 && !drawing && !app.manufacture,
+          "Drawing" => drawing && !ecad,
+          "Manufacture" => app.manufacture && !drawing && !ecad,
+          "Electronics" => ecad,
+          _ => i == 0 && !drawing && !app.manufacture && !ecad,
         };
-        let r =
-          ui.add_enabled(matches!(*w, "Design" | "Drawing" | "Manufacture"), egui::Button::selectable(current, *w));
+        let r = ui.add_enabled(
+          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics"),
+          egui::Button::selectable(current, *w),
+        );
         if r.clicked() {
           ui.close();
           switch_workspace(app, w);
@@ -850,6 +860,15 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
 /// Switches to the Design, Manufacture or Drawing workspace.
 pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   let drawing = app.drawing.is_some();
+  if w == "Electronics" {
+    if drawing {
+      app.close_drawing();
+    }
+    app.manufacture = false;
+    app.open_electronics();
+    return;
+  }
+  app.electronics = None;
   match w {
     "Drawing" if !drawing => {
       app.manufacture = false;

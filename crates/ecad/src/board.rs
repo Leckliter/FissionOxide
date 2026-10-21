@@ -275,7 +275,10 @@ impl Board {
       for pad in &fp.pads {
         let net = sym
           .and_then(|s| {
-            s.pins.iter().find(|pin| dev.pads_of(&pin.number).contains(&pad.number.as_str())).and_then(|pin| nets.net_of(&pl.refdes, &pin.number))
+            s.pins
+              .iter()
+              .find(|pin| dev.pads_of(&pin.number).contains(&pad.number.as_str()))
+              .and_then(|pin| nets.net_of(&pl.refdes, &pin.number))
           })
           .unwrap_or("")
           .to_string();
@@ -307,14 +310,29 @@ impl Board {
       }
     }
     for (i, t) in self.tracks.iter().enumerate() {
-      out.push(Copper { item: Item::Track(i), net: t.net.clone(), layers: vec![t.layer], shape: Shape2::Capsule { a: t.a, b: t.b, r: t.width / 2.0 } });
+      out.push(Copper {
+        item: Item::Track(i),
+        net: t.net.clone(),
+        layers: vec![t.layer],
+        shape: Shape2::Capsule { a: t.a, b: t.b, r: t.width / 2.0 },
+      });
     }
     for (i, v) in self.vias.iter().enumerate() {
-      out.push(Copper { item: Item::Via(i), net: v.net.clone(), layers: all.clone(), shape: Shape2::circle(v.at, v.diameter) });
+      out.push(Copper {
+        item: Item::Via(i),
+        net: v.net.clone(),
+        layers: all.clone(),
+        shape: Shape2::circle(v.at, v.diameter),
+      });
     }
     for (i, p) in self.pours.iter().enumerate() {
       if p.outline.len() >= 3 {
-        out.push(Copper { item: Item::Pour(i), net: p.net.clone(), layers: vec![p.layer], shape: Shape2::Poly(p.outline.clone()) });
+        out.push(Copper {
+          item: Item::Pour(i),
+          net: p.net.clone(),
+          layers: vec![p.layer],
+          shape: Shape2::Poly(p.outline.clone()),
+        });
       }
     }
     out
@@ -324,7 +342,12 @@ impl Board {
   pub fn net_at(&self, pads: &[BoardPad], at: P, layer: Option<Layer>) -> Option<String> {
     let cu = self.copper(pads);
     let hit = |c: &&Copper| layer.is_none_or(|l| c.layers.contains(&l)) && c.shape.contains(at) && !c.net.is_empty();
-    cu.iter().filter(|c| matches!(c.item, Item::Pad(_) | Item::Via(_))).find(hit).or_else(|| cu.iter().filter(|c| matches!(c.item, Item::Track(_))).find(hit)).or_else(|| cu.iter().find(hit)).map(|c| c.net.clone())
+    cu.iter()
+      .filter(|c| matches!(c.item, Item::Pad(_) | Item::Via(_)))
+      .find(hit)
+      .or_else(|| cu.iter().filter(|c| matches!(c.item, Item::Track(_))).find(hit))
+      .or_else(|| cu.iter().find(hit))
+      .map(|c| c.net.clone())
   }
 
   /// Connections still to route: per net, a minimum spanning tree between the groups of copper
@@ -360,9 +383,9 @@ impl Board {
       }
       // anchor points per group that holds a pad
       let mut groups: Vec<(usize, Vec<P>)> = Vec::new();
-      for i in 0..n {
+      for (i, it) in items.iter().enumerate() {
         let r = find(&mut parent, i);
-        let pts: Vec<P> = match (&items[i].item, &items[i].shape) {
+        let pts: Vec<P> = match (&it.item, &it.shape) {
           (Item::Pour(_), _) => Vec::new(),
           (Item::Pad(k), _) => vec![pads[*k].at],
           (_, Shape2::Capsule { a, b, .. }) => vec![*a, *b],
@@ -373,8 +396,12 @@ impl Board {
           None => groups.push((r, pts)),
         }
       }
-      let has_pad: Vec<bool> = groups.iter().map(|g| (0..n).any(|i| matches!(items[i].item, Item::Pad(_)) && find(&mut parent, i) == g.0)).collect();
-      let groups: Vec<Vec<P>> = groups.into_iter().zip(has_pad).filter(|(g, p)| *p && !g.1.is_empty()).map(|(g, _)| g.1).collect();
+      let has_pad: Vec<bool> = groups
+        .iter()
+        .map(|g| (0..n).any(|i| matches!(items[i].item, Item::Pad(_)) && find(&mut parent, i) == g.0))
+        .collect();
+      let groups: Vec<Vec<P>> =
+        groups.into_iter().zip(has_pad).filter(|(g, p)| *p && !g.1.is_empty()).map(|(g, _)| g.1).collect();
       // Kruskal over the groups
       let mut edges = Vec::new();
       for i in 0..groups.len() {
@@ -433,10 +460,21 @@ impl Board {
       layer: layer.map(|l| l.name().to_string()),
     };
     if self.outline.len() < 3 {
-      out.push(Violation { code: "no_outline".into(), severity: Severity::Error, message: "the board has no outline".into(), at: None, layer: None });
+      out.push(Violation {
+        code: "no_outline".into(),
+        severity: Severity::Error,
+        message: "the board has no outline".into(),
+        at: None,
+        layer: None,
+      });
     }
     for pl in &self.placements {
-      let fp = sch.parts.iter().find(|p| p.refdes == pl.refdes).and_then(|p| libs.device(&p.device)).map(|d| if pl.footprint.is_empty() { d.footprint.clone() } else { pl.footprint.clone() });
+      let fp = sch
+        .parts
+        .iter()
+        .find(|p| p.refdes == pl.refdes)
+        .and_then(|p| libs.device(&p.device))
+        .map(|d| if pl.footprint.is_empty() { d.footprint.clone() } else { pl.footprint.clone() });
       if fp.as_ref().is_none_or(|f| libs.footprint(f).is_none()) {
         out.push(viol("missing_footprint", Severity::Error, format!("{}: no footprint", pl.refdes), pl.at, None));
       }
@@ -459,42 +497,89 @@ impl Board {
         }
         let Some(layer) = a.layers.iter().find(|l| b.layers.contains(l)) else { continue };
         let (ba, bb) = (boxes[i], boxes[j]);
-        if ba.0[0] - r.clearance > bb.1[0] || bb.0[0] - r.clearance > ba.1[0] || ba.0[1] - r.clearance > bb.1[1] || bb.0[1] - r.clearance > ba.1[1] {
+        if ba.0[0] - r.clearance > bb.1[0]
+          || bb.0[0] - r.clearance > ba.1[0]
+          || ba.0[1] - r.clearance > bb.1[1]
+          || bb.0[1] - r.clearance > ba.1[1]
+        {
           continue;
         }
         let g = gap(&a.shape, &b.shape);
         if g < r.clearance - 1e-6 {
           let at = a.shape.anchor();
-          let (na, nb) = (if a.net.is_empty() { "no net" } else { &a.net }, if b.net.is_empty() { "no net" } else { &b.net });
+          let (na, nb) =
+            (if a.net.is_empty() { "no net" } else { &a.net }, if b.net.is_empty() { "no net" } else { &b.net });
           if g <= 0.0 {
-            out.push(viol("short", Severity::Error, format!("{} ({na}) touches {} ({nb})", describe(a), describe(b)), at, Some(*layer)));
+            out.push(viol(
+              "short",
+              Severity::Error,
+              format!("{} ({na}) touches {} ({nb})", describe(a), describe(b)),
+              at,
+              Some(*layer),
+            ));
           } else {
-            out.push(viol("clearance", Severity::Error, format!("{} ({na}) is {g:.3} mm from {} ({nb}), less than {:.3}", describe(a), describe(b), r.clearance), at, Some(*layer)));
+            out.push(viol(
+              "clearance",
+              Severity::Error,
+              format!("{} ({na}) is {g:.3} mm from {} ({nb}), less than {:.3}", describe(a), describe(b), r.clearance),
+              at,
+              Some(*layer),
+            ));
           }
         }
       }
     }
     for t in &self.tracks {
       if t.width < r.min_track - 1e-9 {
-        out.push(viol("track_width", Severity::Error, format!("track {:.3} mm wide, narrower than {:.3}", t.width, r.min_track), t.a, Some(t.layer)));
+        out.push(viol(
+          "track_width",
+          Severity::Error,
+          format!("track {:.3} mm wide, narrower than {:.3}", t.width, r.min_track),
+          t.a,
+          Some(t.layer),
+        ));
       }
     }
     for v in &self.vias {
       if v.drill < r.min_drill - 1e-9 {
-        out.push(viol("drill", Severity::Error, format!("via drill {:.3} mm, smaller than {:.3}", v.drill, r.min_drill), v.at, None));
+        out.push(viol(
+          "drill",
+          Severity::Error,
+          format!("via drill {:.3} mm, smaller than {:.3}", v.drill, r.min_drill),
+          v.at,
+          None,
+        ));
       }
       if (v.diameter - v.drill) / 2.0 < r.min_annular - 1e-9 {
-        out.push(viol("annular_ring", Severity::Error, format!("via annular ring {:.3} mm, less than {:.3}", (v.diameter - v.drill) / 2.0, r.min_annular), v.at, None));
+        out.push(viol(
+          "annular_ring",
+          Severity::Error,
+          format!("via annular ring {:.3} mm, less than {:.3}", (v.diameter - v.drill) / 2.0, r.min_annular),
+          v.at,
+          None,
+        ));
       }
     }
     for p in pads.iter().filter(|p| !p.npth) {
       if let Some(d) = p.drill {
         if d < r.min_drill - 1e-9 {
-          out.push(viol("drill", Severity::Error, format!("pad {}.{} drill {d:.3} mm, smaller than {:.3}", p.refdes, p.number, r.min_drill), p.at, None));
+          out.push(viol(
+            "drill",
+            Severity::Error,
+            format!("pad {}.{} drill {d:.3} mm, smaller than {:.3}", p.refdes, p.number, r.min_drill),
+            p.at,
+            None,
+          ));
         }
         let ring = (p.size[0].min(p.size[1]) - d) / 2.0;
         if ring < r.min_annular - 1e-9 {
-          out.push(viol("annular_ring", Severity::Error, format!("pad {}.{} annular ring {ring:.3} mm, less than {:.3}", p.refdes, p.number, r.min_annular), p.at, None));
+          out.push(viol(
+            "annular_ring",
+            Severity::Error,
+            format!("pad {}.{} annular ring {ring:.3} mm, less than {:.3}", p.refdes, p.number, r.min_annular),
+            p.at,
+            None,
+          ));
         }
       }
     }
@@ -506,9 +591,21 @@ impl Board {
         let (g, inside) = gap_to_outline(&c.shape, &self.outline);
         let at = c.shape.anchor();
         if !inside {
-          out.push(viol("outside_board", Severity::Error, format!("{} is outside the board", describe(c)), at, c.layers.first().copied()));
+          out.push(viol(
+            "outside_board",
+            Severity::Error,
+            format!("{} is outside the board", describe(c)),
+            at,
+            c.layers.first().copied(),
+          ));
         } else if g < r.edge_clearance - 1e-6 {
-          out.push(viol("edge_clearance", Severity::Error, format!("{} is {g:.3} mm from the board edge, less than {:.3}", describe(c), r.edge_clearance), at, c.layers.first().copied()));
+          out.push(viol(
+            "edge_clearance",
+            Severity::Error,
+            format!("{} is {g:.3} mm from the board edge, less than {:.3}", describe(c), r.edge_clearance),
+            at,
+            c.layers.first().copied(),
+          ));
         }
       }
       for (at, d, _) in self.drills(&pads) {
@@ -523,7 +620,13 @@ impl Board {
         let (a, b) = (drills[i], drills[j]);
         let g = dist(a.0, b.0) - (a.1 + b.1) / 2.0;
         if g < r.hole_clearance - 1e-6 {
-          out.push(viol("hole_clearance", Severity::Error, format!("holes {g:.3} mm apart, less than {:.3}", r.hole_clearance), a.0, None));
+          out.push(viol(
+            "hole_clearance",
+            Severity::Error,
+            format!("holes {g:.3} mm apart, less than {:.3}", r.hole_clearance),
+            a.0,
+            None,
+          ));
         }
       }
     }
@@ -537,18 +640,34 @@ impl Board {
         let fp = libs.footprint(if pl.footprint.is_empty() { &dev.footprint } else { &pl.footprint })?;
         let (lo, hi) = fp.courtyard();
         let xf = pl.xf();
-        Some((pl.refdes.clone(), pl.side, Shape2::Poly([lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]].iter().map(|p| xf.apply(*p)).collect())))
+        Some((
+          pl.refdes.clone(),
+          pl.side,
+          Shape2::Poly([lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]].iter().map(|p| xf.apply(*p)).collect()),
+        ))
       })
       .collect();
     for i in 0..yards.len() {
       for j in i + 1..yards.len() {
         if yards[i].1 == yards[j].1 && overlap(&yards[i].2, &yards[j].2) {
-          out.push(viol("courtyard_overlap", Severity::Warning, format!("{} and {} overlap", yards[i].0, yards[j].0), yards[i].2.anchor(), None));
+          out.push(viol(
+            "courtyard_overlap",
+            Severity::Warning,
+            format!("{} and {} overlap", yards[i].0, yards[j].0),
+            yards[i].2.anchor(),
+            None,
+          ));
         }
       }
     }
     for a in self.ratsnest(&pads) {
-      out.push(viol("unrouted", Severity::Warning, format!("net {} is not routed ({:.1} mm)", a.net, dist(a.a, a.b)), a.a, None));
+      out.push(viol(
+        "unrouted",
+        Severity::Warning,
+        format!("net {} is not routed ({:.1} mm)", a.net, dist(a.a, a.b)),
+        a.a,
+        None,
+      ));
     }
     out
   }

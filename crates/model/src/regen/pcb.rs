@@ -40,7 +40,8 @@ impl Ctx<'_> {
       PcbOutline::Face { face } => {
         let bi = self.body_index(face.body)?;
         let body = &self.state.bodies[bi];
-        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the outline's face could not be found")?;
+        let fid =
+          face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the outline's face could not be found")?;
         refresh_face(face, body, fid);
         let info = body.faces().iter().find(|f| f.id == fid).ok_or("the outline's face could not be found")?;
         if info.kind != fox_kernel::SurfaceKind::Plane {
@@ -56,7 +57,10 @@ impl Ctx<'_> {
       let cyls: Vec<Shape> = holes
         .iter()
         .filter(|h| h[2] > 0.0)
-        .map(|h| Shape::cylinder(DVec3::new(h[0], h[1], -1.0), DVec3::Z, h[2] / 2.0, t + 2.0).and_then(|c| c.transformed(to_world)))
+        .map(|h| {
+          Shape::cylinder(DVec3::new(h[0], h[1], -1.0), DVec3::Z, h[2] / 2.0, t + 2.0)
+            .and_then(|c| c.transformed(to_world))
+        })
         .collect::<Result<_, _>>()
         .map_err(ke)?;
       if !cyls.is_empty() {

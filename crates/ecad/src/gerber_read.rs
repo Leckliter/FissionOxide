@@ -75,7 +75,8 @@ fn aperture(def: &str) -> Result<(u32, Aperture), String> {
   }
   let tmpl = &rest[digits.len()..];
   let (name, params) = tmpl.split_once(',').unwrap_or((tmpl, ""));
-  let p: Vec<f64> = if params.is_empty() { Vec::new() } else { params.split('X').map(num).collect::<Result<_, _>>()? };
+  let p: Vec<f64> =
+    if params.is_empty() { Vec::new() } else { params.split('X').map(num).collect::<Result<_, _>>()? };
   let need = |k: usize| if p.len() >= k { Ok(()) } else { Err(format!("aperture D{code}: missing parameters")) };
   let a = match name {
     "C" => {

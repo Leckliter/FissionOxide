@@ -43,6 +43,7 @@ use serde_json::Value;
 
 pub use commands::{COMMANDS, CommandSpec};
 pub use fillet::tangent_neighbours;
+pub use fox_ecad as electronics;
 pub use fox_exchange as exchange;
 pub use fox_expr as expr;
 pub use fox_kernel as kernel;

@@ -30,7 +30,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "ecad.part.edit" => part_edit(s, p),
     "ecad.part.delete" => {
       let r = req_str(p, "refdes").map(str::to_string);
-      r.and_then(|r| modify(s, |pr| if pr.remove_part(&r) { Ok(json!({"deleted": r})) } else { Err(format!("no part {r}")) }))
+      r.and_then(|r| {
+        modify(s, |pr| if pr.remove_part(&r) { Ok(json!({"deleted": r})) } else { Err(format!("no part {r}")) })
+      })
     }
     "ecad.wire" => wire(s, p),
     "ecad.label" => label(s, p),
@@ -76,7 +78,11 @@ fn modify<T>(s: &mut Session, f: impl FnOnce(&mut Project) -> Result<T, String>)
 }
 
 /// [`modify`], also setting where the outline comes from (`Some(None)`: drawn by hand).
-fn modify_src<T>(s: &mut Session, new_source: Option<Option<Value>>, f: impl FnOnce(&mut Project) -> Result<T, String>) -> Result<T, CmdError> {
+fn modify_src<T>(
+  s: &mut Session,
+  new_source: Option<Option<Value>>,
+  f: impl FnOnce(&mut Project) -> Result<T, String>,
+) -> Result<T, CmdError> {
   let source = match &new_source {
     Some(src) => src.clone(),
     None => s.design.electronics.as_ref().and_then(|pr| pr.outline_from.clone()),
@@ -154,7 +160,8 @@ fn pin_point(pr: &Project, part: &str, pin: &str) -> Result<(P, f64), String> {
 
 fn new(s: &mut Session, p: &Value) -> CmdResult {
   let example = p.get("example").and_then(Value::as_bool).unwrap_or(false);
-  let mut pr = if example { fox_ecad::example::usb_mcu_board().map_err(CmdError::new)? } else { Project::new(&s.design.name) };
+  let mut pr =
+    if example { fox_ecad::example::usb_mcu_board().map_err(CmdError::new)? } else { Project::new(&s.design.name) };
   if let Some(n) = opt_str(p, "name") {
     pr.name = n.to_string();
   }
@@ -241,8 +248,14 @@ fn library_import(s: &mut Session, p: &Value) -> CmdResult {
     let text = std::fs::read_to_string(&path).map_err(|e| CmdError::new(format!("{}: {e}", path.display())))?;
     match ext.as_str() {
       "kicad_sym" => kicad::import_symbols(&text, &name).map_err(CmdError::new)?,
-      "kicad_mod" => Library { name: name.clone(), footprints: vec![kicad::import_footprint(&text).map_err(CmdError::new)?], ..Default::default() },
-      "json" => serde_json::from_str::<Library>(&text).map_err(|e| CmdError::new(format!("{}: {e}", path.display())))?,
+      "kicad_mod" => Library {
+        name: name.clone(),
+        footprints: vec![kicad::import_footprint(&text).map_err(CmdError::new)?],
+        ..Default::default()
+      },
+      "json" => {
+        serde_json::from_str::<Library>(&text).map_err(|e| CmdError::new(format!("{}: {e}", path.display())))?
+      }
       _ => return Err(CmdError::new("import .kicad_sym, .kicad_mod, a .pretty folder or a .json library")),
     }
   };
@@ -263,9 +276,12 @@ fn library_export(s: &Session, p: &Value) -> CmdResult {
   let empty = Project::new("");
   let pr = s.design.electronics.as_deref().unwrap_or(&empty);
   let libs = pr.libs();
-  let lib = libs.0.iter().find(|l| l.name.eq_ignore_ascii_case(name)).ok_or(CmdError::new(format!("no library '{name}'")))?;
+  let lib =
+    libs.0.iter().find(|l| l.name.eq_ignore_ascii_case(name)).ok_or(CmdError::new(format!("no library '{name}'")))?;
   std::fs::write(&path, serde_json::to_string_pretty(lib)?)?;
-  Ok(json!({"path": path, "devices": lib.devices.len(), "symbols": lib.symbols.len(), "footprints": lib.footprints.len()}))
+  Ok(
+    json!({"path": path, "devices": lib.devices.len(), "symbols": lib.symbols.len(), "footprints": lib.footprints.len()}),
+  )
 }
 
 fn part_add(s: &mut Session, p: &Value) -> CmdResult {
@@ -329,14 +345,22 @@ fn part_edit(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 fn wire(s: &mut Session, p: &Value) -> CmdResult {
-  let list = p.get("points").and_then(Value::as_array).cloned().ok_or(CmdError::new("'points' must list [x, y] or {part, pin}"))?;
+  let list = p
+    .get("points")
+    .and_then(Value::as_array)
+    .cloned()
+    .ok_or(CmdError::new("'points' must list [x, y] or {part, pin}"))?;
   if list.len() < 2 {
     return Err(CmdError::new("a wire needs two points"));
   }
   modify(s, |pr| {
     let mut ps: Vec<P> = list.iter().map(|v| sch_point(pr, v)).collect::<Result<_, _>>()?;
     // two pins straight to each other: an L through the corner
-    if ps.len() == 2 && (ps[0][0] - ps[1][0]).abs() > 1e-6 && (ps[0][1] - ps[1][1]).abs() > 1e-6 && p.get("direct") != Some(&Value::Bool(true)) {
+    if ps.len() == 2
+      && (ps[0][0] - ps[1][0]).abs() > 1e-6
+      && (ps[0][1] - ps[1][1]).abs() > 1e-6
+      && p.get("direct") != Some(&Value::Bool(true))
+    {
       // the corner that lands on no other pin
       let pins = fox_ecad::schematic::placed_pins(&pr.schematic, &pr.libs());
       let free = |c: P| !pins.iter().any(|q| fox_ecad::geom::near(q.at, c));
@@ -526,7 +550,13 @@ fn outline(s: &mut Session, p: &Value) -> CmdResult {
   modify_outline(s, src.or(if poly.is_some() { Some(None) } else { None }), poly, layers, thickness)
 }
 
-fn modify_outline(s: &mut Session, src: Option<Option<Value>>, poly: Option<Vec<P>>, layers: Option<u64>, thickness: Option<f64>) -> CmdResult {
+fn modify_outline(
+  s: &mut Session,
+  src: Option<Option<Value>>,
+  poly: Option<Vec<P>>,
+  layers: Option<u64>,
+  thickness: Option<f64>,
+) -> CmdResult {
   modify_src(s, src, |pr| {
     if let Some(poly) = poly {
       pr.board.outline = poly;
@@ -540,11 +570,14 @@ fn modify_outline(s: &mut Session, src: Option<Option<Value>>, poly: Option<Vec<
     Ok(())
   })?;
   let pr = project(s)?;
-  Ok(json!({"outline": pr.board.outline, "outline_from": pr.outline_from, "layers": pr.board.layers, "thickness": pr.board.thickness}))
+  Ok(
+    json!({"outline": pr.board.outline, "outline_from": pr.outline_from, "layers": pr.board.layers, "thickness": pr.board.thickness}),
+  )
 }
 
 fn rules(s: &mut Session, p: &Value) -> CmdResult {
-  let given: Vec<(String, f64)> = p.as_object().map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect()).unwrap_or_default();
+  let given: Vec<(String, f64)> =
+    p.as_object().map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect()).unwrap_or_default();
   if !given.is_empty() {
     modify(s, |pr| {
       let mut v = serde_json::to_value(&pr.board.rules).map_err(|e| e.to_string())?;
@@ -582,7 +615,12 @@ fn place(s: &mut Session, p: &Value) -> CmdResult {
     {
       return Err(format!("no footprint '{f}' in the libraries"));
     }
-    let pl = pr.board.placements.iter_mut().find(|x| x.refdes == refdes).ok_or(format!("no footprint for {refdes} on the board"))?;
+    let pl = pr
+      .board
+      .placements
+      .iter_mut()
+      .find(|x| x.refdes == refdes)
+      .ok_or(format!("no footprint for {refdes} on the board"))?;
     if let Some(at) = at {
       pl.at = at;
     }
@@ -736,7 +774,11 @@ fn unroute(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 fn autoroute(s: &mut Session, p: &Value) -> CmdResult {
-  let nets: Vec<String> = p.get("nets").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+  let nets: Vec<String> = p
+    .get("nets")
+    .and_then(Value::as_array)
+    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+    .unwrap_or_default();
   let grid = num(p, "grid").unwrap_or(0.25);
   if !(0.05..=2.0).contains(&grid) {
     return Err(CmdError::new("the routing grid is 0.05 to 2 mm"));
@@ -747,7 +789,9 @@ fn autoroute(s: &mut Session, p: &Value) -> CmdResult {
     }
     let rep = router::autoroute(pr, &nets, grid);
     let unrouted = pr.board.ratsnest(&pr.pads()).len();
-    Ok(json!({"routed": rep.routed, "tracks": rep.tracks, "vias": rep.vias, "failed": rep.failed.iter().map(|f| json!({"net": f.0, "from": f.1, "to": f.2})).collect::<Vec<_>>(), "unrouted": unrouted}))
+    Ok(
+      json!({"routed": rep.routed, "tracks": rep.tracks, "vias": rep.vias, "failed": rep.failed.iter().map(|f| json!({"net": f.0, "from": f.1, "to": f.2})).collect::<Vec<_>>(), "unrouted": unrouted}),
+    )
   })
 }
 
@@ -875,15 +919,20 @@ fn part_model(pr: &Project, refdes: &str) -> Option<(PcbModel, Option<[f32; 3]>)
   };
   Some(match model {
     Some(Model3d::Box { size, offset, color }) => (PcbModel::Box { size: *size, offset: *offset }, *color),
-    Some(Model3d::Cylinder { diameter, height, offset, color }) => (PcbModel::Cylinder { diameter: *diameter, height: *height, offset: *offset }, *color),
+    Some(Model3d::Cylinder { diameter, height, offset, color }) => {
+      (PcbModel::Cylinder { diameter: *diameter, height: *height, offset: *offset }, *color)
+    }
     Some(Model3d::File { path, offset, rotate, scale }) => {
       let full = expand_vars(path);
       let base = Path::new(&full);
-      let found = [base.to_path_buf(), base.with_extension("step"), base.with_extension("stp")]
-        .into_iter()
-        .find(|c| c.is_file() && c.extension().is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp")));
+      let found = [base.to_path_buf(), base.with_extension("step"), base.with_extension("stp")].into_iter().find(|c| {
+        c.is_file() && c.extension().is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+      });
       match found {
-        Some(f) => (PcbModel::File { path: f.to_string_lossy().into_owned(), offset: *offset, rotate: *rotate, scale: *scale }, Some([0.6, 0.6, 0.6])),
+        Some(f) => (
+          PcbModel::File { path: f.to_string_lossy().into_owned(), offset: *offset, rotate: *rotate, scale: *scale },
+          Some([0.6, 0.6, 0.6]),
+        ),
         None => fallback(),
       }
     }
@@ -927,8 +976,10 @@ fn tidy_component(s: &mut Session) {
   let Some(id) = pcb_feature(&s.design) else { return };
   let Some(pr) = s.design.electronics.as_deref() else { return };
   let name = pr.name.clone();
-  let colors: Vec<(String, Option<[f32; 3]>)> = pr.board.placements.iter().map(|pl| (pl.refdes.clone(), part_model(pr, &pl.refdes).and_then(|m| m.1))).collect();
-  let bodies: Vec<(fox_model::BodyId, String)> = s.model.bodies.iter().filter(|b| b.feature == id).map(|b| (b.id, b.name.clone())).collect();
+  let colors: Vec<(String, Option<[f32; 3]>)> =
+    pr.board.placements.iter().map(|pl| (pl.refdes.clone(), part_model(pr, &pl.refdes).and_then(|m| m.1))).collect();
+  let bodies: Vec<(fox_model::BodyId, String)> =
+    s.model.bodies.iter().filter(|b| b.feature == id).map(|b| (b.id, b.name.clone())).collect();
   if bodies.is_empty() {
     return;
   }
@@ -960,7 +1011,8 @@ fn tidy_component(s: &mut Session) {
   }
   let to8 = |c: [f32; 3]| [(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8];
   for (i, (bid, bname)) in bodies.iter().enumerate() {
-    let color = if i == 0 { Some([20, 110, 50]) } else { colors.iter().find(|c| c.0 == *bname).and_then(|c| c.1).map(to8) };
+    let color =
+      if i == 0 { Some([20, 110, 50]) } else { colors.iter().find(|c| c.0 == *bname).and_then(|c| c.1).map(to8) };
     if let Some(c) = color {
       let st = d.body_settings_mut(*bid);
       if st.color.is_none() {

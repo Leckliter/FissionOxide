@@ -14,6 +14,7 @@ mod customize;
 mod cut_ui;
 mod data_panel;
 mod dialogs;
+mod ecad_ui;
 mod forms;
 mod gpu;
 mod help;
@@ -185,6 +186,8 @@ pub struct App {
   pub(crate) ghost: preview::Ghost,
   /// The 2D cut window (laser, plasma, waterjet), while open.
   pub cut_window: Option<cut_ui::CutWindow>,
+  /// The Electronics workspace, while it is open (in place of the Design workspace).
+  pub electronics: Option<ecad_ui::EcadView>,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -384,6 +387,7 @@ impl App {
       manip: manipulators::State::default(),
       ghost: preview::Ghost::default(),
       cut_window: None,
+      electronics: None,
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -1456,7 +1460,7 @@ impl App {
       self.draw_busy(ui, &ctx);
       return;
     }
-    if self.data.save.is_none() {
+    if self.data.save.is_none() && self.electronics.is_none() {
       // typed values go to the heads-up box or dialog before shortcuts see the keys
       viewport::route_typing(self, &ctx);
       self.shortcuts(&ctx);
@@ -1469,7 +1473,7 @@ impl App {
     self.dropped_files(&ctx);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
-    if self.drawing.is_none() {
+    if self.drawing.is_none() && self.electronics.is_none() {
       panels::timeline(self, ui);
     }
     data_panel::heartbeat(self, &ctx);
@@ -1478,7 +1482,11 @@ impl App {
       ctx.request_repaint();
     }
     viewcube::keep_projection(self);
-    if self.drawing.is_some() {
+    if self.electronics.is_some() {
+      egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        ecad_ui::show(self, ui);
+      });
+    } else if self.drawing.is_some() {
       egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
         sheet::show(self, ui);
       });
