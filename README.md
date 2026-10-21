@@ -325,9 +325,14 @@ cuts, fillets, patterns) works on them. Bends are true cylinders: the flat lengt
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
 sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline and holes
 on layer `CUT` and bend centre lines on `BEND_UP` / `BEND_DOWN` (dashed), with a bend note at
-each bend on `NOTES` and an `ETCH` layer for marking; `sheet.flat_sketch` makes the same
-outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
-XY at the origin, to dimension, extrude or export.
+each bend on `NOTES` and an `ETCH` layer for marking. Spline and ellipse edges are written as
+true `SPLINE` entities (their exact NURBS), which makes the file R2000 instead of R12; it still
+passes `sheet.check_dxf`. `sheet.flat_sketch` makes the same outline (and the bend lines, as
+construction lines) into a sketch on the stationary face, or on XY at the origin, to dimension,
+extrude or export. The sketch follows the model: its flat pattern curves are fixed, like
+projected geometry, and regenerate whenever the sheet metal body changes (a taller flange, a new
+thickness), keeping their ids when only sizes change; `follow: false` (`curves: "once"` in the
+dialog) makes free curves once instead.
 
 ```sh
 fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
@@ -340,7 +345,8 @@ fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
   *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
   pattern is the neutral layer developed facet by facet; holes and notches cut in the flange
   later are carried into it, facet by facet. `rounded` rounds a press-brake flange's bends to
-  the rule's bend radius (folds that converge too tightly to round stay sharp, with a warning).
+  the rule's bend radius; where folds converge on a corner (a fan of facets) the bends are
+  conical, closing from the full radius to nothing at the corner.
 - **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
   edge, starting on it, swept along a chain of edges of one face; the profile is where the face
   of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.

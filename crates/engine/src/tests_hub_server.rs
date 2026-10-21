@@ -41,7 +41,8 @@ fn designs_locks_and_presence_on_a_hub_server() {
   run(&mut a, "hub.here", json!({}));
 
   // bob, on another machine
-  let mut b = Session { store_root: Some(url.replace("http://", &format!("http://{BOB}@")).into()), ..Default::default() };
+  let mut b =
+    Session { store_root: Some(url.replace("http://", &format!("http://{BOB}@")).into()), ..Default::default() };
   run(&mut b, "hub.open", json!({"item": item}));
   assert_eq!(b.design.features.len(), 1, "the design came over the wire");
   let v = run(&mut b, "hub.versions", json!({"item": item}));
@@ -52,7 +53,11 @@ fn designs_locks_and_presence_on_a_hub_server() {
     assert!(start.elapsed() < Duration::from_secs(10), "alice's presence never arrived");
     std::thread::sleep(Duration::from_millis(50));
   }
-  run(&mut b, "box", json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "width": 5, "depth": 5, "height": 5, "operation": "join"}));
+  run(
+    &mut b,
+    "box",
+    json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "width": 5, "depth": 5, "height": 5, "operation": "join"}),
+  );
   let e = b.execute("hub.save", &json!({})).unwrap_err();
   assert!(e.0.contains("locked by alice"), "{}", e.0);
   run(&mut b, "hub.lock", json!({"steal": true}));

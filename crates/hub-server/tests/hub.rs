@@ -195,9 +195,7 @@ fn the_hub_directory_still_works_as_a_sync_folder() {
   let mut local = Store::open(&root).unwrap();
   assert_eq!(local.find_project("Shared").unwrap().id, p);
   let (item, _) = local.create_item(design(&p, "From disk"), b"disk", Origin::Saved, Default::default()).unwrap();
-  eventually("the server to pick up the disk change", || {
-    remote.refresh().is_ok() && remote.item(&item).is_ok()
-  });
+  eventually("the server to pick up the disk change", || remote.refresh().is_ok() && remote.item(&item).is_ok());
   assert_eq!(remote.read_version(&item, None).unwrap(), b"disk");
   // and what clients do lands in the directory
   remote.add_version(&item, b"net", Origin::Saved, Default::default()).unwrap();
@@ -207,8 +205,7 @@ fn the_hub_directory_still_works_as_a_sync_folder() {
 }
 
 fn http(method: &str, url: &str, token: Option<&str>, body: Option<serde_json::Value>) -> (u16, serde_json::Value) {
-  let agent: ureq::Agent =
-    ureq::Agent::config_builder().http_status_as_error(false).proxy(None).build().new_agent();
+  let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).proxy(None).build().new_agent();
   let resp = match (method, body) {
     ("POST", Some(b)) => {
       let mut r = agent.post(url).header("Content-Type", "application/json");

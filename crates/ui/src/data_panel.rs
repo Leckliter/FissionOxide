@@ -714,11 +714,8 @@ fn lock_row(app: &mut App, ui: &mut egui::Ui, id: &str, lock: Option<&Value>) {
     }
     Some(l) if l.get("mine") == Some(&json!(true)) => {
       let host = s(l, "host");
-      let where_ = if l.get("here") == Some(&json!(true)) || host.is_empty() {
-        String::new()
-      } else {
-        format!(" on {host}")
-      };
+      let where_ =
+        if l.get("here") == Some(&json!(true)) || host.is_empty() { String::new() } else { format!(" on {host}") };
       ui.label(RichText::new(format!("🔒 Locked by you{where_}")).small().color(theme::ICON_GREEN))
         .on_hover_text(format!("Since {}", s(l, "since_time")));
       if ui.small_button("Release").on_hover_text("Let others save versions of it again").clicked() {
@@ -819,7 +816,10 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
         ui.label(RichText::new("A FissionOxide hub server (fox-hub-server) and your access token").small());
         ui.add(egui::TextEdit::singleline(url).hint_text(hint).desired_width(260.0));
         let r = ui.add(
-          egui::TextEdit::singleline(token).hint_text("Access token (kept for this server)").password(true).desired_width(260.0),
+          egui::TextEdit::singleline(token)
+            .hint_text("Access token (kept for this server)")
+            .password(true)
+            .desired_width(260.0),
         );
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
           done = true;

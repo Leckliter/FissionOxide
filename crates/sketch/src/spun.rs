@@ -42,6 +42,10 @@ pub enum SpunSeg {
   Spline {
     points: Vec<[f64; 2]>,
   },
+  /// A chain of cubic Bézier pieces (points 0, 3, 6, … on the curve, handles between).
+  Bezier {
+    points: Vec<[f64; 2]>,
+  },
   /// The axis, as a construction centre line.
   Centerline {
     a: [f64; 2],
@@ -50,7 +54,7 @@ pub enum SpunSeg {
 }
 
 impl SpunSeg {
-  fn close(&self, o: &SpunSeg, tol: f64) -> bool {
+  pub(crate) fn close(&self, o: &SpunSeg, tol: f64) -> bool {
     let p = |a: &[f64; 2], b: &[f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= tol;
     match (self, o) {
       (SpunSeg::Line { a, b }, SpunSeg::Line { a: c, b: d })
@@ -59,7 +63,8 @@ impl SpunSeg {
       (SpunSeg::Circle { center, radius }, SpunSeg::Circle { center: c, radius: r }) => {
         p(center, c) && (radius - r).abs() <= tol
       }
-      (SpunSeg::Spline { points }, SpunSeg::Spline { points: q }) => {
+      (SpunSeg::Spline { points }, SpunSeg::Spline { points: q })
+      | (SpunSeg::Bezier { points }, SpunSeg::Bezier { points: q }) => {
         points.len() == q.len() && points.iter().zip(q).all(|(a, b)| p(a, b))
       }
       _ => false,
@@ -124,6 +129,18 @@ impl Sketch {
       return Ok(false);
     }
     self.clear_spun(&s);
+    let (curves, points) = self.place_outline(&outline)?;
+    if let Some(s) = self.spuns.iter_mut().find(|s| s.id == id) {
+      s.outline = outline;
+      s.curves = curves;
+      s.points = points;
+    }
+    Ok(true)
+  }
+
+  /// Adds the fixed curves of an outline (ends within 1e-7 shared); returns them and the points
+  /// they made.
+  pub(crate) fn place_outline(&mut self, outline: &[SpunSeg]) -> Result<(Vec<CurveId>, Vec<PointId>), SketchError> {
     let before: Vec<PointId> = self.points.iter().map(|p| p.id).collect();
     let mut made: Vec<(PointId, [f64; 2])> = Vec::new();
     let mut at = |sk: &mut Sketch, q: [f64; 2]| -> PointId {
@@ -135,7 +152,7 @@ impl Sketch {
       id
     };
     let mut curves = Vec::new();
-    for seg in &outline {
+    for seg in outline {
       let c = match seg {
         SpunSeg::Line { a, b } | SpunSeg::Centerline { a, b } => {
           let (pa, pb) = (at(self, *a), at(self, *b));
@@ -160,6 +177,15 @@ impl Sketch {
           let ids: Vec<PointId> = points.iter().map(|q| at(self, *q)).collect();
           self.add_curve(CurveKind::spline(ids))?
         }
+        SpunSeg::Bezier { points } => {
+          // handles get points of their own, even where they coincide with an end
+          let ids: Vec<PointId> = points
+            .iter()
+            .enumerate()
+            .map(|(k, q)| if k % 3 == 0 { at(self, *q) } else { self.add_point(q[0], q[1]) })
+            .collect();
+          self.add_curve(CurveKind::Bezier { points: ids })?
+        }
       };
       curves.push(c);
     }
@@ -167,12 +193,7 @@ impl Sketch {
     for p in self.points.iter_mut().filter(|p| points.contains(&p.id)) {
       p.fixed = true;
     }
-    if let Some(s) = self.spuns.iter_mut().find(|s| s.id == id) {
-      s.outline = outline;
-      s.curves = curves;
-      s.points = points;
-    }
-    Ok(true)
+    Ok((curves, points))
   }
 
   /// Deletes a spun profile and its curves.

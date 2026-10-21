@@ -94,7 +94,10 @@ impl Hub {
   fn presence_list(&self) -> Vec<Presence> {
     let now = Instant::now();
     let p = guard(&self.presence);
-    p.values().filter(|e| e.expires.is_none_or(|t| t > now)).flat_map(|e| e.here.entries().collect::<Vec<_>>()).collect()
+    p.values()
+      .filter(|e| e.expires.is_none_or(|t| t > now))
+      .flat_map(|e| e.here.entries().collect::<Vec<_>>())
+      .collect()
   }
 
   fn presence_changed(&self) {
@@ -193,7 +196,9 @@ struct TokenQuery {
 }
 
 async fn root_page() -> impl IntoResponse {
-  format!("FissionOxide hub server {VERSION}\nConnect with: fissionoxide-cli --hub <this URL> --token TOKEN hub projects\n")
+  format!(
+    "FissionOxide hub server {VERSION}\nConnect with: fissionoxide-cli --hub <this URL> --token TOKEN hub projects\n"
+  )
 }
 
 async fn whoami(State(hub): State<Shared>, headers: HeaderMap) -> Answer {
@@ -213,7 +218,11 @@ async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(q): Query<In
       hub.bump();
     }
     let rev = hub.rev.load(Ordering::SeqCst);
-    Ok(if q.rev == Some(rev) { json!({"rev": rev, "unchanged": true}) } else { json!({"rev": rev, "index": st.snapshot()}) })
+    Ok(if q.rev == Some(rev) {
+      json!({"rev": rev, "unchanged": true})
+    } else {
+      json!({"rev": rev, "index": st.snapshot()})
+    })
   })
   .await?;
   Ok(Json(v).into_response())
@@ -385,9 +394,10 @@ struct ActivityQuery {
 
 async fn activity(State(hub): State<Shared>, headers: HeaderMap, Query(q): Query<ActivityQuery>) -> Answer {
   hub.user(&headers, None).ok_or_else(unauthorized)?;
-  let v =
-    with_store(&hub, move |_, st| Ok(json!(st.activity(q.project.as_deref(), q.item.as_deref(), q.limit.unwrap_or(100)))))
-      .await?;
+  let v = with_store(&hub, move |_, st| {
+    Ok(json!(st.activity(q.project.as_deref(), q.item.as_deref(), q.limit.unwrap_or(100))))
+  })
+  .await?;
   Ok(Json(v).into_response())
 }
 

@@ -358,8 +358,15 @@ pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
       let prepared: Vec<fit::Prepared> =
         contour::trace(&mask, &labels, w, h).iter().map(|raw| fit::prepare(raw, options)).collect();
       // the background layer isn't cut, so it isn't checked
-      let narrow = if options.kerf > 0.0 && !m.background { kerf::check(&mask, w, h, options.kerf) } else { Vec::new() };
-      Layer { color: m.color, background: m.background, contours: validate::finish(&prepared, options), strokes: Vec::new(), narrow }
+      let narrow =
+        if options.kerf > 0.0 && !m.background { kerf::check(&mask, w, h, options.kerf) } else { Vec::new() };
+      Layer {
+        color: m.color,
+        background: m.background,
+        contours: validate::finish(&prepared, options),
+        strokes: Vec::new(),
+        narrow,
+      }
     })
     .collect();
   Ok(Trace { width: w as u32, height: h as u32, layers })

@@ -1916,7 +1916,7 @@ pub static SHEET_CHAMFER: Form = Form {
 pub static FLAT_SKETCH: Form = Form {
   title: "FLAT PATTERN SKETCH",
   name: "Flat Pattern Sketch",
-  hint: "The flat pattern as an editable sketch: outline and bend lines",
+  hint: "The flat pattern as a sketch: outline and bend lines that follow the body as it changes",
   icon: Icon::FlatPattern,
   cmd: "sheet.flat_sketch",
   fixed: &[],
@@ -1926,6 +1926,11 @@ pub static FLAT_SKETCH: Form = Form {
       key: "on",
       label: "Place on",
       options: &[("face", "Stationary face"), ("xy", "XY plane at the origin")],
+    },
+    Input::Choice {
+      key: "curves",
+      label: "Curves",
+      options: &[("follow", "Follow the body"), ("once", "Free, made once")],
     },
   ],
   picks_model: false,

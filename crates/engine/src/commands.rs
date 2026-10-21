@@ -282,7 +282,7 @@ cmds! {
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
   "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
-  "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
+  "sheet.flat_sketch" => "The flat pattern as a sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin; it follows the body as the model changes unless follow is false", "{body?, face?, on?: face|xy, follow?: bool, curves?: follow|once}";
   "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
   "sheet.join_by_bend" => "Join two separate sheet metal bodies with a bend between an edge picked on a flange of each (flanges are extended or trimmed to meet it)", "{edge1: {body, edge} | {point}, edge2, bend_radius? (default the rule's), position?: tangent|first|second (the bend starts at that edge), relief?: rule|rectangular|round|none}";
   "sheet.fillet" => "Round edges that run through a sheet metal body's thickness (flange corners); the rounding carries into the flat pattern", "{edges: [{body, edge} | {point}], radius}";
@@ -731,7 +731,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
       if let Some(inf) = inferred {
         out["constraints"] = json!(inf.constraints.iter().map(|(c, _)| c.0).collect::<Vec<_>>());
-        out["constraint_counts"] = Value::Object(inf.counts().into_iter().map(|(k, n)| (k.to_string(), json!(n))).collect());
+        out["constraint_counts"] =
+          Value::Object(inf.counts().into_iter().map(|(k, n)| (k.to_string(), json!(n))).collect());
         if let Some(w) = inf.warning {
           out["constraint_warning"] = json!(w);
         }

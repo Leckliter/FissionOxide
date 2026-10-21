@@ -321,11 +321,11 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
   (a[0] - b[0]).hypot(a[1] - b[1])
 }
 
-/// The ends of a line, arc or spline.
+/// The ends of a line, arc, spline or Bézier chain.
 fn ends(s: &SpunSeg) -> Option<([f64; 2], [f64; 2])> {
   match s {
     SpunSeg::Line { a, b } | SpunSeg::Arc { a, b, .. } => Some((*a, *b)),
-    SpunSeg::Spline { points } => Some((points[0], points[points.len() - 1])),
+    SpunSeg::Spline { points } | SpunSeg::Bezier { points } => Some((points[0], points[points.len() - 1])),
     SpunSeg::Circle { .. } | SpunSeg::Centerline { .. } => None,
   }
 }

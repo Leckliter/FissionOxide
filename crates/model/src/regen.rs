@@ -562,6 +562,7 @@ impl Ctx<'_> {
         let lost =
           self.refresh_links(&pl, sketch, links) + crate::include::refresh_sources(&self.state.sketches, sketch);
         let spun = if sketch.spuns.is_empty() { None } else { self.refresh_spuns(&pl, sketch) };
+        let flat = if sketch.flats.is_empty() { None } else { self.refresh_flats(plane, &pl, sketch) };
         let dim_errors: Vec<(ConstraintId, String)> =
           sketch.evaluate_dims(self.params).into_iter().map(|(c, e)| (c, e.to_string())).collect();
         let report = sketch.solve();
@@ -569,7 +570,7 @@ impl Ctx<'_> {
         let r = SketchResult { plane: pl, sketch: sketch.clone(), profiles, report, dim_errors };
         let w =
           sketch_warning(&r).or_else(|| (lost > 0).then(|| format!("{lost} projected edge(s) could not be found")));
-        let w = spun.or(w);
+        let w = flat.or(spun).or(w);
         self.state.sketches.insert(id, r);
         Ok(w)
       }
@@ -2503,6 +2504,7 @@ mod extra;
 pub use extra::iso_pitch;
 mod solid;
 pub use solid::boundary_cells;
+mod flatsketch;
 mod sheet2;
 mod sheetmod;
 mod spun;

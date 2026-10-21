@@ -71,7 +71,8 @@ fn rounded_corners_are_not_flagged() {
   // a plain rectangle and an L: every corner rounds under a big kerf, nothing is too thin
   let image = img(120, 120, |x, y| {
     let rect = (10.0..60.0).contains(&x) && (10.0..50.0).contains(&y);
-    let l = ((70.0..110.0).contains(&x) && (70.0..82.0).contains(&y)) || ((70.0..82.0).contains(&x) && (70.0..110.0).contains(&y));
+    let l = ((70.0..110.0).contains(&x) && (70.0..82.0).contains(&y))
+      || ((70.0..82.0).contains(&x) && (70.0..110.0).contains(&y));
     rect || l
   });
   let found = narrow(&image, 10.0);

@@ -15,9 +15,10 @@ mod edit;
 mod ellipse;
 mod fitquintic;
 mod fitspline;
+mod flatlink;
 mod fonts;
-mod infer;
 mod freeform;
+mod infer;
 mod profile;
 mod quintic;
 mod smoothend;
@@ -36,6 +37,7 @@ pub use conic::{RHO_RANGE, conic_at, conic_beziers, conic_weight};
 pub use curve3d::{Curve3d, Curve3dKind, CurveSource};
 pub use edit::PatternDir;
 pub use ellipse::{Ellipse2, ellipse_arc_beziers};
+pub use flatlink::{FlatId, SketchFlat};
 pub use fonts::{font_dirs, system_fonts};
 pub use infer::{InferTolerance, Inferred};
 pub use profile::{Loop, Profile, Seg, SegSrc, find_profiles};
@@ -70,6 +72,9 @@ pub struct Sketch {
   /// Spun profiles: outlines of bodies turned about an axis, kept up to date by the model.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub spuns: Vec<SketchSpun>,
+  /// Flat patterns of sheet metal bodies, kept up to date by the model.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub flats: Vec<SketchFlat>,
   /// Included 3D geometry (Include 3D Geometry): curves kept at their world positions, off the
   /// sketch plane, usable as sweep paths and rails but never part of a profile.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -519,6 +524,7 @@ impl Sketch {
       next_id: 1,
       texts: Vec::new(),
       spuns: Vec::new(),
+      flats: Vec::new(),
       curves3d: Vec::new(),
       behaviours: Behaviours::current(),
     }
@@ -677,6 +683,9 @@ impl Sketch {
     if let Some(sp) = self.spun_of(id) {
       return self.remove_spun(sp);
     }
+    if let Some(f) = self.flat_of(id) {
+      return self.remove_flat(f);
+    }
     if self.curve3d(id).is_some() {
       self.curves3d.retain(|c| c.id != id);
       return Ok(());
@@ -713,6 +722,9 @@ impl Sketch {
     }
     if let Some(sp) = self.spuns.iter().find(|s| s.points.contains(&id)).map(|s| s.id) {
       return self.remove_spun(sp);
+    }
+    if let Some(f) = self.flats.iter().find(|s| s.points.contains(&id)).map(|s| s.id) {
+      return self.remove_flat(f);
     }
     let users: Vec<CurveId> =
       self.curves.iter().filter(|c| curve_points(&c.kind).contains(&id)).map(|c| c.id).collect();

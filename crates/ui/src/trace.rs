@@ -474,7 +474,9 @@ pub fn overlay(app: &mut App, painter: &egui::Painter, to_screen: &dyn Fn(DVec3)
   for n in r["narrow"].as_array().into_iter().flatten() {
     let (Some(x), Some(y)) = (n["at"][0].as_f64(), n["at"][1].as_f64()) else { continue };
     let w = n["width"].as_f64().unwrap_or(0.0);
-    let (Some(c), Some(e)) = (to_screen(plane.to_world([x, y])), to_screen(plane.to_world([x + w, y]))) else { continue };
+    let (Some(c), Some(e)) = (to_screen(plane.to_world([x, y])), to_screen(plane.to_world([x + w, y]))) else {
+      continue;
+    };
     let radius = (c.distance(e)).max(7.0);
     painter.circle_stroke(c, radius, egui::Stroke::new(2.0, theme::ERROR));
   }

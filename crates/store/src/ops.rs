@@ -225,7 +225,9 @@ impl Store {
       Op::RenameProject { id, name } => done(self.rename_project(&id, &name)),
       Op::TrashProject { id } => done(self.trash_project(&id)),
       Op::RestoreProject { id } => done(self.restore_project(&id)),
-      Op::CreateFolder { project, parent, name } => Ok(json!(self.create_folder(&project, parent.as_deref(), &name)?)),
+      Op::CreateFolder { project, parent, name } => {
+        Ok(json!(self.create_folder(&project, parent.as_deref(), &name)?))
+      }
       Op::RenameFolder { id, name } => done(self.rename_folder(&id, &name)),
       Op::DeleteFolder { id } => done(self.delete_folder(&id)),
       Op::CreateItem { project, folder, name, kind, ext, content, origin, meta } => {
@@ -237,9 +239,7 @@ impl Store {
       }
       Op::Promote { item, version } => Ok(json!(self.promote(&item, version)?)),
       Op::SetMilestone { item, version, name } => done(self.set_milestone(&item, version, name.as_deref())),
-      Op::SetDescription { item, version, description } => {
-        done(self.set_description(&item, version, &description))
-      }
+      Op::SetDescription { item, version, description } => done(self.set_description(&item, version, &description)),
       Op::DeleteVersion { item, version } => done(self.delete_version(&item, version)),
       Op::RenameItem { item, name } => done(self.rename_item(&item, &name)),
       Op::MoveItem { item, project, folder } => done(self.move_item(&item, &project, folder.as_deref())),
