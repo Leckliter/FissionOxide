@@ -243,12 +243,14 @@ fn gauss(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     }
     a.swap(i, p);
     b.swap(i, p);
-    for r in i + 1..n {
-      let f = a[r][i] / a[i][i];
-      for k in i..n {
-        a[r][k] -= f * a[i][k];
+    let (top, rest) = a.split_at_mut(i + 1);
+    let pivot = &top[i];
+    for (r, row) in rest.iter_mut().enumerate() {
+      let f = row[i] / pivot[i];
+      for (x, p) in row.iter_mut().zip(pivot).skip(i) {
+        *x -= f * p;
       }
-      b[r] -= f * b[i];
+      b[i + 1 + r] -= f * b[i];
     }
   }
   let mut x = vec![0.0; n];
