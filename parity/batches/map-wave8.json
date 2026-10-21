@@ -1,0 +1,20 @@
+{
+  "ui:sketch:curve-selected-color": "ui-sketch-selection-feedback",
+  "ui:sketch:curve-hover-color": "ui-sketch-selection-feedback",
+  "ui:sketch:line-end-points": "ui-sketch-selection-feedback",
+  "ui:sketch:crossing-select-wrong-curve": "ui-sketch-selection-feedback",
+  "ui:sketch:dimension-label-and-hover": "ui-sketch-selection-feedback",
+  "ui:sketch:canvas-background": "ui-sketch-selection-feedback",
+  "ui:canvas:vertex-filter-default": "ui-vertex-and-construction",
+  "ui:canvas:vertex-marker-style": "ui-vertex-and-construction",
+  "ui:browser:origin-rows": "ui-vertex-and-construction",
+  "ui:canvas:construction-plane-colors": "ui-vertex-and-construction",
+  "ui:canvas:construction-axis-colors": "ui-vertex-and-construction",
+  "ui:menus:selection-filters-list": "ui-select-menus-and-other",
+  "ui:menus:selection-priority-list": "ui-select-menus-and-other",
+  "ui:menus:selection-tools-list": "ui-select-menus-and-other",
+  "ui:canvas:select-other-popup": "ui-select-menus-and-other",
+  "ui:canvas:multi-select-status": "ui-select-menus-and-other",
+  "ui:canvas:box-select-colors": "ui-select-menus-and-other",
+  "ui:sketch:modify-menu-list": "ui-select-menus-and-other"
+}

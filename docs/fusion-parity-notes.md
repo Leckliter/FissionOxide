@@ -281,3 +281,15 @@ check-mark, Sketch Dimension without a placement step, Text opening as a full fo
 inert, and the construction geometry, glyphs and dialog rows Fusion's tools leave behind.
 23 rows in three batches (`map-wave7.json`), eight match rows. Report:
 [parity/reports/2026-10-21-sketch-create-tools.md](../parity/reports/2026-10-21-sketch-create-tools.md).
+
+## 2026-10-21, prober 3: selection remainder and the sketch MODIFY menu
+
+Probed vertex, construction plane/axis/origin point, sketch points, in-sketch hover and selected
+colours, dimension hover, window and crossing boxes, Select Other, the SELECT submenus and the
+sketch MODIFY list in both apps (report `parity/reports/2026-10-21-selection-remainder.md`).
+Biggest gaps: a selected sketch curve is invisible in FissionOxide and the status bar never names
+it; vertices are not pickable with the default filters; the Origin folder lacks axis rows and eyes;
+construction planes have no hover/selected colours; the Selection Filters list has 7 entries to
+Fusion's 27. Three batches in `parity/batches/map-wave8.json` (18 rows); five earlier `match` rows
+reopened. Fusion's box colours: window peach (253,223,185) with a solid purple-grey border, crossing
+pale yellow (255,253,202) with a dashed dark border.

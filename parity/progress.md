@@ -1,46 +1,54 @@
 # Prober progress
 
-## Last stop: 2026-10-21, 11:45, session "Parity prober 2" (every sketch CREATE tool)
+## Last stop: 2026-10-21, 16:15, session "Parity prober 3" (selection remainder, sketch MODIFY menu)
 
-Finished: chrome, toolbar, ViewCube and navigation bar, marking menus, browser and timeline
-menus, Preferences layout, the basic sketch flow, Extrude/Fillet/Chamfer/Shell/Press
-Pull/Move/Hole dialogs, selection and hover colours (face, edge, body, sketch curve on a face),
-and every sketch CREATE tool (Midpoint Line, 3-point and center rectangles, 3-point circle,
-center-point and tangent arcs, inscribed and edge polygons, ellipse, all five slots, both
-splines, conic, point, text, mirror, both patterns, Project / Include, sketch dimension on a
-line and an arc). Reports: `parity/reports/2026-10-21.md`, `2026-10-21-sketch-and-modify.md`,
-`2026-10-21-selection-colors.md`, `2026-10-21-sketch-create-tools.md`. Batches: waves 4-7
-(16 batches, 87 rows); cloud fixers run on waves 4-5 and were requested for waves 6-7.
+Finished: the selection remainder (vertex, construction planes and axes, sketch points,
+in-sketch hover and selected colours, selection filters/priority/tools lists, window and crossing
+boxes, Select Other, status readouts) and the sketch MODIFY dropdown list. Report
+`parity/reports/2026-10-21-selection-remainder.md`; batches `map-wave8.json`
+(`ui-sketch-selection-feedback`, `ui-vertex-and-construction`, `ui-select-menus-and-other`,
+18 rows) plus five reopened rows. Earlier: chrome, toolbar, ViewCube and navigation bar, marking
+menus, browser and timeline menus, Preferences, the basic sketch flow, the first-pass feature
+dialogs, face/edge/body colours, every sketch CREATE tool (reports in `parity/reports/`).
 
 ## Next prober: start here
 
-1. The selection remainder on the coverage line under *Design workspace: canvas*: vertex
-   hover/selection, construction planes and axes, sketch points, in-sketch hover colours,
-   selection filters and priority, window/crossing box colours, Select Other. Sample colours with
-   the pixel trick below.
-2. Then "Every MODIFY tool" under *sketch* (fillet, trim by drag, extend, break, offset chain and
-   both sides, scale, move/copy, change parameters), and the CREATE leftovers: 2-/3-Tangent
-   Circle (pick the lines exactly on the stroke; a miss shows "Click a curve" in FissionOxide),
-   Text after the frame drag, Mirror and pattern previews, angular and diameter dimensions.
+1. "Every MODIFY tool" under *sketch* (coverage line marked `todo; menu lists compared`): Fillet,
+   Trim by drag, Extend, Break, Offset (chain and both sides), Sketch Scale, Move/Copy, Change
+   Parameters, plus Fusion's Chamfer submenu. Fusion is left in Sketch4 (XY plane, FRONT view) with
+   a rectangle at about (560..700, 420..520) screenshot px and a short vertical line below it;
+   draw a circle over the rectangle's right edge first (press C with the pointer over empty canvas,
+   then click; a click on an existing edge may not register). FissionOxide has Sketch1 (XZ, a
+   dimensioned rectangle) extruded into Body1; double-click Sketch1 in the browser to edit it.
+   Fusion's Fillet: "Select first line or arc", then "Select second line or arc"; the second pick
+   must be within 1 px of the stroke or the first pick clears.
+2. Then the CREATE leftovers (2-/3-Tangent Circle, Text after the frame, Mirror and pattern
+   previews, angular and diameter dimensions) and "Every constraint".
 3. Re-verify in the app any key marked `fixing-merged` once fixers have pushed
    (`parity/batches/index.jsonl`).
 
 ## Traps
-- The Claude overlay window on the right of the screen (see `LOOP.md`, Setup 2). Keep each app
-  window inside x < 1370 screen pixels (restore and drag, or `Win+Left`).
+- Tool calls run one after another, never in parallel: a Bash pixel sample always runs after the
+  whole computer_batch before it. Sample colours in their own turn while the pointer rests
+  (`scratchpad/px.ps1`: `x,y,scanh,n` / `x,y,scanv,n` prints a run of pixels), or read flat fills
+  from a scale-1 zoom JPEG with `System.Drawing` (`jpg.ps1`). Fusion's rubber-band box is in an
+  overlay the sampler never sees; zoom JPEGs do.
+- Screen px = screenshot px x 1.3187 (1920/1456). `GetCursorPos` in the sampler confirms it.
+- The Claude overlay window on the right of the screen (see `LOOP.md`, Setup 2): keep clicks
+  below x = 1040 screenshot px. The overlay hides while desktop control runs, so it is not in
+  screenshots, but its region still swallows clicks.
 - Only one session can hold desktop control; if `request_access` says another session is using
-  the computer, the user must stop that session first. The approval dialog may be denied by
-  accident: ask once, then wait.
-- Clicking the taskbar button of the active window minimises it. On this taskbar Fusion is the
-  orange "F" button and FissionOxide the one right of it.
-- Submenu rows are 15-16 px apart in both apps; zoom the open submenu and compute each row's
-  y before clicking, or the click lands on the neighbour (Project vs Intersect).
-- FissionOxide's dialogs remember their last position; drag them left if they open under the
-  overlay, or use Enter/Escape. In sketch mode Ctrl+Z undoes one curve at a time in both apps,
-  which is the quickest way to clear the canvas between tools.
-- Fusion is in inches with Layout Grid off in 3D; FissionOxide is in mm.
-- To read colours, rest the pointer two seconds and sample pixels (`System.Drawing`
-  `CopyFromScreen`/`GetPixel` from PowerShell); Fusion's hover lightening is invisible in a
-  scaled screenshot.
-- Both documents now have an unsaved Sketch3 on a vertical plane with slots and a spline (the
-  Fusion one is still in sketch mode). Start a new design in each when a clean body matters.
+  the computer, the user must stop that session first.
+- Clicking the taskbar button of the active window minimises it. Fusion is the orange "F"
+  button (497,804 screenshot), FissionOxide the one right of it (535,804).
+- A fresh `fissionoxide.exe` opens with the Data Panel open and the window straddling the
+  overlay: drag the title bar to the top-left, close the Data Panel with the grid icon.
+- Fusion: the big SELECT icon toggles the Select tool, the "SELECT" label opens the dropdown.
+  Submenus open to the right (x > 1010) under the overlay region: hover them, never click there.
+  Wheel down zooms in. Body corners carry sketch points that win over vertices: hide the Sketches
+  folder to pick a vertex. Origin children show only when the Origin folder's eye is also on.
+- FissionOxide: clicking a sketch curve selects it with no visual change (Delete still removes
+  it). Vertices need SELECT > Selection Filters > Vertices. The sketch Fillet/Trim/etc. prompts
+  are in the lower-left status text.
+- Fusion is in inches with Layout Grid off in 3D; FissionOxide is in mm. Ctrl+Z in sketch mode
+  undoes one curve at a time in both apps.

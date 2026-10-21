@@ -17,7 +17,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Design workspace: canvas
 - [done (2026-10-21)] ViewCube (faces, edges, corners, arrows, menu, home, fade, compass), navigation bar flyouts
 - [todo] Camera: orbit/pan/zoom with every mouse preset, Fit, Look At, zoom-to-cursor, animation timing, orthographic/perspective switch
-- [done (2026-10-21); remainder in progress (2026-10-21, Parity prober 3): vertex, construction plane/axis, sketch point, in-sketch hover, selection filters, window/crossing colours, Select Other] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
+- [done (2026-10-21); not exercised: Body/Edge priority behaviour, Freeform and Paint selection, Select Through] Selection: hover/selected colours for face, edge, vertex, body, sketch curve, sketch point, construction plane, axis; window and crossing boxes; Select Other; selection filters and priority; Escape and empty-click
 - [done (2026-10-21)] Marking menus on empty canvas, face, edge; todo: body, vertex, sketch point, construction geometry, timeline feature, in-sketch
 - [todo] Display settings: every visual style, environment, effects, object visibility, ground plane, full screen
 - [todo] Grid and snaps: layout grid in 3D and sketch, lock, snap, grid settings, incremental move
@@ -26,7 +26,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 ## Design workspace: sketch
 - [done (2026-10-21)] Create Sketch flow, rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal
 - [done (2026-10-21), remainder todo: 2-/3-Tangent Circle, Text after the frame, Mirror/pattern previews, angular and diameter dimensions] Every CREATE tool: midpoint line, 3-point/center rectangles, every circle and arc type, inscribed/edge polygon, ellipse, every slot, spline (fit and control point), conic, point, text, mirror, circular and rectangular pattern, project/include, sketch dimension (every type)
-- [in progress (2026-10-21, Parity prober 3)] Every MODIFY tool: fillet, trim (drag), extend, break, offset (chain, both sides), scale, move/copy, change parameters
+- [todo; menu lists compared 2026-10-21 (ui:sketch:modify-menu-list), the tools themselves are next] Every MODIFY tool: fillet, trim (drag), extend, break, offset (chain, both sides), scale, move/copy, change parameters
 - [todo] Every constraint: coincident, collinear, concentric, midpoint, fix/unfix, parallel, perpendicular, horizontal/vertical, tangent, curvature, equal, symmetry, lock; glyph positions and hover; constraint deletion
 - [todo] Sketch Palette: every option, linetype, look at, slice, 3D sketch; Feature Options per tool
 - [todo] Heads-up input: every tool's boxes, Tab order, units, expressions, lock icon, parameter names
