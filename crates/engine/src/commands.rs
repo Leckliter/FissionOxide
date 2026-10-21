@@ -2442,9 +2442,9 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       p.get("symmetric").and_then(Value::as_bool).unwrap_or(false),
     ),
   };
-  // Fusion warns when a chamfer drops constraints: the corner's coincidence (a point two lines
-  // share) and anything else on the point the chamfer cut away
-  let warn_removed = name == "sketch.chamfer";
+  // Fusion warns when Chamfer or Trim (and Break, in sketch_tools) drop constraints: the corner's
+  // coincidence (a point two lines share) and anything else on the points the operation cut away
+  let warn_removed = matches!(name, "sketch.chamfer" | "sketch.trim");
   let (made, removed) = s.edit(move |d| {
     let sketch = d.sketch_mut(sk)?;
     let before: Vec<ConstraintId> = sketch.constraints.iter().map(|c| c.id).collect();
@@ -2513,11 +2513,21 @@ fn modify(s: &mut Session, name: &str, p: &Value) -> CmdResult {
   })?;
   let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.len()).unwrap_or(0);
   let mut out = json!({"curves": made.iter().map(|c| c.0).collect::<Vec<_>>(), "profiles": profiles});
+  report_removed(&mut out, removed);
+  Ok(out)
+}
+
+/// Fusion's warning when a sketch Modify command (Chamfer, Trim, Break) drops constraints or
+/// dimensions; the app shows it as a toast.
+pub const CONSTRAINTS_REMOVED: &str = "Constraints and/or dimensions were removed during operation.";
+
+/// Adds `removed` (how many) and the [`CONSTRAINTS_REMOVED`] `warning` to a sketch Modify
+/// command's result when the operation dropped `removed` constraints or dimensions.
+pub(crate) fn report_removed(out: &mut Value, removed: usize) {
   if removed > 0 {
     out["removed"] = json!(removed);
-    out["warning"] = json!("Constraints and/or dimensions were removed during operation.");
+    out["warning"] = json!(CONSTRAINTS_REMOVED);
   }
-  Ok(out)
 }
 
 /// A parsed `sketch.pattern_rect`: its two directions, each either a vector or a sketch line.

@@ -95,6 +95,10 @@ pub struct App {
   /// The status text when it is a tool's or command's hint ("select lines or two points"): it
   /// clears when that tool or command ends, as Fusion's canvas hint does.
   hint: Option<String>,
+  /// Fusion's warning toast after a command that dropped constraints or dimensions (Chamfer,
+  /// Trim, Break): shown at the canvas's lower right, with a warning icon at the right end of the
+  /// status readout until the next command.
+  pub(crate) warning_toast: Option<panels::WarningToast>,
   pub show_params: bool,
   /// Change Parameters' filters, sort, selection and Automatic Compute (see [`params_ui`]).
   pub params_ui: params_ui::Panel,
@@ -402,6 +406,7 @@ impl App {
       dialog: None,
       status: None,
       hint: None,
+      warning_toast: None,
       show_params: false,
       params_ui: params_ui::Panel::default(),
       drawing: None,
@@ -549,12 +554,19 @@ impl App {
       self.status = Some(("Still computing — wait for it to finish".into(), false));
       return None;
     }
+    // the warning toast (and its status-bar icon) lasts until the next command, as in Fusion
+    self.warning_toast = None;
     match self.s.execute(cmd, &params) {
       Ok(v) => {
         if let Some(e) = v.get("error").and_then(Value::as_str) {
           self.status = Some((format!("{cmd}: {e}"), true));
         } else if let Some(w) = v.get("warning").and_then(Value::as_str) {
-          self.status = Some((w.to_string(), false));
+          if v.get("removed").and_then(Value::as_u64).is_some_and(|n| n > 0) {
+            // a sketch Modify command dropped constraints or dimensions: Fusion's warning toast
+            self.warning_toast = Some(panels::WarningToast { warnings: vec![w.to_string()], since: None });
+          } else {
+            self.status = Some((w.to_string(), false));
+          }
         }
         Some(v)
       }
@@ -1671,6 +1683,7 @@ impl App {
     panels::canvas_status(self, &ctx);
     panels::unsaved_banner(self, &ctx);
     panels::selection_info(self, &ctx);
+    panels::warning_toast(self, &ctx);
     notifications::panel(self, &ctx);
     marking::end_frame(self, &ctx);
     if let Some(mut d) = self.dialog.take() {

@@ -464,6 +464,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   trim_preview(app, &painter, &resp, &view);
   crate::sketch_modify::preview(app, &painter, &resp, &view);
   consumed |= crate::sketch_modify::manipulator(app, &resp, &painter, &view, &ctx);
+  extend_preview(app, &painter, &resp, &view);
+  break_preview(app, &painter, &resp, &view);
   dim_place_preview(app, &painter, &resp, &view);
   consumed |= spline_accept(app, ui, &painter, &view);
   consumed |= conic_rho_manip(app, &resp, &painter, &view);
@@ -1858,8 +1860,44 @@ pub(crate) fn trim_piece(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at
   let line = fox_engine::scene::curve_polyline(sketch, &c.kind);
   let mut after = sketch.clone();
   let Ok(kept) = after.trim(curve, at) else { return Vec::new() };
+  let tol = polyline_tol(&line);
+  let removed = |p: [f64; 2]| !kept.iter().any(|k| after.distance_to_curve(*k, p).is_some_and(|d| d <= tol));
+  runs_of(&line, removed)
+}
+
+/// The piece Extend at `at` adds to `curve` (from its end nearest `at` to the curve it reaches),
+/// as polylines in sketch coordinates; empty when there is nothing to extend to.
+pub(crate) fn extend_piece(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at: [f64; 2]) -> Vec<Vec<[f64; 2]>> {
+  let mut after = sketch.clone();
+  if after.extend(curve, at).is_err() {
+    return Vec::new();
+  }
+  let Some(c) = after.curve(curve) else { return Vec::new() };
+  let line = fox_engine::scene::curve_polyline(&after, &c.kind);
+  let tol = polyline_tol(&line);
+  let added = |p: [f64; 2]| !sketch.distance_to_curve(curve, p).is_some_and(|d| d <= tol);
+  runs_of(&line, added)
+}
+
+/// The points Break at `at` splits `curve` at (its nearest crossings on each side of `at`, or
+/// `at` itself when nothing crosses it), in sketch coordinates; empty when it can't be broken.
+pub(crate) fn break_points(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at: [f64; 2]) -> Vec<[f64; 2]> {
+  let mut after = sketch.clone();
+  if after.break_curve(curve, at, false, 0.0).is_err() {
+    return Vec::new();
+  }
+  after.points.iter().filter(|p| sketch.pos(p.id).is_none()).map(|p| [p.x, p.y]).collect()
+}
+
+/// How close to a curve a point counts as on it, for a curve of this polyline's size.
+fn polyline_tol(line: &[[f64; 2]]) -> f64 {
   let size = line.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum::<f64>();
-  let tol = (size * 1e-4).max(1e-9);
+  (size * 1e-4).max(1e-9)
+}
+
+/// The runs of a curve's polyline where `removed` holds (sampled along each chord, each run
+/// ending where `removed` flips, found by bisection), as polylines.
+fn runs_of(line: &[[f64; 2]], removed: impl Fn([f64; 2]) -> bool) -> Vec<Vec<[f64; 2]>> {
   const SPLIT: usize = 8;
   let mut samples: Vec<[f64; 2]> = Vec::new();
   for w in line.windows(2) {
@@ -1869,7 +1907,6 @@ pub(crate) fn trim_piece(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at
     }
   }
   samples.extend(line.last().copied());
-  let removed = |p: [f64; 2]| !kept.iter().any(|k| after.distance_to_curve(*k, p).is_some_and(|d| d <= tol));
   let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
   let mut cur: Vec<[f64; 2]> = Vec::new();
   // where the cut is between a kept sample and a removed one (the chord near the curve)
@@ -1922,6 +1959,72 @@ fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   for run in trim_piece(s, curve, plane.to_local(hit)) {
     let pts: Vec<Pos2> = run.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
     painter.add(egui::Shape::line(pts, stroke));
+  }
+}
+
+/// The sketch curve under the pointer for a curve-picking Modify tool, with the point under
+/// the pointer in sketch coordinates.
+fn hovered_curve(
+  app: &App,
+  resp: &egui::Response,
+  view: &View,
+) -> Option<(FeatureId, Plane, fox_engine::sketch::CurveId, [f64; 2])> {
+  let (sk, plane) = sketch_plane(app)?;
+  let (Some(Pick::SketchCurve { sketch, curve }), Some(pos)) = (app.hover, resp.hover_pos()) else { return None };
+  if sketch != sk {
+    return None;
+  }
+  let (o, d) = view.ray(&app.cam, pos);
+  let hit = ray_plane(o, d, plane.origin, plane.normal())?;
+  Some((sk, plane, curve, plane.to_local(hit)))
+}
+
+/// Draws a sketch curve bold blue, as Fusion highlights the curve Extend or Break would act on.
+fn bold_curve(
+  app: &App,
+  painter: &egui::Painter,
+  view: &View,
+  s: &Sketch,
+  plane: &Plane,
+  curve: fox_engine::sketch::CurveId,
+) {
+  let Some(c) = s.curve(curve) else { return };
+  let line = fox_engine::scene::curve_polyline(s, &c.kind);
+  let pts: Vec<Pos2> = line.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
+  painter.add(egui::Shape::line(pts, Stroke::new(3.0, crate::theme::MODIFY_HOVER)));
+}
+
+/// Extend: the hovered curve bold blue and the piece the click would add in light red, as Fusion
+/// previews it.
+fn extend_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
+  if app.tool != Tool::Extend {
+    return;
+  }
+  let Some((sk, plane, curve, at)) = hovered_curve(app, resp, view) else { return };
+  let Ok(s) = app.s.design.sketch(sk) else { return };
+  bold_curve(app, painter, view, s, &plane, curve);
+  let stroke = Stroke::new(3.0, crate::theme::EXTEND_PIECE);
+  for run in extend_piece(s, curve, at) {
+    let pts: Vec<Pos2> = run.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
+    painter.add(egui::Shape::line(pts, stroke));
+  }
+}
+
+/// Break: the hovered curve bold blue with a small red x at each point the click would split it
+/// at, as Fusion previews it.
+fn break_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
+  if app.tool != Tool::Break {
+    return;
+  }
+  let Some((sk, plane, curve, at)) = hovered_curve(app, resp, view) else { return };
+  let Ok(s) = app.s.design.sketch(sk) else { return };
+  bold_curve(app, painter, view, s, &plane, curve);
+  let stroke = Stroke::new(1.5, crate::theme::BREAK_MARK);
+  for p in break_points(s, curve, at) {
+    let Some(c) = view.to_screen(&app.cam, plane.to_world(p)) else { continue };
+    let r = 4.0;
+    painter.line_segment([c + Vec2::new(-r, -r), c + Vec2::new(r, r)], stroke);
+    painter.line_segment([c + Vec2::new(-r, r), c + Vec2::new(r, -r)], stroke);
   }
 }
 
@@ -4187,9 +4290,9 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
       Some(p) if p.kind.is_angle() => "Select location for dimension",
       _ => "Select additional sketch geometry or location for dimension",
     },
-    Tool::Trim => "Select curve to trim",
+    Tool::Trim => "Select curve section to trim",
     Tool::Extend => "Select curve to extend",
-    Tool::Break => "Select curve to break",
+    Tool::Break => "Select curve to Break",
     Tool::Blend => {
       if picked == 0 {
         "Select first curve or edge"
@@ -5904,5 +6007,81 @@ mod tests {
     let c = s.constraints.iter().rfind(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).unwrap();
     let (at, _) = anchor(s, &c.kind);
     assert!((at[0] - 20.0).abs() < 1e-3 && at[1].abs() < 1e-3, "{at:?}");
+  }
+
+  /// `ui:sketch:trim-prompt`, `ui:sketch:break-preview`: Fusion's prompts for the curve
+  /// modify tools.
+  #[test]
+  fn trim_extend_and_break_prompts_read_as_fusions() {
+    let st = ToolState::default();
+    assert_eq!(sketch_prompt(Tool::Trim, &st), Some("Select curve section to trim"));
+    assert_eq!(sketch_prompt(Tool::Extend, &st), Some("Select curve to extend"));
+    assert_eq!(sketch_prompt(Tool::Break, &st), Some("Select curve to Break"));
+  }
+
+  /// `ui:sketch:extend-preview`: the preview is the piece the click adds, from the end nearest
+  /// the pointer to the curve it reaches, and nothing when there is nothing to extend to.
+  #[test]
+  fn extend_shows_the_piece_it_would_add() {
+    let (mut app, sk) = sketching(Tool::Extend);
+    let id =
+      |v: Option<serde_json::Value>| fox_engine::sketch::CurveId(v.unwrap()["curves"][0].as_u64().unwrap() as u32);
+    let line = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})));
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[20, -5], [20, 5]]}));
+    let s = app.s.design.sketch(sk).unwrap();
+    let near = |a: f64, b: f64| (a - b).abs() < 0.5;
+    let piece = extend_piece(s, line, [9.0, 0.0]);
+    assert_eq!(piece.len(), 1, "{piece:?}");
+    let xs: Vec<f64> = piece[0].iter().map(|p| p[0]).collect();
+    let (lo, hi) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
+    assert!(near(lo, 10.0) && near(hi, 20.0) && piece[0].iter().all(|p| p[1].abs() < 1e-6), "{piece:?}");
+    // the other end reaches nothing
+    assert!(extend_piece(s, line, [1.0, 0.0]).is_empty());
+    // the sketch itself is untouched by the preview
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.len(), 2);
+    assert_eq!(s.pos(s.curve_points(line)[1]), Some([10.0, 0.0]));
+  }
+
+  /// `ui:sketch:break-preview`: the preview marks the points the click splits the curve at: its
+  /// nearest crossings on each side of the pointer, or the pointer's point on a lone curve.
+  #[test]
+  fn break_shows_its_split_points() {
+    let (mut app, sk) = sketching(Tool::Break);
+    let id =
+      |v: Option<serde_json::Value>| fox_engine::sketch::CurveId(v.unwrap()["curves"][0].as_u64().unwrap() as u32);
+    let long = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [30, 0]]})));
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[10, -5], [10, 5]]}));
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[20, -5], [20, 5]]}));
+    let lone = id(app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 20], [8, 20]]})));
+    let s = app.s.design.sketch(sk).unwrap();
+    let xs = |at: [f64; 2], c| -> Vec<f64> {
+      let mut v: Vec<f64> = break_points(s, c, at).iter().map(|p| (p[0] * 1e6).round() / 1e6).collect();
+      v.sort_by(f64::total_cmp);
+      v
+    };
+    assert_eq!(xs([15.0, 0.0], long), vec![10.0, 20.0]);
+    assert_eq!(xs([3.0, 0.0], long), vec![10.0]);
+    assert_eq!(xs([4.0, 20.0], lone), vec![4.0]);
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), 4, "the preview changes nothing");
+  }
+
+  /// `ui:sketch:modify-warning-toast`: a trim that drops a constraint raises Fusion's warning
+  /// toast ("1 warning(s)" and the message), which the next command clears.
+  #[test]
+  fn trim_that_drops_constraints_raises_the_warning_toast() {
+    let (mut app, sk) = sketching(Tool::Trim);
+    let r = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})).unwrap();
+    let line = r["curves"][0].as_u64().unwrap();
+    app.run("sketch.constrain", json!({"sketch": sk.0, "type": "horizontal", "curves": [line]}));
+    assert!(app.warning_toast.is_none());
+    app.run("sketch.trim", json!({"sketch": sk.0, "curve": line, "at": [5.0, 0.0]}));
+    let toast = app.warning_toast.clone().expect("the trim dropped the Horizontal constraint");
+    assert_eq!(toast.warnings, vec![fox_engine::CONSTRAINTS_REMOVED.to_string()]);
+    assert_eq!(crate::panels::warning_title(&toast), "1 warning(s)");
+    assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "no error in the status bar: {:?}", app.status);
+    // the next command clears it
+    app.run("sketch.point", json!({"sketch": sk.0, "at": [3.0, 3.0]}));
+    assert!(app.warning_toast.is_none());
   }
 }

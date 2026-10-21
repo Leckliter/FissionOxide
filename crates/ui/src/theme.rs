@@ -49,6 +49,12 @@ pub const TIMELINE: Color32 = color(app::TIMELINE);
 pub const TRIM_PIECE: Color32 = color(fox_brand::PURPLE.deep);
 /// A menu row's tooltip: Fusion's dark panel with white text.
 pub const TOOLTIP: Color32 = color(fox_brand::neutral::GRAPHITE);
+/// A curve under the pointer with Extend or Break: Fusion's bold blue.
+pub const MODIFY_HOVER: Color32 = color(fox_brand::BLUE.base);
+/// The piece Extend will add, previewed in Fusion's light red.
+pub const EXTEND_PIECE: Color32 = color(fox_brand::RED.light);
+/// Break's red x at each point the curve will split at.
+pub const BREAK_MARK: Color32 = color(fox_brand::RED.base);
 
 /// Icon palette: outlines, solid fills, the highlighted face, sketch curves and accents.
 pub const ICON_INK: Color32 = color(app::ICON_INK);

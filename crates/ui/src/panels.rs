@@ -2919,7 +2919,15 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
     app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
   let at = readout_anchor(app.canvas, palette);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
-  painter.text(at, egui::Align2::RIGHT_BOTTOM, text, egui::FontId::proportional(12.5), Color32::from_gray(50));
+  // the readout moves left of the warning icon at the status bar's right end
+  let shift = if app.warning_toast.is_some() { WARNING_ICON + 6.0 } else { 0.0 };
+  painter.text(
+    at - vec2(shift, 0.0),
+    egui::Align2::RIGHT_BOTTOM,
+    text,
+    egui::FontId::proportional(12.5),
+    Color32::from_gray(50),
+  );
 }
 
 /// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2` (one face's area, two faces
@@ -3113,6 +3121,84 @@ pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
   let bg = Rect::from_min_size(at - vec2(5.0, 3.0), galley.size() + vec2(10.0, 6.0));
   painter.rect_filled(bg, 2.0, Color32::from_white_alpha(200));
   painter.galley(at, galley, color);
+}
+
+/// Fusion's warning toast after a command that dropped constraints or dimensions: its messages
+/// and when it first showed (egui time), for the toast's few seconds on screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarningToast {
+  pub warnings: Vec<String>,
+  pub since: Option<f64>,
+}
+
+/// How long the toast stays up; its status-bar icon stays until the next command.
+const TOAST_SECS: f64 = 8.0;
+/// The warning icon's size.
+const WARNING_ICON: f32 = 16.0;
+
+/// The toast's title: `1 warning(s)`, as Fusion counts them.
+pub(crate) fn warning_title(toast: &WarningToast) -> String {
+  format!("{} warning(s)", toast.warnings.len())
+}
+
+/// Fusion's warning glyph: an amber triangle with a white exclamation mark.
+fn warning_glyph(p: &egui::Painter, rect: Rect) {
+  let tri = vec![rect.center_top(), rect.right_bottom(), rect.left_bottom()];
+  p.add(egui::Shape::convex_polygon(tri, theme::WARNING, Stroke::NONE));
+  p.text(
+    rect.center() + vec2(0.0, 2.0),
+    egui::Align2::CENTER_CENTER,
+    "!",
+    egui::FontId::proportional(rect.height() * 0.7),
+    Color32::WHITE,
+  );
+}
+
+/// The warning toast at the canvas's lower right (a warning icon, bold "1 warning(s)" and the
+/// message) for a few seconds after a command dropped constraints or dimensions, and the warning
+/// icon at the right end of the status readout until the next command, as Fusion shows them.
+pub fn warning_toast(app: &mut App, ctx: &egui::Context) {
+  let Some(toast) = app.warning_toast.as_mut() else { return };
+  let now = ctx.input(|i| i.time);
+  let since = *toast.since.get_or_insert(now);
+  let toast = toast.clone();
+  let palette =
+    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
+  let at = readout_anchor(app.canvas, palette);
+  let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("warning-icon")));
+  warning_glyph(&painter, Rect::from_min_size(at - Vec2::splat(WARNING_ICON), Vec2::splat(WARNING_ICON)));
+  if now - since > TOAST_SECS {
+    return;
+  }
+  ctx.request_repaint_after(std::time::Duration::from_millis(250));
+  egui::Area::new(egui::Id::new("warning-toast"))
+    .fixed_pos(at - vec2(0.0, 28.0))
+    .pivot(egui::Align2::RIGHT_BOTTOM)
+    .order(egui::Order::Middle)
+    .interactable(false)
+    .show(ctx, |ui| {
+      egui::Frame::new()
+        .fill(theme::PANEL)
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(40) })
+        .show(ui, |ui| {
+          ui.set_max_width(320.0);
+          ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(WARNING_ICON + 2.0), egui::Sense::hover());
+            warning_glyph(ui.painter(), r.shrink(1.0));
+            ui.vertical(|ui| {
+              ui.spacing_mut().item_spacing.y = 3.0;
+              ui.label(RichText::new(warning_title(&toast)).strong().color(theme::TEXT));
+              for w in &toast.warnings {
+                ui.label(RichText::new(w).color(theme::TEXT));
+              }
+            });
+          });
+        });
+    });
 }
 
 // ---------------------------------------------------------------- timeline

@@ -1,7 +1,8 @@
 //! Sketch commands for editable text, Break, tangent circles and blend curves.
 
 use fox_sketch::{
-  ConstraintKind, CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextAlign, TextId, TextPath, TextStyle, VAlign,
+  ConstraintId, ConstraintKind, CurveId, Dim, HAlign, PointId, PtSpec, Sketch, TextAlign, TextId, TextPath, TextStyle,
+  VAlign,
 };
 use serde_json::{Value, json};
 
@@ -230,8 +231,12 @@ fn break_curve(s: &mut Session, p: &Value) -> CmdResult {
       Some(c) => c,
       None => sk.nearest_curve(at, 1.0).ok_or(CmdError::new("no curve there"))?,
     };
+    let before: Vec<ConstraintId> = sk.constraints.iter().map(|c| c.id).collect();
     let parts = sk.break_curve(c, at, at_point, snap)?;
-    Ok(json!({"pieces": parts.iter().map(|c| c.0).collect::<Vec<_>>()}))
+    let mut out = json!({"pieces": parts.iter().map(|c| c.0).collect::<Vec<_>>()});
+    // Fusion warns when a break drops constraints or dimensions
+    super::report_removed(&mut out, before.iter().filter(|id| sk.constraint(**id).is_none()).count());
+    Ok(out)
   })?;
   finish(s, p, out, &[])
 }

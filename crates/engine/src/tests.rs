@@ -1398,3 +1398,34 @@ fn sketch_chamfer_warns_of_removed_constraints_and_adds_its_dimensions() {
   let r = run(&mut s, "sketch.fillet", json!({"curves": [c[2], c[3]], "radius": 2}));
   assert!(r.get("warning").is_none(), "{r}");
 }
+
+/// `ui:sketch:modify-warning-toast`: Trim, Chamfer and Break report the constraints and
+/// dimensions they drop with Fusion's warning, and nothing when they drop none.
+#[test]
+fn sketch_modify_commands_report_removed_constraints() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  // a lone horizontal line trimmed away takes its Horizontal constraint with it
+  let r = run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+  let lone = r["curves"][0].as_u64().unwrap();
+  run(&mut s, "sketch.constrain", json!({"type": "horizontal", "curves": [lone]}));
+  let r = run(&mut s, "sketch.trim", json!({"curve": lone, "at": [5, 20]}));
+  // (the line's inferred Horizontal goes too)
+  assert!(r["removed"].as_u64().is_some_and(|n| n >= 1), "{r}");
+  assert_eq!(r["warning"], json!(crate::CONSTRAINTS_REMOVED), "{r}");
+  // a chamfer drops the corner point, and the Fix on it
+  let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10]]}));
+  let (a, b) = (r["curves"][0].as_u64().unwrap(), r["curves"][1].as_u64().unwrap());
+  let sk = s.edit_sketch.unwrap();
+  let corner = s.design.sketch(sk).unwrap().curve_points(sketch::CurveId(a as u32))[1];
+  run(&mut s, "sketch.constrain", json!({"type": "fix", "points": [corner.0]}));
+  let r = run(&mut s, "sketch.chamfer", json!({"curves": [a, b], "distance": 2}));
+  assert!(r["removed"].as_u64().is_some_and(|n| n >= 1), "{r}");
+  assert_eq!(r["warning"], json!(crate::CONSTRAINTS_REMOVED), "{r}");
+  // a break that keeps every constraint warns of nothing
+  let r = run(&mut s, "sketch.line", json!({"points": [[-5, 5], [15, 5]]}));
+  let across = r["curves"][0].as_u64().unwrap();
+  let r = run(&mut s, "sketch.break", json!({"curve": across, "at": [12, 5]}));
+  assert_eq!(r["pieces"].as_array().map(Vec::len), Some(2), "{r}");
+  assert!(r.get("removed").is_none() && r.get("warning").is_none(), "{r}");
+}
