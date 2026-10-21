@@ -534,6 +534,8 @@ pub struct Dialog {
   comp_name: String,
   /// What the previewed command reports it did (Remove Duplicates' counts).
   summary: Option<String>,
+  /// The sketch curves the previewed command made (Offset's dimension measures to them).
+  made: Vec<u32>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -651,6 +653,7 @@ impl Dialog {
       sheet_picks: 0,
       comp_name: String::new(),
       summary: None,
+      made: Vec::new(),
     }
   }
 
@@ -1578,6 +1581,10 @@ impl Dialog {
         self.note_preview(&v);
         self.error = v.get("error").and_then(Value::as_str).map(str::to_string);
         self.summary = v.get("summary").and_then(Value::as_str).map(str::to_string);
+        self.made = v["curves"]
+          .as_array()
+          .map(|a| a.iter().filter_map(Value::as_u64).map(|c| c as u32).collect())
+          .unwrap_or_default();
       }
       Err(e) => {
         self.error = Some(e.0);
@@ -2084,6 +2091,9 @@ impl Dialog {
         }
         if self.kind == Kind::Move {
           self.finish_paste(app);
+        }
+        if self.kind == Kind::SkOffset {
+          offset_dimension(app, &self.curves, &self.made, &self.distance);
         }
         if self.kind == Kind::NewDrawing {
           app.drawing = app.s.design.drawings.last().map(|d| d.id);
@@ -4553,9 +4563,79 @@ fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> 
   resp
 }
 
+/// Offset's dimension, added when the command commits as Fusion does: the offset distance from
+/// the start of an offset line to the line it was offset from, drawn between the two and driving
+/// the offset's distance. `sources` are the curves offset, `made` the curves the offset produced
+/// and `distance` the dialog's offset (its sign is the side).
+pub(crate) fn offset_dimension(app: &mut App, sources: &[u32], made: &[u32], distance: &str) {
+  use fox_engine::sketch::{CurveId, CurveKind};
+  let Some(sk) = app.s.edit_sketch else { return };
+  let Ok(sketch) = app.s.design.sketch(sk) else { return };
+  let line = |c: u32| match sketch.curve(CurveId(c)).map(|c| &c.kind) {
+    Some(CurveKind::Line { a, b }) => Some((sketch.pos(*a)?, sketch.pos(*b)?, *a)),
+    _ => None,
+  };
+  // the first source line, and the offset line parallel to it at the offset's distance
+  let Some((src, (p0, p1, _))) = sources.iter().find_map(|c| Some((*c, line(*c)?))) else { return };
+  let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
+  let len = dx.hypot(dy);
+  if len < 1e-9 {
+    return;
+  }
+  let dist = |q: [f64; 2]| ((q[0] - p0[0]) * dy - (q[1] - p0[1]) * dx).abs() / len;
+  let text = distance.trim().trim_start_matches('-').trim();
+  let typed = fox_engine::expr::eval(text, fox_engine::expr::Kind::Length, &app.s.model.params).ok();
+  let Some((point, measured)) = made.iter().filter_map(|c| line(*c)).find_map(|(qa, qb, a)| {
+    let (da, db) = (dist(qa), dist(qb));
+    (da > 1e-9 && (da - db).abs() < 1e-6).then_some((a, da))
+  }) else {
+    return;
+  };
+  // the typed distance labels the dimension when it is what was measured (the engine read it the
+  // same way), else the measurement
+  let value = match typed {
+    Some(t) if (t.abs() - measured).abs() < 1e-6 => text.to_string(),
+    _ => app.s.design.units.format(measured),
+  };
+  app.run(
+    "sketch.dimension",
+    json!({"sketch": sk.0, "type": "point_line", "points": [point.0], "curves": [src], "value": value}),
+  );
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn offset_commits_with_a_dimension_to_its_source() {
+    use fox_engine::sketch::ConstraintKind;
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let line = app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [30, 0]]})).unwrap()["curves"][0]
+      .as_u64()
+      .unwrap() as u32;
+    let made = app.run("sketch.offset", json!({"sketch": sk.0, "curves": [line], "distance": "-5"})).unwrap();
+    let made: Vec<u32> = made["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    offset_dimension(&mut app, &[line], &made, "-5");
+    let s = app.s.design.sketch(sk).unwrap();
+    let dim = s.constraints.iter().find_map(|c| match &c.kind {
+      ConstraintKind::PointLineDistance { line: l, value, .. } => Some((*l, value.clone())),
+      _ => None,
+    });
+    let (src, value) = dim.expect("an offset dimension");
+    assert_eq!(src.0, line, "measured to the source line");
+    assert_eq!((value.expr.as_str(), value.value), ("5", 5.0), "the typed distance, as a distance");
+    // nothing to measure to (a circle's offset) adds nothing
+    let circle =
+      app.run("sketch.circle", json!({"sketch": sk.0, "center": [50, 50], "radius": 4})).unwrap()["curves"][0].clone();
+    let made = app.run("sketch.offset", json!({"sketch": sk.0, "curves": [circle], "distance": "2"})).unwrap();
+    let made: Vec<u32> = made["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    let before = app.s.design.sketch(sk).unwrap().constraints.len();
+    offset_dimension(&mut app, &[circle.as_u64().unwrap() as u32], &made, "2");
+    assert_eq!(app.s.design.sketch(sk).unwrap().constraints.len(), before);
+  }
 
   #[test]
   fn typing_goes_to_the_first_value_box() {

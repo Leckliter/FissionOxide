@@ -2519,6 +2519,32 @@ pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
                 .on_disabled_hover_text("Not in FissionOxide yet");
             });
           }
+          // Fusion's Feature Options while a polygon tool is active: circumscribed, inscribed, edge
+          if matches!(app.tool, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) {
+            ui.add_space(4.0);
+            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::hover());
+            triangle(ui.painter(), r.left_center() + vec2(5.0, 0.0), true, theme::GROUP_LABEL);
+            ui.painter().text(
+              r.left_center() + vec2(16.0, 0.0),
+              egui::Align2::LEFT_CENTER,
+              "Feature Options",
+              egui::FontId::proportional(13.0),
+              theme::TEXT,
+            );
+            row(ui, "Polygon", &mut |ui| {
+              // laid out right to left, so the last listed is the leftmost
+              for (tool, icon, hint) in [
+                (Tool::EdgePolygon, Icon::PolygonEdge, "Edge Polygon"),
+                (Tool::Polygon, Icon::Polygon, "Inscribed Polygon"),
+                (Tool::CircPolygon, Icon::PolygonCirc, "Circumscribed Polygon"),
+              ] {
+                if icons::icon_button(ui, icon, 22.0, hint, app.tool == tool, None).clicked() {
+                  // the point already placed carries over to the other kind
+                  app.tool = tool;
+                }
+              }
+            });
+          }
           if let Some(r) = app.s.model.sketches.get(&sk) {
             ui.add_space(4.0);
             let (txt, col) = if !r.report.ok() {

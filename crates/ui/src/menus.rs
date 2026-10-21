@@ -598,7 +598,7 @@ const SKETCH_CREATE: &[E] = &[
   c("Conic Curve", Icon::Conic, T(Tool::Conic)),
   c("Point", Icon::Point, T(Tool::Point)),
   c("Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT))),
-  c("Trace Image", Icon::TraceImage, D(Kind::TraceImage)),
+  // Trace Image isn't a Fusion CREATE command: it sits in INSERT, next to Canvas
   E::Sep,
   c("Mirror", Icon::SkMirror, D(Kind::SkMirror)),
   c("Circular Pattern", Icon::SkCircPattern, D(Kind::SkCircPattern)),
@@ -1636,6 +1636,46 @@ mod tests {
       }
     }
     assert!(missing.is_empty(), "{missing:?}");
+  }
+
+  #[test]
+  fn the_sketch_create_list_is_fusions() {
+    let mut create = Vec::new();
+    labels(SKETCH_CREATE, &mut create);
+    assert!(!create.contains(&"Trace Image"), "not a Fusion CREATE command: {create:?}");
+    let mut insert = Vec::new();
+    labels(SKETCH_INSERT, &mut insert);
+    assert!(insert.contains(&"Trace Image"), "it lives in INSERT, next to Canvas");
+    let top: Vec<&str> = SKETCH_CREATE
+      .iter()
+      .filter_map(|e| match e {
+        E::I(i) => Some(i.label),
+        E::Sub(l, _) => Some(l),
+        E::Sep => None,
+      })
+      .collect();
+    assert_eq!(
+      top,
+      [
+        "Line",
+        "Midpoint Line",
+        "Rectangle",
+        "Circle",
+        "Arc",
+        "Polygon",
+        "Ellipse",
+        "Slot",
+        "Spline",
+        "Conic Curve",
+        "Point",
+        "Text",
+        "Mirror",
+        "Circular Pattern",
+        "Rectangular Pattern",
+        "Project / Include",
+        "Sketch Dimension"
+      ]
+    );
   }
 
   #[test]

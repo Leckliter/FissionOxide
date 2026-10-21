@@ -161,6 +161,10 @@ enum Field {
   Width,
   Height,
   Diameter,
+  /// A polygon's radius: centre to a vertex (inscribed) or to the middle of a side (circumscribed).
+  Radius,
+  /// A polygon's number of sides.
+  Sides,
 }
 
 /// The heads-up boxes of `tool` once it has `n` points.
@@ -169,6 +173,9 @@ fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
     (Tool::Line, 1..) => &[Field::Length, Field::Angle],
     (Tool::Rect | Tool::CenterRect, 1) => &[Field::Width, Field::Height],
     (Tool::Circle, 1) => &[Field::Diameter],
+    // Fusion's polygon boxes: the radius (or the edge's length) and the number of sides
+    (Tool::Polygon | Tool::CircPolygon, 1) => &[Field::Radius, Field::Sides],
+    (Tool::EdgePolygon, 1) => &[Field::Length, Field::Sides],
     _ => &[],
   }
 }
@@ -967,7 +974,7 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       Some(("sketch.arc", json!({"sketch": sid, "center": first, "start": pts[1], "end": p, "clockwise": clockwise})))
     }
     Tool::Polygon if n == 2 => {
-      Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6})))
+      Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": hud_sides(&locks)})))
     }
     Tool::Slot if n == 3 => {
       let (a, b) = (first, pts[1]);
@@ -978,10 +985,13 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     Tool::Rect3 if n == 3 => Some(("sketch.rect", json!({"sketch": sid, "points": [first, pts[1], p]}))),
     Tool::Circle2P if n == 2 => Some(("sketch.circle", json!({"sketch": sid, "through": [first, p]}))),
     Tool::Circle3P if n == 3 => Some(("sketch.circle", json!({"sketch": sid, "through": [first, pts[1], p]}))),
-    Tool::CircPolygon if n == 2 => {
-      Some(("sketch.polygon", json!({"sketch": sid, "center": first, "vertex": p, "sides": 6, "circumscribed": true})))
+    Tool::CircPolygon if n == 2 => Some((
+      "sketch.polygon",
+      json!({"sketch": sid, "center": first, "vertex": p, "sides": hud_sides(&locks), "circumscribed": true}),
+    )),
+    Tool::EdgePolygon if n == 2 => {
+      Some(("sketch.polygon", json!({"sketch": sid, "edge": [first, p], "sides": hud_sides(&locks)})))
     }
-    Tool::EdgePolygon if n == 2 => Some(("sketch.polygon", json!({"sketch": sid, "edge": [first, p], "sides": 6}))),
     Tool::OverallSlot | Tool::CenterSlot if n == 3 => {
       let w = 2.0 * point_line_dist(p, first, pts[1]);
       let mut q = json!({"sketch": sid, "end": pts[1], "width": w.max(0.1)});
@@ -1071,7 +1081,15 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
 /// Heads-up box text as an expression: a bare length means the design's unit.
 fn hud_text(app: &App, field: Field, text: &str) -> String {
   let t = text.trim();
-  if field == Field::Angle { t.to_string() } else { app.s.design.units.typed(t) }
+  if matches!(field, Field::Angle | Field::Sides) { t.to_string() } else { app.s.design.units.typed(t) }
+}
+
+/// The number of sides typed in a polygon's heads-up box (Fusion's default is 6).
+fn hud_sides(locks: &[(Field, String)]) -> u64 {
+  let typed = locks.iter().find(|l| l.0 == Field::Sides).map(|(_, t)| t.as_str());
+  typed
+    .and_then(|t| fox_engine::expr::eval(t, fox_engine::expr::Kind::Unitless, &fox_engine::expr::Empty).ok())
+    .map_or(6, |v| v.round() as u64)
 }
 
 /// The value typed in heads-up box `i` (mm, or radians for an angle), if any.
@@ -1081,9 +1099,18 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
   if text.is_empty() {
     return None;
   }
-  let kind = if field == Field::Angle { fox_engine::expr::Kind::Angle } else { fox_engine::expr::Kind::Length };
+  let kind = match field {
+    Field::Angle => fox_engine::expr::Kind::Angle,
+    Field::Sides => fox_engine::expr::Kind::Unitless,
+    _ => fox_engine::expr::Kind::Length,
+  };
   let v = fox_engine::expr::eval(&hud_text(app, field, text), kind, &app.s.model.params).ok()?;
-  (field == Field::Angle || v > 1e-9).then_some(v)
+  match field {
+    Field::Angle => Some(v),
+    // the polygon command takes 3 to 256 sides
+    Field::Sides => (3.0..=256.0).contains(&v).then_some(v.round()),
+    _ => (v > 1e-9).then_some(v),
+  }
 }
 
 /// The cursor moved to where the typed heads-up values put it.
@@ -1114,6 +1141,15 @@ fn hud_apply(app: &App, cur: [f64; 2]) -> [f64; 2] {
       }
       None => cur,
     },
+    // a typed radius (or edge length) holds the point that far from the centre (or edge start)
+    Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon => match v(0) {
+      Some(r) => {
+        let l = dx.hypot(dy);
+        let (ux, uy) = if l > 1e-12 { (dx / l, dy / l) } else { (1.0, 0.0) };
+        [last[0] + r * ux, last[1] + r * uy]
+      }
+      None => cur,
+    },
     _ => cur,
   }
 }
@@ -1128,7 +1164,59 @@ fn hud_live(app: &App, cur: [f64; 2]) -> [f64; 2] {
     Tool::Rect => [dx.abs(), dy.abs()],
     Tool::CenterRect => [2.0 * dx.abs(), 2.0 * dy.abs()],
     Tool::Circle => [2.0 * dx.hypot(dy), 0.0],
+    Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon => [dx.hypot(dy), 6.0],
     _ => [0.0; 2],
+  }
+}
+
+/// The corners of a regular `n`-gon about `c`, `r` from the centre, the first at angle `a0`.
+fn polygon_points(c: [f64; 2], r: f64, a0: f64, n: usize) -> Vec<[f64; 2]> {
+  (0..n)
+    .map(|i| {
+      let a = a0 + std::f64::consts::TAU * i as f64 / n as f64;
+      [c[0] + r * a.cos(), c[1] + r * a.sin()]
+    })
+    .collect()
+}
+
+/// The regular `n`-gon with `a`→`b` as one side, its centre on the side's left (as `sketch.polygon`
+/// builds an edge polygon).
+fn edge_polygon_points(a: [f64; 2], b: [f64; 2], n: usize) -> Vec<[f64; 2]> {
+  let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+  let side = dx.hypot(dy);
+  if side < 1e-12 {
+    return Vec::new();
+  }
+  let half = std::f64::consts::PI / n as f64;
+  let apothem = side / (2.0 * half.tan());
+  let c = [(a[0] + b[0]) / 2.0 - dy / side * apothem, (a[1] + b[1]) / 2.0 + dx / side * apothem];
+  polygon_points(c, side / (2.0 * half.sin()), (a[1] - c[1]).atan2(a[0] - c[0]), n)
+}
+
+/// The number of sides the polygon being drawn will have: what its heads-up box holds, else 6.
+fn hud_sides_live(app: &App) -> usize {
+  let i = hud_fields(app.tool, app.tstate.pts.len()).iter().position(|f| *f == Field::Sides);
+  i.and_then(|i| hud_value(app, i)).map_or(6, |v| v as usize)
+}
+
+/// A heads-up box's live value as Fusion shows it: a length with its unit at the document's
+/// display precision ("0.492 in"), an angle to one decimal with "deg" ("336.8 deg"), a count as it
+/// is ("6"). Each is also a valid expression to type back.
+fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> String {
+  match field {
+    Field::Angle => format!("{v:.1} deg"),
+    Field::Sides => format!("{}", v.round() as i64),
+    _ => unit.fixed(v, display_decimals(unit)),
+  }
+}
+
+/// Fusion's default display precision for a unit (Document Settings → Units).
+fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
+  use fox_engine::model::LengthUnit;
+  match unit {
+    LengthUnit::Mm | LengthUnit::Cm => 2,
+    LengthUnit::In => 3,
+    LengthUnit::M | LengthUnit::Ft => 4,
   }
 }
 
@@ -1145,12 +1233,16 @@ fn lock_typed(
     .as_array()
     .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
     .unwrap_or_default();
+  if matches!(app.tool, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) {
+    lock_polygon(app, sk, &curves, locks);
+    return;
+  }
   for (field, text) in locks {
     // rectangles are drawn bottom, right, top, left: the bottom sets the width, the right the height
     let curve = match field {
       Field::Width | Field::Length => curves.first(),
       Field::Height => curves.get(1),
-      Field::Angle | Field::Diameter => None,
+      Field::Angle | Field::Diameter | Field::Radius | Field::Sides => None,
     };
     if let Some(c) = curve {
       app.run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [c], "value": text}));
@@ -1160,6 +1252,28 @@ fn lock_typed(
     {
       lock_angle(app, sk, line, from);
     }
+  }
+}
+
+/// Locks a polygon's typed radius as Fusion dimensions it: centre to the first vertex (inscribed)
+/// or centre to the first side (circumscribed); an edge polygon's typed length dimensions its first
+/// side. `curves` is `sketch.polygon`'s result: the construction circle, then the sides.
+fn lock_polygon(app: &mut App, sk: FeatureId, curves: &[u32], locks: &[(Field, String)]) {
+  let (Some(&circle), Some(&side)) = (curves.first(), curves.get(1)) else { return };
+  let Ok(sketch) = app.s.design.sketch(sk) else { return };
+  let point = |c: u32| sketch.curve_points(fox_engine::sketch::CurveId(c)).first().copied();
+  let (Some(center), Some(vertex)) = (point(circle), point(side)) else { return };
+  for (field, text) in locks {
+    let mut params = match (app.tool, field) {
+      (Tool::Polygon, Field::Radius) => json!({"type": "distance", "points": [center.0, vertex.0], "value": text}),
+      (Tool::CircPolygon, Field::Radius) => {
+        json!({"type": "point_line", "points": [center.0], "curves": [side], "value": text})
+      }
+      (Tool::EdgePolygon, Field::Length) => json!({"type": "distance", "curves": [side], "value": text}),
+      _ => continue,
+    };
+    params["sketch"] = json!(sk.0);
+    app.run("sketch.dimension", params);
   }
 }
 
@@ -1393,7 +1507,7 @@ pub(crate) fn trim_piece(sketch: &Sketch, curve: fox_engine::sketch::CurveId, at
   runs
 }
 
-/// Trim: the piece the click would remove, in red under the pointer, as in Fusion.
+/// Trim: the piece the click would remove, highlighted under the pointer in Fusion's dark blue.
 fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
   if app.tool != Tool::Trim {
     return;
@@ -1406,7 +1520,7 @@ fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   let (o, d) = view.ray(&app.cam, pos);
   let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
   let Ok(s) = app.s.design.sketch(sk) else { return };
-  let stroke = Stroke::new(3.0, Color32::from_rgb(225, 40, 40));
+  let stroke = Stroke::new(3.0, crate::theme::TRIM_PIECE);
   for run in trim_piece(s, curve, plane.to_local(hit)) {
     let pts: Vec<Pos2> = run.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
     painter.add(egui::Shape::line(pts, stroke));
@@ -1622,6 +1736,10 @@ fn line_angle(s: &Sketch, a: fox_engine::sketch::CurveId, b: fox_engine::sketch:
 /// The floating value box for new or edited dimensions.
 fn dim_editor(app: &mut App, ctx: &egui::Context) {
   let Some((cid, mut text, pos)) = app.dim_edit.take() else { return };
+  // an existing dimension names its model parameter ("d7 : 0.4 in"), as Fusion's tooltip does
+  let param = if cid == 0 { None } else { dim_param_name(app, cid) };
+  let mut open_params = false;
+  let mut delete = false;
   // a box that wasn't showing last frame (or shows another edit) takes the keyboard with its
   // text selected
   let shown_id = egui::Id::new("dim-editor-shown");
@@ -1636,18 +1754,47 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
     .order(egui::Order::Foreground)
     .show(ctx, |ui| {
       egui::Frame::popup(ui.style()).inner_margin(3.0).show(ui, |ui| {
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0).hint_text("value or expression"));
-        if fresh {
-          focus_text(ctx, &r, &text, true);
-        } else if !r.has_focus() && !r.lost_focus() {
-          r.request_focus();
-        }
-        // Enter commits and Esc cancels, as in Fusion (no buttons)
-        let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        cancel = esc;
-        commit = enter && !esc && (r.has_focus() || r.lost_focus());
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 2.0;
+          let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0).hint_text("value or expression"));
+          let r = match &param {
+            Some(name) => r.on_hover_text(format!("{name} : {text}")),
+            None => r,
+          };
+          if fresh {
+            focus_text(ctx, &r, &text, true);
+          } else if !r.has_focus() && !r.lost_focus() && !egui::Popup::is_any_open(ctx) {
+            r.request_focus();
+          }
+          // Enter commits and Esc cancels, as in Fusion (no OK button); ⋮ holds the dimension's menu
+          let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+          cancel = esc;
+          commit = enter && !esc && (r.has_focus() || r.lost_focus());
+          if cid != 0 {
+            let m = ui.add(egui::Button::new("").min_size(Vec2::new(14.0, 20.0)).frame(false));
+            let dot = Color32::from_gray(60);
+            for dy in [-4.0, 0.0, 4.0] {
+              ui.painter().circle_filled(m.rect.center() + Vec2::new(0.0, dy), 1.3, dot);
+            }
+            egui::Popup::menu(&m).show(|ui| {
+              if ui.button("Change Parameters").clicked() {
+                open_params = true;
+              }
+              if ui.button("Delete").clicked() {
+                delete = true;
+              }
+            });
+          }
+        });
       });
     });
+  if open_params {
+    app.show_params = true;
+  }
+  if delete && let Some(sk) = app.s.edit_sketch {
+    app.run("sketch.delete", json!({"sketch": sk.0, "constraints": [cid]}));
+    return;
+  }
   if commit {
     // the Enter is this box's, not the open dialog's OK
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -1682,6 +1829,28 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
   }
 }
 
+/// The model parameter that drives the open sketch's dimension `cid` ("d7"), as the Parameters
+/// dialog names it.
+fn dim_param_name(app: &App, cid: u32) -> Option<String> {
+  let sk = app.s.edit_sketch?;
+  let sketch = app.s.design.sketch(sk).ok()?;
+  let index = sketch.constraints.iter().filter(|c| c.kind.dim().is_some()).position(|c| c.id.0 == cid)?;
+  app.s.design.model_parameters().into_iter().find(|p| p.feature == sk && p.index == index).map(|p| p.name)
+}
+
+/// What the dimension editor opens with: a plain value with its unit ("0.4 in", "45 deg") as Fusion
+/// shows it; an expression with parameters as it was typed.
+fn dim_edit_text(k: &ConstraintKind, dim: &fox_engine::sketch::Dim, unit: fox_engine::model::LengthUnit) -> String {
+  if fox_engine::expr::eval_raw(&dim.expr, &fox_engine::expr::Empty).is_err() {
+    return dim.expr.clone();
+  }
+  if k.is_angle() {
+    format!("{} deg", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
+  } else {
+    unit.format(dim.value)
+  }
+}
+
 /// Gives a text box the keyboard, with all its text selected (typing replaces it) or the caret
 /// at the end.
 pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, select_all: bool) {
@@ -1711,8 +1880,8 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
     for c in &r.sketch.constraints {
       let Some(dim) = c.kind.dim() else { continue };
       let Some((anchor, label)) = dim_label(&r.sketch, &c.kind, dim, app.s.design.units) else { continue };
-      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
-      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let text = DimText::new(painter, &label, font.clone());
+      let size = text.size() + Vec2::new(8.0, 4.0);
       let shape = dim_shape(&r.sketch, &c.kind, dim, size, wpp, &to_screen);
       let at = match &shape {
         Some(s) => s.label,
@@ -1726,7 +1895,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
       }
       let rect = Rect::from_center_size(at, size);
       painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
-      painter.galley(rect.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+      text.paint(painter, rect.min + Vec2::new(4.0, 2.0), Color32::BLACK);
     }
   }
 }
@@ -1748,8 +1917,8 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     let selected = app.s.selection.contains(&Sel::SketchConstraint { sketch: sk, constraint: c.id });
     if let Some(dim) = c.kind.dim() {
       let Some((anchor, label)) = dim_label(&sketch, &c.kind, dim, app.s.design.units) else { continue };
-      let galley = painter.layout_no_wrap(label, font.clone(), DIM_INK);
-      let size = galley.size() + Vec2::new(8.0, 4.0);
+      let text = DimText::new(painter, &label, font.clone());
+      let size = text.size() + Vec2::new(8.0, 4.0);
       // extension lines, dimension line and arrows, offset from the geometry as in Fusion
       let shape = dim_shape(&sketch, &c.kind, dim, size, wpp, &to_screen);
       let at = match &shape {
@@ -1776,10 +1945,9 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       if selected || resp.hovered() {
         painter.rect_stroke(r, 1.0, Stroke::new(1.0, crate::theme::ACCENT), egui::StrokeKind::Inside);
       }
-      painter.galley(r.min + Vec2::new(4.0, 2.0), galley, Color32::BLACK);
+      text.paint(painter, r.min + Vec2::new(4.0, 2.0), Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
-        // a stored bare length is mm: shown with its unit in a design in another unit
-        let text = if c.kind.is_angle() { dim.expr.clone() } else { app.s.design.units.shown(&dim.expr) };
+        let text = dim_edit_text(&c.kind, dim, app.s.design.units);
         app.dim_edit = Some((c.id.0, text, at));
         consumed = true;
       } else if resp.clicked() {
@@ -1814,6 +1982,43 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
     resp.on_hover_text(format!("{} (click to select, Del to remove)", c.kind.name()));
   }
   consumed
+}
+
+/// A dimension's value as drawn. The font has no ⌀ (U+2300), so a diameter's glyph is painted
+/// the way Fusion draws it, a circle with a slash, in front of the number.
+struct DimText {
+  glyph: bool,
+  galley: std::sync::Arc<egui::Galley>,
+  em: f32,
+}
+
+impl DimText {
+  fn new(painter: &egui::Painter, label: &str, font: egui::FontId) -> DimText {
+    let (glyph, rest) = match label.strip_prefix('⌀') {
+      Some(rest) => (true, rest),
+      None => (false, label),
+    };
+    DimText { glyph, em: font.size, galley: painter.layout_no_wrap(rest.to_string(), font, Color32::BLACK) }
+  }
+
+  fn glyph_width(&self) -> f32 {
+    if self.glyph { self.em * 0.8 } else { 0.0 }
+  }
+
+  fn size(&self) -> Vec2 {
+    self.galley.size() + Vec2::new(self.glyph_width(), 0.0)
+  }
+
+  fn paint(&self, painter: &egui::Painter, at: Pos2, col: Color32) {
+    if self.glyph {
+      let r = self.em * 0.27;
+      let c = at + Vec2::new(self.glyph_width() / 2.0 - 1.0, self.galley.size().y / 2.0);
+      painter.circle_stroke(c, r, Stroke::new(1.0, col));
+      let d = Vec2::new(r * 1.5, -r * 1.5);
+      painter.line_segment([c - d, c + d], Stroke::new(1.0, col));
+    }
+    painter.galley(at + Vec2::new(self.glyph_width(), 0.0), self.galley.clone(), col);
+  }
 }
 
 /// A dimension's leader graphics in screen space: extension and dimension lines, an arc for an
@@ -1925,6 +2130,19 @@ fn radial_shape(
   Some(DimShape { lines: vec![[start, at - u * half]], arc: Vec::new(), arrows, label: at })
 }
 
+/// Fusion's diameter dimension of a circle: a horizontal line through the centre with arrowheads
+/// on the circle at both ends, the value sitting on the line at the centre.
+fn diameter_shape(center: [f64; 2], r: f64, to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>) -> Option<DimShape> {
+  let a = to_screen([center[0] - r, center[1]])?;
+  let b = to_screen([center[0] + r, center[1]])?;
+  let c = to_screen(center)?;
+  let d = b - a;
+  if !d.is_finite() || d.length() < 1e-6 {
+    return None;
+  }
+  Some(DimShape { lines: vec![[a, b]], arc: Vec::new(), arrows: vec![(a, -d), (b, d)], label: c })
+}
+
 /// An angle between two lines: an arc between them around where they meet, with extension lines
 /// when the arc lands beyond a line's ends.
 fn angular_shape(
@@ -2027,7 +2245,11 @@ fn dim_shape(
     ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
       let c = s.pos(*s.curve_points(*curve).first()?)?;
       let r = s.radius(*curve)?;
-      // circles are dimensioned at 45°, arcs at their middle
+      let circle = matches!(s.curve(*curve).map(|c| &c.kind), Some(CurveKind::Circle { .. }));
+      if circle && matches!(k, ConstraintKind::Diameter { .. }) {
+        return diameter_shape(c, r, to_screen);
+      }
+      // radii: circles are dimensioned at 45°, arcs at their middle
       let on = match s.curve(*curve).map(|c| &c.kind) {
         Some(CurveKind::Arc { .. }) => {
           let pts = fox_engine::scene::curve_polyline(s, &s.curve(*curve)?.kind);
@@ -2195,7 +2417,19 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       }
     }
     (Tool::MidpointLine, [a]) => line([2.0 * a[0] - cur[0], 2.0 * a[1] - cur[1]], cur),
-    (Tool::CircPolygon | Tool::EdgePolygon | Tool::TangentArc, [a]) => line(*a, cur),
+    (Tool::TangentArc, [a]) => line(*a, cur),
+    (Tool::Polygon | Tool::CircPolygon, [c]) => {
+      // the polygon and the circle it is inscribed in (or circumscribes), as in Fusion
+      let n = hud_sides_live(app);
+      let (dx, dy) = (cur[0] - c[0], cur[1] - c[1]);
+      let d = dx.hypot(dy);
+      let half = std::f64::consts::PI / n as f64;
+      let (r, a0) =
+        if app.tool == Tool::CircPolygon { (d / half.cos(), dy.atan2(dx) + half) } else { (d, dy.atan2(dx)) };
+      circle(*c, d);
+      poly(&polygon_points(*c, r, a0, n), true);
+    }
+    (Tool::EdgePolygon, [a]) => poly(&edge_polygon_points(*a, cur, hud_sides_live(app)), true),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
@@ -2224,7 +2458,7 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       let o = [2.0 * c[0] - cur[0], 2.0 * c[1] - cur[1]];
       poly(&[o, [cur[0], o[1]], cur, [o[0], cur[1]]], true);
     }
-    (Tool::Circle | Tool::Polygon, [c]) => circle(*c, (cur[0] - c[0]).hypot(cur[1] - c[1])),
+    (Tool::Circle, [c]) => circle(*c, (cur[0] - c[0]).hypot(cur[1] - c[1])),
     (Tool::Arc3 | Tool::CenterArc | Tool::Slot, [a]) => line(*a, cur),
     (Tool::Arc3, [a, b]) => {
       if let Some(c) = fox_engine::sketch::circumcenter(*a, cur, *b) {
@@ -2325,20 +2559,25 @@ pub fn route_typing(app: &mut App, ctx: &egui::Context) {
 fn take_hud_tab(app: &mut App, ctx: &egui::Context) {
   let hud = &mut app.tstate.hud;
   hud.tab = None;
-  if app.s.edit_sketch.is_none()
-    || hud_fields(app.tool, app.tstate.pts.len()).len() < 2
-    || app.drawing.is_some()
-    || app.dim_edit.is_some()
-    || app.marking.is_some()
-    || (hud.buf.is_none() && ctx.egui_wants_keyboard_input())
-  {
+  // a text box elsewhere has the keyboard: Tab moves egui's focus between fields
+  if hud.buf.is_none() && ctx.egui_wants_keyboard_input() {
     return;
   }
   let (tab, shift_tab) = ctx.input_mut(|i| {
     (i.consume_key(egui::Modifiers::NONE, egui::Key::Tab), i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab))
   });
-  if tab || shift_tab {
-    ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+  if !(tab || shift_tab) {
+    return;
+  }
+  // with nothing focused, egui would give the keyboard to the first widget drawn (the Data Panel
+  // button, which Enter then presses); in Fusion Tab never reaches the toolbar
+  ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+  if app.s.edit_sketch.is_some()
+    && !hud_fields(app.tool, app.tstate.pts.len()).is_empty()
+    && app.drawing.is_none()
+    && app.dim_edit.is_none()
+    && app.marking.is_none()
+  {
     hud.tab = Some(shift_tab);
   }
 }
@@ -2371,7 +2610,7 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
   let mut at: Vec<Option<Pos2>> = Vec::new();
   for f in fields {
     let shape = match (app.tool, f) {
-      (Tool::Line, Field::Length) => {
+      (Tool::Line | Tool::EdgePolygon, Field::Length) => {
         let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
         let l = dx.hypot(dy).max(1e-12);
         // the dimension sits on the line's left
@@ -2393,6 +2632,10 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
         let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
         radial_shape(last, r, cur, true, Vec2::new(60.0, 18.0), &to_screen)
       }
+      (Tool::Polygon | Tool::CircPolygon, Field::Radius) => {
+        let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
+        radial_shape(last, r, cur, false, Vec2::new(60.0, 18.0), &to_screen)
+      }
       _ => None,
     };
     if let Some(s) = &shape {
@@ -2400,24 +2643,21 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     }
     at.push(shape.map(|s| s.label));
   }
+  // a polygon's sides box sits under its radius box, as in Fusion
+  if let Some(i) = fields.iter().position(|f| *f == Field::Sides) {
+    let under = at.first().copied().flatten().map(|p| p + Vec2::new(0.0, 26.0));
+    at[i] = under;
+  }
   // lengths in the design's unit (a bare number typed back means that unit, see [`hud_text`])
   let unit = app.s.design.units;
-  let fmt = |i: usize| {
-    if fields[i] == Field::Angle {
-      format!("{}°", fox_engine::sketch::Dim::new(live[i]).expr)
-    } else {
-      unit.number(live[i])
-    }
-  };
+  let fmt = |i: usize| hud_display(unit, fields[i], live[i]);
   let n = fields.len();
   let hud = &mut app.tstate.hud;
   hud.active = hud.active.min(n - 1);
   let mut commit = false;
   // Tab keeps what was typed and moves on to the next box (Shift+Tab: the previous one), or with
   // no box focused starts typing in the next box; either way the box's value is selected
-  if let Some(back) = tab
-    && n > 1
-  {
+  if let Some(back) = tab {
     hud.active = if back { (hud.active + n - 1) % n } else { (hud.active + 1) % n };
     let t = if hud.typed[hud.active].is_empty() { fmt(hud.active) } else { hud.typed[hud.active].clone() };
     hud.buf = Some(t);
@@ -2567,11 +2807,15 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Circle) => "Circle: click the centre, then a point on the circle",
     (true, Tool::Arc3) => "3-point arc: start, end, then a point on the arc",
     (true, Tool::CenterArc) => "Centre arc: centre, start, end",
+    // Fusion's prompt once the centre (or the edge's start) is down
+    (true, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) if !app.tstate.pts.is_empty() => {
+      "Place point on polygon"
+    }
     (true, Tool::Polygon) => "Polygon: centre, then a vertex",
     (true, Tool::Slot) => "Slot: first centre, second centre, then the width",
     (true, Tool::Point) => "Point: click to place",
     (true, Tool::Spline) => "Spline: click fit points · click the last point again or Enter to finish",
-    (true, Tool::Trim) => "Trim: click the piece shown in red to remove it · drag across curves to trim each one",
+    (true, Tool::Trim) => "Select curve section to trim · drag across curves to trim each one",
     (true, Tool::Extend) => "Extend: click near the end of a line to extend it to the next curve",
     (true, Tool::Rect3) => "3-point rectangle: two corners along one side, then the height",
     (true, Tool::Circle2P) => "2-point circle: the two ends of a diameter",
@@ -3139,6 +3383,151 @@ mod tests {
     typed(&mut app, ["12", ""]);
     place_point(&mut app, sk, [2.0, 1.0], None);
     assert_eq!(dims(&app, sk), vec![12.0]);
+  }
+
+  #[test]
+  fn typed_polygon_radius_and_sides() {
+    // Fusion: ".3 Tab 5 Enter" after the centre makes a pentagon with a radius dimension
+    let (mut app, sk) = sketching(Tool::Polygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    assert_eq!(hud_fields(app.tool, 1), &[Field::Radius, Field::Sides]);
+    assert_eq!(hud_live(&app, [3.0, 4.0]), [5.0, 6.0]);
+    typed(&mut app, ["8", "5"]);
+    assert_eq!(hud_sides_live(&app), 5);
+    // the cursor only gives the direction
+    let p = hud_apply(&app, [3.0, 4.0]);
+    assert!((p[0] - 4.8).abs() < 1e-9 && (p[1] - 6.4).abs() < 1e-9, "{p:?}");
+    place_point(&mut app, sk, [3.0, 4.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 5);
+    assert_eq!(dims(&app, sk), vec![8.0], "centre to vertex");
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Distance { .. })));
+    // circumscribed: the radius reaches the middle of a side
+    let (mut app, sk) = sketching(Tool::CircPolygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["8", "5"]);
+    place_point(&mut app, sk, [1.0, 0.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 5);
+    assert_eq!(dims(&app, sk), vec![8.0]);
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointLineDistance { .. })));
+    // an edge polygon's boxes are the edge's length and the sides
+    let (mut app, sk) = sketching(Tool::EdgePolygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    assert_eq!(hud_fields(app.tool, 1), &[Field::Length, Field::Sides]);
+    typed(&mut app, ["10", "4"]);
+    place_point(&mut app, sk, [1.0, 0.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 4);
+    assert_eq!(dims(&app, sk), vec![10.0]);
+    // too few sides falls back to Fusion's six
+    let (mut app, sk) = sketching(Tool::Polygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["", "2"]);
+    assert_eq!(hud_sides_live(&app), 6);
+    place_point(&mut app, sk, [5.0, 0.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 6);
+    assert!(dims(&app, sk).is_empty());
+  }
+
+  #[test]
+  fn polygon_preview_follows_the_sides_box() {
+    let hexagon = polygon_points([0.0, 0.0], 2.0, 0.0, 6);
+    assert_eq!(hexagon.len(), 6);
+    assert_eq!(hexagon[0], [2.0, 0.0]);
+    assert!(hexagon.iter().all(|p| (p[0].hypot(p[1]) - 2.0).abs() < 1e-9));
+    // an edge polygon's centre is on the edge's left
+    let square = edge_polygon_points([0.0, 0.0], [10.0, 0.0], 4);
+    assert_eq!(square.len(), 4);
+    assert!(square.iter().all(|p| p[1] > -1e-9 && p[1] < 10.0 + 1e-9), "{square:?}");
+    assert!(square.iter().any(|p| (p[0] - 10.0).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9), "{square:?}");
+  }
+
+  #[test]
+  fn heads_up_boxes_read_as_fusions() {
+    use fox_engine::model::LengthUnit;
+    // units on lengths at the document's precision, one decimal and "deg" on angles
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Length, 14.76), "14.76 mm");
+    assert_eq!(hud_display(LengthUnit::In, Field::Length, 0.492 * 25.4), "0.492 in");
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Angle, 336.7876), "336.8 deg");
+    assert_eq!(hud_display(LengthUnit::Mm, Field::Sides, 6.0), "6");
+    // and each reads back as the value it shows
+    let (mut app, sk) = sketching(Tool::Line);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["14.76 mm", "336.8 deg"]);
+    assert!((hud_value(&app, 0).unwrap() - 14.76).abs() < 1e-9);
+    assert!((hud_value(&app, 1).unwrap() - 336.8f64.to_radians()).abs() < 1e-9);
+  }
+
+  #[test]
+  fn circle_diameter_runs_horizontally_through_the_centre() {
+    let (mut app, sk) = sketching(Tool::Select);
+    let made = app.run("sketch.circle", json!({"sketch": sk.0, "center": [10, 5], "radius": 6})).unwrap();
+    let curve = made["curves"][0].as_u64().unwrap();
+    app.run("sketch.dimension", json!({"sketch": sk.0, "type": "diameter", "curves": [curve], "value": "12"})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
+    let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
+    assert_eq!(label, "⌀12");
+    // sketch units are screen points
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
+    let shape = dim_shape(s, &c.kind, c.kind.dim().unwrap(), Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    assert_eq!(shape.label, Pos2::new(10.0, 5.0), "the value sits on the line at the centre");
+    assert_eq!(shape.lines, vec![[Pos2::new(4.0, 5.0), Pos2::new(16.0, 5.0)]]);
+    assert_eq!(shape.arrows.len(), 2);
+    assert!(shape.arrows.iter().all(|(tip, dir)| (tip.x - 10.0).signum() == dir.x.signum()), "arrows point out");
+    // a radius keeps its leader; an arc's diameter does too
+    app.run("sketch.dimension", json!({"sketch": sk.0, "type": "radius", "curves": [curve], "value": "6"})).unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let r = s.constraints.iter().filter(|c| c.kind.dim().is_some()).nth(1).unwrap();
+    let shape = dim_shape(s, &r.kind, r.kind.dim().unwrap(), Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();
+    assert_eq!(shape.arrows.len(), 1);
+    // the ⌀ is painted, not a missing glyph: the text takes room for it
+    let ctx = egui::Context::default();
+    frame(&ctx, vec![], |ctx| {
+      let painter = ctx.layer_painter(egui::LayerId::background());
+      let font = egui::FontId::proportional(12.0);
+      let dia = DimText::new(&painter, "⌀12", font.clone());
+      let plain = DimText::new(&painter, "12", font.clone());
+      assert!(dia.glyph && !plain.glyph);
+      assert!(dia.size().x > plain.size().x + 5.0, "{} {}", dia.size().x, plain.size().x);
+      assert_eq!(dia.galley.text(), "12", "the glyph never reaches the font");
+      let r = DimText::new(&painter, "R6", font);
+      assert!(!r.glyph && r.galley.text() == "R6");
+    });
+  }
+
+  #[test]
+  fn dimension_editor_shows_the_value_with_its_unit_and_parameter() {
+    let (mut app, sk) = sketching(Tool::Select);
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 5], [8, 5]]})).unwrap();
+    let lines: Vec<u32> = app.s.design.sketch(sk).unwrap().curves.iter().map(|c| c.id.0).collect();
+    app
+      .run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [lines[0]], "value": "10"}))
+      .unwrap();
+    app
+      .run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [lines[1]], "value": "8"}))
+      .unwrap();
+    let s = app.s.design.sketch(sk).unwrap();
+    let dims: Vec<_> = s.constraints.iter().filter(|c| c.kind.dim().is_some()).cloned().collect();
+    let unit = app.s.design.units;
+    assert_eq!(dim_edit_text(&dims[0].kind, dims[0].kind.dim().unwrap(), unit), "10 mm");
+    // the second dimension is the sketch's second model parameter
+    assert_eq!(dim_param_name(&app, dims[0].id.0), Some("d1".into()));
+    assert_eq!(dim_param_name(&app, dims[1].id.0), Some("d2".into()));
+    assert_eq!(dim_param_name(&app, 999), None);
+    // in inches the value reads in inches; an expression with a parameter stays as typed
+    let inch = fox_engine::model::LengthUnit::In;
+    assert_eq!(dim_edit_text(&dims[0].kind, &fox_engine::sketch::Dim::expr("2 in", 50.8), inch), "2 in");
+    assert_eq!(dim_edit_text(&dims[0].kind, &fox_engine::sketch::Dim::expr("w + 2", 12.0), inch), "w + 2");
+    let angle = ConstraintKind::Angle {
+      a: fox_engine::sketch::CurveId(lines[0]),
+      b: fox_engine::sketch::CurveId(lines[1]),
+      value: fox_engine::sketch::Dim::expr("45", 45f64.to_radians()),
+    };
+    assert_eq!(dim_edit_text(&angle, angle.dim().unwrap(), unit), "45 deg");
   }
 
   #[test]

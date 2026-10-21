@@ -2,6 +2,7 @@
 
 use egui::{Event, Pos2, RawInput, Rect, vec2};
 use fox_engine::Session;
+use serde_json::json;
 
 use crate::App;
 
@@ -96,6 +97,33 @@ fn the_create_sketch_dialog_takes_clicks_where_it_opens() {
   assert!(r.right() > h.app.canvas.right() - 60.0, "the dialog opens on the right of the canvas: {r:?}");
   h.move_then_click(cancel_pos(r));
   assert!(h.app.dialog.is_none(), "Cancel closes the dialog");
+}
+
+/// Tab with nothing focused used to give egui's keyboard focus to the first widget drawn, the Data
+/// Panel button, which Enter then pressed: the panel opened on its own mid-sketch. Fusion's Tab
+/// never reaches the toolbar.
+#[test]
+fn tab_then_enter_leaves_the_data_panel_alone() {
+  let mut h = Harness::new();
+  assert!(!h.app.data.open);
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  assert!(!h.ctx.memory(|m| m.focused().is_some()), "Tab focused a widget");
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(!h.app.data.open, "Enter pressed the Data Panel button");
+  // in a sketch with a one-box shape (a circle's diameter) too
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.set_tool(crate::Tool::Circle);
+  h.frame(vec![]);
+  let c = h.app.canvas.center();
+  h.move_then_click(c);
+  assert!(!h.app.tstate.is_empty(), "the centre is down");
+  h.frame(vec![key(egui::Key::Tab)]);
+  h.frame(vec![]);
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(!h.app.data.open);
 }
 
 #[test]
