@@ -1,0 +1,15 @@
+[package]
+name = "fox-sim"
+description = "Finite element simulation: tetrahedral meshing, linear static stress, modal frequencies, steady-state thermal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+faer = { version = "0.24", default-features = false, features = ["std", "sparse-linalg", "rayon"] }
+robust = "1.2"
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
