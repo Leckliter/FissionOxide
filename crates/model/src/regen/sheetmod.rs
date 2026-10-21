@@ -72,7 +72,7 @@ impl Ctx<'_> {
     for er in edges {
       let body = &self.state.bodies[self.body_index(er.body)?];
       let info = body.sheet.as_ref().ok_or(format!("{what} works on sheet metal bodies"))?;
-      let Some(eid) = er.resolve(body.edges(), body.faces(), body.diagonal()) else { continue };
+      let Some(eid) = body.find_edge(er) else { continue };
       let e = body.edges().iter().find(|e| e.id == eid).ok_or("an edge could not be found")?;
       if !thickness_edge(body, e, info.thickness) {
         return Err(format!("{what}: pick edges that run through the sheet's thickness (flange corners)"));
@@ -89,9 +89,9 @@ impl Ctx<'_> {
     if info.flat {
       return Err("refold the unfolded body before joining it".into());
     }
-    let eid = er.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("an edge could not be found")?;
+    let eid = body.find_edge(er).ok_or("an edge could not be found")?;
     let e = *body.edges().iter().find(|e| e.id == eid).ok_or("an edge could not be found")?;
-    *er = EdgeRef::from_edge(er.body, &e, body.faces());
+    *er = body.edge_ref(&e, er.names);
     if e.kind != CurveKind::Line {
       return Err("pick a straight edge at the end of each flange".into());
     }

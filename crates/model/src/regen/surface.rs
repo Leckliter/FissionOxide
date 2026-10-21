@@ -350,7 +350,7 @@ mod tests {
     let m = regenerate(&mut d);
     let b = &m.bodies[0];
     let e = b.edges().iter().find(|e| (e.mid - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-6).unwrap();
-    let edge = EdgeRef::from_edge(b.id, e, b.faces());
+    let edge = b.edge_ref(e, [0; 2]);
     let ext = d
       .add_feature(FeatureKind::SurfaceExtend { edges: vec![edge], distance: "ext".into(), mode: ExtendMode::Natural })
       .unwrap();

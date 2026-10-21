@@ -6,7 +6,7 @@
 //! `pattern.rectangular`, `component.copy`, `thread`), runs that command for the rest.
 
 use fox_kernel::glam::DVec3;
-use fox_model::{BodyId, EdgeRef, FeatureId, FeatureKind, SketchLink};
+use fox_model::{BodyId, FeatureId, FeatureKind, SketchLink};
 use fox_sketch::{ConstraintKind, Dim, PtSpec};
 use serde_json::{Value, json};
 
@@ -136,7 +136,7 @@ fn place(s: &mut Session, face: &Value, p: &Value) -> Result<(FeatureId, u32), C
     }
     let expr = expr_of(o.get("distance").ok_or(CmdError::new("each offset needs a 'distance'"))?)?;
     let v = fox_expr::eval(&expr, fox_expr::Kind::Length, &params_scope(s))?;
-    refs.push((edge.start, edge.end, EdgeRef::from_edge(eb, &edge, b.faces()), Dim::expr(expr, v)));
+    refs.push((edge.start, edge.end, b.edge_ref(&edge, [0; 2]), Dim::expr(expr, v)));
   }
   if refs.len() > 2 {
     return Err(CmdError::new("a hole takes at most two offset edges"));

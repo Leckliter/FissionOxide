@@ -15,6 +15,7 @@ use fox_sketch::{ConstraintId, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::ThinSide;
 use crate::assembly;
+use crate::naming;
 use crate::sheet::{self, FlatPattern, SheetInfo, Unfolded};
 use crate::{
   AxisRef, BendPosition, BodyId, BodySel, CornerMode, Design, EdgeRef, ExtentKind, FaceRef, Feature, FeatureId,
@@ -38,6 +39,8 @@ pub struct Body {
   pub sheet: Option<SheetInfo>,
   /// Set on unfolded sheets (for Refold).
   pub unfolded: Option<Box<Unfolded>>,
+  /// Its faces' names (see [`crate::naming`]); the shape carries them as labels.
+  names: naming::Shared,
   mesh: OnceCell<Option<TriMesh>>,
   faces: OnceCell<Vec<FaceInfo>>,
   edges: OnceCell<Vec<EdgeInfo>>,
@@ -50,7 +53,17 @@ impl std::fmt::Debug for Body {
 }
 
 impl Body {
+  /// A body made by `feature`, its faces named from the shape's history.
   pub fn new(id: BodyId, name: String, shape: Shape, feature: FeatureId) -> Body {
+    Body::named(id, name, shape, feature, None)
+  }
+
+  /// [`Body::new`]; faces the history can't name take the names of the faces of `before` they are.
+  fn named(id: BodyId, name: String, mut shape: Shape, feature: FeatureId, before: Option<&Body>) -> Body {
+    let names = naming::from_history(&shape, feature)
+      .or_else(|| before.map(|b| naming::from_identity(&shape, &b.shape, &b.names)))
+      .unwrap_or_default();
+    naming::label(&mut shape, &names);
     Body {
       id,
       name,
@@ -58,6 +71,7 @@ impl Body {
       feature,
       sheet: None,
       unfolded: None,
+      names: std::sync::Arc::new(names),
       mesh: OnceCell::new(),
       faces: OnceCell::new(),
       edges: OnceCell::new(),
@@ -68,8 +82,92 @@ impl Body {
     Body {
       sheet: self.sheet.clone(),
       unfolded: self.unfolded.clone(),
-      ..Body::new(self.id, self.name.clone(), shape, feature)
+      ..Body::named(self.id, self.name.clone(), shape, feature, Some(self))
     }
+  }
+
+  /// Its faces' names.
+  pub fn names(&self) -> &naming::Names {
+    &self.names
+  }
+
+  /// Renames its faces (and relabels the shape for the features after).
+  pub fn set_names(&mut self, names: naming::Names) {
+    naming::label(&mut self.shape, &names);
+    self.names = std::sync::Arc::new(names);
+  }
+
+  /// The face a reference stands for: the face its name is on, or among several (the pieces of a
+  /// split face), the one its signature matches best; by signature alone when no face has its name.
+  pub fn find_face(&self, fr: &FaceRef) -> Option<u32> {
+    let named = naming::faces_named(&self.names, fr.name);
+    match named.as_slice() {
+      [] => fr.resolve(self.faces(), self.mesh(), self.diagonal()),
+      [one] => Some(*one),
+      _ => {
+        let cands: Vec<FaceInfo> = self.faces().iter().filter(|f| named.contains(&f.id)).copied().collect();
+        fr.resolve(&cands, self.mesh(), self.diagonal())
+          .or_else(|| naming::nearest(self.faces(), &named, DVec3::from(fr.point)))
+      }
+    }
+  }
+
+  /// Every face a reference stands for: all the faces with its name (a split face's pieces), or
+  /// as its signature finds them when no face has it.
+  pub fn find_faces(&self, fr: &FaceRef) -> Vec<u32> {
+    let named = naming::faces_named(&self.names, fr.name);
+    if named.len() < 2 {
+      return if named.is_empty() { fr.resolve_all(self.faces(), self.mesh(), self.diagonal()) } else { named };
+    }
+    // the pieces of one face lie on one surface: the best match's
+    let Some(best) = self.find_face(fr).and_then(|id| self.faces().iter().find(|f| f.id == id)) else { return named };
+    let scale = 1e-6 * self.diagonal().max(1.0);
+    self
+      .faces()
+      .iter()
+      .filter(|f| named.contains(&f.id) && naming::same_surface(f, best, scale))
+      .map(|f| f.id)
+      .collect()
+  }
+
+  /// The edge a reference stands for: one between the faces it names, or among several, its
+  /// signature's best match; by signature alone when no edge lies between them.
+  pub fn find_edge(&self, er: &EdgeRef) -> Option<u32> {
+    let named = naming::edges_named(&self.names, self.edges(), er.names);
+    match named.as_slice() {
+      [] => er.resolve(self.edges(), self.faces(), self.diagonal()),
+      [one] => Some(*one),
+      _ => {
+        let cands: Vec<EdgeInfo> = self.edges().iter().filter(|e| named.contains(&e.id)).copied().collect();
+        er.resolve(&cands, self.faces(), self.diagonal()).or_else(|| named.first().copied())
+      }
+    }
+  }
+
+  /// Every edge a reference stands for: all the edges between the faces it names (a split edge's
+  /// pieces), or as its signature finds them when there are none.
+  pub fn find_edges(&self, er: &EdgeRef) -> Vec<u32> {
+    let named = naming::edges_named(&self.names, self.edges(), er.names);
+    if named.len() < 2 {
+      return if named.is_empty() { er.resolve_all(self.edges(), self.faces(), self.diagonal()) } else { named };
+    }
+    // two faces can meet in separate edges (two crossing holes); the pieces of one edge lie on
+    // one curve: the best match's
+    let Some(best) = self.find_edge(er).and_then(|id| self.edges().iter().find(|e| e.id == id)) else { return named };
+    let scale = 1e-6 * self.diagonal().max(1.0);
+    self.edges().iter().filter(|e| named.contains(&e.id) && naming::same_curve(e, best, scale)).map(|e| e.id).collect()
+  }
+
+  /// A reference to an edge of this body, with the names of the faces along it (keeping the ones
+  /// `had` gives where the faces still have them).
+  pub fn edge_ref(&self, e: &EdgeInfo, had: [u64; 2]) -> EdgeRef {
+    EdgeRef { names: naming::pick_pair(&self.names, e, had), ..EdgeRef::from_edge(self.id, e, self.faces()) }
+  }
+
+  /// A reference to a face of this body picked at `at`, with its name (the one `had` gives if the
+  /// face still has it).
+  pub fn face_ref(&self, f: &FaceInfo, at: DVec3, had: u64) -> FaceRef {
+    FaceRef { name: naming::pick(&self.names, f.id, had), ..FaceRef::from_face(self.id, f, at) }
   }
 
   /// The flat pattern of a sheet metal body, unfolded onto `face` (default: the largest planar
@@ -505,8 +603,7 @@ impl Ctx<'_> {
             let fr = extent.to.as_mut().ok_or("pick the face to extrude to")?;
             let bi = self.body_index(fr.body)?;
             let body = &self.state.bodies[bi];
-            let fid =
-              fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the target face could not be found")?;
+            let fid = body.find_face(fr).ok_or("the target face could not be found")?;
             refresh_face(fr, body, fid);
             let info = body.faces().iter().find(|f| f.id == fid).ok_or("the target face could not be found")?;
             if info.kind != fox_kernel::SurfaceKind::Plane || info.normal.cross(n).length() > 1e-6 {
@@ -571,7 +668,8 @@ impl Ctx<'_> {
         };
         let mut tools = Vec::new();
         for p in &chosen {
-          let face = Shape::face(&sk.plane, p).map_err(ke)?;
+          let mut face = Shape::face(&sk.plane, p).map_err(ke)?;
+          naming::label_profile(&mut face, &sk.plane, p, id);
           if thin > 0.0 {
             let (outer, inner) = match extent.thin_side {
               ThinSide::Inside => (face.clone(), face.offset_face(-thin).map_err(ke)?),
@@ -622,6 +720,7 @@ impl Ctx<'_> {
         let mut tools = Vec::new();
         for p in &chosen {
           let mut face = Shape::face(&sk.plane, p).map_err(ke)?;
+          naming::label_profile(&mut face, &sk.plane, p, id);
           if back.abs() > 1e-12 {
             face = face.rotated(o, d, -back).map_err(ke)?;
           }
@@ -850,6 +949,10 @@ impl Ctx<'_> {
             Shape::torus(DVec3::ZERO, DVec3::Z, self.len(major)?, self.len(minor)?).map_err(ke)?
           }
         };
+        // a primitive's faces always come in the same order
+        let mut local = local;
+        let count = local.faces().map_err(ke)?.len();
+        naming::label(&mut local, &naming::by_index(count, id));
         let m = plane_matrix(&pl) * DMat4::from_translation(DVec3::new(at[0], at[1], 0.0));
         let tool = local.transformed(m).map_err(ke)?;
         self.operate(id, tool, *operation)?;
@@ -868,8 +971,9 @@ impl Ctx<'_> {
         let pl = self.resolve_plane(plane)?;
         for f in features.iter() {
           let tools = self.state.tools.get(f).cloned().ok_or("a mirrored feature failed or has no solid to mirror")?;
-          for t in tools {
-            let copy = t.shape.mirrored(pl.origin, pl.normal()).map_err(ke)?;
+          for (k, t) in tools.into_iter().enumerate() {
+            let mut copy = t.shape.mirrored(pl.origin, pl.normal()).map_err(ke)?;
+            naming::relabel_copy(&mut copy, id, (u64::from(f.0) << 20) | k as u64);
             // the mirror's own targets, else the bodies the feature itself was limited to
             let targets = if self.targets.is_empty() { t.targets } else { self.targets.to_vec() };
             self.operate_on(id, copy, t.op, &targets)?;
@@ -1095,7 +1199,9 @@ impl Ctx<'_> {
         let guide = self.sweep_guide(rail.as_ref(), twist, taper, *orientation, *profile_scaling)?;
         let mut tools = Vec::new();
         for p in &chosen {
-          tools.push(solid::sweep(&Shape::face(&sk.plane, p).map_err(ke)?, &path, &guide)?);
+          let mut face = Shape::face(&sk.plane, p).map_err(ke)?;
+          naming::label_profile(&mut face, &sk.plane, p, id);
+          tools.push(solid::sweep(&face, &path, &guide)?);
         }
         self.operate(id, union_all(tools)?, *operation)?;
         Ok(missing.then(|| "some selected profiles no longer exist".to_string()))
@@ -1544,9 +1650,9 @@ impl Ctx<'_> {
           let mut tools = Vec::new();
           for i in idxs {
             let Some(er) = edges.get_mut(i) else { continue };
-            let eid = er.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("an edge could not be found")?;
+            let eid = body.find_edge(er).ok_or("an edge could not be found")?;
             let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
-            *er = EdgeRef::from_edge(bid, &e, body.faces());
+            *er = body.edge_ref(&e, er.names);
             let face = |id: u32| body.faces().iter().find(|f| f.id == id && f.kind == fox_kernel::SurfaceKind::Plane);
             let (Some(f1), Some(f2)) = (face(e.faces[0]), face(e.faces[1])) else {
               return Err("rip along a straight edge between two flat faces".into());
@@ -1660,7 +1766,7 @@ impl Ctx<'_> {
     let body = &self.state.bodies[bi];
     let fid = match face {
       Some(fr) => {
-        let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
+        let fid = body.find_face(fr).ok_or("the face could not be found")?;
         refresh_face(fr, body, fid);
         fid
       }
@@ -1723,12 +1829,12 @@ impl Ctx<'_> {
       let mut list: Vec<Flange> = Vec::new();
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
-        let Some(eid) = er.resolve(body.edges(), body.faces(), body.diagonal()) else {
+        let Some(eid) = body.find_edge(er) else {
           missing = true;
           continue;
         };
         let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
-        *er = EdgeRef::from_edge(bid, &e, body.faces());
+        *er = body.edge_ref(&e, er.names);
         if e.kind != fox_kernel::CurveKind::Line {
           return Err("flanges need straight edges".into());
         }
@@ -1945,12 +2051,12 @@ impl Ctx<'_> {
         continue;
       };
       let body = &self.state.bodies[bi];
-      let Some(eid) = link.edge.resolve(body.edges(), body.faces(), body.diagonal()) else {
+      let Some(eid) = body.find_edge(&link.edge) else {
         lost += 1;
         continue;
       };
       let Some(e) = body.edges().iter().find(|e| e.id == eid).copied() else { continue };
-      link.edge = EdgeRef::from_edge(link.edge.body, &e, body.faces());
+      link.edge = body.edge_ref(&e, link.edge.names);
       if let Some(c) = sketch.curve3d_mut(link.curve) {
         if let Ok(k) = crate::include::edge_curve3d(&e) {
           c.kind = k;
@@ -2022,7 +2128,7 @@ impl Ctx<'_> {
       assembly::JointGeometry::Face { face } => {
         let bi = self.body_index(face.body)?;
         let body = &self.state.bodies[bi];
-        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a joint face could not be found")?;
+        let fid = body.find_face(face).ok_or("a joint face could not be found")?;
         refresh_face(face, body, fid);
         let info = body.faces().iter().find(|f| f.id == fid).ok_or("a joint face could not be found")?;
         assembly::face_frame(info)
@@ -2030,9 +2136,9 @@ impl Ctx<'_> {
       assembly::JointGeometry::Edge { edge } => {
         let bi = self.body_index(edge.body)?;
         let body = &self.state.bodies[bi];
-        let eid = edge.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("a joint edge could not be found")?;
+        let eid = body.find_edge(edge).ok_or("a joint edge could not be found")?;
         let info = body.edges().iter().find(|e| e.id == eid).ok_or("a joint edge could not be found")?;
-        *edge = EdgeRef::from_edge(edge.body, info, body.faces());
+        *edge = body.edge_ref(info, edge.names);
         assembly::edge_frame(info, body.faces())
       }
       assembly::JointGeometry::Origin { origin } => self.origin_frame(*origin),
@@ -2060,7 +2166,7 @@ impl Ctx<'_> {
       PlaneRef::Face { face, x } => {
         let bi = self.body_index(face.body)?;
         let body = &self.state.bodies[bi];
-        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
+        let fid = body.find_face(face).ok_or("the face could not be found")?;
         let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("the face could not be found")?;
         refresh_face(face, body, fid);
         if info.kind != fox_kernel::SurfaceKind::Plane {
@@ -2097,10 +2203,9 @@ impl Ctx<'_> {
       AxisRef::Edge { edge } => {
         let bi = self.body_index(edge.body)?;
         let body = &self.state.bodies[bi];
-        let eid =
-          edge.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("the axis edge could not be found")?;
+        let eid = body.find_edge(edge).ok_or("the axis edge could not be found")?;
         let e = body.edges().iter().find(|e| e.id == eid).copied().ok_or("the axis edge could not be found")?;
-        *edge = EdgeRef::from_edge(edge.body, &e, body.faces());
+        *edge = body.edge_ref(&e, edge.names);
         match e.kind {
           fox_kernel::CurveKind::Line => Ok((e.start, (e.end - e.start).normalize_or_zero())),
           fox_kernel::CurveKind::Circle => Ok((e.center, e.axis)),
@@ -2144,7 +2249,7 @@ impl Ctx<'_> {
     let offset = if extent.start.trim().is_empty() { 0.0 } else { self.len(&extent.start)? };
     let Some(fr) = extent.start_face.as_mut() else { return Ok(offset) };
     let body = &self.state.bodies[self.body_index(fr.body)?];
-    let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the start face could not be found")?;
+    let fid = body.find_face(fr).ok_or("the start face could not be found")?;
     refresh_face(fr, body, fid);
     let info = body.faces().iter().find(|f| f.id == fid).ok_or("the start face could not be found")?;
     if info.kind != fox_kernel::SurfaceKind::Plane || info.normal.cross(plane.normal()).length() > 1e-6 {
@@ -2280,7 +2385,10 @@ impl Ctx<'_> {
   }
 
   /// Adds pattern/mirror copies of body `bi`: joined into it, or as new bodies.
-  fn add_copies(&mut self, feature: FeatureId, bi: usize, copies: Vec<Shape>, join: bool) -> Result<(), String> {
+  fn add_copies(&mut self, feature: FeatureId, bi: usize, mut copies: Vec<Shape>, join: bool) -> Result<(), String> {
+    for (k, c) in copies.iter_mut().enumerate() {
+      naming::relabel_copy(c, feature, k as u64 + 1);
+    }
     if join {
       let mut acc = self.state.bodies[bi].shape.clone();
       for c in &copies {
@@ -2327,18 +2435,17 @@ impl Ctx<'_> {
     for (bid, idxs) in by_body {
       let bi = self.body_index(bid)?;
       let body = &self.state.bodies[bi];
-      let scale = body.diagonal();
       let (mut ids, mut from) = (Vec::new(), Vec::new());
       for i in idxs {
         let Some(er) = edges.get_mut(i) else { continue };
-        let found = er.resolve_all(body.edges(), body.faces(), scale);
+        let found = body.find_edges(er);
         if found.is_empty() {
           missing = true;
           continue;
         }
         let pieces: Vec<&EdgeInfo> = body.edges().iter().filter(|e| found.contains(&e.id)).collect();
         if let Some(r) = EdgeRef::from_pieces(bid, &pieces, body.faces()) {
-          *er = r;
+          *er = EdgeRef { names: pieces.first().map_or([0; 2], |e| body.edge_ref(e, er.names).names), ..r };
         }
         for eid in found {
           if !ids.contains(&eid) {
@@ -2368,7 +2475,7 @@ fn refresh_face_pieces(fr: &mut FaceRef, body: &Body, ids: &[u32]) {
   let p = DVec3::from(fr.point);
   let q =
     if info.kind == fox_kernel::SurfaceKind::Plane { p - info.normal * (p - info.origin).dot(info.normal) } else { p };
-  *fr = FaceRef::from_face(fr.body, info, q);
+  *fr = FaceRef { body: fr.body, ..body.face_ref(info, q, fr.name) };
   let bounds = body.mesh().map(|m| ids.iter().filter_map(|id| crate::refs::face_bounds(m, *id)).collect::<Vec<_>>());
   if let Some((lo, hi)) = bounds.unwrap_or_default().into_iter().reduce(|(a, b), (c, d)| (a.min(c), b.max(d))) {
     fr.lo = lo.to_array();
@@ -2378,7 +2485,7 @@ fn refresh_face_pieces(fr: &mut FaceRef, body: &Body, ids: &[u32]) {
 
 /// Every face a face reference stands for on `body` (all pieces of a split face), refreshing it.
 fn resolve_face_pieces(fr: &mut FaceRef, body: &Body) -> Vec<u32> {
-  let ids = fr.resolve_all(body.faces(), body.mesh(), body.diagonal());
+  let ids = body.find_faces(fr);
   if !ids.is_empty() {
     refresh_face_pieces(fr, body, &ids);
   }

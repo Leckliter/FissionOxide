@@ -6,6 +6,11 @@
 //! regeneration by scoring candidates against that signature. After resolving, the signature is
 //! refreshed so references follow gradual changes (a block getting taller drags the sketch on its
 //! top face up with it).
+//!
+//! References also keep the names of the faces they were found on ([`crate::naming`]), taken from
+//! the kernel's modification history; the body resolves them by name first
+//! (`regen::Body::find_face` and friends) and falls back to the signature here only when no face
+//! has the name.
 
 use fox_kernel::glam::DVec3;
 use fox_kernel::{CurveKind, EdgeInfo, FaceInfo, SurfaceKind, TriMesh};
@@ -27,6 +32,10 @@ pub struct FaceRef {
   pub lo: [f64; 3],
   #[serde(default, skip_serializing_if = "is_zero")]
   pub hi: [f64; 3],
+  /// The face's name when it was last found (see [`crate::naming`]); 0 until then. Found by name
+  /// first, by the signature above when no face has it.
+  #[serde(default, skip_serializing_if = "is_unnamed")]
+  pub name: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,10 +57,22 @@ pub struct EdgeRef {
   pub start: [f64; 3],
   #[serde(default, skip_serializing_if = "is_zero")]
   pub end: [f64; 3],
+  /// The names of the faces on either side when it was last found (sorted; zeros until then).
+  /// Found by them first, by the signature above when no edge lies between such faces.
+  #[serde(default, skip_serializing_if = "no_names")]
+  pub names: [u64; 2],
 }
 
 fn is_zero(p: &[f64; 3]) -> bool {
   *p == [0.0; 3]
+}
+
+fn is_unnamed(n: &u64) -> bool {
+  *n == 0
+}
+
+fn no_names(n: &[u64; 2]) -> bool {
+  *n == [0; 2]
 }
 
 impl FaceRef {
@@ -63,6 +84,7 @@ impl FaceRef {
       planar: f.kind == SurfaceKind::Plane,
       lo: [0.0; 3],
       hi: [0.0; 3],
+      name: 0,
     }
   }
 
@@ -155,6 +177,7 @@ impl EdgeRef {
       radius: e.radius,
       start: e.start.to_array(),
       end: e.end.to_array(),
+      names: [0; 2],
     }
   }
 

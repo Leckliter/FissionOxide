@@ -24,6 +24,7 @@ pub mod groups;
 pub mod include;
 pub mod mechanism;
 pub mod meshops;
+pub mod naming;
 pub mod pathpattern;
 pub mod plot;
 pub mod refs;

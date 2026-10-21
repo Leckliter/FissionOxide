@@ -354,7 +354,7 @@ impl Ctx<'_> {
     Ok(match g {
       JointGeometry::Face { face } => {
         let body = &self.state.bodies[self.body_index(face.body)?];
-        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("an align face could not be found")?;
+        let fid = body.find_face(face).ok_or("an align face could not be found")?;
         match body.faces().iter().find(|f| f.id == fid).map(|f| f.kind) {
           Some(SurfaceKind::Plane) => AlignShape::Plane,
           Some(SurfaceKind::Cylinder | SurfaceKind::Cone) => AlignShape::Axis,

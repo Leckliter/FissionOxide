@@ -33,7 +33,7 @@ pub(super) fn include(s: &mut Session, p: &Value) -> CmdResult {
     let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
     let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
     let kind = edge_curve3d(info).map_err(CmdError::new)?;
-    let edge = associative.then(|| EdgeRef::from_edge(body, info, b.faces()));
+    let edge = associative.then(|| b.edge_ref(info, [0; 2]));
     todo.push(Item { kind, edge, source: None });
   }
   let here = s.design.index_of(sk);

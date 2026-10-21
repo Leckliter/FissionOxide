@@ -34,8 +34,7 @@ impl Ctx<'_> {
         let body = &self.state.bodies[bi];
         let info = body.sheet.clone().ok_or("flanges go on sheet metal bodies")?;
         let (t, r) = (info.thickness, info.bend_radius);
-        let eid =
-          first.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("the first edge could not be found")?;
+        let eid = body.find_edge(&first).ok_or("the first edge could not be found")?;
         let e = body.edges().iter().find(|e| e.id == eid).copied().ok_or("the first edge could not be found")?;
         let (panel, wall) = sheet::edge_faces(body.faces(), e.faces, e.length, t)
           .ok_or("pick an edge where a face of the sheet meets a square side")?;

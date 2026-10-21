@@ -86,10 +86,18 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     })(),
     "drawing.dimension" => (|| {
       let id = drawing_id(s, p)?;
+      let (a, b) = (req_vec3(p, "a")?, req_vec3(p, "b")?);
+      // points on model edges follow them (associative: false keeps them where they are)
+      let follow = if p.get("associative").and_then(Value::as_bool).unwrap_or(true) {
+        [a, b].map(|q| fox_model::drawing::EdgePoint::at_point(&s.model, q.into()))
+      } else {
+        [None, None]
+      };
       let dim = DrawingDim::Distance {
         view: req_u32(p, "view")?,
-        a: req_vec3(p, "a")?,
-        b: req_vec3(p, "b")?,
+        a,
+        b,
+        follow,
         orientation: match opt_str(p, "orientation").unwrap_or("aligned") {
           "aligned" => DimOrientation::Aligned,
           "horizontal" => DimOrientation::Horizontal,

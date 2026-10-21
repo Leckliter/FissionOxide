@@ -82,7 +82,7 @@ pub(crate) fn selection_edges(
     seen.push((body, id));
     let b = s.model.body(body).ok_or(CmdError::new("no such body"))?;
     let info = b.edges().iter().find(|x| x.id == id).ok_or(CmdError::new(format!("body has no edge {id}")))?;
-    out.push(EdgeRef::from_edge(body, info, b.faces()));
+    out.push(b.edge_ref(info, [0; 2]));
   }
   Ok(out)
 }

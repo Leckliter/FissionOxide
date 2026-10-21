@@ -559,7 +559,7 @@ impl Ctx<'_> {
   pub(super) fn face_info(&mut self, fr: &mut FaceRef) -> Result<(usize, FaceInfo), String> {
     let bi = self.body_index(fr.body)?;
     let body = &self.state.bodies[bi];
-    let fid = fr.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("a face could not be found")?;
+    let fid = body.find_face(fr).ok_or("a face could not be found")?;
     refresh_face(fr, body, fid);
     let info = body.faces().iter().find(|f| f.id == fid).copied().ok_or("a face could not be found")?;
     Ok((bi, info))
@@ -594,9 +594,9 @@ impl Ctx<'_> {
   pub(super) fn edge_info(&mut self, e: &mut EdgeRef) -> Result<(usize, EdgeInfo), String> {
     let bi = self.body_index(e.body)?;
     let body = &self.state.bodies[bi];
-    let eid = e.resolve(body.edges(), body.faces(), body.diagonal()).ok_or("an edge could not be found")?;
+    let eid = body.find_edge(e).ok_or("an edge could not be found")?;
     let info = body.edges().iter().find(|x| x.id == eid).copied().ok_or("an edge could not be found")?;
-    *e = EdgeRef::from_edge(e.body, &info, body.faces());
+    *e = body.edge_ref(&info, e.names);
     Ok((bi, info))
   }
 
@@ -1561,6 +1561,7 @@ mod tests {
       radius: 0.0,
       start: [0.0; 3],
       end: [0.0; 3],
+      names: [0; 2],
     };
     let old = serde_json::json!({"type": "two_edges", "a": e, "b": e});
     let def: PointDef = serde_json::from_value(old).unwrap();

@@ -64,7 +64,7 @@ pub fn boundary_cells(model: &Model, tools: &[BodyId], planes: &[PlaneRef]) -> R
       PlaneRef::Construction { feature } => *model.planes.get(feature).ok_or("its construction plane failed")?,
       PlaneRef::Face { face, .. } => {
         let body = model.body(face.body).ok_or("the plane's body no longer exists")?;
-        let fid = face.resolve(body.faces(), body.mesh(), body.diagonal()).ok_or("the face could not be found")?;
+        let fid = body.find_face(face).ok_or("the face could not be found")?;
         let info = body.faces().iter().find(|f| f.id == fid).ok_or("the face could not be found")?;
         if info.kind != SurfaceKind::Plane {
           return Err("the face is not planar".into());

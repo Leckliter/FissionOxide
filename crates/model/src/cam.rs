@@ -360,7 +360,7 @@ fn part_box(setup: &Setup, model: &Model) -> Result<(DVec3, DVec3), String> {
 /// Resolves a face reference against the model: the body and the face's current id.
 fn resolve<'a>(model: &'a Model, f: &FaceRef) -> Result<(&'a Body, u32), String> {
   let b = model.body(f.body).ok_or_else(|| format!("body {} no longer exists", f.body.0))?;
-  let id = f.resolve(b.faces(), b.mesh(), b.diagonal()).ok_or("a face of the operation can't be found")?;
+  let id = b.find_face(f).ok_or("a face of the operation can't be found")?;
   Ok((b, id))
 }
 

@@ -17,11 +17,13 @@ use crate::{BodyId, ComponentId, Design};
 mod annotate;
 mod breaks;
 mod chain;
+mod follow;
 mod sheets;
 mod weld;
 
 pub use annotate::{Characteristic, Datums, FinishProcess, MaterialCondition, Standard};
 pub use breaks::{BreakDirection, DEFAULT_GAP, ViewBreak};
+pub use follow::{EdgeAt, EdgePoint};
 pub use sheets::{FIRST_SHEET, Revision, Sheet};
 pub use weld::{FrameTier, WeldKind, WeldSide, WeldSymbol};
 
@@ -258,6 +260,10 @@ pub enum DrawingDim {
     /// Sheet mm between the measured points and the dimension line.
     #[serde(default = "dim_offset")]
     offset: f64,
+    /// The model edges `a` and `b` were picked on (an end, the middle, a circle's centre): the
+    /// dimension measures where those points are now, so it follows the model's edits.
+    #[serde(default, skip_serializing_if = "follow::is_free")]
+    follow: [Option<EdgePoint>; 2],
   },
   /// Free text on the sheet.
   Note {
@@ -627,8 +633,11 @@ pub fn render_sheet(d: &Drawing, design: &Design, model: &Model, sheet: u32) -> 
     let pv = dim.view().and_then(|id| views.iter().find(|v| v.view.id == id));
     let anchor = |p: &[f64; 3]| pv.map(|pv| sheet_pt(pv, scale, pv.to_view(DVec3::from(*p)))).unwrap_or_default();
     match dim {
-      DrawingDim::Distance { a, b, orientation, offset, .. } => {
+      DrawingDim::Distance { a, b, orientation, offset, follow, .. } => {
         let Some(pv) = pv else { continue };
+        let now =
+          |p: &[f64; 3], f: &Option<EdgePoint>| f.as_ref().and_then(|f| f.locate(model)).map_or(*p, |q| q.to_array());
+        let (a, b) = (&now(a, &follow[0]), &now(b, &follow[1]));
         let (va, vb) = (pv.to_view(DVec3::from(*a)), pv.to_view(DVec3::from(*b)));
         // true lengths, whatever breaks the view has
         let value = match orientation {

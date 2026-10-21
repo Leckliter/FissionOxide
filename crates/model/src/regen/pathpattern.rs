@@ -94,9 +94,10 @@ impl Ctx<'_> {
     }
     // a copy that misses every body is skipped, as Fusion leaves such an instance out
     let (mut placed, mut missed) = (0, None);
-    for m in &moves {
-      for t in &tools {
-        let shape = t.shape.transformed(*m).map_err(ke)?;
+    for (i, m) in moves.iter().enumerate() {
+      for (k, t) in tools.iter().enumerate() {
+        let mut shape = t.shape.transformed(*m).map_err(ke)?;
+        crate::naming::relabel_copy(&mut shape, id, ((i as u64) << 20) | k as u64);
         let mut ctx = Ctx {
           params: self.params,
           rules: self.rules,

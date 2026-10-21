@@ -139,7 +139,7 @@ pub(crate) fn body_face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError>
   let body = BodyId(u32::try_from(id).map_err(|_| CmdError::new("bad body id"))?);
   let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
   let f = b.faces().first().ok_or(CmdError::new("the body has no faces"))?;
-  Ok(FaceRef::from_face(body, f, f.center))
+  Ok(b.face_ref(f, f.center, 0))
 }
 
 fn points(p: &Value, k: &str) -> Result<Vec<[f64; 3]>, CmdError> {

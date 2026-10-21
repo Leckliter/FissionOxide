@@ -242,7 +242,7 @@ cmds! {
   "drawing.add_view" => "Add a view to a drawing", "{drawing?, kind, at?: [x,y] sheet mm, hidden_lines?, sheet?}";
   "drawing.remove_view" => "Remove a view", "{drawing?, view}";
   "drawing.move_view" => "Place a view (sheet mm; null = automatic), or move it to another sheet", "{drawing?, view, at, sheet?}";
-  "drawing.dimension" => "Dimension two model points in a view", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?}";
+  "drawing.dimension" => "Dimension two model points in a view; a point at an edge's end, middle or circle centre follows that edge as the model changes (unless associative is false)", "{drawing?, view, a: [x,y,z], b: [x,y,z], orientation?: aligned|horizontal|vertical, offset?, associative?: bool}";
   "drawing.note" => "Text note on the sheet", "{drawing?, at: [x,y], text, sheet?}";
   "drawing.title" => "Fill in the title block", "{drawing?, title?, author?, part_number?, material?, revision?, company?}";
   "drawing.info" => "A drawing's views, scale and text", "{drawing?}";
@@ -1877,13 +1877,13 @@ pub(crate) fn face_ref(s: &Session, v: &Value) -> Result<FaceRef, CmdError> {
       face_at(s, DVec3::from(req_vec3(v, "point")?), v.get("normal").map(|_| req_vec3(v, "normal")).transpose()?)?;
     let b = s.model.body(body).ok_or(CmdError::new("no such body"))?;
     let info = b.faces().iter().find(|f| f.id == face).ok_or(CmdError::new("no such face"))?;
-    return Ok(FaceRef::from_face(body, info, DVec3::from(req_vec3(v, "point")?)));
+    return Ok(b.face_ref(info, DVec3::from(req_vec3(v, "point")?), 0));
   }
   let body = BodyId(req_u32(v, "body")?);
   let face = req_u32(v, "face")?;
   let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
   let info = b.faces().iter().find(|f| f.id == face).ok_or(CmdError::new(format!("body has no face {face}")))?;
-  Ok(FaceRef::from_face(body, info, info.center))
+  Ok(b.face_ref(info, info.center, 0))
 }
 
 /// The face containing a world point (within 1e-4 mm), optionally with a matching normal.
@@ -2031,7 +2031,7 @@ pub(crate) fn edge_ref_of(s: &Session, e: &Value) -> Result<EdgeRef, CmdError> {
   };
   let b = s.model.body(body).ok_or(CmdError::new(format!("no body {}", body.0)))?;
   let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new(format!("body has no edge {edge}")))?;
-  Ok(EdgeRef::from_edge(body, info, b.faces()))
+  Ok(b.edge_ref(info, [0; 2]))
 }
 
 pub(crate) fn edge_refs(s: &Session, p: &Value) -> Result<Vec<EdgeRef>, CmdError> {
@@ -2079,7 +2079,7 @@ pub(crate) fn axis_ref(s: &Session, v: &Value) -> Result<AxisRef, CmdError> {
   let edge = req_u32(v, "edge")?;
   let b = s.model.body(body).ok_or(CmdError::new("no such body"))?;
   let info = b.edges().iter().find(|x| x.id == edge).ok_or(CmdError::new("no such edge"))?;
-  Ok(AxisRef::Edge { edge: EdgeRef::from_edge(body, info, b.faces()) })
+  Ok(AxisRef::Edge { edge: b.edge_ref(info, [0; 2]) })
 }
 
 /// The sketch a draw/constraint command targets: `sketch` param or the one being edited.
@@ -2407,7 +2407,7 @@ fn project(s: &mut Session, p: &Value) -> CmdResult {
   }
   for e in body.edges().iter().filter(|e| face.is_some_and(|f| e.faces.contains(&f))) {
     let l = |v: fox_kernel::glam::DVec3| plane.to_local(v);
-    let link = associative.then(|| EdgeRef::from_edge(body.id, e, body.faces()));
+    let link = associative.then(|| body.edge_ref(e, [0; 2]));
     match e.kind {
       fox_kernel::CurveKind::Line => todo.push((E::Line(l(e.start), l(e.end)), link)),
       fox_kernel::CurveKind::Circle if e.axis.dot(n).abs() > 0.999 => {
