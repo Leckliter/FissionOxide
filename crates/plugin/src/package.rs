@@ -1,5 +1,6 @@
-//! `.foxplugin` packages: a zip of `plugin.toml`, `plugin.wasm`, `icons/`, `resources/` and
-//! `README.md`. Reading one checks everything that can be checked before installing it.
+//! `.foxplugin` packages: a zip of `plugin.toml`, `plugin.wasm`, `icons/`, `resources/`, the
+//! sketch library folder the manifest names and `README.md`. Reading one checks everything that
+//! can be checked before installing it.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -91,6 +92,15 @@ impl Package {
     }
     for sub in ["icons", "resources"] {
       collect(dir, &dir.join(sub), &mut files)?;
+    }
+    // the manifest's sketch library folder, if it names one
+    let lib = files
+      .get(MANIFEST)
+      .and_then(|t| std::str::from_utf8(t).ok())
+      .and_then(|t| Manifest::parse(t).ok())
+      .and_then(|m| m.library);
+    if let Some(lib) = lib.filter(|l| !["icons", "resources"].contains(&l.trim_end_matches('/'))) {
+      collect(dir, &dir.join(&lib), &mut files)?;
     }
     Package::from_files(files)
   }

@@ -13,7 +13,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |
-| Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
+| Add-ins   | Native parts for add-ins: feature types that re-run in the timeline, so LumenArt's tabs and flanges follow when a layer moves (today they are macros); bending flanges with sheet metal Bend instead of leaving a bend line |
 
 ## Files and data
 

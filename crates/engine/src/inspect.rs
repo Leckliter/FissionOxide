@@ -14,8 +14,31 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "select.all" => select_all(s, p),
     "select.invert" => select_invert(s),
     "inspect.center_of_mass" => center_of_mass(s, p),
+    "body.classify" => classify(s, p),
     _ => return None,
   })
+}
+
+/// `body.classify`: in, out or on for each point.
+fn classify(s: &Session, p: &Value) -> CmdResult {
+  let id = BodyId(req_u32(p, "body")?);
+  let body = s.model.body(id).ok_or_else(|| CmdError::new(format!("no body {}", id.0)))?;
+  let points = p.get("points").and_then(Value::as_array).ok_or_else(|| CmdError::new("'points' is required"))?;
+  let mut out = Vec::with_capacity(points.len());
+  for (i, q) in points.iter().enumerate() {
+    let xyz =
+      q.as_array().filter(|a| a.len() == 3).and_then(|a| Some([a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?]));
+    let Some([x, y, z]) = xyz else {
+      return Err(CmdError::new(format!("point {i} is not [x, y, z]")));
+    };
+    let w = body.shape.classify(DVec3::new(x, y, z)).map_err(|e| CmdError::new(e.to_string()))?;
+    out.push(match w {
+      fox_kernel::Inside::In => "in",
+      fox_kernel::Inside::Out => "out",
+      fox_kernel::Inside::On => "on",
+    });
+  }
+  Ok(json!({ "inside": out }))
 }
 
 /// What a measured entity is: its shape plus a direction (planar face normal or line) and a

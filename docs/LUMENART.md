@@ -25,6 +25,9 @@ bugs below). Material is 0.063" (16 ga aluminium) throughout.
 
 ## Core features and the add-in
 
+Status: done. The core features are in the app and the add-in is
+[`addins/lumenart`](../addins/lumenart) (its README lists the tab, step by step).
+
 General tools become part of FissionOxide; only the sign-specific ones stay in the LumenArt
 add-in. With the add-in on, its **LumenArt** tab still lists every step, built-in ones included
 (see [PLUGINS.md](PLUGINS.md#an-add-ins-toolbar-tab-can-hold-built-in-commands)), with

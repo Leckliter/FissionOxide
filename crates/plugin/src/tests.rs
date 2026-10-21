@@ -173,7 +173,10 @@ fn a_run_is_one_undo_step_and_failures_roll_back() {
   let mut p = Plugins::open(&dir.join("plugins"), vec![]);
   let mut w = Wat::default();
   let (b, params) = (w.s("box"), w.s(r#"{"width": 10, "depth": 10, "height": 10}"#));
-  let body = format!("(drop (call $execute {b} {params})) (drop (call $execute {b} {params})) (call $str {})", w.s(r#"{"ok": {"made": 2}}"#));
+  let body = format!(
+    "(drop (call $execute {b} {params})) (drop (call $execute {b} {params})) (call $str {})",
+    w.s(r#"{"ok": {"made": 2}}"#)
+  );
   let id = install(&mut p, "good", &[], &w, &body);
   let r = p.run(&mut s, &id, &json!({}), RunOptions::default()).unwrap();
   assert_eq!(r.result, json!({"made": 2}));
@@ -195,7 +198,8 @@ fn a_run_is_one_undo_step_and_failures_roll_back() {
 
   // so does a trap, and running forever
   let mut w = Wat::default();
-  let body = format!("(drop (call $execute {} {})) (unreachable)", w.s("box"), w.s(r#"{"width": 1, "depth": 1, "height": 1}"#));
+  let body =
+    format!("(drop (call $execute {} {})) (unreachable)", w.s("box"), w.s(r#"{"width": 1, "depth": 1, "height": 1}"#));
   let id = install(&mut p, "trap", &[], &w, &body);
   assert!(p.run(&mut s, &id, &json!({}), RunOptions::default()).unwrap_err().contains("crashed"));
   assert_eq!(bodies(&s), 0);
@@ -219,13 +223,14 @@ fn commands_are_sandboxed() {
   let mut s = session(&dir);
   let mut p = Plugins::open(&dir.join("plugins"), vec![]);
   // the plugin passes the host's reply straight back, so its error is the run's error
-  let forward = |p: &mut Plugins, s: &mut Session, name: &str, perms: &[&str], cmd: &str, params: Value, folder: Option<&Path>| {
-    let mut w = Wat::default();
-    let body = format!("(call $execute {} {})", w.s(cmd), w.s(&params.to_string()));
-    let id = install(p, name, perms, &w, &body);
-    let opts = RunOptions { folder: folder.map(Path::to_path_buf), ..Default::default() };
-    p.run(s, &id, &json!({}), opts)
-  };
+  let forward =
+    |p: &mut Plugins, s: &mut Session, name: &str, perms: &[&str], cmd: &str, params: Value, folder: Option<&Path>| {
+      let mut w = Wat::default();
+      let body = format!("(call $execute {} {})", w.s(cmd), w.s(&params.to_string()));
+      let id = install(p, name, perms, &w, &body);
+      let opts = RunOptions { folder: folder.map(Path::to_path_buf), ..Default::default() };
+      p.run(s, &id, &json!({}), opts)
+    };
   for cmd in ["open", "new", "save", "undo", "transaction.commit", "hub.open"] {
     let e = forward(&mut p, &mut s, "refused", &[], cmd, json!({"path": "x.fox"}), None).unwrap_err();
     assert!(e.contains("plugins can't run"), "{cmd}: {e}");
@@ -235,13 +240,16 @@ fn commands_are_sandboxed() {
   assert!(e.contains("'write-files' permission"), "{e}");
   let e = forward(&mut p, &mut s, "hub", &[], "hub.projects", json!({}), None).unwrap_err();
   assert!(e.contains("'hub' permission"), "{e}");
-  let e = forward(&mut p, &mut s, "render", &["write-files"], "view.render", json!({"path": "a.png"}), Some(&out)).unwrap_err();
+  let e = forward(&mut p, &mut s, "render", &["write-files"], "view.render", json!({"path": "a.png"}), Some(&out))
+    .unwrap_err();
   assert!(e.contains("'render' permission"), "{e}");
   let e = forward(&mut p, &mut s, "nofolder", &["write-files"], "export", json!({"path": "a.step"}), None).unwrap_err();
   assert!(e.contains("pick a folder"), "{e}");
-  let e = forward(&mut p, &mut s, "escape", &["write-files"], "export", json!({"path": "../a.step"}), Some(&out)).unwrap_err();
+  let e = forward(&mut p, &mut s, "escape", &["write-files"], "export", json!({"path": "../a.step"}), Some(&out))
+    .unwrap_err();
   assert!(e.contains("without '..'"), "{e}");
-  let e = forward(&mut p, &mut s, "abs", &["write-files"], "export", json!({"path": "/tmp/a.step"}), Some(&out)).unwrap_err();
+  let e =
+    forward(&mut p, &mut s, "abs", &["write-files"], "export", json!({"path": "/tmp/a.step"}), Some(&out)).unwrap_err();
   assert!(e.contains("relative"), "{e}");
   // granted: the path lands in the run's folder
   s.execute("box", &json!({"width": 5, "depth": 5, "height": 5})).unwrap();
@@ -468,10 +476,10 @@ fn the_example_plugin_works() {
   let pkg = Package::read(&pkg.to_bytes().unwrap()).unwrap();
   p.install(&pkg, InstallOptions::default()).unwrap();
   let cmds = p.commands();
-  assert_eq!(cmds.iter().map(|c| c.full_id.as_str()).collect::<Vec<_>>(), [
-    "org.fissionoxide.examples.flange/flange",
-    "org.fissionoxide.examples.flange/report"
-  ]);
+  assert_eq!(
+    cmds.iter().map(|c| c.full_id.as_str()).collect::<Vec<_>>(),
+    ["org.fissionoxide.examples.flange/flange", "org.fissionoxide.examples.flange/report"]
+  );
   assert_eq!((cmds[0].tab.as_str(), cmds[0].panel.as_str()), ("Flange Tools", "FLANGES"));
   assert!(cmds[0].icon.as_ref().unwrap().is_file());
 
@@ -482,7 +490,14 @@ fn the_example_plugin_works() {
   assert_eq!(u["pitch"]["value"], "60 mm");
   assert_eq!(bodies(&s), 0);
 
-  let r = p.run(&mut s, flange, &json!({"outer": "100 mm", "bore": 30, "thickness": 10, "holes": 6, "hole": 8}), RunOptions::default()).unwrap();
+  let r = p
+    .run(
+      &mut s,
+      flange,
+      &json!({"outer": "100 mm", "bore": 30, "thickness": 10, "holes": 6, "hole": 8}),
+      RunOptions::default(),
+    )
+    .unwrap();
   assert_eq!(r.result["flanges_made"], 1);
   assert_eq!(bodies(&s), 1);
   let info = s.execute("info", &json!({})).unwrap();
@@ -560,12 +575,24 @@ fn plugins_through_the_data_hub() {
   assert_eq!(cmds.as_array().unwrap().len(), 3);
   run(&mut p, &mut s, "plugin.enable", json!({"id": "com.test.shared", "enabled": false})).unwrap();
   assert_eq!(run(&mut p, &mut s, "plugin.commands", json!({})).unwrap().as_array().unwrap().len(), 2);
-  let r = run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["hub", "render"]})).unwrap();
+  let r =
+    run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["hub", "render"]})).unwrap();
   assert_eq!(r["granted"], json!(["hub"]), "only what it asks for");
   assert!(run(&mut p, &mut s, "plugin.grant", json!({"id": "com.test.shared", "permissions": ["root"]})).is_err());
-  let r = run(&mut p, &mut s, "plugin.run", json!({"command": "org.fissionoxide.examples.flange/flange", "inputs": {"holes": 3}})).unwrap();
+  let r = run(
+    &mut p,
+    &mut s,
+    "plugin.run",
+    json!({"command": "org.fissionoxide.examples.flange/flange", "inputs": {"holes": 3}}),
+  )
+  .unwrap();
   assert_eq!(r["changed"], true);
-  assert!(run(&mut p, &mut s, "plugin.log", json!({"id": "org.fissionoxide.examples.flange"})).unwrap()["log"].as_str().unwrap().contains("Bolt Flange: done"));
+  assert!(
+    run(&mut p, &mut s, "plugin.log", json!({"id": "org.fissionoxide.examples.flange"})).unwrap()["log"]
+      .as_str()
+      .unwrap()
+      .contains("Bolt Flange: done")
+  );
   run(&mut p, &mut s, "plugin.uninstall", json!({"id": "com.test.shared"})).unwrap();
   assert_eq!(run(&mut p, &mut s, "plugin.list", json!({})).unwrap().as_array().unwrap().len(), 1);
 }
@@ -644,7 +671,128 @@ step = 2
     let id = format!("{}/{}", pkg.manifest.id, pkg.manifest.commands[1].key());
     assert!(p.run(&mut s, &id, &json!({}), RunOptions::default()).is_err(), "{id}");
   }
-  for bad in ["[[commands]]\nbuiltin = \"box\"\nid = \"x\"\n", "[[commands]]\nbuiltin = \"Box!\"\n", "[[commands]]\nid = \"nolabel\"\n"] {
+  for bad in [
+    "[[commands]]\nbuiltin = \"box\"\nid = \"x\"\n",
+    "[[commands]]\nbuiltin = \"Box!\"\n",
+    "[[commands]]\nid = \"nolabel\"\n",
+  ] {
     assert!(Manifest::parse(&format!("{}{bad}", manifest("com.test.bad", "1.0.0", &[]))).is_err(), "{bad}");
   }
+}
+
+#[test]
+fn bundled_add_ins_can_start_off_and_ship_a_library() {
+  let dir = scratch("addin");
+  let bundled = dir.join("addins");
+  let addin = bundled.join("lumen");
+  std::fs::create_dir_all(addin.join("library/Pack")).unwrap();
+  let text = "id = \"com.test.addin\"\nname = \"Add-in\"\nversion = \"1.0.0\"\napi = 1\nlibrary = \"library\"\n\
+              enabled_by_default = false\n\n[[commands]]\nid = \"go\"\nlabel = \"Go\"\n";
+  std::fs::write(addin.join("plugin.toml"), text).unwrap();
+  std::fs::write(addin.join("plugin.wasm"), Wat::default().module("(i64.const 0)")).unwrap();
+  std::fs::write(addin.join("library/Pack/disc.dxf"), "0\nEOF\n").unwrap();
+  let lib = addin.join("library");
+  let mut p = Plugins::open(&dir.join("plugins"), vec![bundled]);
+  let a = p.get("com.test.addin").unwrap();
+  assert!(a.bundled && !a.record.enabled, "starts off");
+  assert!(p.commands().is_empty());
+  assert!(!p.libraries.contains(&lib));
+  p.set_enabled("com.test.addin", true).unwrap();
+  assert!(p.get("com.test.addin").unwrap().record.enabled);
+  assert_eq!(p.libraries, vec![lib.clone()], "its library is offered while it is on");
+  p.reload();
+  assert!(p.get("com.test.addin").unwrap().record.enabled, "remembered");
+  p.set_enabled("com.test.addin", false).unwrap();
+  assert!(p.libraries.is_empty());
+  assert!(Manifest::parse(&text.replace("library = \"library\"", "library = \"../up\"")).is_err());
+}
+
+#[test]
+fn new_file_commands_are_confined() {
+  let dir = scratch("confine");
+  let out = scratch("confine-out");
+  let res = dir.join("res");
+  let all = vec![Permission::ReadFiles, Permission::WriteFiles, Permission::Render];
+  let ctx = Context { granted: all, folder: Some(out.clone()), resources: res.clone() };
+  let r = ctx.prepare("view.render_components", &json!({"folder": "Parts"})).unwrap();
+  assert_eq!(r["folder"], json!(out.join("Parts")), "a bare folder name is still inside the run's folder");
+  let r = ctx.prepare("cut.estimate", &json!({"sketch": 3, "export": "est.csv"})).unwrap();
+  assert_eq!(r["export"], json!(out.join("est.csv")));
+  assert!(ctx.prepare("cut.service.check", &json!({"dxf": "/etc/passwd"})).is_err());
+  assert!(ctx.prepare("inspect.overall_size", &json!({"export": "../x.json"})).is_err());
+  let r = ctx.prepare("sketch.library.insert", &json!({"part": "LumenArt/keyhole", "at": [0, 0]})).unwrap();
+  assert_eq!(r["part"], "LumenArt/keyhole", "pack/name is not a path");
+  let r = ctx.prepare("sketch.library.insert", &json!({"part": "resources/a.dxf", "at": [0, 0]})).unwrap();
+  assert_eq!(r["part"], json!(res.join("a.dxf")));
+  assert!(ctx.prepare("sketch.library.list", &json!({"folders": ["C:/"]})).is_err());
+  let render_only = Context { granted: vec![Permission::Render], folder: Some(out.clone()), resources: res.clone() };
+  assert!(render_only.prepare("view.render_components", &json!({"folder": "Parts"})).is_ok());
+  let nothing = Context { granted: vec![], folder: Some(out), resources: res };
+  assert!(nothing.prepare("view.render_components", &json!({"folder": "Parts"})).unwrap_err().contains("render"));
+  assert!(nothing.prepare("sheet.collect_flat", &json!({"path": "cut.dxf"})).unwrap_err().contains("write-files"));
+}
+/// The LumenArt add-in in the repository's `addins/` builds a two-layer sign: numbered layers,
+/// tab stubs half a thou proud, and flanges over the standoff gap plus the bend allowance.
+#[test]
+fn lumenart_add_in_builds_a_layered_sign() {
+  let addins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../addins");
+  if !addins.join("lumenart/plugin.wasm").is_file() {
+    return; // not built in this checkout
+  }
+  let dir = scratch("lumenart");
+  let mut s = session(&dir);
+  let mut p = Plugins::open(&dir.join("plugins"), vec![addins]);
+  let id = "shop.lumenart.signs";
+  assert!(!p.get(id).unwrap().record.enabled, "an add-in for one trade starts off");
+  p.set_enabled(id, true).unwrap();
+  let run = |p: &mut Plugins, s: &mut Session, cmd: &str, inputs: Value| {
+    p.run(s, &format!("{id}/{cmd}"), &inputs, RunOptions::default()).unwrap_or_else(|e| panic!("{cmd}: {e}")).result
+  };
+  for (lo, hi) in [([0, 0], [200, 100]), ([50, 25], [150, 75])] {
+    s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    s.execute("sketch.rect", &json!({"corner1": lo, "corner2": hi})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+  }
+  let sketches: Vec<u32> = s.design.features.iter().map(|f| f.id.0).collect();
+  run(
+    &mut p,
+    &mut s,
+    "new_layer",
+    json!({"profiles": [{"type": "profile", "sketch": sketches[0], "index": 0}], "name": "Back"}),
+  );
+  let r = run(
+    &mut p,
+    &mut s,
+    "new_layer",
+    json!({"profiles": [{"type": "profile", "sketch": sketches[1], "index": 0}], "name": "Letters", "height": "1 in"}),
+  );
+  assert_eq!(r["component"], "02 - Letters");
+  let letters = r["body"].as_u64().unwrap();
+  let topo = s.execute("body.topology", &json!({"body": letters})).unwrap();
+  let edge_at =
+    |x: f64| {
+      topo["edges"].as_array().unwrap().iter().find(|e| {
+        (e["mid"][0].as_f64().unwrap() - x).abs() < 0.01 && (e["mid"][2].as_f64().unwrap() - 27.0).abs() < 0.01
+      })
+    };
+  let edges: Vec<Value> = [150.0, 50.0]
+    .iter()
+    .map(|x| json!({"type": "edge", "body": letters, "edge": edge_at(*x).unwrap()["id"]}))
+    .collect();
+  run(&mut p, &mut s, "quick_tab", json!({"edges": edges}));
+  let span = |s: &mut Session| {
+    let info = s.execute("info", &json!({})).unwrap();
+    let b = info["bodies"].as_array().unwrap().iter().find(|b| b["id"] == letters).unwrap().clone();
+    (b["bbox"][0][0].as_f64().unwrap(), b["bbox"][1][0].as_f64().unwrap())
+  };
+  let (lo, hi) = span(&mut s);
+  assert!((lo - (50.0 - 0.127)).abs() < 1e-3 && (hi - (150.0 + 0.127)).abs() < 1e-3, "tabs 0.005\" proud: {lo} {hi}");
+  let r = run(&mut p, &mut s, "auto_flange", json!({}));
+  assert_eq!(r["flanges"], 2, "{r}");
+  // gap from the tab's middle (25.4 + 0.8) down to the back's top (1.6), plus 0.025"
+  let len = 26.2001 - 1.6002 + 0.635;
+  let (lo2, hi2) = span(&mut s);
+  assert!((lo - lo2 - len).abs() < 1e-3 && (hi2 - hi - len).abs() < 1e-3, "{lo2} {hi2}");
+  assert_eq!(run(&mut p, &mut s, "auto_flange", json!({}))["flanges"], 0, "flanged tabs are left alone");
+  assert!(s.design.features.iter().any(|f| f.name == "Bend Lines"));
 }

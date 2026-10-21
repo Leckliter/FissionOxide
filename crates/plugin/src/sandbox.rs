@@ -10,8 +10,17 @@ use crate::manifest::Permission;
 
 /// Commands a plugin can never run: they replace the design, save over the user's file, or
 /// change the undo history the host keeps for the run.
-const REFUSED: [&str; 9] =
-  ["new", "open", "save", "undo", "redo", "transaction.begin", "transaction.commit", "transaction.rollback", "hub.open"];
+const REFUSED: [&str; 9] = [
+  "new",
+  "open",
+  "save",
+  "undo",
+  "redo",
+  "transaction.begin",
+  "transaction.commit",
+  "transaction.rollback",
+  "hub.open",
+];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Access {
@@ -20,7 +29,7 @@ enum Access {
 }
 
 /// Commands that take file paths: (command, JSON pointer, read or write).
-const FILES: [(&str, &str, Access); 17] = [
+const FILES: &[(&str, &str, Access)] = &[
   ("import", "/path", Access::Read),
   ("inspect", "/path", Access::Read),
   ("form.insert_tsm", "/path", Access::Read),
@@ -38,10 +47,22 @@ const FILES: [(&str, &str, Access); 17] = [
   ("sheet.flat_pattern", "/path", Access::Write),
   ("cut.gcode", "/path", Access::Write),
   ("hub.download", "/path", Access::Write),
+  ("cut.service.check", "/dxf", Access::Read),
+  ("cut.service.check", "/export", Access::Write),
+  ("cut.estimate", "/dxf", Access::Read),
+  ("cut.estimate", "/export", Access::Write),
+  ("sheet.collect_flat", "/path", Access::Write),
+  ("inspect.properties", "/export", Access::Write),
+  ("inspect.overall_size", "/export", Access::Write),
+  ("view.render_components", "/folder", Access::Write),
+  ("sketch.library.insert", "/part", Access::Read),
 ];
 
+/// Commands that write only images (and their manifests), allowed by "render" alone.
+const RENDERS: [&str; 2] = ["view.render", "view.render_components"];
+
 /// Keys that hold file paths in commands not listed in [`FILES`].
-const PATH_KEYS: [&str; 6] = ["path", "image", "file", "dir", "folder", "font"];
+const PATH_KEYS: [&str; 8] = ["path", "image", "file", "dir", "folder", "font", "export", "dxf"];
 
 /// The error of a run that needs a folder and wasn't given one (the UI then asks for one).
 pub const NO_FOLDER: &str = "this command uses files: pick a folder for the run first";
@@ -103,12 +124,15 @@ impl Context {
     if cmd.starts_with("hub.") {
       self.need(Permission::Hub, &format!("'{cmd}'"))?;
     }
-    if cmd == "view.render" {
-      self.need(Permission::Render, "'view.render'")?;
+    if RENDERS.contains(&cmd) {
+      self.need(Permission::Render, &format!("'{cmd}'"))?;
+    }
+    if cmd.starts_with("sketch.library.") && params.get("folders").is_some() {
+      return Err(format!("plugins can't pass 'folders' to '{cmd}': ship a library in the package instead"));
     }
     let mut params = params.clone();
     let mut known = false;
-    for (c, ptr, access) in FILES {
+    for &(c, ptr, access) in FILES {
       if c != cmd {
         continue;
       }
@@ -117,6 +141,10 @@ impl Context {
         && let Some(s) = v.as_str()
       {
         if ptr == "/font" && !looks_like_file(s) {
+          continue;
+        }
+        // a library part is named pack/name; only a file name (with an extension) is a path
+        if ptr == "/part" && Path::new(s).extension().is_none() && !Path::new(s).is_absolute() {
           continue;
         }
         *v = Value::String(self.path(cmd, s, access)?.to_string_lossy().into_owned());
@@ -136,7 +164,7 @@ impl Context {
         self.in_folder(s, false)
       }
       Access::Write => {
-        if cmd != "view.render" {
+        if !RENDERS.contains(&cmd) {
           self.need(Permission::WriteFiles, &format!("writing '{s}' ('{cmd}')"))?;
         }
         self.in_folder(s, true)
@@ -179,7 +207,9 @@ fn looks_like_file(s: &str) -> bool {
 /// `rel` joined to `base`, refusing absolute paths and `..`.
 pub fn confine(base: &Path, rel: &str) -> Result<PathBuf, String> {
   let p = Path::new(rel);
-  if rel.is_empty() || rel.contains('\\') || !p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+  if rel.is_empty()
+    || rel.contains('\\')
+    || !p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
   {
     return Err(format!("'{rel}': plugins use paths relative to the run's folder, without '..'"));
   }

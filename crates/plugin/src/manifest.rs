@@ -1,6 +1,7 @@
 //! `plugin.toml`: what a plugin is, what it adds to the toolbar and what it may do.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -39,10 +40,21 @@ pub struct Manifest {
   pub panels: Vec<Panel>,
   #[serde(default)]
   pub commands: Vec<Command>,
+  /// A folder in the package holding sketch library packs (each sub-folder a pack), offered in
+  /// Insert → Sketch Library while the plugin is on.
+  #[serde(default)]
+  pub library: Option<String>,
+  /// Bundled with the app: whether it starts switched on (an add-in for one trade starts off).
+  #[serde(default = "yes")]
+  pub enabled_by_default: bool,
 }
 
 fn any_version() -> String {
   "*".into()
+}
+
+fn yes() -> bool {
+  true
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -294,6 +306,10 @@ impl Manifest {
     }
     if self.api != API_VERSION {
       return Err(format!("needs plugin API {}, this app has API {API_VERSION}", self.api));
+    }
+    if let Some(l) = &self.library {
+      crate::sandbox::confine(Path::new("."), l)
+        .map_err(|_| format!("library = '{l}' must be a folder in the package"))?;
     }
     let mut seen = HashSet::new();
     for p in &self.panels {

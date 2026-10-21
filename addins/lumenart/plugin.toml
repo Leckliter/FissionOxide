@@ -1,0 +1,634 @@
+# LumenArt: layered aluminium signs, from artwork to SendCutSend. The first official add-in.
+# Build plugin.wasm with build.ps1 (or build.sh). The app finds this folder in a checkout, and the
+# installer ships it in plugins/, so it is a bundled plugin: Plugins window → LumenArt → on.
+#
+# The LumenArt tab lists every step of making a sign in order (`step`), the built-in tools that
+# came from the Fusion 360 suite included. Spec: docs/LUMENART.md.
+id = "shop.lumenart.signs"
+name = "LumenArt"
+version = "1.0.0"
+author = "LumenArt"
+description = "Layered sign workflow: clean and size artwork, hardware cutouts, numbered layers, tabs, flanges and slots, cut file checks and a one-click export"
+homepage = "https://lumenart.shop"
+fissionoxide = ">=0.1"
+api = 1
+permissions = ["write-files", "render"]
+library = "library"
+enabled_by_default = false
+
+[[panels]]
+id = "prepare"
+label = "PREPARE"
+tab = "LumenArt"
+
+[[panels]]
+id = "build"
+label = "BUILD"
+tab = "LumenArt"
+
+[[panels]]
+id = "tabs"
+label = "TABS"
+tab = "LumenArt"
+
+[[panels]]
+id = "cut"
+label = "CUT FILE"
+tab = "LumenArt"
+
+[[panels]]
+id = "export"
+label = "EXPORT"
+tab = "LumenArt"
+
+[[panels]]
+id = "analyze"
+label = "ANALYZE"
+tab = "LumenArt"
+
+# ---------------------------------------------------------------- 1-3 · PREPARE the artwork
+
+[[commands]]
+builtin = "sketch.cleanup"
+label = "Clean Up Sketch"
+tooltip = "Make imported artwork DXF-clean: break projection links, delete constraints and stray points"
+icon = "icons/01-clean-up.png"
+panel = "prepare"
+step = 1
+promoted = true
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Sketch with the artwork"
+
+  [[commands.inputs]]
+  id = "break_links"
+  type = "checkbox"
+  label = "Break projection links"
+  default = true
+
+  [[commands.inputs]]
+  id = "delete_constraints"
+  type = "choice"
+  label = "Delete constraints"
+  options = ["all", "projected", "none"]
+  default = "all"
+
+  [[commands.inputs]]
+  id = "purge_points"
+  type = "checkbox"
+  label = "Delete stray points"
+  default = true
+
+[[commands]]
+builtin = "sketch.remove_duplicates"
+label = "Remove Duplicate Lines"
+tooltip = "Delete overlapping lines, arcs and circles so nothing is cut twice"
+icon = "icons/02-remove-duplicates.png"
+panel = "prepare"
+step = 2
+promoted = true
+repeatable = true
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Sketch to clean"
+
+  [[commands.inputs]]
+  id = "tolerance"
+  type = "value"
+  label = "Tolerance"
+  unit = "length"
+  default = "0.001 in"
+  min = 0
+
+  [[commands.inputs]]
+  id = "include_construction"
+  type = "checkbox"
+  label = "Include construction"
+  default = false
+
+  [[commands.inputs]]
+  id = "dry_run"
+  type = "checkbox"
+  label = "Only report"
+  default = false
+
+[[commands]]
+id = "size_sign"
+label = "Size Sign"
+tooltip = "Scale the artwork to the sign's width or height, or the largest size that fits a box"
+icon = "icons/03-size-sign.png"
+panel = "prepare"
+step = 3
+promoted = true
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Sketch with the artwork"
+
+  [[commands.inputs]]
+  id = "mode"
+  type = "choice"
+  label = "Size by"
+  options = ["Width", "Height", "Fit in box"]
+  default = "Fit in box"
+
+  [[commands.inputs]]
+  id = "width"
+  type = "value"
+  label = "Width"
+  unit = "length"
+  default = "36 in"
+  min = 0
+  visible_when = { mode = "Width" }
+
+  [[commands.inputs]]
+  id = "height"
+  type = "value"
+  label = "Height"
+  unit = "length"
+  default = "18 in"
+  min = 0
+  visible_when = { mode = "Height" }
+
+  [[commands.inputs]]
+  id = "box"
+  type = "choice"
+  label = "Box"
+  options = ["20 x 20 box (19.5 x 19.5)", "36 x 10", "Custom"]
+  default = "20 x 20 box (19.5 x 19.5)"
+  visible_when = { mode = "Fit in box" }
+
+  [[commands.inputs]]
+  id = "box_width"
+  type = "value"
+  label = "Box width"
+  unit = "length"
+  default = "20 in"
+  min = 0
+  visible_when = { mode = "Fit in box", box = "Custom" }
+
+  [[commands.inputs]]
+  id = "box_height"
+  type = "value"
+  label = "Box height"
+  unit = "length"
+  default = "20 in"
+  min = 0
+  visible_when = { mode = "Fit in box", box = "Custom" }
+
+  [[commands.inputs]]
+  id = "margin"
+  type = "value"
+  label = "Margin"
+  unit = "length"
+  default = "0.25 in"
+  min = 0
+  visible_when = { mode = "Fit in box", box = "Custom" }
+
+  [[commands.inputs]]
+  id = "rotate"
+  type = "checkbox"
+  label = "Turn to fit larger"
+  default = false
+  visible_when = { mode = "Fit in box" }
+
+  [[commands.inputs]]
+  id = "anchor"
+  type = "choice"
+  label = "Scale about"
+  options = ["Centre", "Origin"]
+  default = "Centre"
+
+# ---------------------------------------------------------------- 4-5 · BUILD the layers
+
+[[commands]]
+id = "place_part"
+label = "Place Hardware"
+tooltip = "Keyholes, studs, an E12 socket, LED strip slots and more from the LumenArt library (also in Insert → Sketch Library, where you click to place)"
+icon = "icons/04-place-part.png"
+panel = "build"
+step = 4
+promoted = true
+repeatable = true
+
+  [[commands.inputs]]
+  id = "part"
+  type = "choice"
+  label = "Part"
+  options = ["Keyholes 16 in", "Keyholes 8 in", "10-32 Stud", "Stud Pattern", "E12 Socket", "LED Strip Slot", "Back Bracing", "Part Identifier", "Tab Slot", "Tab Head"]
+  default = "Keyholes 16 in"
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Sketch (default: the one being edited)"
+
+  [[commands.inputs]]
+  id = "x"
+  type = "value"
+  label = "X"
+  unit = "length"
+  default = "0 in"
+
+  [[commands.inputs]]
+  id = "y"
+  type = "value"
+  label = "Y"
+  unit = "length"
+  default = "0 in"
+
+  [[commands.inputs]]
+  id = "angle"
+  type = "value"
+  label = "Angle"
+  unit = "angle"
+  default = 0
+
+[[commands]]
+id = "new_layer"
+label = "New Layer"
+tooltip = "The picked profiles become the next numbered layer (01, 02 - Letters, …): one sheet thick, at its height in the stack"
+icon = "icons/05-new-layer.png"
+panel = "build"
+step = 5
+promoted = true
+repeatable = true
+
+  [[commands.inputs]]
+  id = "profiles"
+  type = "selection"
+  filter = ["profile"]
+  prompt = "Profiles of this layer"
+
+  [[commands.inputs]]
+  id = "name"
+  type = "text"
+  label = "Name"
+  default = ""
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Thickness"
+  unit = "length"
+  default = "0.063 in"
+  min = 0.01
+
+  [[commands.inputs]]
+  id = "height"
+  type = "value"
+  label = "Height"
+  unit = "length"
+  default = "0 in"
+  prompt = "Where the layer's bottom sits above the sketch (the standoff stack)"
+
+# ---------------------------------------------------------------- 6-9 · TABS
+
+[[commands]]
+id = "quick_tab"
+label = "Quick Tab"
+tooltip = "Click edges of a layer to put a tab stub on each: 0.25 in along the edge, just proud of it, one sheet thick"
+icon = "icons/06-quick-tab.png"
+panel = "tabs"
+step = 6
+promoted = true
+repeatable = true
+
+  [[commands.inputs]]
+  id = "edges"
+  type = "selection"
+  filter = ["edge"]
+  prompt = "Edges on the top or bottom face of a layer"
+
+  [[commands.inputs]]
+  id = "width"
+  type = "value"
+  label = "Tab width"
+  unit = "length"
+  default = "0.25 in"
+  min = 0.1
+
+  [[commands.inputs]]
+  id = "depth"
+  type = "value"
+  label = "Into the part"
+  unit = "length"
+  default = "0.125 in"
+  min = 0.01
+
+  [[commands.inputs]]
+  id = "proud"
+  type = "value"
+  label = "Past the edge"
+  unit = "length"
+  default = "0.005 in"
+  min = 0.001
+
+[[commands]]
+id = "auto_flange"
+label = "Auto Flange"
+tooltip = "Lengthen every tab stub over the gap to the layer below (plus the bend allowance) and draw its bend line"
+icon = "icons/07-auto-flange.png"
+panel = "tabs"
+step = 7
+promoted = true
+
+  [[commands.inputs]]
+  id = "allowance"
+  type = "value"
+  label = "Bend allowance"
+  unit = "length"
+  default = "0.025 in"
+  prompt = "Added to the gap: +0.028 in for the bend, -0.003 in clearance"
+
+  [[commands.inputs]]
+  id = "tab_width"
+  type = "value"
+  label = "Tab width"
+  unit = "length"
+  default = "0.25 in"
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Sheet thickness"
+  unit = "length"
+  default = "0.063 in"
+
+[[commands]]
+id = "slot_projector"
+label = "Slot Projector"
+tooltip = "Cut a receiver slot in the layer below every tab that points down at it"
+icon = "icons/08-slot-projector.png"
+panel = "tabs"
+step = 8
+promoted = true
+
+  [[commands.inputs]]
+  id = "slot_length"
+  type = "value"
+  label = "Slot length"
+  unit = "length"
+  default = "0.200 in"
+
+  [[commands.inputs]]
+  id = "slot_width"
+  type = "value"
+  label = "Slot width"
+  unit = "length"
+  default = "0.085 in"
+
+  [[commands.inputs]]
+  id = "tab_width"
+  type = "value"
+  label = "Tab width"
+  unit = "length"
+  default = "0.25 in"
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Sheet thickness"
+  unit = "length"
+  default = "0.063 in"
+
+  [[commands.inputs]]
+  id = "dry_run"
+  type = "checkbox"
+  label = "Only count the tabs"
+  default = false
+
+[[commands]]
+id = "tab_builder"
+label = "Tab Builder"
+tooltip = "Put a locking tab head (0.11 in neck, 0.17 in head) on the free end of every flange leg"
+icon = "icons/09-tab-builder.png"
+panel = "tabs"
+step = 9
+promoted = true
+
+  [[commands.inputs]]
+  id = "faces"
+  type = "selection"
+  filter = ["face"]
+  min = 0
+  prompt = "Flange legs (none: find them all)"
+
+  [[commands.inputs]]
+  id = "tab_width"
+  type = "value"
+  label = "Tab width"
+  unit = "length"
+  default = "0.25 in"
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Sheet thickness"
+  unit = "length"
+  default = "0.063 in"
+
+[[commands]]
+id = "auto_tab"
+label = "Auto Tab"
+tooltip = "Slot Projector, then Tab Builder, over the whole sign"
+icon = "icons/auto-tab.png"
+panel = "tabs"
+promoted = true
+
+# ---------------------------------------------------------------- 10-12 · CUT FILE
+
+[[commands]]
+builtin = "sheet.collect_flat"
+label = "Collect Flat Patterns"
+tooltip = "Every sheet metal part's flat pattern in one Cut File sketch, in rows"
+icon = "icons/10-collect-flat.png"
+panel = "cut"
+step = 10
+promoted = true
+
+  [[commands.inputs]]
+  id = "max_width"
+  type = "value"
+  label = "Max row width"
+  unit = "length"
+  default = "48 in"
+  min = 1
+
+  [[commands.inputs]]
+  id = "gap"
+  type = "value"
+  label = "Gap"
+  unit = "length"
+  default = "0.25 in"
+  min = 0
+
+  [[commands.inputs]]
+  id = "sketch_name"
+  type = "text"
+  label = "Sketch name"
+  default = "Cut File"
+
+[[commands]]
+builtin = "cut.service.check"
+label = "Check for SendCutSend"
+tooltip = "Open contours, text, double cuts, features too small for the material, parts too big"
+icon = "icons/11-cut-service-check.png"
+panel = "cut"
+step = 11
+promoted = true
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Cut File sketch"
+
+  [[commands.inputs]]
+  id = "service"
+  type = "choice"
+  label = "Service"
+  options = ["sendcutsend", "oshcut", "ponoko"]
+  default = "sendcutsend"
+
+  [[commands.inputs]]
+  id = "process"
+  type = "choice"
+  label = "Process"
+  options = ["laser", "waterjet", "router"]
+  default = "laser"
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Thickness"
+  unit = "length"
+  default = "0.063 in"
+
+[[commands]]
+builtin = "cut.estimate"
+label = "Cut Estimate"
+tooltip = "Area, cut length, pierces and pieces for quoting"
+icon = "icons/12-cut-estimate.png"
+panel = "cut"
+step = 12
+promoted = true
+
+  [[commands.inputs]]
+  id = "sketch"
+  type = "selection"
+  filter = ["sketch"]
+  min = 0
+  max = 1
+  prompt = "Cut File sketch"
+
+# ---------------------------------------------------------------- 13-15 · EXPORT
+
+[[commands]]
+builtin = "view.explode"
+label = "Explode Layers"
+tooltip = "Spread the layers apart in the view (display only)"
+icon = "icons/13-explode.png"
+panel = "export"
+step = 13
+promoted = true
+
+  [[commands.inputs]]
+  id = "factor"
+  type = "slider"
+  label = "Spacing"
+  min = 0
+  max = 5
+  step = 0.1
+  default = 1
+
+[[commands]]
+builtin = "view.render_components"
+label = "Render Parts"
+tooltip = "One picture per part, with a part data sheet (area for powder coat, finish)"
+icon = "icons/14-render-parts.png"
+panel = "export"
+step = 14
+promoted = true
+
+  [[commands.inputs]]
+  id = "folder"
+  type = "text"
+  label = "Sub-folder"
+  default = "Parts"
+
+  [[commands.inputs]]
+  id = "size"
+  type = "integer"
+  label = "Image size"
+  default = 1080
+  min = 64
+  max = 4096
+
+[[commands]]
+id = "auto_export"
+label = "Auto Export"
+tooltip = "Product and exploded renders, part pictures and data, cut file data and DXF, dimensions and a master JSON, in one folder named after the product (LAP-0002 …)"
+icon = "icons/15-auto-export.png"
+panel = "export"
+step = 15
+promoted = true
+
+  [[commands.inputs]]
+  id = "label"
+  type = "text"
+  label = "Product label"
+  default = ""
+  prompt = "Empty: taken from the design name (LAP-0002 …)"
+
+  [[commands.inputs]]
+  id = "explode"
+  type = "slider"
+  label = "Exploded spacing"
+  min = 0.5
+  max = 5
+  step = 0.1
+  default = 2
+
+  [[commands.inputs]]
+  id = "size"
+  type = "integer"
+  label = "Image size"
+  default = 1080
+  min = 64
+  max = 4096
+
+# ---------------------------------------------------------------- ANALYZE
+
+[[commands]]
+builtin = "inspect.overall_size"
+label = "Overall Size"
+tooltip = "The sign's width, height and thickness"
+icon = "icons/overall-size.png"
+panel = "analyze"
+
+[[commands]]
+builtin = "inspect.properties"
+label = "Properties"
+tooltip = "Everything about the selection: geometry, sizes, ids"
+icon = "icons/properties.png"
+panel = "analyze"

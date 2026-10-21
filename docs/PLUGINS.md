@@ -17,12 +17,17 @@ JSON commands) and one manifest format (`plugin.toml` below: panels, commands, d
   window. They use the command API: new commands, dialogs, macros, exports, checks. Safe to take
   from a stranger, one file for every platform, unaffected by app updates. Sharing is "send the
   file" for now.
-- **Add-ins** add real functionality and are compiled in. Each is a crate in this repository
-  under `addins/`, shipped with the app and switched on or off in the add-in manager (off by
-  default unless it says otherwise). Besides the command API they can add feature types that
-  re-run in the timeline, workspaces, manipulators and engine commands. Anyone can write one:
-  build the app with it, or send it upstream. Rust has no stable ABI and FissionOxide forbids
-  `unsafe`, so native code is never loaded at run time; that is what plugins are for.
+- **Add-ins** are the official extensions that ship with the app. Each lives in this
+  repository under `addins/` and is switched on or off in the Plugins window (off by default
+  when its manifest says `enabled_by_default = false`). Anyone can write one and send it
+  upstream. Today an add-in is a bundled plugin: the same manifest and WebAssembly as any plugin,
+  found in `addins/` in a build from a checkout and in `plugins/` next to an installed
+  `fissionoxide.exe` (the installer copies it there). What an add-in needs from the engine is
+  added as JSON commands. Add-ins that also bring native parts (feature types that re-run in the
+  timeline, workspaces, manipulators) are the next step; Rust has no stable ABI and FissionOxide
+  forbids `unsafe`, so such parts are compiled into the app, never loaded at run time.
+
+The first add-in is [LumenArt](../addins/lumenart) (`addins/lumenart`).
 
 Rules that keep the two from drifting apart:
 
@@ -105,6 +110,11 @@ api = 1                            # plugin API version
 
 # What the plugin may do beyond running design commands. Shown to the user at install.
 permissions = ["write-files", "render"]   # also: "read-files", "hub"
+
+library = "library"                # optional: a folder of sketch library packs (each sub-folder
+                                   # a pack of DXF, SVG or .fox parts), in Insert → Sketch Library
+                                   # while the plugin is on; sketch.library.insert part "Pack/Name"
+enabled_by_default = false         # optional, bundled plugins and add-ins: start switched off
 
 # Toolbar placement. Panels are created on demand in this order; tabs group panels.
 [[panels]]
@@ -302,6 +312,11 @@ plugin.
   with a path) need **write-files** (`view.render` only **render**). Commands that read
   (`import`, `inspect`, `sketch.insert`, `sketch.trace`, `canvas.insert`, `sheet.check_dxf`,
   font files) need **read-files**, except that `resources/...` reads the plugin's own resources.
+  The newer commands are held to the same rules: `cut.service.check` and `cut.estimate` (`dxf`
+  read, `export` written), `sheet.collect_flat` (`path`), `inspect.properties` and
+  `inspect.overall_size` (`export`), `view.render_components` (`folder`, with **render**), and
+  `sketch.library.insert` (a `part` given as a file). Plugins can't pass `folders` to the sketch
+  library: they ship a `library` folder instead.
   A command the host doesn't know that has a file-like `path`/`file`/`image`/`dir` is treated as
   a write.
 - A run without a folder (the CLI defaults to the current directory; the UI asks for one when a
@@ -382,4 +397,10 @@ multi-body DXF cut file, ellipse curves, curve/surface evaluation on freeform ge
    panels and dialogs, result messages, plugin log (done).
 4. **SDK** — the Rust bindings and example plugin in `examples/plugins/flange`,
    `fissionoxide-cli plugin pack|check|run --dev` for development (done).
-5. **First ports** — Clean Duplicate Lines, then the rest of LumenArt Tools in the order above.
+5. **First ports** — the general tools of the LumenArt suite went into the app; the LumenArt
+   add-in (`addins/lumenart`) holds the sign workflow: Size Sign, Place Hardware, New Layer,
+   Quick Tab, Auto Flange, Slot Projector, Tab Builder, Auto Tab and Auto Export, with the
+   built-in steps on its tab (done). `fox-plugin`'s `lumenart_add_in_builds_a_layered_sign` test
+   runs it.
+6. **Native add-ins** — feature types that re-run in the timeline, so tabs and flanges follow
+   when a layer moves.

@@ -1248,3 +1248,13 @@ fn timeline_move_refuses_breaking_body_references() {
   assert!(s.design.features.iter().all(|f| s.model.status(f.id).is_none_or(|st| st.error.is_none())));
   assert!(s.redo.is_empty(), "the refused move isn't left to redo");
 }
+
+#[test]
+fn body_classify_tells_inside_from_outside() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let b = s.model.bodies[0].id.0;
+  let r = run(&mut s, "body.classify", json!({"body": b, "points": [[0, 0, 2.5], [50, 0, 2.5], [0, 0, 0]]}));
+  assert_eq!(r["inside"], json!(["in", "out", "on"]));
+  assert!(s.execute("body.classify", &json!({"body": b, "points": [[0, 0]]})).is_err());
+}

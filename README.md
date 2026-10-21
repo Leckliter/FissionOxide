@@ -195,6 +195,11 @@ change a parameter and watch the whole history rebuild.
   commands get their own toolbar tab and dialogs. Plugin code is WebAssembly, sandboxed: it
   drives the same JSON commands and may touch files or the data hub only with the permissions
   you grant. Share and update plugins through the data hub; see [Plugins](#plugins).
+- **Add-ins.** Official extensions that ship with the app, off until you turn them on. The first
+  is **LumenArt**: layered aluminium signs from artwork to a SendCutSend order (numbered
+  layers, tab stubs, flanges over the standoff gap, receiver slots, locking tab heads, a hardware
+  library and a one-click export), on a tab that lists every step in order. See
+  [addins/lumenart](addins/lumenart).
 - **Configurations and base features.** A configuration table of named variants that override
   parameters, feature suppression, appearances and joint values, with rules that drive a column
   from each row's other values; switch the active one from the browser, edit them in a table,
@@ -1084,6 +1089,11 @@ fissionoxide-cli plugin list | commands | check FILE | log ID | enable ID | disa
 ```
 
 The MCP server has the same commands as tools (`plugin_list`, `plugin_install`, `plugin_run` ...).
+
+**Add-ins** are plugins that come with FissionOxide, kept in [`addins/`](addins) and installed
+next to the app (they can be turned off, not removed). A plugin's tab can also list built-in
+commands, numbered in workflow order (`builtin` and `step` in the manifest), and a plugin can
+ship a sketch library pack (`library`). [LumenArt](addins/lumenart) is the first.
 
 ## Image tracing
 

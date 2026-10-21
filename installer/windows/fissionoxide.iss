@@ -115,6 +115,13 @@ Name: "assoc"; Description: "{cm:AssocFox}"; GroupDescription: "{cm:AssocGroup}"
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#CliExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion
+; bundled add-ins (addins/*: plugin.toml, plugin.wasm, icons, resources, library), off until turned on
+Source: "..\..\addins\lumenart\plugin.toml"; DestDir: "{app}\plugins\lumenart"; Flags: ignoreversion
+Source: "..\..\addins\lumenart\plugin.wasm"; DestDir: "{app}\plugins\lumenart"; Flags: ignoreversion
+Source: "..\..\addins\lumenart\README.md"; DestDir: "{app}\plugins\lumenart"; Flags: ignoreversion
+Source: "..\..\addins\lumenart\icons\*"; DestDir: "{app}\plugins\lumenart\icons"; Flags: ignoreversion
+Source: "..\..\addins\lumenart\resources\*"; DestDir: "{app}\plugins\lumenart\resources"; Flags: ignoreversion recursesubdirs
+Source: "..\..\addins\lumenart\library\*"; DestDir: "{app}\plugins\lumenart\library"; Flags: ignoreversion recursesubdirs
 ; the fox in 3D (brand/model.py); the app also adds it to the data hub the first time it starts
 Source: "..\..\brand\model\FissionOxide.fox"; DestDir: "{app}\Samples"; Flags: ignoreversion
 ; the ripple loader's frames for the progress page (made by brand/build.py; see CreateLoader)

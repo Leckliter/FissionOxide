@@ -52,6 +52,9 @@ struct State {
   /// Bundled plugins the user turned off.
   #[serde(default)]
   disabled_bundled: Vec<String>,
+  /// Bundled plugins that start off (`enabled_by_default = false`) and the user turned on.
+  #[serde(default)]
+  enabled_bundled: Vec<String>,
 }
 
 /// A plugin as loaded: its record, and its manifest or why it failed to load.
@@ -110,11 +113,15 @@ impl Installed {
 pub enum Plan {
   Install,
   /// A newer version of an installed plugin.
-  Update { from: String },
+  Update {
+    from: String,
+  },
   /// The same version again.
   Reinstall,
   /// An older version than the installed one: only with `allow_downgrade`.
-  Downgrade { from: String },
+  Downgrade {
+    from: String,
+  },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -174,6 +181,8 @@ pub struct Plugins {
   state: State,
   pub list: Vec<Installed>,
   modules: HashMap<PathBuf, wasmtime::Module>,
+  /// Library folders of usable plugins, added to the sketch library.
+  libraries: Vec<PathBuf>,
 }
 
 fn now() -> u64 {
@@ -181,10 +190,16 @@ fn now() -> u64 {
 }
 
 impl Plugins {
-  /// The plugins of a data hub (`<hub>/plugins`), with the bundled ones next to the executable.
+  /// The plugins of a data hub (`<hub>/plugins`), with the bundled ones next to the executable
+  /// and, in a build from a checkout, the add-ins in the repository's `addins/`.
   pub fn for_hub(hub_root: &Path) -> Plugins {
-    let bundled = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins")));
-    Plugins::open(&hub_root.join("plugins"), bundled.into_iter().collect())
+    let mut bundled: Vec<PathBuf> =
+      std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).into_iter().collect();
+    let addins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../addins");
+    if addins.is_dir() {
+      bundled.push(addins);
+    }
+    Plugins::open(&hub_root.join("plugins"), bundled)
   }
 
   /// The plugins installed under `root`, plus unpacked plugins in each of `bundled_dirs`.
@@ -195,6 +210,7 @@ impl Plugins {
       state: State::default(),
       list: Vec::new(),
       modules: HashMap::new(),
+      libraries: Vec::new(),
     };
     p.reload();
     p
@@ -210,10 +226,8 @@ impl Plugins {
 
   /// Re-reads the registry and every plugin's manifest.
   pub fn reload(&mut self) {
-    self.state = std::fs::read_to_string(self.state_path())
-      .ok()
-      .and_then(|t| serde_json::from_str(&t).ok())
-      .unwrap_or_default();
+    self.state =
+      std::fs::read_to_string(self.state_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     self.modules.clear();
     let mut list = Vec::new();
     for r in &self.state.plugins {
@@ -231,14 +245,19 @@ impl Plugins {
           log::warn!("bundled plugin {}: {}", dir.display(), error.unwrap_or_default());
           continue;
         };
-        // a version the user installed wins over the bundled one
+        // a version the user installed (or an earlier bundled folder) wins over this one
         if list.iter().any(|i: &Installed| i.record.id == m.id) {
           continue;
         }
+        let enabled = if m.enabled_by_default {
+          !self.state.disabled_bundled.contains(&m.id)
+        } else {
+          self.state.enabled_bundled.contains(&m.id)
+        };
         let record = Record {
           id: m.id.clone(),
           version: m.version.clone(),
-          enabled: !self.state.disabled_bundled.contains(&m.id),
+          enabled,
           granted: m.permissions.clone(),
           installed: 0,
           source: dir.to_string_lossy().into_owned(),
@@ -247,6 +266,25 @@ impl Plugins {
       }
     }
     self.list = list;
+    self.update_libraries();
+  }
+
+  /// Offers the library packs of the plugins that are on in the sketch library, and withdraws
+  /// those of plugins turned off or removed.
+  fn update_libraries(&mut self) {
+    let now: Vec<PathBuf> = self
+      .list
+      .iter()
+      .filter(|p| p.usable())
+      .filter_map(|p| p.manifest.as_ref()?.library.as_ref().map(|l| p.dir.join(l)))
+      .collect();
+    for old in self.libraries.iter().filter(|l| !now.contains(l)) {
+      fox_engine::library::remove_root(old);
+    }
+    for l in &now {
+      fox_engine::library::add_root(l.clone());
+    }
+    self.libraries = now;
   }
 
   fn save(&self) -> Result<(), String> {
@@ -346,7 +384,10 @@ impl Plugins {
   pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
     if self.find(id)?.bundled {
       self.state.disabled_bundled.retain(|d| d != id);
-      if !enabled {
+      self.state.enabled_bundled.retain(|d| d != id);
+      if enabled {
+        self.state.enabled_bundled.push(id.to_string());
+      } else {
         self.state.disabled_bundled.push(id.to_string());
       }
     } else if let Some(r) = self.state.plugins.iter_mut().find(|r| r.id == id) {
@@ -408,7 +449,8 @@ impl Plugins {
     let mut out = Vec::new();
     for p in self.list.iter().filter(|p| p.usable()) {
       let m = p.manifest.as_ref().expect("usable plugins have a manifest");
-      let uses_files = m.permissions.iter().any(|p| matches!(p, Permission::ReadFiles | Permission::WriteFiles | Permission::Render));
+      let uses_files =
+        m.permissions.iter().any(|p| matches!(p, Permission::ReadFiles | Permission::WriteFiles | Permission::Render));
       // the tab is laid out in workflow order: numbered steps first
       let mut cmds: Vec<&Command> = m.commands.iter().collect();
       cmds.sort_by_key(|c| c.step.unwrap_or(u32::MAX));
@@ -430,7 +472,8 @@ impl Plugins {
   }
 
   pub fn command(&self, full_id: &str) -> Result<CommandRef, String> {
-    let (plugin, _) = full_id.split_once('/').ok_or_else(|| format!("'{full_id}': plugin commands are <plugin id>/<command id>"))?;
+    let (plugin, _) =
+      full_id.split_once('/').ok_or_else(|| format!("'{full_id}': plugin commands are <plugin id>/<command id>"))?;
     let p = self.find(plugin)?;
     if let Some(e) = &p.error {
       return Err(format!("{}: {e}", p.name()));
@@ -438,7 +481,11 @@ impl Plugins {
     if !p.record.enabled {
       return Err(format!("{} is turned off", p.name()));
     }
-    self.commands().into_iter().find(|c| c.full_id == full_id).ok_or_else(|| format!("{} has no command '{full_id}'", p.name()))
+    self
+      .commands()
+      .into_iter()
+      .find(|c| c.full_id == full_id)
+      .ok_or_else(|| format!("{} has no command '{full_id}'", p.name()))
   }
 
   fn module(&mut self, dir: &Path) -> Result<wasmtime::Module, String> {
@@ -459,7 +506,13 @@ impl Plugins {
 
   /// Runs a plugin command (the user pressed OK): its inputs are checked and filled in, and
   /// everything it does is one undo step named after it, rolled back if it fails or is cancelled.
-  pub fn run(&mut self, session: &mut Session, full_id: &str, given: &Value, opts: RunOptions) -> Result<RunResult, String> {
+  pub fn run(
+    &mut self,
+    session: &mut Session,
+    full_id: &str,
+    given: &Value,
+    opts: RunOptions,
+  ) -> Result<RunResult, String> {
     let cmd = self.command(full_id)?;
     let values = inputs::resolve(&cmd.command, given, session)?;
     if let Some(b) = &cmd.command.builtin {
@@ -473,7 +526,11 @@ impl Plugins {
     let entry = runtime::Entry::Run { command: &cmd.command.id, inputs: &values };
     let (host, result) = runtime::invoke(&module, host, entry, opts.fuel.unwrap_or(runtime::DEFAULT_FUEL));
     *session = host.session;
-    let mut text: Vec<String> = host.log.iter().map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message)).collect();
+    let mut text: Vec<String> = host
+      .log
+      .iter()
+      .map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message))
+      .collect();
     let out = match result {
       Ok(result) => {
         let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
@@ -504,10 +561,11 @@ impl Plugins {
     let ctx = sandbox::Context { granted: p.record.granted.clone(), folder, resources: p.dir.join("resources") };
     let params = ctx.prepare(builtin, &inputs::as_params(&cmd.command, values))?;
     session.begin_transaction().map_err(|e| e.0)?;
-    let result = session.execute(builtin, &params).map_err(|e| e.0).and_then(|v| match v.get("error").and_then(Value::as_str) {
-      Some(e) => Err(e.to_string()),
-      None => Ok(v),
-    });
+    let result =
+      session.execute(builtin, &params).map_err(|e| e.0).and_then(|v| match v.get("error").and_then(Value::as_str) {
+        Some(e) => Err(e.to_string()),
+        None => Ok(v),
+      });
     match result {
       Ok(result) => {
         let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
@@ -524,7 +582,13 @@ impl Plugins {
   /// An input changed while the dialog is open: the plugin returns updates for other inputs
   /// (`{"<input>": {"value"?, "visible"?, "enabled"?, "text"?, "options"?}}`). Anything it does
   /// to the design is rolled back.
-  pub fn input_changed(&mut self, session: &mut Session, full_id: &str, input: &str, given: &Value) -> Result<Value, String> {
+  pub fn input_changed(
+    &mut self,
+    session: &mut Session,
+    full_id: &str,
+    input: &str,
+    given: &Value,
+  ) -> Result<Value, String> {
     let cmd = self.command(full_id)?;
     if cmd.command.builtin.is_some() {
       return Ok(json!({}));

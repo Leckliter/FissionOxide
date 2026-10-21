@@ -505,6 +505,7 @@ cmds! {
   "cut.service.check" => "Check a cut file for a cutting service: text not outlined, open contours, duplicate or overlapping cuts (holes inside a part are fine), features under the service's minimum (laser 0.5 × thickness, waterjet 0.070\", router 0.125\"), parts too big or small, wrong units; PASS / WARNINGS / ERRORS with locations, and the cut estimate", "{sketch? | body? | dxf?: path (default: the sketch being edited, else the sheet metal body), service? (default sendcutsend), process?, material?, thickness?, export?: .json|.csv}";
   "cut.estimate" => "Cut estimate for quoting, per part and in total: area (in² and mm²), cut length, pierces (closed contours), pieces (outer contours), holes, bounding box", "{sketch? | body? | dxf?: path, export?: .csv|.json}";
   "sheet.collect_flat" => "All flat patterns on one sheet: every sheet metal body's flat pattern outline (bend lines as construction) in one new sketch, or one DXF, in rows that wrap before a part runs past max_width", "{bodies?: [body] (default every sheet metal body), max_width? (default 48 in), gap? (default 0.25 in), sketch_name? (default \"Cut File\"), path?: .dxf}";
+  "body.classify" => "Whether points are inside a body, outside it or on its surface (which side of an edge the material is on, what a ray would hit)", "{body, points: [[x, y, z], ...]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
