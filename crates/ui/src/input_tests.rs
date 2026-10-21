@@ -97,20 +97,27 @@ fn the_cursor_prompt_follows_the_pointer_and_hides_over_the_dialog() {
   h.open_create_sketch();
   let r = h.dialog_rect();
   let c = h.app.canvas.center();
-  let shown = h.rest(c, 0.1);
-  assert!(shown.iter().any(|t| t == crate::dialogs::PICK_PLANE_HINT), "{shown:?}");
-  let shown = h.rest(r.center(), 0.1);
-  assert!(!shown.iter().any(|t| t == crate::dialogs::PICK_PLANE_HINT), "{shown:?}");
+  // the dialog's own label says the same thing: the prompt is the copy just below-right of the pointer
+  assert!(h.prompt_at(c, crate::dialogs::PICK_PLANE_HINT));
+  assert!(!h.prompt_at(r.center(), crate::dialogs::PICK_PLANE_HINT), "hidden over the dialog");
   h.move_then_click(cancel_pos(r));
 
   h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
   h.app.set_tool(crate::viewport::Tool::Rect);
-  let shown = h.rest(c, 0.1);
-  assert!(shown.iter().any(|t| t == "Place first corner"), "{shown:?}");
-  assert!(!shown.iter().any(|t| t.starts_with("Sketching")), "{shown:?}");
+  assert!(h.prompt_at(c, "Place first corner"));
+  let all = h.rest(c, 0.1);
+  assert!(!all.iter().any(|t| t.starts_with("Sketching")), "{all:?}");
   h.move_then_click(c);
-  let shown = h.rest(c + vec2(60.0, -40.0), 0.1);
-  assert!(shown.iter().any(|t| t == "Specify size of rectangle"), "{shown:?}");
+  assert!(h.prompt_at(c + vec2(60.0, -40.0), "Specify size of rectangle"));
+}
+
+impl Harness {
+  /// Is `text` drawn just below-right of the pointer resting at `pos` (as the cursor prompt is)?
+  fn prompt_at(&mut self, pos: Pos2, text: &str) -> bool {
+    self.frame_texts(1.0 / 60.0, vec![Event::PointerMoved(pos)]);
+    let near = Rect::from_min_size(pos, vec2(80.0, 60.0));
+    self.frame_texts(0.1, vec![]).iter().any(|(r, t)| t == text && near.contains(r.min))
+  }
 }
 
 #[test]

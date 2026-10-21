@@ -2165,7 +2165,7 @@ impl Dialog {
         _ => sentence(self.missing_input()),
       });
     }
-    if hovering && self.picks() {
+    if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
     }
     let specify = match self.kind {
@@ -2184,6 +2184,36 @@ impl Dialog {
       _ => return None,
     };
     Some(specify.into())
+  }
+
+  /// Does this dialog take its input from a selection in the canvas (so a later pick changes it)?
+  fn selects(&self) -> bool {
+    self.picks()
+      || matches!(
+        self.kind,
+        Kind::Extrude
+          | Kind::Revolve
+          | Kind::Loft
+          | Kind::Sweep
+          | Kind::Hole
+          | Kind::Fold
+          | Kind::Flange
+          | Kind::NewComponent
+          | Kind::Project
+          | Kind::Material
+          | Kind::Mirror
+          | Kind::RectPattern
+          | Kind::CircPattern
+          | Kind::Move
+          | Kind::SkFillet
+          | Kind::SkChamfer
+          | Kind::SkChamfer2
+          | Kind::SkChamferAngle
+          | Kind::SkMirror
+          | Kind::SkOffset
+          | Kind::SkCircPattern
+          | Kind::SkRectPattern
+      )
   }
 
   fn missing_input(&self) -> &'static str {
