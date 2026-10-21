@@ -443,3 +443,49 @@ fn a_command_starting_closes_the_help_menu() {
   assert!(h.app.dialog.is_some(), "E started Extrude");
   assert!(!egui::Popup::is_any_open(&h.ctx), "the Help menu closed");
 }
+
+/// Where a world point is drawn in the viewport.
+fn on_screen(app: &App, p: fox_engine::kernel::glam::DVec3) -> Pos2 {
+  let r = app.canvas;
+  let (x, y, _) = app.cam.project(p, r.width().round() as u32, r.height().round() as u32).unwrap();
+  r.min + vec2(x as f32, y as f32)
+}
+
+#[test]
+fn dragging_a_jointed_component_stops_at_its_contact_set() {
+  use fox_engine::kernel::glam::DVec3;
+  use serde_json::json;
+  let mut h = Harness::new();
+  let s = &mut h.app.s;
+  let part = |s: &mut Session, w: f64, at: [f64; 2]| {
+    s.execute("box", &json!({"width": w, "depth": 10, "height": 10, "at": at})).unwrap();
+    let b = s.model.bodies.last().unwrap().id.0;
+    let c = s.execute("component.create", &json!({"bodies": [b]})).unwrap()["component"].as_u64().unwrap();
+    (c, b)
+  };
+  let (base, _) = part(s, 40.0, [40.0, 0.0]);
+  s.execute("component.ground", &json!({"component": base})).unwrap();
+  let (block, body) = part(s, 10.0, [-30.0, 0.0]);
+  let o = json!({"at": [0, 0, 0], "z": [1, 0, 0]});
+  s.execute(
+    "joint",
+    &json!({"moving": block, "moving_origin": o, "fixed_origin": o, "kind": "slider", "as_built": true}),
+  )
+  .unwrap();
+  s.execute("contact_set.create", &json!({"components": [base, block]})).unwrap();
+  let undo_depth = s.undo_history().len();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  // press on the block and drag it right, past the base's near side (x = 20)
+  let a = on_screen(&h.app, DVec3::new(-30.0, 0.0, 10.0));
+  let b = on_screen(&h.app, DVec3::new(30.0, 0.0, 10.0));
+  h.drag(a, b);
+  let hi = h.app.s.model.body(fox_engine::model::BodyId(body)).unwrap().shape.mass().unwrap().bbox_max.x;
+  assert!(hi <= 20.0 + 1e-6 && hi > 19.9, "the block's right side is at {hi}");
+  // the whole drag is one undo, and the status says why it stopped
+  assert_eq!(h.app.s.undo_history().len(), undo_depth + 1);
+  assert!(h.app.status.as_ref().is_some_and(|(m, _)| m.contains("contact")), "{:?}", h.app.status);
+}

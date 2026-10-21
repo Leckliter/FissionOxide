@@ -7,6 +7,9 @@ use crate::icons::Icon;
 const MOTIONS: &[(&str, &str)] =
   &[("", "Joint's first"), ("rotation", "Rotation"), ("slide", "Slide"), ("slide2", "Slide 2"), ("pitch", "Pitch")];
 
+const CAM_MOTIONS: &[(&str, &str)] =
+  &[("slide", "Slide (straight)"), ("rotation", "Rotation (rocker arm)"), ("slide2", "Slide 2")];
+
 pub static JOINT_ORIGIN: Form = Form {
   title: "JOINT ORIGIN",
   name: "Joint Origin",
@@ -76,15 +79,19 @@ pub static CONTACT_SET: Form = Form {
 pub static CAM_FOLLOWER: Form = Form {
   title: "CAM FOLLOWER",
   name: "Cam Follower",
-  hint: "Keep a sliding joint's component in contact with a cam component as the cam turns: pick the cam's body",
+  hint: "Keep a joint's component in contact with a cam component as the cam turns: pick the cam's body, \
+         then a roller face of the follower if it has one",
   icon: Icon::DriveJoint,
   cmd: "cam_follower",
   fixed: &[],
   inputs: &[
     Input::Bodies { key: "bodies", label: "Cam", required: true },
-    Input::Text { key: "follower", label: "Follower joint (slides)", default: "Joint2" },
+    Input::Text { key: "follower", label: "Follower joint", default: "Joint2" },
+    Input::Choice { key: "motion", label: "Pushes", options: CAM_MOTIONS },
+    Input::FacesOpt { key: "tip", label: "Roller face (cylinder or sphere)" },
+    Input::Expr { key: "roller", label: "Ball roller radius", default: "" },
     Input::Check { key: "flat", label: "Flat-faced follower" },
-    Input::Expr { key: "clearance", label: "Clearance (roller radius)", default: "0 mm" },
+    Input::Expr { key: "clearance", label: "Clearance", default: "0 mm" },
     Input::Text { key: "name", label: "Name", default: "" },
   ],
   picks_model: false,
@@ -140,5 +147,36 @@ mod tests {
     .unwrap();
     let x = s.model.bodies.iter().find(|b| b.id.0 == bodies[2]).unwrap().shape.mass().unwrap().bbox_min.x;
     assert!((x - 100.0).abs() < 1e-6, "{x}");
+  }
+
+  #[test]
+  fn the_cam_follower_form_takes_a_roller_face() {
+    let mut s = Session::default();
+    s.execute("cylinder", &json!({"radius": 10, "height": 5, "at": [5, 0]})).unwrap();
+    let disc = s.model.bodies[0].id.0;
+    s.execute("component.create", &json!({"bodies": [disc]})).unwrap();
+    s.execute("cylinder", &json!({"radius": 3, "height": 5, "at": [45, 0]})).unwrap();
+    let roller = s.model.bodies[1].id.0;
+    let c = s.execute("component.create", &json!({"bodies": [roller]})).unwrap()["component"].clone();
+    let axis = json!({"at": [45, 0, 2.5], "z": [1, 0, 0]});
+    s.execute(
+      "joint",
+      &json!({"moving": c, "moving_origin": axis, "fixed_origin": axis, "kind": "slider", "as_built": true}),
+    )
+    .unwrap();
+    let face =
+      s.model.bodies[1].faces().iter().find(|f| f.kind == fox_engine::kernel::SurfaceKind::Cylinder).unwrap().id;
+    run_form(
+      &mut s,
+      &CAM_FOLLOWER,
+      &[
+        ("bodies", json!([disc, roller])),
+        ("follower", json!("Joint1")),
+        ("tip", json!([{"body": roller, "face": face}])),
+      ],
+    );
+    // the roller's centre rests 13 from the disc's centre (5, 0)
+    let x = s.model.bodies[1].shape.mass().unwrap().center_of_mass.x;
+    assert!((x - 18.0).abs() < 0.01, "{x}");
   }
 }

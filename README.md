@@ -332,22 +332,31 @@ instead, `angle` and `offset` adjust the placement, and the joint's motion (`rot
   moves `leader_value`, the follower moves `follower_value` (`360 deg` ↔ `2 * pi * 5 mm` is a
   rack and pinion with a 5 mm pitch radius). Links chain; loops are reported.
 - **Contact sets** (`contact_set.create`) list components that can't pass through each other:
-  Drive Joints and motion studies stop where their bodies first touch.
+  Drive Joints, motion studies and viewport drags stop where their bodies first touch.
+- **Dragging components.** With the select tool, press on an ungrounded component and drag: a
+  jointed one moves within its joint's freedoms (and limits) so the grabbed point follows the
+  cursor, an unjointed one slides in the view plane (one Move at the end of the timeline,
+  taken on by the next drag). A drag is one undo; `component.drag` does the same from scripts.
 - **Insert Component** (`component.insert`, or right-click a design in the data panel) brings a
   hub design in as a component. Its bodies are stored in the design, so it opens without the
   hub; linked, `component.links` shows when the source has a newer version, `component.update_link`
   gets it, and `component.break_link` keeps a local copy.
 - **Screw joints** (`"kind": "screw"` with a `lead`) slide along their axis by the lead for every
   turn of rotation (a negative lead is left-handed); motion links can turn them but not slide them.
-- **Cam followers** (`cam_follower`) set a sliding joint's slide so its component stays in contact
+- **Cam followers** (`cam_follower`) set a joint's motion so its component stays in contact
   with a cam component wherever the cam's own joint has turned it: a knife edge touches where
   the slide line meets the cam, a flat follower the cam's furthest point; `clearance` keeps a
-  gap (a roller's radius). Motion studies of the cam move the follower too.
+  gap. A `tip` (a point, face, edge or joint origin on the follower) is where it touches: a
+  cylindrical face there is a roller (its radius, axis and width: it rests on a plate cam's
+  profile as a real roller does), a spherical face or `roller` a ball. `"motion": "rotation"`
+  swings a rocker arm (a revolute follower) so its tip, moving along an arc, rests on the cam
+  from the side it starts on. Motion studies of the cam move the follower too.
 - **Sub-assemblies.** Inserting a design that has components keeps them, as children of the
   inserted component (the browser nests them; `component.parent` nests components by hand).
   Joints that move a component move everything below it. The source's joints come along:
   rigid (the default) keeps the positions the source solved; `component.flexible` solves them
-  again in this design so `component.drive` can move them (`component.sub_joints` lists them).
+  again in this design so `component.drive` can move them (`component.sub_joints` lists them,
+  with the motions set by the source's motion links and cam followers, which act here too).
   `assembly.bom` is indented by level, or `"view": "top"` (top-level totals) or `"parts"`
   (leaf parts with quantities).
 

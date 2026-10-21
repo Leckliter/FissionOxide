@@ -9,6 +9,7 @@ mod assembly_forms;
 mod cam_ui;
 mod canvas_ui;
 mod clipboard;
+mod comp_drag;
 mod config_ui;
 mod customize;
 mod cut_ui;
@@ -124,6 +125,8 @@ pub struct App {
   /// Feature id being renamed in the timeline/browser.
   rename: Option<(RenameTarget, String)>,
   drag: Option<viewport::Drag>,
+  /// The component being dragged in the viewport.
+  comp_drag: Option<comp_drag::CompDrag>,
   tstate: viewport::ToolState,
   fitted_once: bool,
   last_sketch: Option<fox_engine::model::FeatureId>,
@@ -359,6 +362,7 @@ impl App {
       dim_edit: None,
       rename: None,
       drag: None,
+      comp_drag: None,
       tstate: viewport::ToolState::default(),
       fitted_once: false,
       last_sketch: None,

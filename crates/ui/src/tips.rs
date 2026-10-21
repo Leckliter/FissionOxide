@@ -1004,7 +1004,8 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Cam Follower") => (
       "Makes a follower ride along the profile of a turning cam.",
-      "Pick the cam faces and the follower. As the cam turns, the follower moves to stay in contact.",
+      "Pick the cam and the follower's joint, and a roller face if it has one. As the cam turns, the \
+       follower slides, or swings as a rocker arm, to stay in contact.",
     ),
 
     // CONSTRUCT

@@ -102,6 +102,8 @@ pub enum Drag {
   Paint,
   /// Dragging a handle of the dialog's move/rotate triad (see [`crate::manipulators`]).
   Triad,
+  /// Dragging a component (see [`crate::comp_drag`]).
+  Component,
   /// Zoom Window: the box being dragged.
   ZoomWindow {
     start: Pos2,
@@ -426,6 +428,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
   {
     match drag {
       Drag::SketchPoint { sketch, point } => finish_point_drag(app, sketch, point),
+      Drag::Component => crate::comp_drag::finish(app),
       Drag::Box { start, now, since } => {
         let held = ctx.input(|i| i.time) - since;
         if (now - start).length() < 4.0 && held > 0.45 {
@@ -775,7 +778,11 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if crate::select::drag_region(app, resp, ctx, pos, &|p| view.to_px(p).into()) {
     return;
   }
-  // window selection with the select tool
+  // dragging a component, else window selection with the select tool
+  let cam = app.cam;
+  if crate::comp_drag::handle(app, resp, ctx, pos, &|p| view.ray(&cam, p)) {
+    return;
+  }
   if resp.drag_started_by(egui::PointerButton::Primary) && app.drag.is_none() && app.tool == Tool::Select {
     let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or(pos);
     let since = ctx.input(|i| i.pointer.press_start_time()).unwrap_or(0.0);
