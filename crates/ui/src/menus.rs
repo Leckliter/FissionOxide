@@ -1142,7 +1142,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 13] = [
+const ALL_TABS: [Tab; 14] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
