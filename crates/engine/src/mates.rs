@@ -372,7 +372,19 @@ fn insert_bodies(fid: FeatureId, n: usize) -> Vec<BodyId> {
 fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let item = req_str(p, "item")?;
   let st = hub::open_store(s)?;
-  let item = st.item(item)?.clone();
+  let item = match st.item(item) {
+    Ok(it) => it.clone(),
+    // or a design's name, when exactly one design in the hub has it
+    Err(e) => {
+      let named: Vec<_> =
+        st.search(item).into_iter().filter(|i| i.name == item && !i.trashed && i.kind == ItemKind::Design).collect();
+      match named.as_slice() {
+        [one] => (*one).clone(),
+        [] => return Err(e.into()),
+        _ => return Err(CmdError::new(format!("more than one design is named '{item}'; pass its item id"))),
+      }
+    }
+  };
   let version = match p.get("version").and_then(Value::as_u64) {
     Some(v) => v as u32,
     None => item.latest().map(|v| v.number).ok_or(CmdError::new("the item has no versions"))?,

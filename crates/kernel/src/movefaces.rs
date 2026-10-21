@@ -166,3 +166,11 @@ fn grown(region: &Shape, picked: &[crate::FaceInfo], m: DMat4) -> Shape {
     .filter(|s| s.solid_count() == 1)
     .unwrap_or_else(|| region.clone())
 }
+
+fn one_solid(s: Shape) -> Result<Shape> {
+  match s.solid_count() {
+    1 if s.is_valid() => Ok(s),
+    1 => Err(KernelError::Kernel("moving the faces made an invalid solid".into())),
+    _ => Err(KernelError::Kernel("the moved faces no longer meet the rest of the body".into())),
+  }
+}

@@ -293,7 +293,7 @@ cmds! {
   "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
   "contact_set.delete" => "Delete a contact set", "{contact_set}";
   "contact_set.list" => "List the contact sets", "{}";
-  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item, version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item (id, or a unique design name), version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
   "component.configuration" => "Switch which configuration of its source design a linked component uses (null: the design as modelled); without 'configuration' lists the source's configurations", "{component, configuration?: name | null}";
   "component.links" => "Inserted components: source item, version, configuration and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
