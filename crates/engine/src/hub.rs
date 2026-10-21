@@ -686,6 +686,10 @@ fn connect(s: &mut Session, p: &Value) -> CmdResult {
   let token = opt(p, "token");
   let st = Store::open_remote(url, token)?;
   let server = st.server().unwrap_or(url).to_string();
+  // the token stays in use for the rest of this process either way
+  if let Some(t) = token {
+    fox_store::remote::use_token(&server, t);
+  }
   if p.get("remember").and_then(Value::as_bool) != Some(false) {
     if let Some(t) = token {
       fox_store::remote::remember_token(&server, t)?;

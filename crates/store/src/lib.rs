@@ -390,8 +390,9 @@ impl Store {
   ///
   /// `root` may also be a hub server's URL (`https://hub.example.com`), see [`remote`].
   pub fn open(root: &Path) -> Result<Store> {
-    if let Some(url) = remote::url_of(root) {
-      return Self::open_remote(&url, None);
+    if remote::is_remote(root) {
+      // as given: a token in the URL is used
+      return Self::open_remote(&root.to_string_lossy(), None);
     }
     assert!(
       !(is_test_process() && is_user_hub(root)),
