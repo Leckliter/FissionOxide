@@ -10,17 +10,8 @@ use crate::manifest::Permission;
 
 /// Commands a plugin can never run: they replace the design, save over the user's file, or
 /// change the undo history the host keeps for the run.
-const REFUSED: [&str; 9] = [
-  "new",
-  "open",
-  "save",
-  "undo",
-  "redo",
-  "transaction.begin",
-  "transaction.commit",
-  "transaction.rollback",
-  "hub.open",
-];
+const REFUSED: [&str; 9] =
+  ["new", "open", "save", "undo", "redo", "transaction.begin", "transaction.commit", "transaction.rollback", "hub.open"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Access {
@@ -188,9 +179,7 @@ fn looks_like_file(s: &str) -> bool {
 /// `rel` joined to `base`, refusing absolute paths and `..`.
 pub fn confine(base: &Path, rel: &str) -> Result<PathBuf, String> {
   let p = Path::new(rel);
-  if rel.is_empty()
-    || rel.contains('\\')
-    || !p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+  if rel.is_empty() || rel.contains('\\') || !p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
   {
     return Err(format!("'{rel}': plugins use paths relative to the run's folder, without '..'"));
   }

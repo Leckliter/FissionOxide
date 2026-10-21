@@ -110,15 +110,11 @@ impl Installed {
 pub enum Plan {
   Install,
   /// A newer version of an installed plugin.
-  Update {
-    from: String,
-  },
+  Update { from: String },
   /// The same version again.
   Reinstall,
   /// An older version than the installed one: only with `allow_downgrade`.
-  Downgrade {
-    from: String,
-  },
+  Downgrade { from: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -214,8 +210,10 @@ impl Plugins {
 
   /// Re-reads the registry and every plugin's manifest.
   pub fn reload(&mut self) {
-    self.state =
-      std::fs::read_to_string(self.state_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    self.state = std::fs::read_to_string(self.state_path())
+      .ok()
+      .and_then(|t| serde_json::from_str(&t).ok())
+      .unwrap_or_default();
     self.modules.clear();
     let mut list = Vec::new();
     for r in &self.state.plugins {
@@ -410,8 +408,7 @@ impl Plugins {
     let mut out = Vec::new();
     for p in self.list.iter().filter(|p| p.usable()) {
       let m = p.manifest.as_ref().expect("usable plugins have a manifest");
-      let uses_files =
-        m.permissions.iter().any(|p| matches!(p, Permission::ReadFiles | Permission::WriteFiles | Permission::Render));
+      let uses_files = m.permissions.iter().any(|p| matches!(p, Permission::ReadFiles | Permission::WriteFiles | Permission::Render));
       // the tab is laid out in workflow order: numbered steps first
       let mut cmds: Vec<&Command> = m.commands.iter().collect();
       cmds.sort_by_key(|c| c.step.unwrap_or(u32::MAX));
@@ -433,8 +430,7 @@ impl Plugins {
   }
 
   pub fn command(&self, full_id: &str) -> Result<CommandRef, String> {
-    let (plugin, _) =
-      full_id.split_once('/').ok_or_else(|| format!("'{full_id}': plugin commands are <plugin id>/<command id>"))?;
+    let (plugin, _) = full_id.split_once('/').ok_or_else(|| format!("'{full_id}': plugin commands are <plugin id>/<command id>"))?;
     let p = self.find(plugin)?;
     if let Some(e) = &p.error {
       return Err(format!("{}: {e}", p.name()));
@@ -442,11 +438,7 @@ impl Plugins {
     if !p.record.enabled {
       return Err(format!("{} is turned off", p.name()));
     }
-    self
-      .commands()
-      .into_iter()
-      .find(|c| c.full_id == full_id)
-      .ok_or_else(|| format!("{} has no command '{full_id}'", p.name()))
+    self.commands().into_iter().find(|c| c.full_id == full_id).ok_or_else(|| format!("{} has no command '{full_id}'", p.name()))
   }
 
   fn module(&mut self, dir: &Path) -> Result<wasmtime::Module, String> {
@@ -467,13 +459,7 @@ impl Plugins {
 
   /// Runs a plugin command (the user pressed OK): its inputs are checked and filled in, and
   /// everything it does is one undo step named after it, rolled back if it fails or is cancelled.
-  pub fn run(
-    &mut self,
-    session: &mut Session,
-    full_id: &str,
-    given: &Value,
-    opts: RunOptions,
-  ) -> Result<RunResult, String> {
+  pub fn run(&mut self, session: &mut Session, full_id: &str, given: &Value, opts: RunOptions) -> Result<RunResult, String> {
     let cmd = self.command(full_id)?;
     let values = inputs::resolve(&cmd.command, given, session)?;
     if let Some(b) = &cmd.command.builtin {
@@ -487,11 +473,7 @@ impl Plugins {
     let entry = runtime::Entry::Run { command: &cmd.command.id, inputs: &values };
     let (host, result) = runtime::invoke(&module, host, entry, opts.fuel.unwrap_or(runtime::DEFAULT_FUEL));
     *session = host.session;
-    let mut text: Vec<String> = host
-      .log
-      .iter()
-      .map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message))
-      .collect();
+    let mut text: Vec<String> = host.log.iter().map(|l| format!("[{}] {}", ["error", "warn", "info", "debug"][l.level as usize], l.message)).collect();
     let out = match result {
       Ok(result) => {
         let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
@@ -522,11 +504,10 @@ impl Plugins {
     let ctx = sandbox::Context { granted: p.record.granted.clone(), folder, resources: p.dir.join("resources") };
     let params = ctx.prepare(builtin, &inputs::as_params(&cmd.command, values))?;
     session.begin_transaction().map_err(|e| e.0)?;
-    let result =
-      session.execute(builtin, &params).map_err(|e| e.0).and_then(|v| match v.get("error").and_then(Value::as_str) {
-        Some(e) => Err(e.to_string()),
-        None => Ok(v),
-      });
+    let result = session.execute(builtin, &params).map_err(|e| e.0).and_then(|v| match v.get("error").and_then(Value::as_str) {
+      Some(e) => Err(e.to_string()),
+      None => Ok(v),
+    });
     match result {
       Ok(result) => {
         let changed = session.commit_transaction_named(cmd.command.label()).map_err(|e| e.0)?;
@@ -543,13 +524,7 @@ impl Plugins {
   /// An input changed while the dialog is open: the plugin returns updates for other inputs
   /// (`{"<input>": {"value"?, "visible"?, "enabled"?, "text"?, "options"?}}`). Anything it does
   /// to the design is rolled back.
-  pub fn input_changed(
-    &mut self,
-    session: &mut Session,
-    full_id: &str,
-    input: &str,
-    given: &Value,
-  ) -> Result<Value, String> {
+  pub fn input_changed(&mut self, session: &mut Session, full_id: &str, input: &str, given: &Value) -> Result<Value, String> {
     let cmd = self.command(full_id)?;
     if cmd.command.builtin.is_some() {
       return Ok(json!({}));

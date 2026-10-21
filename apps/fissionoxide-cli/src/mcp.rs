@@ -78,13 +78,10 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
       } else {
         if let Some(c) = fox_plugin::commands::COMMANDS.iter().find(|c| tool_name(c.id) == name) {
           let mut plugins = fox_plugin::Plugins::for_hub(&s.hub_root());
-          return Some(reply(
-            id,
-            Ok(match fox_plugin::commands::run(&mut plugins, s, c.id, &args) {
-              Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "isError": false}),
-              Err(e) => json!({"content": [{"type": "text", "text": e}], "isError": true}),
-            }),
-          ));
+          return Some(reply(id, Ok(match fox_plugin::commands::run(&mut plugins, s, c.id, &args) {
+            Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "isError": false}),
+            Err(e) => json!({"content": [{"type": "text", "text": e}], "isError": true}),
+          })));
         }
         match COMMANDS.iter().find(|c| tool_name(c.id) == name) {
           None => json!({"content": [{"type": "text", "text": format!("unknown tool '{name}'")}], "isError": true}),

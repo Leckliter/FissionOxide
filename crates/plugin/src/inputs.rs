@@ -62,10 +62,9 @@ fn value(i: &Input, v: Option<&Value>, s: &Session) -> Result<Value, String> {
   match i.kind {
     InputKind::Selection => {
       let picks: Vec<Sel> = match v {
-        Some(Value::Array(a)) => a
-          .into_iter()
-          .map(|p| serde_json::from_value(p).map_err(|e| format!("bad pick: {e}")))
-          .collect::<Result<_, _>>()?,
+        Some(Value::Array(a)) => {
+          a.into_iter().map(|p| serde_json::from_value(p).map_err(|e| format!("bad pick: {e}"))).collect::<Result<_, _>>()?
+        }
         Some(p @ Value::Object(_)) => vec![serde_json::from_value(p).map_err(|e| format!("bad pick: {e}"))?],
         Some(_) => return Err("expected picks like {\"type\": \"body\", \"body\": 1}".into()),
         None => s.selection.iter().copied().filter(|p| accepts(i, p, s)).collect(),
@@ -111,14 +110,11 @@ fn value(i: &Input, v: Option<&Value>, s: &Session) -> Result<Value, String> {
       Ok(json!(n as i64))
     }
     InputKind::Slider => {
-      let n =
-        v.or_else(|| i.default.clone()).unwrap_or(json!(i.min.unwrap_or(0.0))).as_f64().ok_or("expected a number")?;
+      let n = v.or_else(|| i.default.clone()).unwrap_or(json!(i.min.unwrap_or(0.0))).as_f64().ok_or("expected a number")?;
       in_range(i, n)?;
       Ok(json!(n))
     }
-    InputKind::Checkbox => {
-      Ok(json!(v.or_else(|| i.default.clone()).unwrap_or(json!(false)).as_bool().ok_or("expected true or false")?))
-    }
+    InputKind::Checkbox => Ok(json!(v.or_else(|| i.default.clone()).unwrap_or(json!(false)).as_bool().ok_or("expected true or false")?)),
     InputKind::Choice => {
       let c = v.or_else(|| i.default.clone()).unwrap_or_else(|| json!(i.options[0]));
       match c.as_str() {
