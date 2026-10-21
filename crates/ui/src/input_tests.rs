@@ -642,6 +642,7 @@ fn the_workspace_menu_lists_fusions_workspaces() {
   assert!(h.find(vec![], "From Animation").is_some());
   h.move_then_click(from_design.center());
   assert!(h.app.drawing.is_some() || h.app.dialog.is_some(), "From Design opens the Drawing workspace");
+}
 
 /// The browser's root row and Origin folder have eye toggles, Document Settings starts expanded
 /// (its Units and Part Design rows push Origin down), and hovering a row names it in the status
