@@ -115,7 +115,8 @@ fn cleanup_breaks_links_deletes_constraints_and_closes_gaps() {
   run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
   let sk = new_sketch(&mut s);
   let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).map(|f| f.id).unwrap();
-  run(&mut s, "sketch.project", json!({"body": s.model.bodies[0].id.0, "face": top}));
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "sketch.project", json!({"body": body, "face": top}));
   let linked = |s: &Session| match &s.design.feature(sk).unwrap().kind {
     fox_model::FeatureKind::Sketch { links, .. } => links.len(),
     _ => 0,
@@ -148,7 +149,11 @@ fn cleanup_breaks_links_deletes_constraints_and_closes_gaps() {
   let sketch = s.design.sketch(sk).unwrap();
   // the projected rectangle's points are free now, and their constraints went
   assert!(sketch.points.iter().filter(|p| p.id != fox_sketch::ORIGIN).all(|p| !p.fixed));
-  assert!(sketch.constraints.len() < cons + 1);
+  // the gap's coincidence joined the constraints; the dimension stayed
+  let deleted = r["constraints_deleted"].as_u64().unwrap() as usize;
+  assert_eq!(sketch.constraints.len(), cons - deleted + 1, "{r}");
+  assert!(sketch.constraints.iter().any(|c| matches!(c.kind, fox_sketch::ConstraintKind::Coincident { .. })));
+  assert!(sketch.constraints.iter().any(|c| c.kind.dim().is_some()));
   assert!(sketch.curves.iter().all(|c| !c.kind.is_freeform() && !c.construction));
   // the spline became arcs or lines within the tolerance, still ending where it did
   let added = r["curves"].as_array().unwrap().len();

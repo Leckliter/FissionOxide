@@ -610,6 +610,8 @@ mod tests_sheet5;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]
+mod tests_sketch_cleanup;
+#[cfg(test)]
 mod tests_sketch_curves;
 #[cfg(test)]
 mod tests_sketch_fit;
@@ -623,5 +625,3 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
-#[cfg(test)]
-mod tests_sketch_cleanup;

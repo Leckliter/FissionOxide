@@ -54,15 +54,48 @@ fn owned(sketch: &Sketch, id: CurveId) -> bool {
 
 /// What a duplicate is compared by, at the positions when the command ran.
 enum Geo {
-  Line { a: P, b: P, ia: PointId, ib: PointId },
-  Arc { c: P, r: f64, s: P, e: P, m: P },
-  Circle { c: P, r: f64 },
+  Line {
+    a: P,
+    b: P,
+    ia: PointId,
+    ib: PointId,
+  },
+  Arc {
+    c: P,
+    r: f64,
+    s: P,
+    e: P,
+    m: P,
+  },
+  Circle {
+    c: P,
+    r: f64,
+  },
   /// Splines and Bézier chains: their defining points, and those that only match in order
   /// (tangent and curvature handles).
-  Points { pts: Vec<P>, fixed_order: Vec<P>, degree: u8 },
-  Conic { s: P, e: P, apex: P, rho: f64 },
-  Ellipse { c: P, major: P, minor: f64 },
-  EllArc { c: P, major: P, minor: f64, s: P, e: P },
+  Points {
+    pts: Vec<P>,
+    fixed_order: Vec<P>,
+    degree: u8,
+  },
+  Conic {
+    s: P,
+    e: P,
+    apex: P,
+    rho: f64,
+  },
+  Ellipse {
+    c: P,
+    major: P,
+    minor: f64,
+  },
+  EllArc {
+    c: P,
+    major: P,
+    minor: f64,
+    s: P,
+    e: P,
+  },
 }
 
 struct Item {
@@ -112,7 +145,9 @@ fn geo(kind: &CurveKind, pos: &HashMap<PointId, P>) -> Option<Geo> {
         [start_handle, end_handle, start_curvature, end_curvature].into_iter().flatten().copied().collect();
       Geo::Points { pts: all(points)?, fixed_order: all(&handles)?, degree: 0 }
     }
-    CurveKind::ControlSpline { points, degree } => Geo::Points { pts: all(points)?, fixed_order: vec![], degree: *degree },
+    CurveKind::ControlSpline { points, degree } => {
+      Geo::Points { pts: all(points)?, fixed_order: vec![], degree: *degree }
+    }
     CurveKind::Bezier { points } | CurveKind::QuinticSpline { points } => {
       Geo::Points { pts: all(points)?, fixed_order: vec![], degree: 0 }
     }
@@ -134,7 +169,10 @@ enum Overlap {
   FirstInSecond,
   /// They overlap part way: the second is cut back to the first's end `keep` (its point
   /// `moved` is replaced by it).
-  Partial { moved: PointId, keep: PointId },
+  Partial {
+    moved: PointId,
+    keep: PointId,
+  },
 }
 
 fn lines(first: (P, P, PointId, PointId), second: (P, P, PointId, PointId), tol: f64) -> Overlap {
@@ -198,10 +236,7 @@ fn duplicate(g1: &Geo, g2: &Geo, tol: f64) -> bool {
         && ((near(*s1, *s2) && near(*e1, *e2)) || (near(*s1, *e2) && near(*e1, *s2)))
         && near(*m1, *m2)
     }
-    (
-      Geo::Points { pts: p1, fixed_order: h1, degree: d1 },
-      Geo::Points { pts: p2, fixed_order: h2, degree: d2 },
-    ) => {
+    (Geo::Points { pts: p1, fixed_order: h1, degree: d1 }, Geo::Points { pts: p2, fixed_order: h2, degree: d2 }) => {
       d1 == d2
         && if h1.is_empty() && h2.is_empty() {
           same_pts_either_way(p1, p2, tol)
@@ -682,9 +717,9 @@ fn merge_gaps(sketch: &mut Sketch, tol: f64) -> Result<usize, CmdError> {
     }
   }
   let mut groups: HashMap<usize, Vec<PointId>> = HashMap::new();
-  for i in 0..pts.len() {
+  for (i, p) in pts.iter().enumerate() {
     let r = root(&mut parent, i);
-    groups.entry(r).or_default().push(pts[i]);
+    groups.entry(r).or_default().push(*p);
   }
   let mut groups: Vec<Vec<PointId>> = groups.into_values().filter(|g| g.len() > 1).collect();
   groups.sort_by_key(|g| g[0].0);
@@ -775,17 +810,14 @@ fn fit_arcs(pts: &[P], tol: f64) -> Vec<Piece> {
     let (a, b) = (pts[i], pts[j]);
     let l = dist(a, b);
     l > 0.0
-      && pts[i + 1..j]
-        .iter()
-        .all(|p| ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])).abs() / l <= tol)
+      && pts[i + 1..j].iter().all(|p| ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])).abs() / l <= tol)
   };
   let arc_fits = |i: usize, j: usize| {
     let m = (i + j) / 2;
     let Some(c) = fox_sketch::circumcenter(pts[i], pts[m], pts[j]) else { return false };
     let r = dist(c, pts[i]);
     // a nearly straight run is a line
-    r < 1e6 * dist(pts[i], pts[j]).max(tol)
-      && pts[i + 1..j].iter().all(|p| (dist(*p, c) - r).abs() <= tol)
+    r < 1e6 * dist(pts[i], pts[j]).max(tol) && pts[i + 1..j].iter().all(|p| (dist(*p, c) - r).abs() <= tol)
   };
   let mut out = Vec::new();
   let mut i = 0;
@@ -810,7 +842,12 @@ fn fit_arcs(pts: &[P], tol: f64) -> Vec<Piece> {
 
 /// Replaces a spline with lines or arcs joined end to end, keeping its end points (so what it
 /// was joined to stays joined). Returns the new curves, or None if it can't be converted.
-fn convert_spline(sketch: &mut Sketch, id: CurveId, to: SplinesTo, o: &Options) -> Result<Option<Vec<CurveId>>, CmdError> {
+fn convert_spline(
+  sketch: &mut Sketch,
+  id: CurveId,
+  to: SplinesTo,
+  o: &Options,
+) -> Result<Option<Vec<CurveId>>, CmdError> {
   let Some(curve) = sketch.curve(id).cloned() else { return Ok(None) };
   let (first, last) = match &curve.kind {
     CurveKind::Spline { points, .. }
