@@ -148,7 +148,8 @@ fn hostile_params_never_panic() {
     json!({"feature": 1, "set": {"type": "sketch", "plane": 5}}),
     json!({"items": [{"type": "nope"}]}),
   ];
-  let names: Vec<&str> = COMMANDS.iter().map(|c| c.id).filter(|c| !matches!(*c, "new" | "open" | "hub.disconnect")).collect();
+  let names: Vec<&str> =
+    COMMANDS.iter().map(|c| c.id).filter(|c| !matches!(*c, "new" | "open" | "hub.disconnect")).collect();
   // hub commands must never touch the real data directory
   s.store_root = Some(temp_dir("hostile"));
   run(&mut s, "sketch.create", json!({"plane": "xy"}));

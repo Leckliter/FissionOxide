@@ -367,8 +367,9 @@ fn edit_locks_keep_others_from_saving() {
   let mut alice = Store::open(&root).unwrap();
   alice.set_actor("alice", "s-alice", "a-pc");
   let p = alice.create_project("Locks").unwrap();
-  let (item, _) =
-    alice.create_item(NewItem { project: &p, name: "Hinge", ..design() }, b"1", Origin::Saved, Default::default()).unwrap();
+  let (item, _) = alice
+    .create_item(NewItem { project: &p, name: "Hinge", ..design() }, b"1", Origin::Saved, Default::default())
+    .unwrap();
   let l = alice.take_lock(&item, false).unwrap();
   assert_eq!((l.user.as_str(), l.host.as_str()), ("alice", "a-pc"));
   // taking it again keeps when it was first taken

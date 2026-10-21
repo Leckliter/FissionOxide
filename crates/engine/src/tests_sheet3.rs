@@ -162,7 +162,7 @@ fn cuts_in_a_lofted_flange_reach_its_flat_pattern() {
 }
 
 /// Runs a reference part's command script (`tests/reference/<case>/part.jsonl`).
-fn reference_part(case: &str) -> Session {
+pub(crate) fn reference_part(case: &str) -> Session {
   let path =
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reference").join(case).join("part.jsonl");
   let text = std::fs::read_to_string(&path).unwrap();

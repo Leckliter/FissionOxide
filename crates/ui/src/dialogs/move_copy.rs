@@ -5,7 +5,10 @@
 //!
 //! Free Move turns about the picked objects' centre (X, then Y, then Z angles) and then moves
 //! by the X/Y/Z distances, so the distances are how far the centre goes and the triad's value
-//! boxes read the same as the fields.
+//! boxes read the same as the fields. Its triad also turns about any axis (the view ring and
+//! trackball), which comes back as the X, Y and Z angles of the same turn. Rotate turns about a
+//! world axis, a construction axis or a straight edge picked in the viewport, its ring on that
+//! axis.
 
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DQuat, DVec3};
@@ -13,10 +16,10 @@ use fox_engine::model::{BodyId, BodySel, ComponentId, FeatureId, FeatureKind};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
-use super::manip::{centre, deg, mm};
+use super::manip::{axis_line, centre, deg, mm};
 use super::{Dialog, sel_chip, value_edit};
 use crate::App;
-use crate::manipulators::{Triad, TriadEdit};
+use crate::manipulators::{Triad, TriadEdit, from_xyz, xyz_of};
 
 /// Move Object choices.
 const OBJECTS: [(&str, &str); 4] =
@@ -85,11 +88,12 @@ impl Default for MoveForm {
   }
 }
 
-/// A Move dialog's axis choice as the command takes it.
-fn axis_json(a: &str) -> Option<Value> {
+/// A Move dialog's axis choice as the command takes it (`edge`: the picked edge).
+fn axis_json(a: &str, edge: &Value) -> Option<Value> {
   Some(match (a.strip_prefix("line:"), a.strip_prefix("axis:")) {
     (Some(n), _) => json!({"line": n.parse::<u32>().ok()?}),
     (_, Some(n)) => json!({"axis": n.parse::<u32>().ok()?}),
+    _ if a == "edge" => Some(edge.clone()).filter(|e| !e.is_null())?,
     _ => json!(a),
   })
 }
@@ -263,7 +267,24 @@ impl Dialog {
         }
       }
       _ => {
-        let b = super::sel_bodies(s);
+        // Rotate: a straight edge or construction axis picked is the axis, not something to move
+        let rotate = self.mv.mtype == "rotate";
+        if rotate {
+          self.sync_revolve_axis(s);
+        }
+        let b: Vec<u32> = if rotate {
+          let mut b: Vec<u32> = Vec::new();
+          for x in &s.selection {
+            if let Sel::Body { body } | Sel::Face { body, .. } = x
+              && !b.contains(&body.0)
+            {
+              b.push(body.0);
+            }
+          }
+          b
+        } else {
+          super::sel_bodies(s)
+        };
         if !b.is_empty() && b != self.bodies {
           self.comps = b.iter().map(|x| s.design.component_of(BodyId(*x)).map(|c| c.id.0)).collect();
           self.bodies = b;
@@ -397,13 +418,10 @@ impl Dialog {
     // a showing preview has moved the picks already (unless it copied them): take it back out
     let before = if self.applied && !self.mv.copy {
       match self.mv.mtype {
-        "rotate" if self.mv.object != "sketch" => {
-          let i = AXES.iter().position(|x| *x == self.axis);
-          match (i, self.ang(s, &self.angle)) {
-            (Some(i), Some(a)) => DQuat::from_axis_angle(WORLD[i], -a) * now,
-            _ => now,
-          }
-        }
+        "rotate" if self.mv.object != "sketch" => match (self.move_axis(s), self.ang(s, &self.angle)) {
+          (Some((o, d)), Some(a)) => o + DQuat::from_axis_angle(d, -a) * (now - o),
+          _ => now,
+        },
         _ => self.move_vector(s).map_or(now, |v| now - v),
       }
     } else {
@@ -443,6 +461,9 @@ impl Dialog {
             t.rings = [free; 3];
             if free {
               t.angles = [a(&self.mv.rotate[0])?, a(&self.mv.rotate[1])?, a(&self.mv.rotate[2])?];
+              // and the view ring and trackball, which turn about any axis
+              t.free = true;
+              t.orient = from_xyz(t.angles);
             }
           }
         }
@@ -453,18 +474,32 @@ impl Dialog {
         let (origin, axes, i) = if sketch {
           let (_, pl) = self.mv.sketch?;
           (c, [pl.x, pl.y, pl.normal()], 2)
-        } else {
-          let i = AXES.iter().position(|x| *x == self.axis)?;
+        } else if let Some(i) = AXES.iter().position(|x| *x == self.axis) {
           (WORLD[i] * c.dot(WORLD[i]), WORLD, i)
+        } else {
+          // any other axis: the ring on it, level with the centre
+          let (o, d) = self.move_axis(s)?;
+          let x = d.any_orthonormal_vector();
+          (o + d * (c - o).dot(d), [x, d.cross(x), d], 2)
         };
         let mut rings = [false; 3];
         rings[i] = true;
         let mut angles = [0.0; 3];
         angles[i] = angle;
-        Some(Triad { origin, axes, arrows: [false; 3], rings, planes: [false; 3], home: origin, angles })
+        Some(Triad { rings, arrows: [false; 3], planes: [false; 3], axes, angles, ..Triad::world(origin) })
       }
       _ => None,
     }
+  }
+
+  /// Rotate's axis as a world line (a point and unit direction): a world or construction axis, or
+  /// the picked straight edge.
+  pub(super) fn move_axis(&self, s: &Session) -> Option<(DVec3, DVec3)> {
+    if self.axis == "edge" {
+      let (a, b) = super::hole_pattern::line_of(s, &self.solid.axis_edge)?;
+      return Some((a, (b - a).try_normalize()?));
+    }
+    axis_line(s, &self.axis)
   }
 
   /// Takes a triad drag into Move's fields; false when the edit doesn't apply.
@@ -478,8 +513,10 @@ impl Dialog {
           [mm(self.unit, d.x), mm(self.unit, d.y), if sketch { self.translate[2].clone() } else { mm(self.unit, d.z) }];
       }
       ("free", TriadEdit::Rotate(i, a)) => self.mv.rotate[if sketch { 2 } else { i }] = deg(a),
+      // a turn about any axis, as the X, Y and Z angles of the same turn
+      ("free", TriadEdit::Orient(q)) if !sketch => self.mv.rotate = xyz_of(q).map(deg),
       ("rotate", TriadEdit::Rotate(i, a)) => {
-        if !sketch {
+        if !sketch && AXES.contains(&self.axis.as_str()) {
           self.axis = AXES[i].into();
         }
         self.angle = deg(a);
@@ -547,7 +584,7 @@ impl Dialog {
           p["pivot"] = json!(self.mv.pivot.as_ref()?.1.to_array());
         }
         if rotate && self.move_turns() {
-          p["axis"] = axis_json(&self.axis)?;
+          p["axis"] = axis_json(&self.axis, &self.solid.axis_edge)?;
           p["angle"] = json!(self.angle);
         }
         if self.mv.copy {
@@ -919,5 +956,74 @@ mod tests {
     apply(&mut s, &mut d);
     assert_eq!(pts(&s), vec![[20.0, 0.0], [30.0, 0.0]], "the original stays");
     assert_eq!(s.design.sketch(FeatureId(sk)).unwrap().curves.len(), 2);
+  }
+
+  #[test]
+  fn free_move_turns_about_any_axis_and_rotate_about_a_picked_edge() {
+    use crate::manipulators::Handle as TriadHandle;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+    let b = s.model.bodies[0].id;
+    let c = centre(&s, &[b.0]).unwrap();
+    let mut d = move_dialog(&mut s, vec![Sel::Body { body: b }]);
+    apply(&mut s, &mut d);
+    let t = d.triad(&s).unwrap();
+    assert!(t.free && t.orient.angle_between(DQuat::IDENTITY) < 1e-9);
+    // a third of a turn about (1, 1, 1) — X to Y, Y to Z, Z to X — as the X, Y and Z angles
+    let q = DQuat::from_axis_angle(DVec3::ONE.normalize(), std::f64::consts::TAU / 3.0);
+    d.set_triad(&s, TriadEdit::Orient(q));
+    let a: Vec<f64> = d.mv.rotate.iter().map(|e| d.ang(&s, e).unwrap()).collect();
+    assert!(from_xyz([a[0], a[1], a[2]]).angle_between(q) < 1e-6, "{:?}", d.mv.rotate);
+    apply(&mut s, &mut d);
+    let (lo, hi) = bbox(&s, 0);
+    assert!(((hi - lo) - DVec3::new(30.0, 10.0, 20.0)).length() < 1e-6, "{lo:?} {hi:?}");
+    assert!(close(centre(&s, &[b.0]).unwrap(), c));
+    // the triad carries the turn: a trackball drag continues from it
+    let t = d.triad(&s).unwrap();
+    assert!(t.orient.angle_between(q) < 1e-6);
+    assert!(crate::manipulators::value_text(&t, TriadHandle::View).ends_with("deg"));
+    d.cancel(&mut s);
+
+    // Rotate about a straight edge picked in the viewport: the edge doesn't join what moves
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 10, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let e = s.model.bodies[0]
+      .edges()
+      .iter()
+      .find(|e| {
+        (e.start.x - 5.0).abs() < 1e-6
+          && (e.start.y - 5.0).abs() < 1e-6
+          && (e.end.x - 5.0).abs() < 1e-6
+          && (e.end.y - 5.0).abs() < 1e-6
+      })
+      .unwrap()
+      .id;
+    let mut d = move_dialog(&mut s, vec![Sel::Body { body: b }]);
+    d.mv.mtype = "rotate";
+    s.selection.push(Sel::Edge { body: b, edge: e });
+    d.sync_move(&s);
+    assert_eq!((d.axis.as_str(), d.bodies.clone()), ("edge", vec![b.0]));
+    d.refresh_manip(&s);
+    let t = d.triad(&s).unwrap();
+    // its ring on the edge, level with the centre
+    assert!(t.rings == [false, false, true] && t.arrows == [false; 3] && !t.free);
+    assert!(close(t.origin, DVec3::new(5.0, 5.0, 5.0)) && t.axes[2].z.abs() > 0.999, "{t:?}");
+    d.set_triad(&s, TriadEdit::Rotate(2, std::f64::consts::FRAC_PI_2));
+    assert_eq!((d.axis.as_str(), d.angle.as_str()), ("edge", "90 deg"));
+    apply(&mut s, &mut d);
+    let (lo, _) = bbox(&s, 0);
+    // a quarter turn about the corner edge swings the box round it
+    let want = if t.axes[2].z > 0.0 { DVec3::new(5.0, -5.0, 0.0) } else { DVec3::new(-5.0, 5.0, 0.0) };
+    assert!(close(lo, want), "{lo:?}");
+    // previewed, the triad stays on the edge
+    d.mv.pivot = None;
+    d.refresh_manip(&s);
+    assert!(close(d.triad(&s).unwrap().origin, DVec3::new(5.0, 5.0, 5.0)));
+    // and Rotate about a construction axis
+    let ax = run(&mut s, "axis", json!({"method": "two_points", "a": {"at": [0, 0, 0]}, "b": {"at": [1, 1, 0]}}));
+    d.axis = format!("axis:{}", ax["feature"]);
+    let t = d.triad(&s).unwrap();
+    assert!(close(t.axes[2], DVec3::new(1.0, 1.0, 0.0).normalize()));
   }
 }

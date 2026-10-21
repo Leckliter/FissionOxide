@@ -579,8 +579,17 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   }
   v.push(Some(Item::cmd(Cmd::Dialog(Kind::Inspect))));
   let mut ws = Item::new(Action::Open, Icon::Component, "Workspace");
-  for (w, icon) in [("Design", Icon::Component), ("Manufacture", Icon::MotionStudy), ("Drawing", Icon::NewDrawing)] {
-    let current = if w == "Manufacture" { app.manufacture } else { w == "Design" && !app.manufacture };
+  for (w, icon) in [
+    ("Design", Icon::Component),
+    ("Generative Design", Icon::Gauge),
+    ("Manufacture", Icon::MotionStudy),
+    ("Drawing", Icon::NewDrawing),
+  ] {
+    let current = match w {
+      "Manufacture" => app.manufacture,
+      "Generative Design" => app.generative,
+      _ => w == "Design" && !app.manufacture && !app.generative,
+    };
     let label = if current { format!("{w}  ✔") } else { w.to_string() };
     ws.children.push(Item::new(Action::Workspace(w), icon, &label));
   }

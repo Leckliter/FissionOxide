@@ -537,6 +537,34 @@ impl Out {
 /// An R2000 (AC1015) file: the tables, blocks and objects AutoCAD expects of that version, with
 /// handles and owners, and SPLINE / ELLIPSE entities.
 fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
+  let layers = [Layer { name: "0", color: 7, dashed: false }, Layer { name: "CONSTRUCTION", color: 3, dashed: false }];
+  let ents: Vec<(Entity, &str)> =
+    entities.iter().map(|(e, cons)| (e.clone(), if *cons { "CONSTRUCTION" } else { "0" })).collect();
+  write_dxf2000_layered(&layers, &ents, &[])
+}
+
+/// A layer of a layered DXF: its name, colour (AutoCAD colour index) and line type (`dashed`:
+/// DASHED, else continuous).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Layer<'a> {
+  pub name: &'a str,
+  pub color: u8,
+  pub dashed: bool,
+}
+
+/// A single-line TEXT entity: its layer, insertion point, height, angle (degrees) and text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Text<'a> {
+  pub layer: &'a str,
+  pub at: [f64; 2],
+  pub height: f64,
+  pub angle: f64,
+  pub text: String,
+}
+
+/// An R2000 (AC1015) file with named layers (the `0` layer is always there), entities on them and
+/// TEXT entities: for writers that need SPLINEs and layers both (flat pattern DXFs).
+pub fn write_dxf2000_layered(layers: &[Layer], entities: &[(Entity, &str)], texts: &[Text]) -> String {
   let mut o = Out { s: String::new(), next: 0x10 };
   let [vport, ltype, layer, style, view, ucs, appid, dimstyle, block_rec] = std::array::from_fn(|_| o.handle());
   let (ms, ps, root, groups) = (o.handle(), o.handle(), o.handle(), o.handle());
@@ -583,16 +611,29 @@ fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
     (78, "0"),
     (0, "ENDTAB"),
   ]);
-  o.table("LTYPE", &ltype, 3);
+  let dashed = layers.iter().any(|l| l.dashed);
+  o.table("LTYPE", &ltype, 3 + usize::from(dashed));
   for (name, desc) in [("ByBlock", ""), ("ByLayer", ""), ("Continuous", "Solid line")] {
     o.record("LTYPE", &ltype, "AcDbLinetypeTableRecord");
     o.pairs(&[(2, name), (70, "0"), (3, desc), (72, "65"), (73, "0"), (40, "0")]);
   }
+  if dashed {
+    o.record("LTYPE", &ltype, "AcDbLinetypeTableRecord");
+    o.pairs(&[(2, "DASHED"), (70, "0"), (3, "Dashed __ __"), (72, "65"), (73, "2"), (40, "6")]);
+    o.pairs(&[(49, "4"), (74, "0"), (49, "-2"), (74, "0")]);
+  }
   o.pair(0, "ENDTAB");
-  o.table("LAYER", &layer, 2);
-  for (name, color) in [("0", "7"), ("CONSTRUCTION", "3")] {
+  let mut all = vec![Layer { name: "0", color: 7, dashed: false }];
+  all.extend(layers.iter().filter(|l| l.name != "0"));
+  if let Some(l) = layers.iter().find(|l| l.name == "0") {
+    all[0] = *l;
+  }
+  o.table("LAYER", &layer, all.len());
+  for l in &all {
     o.record("LAYER", &layer, "AcDbLayerTableRecord");
-    o.pairs(&[(2, name), (70, "0"), (62, color), (6, "Continuous"), (370, "-3")]);
+    let color = l.color.to_string();
+    let lt = if l.dashed { "DASHED" } else { "Continuous" };
+    o.pairs(&[(2, l.name), (70, "0"), (62, &color), (6, lt), (370, "-3")]);
   }
   o.pair(0, "ENDTAB");
   o.table("STYLE", &style, 1);
@@ -632,8 +673,8 @@ fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
   o.pair(0, "ENDSEC");
 
   o.pairs(&[(0, "SECTION"), (2, "ENTITIES")]);
-  for (e, cons) in entities {
-    let layer = if *cons { "CONSTRUCTION" } else { "0" };
+  for (e, layer) in entities {
+    let layer = *layer;
     match e {
       Entity::Line { a, b } => {
         o.entity("LINE", &ms, layer, "AcDbLine");
@@ -678,6 +719,14 @@ fn write_dxf2000(entities: &[(Entity, bool)]) -> String {
         o.spline(sp);
       }
     }
+  }
+  for t in texts {
+    o.entity("TEXT", &ms, t.layer, "AcDbText");
+    o.point(10, t.at);
+    o.pair(40, &num(t.height));
+    o.pair(1, &t.text);
+    o.pair(50, &num(t.angle));
+    o.pair(100, "AcDbText");
   }
   o.pair(0, "ENDSEC");
 

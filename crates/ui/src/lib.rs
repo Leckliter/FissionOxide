@@ -18,7 +18,9 @@ mod dialogs;
 mod ecad_ui;
 mod form_ui;
 mod forms;
+mod gen_ui;
 mod gpu;
+mod handles;
 mod help;
 mod icons;
 #[cfg(test)]
@@ -198,6 +200,10 @@ pub struct App {
   pub electronics: Option<ecad_ui::EcadView>,
   /// A cut job whose preview failed at this design revision (not retried every frame).
   pub cut_preview_failed: Option<(u32, u64)>,
+  /// In the Generative Design workspace.
+  pub generative: bool,
+  /// The generative study window and its background solves.
+  pub(crate) gd: gen_ui::GenState,
   /// Software updates (Help → Check for Updates).
   pub updates: updates::Updates,
   /// The Preferences dialog and the saved preferences.
@@ -403,6 +409,8 @@ impl App {
       cut_window: None,
       electronics: None,
       cut_preview_failed: None,
+      generative: false,
+      gd: gen_ui::GenState::default(),
       updates: updates::Updates::default(),
       preferences: preferences::Preferences::default(),
       opening: None,
@@ -731,10 +739,22 @@ impl App {
       Ok(r) if report => {
         let ops = r["operations"].as_array().map(Vec::len).unwrap_or(0);
         let min = r["minutes"].as_f64().unwrap_or(0.0);
-        self.status = Some((
-          format!("{ops} operation(s) · about {:.0} min {:.0} s machining", min.floor(), (min.fract() * 60.0).round()),
-          false,
-        ));
+        let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+        let time =
+          format!("{ops} operation(s) · about {:.0} min {:.0} s machining", min.floor(), (min.fract() * 60.0).round());
+        // holder and fixture collisions
+        self.status = Some(match warnings.first() {
+          None => (time, false),
+          Some(w) => (
+            format!(
+              "{time} · {} warning(s): {}{}",
+              warnings.len(),
+              w["message"].as_str().unwrap_or(""),
+              if warnings.len() > 1 { " …" } else { "" }
+            ),
+            true,
+          ),
+        });
       }
       Ok(_) => {}
       Err(e) => {
@@ -954,7 +974,9 @@ impl App {
   /// menus' defaults, the open sketch's toolbar first, then the tab's, then the rest of the
   /// workspace's; a key goes to the first command that has it.
   fn command_key_table(&self) -> Vec<(egui::Modifiers, egui::Key, panels::Cmd)> {
-    let tabs = if self.manufacture && self.drawing.is_none() {
+    let tabs = if self.generative && self.drawing.is_none() {
+      vec![panels::Tab::Generative]
+    } else if self.manufacture && self.drawing.is_none() {
       vec![panels::Tab::Milling, panels::Tab::Utilities]
     } else {
       toolbox::workspace_tabs(self)
@@ -1554,6 +1576,7 @@ impl App {
     config_ui::table_window(self, &ctx);
     preferences::window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
+    gen_ui::window(self, &ctx);
     canvas_ui::windows(self, &ctx);
     help::window(self, &ctx);
     plugins_ui::window(self, &ctx);

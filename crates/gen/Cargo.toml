@@ -1,0 +1,15 @@
+[package]
+name = "fox-gen"
+description = "Generative design: density-based topology optimisation (SIMP) on a voxel grid, iso-surfaces of the outcomes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["rc"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

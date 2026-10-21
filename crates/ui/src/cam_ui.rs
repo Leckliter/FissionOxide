@@ -27,9 +27,12 @@ pub struct ToolEdit {
   pub rpm: String,
   pub feed: String,
   pub plunge: String,
+  pub stickout: String,
+  /// The holder's steps, "Ø×length, …" from its face up (one number: a plain cylinder).
+  pub holder: String,
 }
 
-const FIELDS: [(&str, &str); 10] = [
+const FIELDS: [(&str, &str); 11] = [
   ("diameter", "Diameter (mm)"),
   ("corner_radius", "Corner radius (mm)"),
   ("angle", "Tip angle (°)"),
@@ -39,6 +42,7 @@ const FIELDS: [(&str, &str); 10] = [
   ("rpm", "Spindle speed (rpm)"),
   ("feed", "Cutting feed (mm/min)"),
   ("plunge", "Plunge feed (mm/min)"),
+  ("stickout", "Stickout from the holder (mm)"),
   ("number", "Tool number"),
 ];
 
@@ -67,6 +71,12 @@ impl ToolEdit {
       rpm: n("rpm"),
       feed: n("feed"),
       plunge: n("plunge"),
+      stickout: n("stickout"),
+      // a plain holder from older libraries reads as one step
+      holder: match (s("holder_text"), t.get("holder_diameter").and_then(Value::as_f64)) {
+        (h, Some(d)) if h.is_empty() && d > 0.0 => format!("{d}"),
+        (h, _) => h,
+      },
     }
   }
 
@@ -81,6 +91,7 @@ impl ToolEdit {
       "flutes" => &mut self.flutes,
       "rpm" => &mut self.rpm,
       "feed" => &mut self.feed,
+      "stickout" => &mut self.stickout,
       _ => &mut self.plunge,
     }
   }
@@ -95,6 +106,9 @@ impl ToolEdit {
         p[k] = v.parse::<f64>().map(|x| json!(x)).unwrap_or(json!(v));
       }
     }
+    // the steps are the whole holder
+    p["holder"] = json!(self.holder.trim());
+    p["holder_diameter"] = json!(0);
     p
   }
 }
@@ -198,6 +212,10 @@ pub fn tool_library_window(app: &mut App, ctx: &egui::Context) {
             ui.end_row();
           }
         }
+        ui.label("Holder (Ø×length, … from its face up)")
+          .on_hover_text("Stepped cylinders checked for collisions, e.g. \"20x15, 32x20, 50\"; empty = no holder");
+        ui.add(egui::TextEdit::singleline(&mut e.holder).desired_width(220.0).hint_text("20x15, 32x20, 50"));
+        ui.end_row();
       });
       ui.horizontal(|ui| {
         if ui.button("Save tool").clicked() {

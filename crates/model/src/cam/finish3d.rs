@@ -274,19 +274,35 @@ pub(super) fn steep_shallow(
   Ok(())
 }
 
+/// Most pencil passes either side of a corner.
+pub const MAX_PENCIL_PASSES: u32 = 50;
+
+/// Steeper than this (degrees) between two samples of the relief, the tool would jump a cliff
+/// to get from a corner to an offset pass there: that piece of the pass is left out.
+const PENCIL_CLIFF: f64 = 80.0;
+
+/// Offset passes follow only the stretches of a crease less steep than this (degrees).
+const PENCIL_CLIMB: f64 = 60.0;
+
 /// Pencil finishing: a pass along each crease of the relief that bends up by more than
-/// [`PENCIL_BEND`], where the tool sits in a corner touching the part on two sides.
+/// [`PENCIL_BEND`], where the tool sits in a corner touching the part on two sides, and
+/// `passes` more either side of it a step-over apart (inside out), where the tool rides the
+/// faces meeting at the corner.
 pub(super) fn pencil(
   p: &mut Path,
   setup: &Setup,
   model: &Model,
   op: &Operation,
   faces: &[FaceRef],
+  passes: u32,
 ) -> Result<(), String> {
+  if passes > MAX_PENCIL_PASSES {
+    return Err(format!("at most {MAX_PENCIL_PASSES} pencil passes either side"));
+  }
   let s = Surface::new(setup, model, op, faces)?;
   let rel = Relief::new(&s);
   let marks = creases(&rel);
-  let passes: Vec<(Vec<DVec2>, bool)> = chains(&rel.g, &marks)
+  let mut all: Vec<(Vec<DVec2>, bool)> = chains(&rel.g, &marks)
     .into_iter()
     .map(|(nodes, closed)| {
       let pts: Vec<DVec2> = nodes.iter().map(|k| rel.g.node(*k)).collect();
@@ -294,11 +310,166 @@ pub(super) fn pencil(
     })
     .filter(|(pts, _)| pts.len() > 1)
     .collect();
-  if passes.is_empty() {
+  if all.is_empty() {
     return Err("there are no corners tighter than the tool to pencil".into());
   }
-  s.emit(p, passes, rel.g.h * 3.0);
+  let step = op.tool.diameter * op.stepover;
+  if passes > 0 {
+    let used: Vec<bool> = {
+      // the creases the passes follow, but not where they climb steeply (up a vertical corner,
+      // where there are no faces either side for the tool to ride)
+      let mut on = vec![false; marks.len()];
+      let climb = PENCIL_CLIMB.to_radians().tan();
+      for (pts, _) in &all {
+        for w in pts.windows(2) {
+          let rise = (rel.g.sample(w[1]) - rel.g.sample(w[0])).abs();
+          if rise > climb * (w[1] - w[0]).length() {
+            continue;
+          }
+          let n = (((w[1] - w[0]).length() / (rel.g.h * 0.5)).ceil() as usize).max(1);
+          for k in 0..=n {
+            on[rel.g.index(w[0].lerp(w[1], k as f64 / n as f64))] = true;
+          }
+        }
+      }
+      on
+    };
+    let (dist, from) = nearest(&rel.g, &used);
+    let mut at = all.last().and_then(|(pts, _)| pts.last().copied()).unwrap_or(s.lo);
+    for k in 1..=passes {
+      let d = k as f64 * step;
+      let w = Grid { v: dist.iter().map(|v| v - d).collect(), ..rel.g.clone() };
+      let mut level: Vec<(Vec<DVec2>, bool)> = Vec::new();
+      for l in w.contours() {
+        let keep: Vec<bool> = l.iter().map(|q| rel.reaches(&s, *q) && rides(&rel, &from, *q)).collect();
+        level.extend(runs(&l, &keep, rel.g.h));
+      }
+      // nearest first
+      while !level.is_empty() {
+        let (i, flip) = nearest_run(&level, at);
+        let (mut pts, closed) = level.swap_remove(i);
+        if flip {
+          pts.reverse();
+        }
+        if closed {
+          let i =
+            (0..pts.len()).min_by(|a, b| (pts[*a] - at).length().total_cmp(&(pts[*b] - at).length())).unwrap_or(0);
+          pts.rotate_left(i);
+        }
+        let pts = simplify(&pts, rel.g.h * 0.3, closed);
+        if pts.len() < 2 {
+          continue;
+        }
+        at = if closed { pts[0] } else { pts[pts.len() - 1] };
+        all.push((pts, closed));
+      }
+    }
+  }
+  s.emit(p, all, (rel.g.h * 3.0).max(step * 1.5));
   Ok(())
+}
+
+/// Distance from every node to the nearest node of `set`, and that node (usize::MAX where
+/// there is none): a front grown out from the set, each node taking its neighbours' nearest.
+fn nearest(g: &Grid, set: &[bool]) -> (Vec<f64>, Vec<usize>) {
+  use std::cmp::Reverse;
+  use std::collections::BinaryHeap;
+  let (nx, ny) = (g.nx as i64, g.ny as i64);
+  let n = set.len();
+  let mut dist = vec![f64::INFINITY; n];
+  let mut from = vec![usize::MAX; n];
+  let mut heap = BinaryHeap::new();
+  for k in (0..n).filter(|k| set[*k]) {
+    dist[k] = 0.0;
+    from[k] = k;
+    heap.push(Reverse((0u64, k)));
+  }
+  while let Some(Reverse((dk, k))) = heap.pop() {
+    if f64::from_bits(dk) > dist[k] {
+      continue;
+    }
+    let (i, j) = (k as i64 % nx, k as i64 / nx);
+    let src = g.node(from[k]);
+    for (di, dj) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+      let (a, b) = (i + di, j + dj);
+      if a < 0 || b < 0 || a >= nx || b >= ny {
+        continue;
+      }
+      let m = (b * nx + a) as usize;
+      let dm = (g.node(m) - src).length();
+      if dm < dist[m] - 1e-12 {
+        dist[m] = dm;
+        from[m] = from[k];
+        heap.push(Reverse((dm.to_bits(), m)));
+      }
+    }
+  }
+  (dist, from)
+}
+
+/// Whether the tool gets from the corner nearest `q` out to `q` riding the surface: the relief
+/// never steeper than [`PENCIL_CLIFF`] on the way, and the tool on the part all along.
+fn rides(rel: &Relief, from: &[usize], q: DVec2) -> bool {
+  let g = &rel.g;
+  let k = g.index(q);
+  if from[k] == usize::MAX || !rel.raw[k].is_finite() {
+    return false;
+  }
+  let c = g.node(from[k]);
+  let len = (q - c).length();
+  let n = ((len / (g.h * 0.5)).ceil() as usize).max(1);
+  let limit = PENCIL_CLIFF.to_radians().tan() * len / n as f64;
+  let z = |t: f64| g.sample(c.lerp(q, t));
+  (1..=n).all(|i| {
+    let (a, b) = ((i - 1) as f64 / n as f64, i as f64 / n as f64);
+    rel.raw[g.index(c.lerp(q, b))].is_finite() && (z(b) - z(a)).abs() <= limit + 1e-9
+  })
+}
+
+/// The runs of a closed line where `keep` holds: the whole line closed when it all does, else
+/// open pieces at least `min` long.
+fn runs(l: &[DVec2], keep: &[bool], min: f64) -> Vec<(Vec<DVec2>, bool)> {
+  if keep.iter().all(|x| *x) {
+    return vec![(l.to_vec(), true)];
+  }
+  let Some(start) = keep.iter().position(|x| !*x) else { return Vec::new() };
+  let n = l.len();
+  let mut out = Vec::new();
+  let mut run: Vec<DVec2> = Vec::new();
+  let flush = |run: &mut Vec<DVec2>, out: &mut Vec<(Vec<DVec2>, bool)>| {
+    let length: f64 = run.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    if run.len() > 1 && length >= min {
+      out.push((std::mem::take(run), false));
+    }
+    run.clear();
+  };
+  for k in 1..=n {
+    let i = (start + k) % n;
+    if keep[i] {
+      run.push(l[i]);
+    } else {
+      flush(&mut run, &mut out);
+    }
+  }
+  flush(&mut run, &mut out);
+  out
+}
+
+/// The run nearest `at`: its index, and whether to cut it backwards (open runs only).
+fn nearest_run(runs: &[(Vec<DVec2>, bool)], at: DVec2) -> (usize, bool) {
+  let mut best = (0, false, f64::INFINITY);
+  for (k, (pts, closed)) in runs.iter().enumerate() {
+    let (a, b) = ((pts[0] - at).length(), (pts[pts.len() - 1] - at).length());
+    if *closed {
+      let d = pts.iter().map(|q| (*q - at).length()).fold(f64::INFINITY, f64::min);
+      if d < best.2 {
+        best = (k, false, d);
+      }
+    } else if a.min(b) < best.2 {
+      best = (k, b < a, a.min(b));
+    }
+  }
+  (best.0, best.1)
 }
 
 /// Nodes on a crease of the relief: where its slope turns up by more than the pencil bend

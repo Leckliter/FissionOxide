@@ -20,6 +20,7 @@ pub mod direct;
 pub mod drawing;
 pub mod fillet;
 pub mod form;
+pub mod generative;
 pub mod groups;
 pub mod include;
 pub mod mechanism;
@@ -119,6 +120,9 @@ pub struct Design {
   /// 2D cut jobs (laser, plasma, waterjet) kept with the design and recomputed as it changes.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cut_jobs: Vec<CutJob>,
+  /// Generative design studies.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub generative: Vec<generative::Study>,
   /// Assembly contact sets (see [`assembly::ContactSet`]).
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub contact_sets: Vec<assembly::ContactSet>,
@@ -2146,6 +2150,7 @@ impl Design {
       attributes: Vec::new(),
       cam: Vec::new(),
       cut_jobs: Vec::new(),
+      generative: Vec::new(),
       contact_sets: Vec::new(),
       configurations: config::ConfigTable::default(),
       history_off: false,

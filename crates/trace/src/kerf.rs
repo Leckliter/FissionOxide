@@ -112,7 +112,15 @@ fn components(on: &[bool], w: usize, h: usize) -> (Vec<usize>, usize) {
 
 /// The spots of `region` a disc `kerf` px across can't reach. `border`: the image's outside is
 /// the region's edge (shapes) rather than more of it (the background runs on past the image).
-fn unreachable(region: &[bool], w: usize, h: usize, kerf: f64, border: bool, small: NarrowKind, thin: NarrowKind) -> Vec<Narrow> {
+fn unreachable(
+  region: &[bool],
+  w: usize,
+  h: usize,
+  kerf: f64,
+  border: bool,
+  small: NarrowKind,
+  thin: NarrowKind,
+) -> Vec<Narrow> {
   let r = kerf / 2.0;
   let outside: Vec<bool> = region.iter().map(|v| !v).collect();
   // distance from each pixel centre of the region to the nearest centre outside it (its edge is

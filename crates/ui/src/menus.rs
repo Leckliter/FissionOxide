@@ -786,6 +786,7 @@ const DRAWING: [Group; 8] = [
 
 const CAM_SETUP: &[E] = &[
   c("New Setup", Icon::Box, D(Kind::Form(&forms::CAM_SETUP))),
+  c("Fixtures", Icon::Component, D(Kind::Form(&forms::CAM_FIXTURES))),
   E::Sep,
   c("Tool Library", Icon::Configure, Cmd::CamTools),
 ];
@@ -820,6 +821,36 @@ const CAM_ACTIONS: &[E] = &[
   c("Post Process", Icon::ExportDxf, Cmd::CamPost),
   c("Delete Setup", Icon::Remove, Cmd::CamDelete),
   c("2D Cut (Laser, Plasma, Waterjet)", Icon::ExportDxf, Cmd::Cut2d),
+];
+
+const GEN_DEFINE: &[E] = &[
+  c("New Generative Study", Icon::Plus, Cmd::Gen("study")),
+  E::Sep,
+  c("Preserve Geometry", Icon::Fix, Cmd::Gen("preserve")),
+  c("Obstacle Geometry", Icon::Remove, Cmd::Gen("obstacle")),
+  c("Starting Shape", Icon::Body, Cmd::Gen("start")),
+  E::Sep,
+  c("Structural Loads", Icon::Move, Cmd::Gen("load")),
+  c("Structural Constraints", Icon::Fix, Cmd::Gen("constraint")),
+];
+
+const GEN_CRITERIA: &[E] = &[c("Study Settings", Icon::Gauge, Cmd::Gen("criteria"))];
+
+const GEN_GENERATE: &[E] =
+  &[c("Pre-check", Icon::Interference, Cmd::Gen("precheck")), c("Generate", Icon::Play, Cmd::Gen("generate"))];
+
+const GEN_EXPLORE: &[E] = &[c("Explore", Icon::Views, Cmd::Gen("explore"))];
+
+/// The Generative Design workspace's tab.
+const GENERATIVE: [Group; 4] = [
+  Group {
+    label: "DEFINE",
+    quick: &["Preserve Geometry", "Obstacle Geometry", "Structural Loads", "Structural Constraints"],
+    menu: GEN_DEFINE,
+  },
+  Group { label: "DESIGN CRITERIA", quick: &["Study Settings"], menu: GEN_CRITERIA },
+  Group { label: "GENERATE", quick: &["Pre-check", "Generate"], menu: GEN_GENERATE },
+  Group { label: "EXPLORE", quick: &["Explore"], menu: GEN_EXPLORE },
 ];
 
 /// The Manufacture workspace's MILLING tab.
@@ -1024,6 +1055,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Milling => (&MILLING, &[]),
     Tab::Plugin(_) => (&[], &[]),
     Tab::Form => (&FORM, &[]),
+    Tab::Generative => (&GENERATIVE, &[]),
   }
 }
 
@@ -1047,7 +1079,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 11] = [
+const ALL_TABS: [Tab; 12] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1059,6 +1091,7 @@ const ALL_TABS: [Tab; 11] = [
   Tab::Drawing,
   Tab::Milling,
   Tab::Form,
+  Tab::Generative,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that

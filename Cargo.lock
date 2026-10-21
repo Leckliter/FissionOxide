@@ -1558,6 +1558,7 @@ dependencies = [
  "fox-exchange",
  "fox-expr",
  "fox-form",
+ "fox-gen",
  "fox-hub-server",
  "fox-kernel",
  "fox-model",
@@ -1602,6 +1603,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fox-gen"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fox-hub-server"
 version = "0.1.0"
 dependencies = [
@@ -1635,8 +1644,10 @@ name = "fox-model"
 version = "0.1.0"
 dependencies = [
  "fox-ecad",
+ "fox-exchange",
  "fox-expr",
  "fox-form",
+ "fox-gen",
  "fox-kernel",
  "fox-sketch",
  "log",

@@ -12,7 +12,7 @@ use std::f64::consts::PI;
 
 use fox_kernel::glam::DVec3;
 use fox_kernel::{Bend, Plane, Shape};
-use fox_sketch::{Loop, Profile, PtSpec, Seg, Sketch};
+use fox_sketch::{Loop, Profile, Seg, Sketch, SpunSeg};
 
 use crate::sheet::{self, FlatPattern, SheetInfo};
 use crate::{CornerRelief, LoftMethod};
@@ -225,6 +225,9 @@ pub struct Development {
   /// The flange as built; later cuts are what's missing from it. (Behind a mutex: shapes may
   /// move between threads but not be shared.)
   pub built: Option<std::sync::Arc<std::sync::Mutex<Shape>>>,
+  /// Round reliefs cut through the flat (centre in `outline`'s coordinates, radius): where
+  /// rounded press-brake folds converge on a corner.
+  pub reliefs: Vec<(P2, f64)>,
 }
 
 impl PartialEq for Development {
@@ -236,15 +239,30 @@ impl PartialEq for Development {
 impl Development {
   /// The flat pattern of a sheet `t` thick.
   pub fn flat_pattern(&self, t: f64) -> Result<FlatPattern, String> {
-    let n = self.outline.len();
-    let segs = (0..n).map(|i| Seg::Line { a: self.outline[i], b: self.outline[(i + 1) % n] }).collect();
+    // a fan's apex develops to one point, repeated
+    let mut pts: Vec<P2> = Vec::with_capacity(self.outline.len());
+    for p in &self.outline {
+      if pts.last().is_none_or(|q| len2(sub(*p, *q)) > 1e-9) {
+        pts.push(*p);
+      }
+    }
+    while pts.len() > 1 && len2(sub(pts[0], pts[pts.len() - 1])) <= 1e-9 {
+      pts.pop();
+    }
+    let n = pts.len();
+    let segs = (0..n).map(|i| Seg::Line { a: pts[i], b: pts[(i + 1) % n] }).collect();
     let mut outer = Loop::new(segs);
     if outer.signed_area() < 0.0 {
       outer = outer.reversed();
     }
     let face = Shape::face(&self.plane, &Profile { outer, holes: Vec::new() })
       .map_err(|e| format!("the developed flat pattern overlaps itself ({e})"))?;
-    let shape = face.extrude(-self.plane.normal() * t).map_err(|e| e.to_string())?;
+    let mut shape = face.extrude(-self.plane.normal() * t).map_err(|e| e.to_string())?;
+    let n = self.plane.normal();
+    for (c, r) in &self.reliefs {
+      let hole = Shape::cylinder(self.plane.to_world(*c) + n * t, -n, *r, 3.0 * t).map_err(|e| e.to_string())?;
+      shape = shape.boolean(&hole, fox_kernel::BoolOp::Subtract).map_err(|e| e.to_string())?;
+    }
     Ok(FlatPattern { shape, bends: self.bends.clone(), plane: self.plane })
   }
 }
@@ -276,11 +294,25 @@ pub fn lofted_flange(
   };
   // a die-formed flange is one smooth surface unless a profile has corners; then fine facets
   let smooth = method == LoftMethod::DieFormed && !sharp;
-  let strip = Strip::new(pa, pb, flip, smooth)?;
+  let round = rounded && method == LoftMethod::PressBrake;
+  let strip = Strip::new(pa, pb, flip, smooth, round)?;
   let shape = if smooth { strip.smooth_solid(t)? } else { strip.solid(t)? };
   let mut dev = strip.develop(t, k, method == LoftMethod::PressBrake)?;
-  let (shape, warning) = if rounded && method == LoftMethod::PressBrake {
-    crate::sheet3::round_folds(&shape, &dev.bends, sheet)?
+  let (shape, warning) = if round {
+    // where folds converge on a corner, a round relief through the sheet (in the flat too), so
+    // each fold ends on its wall and can be rounded
+    let rho = (sheet.corner_relief_size() / 2.0).max(t / 2.0);
+    let m = strip.a.len();
+    let mut shape = shape;
+    let mut corners = Vec::new();
+    for (i, p, up) in strip.corners() {
+      let hole = Shape::cylinder(p - up * (2.0 * t), up, rho, 5.0 * t).map_err(|e| e.to_string())?;
+      shape = shape.boolean(&hole, fox_kernel::BoolOp::Subtract).map_err(|e| e.to_string())?;
+      let at = if i < m { dev.outline[i] } else { dev.outline[3 * m - 1 - i] };
+      dev.reliefs.push((at, rho));
+      corners.push((p, rho));
+    }
+    crate::sheet3::round_folds(&shape, &dev.bends, sheet, &corners)?
   } else {
     (shape, None)
   };
@@ -645,7 +677,10 @@ struct Strip {
 }
 
 impl Strip {
-  fn new(a: Vec<DVec3>, b: Vec<DVec3>, flip: bool, smooth: bool) -> Result<Strip, String> {
+  /// `one_apex`: a fan's apex (one point repeated along a profile) gets one offset for all its
+  /// repeats, so the sheet's other face also comes to one point there (where rounded folds
+  /// converge on a relief).
+  fn new(a: Vec<DVec3>, b: Vec<DVec3>, flip: bool, smooth: bool, one_apex: bool) -> Result<Strip, String> {
     let quads = a.len().saturating_sub(1);
     if quads == 0 {
       return Err("the profiles are too short".into());
@@ -695,10 +730,16 @@ impl Strip {
           tri_n[v].push(nt);
         }
       }
+      let same: Vec<Vec<usize>> = (0..2 * m)
+        .map(|v| match one_apex {
+          true => (0..2 * m).filter(|&w| (pts[w] - pts[v]).length() < 1e-9).collect(),
+          false => vec![v],
+        })
+        .collect();
       let vs: Vec<DVec3> = (0..2 * m)
         .map(|v| {
-          let u = sum[v].normalize_or_zero();
-          let c = tri_n[v].iter().map(|nt| u.dot(*nt)).fold(1.0, f64::min).max(0.5);
+          let u = same[v].iter().map(|&w| sum[w]).sum::<DVec3>().normalize_or_zero();
+          let c = same[v].iter().flat_map(|&w| &tri_n[w]).map(|nt| u.dot(*nt)).fold(1.0, f64::min).max(0.5);
           u / c
         })
         .collect();
@@ -706,6 +747,50 @@ impl Strip {
       st.vb = vs[m..].to_vec();
     }
     Ok(st)
+  }
+
+  /// The folds between neighbouring facets (along a diagonal or a generator), on the profiles:
+  /// the two points (indices into a ++ b) the fold runs between, the two triangles and the
+  /// angle between them.
+  fn folds(&self) -> Vec<([usize; 2], [usize; 3], [usize; 3], f64)> {
+    let prof: Vec<DVec3> = self.a.iter().chain(&self.b).copied().collect();
+    let normal =
+      |tri: &[usize; 3]| (prof[tri[1]] - prof[tri[0]]).cross(prof[tri[2]] - prof[tri[0]]).normalize_or_zero();
+    let ftris = self.triangles();
+    let near = |i: usize, j: usize| (prof[i] - prof[j]).length() < 1e-9;
+    let mut out = Vec::new();
+    for j in 0..ftris.len() {
+      for l in j + 1..(j + 4).min(ftris.len()) {
+        let (t1, t2) = (ftris[j], ftris[l]);
+        let shared: Vec<usize> = t1.iter().copied().filter(|&v| t2.iter().any(|&w| near(v, w))).collect();
+        if shared.len() != 2 {
+          continue;
+        }
+        let angle = normal(&t1).dot(normal(&t2)).clamp(-1.0, 1.0).acos();
+        if angle >= 1e-3 {
+          out.push(([shared[0], shared[1]], t1, t2, angle));
+        }
+      }
+    }
+    out
+  }
+
+  /// Where folds converge: points of the profiles that two or more folds run from (the apex of
+  /// a fan of facets, or two folds meeting in a V). The index of the point in a ++ b, the point,
+  /// and the unit direction into the material there.
+  fn corners(&self) -> Vec<(usize, DVec3, DVec3)> {
+    let m = self.a.len();
+    let prof: Vec<DVec3> = self.a.iter().chain(&self.b).copied().collect();
+    let dirs: Vec<DVec3> = self.va.iter().chain(&self.vb).copied().collect();
+    let ends: Vec<usize> = self.folds().iter().flat_map(|f| f.0).collect();
+    let mut out: Vec<(usize, DVec3, DVec3)> = Vec::new();
+    for (i, p) in prof.iter().enumerate().take(2 * m) {
+      let meet = ends.iter().filter(|&&e| (prof[e] - *p).length() < 1e-9).count();
+      if meet >= 2 && !out.iter().any(|(_, q, _)| (*q - *p).length() < 1e-9) {
+        out.push((i, *p, dirs[i].normalize_or_zero()));
+      }
+    }
+    out
   }
 
   /// The triangles with area on the profiles (a fan's apex repeats one point).
@@ -880,34 +965,19 @@ impl Strip {
     outline.extend((0..m).rev().map(|i| to2(flat[m + i])));
     let mut bends = Vec::new();
     if folds {
-      // folds between neighbouring facets (along a diagonal or a generator), on the profiles
       let prof: Vec<DVec3> = self.a.iter().chain(&self.b).copied().collect();
-      let normal =
-        |tri: &[usize; 3]| (prof[tri[1]] - prof[tri[0]]).cross(prof[tri[2]] - prof[tri[0]]).normalize_or_zero();
-      let ftris = self.triangles();
       let near = |i: usize, j: usize| (prof[i] - prof[j]).length() < 1e-9;
-      for j in 0..ftris.len() {
-        for l in j + 1..(j + 4).min(ftris.len()) {
-          let (t1, t2) = (ftris[j], ftris[l]);
-          let shared: Vec<usize> = t1.iter().copied().filter(|&v| t2.iter().any(|&w| near(v, w))).collect();
-          if shared.len() != 2 {
-            continue;
-          }
-          let (n1, n2) = (normal(&t1), normal(&t2));
-          let angle = n1.dot(n2).clamp(-1.0, 1.0).acos();
-          if angle < 1e-3 {
-            continue;
-          }
-          let far = t2.iter().copied().find(|&w| !shared.iter().any(|&v| near(v, w))).unwrap_or(shared[0]);
-          let mat = if toward_material { n1 } else { -n1 };
-          let inner = (prof[far] - prof[shared[0]]).dot(mat) < 0.0;
-          bends.push(Bend {
-            start: plane.to_world(to2(flat[shared[0]])),
-            end: plane.to_world(to2(flat[shared[1]])),
-            angle,
-            inner,
-          });
-        }
+      for (shared, t1, t2, angle) in self.folds() {
+        let n1 = (prof[t1[1]] - prof[t1[0]]).cross(prof[t1[2]] - prof[t1[0]]).normalize_or_zero();
+        let far = t2.iter().copied().find(|&w| !shared.iter().any(|&v| near(v, w))).unwrap_or(shared[0]);
+        let mat = if toward_material { n1 } else { -n1 };
+        let inner = (prof[far] - prof[shared[0]]).dot(mat) < 0.0;
+        bends.push(Bend {
+          start: plane.to_world(to2(flat[shared[0]])),
+          end: plane.to_world(to2(flat[shared[1]])),
+          angle,
+          inner,
+        });
       }
     }
     let quads = self.n.len();
@@ -920,7 +990,7 @@ impl Strip {
       })
       .filter(|(p3, _, _)| (p3[1] - p3[0]).cross(p3[2] - p3[0]).length() > 1e-12)
       .collect();
-    Ok(Development { plane, outline, bends, volume: 0.0, facets, depth: d, built: None })
+    Ok(Development { plane, outline, bends, volume: 0.0, facets, depth: d, built: None, reliefs: Vec::new() })
   }
 }
 
@@ -1035,74 +1105,80 @@ pub fn corner_relief(
 
 // ---------------------------------------------------------------- flat pattern sketch
 
-/// The flat pattern as an editable sketch on `plane` (which should be the flat's plane or
-/// parallel to it): the outline's lines, arcs and circles (other curves as polylines) and the
-/// bend centre lines as construction lines. `shift` moves everything in the sketch.
-pub fn flat_sketch(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Sketch, String> {
-  use fox_sketch::{CurveKind, PointId};
+/// The flat pattern's outline and bend lines in `plane`'s coordinates (`plane` should be the
+/// flat's plane or parallel to it), moved by `shift`: lines, arcs and circles as they are,
+/// splines and ellipses as Bézier chains (exact for non-rational splines), and the bend centre
+/// lines as centre lines.
+pub fn flat_outline(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Vec<SpunSeg>, String> {
   let pl = &flat.plane;
   let n = pl.normal();
   let on_plane = |p: DVec3| (p - pl.origin).dot(n).abs() < 1e-4;
   let edges = flat.shape.edges().map_err(|e| e.to_string())?;
-  let lines = flat.shape.edge_lines(0.01).map_err(|e| e.to_string())?;
+  let faces = flat.shape.faces().map_err(|e| e.to_string())?;
+  // a seam between two faces of the flat's top is no edge of the part (as in the DXF)
+  let top = |id: u32| {
+    faces.iter().any(|f| {
+      f.id == id && f.kind == fox_kernel::SurfaceKind::Plane && f.normal.dot(n) > 1.0 - 1e-9 && on_plane(f.origin)
+    })
+  };
   let loc = |v: DVec3| {
     let q = plane.to_local(v);
     [q[0] + shift[0], q[1] + shift[1]]
   };
-  let mut sk = Sketch::new();
-  // ends shared by outline curves become shared sketch points
-  let mut points: Vec<(P2, PointId)> = Vec::new();
-  let mut pt = |sk: &mut Sketch, q: P2| -> PointId {
-    if let Some((_, id)) = points.iter().find(|(p, _)| len2(sub(*p, q)) < 1e-6) {
-      return *id;
-    }
-    let id = sk.add_point(q[0], q[1]);
-    points.push((q, id));
-    id
-  };
-  let mut kinds = Vec::new();
+  let mut out = Vec::new();
   for e in &edges {
     if !(on_plane(e.start) && on_plane(e.end) && on_plane(e.mid)) || e.kind == fox_kernel::CurveKind::Degenerate {
       continue;
     }
-    match e.kind {
-      fox_kernel::CurveKind::Line => {
-        kinds.push(CurveKind::Line { a: pt(&mut sk, loc(e.start)), b: pt(&mut sk, loc(e.end)) })
-      }
-      fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
-        kinds.push(CurveKind::Circle { center: pt(&mut sk, loc(e.center)), radius: e.radius })
-      }
-      fox_kernel::CurveKind::Circle => {
-        // sketch arcs run counter-clockwise (seen along the sketch normal) from start to end
-        let (a, b) = if e.axis.dot(plane.normal()) > 0.0 { (e.start, e.end) } else { (e.end, e.start) };
-        kinds.push(CurveKind::Arc {
-          center: pt(&mut sk, loc(e.center)),
-          start: pt(&mut sk, loc(a)),
-          end: pt(&mut sk, loc(b)),
-        });
-      }
-      _ => {
-        for l in lines.iter().filter(|l| l.id == e.id) {
-          for w in l.points.windows(2) {
-            if len2(sub(loc(w[0]), loc(w[1]))) > 1e-9 {
-              kinds.push(CurveKind::Line { a: pt(&mut sk, loc(w[0])), b: pt(&mut sk, loc(w[1])) });
-            }
-          }
-        }
-      }
+    if e.faces[1] != 0 && top(e.faces[0]) && top(e.faces[1]) {
+      continue;
     }
+    out.push(match e.kind {
+      fox_kernel::CurveKind::Line => SpunSeg::Line { a: loc(e.start), b: loc(e.end) },
+      fox_kernel::CurveKind::Circle if (e.start - e.end).length() < 1e-6 => {
+        SpunSeg::Circle { center: loc(e.center), radius: e.radius }
+      }
+      fox_kernel::CurveKind::Circle => SpunSeg::Arc { a: loc(e.start), mid: loc(e.mid), b: loc(e.end) },
+      _ => {
+        let nurbs = flat.shape.edge_nurbs(e.id).map_err(|e| e.to_string())?;
+        let sp = fox_exchange::dxf::Spline {
+          degree: nurbs.degree,
+          knots: nurbs.knots,
+          control: nurbs.poles.iter().map(|q| loc(*q)).collect(),
+          weights: nurbs.weights,
+          fit: Vec::new(),
+        };
+        let pieces = sp.beziers();
+        if pieces.is_empty() {
+          return Err(format!("edge {} of the flat pattern could not be converted", e.id));
+        }
+        let mut points = vec![pieces[0][0]];
+        for b in &pieces {
+          points.extend_from_slice(&b[1..]);
+        }
+        SpunSeg::Bezier { points }
+      }
+    });
   }
-  if kinds.is_empty() {
+  if out.is_empty() {
     return Err("the flat pattern has no outline".into());
   }
-  let err = |e: fox_sketch::SketchError| e.to_string();
-  for k in kinds {
-    sk.add_curve(k).map_err(err)?;
-  }
   for b in &flat.bends {
-    let (s, e) = (loc(b.start), loc(b.end));
-    let (id, _) = sk.add_line(PtSpec::At(s[0], s[1]), PtSpec::At(e[0], e[1])).map_err(err)?;
-    sk.set_construction(id, true).map_err(err)?;
+    out.push(SpunSeg::Centerline { a: loc(b.start), b: loc(b.end) });
+  }
+  Ok(out)
+}
+
+/// The flat pattern as an editable sketch on `plane` (see [`flat_outline`]): free curves that no
+/// longer follow the body.
+pub fn flat_sketch(flat: &FlatPattern, plane: &Plane, shift: P2) -> Result<Sketch, String> {
+  let outline = flat_outline(flat, plane, shift)?;
+  let mut sk = Sketch::new();
+  let id = sk.add_flat(0, false, None);
+  sk.set_flat_outline(id, outline).map_err(|e| e.to_string())?;
+  sk.flats.clear();
+  for p in sk.points.iter_mut().filter(|p| p.id != fox_sketch::ORIGIN) {
+    p.fixed = false;
   }
   Ok(sk)
 }

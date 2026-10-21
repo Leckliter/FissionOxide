@@ -358,8 +358,8 @@ fn a_canvas_traces_where_it_lies_at_its_calibrated_size() {
   // a rotated canvas on a parallel offset plane: the trace turns with it
   let mut s = Session::default();
   let plane = json!({"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]});
-  let c = run(&mut s, "canvas.insert", json!({"image": image, "plane": plane, "width": 200, "angle": 90}))["feature"]
-    .clone();
+  let c =
+    run(&mut s, "canvas.insert", json!({"image": image, "plane": plane, "width": 200, "angle": 90}))["feature"].clone();
   run(&mut s, "sketch.create", json!({"plane": "xy"}));
   let r = run(&mut s, "sketch.trace", json!({"canvas": c}));
   assert!((r["angle"].as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{r}");

@@ -163,7 +163,9 @@ fn loft_profile(s: &Session, p: &Value, k: &str) -> Result<LoftProfile, CmdError
 }
 
 /// The flat pattern as a new sketch: on the stationary face, or on XY with its lower-left corner
-/// at the origin (`on: "xy"`, and always for lofted flanges, which have no stationary face).
+/// at the origin (`on: "xy"`, and always for lofted flanges, which have no stationary face). Its
+/// curves follow the body as the model changes (fixed, as projected geometry), unless `follow`
+/// is false: then they are free curves made once.
 fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
   // forms pass the picked bodies as a list
   let mut p = p.clone();
@@ -178,6 +180,13 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
     }
   }
   let p = &p;
+  // `follow: false`, or (from the form) `curves: "once"`, makes free curves once
+  let follow = match (p.get("follow").and_then(Value::as_bool), opt_str(p, "curves")) {
+    (Some(f), _) => f,
+    (None, None | Some("follow")) => true,
+    (None, Some("once")) => false,
+    (None, Some(o)) => return Err(CmdError::new(format!("unknown curves '{o}' (follow, once)"))),
+  };
   let id = sheet_body(s, p)?;
   let face = p.get("face").map(|f| face_ref(s, f)).transpose()?;
   if face.as_ref().is_some_and(|f| f.body != id) {
@@ -195,22 +204,47 @@ fn flat_sketch(s: &mut Session, p: &Value) -> CmdResult {
     "xy" => false,
     o => return Err(CmdError::new(format!("unknown placement '{o}' (face, xy)"))),
   };
+  let picked = |fid: u32| body.faces().iter().find(|f| f.id == fid).copied().ok_or(CmdError::new("no such face"));
   let (plane, sketch) = if let (true, Some(fid)) = (on_face, fid) {
-    let info = *body.faces().iter().find(|f| f.id == fid).ok_or(CmdError::new("no such face"))?;
-    let pl = fox_model::regen::sketch_plane_on(info.normal, info.origin, s.design.frames()).map_err(CmdError::new)?;
-    let sk = fox_model::sheet2::flat_sketch(&flat, &pl, [0.0, 0.0]).map_err(CmdError::new)?;
-    (PlaneRef::Face { face: face_ref(s, &json!({"body": id.0, "face": fid}))?, x: None }, sk)
+    let info = picked(fid)?;
+    let plane = PlaneRef::Face { face: face_ref(s, &json!({"body": id.0, "face": fid}))?, x: None };
+    let sketch = if follow {
+      let mut sk = fox_sketch::Sketch::new();
+      sk.add_flat(id.0, false, None);
+      sk
+    } else {
+      let pl = fox_model::regen::sketch_plane_on(info.normal, info.origin, s.design.frames()).map_err(CmdError::new)?;
+      fox_model::sheet2::flat_sketch(&flat, &pl, [0.0, 0.0]).map_err(CmdError::new)?
+    };
+    (plane, sketch)
   } else {
-    let sk = fox_model::sheet2::flat_sketch(&flat, &flat.plane, [0.0, 0.0]).map_err(CmdError::new)?;
-    let (lo, _) = sk.bounds().ok_or(CmdError::new("the flat pattern is empty"))?;
-    let sk = fox_model::sheet2::flat_sketch(&flat, &flat.plane, [-lo[0], -lo[1]]).map_err(CmdError::new)?;
-    (PlaneRef::Origin { plane: OriginPlane::Xy }, sk)
+    let sketch = if follow {
+      // the stationary face, when one was picked, as a point on it and its normal
+      let pick = match (&face, fid) {
+        (Some(_), Some(fid)) if !developed => {
+          let info = picked(fid)?;
+          Some((info.center.to_array(), info.normal.to_array()))
+        }
+        _ => None,
+      };
+      let mut sk = fox_sketch::Sketch::new();
+      sk.add_flat(id.0, true, pick);
+      sk
+    } else {
+      let sk = fox_model::sheet2::flat_sketch(&flat, &flat.plane, [0.0, 0.0]).map_err(CmdError::new)?;
+      let (lo, _) = sk.bounds().ok_or(CmdError::new("the flat pattern is empty"))?;
+      fox_model::sheet2::flat_sketch(&flat, &flat.plane, [-lo[0], -lo[1]]).map_err(CmdError::new)?
+    };
+    (PlaneRef::Origin { plane: OriginPlane::Xy }, sketch)
   };
-  let (curves, bends) = (sketch.curves.len(), flat.bends.len());
+  let bends = flat.bends.len();
   let mut out = add_feature(s, FeatureKind::Sketch { plane, sketch, links: Vec::new() })?;
+  let sk = out["feature"].as_u64().map(|f| fox_model::FeatureId(f as u32));
+  let curves = sk.and_then(|f| s.model.sketches.get(&f)).map_or(0, |r| r.sketch.curves.len());
   out["body"] = json!(id.0);
   out["curves"] = json!(curves);
   out["bends"] = json!(bends);
+  out["follows"] = json!(follow);
   Ok(out)
 }
 

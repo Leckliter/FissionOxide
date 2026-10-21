@@ -708,7 +708,11 @@ impl Store {
 
   pub fn create_folder(&mut self, project: &str, parent: Option<&str>, name: &str) -> Result<String> {
     if self.remote.is_some() {
-      return self.remote_op(ops::Op::CreateFolder { project: project.into(), parent: parent.map(Into::into), name: name.into() });
+      return self.remote_op(ops::Op::CreateFolder {
+        project: project.into(),
+        parent: parent.map(Into::into),
+        name: name.into(),
+      });
     }
     let name = Self::clean_name(name)?;
     self.project(project)?;
@@ -870,9 +874,10 @@ impl Store {
   /// these): only names the index lists.
   pub fn item_file(&self, item: &str, file: &str) -> Result<Vec<u8>> {
     let it = self.item(item)?;
-    let listed = it.versions.iter().any(|v| {
-      v.file == file || v.thumbnail.as_deref() == Some(file) || v.original.as_deref() == Some(file)
-    });
+    let listed = it
+      .versions
+      .iter()
+      .any(|v| v.file == file || v.thumbnail.as_deref() == Some(file) || v.original.as_deref() == Some(file));
     if !listed {
       return Err(StoreError::NotFound(format!("{} has no file '{file}'", it.name)));
     }
@@ -943,7 +948,12 @@ impl Store {
   /// Adds a version to an existing item; returns its number.
   pub fn add_version(&mut self, item: &str, content: &[u8], origin: Origin, meta: VersionMeta) -> Result<u32> {
     if self.remote.is_some() {
-      return self.remote_op(ops::Op::AddVersion { item: item.into(), content: content.into(), origin, meta: meta.into() });
+      return self.remote_op(ops::Op::AddVersion {
+        item: item.into(),
+        content: content.into(),
+        origin,
+        meta: meta.into(),
+      });
     }
     if self.item(item)?.trashed {
       return Err(invalid("the item is in the trash; restore it first"));
@@ -1160,7 +1170,11 @@ impl Store {
 
   pub fn move_item(&mut self, item: &str, project: &str, folder: Option<&str>) -> Result<()> {
     if self.remote.is_some() {
-      return self.remote_op(ops::Op::MoveItem { item: item.into(), project: project.into(), folder: folder.map(Into::into) });
+      return self.remote_op(ops::Op::MoveItem {
+        item: item.into(),
+        project: project.into(),
+        folder: folder.map(Into::into),
+      });
     }
     self.project(project)?;
     if let Some(f) = folder
@@ -1426,7 +1440,8 @@ impl Store {
     if !steal {
       self.check_unlocked(item)?;
     }
-    let lock = EditLock { user: self.user.clone(), session: self.session.clone(), host: self.host.clone(), since: now() };
+    let lock =
+      EditLock { user: self.user.clone(), session: self.session.clone(), host: self.host.clone(), since: now() };
     let it = self.item_mut(item)?;
     if it.kind != ItemKind::Design {
       return Err(invalid(format!("{} is a file, not a design: only designs can be locked", it.name)));
@@ -1440,7 +1455,9 @@ impl Store {
     };
     it.lock = Some(lock.clone());
     match before {
-      Some(b) if b.user != lock.user => self.log(&project, Some(item), format!("took the lock on {name} from {}", b.user)),
+      Some(b) if b.user != lock.user => {
+        self.log(&project, Some(item), format!("took the lock on {name} from {}", b.user))
+      }
       Some(_) => {}
       None => self.log(&project, Some(item), format!("locked {name} for editing")),
     }

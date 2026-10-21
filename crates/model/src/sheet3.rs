@@ -79,22 +79,31 @@ pub fn bend_past_end(edges: &[EdgeInfo], p: DVec3, out: DVec3, w: DVec3, r: f64,
 // ---------------------------------------------------------------- lofted flanges
 
 /// Rounds the folds between a press-brake flange's facets: the inside of each fold gets the
-/// rule's bend radius, the outside that plus the thickness. Folds that meet too closely to round
-/// (a fan of facets converging on a corner) stay sharp, with a warning. The developed flat
-/// pattern stays as it is: a fold of angle θ shortens the flat by ρ·(2·tan(θ/2) − θ) (ρ the
-/// neutral radius), which `bends` (the folds in the flat) is checked against.
-pub fn round_folds(shape: &Shape, bends: &[Bend], info: &SheetInfo) -> Result<(Shape, Option<String>), String> {
+/// rule's bend radius, the outside that plus the thickness. Where folds converge on a corner
+/// (`corners`: each corner and the radius of the relief already cut there; the apex of a fan of
+/// facets, or two folds meeting in a V) the bends are conical: from the relief their radius grows
+/// in proportion to the distance from the corner, to the full radius at the fold's far end. A
+/// fold that still can't be rounded gets a smaller bend, or one that closes towards its ends,
+/// and the rest stay sharp, with a warning. The developed flat pattern stays as it is: a fold of
+/// angle θ shortens the flat by ρ·(2·tan(θ/2) − θ) (ρ the neutral radius), which `bends` (the
+/// folds in the flat) is checked against.
+pub fn round_folds(
+  shape: &Shape,
+  bends: &[Bend],
+  info: &SheetInfo,
+  corners: &[(DVec3, f64)],
+) -> Result<(Shape, Option<String>), String> {
   let (t, r) = (info.thickness, info.bend_radius);
   if r <= 1e-9 {
     return Err("rounded bends need a bend radius above zero".into());
   }
   let ke = |e: fox_kernel::KernelError| e.to_string();
-  let folds = |s: &Shape| -> Result<Vec<(u32, f64, DVec3)>, String> {
+  let folds = |s: &Shape| -> Result<Vec<Fold>, String> {
     let (faces, edges) = (s.faces().map_err(ke)?, s.edges().map_err(ke)?);
     Ok(
-      sheet::sharp_corners(&faces, &edges, t, r)
+      lofted_folds(&faces, &edges, t, r)
         .into_iter()
-        .filter_map(|(id, rad)| edges.iter().find(|e| e.id == id).map(|e| (id, rad, e.mid)))
+        .filter_map(|(id, rad)| edges.iter().find(|e| e.id == id).map(|e| Fold { id, rad, a: e.start, b: e.end }))
         .collect(),
     )
   };
@@ -103,36 +112,192 @@ pub fn round_folds(shape: &Shape, bends: &[Bend], info: &SheetInfo) -> Result<(S
     return Ok((shape.clone(), None));
   }
   let mut warnings = Vec::new();
-  let shape = match shape.fillet_each(&all.iter().map(|(id, rad, _)| (*id, *rad)).collect::<Vec<_>>()) {
-    Ok(s) => s,
-    Err(_) => {
-      // one at a time, skipping those that fail
-      let mut s = shape.clone();
-      let mut failed: Vec<DVec3> = Vec::new();
-      for _ in 0..2 * all.len() {
-        let near = |m: DVec3| failed.iter().any(|f| (*f - m).length() < 1e-6 * (1.0 + t));
-        let Some((id, rad, mid)) = folds(&s)?.into_iter().find(|(_, _, m)| !near(*m)) else { break };
-        match s.fillet_each(&[(id, rad)]) {
-          Ok(n) if n.is_valid() => s = n,
-          _ => failed.push(mid),
-        }
-      }
-      // edges on both faces of the sheet: each fold has two
-      let sharp = folds(&s)?.len();
-      warnings.push(format!(
-        "{} of {} fold edges meet too closely to round (or the facets are narrower than the bend); they stay sharp",
-        sharp,
-        all.len()
-      ));
-      s
+  // the corner a fold runs from: the relief one of its ends lies on (the other end clear of it)
+  let corner_of = |f: &Fold| {
+    let on = |p: DVec3| corners.iter().find(|(c, rr)| (p - *c).length() < rr + 2.0 * t).map(|(c, _)| *c);
+    match (on(f.a), on(f.b)) {
+      (Some(c), None) | (None, Some(c)) => Some(c),
+      _ => None,
     }
   };
+  let conical = |f: &Fold| -> Vec<(f64, f64)> {
+    let Some(c) = corner_of(f) else { return constant(f.rad) };
+    let far = (f.a - c).length().max((f.b - c).length());
+    (0..=8)
+      .map(|k| {
+        let u = k as f64 / 8.0;
+        (u, f.rad * ((f.a + (f.b - f.a) * u) - c).length() / far)
+      })
+      .collect()
+  };
+  // the folds clear of corners first (true cylinders), then the converging ones, a corner at a
+  // time
+  let mut converging: Vec<Vec<DVec3>> = Vec::new();
+  for (c, _) in corners {
+    let at: Vec<DVec3> = all.iter().filter(|f| corner_of(f) == Some(*c)).map(Fold::mid).collect();
+    if !at.is_empty() {
+      converging.push(at);
+    }
+  }
+  let rest: Vec<Vec<DVec3>> = all.iter().filter(|f| corner_of(f).is_none()).map(|f| vec![f.mid()]).collect();
+  let shape = round_batch(shape.clone(), &folds, rest, t, &|f| constant(f.rad))?;
+  let shape = round_batch(shape, &folds, converging, t, &conical)?;
+  let shape = round_tapered(shape, &folds, t)?;
+  // edges on both faces of the sheet: each fold has two
+  let sharp = folds(&shape)?.len();
+  if sharp > 0 {
+    warnings.push(format!(
+      "{} of {} fold edges meet too closely to round (or the facets are narrower than the bend); they stay sharp",
+      sharp,
+      all.len()
+    ));
+  }
   let rho = r + info.k_factor * t;
   let deduction = bends.iter().map(|b| rho * (2.0 * (b.angle / 2.0).tan() - b.angle)).fold(0.0, f64::max);
   if deduction > 0.01 {
     warnings.push(format!("the flat pattern leaves out up to {deduction:.3} mm of bend deduction at each bend"));
   }
   Ok((shape, (!warnings.is_empty()).then(|| warnings.join("; "))))
+}
+
+/// The sharp folds of a press-brake lofted flange, with the fillet radius that turns each into a
+/// bend of inside radius `r` (as [`sheet::sharp_corners`]). The sheet's faces are found more
+/// loosely than there: around a corner where facets converge, the offset facets can't all stay
+/// exactly parallel to their inside faces, so a face of the sheet is a planar face with a nearly
+/// opposite one about `t` away.
+pub fn lofted_folds(faces: &[fox_kernel::FaceInfo], edges: &[EdgeInfo], t: f64, r: f64) -> Vec<(u32, f64)> {
+  use fox_kernel::SurfaceKind;
+  let skin = |id: u32| {
+    let f = faces.iter().find(|f| f.id == id && f.kind == SurfaceKind::Plane)?;
+    faces
+      .iter()
+      .filter(|g| g.kind == SurfaceKind::Plane && g.normal.dot(f.normal) < -0.98)
+      .any(|g| {
+        let d = (f.center - g.origin).dot(g.normal).abs();
+        d > 0.7 * t && d < 1.3 * t
+      })
+      .then_some(*f)
+  };
+  let mut out = Vec::new();
+  for e in edges {
+    if e.kind != CurveKind::Line || e.faces[1] == 0 {
+      continue;
+    }
+    let (Some(f1), Some(f2)) = (skin(e.faces[0]), skin(e.faces[1])) else { continue };
+    if f1.normal.dot(f2.normal).abs() > 0.9999 {
+      continue;
+    }
+    let convex = (f1.center - e.mid).dot(f2.normal) < 0.0;
+    out.push((e.id, if convex { r + t } else { r }));
+  }
+  out
+}
+
+/// A sharp fold edge of a shape: its id, the fillet radius that makes it a bend, its ends.
+#[derive(Debug, Clone, Copy)]
+struct Fold {
+  id: u32,
+  rad: f64,
+  a: DVec3,
+  b: DVec3,
+}
+
+impl Fold {
+  fn mid(&self) -> DVec3 {
+    (self.a + self.b) / 2.0
+  }
+}
+
+/// The fold edges of a shape.
+type Folds<'a> = dyn Fn(&Shape) -> Result<Vec<Fold>, String> + 'a;
+
+/// A radius law holding `rad` along the edge.
+fn constant(rad: f64) -> Vec<(f64, f64)> {
+  vec![(0.0, rad), (1.0, rad)]
+}
+
+/// A fillet that comes out as one valid solid (constant radii as true cylinders).
+fn fillet_ok(s: &Shape, edges: &[(u32, Vec<(f64, f64)>)]) -> Option<Shape> {
+  let flat = |l: &[(f64, f64)]| l.iter().all(|(_, r)| (r - l[0].1).abs() < 1e-12);
+  let made = if edges.iter().all(|(_, l)| flat(l)) {
+    s.fillet_each(&edges.iter().map(|(id, l)| (*id, l[0].1)).collect::<Vec<_>>())
+  } else {
+    s.fillet_laws(edges)
+  };
+  made.ok().filter(|n| n.is_valid() && n.solid_count() == 1)
+}
+
+/// Rounds the folds whose midpoints are in `groups` with the radius laws `law` gives them: all
+/// in one fillet, else group by group, else one by one, a fold that fails on its own getting a
+/// slightly smaller law before it is given up (OCCT's fillets fail now and then at one size).
+fn round_batch(
+  shape: Shape,
+  folds: &Folds,
+  groups: Vec<Vec<DVec3>>,
+  t: f64,
+  law: &dyn Fn(&Fold) -> Vec<(f64, f64)>,
+) -> Result<Shape, String> {
+  let tol = 1e-6 * (1.0 + t);
+  // edge ids change with every fillet: find the folds again by their midpoints
+  let find = |s: &Shape, mids: &[DVec3]| -> Result<Vec<(u32, Vec<(f64, f64)>)>, String> {
+    Ok(
+      folds(s)?.iter().filter(|f| mids.iter().any(|q| (*q - f.mid()).length() < tol)).map(|f| (f.id, law(f))).collect(),
+    )
+  };
+  let everything: Vec<DVec3> = groups.iter().flatten().copied().collect();
+  let now = find(&shape, &everything)?;
+  if now.is_empty() {
+    return Ok(shape);
+  }
+  if let Some(n) = fillet_ok(&shape, &now) {
+    return Ok(n);
+  }
+  let mut s = shape;
+  for g in &groups {
+    let now = find(&s, g)?;
+    if now.is_empty() {
+      continue;
+    }
+    if let Some(n) = fillet_ok(&s, &now) {
+      s = n;
+      continue;
+    }
+    for m in g {
+      let Some((id, l)) = find(&s, &[*m])?.into_iter().next() else { continue };
+      let made = [1.0, 0.9].iter().find_map(|k| {
+        let l: Vec<(f64, f64)> = l.iter().map(|(u, r)| (*u, r * k)).collect();
+        fillet_ok(&s, &[(id, l)])
+      });
+      if let Some(n) = made {
+        s = n;
+      }
+    }
+  }
+  Ok(s)
+}
+
+/// The last try at folds still sharp: the bend at 75 % and half its radius, then bends
+/// that close to nothing at one end, at the other, or at both.
+fn round_tapered(shape: Shape, folds: &Folds, t: f64) -> Result<Shape, String> {
+  let tol = 1e-6 * (1.0 + t);
+  let mut s = shape;
+  let mut failed: Vec<DVec3> = Vec::new();
+  let start = folds(&s)?.len();
+  for _ in 0..2 * start {
+    let near = |m: DVec3| failed.iter().any(|f| (*f - m).length() < tol);
+    let Some(f) = folds(&s)?.into_iter().find(|f| !near(f.mid())) else { break };
+    let steps =
+      |g: &dyn Fn(f64) -> f64| (0..=8).map(|k| (k as f64 / 8.0, f.rad * g(k as f64 / 8.0))).collect::<Vec<_>>();
+    let mut laws: Vec<Vec<(f64, f64)>> = [0.75, 0.5].iter().map(|k| steps(&|_| *k)).collect();
+    laws.push(steps(&|u| u));
+    laws.push(steps(&|u| 1.0 - u));
+    laws.push(steps(&|u| 1.0 - (2.0 * u - 1.0).abs()));
+    match laws.into_iter().find_map(|l| fillet_ok(&s, &[(f.id, l)])) {
+      Some(n) => s = n,
+      None => failed.push(f.mid()),
+    }
+  }
+  Ok(s)
 }
 
 /// A lofted flange's flat pattern with the cuts made since it was built (holes, notches, any

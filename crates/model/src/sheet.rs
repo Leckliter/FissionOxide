@@ -706,11 +706,20 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
         ents.push(Ent::Arc(c, e.radius, ang(a), ang(b)));
       }
       _ => {
-        if let Some(l) = lines.iter().find(|l| l.id == e.id) {
-          for w in l.points.windows(2) {
-            ents.push(Ent::Line(p(w[0]), p(w[1]), "CUT"));
-          }
+        // splines and ellipses as their exact NURBS (SPLINE entities)
+        let pts: Vec<P2> = lines.iter().filter(|l| l.id == e.id).flat_map(|l| l.points.iter().map(|q| p(*q))).collect();
+        let nurbs = flat.shape.edge_nurbs(e.id).map_err(|e| e.to_string())?;
+        let sp = fox_exchange::dxf::Spline {
+          degree: nurbs.degree,
+          knots: nurbs.knots,
+          control: nurbs.poles.iter().map(|q| p(*q)).collect(),
+          weights: nurbs.weights,
+          fit: Vec::new(),
+        };
+        if !sp.is_valid() {
+          return Err(format!("edge {} of the flat pattern has a bad NURBS", e.id));
         }
+        ents.push(Ent::Spline(sp, if pts.is_empty() { vec![p(e.start), p(e.end)] } else { pts }));
       }
     }
   }
@@ -752,6 +761,9 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
     let text = format!("SHEET T={} R={} K={}", round3(sh.thickness), round3(sh.bend_radius), round3(sh.k_factor));
     notes.push(([x0, y0 - 2.0 * h], 0.0, text));
   }
+  if ents.iter().any(|e| matches!(e, Ent::Spline(..))) {
+    return Ok(flat_dxf2000(&ents, &notes, o, h));
+  }
   let mut s = String::from("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n");
   s.push_str("0\nSECTION\n2\nTABLES\n");
   s.push_str("0\nTABLE\n2\nLTYPE\n70\n2\n");
@@ -779,6 +791,8 @@ fn write_flat_dxf(flat: &FlatPattern, sheet: Option<&SheetInfo>) -> Result<Strin
         let c = sub(c, o);
         let _ = write!(s, "0\nARC\n8\nCUT\n10\n{}\n20\n{}\n30\n0\n40\n{r}\n50\n{a0}\n51\n{a1}\n", c[0], c[1]);
       }
+      // flat patterns with splines are written as R2000 (above)
+      Ent::Spline(..) => {}
     }
   }
   for (at, ang, text) in &notes {
@@ -795,17 +809,48 @@ fn round3(v: f64) -> String {
   s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// The flat pattern DXF as R2000 (AC1015), which SPLINE entities need: the same layers, line
+/// types and notes as the R12 file, moved by `-o`.
+fn flat_dxf2000(ents: &[Ent], notes: &[(P2, f64, String)], o: P2, h: f64) -> String {
+  use fox_exchange::dxf::{Entity, Layer, Text};
+  let layers: Vec<Layer> =
+    FLAT_LAYERS.iter().map(|(name, color, lt)| Layer { name, color: *color, dashed: *lt == "DASHED" }).collect();
+  let out: Vec<(Entity, &str)> = ents
+    .iter()
+    .map(|e| match e {
+      Ent::Line(a, b, layer) => (Entity::Line { a: sub(*a, o), b: sub(*b, o) }, *layer),
+      Ent::Circle(c, r) => (Entity::Circle { center: sub(*c, o), radius: *r }, "CUT"),
+      Ent::Arc(c, r, a0, a1) => {
+        (Entity::Arc { center: sub(*c, o), radius: *r, start: a0.to_radians(), end: a1.to_radians() }, "CUT")
+      }
+      Ent::Spline(sp, _) => {
+        let mut sp = sp.clone();
+        sp.control.iter_mut().for_each(|q| *q = sub(*q, o));
+        (Entity::Spline(sp), "CUT")
+      }
+    })
+    .collect();
+  let texts: Vec<Text> = notes
+    .iter()
+    .map(|(at, angle, text)| Text { layer: "NOTES", at: sub(*at, o), height: h, angle: *angle, text: text.clone() })
+    .collect();
+  fox_exchange::dxf::write_dxf2000_layered(&layers, &out, &texts)
+}
+
 enum Ent {
   Line(P2, P2, &'static str),
   Circle(P2, f64),
   Arc(P2, f64, f64, f64),
+  /// A spline (exact NURBS) and points along it.
+  Spline(fox_exchange::dxf::Spline, Vec<P2>),
 }
 
 impl Ent {
   fn extent(&self) -> Vec<P2> {
-    match *self {
-      Ent::Line(a, b, _) => vec![a, b],
-      Ent::Circle(c, r) | Ent::Arc(c, r, ..) => vec![sub(c, [r, r]), add(c, [r, r])],
+    match self {
+      Ent::Line(a, b, _) => vec![*a, *b],
+      Ent::Circle(c, r) | Ent::Arc(c, r, ..) => vec![sub(*c, [*r, *r]), add(*c, [*r, *r])],
+      Ent::Spline(_, pts) => pts.clone(),
     }
   }
 }

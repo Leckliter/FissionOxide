@@ -162,12 +162,8 @@ impl Sketch {
         }
         SolveStatus::Failed => {}
       }
-      let failing: Vec<usize> = ids
-        .iter()
-        .enumerate()
-        .filter(|(_, (id, _))| report.failing.contains(id))
-        .map(|(i, _)| i)
-        .collect();
+      let failing: Vec<usize> =
+        ids.iter().enumerate().filter(|(_, (id, _))| report.failing.contains(id)).map(|(i, _)| i).collect();
       let before = keep.len();
       if named_rounds < NAMED_ROUNDS && !failing.is_empty() {
         named_rounds += 1;

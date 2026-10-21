@@ -23,6 +23,7 @@ mod features;
 pub mod files;
 mod fillet;
 mod form;
+pub mod generative;
 mod groups;
 pub mod history;
 pub mod hub;
@@ -561,6 +562,8 @@ mod tests_cam;
 #[cfg(test)]
 mod tests_cam3d;
 #[cfg(test)]
+mod tests_cam_checks;
+#[cfg(test)]
 mod tests_canvas;
 #[cfg(test)]
 mod tests_config;
@@ -575,11 +578,13 @@ mod tests_ecad;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]
-mod tests_hub_server;
-#[cfg(test)]
 mod tests_fillet;
 #[cfg(test)]
 mod tests_form;
+#[cfg(test)]
+mod tests_gen;
+#[cfg(test)]
+mod tests_hub_server;
 #[cfg(test)]
 mod tests_include;
 #[cfg(test)]
@@ -596,6 +601,8 @@ mod tests_sheet2;
 mod tests_sheet3;
 #[cfg(test)]
 mod tests_sheet4;
+#[cfg(test)]
+mod tests_sheet5;
 #[cfg(test)]
 mod tests_sketch;
 #[cfg(test)]

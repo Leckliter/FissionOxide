@@ -168,21 +168,21 @@ cmds! {
   "body.appearance" => "Set the appearance of bodies (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{body?|bodies?|component?, appearance? | color?}";
   "appearances" => "The appearance library", "{}";
   "face.appearance" => "Set the appearance of single faces, over their body's (a library name, [r,g,b] or \"#rrggbb\"; nothing clears it)", "{faces: [{body, face} | {point}], appearance? | color?}";
-  "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner; post-processor and units for its G-code", "{name?, body?, stock_side?, stock_top?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch}";
+  "cam.setup" => "New milling setup: stock around a body (or every body), work origin at the stock top's min X/Y corner; post-processor and units for its G-code", "{name?, body?, stock_side?, stock_top?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch, fixtures?: [body], components?: [component] (fixtures)}";
   "cam.face" => "Facing operation: take the stock down to the part's top", "{setup?, tool_number? (library) | tool: {diameter, number?, kind?, rpm?, feed?, plunge?, ...} | tool_diameter, stepover?: fraction, stepdown?}";
   "cam.pocket" => "2D pocket: clear down to flat floor faces (holes in them stay as islands); rest: only what earlier operations left", "{setup?, floors: [face], tool_number? | tool | tool_diameter, stepover?, stepdown?, stock_to_leave?, rest?, entry?: plunge|ramp|helix, ramp_angle?, helix_diameter?}";
   "cam.contour" => "2D contour around the outline of faces (default the part's bottom), down through the part, with holding tabs if asked", "{setup?, faces?, inside?, tool_number? | tool | tool_diameter, stepdown?, stock_to_leave?, entry?: plunge|ramp, ramp_angle?, tabs?: count | {count, width?, height?}, tab_width?, tab_height?}";
   "cam.drill" => "Drill vertical holes (default every hole); peck > 0 pecks", "{setup?, holes?: [face], tool_number? | tool | tool_diameter, peck?}";
-  "cam.generate" => "Compute a setup's toolpaths (shown in the viewport): moves, length and time", "{setup?}";
+  "cam.generate" => "Compute a setup's toolpaths (shown in the viewport): moves, length and time; warnings for holders running into the part and tools or holders into the fixtures", "{setup?}";
   "cam.post" => "Write a setup's G-code with its post-processor (default Fanuc, mm, G54); without a path, returns it", "{setup?, path?, post?: fanuc|haas|grbl|linuxcnc|mach3, units?: mm|inch}";
   "cam.list" => "Setups and their operations", "{}";
   "cam.delete" => "Delete a setup, or one of its operations", "{setup?, operation?}";
   "cam.adaptive" => "2D adaptive clearing down to flat floor faces: grows out from a helix by the step-over (optimal load), keeping the tool's engagement about constant", "{setup?, floors: [face], tool_number? | tool | tool_diameter, stepover?: fraction (default 0.1), stepdown?, stock_to_leave?, entry?: helix|plunge, ramp_angle?, helix_diameter?}";
   "cam.parallel" => "3D parallel finishing: rows across the part (or faces) with the tool dropped onto its surface", "{setup?, faces?, angle?: degrees, tool_number? | tool | tool_diameter, stepover?}";
   "cam.scallop" => "3D scallop finishing: rings a constant distance apart over the surface, from the outline of the faces in", "{setup?, faces?, tool_number? | tool | tool_diameter, stepover?}";
-  "cam.simulate" => "Simulate the stock removal of a setup (shown in the viewport): removed volume, gouges, rapids into the stock, cuts deeper than the flutes", "{setup?}";
+  "cam.simulate" => "Simulate the stock removal of a setup (shown in the viewport): removed volume, gouges, rapids into the stock, cuts deeper than the flutes, holders into the material, tools or holders into the fixtures", "{setup?}";
   "cam.tools" => "The hub's tool library (tools.json): flat, ball, bull-nose, drill and chamfer tools with feeds and speeds", "{}";
-  "cam.tool.add" => "Add or change a tool in the library", "{number?, name?, kind?: flat|ball|bull_nose|drill|chamfer, diameter, corner_radius?, angle?, tip_diameter?, flute_length?, flutes?, rpm?, feed?, plunge?}";
+  "cam.tool.add" => "Add or change a tool in the library", "{number?, name?, kind?: flat|ball|bull_nose|drill|chamfer, diameter, corner_radius?, angle?, tip_diameter?, flute_length?, flutes?, rpm?, feed?, plunge?, stickout?, holder_diameter?, holder?: [{diameter, length}] | \"Ø×length, …\" (stepped, from the holder face up)}";
   "cam.tool.delete" => "Remove a tool from the library", "{number}";
   "cam.posts" => "The post-processors G-code can be written for", "{}";
   "mirror" => "Mirror bodies, or features (their cut/join applied again), across a plane", "{plane, bodies?, features?: [id], join?, targets?}";
@@ -282,7 +282,7 @@ cmds! {
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all)", "{faces? | bodies?, loops?: all|inner|outer}";
   "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
   "sheet.miter_flange" => "Sweep an open sketch profile (drawn across the first edge, starting on it) along a chain of sheet edges with mitred corners", "{edges: [{body, edge} | {point}], sketch?, curves?: [id], corners?: miter|open|closed|overlap|butt}";
-  "sheet.flat_sketch" => "The flat pattern as an editable sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin", "{body?, face?, on?: face|xy}";
+  "sheet.flat_sketch" => "The flat pattern as a sketch (outline, bend lines as construction lines) on the stationary face, or on XY at the origin; it follows the body as the model changes unless follow is false", "{body?, face?, on?: face|xy, follow?: bool, curves?: follow|once}";
   "sheet.corner_closure" => "How an edge or miter flange (default the last) closes its corners, and the rule's corner relief", "{feature?, corners?: miter|open|closed|overlap|butt, relief?: none|round|square|tear, relief_size?, rule?}";
   "sheet.join_by_bend" => "Join two separate sheet metal bodies with a bend between an edge picked on a flange of each (flanges are extended or trimmed to meet it)", "{edge1: {body, edge} | {point}, edge2, bend_radius? (default the rule's), position?: tangent|first|second (the bend starts at that edge), relief?: rule|rectangular|round|none}";
   "sheet.fillet" => "Round edges that run through a sheet metal body's thickness (flange corners); the rounding carries into the flat pattern", "{edges: [{body, edge} | {point}], radius}";
@@ -346,10 +346,31 @@ cmds! {
   "drawing.datum_target" => "Datum target (A1, B2, ...): a point, a line from point to end, or an area (area > 0)", "{drawing?, view?, point: [x,y,z], end?: [x,y,z] (a target line), label, area?: model mm, offset?: [x,y]}";
   "drawing.revision" => "Add a row to the revision table (next letter by default)", "{drawing?, rev?, description?, date?, by?}";
   "drawing.remove_revision" => "Remove a revision table row", "{drawing?, index}";
-  "cam.adaptive3d" => "3D adaptive roughing: clear the stock around the part level by level, growing in from the open side (or a helix) by the step-over so the engagement stays about constant; flat areas get a level of their own", "{setup?, tool_number? | tool | tool_diameter, stepover?: fraction (default 0.15), stepdown?, stock_to_leave? (default 0.3), entry?: helix|plunge, ramp_angle?, helix_diameter?}";
-  "cam.pencil" => "3D pencil finishing: a pass along each concave corner or fillet tighter than the tool", "{setup?, faces?, tool_number? | tool | tool_diameter, tool_kind?}";
+  "cam.adaptive3d" => "3D adaptive roughing: clear the stock around the part level by level, growing in from the open side (or a helix) by the step-over so the engagement stays about constant; flat areas get a level of their own; rest: only what earlier (larger) tools left", "{setup?, tool_number? | tool | tool_diameter, stepover?: fraction (default 0.15), stepdown?, stock_to_leave? (default 0.3), rest?, entry?: helix|plunge, ramp_angle?, helix_diameter?}";
+  "cam.pencil" => "3D pencil finishing: a pass along each concave corner or fillet tighter than the tool, and passes more either side of it a step-over apart", "{setup?, faces?, tool_number? | tool | tool_diameter, tool_kind?, passes?: count either side, stepover?: fraction of the tool}";
+  "cam.fixtures" => "Set the fixtures of a setup (vise jaws, clamps: bodies never machined, checked for collisions with tools and holders); empty clears them", "{setup?, fixtures?: [body], components?: [component]}";
   "cam.steep_shallow" => "3D steep and shallow finishing: waterline passes a step-down apart on areas steeper than the threshold, parallel rows a step-over apart on the rest", "{setup?, faces?, threshold?: degrees (default 45), tool_number? | tool | tool_diameter, stepover?, stepdown?}";
   "cam.contour3d" => "3D contour (waterline) finishing: passes at constant heights a step-down apart on areas at least min_slope steep", "{setup?, faces?, min_slope?: degrees, tool_number? | tool | tool_diameter, stepdown?}";
+  "gen.study" => "New generative design study (Generative Design workspace): default material Aluminum AlSi10Mg, unrestricted manufacturing, one load case", "{name?, resolution?: element size}";
+  "gen.studies" => "Generative design studies with their inputs", "{}";
+  "gen.info" => "A study's inputs", "{study?}";
+  "gen.delete" => "Delete a study and its outcomes", "{study?}";
+  "gen.preserve" => "Preserve geometry: bodies the outcome must keep (loads and constraints go on their faces)", "{study?, bodies, remove?, replace?}";
+  "gen.obstacle" => "Obstacle geometry: bodies the outcome must stay out of (bolt holes, clearances)", "{study?, bodies, remove?, replace?}";
+  "gen.starting_shape" => "Starting shape the optimisation begins from (its bounds join the design space); no body clears it", "{study?, body?}";
+  "gen.design_space" => "Design space and solver settings: margin around the preserve geometry, explicit bounds, element size or count, iterations", "{study?, margin?, min?: [x,y,z], max?: [x,y,z], clear_bounds?, resolution?, elements?, iterations?}";
+  "gen.case" => "Add, rename, clear or delete a load case (a new case copies the first case's constraints)", "{study?, case: name|index, rename?, clear?, delete?}";
+  "gen.load" => "Structural load on faces or near a point: a total force (N) or a pressure (MPa) pushing into the faces", "{study?, case?, face? | faces? | point?: [x,y,z], radius?, force?: [fx,fy,fz] | magnitude, direction?: +x..-z | [x,y,z], pressure?}";
+  "gen.constraint" => "Fixed constraint on faces or near a point (every load case unless one is named)", "{study?, case?, face? | faces? | point?, radius?, fix?: xyz|x|yz...}";
+  "gen.objective" => "Objective and limits: maximise stiffness at a mass target (solid fraction of the design space), or minimise mass; safety factor and displacement limits", "{study?, objective?: max_stiffness|min_mass, mass_target?: 0.01..1, safety_factor?, max_displacement?: mm|null}";
+  "gen.materials" => "Materials to generate outcomes in (library names or custom {name, youngs, poisson, density, yield})", "{study?, materials: [name | material]}";
+  "gen.material_library" => "The generative design material library", "{}";
+  "gen.manufacturing" => "Manufacturing methods (one outcome each per material), symmetry planes and minimum member size", "{study?, methods?: [unrestricted | milling_3axis | milling_2_5axis | {kind, directions?: [+z, -x ...]}], symmetry?: [yz|xz|xy | {plane, offset}], min_member?}";
+  "gen.precheck" => "Check a study before generating: grid size, element counts, nodes each load and constraint reaches, warnings", "{study?}";
+  "gen.generate" => "Generate outcomes: topology optimisation (SIMP, density filter, Heaviside projection, optimality criteria) for every material and method, then a smoothed iso-surface of each", "{study?}";
+  "gen.outcomes" => "Outcomes explorer: mass, volume, stiffness, displacement, peak stress and safety factor per outcome", "{study?}";
+  "gen.insert" => "Insert an outcome into the design as a mesh body; optionally decimated (quadric edge collapses), converted to B-rep and joined with the exact preserve geometry (obstacles cut)", "{study?, outcome?, reduce?: 0..1 | triangles?, brep?, merge_preserve?}";
+  "gen.export" => "Export an outcome's mesh (.stl .obj .3mf .ply)", "{study?, outcome?, path}";
   "cut.machines" => "Laser, plasma and waterjet machine profiles (built in, and the hub's machines.json) with their processes", "{}";
   "cut.machine.add" => "Add or replace a machine profile in the hub: G-code templates and any number of processes", "{machine: {id, name, kind?: laser|plasma|waterjet|dxf, extension?, arcs?, header?, pierce?, off?, footer?, rapid?, line?, arc_cw?, arc_ccw?, max_power?, rapid_rate?, processes?: [{name, kerf?, feed?, power?, pierce_delay?, ...}]}}";
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
@@ -471,6 +492,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::ecad::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::generative::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::form::run(s, name, p) {
@@ -731,7 +755,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
       if let Some(inf) = inferred {
         out["constraints"] = json!(inf.constraints.iter().map(|(c, _)| c.0).collect::<Vec<_>>());
-        out["constraint_counts"] = Value::Object(inf.counts().into_iter().map(|(k, n)| (k.to_string(), json!(n))).collect());
+        out["constraint_counts"] =
+          Value::Object(inf.counts().into_iter().map(|(k, n)| (k.to_string(), json!(n))).collect());
         if let Some(w) = inf.warning {
           out["constraint_warning"] = json!(w);
         }

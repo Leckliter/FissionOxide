@@ -77,7 +77,36 @@ impl Tool {
       flutes: 0,
       holder_diameter: 0.0,
       stickout: 0.0,
+      holder: Vec::new(),
     }
+  }
+
+  /// The holder's cylinders as (bottom above the tip, radius), bottom first; empty without a
+  /// holder. Each runs up to the next, the last up to the spindle.
+  pub fn holder_sections(&self) -> Vec<(f64, f64)> {
+    if self.stickout <= 0.0 {
+      return Vec::new();
+    }
+    if self.holder.is_empty() {
+      return if self.holder_diameter > 0.0 { vec![(self.stickout, self.holder_diameter / 2.0)] } else { Vec::new() };
+    }
+    let mut z = self.stickout;
+    let mut out = Vec::new();
+    for s in &self.holder {
+      out.push((z, s.diameter / 2.0));
+      z += s.length;
+    }
+    out
+  }
+
+  /// The lowest the tool and its holder reach above the tip at `rho` from the axis (None
+  /// beyond them): the cutting end within the tool's radius, the holder's steps beyond it.
+  pub fn envelope(&self, rho: f64) -> Option<f64> {
+    if let Some(p) = self.profile(rho) {
+      return Some(p);
+    }
+    // the lowest section that reaches out this far (sections run bottom first)
+    self.holder_sections().into_iter().find(|(_, r)| *r >= rho).map(|(z, _)| z)
   }
 
   pub fn radius(&self) -> f64 {
@@ -138,6 +167,23 @@ impl Tool {
     {
       return Err("a holder needs the tool's stickout, and must be at least as wide as the tool".into());
     }
+    if !self.holder.is_empty() {
+      if !(self.stickout > 0.0) {
+        return Err("a holder needs the tool's stickout".into());
+      }
+      let last = self.holder.len() - 1;
+      for (i, s) in self.holder.iter().enumerate() {
+        if !(s.diameter.is_finite() && s.diameter >= self.diameter) {
+          return Err("each holder step must be at least as wide as the tool".into());
+        }
+        if !(s.length.is_finite() && s.length >= 0.0) || (i < last && s.length <= 0.0) {
+          return Err("each holder step but the last needs a length".into());
+        }
+      }
+      if self.holder.len() > 16 {
+        return Err("a holder has at most 16 steps".into());
+      }
+    }
     Ok(())
   }
 
@@ -156,6 +202,46 @@ impl Tool {
     } else {
       format!("T{} {}", self.number, self.name)
     }
+  }
+}
+
+/// One cylinder of a stepped tool holder.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct HolderStep {
+  pub diameter: f64,
+  /// Length along the tool (mm); the last step's runs up to the spindle.
+  #[serde(default)]
+  pub length: f64,
+}
+
+impl HolderStep {
+  /// Steps written "Ø×length, Ø×length, Ø" (`x`, `×` or `*`; the last length may be left out).
+  pub fn parse_list(text: &str) -> Result<Vec<HolderStep>, String> {
+    let mut out = Vec::new();
+    for part in text.split([',', ';']).map(str::trim).filter(|p| !p.is_empty()) {
+      let mut it = part.split(['x', 'X', '×', '*']).map(str::trim);
+      let num = |t: Option<&str>| -> Result<f64, String> {
+        let t = t.unwrap_or("0").trim_end_matches("mm").trim();
+        t.parse::<f64>().map_err(|_| format!("'{part}' isn't a holder step (diameter×length)"))
+      };
+      let diameter = num(it.next())?;
+      let length = num(it.next())?;
+      if it.next().is_some() {
+        return Err(format!("'{part}' isn't a holder step (diameter×length)"));
+      }
+      out.push(HolderStep { diameter, length });
+    }
+    Ok(out)
+  }
+
+  /// The steps as [`HolderStep::parse_list`] reads them.
+  pub fn format_list(steps: &[HolderStep]) -> String {
+    let n = |v: f64| format!("{}", (v * 1000.0).round() / 1000.0);
+    steps
+      .iter()
+      .map(|s| if s.length > 0.0 { format!("{}x{}", n(s.diameter), n(s.length)) } else { n(s.diameter) })
+      .collect::<Vec<_>>()
+      .join(", ")
   }
 }
 

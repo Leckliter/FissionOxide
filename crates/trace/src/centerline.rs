@@ -60,7 +60,8 @@ fn thin(m: &mut [bool], w: usize, h: usize) {
           continue;
         }
         let (p2, p4, p6, p8) = (n[0], n[2], n[4], n[6]);
-        let ok = if pass == 0 { !(p2 && p4 && p6) && !(p4 && p6 && p8) } else { !(p2 && p4 && p8) && !(p2 && p6 && p8) };
+        let ok =
+          if pass == 0 { !(p2 && p4 && p6) && !(p4 && p6 && p8) } else { !(p2 && p4 && p8) && !(p2 && p6 && p8) };
         if ok {
           del.push(i);
         }
@@ -355,8 +356,12 @@ fn prune(nodes: &mut [Node], mut paths: Vec<Path>, spur: f64) -> Vec<Path> {
       if nodes[n].free || degree(&paths, n) != 2 {
         continue;
       }
-      let ix: Vec<usize> =
-        paths.iter().enumerate().filter(|(_, p)| p.ends.is_some_and(|(a, b)| a == n || b == n)).map(|(i, _)| i).collect();
+      let ix: Vec<usize> = paths
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.ends.is_some_and(|(a, b)| a == n || b == n))
+        .map(|(i, _)| i)
+        .collect();
       if ix.len() == 1 {
         // a loop from the node back to itself: a closed stroke
         let p = &mut paths[ix[0]];

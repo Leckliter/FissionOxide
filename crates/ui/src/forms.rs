@@ -1335,7 +1335,19 @@ pub static CAM_SETUP: Form = Form {
     Input::Expr { key: "stock_top", label: "Stock top offset", default: "1" },
     Input::Choice { key: "post", label: "Post-processor", options: CAM_POSTS },
     Input::Choice { key: "units", label: "G-code units", options: &[("mm", "Millimetres"), ("inch", "Inches")] },
+    Input::Bodies { key: "fixtures", label: "Fixtures (vise, clamps)", required: false },
   ],
+  picks_model: false,
+};
+
+pub static CAM_FIXTURES: Form = Form {
+  title: "FIXTURES",
+  name: "Fixtures",
+  hint: "The bodies holding the part (vise jaws, clamps): never machined, checked for collisions with tools and holders",
+  icon: Icon::Component,
+  cmd: "cam.fixtures",
+  fixed: &[],
+  inputs: &[Input::Bodies { key: "fixtures", label: "Fixtures (none = clear)", required: false }],
   picks_model: false,
 };
 
@@ -1916,7 +1928,7 @@ pub static SHEET_CHAMFER: Form = Form {
 pub static FLAT_SKETCH: Form = Form {
   title: "FLAT PATTERN SKETCH",
   name: "Flat Pattern Sketch",
-  hint: "The flat pattern as an editable sketch: outline and bend lines",
+  hint: "The flat pattern as a sketch: outline and bend lines that follow the body as it changes",
   icon: Icon::FlatPattern,
   cmd: "sheet.flat_sketch",
   fixed: &[],
@@ -1926,6 +1938,11 @@ pub static FLAT_SKETCH: Form = Form {
       key: "on",
       label: "Place on",
       options: &[("face", "Stationary face"), ("xy", "XY plane at the origin")],
+    },
+    Input::Choice {
+      key: "curves",
+      label: "Curves",
+      options: &[("follow", "Follow the body"), ("once", "Free, made once")],
     },
   ],
   picks_model: false,
@@ -2008,6 +2025,7 @@ pub static CAM_ADAPTIVE3D: Form = Form {
     Input::Expr { key: "stepover", label: "Optimal load (of the tool)", default: "0.15" },
     Input::Expr { key: "stepdown", label: "Maximum step-down", default: "3 mm" },
     Input::Expr { key: "stock_to_leave", label: "Stock to leave", default: "0.3 mm" },
+    Input::Check { key: "rest", label: "Rest machining (only what earlier, larger tools left)" },
     Input::Choice { key: "entry", label: "Entry", options: &[("helix", "Helix"), ("plunge", "Plunge")] },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1500" },
     Input::Expr { key: "plunge", label: "Plunge (mm/min)", default: "300" },
@@ -2027,6 +2045,8 @@ pub static CAM_PENCIL: Form = Form {
     CAM_TOOL,
     Input::Choice { key: "tool_kind", label: "Tool", options: CAM_3D_TOOLS },
     Input::Expr { key: "tool_diameter", label: "Tool diameter", default: "4 mm" },
+    Input::Expr { key: "passes", label: "Passes either side", default: "0" },
+    Input::Expr { key: "stepover", label: "Step-over (of the tool)", default: "0.1" },
     Input::Expr { key: "feed", label: "Feed (mm/min)", default: "1200" },
   ],
   picks_model: false,

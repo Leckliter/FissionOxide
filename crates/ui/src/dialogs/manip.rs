@@ -1,7 +1,8 @@
 //! The dialogs' viewport manipulators beyond Extrude's and Offset Plane's arrow: the radius arrow
 //! of Fillet and Chamfer, Press Pull's distance arrow, the move/rotate triad of Move and the
-//! offset arrow and angle ring of Joint (see [`crate::manipulators`]); and picking joints and
-//! saved joint origins in the viewport.
+//! offset arrow and angle ring of Joint (see [`crate::manipulators`]), the feature handles of
+//! Shell (thickness arrows), Draft (angle dial) and the patterns (distance, count and angle; see
+//! [`crate::handles`]); and picking joints and saved joint origins in the viewport.
 
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
@@ -12,7 +13,8 @@ use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
 use super::{Dialog, Kind, Manipulator};
-use crate::manipulators::{Triad, TriadEdit};
+use crate::handles::Handle;
+use crate::manipulators::{Triad, TriadEdit, snap};
 
 /// Geometry a dialog's manipulator hangs on, worked out while its picks are valid (a preview
 /// changes the very edges and faces they name) and kept while the preview shows.
@@ -131,7 +133,7 @@ impl Dialog {
   /// offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
-      Kind::PressPull => json!(self.faces.first()),
+      Kind::PressPull | Kind::Shell | Kind::Draft => json!(self.faces.first()),
       Kind::SkOffset => json!({"offset": self.curves}),
       _ => json!(self.edges.first()),
     }
@@ -143,7 +145,7 @@ impl Dialog {
       return;
     }
     match self.kind {
-      Kind::Fillet | Kind::Chamfer | Kind::PressPull if !self.applied => {
+      Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::Shell | Kind::Draft if !self.applied => {
         let key = self.anchor_key();
         if self.manip.anchor.as_ref().is_none_or(|a| a.0 != key) {
           self.manip.anchor = anchor(s, &key).map(|(o, d)| (key, o, d));
@@ -156,8 +158,10 @@ impl Dialog {
           self.manip.anchor = offset_anchor(s, &self.curves).map(|(o, d)| (key, o, d));
         }
       }
-      // the pattern's arrow starts at the objects' centre before the preview
-      Kind::RectPattern if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) => {
+      // the patterns' handles start at the objects' centre before the preview
+      Kind::RectPattern | Kind::CircPattern
+        if !self.applied && self.manip.pivot.as_ref().is_none_or(|p| p.0 != self.bodies) =>
+      {
         self.manip.pivot = centre(s, &self.bodies).map(|c| (self.bodies.clone(), c));
       }
       Kind::Move => self.refresh_move(s),
@@ -168,10 +172,6 @@ impl Dialog {
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
   /// along the first face's normal).
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
-    if self.kind == Kind::RectPattern && self.editing.is_none() {
-      let (bodies, c) = self.manip.pivot.as_ref()?;
-      return (*bodies == self.bodies).then(|| self.pattern_arrow(s, *c)).flatten();
-    }
     if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
       return None;
     }
@@ -181,6 +181,126 @@ impl Dialog {
     }
     let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
     Some(Manipulator { origin: *origin, dir: *dir, value: self.len(s, field)? })
+  }
+
+  /// The feature handles this dialog shows (see [`crate::handles`]): Shell's thickness arrows,
+  /// Draft's angle dial, the rectangular pattern's distance and count handles along each
+  /// direction and the circular pattern's angle and count dials.
+  pub fn handles(&self, s: &Session) -> Vec<Handle> {
+    if self.editing.is_some() {
+      return Vec::new();
+    }
+    match self.kind {
+      Kind::Shell => self.shell_handles(s),
+      Kind::Draft => self.draft_handles(s),
+      Kind::RectPattern => self.pattern_centre().and_then(|c| self.pattern_handles(s, c)),
+      Kind::CircPattern => self.pattern_centre().and_then(|c| self.circ_handles(s, c)),
+      _ => None,
+    }
+    .unwrap_or_default()
+  }
+
+  /// Takes handle `i`'s dragged value (not yet snapped; lengths snap to `step` world units,
+  /// angles to `step` radians) into the dialog's fields.
+  pub fn set_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) {
+    let v_snapped = snap(v, step);
+    match self.kind {
+      Kind::Shell => {
+        let t = mm(self.unit, v_snapped.max(step.max(1e-3)));
+        if i == 1 { self.solid.thickness_out = t } else { self.radius = t }
+      }
+      // a draft stays short of a right angle
+      Kind::Draft => self.angle = deg(v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians())),
+      Kind::RectPattern => {
+        if !self.set_pattern_handle(s, i, v, step) {
+          return;
+        }
+      }
+      Kind::CircPattern => {
+        if !self.set_circ_handle(s, i, v, step) {
+          return;
+        }
+      }
+      _ => return,
+    }
+    self.dirty = true;
+  }
+
+  /// The pattern's objects' centre before the preview, while they are the ones picked.
+  fn pattern_centre(&self) -> Option<DVec3> {
+    let (bodies, c) = self.manip.pivot.as_ref()?;
+    (*bodies == self.bodies).then_some(*c)
+  }
+
+  /// The face anchor (a point and the outward normal) while it is for the first picked face.
+  fn face_anchor(&self) -> Option<(DVec3, DVec3)> {
+    let (key, o, n) = self.manip.anchor.as_ref()?;
+    (*key == self.anchor_key() && !self.faces.is_empty()).then_some((*o, *n))
+  }
+
+  /// Shell: an arrow from the first opened face into the wall for an inside thickness, out of it
+  /// for an outside one; both for Both (the inside one first).
+  fn shell_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (o, n) = self.face_anchor()?;
+    let t = self.len(s, &self.radius)?;
+    let arrow = |dir: DVec3, v: f64| Handle::arrow(o, dir, v, mm(self.unit, v));
+    Some(match self.solid.shell_dir {
+      "outside" => vec![arrow(n, t)],
+      "both" => {
+        let out =
+          if self.solid.thickness_out.trim().is_empty() { t } else { self.len(s, &self.solid.thickness_out)? };
+        vec![arrow(-n, t), arrow(n, out)]
+      }
+      _ => vec![arrow(-n, t)],
+    })
+  }
+
+  /// Draft: a dial on the first face's hinge (where it meets the neutral plane), turning from the
+  /// pull direction the way a positive angle tilts the face.
+  fn draft_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (c, n) = self.face_anchor()?;
+    let pl = super::plane_of(s, &self.plane)?;
+    let pull = if self.flip { -pl.normal() } else { pl.normal() };
+    let (zero, axis, hinge) = draft_dial(c, n, pl.origin, pull)?;
+    let a = self.ang(s, &self.angle)?;
+    Some(vec![Handle::dial(hinge, axis, zero, None, a, deg(a))])
+  }
+
+  /// Circular Pattern: dials about its axis through the objects' centre, one for the total angle
+  /// and a dot at the next instance for the count.
+  fn circ_handles(&self, s: &Session, c: DVec3) -> Option<Vec<Handle>> {
+    let (o, d) = axis_line(s, &self.axis)?;
+    let foot = o + d * (c - o).dot(d);
+    let (zero, r) = match (c - foot).try_normalize() {
+      Some(z) => (z, Some((c - foot).length())),
+      None => (d.any_orthonormal_vector(), None),
+    };
+    let total = self.ang(s, &self.angle)?;
+    let n = count_of(&self.count);
+    let step = circ_step(total, n);
+    let instances = format!("{n} instances");
+    Some(vec![Handle::dial(foot, d, zero, r, total, deg(total)), Handle::dial(foot, d, zero, r, step, instances).dot()])
+  }
+
+  /// A dragged circular pattern handle: the total angle, or the count that puts the next instance
+  /// nearest the dot. False when the value can't apply.
+  fn set_circ_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) -> bool {
+    if i == 0 {
+      let a = snap(v, step);
+      if a.abs() < 1e-9 {
+        return false;
+      }
+      self.angle = deg(a);
+      return true;
+    }
+    let Some(total) = self.ang(s, &self.angle) else { return false };
+    if v * total <= 0.0 {
+      return false;
+    }
+    let full = is_full_turn(total);
+    let n = (total / v).round() + if full { 0.0 } else { 1.0 };
+    self.count = (n.clamp(2.0, MAX_COUNT) as u32).to_string();
+    true
   }
 
   /// Takes a dragged arrow value (already rounded to `step`) into the field; false for dialogs
@@ -195,7 +315,6 @@ impl Dialog {
         self.distance = mm(self.unit, nonzero(v, step));
         self.follow = false;
       }
-      Kind::RectPattern => self.set_pattern_arrow(v, step),
       _ => return false,
     }
     true
@@ -249,6 +368,8 @@ impl Dialog {
           planes: [false; 3],
           home: o,
           angles: [0.0, 0.0, angle],
+          free: false,
+          orient: DQuat::IDENTITY,
         })
       }
       _ => None,
@@ -270,6 +391,8 @@ impl Dialog {
           self.distance = mm(self.unit, (p - f.w_axis.truncate()).dot(f.z_axis.truncate()));
         }
         TriadEdit::Rotate(_, a) => self.angle = deg(a),
+        // Joint's triad isn't free
+        TriadEdit::Orient(_) => return,
       },
       _ => return,
     }
@@ -326,6 +449,47 @@ pub(super) fn centre(s: &Session, bodies: &[u32]) -> Option<DVec3> {
     }
   }
   (area > 0.0).then(|| sum / area)
+}
+
+/// The most instances a count handle asks for.
+pub(super) const MAX_COUNT: f64 = 1000.0;
+
+/// A count field's whole number of instances (at least one).
+pub(super) fn count_of(e: &str) -> u32 {
+  e.trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n >= 1.0).map_or(1, |n| n as u32)
+}
+
+/// Is a circular pattern's total angle a whole turn (the instances share it out evenly)?
+fn is_full_turn(total: f64) -> bool {
+  (total.abs() - std::f64::consts::TAU).abs() < 1e-9
+}
+
+/// The angle between a circular pattern's instances, as the command spaces them.
+fn circ_step(total: f64, n: u32) -> f64 {
+  if is_full_turn(total) || n < 2 { total / f64::from(n) } else { total / f64::from(n - 1) }
+}
+
+/// A dialog's axis choice ("x", "y", "z", "axis:7") as a world line: a point and unit direction.
+pub(super) fn axis_line(s: &Session, key: &str) -> Option<(DVec3, DVec3)> {
+  Some(match key {
+    "x" => (DVec3::ZERO, DVec3::X),
+    "y" => (DVec3::ZERO, DVec3::Y),
+    "z" => (DVec3::ZERO, DVec3::Z),
+    k => {
+      let f = FeatureId(k.strip_prefix("axis:")?.parse().ok()?);
+      let (o, d) = *s.model.axes.get(&f)?;
+      (o, d.try_normalize()?)
+    }
+  })
+}
+
+/// Draft's dial for a face through `c` with outward normal `n`, the neutral plane through
+/// `origin` and the pull direction: where it turns from (the pull direction), about which axis
+/// (so a positive angle leans the face in, as the draft does) and its hinge on the neutral plane.
+fn draft_dial(c: DVec3, n: DVec3, origin: DVec3, pull: DVec3) -> Option<(DVec3, DVec3, DVec3)> {
+  let n = (n - pull * n.dot(pull)).try_normalize()?;
+  let axis = n.cross(pull).try_normalize()?;
+  Some((pull, axis, c - pull * (c - origin).dot(pull)))
 }
 
 /// `v`, or the smallest step on its side when it rounds to nothing.
@@ -650,5 +814,121 @@ mod tests {
     // a new design offsets from XZ along +Y; one from before XZ_OFFSET_PLUS_Y along -Y
     assert!(close(arrow(false).dir, DVec3::Y), "{:?}", arrow(false));
     assert!(close(arrow(true).dir, -DVec3::Y), "{:?}", arrow(true));
+  }
+
+  #[test]
+  fn shell_draft_and_circular_pattern_handles_write_their_fields() {
+    use crate::handles::Shape;
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+    let b = s.model.bodies[0].id.0;
+    let face_of = |s: &Session, dir: DVec3| {
+      let f = s.model.bodies[0].faces().iter().find(|f| f.normal.dot(dir) > 0.9).unwrap();
+      (json!({"body": b, "face": f.id}), f.center)
+    };
+    // Shell: an arrow from the opened face into the wall, out of it for an outside thickness
+    let (top, top_c) = face_of(&s, DVec3::Z);
+    let mut d = Dialog::blank(Kind::Shell);
+    d.faces = vec![top.clone()];
+    d.refresh_manip(&s);
+    let h = d.handles(&s);
+    assert_eq!(h.len(), 1);
+    assert!(matches!(h[0].shape, Shape::Arrow { origin, dir } if close(origin, top_c) && close(dir, -DVec3::Z)));
+    assert!((h[0].value - 2.0).abs() < 1e-9 && h[0].label == "2 mm");
+    d.set_handle(&s, 0, 3.26, 0.5);
+    assert_eq!(d.radius, "3.5 mm");
+    assert!(d.dirty);
+    // never through zero
+    d.set_handle(&s, 0, -1.0, 0.5);
+    assert_eq!(d.radius, "0.5 mm");
+    d.solid.shell_dir = "both";
+    let h = d.handles(&s);
+    assert_eq!(h.len(), 2);
+    assert!(matches!(h[1].shape, Shape::Arrow { dir, .. } if close(dir, DVec3::Z)) && (h[1].value - 0.5).abs() < 1e-9);
+    d.set_handle(&s, 1, 1.1, 0.5);
+    assert_eq!((d.radius.as_str(), d.solid.thickness_out.as_str()), ("0.5 mm", "1 mm"));
+    d.solid.shell_dir = "inside";
+    d.radius = "1 mm".into();
+    apply(&mut s, &mut d);
+    // the face is gone from the preview; the arrow stays where it was
+    d.refresh_manip(&s);
+    assert!(matches!(d.handles(&s)[0].shape, Shape::Arrow { origin, .. } if close(origin, top_c)));
+    d.cancel(&mut s);
+
+    // Draft: a dial on the face's hinge in the neutral plane, from the pull direction, leaning
+    // the face in for a positive angle
+    let (front, _) = face_of(&s, -DVec3::Y);
+    let before = s.model.bodies[0].shape.mass().unwrap().volume;
+    let mut d = Dialog::blank(Kind::Draft);
+    d.angle = "3 deg".into();
+    d.plane = json!("xy");
+    d.faces = vec![front];
+    d.refresh_manip(&s);
+    let h = d.handles(&s);
+    assert_eq!(h.len(), 1);
+    let Shape::Dial { center, axis, zero, radius: None } = h[0].shape else { panic!("{h:?}") };
+    assert!(close(center, DVec3::new(0.0, -10.0, 0.0)) && close(zero, DVec3::Z), "{center} {zero}");
+    assert!((h[0].value - 3f64.to_radians()).abs() < 1e-9 && h[0].label == "3 deg");
+    // the head turns from +Z towards +Y: into the body
+    assert!(close(axis.cross(zero), DVec3::Y), "{axis}");
+    d.set_handle(&s, 0, 10.3f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.angle, "10 deg");
+    d.set_handle(&s, 0, 120f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.angle, "89 deg", "short of a right angle");
+    d.angle = "10 deg".into();
+    apply(&mut s, &mut d);
+    let m = s.model.bodies[0].shape.mass().unwrap();
+    assert!(m.volume < before && (m.bbox_min.y + 10.0).abs() < 1e-6, "{m:?}");
+    // flipped, the dial turns from -Z
+    d.flip = true;
+    let Shape::Dial { zero, .. } = d.handles(&s)[0].shape else { panic!() };
+    assert!(close(zero, -DVec3::Z));
+    d.cancel(&mut s);
+
+    // Circular Pattern: dials about the axis through the objects' centre, the total angle and a
+    // dot at the next instance for the count
+    run(&mut s, "box", json!({"width": 4, "depth": 4, "height": 30, "at": [30, 0]}));
+    let small = s.model.bodies[1].id.0;
+    let mut d = Dialog::blank(Kind::CircPattern);
+    d.bodies = vec![small];
+    d.axis = "z".into();
+    d.count = "4".into();
+    d.angle = "360 deg".into();
+    d.refresh_manip(&s);
+    let h = d.handles(&s);
+    assert_eq!(h.len(), 2);
+    let Shape::Dial { center, axis, zero, radius } = h[0].shape else { panic!() };
+    assert!(close(center, DVec3::new(0.0, 0.0, 15.0)) && close(axis, DVec3::Z) && close(zero, DVec3::X));
+    assert!((radius.unwrap() - 30.0).abs() < 1e-6);
+    assert!((h[0].value - std::f64::consts::TAU).abs() < 1e-9);
+    assert!((h[1].value - std::f64::consts::FRAC_PI_2).abs() < 1e-9 && h[1].label == "4 instances");
+    // a whole turn shared out: the dot at 70° asks for 5
+    d.set_handle(&s, 1, 70f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.count, "5");
+    // the wrong way round asks for nothing
+    d.dirty = false;
+    d.set_handle(&s, 1, -0.3, 1f64.to_radians());
+    assert!(!d.dirty && d.count == "5");
+    // a part turn: the instances span it, the first on the original
+    d.set_handle(&s, 0, 180.4f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.angle, "180 deg");
+    d.set_handle(&s, 1, 61f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.count, "4");
+    let h = d.handles(&s);
+    assert!((h[1].value - 60f64.to_radians()).abs() < 1e-9);
+    apply(&mut s, &mut d);
+    assert_eq!(s.model.bodies.len(), 5);
+    // the handles stay on the centre found before the preview
+    d.refresh_manip(&s);
+    assert!(matches!(d.handles(&s)[0].shape, Shape::Dial { radius: Some(r), .. } if (r - 30.0).abs() < 1e-6));
+    d.cancel(&mut s);
+    // about a construction axis: the dial is on it
+    let ax = run(&mut s, "axis", json!({"method": "two_points", "a": {"at": [10, 0, 0]}, "b": {"at": [10, 0, 1]}}));
+    d.axis = format!("axis:{}", ax["feature"]);
+    let Shape::Dial { center, radius, .. } = d.handles(&s)[0].shape else { panic!() };
+    assert!(close(center, DVec3::new(10.0, 0.0, 15.0)) && (radius.unwrap() - 20.0).abs() < 1e-6);
+    // no handles while editing a feature
+    d.editing = Some(FeatureId(1));
+    assert!(d.handles(&s).is_empty());
   }
 }

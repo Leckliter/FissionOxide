@@ -109,9 +109,14 @@ change a parameter and watch the whole history rebuild.
   picked in the viewport by their glyphs, Select All and Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
   drawn in the view); centre of mass; section analysis capped with the exact cut face; zebra,
   draft, accessibility and curvature-map analyses.
-- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset
-  and the fillet and chamfer size; a move/rotate triad (three arrows, three rings, three planar
-  handles) for Move, and an offset arrow and angle ring for Joint. A drag writes its dialog's
+- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset,
+  the fillet and chamfer size and the shell thickness (inside, outside or both); an angle dial
+  for draft; distance arrows and quantity dots along each direction of a rectangular pattern, and
+  total-angle and quantity dials round a circular pattern's axis; a move/rotate triad (three
+  arrows, three rings, three planar handles) for Move, and an offset arrow and angle ring for
+  Joint. Free Move's triad turns about any axis: its outer view ring turns about the line of
+  sight and a drag inside it rolls the objects like a trackball; Rotate puts its ring on a world
+  or construction axis or a straight edge picked in the viewport. A drag writes its dialog's
   fields, which still take typed values. While a command previews its result, the bodies as they
   were show through it as transparent ghosts.
 - **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
@@ -122,6 +127,12 @@ change a parameter and watch the whole history rebuild.
   tabs, ramp and helix entries, drilling (G81/G83), 3D parallel and scallop finishing, a stock
   removal simulation with gouge and collision warnings, and G-code for Fanuc, Haas, GRBL,
   LinuxCNC and Mach3/4 in mm or inches. See [Manufacture](#manufacture-cam).
+- **Generative design.** A Generative Design workspace: preserve and obstacle geometry, a
+  starting shape, load cases with forces, pressures and fixed constraints, maximum stiffness or
+  minimum mass with safety factor and displacement limits, materials, and unrestricted, 3-axis
+  or 2.5-axis milling outcomes with symmetry planes and a minimum member size. Topology
+  optimisation (SIMP) on a voxel grid, smoothed into outcomes you compare and insert as mesh or
+  B-rep bodies. See [Generative design](#generative-design).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
@@ -173,9 +184,10 @@ change a parameter and watch the whole history rebuild.
   arcs. A fit-point spline stays a fit-point spline after Trim, Break and Extend (through the
   fit points it keeps, its new ends holding their direction). Sketch text takes fonts from
   disk: a font file's path or the name of one in the system's font folders (`sketch.fonts`).
-- **3D milling and arcs.** 3D adaptive roughing of the stock around the part, pencil,
-  steep-and-shallow and contour (waterline) finishing, and G2/G3 arcs (helical too) fitted to
-  the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
+- **3D milling and arcs.** 3D adaptive roughing of the stock around the part (and rest roughing
+  after a larger tool), pencil (with more passes either side of the corner), steep-and-shallow
+  and contour (waterline) finishing, stepped tool holders and fixtures checked for collisions,
+  and G2/G3 arcs (helical too) fitted to the toolpaths in the G-code. See [Manufacture](#manufacture-cam).
 - **Laser, plasma and waterjet cutting.** A flat pattern, faces or a sketch to G-code or R12
   DXF: kerf compensation with true arcs, leads in the scrap, holes first, micro-joints, and
   machine profiles you can add to. See [2D cutting](#2d-cutting-laser-plasma-waterjet).
@@ -249,8 +261,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Freeform / paint selection | 2 / 3 (1 for window again), or SELECT ▾; a lasso that sets off to the right takes what's inside, to the left what it touches |
 | Select Other           | Alt+click, or hold the mouse button still; SELECT ▾ also sets selection priority and filters |
 | Measure                | Select one or two bodies, faces or edges, then I            |
-| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer or Offset Plane, drag the arrow head |
-| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square |
+| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer, Shell or Offset Plane, drag the arrow head |
+| Draft / pattern handles | Draft: drag the dial's head (1° steps); Rectangular Pattern: the arrow sets the distance, the dot the quantity; Circular Pattern: the dial's arrow sets the total angle, its dot the quantity |
+| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square; in Free Move drag the outer ring to turn about the line of sight, or inside it to turn like a trackball; in Rotate pick a straight edge for the axis |
 | Joints in the viewport | Click a joint origin's glyph to use it in Joint, a joint's to drive it (or select it) |
 | Appearance             | A                                                           |
 | Compute All            | Ctrl+B (in the background)                                  |
@@ -329,9 +342,14 @@ cuts, fillets, patterns) works on them. Bends are true cylinders: the flat lengt
 `angle × (bend radius + K × thickness)`. Edge flange height is measured from the outside of the
 sheet to the tip (Fusion's default "outer" datum). The flat pattern DXF has the outline and holes
 on layer `CUT` and bend centre lines on `BEND_UP` / `BEND_DOWN` (dashed), with a bend note at
-each bend on `NOTES` and an `ETCH` layer for marking; `sheet.flat_sketch` makes the same
-outline (and the bend lines, as construction lines) into a sketch on the stationary face, or on
-XY at the origin, to dimension, extrude or export.
+each bend on `NOTES` and an `ETCH` layer for marking. Spline and ellipse edges are written as
+true `SPLINE` entities (their exact NURBS), which makes the file R2000 instead of R12; it still
+passes `sheet.check_dxf`. `sheet.flat_sketch` makes the same outline (and the bend lines, as
+construction lines) into a sketch on the stationary face, or on XY at the origin, to dimension,
+extrude or export. The sketch follows the model: its flat pattern curves are fixed, like
+projected geometry, and regenerate whenever the sheet metal body changes (a taller flange, a new
+thickness), keeping their ids when only sizes change; `follow: false` (`curves: "once"` in the
+dialog) makes free curves once instead.
 
 ```sh
 fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
@@ -344,7 +362,8 @@ fissionoxide-cli run examples/sheet_hopper.jsonl --save hopper.fox
   *press brake* is flat facets with straight bends between them, about `bends` of them. Its flat
   pattern is the neutral layer developed facet by facet; holes and notches cut in the flange
   later are carried into it, facet by facet. `rounded` rounds a press-brake flange's bends to
-  the rule's bend radius (folds that converge too tightly to round stay sharp, with a warning).
+  the rule's bend radius; where folds converge on a corner (a fan of facets) the bends are
+  conical, closing from the full radius to nothing at the corner.
 - **Miter flange** (`sheet.miter_flange`): an open profile drawn on a plane across the first
   edge, starting on it, swept along a chain of edges of one face; the profile is where the face
   of the flange ends up, so the sheet is trimmed back by the first bend. Corners are mitred.
@@ -595,23 +614,39 @@ operations:
 - **Adaptive Clearing** (3D) roughs the stock around the whole part in levels a step-down apart,
   plus a level on each flat area: at each level the cut grows in from the open air around the
   stock (or from a helix in closed areas) by the optimal load, so the engagement stays about
-  constant, keeping the stock to leave (0.3 mm by default) off the part.
+  constant, keeping the stock to leave (0.3 mm by default) off the part. **Rest machining**
+  roughs only what the setup's earlier operations left, such as the corners a larger tool
+  couldn't reach: their toolpaths are run through the stock first, and wherever the tool would
+  find no material left it counts as open air.
 - **Contour** (3D) finishes steep areas in waterline passes at constant heights a step-down
   apart (only where the part is at least the minimum slope steep); **Steep and Shallow** adds
   parallel rows on the areas below the threshold angle; **Pencil** runs one pass along each
-  concave corner or fillet tighter than the tool, where it touches the part on two sides.
+  concave corner or fillet tighter than the tool, where it touches the part on two sides, and
+  **passes** more either side of it a step-over apart, inside out, riding the faces that meet
+  there (pieces the tool could only reach by jumping a cliff, such as up a vertical wall, are
+  left out).
 
 Pockets and contours enter by plunging, **ramping** along the cut, or down a **helix**, at the
 ramp angle.
 
 The **Tool Library** (SETUP ▸ Tool Library) is `tools.json` in the data hub; a hub without one
 starts with a standard set. Operations take a tool by number (`tool_number`) or by diameter,
-and keep a copy of it, so a design machines the same on another computer.
+and keep a copy of it, so a design machines the same on another computer. A tool's **holder**
+is its stickout (tip to holder face) and stepped cylinders from the face up, written
+`Ø×length, …` (`"16x20, 25x10, 40"`: the last runs up to the spindle).
+
+**Fixtures** (New Setup, or SETUP ▸ Fixtures, `cam.fixtures`) are the bodies or components
+holding the part — vise jaws, clamps, a fixture plate. They are never machined and don't count
+for the stock. While toolpaths are generated (each new operation, and **Generate**), holders
+running into the part and tools or holders running into a fixture are reported with where it
+first happens and how deep; **Simulate** checks the holder steps against the stock as it is
+cut, and the fixtures again.
 
 Toolpaths (cutting moves blue, rapids dashed orange) are drawn with the stock and follow design
 changes; **Generate** reports the machining time. **Simulate** cuts the stock with the
 toolpaths on a heightfield, shows what's left in the view (gouges in red) and warns about
-gouges, rapids into the stock and cuts deeper than the flutes. **Post Process** writes the
+gouges, rapids into the stock, cuts deeper than the flutes, holders into the material and
+tools or holders into the fixtures. **Post Process** writes the
 G-code with the setup's post: Fanuc (`.nc`, `O` number, decimal points), Haas (`.nc`), GRBL
 (`.gcode`, no tool changer: it stops for each tool, drilling written out), LinuxCNC (`.ngc`)
 or Mach3/4 (`.tap`), in mm or inches.
@@ -628,7 +663,8 @@ fissionoxide-cli exec part.fox '{"cmd": "cam.post", "path": "part.nc", "units": 
 fissionoxide-cli run examples/milling.jsonl --save milled.fox   # a whole job, start to finish
 ```
 
-The simulation is a heightfield seen from above (no undercuts, no holder geometry), and there
+The simulation is a heightfield seen from above (no undercuts; holders and fixtures are checked
+from above too, so a fixture counts as solid down to the table), and there
 are no 4/5-axis or turning toolpaths yet: check the G-code against your machine before running
 it.
 
@@ -730,6 +766,50 @@ fissionoxide-cli exec blinky.fox '{"cmd": "ecad.svg", "view": "schematic", "path
 regulator, an LED and a programming header, routed with ground pours. Not there yet: multiple
 schematic sheets, differential pairs and length tuning, thermal reliefs on pours (pads join
 them solidly), push-and-shove routing, and board cutouts in the fab outline.
+
+## Generative design
+
+Switch the workspace to **Generative Design** (or script the `gen.*` commands). A study needs a
+design space and the loads it has to carry:
+
+- **Preserve geometry**: bodies the outcomes keep (bolt bosses, mounting pads); loads and
+  constraints go on their faces. **Obstacle geometry**: bodies they stay out of (bolt holes,
+  clearance for other parts). A **starting shape** is where the optimisation begins. The design
+  space is the box around the preserve geometry and starting shape, plus a margin, or bounds
+  you give.
+- **Load cases**: forces (N, spread over faces or the nodes near a point), pressures (MPa,
+  pushing into faces) and fixed constraints (any of X, Y, Z). A new case copies the first
+  case's constraints; the outcome has to carry all of them.
+- **Objectives and limits**: maximise stiffness at a mass target (the solid fraction of the
+  design space), or minimise mass: the target steps down, each step warm started from the
+  last, and the lightest design that still meets the safety factor (yield over peak von Mises
+  stress) and displacement limit wins.
+- **Materials** (aluminium, steel, stainless, titanium, ABS, nylon, PLA, or your own) and
+  **manufacturing**: unrestricted (additive), 3-axis milling from one or more tool directions
+  (nothing the tool can't reach), 2.5-axis milling (prismatic along the tool axis), symmetry
+  planes and a minimum member size. Every material with every method is one outcome.
+
+**Pre-check** shows the grid and warns about loads that miss the geometry; **Generate** runs
+in the background with a progress bar and can be stopped. The solver is density-based topology
+optimisation (`fox-gen`): SIMP with penalty 3 on a voxel grid of 8-node bricks, a cone density
+filter (its radius is half the minimum member size), Heaviside projection made sharper as it
+goes, the milling and symmetry constraints, optimality-criteria updates, and a threaded
+matrix-free conjugate-gradient finite element solve. The outcome is the 0.5 iso-surface of the
+densities (marching cubes on a tetrahedral split, so it's closed and manifold) with Taubin
+smoothing. **Explore** lists each outcome's mass, volume, maximum displacement, peak stress
+and safety factor (peak stress leaves out the most stressed 0.5 % of elements, the corners of
+the voxels), whether it meets the limits; **Insert** puts one into the design as a mesh body,
+or reduced, converted to B-rep, joined with the exact preserve geometry and with the obstacles
+cut, so bolt holes come out round. `gen.export` writes an outcome as STL, OBJ, 3MF or PLY.
+
+```sh
+fissionoxide-cli run examples/generative_bracket.jsonl --save bracket_gd.fox
+fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.outcomes"}'
+fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.insert", "outcome": 3, "reduce": 0.25, "brep": true, "merge_preserve": true}' --save bracket_gd.fox
+```
+
+The analysis is linear static on a voxel model, a guide to the shape and not a validation:
+check the inserted part with a proper simulation before trusting its safety factor.
 
 ## Headless CLI and scripting
 
@@ -952,6 +1032,7 @@ Design History off collapses the timeline into one base feature holding the bodi
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 | `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 | `fox-ecad`          | Electronics: library format, KiCad import, schematics and ERC, PCB layout, DRC, autorouter, Gerber/Excellon/BOM/pick-and-place |
+| `fox-gen`           | Generative design: SIMP topology optimisation on a voxel grid (threaded matrix-free FE), milling and symmetry constraints, iso-surfaces |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).

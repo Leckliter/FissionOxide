@@ -530,8 +530,9 @@ impl Conn {
     let stream = if tls {
       use rustls_platform_verifier::ConfigVerifierExt;
       let config = rustls::ClientConfig::with_platform_verifier().map_err(|e| e.to_string())?;
-      let name = rustls::pki_types::ServerName::try_from(host.trim_start_matches('[').trim_end_matches(']').to_string())
-        .map_err(|e| e.to_string())?;
+      let name =
+        rustls::pki_types::ServerName::try_from(host.trim_start_matches('[').trim_end_matches(']').to_string())
+          .map_err(|e| e.to_string())?;
       let c = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| e.to_string())?;
       Stream::Tls(Box::new(rustls::StreamOwned::new(c, tcp)))
     } else {
@@ -602,6 +603,8 @@ mod tests {
     assert_eq!(url_of(Path::new("http://tok@localhost:7474/")), Some("http://localhost:7474".into()));
     assert_eq!(host_port("https://h.example").ok(), Some(("h.example".into(), 443, true)));
     assert_eq!(host_port("http://[::1]:7474/x").ok(), Some(("[::1]".into(), 7474, false)));
-    assert!(is_loopback("[::1]") && is_loopback("127.0.0.1") && is_loopback("LOCALHOST") && !is_loopback("example.com"));
+    assert!(
+      is_loopback("[::1]") && is_loopback("127.0.0.1") && is_loopback("LOCALHOST") && !is_loopback("example.com")
+    );
   }
 }

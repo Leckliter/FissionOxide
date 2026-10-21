@@ -13,9 +13,7 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 |-----------|------------------------------------------------------------------------------|
 | Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
-| Sheet     | A flat pattern sketch that follows the model; rounded bends where press-brake folds converge on a corner (they stay sharp); splines in flat pattern DXFs |
-| UI        | Manipulators for more commands (shell, draft, patterns); a triad that turns about any axis |
-| Manufacture | Holder and fixture collision checks; turning and 4/5-axis; rest roughing after a larger tool in 3D; more pencil passes either side of a corner |
+| Manufacture | Turning and 4/5-axis |
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
 | Sketch    | Remove duplicate/overlapping curves; Clean Up (break links, delete constraints, splines to arcs/lines); Scale to Size and Fit in Box; a sketch library placed where you click |
@@ -32,4 +30,4 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 ## Later
 
 - Render workspace (materials beyond flat appearance colours, ray tracing)
-- Simulation (FEA), generative design
+- Simulation (FEA)
