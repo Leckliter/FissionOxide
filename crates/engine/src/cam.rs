@@ -137,7 +137,7 @@ fn faces_of(s: &Session, p: &Value, k: &str) -> Result<Vec<fox_model::FaceRef>, 
 
 /// The hub's tool library.
 fn library(s: &Session) -> Result<Library, CmdError> {
-  Library::load(&s.hub_root()).map_err(CmdError::new)
+  Library::load(&s.hub_dir()).map_err(CmdError::new)
 }
 
 fn tool_json(t: &Tool) -> Value {
@@ -195,7 +195,7 @@ fn tool_add(s: &mut Session, p: &Value) -> CmdResult {
   let tool = tool_fields(p, Tool { number, ..base })?;
   let out = tool_json(&tool);
   lib.put(tool);
-  lib.save(&s.hub_root()).map_err(CmdError::new)?;
+  lib.save(&s.hub_dir()).map_err(CmdError::new)?;
   Ok(out)
 }
 
@@ -205,7 +205,7 @@ fn tool_delete(s: &mut Session, p: &Value) -> CmdResult {
   if !lib.remove(number) {
     return Err(CmdError::new(format!("the library has no tool {number}")));
   }
-  lib.save(&s.hub_root()).map_err(CmdError::new)?;
+  lib.save(&s.hub_dir()).map_err(CmdError::new)?;
   Ok(json!({"deleted": number}))
 }
 

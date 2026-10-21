@@ -3,6 +3,11 @@
 //! Everything goes through the engine's `hub.*` commands; the panel only caches their JSON
 //! results (refreshed after each action and every few seconds, so saves from the CLI or another
 //! window show up) and the thumbnails as textures.
+//!
+//! The hub can be the local one or a hub server (Connect to a hub server…): then what others
+//! do shows up as it happens. A design's edit lock (Lock / Release / Steal lock) and who else
+//! has it open are shown with its versions; the open design is announced to the hub
+//! ([`heartbeat`]) so others see it too.
 
 use std::collections::HashMap;
 
@@ -34,6 +39,8 @@ enum Prompt {
   RenameItem(String, String),
   Milestone(String, u32, String),
   Comment(String, u32, String),
+  /// A hub server's URL and access token.
+  Connect(String, String),
 }
 
 /// The Save dialog's fields.
@@ -68,6 +75,12 @@ pub struct DataPanel {
   stale: bool,
   last_refresh: f64,
   error: Option<String>,
+  /// `hub.info`: where the hub is (a server?) and who we are on it.
+  info: Value,
+  /// The hub server news counter last seen ([`fox_engine::store::remote::generation`]).
+  heard: u64,
+  /// The design last announced as open here, and when.
+  here: Option<(Option<String>, f64)>,
 }
 
 impl DataPanel {
@@ -109,6 +122,7 @@ fn refresh(app: &mut App, ctx: &egui::Context) {
   d.stale = false;
   d.last_refresh = ctx.input(|i| i.time);
   let projects = hub(app, "hub.projects", json!({})).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+  app.data.info = app.s.execute("hub.info", &json!({})).unwrap_or(Value::Null);
   let d = &mut app.data;
   d.projects = projects;
   if d.project.as_ref().is_none_or(|p| !d.projects.iter().any(|x| s(x, "id") == *p)) {
@@ -201,6 +215,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let ctx = ui.ctx().clone();
   let now = ctx.input(|i| i.time);
+  // a hub server said something changed
+  let heard = fox_engine::store::remote::generation();
+  if heard != app.data.heard {
+    app.data.heard = heard;
+    app.data.stale = true;
+  }
   if app.data.stale || now - app.data.last_refresh > REFRESH_SECS {
     refresh(app, &ctx);
   }
@@ -226,6 +246,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
           }
         });
       });
+      hub_location(app, ui);
       ui.horizontal(|ui| {
         for (t, label) in
           [(Tab::Files, "Files"), (Tab::Recent, "Recent"), (Tab::Activity, "Activity"), (Tab::Trash, "Trash")]
@@ -253,6 +274,76 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     });
   prompt_window(app, &ctx);
   compare_window(app, &ctx);
+}
+
+/// Which hub this is (local, or a hub server and who we are on it), and switching.
+fn hub_location(app: &mut App, ui: &mut egui::Ui) {
+  let server = app.data.info.get("server").and_then(Value::as_str).map(str::to_string);
+  ui.horizontal(|ui| {
+    match &server {
+      Some(url) => {
+        let live = fox_engine::store::remote::is_live(std::path::Path::new(url));
+        let host = url.split_once("://").map(|(_, h)| h).unwrap_or(url);
+        ui.label(RichText::new(format!("🌐 {host}")).small().strong())
+          .on_hover_text(format!("Hub server {url}, as {}", s(&app.data.info, "user")));
+        let (dot, tip) = if live {
+          (RichText::new("● live").small().color(theme::ICON_GREEN), "Changes and presence arrive as they happen")
+        } else {
+          (RichText::new("● offline").small().color(theme::WARNING), "No live connection: re-read every few seconds")
+        };
+        ui.label(dot).on_hover_text(tip);
+      }
+      None => {
+        ui.label(RichText::new("Local hub").small().color(theme::MUTED));
+      }
+    }
+    ui.menu_button(RichText::new("Hub ▾").small(), |ui| {
+      if ui.button("Connect to a hub server…").clicked() {
+        let url = server.clone().unwrap_or_else(|| "https://".into());
+        app.data.prompt = Some(Prompt::Connect(url, String::new()));
+        ui.close();
+      }
+      if server.is_some() && ui.button("Use the local hub").clicked() {
+        hub(app, "hub.disconnect", json!({}));
+        reset_location(app);
+        ui.close();
+      }
+    });
+  });
+}
+
+fn reset_location(app: &mut App) {
+  let d = &mut app.data;
+  d.project = None;
+  d.folder = None;
+  d.selected = None;
+  d.thumbs.clear();
+  d.here = None;
+  d.stale = true;
+}
+
+/// Tells the hub which design is open here (on change, and every [`HEARTBEAT`] while one is),
+/// so others see it in their data panel.
+///
+/// [`HEARTBEAT`]: fox_engine::store::presence::HEARTBEAT
+pub fn heartbeat(app: &mut App, ctx: &egui::Context) {
+  let now = ctx.input(|i| i.time);
+  let open = app.s.hub.as_ref().map(|h| h.item.clone());
+  let every = fox_engine::store::presence::HEARTBEAT.as_secs_f64();
+  let due = match &app.data.here {
+    None => open.is_some(),
+    Some((last, t)) => *last != open || (open.is_some() && now - t > every),
+  };
+  if due {
+    let items: Vec<String> = open.iter().cloned().collect();
+    if let Err(e) = app.s.execute("hub.here", &json!({"items": items})) {
+      log::debug!("couldn't announce the open design: {}", e.0);
+    }
+    app.data.here = Some((open.clone(), now));
+  }
+  if open.is_some() {
+    ctx.request_repaint_after(fox_engine::store::presence::HEARTBEAT);
+  }
 }
 
 fn files_tab(app: &mut App, ui: &mut egui::Ui) {
@@ -418,7 +509,14 @@ fn item_rows(app: &mut App, ui: &mut egui::Ui, items: Vec<Value>, show_path: boo
             if open_here {
               title = title.color(theme::ACCENT);
             }
-            ui.label(title);
+            ui.horizontal(|ui| {
+              ui.label(title);
+              if let Some(l) = it.get("lock").filter(|l| !l.is_null()) {
+                let who = if l.get("mine") == Some(&json!(true)) { "you".to_string() } else { s(l, "user") };
+                ui.label(RichText::new(format!("🔒 {who}")).small().color(theme::WARNING))
+                  .on_hover_text(format!("Locked for editing by {who} since {}", s(l, "since_time")));
+              }
+            });
             let n = latest.get("number").and_then(Value::as_u64).unwrap_or(0);
             let when = latest
               .get("created")
@@ -507,6 +605,22 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
       }
     });
   });
+  if is_design {
+    lock_row(app, ui, &id, item.get("lock").filter(|l| !l.is_null()));
+  }
+  let presence = d.get("presence").and_then(Value::as_array).cloned().unwrap_or_default();
+  let others: Vec<String> = presence
+    .iter()
+    .filter(|p| p.get("me") != Some(&json!(true)))
+    .map(|p| {
+      let host = s(p, "host");
+      if host.is_empty() { s(p, "user") } else { format!("{} ({host})", s(p, "user")) }
+    })
+    .collect();
+  if !others.is_empty() {
+    ui.label(RichText::new(format!("👥 Open by {}", others.join(", "))).small().color(theme::ACCENT))
+      .on_hover_text("They have this design open right now");
+  }
   let versions = d.get("versions").and_then(Value::as_array).cloned().unwrap_or_default();
   ui.label(RichText::new(format!("{} versions", versions.len())).small().color(theme::MUTED));
   let latest = versions.first().and_then(|v| v.get("number")).and_then(Value::as_u64);
@@ -584,6 +698,49 @@ fn details(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
+/// The design's edit lock and what can be done about it.
+fn lock_row(app: &mut App, ui: &mut egui::Ui, id: &str, lock: Option<&Value>) {
+  ui.horizontal(|ui| match lock {
+    None => {
+      ui.label(RichText::new("🔓 Not locked").small().color(theme::MUTED));
+      if ui
+        .small_button("Lock")
+        .on_hover_text("Take the edit lock: nobody else can save versions of it until you release it")
+        .clicked()
+      {
+        hub(app, "hub.lock", json!({"item": id}));
+        app.data.stale = true;
+      }
+    }
+    Some(l) if l.get("mine") == Some(&json!(true)) => {
+      let host = s(l, "host");
+      let where_ = if l.get("here") == Some(&json!(true)) || host.is_empty() {
+        String::new()
+      } else {
+        format!(" on {host}")
+      };
+      ui.label(RichText::new(format!("🔒 Locked by you{where_}")).small().color(theme::ICON_GREEN))
+        .on_hover_text(format!("Since {}", s(l, "since_time")));
+      if ui.small_button("Release").on_hover_text("Let others save versions of it again").clicked() {
+        hub(app, "hub.unlock", json!({"item": id}));
+        app.data.stale = true;
+      }
+    }
+    Some(l) => {
+      ui.label(RichText::new(format!("🔒 Locked by {}", s(l, "user"))).small().color(theme::WARNING))
+        .on_hover_text(format!("Since {}: until they release it, only they can save versions", s(l, "since_time")));
+      if ui
+        .small_button("Steal lock")
+        .on_hover_text("Take the lock from them: they can't save versions of it until it's released")
+        .clicked()
+      {
+        hub(app, "hub.lock", json!({"item": id, "steal": true}));
+        app.data.stale = true;
+      }
+    }
+  });
+}
+
 fn activity_tab(app: &mut App, ui: &mut egui::Ui) {
   let now = fox_engine::store::now();
   let list = app.data.other.as_array().cloned().unwrap_or_default();
@@ -651,21 +808,34 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
     Prompt::RenameItem(..) => ("Rename design", "New name"),
     Prompt::Milestone(..) => ("Mark milestone", "Milestone name (e.g. Sent to shop)"),
     Prompt::Comment(..) => ("Comment on version", "Your comment"),
+    Prompt::Connect(..) => ("Connect to a hub server", "https://hub.example.com"),
   };
   let mut done = false;
   let mut cancel = false;
   egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
     ctx,
     |ui| {
-      let text = match &mut p {
-        Prompt::NewProject(t) | Prompt::NewFolder(t) | Prompt::RenameProject(t) => t,
-        Prompt::RenameFolder(_, t) | Prompt::RenameItem(_, t) | Prompt::Milestone(_, _, t) => t,
-        Prompt::Comment(_, _, t) => t,
-      };
-      let r = ui.add(egui::TextEdit::singleline(text).hint_text(hint).desired_width(260.0));
-      r.request_focus();
-      if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-        done = true;
+      if let Prompt::Connect(url, token) = &mut p {
+        ui.label(RichText::new("A FissionOxide hub server (fox-hub-server) and your access token").small());
+        ui.add(egui::TextEdit::singleline(url).hint_text(hint).desired_width(260.0));
+        let r = ui.add(
+          egui::TextEdit::singleline(token).hint_text("Access token (kept for this server)").password(true).desired_width(260.0),
+        );
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+          done = true;
+        }
+      } else {
+        let text = match &mut p {
+          Prompt::NewProject(t) | Prompt::NewFolder(t) | Prompt::RenameProject(t) => t,
+          Prompt::RenameFolder(_, t) | Prompt::RenameItem(_, t) | Prompt::Milestone(_, _, t) => t,
+          Prompt::Comment(_, _, t) => t,
+          Prompt::Connect(t, _) => t,
+        };
+        let r = ui.add(egui::TextEdit::singleline(text).hint_text(hint).desired_width(260.0));
+        r.request_focus();
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+          done = true;
+        }
       }
       ui.horizontal(|ui| {
         done |= ui.button("OK").clicked();
@@ -702,6 +872,14 @@ fn prompt_window(app: &mut App, ctx: &egui::Context) {
     }
     Prompt::Comment(id, n, text) => {
       hub(app, "hub.comment", json!({"item": id, "version": n, "text": text})).map(|_| ())
+    }
+    Prompt::Connect(url, token) => {
+      let token = Some(token.trim()).filter(|t| !t.is_empty());
+      let r = hub(app, "hub.connect", json!({"url": url.trim(), "token": token}));
+      if r.is_some() {
+        reset_location(app);
+      }
+      r.map(|_| ())
     }
   };
   let _ = ok;

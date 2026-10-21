@@ -106,6 +106,31 @@ pub fn item_json(st: &Store, it: &Item) -> Value {
     "trashed": it.trashed,
     "versions": it.versions.len(),
     "latest": it.latest().map(version_json),
+    "lock": it.lock.as_ref().map(|l| lock_json(st, l)),
+  })
+}
+
+fn lock_json(st: &Store, l: &fox_store::EditLock) -> Value {
+  json!({
+    "user": l.user,
+    "host": l.host,
+    "session": l.session,
+    "since": l.since,
+    "since_time": fox_store::format_time(l.since),
+    "mine": st.is_mine(l),
+    "here": l.session == st.session(),
+  })
+}
+
+fn presence_json(st: &Store, p: &fox_store::presence::Presence) -> Value {
+  json!({
+    "user": p.user,
+    "host": p.host,
+    "session": p.session,
+    "item": p.item,
+    "since": p.since,
+    "since_time": fox_store::format_time(p.since),
+    "me": p.session == st.session(),
   })
 }
 
@@ -175,6 +200,15 @@ fn with_named_copy<T>(
 }
 
 pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
+  match name {
+    "hub.connect" => return connect(s, p),
+    "hub.disconnect" => {
+      s.store_root = None;
+      fox_store::remote::remember_last(None)?;
+      return Ok(json!({"root": s.hub_root()}));
+    }
+    _ => {}
+  }
   let root = s.hub_root();
   let mut st = Store::open(&root)?;
   match name {
@@ -188,6 +222,9 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "bytes": st.disk_usage(),
         "linked": s.hub,
         "merged_conflicts": st.merged_conflicts(),
+        "server": st.server(),
+        "user": st.user(),
+        "locks": st.my_locks().iter().map(|i| json!({"id": i.id, "name": i.name})).collect::<Vec<_>>(),
       }))
     }
     "hub.projects" => {
@@ -308,9 +345,36 @@ pub fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     "hub.versions" => {
       let item = item_of(s, p)?;
       let it = st.item(&item)?;
-      Ok(
-        json!({"item": item_json(&st, it), "versions": it.versions.iter().rev().map(version_json).collect::<Vec<_>>()}),
-      )
+      let presence: Vec<Value> = st.presence(Some(&item))?.iter().map(|x| presence_json(&st, x)).collect();
+      Ok(json!({
+        "item": item_json(&st, it),
+        "versions": it.versions.iter().rev().map(version_json).collect::<Vec<_>>(),
+        "presence": presence,
+      }))
+    }
+    "hub.lock" => {
+      let item = item_of(s, p)?;
+      let steal = p.get("steal").and_then(Value::as_bool).unwrap_or(false);
+      let l = st.take_lock(&item, steal)?;
+      Ok(json!({"item": item, "lock": lock_json(&st, &l)}))
+    }
+    "hub.unlock" => {
+      let item = item_of(s, p)?;
+      st.release_lock(&item)?;
+      Ok(json!({"item": item}))
+    }
+    "hub.presence" => {
+      let list = st.presence(opt(p, "item"))?;
+      Ok(json!(list.iter().map(|x| presence_json(&st, x)).collect::<Vec<_>>()))
+    }
+    "hub.here" => {
+      // default: the design open in this session
+      let items: Vec<String> = match p.get("items").and_then(Value::as_array) {
+        Some(a) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+        None => s.hub.iter().map(|h| h.item.clone()).collect(),
+      };
+      st.here(&items)?;
+      Ok(json!({"items": items, "live": st.server().is_some_and(|_| fox_store::remote::is_live(&root))}))
     }
     "hub.promote" => {
       let item = item_of(s, p)?;
@@ -583,6 +647,10 @@ const WELCOME_MARKER: &str = "welcome";
 /// Adds [`WELCOME`] to the hub at `root` (in "Default Project") the first time FissionOxide runs
 /// with it; returns the new item, or `None` if the hub already had it.
 pub fn add_welcome(root: &Path) -> Result<Option<String>, CmdError> {
+  // a hub server's hub is shared: it isn't ours to fill
+  if fox_store::remote::is_remote(root) {
+    return Ok(None);
+  }
   let marker = root.join(WELCOME_MARKER);
   if marker.exists() {
     return Ok(None);
@@ -605,6 +673,27 @@ pub fn add_welcome(root: &Path) -> Result<Option<String>, CmdError> {
   let (item, _) = st.create_item(at, WELCOME.as_bytes(), Origin::Saved, m)?;
   std::fs::write(&marker, format!("{item}\n"))?;
   Ok(Some(item))
+}
+
+/// `hub.connect`: work on the hub server at `url` from now on (checking it can be reached and
+/// the token is good), remembering the token for it and that the app should reconnect to it at
+/// the next start, unless `remember` is false.
+fn connect(s: &mut Session, p: &Value) -> CmdResult {
+  let url = req(p, "url")?;
+  if !fox_store::remote::is_remote(Path::new(url)) {
+    return Err(CmdError::new("'url' must be a hub server's http:// or https:// URL"));
+  }
+  let token = opt(p, "token");
+  let st = Store::open_remote(url, token)?;
+  let server = st.server().unwrap_or(url).to_string();
+  if p.get("remember").and_then(Value::as_bool) != Some(false) {
+    if let Some(t) = token {
+      fox_store::remote::remember_token(&server, t)?;
+    }
+    fox_store::remote::remember_last(Some(&server))?;
+  }
+  s.store_root = Some(PathBuf::from(&server));
+  Ok(json!({"server": server, "user": st.user(), "projects": st.projects().len()}))
 }
 
 /// Re-exports for the UI.

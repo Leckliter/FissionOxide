@@ -22,7 +22,9 @@
 //! `check-dxf` checks a flat pattern DXF (or a design's sheet metal flat pattern) against shop
 //! rules (`sheet.check_dxf`) and fails when it finds a problem.
 //!
-//! `--hub DIR` (or `FOX_DATA_DIR`) picks the data hub directory for every subcommand.
+//! `--hub DIR` (or `FOX_DATA_DIR`) picks the data hub directory for every subcommand; `--hub
+//! https://HOST` works on a hub server (`fox-hub-server`) instead, with `--token TOKEN` (or
+//! `FOX_HUB_TOKEN`, or the token remembered by `hub connect`).
 //! `--configuration NAME` picks a configuration of the design for `export`, `convert`, `render`,
 //! `info` and the `--export`/`--png` outputs of `run`.
 //!
@@ -32,6 +34,8 @@
 //! fissionoxide-cli hub versions '{"item": "i3"}'
 //! fissionoxide-cli hub comment '{"item": "i3", "version": 2, "text": "check the fillet"}'
 //! fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "v2.step"}'
+//! fissionoxide-cli --hub https://hub.example.com --token T0K3N hub lock '{"item": "i3"}'
+//! fissionoxide-cli --hub https://hub.example.com hub presence
 //! ```
 //!
 //! A script is one JSON command per line: `{"cmd": "extrude", "distance": 10}` (the remaining
@@ -73,8 +77,23 @@ fn out(v: &Value) {
 
 fn run(args: &[String]) -> Result<(), String> {
   if let Some(dir) = flag(args, "--hub") {
+    if let Some(token) = flag(args, "--token") {
+      fox_engine::store::remote::use_token(&dir, &token);
+    }
     HUB.with(|h| *h.borrow_mut() = Some(PathBuf::from(dir)));
   }
+  // the hub flags go anywhere, even before the subcommand
+  let mut kept = Vec::new();
+  let mut i = 0;
+  while i < args.len() {
+    if args[i] == "--hub" || args[i] == "--token" {
+      i += 2;
+      continue;
+    }
+    kept.push(args[i].clone());
+    i += 1;
+  }
+  let args = &kept[..];
   let Some(sub) = args.first() else { return Err(usage()) };
   let rest = &args[1..];
   match sub.as_str() {
@@ -256,7 +275,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | check-dxf F.dxf|F.fox  (all take --hub DIR; export, convert, render, info and run take --configuration NAME)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | check-dxf F.dxf|F.fox  (all take --hub DIR|URL [--token T]; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {

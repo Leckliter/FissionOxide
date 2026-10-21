@@ -228,6 +228,13 @@ impl Session {
     self.store_root.clone().unwrap_or_else(store::Store::default_root)
   }
 
+  /// The directory for files kept beside the hub (the tool library, machine profiles): the hub
+  /// directory, or for a hub server a local one kept for it.
+  pub fn hub_dir(&self) -> PathBuf {
+    let root = self.hub_root();
+    store::remote::local_dir_for(&root).unwrap_or(root)
+  }
+
   /// Runs a command by name with JSON parameters.
   pub fn execute(&mut self, name: &str, params: &Value) -> CmdResult {
     // Last-resort guard: a panic anywhere in a command restores the design and reports an error.
@@ -544,6 +551,8 @@ mod tests_curves3d;
 mod tests_cut;
 #[cfg(test)]
 mod tests_files;
+#[cfg(test)]
+mod tests_hub_server;
 #[cfg(test)]
 mod tests_fillet;
 #[cfg(test)]

@@ -41,7 +41,7 @@ fn user_machines(hub: &Path) -> Result<Vec<Machine>, CmdError> {
 
 /// Built-in machines, then the hub's (a hub machine with a built-in's id replaces it).
 fn machines(s: &Session) -> Result<Vec<Machine>, CmdError> {
-  let user = user_machines(&s.hub_root())?;
+  let user = user_machines(&s.hub_dir())?;
   let mut all: Vec<Machine> = fox_cut::builtin_machines()
     .into_iter()
     .filter(|b| !user.iter().any(|u| u.id.eq_ignore_ascii_case(&b.id)))
@@ -66,7 +66,7 @@ fn machine_add(s: &mut Session, p: &Value) -> CmdResult {
   if m.id.trim().is_empty() {
     return Err(CmdError::new("a machine needs an id"));
   }
-  let hub = s.hub_root();
+  let hub = s.hub_dir();
   let mut user = user_machines(&hub)?;
   user.retain(|u| !u.id.eq_ignore_ascii_case(&m.id));
   user.push(m.clone());
@@ -77,7 +77,7 @@ fn machine_add(s: &mut Session, p: &Value) -> CmdResult {
 
 fn machine_delete(s: &mut Session, p: &Value) -> CmdResult {
   let id = opt_str(p, "id").ok_or(CmdError::new("'id' is required"))?;
-  let hub = s.hub_root();
+  let hub = s.hub_dir();
   let mut user = user_machines(&hub)?;
   let n = user.len();
   user.retain(|u| !u.id.eq_ignore_ascii_case(id));

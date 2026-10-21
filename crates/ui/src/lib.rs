@@ -53,6 +53,11 @@ pub use logo::{Splash, SplashPhase};
 pub use updates::Updates;
 pub use viewport::{NavMode, Tool};
 
+/// Whether a hub root is a hub server's URL rather than a directory.
+pub fn is_remote_hub(root: &std::path::Path) -> bool {
+  fox_engine::store::remote::is_remote(root)
+}
+
 pub struct App {
   pub s: Session,
   pub cam: Camera,
@@ -244,6 +249,14 @@ impl App {
     app.prefs = customize::Prefs::load();
     app.preferences = preferences::Preferences::load();
     preferences::apply(&mut app);
+    // back on the hub server it was connected to last time
+    if app.s.store_root.is_none()
+      && std::env::var_os("FOX_DATA_DIR").is_none()
+      && let Some(url) = fox_engine::store::remote::last_server()
+    {
+      log::info!("using the hub server {url}");
+      app.s.store_root = Some(url.into());
+    }
     // the first start puts the fox in 3D in the hub, and shows it unless a file was asked for
     let welcome = fox_engine::hub::add_welcome(&app.hub_root()).unwrap_or_else(|e| {
       log::warn!("couldn't add the welcome design to the hub: {}", e.0);
@@ -1459,6 +1472,7 @@ impl App {
     if self.drawing.is_none() {
       panels::timeline(self, ui);
     }
+    data_panel::heartbeat(self, &ctx);
     data_panel::show(self, ui);
     if self.step_cam_move(now()) {
       ctx.request_repaint();

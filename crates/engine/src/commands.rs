@@ -319,6 +319,12 @@ cmds! {
   "hub.comment" => "Comment on a version (default: the open one, else the latest)", "{item?, version?, text}";
   "hub.comments" => "Comments on an item's versions", "{item?, version?}";
   "hub.comment.delete" => "Delete a comment", "{item?, comment}";
+  "hub.lock" => "Take a design's edit lock (default the open one): nobody else can save versions of it until it is released; steal takes someone else's", "{item?, steal?: bool}";
+  "hub.unlock" => "Release your edit lock on a design (default the open one)", "{item?}";
+  "hub.presence" => "Who has designs open (one design, or all), on a hub server in real time", "{item?}";
+  "hub.here" => "Say which designs this session has open (default the open design); repeat every 30 s while they stay open", "{items?: [id]}";
+  "hub.connect" => "Work on a hub server (fox-hub-server) from now on; the token is remembered for it, and the app reconnects at its next start", "{url, token?, remember?: bool}";
+  "hub.disconnect" => "Go back to the local hub", "{}";
   "hub.diff" => "Show two versions in the viewport: added geometry green, removed red, unchanged ghosted", "{item?, a, b?, clear?: bool}";
   "sheet.check_dxf" => "Check a flat pattern DXF (a file, or a sheet metal body's flat pattern) against shop rules: closed contours, no duplicates, minimum feature size, holes clear of bends", "{path? | body?, face?, min_feature?, hole_to_bend?}";
   "sketch.fonts" => "Fonts sketch text can use: built in, and font files in the system's font folders (FOX_FONT_DIR first); a text's font may also be a font file's path", "{}";

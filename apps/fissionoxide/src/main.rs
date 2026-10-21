@@ -169,7 +169,10 @@ impl Desktop {
         }
         Action::OpenDataFolder => {
           let root = self.app.hub_root();
-          let _ = std::fs::create_dir_all(&root);
+          // a hub server's page opens in the browser
+          if !fox_ui::is_remote_hub(&root) {
+            let _ = std::fs::create_dir_all(&root);
+          }
           if let Err(e) = fox_desktop::open(&root.to_string_lossy()) {
             log::warn!("couldn't open {}: {e}", root.display());
           }

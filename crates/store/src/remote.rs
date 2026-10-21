@@ -99,6 +99,17 @@ fn local_dir() -> PathBuf {
   crate::platform_dir("FissionOxide", "fissionoxide").join("remote")
 }
 
+fn cache_of(base: &str) -> PathBuf {
+  let safe: String = base.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
+  local_dir().join(safe)
+}
+
+/// The local directory kept for the hub server `root` names (its file cache, and what is kept
+/// beside a hub, like tool libraries), if it is one.
+pub fn local_dir_for(root: &Path) -> Option<PathBuf> {
+  url_of(root).map(|u| cache_of(&u))
+}
+
 fn tokens_file() -> PathBuf {
   local_dir().join("tokens.json")
 }
@@ -140,6 +151,28 @@ pub fn remember_token(url: &str, token: &str) -> Result<()> {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
   }
   Ok(())
+}
+
+/// Remembers the hub server the app last connected to (`None`: back to the local hub).
+pub fn remember_last(url: Option<&str>) -> Result<()> {
+  let path = local_dir().join("last.txt");
+  match url {
+    Some(u) => {
+      std::fs::create_dir_all(local_dir())?;
+      std::fs::write(path, parse(u)?.0)?;
+    }
+    None => {
+      let _ = std::fs::remove_file(path);
+    }
+  }
+  Ok(())
+}
+
+/// The hub server the app last connected to, if it didn't go back to the local hub since.
+pub fn last_server() -> Option<String> {
+  let s = std::fs::read_to_string(local_dir().join("last.txt")).ok()?;
+  let s = s.trim();
+  is_url(s).then(|| s.to_string())
 }
 
 /// One connection to a hub server, shared by every store this process opens on it.
@@ -304,8 +337,7 @@ impl Conn {
 
   /// Where this server's files are cached.
   pub(crate) fn cache_dir(&self) -> PathBuf {
-    let safe: String = self.url.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
-    local_dir().join(safe)
+    cache_of(&self.url)
   }
 
   /// The server's index, as it is now.
