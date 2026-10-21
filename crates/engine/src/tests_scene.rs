@@ -236,8 +236,8 @@ fn profiles_shade_blue_outside_and_pale_inside_the_sketch() {
   assert_eq!(profile_color(&mut b, &s), scene::PROFILE_SELECTED);
 }
 
-/// Sketch points draw as open circles, filled once two curves share them or a constraint ties
-/// them (Fusion's coincident look); the origin stays a filled dot.
+/// A free sketch point draws as an open circle; a curve's ends draw filled, as do points two
+/// curves share or a constraint ties (Fusion's look); the origin stays a filled dot.
 #[test]
 fn sketch_points_draw_hollow_until_joined() {
   let mut s = Session::default();
@@ -252,7 +252,77 @@ fn sketch_points_draw_hollow_until_joined() {
   let points: Vec<_> =
     scene.markers.iter().filter(|m| matches!(picks.get(m.id), Some(Pick::SketchPoint { .. }))).collect();
   assert_eq!(points.len(), 5, "origin, three line ends, one point");
-  assert_eq!(points.iter().filter(|m| m.hollow).count(), 3, "the shared corner and the origin are filled");
+  assert_eq!(points.iter().filter(|m| m.hollow).count(), 1, "only the free point is open");
+  assert!(points.iter().all(|m| m.color == scene::SKETCH_POINT || m.color == [200, 60, 40, 255]), "dark-grey dots");
+}
+
+/// In a sketch a selected curve draws wide in Fusion's selection blue and a hovered one wide in
+/// its darker hover blue, while a plain curve keeps its width and colour; the canvas behind the
+/// sketch is white, and goes back to the gradient when the sketch is finished.
+#[test]
+fn selected_and_hovered_sketch_curves_draw_wide_blue_on_a_white_canvas() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let id = |v: &Value| fox_sketch::CurveId(v["curves"][0].as_u64().unwrap() as u32);
+  let picked = id(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]})));
+  let hovered = id(&run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 5]]})));
+  let plain = id(&run(&mut s, "sketch.line", json!({"points": [[0, 10], [10, 10]]})));
+  let sk = s.edit_sketch.unwrap();
+  s.selection = vec![Sel::SketchCurve { sketch: sk, curve: picked }];
+  let opts = ViewOptions { hover: Some(Pick::SketchCurve { sketch: sk, curve: hovered }), ..Default::default() };
+  let (scene, picks) = SceneBuilder::default().build(&s, &opts);
+  let line = |curve| {
+    let l = scene.lines.iter().find(|l| picks.get(l.id) == Some(Pick::SketchCurve { sketch: sk, curve })).unwrap();
+    (l.color, l.width)
+  };
+  assert_eq!(line(picked), (scene::SKETCH_SELECTED, scene::SKETCH_CURVE_WIDTH_HOT));
+  assert_eq!(line(hovered), (scene::SKETCH_HOVER_EDIT, scene::SKETCH_CURVE_WIDTH_HOT));
+  assert_eq!(line(plain), (scene::SKETCH_FREE, scene::SKETCH_CURVE_WIDTH));
+  assert_eq!((scene.background_top, scene.background_bottom), (scene::SKETCH_BACKGROUND, scene::SKETCH_BACKGROUND));
+  run(&mut s, "sketch.finish", json!({}));
+  let (scene, _) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  assert_ne!(scene.background_top, scene::SKETCH_BACKGROUND, "the gradient is back outside the sketch");
+}
+
+/// A sketch point under the cursor draws as a hollow ring, a selected one as a light-blue disc
+/// inside a dark ring (both a size larger than the plain dot), and a visible sketch's points are
+/// still drawn and pickable outside the sketch.
+#[test]
+fn sketch_points_show_hover_ring_and_selected_fill_inside_and_outside_the_sketch() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let c = run(&mut s, "sketch.line", json!({"points": [[5, 5], [15, 5]]}))["curves"][0].as_u64().unwrap() as u32;
+  let sk = s.edit_sketch.unwrap();
+  let ends = s.design.sketch(sk).unwrap().curve_points(fox_sketch::CurveId(c));
+  let (a, b) = (ends[0], ends[1]);
+  s.selection = vec![Sel::SketchPoint { sketch: sk, point: a }];
+  let opts = ViewOptions { hover: Some(Pick::SketchPoint { sketch: sk, point: b }), ..Default::default() };
+  let (scene, picks) = SceneBuilder::default().build(&s, &opts);
+  let marks = |scene: &fox_render::Scene, picks: &scene::PickTable, point| -> Vec<(f32, bool, [u8; 4])> {
+    scene
+      .markers
+      .iter()
+      .filter(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point }))
+      .map(|m| (m.size, m.hollow, m.color))
+      .collect()
+  };
+  assert_eq!(
+    marks(&scene, &picks, a),
+    vec![(4.0, false, scene::SKETCH_POINT), (3.0, false, scene::SKETCH_POINT_SELECTED)],
+    "a dark ring around a light-blue disc"
+  );
+  assert_eq!(marks(&scene, &picks, b), vec![(4.0, true, scene::SKETCH_POINT)], "a hollow ring");
+  assert!(
+    scene.markers.iter().any(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point: fox_sketch::ORIGIN }))
+  );
+  // outside the sketch (still visible: nothing consumed it) the dots stay, pickable, without the origin
+  s.selection.clear();
+  run(&mut s, "sketch.finish", json!({}));
+  let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  assert_eq!(marks(&scene, &picks, a), vec![(3.0, false, scene::SKETCH_POINT)]);
+  assert!(
+    !scene.markers.iter().any(|m| picks.get(m.id) == Some(Pick::SketchPoint { sketch: sk, point: fox_sketch::ORIGIN }))
+  );
 }
 
 /// Hovering a face lightens it and keeps its hue; a selected face or body is the medium

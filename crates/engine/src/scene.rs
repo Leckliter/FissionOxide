@@ -48,6 +48,20 @@ pub const SKETCH_FIXED: [u8; 4] = [20, 20, 24, 255];
 /// Construction geometry: grey dashed, as Fusion draws it.
 pub const SKETCH_CONSTRUCTION: [u8; 4] = [128, 128, 132, 255];
 pub const SKETCH_IDLE: [u8; 4] = [60, 70, 90, 255];
+/// A sketch curve under the cursor and a selected one in the sketch being edited, as Fusion
+/// draws them: both about 4 px wide, the hover a darker, more saturated blue than a free curve
+/// and the selection a vivid blue.
+pub const SKETCH_HOVER_EDIT: [u8; 4] = [74, 130, 252, 255];
+pub const SKETCH_SELECTED: [u8; 4] = [3, 123, 253, 255];
+/// A sketch point's mark (a line end, a corner): a dark-grey dot about 7 px across, a hollow
+/// ring under the cursor, and a light-blue fill inside the dark ring once selected.
+pub const SKETCH_POINT: [u8; 4] = [50, 50, 50, 255];
+pub const SKETCH_POINT_SELECTED: [u8; 4] = [125, 158, 213, 255];
+/// The canvas behind the sketch being edited: Fusion clears it to white.
+pub const SKETCH_BACKGROUND: [u8; 4] = [255, 255, 255, 255];
+/// A sketch curve's width in the sketch, plain and under the cursor or selected.
+pub const SKETCH_CURVE_WIDTH: f32 = 2.0;
+pub const SKETCH_CURVE_WIDTH_HOT: f32 = 4.0;
 /// The origin axes' colours (X red, Y green, Z blue), shared with the viewport's axis triad.
 pub const ORIGIN_X_COLOR: [u8; 4] = [232, 96, 92, 255];
 pub const ORIGIN_Y_COLOR: [u8; 4] = [96, 190, 96, 255];
@@ -223,6 +237,11 @@ impl SceneBuilder {
     let selected_bodies: Vec<BodyId> =
       s.selection.iter().filter_map(|x| if let Sel::Body { body } = x { Some(*body) } else { None }).collect();
     let editing = s.edit_sketch.is_some();
+    if editing {
+      // Fusion clears the canvas to white behind a sketch
+      scene.background_top = SKETCH_BACKGROUND;
+      scene.background_bottom = SKETCH_BACKGROUND;
+    }
     let offsets = self.explode_offsets(s, opts);
 
     // a version comparison replaces the bodies
@@ -674,22 +693,25 @@ fn sketch_lines(
   hover_more: &[Pick],
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
-  // a curve's colour and width: selected curves draw bright blue (over a halo outside the
-  // sketch); a hovered curve is light blue in its sketch and a thicker darker blue outside it,
-  // where it is picked over the face it lies on
+  // a curve's colour and width: in its sketch a selected curve draws Fusion's vivid blue about
+  // 4 px wide and a hovered one a darker blue as wide; outside the sketch a selected curve is
+  // bright blue over a halo and a hovered one a thicker darker blue, picked over the face it
+  // lies on
   let look = |pick: Pick, idle: [u8; 4], construction: bool| -> ([u8; 4], f32, bool) {
     if selected.contains(&pick) {
-      (EDGE_SELECT_COLOR, if editing { 2.0 } else { 1.0 }, !editing)
+      if editing { (SKETCH_SELECTED, SKETCH_CURVE_WIDTH_HOT, false) } else { (EDGE_SELECT_COLOR, 1.0, true) }
     } else if hover == Some(pick) && !editing {
       (SKETCH_HOVER, 2.0, false)
-    } else if hover == Some(pick) || peeked || hover_more.contains(&pick) {
-      (HOVER_COLOR, if editing { 2.0 } else { 1.0 }, false)
+    } else if hover == Some(pick) {
+      (SKETCH_HOVER_EDIT, SKETCH_CURVE_WIDTH_HOT, false)
+    } else if peeked || hover_more.contains(&pick) {
+      (HOVER_COLOR, if editing { SKETCH_CURVE_WIDTH } else { 1.0 }, false)
     } else if !editing {
       (SKETCH_IDLE, 1.0, false)
     } else if construction {
-      (SKETCH_CONSTRUCTION, 2.0, false)
+      (SKETCH_CONSTRUCTION, SKETCH_CURVE_WIDTH, false)
     } else {
-      (idle, 2.0, false)
+      (idle, SKETCH_CURVE_WIDTH, false)
     }
   };
   let push = |scene: &mut Scene, points: Vec<[f32; 3]>, (color, width, haloed): ([u8; 4], f32, bool), id, dashed| {
@@ -748,27 +770,63 @@ fn sketch_lines(
         }
       }
     }
-    // a text's glyph points are its own business: only its anchor is shown
-    let glyph_points: std::collections::HashSet<PointId> =
-      sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
-    let joined = joined_points(sk);
-    for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
-      let pick = Pick::SketchPoint { sketch: sid, point: p.id };
-      let color = if selected.contains(&pick) {
-        EDGE_SELECT_COLOR
-      } else if hover == Some(pick) || hover_more.contains(&pick) {
-        HOVER_COLOR
-      } else if p.id == fox_sketch::ORIGIN {
-        [200, 60, 40, 255]
-      } else if report.free_points.contains(&p.id) {
-        SKETCH_FREE
-      } else {
-        SKETCH_FIXED
-      };
-      // Fusion's sketch point: a small open circle, filled once it is tied to other geometry
-      let hollow = p.id != fox_sketch::ORIGIN && !joined.contains(&p.id);
-      scene.markers.push(Marker { at: w([p.x, p.y]), color, size: 3.0, id: picks.id(pick), on_top: true, hollow });
+  }
+  // sketch points: a filled dark dot at every curve end (line ends, corners, fit points) and an
+  // open circle for a free point or a centre; a hollow ring under the cursor and a light-blue
+  // fill inside a dark ring once selected. A visible sketch shows them outside the sketch too,
+  // where they pick ahead of body vertices. A text's glyph points are its own business: only
+  // its anchor is shown.
+  let glyph_points: std::collections::HashSet<PointId> =
+    sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+  let filled = filled_points(sk);
+  for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
+    let pick = Pick::SketchPoint { sketch: sid, point: p.id };
+    let at = w([p.x, p.y]);
+    let id = if pickable { picks.id(pick) } else { 0 };
+    let on_top = editing;
+    if p.id == fox_sketch::ORIGIN {
+      if editing {
+        scene.markers.push(Marker { at, color: [200, 60, 40, 255], size: 3.0, id, on_top, hollow: false });
+      }
+    } else if selected.contains(&pick) {
+      // a dark ring around a light-blue disc: the ring is the larger dot underneath
+      scene.markers.push(Marker { at, color: SKETCH_POINT, size: 4.0, id, on_top, hollow: false });
+      scene.markers.push(Marker { at, color: SKETCH_POINT_SELECTED, size: 3.0, id, on_top, hollow: false });
+    } else if hover == Some(pick) || hover_more.contains(&pick) {
+      scene.markers.push(Marker { at, color: SKETCH_POINT, size: 4.0, id, on_top, hollow: true });
+    } else {
+      let hollow = !filled.contains(&p.id);
+      scene.markers.push(Marker { at, color: SKETCH_POINT, size: 3.0, id, on_top, hollow });
     }
+  }
+}
+
+/// The sketch points Fusion draws as a filled dot: every curve end (a line's ends, an arc's
+/// ends, a spline's fit points) and every point a constraint ties ([`joined_points`]); a free
+/// point and a centre stay an open circle.
+pub fn filled_points(sk: &Sketch) -> std::collections::HashSet<PointId> {
+  let mut out = joined_points(sk);
+  for c in &sk.curves {
+    out.extend(curve_end_points(&c.kind));
+  }
+  out
+}
+
+/// The points that lie on a curve itself: its ends and fit points, not its centre, handles or
+/// control points.
+pub fn curve_end_points(kind: &CurveKind) -> Vec<PointId> {
+  match kind {
+    CurveKind::Line { a, b } => vec![*a, *b],
+    CurveKind::Circle { .. } | CurveKind::Ellipse { .. } => vec![],
+    CurveKind::Arc { start, end, .. }
+    | CurveKind::EllipticalArc { start, end, .. }
+    | CurveKind::Conic { start, end, .. } => vec![*start, *end],
+    CurveKind::Spline { points, .. } => points.clone(),
+    CurveKind::ControlSpline { points, .. } | CurveKind::QuinticSpline { points } => {
+      points.first().copied().into_iter().chain(points.last().copied()).collect()
+    }
+    // every third point of a Bézier chain is on the curve
+    CurveKind::Bezier { points } => points.iter().step_by(3).copied().chain(points.last().copied()).collect(),
   }
 }
 

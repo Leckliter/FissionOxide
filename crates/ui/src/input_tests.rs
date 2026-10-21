@@ -1070,3 +1070,60 @@ fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
     sketch.curves.iter().flat_map(|c| sketch.curve_points(c.id)).filter_map(|p| sketch.pos(p)).map(|p| p[1]).collect();
   assert!(ys.iter().any(|y| (y - 0.1).abs() < 1e-6), "offset by 0.1 mm: {ys:?}");
 }
+
+/// A right-to-left box crossing only one curve of a rectangle selects just that curve, after
+/// Escape cleared an earlier click's selection, so Delete removes the boxed curve alone, as in
+/// Fusion.
+#[test]
+fn a_crossing_box_over_one_curve_selects_exactly_that_curve() {
+  use crate::viewport::Tool;
+  use fox_engine::Sel;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.set_tool(Tool::Rect);
+  let c = h.app.canvas.center();
+  h.move_then_click(c);
+  h.move_then_click(c + vec2(160.0, -120.0));
+  let s = h.app.s.design.sketch(sk).unwrap().clone();
+  assert_eq!(s.curves.len(), 4);
+  h.app.set_tool(Tool::Select);
+  // where a curve's middle lands on screen
+  let plane = h.app.s.model.sketches[&sk].plane;
+  let mid_of = |h: &Harness, curve: fox_engine::sketch::CurveId| {
+    let p = s.curve_points(curve);
+    let (a, b) = (s.pos(p[0]).unwrap(), s.pos(p[1]).unwrap());
+    let w = plane.to_world([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+    let [pw, ph] = h.app.canvas_px;
+    let (x, y, _) = h.app.cam.project(w, pw, ph).unwrap();
+    h.app.canvas.min + vec2(x as f32, y as f32) * (h.app.canvas.width() / pw as f32)
+  };
+  // the line whose ends both sit at the rectangle's largest x (right) or y (top)
+  let line_with = |axis: usize| {
+    let coord = |p: &fox_engine::sketch::PointId| s.pos(*p).unwrap()[axis];
+    let at =
+      s.points.iter().filter(|p| p.id != fox_engine::sketch::ORIGIN).map(|p| [p.x, p.y][axis]).fold(f64::MIN, f64::max);
+    s.curves.iter().find(|c| s.curve_points(c.id).iter().all(|p| (coord(p) - at).abs() < 1e-6)).expect("a side").id
+  };
+  let (top, right) = (line_with(1), line_with(0));
+  // click the top line, then Escape clears it
+  h.move_then_click(mid_of(&h, top));
+  assert_eq!(h.app.s.selection, vec![Sel::SketchCurve { sketch: sk, curve: top }], "the click picks the top line");
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert!(h.app.s.selection.is_empty(), "Escape clears the selection");
+  // a right-to-left box across the middle of the right line, clear of its corners
+  let m = mid_of(&h, right);
+  h.drag(m + vec2(20.0, 10.0), m + vec2(-20.0, -10.0));
+  assert_eq!(
+    h.app.s.selection,
+    vec![Sel::SketchCurve { sketch: sk, curve: right }],
+    "the box picks the right line only"
+  );
+  h.frame(vec![key(egui::Key::Delete)]);
+  h.frame(vec![]);
+  let after = h.app.s.design.sketch(sk).unwrap();
+  assert_eq!(after.curves.len(), 3, "Delete removed one line");
+  assert!(after.curve(right).is_none() && after.curve(top).is_some(), "the right line went, the top one stayed");
+}

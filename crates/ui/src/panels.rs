@@ -2921,7 +2921,7 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       Sel::Body { .. } => ("Body", "Bodies"),
       Sel::Profile { .. } => ("Profile", "Profiles"),
       Sel::Feature { .. } => ("Feature", "Features"),
-      Sel::SketchCurve { .. } => ("Sketch Curve", "Sketch Curves"),
+      Sel::SketchCurve { sketch, curve } => sketch_curve_noun(app, *sketch, *curve),
       Sel::SketchPoint { .. } => ("Sketch Point", "Sketch Points"),
       Sel::SketchConstraint { .. } => ("Constraint", "Constraints"),
       Sel::Vertex { .. } => ("Vertex", "Vertices"),
@@ -2965,12 +2965,89 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
         .map(|d| format!("Min Distance : {}", u.fixed(d, crate::viewport::display_decimals(u)))),
       _ => None,
     },
+    // "1 Sketch Line | Length : 0.524 in", as Fusion spaces it
+    Sel::SketchCurve { .. } => sum(&|s| match s {
+      Sel::SketchCurve { sketch, curve } => {
+        let r = model.sketches.get(sketch)?;
+        Some(sketch_curve_length(&r.sketch, &r.sketch.curve(*curve)?.kind))
+      }
+      _ => None,
+    })
+    .map(|l| format!("Length : {}", u.fixed(l, crate::viewport::display_decimals(u)))),
+    // "Sketch Point | X: -1.974 Y: 0.00 Z: -0.259 in": the point's world coordinates
+    Sel::SketchPoint { sketch, point } if n == 1 => model.sketches.get(&sketch).and_then(|r| {
+      let w = r.plane.to_world(r.sketch.pos(point)?);
+      let c = |v: f64| sketch_coord(u, v);
+      Some(format!("X: {} Y: {} Z: {} {}", c(w.x), c(w.y), c(w.z), u.symbol()))
+    }),
     _ => None,
   };
   Some(match readout {
     Some(r) => format!("{count} | {r}"),
     None => count,
   })
+}
+
+/// Fusion's name for a sketch curve by its kind ("Sketch Line", "Sketch Circle"), singular
+/// and plural.
+fn sketch_curve_noun(app: &App, sketch: FeatureId, curve: fox_engine::sketch::CurveId) -> (&'static str, &'static str) {
+  use fox_engine::sketch::CurveKind;
+  let kind = app.s.model.sketches.get(&sketch).and_then(|r| r.sketch.curve(curve)).map(|c| &c.kind);
+  match kind {
+    Some(CurveKind::Line { .. }) => ("Sketch Line", "Sketch Lines"),
+    Some(CurveKind::Circle { .. }) => ("Sketch Circle", "Sketch Circles"),
+    Some(CurveKind::Arc { .. }) => ("Sketch Arc", "Sketch Arcs"),
+    Some(CurveKind::Ellipse { .. }) => ("Sketch Ellipse", "Sketch Ellipses"),
+    Some(CurveKind::EllipticalArc { .. }) => ("Sketch Elliptical Arc", "Sketch Elliptical Arcs"),
+    Some(CurveKind::Spline { .. }) => ("Sketch Fitted Spline", "Sketch Fitted Splines"),
+    Some(CurveKind::ControlSpline { .. } | CurveKind::QuinticSpline { .. }) => {
+      ("Sketch Control Point Spline", "Sketch Control Point Splines")
+    }
+    Some(CurveKind::Conic { .. }) => ("Sketch Conic Curve", "Sketch Conic Curves"),
+    _ => ("Sketch Curve", "Sketch Curves"),
+  }
+}
+
+/// A sketch curve's length (mm): exact for lines, circles and arcs, along the drawn polyline
+/// for the rest.
+fn sketch_curve_length(sk: &fox_engine::sketch::Sketch, kind: &fox_engine::sketch::CurveKind) -> f64 {
+  use fox_engine::sketch::CurveKind;
+  match kind {
+    CurveKind::Line { a, b } => match (sk.pos(*a), sk.pos(*b)) {
+      (Some(a), Some(b)) => (b[0] - a[0]).hypot(b[1] - a[1]),
+      _ => 0.0,
+    },
+    CurveKind::Circle { radius, .. } => std::f64::consts::TAU * radius,
+    CurveKind::Arc { center, start, end } => match (sk.pos(*center), sk.pos(*start), sk.pos(*end)) {
+      (Some(c), Some(s), Some(e)) => {
+        let r = (s[0] - c[0]).hypot(s[1] - c[1]);
+        let a0 = (s[1] - c[1]).atan2(s[0] - c[0]);
+        let a1 = (e[1] - c[1]).atan2(e[0] - c[0]);
+        let mut sweep = (a1 - a0).rem_euclid(std::f64::consts::TAU);
+        if sweep < 1e-12 {
+          sweep = std::f64::consts::TAU;
+        }
+        r * sweep
+      }
+      _ => 0.0,
+    },
+    _ => {
+      let pts = fox_engine::scene::curve_polyline(sk, kind);
+      pts.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum()
+    }
+  }
+}
+
+/// A sketch point's coordinate (mm) as Fusion's status bar reads it out: the document precision
+/// with trailing zeros trimmed, two decimals at least ("-1.974", "0.00").
+fn sketch_coord(u: fox_engine::model::LengthUnit, mm: f64) -> String {
+  let decimals = crate::viewport::display_decimals(u);
+  let s = format!("{:.*}", decimals, u.from_mm(mm));
+  let (int, frac) = s.split_once('.').unwrap_or((&s, ""));
+  let frac = frac.trim_end_matches('0');
+  let frac = format!("{frac:0<2}");
+  let int = if int == "-0" && frac.trim_matches('0').is_empty() { "0" } else { int };
+  format!("{int}.{frac}")
 }
 
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
@@ -3715,6 +3792,19 @@ pub(crate) use browser_rows::window_title;
 #[cfg(test)]
 mod row_menu_tests {
   use super::*;
+
+  /// A sketch point's coordinate reads at the document precision with trailing zeros trimmed
+  /// down to two decimals, as Fusion's status bar prints it.
+  #[test]
+  fn sketch_coordinates_trim_to_two_decimals() {
+    use fox_engine::model::LengthUnit;
+    assert_eq!(sketch_coord(LengthUnit::In, -1.974 * 25.4), "-1.974");
+    assert_eq!(sketch_coord(LengthUnit::In, 0.0), "0.00");
+    assert_eq!(sketch_coord(LengthUnit::In, 12.7), "0.50");
+    assert_eq!(sketch_coord(LengthUnit::In, -0.0001), "0.00");
+    assert_eq!(sketch_coord(LengthUnit::Mm, 12.346), "12.35");
+    assert_eq!(sketch_coord(LengthUnit::Mm, 10.0), "10.00");
+  }
 
   /// The palette's Feature Options list a running tool's types, as Fusion's does: rectangles,
   /// circles, arcs, polygons, slots and splines; Line (one form) and Select show none.

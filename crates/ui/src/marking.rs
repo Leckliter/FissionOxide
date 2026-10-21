@@ -1387,6 +1387,50 @@ mod tests {
     assert!(app.ctx_menu.peek.is_empty(), "the highlight goes when the pointer leaves");
   }
 
+  /// In a sketch the readout names the curve's kind with its length as Fusion spaces it
+  /// ("1 Sketch Line | Length : 1.575 in"), and a point with its world coordinates.
+  #[test]
+  fn status_bar_reads_out_sketch_lines_and_points() {
+    let mut app = App::with_session(Session::default());
+    app.run("design.units", json!({"unit": "in"}));
+    let sk = app.run("sketch.create", json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap();
+    let sketch = fox_engine::model::FeatureId(sk as u32);
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
+    let circle = app.run("sketch.circle", json!({"center": [60, 10], "radius": 5})).unwrap()["curves"][0].clone();
+    let circle = fox_engine::sketch::CurveId(circle.as_u64().unwrap() as u32);
+    let s = app.s.design.sketch(sketch).unwrap().clone();
+    let line_of = |len: f64| {
+      s.curves
+        .iter()
+        .find(|c| {
+          let p = fox_engine::sketch::curve_points(&c.kind);
+          let (a, b) = (s.pos(p[0]).unwrap(), s.pos(p[1]).unwrap());
+          matches!(c.kind, fox_engine::sketch::CurveKind::Line { .. })
+            && ((b[0] - a[0]).hypot(b[1] - a[1]) - len).abs() < 1e-9
+        })
+        .unwrap()
+        .id
+    };
+    let (long, short) = (line_of(40.0), line_of(20.0));
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: long }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Line | Length : 1.575 in"));
+    // two curves read how close they come (ui-sketch-tangent-circles-dims), not their length
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: long }, Sel::SketchCurve { sketch, curve: short }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Sketch Lines | Min Distance : 0.000 in"));
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Circle | Length : 1.237 in"));
+    app.s.selection = vec![Sel::SketchCurve { sketch, curve: circle }, Sel::SketchCurve { sketch, curve: short }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Multiple selections | 2"));
+    // the far corner of the rectangle, in world coordinates
+    let corner = s.points.iter().find(|p| (p.x - 40.0).abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9).unwrap().id;
+    app.s.selection = vec![Sel::SketchPoint { sketch, point: corner }];
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("Sketch Point | X: 1.575 Y: 0.787 Z: 0.00 in"));
+    // hovering reads out the same
+    app.s.selection.clear();
+    app.hover = Some(fox_engine::scene::Pick::SketchCurve { sketch, curve: short });
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Sketch Line | Length : 0.787 in"));
+  }
+
   #[test]
   fn status_bar_profile_area_in_inches() {
     let mut app = App::with_session(Session::default());
