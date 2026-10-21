@@ -56,7 +56,9 @@ pub fn subtree(d: &Design, root: ComponentId) -> Vec<ComponentId> {
   let mut k = 0;
   while k < out.len() && out.len() < 4096 {
     let p = out[k];
-    out.extend(d.components.iter().filter(|c| c.parent == Some(p) && !out.contains(&c.id)).map(|c| c.id).collect::<Vec<_>>());
+    out.extend(
+      d.components.iter().filter(|c| c.parent == Some(p) && !out.contains(&c.id)).map(|c| c.id).collect::<Vec<_>>(),
+    );
     k += 1;
   }
   out

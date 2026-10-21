@@ -19,6 +19,7 @@ pub mod diff;
 mod drag;
 mod drawings;
 pub mod ecad;
+pub mod explode;
 mod features;
 pub mod files;
 mod fillet;
@@ -41,7 +42,6 @@ mod subassembly;
 mod surfaces;
 mod trace;
 mod views;
-pub mod explode;
 
 use std::path::PathBuf;
 
@@ -579,6 +579,8 @@ mod tests_cut;
 #[cfg(test)]
 mod tests_ecad;
 #[cfg(test)]
+mod tests_explode;
+#[cfg(test)]
 mod tests_files;
 #[cfg(test)]
 mod tests_fillet;
@@ -626,5 +628,3 @@ mod tests_subassembly;
 mod tests_surface;
 #[cfg(test)]
 mod tests_trace;
-#[cfg(test)]
-mod tests_explode;

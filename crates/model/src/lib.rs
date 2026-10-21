@@ -18,6 +18,7 @@ pub mod construct;
 pub mod cutcheck;
 pub mod direct;
 pub mod drawing;
+pub mod explode;
 pub mod fillet;
 pub mod form;
 pub mod generative;
@@ -39,7 +40,6 @@ pub mod subassembly;
 pub mod surface;
 pub mod thread;
 pub mod units;
-pub mod explode;
 
 use serde::{Deserialize, Serialize};
 

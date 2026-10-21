@@ -518,6 +518,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::properties::run(s, name, p) {
+    return r;
+  }
   if let Some(r) = crate::explode::run(s, name, p) {
     return r;
   }

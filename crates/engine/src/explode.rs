@@ -204,7 +204,9 @@ fn camera(d: &Design, v: Option<&Value>) -> Result<Value, CmdError> {
     }
     Some(Value::String(name)) => match d.named_views.iter().find(|v| v.name.eq_ignore_ascii_case(name)) {
       // the named view's direction; each part is still fitted
-      Some(nv) => json!({"yaw": format!("{} rad", nv.yaw), "pitch": format!("{} rad", nv.pitch), "fov": format!("{} rad", nv.fov), "ortho": nv.ortho}),
+      Some(nv) => {
+        json!({"yaw": format!("{} rad", nv.yaw), "pitch": format!("{} rad", nv.pitch), "fov": format!("{} rad", nv.fov), "ortho": nv.ortho})
+      }
       None if fox_render::StandardView::parse(name).is_some() => json!({"view": name}),
       None => return Err(CmdError::new(format!("no named view '{name}'"))),
     },
@@ -246,7 +248,8 @@ fn render_components(s: &mut Session, p: &Value) -> CmdResult {
   for (i, c) in comps.iter().enumerate() {
     let Some(comp) = s.design.component(*c) else { continue };
     let cname = comp.name.clone();
-    let bodies: Vec<BodyId> = subtree_bodies(&s.design, *c).into_iter().filter(|b| s.model.body(*b).is_some()).collect();
+    let bodies: Vec<BodyId> =
+      subtree_bodies(&s.design, *c).into_iter().filter(|b| s.model.body(*b).is_some()).collect();
     if bodies.is_empty() {
       continue;
     }

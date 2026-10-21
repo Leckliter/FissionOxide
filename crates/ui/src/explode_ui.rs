@@ -167,7 +167,9 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
         .on_hover_text("{label}, {component}, {number} (the name's leading number), {index}");
       ui.end_row();
     });
-    ui.label(RichText::new("Each component is drawn on its own; visibility is left as it is.").small().color(theme::MUTED));
+    ui.label(
+      RichText::new("Each component is drawn on its own; visibility is left as it is.").small().color(theme::MUTED),
+    );
     if let Some((t, err)) = &rc.result {
       ui.label(RichText::new(t).color(if *err { theme::ERROR } else { theme::MUTED }));
     }
@@ -220,7 +222,8 @@ mod tests {
     assert!(app.s.design.exploded_view.is_none());
 
     let dir = std::env::temp_dir().join(format!("fox-ui-render-components-{}", std::process::id()));
-    let rc = RenderComponents { folder: dir.display().to_string(), size: 24, label: "Sign".into(), ..Default::default() };
+    let rc =
+      RenderComponents { folder: dir.display().to_string(), size: 24, label: "Sign".into(), ..Default::default() };
     assert!(RenderComponents::default().params().is_none());
     let p = rc.params().unwrap();
     assert_eq!(p["camera"], json!({"yaw": 15.0, "pitch": 20.0}));

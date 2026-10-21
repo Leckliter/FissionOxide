@@ -137,7 +137,11 @@ fn render_and_export_respect_the_exploded_view() {
   assert!(s.design.exploded_view.is_none());
   assert!(std::fs::metadata(&top).unwrap().len() > 0 && std::fs::metadata(&exploded).unwrap().len() > 0);
   // a named view's camera
-  run(&mut s, "view.named.save", json!({"name": "Hero", "target": [0, 0, 0], "yaw": 0.3, "pitch": 0.4, "distance": 200}));
+  run(
+    &mut s,
+    "view.named.save",
+    json!({"name": "Hero", "target": [0, 0, 0], "yaw": 0.3, "pitch": 0.4, "distance": 200}),
+  );
   run(&mut s, "view.render", json!({"path": dir.join("hero.png"), "camera": "Hero", "width": 32, "height": 32}));
   assert!(s.execute("view.render", &json!({"path": dir.join("x.png"), "camera": "Nope"})).is_err());
 
@@ -182,7 +186,8 @@ fn render_components_writes_one_image_each_and_a_manifest() {
   let letters = parts.iter().find(|p| p["component"] == json!(c3)).unwrap();
   assert_eq!(letters["appearance"], "Default");
   // the manifest, in both forms
-  let json: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("LA-1234 - Part Data.json")).unwrap()).unwrap();
+  let json: Value =
+    serde_json::from_str(&std::fs::read_to_string(dir.join("LA-1234 - Part Data.json")).unwrap()).unwrap();
   assert_eq!(json["parts"].as_array().unwrap().len(), 3);
   let csv = std::fs::read_to_string(dir.join("LA-1234 - Part Data.csv")).unwrap();
   assert_eq!(csv.lines().count(), 4, "{csv}");
@@ -191,7 +196,11 @@ fn render_components_writes_one_image_each_and_a_manifest() {
   assert!(!s.body_visible(fox_model::BodyId(b1)));
   assert!(s.design.exploded_view.is_some());
   // other patterns, a named view and a bad camera
-  run(&mut s, "view.named.save", json!({"name": "Side", "target": [0, 0, 0], "yaw": 1.0, "pitch": 0.2, "distance": 50}));
+  run(
+    &mut s,
+    "view.named.save",
+    json!({"name": "Side", "target": [0, 0, 0], "yaw": 1.0, "pitch": 0.2, "distance": 50}),
+  );
   let r = run(
     &mut s,
     "view.render_components",

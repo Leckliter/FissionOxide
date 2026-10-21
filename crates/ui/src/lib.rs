@@ -16,6 +16,7 @@ mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod ecad_ui;
+mod explode_ui;
 mod form_ui;
 mod forms;
 mod gen_ui;
@@ -48,7 +49,6 @@ mod units;
 mod updates;
 mod viewcube;
 mod viewport;
-mod explode_ui;
 
 use std::path::PathBuf;
 

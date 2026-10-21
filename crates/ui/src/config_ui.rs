@@ -255,8 +255,7 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
               let failed = r["errors"].as_array().and_then(|e| e.iter().find(|e| e["column"] == c["column"]));
               match failed {
                 Some(e) => {
-                  ui.label(RichText::new("error").color(theme::ERROR))
-                    .on_hover_text(e["error"].as_str().unwrap_or(""));
+                  ui.label(RichText::new("error").color(theme::ERROR)).on_hover_text(e["error"].as_str().unwrap_or(""));
                 }
                 None => {
                   ui.label(RichText::new(if cur.is_empty() { "default" } else { &cur }).italics());

@@ -154,8 +154,11 @@ fn move_face_turns_and_moves_curved_faces() {
   assert!((m.bbox_max.z - (10.0 + 20.0 * 10f64.to_radians().tan())).abs() < 1e-4);
   assert!(s.execute("direct.move_face", &json!({"faces": [{"point": [0, 0, 10]}]})).is_err());
   assert!(
-    s.execute("direct.move_face", &json!({"faces": [{"point": [0, 0, 10]}], "rotate": {"axis": [0, 0, 0], "angle": 5}}))
-      .is_err()
+    s.execute(
+      "direct.move_face",
+      &json!({"faces": [{"point": [0, 0, 10]}], "rotate": {"axis": [0, 0, 0], "angle": 5}})
+    )
+    .is_err()
   );
 
   // a plate with a pin hole: the hole's wall moves sideways, then turns
@@ -166,7 +169,12 @@ fn move_face_turns_and_moves_curved_faces() {
   run(&mut s, "direct.move_face", json!({"faces": [{"point": [-11, 0, 5]}], "translate": [25, 5, 0]}));
   assert!((volume(&s) - v0).abs() < 1e-3);
   let cyl = |s: &Session| {
-    s.model.bodies[0].faces().iter().filter(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).copied().collect::<Vec<_>>()
+    s.model.bodies[0]
+      .faces()
+      .iter()
+      .filter(|f| f.kind == fox_kernel::SurfaceKind::Cylinder)
+      .copied()
+      .collect::<Vec<_>>()
   };
   let c = cyl(&s);
   assert_eq!(c.len(), 1);
@@ -183,7 +191,10 @@ fn move_face_turns_and_moves_curved_faces() {
   let faces = s.model.bodies[0].faces().len();
   assert_eq!(faces, 7, "{faces}");
   // all in one base feature, replayed after save and reopen
-  assert_eq!(s.design.features.iter().filter(|f| matches!(f.kind, fox_model::FeatureKind::BaseFeature { .. })).count(), 1);
+  assert_eq!(
+    s.design.features.iter().filter(|f| matches!(f.kind, fox_model::FeatureKind::BaseFeature { .. })).count(),
+    1
+  );
   let back = Session::new(fox_model::Design::from_json(&s.design.to_json()).unwrap());
   assert!(back.model.errors().is_empty(), "{:?}", back.model.errors());
   assert!((volume(&back) - volume(&s)).abs() < 1e-6);
