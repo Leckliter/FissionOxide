@@ -480,8 +480,7 @@ impl Renderer {
     let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
     let eye = cam.eye().as_vec3();
     if self.pbr_on && self.style.shaded() {
-      let casters: Vec<_> =
-        self.meshes.iter().map(|m| (m.vao, m.count, m.analyze && m.color[3] == 255)).collect();
+      let casters: Vec<_> = self.meshes.iter().map(|m| (m.vao, m.count, m.analyze && m.color[3] == 255)).collect();
       if let Some(p) = self.pbr.as_mut() {
         p.shadow_pass(gl, &casters)?;
       }

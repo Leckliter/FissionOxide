@@ -11,14 +11,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use egui::{Color32, RichText};
+use fox_engine::Sel;
 use fox_engine::model::BodyId;
 use fox_engine::render::Scene;
 use fox_engine::rendering::raytrace::{
-  self, Background, EnvMap, Environment, Material, Pattern, Preset, Progressive, Projection, RenderCamera,
-  RenderImage, RenderSettings, TextureSource, TextureSpec, ToneMap,
+  self, Background, EnvMap, Environment, Material, Pattern, Preset, Progressive, Projection, RenderCamera, RenderImage,
+  RenderSettings, TextureSource, TextureSpec, ToneMap,
 };
 use fox_engine::scene::{Pick, PickTable, SELECT_COLOR};
-use fox_engine::Sel;
 use serde_json::{Value, json};
 
 use crate::App;
@@ -39,9 +39,11 @@ pub enum RenderCmd {
 impl RenderCmd {
   pub(crate) fn info(self) -> (Icon, &'static str, &'static str) {
     match self {
-      RenderCmd::Appearance => {
-        (Icon::Appearance, "Appearance", "Physically based materials: pick one and apply it to selected bodies or faces")
-      }
+      RenderCmd::Appearance => (
+        Icon::Appearance,
+        "Appearance",
+        "Physically based materials: pick one and apply it to selected bodies or faces",
+      ),
       RenderCmd::SceneSettings => {
         (Icon::EnvMap, "Scene Settings", "Environment lighting, background, ground plane and shadows, camera")
       }
@@ -440,7 +442,8 @@ fn appearance_window(app: &mut App, ctx: &egui::Context) {
       let q = r.filter.to_ascii_lowercase();
       let mut last_cat = String::new();
       for m in lib.iter().filter(|m| {
-        (r.category.is_empty() || m.category == r.category) && (q.is_empty() || m.name.to_ascii_lowercase().contains(&q))
+        (r.category.is_empty() || m.category == r.category)
+          && (q.is_empty() || m.name.to_ascii_lowercase().contains(&q))
       }) {
         if m.category != last_cat {
           ui.label(RichText::new(&m.category).strong());
@@ -539,7 +542,9 @@ fn material_editor(app: &mut App, ctx: &egui::Context) {
       let current = match &m.texture {
         None => "None".to_string(),
         Some(t) => match &t.source {
-          TextureSource::Image(p) => format!("Image: {}", std::path::Path::new(p).file_name().map(|f| f.to_string_lossy()).unwrap_or_default()),
+          TextureSource::Image(p) => {
+            format!("Image: {}", std::path::Path::new(p).file_name().map(|f| f.to_string_lossy()).unwrap_or_default())
+          }
           TextureSource::Pattern(p) => p.name().to_string(),
         },
       };
@@ -554,7 +559,8 @@ fn material_editor(app: &mut App, ctx: &egui::Context) {
           }
         }
         if ui.selectable_label(false, "Image…").clicked()
-          && let Some(path) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg", "bmp", "webp"]).pick_file()
+          && let Some(path) =
+            rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg", "bmp", "webp"]).pick_file()
         {
           let t = m.texture.clone().unwrap_or_default();
           m.color = [255, 255, 255];
@@ -725,7 +731,8 @@ fn scene_window(app: &mut App, ctx: &egui::Context) {
       ui.end_row();
     });
     ui.horizontal(|ui| {
-      use_view = ui.button("Use Current View").on_hover_text("Store the viewport's framing as the render camera").clicked();
+      use_view =
+        ui.button("Use Current View").on_hover_text("Store the viewport's framing as the render camera").clicked();
       reset = ui.button("Reset Camera").on_hover_text("Renders frame the model from the viewport again").clicked();
     });
   });
@@ -775,7 +782,8 @@ const RESOLUTIONS: [(&str, u32, u32); 6] = [
   ("4K (3840 × 2160)", 3840, 2160),
 ];
 
-const QUALITY: [(&str, u32); 4] = [("Draft (16)", 16), ("Preview (64)", 64), ("Final (256)", 256), ("Excellent (1024)", 1024)];
+const QUALITY: [(&str, u32); 4] =
+  [("Draft (16)", 16), ("Preview (64)", 64), ("Final (256)", 256), ("Excellent (1024)", 1024)];
 
 fn start_render(app: &mut App) {
   if app.render.job.is_some() {
@@ -836,7 +844,12 @@ fn start_render(app: &mut App) {
       s.finished = Some(result);
     }
   });
-  app.render.job = Some(Job { state, cancel, started: Instant::now(), name: format!("Render {}", app.s.design.render.next_gallery_id()) });
+  app.render.job = Some(Job {
+    state,
+    cancel,
+    started: Instant::now(),
+    name: format!("Render {}", app.s.design.render.next_gallery_id()),
+  });
   app.render.error = None;
   app.render.progress = (0, st.samples);
 }
@@ -884,7 +897,8 @@ fn poll_job(app: &mut App, ctx: &egui::Context) {
         }
         Err(e) => app.render.error = Some(e),
       }
-      app.status = Some((format!("Rendered {} samples in {seconds:.1} s; kept in the Render Gallery", img.samples), false));
+      app.status =
+        Some((format!("Rendered {} samples in {seconds:.1} s; kept in the Render Gallery", img.samples), false));
       app.render.last = Some((img, tex, seconds, id));
       app.render.preview_tex = None;
     }
@@ -1097,9 +1111,8 @@ fn gallery_window(app: &mut App, ctx: &egui::Context) {
   }
   if let Some(id) = export
     && let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).set_file_name("render.png").save_file()
+    && app.run("render.gallery.export", json!({"id": id, "path": path})).is_some()
   {
-    if app.run("render.gallery.export", json!({"id": id, "path": path})).is_some() {
-      app.status = Some((format!("Wrote {}", path.display()), false));
-    }
+    app.status = Some((format!("Wrote {}", path.display()), false));
   }
 }

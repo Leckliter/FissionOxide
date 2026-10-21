@@ -104,7 +104,8 @@ impl Prepared {
     let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for (mi, m) in scene.meshes.iter().enumerate() {
       for t in m.indices.chunks_exact(3) {
-        let Some(p) = t.iter().map(|&i| m.positions.get(i as usize).map(|p| Vec3::from(*p))).collect::<Option<Vec<_>>>()
+        let Some(p) =
+          t.iter().map(|&i| m.positions.get(i as usize).map(|p| Vec3::from(*p))).collect::<Option<Vec<_>>>()
         else {
           continue;
         };
@@ -113,7 +114,11 @@ impl Prepared {
           continue;
         }
         let n = [t[0], t[1], t[2]].map(|i| {
-          m.normals.get(i as usize).map(|n| Vec3::from(*n).normalize_or_zero()).filter(|n| *n != Vec3::ZERO).unwrap_or(face_n)
+          m.normals
+            .get(i as usize)
+            .map(|n| Vec3::from(*n).normalize_or_zero())
+            .filter(|n| *n != Vec3::ZERO)
+            .unwrap_or(face_n)
         });
         for q in &p {
           lo = lo.min(*q);
@@ -139,7 +144,8 @@ impl Prepared {
       })
       .collect();
     let size = if verts.is_empty() { 100.0 } else { (hi - lo).length().max(1e-3) };
-    let ground = (scene.environment.ground && !verts.is_empty()).then(|| lo.z - scene.environment.ground_offset.max(0.0));
+    let ground =
+      (scene.environment.ground && !verts.is_empty()).then(|| lo.z - scene.environment.ground_offset.max(0.0));
     Ok(Prepared {
       bvh,
       normals,
@@ -247,11 +253,12 @@ impl Prepared {
         if chain {
           // the camera sees the ground: a shadow catcher showing the background behind it
           let (wi, _, _) = self.env.sample(rng.f32(), rng.f32());
-          let shadow = if self.environment.shadows && wi.z > 0.0 && self.bvh.occluded(p + Vec3::Z * self.eps, wi, f32::INFINITY) {
-            SHADOW_STRENGTH
-          } else {
-            0.0
-          };
+          let shadow =
+            if self.environment.shadows && wi.z > 0.0 && self.bvh.occluded(p + Vec3::Z * self.eps, wi, f32::INFINITY) {
+              SHADOW_STRENGTH
+            } else {
+              0.0
+            };
           if env_bg {
             self.add(&mut out, throughput * self.env.lookup(d) * (1.0 - shadow), bounce);
           } else if bounce == 0 {
@@ -289,7 +296,21 @@ impl Prepared {
           ior: 1.5,
           emission: Vec3::ZERO,
         };
-        if !self.shade(&mut out, &s, p, Vec3::Z, Vec3::Z, d, bounce, &mut throughput, &mut o, &mut d, &mut last_pdf, &mut last_delta, rng) {
+        if !self.shade(
+          &mut out,
+          &s,
+          p,
+          Vec3::Z,
+          Vec3::Z,
+          d,
+          bounce,
+          &mut throughput,
+          &mut o,
+          &mut d,
+          &mut last_pdf,
+          &mut last_delta,
+          rng,
+        ) {
           break;
         }
         chain = false;
@@ -329,7 +350,21 @@ impl Prepared {
       if s.emission != Vec3::ZERO {
         self.add(&mut out, throughput * s.emission, bounce);
       }
-      if !self.shade(&mut out, &s, p, ng, ns, d, bounce, &mut throughput, &mut o, &mut d, &mut last_pdf, &mut last_delta, rng) {
+      if !self.shade(
+        &mut out,
+        &s,
+        p,
+        ng,
+        ns,
+        d,
+        bounce,
+        &mut throughput,
+        &mut o,
+        &mut d,
+        &mut last_pdf,
+        &mut last_delta,
+        rng,
+      ) {
         break;
       }
       chain &= last_delta;
@@ -534,7 +569,14 @@ impl Progressive {
                 for k in first..first + n {
                   let mut rng = Rng::for_sample(x, y, k, this.settings.seed);
                   let (jx, jy) = rng.pair();
-                  let r = this.prepared.trace(&this.lens, x as f32 + jx, y as f32 + jy, rows[y as usize], this.settings.max_bounces, &mut rng);
+                  let r = this.prepared.trace(
+                    &this.lens,
+                    x as f32 + jx,
+                    y as f32 + jy,
+                    rows[y as usize],
+                    this.settings.max_bounces,
+                    &mut rng,
+                  );
                   let l = luminance(r.radiance);
                   sq += l * l;
                   sum.radiance += r.radiance;

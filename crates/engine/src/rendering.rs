@@ -13,8 +13,8 @@ use std::sync::atomic::AtomicBool;
 use fox_model::render::{BodyMaterial, FaceMaterial, RenderDoc};
 use fox_model::{BodyId, Design};
 use fox_raytrace::{
-  Axis, Background, Environment, GalleryImage, Material, Pattern, Png, Preset, Progressive, Projection,
-  RenderCamera, RenderImage, RenderMesh, RenderScene, RenderSettings, TextureSource, TextureSpec, ToneMap,
+  Axis, Background, Environment, GalleryImage, Material, Pattern, Png, Preset, Progressive, Projection, RenderCamera,
+  RenderImage, RenderMesh, RenderScene, RenderSettings, TextureSource, TextureSpec, ToneMap,
 };
 use fox_render::{Camera, StandardView};
 use serde_json::{Value, json};
@@ -275,7 +275,8 @@ fn material_apply(s: &mut Session, p: &Value) -> CmdResult {
       refs.push(r);
     }
     // what those faces had goes
-    let old: Vec<usize> = face_materials(s).into_iter().filter(|(b, f, _, _)| picked.contains(&(*b, *f))).map(|x| x.3).collect();
+    let old: Vec<usize> =
+      face_materials(s).into_iter().filter(|(b, f, _, _)| picked.contains(&(*b, *f))).map(|x| x.3).collect();
     edit(s, "Render Material", |r| {
       let mut i = 0;
       r.faces.retain(|_| {
@@ -457,10 +458,8 @@ fn camera_json(c: &RenderCamera, stored: bool) -> Value {
 pub fn fitted_camera(s: &Session, aspect: f64) -> Camera {
   let mut cam = Camera::default();
   cam.set_view(StandardView::Home);
-  let (lo, hi) = s
-    .model
-    .bounds()
-    .unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
+  let (lo, hi) =
+    s.model.bounds().unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
   cam.fit(lo, hi, aspect);
   cam
 }
@@ -481,7 +480,8 @@ fn set_camera_fields(s: &Session, cam: &mut RenderCamera, p: &Value) -> Result<(
       let st = &s.design.render.settings;
       let mut c = fitted_camera(s, st.width as f64 / st.height.max(1) as f64);
       c.set_view(sv);
-      let (lo, hi) = s.model.bounds().unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
+      let (lo, hi) =
+        s.model.bounds().unwrap_or((fox_kernel::glam::DVec3::splat(-50.0), fox_kernel::glam::DVec3::splat(50.0)));
       c.fit(lo, hi, st.width as f64 / st.height.max(1) as f64);
       c.ortho = cam.view.ortho;
       cam.view = c;
@@ -665,11 +665,7 @@ fn settings(s: &mut Session, p: &Value) -> CmdResult {
 /// What the bodies render as: one mesh per body and material, faces with their own material
 /// split out. `only` limits it to some bodies.
 pub fn render_scene(s: &Session, camera: RenderCamera, only: Option<&[BodyId]>) -> RenderScene {
-  let mut scene = RenderScene {
-    environment: s.design.render.environment.clone(),
-    camera,
-    ..RenderScene::default()
-  };
+  let mut scene = RenderScene { environment: s.design.render.environment.clone(), camera, ..RenderScene::default() };
   let face_mats = face_materials(s);
   for body in &s.model.bodies {
     let shown = match only {
@@ -792,16 +788,8 @@ pub fn add_to_gallery(
 ) -> Result<u32, CmdError> {
   let id = s.design.render.next_gallery_id();
   let name = name.map(str::to_string).unwrap_or_else(|| format!("Render {id}"));
-  let img = GalleryImage {
-    id,
-    name,
-    width: size.0,
-    height: size.1,
-    samples,
-    seconds,
-    created: now(),
-    png: Png(Arc::new(png)),
-  };
+  let img =
+    GalleryImage { id, name, width: size.0, height: size.1, samples, seconds, created: now(), png: Png(Arc::new(png)) };
   edit(s, "Render", |r| {
     r.gallery.push(img);
     Ok(())
@@ -840,7 +828,12 @@ fn gallery_json(g: &GalleryImage) -> Value {
 
 fn gallery_index(s: &Session, p: &Value) -> Result<usize, CmdError> {
   let id = req_u32(p, "id")?;
-  s.design.render.gallery.iter().position(|g| g.id == id).ok_or_else(|| CmdError::new(format!("no render {id} in the gallery")))
+  s.design
+    .render
+    .gallery
+    .iter()
+    .position(|g| g.id == id)
+    .ok_or_else(|| CmdError::new(format!("no render {id} in the gallery")))
 }
 
 /// `{path, name?}`: keeps an image file (a PNG made elsewhere, or by the Render window) in the

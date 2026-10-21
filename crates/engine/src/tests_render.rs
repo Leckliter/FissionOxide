@@ -21,7 +21,11 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn part() -> Session {
   let mut s = Session::default();
   run(&mut s, "box", json!({"width": 60, "depth": 40, "height": 5}));
-  run(&mut s, "cylinder", json!({"at": [0, 0], "radius": 8, "height": 20, "plane": {"point": [0, 0, 5], "normal": [0, 0, 1]}}));
+  run(
+    &mut s,
+    "cylinder",
+    json!({"at": [0, 0], "radius": 8, "height": 20, "plane": {"point": [0, 0, 5], "normal": [0, 0, 1]}}),
+  );
   s
 }
 
@@ -81,7 +85,8 @@ fn design_materials_with_textures() {
 #[test]
 fn environment_camera_and_settings_are_stored() {
   let mut s = part();
-  let e = run(&mut s, "render.environment", json!({"preset": "sky", "background": "gradient", "ground_reflection": 0.5}));
+  let e =
+    run(&mut s, "render.environment", json!({"preset": "sky", "background": "gradient", "ground_reflection": 0.5}));
   assert_eq!(e["preset"], "sky");
   assert!(s.execute("render.environment", &json!({"preset": "moon"})).is_err());
   assert!(s.execute("render.environment", &json!({"hdri": "/no/such.hdr"})).is_err());
@@ -144,7 +149,8 @@ fn transparent_background_renders_alpha() {
 
 #[test]
 fn the_example_script_runs() {
-  let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/render_studio.jsonl")).unwrap();
+  let script =
+    std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/render_studio.jsonl")).unwrap();
   let d = temp_dir("example");
   let mut s = Session::default();
   for line in script.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {

@@ -309,17 +309,8 @@ impl Pbr {
   pub(crate) fn new(gl: &Gl, header: &str) -> Result<Pbr, String> {
     let common = COMMON.to_string();
     let fs = PBR_FS.replace("COMMON", &common).replace("ID_COLOR", crate::gl::ID_COLOR);
-    let common_u = [
-      "u_env",
-      "u_env_levels",
-      "u_env_rot",
-      "u_sh",
-      "u_exposure",
-      "u_tone",
-      "u_shadow",
-      "u_light_vp",
-      "u_shadow_on",
-    ];
+    let common_u =
+      ["u_env", "u_env_levels", "u_env_rot", "u_sh", "u_exposure", "u_tone", "u_shadow", "u_light_vp", "u_shadow_on"];
     let mut mesh_u = vec![
       "u_vp",
       "u_eye",
@@ -475,7 +466,8 @@ impl Pbr {
         for y in 0..nh {
           for x in 0..nw {
             let at = |i: usize, j: usize| level_data[j.min(lh - 1) * lw + i.min(lw - 1)];
-            next.push((at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1)) / 4.0);
+            next
+              .push((at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1)) / 4.0);
           }
         }
         (lw, lh, level_data) = (nw, nh, next);

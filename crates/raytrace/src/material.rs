@@ -215,7 +215,13 @@ pub fn library() -> Vec<Material> {
     coat(m("Aluminum - Anodized Black", "Metal", [52, 54, 58], 1.0, 0.38), 0.2, 0.2),
     coat(m("Aluminum - Anodized Red", "Metal", [176, 46, 44], 1.0, 0.35), 0.2, 0.2),
     coat(m("Aluminum - Anodized Blue", "Metal", [46, 92, 170], 1.0, 0.35), 0.2, 0.2),
-    textured(m("Aluminum - Brushed", "Metal", [205, 207, 210], 1.0, 0.28), Pattern::Brushed, [170, 172, 176], 30.0, 0.25),
+    textured(
+      m("Aluminum - Brushed", "Metal", [205, 207, 210], 1.0, 0.28),
+      Pattern::Brushed,
+      [170, 172, 176],
+      30.0,
+      0.25,
+    ),
     m("Brass - Polished", "Metal", [204, 170, 84], 1.0, 0.08),
     m("Copper", "Metal", [190, 112, 72], 1.0, 0.22),
     m("Gold - Polished", "Metal", [222, 182, 70], 1.0, 0.06),
@@ -225,7 +231,11 @@ pub fn library() -> Vec<Material> {
     m("ABS (Yellow)", "Plastic", [236, 196, 48], 0.0, 0.35),
     m("ABS (Green)", "Plastic", [70, 160, 80], 0.0, 0.35),
     m("Rubber - Black", "Plastic", [30, 30, 30], 0.0, 0.85),
-    coat(textured(m("Wood - Oak", "Wood", [180, 132, 82], 0.0, 0.55), Pattern::Wood, [128, 86, 48], 40.0, 0.2), 0.3, 0.15),
+    coat(
+      textured(m("Wood - Oak", "Wood", [180, 132, 82], 0.0, 0.55), Pattern::Wood, [128, 86, 48], 40.0, 0.2),
+      0.3,
+      0.15,
+    ),
     glass("Glass - Clear", [190, 220, 230], 0.0, 1.5),
     // more metals
     m("Steel - Polished", "Metal", [196, 199, 204], 1.0, 0.05),
@@ -246,7 +256,13 @@ pub fn library() -> Vec<Material> {
     m("Plastic - Glossy (Blue)", "Plastic", [30, 80, 190], 0.0, 0.12),
     m("Plastic - Matte (Grey)", "Plastic", [128, 130, 134], 0.0, 0.6),
     m("Nylon - White", "Plastic", [232, 228, 216], 0.0, 0.75),
-    textured(m("Plastic - Textured (Black)", "Plastic", [44, 44, 46], 0.0, 0.7), Pattern::Noise, [28, 28, 30], 4.0, 0.3),
+    textured(
+      m("Plastic - Textured (Black)", "Plastic", [44, 44, 46], 0.0, 0.7),
+      Pattern::Noise,
+      [28, 28, 30],
+      4.0,
+      0.3,
+    ),
     Material { transmission: 0.9, ior: 1.49, ..m("Acrylic - Clear", "Plastic", [235, 240, 245], 0.0, 0.03) },
     Material { transmission: 0.85, ior: 1.46, ..m("Polycarbonate - Smoke", "Plastic", [90, 92, 96], 0.0, 0.05) },
     m("Rubber - Grey", "Plastic", [92, 94, 96], 0.0, 0.9),
@@ -263,8 +279,16 @@ pub fn library() -> Vec<Material> {
     glass("Water", [230, 240, 245], 0.0, 1.33),
     glass("Diamond", [250, 250, 252], 0.0, 2.42),
     // composites, wood, stone
-    coat(textured(m("Carbon Fiber", "Other", [26, 26, 28], 0.2, 0.4), Pattern::Carbon, [70, 72, 76], 8.0, 0.2), 1.0, 0.04),
-    coat(textured(m("Wood - Walnut", "Wood", [110, 70, 42], 0.0, 0.5), Pattern::Wood, [70, 42, 24], 40.0, 0.2), 0.3, 0.15),
+    coat(
+      textured(m("Carbon Fiber", "Other", [26, 26, 28], 0.2, 0.4), Pattern::Carbon, [70, 72, 76], 8.0, 0.2),
+      1.0,
+      0.04,
+    ),
+    coat(
+      textured(m("Wood - Walnut", "Wood", [110, 70, 42], 0.0, 0.5), Pattern::Wood, [70, 42, 24], 40.0, 0.2),
+      0.3,
+      0.15,
+    ),
     textured(m("Wood - Pine", "Wood", [214, 176, 120], 0.0, 0.6), Pattern::Wood, [176, 128, 74], 50.0, 0.2),
     textured(m("Concrete", "Other", [150, 148, 144], 0.0, 0.9), Pattern::Noise, [118, 116, 112], 25.0, 0.1),
     m("Ceramic - White", "Other", [244, 244, 240], 0.0, 0.08),
@@ -285,11 +309,12 @@ pub fn find(name: &str) -> Option<Material> {
 /// What a body coloured `color` (and given no material) renders as: the library material with
 /// that exact colour (an appearance), else a satin plastic of that colour.
 pub fn for_color(color: [u8; 3]) -> Material {
-  library()
-    .into_iter()
-    .take(16)
-    .find(|m| m.color == color)
-    .unwrap_or_else(|| Material { name: "Plastic".into(), color, roughness: 0.4, ..Material::default() })
+  library().into_iter().take(16).find(|m| m.color == color).unwrap_or_else(|| Material {
+    name: "Plastic".into(),
+    color,
+    roughness: 0.4,
+    ..Material::default()
+  })
 }
 
 /// What a body with no appearance renders as (Fusion's default, Steel - Satin).

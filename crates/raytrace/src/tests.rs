@@ -99,9 +99,8 @@ fn check(name: &str, img: &RenderImage) {
     img.save_png(&path).unwrap();
     return;
   }
-  let want = image::open(&path)
-    .unwrap_or_else(|e| panic!("{}: {e} (FOX_BLESS_RENDERS=1 writes it)", path.display()))
-    .to_rgba8();
+  let want =
+    image::open(&path).unwrap_or_else(|e| panic!("{}: {e} (FOX_BLESS_RENDERS=1 writes it)", path.display())).to_rgba8();
   assert_eq!((want.width(), want.height()), (img.width, img.height), "{name}: size");
   // the same maths on another CPU or compiler may round differently: allow small differences
   let diffs: Vec<i32> = want.as_raw().iter().zip(&img.rgba).map(|(a, b)| (*a as i32 - *b as i32).abs()).collect();
@@ -178,7 +177,11 @@ fn cancelling_keeps_every_pixel_at_the_same_sample_count() {
 #[test]
 fn an_empty_scene_shows_the_background() {
   let s = RenderScene {
-    environment: Environment { background: Background::Color, background_color: [10, 20, 30], ..Environment::default() },
+    environment: Environment {
+      background: Background::Color,
+      background_color: [10, 20, 30],
+      ..Environment::default()
+    },
     camera: camera(),
     ..RenderScene::default()
   };
@@ -193,7 +196,10 @@ fn big_preview() {
   let mut s = showcase();
   let st = RenderSettings { width: 480, height: 320, samples: 64, denoise: false, ..settings(64) };
   render(&s, st).unwrap().save_png(&PathBuf::from(&dir).join("a.png")).unwrap();
-  render(&s, RenderSettings { samples: 8, denoise: true, ..st }).unwrap().save_png(&PathBuf::from(&dir).join("a8d.png")).unwrap();
+  render(&s, RenderSettings { samples: 8, denoise: true, ..st })
+    .unwrap()
+    .save_png(&PathBuf::from(&dir).join("a8d.png"))
+    .unwrap();
   s.environment.preset = Preset::Sky;
   s.materials = vec![lib("Paint - Metallic Red"), lib("Carbon Fiber"), lib("Steel - Brushed")];
   render(&s, st).unwrap().save_png(&PathBuf::from(&dir).join("b.png")).unwrap();
