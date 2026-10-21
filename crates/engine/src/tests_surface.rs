@@ -410,7 +410,8 @@ fn untrim_with_an_extension() {
   run(&mut s, "surface.untrim", json!({"bodies": [id], "extension": 2}));
   assert!(s.model.errors().is_empty(), "{:?}", s.model.errors());
   let m = s.model.bodies[0].shape.mass().unwrap();
-  assert!(m.bbox_max.x > 31.5 && m.bbox_min.x < -1.5, "{m:?}");
+  // 2 mm along the spline at each end, which leaves it at an angle
+  assert!(m.bbox_max.x > 31.2 && m.bbox_min.x < -1.2, "{m:?}");
   assert!(close(m.bbox_min.z, -2.0, 1e-3) && close(m.bbox_max.z, 7.0, 1e-3), "{m:?}");
 }
 
