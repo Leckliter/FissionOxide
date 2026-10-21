@@ -26,6 +26,7 @@ pub mod mechanism;
 pub mod meshops;
 pub mod naming;
 pub mod pathpattern;
+pub mod pcb;
 pub mod plot;
 pub mod refs;
 pub mod regen;
@@ -128,6 +129,9 @@ pub struct Design {
   /// Timeline groups (Create Group): how the timeline shows its features; never what they build.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub timeline_groups: Vec<TimelineGroup>,
+  /// The Electronics workspace's design: schematic, board and libraries (see `fox_ecad`).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub electronics: Option<Box<fox_ecad::Project>>,
   #[serde(default)]
   next_id: u32,
 }
@@ -1751,6 +1755,22 @@ pub enum FeatureKind {
     #[serde(default = "zero")]
     frame: String,
   },
+  /// A printed circuit board from the Electronics workspace: the outline extruded to the board
+  /// thickness, drilled, with its parts' 3D models on it (see [`pcb`]). The engine rewrites it
+  /// whenever the layout changes; the outline follows its sketch or face.
+  Pcb {
+    name: String,
+    outline: pcb::PcbOutline,
+    /// The plane a polygon outline lies on (default XY).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plane: Option<PlaneRef>,
+    thickness: f64,
+    /// Drilled holes: (x, y, diameter) in board coordinates.
+    #[serde(default)]
+    holes: Vec<[f64; 3]>,
+    #[serde(default)]
+    parts: Vec<pcb::PcbPart>,
+  },
   /// Full round fillet: each set's centre face is replaced by one round tangent to it and to
   /// the faces on both sides (a half-cylinder across a rib with parallel sides).
   FullRoundFillet {
@@ -1940,6 +1960,7 @@ impl FeatureKind {
       FeatureKind::ProjectToSurface { .. } => "ProjectToSurface",
       FeatureKind::PathPattern { .. } => "PathPattern",
       FeatureKind::Arrange { .. } => "Arrange",
+      FeatureKind::Pcb { .. } => "PCB",
       FeatureKind::FullRoundFillet { .. } => "Fillet",
       FeatureKind::IntersectionCurve { .. } => "IntersectionCurve",
       FeatureKind::Canvas { .. } => "Canvas",
@@ -2030,6 +2051,13 @@ impl FeatureKind {
         std::iter::once(*path_sketch).chain(features.iter().copied()).collect()
       }
       FeatureKind::Arrange { plane, .. } => plane_dep(plane),
+      FeatureKind::Pcb { outline, plane, .. } => {
+        let mut v: Vec<FeatureId> = plane.iter().flat_map(plane_dep).collect();
+        if let pcb::PcbOutline::Profile { sketch, .. } = outline {
+          v.push(*sketch);
+        }
+        v
+      }
       FeatureKind::IntersectionCurve { curves, with, .. } => {
         std::iter::once(curves.sketch).chain(with.iter().map(|w| w.sketch)).collect()
       }
@@ -2090,6 +2118,7 @@ impl Design {
       named_views: Vec::new(),
       face_appearances: Vec::new(),
       timeline_groups: Vec::new(),
+      electronics: None,
       next_id: 1,
     }
   }
@@ -2875,6 +2904,7 @@ pub fn for_each_expr(kind: &mut FeatureKind, f: &mut dyn FnMut(&mut String)) {
     FeatureKind::FullRoundFillet { .. } => {}
     FeatureKind::IntersectionCurve { .. } => {}
     FeatureKind::Canvas { .. } => {}
+    FeatureKind::Pcb { .. } => {}
   }
 }
 

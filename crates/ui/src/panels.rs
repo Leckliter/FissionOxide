@@ -3072,6 +3072,7 @@ fn feature_icon(k: &FeatureKind) -> Icon {
     FeatureKind::BoundingSolid { .. } => Icon::Box,
     FeatureKind::ProjectToSurface { .. } => Icon::ProjectSurface,
     FeatureKind::Arrange { .. } => Icon::Component,
+    FeatureKind::Pcb { .. } => Icon::Component,
     FeatureKind::FullRoundFillet { .. } => Icon::Fillet,
     FeatureKind::IntersectionCurve { .. } => Icon::SplineFit,
     FeatureKind::Canvas { .. } => Icon::Canvas,

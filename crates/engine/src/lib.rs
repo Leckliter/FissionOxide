@@ -16,6 +16,7 @@ pub mod config;
 mod cut;
 pub mod diff;
 mod drawings;
+pub mod ecad;
 mod features;
 pub mod files;
 mod fillet;

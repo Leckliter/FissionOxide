@@ -514,6 +514,7 @@ impl Ctx<'_> {
       FeatureKind::ProjectToSurface { .. } => self.apply_project(id, kind),
       FeatureKind::PathPattern { .. } => self.apply_path_pattern(id, kind),
       FeatureKind::Arrange { .. } => self.apply_arrange(id, kind),
+      FeatureKind::Pcb { .. } => self.apply_pcb(id, kind),
       FeatureKind::FullRoundFillet { sets } => self.full_round(id, sets),
       FeatureKind::IntersectionCurve { .. } => self.apply_curves3d(id, kind),
       FeatureKind::Canvas { plane, .. } => {

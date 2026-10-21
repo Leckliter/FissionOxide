@@ -352,6 +352,37 @@ cmds! {
   "cut.machine.delete" => "Delete a machine profile from the hub", "{id}";
   "cut.contours" => "Closed contours a 2D cut would follow: outlines and holes of a flat pattern (default), flat faces or a sketch", "{body?, face?, faces?: [face], sketch?, origin?: corner|model}";
   "cut.gcode" => "2D cut for a laser, plasma or waterjet: kerf offset to the scrap side with true arcs, leads in the scrap, holes before outlines, nearest-first order, micro-joints; G-code or R12 DXF; without a path, returns it", "{body?, face?, faces?: [face], sketch?, machine?: grbl_laser|fluidnc_laser|qtplasmac|plasma_z|wazer|dxf|id|{profile}, process?: name|index, kerf?, feed?, power?: %, pierce_delay?: s, pierce_height?, cut_height?, safe_height?, lead_in?: arc|line|none|length|{kind, length}, lead_out?, overcut?, tabs?: count, tab_width?, tabs_on_holes?, compensate?, part_on_right?, small_hole_diameter?, small_hole_feed?, material?, units?: mm|inch, origin?: corner|model, name?, path?}";
+  "ecad.new" => "Electronics: start the design's schematic and board (empty, or the example USB-C ATmega328P board)", "{name?, example?: bool}";
+  "ecad.info" => "Electronics summary: parts, nets, board size and layers, tracks, vias, pours, unrouted connections, ERC and DRC counts, the 3D PCB feature", "{}";
+  "ecad.library" => "Devices in the component libraries (the design's imported ones, then the starter library: passives, LEDs, headers, SOIC/QFN/SOT-23 ICs, USB-C, an MCU, power symbols)", "{query?, library?, footprints?: bool}";
+  "ecad.library.import" => "Import a component library: KiCad .kicad_sym (symbols become devices; their Footprint property picks the footprint), .kicad_mod, a .pretty folder, or a .json library in this app's format", "{path, name?}";
+  "ecad.library.export" => "Write a library as JSON (symbol + footprint + 3D model + pin map per device): the format ecad.library.import reads", "{path, library?}";
+  "ecad.part.add" => "Place a device on the schematic (its footprint joins the board, beside it); reference designator R1, C2 ... unless given", "{device, at: [x, y], refdes?, value?, rot?: deg, mirror?}";
+  "ecad.part.edit" => "Move, rotate, mirror, revalue, rename or swap the device of a schematic part", "{refdes, at?, rot?, mirror?, value?, device?, new_refdes?}";
+  "ecad.part.delete" => "Delete a part from the schematic and the board", "{refdes}";
+  "ecad.wire" => "Draw schematic wires through points; a point is [x, y] or {part, pin}; two off-axis points get an L", "{points: [[x, y] | {part, pin}], direct?: bool}";
+  "ecad.label" => "Net label: names the net of the wire or pin it sits on; same-named nets connect", "{name, at: [x, y] | {part, pin}}";
+  "ecad.connect" => "Put a pin on a net: a short wire with a net label, a power symbol for power nets (GND, VCC, +5V, +3V3, VBUS), or a no-connect for 'nc'", "{part, pin: number or name, net, length?}";
+  "ecad.bus" => "Draw a bus carrying signals (D[0..7], SDA,SCL); wires leaving it take a member's name from their label", "{name, points: [[x, y]]}";
+  "ecad.no_connect" => "No-connect marker on a pin that stays unconnected", "{at: [x, y] | {part, pin}}";
+  "ecad.schematic.delete" => "Delete the wires, labels, buses and no-connect markers at a point", "{at: [x, y], tolerance?}";
+  "ecad.netlist" => "The schematic's netlist: every net with its pins", "{}";
+  "ecad.erc" => "Electrical rules check: unconnected pins, outputs driving each other, unpowered power pins, undriven inputs, dangling wires, conflicting labels, unnamed bus entries, duplicate designators", "{}";
+  "ecad.board.outline" => "The board outline: points, a rectangle, a sketch's closed region or a planar face (which it then follows); copper layers and thickness", "{points?: [[x, y]] | rect?: [w, h], origin?: [x, y] | sketch?, point?: [x, y] | face?, layers?: 2|4, thickness?}";
+  "ecad.board.rules" => "Design rules (mm): clearance, track_width, min_track, via_drill, via_diameter, min_drill, min_annular, edge_clearance, hole_clearance, mask_expansion; sets those given", "{clearance?, track_width?, ...}";
+  "ecad.place" => "Move, rotate or flip a part's footprint on the board, or change its footprint", "{refdes, at?, rot?: deg, side?: top|bottom, footprint?}";
+  "ecad.route" => "Manual routing: a track through points on a copper layer; the net is the copper it starts or ends on unless given", "{points: [[x, y]], layer?: top|inner1|inner2|bottom, width?, net?}";
+  "ecad.via" => "A via at a point (the net of the copper there unless given)", "{at, net?, drill?, diameter?}";
+  "ecad.pour" => "Copper pour on a layer for a net: the polygon (default the board outline) cleared around other nets' copper", "{net, layer?: (default bottom), points?, clearance?}";
+  "ecad.hole" => "Unplated mounting hole", "{at, drill}";
+  "ecad.board.delete" => "Delete the tracks, vias, holes (or with what: pour, the pour) at a point", "{at, layer?, what?: any|track|via|hole|pour}";
+  "ecad.unroute" => "Remove the tracks and vias of a net (or all)", "{net?}";
+  "ecad.autoroute" => "Route the unrouted connections (shortest first) on a grid over every copper layer, with vias, keeping the design rules", "{nets?: [name], grid?: mm (default 0.25)}";
+  "ecad.ratsnest" => "Connections still to route (airwires) per net", "{}";
+  "ecad.drc" => "Design rules check: clearances and shorts, track width, drill and annular ring, copper to edge, hole spacing, overlapping parts, unrouted nets", "{}";
+  "ecad.export" => "Fab output into a folder: Gerber RS-274X (copper, mask, paste, silkscreen, outline), Excellon drill files (plated, unplated), BOM and pick-and-place CSV", "{dir, what?: all|gerber|drill|bom|pnp}";
+  "ecad.svg" => "An SVG picture of the schematic or the board (returned, or written to path)", "{view?: schematic|board, path?}";
+  "ecad.push3d" => "Push the board to 3D: a PCB feature (the board body drilled, with its parts' 3D models placed) in a component, kept up to date as the layout changes", "{}";
   "sketch.project_to_surface" => "Project To Surface: drape sketch curves onto faces as 3D curves, pushed along a direction (both ways) or each point to the closest point of the faces; a pipe can follow them (path: this feature)", "{sketch?, curves?: [curve], faces: [face], type?: closest_point|along_vector, direction?: x|y|z|{axis}|{line}|{body, edge}}";
   "sketch.intersection_curve" => "Intersection curve: 3D curves where sketch curves, pushed along their sketch's normal, cross faces or other sketches' curves (pushed along theirs); pipe can follow them; they follow the body", "{sketch?, curves?: [id] (default all), faces?: [face], with?: [sketch id | {sketch, curves?}]}";
   "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
@@ -400,6 +431,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::cut::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::ecad::run(s, name, p) {
     return r;
   }
   if let Some(r) = crate::form::run(s, name, p) {

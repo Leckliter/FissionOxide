@@ -24,6 +24,7 @@ fox-brand = { path = "crates/brand" }
 fox-cut = { path = "crates/cut" }
 fox-desktop = { path = "crates/desktop" }
 fox-hub-server = { path = "crates/hub-server" }
+fox-ecad = { path = "crates/ecad" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

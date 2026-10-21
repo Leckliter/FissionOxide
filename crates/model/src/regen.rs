@@ -2629,6 +2629,7 @@ fn lone_point(sk: &fox_sketch::Sketch) -> Option<[f64; 2]> {
 
 mod arrange;
 mod bound;
+mod pcb;
 mod direct;
 mod pathpattern;
 mod project;
