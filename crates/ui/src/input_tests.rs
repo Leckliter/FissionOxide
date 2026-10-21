@@ -709,3 +709,35 @@ fn cancel_and_ok_sit_at_the_bottom_right_of_the_preferences() {
   assert!(!h.app.preferences.open, "OK closes");
   assert!(!h.app.preferences.values.show_prompt, "OK applies the edit");
 }
+
+/// Extrude with a profile shows the floating value box at its arrow, focused: typing goes into
+/// it and the dialog's Distance mirrors it; Enter is OK.
+#[test]
+fn the_floating_value_box_takes_typing_and_enter_is_ok() {
+  use serde_json::json;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.run("sketch.rect", json!({"corner1": [-10, -10], "corner2": [10, 10]})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  h.app.run("sketch.finish", json!({})).unwrap();
+  h.app.s.selection = vec![fox_engine::Sel::Profile { sketch: sk, index: 0 }];
+  h.app.start(crate::dialogs::Kind::Extrude);
+  h.app.fit_view_now();
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
+  assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
+  // its value is selected: typing replaces it, and the dialog's field says the same
+  h.frame(typing("25"));
+  h.frame(vec![]);
+  let distance = h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone();
+  assert_eq!(distance, "25");
+  let features = h.app.s.design.features.len();
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none(), "Enter in the box is OK");
+  assert_eq!(h.app.s.design.features.len(), features, "the previewed extrude stayed");
+  let top = h.app.s.model.bodies[0].shape.mass().unwrap().bbox_max.z;
+  assert!((top - 25.0).abs() < 1e-6, "extruded by the typed 25 mm: {top}");
+}

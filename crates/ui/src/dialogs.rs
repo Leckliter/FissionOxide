@@ -1152,6 +1152,7 @@ impl Dialog {
     };
     d.editing = Some(id);
     d.unit = app.s.design.units;
+    d.load_edit_anchor(&f.kind);
     // a stored bare length is mm: in a design in another unit its box says so ("10 mm")
     let u = d.unit;
     let fields = [&mut d.distance, &mut d.distance2, &mut d.radius, &mut d.spacing, &mut d.spacing2];
@@ -1585,6 +1586,7 @@ impl Dialog {
           .as_array()
           .map(|a| a.iter().filter_map(Value::as_u64).map(|c| c as u32).collect())
           .unwrap_or_default();
+        self.reselect_picks(s);
       }
       Err(e) => {
         self.error = Some(e.0);
@@ -1839,6 +1841,7 @@ impl Dialog {
         if e != self.edges || f != self.faces {
           self.edges = e;
           self.faces = f;
+          self.round_sync();
         }
       }
       Kind::Chamfer if !self.applied => {
@@ -1999,12 +2002,15 @@ impl Dialog {
         && self.kind != Kind::PickPlane
         && match ctx.memory(|m| m.focused()) {
           None => true,
-          Some(id) => ctx.read_response(id).is_some_and(|r| r.layer_id == dialog_layer),
+          Some(id) => {
+            ctx.read_response(id).is_some_and(|r| r.layer_id == dialog_layer || r.layer_id == crate::value_box::layer())
+          }
         };
     let mut cancel = false;
     let base = self.move_title().filter(|_| self.kind == Kind::Move).unwrap_or(self.kind.title());
     let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
-    let width = 300.0;
+    // FILLET's selection table needs the extra width, as in Fusion
+    let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
     egui::Area::new(egui::Id::new("feature-dialog"))
       .default_pos(app.canvas.right_top() + egui::vec2(-34.0, 190.0))
       .pivot(egui::Align2::RIGHT_TOP)
@@ -4518,6 +4524,35 @@ const TYPING: &str = "dialog-typing";
 /// Sends typing to the open dialog's primary value box (see [`value_edit`]).
 pub fn type_into(ctx: &egui::Context, text: String) {
   ctx.data_mut(|d| d.insert_temp(egui::Id::new(TYPING), text));
+}
+
+/// Takes the typing aimed at the open dialog, if any (the floating value box draws before the
+/// dialog, so it gets first call).
+pub(crate) fn take_typing(ctx: &egui::Context) -> Option<String> {
+  ctx.data_mut(|d| d.remove_temp::<String>(egui::Id::new(TYPING)))
+}
+
+impl Dialog {
+  /// The field the floating value box beside the drag arrow edits (see [`crate::value_box`]):
+  /// the distance of Extrude, Press Pull, Offset Plane and Sketch Offset, the radius or distance
+  /// of Fillet and Chamfer. None for dialogs without an arrow.
+  pub fn value_box_field(&mut self) -> Option<&mut String> {
+    match self.kind {
+      Kind::Extrude | Kind::OffsetPlane | Kind::PressPull | Kind::SkOffset => Some(&mut self.distance),
+      Kind::Fillet | Kind::Chamfer => Some(&mut self.radius),
+      _ => None,
+    }
+  }
+
+  /// The floating value box changed its field: re-preview.
+  pub fn value_box_edited(&mut self) {
+    self.dirty = true;
+    self.live_reset();
+    if self.kind == Kind::SkOffset {
+      // a typed distance holds: the offset stops following the cursor
+      self.follow = false;
+    }
+  }
 }
 
 /// A dialog value box. The first one drawn takes typing aimed at the dialog: its text is replaced

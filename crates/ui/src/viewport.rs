@@ -279,7 +279,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let cam = app.cam;
   crate::canvas_ui::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   crate::trace::overlay(app, &painter, &|p| view.to_screen(&cam, p));
-  crate::preview::overlay(app, &painter, &|p| view.to_screen(&cam, p));
 
   // overlays that take clicks come first
   let mut consumed = false;
@@ -3175,9 +3174,9 @@ pub(crate) fn select_other_at_last_click(app: &mut App) {
 
 // ---------------------------------------------------------------- manipulators, measure line
 
-/// The open dialog's drag arrow: drawn from its base along its direction to the current value;
-/// dragging the head changes the value (snapped to a tenth of the grid). Returns true while the
-/// arrow has the pointer.
+/// The open dialog's drag arrow: drawn from its base along its direction to the current value,
+/// with the floating value box at its head (see [`crate::value_box`]); dragging the head changes
+/// the value (snapped to a tenth of the grid). Returns true while the arrow has the pointer.
 fn manipulator(
   app: &mut App,
   resp: &egui::Response,
@@ -3185,9 +3184,15 @@ fn manipulator(
   view: &View,
   ctx: &egui::Context,
 ) -> bool {
-  let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else { return false };
+  let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else {
+    app.manip.value_box.hide();
+    return false;
+  };
   let tip = m.origin + m.dir * m.value;
-  let (Some(a), Some(b)) = (view.to_screen(&app.cam, m.origin), view.to_screen(&app.cam, tip)) else { return false };
+  let (Some(a), Some(b)) = (view.to_screen(&app.cam, m.origin), view.to_screen(&app.cam, tip)) else {
+    app.manip.value_box.hide();
+    return false;
+  };
   let hot = resp.hover_pos().is_some_and(|p| (p - b).length() < 12.0);
   let active = matches!(app.drag, Some(Drag::Manip));
   let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
@@ -3197,13 +3202,28 @@ fn manipulator(
   let side = Vec2::new(-dir2.y, dir2.x);
   let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
   painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
-  painter.text(
-    b + side * 14.0 + dir2 * 4.0,
-    egui::Align2::LEFT_CENTER,
-    app.s.design.units.format(m.value),
-    egui::FontId::proportional(12.0),
-    Color32::from_gray(40),
-  );
+  // the value box beside the head edits the dialog's field; a dialog without one gets a label
+  let label_at = b + side * 14.0 + dir2 * 4.0;
+  let params = crate::value_box::params_of(&app.s);
+  let mut boxed = false;
+  if let Some(dlg) = app.dialog.as_mut()
+    && let Some(text) = dlg.value_box_field()
+  {
+    if crate::value_box::show(ctx, &mut app.manip.value_box, label_at, text, &params).changed {
+      dlg.value_box_edited();
+    }
+    boxed = true;
+  }
+  if !boxed {
+    app.manip.value_box.hide();
+    painter.text(
+      label_at,
+      egui::Align2::LEFT_CENTER,
+      app.s.design.units.format(m.value),
+      egui::FontId::proportional(12.0),
+      Color32::from_gray(40),
+    );
+  }
   // a drag starts only once the pointer has moved: test where the press began
   let pressed_on_head = ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| (p - b).length() < 14.0);
   if pressed_on_head && resp.drag_started_by(egui::PointerButton::Primary) {

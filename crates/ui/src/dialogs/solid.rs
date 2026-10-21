@@ -36,6 +36,14 @@ pub(super) struct Extra {
   /// Fillet selection sets (empty: just the one in the dialog's fields) and the active one.
   pub(super) rows: Vec<FilletRow>,
   active: usize,
+  /// Fillet Type (see [`FILLET_TYPES`]): "" (Fillet) or "full_round".
+  pub(super) fillet_type: &'static str,
+  /// Full Round Fillet's picks: side faces 1, centre faces, side faces 2; and the set the next
+  /// picked face goes to.
+  pub(super) round: [Vec<Value>; 3],
+  round_active: usize,
+  /// Fillet Tangency Weight (curvature continuity only, which the engine doesn't do yet).
+  tangency_weight: String,
   /// Fillet: tangent chain off (on by default, as in Fusion).
   pub(super) no_chain: bool,
   /// Fillet corner type: setback (else rolling ball).
@@ -66,6 +74,16 @@ pub(super) struct Extra {
   pub(super) hp: super::hole_pattern::State,
 }
 
+/// Fusion's Fillet Type; Rule Fillet has no engine support and is greyed.
+pub(super) const FILLET_TYPES: [(&str, &str); 3] =
+  [("", "Fillet"), ("rule", "Rule Fillet"), ("full_round", "Full Round Fillet")];
+/// Fusion's Radius Type.
+const RADIUS_TYPES: [(&str, &str); 3] = [("constant", "Constant"), ("chord", "Chord length"), ("variable", "Variable")];
+/// A fillet set's continuity; curvature (G2) has no engine support and is greyed.
+const CONTINUITIES: [(&str, &str); 2] = [("", "Tangent (G1)"), ("g2", "Curvature (G2)")];
+/// Full Round Fillet's selection rows.
+const ROUND_SETS: [&str; 3] = ["Side Face 1", "Center Faces", "Side Face 2"];
+
 /// Fusion's Chamfer Type.
 pub(super) const CHAMFER_TYPES: [(&str, &str); 3] =
   [("equal", "Equal distance"), ("two", "Two distances"), ("angle", "Distance and angle")];
@@ -84,12 +102,14 @@ fn choice(ui: &mut egui::Ui, id: &str, cur: &mut &'static str, options: &[(&'sta
   changed
 }
 
-/// One fillet selection set: edges, faces (all their edges) and its radius.
+/// One fillet selection set: edges, faces (all their edges), its radius and continuity (see
+/// [`CONTINUITIES`]).
 #[derive(Debug, Clone, Default)]
 pub(super) struct FilletRow {
   pub(super) edges: Vec<Value>,
   pub(super) faces: Vec<Value>,
   pub(super) radius: String,
+  pub(super) continuity: &'static str,
 }
 
 impl FilletRow {
@@ -112,34 +132,75 @@ impl FilletRow {
 impl Dialog {
   // ---- fillet ----
 
-  /// Fusion's selection rows: each set of edges and faces with its own radius, the active one
-  /// in `edges` / `faces` / `radius` (and the viewport selection), + for another set.
+  /// Fusion's FILLET rows: Type, the selection-set table (one row per set: its picks, radius,
+  /// setback and continuity, with ✕) and +, Radius Type, the active set's Edges/Faces/Features
+  /// chip, Tangent Chain and Tangency Weight. The active set is the one in `edges` / `faces` /
+  /// `radius` (and the viewport selection). Full Round Fillet shows its three face rows instead.
   pub(super) fn fillet_rows(&mut self, app: &mut App, ui: &mut egui::Ui, creating: bool) {
+    ui.label("Type");
+    let shown = FILLET_TYPES.iter().find(|(k, _)| *k == self.solid.fillet_type).map_or("Fillet", |(_, l)| *l);
+    let mut switch_type = None;
+    egui::ComboBox::from_id_salt("fillet-type").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+      for (k, l) in FILLET_TYPES {
+        if k == "rule" {
+          ui.add_enabled(false, egui::Button::selectable(false, l))
+            .on_disabled_hover_text("Rule fillets are not supported yet");
+        } else if ui.selectable_label(self.solid.fillet_type == k, l).clicked() && self.solid.fillet_type != k {
+          switch_type = Some(k);
+        }
+      }
+    });
+    ui.end_row();
+    if let Some(k) = switch_type.filter(|_| creating) {
+      self.set_fillet_type(&mut app.s, k);
+    }
+    if self.solid.fillet_type == "full_round" {
+      self.full_round_rows(ui, creating);
+      return;
+    }
     let rows = self.fillet_sets();
     let accent = self.accent();
     let (mut switch, mut remove, mut add) = (None, None, false);
+    let mut changed = false;
     for (i, row) in rows.iter().enumerate() {
-      ui.label(if i == 0 { "Edges / Faces" } else { "" });
+      // the set's picks; clicking another set's makes it the active one
+      let active = i == self.solid.active;
+      let text = if creating { row.label() } else { format!("{} (unchanged)", row.edges.len()) };
+      let cell = ui.add(egui::Label::new(egui::RichText::new(text).strong()).sense(egui::Sense::click()));
+      if !active && creating && cell.on_hover_text("Select this set").clicked() {
+        switch = Some(i);
+      }
       ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let active = i == self.solid.active;
-        let text = if creating { row.label() } else { format!("{} (unchanged)", row.edges.len()) };
-        let chip = sel_chip(ui, accent, &text, active && (!row.edges.is_empty() || !row.faces.is_empty()));
-        if !active && chip.interact(egui::Sense::click()).on_hover_text("Select this set").clicked() {
-          switch = Some(i);
-        }
         // the active set's radius takes typing aimed at the dialog
-        let changed = if active {
-          super::value_edit_w(ui, &mut self.radius, 64.0).changed()
+        changed |= if active {
+          super::value_edit_w(ui, &mut self.radius, 52.0).changed()
         } else {
-          let mut r = ui.add(egui::TextEdit::singleline(&mut self.solid.rows[i].radius).desired_width(64.0));
+          let mut r = ui.add(egui::TextEdit::singleline(&mut self.solid.rows[i].radius).desired_width(52.0));
           crate::units::pin(ui, &mut r, &mut self.solid.rows[i].radius);
           r.changed()
         };
-        if changed {
-          self.dirty = !creating || self.applied;
-          self.live_reset();
+        // the corner setback, for Corner Type Setback
+        let mut sb = ui.add_enabled(
+          self.solid.setback_corner,
+          egui::TextEdit::singleline(&mut self.solid.setback).hint_text("setback").desired_width(44.0),
+        );
+        if self.solid.setback_corner {
+          crate::units::pin(ui, &mut sb, &mut self.solid.setback);
         }
+        changed |= sb.changed();
+        // continuity: tangent; curvature has no engine support yet
+        let cont = CONTINUITIES.iter().find(|(k, _)| *k == row.continuity).map_or("Tangent (G1)", |(_, l)| *l);
+        egui::ComboBox::from_id_salt(("fillet-continuity", i)).selected_text(cont).width(96.0).show_ui(ui, |ui| {
+          for (k, l) in CONTINUITIES {
+            if k == "g2" {
+              ui.add_enabled(false, egui::Button::selectable(false, l))
+                .on_disabled_hover_text("Curvature continuity is not supported yet");
+            } else {
+              let _ = ui.selectable_label(row.continuity == k, l);
+            }
+          }
+        });
         if creating && rows.len() > 1 && ui.small_button("✕").on_hover_text("Remove this set").clicked() {
           remove = Some(i);
         }
@@ -153,12 +214,28 @@ impl Dialog {
       }
       ui.end_row();
     }
-    ui.label("Tangent chain");
-    let mut chain = !self.solid.no_chain;
-    if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
-      self.solid.no_chain = !chain;
+    changed |= self.radius_type_row(ui);
+    // the active set's picks
+    ui.label("Edges/Faces/Features");
+    let row = &rows[self.solid.active.min(rows.len() - 1)];
+    if creating {
+      sel_chip(ui, accent, &row.label(), !row.is_empty());
+    } else {
+      ui.label(format!("{} (unchanged)", row.edges.len()));
     }
     ui.end_row();
+    self.tangent_chain_row(ui, creating);
+    ui.label("Tangency weight");
+    if self.solid.tangency_weight.is_empty() {
+      self.solid.tangency_weight = "1.00".into();
+    }
+    ui.add_enabled(false, egui::TextEdit::singleline(&mut self.solid.tangency_weight).desired_width(140.0))
+      .on_disabled_hover_text("Tangency weight applies to curvature continuity, which is not supported yet");
+    ui.end_row();
+    if changed {
+      self.dirty = !creating || self.applied;
+      self.live_reset();
+    }
     let s = &mut app.s;
     if let Some(j) = switch {
       self.switch_fillet_set(s, j);
@@ -177,21 +254,26 @@ impl Dialog {
     }
   }
 
-  /// Radius type and Fusion's Corner Type: rolling ball, or setback (with its distance).
-  pub(super) fn setback_row(&mut self, ui: &mut egui::Ui, creating: bool) {
+  /// Fusion's Tangent Chain checkbox (on by default).
+  fn tangent_chain_row(&mut self, ui: &mut egui::Ui, creating: bool) {
+    ui.label("Tangent chain");
+    let mut chain = !self.solid.no_chain;
+    if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
+      self.solid.no_chain = !chain;
+    }
+    ui.end_row();
+  }
+
+  /// Radius Type: Constant, Chord length or Variable (with its end radius); true when changed.
+  fn radius_type_row(&mut self, ui: &mut egui::Ui) -> bool {
     ui.label("Radius type");
-    let mut changed = false;
     let mut kind = match (self.solid.chord, self.solid.variable) {
-      (true, _) => 1,
-      (_, true) => 2,
-      _ => 0,
+      (true, _) => "chord",
+      (_, true) => "variable",
+      _ => "constant",
     };
-    ui.horizontal(|ui| {
-      changed |= ui.radio_value(&mut kind, 0, "Constant").changed();
-      changed |= ui.radio_value(&mut kind, 1, "Chord length").changed();
-      changed |= ui.radio_value(&mut kind, 2, "Variable").changed();
-    });
-    (self.solid.chord, self.solid.variable) = (kind == 1, kind == 2);
+    let mut changed = choice(ui, "fillet-radius-type", &mut kind, &RADIUS_TYPES);
+    (self.solid.chord, self.solid.variable) = (kind == "chord", kind == "variable");
     ui.end_row();
     if self.solid.variable {
       // Fusion's variable radius: the first row's radius at the start, this one at the end
@@ -202,6 +284,72 @@ impl Dialog {
       changed |= super::value_edit_w(ui, &mut self.solid.radius2, 140.0).changed();
       ui.end_row();
     }
+    changed
+  }
+
+  /// Full Round Fillet: Side Face 1, Center Faces and Side Face 2 (a click on a row's chip makes
+  /// it the one the next picked faces go to), and Tangent Chain.
+  fn full_round_rows(&mut self, ui: &mut egui::Ui, creating: bool) {
+    let accent = self.accent();
+    for (i, label) in ROUND_SETS.iter().enumerate() {
+      ui.label(*label);
+      let n = self.solid.round[i].len();
+      let active = i == self.solid.round_active;
+      let text = match n {
+        0 => "Select".to_string(),
+        1 => "1 Face".to_string(),
+        n => format!("{n} Faces"),
+      };
+      let chip = sel_chip(ui, accent, &text, active || n > 0);
+      if creating && !active && chip.interact(egui::Sense::click()).on_hover_text("Pick faces for this set").clicked() {
+        self.solid.round_active = i;
+      }
+      ui.end_row();
+    }
+    self.tangent_chain_row(ui, creating);
+  }
+
+  /// Switches the Fillet Type, dropping the preview: the picked faces so far become Full Round's
+  /// first set, or the plain fillet's faces.
+  fn set_fillet_type(&mut self, s: &mut Session, kind: &'static str) {
+    self.withdraw(s);
+    self.solid.fillet_type = kind;
+    self.solid.round = Default::default();
+    self.solid.round_active = 0;
+    self.round_sync();
+    self.live_reset();
+  }
+
+  /// Keeps Full Round Fillet's sets in step with the picked faces: faces newly picked go to the
+  /// active set, faces unpicked leave theirs.
+  pub(super) fn round_sync(&mut self) {
+    if self.solid.fillet_type != "full_round" {
+      return;
+    }
+    let faces = self.faces.clone();
+    for set in self.solid.round.iter_mut() {
+      set.retain(|f| faces.contains(f));
+    }
+    let known: Vec<Value> = self.solid.round.iter().flatten().cloned().collect();
+    let active = self.solid.round_active.min(2);
+    self.solid.round[active].extend(faces.into_iter().filter(|f| !known.contains(f)));
+  }
+
+  /// Full Round Fillet's command: one full round per centre face, between the two side sets.
+  fn full_round_params(&self) -> Value {
+    let [side_one, centers, side_two] = &self.solid.round;
+    let sets: Vec<Value> =
+      centers.iter().map(|c| json!({"center": c, "side_one": side_one, "side_two": side_two})).collect();
+    json!({"full_round": sets})
+  }
+
+  /// Radius type and Fusion's Corner Type: rolling ball, or setback (its distance is in the
+  /// selection table). Full Round Fillet has neither.
+  pub(super) fn setback_row(&mut self, ui: &mut egui::Ui, creating: bool) {
+    if self.solid.fillet_type == "full_round" {
+      return;
+    }
+    let mut changed = false;
     ui.label("Corner type");
     let shown = if self.solid.setback_corner { "Setback" } else { "Rolling ball" };
     egui::ComboBox::from_id_salt("fillet-corner").selected_text(shown).width(140.0).show_ui(ui, |ui| {
@@ -209,14 +357,6 @@ impl Dialog {
       changed |= ui.selectable_value(&mut self.solid.setback_corner, true, "Setback").changed();
     });
     ui.end_row();
-    if self.solid.setback_corner {
-      ui.label("Setback");
-      let mut r =
-        ui.add(egui::TextEdit::singleline(&mut self.solid.setback).hint_text("distance").desired_width(140.0));
-      crate::units::pin(ui, &mut r, &mut self.solid.setback);
-      changed |= r.changed();
-      ui.end_row();
-    }
     if changed && (!creating || self.applied) {
       self.dirty = true;
     }
@@ -261,6 +401,7 @@ impl Dialog {
         edges: vec![Value::Null; set.edges.len()],
         faces: Vec::new(),
         radius: set.radius.clone(),
+        continuity: "",
       });
     }
     self.solid.edit_sets = serde_json::to_value(sets).unwrap_or_default();
@@ -268,7 +409,9 @@ impl Dialog {
 
   /// Every selection set, the active one as it is now.
   pub(super) fn fillet_sets(&self) -> Vec<FilletRow> {
-    let now = FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone() };
+    let continuity = self.solid.rows.get(self.solid.active).map_or("", |r| r.continuity);
+    let now =
+      FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone(), continuity };
     if self.solid.rows.is_empty() {
       return vec![now];
     }
@@ -278,7 +421,11 @@ impl Dialog {
   }
 
   /// The fillet command: one set, or `sets` each with its radius; tangent chains on by default.
+  /// A Full Round Fillet's command instead (see [`Dialog::full_round_params`]).
   pub(super) fn fillet_params(&self) -> Value {
+    if self.solid.fillet_type == "full_round" {
+      return self.full_round_params();
+    }
     let rows: Vec<FilletRow> = self.fillet_sets().into_iter().filter(|r| !r.is_empty()).collect();
     let mut p = match rows.as_slice() {
       [] => json!({"edges": [], "radius": self.radius}),
@@ -306,11 +453,16 @@ impl Dialog {
   }
 
   pub(super) fn fillet_ready(&self) -> bool {
+    if self.solid.fillet_type == "full_round" {
+      return self.solid.round.iter().all(|set| !set.is_empty());
+    }
     self.fillet_sets().iter().any(|r| !r.is_empty())
   }
 
   pub(super) fn store_fillet_set(&mut self) {
-    let now = FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone() };
+    let continuity = self.solid.rows.get(self.solid.active).map_or("", |r| r.continuity);
+    let now =
+      FilletRow { edges: self.edges.clone(), faces: self.faces.clone(), radius: self.radius.clone(), continuity };
     match self.solid.rows.get_mut(self.solid.active) {
       Some(r) => *r = now,
       None => {
@@ -1181,6 +1333,55 @@ mod tests {
       let f = app.s.design.features.last().unwrap();
       assert!(matches!(&f.kind, FeatureKind::Chamfer { distance2: None, angle: None, .. }), "{:?}", f.kind);
     }
+  }
+
+  /// Fillet Type: Full Round Fillet picks three face sets (the active one takes the next picks)
+  /// and runs the full round command; the plain type's rows carry their continuity.
+  #[test]
+  fn fillet_type_full_round_and_set_continuity() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 10}));
+    let b = s.model.bodies[0].id;
+    let face = |s: &Session, n: DVec3| {
+      let f = s.model.bodies[0].faces().iter().find(|f| f.normal.dot(n) > 0.9).unwrap().id;
+      (json!({"body": b.0, "face": f}), Sel::Face { body: b, face: f })
+    };
+    let (top, top_sel) = face(&s, DVec3::Z);
+    let (bottom, bottom_sel) = face(&s, DVec3::NEG_Z);
+    let (side, side_sel) = face(&s, DVec3::X);
+    let mut d = Dialog::blank(Kind::Fillet);
+    assert_eq!(d.solid.fillet_type, "");
+    assert_eq!(d.fillet_sets()[0].continuity, "", "tangent (G1) by default");
+    // picked before the switch, the top face becomes Side Face 1
+    s.selection = vec![top_sel];
+    d.sync_selection(&s);
+    d.set_fillet_type(&mut s, "full_round");
+    assert_eq!(d.solid.round, [vec![top.clone()], vec![], vec![]]);
+    assert!(!d.fillet_ready(), "three sets are needed");
+    // the next picks go to the active set: the centre, then side 2
+    d.solid.round_active = 1;
+    s.selection = vec![top_sel, side_sel];
+    d.sync_selection(&s);
+    d.solid.round_active = 2;
+    s.selection = vec![top_sel, side_sel, bottom_sel];
+    d.sync_selection(&s);
+    assert_eq!(d.solid.round, [vec![top.clone()], vec![side.clone()], vec![bottom.clone()]]);
+    assert!(d.fillet_ready());
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!(cmd, "fillet");
+    assert_eq!(p, json!({"full_round": [{"center": side, "side_one": [top], "side_two": [bottom]}]}));
+    apply(&mut s, &mut d);
+    assert!(matches!(s.design.features.last().unwrap().kind, FeatureKind::FullRoundFillet { .. }));
+    // the rounded side is a full cylinder between top and bottom: less volume than the box
+    assert!(volume(&s) < 4000.0 - 1.0, "{}", volume(&s));
+    d.cancel(&mut s);
+    // unpicking a face leaves its set; switching back to Fillet keeps the faces as picks
+    s.selection = vec![top_sel, bottom_sel];
+    d.sync_selection(&s);
+    assert_eq!(d.solid.round[1], Vec::<Value>::new());
+    d.set_fillet_type(&mut s, "");
+    assert_eq!(d.faces.len(), 2);
+    assert!(d.fillet_ready() && d.command().unwrap().1.get("full_round").is_none());
   }
 
   #[test]

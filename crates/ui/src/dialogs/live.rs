@@ -3,12 +3,13 @@
 //! click withdraws the preview and goes on to pick on the un-previewed model, and bodies a preview
 //! adds stay out of the browser until OK.
 
-use fox_engine::Session;
+use fox_engine::kernel::{EdgeInfo, FaceInfo};
 use fox_engine::model::BodyId;
 use fox_engine::scene::Pick;
+use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
-use super::Dialog;
+use super::{Dialog, Kind};
 
 #[derive(Debug, Clone)]
 pub(super) struct Live {
@@ -18,12 +19,81 @@ pub(super) struct Live {
   tried: Option<Value>,
   /// The bodies before the preview.
   before: Vec<BodyId>,
+  /// The picked faces and edges as they were before the preview, to find them again on it.
+  picked: Vec<Was>,
 }
 
 impl Default for Live {
   fn default() -> Live {
-    Live { on: true, tried: None, before: Vec::new() }
+    Live { on: true, tried: None, before: Vec::new(), picked: Vec::new() }
   }
+}
+
+/// A picked edge or face of the un-previewed model.
+#[derive(Debug, Clone, Copy)]
+enum Was {
+  Edge(BodyId, EdgeInfo),
+  Face(BodyId, FaceInfo),
+}
+
+/// Is `x` the edge `e` was, on a body a preview may have changed: the same curve, within `tol`?
+/// (A preview may shorten the edge, as a fillet at its end does.)
+fn same_edge(e: &EdgeInfo, x: &EdgeInfo, tol: f64) -> bool {
+  use fox_engine::kernel::CurveKind;
+  let dir = (e.end - e.start).normalize_or_zero();
+  x.kind == e.kind
+    && match e.kind {
+      CurveKind::Line => {
+        (x.end - x.start).normalize_or_zero().cross(dir).length() < 1e-6 && (x.mid - e.mid).cross(dir).length() < tol
+      }
+      CurveKind::Circle => {
+        (x.center - e.center).length() < tol
+          && (x.radius - e.radius).abs() < tol
+          && x.axis.cross(e.axis).length() < 1e-6
+      }
+      _ => (x.mid - e.mid).length() < tol,
+    }
+}
+
+/// Is `x` the face `f` was: the same surface, within `tol`? (A preview may trim the face, as a
+/// fillet along its edge does.)
+fn same_face(f: &FaceInfo, x: &FaceInfo, tol: f64) -> bool {
+  x.kind == f.kind
+    && x.normal.dot(f.normal) > 1.0 - 1e-9
+    && if f.kind == fox_engine::kernel::SurfaceKind::Plane {
+      (x.origin - f.origin).dot(f.normal).abs() < tol
+    } else {
+      (x.origin - f.origin).cross(f.normal).length() < tol && (x.radius - f.radius).abs() < tol
+    }
+}
+
+/// The pick `was` names on the model now, if it is still there.
+fn find_now(s: &Session, was: Was) -> Option<Pick> {
+  match was {
+    Was::Edge(body, e) => {
+      let b = s.model.body(body)?;
+      let tol = 1e-6 * (1.0 + b.diagonal());
+      b.edges()
+        .iter()
+        .filter(|x| same_edge(&e, x, tol))
+        .min_by(|x, y| (x.mid - e.mid).length().total_cmp(&(y.mid - e.mid).length()))
+        .map(|x| Pick::Edge { body, edge: x.id })
+    }
+    Was::Face(body, f) => {
+      let b = s.model.body(body)?;
+      let tol = 1e-6 * (1.0 + b.diagonal());
+      b.faces()
+        .iter()
+        .filter(|x| same_face(&f, x, tol))
+        .min_by(|x, y| (x.center - f.center).length().total_cmp(&(y.center - f.center).length()))
+        .map(|x| Pick::Face { body, face: x.id })
+    }
+  }
+}
+
+/// The dialogs whose picked faces and edges stay selected on their preview.
+fn keeps_picks(kind: Kind) -> bool {
+  matches!(kind, Kind::Fillet | Kind::Chamfer | Kind::Shell | Kind::PressPull | Kind::Draft)
 }
 
 impl Dialog {
@@ -44,10 +114,52 @@ impl Dialog {
     self.refresh_manip(s);
     self.live.tried = Some(json!([cmd, params]));
     self.live.before = s.model.bodies.iter().map(|b| b.id).collect();
+    self.live.picked.clear();
+    if keeps_picks(self.kind) && self.editing.is_none() {
+      let get = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).map(|x| x as u32);
+      for f in &self.faces {
+        if let (Some(b), Some(id)) = (get(f, "body"), get(f, "face"))
+          && let Some(x) = s.model.body(BodyId(b)).and_then(|x| x.faces().iter().find(|x| x.id == id))
+        {
+          self.live.picked.push(Was::Face(BodyId(b), *x));
+        }
+      }
+      for e in &self.edges {
+        if let (Some(b), Some(id)) = (get(e, "body"), get(e, "edge"))
+          && let Some(x) = s.model.body(BodyId(b)).and_then(|x| x.edges().iter().find(|x| x.id == id))
+        {
+          self.live.picked.push(Was::Edge(BodyId(b), *x));
+        }
+      }
+    }
   }
 
-  /// The Preview checkbox of a model-picking dialog.
+  /// After a preview, the picked faces (and the picked edges it kept) are selected again on the
+  /// previewed body, so only they draw in the selection colour and the body keeps its own
+  /// appearance, as in Fusion. (The session drops picks on a body a feature changed.)
+  pub(super) fn reselect_picks(&self, s: &mut Session) {
+    if !keeps_picks(self.kind) || self.editing.is_some() {
+      return;
+    }
+    s.selection = self
+      .live
+      .picked
+      .iter()
+      .filter_map(|w| find_now(s, *w))
+      .filter_map(|p| match p {
+        Pick::Face { body, face } => Some(Sel::Face { body, face }),
+        Pick::Edge { body, edge } => Some(Sel::Edge { body, edge }),
+        _ => None,
+      })
+      .collect();
+  }
+
+  /// The Preview checkbox of a model-picking dialog. Fillet has none: it always previews, as in
+  /// Fusion.
   pub(super) fn live_checkbox(&mut self, ui: &mut egui::Ui, s: &mut Session) {
+    if self.kind == Kind::Fillet {
+      return;
+    }
     if ui.checkbox(&mut self.live.on, "Preview").changed() {
       if self.live.on {
         self.live.tried = None;
@@ -69,10 +181,6 @@ impl Dialog {
   /// the cursor (`hover`, picked on the preview) on the un-previewed model: the same edge or
   /// face, when the preview didn't change it. None when there is nothing to pick there.
   pub fn unpreview_pick(&mut self, s: &mut Session, hover: Option<Pick>) -> Option<Pick> {
-    enum Was {
-      Edge(BodyId, fox_engine::kernel::EdgeInfo),
-      Face(BodyId, fox_engine::kernel::FaceInfo),
-    }
     let was = hover.and_then(|h| match h {
       Pick::Edge { body, edge } => {
         s.model.body(body)?.edges().iter().find(|e| e.id == edge).map(|e| Was::Edge(body, *e))
@@ -84,54 +192,7 @@ impl Dialog {
     });
     self.withdraw(s);
     self.live.tried = None;
-    match was? {
-      Was::Edge(body, e) => {
-        let b = s.model.body(body)?;
-        let tol = 1e-6 * (1.0 + b.diagonal());
-        // a preview may shorten the edge (a fillet at its end): the same curve, nearest middle
-        let dir = (e.end - e.start).normalize_or_zero();
-        let same = |x: &&fox_engine::kernel::EdgeInfo| {
-          use fox_engine::kernel::CurveKind;
-          x.kind == e.kind
-            && match e.kind {
-              CurveKind::Line => {
-                (x.end - x.start).normalize_or_zero().cross(dir).length() < 1e-6
-                  && (x.mid - e.mid).cross(dir).length() < tol
-              }
-              CurveKind::Circle => {
-                (x.center - e.center).length() < tol
-                  && (x.radius - e.radius).abs() < tol
-                  && x.axis.cross(e.axis).length() < 1e-6
-              }
-              _ => (x.mid - e.mid).length() < tol,
-            }
-        };
-        b.edges()
-          .iter()
-          .filter(same)
-          .min_by(|x, y| (x.mid - e.mid).length().total_cmp(&(y.mid - e.mid).length()))
-          .map(|x| Pick::Edge { body, edge: x.id })
-      }
-      Was::Face(body, f) => {
-        let b = s.model.body(body)?;
-        let tol = 1e-6 * (1.0 + b.diagonal());
-        // a preview may trim the face (a fillet along its edge): the same surface, nearest centre
-        let same = |x: &&fox_engine::kernel::FaceInfo| {
-          x.kind == f.kind
-            && x.normal.dot(f.normal) > 1.0 - 1e-9
-            && if f.kind == fox_engine::kernel::SurfaceKind::Plane {
-              (x.origin - f.origin).dot(f.normal).abs() < tol
-            } else {
-              (x.origin - f.origin).cross(f.normal).length() < tol && (x.radius - f.radius).abs() < tol
-            }
-        };
-        b.faces()
-          .iter()
-          .filter(same)
-          .min_by(|x, y| (x.center - f.center).length().total_cmp(&(y.center - f.center).length()))
-          .map(|x| Pick::Face { body, face: x.id })
-      }
-    }
+    find_now(s, was?)
   }
 }
 
@@ -188,6 +249,50 @@ mod tests {
   fn edge_count(s: &Session) -> usize {
     let FeatureKind::Fillet { edges, sets, .. } = &s.design.features.last().unwrap().kind else { panic!() };
     edges.len() + sets.iter().map(|x| x.edges.len()).sum::<usize>()
+  }
+
+  /// A preview draws the body in its own appearance with only the picked faces (and the edges it
+  /// kept) selected on it, as in Fusion: the session drops the picks when the body changes, and
+  /// the dialog finds them again on the previewed body.
+  #[test]
+  fn picked_faces_stay_selected_on_the_preview() {
+    let mut s = block();
+    let body = s.model.bodies[0].id;
+    let top_face = top(&s);
+    // Shell: the opened top face is still a face of the hollowed body
+    let mut d = Dialog::blank(Kind::Shell);
+    s.selection = vec![top_face];
+    frame(&mut s, &mut d);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    let Some(Sel::Face { body: b, face }) = s.selection.first().copied() else { panic!("{:?}", s.selection) };
+    assert_eq!((b, s.selection.len()), (body, 1));
+    let f = s.model.body(body).unwrap().faces().iter().find(|f| f.id == face).unwrap();
+    assert!(f.normal.z > 0.9 && (f.origin.z - 20.0).abs() < 1e-6, "the top face on the previewed body: {f:?}");
+    // withdrawn, the original pick is back
+    d.cancel(&mut s);
+    assert_eq!(s.selection, vec![top_face]);
+    // Fillet by a face: the face (trimmed by the rounds) stays selected; by an edge, nothing is
+    // (the edge is gone)
+    let mut d = Dialog::blank(Kind::Fillet);
+    s.selection = vec![top_face];
+    frame(&mut s, &mut d);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    assert!(matches!(s.selection.as_slice(), [Sel::Face { body: b, .. }] if *b == body), "{:?}", s.selection);
+    d.cancel(&mut s);
+    let mut d = Dialog::blank(Kind::Fillet);
+    s.selection = vec![edge_at(&s, 10.0, 0.0, 20.0)];
+    frame(&mut s, &mut d);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    assert!(s.selection.is_empty(), "{:?}", s.selection);
+    d.cancel(&mut s);
+    // a dialog that doesn't keep its picks leaves the selection to the session
+    let mut d = Dialog::blank(Kind::Draft);
+    assert!(!super::keeps_picks(Kind::Combine) && super::keeps_picks(d.kind));
+    d.faces = vec![json!({"body": body.0, "face": 1})];
+    d.editing = Some(fox_engine::model::FeatureId(1));
+    s.selection = vec![top_face];
+    d.reselect_picks(&mut s);
+    assert_eq!(s.selection, vec![top_face], "editing: the selection is left alone");
   }
 
   #[test]

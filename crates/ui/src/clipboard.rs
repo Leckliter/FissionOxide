@@ -131,7 +131,6 @@ pub(crate) fn paste(app: &mut App, new: bool) {
   app.cancel_dialog();
   app.tool = Tool::Select;
   app.s.selection = selection;
-  app.ghost.capture(&app.s);
   let mut d = Dialog::open(app, Kind::Move);
   d.set_paste(&app.s, paste, object);
   d.refresh_manip(&app.s);

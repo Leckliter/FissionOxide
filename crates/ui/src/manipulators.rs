@@ -208,6 +208,8 @@ pub struct State {
   pub typed: Option<Typed>,
   /// The feature handle being dragged (see [`crate::handles`]).
   pub handle: Option<crate::handles::HandleDrag>,
+  /// The floating value box beside the drag arrow (see [`crate::value_box`]).
+  pub value_box: crate::value_box::State,
 }
 
 /// The value box of a handle: its text while it is being typed.

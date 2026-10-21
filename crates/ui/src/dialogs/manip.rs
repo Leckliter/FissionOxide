@@ -6,7 +6,7 @@
 
 use fox_engine::kernel::Plane;
 use fox_engine::kernel::glam::{DMat4, DQuat, DVec3};
-use fox_engine::model::{BodyId, FeatureId};
+use fox_engine::model::{BodyId, FeatureId, FeatureKind};
 use fox_engine::scene::JointMark;
 use fox_engine::sketch::{CurveId, Sketch};
 use fox_engine::{Sel, Session};
@@ -129,12 +129,13 @@ impl Dialog {
     fox_engine::expr::eval(e, fox_engine::expr::Kind::Angle, &s.model.params).ok()
   }
 
-  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer) or face (Press Pull), or the
-  /// offset curves (Sketch Offset).
+  /// The pick an arrow hangs on: the first edge (Fillet, Chamfer; a fillet by faces alone hangs
+  /// on the first face) or face (Press Pull), or the offset curves (Sketch Offset).
   fn anchor_key(&self) -> Value {
     match self.kind {
       Kind::PressPull | Kind::Shell | Kind::Draft => json!(self.faces.first()),
       Kind::SkOffset => json!({"offset": self.curves}),
+      Kind::Fillet => json!(self.edges.first().or(self.faces.first())),
       _ => json!(self.edges.first()),
     }
   }
@@ -170,9 +171,13 @@ impl Dialog {
   }
 
   /// The arrows of Fillet and Chamfer (radius, out of the first edge) and Press Pull (distance,
-  /// along the first face's normal).
+  /// along the first face's normal). An edited fillet or chamfer keeps its arrow, on the edge the
+  /// feature stored (see [`Dialog::load_edit_anchor`]); Press Pull's picks name the body before
+  /// it, so it has none while editing.
   pub(super) fn more_manipulator(&self, s: &Session) -> Option<Manipulator> {
-    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset) || self.editing.is_some() {
+    if !matches!(self.kind, Kind::Fillet | Kind::Chamfer | Kind::PressPull | Kind::SkOffset)
+      || (self.editing.is_some() && !matches!(self.kind, Kind::Fillet | Kind::Chamfer))
+    {
       return None;
     }
     let (key, origin, dir) = self.manip.anchor.as_ref()?;
@@ -183,14 +188,29 @@ impl Dialog {
     Some(Manipulator { origin: *origin, dir: *dir, value: self.len(s, field)? })
   }
 
-  /// The feature handles this dialog shows (see [`crate::handles`]): Shell's thickness arrows,
-  /// Draft's angle dial, the rectangular pattern's distance and count handles along each
-  /// direction and the circular pattern's angle and count dials.
+  /// Edit Feature: an edited fillet's or chamfer's arrow hangs on the midpoint of the first edge
+  /// the feature stored, leaning out between the faces that met there (the edge itself is gone
+  /// from the finished body).
+  pub(super) fn load_edit_anchor(&mut self, kind: &FeatureKind) {
+    let e = match kind {
+      FeatureKind::Fillet { edges, .. } | FeatureKind::Chamfer { edges, .. } => edges.first(),
+      _ => None,
+    };
+    let Some(e) = e else { return };
+    let dir = (DVec3::from(e.n1) + DVec3::from(e.n2)).try_normalize().unwrap_or(DVec3::Z);
+    // the edited dialog's edges are placeholders, so its anchor key is null
+    self.manip.anchor = Some((self.anchor_key(), DVec3::from(e.point), dir));
+  }
+
+  /// The feature handles this dialog shows (see [`crate::handles`]): Extrude's taper handle,
+  /// Shell's thickness arrows, Draft's angle dial, the rectangular pattern's distance and count
+  /// handles along each direction and the circular pattern's angle and count dials.
   pub fn handles(&self, s: &Session) -> Vec<Handle> {
     if self.editing.is_some() {
       return Vec::new();
     }
     match self.kind {
+      Kind::Extrude => self.taper_handle(s),
       Kind::Shell => self.shell_handles(s),
       Kind::Draft => self.draft_handles(s),
       Kind::RectPattern => self.pattern_centre().and_then(|c| self.pattern_handles(s, c)),
@@ -205,6 +225,11 @@ impl Dialog {
   pub fn set_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) {
     let v_snapped = snap(v, step);
     match self.kind {
+      // a taper stays short of a right angle; none at all is an empty box
+      Kind::Extrude => {
+        let a = v_snapped.clamp(-89f64.to_radians(), 89f64.to_radians());
+        self.solid.ext.set_taper(if a.abs() < 1e-9 { String::new() } else { deg(a) });
+      }
       Kind::Shell => {
         let t = mm(self.unit, v_snapped.max(step.max(1e-3)));
         if i == 1 { self.solid.thickness_out = t } else { self.radius = t }
@@ -236,6 +261,15 @@ impl Dialog {
   fn face_anchor(&self) -> Option<(DVec3, DVec3)> {
     let (key, o, n) = self.manip.anchor.as_ref()?;
     (*key == self.anchor_key() && !self.faces.is_empty()).then_some((*o, *n))
+  }
+
+  /// Extrude: Fusion's taper handle, a dial at the distance arrow's head turning away from the
+  /// extrude direction about the sketch plane's X axis, for the taper angle.
+  fn taper_handle(&self, s: &Session) -> Option<Vec<Handle>> {
+    let m = self.manipulator(s)?;
+    let axis = s.model.sketches.get(&self.sketch?)?.plane.x.try_normalize()?;
+    let a = self.ang(s, self.solid.ext.taper())?;
+    Some(vec![Handle::dial(m.origin + m.dir * m.value, axis, m.dir, None, a, deg(a))])
   }
 
   /// Shell: an arrow from the first opened face into the wall for an inside thickness, out of it
@@ -694,6 +728,80 @@ mod tests {
     // no arrow when editing an existing feature (its picks name the body before it)
     d.editing = Some(fox_engine::model::FeatureId(1));
     assert!(d.manipulator(&s).is_none());
+  }
+
+  /// Extrude's taper handle: a dial at the arrow's head that writes the taper angle; the floating
+  /// value box edits the distance (Extrude) or radius (Fillet) the arrow shows.
+  #[test]
+  fn extrude_taper_handle_and_the_value_box_fields() {
+    use crate::handles::Shape;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    let sk = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let mut d = Dialog::blank(Kind::Extrude);
+    d.sketch = Some(sk);
+    d.distance = "5 mm".into();
+    let m = d.manipulator(&s).unwrap();
+    let h = d.handles(&s);
+    assert_eq!(h.len(), 1);
+    let Shape::Dial { center, axis, zero, radius } = h[0].shape else { panic!("{:?}", h[0]) };
+    assert!(close(center, m.origin + m.dir * 5.0) && close(zero, DVec3::Z) && close(axis, DVec3::X), "{:?}", h[0]);
+    assert!(radius.is_none() && h[0].value.abs() < 1e-9 && h[0].label == "0 deg");
+    // dragged to 10°: the taper angle box says so; back to nothing: the box is empty again
+    d.set_handle(&s, 0, 10f64.to_radians() + 0.001, 1f64.to_radians());
+    assert_eq!(d.solid.ext.taper(), "10 deg");
+    assert!(d.dirty);
+    assert!((d.handles(&s)[0].value - 10f64.to_radians()).abs() < 1e-9);
+    apply(&mut s, &mut d);
+    assert_eq!(d.command().unwrap().1["taper"], json!("10 deg"));
+    d.set_handle(&s, 0, 0.0, 1f64.to_radians());
+    assert_eq!(d.solid.ext.taper(), "");
+    // and it stays short of a right angle
+    d.set_handle(&s, 0, 2.0, 1f64.to_radians());
+    assert_eq!(d.solid.ext.taper(), "89 deg");
+    // the value box edits the field the arrow shows
+    assert_eq!(d.value_box_field().map(|t| t.clone()), Some("5 mm".to_string()));
+    *d.value_box_field().unwrap() = "7 mm".into();
+    d.value_box_edited();
+    assert!(d.dirty && d.distance == "7 mm");
+    let mut f = Dialog::blank(Kind::Fillet);
+    f.radius = "3 mm".into();
+    assert_eq!(f.value_box_field().map(|t| t.clone()), Some("3 mm".to_string()));
+    assert!(Dialog::blank(Kind::Combine).value_box_field().is_none());
+    assert!(Dialog::blank(Kind::Shell).handles(&s).is_empty(), "no taper handle on other dialogs");
+  }
+
+  /// Edit Feature on a fillet or chamfer shows its arrow and value box again, on the edge the
+  /// feature stored, and dragging it edits the radius.
+  #[test]
+  fn an_edited_fillet_keeps_its_arrow() {
+    for kind in [Kind::Fillet, Kind::Chamfer] {
+      let mut s = Session::default();
+      run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+      let b = &s.model.bodies[0];
+      let e = b.edges().iter().find(|e| (e.mid - DVec3::new(0.0, -10.0, 30.0)).length() < 1e-6).unwrap();
+      let (edge, mid) = (json!({"body": b.id.0, "edge": e.id}), e.mid);
+      let mut d = Dialog::blank(kind);
+      d.edges = vec![edge];
+      d.radius = "2 mm".into();
+      apply(&mut s, &mut d);
+      let app = crate::App::with_session(s);
+      let id = app.s.design.features.last().unwrap().id;
+      let mut e = Dialog::edit(&app, id).unwrap();
+      let s = app.s;
+      let m = e.manipulator(&s).expect("the edited feature's arrow");
+      assert!(close(m.origin, mid) && close(m.dir, DVec3::new(0.0, -1.0, 1.0).normalize()), "{m:?}");
+      assert!((m.value - 2.0).abs() < 1e-9);
+      assert_eq!(e.value_box_field().map(|t| t.clone()), Some("2 mm".to_string()));
+      e.set_manipulator(3.0, 0.5);
+      assert_eq!(e.radius, "3 mm");
+      let field = if kind == Kind::Fillet { "radius" } else { "distance" };
+      assert!(e.edit_set().unwrap()[field] == json!("3 mm"), "{:?}", e.edit_set());
+      e.refresh_manip(&s);
+      assert!((e.manipulator(&s).unwrap().value - 3.0).abs() < 1e-9, "the arrow follows the edit");
+    }
   }
 
   #[test]

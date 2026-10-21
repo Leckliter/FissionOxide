@@ -39,7 +39,6 @@ mod panels;
 mod params_ui;
 mod plugins_ui;
 mod preferences;
-mod preview;
 mod props_ui;
 mod render_ui;
 mod scale_to_ui;
@@ -53,6 +52,7 @@ mod toolbox;
 mod trace;
 mod units;
 mod updates;
+mod value_box;
 mod viewcube;
 mod viewport;
 
@@ -214,8 +214,6 @@ pub struct App {
   pub(crate) region: select::Region,
   /// The move/rotate triad drag in progress.
   pub(crate) manip: manipulators::State,
-  /// The bodies as the open dialog found them, drawn as ghosts behind its preview.
-  pub(crate) ghost: preview::Ghost,
   /// The 2D cut window (laser, plasma, waterjet), while open.
   pub cut_window: Option<cut_ui::CutWindow>,
   /// The Electronics workspace, while it is open (in place of the Design workspace).
@@ -445,7 +443,6 @@ impl App {
       sel_mode: select::Mode::default(),
       region: select::Region::default(),
       manip: manipulators::State::default(),
-      ghost: preview::Ghost::default(),
       cut_window: None,
       electronics: None,
       cut_preview_failed: None,
@@ -1207,7 +1204,6 @@ impl App {
     self.note_cmd(panels::Cmd::Dialog(kind));
     self.cancel_dialog();
     self.tool = Tool::Select;
-    self.ghost.capture(&self.s);
     self.dialog = Some(Dialog::open(self, kind));
     if let Some(d) = self.dialog.as_mut() {
       // manipulators hang on the picks as they are before the preview changes them

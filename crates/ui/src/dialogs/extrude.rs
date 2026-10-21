@@ -43,6 +43,18 @@ fn extent_of(direction: &'static str, kind: &str) -> &'static str {
   }
 }
 
+impl Rows {
+  /// The taper angle's text (empty: no taper).
+  pub(super) fn taper(&self) -> &str {
+    &self.taper
+  }
+
+  /// Sets the taper angle's text (the taper handle; empty: no taper).
+  pub(super) fn set_taper(&mut self, text: String) {
+    self.taper = text;
+  }
+}
+
 impl Dialog {
   fn direction(&self) -> &'static str {
     match self.extent {
