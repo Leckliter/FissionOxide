@@ -53,8 +53,10 @@ pub const ICON_ORANGE: Color32 = color(fox_brand::ORANGE.base);
 pub const ICON_GREEN: Color32 = color(fox_brand::GREEN.base);
 pub const ICON_RED: Color32 = color(fox_brand::RED.base);
 
+/// The light style (the default) and the dark one, for Preferences → General → Theme.
 pub fn apply(ctx: &egui::Context) {
-  ctx.set_visuals(egui::Visuals::light());
+  ctx.options_mut(|o| o.fallback_theme = egui::Theme::Light);
+  ctx.set_theme(egui::ThemePreference::Light);
   ctx.all_styles_mut(|style| {
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 3.0);
@@ -69,6 +71,9 @@ pub fn apply(ctx: &egui::Context) {
       (TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace)),
     ]
     .into();
+  });
+  ctx.style_mut_of(egui::Theme::Light, |style| {
+    style.visuals = egui::Visuals::light();
     let v = &mut style.visuals;
     v.override_text_color = None;
     v.panel_fill = PANEL;
@@ -106,5 +111,46 @@ pub fn apply(ctx: &egui::Context) {
       s.corner_radius = r;
       s.expansion = 0.0;
     }
+  });
+  ctx.style_mut_of(egui::Theme::Dark, |style| {
+    style.visuals = egui::Visuals::dark();
+    let v = &mut style.visuals;
+    v.panel_fill = Color32::from_rgb(43, 43, 43);
+    v.window_fill = Color32::from_rgb(43, 43, 43);
+    v.window_stroke = Stroke::new(1.0, Color32::from_rgb(80, 80, 80));
+    v.window_corner_radius = CornerRadius::same(3);
+    v.menu_corner_radius = CornerRadius::same(2);
+    v.window_shadow = egui::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(120) };
+    v.popup_shadow = egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(100) };
+    v.selection.bg_fill = ACCENT;
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.hyperlink_color = ACCENT;
+    let w = &mut v.widgets;
+    w.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
+    w.active.bg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    for s in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+      s.corner_radius = CornerRadius::same(2);
+      s.expansion = 0.0;
+    }
+  });
+}
+
+/// Preferences → General → Theme: light, dark, or the device's.
+pub fn set_theme(ctx: &egui::Context, theme: crate::preferences::Theme) {
+  use crate::preferences::Theme;
+  ctx.set_theme(match theme {
+    Theme::Light => egui::ThemePreference::Light,
+    Theme::Dark => egui::ThemePreference::Dark,
+    Theme::MatchDevice => egui::ThemePreference::System,
+  });
+}
+
+/// Preferences → General → Show tooltips: off, no hover text ever reaches its delay.
+pub fn set_tooltips(ctx: &egui::Context, show: bool) {
+  let default = egui::style::Interaction::default();
+  ctx.all_styles_mut(|style| {
+    let i = &mut style.interaction;
+    (i.tooltip_delay, i.tooltip_grace_time) =
+      if show { (default.tooltip_delay, default.tooltip_grace_time) } else { (1.0e6, 0.0) };
   });
 }

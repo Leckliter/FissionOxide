@@ -559,3 +559,69 @@ fn the_workspace_menu_lists_fusions_workspaces() {
   h.move_then_click(from_design.center());
   assert!(h.app.drawing.is_some() || h.app.dialog.is_some(), "From Design opens the Drawing workspace");
 }
+
+// ---------------------------------------------------------------- preferences
+
+fn prefs_rect(h: &Harness) -> Rect {
+  h.ctx.memory(|m| m.area_rect(egui::Id::new(crate::preferences::MODAL_ID))).expect("the Preferences modal is open")
+}
+
+#[test]
+fn the_preferences_modal_is_centred_and_sized_like_fusions() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let r = prefs_rect(&h);
+  let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
+  assert!((r.center() - screen.center()).length() < 3.0, "centred: {r:?}");
+  let size = crate::preferences::SIZE;
+  assert!(r.width() >= size.x && r.width() <= size.x + 40.0, "about 750 wide: {r:?}");
+  assert!(r.height() >= size.y && r.height() <= size.y + 40.0, "about 450 high: {r:?}");
+}
+
+#[test]
+fn escape_cancels_the_preferences_and_drops_the_edits() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  h.frame(vec![]);
+  h.app.preferences.draft.show_tooltips = false;
+  h.app.preferences.draft.space_repeats = false;
+  h.frame(vec![Event::Key {
+    key: egui::Key::Escape,
+    physical_key: None,
+    pressed: true,
+    repeat: false,
+    modifiers: Default::default(),
+  }]);
+  h.frame(vec![]);
+  assert!(!h.app.preferences.open, "Esc closes the modal");
+  assert!(h.app.preferences.values.show_tooltips && h.app.preferences.values.space_repeats, "nothing applied");
+  assert_eq!(h.app.preferences.draft, h.app.preferences.values, "the edits are gone");
+  assert!(h.app.dialog.is_none());
+}
+
+#[test]
+fn cancel_and_ok_sit_at_the_bottom_right_of_the_preferences() {
+  let mut h = Harness::new();
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  let r = prefs_rect(&h);
+  // the button row is the last 30 px; Cancel is the rightmost button, OK the next one left
+  let row_y = r.bottom() - 8.0 - 12.0;
+  h.app.preferences.draft.show_prompt = false;
+  h.move_then_click(Pos2::new(r.right() - 8.0 - 24.0, row_y));
+  assert!(!h.app.preferences.open, "Cancel closes");
+  assert!(h.app.preferences.values.show_prompt, "Cancel applies nothing");
+  crate::preferences::open(&mut h.app);
+  for _ in 0..3 {
+    h.frame(vec![]);
+  }
+  h.app.preferences.draft.show_prompt = false;
+  h.move_then_click(Pos2::new(r.right() - 8.0 - 48.0 - 6.0 - 16.0, row_y));
+  assert!(!h.app.preferences.open, "OK closes");
+  assert!(!h.app.preferences.values.show_prompt, "OK applies the edit");
+}

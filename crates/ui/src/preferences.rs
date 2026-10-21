@@ -1,10 +1,11 @@
-//! The Preferences dialog, as in Fusion (profile menu or File → Preferences): General, Navigation,
-//! Design, Sketch and Graphics pages. The values live in the `[Preferences]` section of
-//! `settings.ini` (see [`fox_desktop::settings`]), written whenever one changes.
+//! The Preferences dialog, as in Fusion (profile menu or File → Preferences): a centred modal
+//! with Fusion's tree of sections on the left, the page on the right and Restore Defaults,
+//! Apply, OK and Cancel at the bottom. Changes take effect on OK or Apply. The values live in
+//! the `[Preferences]` section of `settings.ini` (see [`fox_desktop::settings`]).
 
 use std::path::PathBuf;
 
-use egui::{PointerButton, RichText};
+use egui::{Color32, PointerButton, RichText, Sense, Stroke, Vec2, vec2};
 
 use crate::viewcube::CubeSize;
 use crate::{App, theme};
@@ -167,6 +168,74 @@ impl NavPreset {
   }
 }
 
+/// General → Theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Theme {
+  #[default]
+  Light,
+  Dark,
+  /// The operating system's light or dark setting.
+  MatchDevice,
+}
+
+impl Theme {
+  pub const ALL: [Theme; 3] = [Theme::Light, Theme::Dark, Theme::MatchDevice];
+
+  pub fn key(self) -> &'static str {
+    match self {
+      Theme::Light => "light",
+      Theme::Dark => "dark",
+      Theme::MatchDevice => "system",
+    }
+  }
+
+  pub fn label(self) -> &'static str {
+    match self {
+      Theme::Light => "Light",
+      Theme::Dark => "Dark",
+      Theme::MatchDevice => "Match device",
+    }
+  }
+}
+
+/// General → Default Orbit type: what the Orbit command does until the navigation bar's fly-out
+/// picks the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OrbitType {
+  #[default]
+  Constrained,
+  Free,
+}
+
+impl OrbitType {
+  pub const ALL: [OrbitType; 2] = [OrbitType::Constrained, OrbitType::Free];
+
+  pub fn key(self) -> &'static str {
+    match self {
+      OrbitType::Constrained => "constrained",
+      OrbitType::Free => "free",
+    }
+  }
+
+  pub fn label(self) -> &'static str {
+    match self {
+      OrbitType::Constrained => "Constrained Orbit",
+      OrbitType::Free => "Free Orbit",
+    }
+  }
+}
+
+/// General → Automatic recovery backup interval, in minutes (0 never backs up).
+pub const RECOVERY_CHOICES: [u32; 7] = [0, 1, 2, 5, 10, 15, 30];
+
+pub fn recovery_label(minutes: u32) -> String {
+  match minutes {
+    0 => "Never".into(),
+    1 => "1 minute".into(),
+    m => format!("{m} minutes"),
+  }
+}
+
 /// The saved preferences.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prefs {
@@ -199,6 +268,18 @@ pub struct Prefs {
   /// Graphics → the ViewCube is shown, and its size (the ViewCube menu's ViewCube Size).
   pub show_viewcube: bool,
   pub cube_size: CubeSize,
+  pub theme: Theme,
+  /// General → "Show tooltips": the toolbar's and the controls' hover texts.
+  pub show_tooltips: bool,
+  /// General → "Show command prompt": the tool's or command's hint at the bottom left of the
+  /// canvas.
+  pub show_prompt: bool,
+  pub orbit: OrbitType,
+  /// General → "Enable camera pivot": a pivot marker at the orbit centre while orbiting.
+  pub camera_pivot: bool,
+  /// General → "Automatic recovery backup interval", minutes between backups of the unsaved
+  /// design; 0 never backs up.
+  pub recovery_minutes: u32,
 }
 
 impl Default for Prefs {
@@ -218,6 +299,12 @@ impl Default for Prefs {
       space_repeats: true,
       show_viewcube: true,
       cube_size: CubeSize::Automatic,
+      theme: Theme::Light,
+      show_tooltips: true,
+      show_prompt: true,
+      orbit: OrbitType::Constrained,
+      camera_pivot: true,
+      recovery_minutes: 5,
     }
   }
 }
@@ -258,6 +345,12 @@ impl Prefs {
       ("SpaceRepeats", flag(self.space_repeats)),
       ("ShowViewCube", flag(self.show_viewcube)),
       ("ViewCubeSize", self.cube_size.key().to_string()),
+      ("Theme", self.theme.key().to_string()),
+      ("ShowTooltips", flag(self.show_tooltips)),
+      ("ShowCommandPrompt", flag(self.show_prompt)),
+      ("OrbitType", self.orbit.key().to_string()),
+      ("CameraPivot", flag(self.camera_pivot)),
+      ("RecoveryMinutes", self.recovery_minutes.to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -288,6 +381,12 @@ impl Prefs {
         "spacerepeats" => p.space_repeats = b.unwrap_or(p.space_repeats),
         "showviewcube" => p.show_viewcube = b.unwrap_or(p.show_viewcube),
         "viewcubesize" => p.cube_size = pick(&CubeSize::ALL, CubeSize::key, v).unwrap_or(p.cube_size),
+        "theme" => p.theme = pick(&Theme::ALL, Theme::key, v).unwrap_or(p.theme),
+        "showtooltips" => p.show_tooltips = b.unwrap_or(p.show_tooltips),
+        "showcommandprompt" => p.show_prompt = b.unwrap_or(p.show_prompt),
+        "orbittype" => p.orbit = pick(&OrbitType::ALL, OrbitType::key, v).unwrap_or(p.orbit),
+        "camerapivot" => p.camera_pivot = b.unwrap_or(p.camera_pivot),
+        "recoveryminutes" => p.recovery_minutes = v.trim().parse().unwrap_or(p.recovery_minutes),
         _ => {}
       }
     }
@@ -305,50 +404,157 @@ impl Prefs {
   }
 }
 
-/// Pages of the dialog, in Fusion's order.
+/// A section of Fusion's tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
   #[default]
   General,
-  Navigation,
+  Api,
   Design,
-  Sketch,
+  Manufacture,
+  Electronics,
+  Render,
+  Drawing,
+  Simulation,
+  GenerativeDesign,
+  Tokens,
+  Material,
   Graphics,
+  Network,
+  DataCollection,
+  UnitDisplay,
+  DefaultUnits,
+  DefaultUnitsDesign,
+  DefaultUnitsManufacture,
+  DefaultUnitsElectronics,
+  DefaultUnitsSimulation,
+  PreviewFeatures,
+  Compatibility,
 }
 
-impl Page {
-  const ALL: [Page; 5] = [Page::General, Page::Navigation, Page::Design, Page::Sketch, Page::Graphics];
+/// Fusion's tree: each top-level section with its children.
+const TREE: &[(Page, &[Page])] = &[
+  (
+    Page::General,
+    &[
+      Page::Api,
+      Page::Design,
+      Page::Manufacture,
+      Page::Electronics,
+      Page::Render,
+      Page::Drawing,
+      Page::Simulation,
+      Page::GenerativeDesign,
+    ],
+  ),
+  (Page::Tokens, &[]),
+  (Page::Material, &[]),
+  (Page::Graphics, &[]),
+  (Page::Network, &[]),
+  (Page::DataCollection, &[]),
+  (Page::UnitDisplay, &[]),
+  (
+    Page::DefaultUnits,
+    &[
+      Page::DefaultUnitsDesign,
+      Page::DefaultUnitsManufacture,
+      Page::DefaultUnitsElectronics,
+      Page::DefaultUnitsSimulation,
+    ],
+  ),
+  (Page::PreviewFeatures, &[]),
+  (Page::Compatibility, &[]),
+];
 
-  fn label(self) -> &'static str {
+impl Page {
+  pub fn label(self) -> &'static str {
     match self {
       Page::General => "General",
-      Page::Navigation => "Navigation",
-      Page::Design => "Design",
-      Page::Sketch => "Sketch",
+      Page::Api => "API",
+      Page::Design | Page::DefaultUnitsDesign => "Design",
+      Page::Manufacture | Page::DefaultUnitsManufacture => "Manufacture",
+      Page::Electronics | Page::DefaultUnitsElectronics => "Electronics",
+      Page::Render => "Render",
+      Page::Drawing => "Drawing",
+      Page::Simulation | Page::DefaultUnitsSimulation => "Simulation",
+      Page::GenerativeDesign => "Generative Design",
+      Page::Tokens => "Tokens",
+      Page::Material => "Material",
       Page::Graphics => "Graphics",
+      Page::Network => "Network",
+      Page::DataCollection => "Data Collection and Use",
+      Page::UnitDisplay => "Unit and Value Display",
+      Page::DefaultUnits => "Default Units",
+      Page::PreviewFeatures => "Preview Features",
+      Page::Compatibility => "Compatibility & Troubleshooting",
     }
   }
+
+  /// The page's title bar, as Fusion words it.
+  pub fn title(self) -> &'static str {
+    match self {
+      Page::General => "Preferences controlling general UI behavior",
+      Page::Api => "Preferences controlling the API",
+      Page::Design => "Preferences controlling design behavior",
+      Page::Manufacture => "Preferences controlling manufacture behavior",
+      Page::Electronics => "Preferences controlling electronics behavior",
+      Page::Render => "Preferences controlling rendering",
+      Page::Drawing => "Preferences controlling drawings",
+      Page::Simulation => "Preferences controlling simulation",
+      Page::GenerativeDesign => "Preferences controlling generative design",
+      Page::Tokens => "Preferences controlling tokens",
+      Page::Material => "Preferences controlling materials",
+      Page::Graphics => "Preferences controlling graphics",
+      Page::Network => "Preferences controlling network settings",
+      Page::DataCollection => "Preferences controlling data collection and use",
+      Page::UnitDisplay => "Preferences controlling unit and value display",
+      Page::DefaultUnits => "Preferences controlling default units",
+      Page::DefaultUnitsDesign => "Default units for new designs",
+      Page::DefaultUnitsManufacture => "Default units for manufacture",
+      Page::DefaultUnitsElectronics => "Default units for electronics",
+      Page::DefaultUnitsSimulation => "Default units for simulation",
+      Page::PreviewFeatures => "Preview features",
+      Page::Compatibility => "Compatibility and troubleshooting",
+    }
+  }
+}
+
+/// The recovery backups: when the interval started counting and the revision last backed up.
+#[derive(Debug, Default)]
+struct Recovery {
+  since: Option<f64>,
+  revision: Option<u64>,
 }
 
 /// The preferences, where they are saved and the dialog's state.
 #[derive(Debug, Default)]
 pub struct Preferences {
   pub values: Prefs,
+  /// The values as edited in the dialog; OK and Apply make them the preferences.
+  pub draft: Prefs,
   /// `settings.ini`; `None` keeps them in memory (tests).
   path: Option<PathBuf>,
   pub open: bool,
-  page: Page,
+  pub page: Page,
+  /// The tree's collapsed branches (all open to begin with).
+  collapsed: Vec<Page>,
+  /// Where recovery backups go; `None` writes none (tests).
+  pub recovery_dir: Option<PathBuf>,
+  recovery: Recovery,
 }
 
 impl Preferences {
   /// The user's preferences from `settings.ini`.
   pub fn load() -> Preferences {
-    Self::load_from(fox_desktop::settings::Settings::path())
+    let mut p = Self::load_from(fox_desktop::settings::Settings::path());
+    p.recovery_dir = Some(fox_desktop::config_dir().join("recovery"));
+    p
   }
 
   pub fn load_from(path: PathBuf) -> Preferences {
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    Preferences { values: Prefs::parse(&text), path: Some(path), ..Preferences::default() }
+    let values = Prefs::parse(&text);
+    Preferences { draft: values.clone(), values, path: Some(path), ..Preferences::default() }
   }
 
   pub fn save(&self) {
@@ -360,21 +566,106 @@ impl Preferences {
   }
 }
 
-/// Puts the saved defaults into the app (at start).
-pub fn apply(app: &mut App) {
+/// Whether a preference differs from `before`; everything differs from no `before` (start).
+fn changed<T: PartialEq>(before: Option<&Prefs>, now: &Prefs, f: impl Fn(&Prefs) -> T) -> bool {
+  before.is_none_or(|b| f(b) != f(now))
+}
+
+/// Puts the preferences into the app: all of them at start (`before` is `None`), else the ones
+/// that changed. `ctx` is needed for the theme and the tooltips.
+fn take_effect(app: &mut App, ctx: Option<&egui::Context>, before: Option<&Prefs>) {
   let p = app.preferences.values.clone();
-  app.show_dims = p.show_dims;
-  app.show_constraints = p.show_constraints;
-  app.snap = p.snap;
-  app.show_viewcube = p.show_viewcube;
-  if !p.gpu {
-    app.gpu.enabled = false;
+  if changed(before, &p, |p| p.show_dims) {
+    app.show_dims = p.show_dims;
+  }
+  if changed(before, &p, |p| p.show_constraints) {
+    app.show_constraints = p.show_constraints;
+  }
+  if changed(before, &p, |p| p.snap) {
+    app.snap = p.snap;
+  }
+  if changed(before, &p, |p| p.gpu) {
+    // at start an unavailable GPU renderer stays off whatever the setting says
+    if before.is_some() || !p.gpu {
+      app.gpu.enabled = p.gpu;
+    }
+  }
+  if changed(before, &p, |p| p.show_viewcube) {
+    app.show_viewcube = p.show_viewcube;
+  }
+  if changed(before, &p, |p| p.orbit) {
+    app.free_orbit = p.orbit == OrbitType::Free;
+  }
+  if let Some(ctx) = ctx {
+    if changed(before, &p, |p| p.theme) {
+      theme::set_theme(ctx, p.theme);
+    }
+    if changed(before, &p, |p| p.show_tooltips) {
+      theme::set_tooltips(ctx, p.show_tooltips);
+    }
   }
 }
 
-/// Opens the Preferences dialog.
+/// Puts the saved preferences into the app (at start).
+pub fn apply(app: &mut App, ctx: Option<&egui::Context>) {
+  take_effect(app, ctx, None);
+}
+
+/// Opens the Preferences dialog on the values as they are.
 pub fn open(app: &mut App) {
+  app.preferences.draft = app.preferences.values.clone();
   app.preferences.open = true;
+}
+
+/// OK and Apply: the edited values become the preferences, take effect and are saved.
+pub fn commit(app: &mut App, ctx: Option<&egui::Context>) {
+  let before = std::mem::replace(&mut app.preferences.values, app.preferences.draft.clone());
+  take_effect(app, ctx, Some(&before));
+  app.preferences.save();
+}
+
+/// Cancel: the edits are dropped and the dialog closes.
+pub fn cancel(app: &mut App) {
+  app.preferences.draft = app.preferences.values.clone();
+  app.preferences.open = false;
+}
+
+/// Writes a recovery backup of the unsaved design once per interval (General → Automatic
+/// recovery backup interval) when it changed since the last one; `now` is in seconds.
+pub fn recovery_tick(app: &mut App, now: f64) {
+  let minutes = app.preferences.values.recovery_minutes;
+  if minutes == 0 || !app.s.dirty {
+    return;
+  }
+  let r = &mut app.preferences.recovery;
+  let Some(since) = r.since else {
+    r.since = Some(now);
+    return;
+  };
+  if now - since < minutes as f64 * 60.0 {
+    return;
+  }
+  r.since = Some(now);
+  if r.revision == Some(app.s.revision) {
+    return;
+  }
+  let Some(dir) = app.preferences.recovery_dir.clone() else { return };
+  let name: String = app
+    .s
+    .design
+    .name
+    .chars()
+    .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.') { c } else { '_' })
+    .collect();
+  let name = if name.trim().is_empty() { "Untitled".to_string() } else { name };
+  let path = dir.join(format!("{name}.fox"));
+  let written = std::fs::create_dir_all(&dir)
+    .map_err(|e| e.to_string())
+    .and_then(|_| fox_engine::files::save_design(&app.s, &path).map_err(|e| e.0));
+  match written {
+    Ok(()) => app.preferences.recovery.revision = Some(app.s.revision),
+    Err(e) => log::warn!("couldn't write the recovery backup {}: {e}", path.display()),
+  }
 }
 
 fn choice<T: Copy + PartialEq>(
@@ -397,110 +688,252 @@ fn note(ui: &mut egui::Ui, text: &str) {
   ui.label(RichText::new(text).small().color(theme::MUTED));
 }
 
-/// The dialog, while open.
+/// The modal's egui area id, for tests.
+pub const MODAL_ID: &str = "preferences-modal";
+/// The modal's size, as Fusion's.
+pub const SIZE: Vec2 = vec2(750.0, 450.0);
+/// The tree's width.
+const TREE_WIDTH: f32 = 190.0;
+
+/// What a click in the button row asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum Action {
+  Apply,
+  Ok,
+  Cancel,
+}
+
+/// The dialog, while open: a centred modal; the edits take effect on OK or Apply.
 pub fn window(app: &mut App, ctx: &egui::Context) {
   if !app.preferences.open {
     return;
   }
-  let mut open = true;
-  let before = app.preferences.values.clone();
-  egui::Window::new("Preferences").open(&mut open).collapsible(false).resizable(false).default_width(560.0).show(
+  let mut action = None;
+  let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(8));
+  egui::Modal::new(egui::Id::new(MODAL_ID)).frame(frame).backdrop_color(Color32::from_black_alpha(60)).show(
     ctx,
     |ui| {
-      ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-          ui.set_width(120.0);
-          for p in Page::ALL {
-            if ui.selectable_label(app.preferences.page == p, p.label()).clicked() {
-              app.preferences.page = p;
-            }
+      ui.set_width(SIZE.x);
+      ui.set_height(SIZE.y);
+      ui.horizontal(|ui| {
+        ui.label(RichText::new("Preferences").strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+          if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Close without applying").clicked() {
+            action = Some(Action::Cancel);
           }
+        });
+      });
+      ui.separator();
+      let body_height = SIZE.y - 2.0 * 30.0;
+      ui.horizontal_top(|ui| {
+        ui.set_height(body_height);
+        ui.vertical(|ui| {
+          ui.set_width(TREE_WIDTH);
+          egui::ScrollArea::vertical().id_salt("prefs-tree").max_height(body_height).show(ui, |ui| {
+            ui.set_width(TREE_WIDTH);
+            tree(app, ui);
+          });
         });
         ui.separator();
         ui.vertical(|ui| {
-          ui.set_min_width(380.0);
-          ui.set_min_height(260.0);
-          ui.heading(app.preferences.page.label());
+          let page = app.preferences.page;
+          egui::Frame::NONE.fill(theme::FLOAT_HEADER).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(page.title()).strong());
+          });
           ui.add_space(6.0);
-          page(app, ui);
+          egui::ScrollArea::vertical().id_salt("prefs-page").max_height(body_height - 40.0).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            page_ui(app, ui);
+          });
         });
       });
       ui.separator();
       ui.horizontal(|ui| {
         if ui.button("Restore Defaults").on_hover_text("Every page back to its default").clicked() {
-          app.preferences.values = Prefs::default();
+          app.preferences.draft = Prefs::default();
         }
+        info_icon(ui).on_hover_text("Changes take effect when you press OK or Apply.");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-          if ui.button("Close").clicked() {
-            app.preferences.open = false;
+          if ui.button("Cancel").clicked() {
+            action = Some(Action::Cancel);
+          }
+          if ui.button("OK").clicked() {
+            action = Some(Action::Ok);
+          }
+          if ui.button("Apply").clicked() {
+            action = Some(Action::Apply);
           }
         });
       });
     },
   );
-  if !open {
-    app.preferences.open = false;
+  if action.is_none() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    action = Some(Action::Cancel);
   }
-  let now = app.preferences.values.clone();
-  if now != before {
-    // the sketch defaults and the renderer take effect at once, as in Fusion
-    if now.show_dims != before.show_dims {
-      app.show_dims = now.show_dims;
+  match action {
+    Some(Action::Apply) => commit(app, Some(ctx)),
+    Some(Action::Ok) => {
+      commit(app, Some(ctx));
+      app.preferences.open = false;
     }
-    if now.show_constraints != before.show_constraints {
-      app.show_constraints = now.show_constraints;
-    }
-    if now.snap != before.snap {
-      app.snap = now.snap;
-    }
-    if now.gpu != before.gpu {
-      app.gpu.enabled = now.gpu;
-    }
-    if now.show_viewcube != before.show_viewcube {
-      app.show_viewcube = now.show_viewcube;
-    }
-    app.preferences.save();
+    Some(Action::Cancel) => cancel(app),
+    None => {}
   }
 }
 
-fn page(app: &mut App, ui: &mut egui::Ui) {
-  let mut values = app.preferences.values.clone();
+/// The ⓘ beside Restore Defaults.
+fn info_icon(ui: &mut egui::Ui) -> egui::Response {
+  let (rect, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+  let c = rect.center();
+  let p = ui.painter();
+  p.circle_stroke(c, 7.0, Stroke::new(1.2, theme::MUTED));
+  p.text(c, egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(11.0), theme::MUTED);
+  resp
+}
+
+/// A ▸ / ▾ expander for a branch of the tree.
+fn expander(ui: &mut egui::Ui, open: bool) -> egui::Response {
+  let (rect, resp) = ui.allocate_exact_size(vec2(12.0, 16.0), Sense::click());
+  let c = rect.center();
+  let pts = if open {
+    [c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)]
+  } else {
+    [c + vec2(-2.0, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.0, 4.0)]
+  };
+  ui.painter().add(egui::Shape::convex_polygon(pts.to_vec(), theme::MUTED, Stroke::NONE));
+  resp
+}
+
+/// Fusion's tree of sections.
+fn tree(app: &mut App, ui: &mut egui::Ui) {
+  ui.spacing_mut().item_spacing.y = 2.0;
+  for (node, children) in TREE {
+    let collapsed = app.preferences.collapsed.contains(node);
+    ui.horizontal(|ui| {
+      ui.spacing_mut().item_spacing.x = 2.0;
+      if children.is_empty() {
+        ui.add_space(14.0);
+      } else if expander(ui, !collapsed).clicked() {
+        if collapsed {
+          app.preferences.collapsed.retain(|p| p != node);
+        } else {
+          app.preferences.collapsed.push(*node);
+        }
+      }
+      if ui.selectable_label(app.preferences.page == *node, node.label()).clicked() {
+        app.preferences.page = *node;
+      }
+    });
+    if !collapsed {
+      for child in children.iter() {
+        ui.horizontal(|ui| {
+          ui.add_space(26.0);
+          if ui.selectable_label(app.preferences.page == *child, child.label()).clicked() {
+            app.preferences.page = *child;
+          }
+        });
+      }
+    }
+  }
+}
+
+/// A row of the settings grid: its label on the left, the control on the right.
+fn row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui)) {
+  ui.label(label);
+  control(ui);
+  ui.end_row();
+}
+
+fn flag_row(ui: &mut egui::Ui, label: &str, value: &mut bool, hover: &str) {
+  row(ui, label, |ui| {
+    let r = ui.checkbox(value, "");
+    if !hover.is_empty() {
+      r.on_hover_text(hover);
+    }
+  });
+}
+
+/// A setting Fusion has that FissionOxide has no use for yet, shown at Fusion's default.
+fn fixed_row(ui: &mut egui::Ui, label: &str, value: &str) {
+  row(ui, label, |ui| {
+    ui.add_enabled_ui(false, |ui| {
+      egui::ComboBox::from_id_salt(label).selected_text(value).width(170.0).show_ui(ui, |_| {});
+    });
+  });
+}
+
+fn page_ui(app: &mut App, ui: &mut egui::Ui) {
+  let mut values = app.preferences.draft.clone();
   let p = &mut values;
   match app.preferences.page {
     Page::General => {
       egui::Grid::new("prefs-general").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label("Default units");
-        choice(ui, "prefs-units", &mut p.units, &Units::ALL, Units::label);
-        ui.end_row();
-        ui.label("Default modeling orientation");
-        choice(ui, "prefs-up", &mut p.up_axis, &UpAxis::ALL, UpAxis::label);
-        ui.end_row();
-      });
-      ui.add_space(6.0);
-      note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
-      note(ui, "The orientation is saved, but the view stays Z up until the up axis can be changed.");
-      ui.add_space(6.0);
-      ui.checkbox(&mut p.space_repeats, "Spacebar repeats last command");
-    }
-    Page::Navigation => {
-      egui::Grid::new("prefs-nav").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label("Pan, Zoom, Orbit shortcuts");
-        choice(ui, "prefs-nav-preset", &mut p.nav, &NavPreset::ALL, NavPreset::label);
-        ui.end_row();
+        fixed_row(ui, "User language", "English");
+        row(ui, "Theme", |ui| {
+          choice(ui, "prefs-theme", &mut p.theme, &Theme::ALL, Theme::label);
+        });
+        row(ui, "Automatic recovery backup interval", |ui| {
+          egui::ComboBox::from_id_salt("prefs-recovery")
+            .selected_text(recovery_label(p.recovery_minutes))
+            .width(170.0)
+            .show_ui(ui, |ui| {
+              for m in RECOVERY_CHOICES {
+                ui.selectable_value(&mut p.recovery_minutes, m, recovery_label(m));
+              }
+            });
+        });
+        row(ui, "Default modeling orientation", |ui| {
+          choice(ui, "prefs-up", &mut p.up_axis, &UpAxis::ALL, UpAxis::label);
+        });
+        flag_row(ui, "Show tooltips", &mut p.show_tooltips, "Hover texts on the toolbar and the controls");
+        flag_row(ui, "Show command prompt", &mut p.show_prompt, "The command's hint at the bottom left of the canvas");
+        row(ui, "Mouse setup (pan, zoom, orbit)", |ui| {
+          choice(ui, "prefs-nav-preset", &mut p.nav, &NavPreset::ALL, NavPreset::label);
+        });
         for (name, a) in [("Orbit", NavAction::Orbit), ("Pan", NavAction::Pan), ("Zoom", NavAction::Zoom)] {
-          ui.label(RichText::new(name).color(theme::MUTED));
+          ui.label(RichText::new(format!("    {name}")).color(theme::MUTED));
           ui.label(p.nav.describe(a));
           ui.end_row();
         }
+        row(ui, "Default Orbit type", |ui| {
+          choice(ui, "prefs-orbit", &mut p.orbit, &OrbitType::ALL, OrbitType::label);
+        });
+        flag_row(
+          ui,
+          "Reverse zoom direction",
+          &mut p.reverse_zoom,
+          "Off, as in Fusion: rolling the wheel toward you zooms in",
+        );
+        flag_row(ui, "Zoom toward the cursor", &mut p.zoom_to_cursor, "");
+        flag_row(ui, "Enable camera pivot", &mut p.camera_pivot, "Shows the orbit's pivot while orbiting");
+        row(ui, "ViewCube size", |ui| {
+          choice(ui, "prefs-cube", &mut p.cube_size, &CubeSize::ALL, CubeSize::label);
+        });
+        flag_row(ui, "Spacebar repeats last command", &mut p.space_repeats, "");
       });
       ui.add_space(6.0);
-      ui.checkbox(&mut p.reverse_zoom, "Reverse zoom direction")
-        .on_hover_text("Off, as in Fusion: rolling the wheel toward you zooms in");
-      ui.checkbox(&mut p.zoom_to_cursor, "Zoom toward the cursor");
+      note(ui, "The orientation is saved, but the view stays Z up until the up axis can be changed.");
     }
     Page::Design => {
-      ui.checkbox(&mut p.capture_history, "Capture design history for new designs");
-      note(ui, "Off: new designs start without a timeline, edits go into a base feature.");
+      egui::Grid::new("prefs-design").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+        row(ui, "Default units", |ui| {
+          choice(ui, "prefs-units", &mut p.units, &Units::ALL, Units::label);
+        });
+        flag_row(ui, "Capture design history", &mut p.capture_history, "Off: new designs start without a timeline");
+        flag_row(
+          ui,
+          "Auto look at sketch",
+          &mut p.auto_look_at,
+          "Creating or editing a sketch turns the view to face it",
+        );
+        flag_row(ui, "Show sketch dimensions", &mut p.show_dims, "");
+        flag_row(ui, "Show sketch constraints", &mut p.show_constraints, "");
+        flag_row(ui, "Snap sketch points to grid", &mut p.snap, "");
+      });
+      ui.add_space(6.0);
+      note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
+      note(ui, "Without design history new designs have no timeline; edits go into a base feature.");
       ui.add_space(8.0);
       let capturing = !app.s.design.history_off;
       ui.horizontal(|ui| {
@@ -510,14 +943,6 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
           crate::config_ui::toggle_history(app);
         }
       });
-    }
-    Page::Sketch => {
-      ui.checkbox(&mut p.auto_look_at, "Auto look at sketch");
-      note(ui, "Creating or editing a sketch turns the view to face it.");
-      ui.add_space(4.0);
-      ui.checkbox(&mut p.show_dims, "Show dimensions");
-      ui.checkbox(&mut p.show_constraints, "Show constraints");
-      ui.checkbox(&mut p.snap, "Snap to grid");
     }
     Page::Graphics => {
       ui.checkbox(&mut p.show_viewcube, "Show ViewCube");
@@ -539,8 +964,20 @@ fn page(app: &mut App, ui: &mut egui::Ui) {
       }
       note(ui, "FOX_RENDERER=cpu turns the GPU renderer off at start whatever this says.");
     }
+    Page::DefaultUnitsDesign => {
+      egui::Grid::new("prefs-default-units").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+        row(ui, "Default units", |ui| {
+          choice(ui, "prefs-units-2", &mut p.units, &Units::ALL, Units::label);
+        });
+      });
+      ui.add_space(6.0);
+      note(ui, "Default units apply to new designs; Document Settings changes a design's own units.");
+    }
+    _ => {
+      note(ui, "No settings yet.");
+    }
   }
-  app.preferences.values = values;
+  app.preferences.draft = values;
 }
 
 #[cfg(test)]
@@ -566,6 +1003,12 @@ mod tests {
       space_repeats: false,
       show_viewcube: false,
       cube_size: CubeSize::Tiny,
+      theme: Theme::Dark,
+      show_tooltips: false,
+      show_prompt: false,
+      orbit: OrbitType::Free,
+      camera_pivot: false,
+      recovery_minutes: 15,
     };
     let ini = "[Updates]\nMode=notify\n\n[Window]\nMaximized=1\n";
     let text = p.write_into(ini);
@@ -600,7 +1043,7 @@ mod tests {
     app.preferences.values.show_dims = false;
     app.preferences.values.snap = true;
     app.preferences.values.gpu = false;
-    apply(&mut app);
+    apply(&mut app, None);
     assert!(!app.show_dims && app.snap && !app.gpu.enabled);
     app.new_design();
     assert!(app.s.design.history_off, "no timeline");
@@ -620,6 +1063,88 @@ mod tests {
     app.preferences.values.units = Units::Mm;
     app.new_design();
     assert_eq!(app.s.design.units, fox_engine::model::LengthUnit::Mm);
+  }
+
+  #[test]
+  fn ok_and_apply_take_effect_and_cancel_drops_the_edits() {
+    let mut app = App::with_session(fox_engine::Session::default());
+    open(&mut app);
+    assert!(app.preferences.open);
+    app.preferences.draft.orbit = OrbitType::Free;
+    app.preferences.draft.snap = true;
+    // nothing happens until OK or Apply
+    assert!(!app.free_orbit && !app.snap && app.preferences.values.orbit == OrbitType::Constrained);
+    cancel(&mut app);
+    assert!(!app.preferences.open && app.preferences.draft == app.preferences.values && !app.snap);
+    open(&mut app);
+    app.preferences.draft.orbit = OrbitType::Free;
+    app.preferences.draft.snap = true;
+    commit(&mut app, None);
+    assert!(app.free_orbit && app.snap, "Apply puts the edits into the app");
+    assert_eq!(app.preferences.values.orbit, OrbitType::Free);
+    // Restore Defaults is an edit like any other: it needs OK or Apply too
+    app.preferences.draft = Prefs::default();
+    assert!(app.free_orbit && app.preferences.values.snap);
+    commit(&mut app, None);
+    assert!(!app.free_orbit && !app.snap);
+  }
+
+  #[test]
+  fn recovery_backups_follow_the_interval_and_the_design() {
+    let dir = std::env::temp_dir().join(format!("fox-recovery-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut app = App::with_session(fox_engine::Session::default());
+    app.preferences.recovery_dir = Some(dir.clone());
+    app.preferences.values.recovery_minutes = 1;
+    app.s.design.name = "Bracket v2".into();
+    let backup = dir.join("Bracket v2.fox");
+    // nothing to back up while the design is saved
+    recovery_tick(&mut app, 0.0);
+    recovery_tick(&mut app, 600.0);
+    assert!(!backup.exists());
+    app.run("sketch.create", serde_json::json!({"plane": "xy"}));
+    assert!(app.s.dirty);
+    recovery_tick(&mut app, 600.0);
+    assert!(!backup.exists(), "the interval starts counting at the first unsaved change");
+    recovery_tick(&mut app, 630.0);
+    assert!(!backup.exists(), "half a minute isn't the interval");
+    recovery_tick(&mut app, 661.0);
+    assert!(backup.exists(), "a minute later the backup is written");
+    assert!(app.s.dirty, "a backup isn't a save");
+    let first = std::fs::metadata(&backup).unwrap().modified().unwrap();
+    std::fs::remove_file(&backup).unwrap();
+    recovery_tick(&mut app, 730.0);
+    assert!(!backup.exists(), "nothing changed since the last backup");
+    app.run("sketch.line", serde_json::json!({"points": [[0, 0], [10, 0]]}));
+    recovery_tick(&mut app, 800.0);
+    assert!(backup.exists() && std::fs::metadata(&backup).unwrap().modified().unwrap() >= first);
+    // Never
+    app.preferences.values.recovery_minutes = 0;
+    std::fs::remove_file(&backup).unwrap();
+    app.run("sketch.line", serde_json::json!({"points": [[0, 5], [10, 5]]}));
+    recovery_tick(&mut app, 2000.0);
+    assert!(!backup.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+  }
+
+  #[test]
+  fn the_viewcube_size_scales_the_cube() {
+    let f = |c: CubeSize| c.factor(900.0);
+    assert!(f(CubeSize::Tiny) < f(CubeSize::Small) && f(CubeSize::Small) < f(CubeSize::Normal));
+    assert!(f(CubeSize::Normal) < f(CubeSize::Large));
+    assert!(
+      CubeSize::Automatic.factor(400.0) < CubeSize::Automatic.factor(900.0),
+      "a short canvas gets a smaller cube"
+    );
+    assert_eq!(recovery_label(0), "Never");
+    assert_eq!(recovery_label(1), "1 minute");
+    assert_eq!(recovery_label(5), "5 minutes");
+    // Fusion's tree: General's children, then the top-level sections in its order
+    let top: Vec<&str> = TREE.iter().map(|(p, _)| p.label()).collect();
+    assert_eq!(top[0], "General");
+    assert_eq!(top.last().copied(), Some("Compatibility & Troubleshooting"));
+    assert_eq!(TREE[0].1.first().map(|p| p.label()), Some("API"));
+    assert_eq!(Page::General.title(), "Preferences controlling general UI behavior");
   }
 
   #[test]

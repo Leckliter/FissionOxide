@@ -286,6 +286,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
+  // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
+  if app.preferences.values.camera_pivot
+    && matches!(app.drag, Some(Drag::Orbit))
+    && let Some(at) = view.to_screen(&cam, DVec3::from(app.cam.target))
+  {
+    pivot_marker(&painter, at);
+  }
   if app.show_viewcube {
     consumed |= crate::viewcube::show(app, ui, &painter, view.rect);
   }
@@ -2540,6 +2547,15 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
   }
 }
 
+/// Fusion's pivot marker: a ringed dot at the point the camera orbits about.
+fn pivot_marker(painter: &egui::Painter, at: Pos2) {
+  painter.circle(at, 9.0, Color32::from_white_alpha(140), Stroke::new(1.5, Color32::from_gray(60)));
+  painter.circle_filled(at, 2.5, crate::theme::ACCENT);
+  for d in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
+    painter.line_segment([at + d * 5.0, at + d * 12.0], Stroke::new(1.5, Color32::from_gray(60)));
+  }
+}
+
 /// Hints in the corner of the viewport.
 fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) {
   let hint = match (app.s.edit_sketch.is_some(), app.tool) {
@@ -2584,7 +2600,7 @@ fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) 
     (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G2 (curvature continuous)",
     (false, _) => return,
   };
-  if app.status.is_some() {
+  if app.status.is_some() || !app.preferences.values.show_prompt {
     return;
   }
   painter.text(

@@ -300,7 +300,7 @@ impl App {
     notifications::post(&mut app, notifications::whats_new_notice());
     app.prefs = customize::Prefs::load();
     app.preferences = preferences::Preferences::load();
-    preferences::apply(&mut app);
+    preferences::apply(&mut app, Some(&cc.egui_ctx));
     // back on the hub server it was connected to last time
     if app.s.store_root.is_none()
       && std::env::var_os("FOX_DATA_DIR").is_none()
@@ -868,8 +868,8 @@ impl App {
   }
 
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if self.key_capture.is_some() {
-      // Change Keyboard Shortcut takes the keys
+    if self.key_capture.is_some() || self.preferences.open {
+      // Change Keyboard Shortcut and the Preferences modal take the keys
       return;
     }
     // Esc closes an open menu (File, Help, a panel's drop-down, a right-click menu) before it
@@ -1560,6 +1560,7 @@ impl App {
     self.refresh_cut_preview();
     self.dropped_files(&ctx);
     plugins_ui::sync(self);
+    preferences::recovery_tick(self, now());
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
     if self.drawing.is_none() && self.electronics.is_none() {

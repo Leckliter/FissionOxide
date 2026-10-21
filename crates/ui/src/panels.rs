@@ -2757,6 +2757,10 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
 /// Status message and sketch hint at the bottom-left of the canvas, above COMMENTS.
 pub fn canvas_status(app: &mut App, ctx: &egui::Context) {
   let Some((msg, err)) = app.status.clone() else { return };
+  // Preferences → General → Show command prompt
+  if !err && !app.preferences.values.show_prompt && app.hint.as_deref() == Some(msg.as_str()) {
+    return;
+  }
   let canvas = app.canvas;
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("canvas-status")));
   let font = egui::FontId::proportional(12.0);
