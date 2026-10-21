@@ -65,8 +65,8 @@ fn scene() -> Scene {
       Polyline { behind: true, ..line(vec![[-40.0, 0.0, 0.0], [40.0, 0.0, 0.0]], 0, 1.0, false, false) },
     ],
     markers: vec![
-      Marker { at: [30.0, 30.0, 0.0], color: [200, 140, 40, 255], size: 5.0, id: 60, on_top: true },
-      Marker { at: [-30.0, -30.0, 0.0], color: [30, 110, 235, 255], size: 3.0, id: 0, on_top: false },
+      Marker { at: [30.0, 30.0, 0.0], color: [200, 140, 40, 255], size: 5.0, id: 60, on_top: true, hollow: false },
+      Marker { at: [-30.0, -30.0, 0.0], color: [30, 110, 235, 255], size: 3.0, id: 0, on_top: false, hollow: true },
     ],
     background_top: [250, 250, 251, 255],
     background_bottom: [234, 236, 239, 255],

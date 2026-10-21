@@ -887,7 +887,7 @@ fn page_ui(app: &mut App, ui: &mut egui::Ui) {
           choice(ui, "prefs-up", &mut p.up_axis, &UpAxis::ALL, UpAxis::label);
         });
         flag_row(ui, "Show tooltips", &mut p.show_tooltips, "Hover texts on the toolbar and the controls");
-        flag_row(ui, "Show command prompt", &mut p.show_prompt, "The command's hint at the bottom left of the canvas");
+        flag_row(ui, "Show command prompt", &mut p.show_prompt, "The command's prompt at the cursor");
         row(ui, "Mouse setup (pan, zoom, orbit)", |ui| {
           choice(ui, "prefs-nav-preset", &mut p.nav, &NavPreset::ALL, NavPreset::label);
         });

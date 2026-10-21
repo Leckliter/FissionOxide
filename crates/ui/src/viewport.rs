@@ -111,14 +111,18 @@ pub enum Drag {
     start: Pos2,
     now: Pos2,
   },
+  /// Dragging the conic's rho arrow (see [`conic_rho_manip`]).
+  ConicRho,
 }
 
 /// Clicks collected by the active sketch tool (sketch coordinates).
 #[derive(Default)]
 pub struct ToolState {
   pts: Vec<[f64; 2]>,
-  /// Dimension tool: first picked entity.
-  dim_first: Option<Pick>,
+  /// Dimension tool: the geometry picked so far (a point waits for a second pick).
+  dim_picks: Vec<Pick>,
+  /// Dimension tool: the dimension being placed (it follows the cursor until a click places it).
+  dim_place: Option<DimPlace>,
   /// Design before a sketch-point drag started.
   drag_backup: Option<fox_engine::model::Design>,
   /// Dimension command waiting for its value.
@@ -132,6 +136,25 @@ pub struct ToolState {
   arc_wind: Option<(f64, f64)>,
   /// Line: a press on the end of the last segment is being dragged; it draws a tangent arc.
   line_arc: bool,
+  /// Values typed in the heads-up boxes of the shape's earlier steps (a slot's length, an edge
+  /// polygon's edge), locked with dimensions when the shape is drawn.
+  held: Vec<(Field, String)>,
+  /// Conic: the rho its arrow was dragged to (None: [`CONIC_RHO`], or what its box holds).
+  rho: Option<f64>,
+}
+
+/// Fusion's rho for a new conic curve.
+const CONIC_RHO: f64 = 0.75;
+
+/// A dimension the Dimension tool is placing: its geometry, the command that creates it and its
+/// measured value, drawn as a preview that follows the cursor until a click places it.
+struct DimPlace {
+  kind: ConstraintKind,
+  cmd: serde_json::Value,
+  /// The measured value (mm, or degrees for an angle).
+  current: Option<f64>,
+  /// Where the placement click put it (sketch coordinates), once placed.
+  placed: Option<[f64; 2]>,
 }
 
 /// Fusion's heads-up dimension input: boxes that follow the shape being drawn. Typing sets the
@@ -165,6 +188,8 @@ enum Field {
   Radius,
   /// A polygon's number of sides.
   Sides,
+  /// A conic's rho (how far its middle lies from the chord towards the apex).
+  Rho,
 }
 
 /// The heads-up boxes of `tool` once it has `n` points.
@@ -176,23 +201,65 @@ fn hud_fields(tool: Tool, n: usize) -> &'static [Field] {
     // Fusion's polygon boxes: the radius (or the edge's length) and the number of sides
     (Tool::Polygon | Tool::CircPolygon, 1) => &[Field::Radius, Field::Sides],
     (Tool::EdgePolygon, 1) => &[Field::Length, Field::Sides],
+    // the rest of Fusion's heads-up boxes, by tool and step
+    (Tool::MidpointLine, 1) => &[Field::Length, Field::Angle],
+    (Tool::Rect3, 1) => &[Field::Length],
+    (Tool::Rect3, 2) => &[Field::Width],
+    (Tool::Circle2P, 1) | (Tool::Circle3P, 2) => &[Field::Diameter],
+    (Tool::Arc3, 2) | (Tool::CenterArc | Tool::TangentArc | Tool::ArcSlotCenter, 1) | (Tool::ArcSlot3, 2) => {
+      &[Field::Radius]
+    }
+    (Tool::CenterArc | Tool::ArcSlotCenter, 2) => &[Field::Angle],
+    (Tool::Ellipse, 1 | 2) => &[Field::Length],
+    (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot | Tool::ArcSlot3, 1) => &[Field::Length],
+    (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot, 2) | (Tool::ArcSlot3 | Tool::ArcSlotCenter, 3) => {
+      &[Field::Width]
+    }
+    (Tool::Conic, 3) => &[Field::Rho],
     _ => &[],
   }
 }
 
 impl ToolState {
   pub fn is_empty(&self) -> bool {
-    self.pts.is_empty() && self.dim_first.is_none() && self.curves.is_empty()
+    self.pts.is_empty() && self.dim_picks.is_empty() && self.dim_place.is_none() && self.curves.is_empty()
   }
 }
 
 pub fn reset_tool_state(app: &mut App) {
   app.tstate.pts.clear();
-  app.tstate.dim_first = None;
+  app.tstate.dim_picks.clear();
+  app.tstate.dim_place = None;
+  app.tstate.pending_dim = None;
   app.tstate.curves.clear();
   app.tstate.hud = HeadsUp::default();
   app.tstate.arc_wind = None;
   app.tstate.line_arc = false;
+  app.tstate.held.clear();
+  app.tstate.rho = None;
+}
+
+/// The conic's rho as the tool has it now: typed in its box, dragged with its arrow, or Fusion's
+/// default.
+fn conic_rho(app: &App) -> f64 {
+  let typed =
+    hud_fields(app.tool, app.tstate.pts.len()).iter().position(|f| *f == Field::Rho).and_then(|i| hud_value(app, i));
+  typed.or(app.tstate.rho).unwrap_or(CONIC_RHO)
+}
+
+/// Enter accepts the shape a tool is still shaping: the spline being drawn, or the conic whose
+/// rho is being set. Returns whether there was one.
+pub fn accept_tool(app: &mut App) -> bool {
+  if matches!(app.tool, Tool::Spline | Tool::ControlSpline) {
+    return finish_spline(app);
+  }
+  if app.tool == Tool::Conic && app.tstate.pts.len() == 3 {
+    let Some(sk) = app.s.edit_sketch else { return false };
+    let apex = app.tstate.pts[2];
+    place_point(app, sk, apex, None);
+    return true;
+  }
+  false
 }
 
 /// Center Point Arc: follows the cursor around the centre once the start is placed, so the arc
@@ -326,9 +393,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   offset_follow(app, &resp, &view);
   tool_preview(app, &painter, &resp, &view);
   trim_preview(app, &painter, &resp, &view);
+  dim_place_preview(app, &painter, &resp, &view);
+  consumed |= spline_accept(app, ui, &painter, &view);
+  consumed |= conic_rho_manip(app, &resp, &painter, &view);
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
-  hud(app, &painter, &resp, &view);
   cursor_prompt(app, &resp);
   if let Some(Drag::Box { start, now, .. }) = app.drag {
     let r = Rect::from_two_pos(start, now);
@@ -942,9 +1011,13 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
 /// Adds the active tool's next point; the last one draws the shape. Values typed in the heads-up
 /// boxes override the cursor and become driving dimensions.
 fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointId>) {
-  let locks = hud_locks(app);
-  let (p, snapped) = if locks.is_empty() { (p, snapped) } else { (hud_apply(app, p), None) };
+  let step_locks = hud_locks(app);
+  let (p, snapped) = if step_locks.is_empty() { (p, snapped) } else { (hud_apply(app, p), None) };
+  let rho = conic_rho(app);
   app.tstate.hud = HeadsUp::default();
+  // values typed at earlier steps are locked along with this step's when the shape is drawn
+  app.tstate.held.extend(step_locks);
+  let locks = app.tstate.held.clone();
   let pts = &mut app.tstate.pts;
   pts.push(p);
   let n = pts.len();
@@ -995,8 +1068,13 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       "sketch.polygon",
       json!({"sketch": sid, "center": first, "vertex": p, "sides": hud_sides(&locks), "circumscribed": true}),
     )),
-    Tool::EdgePolygon if n == 2 => {
-      Some(("sketch.polygon", json!({"sketch": sid, "edge": [first, p], "sides": hud_sides(&locks)})))
+    Tool::EdgePolygon if n == 3 => {
+      // the third click says which side of the edge the polygon goes (the engine builds it on
+      // the edge's left)
+      let (a, b) = (first, pts[1]);
+      let left = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0.0;
+      let edge = if left { [a, b] } else { [b, a] };
+      Some(("sketch.polygon", json!({"sketch": sid, "edge": edge, "sides": hud_sides(&locks)})))
     }
     Tool::OverallSlot | Tool::CenterSlot if n == 3 => {
       let w = 2.0 * point_line_dist(p, first, pts[1]);
@@ -1010,19 +1088,20 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
       Some(("sketch.slot", q))
     }
     Tool::ArcSlot3 | Tool::ArcSlotCenter if n == 4 => {
-      // the width is twice the last click's distance from the arc
+      // the width is twice the last click's distance from the arc; a 3-point arc slot's clicks
+      // run start, end, then a point on the arc, as in Fusion
       let (a, b, c) = (first, pts[1], pts[2]);
       let (center, r) = if app.tool == Tool::ArcSlotCenter {
         (Some(a), (b[0] - a[0]).hypot(b[1] - a[1]))
       } else {
-        let o = fox_engine::sketch::circumcenter(a, b, c);
+        let o = fox_engine::sketch::circumcenter(a, c, b);
         (o, o.map(|o| (a[0] - o[0]).hypot(a[1] - o[1])).unwrap_or(0.0))
       };
       let w = center.map(|o| 2.0 * ((p[0] - o[0]).hypot(p[1] - o[1]) - r).abs()).unwrap_or(1.0).max(0.1);
       let q = if app.tool == Tool::ArcSlotCenter {
         json!({"sketch": sid, "arc_center": a, "start": b, "end": c, "width": w})
       } else {
-        json!({"sketch": sid, "start": a, "mid": b, "end": c, "width": w})
+        json!({"sketch": sid, "start": a, "mid": c, "end": b, "width": w})
       };
       Some(("sketch.slot", q))
     }
@@ -1035,8 +1114,9 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
         None
       }
     },
-    Tool::Conic if n == 3 => {
-      Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": p, "rho": 0.5})))
+    // the vertex click leaves the conic shaping (its rho box and arrow); Enter or a click commits
+    Tool::Conic if n == 4 => {
+      Some(("sketch.conic", json!({"sketch": sid, "start": first, "end": pts[1], "apex": pts[2], "rho": rho})))
     }
     Tool::MidpointLine if n == 2 => {
       // the engine mirrors the end through the midpoint and keeps the midpoint on the line's middle
@@ -1057,6 +1137,8 @@ fn place_point(app: &mut App, sk: FeatureId, p: [f64; 2], snapped: Option<PointI
     if !multi {
       app.tstate.pts.clear();
     }
+    app.tstate.held.clear();
+    app.tstate.rho = None;
     // the shape and the dimensions locking its typed values are one undo step
     let grouped = !locks.is_empty() && app.run("transaction.begin", json!({})).is_some();
     let made = app.run(c, params);
@@ -1087,7 +1169,7 @@ fn hud_locks(app: &App) -> Vec<(Field, String)> {
 /// Heads-up box text as an expression: a bare length means the design's unit.
 fn hud_text(app: &App, field: Field, text: &str) -> String {
   let t = text.trim();
-  if matches!(field, Field::Angle | Field::Sides) { t.to_string() } else { app.s.design.units.typed(t) }
+  if matches!(field, Field::Angle | Field::Sides | Field::Rho) { t.to_string() } else { app.s.design.units.typed(t) }
 }
 
 /// The number of sides typed in a polygon's heads-up box (Fusion's default is 6).
@@ -1107,7 +1189,7 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
   }
   let kind = match field {
     Field::Angle => fox_engine::expr::Kind::Angle,
-    Field::Sides => fox_engine::expr::Kind::Unitless,
+    Field::Sides | Field::Rho => fox_engine::expr::Kind::Unitless,
     _ => fox_engine::expr::Kind::Length,
   };
   let v = fox_engine::expr::eval(&hud_text(app, field, text), kind, &app.s.model.params).ok()?;
@@ -1115,62 +1197,160 @@ fn hud_value(app: &App, i: usize) -> Option<f64> {
     Field::Angle => Some(v),
     // the polygon command takes 3 to 256 sides
     Field::Sides => (3.0..=256.0).contains(&v).then_some(v.round()),
+    Field::Rho => fox_engine::sketch::RHO_RANGE.contains(&v).then_some(v),
     _ => (v > 1e-9).then_some(v),
   }
 }
 
 /// The cursor moved to where the typed heads-up values put it.
 fn hud_apply(app: &App, cur: [f64; 2]) -> [f64; 2] {
-  let Some(&last) = app.tstate.pts.last() else { return cur };
-  if hud_fields(app.tool, app.tstate.pts.len()).is_empty() {
+  let pts = app.tstate.pts.as_slice();
+  let Some(&last) = pts.last() else { return cur };
+  if hud_fields(app.tool, pts.len()).is_empty() {
     return cur;
   }
   let v = |i| hud_value(app, i);
   let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
   let sign = |d: f64| if d < 0.0 { -1.0 } else { 1.0 };
-  match app.tool {
-    Tool::Line => {
+  // the point `r` from `o` in the cursor's direction from `o`
+  let out = |o: [f64; 2], r: f64| {
+    let (dx, dy) = (cur[0] - o[0], cur[1] - o[1]);
+    let l = dx.hypot(dy);
+    let (ux, uy) = if l > 1e-12 { (dx / l, dy / l) } else { (1.0, 0.0) };
+    [o[0] + r * ux, o[1] + r * uy]
+  };
+  // the point `d` off the line `a`→`b` (its middle `m`), on the cursor's side
+  let beside = |a: [f64; 2], b: [f64; 2], m: [f64; 2], d: f64| {
+    let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+    let l = ex.hypot(ey).max(1e-12);
+    let (nx, ny) = (-ey / l, ex / l);
+    let side = sign((cur[0] - m[0]) * nx + (cur[1] - m[1]) * ny);
+    [m[0] + nx * d * side, m[1] + ny * d * side]
+  };
+  match (app.tool, pts) {
+    (Tool::Line, _) => {
       let len = v(0).unwrap_or(dx.hypot(dy));
       let ang = v(1).unwrap_or(dy.atan2(dx));
       [last[0] + len * ang.cos(), last[1] + len * ang.sin()]
     }
-    Tool::Rect | Tool::CenterRect => {
+    // the box holds the whole line's length; the end is half of it from the midpoint
+    (Tool::MidpointLine, _) => {
+      let len = v(0).map_or(dx.hypot(dy), |l| l / 2.0);
+      let ang = v(1).unwrap_or(dy.atan2(dx));
+      [last[0] + len * ang.cos(), last[1] + len * ang.sin()]
+    }
+    (Tool::Rect | Tool::CenterRect, _) => {
       // a centre rectangle's boxes hold its whole width and height
       let k = if app.tool == Tool::CenterRect { 0.5 } else { 1.0 };
       [v(0).map_or(cur[0], |w| last[0] + sign(dx) * w * k), v(1).map_or(cur[1], |h| last[1] + sign(dy) * h * k)]
     }
-    Tool::Circle => match v(0) {
-      Some(d) => {
-        let l = dx.hypot(dy);
-        let (ux, uy) = if l > 1e-12 { (dx / l, dy / l) } else { (1.0, 0.0) };
-        [last[0] + d / 2.0 * ux, last[1] + d / 2.0 * uy]
-      }
-      None => cur,
+    (Tool::Rect3, [a, b]) => v(0).map_or(cur, |h| beside(*a, *b, *b, h)),
+    (Tool::Circle, _) => v(0).map_or(cur, |d| out(last, d / 2.0)),
+    (Tool::Circle2P, _) => v(0).map_or(cur, |d| out(last, d)),
+    (Tool::Circle3P, [a, b]) => v(0).map_or(cur, |d| on_circle_through(*a, *b, d / 2.0, cur)),
+    (Tool::Arc3 | Tool::ArcSlot3, [a, b]) => v(0).map_or(cur, |r| on_circle_through(*a, *b, r, cur)),
+    (Tool::CenterArc | Tool::ArcSlotCenter, [c, a]) => v(0).map_or(cur, |ang| {
+      // the end at the typed sweep from the start, the way the cursor went (counter-clockwise
+      // until it moves)
+      let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+      let dir = app.tstate.arc_wind.map_or(1.0, |(_, s)| sign(s));
+      let t = (a[1] - c[1]).atan2(a[0] - c[0]) + dir * ang;
+      [c[0] + r * t.cos(), c[1] + r * t.sin()]
+    }),
+    (Tool::TangentArc, [a]) => v(0).map_or(cur, |r| tangent_arc_end(app, *a, r, cur)),
+    (Tool::Ellipse, [c, m]) => v(0).map_or(cur, |b| beside(*c, *m, *c, b)),
+    (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot, [a, b]) => {
+      let m = if app.tool == Tool::CenterSlot { *a } else { [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0] };
+      v(0).map_or(cur, |w| beside(*a, *b, m, w / 2.0))
+    }
+    (Tool::ArcSlot3, [a, b, c]) => match (v(0), fox_engine::sketch::circumcenter(*a, *c, *b)) {
+      (Some(w), Some(o)) => out(o, (a[0] - o[0]).hypot(a[1] - o[1]) + w / 2.0),
+      _ => cur,
     },
-    // a typed radius (or edge length) holds the point that far from the centre (or edge start)
-    Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon => match v(0) {
-      Some(r) => {
-        let l = dx.hypot(dy);
-        let (ux, uy) = if l > 1e-12 { (dx / l, dy / l) } else { (1.0, 0.0) };
-        [last[0] + r * ux, last[1] + r * uy]
-      }
-      None => cur,
-    },
+    (Tool::ArcSlotCenter, [c, s, _]) => v(0).map_or(cur, |w| out(*c, (s[0] - c[0]).hypot(s[1] - c[1]) + w / 2.0)),
+    // a typed length, radius or diameter holds the point that far from the last click
+    (Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon, _)
+    | (Tool::Rect3, _)
+    | (Tool::CenterArc | Tool::ArcSlotCenter, _)
+    | (Tool::Ellipse, _)
+    | (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot | Tool::ArcSlot3, _) => v(0).map_or(cur, |r| out(last, r)),
     _ => cur,
   }
 }
 
-/// The values the heads-up boxes show for a cursor at `cur`: length and angle (degrees), width
-/// and height, or diameter.
+/// The point on the circle of radius `r` through `a` and `b` nearest the cursor, with the circle's
+/// centre on the cursor's side of the chord (the cursor itself when `r` can't span the chord).
+fn on_circle_through(a: [f64; 2], b: [f64; 2], r: f64, cur: [f64; 2]) -> [f64; 2] {
+  let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+  let l = ex.hypot(ey);
+  if l < 1e-12 || r < l / 2.0 {
+    return cur;
+  }
+  let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+  let (nx, ny) = (-ey / l, ex / l);
+  let side = if (cur[0] - m[0]) * nx + (cur[1] - m[1]) * ny < 0.0 { -1.0 } else { 1.0 };
+  let h = (r * r - l * l / 4.0).max(0.0).sqrt();
+  let c = [m[0] + nx * h * side, m[1] + ny * h * side];
+  let (dx, dy) = (cur[0] - c[0], cur[1] - c[1]);
+  let d = dx.hypot(dy);
+  if d < 1e-12 { [c[0] - nx * r * side, c[1] - ny * r * side] } else { [c[0] + r * dx / d, c[1] + r * dy / d] }
+}
+
+/// The end of the tangent arc of radius `r` from `start` that bends towards the cursor, at the
+/// cursor's angle around the arc's centre (the cursor itself when nothing ends at `start`).
+fn tangent_arc_end(app: &App, start: [f64; 2], r: f64, cur: [f64; 2]) -> [f64; 2] {
+  let Some(dir) = tangent_direction(app, start) else { return cur };
+  let n = [-dir[1], dir[0]];
+  let side = if (cur[0] - start[0]) * n[0] + (cur[1] - start[1]) * n[1] < 0.0 { -1.0 } else { 1.0 };
+  let c = [start[0] + n[0] * r * side, start[1] + n[1] * r * side];
+  let (dx, dy) = (cur[0] - c[0], cur[1] - c[1]);
+  let d = dx.hypot(dy);
+  if d < 1e-12 { cur } else { [c[0] + r * dx / d, c[1] + r * dy / d] }
+}
+
+/// The values the heads-up boxes show for a cursor at `cur` (mm, degrees, a count or rho).
 fn hud_live(app: &App, cur: [f64; 2]) -> [f64; 2] {
-  let Some(&last) = app.tstate.pts.last() else { return [0.0; 2] };
+  let pts = app.tstate.pts.as_slice();
+  let Some(&last) = pts.last() else { return [0.0; 2] };
   let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
-  match app.tool {
-    Tool::Line => [dx.hypot(dy), dy.atan2(dx).to_degrees().rem_euclid(360.0)],
-    Tool::Rect => [dx.abs(), dy.abs()],
-    Tool::CenterRect => [2.0 * dx.abs(), 2.0 * dy.abs()],
-    Tool::Circle => [2.0 * dx.hypot(dy), 0.0],
-    Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon => [dx.hypot(dy), 6.0],
+  let d = dx.hypot(dy);
+  let ang = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+  let radius_through = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+    fox_engine::sketch::circumcenter(a, b, c).map_or(0.0, |o| (a[0] - o[0]).hypot(a[1] - o[1]))
+  };
+  match (app.tool, pts) {
+    (Tool::Line, _) => [d, ang],
+    (Tool::MidpointLine, _) => [2.0 * d, ang],
+    (Tool::Rect, _) => [dx.abs(), dy.abs()],
+    (Tool::CenterRect, _) => [2.0 * dx.abs(), 2.0 * dy.abs()],
+    (Tool::Rect3, [a, b]) => [point_line_dist(cur, *a, *b), 0.0],
+    (Tool::Circle, _) => [2.0 * d, 0.0],
+    (Tool::Circle2P, _) => [d, 0.0],
+    (Tool::Circle3P, [a, b]) => [2.0 * radius_through(*a, *b, cur), 0.0],
+    (Tool::Arc3 | Tool::ArcSlot3, [a, b]) => [radius_through(*a, cur, *b), 0.0],
+    (Tool::CenterArc, [_, _]) => [app.tstate.arc_wind.map_or(0.0, |(_, s)| s.to_degrees().abs()), 0.0],
+    (Tool::ArcSlotCenter, [c, s]) => {
+      let a0 = (s[1] - c[1]).atan2(s[0] - c[0]);
+      [((cur[1] - c[1]).atan2(cur[0] - c[0]) - a0).rem_euclid(std::f64::consts::TAU).to_degrees(), 0.0]
+    }
+    (Tool::TangentArc, [a]) => [tangent_arc_geometry(app, *a, cur).map_or(0.0, |(_, r, _, _)| r), 0.0],
+    (Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon, _) => [d, 6.0],
+    (Tool::Ellipse, [c, m]) => {
+      [Ellipse2::minor_through(*c, *m, cur).unwrap_or_else(|| point_line_dist(cur, *c, *m)), 0.0]
+    }
+    (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot, [a, b]) => [2.0 * point_line_dist(cur, *a, *b), 0.0],
+    (Tool::ArcSlot3, [a, b, c]) => {
+      let w = fox_engine::sketch::circumcenter(*a, *c, *b)
+        .map_or(0.0, |o| 2.0 * ((cur[0] - o[0]).hypot(cur[1] - o[1]) - (a[0] - o[0]).hypot(a[1] - o[1])).abs());
+      [w, 0.0]
+    }
+    (Tool::ArcSlotCenter, [c, s, _]) => {
+      [2.0 * ((cur[0] - c[0]).hypot(cur[1] - c[1]) - (s[0] - c[0]).hypot(s[1] - c[1])).abs(), 0.0]
+    }
+    (Tool::Conic, [_, _, _]) => [conic_rho(app), 0.0],
+    // a length, radius or diameter from the last click
+    (Tool::Rect3 | Tool::CenterArc | Tool::ArcSlotCenter | Tool::Ellipse, _)
+    | (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot | Tool::ArcSlot3, _) => [d, 0.0],
     _ => [0.0; 2],
   }
 }
@@ -1212,6 +1392,7 @@ fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> Str
   match field {
     Field::Angle => format!("{v:.1} deg"),
     Field::Sides => format!("{}", v.round() as i64),
+    Field::Rho => format!("{v:.2}"),
     _ => unit.fixed(v, display_decimals(unit)),
   }
 }
@@ -1244,16 +1425,26 @@ fn lock_typed(
     return;
   }
   for (field, text) in locks {
-    // rectangles are drawn bottom, right, top, left: the bottom sets the width, the right the height
-    let curve = match field {
-      Field::Width | Field::Length => curves.first(),
-      Field::Height => curves.get(1),
-      Field::Angle | Field::Diameter | Field::Radius | Field::Sides => None,
+    // rectangles are drawn bottom, right, top, left: the bottom sets the width, the right the
+    // height (a 3-point rectangle's first side, then its second); a circle's diameter and an
+    // arc's radius dimension the curve itself
+    let (kind, curve) = match (app.tool, field) {
+      (Tool::Line | Tool::MidpointLine | Tool::Rect | Tool::CenterRect | Tool::Rect3, Field::Width | Field::Length)
+        if !(app.tool == Tool::Rect3 && *field == Field::Width) =>
+      {
+        ("distance", curves.first())
+      }
+      (Tool::Rect | Tool::CenterRect, Field::Height) | (Tool::Rect3, Field::Width) => ("distance", curves.get(1)),
+      // (the Circle tool draws a typed diameter with its dimension itself: `sketch.circle {diameter}`)
+      (Tool::Circle2P | Tool::Circle3P, Field::Diameter) => ("diameter", curves.first()),
+      (Tool::Arc3 | Tool::CenterArc | Tool::TangentArc, Field::Radius) => ("radius", curves.first()),
+      _ => ("", None),
     };
     if let Some(c) = curve {
-      app.run("sketch.dimension", json!({"sketch": sk.0, "type": "distance", "curves": [c], "value": text}));
+      app.run("sketch.dimension", json!({"sketch": sk.0, "type": kind, "curves": [c], "value": text}));
     }
     if *field == Field::Angle
+      && app.tool == Tool::Line
       && let (Some(&line), Some(from)) = (curves.first(), from)
     {
       lock_angle(app, sk, line, from);
@@ -1308,8 +1499,8 @@ fn lock_angle(app: &mut App, sk: FeatureId, line: u32, from: [f64; 2]) {
   app.run("sketch.dimension", json!({"sketch": sk.0, "type": "angle", "curves": [prev.0, line], "value": value}));
 }
 
-/// Commits the fit-point spline being drawn (Enter, or clicking its last point again).
-/// Returns whether there was a spline to commit.
+/// Commits the spline being drawn (Enter, its check-mark button, or clicking its last point
+/// again). Returns whether there was a spline to commit.
 pub fn finish_spline(app: &mut App) -> bool {
   if !matches!(app.tool, Tool::Spline | Tool::ControlSpline) || app.tstate.pts.len() < 2 {
     return false;
@@ -1374,10 +1565,8 @@ fn line_tangent_arc(app: &mut App, sk: FeatureId, end: [f64; 2]) {
   }
 }
 
-/// The tangent arc from `start` (the end of a line or arc) to `end`, as the engine's
-/// `sketch.arc {tangent}` draws it: points along it, or None when nothing ends at `start` or the
-/// end lies straight ahead.
-fn tangent_arc_points(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<Vec<[f64; 2]>> {
+/// The direction a line or arc ending at `start` leaves it in (a tangent arc carries on that way).
+fn tangent_direction(app: &App, start: [f64; 2]) -> Option<[f64; 2]> {
   let sk = app.s.edit_sketch?;
   let curve = fox_engine::sketch::CurveId(tangent_curve(app, sk, start)?);
   let sketch = app.s.design.sketch(sk).ok()?;
@@ -1397,10 +1586,15 @@ fn tangent_arc_points(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<Vec<[
     _ => return None,
   };
   let l = dir[0].hypot(dir[1]);
-  if l < 1e-12 {
-    return None;
-  }
-  let n = [-dir[1] / l, dir[0] / l];
+  (l >= 1e-12).then(|| [dir[0] / l, dir[1] / l])
+}
+
+/// The tangent arc from `start` (the end of a line or arc) to `end`, as the engine's
+/// `sketch.arc {tangent}` draws it: centre, radius, start angle and signed sweep, or None when
+/// nothing ends at `start` or the end lies straight ahead.
+fn tangent_arc_geometry(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<([f64; 2], f64, f64, f64)> {
+  let dir = tangent_direction(app, start)?;
+  let n = [-dir[1], dir[0]];
   let chord = [end[0] - start[0], end[1] - start[1]];
   let den = 2.0 * (chord[0] * n[0] + chord[1] * n[1]);
   if den.abs() < 1e-12 {
@@ -1413,14 +1607,35 @@ fn tangent_arc_points(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<Vec<[
   let tau = std::f64::consts::TAU;
   // counter-clockwise when the centre is on the left of the way the curve runs
   let sweep = if t > 0.0 { (a1 - a0).rem_euclid(tau) } else { -(a0 - a1).rem_euclid(tau) };
-  Some(
-    (0..=64)
-      .map(|i| {
-        let a = a0 + sweep * i as f64 / 64.0;
-        [c[0] + r * a.cos(), c[1] + r * a.sin()]
-      })
-      .collect(),
-  )
+  Some((c, r, a0, sweep))
+}
+
+/// Points along the tangent arc from `start` to `end` (see [`tangent_arc_geometry`]).
+fn tangent_arc_points(app: &App, start: [f64; 2], end: [f64; 2]) -> Option<Vec<[f64; 2]>> {
+  let (c, r, a0, sweep) = tangent_arc_geometry(app, start, end)?;
+  Some(arc_points(c, r, a0, sweep))
+}
+
+/// Points along the arc of radius `r` about `c` from angle `a0` sweeping `sweep` (signed).
+fn arc_points(c: [f64; 2], r: f64, a0: f64, sweep: f64) -> Vec<[f64; 2]> {
+  (0..=64)
+    .map(|i| {
+      let a = a0 + sweep * i as f64 / 64.0;
+      [c[0] + r * a.cos(), c[1] + r * a.sin()]
+    })
+    .collect()
+}
+
+/// The arc from `a` to `b` through `m`: centre, radius, start angle and signed sweep.
+fn arc_through(a: [f64; 2], m: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64, f64, f64)> {
+  let o = fox_engine::sketch::circumcenter(a, m, b)?;
+  let r = (a[0] - o[0]).hypot(a[1] - o[1]);
+  let ang = |p: [f64; 2]| (p[1] - o[1]).atan2(p[0] - o[0]);
+  let tau = std::f64::consts::TAU;
+  let (a0, ccw) = (ang(a), (ang(b) - ang(a)).rem_euclid(tau));
+  // the sweep runs the way round that passes through `m`
+  let sweep = if (ang(m) - a0).rem_euclid(tau) <= ccw { ccw } else { ccw - tau };
+  Some((o, r, a0, sweep))
 }
 
 /// Trim: dragging across curves trims each one the pointer crosses (once per drag), as in
@@ -1577,10 +1792,8 @@ fn curve_tool_click(app: &mut App, view: &View, pos: Pos2, shift: bool) {
     app.run("sketch.tangent_circle", json!({"sketch": sk.0, "curves": curves, "radius": r, "near": at}));
     return;
   }
-  let Some(c) = hovered else {
-    app.status = Some(("Click a curve".into(), true));
-    return;
-  };
+  // a click on nothing picks nothing (the cursor prompt still says what to click)
+  let Some(c) = hovered else { return };
   if app.tstate.curves.iter().any(|x| x.0 == c) {
     return;
   }
@@ -1655,72 +1868,265 @@ fn finish_point_drag(app: &mut App, sketch: FeatureId, point: PointId) {
   }
 }
 
-/// Dimension tool: line → length, circle → diameter, arc → radius; point then point/line →
-/// distance; shift-click a line then another line → angle.
+/// Dimension tool, as Fusion runs it: a pick (line → length, circle → diameter, arc → radius;
+/// a point then a point or line → distance; a line then a line (or Shift+click a line) → angle)
+/// shows the dimension following the cursor; the next click places it and opens its value box.
+/// Clicking more geometry while placing changes the dimension (a line then a point → distance).
 fn dimension_click(app: &mut App, pos: Pos2, shift: bool) {
   let Some(sk) = app.s.edit_sketch else { return };
   let Ok(sketch) = app.s.design.sketch(sk) else { return };
   let sketch = sketch.clone();
-  let hover = app.hover;
-  let first = app.tstate.dim_first;
-  let (cmd, current) = match (first, hover) {
-    (None, Some(Pick::SketchCurve { curve, .. })) => match sketch.curve(curve).map(|c| c.kind.clone()) {
-      Some(CurveKind::Line { a, b }) => {
-        if shift {
-          app.tstate.dim_first = hover;
-          app.hint("Pick a second line for an angle");
-          return;
-        }
-        (json!({"type": "distance", "points": [a.0, b.0]}), dist(&sketch, a, b))
+  let picked = app.hover.filter(|p| matches!(p, Pick::SketchCurve { .. } | Pick::SketchPoint { .. }));
+  if let Some(h) = picked
+    && !app.tstate.dim_picks.contains(&h)
+  {
+    let mut picks = app.tstate.dim_picks.clone();
+    picks.push(h);
+    match dimension_of(&sketch, &picks, shift) {
+      Some((cmd, kind, current)) => {
+        app.tstate.dim_picks = picks;
+        app.tstate.dim_place = Some(DimPlace { kind, cmd, current, placed: None });
       }
-      Some(CurveKind::Circle { radius, .. }) => (json!({"type": "diameter", "curves": [curve.0]}), Some(2.0 * radius)),
-      Some(CurveKind::Arc { .. }) => (json!({"type": "radius", "curves": [curve.0]}), sketch.radius(curve)),
-      Some(
-        CurveKind::Spline { .. }
-        | CurveKind::ControlSpline { .. }
-        | CurveKind::Ellipse { .. }
-        | CurveKind::Bezier { .. }
-        | CurveKind::EllipticalArc { .. }
-        | CurveKind::Conic { .. }
-        | CurveKind::QuinticSpline { .. },
-      )
-      | None => return,
-    },
-    (None, Some(Pick::SketchPoint { .. })) => {
-      app.tstate.dim_first = hover;
-      app.hint("Pick a second point or a line");
-      return;
+      // a point (or a Shift-clicked line) waits for the second pick; a pair that makes no
+      // dimension starts over from this pick
+      None if picks.len() == 1 => {
+        app.tstate.dim_picks = picks;
+        app.tstate.dim_place = None;
+      }
+      None => {
+        let fresh = vec![h];
+        app.tstate.dim_place = dimension_of(&sketch, &fresh, shift).map(|(cmd, kind, current)| DimPlace {
+          kind,
+          cmd,
+          current,
+          placed: None,
+        });
+        app.tstate.dim_picks = fresh;
+      }
     }
-    (Some(Pick::SketchPoint { point: a, .. }), Some(Pick::SketchPoint { point: b, .. })) if a != b => {
-      app.tstate.dim_first = None;
-      (json!({"type": "distance", "points": [a.0, b.0]}), dist(&sketch, a, b))
-    }
-    (Some(Pick::SketchPoint { point, .. }), Some(Pick::SketchCurve { curve, .. })) => {
-      app.tstate.dim_first = None;
-      let d = match (sketch.pos(point), sketch.curve(curve)) {
-        (Some(p), Some(_)) => sketch.distance_to_curve(curve, p),
-        _ => None,
-      };
-      (json!({"type": "point_line", "points": [point.0], "curves": [curve.0]}), d)
-    }
-    (Some(Pick::SketchCurve { curve: a, .. }), Some(Pick::SketchCurve { curve: b, .. })) if a != b => {
-      app.tstate.dim_first = None;
-      let ang = line_angle(&sketch, a, b);
-      (json!({"type": "angle", "curves": [a.0, b.0]}), ang.map(f64::to_degrees))
-    }
-    _ => {
-      app.tstate.dim_first = None;
-      return;
-    }
-  };
-  // the measured value, in the design's unit (degrees for an angle)
-  let angle = cmd["type"] == "angle";
+    return;
+  }
+  let Some(place) = app.tstate.dim_place.as_mut() else { return };
+  if place.placed.is_some() {
+    return;
+  }
+  // the placement click: the dimension stays where the cursor put it (see [`dim_place_preview`])
+  // and its value box opens there
+  place.placed = app.tstate.hud.cursor.map(|c| c.0);
+  let angle = place.kind.is_angle();
   let unit = app.s.design.units;
-  let text =
-    current.map(|v| if angle { fox_engine::sketch::Dim::new(v).expr } else { unit.number(v) }).unwrap_or_default();
-  // stash the pending dimension in the editor (constraint id 0 = new)
+  let text = place.current.map(|v| dim_full_text(unit, angle, v)).unwrap_or_default();
+  app.tstate.pending_dim = Some(place.cmd.clone());
   app.dim_edit = Some((0, text, pos));
-  app.tstate.pending_dim = Some(cmd);
+}
+
+/// The dimension `picks` make (its command, the constraint it adds and the measured value in mm
+/// or degrees), or None when they make none yet (a point alone, a Shift-clicked line).
+fn dimension_of(
+  sketch: &Sketch,
+  picks: &[Pick],
+  shift: bool,
+) -> Option<(serde_json::Value, ConstraintKind, Option<f64>)> {
+  use fox_engine::sketch::Dim;
+  let dim = |v: Option<f64>| Dim::new(v.unwrap_or(0.0));
+  let kind_of = |c: fox_engine::sketch::CurveId| sketch.curve(c).map(|c| c.kind.clone());
+  match picks {
+    [Pick::SketchCurve { curve, .. }] => match kind_of(*curve)? {
+      CurveKind::Line { a, b } => {
+        if shift {
+          return None;
+        }
+        let d = dist(sketch, a, b);
+        Some((json!({"type": "distance", "points": [a.0, b.0]}), ConstraintKind::Distance { a, b, value: dim(d) }, d))
+      }
+      CurveKind::Circle { radius, .. } => Some((
+        json!({"type": "diameter", "curves": [curve.0]}),
+        ConstraintKind::Diameter { curve: *curve, value: Dim::new(2.0 * radius) },
+        Some(2.0 * radius),
+      )),
+      CurveKind::Arc { .. } => {
+        let r = sketch.radius(*curve);
+        Some((
+          json!({"type": "radius", "curves": [curve.0]}),
+          ConstraintKind::Radius { curve: *curve, value: dim(r) },
+          r,
+        ))
+      }
+      _ => None,
+    },
+    [Pick::SketchPoint { point: a, .. }, Pick::SketchPoint { point: b, .. }] if a != b => {
+      let d = dist(sketch, *a, *b);
+      Some((
+        json!({"type": "distance", "points": [a.0, b.0]}),
+        ConstraintKind::Distance { a: *a, b: *b, value: dim(d) },
+        d,
+      ))
+    }
+    [Pick::SketchPoint { point, .. }, Pick::SketchCurve { curve, .. }]
+    | [Pick::SketchCurve { curve, .. }, Pick::SketchPoint { point, .. }] => {
+      if !matches!(kind_of(*curve)?, CurveKind::Line { .. }) {
+        return None;
+      }
+      let d = sketch.pos(*point).and_then(|p| sketch.distance_to_curve(*curve, p));
+      Some((
+        json!({"type": "point_line", "points": [point.0], "curves": [curve.0]}),
+        ConstraintKind::PointLineDistance { p: *point, line: *curve, value: dim(d) },
+        d,
+      ))
+    }
+    [Pick::SketchCurve { curve: a, .. }, Pick::SketchCurve { curve: b, .. }] if a != b => {
+      if !matches!(kind_of(*a)?, CurveKind::Line { .. }) || !matches!(kind_of(*b)?, CurveKind::Line { .. }) {
+        return None;
+      }
+      let ang = line_angle(sketch, *a, *b);
+      Some((
+        json!({"type": "angle", "curves": [a.0, b.0]}),
+        ConstraintKind::Angle { a: *a, b: *b, value: dim(ang) },
+        ang.map(f64::to_degrees),
+      ))
+    }
+    _ => None,
+  }
+}
+
+/// A new dimension's value as its box opens: the full measurement with its unit, as Fusion's
+/// "0.4787837888 in" (an angle in degrees).
+fn dim_full_text(unit: fox_engine::model::LengthUnit, angle: bool, v: f64) -> String {
+  let (n, sym) = if angle { (v, "deg") } else { (unit.from_mm(v), unit.symbol()) };
+  let s = format!("{n:.10}");
+  let s = s.trim_end_matches('0').trim_end_matches('.');
+  format!("{} {sym}", if s == "-0" || s.is_empty() { "0" } else { s })
+}
+
+/// A dimension being placed, as Fusion previews it: the value at document precision with its
+/// prefix ("0.479", "R0.228", "⌀0.479", "90.0°") and extension lines out to the cursor.
+fn dim_place_preview(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view: &View) {
+  if app.tool != Tool::Dimension {
+    return;
+  }
+  let Some((sk, plane)) = sketch_plane(app) else { return };
+  // the cursor on the sketch plane (unsnapped: the placement is free), kept for the placing click
+  if let Some(pos) = resp.hover_pos() {
+    let (o, d) = view.ray(&app.cam, pos);
+    if let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) {
+      let at = plane.to_local(hit);
+      app.tstate.hud.cursor = Some((at, None));
+    }
+  }
+  let Some(place) = app.tstate.dim_place.as_ref() else { return };
+  let Some(cur) = place.placed.or(app.tstate.hud.cursor.map(|c| c.0)) else { return };
+  let Ok(sketch) = app.s.design.sketch(sk) else { return };
+  let unit = app.s.design.units;
+  let label = match (&place.kind, place.current) {
+    (_, None) => String::new(),
+    (ConstraintKind::Radius { .. }, Some(v)) => format!("R{}", fixed_number(unit, v)),
+    (ConstraintKind::Diameter { .. }, Some(v)) => format!("⌀{}", fixed_number(unit, v)),
+    (ConstraintKind::Angle { .. }, Some(v)) => format!("{v:.1}°"),
+    (_, Some(v)) => fixed_number(unit, v),
+  };
+  let font = egui::FontId::proportional(12.0);
+  let text = DimText::new(painter, &label, font);
+  let size = text.size() + Vec2::new(8.0, 4.0);
+  let wpp = app.cam.view_height() / view.h.max(1) as f64 * view.ppp as f64;
+  let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let Some(shape) = dim_shape_at(sketch, &place.kind, cur, size, wpp, &to_screen) else { return };
+  paint_dim(painter, &shape, DIM_INK);
+  let rect = Rect::from_center_size(shape.label, size);
+  painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+  text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_INK);
+}
+
+/// A length (mm) in the design's unit at Fusion's document precision, without the unit.
+fn fixed_number(unit: fox_engine::model::LengthUnit, mm: f64) -> String {
+  format!("{:.*}", display_decimals(unit), unit.from_mm(mm))
+}
+
+/// The leader graphics of a dimension placed by the cursor at `cur` (sketch coordinates): a
+/// linear dimension's line runs through the cursor's level on its side, a radial one's leader
+/// ends at the cursor, an angle's value sits at the cursor.
+fn dim_shape_at(
+  s: &Sketch,
+  k: &ConstraintKind,
+  cur: [f64; 2],
+  size: Vec2,
+  wpp: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let unit = |p: [f64; 2], q: [f64; 2]| -> Option<[f64; 2]> {
+    let l = (q[0] - p[0]).hypot(q[1] - p[1]);
+    (l > 1e-12).then(|| [(q[0] - p[0]) / l, (q[1] - p[1]) / l])
+  };
+  let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+  // a linear dimension from p to q along dir, its line at the cursor's offset on the cursor's side
+  let linear_at = |p: [f64; 2], q: [f64; 2], dir: [f64; 2]| {
+    let mut n = [-dir[1], dir[0]];
+    let mid = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0];
+    if dot(n, [cur[0] - mid[0], cur[1] - mid[1]]) < 0.0 {
+      n = [-n[0], -n[1]];
+    }
+    let off = (dot(cur, n) - dot(p, n).max(dot(q, n))).max(4.0 * wpp);
+    linear_shape(p, q, dir, [mid[0] - n[0], mid[1] - n[1]], off, wpp, to_screen)
+  };
+  match k {
+    ConstraintKind::Distance { a, b, .. } => {
+      let (p, q) = (s.pos(*a)?, s.pos(*b)?);
+      linear_at(p, q, unit(p, q)?)
+    }
+    ConstraintKind::PointLineDistance { p, line, .. } => {
+      let pts = s.curve_points(*line);
+      let (l0, l1, pp) = (s.pos(*pts.first()?)?, s.pos(*pts.get(1)?)?, s.pos(*p)?);
+      let d = unit(l0, l1)?;
+      let t = (pp[0] - l0[0]) * d[0] + (pp[1] - l0[1]) * d[1];
+      let foot = [l0[0] + d[0] * t, l0[1] + d[1] * t];
+      linear_at(foot, pp, unit(foot, pp)?)
+    }
+    ConstraintKind::Radius { curve, .. } | ConstraintKind::Diameter { curve, .. } => {
+      let c = s.pos(*s.curve_points(*curve).first()?)?;
+      let r = s.radius(*curve)?;
+      let diameter = matches!(k, ConstraintKind::Diameter { .. });
+      let mut shape = radial_shape(c, r, cur, diameter, size, to_screen)?;
+      // the leader carries on to the cursor once it is outside the circle
+      if (cur[0] - c[0]).hypot(cur[1] - c[1]) > r {
+        let at = to_screen(cur)?;
+        let on = shape.arrows.first()?.0;
+        let u = (at - on).normalized();
+        if u.is_finite() {
+          let half = (u.x.abs() * size.x + u.y.abs() * size.y) / 2.0;
+          let start = shape.lines.first().map_or(on, |l| l[0]);
+          shape.lines = vec![[start, at - u * half]];
+          shape.label = at;
+        }
+      }
+      Some(shape)
+    }
+    ConstraintKind::Angle { a, b, value } => {
+      let mut shape = angular_shape(s, *a, *b, value.value, wpp, to_screen)?;
+      shape.label = to_screen(cur)?;
+      Some(shape)
+    }
+    _ => None,
+  }
+}
+
+/// Escape on a new dimension's value box keeps the dimension at its current value, as Fusion
+/// does; on an existing dimension's it drops the edit. Either way the box closes.
+pub fn settle_dim_edit(app: &mut App) {
+  if let Some((0, text, _)) = app.dim_edit.take() {
+    commit_pending_dim(app, &text);
+  }
+  app.dim_edit = None;
+  app.tstate.dim_place = None;
+  app.tstate.dim_picks.clear();
+}
+
+/// Creates the dimension the Dimension tool placed, with `text` as its value.
+fn commit_pending_dim(app: &mut App, text: &str) {
+  let (Some(sk), Some(mut cmd)) = (app.s.edit_sketch, app.tstate.pending_dim.take()) else { return };
+  let unit = app.s.design.units;
+  let value = if cmd["type"] == "angle" { text.to_string() } else { unit.typed(text) };
+  cmd["sketch"] = json!(sk.0);
+  cmd["value"] = json!(value);
+  app.run("sketch.dimension", cmd);
 }
 
 fn dist(s: &Sketch, a: PointId, b: PointId) -> Option<f64> {
@@ -1772,25 +2178,25 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
           } else if !r.has_focus() && !r.lost_focus() && !egui::Popup::is_any_open(ctx) {
             r.request_focus();
           }
-          // Enter commits and Esc cancels, as in Fusion (no OK button); ⋮ holds the dimension's menu
+          // Enter commits, as in Fusion (no OK button); Esc keeps a new dimension at its current
+          // value and drops an edit of an existing one; ⋮ holds the dimension's menu
           let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-          cancel = esc;
-          commit = enter && !esc && (r.has_focus() || r.lost_focus());
-          if cid != 0 {
-            let m = ui.add(egui::Button::new("").min_size(Vec2::new(14.0, 20.0)).frame(false));
-            let dot = Color32::from_gray(60);
-            for dy in [-4.0, 0.0, 4.0] {
-              ui.painter().circle_filled(m.rect.center() + Vec2::new(0.0, dy), 1.3, dot);
-            }
-            egui::Popup::menu(&m).show(|ui| {
-              if ui.button("Change Parameters").clicked() {
-                open_params = true;
-              }
-              if ui.button("Delete").clicked() {
-                delete = true;
-              }
-            });
+          let accept = enter || (esc && cid == 0);
+          commit = accept && (r.has_focus() || r.lost_focus());
+          cancel = esc && !commit;
+          let m = ui.add(egui::Button::new("").min_size(Vec2::new(14.0, 20.0)).frame(false));
+          let dot = Color32::from_gray(60);
+          for dy in [-4.0, 0.0, 4.0] {
+            ui.painter().circle_filled(m.rect.center() + Vec2::new(0.0, dy), 1.3, dot);
           }
+          egui::Popup::menu(&m).show(|ui| {
+            if ui.button("Change Parameters").clicked() {
+              open_params = true;
+            }
+            if cid != 0 && ui.button("Delete").clicked() {
+              delete = true;
+            }
+          });
         });
       });
     });
@@ -1808,12 +2214,9 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
       // a bare length means the design's unit
       let unit = app.s.design.units;
       if cid == 0 {
-        if let Some(mut cmd) = app.tstate.pending_dim.take() {
-          let value = if cmd["type"] == "angle" { text.clone() } else { unit.typed(&text) };
-          cmd["sketch"] = json!(sk.0);
-          cmd["value"] = json!(value);
-          app.run("sketch.dimension", cmd);
-        }
+        commit_pending_dim(app, &text);
+        app.tstate.dim_place = None;
+        app.tstate.dim_picks.clear();
       } else {
         let angle = app
           .s
@@ -1829,6 +2232,8 @@ fn dim_editor(app: &mut App, ctx: &egui::Context) {
   }
   if cancel {
     app.tstate.pending_dim = None;
+    app.tstate.dim_place = None;
+    app.tstate.dim_picks.clear();
   }
   if !commit && !cancel {
     app.dim_edit = Some((cid, text, pos));
@@ -2326,8 +2731,9 @@ fn dim_label(
   let val = if k.is_angle() {
     format!("{}°", fox_engine::sketch::Dim::new(dim.value.to_degrees()).expr)
   } else {
-    // in the design's unit, without the unit (as Fusion labels sketch dimensions)
-    fox_engine::expr::trim_number(unit.from_mm(dim.value))
+    // in the design's unit at the document precision, without the unit (as Fusion labels
+    // sketch dimensions: "0.479", "12.00")
+    fixed_number(unit, dim.value)
   };
   let shown = |prefix: &str| if numeric { format!("{prefix}{val}") } else { format!("{prefix}{} = {val}", dim.expr) };
   let mid = |a: PointId, b: PointId| -> Option<[f64; 2]> {
@@ -2445,10 +2851,65 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     (Tool::TangentArc, [a]) if tangent_arc_points(app, *a, cur).is_some() => {
       poly(&tangent_arc_points(app, *a, cur).unwrap_or_default(), false)
     }
-    (Tool::Spline | Tool::ControlSpline | Tool::Conic | Tool::ArcSlot3 | Tool::ArcSlotCenter, [_, ..]) => {
+    (Tool::Spline | Tool::ControlSpline, [_, ..]) => {
+      // the curve itself, smooth, through (or shaped by) the clicks and the cursor
       let mut all = pts.clone();
       all.push(cur);
-      poly(&all, false);
+      let bz = spline_beziers(app, app.tool, &all);
+      poly(&flatten_beziers(&bz), false);
+      if app.tool == Tool::ControlSpline {
+        // the control polygon, dashed
+        let ctrl: Vec<Pos2> = all.iter().filter_map(|p| s(*p)).collect();
+        painter.extend(egui::Shape::dashed_line(&ctrl, Stroke::new(1.0, Color32::from_gray(140)), 4.0, 3.0));
+      } else {
+        // the tangent comb: the curve's direction at each fit point
+        for (p, t) in spline_tangents(&bz) {
+          if let (Some(a), Some(b)) = (s(p), s([p[0] + t[0], p[1] + t[1]])) {
+            let d = (b - a).normalized() * 12.0;
+            if d.is_finite() {
+              painter.line_segment([a - d, a + d], Stroke::new(1.0, Color32::from_gray(140)));
+            }
+          }
+        }
+      }
+    }
+    (Tool::Conic, [a]) => line(*a, cur),
+    (Tool::Conic, [a, b]) => {
+      line(*a, *b);
+      poly(&conic_points(*a, cur, *b, conic_rho(app)), false);
+    }
+    // the vertex is down: the conic takes its shape from the rho box and arrow, not the cursor
+    (Tool::Conic, [a, b, apex]) => poly(&conic_points(*a, *apex, *b, conic_rho(app)), false),
+    (Tool::ArcSlot3, [a]) | (Tool::ArcSlotCenter, [a]) => line(*a, cur),
+    (Tool::ArcSlot3, [a, b]) => {
+      if let Some((c, r, a0, sweep)) = arc_through(*a, cur, *b) {
+        poly(&arc_points(c, r, a0, sweep), false);
+      }
+    }
+    (Tool::ArcSlotCenter, [c, st]) => {
+      let r = (st[0] - c[0]).hypot(st[1] - c[1]);
+      let a0 = (st[1] - c[1]).atan2(st[0] - c[0]);
+      let sweep = ((cur[1] - c[1]).atan2(cur[0] - c[0]) - a0).rem_euclid(std::f64::consts::TAU);
+      poly(&arc_points(*c, r, a0, sweep), false);
+    }
+    (Tool::ArcSlot3, [a, b, m]) | (Tool::ArcSlotCenter, [a, b, m]) => {
+      // the slot: its centre arc and the two edges half the width either side
+      let geo = if app.tool == Tool::ArcSlot3 {
+        arc_through(*a, *m, *b)
+      } else {
+        let r = (b[0] - a[0]).hypot(b[1] - a[1]);
+        let a0 = (b[1] - a[1]).atan2(b[0] - a[0]);
+        Some((*a, r, a0, ((m[1] - a[1]).atan2(m[0] - a[0]) - a0).rem_euclid(std::f64::consts::TAU)))
+      };
+      if let Some((c, r, a0, sweep)) = geo {
+        let half = ((cur[0] - c[0]).hypot(cur[1] - c[1]) - r).abs();
+        poly(&arc_points(c, r, a0, sweep), false);
+        for rr in [r - half, r + half] {
+          if rr > 1e-9 {
+            poly(&arc_points(c, rr, a0, sweep), false);
+          }
+        }
+      }
     }
     (Tool::Rect3, [a]) => line(*a, cur),
     (Tool::Rect3, [a, b]) => {
@@ -2481,6 +2942,12 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
       poly(&polygon_points(*c, r, a0, n), true);
     }
     (Tool::EdgePolygon, [a]) => poly(&edge_polygon_points(*a, cur, hud_sides_live(app)), true),
+    (Tool::EdgePolygon, [a, b]) => {
+      // the polygon on the cursor's side of the edge
+      let left = (b[0] - a[0]) * (cur[1] - a[1]) - (b[1] - a[1]) * (cur[0] - a[0]) >= 0.0;
+      let (p, q) = if left { (*a, *b) } else { (*b, *a) };
+      poly(&edge_polygon_points(p, q, hud_sides_live(app)), true);
+    }
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a]) => line(*a, cur),
     (Tool::OverallSlot | Tool::CenterSlot | Tool::Ellipse, [a, b]) => {
       line(*a, *b);
@@ -2542,23 +3009,59 @@ fn tool_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     _ => {}
   }
   paint_inference_lines(app, painter, view, pos);
-  // cursor marker, and a coordinate readout where no heads-up dimensions show
-  if let Some(p) = s(cur) {
-    let col = if snapped.is_some() { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(30, 110, 235) };
-    painter.circle_stroke(p, 4.0, Stroke::new(1.5, col));
-    if !hud_fields(app.tool, pts.len()).is_empty() {
-      return;
-    }
-    let u = app.s.design.units;
-    let txt = format!("{}, {}", u.number(cur[0]), u.number(cur[1]));
-    painter.text(
-      p + Vec2::new(10.0, 10.0),
-      egui::Align2::LEFT_TOP,
-      txt,
-      egui::FontId::proportional(11.0),
-      Color32::from_gray(70),
-    );
+  // Fusion's snap marker: a small square on the sketch point the cursor is on (the cursor itself
+  // is a crosshair, with no coordinate readout)
+  if snapped.is_some()
+    && let Some(p) = s(cur)
+  {
+    paint_snap_marker(painter, p);
   }
+}
+
+/// The square Fusion draws on a sketch point a tool's cursor has snapped to.
+fn paint_snap_marker(painter: &egui::Painter, at: Pos2) {
+  let r = Rect::from_center_size(at, Vec2::splat(8.0));
+  painter.rect(
+    r,
+    0.0,
+    Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+    Stroke::new(1.5, Color32::from_gray(50)),
+    egui::StrokeKind::Middle,
+  );
+}
+
+/// The spline through (fit-point) or shaped by (control-point) `pts`, as cubic Bézier pieces: the
+/// curve the tool is drawing, before any of its points exist in the sketch.
+fn spline_beziers(app: &App, tool: Tool, pts: &[[f64; 2]]) -> Vec<[[f64; 2]; 4]> {
+  let Some(sk) = app.s.edit_sketch else { return Vec::new() };
+  let Ok(mut sketch) = app.s.design.sketch(sk).cloned() else { return Vec::new() };
+  if pts.len() < 2 {
+    return Vec::new();
+  }
+  let ids: Vec<PointId> = pts.iter().map(|p| sketch.add_point(p[0], p[1])).collect();
+  let kind = if tool == Tool::ControlSpline { CurveKind::control_spline(ids) } else { CurveKind::spline(ids) };
+  sketch.kind_beziers(&kind)
+}
+
+/// Bézier pieces flattened to one polyline.
+fn flatten_beziers(bz: &[[[f64; 2]; 4]]) -> Vec<[f64; 2]> {
+  let mut out: Vec<[f64; 2]> =
+    bz.iter().flat_map(|b| (0..16).map(move |k| fox_engine::sketch::bezier_at(b, k as f64 / 16.0))).collect();
+  out.extend(bz.last().map(|b| b[3]));
+  out
+}
+
+/// Where each Bézier piece starts (and the last ends), with the curve's direction there.
+fn spline_tangents(bz: &[[[f64; 2]; 4]]) -> Vec<([f64; 2], [f64; 2])> {
+  let mut out: Vec<([f64; 2], [f64; 2])> = bz.iter().map(|b| (b[0], [b[1][0] - b[0][0], b[1][1] - b[0][1]])).collect();
+  out.extend(bz.last().map(|b| (b[3], [b[3][0] - b[2][0], b[3][1] - b[2][1]])));
+  out
+}
+
+/// Points along the conic from `a` to `b` whose end tangents meet at `apex`, shaped by `rho`.
+fn conic_points(a: [f64; 2], apex: [f64; 2], b: [f64; 2], rho: f64) -> Vec<[f64; 2]> {
+  let w = fox_engine::sketch::conic_weight(rho);
+  (0..=64).map(|i| fox_engine::sketch::conic_at(&[a, apex, b], w, i as f64 / 64.0)).collect()
 }
 
 /// Digits typed with no box focused go to the heads-up box of the shape being drawn, or to the
@@ -2659,17 +3162,116 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
   let off = 30.0 * wpp;
   // each box's dimension graphics, ending where its box goes
   let mut at: Vec<Option<Pos2>> = Vec::new();
+  let pts = app.tstate.pts.clone();
+  // a length from `o` to `q`, its dimension on the left of o→q
+  let along = |o: [f64; 2], q: [f64; 2]| {
+    let (dx, dy) = (q[0] - o[0], q[1] - o[1]);
+    let l = dx.hypot(dy).max(1e-12);
+    let away = [(o[0] + q[0]) / 2.0 + dy / l, (o[1] + q[1]) / 2.0 - dx / l];
+    linear_shape(o, q, [dx / l, dy / l], away, off, wpp, &to_screen)
+  };
+  // a radius box beside the circle through `on` about `c`
+  let radial = |c: [f64; 2], r: f64, on: [f64; 2]| radial_shape(c, r, on, false, Vec2::new(60.0, 18.0), &to_screen);
+  // a width across the line a→b at `foot`, dimensioned beyond `foot` away from `mid`
+  let across = |a: [f64; 2], b: [f64; 2], mid: [f64; 2], foot: [f64; 2], w: f64| {
+    let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+    let l = ex.hypot(ey).max(1e-12);
+    let n = [-ey / l, ex / l];
+    let (p, q) =
+      ([foot[0] - n[0] * w / 2.0, foot[1] - n[1] * w / 2.0], [foot[0] + n[0] * w / 2.0, foot[1] + n[1] * w / 2.0]);
+    linear_shape(p, q, n, mid, off, wpp, &to_screen)
+  };
+  let mut rho_at: Option<Pos2> = None;
   for f in fields {
-    let shape = match (app.tool, f) {
-      (Tool::Line | Tool::EdgePolygon, Field::Length) => {
-        let (dx, dy) = (cur[0] - last[0], cur[1] - last[1]);
-        let l = dx.hypot(dy).max(1e-12);
-        // the dimension sits on the line's left
-        let away = [(last[0] + cur[0]) / 2.0 + dy / l, (last[1] + cur[1]) / 2.0 - dx / l];
-        linear_shape(last, cur, [dx / l, dy / l], away, off, wpp, &to_screen)
+    let shape = match (app.tool, f, pts.as_slice()) {
+      (Tool::Line | Tool::EdgePolygon, Field::Length, _) => along(last, cur),
+      (Tool::Line, Field::Angle, _) => hud_angle_shape(last, cur, wpp, &to_screen),
+      (Tool::MidpointLine, Field::Length, _) => along([2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]], cur),
+      (Tool::MidpointLine, Field::Angle, _) => hud_angle_shape(last, cur, wpp, &to_screen),
+      (Tool::Rect3, Field::Length, _) => along(last, cur),
+      (Tool::Rect3, Field::Width, [a, b]) => {
+        let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+        let l = ex.hypot(ey).max(1e-12);
+        let n = [-ey / l, ex / l];
+        let h = (cur[0] - a[0]) * n[0] + (cur[1] - a[1]) * n[1];
+        along(*b, [b[0] + n[0] * h, b[1] + n[1] * h])
       }
-      (Tool::Line, Field::Angle) => hud_angle_shape(last, cur, wpp, &to_screen),
-      (Tool::Rect | Tool::CenterRect, Field::Width | Field::Height) => {
+      // a diameter line through the circle, with the value on it
+      (Tool::Circle2P, Field::Diameter, _) => chord_shape(last, cur, &to_screen),
+      (Tool::Circle3P, Field::Diameter, [a, b]) => match fox_engine::sketch::circumcenter(*a, *b, cur) {
+        Some(c) => {
+          let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+          let (dx, dy) = (cur[0] - c[0], cur[1] - c[1]);
+          let l = dx.hypot(dy).max(1e-12);
+          chord_shape([c[0] - r * dx / l, c[1] - r * dy / l], [c[0] + r * dx / l, c[1] + r * dy / l], &to_screen)
+        }
+        None => None,
+      },
+      (Tool::Arc3 | Tool::ArcSlot3, Field::Radius, [a, b]) => {
+        arc_through(*a, cur, *b).and_then(|(c, r, _, _)| radial(c, r, cur))
+      }
+      (Tool::CenterArc | Tool::ArcSlotCenter | Tool::Polygon | Tool::CircPolygon, Field::Radius, _) => {
+        radial(last, (cur[0] - last[0]).hypot(cur[1] - last[1]), cur)
+      }
+      (Tool::TangentArc, Field::Radius, [a]) => {
+        tangent_arc_geometry(app, *a, cur).and_then(|(c, r, _, _)| radial(c, r, cur))
+      }
+      (Tool::CenterArc | Tool::ArcSlotCenter, Field::Angle, [c, st]) => {
+        let r = (st[0] - c[0]).hypot(st[1] - c[1]);
+        let a0 = (st[1] - c[1]).atan2(st[0] - c[0]);
+        let sweep = if app.tool == Tool::CenterArc {
+          app.tstate.arc_wind.map_or(0.0, |(_, s)| s)
+        } else {
+          ((cur[1] - c[1]).atan2(cur[0] - c[0]) - a0).rem_euclid(std::f64::consts::TAU)
+        };
+        hud_sweep_shape(*c, r, a0, sweep, &to_screen)
+      }
+      (Tool::Ellipse, Field::Length, [c, m]) => {
+        let b = Ellipse2::minor_through(*c, *m, cur).unwrap_or_else(|| point_line_dist(cur, *c, *m));
+        let (ex, ey) = (m[0] - c[0], m[1] - c[1]);
+        let l = ex.hypot(ey).max(1e-12);
+        let side = if (cur[0] - c[0]) * -ey + (cur[1] - c[1]) * ex < 0.0 { -1.0 } else { 1.0 };
+        along(*c, [c[0] - ey / l * b * side, c[1] + ex / l * b * side])
+      }
+      (Tool::Ellipse | Tool::Slot | Tool::OverallSlot | Tool::CenterSlot | Tool::ArcSlot3, Field::Length, _) => {
+        along(last, cur)
+      }
+      (Tool::Slot | Tool::OverallSlot | Tool::CenterSlot, Field::Width, [a, b]) => {
+        let mid = if app.tool == Tool::CenterSlot { *a } else { [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0] };
+        let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ey * ey).max(1e-12);
+        let t = ((cur[0] - a[0]) * ex + (cur[1] - a[1]) * ey) / l2;
+        let foot = [a[0] + ex * t, a[1] + ey * t];
+        across(*a, *b, mid, foot, 2.0 * point_line_dist(cur, *a, *b))
+      }
+      (Tool::ArcSlot3 | Tool::ArcSlotCenter, Field::Width, [a, b, m]) => {
+        let geo = if app.tool == Tool::ArcSlot3 {
+          arc_through(*a, *m, *b).map(|(c, r, _, _)| (c, r))
+        } else {
+          Some((*a, (b[0] - a[0]).hypot(b[1] - a[1])))
+        };
+        match geo {
+          Some((c, r)) => {
+            let (dx, dy) = (cur[0] - c[0], cur[1] - c[1]);
+            let l = dx.hypot(dy).max(1e-12);
+            let u = [dx / l, dy / l];
+            let half = (l - r).abs();
+            let (p, q) = (
+              [c[0] + u[0] * (r - half), c[1] + u[1] * (r - half)],
+              [c[0] + u[0] * (r + half), c[1] + u[1] * (r + half)],
+            );
+            linear_shape(p, q, u, c, off, wpp, &to_screen)
+          }
+          None => None,
+        }
+      }
+      // the rho box sits under the conic's middle, by its arrow
+      (Tool::Conic, Field::Rho, [a, b, apex]) => {
+        let m = fox_engine::sketch::conic_at(&[*a, *apex, *b], fox_engine::sketch::conic_weight(conic_rho(app)), 0.5);
+        rho_at = to_screen(m).map(|p| p + Vec2::new(0.0, 30.0));
+        None
+      }
+      (Tool::Rect | Tool::CenterRect, Field::Width | Field::Height, _) => {
         let o = if app.tool == Tool::CenterRect { [2.0 * last[0] - cur[0], 2.0 * last[1] - cur[1]] } else { last };
         let mid = [(o[0] + cur[0]) / 2.0, (o[1] + cur[1]) / 2.0];
         let corner = [cur[0], o[1]];
@@ -2679,20 +3281,16 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
           linear_shape(corner, cur, [0.0, 1.0], mid, off, wpp, &to_screen)
         }
       }
-      (Tool::Circle, Field::Diameter) => {
+      (Tool::Circle, Field::Diameter, _) => {
         let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
         radial_shape(last, r, cur, true, Vec2::new(60.0, 18.0), &to_screen)
-      }
-      (Tool::Polygon | Tool::CircPolygon, Field::Radius) => {
-        let r = (cur[0] - last[0]).hypot(cur[1] - last[1]);
-        radial_shape(last, r, cur, false, Vec2::new(60.0, 18.0), &to_screen)
       }
       _ => None,
     };
     if let Some(s) = &shape {
       paint_dim(painter, s, ink);
     }
-    at.push(shape.map(|s| s.label));
+    at.push(shape.map(|s| s.label).or(rho_at));
   }
   // a polygon's sides box sits under its radius box, as in Fusion
   if let Some(i) = fields.iter().position(|f| *f == Field::Sides) {
@@ -2781,7 +3379,12 @@ fn heads_up(app: &mut App, painter: &egui::Painter, resp: &egui::Response, view:
     if typed {
       paint_lock(painter, r.left_center() + Vec2::new(9.0, 0.0), ink);
     }
-    painter.galley(r.min + Vec2::new(5.0 + lock_w, 2.5), galley, Color32::BLACK);
+    let text_at = r.min + Vec2::new(5.0 + lock_w, 2.5);
+    if active && !typed {
+      // the box with the keyboard shows its value selected, as Fusion's does: typing replaces it
+      painter.rect_filled(Rect::from_min_size(text_at, galley.size()), 0.0, Color32::from_rgb(190, 214, 248));
+    }
+    painter.galley(text_at, galley, Color32::BLACK);
   }
   if commit {
     // this Enter places the point; it isn't the open dialog's OK
@@ -2839,6 +3442,43 @@ fn hud_angle_shape(
   Some(DimShape { lines: vec![[o, base]], arc, arrows, label: mid })
 }
 
+/// A diameter (or any length) drawn as a line from `a` to `b` with arrowheads at both ends and
+/// the value on the line at its middle, as Fusion draws a circle's diameter.
+fn chord_shape(a: [f64; 2], b: [f64; 2], to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>) -> Option<DimShape> {
+  let (p, q) = (to_screen(a)?, to_screen(b)?);
+  let d = q - p;
+  if !d.is_finite() || d.length() < 1e-6 {
+    return None;
+  }
+  Some(DimShape { lines: vec![[p, q]], arc: Vec::new(), arrows: vec![(p, -d), (q, d)], label: p + d / 2.0 })
+}
+
+/// An arc's heads-up angle: an arc glyph inside the arc, from its start through its sweep, with
+/// the value beyond its middle.
+fn hud_sweep_shape(
+  c: [f64; 2],
+  r: f64,
+  a0: f64,
+  sweep: f64,
+  to_screen: &dyn Fn([f64; 2]) -> Option<Pos2>,
+) -> Option<DimShape> {
+  let rr = r * 0.6;
+  let along = arc_points(c, rr, a0, sweep);
+  let arc: Vec<Pos2> = along.iter().step_by(2).filter_map(|p| to_screen(*p)).collect();
+  let at = |ang: f64, d: f64| to_screen([c[0] + d * ang.cos(), c[1] + d * ang.sin()]);
+  let o = to_screen(c)?;
+  let mid = at(a0 + sweep / 2.0, rr)?;
+  let w = (mid - o).normalized();
+  let label = if w.is_finite() { mid + w * 20.0 } else { mid + Vec2::new(0.0, 20.0) };
+  let mut arrows = Vec::new();
+  if arc.len() > 2 && sweep.abs() > 0.15 {
+    let k = arc.len();
+    arrows.push((arc[0], arc[0] - arc[1]));
+    arrows.push((arc[k - 1], arc[k - 1] - arc[k - 2]));
+  }
+  Some(DimShape { lines: vec![[o, at(a0, rr)?], [o, at(a0 + sweep, rr)?]], arc, arrows, label })
+}
+
 /// The 2-tangent circle the next click would place.
 fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: Pos2, plane: Plane) {
   let Some(sk) = app.s.edit_sketch else { return };
@@ -2876,6 +3516,97 @@ fn tangent_circle_preview(app: &App, painter: &egui::Painter, view: &View, pos: 
   }
 }
 
+/// The round check-mark button that floats under the spline being drawn, as in Fusion: clicking
+/// it commits the spline (so does Enter; Escape discards it). Returns true while the pointer is
+/// on the button, so the click doesn't also place a point.
+fn spline_accept(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, view: &View) -> bool {
+  if !matches!(app.tool, Tool::Spline | Tool::ControlSpline) || app.tstate.pts.len() < 2 {
+    return false;
+  }
+  let Some((_, plane)) = sketch_plane(app) else { return false };
+  let curve = flatten_beziers(&spline_beziers(app, app.tool, &app.tstate.pts));
+  let on_screen: Vec<Pos2> = curve.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
+  let Some(bounds) =
+    on_screen.iter().fold(None::<Rect>, |r, p| Some(r.map_or(Rect::from_pos(*p), |r| r.union(Rect::from_pos(*p)))))
+  else {
+    return false;
+  };
+  let at = Pos2::new(bounds.center().x, bounds.max.y + 26.0);
+  let r = Rect::from_center_size(at, Vec2::splat(24.0));
+  let resp = ui.interact(r, ui.id().with("spline-accept"), Sense::click());
+  let (hovered, clicked) = (resp.hovered(), resp.clicked());
+  let (fill, edge) = if hovered {
+    (crate::theme::HOVER, crate::theme::ACCENT)
+  } else {
+    (Color32::from_rgba_unmultiplied(255, 255, 255, 235), Color32::from_gray(150))
+  };
+  painter.circle(at, 11.0, fill, Stroke::new(1.0, edge));
+  let tick = Stroke::new(2.0, Color32::from_rgb(40, 150, 80));
+  painter.line_segment([at + Vec2::new(-5.0, 0.5), at + Vec2::new(-1.5, 4.0)], tick);
+  painter.line_segment([at + Vec2::new(-1.5, 4.0), at + Vec2::new(5.5, -4.0)], tick);
+  resp.on_hover_text("OK (Enter)");
+  if clicked {
+    finish_spline(app);
+  }
+  hovered || clicked
+}
+
+/// The conic's rho arrow, once its vertex is placed: an arrow on the curve's middle pointing at
+/// the vertex; dragging it along that line sets rho (where the middle lies between the chord
+/// and the vertex), a click on it commits the conic. Returns true while the arrow has the
+/// pointer, so the click doesn't also place a point.
+fn conic_rho_manip(app: &mut App, resp: &egui::Response, painter: &egui::Painter, view: &View) -> bool {
+  let (Tool::Conic, [a, b, apex]) = (app.tool, app.tstate.pts.as_slice()) else { return false };
+  let (a, b, apex) = (*a, *b, *apex);
+  let Some((sk, plane)) = sketch_plane(app) else { return false };
+  let rho = conic_rho(app);
+  let m = fox_engine::sketch::conic_at(&[a, apex, b], fox_engine::sketch::conic_weight(rho), 0.5);
+  let chord = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+  let to_screen = |p: [f64; 2]| view.to_screen(&app.cam, plane.to_world(p));
+  let (Some(tail), Some(toward)) = (to_screen(m), to_screen(apex)) else { return false };
+  let u = (toward - tail).normalized();
+  if !u.is_finite() {
+    return false;
+  }
+  let tip = tail + u * 28.0;
+  let dragging = matches!(app.drag, Some(Drag::ConicRho));
+  let near = resp.hover_pos().is_some_and(|p| {
+    let d = tip - tail;
+    let t = ((p - tail).dot(d) / d.length_sq()).clamp(0.0, 1.0);
+    (tail + d * t - p).length() <= 8.0
+  });
+  let ink = if near || dragging { crate::theme::ACCENT } else { Color32::from_rgb(30, 110, 235) };
+  painter.line_segment([tail, tip], Stroke::new(2.0, ink));
+  let n = u.rot90() * 5.0;
+  painter.add(egui::Shape::convex_polygon(vec![tip + u * 6.0, tip + n, tip - n], ink, Stroke::NONE));
+  if near && resp.drag_started_by(egui::PointerButton::Primary) {
+    app.drag = Some(Drag::ConicRho);
+  }
+  if dragging && let Some(pos) = resp.interact_pointer_pos() {
+    // rho: how far along the line from the chord's middle to the vertex the cursor is
+    let (o, d) = view.ray(&app.cam, pos);
+    if let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) {
+      let cur = plane.to_local(hit);
+      let (vx, vy) = (apex[0] - chord[0], apex[1] - chord[1]);
+      let l2 = vx * vx + vy * vy;
+      if l2 > 1e-12 {
+        let t = ((cur[0] - chord[0]) * vx + (cur[1] - chord[1]) * vy) / l2;
+        let lo = *fox_engine::sketch::RHO_RANGE.start();
+        let hi = *fox_engine::sketch::RHO_RANGE.end();
+        app.tstate.rho = Some((t * 100.0).round() / 100.0).map(|r| r.clamp(lo, hi));
+        app.tstate.hud.typed[0].clear();
+        app.tstate.hud.buf = None;
+      }
+    }
+    return true;
+  }
+  if near && resp.clicked() {
+    place_point(app, sk, apex, None);
+    return true;
+  }
+  near
+}
+
 /// Fusion's pivot marker: a ringed dot at the point the camera orbits about.
 fn pivot_marker(painter: &egui::Painter, at: Pos2) {
   painter.circle(at, 9.0, Color32::from_white_alpha(140), Stroke::new(1.5, Color32::from_gray(60)));
@@ -2892,11 +3623,18 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
   let picked = state.curves.len();
   Some(match tool {
     Tool::Select => return None,
-    Tool::Line | Tool::Spline | Tool::ControlSpline => {
+    Tool::Line => {
       if n == 0 {
         "Place first point"
       } else {
         "Place next point"
+      }
+    }
+    Tool::Spline | Tool::ControlSpline => {
+      if n == 0 {
+        "Specify first point"
+      } else {
+        "Specify next point"
       }
     }
     Tool::Rect => {
@@ -2916,7 +3654,7 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
     Tool::Rect3 => match n {
       0 => "Place first corner",
       1 => "Place second corner",
-      _ => "Specify height of rectangle",
+      _ => "Place third corner",
     },
     Tool::Circle => {
       if n == 0 {
@@ -2933,17 +3671,15 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
       }
     }
     Tool::Circle3P => match n {
-      0 => "Place first point",
-      1 => "Place second point",
-      _ => "Place third point",
+      0 => "Place first point on circle",
+      1 => "Place second point on circle",
+      _ => "Place third point on circle",
     },
-    Tool::Circle2T => {
-      if picked < 2 {
-        "Select line, circle, or arc"
-      } else {
-        "Specify diameter"
-      }
-    }
+    Tool::Circle2T => match picked {
+      0 => "Select first tangent of circle",
+      1 => "Select second tangent of circle",
+      _ => "Specify diameter",
+    },
     Tool::Circle3T => "Select line, circle, or arc",
     Tool::Arc3 => match n {
       0 => "Place start point",
@@ -2952,80 +3688,79 @@ pub(crate) fn sketch_prompt(tool: Tool, state: &ToolState) -> Option<&'static st
     },
     Tool::CenterArc => match n {
       0 => "Place center point",
-      1 => "Place start point",
-      _ => "Specify angle",
+      1 => "Specify start point",
+      _ => "Specify end point",
     },
     Tool::TangentArc => {
       if n == 0 {
-        "Select end of line or arc"
+        "Specify start point"
       } else {
-        "Place end point"
+        "Specify end point"
       }
     }
     Tool::Polygon | Tool::CircPolygon => {
       if n == 0 {
         "Place center point"
       } else {
-        "Specify radius"
+        "Place point on polygon"
       }
     }
-    Tool::EdgePolygon => {
-      if n == 0 {
-        "Place first point"
-      } else {
-        "Specify edge length"
-      }
-    }
-    Tool::Slot => match n {
-      0 => "Place first center point",
-      1 => "Place second center point",
-      _ => "Specify width",
-    },
-    Tool::OverallSlot => match n {
+    Tool::EdgePolygon => match n {
       0 => "Place first point",
       1 => "Place second point",
-      _ => "Specify width",
+      _ => "Specify the side of the polygon",
+    },
+    Tool::Slot => match n {
+      0 => "Select start center point",
+      1 => "Select end center point",
+      _ => "Select point on slot",
+    },
+    Tool::OverallSlot => match n {
+      0 => "Select start point",
+      1 => "Select end point",
+      _ => "Select point on slot",
     },
     Tool::CenterSlot => match n {
-      0 => "Place center point",
-      1 => "Place end point",
-      _ => "Specify width",
+      0 => "Select center",
+      1 => "Select second point",
+      _ => "Select point on slot",
     },
     Tool::ArcSlot3 => match n {
-      0 => "Place start point",
-      1 => "Place point on arc",
-      2 => "Place end point",
-      _ => "Specify width",
+      0 => "Select start center point",
+      1 => "Select end center point",
+      2 => "Select point on arc",
+      _ => "Select point on slot",
     },
     Tool::ArcSlotCenter => match n {
-      0 => "Place arc center point",
-      1 => "Place start point",
-      2 => "Place end point",
-      _ => "Specify width",
+      0 => "Select center point of arc",
+      1 => "Select start point of arc",
+      2 => "Select end point of arc",
+      _ => "Select point on slot",
     },
-    Tool::Point => "Place point",
+    Tool::Point => "Draw point",
     Tool::Ellipse => match n {
       0 => "Place center point",
-      1 => "Specify major axis",
-      _ => "Specify minor axis",
+      1 => "Place first axis point",
+      _ => "Place point on ellipse",
     },
     Tool::Conic => match n {
-      0 => "Place start point",
-      1 => "Place end point",
-      _ => "Specify apex",
+      0 => "Place first point on conic curve",
+      1 => "Place second point on conic curve",
+      2 => "Place vertex point of conic curve",
+      _ => "Specify rho value",
     },
     Tool::MidpointLine => {
       if n == 0 {
-        "Place midpoint"
+        "Select midpoint of line"
       } else {
-        "Place end point"
+        "Select end of line"
       }
     }
     Tool::Dimension => {
-      if state.dim_first.is_none() {
-        "Select geometry to dimension"
+      if state.dim_picks.is_empty() && state.dim_place.is_none() {
+        "Select sketch objects to dimension"
       } else {
-        "Place dimension"
+        "Select additional sketch geometry or location to place dimension"
       }
     }
     Tool::Trim => "Select curve to trim",
@@ -3050,10 +3785,15 @@ fn cursor_prompt(app: &App, resp: &egui::Response) {
     None if app.s.edit_sketch.is_some() => sketch_prompt(app.tool, &app.tstate).map(String::from),
     None => None,
   };
-  let Some(prompt) = prompt else { return };
   if !resp.contains_pointer() || app.drag.is_some() {
     return;
   }
+  // a sketch tool that places points draws with a crosshair, as Fusion's do
+  if app.dialog.is_none() && app.s.edit_sketch.is_some() && places_points(app.tool) {
+    resp.ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+  }
+  // Preferences → General → Show command prompt
+  let Some(prompt) = prompt.filter(|_| app.preferences.values.show_prompt) else { return };
   egui::Tooltip::always_open(
     resp.ctx.clone(),
     resp.layer_id,
@@ -3066,64 +3806,10 @@ fn cursor_prompt(app: &App, resp: &egui::Response) {
   });
 }
 
-/// Hints in the corner of the viewport.
-fn hud(app: &App, painter: &egui::Painter, _resp: &egui::Response, view: &View) {
-  let hint = match (app.s.edit_sketch.is_some(), app.tool) {
-    (true, Tool::Line) => {
-      "Line: click points · drag from the last point for a tangent arc · click the first point to close · Esc to end"
-    }
-    (true, Tool::Rect) => "Rectangle: click two corners",
-    (true, Tool::CenterRect) => "Centre rectangle: click the centre, then a corner",
-    (true, Tool::Circle) => "Circle: click the centre, then a point on the circle",
-    (true, Tool::Arc3) => "3-point arc: start, end, then a point on the arc",
-    (true, Tool::CenterArc) => "Centre arc: centre, start, end",
-    // Fusion's prompt once the centre (or the edge's start) is down
-    (true, Tool::Polygon | Tool::CircPolygon | Tool::EdgePolygon) if !app.tstate.pts.is_empty() => {
-      "Place point on polygon"
-    }
-    (true, Tool::Polygon) => "Polygon: centre, then a vertex",
-    (true, Tool::Slot) => "Slot: first centre, second centre, then the width",
-    (true, Tool::Point) => "Point: click to place",
-    (true, Tool::Spline) => "Spline: click fit points · click the last point again or Enter to finish",
-    (true, Tool::Trim) => "Select curve section to trim · drag across curves to trim each one",
-    (true, Tool::Extend) => "Extend: click near the end of a line to extend it to the next curve",
-    (true, Tool::Rect3) => "3-point rectangle: two corners along one side, then the height",
-    (true, Tool::Circle2P) => "2-point circle: the two ends of a diameter",
-    (true, Tool::Circle3P) => "3-point circle: three points on the circle",
-    (true, Tool::TangentArc) => "Tangent arc: click the end of a line or arc, then the arc's end",
-    (true, Tool::CircPolygon) => "Circumscribed polygon: centre, then the middle of a side",
-    (true, Tool::EdgePolygon) => "Edge polygon: the two ends of one side",
-    (true, Tool::OverallSlot) => "Overall slot: the two ends, then the width",
-    (true, Tool::CenterSlot) => "Centre point slot: centre, one end, then the width",
-    (true, Tool::ArcSlot3) => "3-point arc slot: start, a point on the arc, end, then the width",
-    (true, Tool::ArcSlotCenter) => "Centre point arc slot: arc centre, start, end, then the width",
-    (true, Tool::ControlSpline) => {
-      "Control point spline: click control points · click the last again or Enter to finish"
-    }
-    (true, Tool::Ellipse) => "Ellipse: centre, end of the major axis, then a point on the ellipse",
-    (true, Tool::Conic) => "Conic: start, end, then the apex it bends towards",
-    (true, Tool::MidpointLine) => "Midpoint line: the midpoint, then one end",
-    (true, Tool::Dimension) => "Dimension: click a line, circle or arc — or a point then a point/line",
-    (true, Tool::Select) => "Select / drag points · Del deletes · constraints apply to the selection",
-    (true, Tool::Break) => "Break: click a curve to split it at its crossings (or where you click)",
-    (true, Tool::Circle2T) => match app.tstate.curves.len() {
-      0 | 1 => "2-tangent circle: click two lines, circles or arcs",
-      _ => "2-tangent circle: click to place it (the size follows the cursor)",
-    },
-    (true, Tool::Circle3T) => "3-tangent circle: click three lines, circles or arcs near where it should touch",
-    (true, Tool::Blend) => "Blend curve: click near the ends of two curves · Shift+click for G2 (curvature continuous)",
-    (false, _) => return,
-  };
-  if app.status.is_some() || !app.preferences.values.show_prompt {
-    return;
-  }
-  painter.text(
-    view.rect.left_bottom() + Vec2::new(12.0, -48.0),
-    egui::Align2::LEFT_BOTTOM,
-    hint,
-    egui::FontId::proportional(12.0),
-    Color32::from_gray(90),
-  );
+/// The sketch tools that place points with the cursor (a crosshair), rather than pick curves
+/// or select.
+fn places_points(tool: Tool) -> bool {
+  !matches!(tool, Tool::Select | Tool::Dimension | Tool::Trim | Tool::Extend) && !tool.picks_curves()
 }
 
 // ---------------------------------------------------------------- sketch plane picking
@@ -3502,13 +4188,292 @@ mod tests {
   fn the_sketch_prompt_follows_the_tools_step() {
     let mut st = ToolState::default();
     assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Place first corner"));
-    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Select line, circle, or arc"));
+    assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Select first tangent of circle"));
     assert_eq!(sketch_prompt(Tool::Select, &st), None);
     st.pts.push([0.0, 0.0]);
     assert_eq!(sketch_prompt(Tool::Rect, &st), Some("Specify size of rectangle"));
     assert_eq!(sketch_prompt(Tool::Circle, &st), Some("Specify diameter"));
     st.curves = vec![(1, [0.0, 0.0]), (2, [1.0, 0.0])];
     assert_eq!(sketch_prompt(Tool::Circle2T, &st), Some("Specify diameter"));
+  }
+
+  /// The per-step prompts Fusion shows for the create tools (observed 2026-10-21), and the
+  /// Dimension tool's two steps.
+  #[test]
+  fn the_create_tools_prompt_as_fusion_does() {
+    let steps = |tool: Tool| -> Vec<&'static str> {
+      let mut st = ToolState::default();
+      let mut out = Vec::new();
+      for _ in 0..4 {
+        out.push(sketch_prompt(tool, &st).unwrap());
+        st.pts.push([0.0, 0.0]);
+      }
+      out.dedup();
+      out
+    };
+    assert_eq!(steps(Tool::MidpointLine), ["Select midpoint of line", "Select end of line"]);
+    assert_eq!(steps(Tool::Rect3), ["Place first corner", "Place second corner", "Place third corner"]);
+    assert_eq!(steps(Tool::CenterRect), ["Place center point", "Specify size of rectangle"]);
+    assert_eq!(
+      steps(Tool::Circle3P),
+      ["Place first point on circle", "Place second point on circle", "Place third point on circle"]
+    );
+    assert_eq!(steps(Tool::CenterArc), ["Place center point", "Specify start point", "Specify end point"]);
+    assert_eq!(steps(Tool::TangentArc), ["Specify start point", "Specify end point"]);
+    assert_eq!(steps(Tool::Polygon), ["Place center point", "Place point on polygon"]);
+    assert_eq!(
+      steps(Tool::EdgePolygon),
+      ["Place first point", "Place second point", "Specify the side of the polygon"]
+    );
+    assert_eq!(steps(Tool::Ellipse), ["Place center point", "Place first axis point", "Place point on ellipse"]);
+    assert_eq!(steps(Tool::Slot), ["Select start center point", "Select end center point", "Select point on slot"]);
+    assert_eq!(steps(Tool::OverallSlot), ["Select start point", "Select end point", "Select point on slot"]);
+    assert_eq!(steps(Tool::CenterSlot), ["Select center", "Select second point", "Select point on slot"]);
+    assert_eq!(
+      steps(Tool::ArcSlot3),
+      ["Select start center point", "Select end center point", "Select point on arc", "Select point on slot"]
+    );
+    assert_eq!(
+      steps(Tool::ArcSlotCenter),
+      ["Select center point of arc", "Select start point of arc", "Select end point of arc", "Select point on slot"]
+    );
+    assert_eq!(steps(Tool::Spline), ["Specify first point", "Specify next point"]);
+    assert_eq!(steps(Tool::ControlSpline), ["Specify first point", "Specify next point"]);
+    assert_eq!(
+      steps(Tool::Conic),
+      [
+        "Place first point on conic curve",
+        "Place second point on conic curve",
+        "Place vertex point of conic curve",
+        "Specify rho value"
+      ]
+    );
+    assert_eq!(steps(Tool::Point), ["Draw point"]);
+    let mut st = ToolState::default();
+    assert_eq!(sketch_prompt(Tool::Dimension, &st), Some("Select sketch objects to dimension"));
+    st.dim_picks.push(Pick::SketchPoint { sketch: FeatureId(1), point: PointId(1) });
+    assert_eq!(
+      sketch_prompt(Tool::Dimension, &st),
+      Some("Select additional sketch geometry or location to place dimension")
+    );
+    // the point-placing tools draw with a crosshair; selecting and curve picking don't
+    assert!(places_points(Tool::Slot) && places_points(Tool::Conic) && places_points(Tool::Point));
+    assert!(!places_points(Tool::Select) && !places_points(Tool::Dimension) && !places_points(Tool::Trim));
+  }
+
+  /// Every create tool has Fusion's heads-up boxes at the steps it shows them.
+  #[test]
+  fn every_tool_has_its_heads_up_boxes() {
+    use Field::*;
+    let f = |t: Tool, n: usize| hud_fields(t, n).to_vec();
+    assert_eq!(f(Tool::MidpointLine, 1), [Length, Angle]);
+    assert_eq!(f(Tool::Rect3, 1), [Length]);
+    assert_eq!(f(Tool::Rect3, 2), [Width]);
+    assert_eq!(f(Tool::CenterRect, 1), [Width, Height]);
+    assert_eq!(f(Tool::Circle2P, 1), [Diameter]);
+    assert_eq!((f(Tool::Circle3P, 1), f(Tool::Circle3P, 2)), (vec![], vec![Diameter]));
+    assert_eq!((f(Tool::CenterArc, 1), f(Tool::CenterArc, 2)), (vec![Radius], vec![Angle]));
+    assert_eq!(f(Tool::TangentArc, 1), [Radius]);
+    assert_eq!(f(Tool::Polygon, 1), [Radius, Sides]);
+    assert_eq!(f(Tool::EdgePolygon, 1), [Length, Sides]);
+    assert_eq!((f(Tool::Ellipse, 1), f(Tool::Ellipse, 2)), (vec![Length], vec![Length]));
+    for slot in [Tool::Slot, Tool::OverallSlot, Tool::CenterSlot] {
+      assert_eq!((f(slot, 1), f(slot, 2)), (vec![Length], vec![Width]), "{slot:?}");
+    }
+    assert_eq!(
+      (f(Tool::ArcSlotCenter, 1), f(Tool::ArcSlotCenter, 2), f(Tool::ArcSlotCenter, 3)),
+      (vec![Radius], vec![Angle], vec![Width])
+    );
+    assert_eq!(
+      (f(Tool::ArcSlot3, 1), f(Tool::ArcSlot3, 2), f(Tool::ArcSlot3, 3)),
+      (vec![Length], vec![Radius], vec![Width])
+    );
+    assert_eq!((f(Tool::Conic, 2), f(Tool::Conic, 3)), (vec![], vec![Rho]));
+    assert!(f(Tool::Spline, 1).is_empty() && f(Tool::Point, 0).is_empty());
+    assert_eq!(hud_display(fox_engine::model::LengthUnit::In, Rho, 0.75), "0.75");
+    // the live values: a midpoint line's whole length, a slot's width across its axis, a centre
+    // arc slot's sweep
+    let (mut app, sk) = sketching(Tool::MidpointLine);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    let [len, ang] = hud_live(&app, [3.0, 4.0]);
+    assert!((len - 10.0).abs() < 1e-9 && (ang - 53.1301).abs() < 1e-3, "{len} {ang}");
+    let (mut app, sk) = sketching(Tool::Slot);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    assert_eq!(hud_live(&app, [10.0, 0.0])[0], 10.0);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    assert_eq!(hud_live(&app, [5.0, 2.0])[0], 4.0);
+    let (mut app, sk) = sketching(Tool::ArcSlotCenter);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    assert!((hud_live(&app, [0.0, 10.0])[0] - 90.0).abs() < 1e-9);
+  }
+
+  /// Typed heads-up values hold the shape to them and lock it with dimensions: a midpoint line's
+  /// length, a 2-point circle's diameter, a centre arc's radius, and a slot's length typed at
+  /// the first step then its width at the second (held until the slot is drawn).
+  #[test]
+  fn typed_values_of_the_other_tools_hold_and_lock() {
+    let (mut app, sk) = sketching(Tool::MidpointLine);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["40", ""]);
+    assert_eq!(hud_apply(&app, [3.0, 0.0]), [20.0, 0.0], "half the typed length from the midpoint");
+    place_point(&mut app, sk, [3.0, 0.0], None);
+    assert_eq!(dims(&app, sk), vec![40.0]);
+    let (lo, hi) = app.s.design.sketch(sk).unwrap().bounds().unwrap();
+    assert!((lo[0] + 20.0).abs() < 1e-6 && (hi[0] - 20.0).abs() < 1e-6, "{lo:?} {hi:?}");
+
+    let (mut app, sk) = sketching(Tool::Circle2P);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["12", ""]);
+    place_point(&mut app, sk, [1.0, 0.0], None);
+    assert_eq!(dims(&app, sk), vec![12.0]);
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Diameter { .. })));
+
+    let (mut app, sk) = sketching(Tool::CenterArc);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    typed(&mut app, ["5", ""]);
+    place_point(&mut app, sk, [3.0, 0.0], None);
+    assert_eq!(app.tstate.pts, vec![[0.0, 0.0], [5.0, 0.0]], "the start is held at the typed radius");
+    place_point(&mut app, sk, [0.0, 5.0], None);
+    assert_eq!(dims(&app, sk), vec![5.0]);
+    assert!(
+      app.s.design.sketch(sk).unwrap().constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. }))
+    );
+
+    // a typed rho shapes the conic; so does the arrow
+    let (mut app, sk) = sketching(Tool::Conic);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    place_point(&mut app, sk, [5.0, 10.0], None);
+    assert_eq!(app.tstate.pts.len(), 3, "the vertex click leaves the conic shaping");
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty());
+    assert_eq!(conic_rho(&app), CONIC_RHO);
+    typed(&mut app, ["0.3", ""]);
+    assert_eq!(conic_rho(&app), 0.3);
+    assert!(accept_tool(&mut app), "Enter commits the conic");
+    let s = app.s.design.sketch(sk).unwrap();
+    assert!(
+      matches!(s.curves[0].kind, CurveKind::Conic { rho, .. } if (rho - 0.3).abs() < 1e-12),
+      "{:?}",
+      s.curves[0].kind
+    );
+    assert!(app.tstate.is_empty());
+  }
+
+  /// An edge polygon's third click picks the side; a 3-point arc slot's clicks run start, end,
+  /// then a point on the arc, as in Fusion.
+  #[test]
+  fn edge_polygon_side_and_arc_slot_click_order() {
+    let (mut app, sk) = sketching(Tool::EdgePolygon);
+    place_point(&mut app, sk, [0.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    assert!(app.s.design.sketch(sk).unwrap().curves.is_empty(), "two clicks don't draw it yet");
+    place_point(&mut app, sk, [5.0, -3.0], None);
+    let (lo, _) = app.s.design.sketch(sk).unwrap().bounds().unwrap();
+    assert!(lo[1] < -1.0, "the polygon went below the edge, where the third click was: {lo:?}");
+
+    let (mut app, sk) = sketching(Tool::ArcSlot3);
+    place_point(&mut app, sk, [-10.0, 0.0], None);
+    place_point(&mut app, sk, [10.0, 0.0], None);
+    place_point(&mut app, sk, [0.0, 10.0], None);
+    place_point(&mut app, sk, [0.0, 12.0], None);
+    let s = app.s.design.sketch(sk).unwrap();
+    let arcs: Vec<_> = s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).collect();
+    assert!(!arcs.is_empty());
+    // the slot's long arcs are about the origin (the circle through the three clicks)
+    let about_origin = arcs.iter().filter(|c| {
+      let centre = s.pos(s.curve_points(c.id)[0]).unwrap();
+      centre[0].abs() < 1e-6 && centre[1].abs() < 1e-6
+    });
+    assert_eq!(about_origin.count(), 2);
+  }
+
+  /// The Dimension tool: a pick starts a preview that follows the cursor, the placing click opens
+  /// the box with the full value and its unit, Escape keeps the dimension; a radius previews as
+  /// "R0.228"; picking more geometry while placing changes the dimension.
+  #[test]
+  fn dimension_tool_places_before_it_asks_for_the_value() {
+    let (mut app, sk) = sketching(Tool::Dimension);
+    app.s.design.units = fox_engine::model::LengthUnit::In;
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [12.161108, 0]]})).unwrap();
+    app.run("sketch.line", json!({"sketch": sk.0, "points": [[0, 0], [0, 10]]})).unwrap();
+    app
+      .run("sketch.arc", json!({"sketch": sk.0, "center": [30, 0], "start": [35.7912, 0], "end": [30, 5.7912]}))
+      .unwrap();
+    let s = app.s.design.sketch(sk).unwrap().clone();
+    let ids: Vec<_> = s.curves.iter().map(|c| c.id).collect();
+    let pick = |c| Pick::SketchCurve { sketch: sk, curve: c };
+    // the line: picked, previewed, placed
+    app.hover = Some(pick(ids[0]));
+    dimension_click(&mut app, Pos2::new(100.0, 100.0), false);
+    assert!(app.dim_edit.is_none(), "no box yet: the dimension follows the cursor");
+    let place = app.tstate.dim_place.as_ref().unwrap();
+    assert!(matches!(place.kind, ConstraintKind::Distance { .. }));
+    assert_eq!(
+      sketch_prompt(Tool::Dimension, &app.tstate),
+      Some("Select additional sketch geometry or location to place dimension")
+    );
+    app.hover = None;
+    app.tstate.hud.cursor = Some(([6.0, -8.0], None));
+    dimension_click(&mut app, Pos2::new(120.0, 140.0), false);
+    let (cid, text, _) = app.dim_edit.clone().unwrap();
+    assert_eq!((cid, text.as_str()), (0, "0.4787837795 in"), "the full value with its unit");
+    assert_eq!(app.tstate.dim_place.as_ref().unwrap().placed, Some([6.0, -8.0]));
+    // Escape keeps it at that value
+    settle_dim_edit(&mut app);
+    assert!(app.dim_edit.is_none() && app.tstate.is_empty());
+    assert!((dims(&app, sk)[0] - 12.161108).abs() < 1e-6, "{:?}", dims(&app, sk));
+    // an arc previews its radius with an R; its placed shape leads out to the cursor
+    app.hover = Some(pick(ids[2]));
+    dimension_click(&mut app, Pos2::new(100.0, 100.0), false);
+    let place = app.tstate.dim_place.as_ref().unwrap();
+    assert!(matches!(place.kind, ConstraintKind::Radius { .. }));
+    assert_eq!(format!("R{}", fixed_number(app.s.design.units, place.current.unwrap())), "R0.228");
+    let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, -p[1] as f32));
+    let shape = dim_shape_at(&s, &place.kind, [50.0, 20.0], Vec2::new(40.0, 16.0), 1.0, &to_screen).unwrap();
+    assert_eq!(shape.label, Pos2::new(50.0, -20.0), "the value sits at the cursor");
+    // picking the other line while placing turns it into an angle between the two lines
+    reset_tool_state(&mut app);
+    app.hover = Some(pick(ids[0]));
+    dimension_click(&mut app, Pos2::new(100.0, 100.0), false);
+    app.hover = Some(pick(ids[1]));
+    dimension_click(&mut app, Pos2::new(100.0, 100.0), false);
+    let place = app.tstate.dim_place.as_ref().unwrap();
+    assert!(matches!(place.kind, ConstraintKind::Angle { .. }), "{:?}", place.kind);
+    assert!((place.current.unwrap() - 90.0).abs() < 1e-9);
+    assert_eq!(dim_full_text(fox_engine::model::LengthUnit::Mm, true, 90.0), "90 deg");
+    // a linear dimension placed below the line sits on that side, at the cursor's offset
+    let s = app.s.design.sketch(sk).unwrap();
+    let d = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Distance { .. })).unwrap();
+    let shape = dim_shape_at(s, &d.kind, [6.0, -8.0], Vec2::new(40.0, 16.0), 1.0, &to_screen).unwrap();
+    assert!(
+      (shape.label.y - 8.0).abs() < 1e-3,
+      "the dimension line runs through the cursor's level: {:?}",
+      shape.label
+    );
+  }
+
+  /// A spline previews as the curve itself (not a polyline through the clicks), with its check
+  /// mark under it; Escape discards it and Enter commits it (both kinds).
+  #[test]
+  fn spline_previews_the_curve_and_enter_commits_it() {
+    for tool in [Tool::Spline, Tool::ControlSpline] {
+      let (mut app, sk) = sketching(tool);
+      app.tstate.pts = vec![[0.0, 0.0], [10.0, 10.0], [20.0, 0.0]];
+      let bz = spline_beziers(&app, tool, &app.tstate.pts);
+      assert!(!bz.is_empty(), "{tool:?}");
+      let curve = flatten_beziers(&bz);
+      assert!(curve.len() > 16, "{tool:?}: the curve itself, not a polyline through the clicks");
+      if tool == Tool::Spline {
+        // a fit spline passes through its clicks
+        assert!(curve.iter().any(|p| (p[0] - 10.0).abs() < 1e-6 && (p[1] - 10.0).abs() < 1e-6), "{tool:?}");
+      }
+      assert!(accept_tool(&mut app), "Enter commits");
+      assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), 1);
+      assert!(app.tstate.is_empty());
+      assert!(!accept_tool(&mut app), "nothing left to commit");
+    }
   }
 
   #[test]
@@ -3693,7 +4658,7 @@ mod tests {
     // the labels show inches
     let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
     let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
-    assert_eq!(label, "2");
+    assert_eq!(label, "2.000", "labels read at the document precision");
   }
 
   #[test]
@@ -3791,6 +4756,8 @@ mod tests {
     assert_eq!(hud_fields(app.tool, 1), &[Field::Length, Field::Sides]);
     typed(&mut app, ["10", "4"]);
     place_point(&mut app, sk, [1.0, 0.0], None);
+    // the third click picks the polygon's side; the typed values are held until then
+    place_point(&mut app, sk, [5.0, 3.0], None);
     let s = app.s.design.sketch(sk).unwrap();
     assert_eq!(s.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count(), 4);
     assert_eq!(dims(&app, sk), vec![10.0]);
@@ -3843,7 +4810,7 @@ mod tests {
     let s = app.s.design.sketch(sk).unwrap();
     let c = s.constraints.iter().find(|c| c.kind.dim().is_some()).unwrap();
     let (_, label) = dim_label(s, &c.kind, c.kind.dim().unwrap(), app.s.design.units).unwrap();
-    assert_eq!(label, "⌀12");
+    assert_eq!(label, "⌀12.00");
     // sketch units are screen points
     let to_screen = |p: [f64; 2]| Some(Pos2::new(p[0] as f32, p[1] as f32));
     let shape = dim_shape(s, &c.kind, c.kind.dim().unwrap(), Vec2::new(30.0, 16.0), 1.0, &to_screen).unwrap();

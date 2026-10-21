@@ -335,6 +335,9 @@ pub struct Marker {
   pub size: f32,
   pub id: u32,
   pub on_top: bool,
+  /// An open circle: a one-pixel ring in `color` around a white disc (Fusion's sketch point),
+  /// instead of a filled disc.
+  pub hollow: bool,
 }
 
 /// Fusion's visual styles (Display Settings ▸ Visual Style): how body surfaces and their edges
@@ -1232,6 +1235,9 @@ fn rasterize_line(l: &Polyline, vp: &DMat4, width: u32, height: u32, put: &mut d
   }
 }
 
+/// The inside of a hollow marker.
+const MARKER_FILL: [u8; 4] = [255, 255, 255, 255];
+
 fn draw_marker(f: &mut Frame, m: &Marker, vp: &DMat4) {
   let p = DVec3::new(m.at[0] as f64, m.at[1] as f64, m.at[2] as f64);
   let c = *vp * p.extend(1.0);
@@ -1244,8 +1250,11 @@ fn draw_marker(f: &mut Frame, m: &Marker, vp: &DMat4) {
   let r = m.size.clamp(1.0, 12.0) as i64;
   for oy in -r..=r {
     for ox in -r..=r {
-      if ox * ox + oy * oy <= r * r {
-        plot(f, x as i64 + ox, y as i64 + oy, z, m.color, m.id, m.on_top);
+      let d2 = ox * ox + oy * oy;
+      if d2 <= r * r {
+        // a hollow marker's inside is white; its ring is the outermost pixel of the disc
+        let color = if m.hollow && d2 <= (r - 1) * (r - 1) { MARKER_FILL } else { m.color };
+        plot(f, x as i64 + ox, y as i64 + oy, z, color, m.id, m.on_top);
       }
     }
   }
@@ -1321,6 +1330,26 @@ mod tests {
     cam.set_view(StandardView::Bottom);
     let f = render(&scene, &cam, 200, 100);
     assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 1);
+  }
+
+  /// A hollow marker is a ring of its colour around a white disc (Fusion's sketch point); it
+  /// still picks across the whole disc.
+  #[test]
+  fn hollow_markers_are_rings_around_white() {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Top);
+    cam.distance = 100.0;
+    let marker =
+      |hollow| Marker { at: [0.0, 0.0, 0.0], color: [0, 0, 255, 255], size: 4.0, id: 7, on_top: true, hollow };
+    let f = render(&Scene { markers: vec![marker(true)], ..Default::default() }, &cam, 200, 100);
+    fn px(f: &Frame, x: usize, y: usize) -> &[u8] {
+      &f.rgba[(y * 200 + x) * 4..(y * 200 + x) * 4 + 3]
+    }
+    assert_eq!(px(&f, 100, 50), &[255, 255, 255], "white inside");
+    assert_eq!(px(&f, 104, 50), &[0, 0, 255], "the ring at the disc's edge");
+    assert_eq!(f.pick(100.0, 50.0, 0, |_| true), 7, "the inside still picks");
+    let f = render(&Scene { markers: vec![marker(false)], ..Default::default() }, &cam, 200, 100);
+    assert_eq!(px(&f, 100, 50), &[0, 0, 255], "a filled marker is solid");
   }
 
   #[test]

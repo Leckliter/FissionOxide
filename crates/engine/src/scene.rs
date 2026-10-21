@@ -441,6 +441,7 @@ impl SceneBuilder {
         size: 5.0,
         id: 0,
         on_top: true,
+        hollow: false,
       });
     }
     for (_, helix) in &s.model.threads {
@@ -716,6 +717,7 @@ fn sketch_lines(
     // a text's glyph points are its own business: only its anchor is shown
     let glyph_points: std::collections::HashSet<PointId> =
       sk.texts.iter().flat_map(|t| t.points.iter().copied()).collect();
+    let joined = joined_points(sk);
     for p in sk.points.iter().filter(|p| !glyph_points.contains(&p.id)) {
       let pick = Pick::SketchPoint { sketch: sid, point: p.id };
       let color = if selected.contains(&pick) {
@@ -729,9 +731,34 @@ fn sketch_lines(
       } else {
         SKETCH_FIXED
       };
-      scene.markers.push(Marker { at: w([p.x, p.y]), color, size: 3.0, id: picks.id(pick), on_top: true });
+      // Fusion's sketch point: a small open circle, filled once it is tied to other geometry
+      let hollow = p.id != fox_sketch::ORIGIN && !joined.contains(&p.id);
+      scene.markers.push(Marker { at: w([p.x, p.y]), color, size: 3.0, id: picks.id(pick), on_top: true, hollow });
     }
   }
+}
+
+/// The sketch points Fusion draws filled: those shared by two or more curves (coincident ends),
+/// and those a coincident, point-on-curve or midpoint constraint ties down.
+pub fn joined_points(sk: &Sketch) -> std::collections::HashSet<PointId> {
+  let mut uses: HashMap<PointId, usize> = HashMap::new();
+  for c in &sk.curves {
+    for p in fox_sketch::curve_points(&c.kind) {
+      *uses.entry(p).or_default() += 1;
+    }
+  }
+  let mut out: std::collections::HashSet<PointId> = uses.into_iter().filter(|(_, n)| *n > 1).map(|(p, _)| p).collect();
+  for c in &sk.constraints {
+    if matches!(
+      c.kind,
+      fox_sketch::ConstraintKind::Coincident { .. }
+        | fox_sketch::ConstraintKind::PointOnCurve { .. }
+        | fox_sketch::ConstraintKind::Midpoint { .. }
+    ) {
+      out.extend(c.kind.points());
+    }
+  }
+  out
 }
 
 /// Flattened curve in sketch coordinates.
@@ -1327,7 +1354,14 @@ fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &
       } else {
         (VERTEX_COLOR, 3.0)
       };
-      scene.markers.push(Marker { at: p.as_vec3().to_array(), color, size, id: picks.id(pick), on_top: false });
+      scene.markers.push(Marker {
+        at: p.as_vec3().to_array(),
+        color,
+        size,
+        id: picks.id(pick),
+        on_top: false,
+        hollow: false,
+      });
     }
   }
 }

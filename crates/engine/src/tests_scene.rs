@@ -235,3 +235,22 @@ fn profiles_shade_blue_outside_and_pale_inside_the_sketch() {
   s.selection = vec![crate::Sel::Profile { sketch: crate::model::FeatureId(sk), index: 0 }];
   assert_eq!(profile_color(&mut b, &s), scene::PROFILE_SELECTED);
 }
+
+/// Sketch points draw as open circles, filled once two curves share them or a constraint ties
+/// them (Fusion's coincident look); the origin stays a filled dot.
+#[test]
+fn sketch_points_draw_hollow_until_joined() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.line", json!({"points": [[5, 5], [15, 5]]}));
+  run(&mut s, "sketch.line", json!({"points": [[15, 5], [15, 15]]}));
+  run(&mut s, "sketch.point", json!({"at": [20, 20]}));
+  let sk = s.edit_sketch.unwrap();
+  let joined = scene::joined_points(s.design.sketch(sk).unwrap());
+  assert_eq!(joined.len(), 1, "{joined:?}");
+  let (scene, picks) = SceneBuilder::default().build(&s, &ViewOptions::default());
+  let points: Vec<_> =
+    scene.markers.iter().filter(|m| matches!(picks.get(m.id), Some(Pick::SketchPoint { .. }))).collect();
+  assert_eq!(points.len(), 5, "origin, three line ends, one point");
+  assert_eq!(points.iter().filter(|m| m.hollow).count(), 3, "the shared corner and the origin are filled");
+}

@@ -66,7 +66,7 @@ pub struct MeshChunk {
 /// and how far along its polyline it starts (world units, for the dash pattern).
 pub const LINE_STRIDE: usize = 12;
 /// Floats per marker: position, colour bits, id bits, radius (px).
-pub const MARKER_STRIDE: usize = 6;
+pub const MARKER_STRIDE: usize = 7;
 
 /// A mesh as GPU vertices: each vertex carries its triangle's pick id. The indices hold the
 /// full triangles in chunk order, then every chunk's levels of detail.
@@ -438,6 +438,7 @@ pub fn markers(markers: &[Marker]) -> Instances {
       color_bits(m.color),
       f32::from_bits(m.id),
       r,
+      if m.hollow { 1.0 } else { 0.0 },
     ]);
   }
   let mut i = grouped(parts, MARKER_STRIDE);

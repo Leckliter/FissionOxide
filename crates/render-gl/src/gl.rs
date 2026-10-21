@@ -226,14 +226,17 @@ layout(location = 1) in vec3 a_at;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in uint a_id;
 layout(location = 4) in float a_r;
+layout(location = 5) in float a_hollow;
 out vec4 v_color;
 flat out uint v_id;
 flat out vec2 v_center;
 flat out float v_r;
+flat out float v_hollow;
 void main() {
   v_color = a_color;
   v_id = a_id;
   v_r = a_r;
+  v_hollow = a_hollow;
   v_center = vec2(0.0);
   vec4 c = u_vp * vec4(a_at, 1.0);
   if (c.w <= 1e-9) {
@@ -254,6 +257,7 @@ in vec4 v_color;
 flat in uint v_id;
 flat in vec2 v_center;
 flat in float v_r;
+flat in float v_hollow;
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
 ID_COLOR
@@ -261,7 +265,8 @@ void main() {
   vec2 p = vec2(floor(gl_FragCoord.x), u_size.y - 1.0 - floor(gl_FragCoord.y));
   vec2 d = p - v_center;
   if (dot(d, d) > v_r * v_r) discard;
-  o_color = v_color;
+  // a hollow marker's inside is white; its ring is the outermost pixel of the disc, as on the CPU
+  o_color = (v_hollow > 0.5 && dot(d, d) <= (v_r - 1.0) * (v_r - 1.0)) ? vec4(1.0, 1.0, 1.0, v_color.a) : v_color;
   o_id = id_color(v_id);
 }
 "#;
@@ -1301,6 +1306,7 @@ fn marker_attribs(gl: &Gl, offset: i32) {
     gl.vertex_attrib_pointer_f32(2, 4, glow::UNSIGNED_BYTE, true, s, offset + 12);
     gl.vertex_attrib_pointer_i32(3, 1, glow::UNSIGNED_INT, s, offset + 16);
     gl.vertex_attrib_pointer_f32(4, 1, glow::FLOAT, false, s, offset + 20);
+    gl.vertex_attrib_pointer_f32(5, 1, glow::FLOAT, false, s, offset + 24);
   }
 }
 
@@ -1311,7 +1317,7 @@ fn upload_instances(
   stride: usize,
   attribs: AttribFn,
 ) -> Result<GpuInstances, String> {
-  let n_attribs = if stride == MARKER_STRIDE { 4 } else { 5 };
+  let n_attribs = 5;
   unsafe {
     let vao = gl.create_vertex_array()?;
     let vbo = gl.create_buffer()?;

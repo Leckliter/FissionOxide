@@ -584,6 +584,38 @@ fn enter_on_typed_values_ends_the_rectangle_tool() {
   assert!(h.app.tstate.is_empty());
 }
 
+/// Escape discards an unfinished spline of either kind and Enter commits it, as in Fusion (no
+/// kind commits on Escape).
+#[test]
+fn escape_discards_a_spline_and_enter_commits_it() {
+  use crate::viewport::Tool;
+  for tool in [Tool::Spline, Tool::ControlSpline] {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", serde_json::json!({"plane": "xy"})).unwrap();
+    let sk = h.app.s.edit_sketch.unwrap();
+    h.app.cam.set_view(fox_engine::render::StandardView::Top);
+    h.app.set_tool(tool);
+    let c = h.app.canvas.center();
+    let draw = |h: &mut Harness| {
+      h.move_then_click(c);
+      h.move_then_click(c + vec2(80.0, -60.0));
+      h.move_then_click(c + vec2(160.0, -10.0));
+      assert!(!h.app.tstate.is_empty(), "{tool:?}: three points are down");
+      assert!(h.app.s.design.sketch(sk).unwrap().curves.is_empty(), "{tool:?}: nothing drawn yet");
+    };
+    draw(&mut h);
+    h.frame(vec![key(egui::Key::Escape)]);
+    h.frame(vec![]);
+    assert!(h.app.s.design.sketch(sk).unwrap().curves.is_empty(), "{tool:?}: Escape discards the spline");
+    assert!(h.app.tstate.is_empty() && h.app.tool == tool, "{tool:?}: the tool stays");
+    draw(&mut h);
+    h.frame(vec![key(egui::Key::Enter)]);
+    h.frame(vec![]);
+    assert_eq!(h.app.s.design.sketch(sk).unwrap().curves.len(), 1, "{tool:?}: Enter commits the spline");
+    assert!(h.app.tstate.is_empty());
+  }
+}
+
 /// The browser's Origin folder is hidden by default; its bulb shows the three origin planes in
 /// the canvas (and the scene's short axes), each about 120 px wide.
 #[test]

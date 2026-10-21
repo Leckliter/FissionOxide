@@ -926,11 +926,12 @@ impl App {
       } else if self.marking.is_some() {
         self.marking = None;
       } else if self.dim_edit.is_some() {
-        self.dim_edit = None;
+        // a new dimension stays at its current value, as in Fusion
+        viewport::settle_dim_edit(self);
       } else if self.nav_mode.is_some() {
         self.nav_mode = None;
-      } else if self.tool == Tool::Spline && viewport::finish_spline(self) {
       } else if !self.tstate.is_empty() {
+        // an unfinished spline is discarded (Enter or its check mark commits it)
         self.end_hint();
         viewport::reset_tool_state(self);
       } else if self.tool != Tool::Select {
@@ -959,8 +960,9 @@ impl App {
       self.command_keys(ctx, false);
       return;
     }
-    if self.tool == Tool::Spline && pressed(Key::Enter, Modifiers::NONE) {
-      viewport::finish_spline(self);
+    // Enter commits the spline being drawn or the conic being shaped
+    if matches!(self.tool, Tool::Spline | Tool::ControlSpline | Tool::Conic) && pressed(Key::Enter, Modifiers::NONE) {
+      viewport::accept_tool(self);
     }
     // Ctrl+C, Ctrl+V and Ctrl+Shift+V (Paste New); the window delivers them as Copy and Paste
     // events rather than keys
