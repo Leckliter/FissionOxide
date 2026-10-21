@@ -156,8 +156,8 @@ pub fn is_valid_parameter_name(name: &str) -> bool {
 }
 
 const FUNCTIONS: &[&str] = &[
-  "sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil", "if", "and",
-  "or", "not",
+  "sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil", "if", "and", "or",
+  "not",
 ];
 
 /// Unit multiplier into base units (mm, rad).
