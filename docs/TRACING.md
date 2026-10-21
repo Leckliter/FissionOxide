@@ -3,7 +3,8 @@
 Status: pieces 1–5 below are built (`crates/trace`, `crates/exchange/src/svg.rs`,
 `crates/engine/src/trace.rs`, `crates/ui/src/trace.rs`; centre lines in
 `crates/trace/src/centerline.rs`, constraint inference in `crates/sketch/src/infer.rs`, canvases
-in `crates/engine/src/canvas.rs` and `crates/ui/src/canvas_ui.rs`); section 6 is what's left.
+in `crates/engine/src/canvas.rs` and `crates/ui/src/canvas_ui.rs`, the kerf check in
+`crates/trace/src/kerf.rs`). Nothing in it is left to do.
 
 Turn a photo, logo or scan into clean, closed sketch geometry inside FissionOxide — the job the
 separate TracingKit tool was meant to do for Fusion 360, without the SVG round trip. In Fusion a
@@ -29,6 +30,8 @@ finder confirms that every shape is a closed region before you extrude, flange o
      splines (smoothest, fewest entities).
    - **Size**: width in model units (height follows), and where the image centre sits (taken
      from the canvas when tracing one).
+   - **Kerf / tool** (off when empty): the width of the cut; spots it can't make are ringed in
+     red on the sketch.
    - **Add constraints** (on by default): horizontal, vertical, tangent, coincident, equal and
      concentric constraints where the traced geometry makes them unambiguous.
 4. The dialog reports *N shapes (M holes), K curves, all closed* (or *N strokes, ≈ W mm wide*)
@@ -106,12 +109,13 @@ Useful on its own (the roadmap already lists it) and for anyone who already has 
 ```
 {sketch?, image: path | canvas: feature, mode?: "outline"|"colors"|"centerline", threshold?,
  colors?, layers?: [index], invert?, blur?, specks?, holes?, tolerance?, corners?,
- fit?: "lines"|"arcs"|"curves", spurs?, constraints?: bool, width? | height? (expressions) | scale?,
+ fit?: "lines"|"arcs"|"curves", spurs?, constraints?: bool, kerf? (expression),
+ width? | height? (expressions) | scale?,
  at?: [x, y], angle?}
 → {curves: [id], shapes, holes, layers: [{index, color, background, shapes, holes, strokes}],
    size: [w, h], pixels: [w, h], profiles, ink: [[x, y]], ink_profiles: [index], at, angle,
    strokes?, stroke_width?, constraints?: [id], constraint_counts?: {kind: n},
-   constraint_warning?, warning?}
+   constraint_warning?, narrow?: [{layer, kind, at, width, area}], kerf_warning?, warning?}
 ```
 
 The trace becomes a temporary `Sketch` (as `sketch.insert` does with a DXF), and is merged with
@@ -189,9 +193,31 @@ curve, coincident, vertical, horizontal), so inference never leaves a sketch fai
 too big for the solver gets none and a `constraint_warning`. A sketch whose own constraints
 already fail is left alone.
 
-### 6. Later
+### 6. Kerf and minimum-feature check
 
-- **Kerf and minimum-feature check**: flag details thinner than the cutter or laser kerf.
+`kerf` (a length: a laser or plasma kerf, a waterjet stream, a router bit's diameter) checks the
+cleaned mask each non-background layer is traced from (`fox_trace::Options::kerf`, in pixels;
+the engine converts from mm with the trace's scale, known before tracing from
+`fox_trace::traced_size`). A disc of the kerf's diameter is rolled through the shapes and through
+the gaps between them — a morphological opening, from two chamfer distance transforms: the disc
+can be centred where the distance to the edge is at least its radius, and covers what lies within
+its radius of such a centre. What it can't reach is reported as a `Narrow` spot:
+
+| Kind | Where | What goes wrong |
+|------|-------|-----------------|
+| `thin_shape` | a neck or detail of a shape narrower than the kerf | engraved or pocketed with that tool it is lost; on a laser it is the size of the heat zone |
+| `small_shape` | a whole shape the disc doesn't fit in | the same, for the whole shape |
+| `narrow_gap` | a slot or gap between shapes narrower than the kerf | the cut can't get in: the gap closes up |
+| `small_hole` | a whole hole the disc doesn't fit in | the hole is lost |
+
+A round tool rounds every corner it can't get into; those slivers (smaller than a quarter of the
+disc's area) are how any round cut works and are left out, so a plain rectangle or an L reports
+nothing. Each spot has a point inside it (the one furthest from its edges), its width at its
+widest and its area; `sketch.trace` returns them in sketch millimetres where the trace landed
+(`trace.info`: centred on the image) with a `kerf_warning`. The image's outside counts as a
+shape's edge but not a gap's, so the open background around a part never reads as a narrow gap.
+Pixels quantise the check to about a pixel. Centre-line mode has no kerf check: its strokes
+are the tool path, and `stroke_width` says how wide a tool they want.
 
 ## Order of work
 
@@ -201,6 +227,6 @@ already fail is left alone.
    expected profiles (the strongest proof that everything closed).
 4. The dialog, the image overlay, menu and toolbar entries, icon.
 5. README, ROADMAP and an example (`examples/trace_logo.jsonl`).
-6. Canvas tracing, centre lines and constraint inference, with tests in `fox-trace`
-   (`tests_centerline.rs`), `fox-sketch` (`infer.rs`), the engine (`tests_trace.rs`) and the UI
+6. Canvas tracing, centre lines, constraint inference and the kerf check, with tests in
+   `fox-trace` (`tests_centerline.rs`, `tests_kerf.rs`), `fox-sketch` (`infer.rs`), the engine (`tests_trace.rs`) and the UI
    (`canvas_ui.rs`).

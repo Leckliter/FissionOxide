@@ -17,13 +17,8 @@ impl Rgb {
   /// photo never exists at full size in floating point. The caller checked the size.
   pub fn from_image(img: &Image, max_side: u32) -> Rgb {
     let (w, h) = (img.width as usize, img.height as usize);
-    let max_side = (max_side as usize).max(1);
-    let (nw, nh) = if w.max(h) <= max_side {
-      (w, h)
-    } else {
-      let s = max_side as f64 / w.max(h) as f64;
-      (((w as f64 * s).round() as usize).clamp(1, max_side), ((h as f64 * s).round() as usize).clamp(1, max_side))
-    };
+    let (nw, nh) = crate::traced_size(img.width, img.height, max_side);
+    let (nw, nh) = (nw as usize, nh as usize);
     let wx = weights(w, nw);
     // for each source row (top down): the output rows it feeds, and how much
     let mut feeds: Vec<Vec<(usize, f32)>> = vec![Vec::new(); h];

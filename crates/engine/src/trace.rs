@@ -110,17 +110,29 @@ pub(crate) fn centerline(p: &Value) -> bool {
   matches!(opt_str(p, "mode"), Some("centerline" | "centreline"))
 }
 
-/// Runs the tracer on the `image` parameter.
-pub(crate) fn run(p: &Value) -> Result<Trace, CmdError> {
+/// Runs the tracer on the `image` parameter: the trace, and millimetres per traced pixel. A
+/// `kerf` (a length) turns on the kerf and minimum-feature check at that width.
+pub(crate) fn run(p: &Value, scope: &Scope) -> Result<(Trace, f64), CmdError> {
   let img = load(Path::new(req_str(p, "image")?))?;
-  fox_trace::trace(&img, &options(p)?).map_err(|e| CmdError::new(e.to_string()))
+  let mut o = options(p)?;
+  let (w, h) = fox_trace::traced_size(img.width, img.height, o.max_side);
+  let k = mm_per_px(p, w, h, scope)?;
+  if let Some(v) = p.get("kerf").filter(|v| !v.is_null()) {
+    let kerf = fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, scope)?;
+    if kerf.is_nan() || kerf < 0.0 || !kerf.is_finite() {
+      return Err(CmdError::new("'kerf' can't be negative"));
+    }
+    o.kerf = kerf / k;
+  }
+  let t = fox_trace::trace(&img, &o).map_err(|e| CmdError::new(e.to_string()))?;
+  Ok((t, k))
 }
 
 /// Parameter values, for sizes given as expressions ("120 mm", "plate_w - 10").
 pub(crate) type Scope = HashMap<String, f64>;
 
 /// Millimetres per traced pixel: from `width`, `height` (lengths) or `scale` (mm per pixel).
-fn mm_per_px(p: &Value, t: &Trace, scope: &Scope) -> Result<f64, CmdError> {
+fn mm_per_px(p: &Value, width: u32, height: u32, scope: &Scope) -> Result<f64, CmdError> {
   let eval = |k: &str, kind| -> Result<Option<f64>, CmdError> {
     match p.get(k) {
       None | Some(Value::Null) => Ok(None),
@@ -130,9 +142,9 @@ fn mm_per_px(p: &Value, t: &Trace, scope: &Scope) -> Result<f64, CmdError> {
   let k = if let Some(s) = eval("scale", fox_expr::Kind::Unitless)? {
     s
   } else if let Some(h) = eval("height", fox_expr::Kind::Length)? {
-    h / f64::from(t.height.max(1))
+    h / f64::from(height.max(1))
   } else {
-    eval("width", fox_expr::Kind::Length)?.unwrap_or(DEFAULT_WIDTH) / f64::from(t.width.max(1))
+    eval("width", fox_expr::Kind::Length)?.unwrap_or(DEFAULT_WIDTH) / f64::from(width.max(1))
   };
   if k <= 0.0 || !k.is_finite() {
     return Err(CmdError::new("the traced size must be positive"));
@@ -176,6 +188,7 @@ fn summary(t: &Trace, k: f64) -> Value {
         "segments": l.contours.iter().map(|c| c.segs.len()).sum::<usize>()
           + l.strokes.iter().map(|s| s.segs.len()).sum::<usize>(),
         "strokes": l.strokes.len(),
+        "narrow": l.narrow.len(),
       })
     })
     .collect();
@@ -186,11 +199,43 @@ fn summary(t: &Trace, k: f64) -> Value {
   })
 }
 
-/// `trace.info`: what a trace would give, without changing the design.
+/// The kerf check's findings in the chosen layers, `map` taking traced pixels to sketch
+/// coordinates: `[{layer, kind, at, width, area}]` in mm and mm².
+fn narrow(t: &Trace, layers: &[usize], k: f64, map: impl Fn([f64; 2]) -> [f64; 2]) -> Value {
+  let list: Vec<Value> = layers
+    .iter()
+    .flat_map(|&i| t.layers[i].narrow.iter().map(move |n| (i, n)))
+    .map(|(i, n)| {
+      json!({
+        "layer": i,
+        "kind": n.kind,
+        "at": map(n.at),
+        "width": n.width * k,
+        "area": n.area * k * k,
+      })
+    })
+    .collect();
+  Value::Array(list)
+}
+
+/// `trace.info`: what a trace would give, without changing the design (`narrow` spots centred
+/// on the image's centre).
 pub(crate) fn info(p: &Value, scope: &Scope) -> Result<Value, CmdError> {
-  let t = run(p)?;
-  let k = mm_per_px(p, &t, scope)?;
-  Ok(summary(&t, k))
+  let (t, k) = run(p, scope)?;
+  let mut out = summary(&t, k);
+  if p.get("kerf").is_some_and(|v| !v.is_null()) {
+    let place = Place { k, cx: f64::from(t.width) / 2.0, cy: f64::from(t.height) / 2.0, at: [0.0, 0.0] };
+    out["narrow"] = narrow(&t, &chosen_layers(p, &t)?, k, |q| place.map(q));
+  }
+  Ok(out)
+}
+
+/// The `kerf` parameter in mm (0 when it doesn't evaluate; `run` already checked it).
+fn kerf_mm(p: &Value, scope: &Scope) -> f64 {
+  p.get("kerf")
+    .and_then(|v| expr_of(v).ok())
+    .and_then(|e| fox_expr::eval(&e, fox_expr::Kind::Length, scope).ok())
+    .unwrap_or(0.0)
 }
 
 /// Pixel → sketch mapping: the image centre lands on `at`.
@@ -414,8 +459,7 @@ impl Placed {
 /// The traced curves of the chosen layers as a standalone sketch (merged into the target sketch
 /// by `insert_from`), with the summary the command returns.
 pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Result<(Sketch, Value, Placed), CmdError> {
-  let t = run(p)?;
-  let k = mm_per_px(p, &t, scope)?;
+  let (t, k) = run(p, scope)?;
   let place = Place { k, cx: f64::from(t.width) / 2.0, cy: f64::from(t.height) / 2.0, at };
   let layers = chosen_layers(p, &t)?;
   let mut sk = Sketch::new();
@@ -449,6 +493,24 @@ pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Resu
     }
   } else if shapes == 0 {
     out["warning"] = json!("nothing was traced: try another threshold, Invert, or fewer ignored specks");
+  }
+  if p.get("kerf").is_some_and(|v| !v.is_null()) && !centerline(p) {
+    // where the spots land once the trace is turned about `at`
+    let (sn, cs) = angle.sin_cos();
+    let spots = narrow(&t, &layers, k, |q| {
+      let m = place.map(q);
+      let (dx, dy) = (m[0] - at[0], m[1] - at[1]);
+      [at[0] + dx * cs - dy * sn, at[1] + dx * sn + dy * cs]
+    });
+    let n = spots.as_array().map_or(0, Vec::len);
+    if n > 0 {
+      out["kerf_warning"] = json!(format!(
+        "{n} spot{} narrower than the {:.3} mm kerf: thin details, small shapes, narrow gaps or small holes the cut can't make",
+        if n == 1 { " is" } else { "s are" },
+        kerf_mm(p, scope)
+      ));
+    }
+    out["narrow"] = spots;
   }
   let polygons = layers.iter().map(|&i| t.layers[i].contours.iter().map(polygon).collect()).collect();
   Ok((sk, out, Placed { place, angle, polygons }))

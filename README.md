@@ -653,6 +653,9 @@ pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
   with opacity and a visibility eye in the browser's Canvases folder). Calibrate rescales it from
   two picked points and their real distance; right-click > Trace Canvas (or
   `"canvas": <feature>` instead of `image`) traces it where it lies, at its calibrated size.
+- **Kerf check**: `"kerf": "0.2 mm"` (the dialog's *Kerf / tool*) lists — and rings in red — the
+  spots a cut that wide can't make: details and shapes thinner than the kerf, gaps narrower than
+  it and holes it can't fit in. Corners a round tool merely rounds aren't flagged.
 
 ## Viewport renderer
 

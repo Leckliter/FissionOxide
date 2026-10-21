@@ -34,6 +34,8 @@ pub struct TraceState {
   spurs: f64,
   /// Infer horizontal/vertical/tangent/… constraints on the result.
   constraints: bool,
+  /// Kerf and minimum-feature check: the cut's width (an expression); empty = off.
+  kerf: String,
   auto_threshold: bool,
   threshold: f64,
   invert: bool,
@@ -64,6 +66,7 @@ impl Default for TraceState {
       auto_spurs: true,
       spurs: 10.0,
       constraints: true,
+      kerf: String::new(),
       auto_threshold: true,
       threshold: 128.0,
       invert: false,
@@ -126,6 +129,9 @@ impl TraceState {
       }
     } else if !self.auto_threshold {
       p["threshold"] = json!(self.threshold.round());
+    }
+    if !self.kerf.trim().is_empty() && !self.centerline {
+      p["kerf"] = json!(self.kerf.trim());
     }
     if self.centerline && !self.auto_spurs {
       p["spurs"] = json!(self.spurs);
@@ -373,6 +379,16 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
     text(ui, "Angle", &mut t.angle, dirty);
   }
 
+  if !t.centerline {
+    ui.label("Kerf / tool");
+    let r = ui
+      .add(egui::TextEdit::singleline(&mut t.kerf).hint_text("off").desired_width(140.0))
+      .on_hover_text("The cut's width (laser kerf, router bit): marks the details, gaps and holes it can't make");
+    if r.lost_focus() {
+      *dirty = true;
+    }
+    ui.end_row();
+  }
   ui.label("");
   if ui
     .checkbox(&mut t.constraints, "Add constraints")
@@ -424,7 +440,13 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
       ui.label(RichText::new(format!("Constraints: {}", list.join(", "))).color(theme::MUTED));
       ui.end_row();
     }
-    for w in [r["warning"].as_str(), r["constraint_warning"].as_str()].into_iter().flatten() {
+    if r["narrow"].as_array().is_some_and(Vec::is_empty) {
+      ui.label("");
+      ui.label(RichText::new("Nothing narrower than the kerf").color(theme::MUTED));
+      ui.end_row();
+    }
+    for w in [r["warning"].as_str(), r["constraint_warning"].as_str(), r["kerf_warning"].as_str()].into_iter().flatten()
+    {
       ui.label("");
       ui.label(RichText::new(w).color(theme::WARNING));
       ui.end_row();
@@ -448,6 +470,14 @@ pub fn overlay(app: &mut App, painter: &egui::Painter, to_screen: &dyn Fn(DVec3)
   let Some(plane) = app.s.model.sketches.get(&sk).map(|r| r.plane) else { return };
   let Some(t) = app.dialog.as_mut().and_then(|d| d.trace.as_deref_mut()) else { return };
   let (Some(path), Some(r)) = (t.path.clone(), t.result.as_ref()) else { return };
+  // the kerf check's spots, ringed in red at their width (at least big enough to see)
+  for n in r["narrow"].as_array().into_iter().flatten() {
+    let (Some(x), Some(y)) = (n["at"][0].as_f64(), n["at"][1].as_f64()) else { continue };
+    let w = n["width"].as_f64().unwrap_or(0.0);
+    let (Some(c), Some(e)) = (to_screen(plane.to_world([x, y])), to_screen(plane.to_world([x + w, y]))) else { continue };
+    let radius = (c.distance(e)).max(7.0);
+    painter.circle_stroke(c, radius, egui::Stroke::new(2.0, theme::ERROR));
+  }
   if !t.show_image {
     return;
   }
@@ -524,4 +554,34 @@ pub fn image_mesh(
 /// An image file as a texture (scaled down to at most [`MAX_TEXTURE`] across).
 pub fn texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
   load_texture(ctx, path)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn params_carry_mode_constraints_and_kerf() {
+    let mut t = TraceState::with_image(PathBuf::from("logo.png"));
+    let p = t.params().unwrap();
+    assert_eq!(p["mode"], "outline");
+    assert_eq!(p["constraints"], true);
+    assert!(p.get("kerf").is_none(), "{p}");
+    t.kerf = " 0.2 mm ".into();
+    t.constraints = false;
+    let p = t.params().unwrap();
+    assert_eq!(p["kerf"], "0.2 mm");
+    assert_eq!(p["constraints"], false);
+    // centre lines have no kerf check, and take a spur length only when it isn't automatic
+    (t.centerline, t.auto_spurs, t.spurs) = (true, false, 6.0);
+    let p = t.params().unwrap();
+    assert_eq!(p["mode"], "centerline");
+    assert!(p.get("kerf").is_none(), "{p}");
+    assert_eq!(p["spurs"], 6.0);
+    // a canvas supplies the image and its place
+    let c = TraceState::with_canvas(fox_engine::model::FeatureId(7), PathBuf::from("photo.png"));
+    let p = c.params().unwrap();
+    assert_eq!(p["canvas"], 7);
+    assert!(p.get("image").is_none() && p.get("width").is_none() && p.get("at").is_none(), "{p}");
+  }
 }

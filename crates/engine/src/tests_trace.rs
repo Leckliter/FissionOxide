@@ -369,3 +369,37 @@ fn a_canvas_traces_where_it_lies_at_its_calibrated_size() {
   assert!((cy - 40.0).abs() < 0.5, "{disc}");
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_kerf_check_finds_what_the_cut_cant_make() {
+  let dir = temp_dir("kerf");
+  let image = dir.join("plate.png");
+  // a 120 × 60 plate (y down): a 3 px slot from its top edge at x = 60 and a 4 px hole at
+  // (140, 50), at 0.5 mm per pixel: a 1.5 mm slot, a 2 mm hole
+  png(&image, |x, y| {
+    let plate = (40.0..160.0).contains(&x) && (20.0..80.0).contains(&y);
+    let slot = (58.5..61.5).contains(&x) && y < 50.0;
+    let hole = (x - 140.0).hypot(y - 50.0) < 2.0;
+    (plate && !slot && !hole).then_some([0, 0, 0])
+  });
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  // a 4 mm kerf can't cut either
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 100, "kerf": "4 mm", "at": [10, 0], "holes": 4}));
+  let spots = r["narrow"].as_array().unwrap();
+  let kinds: Vec<&str> = spots.iter().map(|n| n["kind"].as_str().unwrap()).collect();
+  assert!(kinds.contains(&"narrow_gap") && kinds.contains(&"small_hole"), "{r}");
+  assert!(r["kerf_warning"].is_string(), "{r}");
+  // the hole is at pixel (140, 50): 20 mm right of the image centre, then moved by `at`
+  let hole = spots.iter().find(|n| n["kind"] == "small_hole").unwrap();
+  let at = [hole["at"][0].as_f64().unwrap(), hole["at"][1].as_f64().unwrap()];
+  assert!((at[0] - 30.0).abs() < 1.0 && at[1].abs() < 1.0, "{hole}");
+  assert!(hole["width"].as_f64().unwrap() < 4.0, "{hole}");
+  // a 1 mm kerf makes both; no kerf, no check
+  let info = run(&mut s, "trace.info", json!({"image": image, "width": 100, "kerf": 1, "holes": 4}));
+  assert_eq!(info["narrow"], json!([]), "{info}");
+  let info = run(&mut s, "trace.info", json!({"image": image, "width": 100}));
+  assert!(info.get("narrow").is_none(), "{info}");
+  assert!(s.execute("trace.info", &json!({"image": image, "kerf": -2})).is_err());
+  let _ = std::fs::remove_dir_all(&dir);
+}

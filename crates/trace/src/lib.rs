@@ -28,6 +28,7 @@ mod centerline;
 mod clean;
 mod contour;
 mod fit;
+mod kerf;
 mod raster;
 mod segment;
 mod svg;
@@ -37,10 +38,14 @@ mod validate;
 mod tests;
 #[cfg(test)]
 mod tests_centerline;
+#[cfg(test)]
+mod tests_kerf;
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+pub use kerf::{Narrow, NarrowKind};
 
 /// A point in pixels, y up.
 pub(crate) type P = [f64; 2];
@@ -158,6 +163,10 @@ pub struct Options {
   /// Centre-line mode: side branches from a junction to a free end shorter than this (px) are
   /// dropped as thinning noise. `None` = 1.5 × the typical stroke width.
   pub spurs: Option<f64>,
+  /// Kerf and minimum-feature check: the width (px) of the cut — a laser or plasma kerf, a
+  /// waterjet, a router bit. Each layer then lists in [`Layer::narrow`] the spots narrower than
+  /// it. 0 = no check. Outline and colours modes.
+  pub kerf: f64,
 }
 
 impl Default for Options {
@@ -173,6 +182,7 @@ impl Default for Options {
       fit: Fit::Curves,
       max_side: 2000,
       spurs: None,
+      kerf: 0.0,
     }
   }
 }
@@ -194,6 +204,9 @@ impl Options {
     }
     if self.spurs.is_some_and(|v| !(v >= 0.0) || !v.is_finite()) {
       return bad("spurs must be a non-negative length");
+    }
+    if !(self.kerf >= 0.0) || !self.kerf.is_finite() {
+      return bad("kerf must be a non-negative width");
     }
     if self.max_side == 0 {
       return bad("max_side must be at least 1");
@@ -229,6 +242,9 @@ pub struct Layer {
   /// the same point.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub strokes: Vec<Stroke>,
+  /// With [`Options::kerf`]: the spots too narrow for the cut.
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub narrow: Vec<Narrow>,
 }
 
 /// A centre line: open (from one end or junction to another), or a closed loop.
@@ -296,6 +312,19 @@ impl Seg {
   }
 }
 
+/// The size (px) an image `width` × `height` is traced at: downscaled so its longer side is at
+/// most `max_side`.
+pub fn traced_size(width: u32, height: u32, max_side: u32) -> (u32, u32) {
+  let (w, h) = (width as usize, height as usize);
+  let max_side = (max_side as usize).max(1);
+  if w.max(h) <= max_side {
+    return (width, height);
+  }
+  let s = max_side as f64 / w.max(h) as f64;
+  let side = |v: usize| ((v as f64 * s).round() as usize).clamp(1, max_side) as u32;
+  (side(w), side(h))
+}
+
 /// Traces `image` into closed contours.
 pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
   options.check()?;
@@ -316,7 +345,7 @@ pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
       let mut m = segment::outline(&rgb, threshold, options.invert);
       clean::clean(&mut m.mask, rgb.w, rgb.h, options.specks, options.holes);
       let strokes = centerline::strokes(&m.mask, rgb.w, rgb.h, options);
-      let layer = Layer { color: m.color, background: false, contours: Vec::new(), strokes };
+      let layer = Layer { color: m.color, background: false, contours: Vec::new(), strokes, narrow: Vec::new() };
       return Ok(Trace { width: rgb.w as u32, height: rgb.h as u32, layers: vec![layer] });
     }
   };
@@ -328,12 +357,9 @@ pub fn trace(image: &Image, options: &Options) -> Result<Trace, TraceError> {
       let labels = clean::clean(&mut mask, w, h, options.specks, options.holes);
       let prepared: Vec<fit::Prepared> =
         contour::trace(&mask, &labels, w, h).iter().map(|raw| fit::prepare(raw, options)).collect();
-      Layer {
-        color: m.color,
-        background: m.background,
-        contours: validate::finish(&prepared, options),
-        strokes: Vec::new(),
-      }
+      // the background layer isn't cut, so it isn't checked
+      let narrow = if options.kerf > 0.0 && !m.background { kerf::check(&mask, w, h, options.kerf) } else { Vec::new() };
+      Layer { color: m.color, background: m.background, contours: validate::finish(&prepared, options), strokes: Vec::new(), narrow }
     })
     .collect();
   Ok(Trace { width: w as u32, height: h as u32, layers })
