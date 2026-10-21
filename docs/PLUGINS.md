@@ -7,6 +7,50 @@ FissionOxide, and so that anyone can extend the app without rebuilding it.
 This document is the plan: what a plugin is, how it is installed, how it runs, and what the
 engine has to grow before the first real plugin can be ported.
 
+## Add-ins and plugins
+
+FissionOxide is free and open source, and it has two kinds of extension. Both share one API (the
+JSON commands) and one manifest format (`plugin.toml` below: panels, commands, dialog inputs).
+
+- **Plugins** are installed at run time by anyone: a sandboxed `.foxplugin` dropped on the
+  window. They use the command API: new commands, dialogs, macros, exports, checks. Safe to take
+  from a stranger, one file for every platform, unaffected by app updates. Sharing is "send the
+  file" for now.
+- **Add-ins** add real functionality and are compiled in. Each is a crate in this repository
+  under `addins/`, shipped with the app and switched on or off in the add-in manager (off by
+  default unless it says otherwise). Besides the command API they can add feature types that
+  re-run in the timeline, workspaces, manipulators and engine commands. Anyone can write one:
+  build the app with it, or send it upstream. Rust has no stable ABI and FissionOxide forbids
+  `unsafe`, so native code is never loaded at run time; that is what plugins are for.
+
+Rules that keep the two from drifting apart:
+
+- When an add-in needs something new from the engine, it is added as a JSON command too, so
+  plugins and scripts get it as well.
+- General-purpose tools go into the app itself, not into an add-in. An add-in holds only what is
+  specific to its trade. A plugin that outgrows the sandbox can become an add-in and keep its
+  manifest.
+
+### An add-in's toolbar tab can hold built-in commands
+
+An add-in's manifest places its own commands **and built-in ones** in its tab, so a workflow tab
+shows every step of the workflow in order, even the steps that are now part of the app. A command
+entry names either the add-in's own command or a built-in one:
+
+```toml
+[[commands]]
+builtin = "sketch.remove_duplicates"   # a built-in command, shown in this tab too
+label = "Clean Duplicate Lines"        # optional: the tab's own label and tooltip
+icon = "icons/01-line-cleaner.svg"     # optional: the add-in's own icon for it
+panel = "prepare"
+step = 1                               # optional: order in the workflow, drawn on the icon
+```
+
+The built-in command stays where it always was in the app's own tabs, with its own icon; the
+add-in's tab only shows it again, in its own style. Switching the add-in off removes its tab and
+leaves the built-in commands alone. `step` numbers the commands in the order they are used from
+start to finish; the add-in's icons carry the number, and the tab is laid out in step order.
+
 ## Goals
 
 - **One file to install.** A plugin is a single `.foxplugin` file. The user installs it from
@@ -193,22 +237,21 @@ a frozen body and shows a warning. This is deliberately not in v1.
 
 ## Porting the LumenArt Tool Suite
 
-The suite splits into two plugins, replacing its current folder-detecting loader:
+What every command does, with its numbers and the bugs not to copy, is in
+[LUMENART.md](LUMENART.md).
 
-- **LumenArt Tools** (the commercial, public commands): Clean Duplicate Lines, Optimize Sketch,
-  Create Assembly Tabs, Create Matching Slots, Analyze Cut File, Extract Component Dimensions,
-  Inspect Entities, Validate for SendCutSend, Render Product View / Individual Parts / Exploded
-  Assembly.
-- **LumenArt Pro** (the private commands), installed only on LumenArt machines.
+The suite splits in two (the table is in [LUMENART.md](LUMENART.md#core-features-and-the-add-in)):
 
-Its DXF library ships in `resources/`. Its `.f3d` library parts can't be read by FissionOxide and
-need converting to `.dxf` or `.fox` once. Signing and license keys for selling the public plugin
-can come later without changing the format.
-
-Port order (each step proves more of the API): Clean Duplicate Lines (selection + choice inputs,
-sketch read/delete) → Analyze Cut File (file output) → Validate for SendCutSend → Create
-Matching Slots / Create Assembly Tabs (B-rep topology, resources, attributes) → render tools →
-the rest.
+- **Into the app:** the general tools (remove duplicate lines, sketch clean-up, scale to size,
+  cut-service checks, cut estimates, flat patterns on one sheet, exploded views and batch
+  renders, a sketch library, inspect). Every CAD user gets them.
+- **The LumenArt add-in** (`addins/lumenart`, the first official add-in): the layered-sign
+  system (layers at standoff heights, Quick Tab, Auto Flange, Slot Projector, Tab Builder, Auto
+  Tab as live timeline features), Auto Export with LumenArt's file layout, and the LumenArt
+  library pack (keyholes, studs, E12 sockets, LED strip slots). Its **LumenArt** tab lists the
+  built-in tools too, in workflow order, with LumenArt's grey-and-yellow icons numbered by step.
+- **Prismatic Colors** becomes the first example plugin: small, and it needs the `network`
+  permission.
 
 ## Gaps to close first
 
