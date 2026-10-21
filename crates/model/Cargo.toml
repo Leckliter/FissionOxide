@@ -11,6 +11,7 @@ fox-sketch.workspace = true
 fox-kernel.workspace = true
 fox-ecad.workspace = true
 fox-form.workspace = true
+fox-exchange.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -1428,6 +1428,7 @@ name = "fox-model"
 version = "0.1.0"
 dependencies = [
  "fox-ecad",
+ "fox-exchange",
  "fox-expr",
  "fox-form",
  "fox-kernel",
