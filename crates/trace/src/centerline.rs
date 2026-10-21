@@ -189,8 +189,8 @@ fn graph(m: &[bool], w: usize, h: usize) -> (Vec<Node>, Vec<Branch>) {
   // nodes: each free end alone, junction pixels clustered by adjacency
   let mut node_of: HashMap<usize, usize> = HashMap::new();
   let mut nodes: Vec<Node> = Vec::new();
-  for i in 0..m.len() {
-    if !m[i] || node_of.contains_key(&i) {
+  for (i, &on) in m.iter().enumerate() {
+    if !on || node_of.contains_key(&i) {
       continue;
     }
     match deg(i) {
@@ -350,7 +350,8 @@ fn prune(nodes: &mut [Node], mut paths: Vec<Path>, spur: f64) -> Vec<Path> {
       }
     }
     // join branches at nodes left with exactly two of them
-    for n in 0..nodes.len() {
+    let junctions: Vec<usize> = (0..nodes.len()).filter(|&n| !nodes[n].free).collect();
+    for n in junctions {
       if nodes[n].free || degree(&paths, n) != 2 {
         continue;
       }
@@ -402,7 +403,7 @@ fn smooth(pts: &mut [P], closed: bool) {
   for _ in 0..SMOOTH_PASSES {
     let src = pts.to_vec();
     let m = if closed { n - 1 } else { n };
-    for i in 0..m {
+    for (i, out) in pts.iter_mut().enumerate().take(m) {
       if !closed && (i == 0 || i + 1 == n) {
         continue;
       }
@@ -419,7 +420,7 @@ fn smooth(pts: &mut [P], closed: bool) {
         s = [s[0] + src[j][0], s[1] + src[j][1]];
         c += 1.0;
       }
-      pts[i] = [s[0] / c, s[1] / c];
+      *out = [s[0] / c, s[1] / c];
     }
     if closed {
       pts[n - 1] = pts[0];
@@ -606,7 +607,7 @@ fn arc(q: &[P], tol: f64) -> Option<Seg> {
   }
   // arcs bulging less than the tolerance are lines; nearly whole circles are left to splits
   let sweep = total.abs();
-  if sweep < 1e-3 || sweep > 1.9 * std::f64::consts::PI || r * (1.0 - (sweep / 2.0).cos()) < tol {
+  if !(1e-3..=1.9 * std::f64::consts::PI).contains(&sweep) || r * (1.0 - (sweep / 2.0).cos()) < tol {
     return None;
   }
   Some(Seg::Arc { a, b, center: c, ccw: total > 0.0 })
