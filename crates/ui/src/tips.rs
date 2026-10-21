@@ -1453,14 +1453,134 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Hold the button and brush over faces or edges to select them. Useful for many small faces.",
     ),
     (_, "Select All") => (
-      "Selects every body, or every curve in a sketch.",
-      "Selects everything that the current filters allow. In a sketch it selects every curve. Combine \
-       it with Invert Selection to pick everything except a few items.",
+      "Includes or excludes every object type.",
+      "Checked, every selection filter is on; uncheck it to turn them all off, then check only the \
+       types you want to select.",
     ),
-    (_, "Select Other") => (
-      "Picks among the items under the last click, front to back.",
-      "When the wrong item was selected, use this to step through everything under the cursor. Holding \
-       the mouse button or Alt+click does the same.",
+    (_, "Select Through") => (
+      "Selects hidden objects during a window or freeform selection.",
+      "With it on, a window or freeform selection also takes objects hidden behind others. Off, only \
+       what is visible is selected.",
+    ),
+    (_, "Select By Name") => (
+      "Selects bodies and components by name.",
+      "Type a name, with * for any run of characters and ? for one, and OK selects every visible \
+       body or component whose name matches, ignoring case.",
+    ),
+    (_, "Select By Boundary") => (
+      "Selects the faces inside a closed chain of edges.",
+      "Select edges that close a boundary on a body, then OK selects the faces on the smaller side of \
+       it. Useful for picking a patch of faces at once.",
+    ),
+    (_, "Select By Size") => (
+      "Selects bodies or faces up to a size.",
+      "Enter the largest size to take: bodies by the diagonal of their bounding box, faces by the \
+       square root of their area. Useful for finding slivers and small parts.",
+    ),
+    (_, "Seed And Boundary") => (
+      "Selects the faces connected to a seed face, up to boundary edges.",
+      "Select a seed face and the edges that bound the region, then OK selects every face reachable \
+       from the seed without crossing the boundary.",
+    ),
+    (_, "Body Faces") => (
+      "Allows selecting faces.",
+      "Turn it off to stop faces being picked when you want edges or bodies. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Body Edges") => (
+      "Allows selecting edges.",
+      "Turn it off to stop edges being picked when you want faces or bodies. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Body Vertices") => (
+      "Allows selecting vertices.",
+      "Turn it off to stop corner points being picked by accident. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Sketch Curves") => (
+      "Allows selecting sketch curves.",
+      "Turn it off to click through sketches to the model behind them. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Sketch Points") => (
+      "Allows selecting sketch points.",
+      "Turn it off to click through sketch points to the curves and model behind them. The filters \
+       combine with the selection priority.",
+    ),
+    (_, "Construction Geometry") => (
+      "Allows selecting construction planes, axes and points.",
+      "Turn it off to click through construction geometry to the model. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Components") => (
+      "Allows selecting components.",
+      "Turn it off to stop whole components being picked under the component priority. The filters \
+       combine with the selection priority.",
+    ),
+    (_, "Coordinate Systems") => (
+      "Allows selecting coordinate systems.",
+      "Turn it off to click through user coordinate systems to the model. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Custom Graphics") => (
+      "Allows selecting custom graphics.",
+      "Turn it off to click through graphics drawn by add-ins to the model. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Features") => (
+      "Allows selecting features.",
+      "Turn it off to stop timeline features being picked in the canvas. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Joint Origins") => (
+      "Allows selecting joint origins.",
+      "Turn it off to click through joint origin glyphs to the model. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Joints") => (
+      "Allows selecting joints.",
+      "Turn it off to click through joint glyphs to the model. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Mesh Bodies") => (
+      "Allows selecting mesh bodies.",
+      "Turn it off to stop mesh bodies being picked when you want solids. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Mesh Face Groups") => (
+      "Allows selecting mesh face groups.",
+      "Turn it off to pick single mesh faces instead of the groups they belong to. The filters \
+       combine with the selection priority.",
+    ),
+    (_, "Mesh Faces") => (
+      "Allows selecting mesh faces.",
+      "Turn it off to stop single mesh faces being picked. The filters combine with the selection \
+       priority.",
+    ),
+    (_, "PMI") => (
+      "Allows selecting product manufacturing information.",
+      "Turn it off to click through PMI annotations to the model. The filters combine with the \
+       selection priority.",
+    ),
+    (_, "Sketch Geometry Constraint") => (
+      "Allows selecting sketch constraints.",
+      "Turn it off to click through constraint glyphs to the geometry under them. The filters combine \
+       with the selection priority.",
+    ),
+    (_, "Sketch Surface") => (
+      "Allows selecting sketch surfaces.",
+      "Turn it off to click through surfaces made from sketches to what is behind them. The filters \
+       combine with the selection priority.",
+    ),
+    (_, "T-Spline Body") => (
+      "Allows selecting T-Spline bodies.",
+      "Turn it off to stop form bodies being picked when you want solids. The filters combine with \
+       the selection priority.",
+    ),
+    (_, "Text Selection") => (
+      "Allows selecting sketch text.",
+      "Turn it off to click through sketch text to the geometry under it. The filters combine with \
+       the selection priority.",
     ),
     (_, "Invert Selection") => (
       "Selects what isn't selected, and clears what is.",

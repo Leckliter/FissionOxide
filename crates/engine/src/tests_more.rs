@@ -822,3 +822,49 @@ fn project_to_surface_drapes_curves_a_pipe_follows() {
   let v = s.execute("pipe", &json!({"path": 3, "diameter": 2, "section": "square", "operation": "cut"})).unwrap();
   assert!(v["error"].is_string(), "{v}");
 }
+
+/// SELECT > Selection Tools: Select By Name (wildcards), Select By Size, Select By Boundary and
+/// Seed And Boundary.
+#[test]
+fn selection_tools_pick_by_name_size_and_boundary() {
+  use crate::Sel;
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 10, "height": 5}));
+  let b = s.model.bodies[0].id;
+  assert!(crate::inspect::name_matches("bo*", "Body1") && crate::inspect::name_matches("b?dy1", "Body1"));
+  assert!(!crate::inspect::name_matches("Body", "Body1") && !crate::inspect::name_matches("*2", "Body1"));
+  let r = run(&mut s, "select.by_name", json!({"name": "body*"}));
+  assert_eq!((r["selected"].as_u64(), s.selection.as_slice()), (Some(1), &[Sel::Body { body: b }][..]));
+  run(&mut s, "select.by_name", json!({"name": "wheel*"}));
+  assert!(s.selection.is_empty());
+  assert!(s.execute("select.by_name", &json!({})).is_err(), "a name is required");
+  // the body's bounding box diagonal is sqrt(20² + 10² + 5²) ≈ 22.9 mm
+  run(&mut s, "select.by_size", json!({"max": 30}));
+  assert_eq!(s.selection, [Sel::Body { body: b }]);
+  run(&mut s, "select.by_size", json!({"max": "20 mm"}));
+  assert!(s.selection.is_empty());
+  // faces by the square root of their area: the two 10 × 5 ends are under 8 mm
+  run(&mut s, "select.by_size", json!({"kind": "faces", "max": 8}));
+  assert_eq!(s.selection.len(), 2);
+  assert!(s.selection.iter().all(|x| matches!(x, Sel::Face { .. })));
+  // the top face's four edges bound it: the one face inside, not the five outside
+  let body = s.model.body(b).unwrap();
+  let top = body.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+  let side = body.faces().iter().find(|f| f.normal.x > 0.9).unwrap().id;
+  let rim: Vec<Value> =
+    body.edges().iter().filter(|e| e.faces.contains(&top)).map(|e| json!({"body": b.0, "edge": e.id})).collect();
+  assert_eq!(rim.len(), 4);
+  run(&mut s, "select.by_boundary", json!({"edges": rim}));
+  assert_eq!(s.selection, [Sel::Face { body: b, face: top }]);
+  // the selected edges are the default boundary; one edge doesn't close a boundary
+  s.selection = vec![Sel::Edge { body: b, edge: rim[0]["edge"].as_u64().unwrap() as u32 }];
+  assert!(s.execute("select.by_boundary", &json!({})).is_err());
+  // a seed face spreads over every face it can reach without crossing the boundary
+  run(&mut s, "select.seed_boundary", json!({"seed": {"body": b.0, "face": top}}));
+  assert_eq!(s.selection.len(), 6);
+  run(&mut s, "select.seed_boundary", json!({"seed": {"body": b.0, "face": top}, "edges": rim}));
+  assert_eq!(s.selection, [Sel::Face { body: b, face: top }]);
+  s.selection = vec![Sel::Face { body: b, face: side }];
+  run(&mut s, "select.seed_boundary", json!({"edges": rim}));
+  assert_eq!(s.selection.len(), 5, "the selected face seeds the outside of the rim");
+}

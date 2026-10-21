@@ -251,8 +251,8 @@ impl Dialog {
     ext.start_face = e.start_face.as_ref().and_then(|f| serde_json::to_value(f).ok()).unwrap_or(Value::Null);
   }
 
-  /// "N Profiles | Area: …" for the status bar while an extrude has profiles picked, in the
-  /// design's unit as Fusion shows it ("1 Profile | Area: 1.24 in^2").
+  /// "N Profiles | Area : …" for the status bar while an extrude has profiles picked, in the
+  /// design's unit as Fusion shows it ("1 Profile | Area : 1.24 in^2").
   pub fn profile_status(&self, s: &Session) -> Option<String> {
     if !matches!(self.kind, super::Kind::Extrude | super::Kind::Revolve) || self.profiles.is_empty() {
       return None;
@@ -265,7 +265,7 @@ impl Dialog {
     }
     let n = self.profiles.len();
     let area = s.design.units.area(area, 2);
-    Some(format!("{n} Profile{} | Area: {area}", if n == 1 { "" } else { "s" }))
+    Some(format!("{n} Profile{} | Area : {area}", if n == 1 { "" } else { "s" }))
   }
 }
 
@@ -397,10 +397,10 @@ mod tests {
   fn thin_tapered_offset_start_and_area_readout() {
     let mut s = Session::default();
     let mut d = square(&mut s);
-    assert_eq!(d.profile_status(&s).as_deref(), Some("1 Profile | Area: 100.00 mm^2"));
+    assert_eq!(d.profile_status(&s).as_deref(), Some("1 Profile | Area : 100.00 mm^2"));
     // in the design's unit: 100 mm² is 0.155 in²
     s.design.units = fox_engine::model::LengthUnit::In;
-    assert_eq!(d.profile_status(&s).as_deref(), Some("1 Profile | Area: 0.16 in^2"));
+    assert_eq!(d.profile_status(&s).as_deref(), Some("1 Profile | Area : 0.16 in^2"));
     s.design.units = fox_engine::model::LengthUnit::Mm;
     d.solid.ext.thin = true;
     d.solid.ext.thickness = "1 mm".into();

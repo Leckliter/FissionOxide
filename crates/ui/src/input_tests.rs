@@ -907,3 +907,113 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
   let top = h.app.s.model.bodies[0].shape.mass().unwrap().bbox_max.z;
   assert!((top - 25.0).abs() < 1e-6, "extruded by the typed 25 mm: {top}");
 }
+
+/// Select Other, as in Fusion: a press held still on the model opens the list (Depth tab, one
+/// row per entity by type) while the button is down, selecting nothing; the release selects
+/// nothing either and the list stays until Escape. Alt+click simply selects.
+#[test]
+fn holding_the_button_on_the_model_opens_select_other() {
+  use fox_engine::scene::Pick;
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20}));
+  let body = h.app.s.model.bodies[0].id;
+  let face = h.app.s.model.bodies[0].faces()[0].id;
+  let at = h.app.canvas.center();
+  // headless there is no frame to pick from: the face under the pointer is given
+  h.app.hover = Some(Pick::Face { body, face });
+  h.frame(vec![Event::PointerMoved(at)]);
+  h.app.hover = Some(Pick::Face { body, face });
+  h.frame(vec![Harness::button(at, true)]);
+  for _ in 0..3 {
+    h.app.hover = Some(Pick::Face { body, face });
+    h.frame_texts(0.1, vec![]);
+  }
+  assert!(h.app.other.is_none(), "not yet: {} s", 3.0 * 0.1);
+  assert!(h.app.s.selection.is_empty(), "nothing is selected on the press");
+  for _ in 0..3 {
+    h.app.hover = Some(Pick::Face { body, face });
+    h.frame_texts(0.1, vec![]);
+  }
+  let menu = h.app.other.as_ref().expect("the list opens while the button is held");
+  assert_eq!(menu.tab, crate::select::OtherTab::Depth);
+  let types: Vec<&str> = menu.depth.iter().map(|r| r.2.as_str()).collect();
+  assert!(!types.is_empty() && types.iter().all(|t| *t == "Face" || *t == "Edge"), "rows by type: {types:?}");
+  assert!(h.app.s.selection.is_empty());
+  h.frame_texts(0.1, vec![Harness::button(at, false)]);
+  assert!(h.app.other.is_some() && h.app.s.selection.is_empty(), "the release picks nothing, the list stays");
+  // (a new egui area sizes itself invisibly on its first frame)
+  let texts = h.frame_texts(0.05, vec![]);
+  assert!(texts.iter().any(|(_, t)| t == "Depth") && texts.iter().any(|(_, t)| t == "Parents"), "the two tabs");
+  h.frame(vec![key(egui::Key::Escape)]);
+  assert!(h.app.other.is_none(), "Escape closes it");
+  // Alt+click (a while later, so it isn't a double click) selects, with no list
+  h.frame_texts(1.0, vec![]);
+  h.app.hover = Some(Pick::Face { body, face });
+  let alt = egui::Modifiers { alt: true, ..Default::default() };
+  let press = |pressed| Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: alt };
+  h.frame(vec![press(true)]);
+  h.app.hover = Some(Pick::Face { body, face });
+  h.frame(vec![press(false)]);
+  assert_eq!(h.app.s.selection.len(), 1, "Alt+click simply selects what is under the pointer");
+  assert!(h.app.other.is_none());
+}
+
+/// The window box is Fusion's peach with a purple-grey border, the crossing box pale yellow
+/// with a dashed dark border.
+#[test]
+fn box_selection_colours_match_fusion() {
+  use crate::viewport::{CROSSING_BOX, WINDOW_BOX};
+  assert_eq!(WINDOW_BOX, (egui::Color32::from_rgb(253, 223, 185), egui::Color32::from_rgb(170, 152, 195)));
+  assert_eq!(CROSSING_BOX, (egui::Color32::from_rgb(255, 253, 202), egui::Color32::from_rgb(55, 61, 47)));
+  let mut h = Harness::new();
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20}));
+  let a = h.app.canvas.center() + vec2(-60.0, -40.0);
+  let b = a + vec2(120.0, 80.0);
+  h.frame(vec![Event::PointerMoved(a)]);
+  h.frame(vec![Harness::button(a, true)]);
+  h.frame(vec![Event::PointerMoved(a + vec2(30.0, 20.0))]);
+  h.frame(vec![Event::PointerMoved(b)]);
+  assert!(matches!(h.app.drag, Some(crate::viewport::Drag::Box { .. })), "{:?}", h.app.drag.is_some());
+  let out = h.shapes(vec![Event::PointerMoved(b)]);
+  assert!(out.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == WINDOW_BOX.0)), "the window box is drawn");
+  h.frame(vec![Harness::button(b, false)]);
+  // right to left: the crossing box, with a dashed border (many short segments)
+  h.frame(vec![Event::PointerMoved(b)]);
+  h.frame(vec![Harness::button(b, true)]);
+  h.frame(vec![Event::PointerMoved(b - vec2(30.0, 20.0))]);
+  let out = h.shapes(vec![Event::PointerMoved(a)]);
+  assert!(out.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.fill == CROSSING_BOX.0)), "the crossing fill");
+  let dashes = out
+    .iter()
+    .filter(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == CROSSING_BOX.1))
+    .count();
+  assert!(dashes > 8, "a dashed border: {dashes} dashes");
+  h.frame(vec![Harness::button(a, false)]);
+}
+
+impl Harness {
+  /// The shapes a frame with `events` draws, flattened.
+  fn shapes(&mut self, events: Vec<Event>) -> Vec<egui::Shape> {
+    fn walk(s: egui::Shape, out: &mut Vec<egui::Shape>) {
+      match s {
+        egui::Shape::Vec(v) => v.into_iter().for_each(|s| walk(s, out)),
+        s => out.push(s),
+      }
+    }
+    self.time += 1.0 / 60.0;
+    let input = RawInput {
+      screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 900.0))),
+      time: Some(self.time),
+      events,
+      ..Default::default()
+    };
+    let app = &mut self.app;
+    let out = self.ctx.run_ui(input, |ui| app.draw(ui));
+    let mut all = Vec::new();
+    for c in out.shapes.iter() {
+      walk(c.shape.clone(), &mut all);
+    }
+    out.drop_without_applying_deltas();
+    all
+  }
+}

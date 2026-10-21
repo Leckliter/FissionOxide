@@ -446,9 +446,7 @@ pub(crate) enum Cmd {
   DrawingExport(&'static str),
   /// Back to the Design workspace.
   FinishDrawing,
-  SelectAll,
   SelectInvert,
-  SelectOther,
   /// Window selection (a left-drag with the select tool; this just switches to it).
   WindowSelect,
   Priority(crate::select::Priority),
@@ -490,6 +488,9 @@ pub(crate) enum Cmd {
   Render(crate::render_ui::RenderCmd),
   /// Fabrication: check a cut file for a cutting service, with the cut estimate.
   CutCheck,
+  /// SELECT > Selection Tools: Select By Name, Select By Boundary, Select By Size, Seed And
+  /// Boundary (each opens a small dialog).
+  SelTool(crate::select::SelTool),
 }
 
 impl Cmd {
@@ -595,11 +596,7 @@ impl Cmd {
         (Icon::MotionStudy, "Simulate", "Cut the stock with the toolpaths and check for gouges and collisions")
       }
       Cmd::CamTools => (Icon::Configure, "Tool Library", "The hub's cutting tools with their feeds and speeds"),
-      Cmd::SelectAll => (Icon::Select, "Select All", "Select every body (every curve in a sketch)"),
       Cmd::SelectInvert => (Icon::Select, "Invert Selection", "Select what isn't selected"),
-      Cmd::SelectOther => {
-        (Icon::Select, "Select Other", "Everything under the last click, front to back (or Alt+click, or hold)")
-      }
       Cmd::WindowSelect => (
         Icon::WindowSel,
         "Window Selection",
@@ -614,13 +611,24 @@ impl Cmd {
         }
       },
       Cmd::Filter(f) => match f {
+        "all" => (Icon::Select, "Select All", "Include or exclude every object type"),
+        "through" => (Icon::Eye, "Select Through", "Select hidden objects during a window or freeform selection"),
         "bodies" => (Icon::Body, "Bodies", "Allow selecting bodies"),
-        "faces" => (Icon::SplitFace, "Faces", "Allow selecting faces"),
-        "edges" => (Icon::Line, "Edges", "Allow selecting edges"),
-        "sketches" => (Icon::SketchSmall, "Sketches", "Allow selecting sketch curves and points"),
-        "vertices" => (Icon::Point, "Vertices", "Show body vertices and allow selecting them"),
-        "construction" => (Icon::Plane, "Construction", "Allow selecting construction planes, axes and points"),
-        _ => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
+        "faces" => (Icon::SplitFace, "Body Faces", "Allow selecting faces"),
+        "edges" => (Icon::Line, "Body Edges", "Allow selecting edges"),
+        "sketches" | "sketch_curves" => (Icon::SketchSmall, "Sketch Curves", "Allow selecting sketch curves"),
+        "sketch_points" => (Icon::Point, "Sketch Points", "Allow selecting sketch points"),
+        "vertices" => (Icon::Point, "Body Vertices", "Show body vertices and allow selecting them"),
+        "construction" => {
+          (Icon::Plane, "Construction Geometry", "Allow selecting construction planes, axes and points")
+        }
+        "components" => (Icon::Component, "Components", "Allow selecting components"),
+        "profiles" => (Icon::Rect, "Sketch Profiles", "Allow selecting sketch profiles"),
+        other => (
+          Icon::Select,
+          crate::select::FILTER_TYPES.iter().find(|(k, _)| *k == other).map_or("Filter", |(_, n)| *n),
+          "Allow selecting this object type",
+        ),
       },
       Cmd::ConfigTable => (
         Icon::ConfigTable,
@@ -677,6 +685,16 @@ impl Cmd {
         "Cut Service Check",
         "Check a sketch, flat pattern or DXF for SendCutSend, OSH Cut, Ponoko or your shop, with a cut estimate",
       ),
+      Cmd::SelTool(t) => {
+        use crate::select::SelTool;
+        let hint = match t {
+          SelTool::ByName => "Select bodies and components by name, with * and ? wildcards",
+          SelTool::ByBoundary => "Select the faces inside a closed chain of edges",
+          SelTool::BySize => "Select bodies or faces up to a size",
+          SelTool::SeedAndBoundary => "Select the faces connected to a seed face, up to boundary edges",
+        };
+        (Icon::Select, t.name(), hint)
+      }
     }
   }
 
@@ -777,13 +795,9 @@ impl Cmd {
       }
       Cmd::CamSimulate => app.cam_simulate(),
       Cmd::CamTools => app.open_tool_library(),
-      Cmd::SelectAll => {
-        app.run("select.all", json!({}));
-      }
       Cmd::SelectInvert => {
         app.run("select.invert", json!({}));
       }
-      Cmd::SelectOther => crate::viewport::select_other_at_last_click(app),
       Cmd::WindowSelect => {
         app.nav_mode = None;
         app.sel_mode = crate::select::Mode::Window;
@@ -811,6 +825,7 @@ impl Cmd {
       Cmd::SketchLibrary => crate::library_ui::open(app),
       Cmd::Render(r) => r.run(app),
       Cmd::CutCheck => crate::service_ui::open(app),
+      Cmd::SelTool(t) => crate::select::open_tool(app, t),
     }
   }
 }
@@ -2863,8 +2878,10 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
   );
 }
 
-/// The selection readout: `1 Face | Area: 100.00 mm^2`, `2 Edges | Length: 20.00 mm`, a body's
-/// or feature's name; the browser or timeline row under the pointer names itself instead.
+/// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2` (one face's area, two faces
+/// just `2 Faces`), `2 Edges | Length : 20.00 mm`, `Multiple selections | 9` from three items or
+/// mixed kinds, a body's or feature's name; the browser or timeline row under the pointer names
+/// itself instead.
 pub(crate) fn selection_text(app: &App) -> Option<String> {
   if let Some(l) = &app.ctx_menu.peek_label {
     return Some(l.clone());
@@ -2891,30 +2908,30 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     }
   };
   let first = noun(&sel[0]);
-  if !sel.iter().all(|s| noun(s) == first) {
-    return Some(format!("{} objects", sel.len()));
-  }
   let n = sel.len();
+  if n >= 3 || !sel.iter().all(|s| noun(s) == first) {
+    return Some(format!("Multiple selections | {n}"));
+  }
   let count = format!("{n} {}", if n == 1 { first.0 } else { first.1 });
   let model = &app.s.model;
   let sum = |f: &dyn Fn(&Sel) -> Option<f64>| sel.iter().map(f).sum::<Option<f64>>();
   let u = app.s.design.units;
   let readout = match sel[0] {
-    Sel::Face { .. } => sum(&|s| match s {
-      Sel::Face { body, face } => model.body(*body)?.faces().iter().find(|f| f.id == *face).map(|f| f.area),
-      _ => None,
-    })
-    .map(|a| format!("Area: {}", u.area(a, 2))),
+    // one face reads its area; two read only the count
+    Sel::Face { body, face } if n == 1 => model
+      .body(body)
+      .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| f.area))
+      .map(|a| format!("Area : {}", u.area(a, 2))),
     Sel::Edge { .. } => sum(&|s| match s {
       Sel::Edge { body, edge } => model.body(*body)?.edges().iter().find(|e| e.id == *edge).map(|e| e.length),
       _ => None,
     })
-    .map(|l| format!("Length: {}", u.fixed(l, 2))),
+    .map(|l| format!("Length : {}", u.fixed(l, 2))),
     Sel::Profile { .. } => sum(&|s| match s {
       Sel::Profile { sketch, index } => model.sketches.get(sketch)?.profiles.get(*index).map(|p| p.area().abs()),
       _ => None,
     })
-    .map(|a| format!("Area: {}", u.area(a, 2))),
+    .map(|a| format!("Area : {}", u.area(a, 2))),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
     _ => None,

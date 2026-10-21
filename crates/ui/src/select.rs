@@ -21,18 +21,77 @@ pub enum Priority {
   Component,
 }
 
-/// What can be picked; everything by default.
+/// Fusion's selection filter types, in its menu order: the key the menu toggles and the name
+/// it shows. Every type is on by default.
+pub const FILTER_TYPES: &[(&str, &str)] = &[
+  ("bodies", "Bodies"),
+  ("edges", "Body Edges"),
+  ("faces", "Body Faces"),
+  ("vertices", "Body Vertices"),
+  ("canvas", "Canvas"),
+  ("components", "Components"),
+  ("construction", "Construction Geometry"),
+  ("coordinate_systems", "Coordinate Systems"),
+  ("custom_graphics", "Custom Graphics"),
+  ("decal", "Decal"),
+  ("dimension", "Dimension"),
+  ("features", "Features"),
+  ("joint_origins", "Joint Origins"),
+  ("joints", "Joints"),
+  ("mesh_bodies", "Mesh Bodies"),
+  ("mesh_face_groups", "Mesh Face Groups"),
+  ("mesh_faces", "Mesh Faces"),
+  ("pmi", "PMI"),
+  ("sketch_curves", "Sketch Curves"),
+  ("sketch_constraints", "Sketch Geometry Constraint"),
+  ("sketch_points", "Sketch Points"),
+  ("profiles", "Sketch Profiles"),
+  ("sketch_surface", "Sketch Surface"),
+  ("tspline", "T-Spline Body"),
+  ("text", "Text Selection"),
+];
+
+/// The filter keys with no named field: kept on or off for the menu, picked by nothing yet.
+const OTHER_FILTERS: [&str; 16] = [
+  "canvas",
+  "coordinate_systems",
+  "custom_graphics",
+  "decal",
+  "dimension",
+  "features",
+  "joint_origins",
+  "joints",
+  "mesh_bodies",
+  "mesh_face_groups",
+  "mesh_faces",
+  "pmi",
+  "sketch_constraints",
+  "sketch_surface",
+  "tspline",
+  "text",
+];
+
+/// What can be picked; everything by default, as Fusion's Selection Filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Filters {
   pub bodies: bool,
   pub faces: bool,
   pub edges: bool,
+  /// Sketch curves.
   pub sketches: bool,
+  pub sketch_points: bool,
   pub profiles: bool,
-  /// Body vertices: off by default, since they are drawn (as dots) only while it is on.
+  /// Body vertices (drawn as dots while it is on).
   pub vertices: bool,
   /// Construction planes, axes and points.
   pub construction: bool,
+  /// Whole components, under the component priority.
+  pub components: bool,
+  /// Select Through: hidden objects count in a window or freeform selection (the id buffer
+  /// sees only what is drawn, so it changes nothing yet).
+  pub select_through: bool,
+  /// The types of [`OTHER_FILTERS`], in that order.
+  others: [bool; 16],
 }
 
 impl Default for Filters {
@@ -42,51 +101,80 @@ impl Default for Filters {
       faces: true,
       edges: true,
       sketches: true,
+      sketch_points: true,
       profiles: true,
-      vertices: false,
+      vertices: true,
       construction: true,
+      components: true,
+      select_through: true,
+      others: [true; 16],
     }
   }
 }
 
 impl Filters {
-  pub fn get(&self, name: &str) -> bool {
+  fn slot(&mut self, name: &str) -> &mut bool {
     match name {
-      "bodies" => self.bodies,
-      "faces" => self.faces,
-      "edges" => self.edges,
-      "sketches" => self.sketches,
-      "vertices" => self.vertices,
-      "construction" => self.construction,
-      _ => self.profiles,
-    }
-  }
-
-  pub fn toggle(&mut self, name: &str) {
-    let slot = match name {
       "bodies" => &mut self.bodies,
       "faces" => &mut self.faces,
       "edges" => &mut self.edges,
-      "sketches" => &mut self.sketches,
+      "sketches" | "sketch_curves" => &mut self.sketches,
+      "sketch_points" => &mut self.sketch_points,
       "vertices" => &mut self.vertices,
       "construction" => &mut self.construction,
-      _ => &mut self.profiles,
-    };
+      "components" => &mut self.components,
+      "through" | "select_through" => &mut self.select_through,
+      "profiles" => &mut self.profiles,
+      other => match OTHER_FILTERS.iter().position(|k| *k == other) {
+        Some(i) => &mut self.others[i],
+        None => &mut self.profiles,
+      },
+    }
+  }
+
+  /// Is the filter on? "all" is on when every type is.
+  pub fn get(&self, name: &str) -> bool {
+    if name == "all" {
+      return self.all_on();
+    }
+    let mut copy = *self;
+    *copy.slot(name)
+  }
+
+  /// Are all the object types on (Select Through aside)?
+  pub fn all_on(&self) -> bool {
+    FILTER_TYPES.iter().all(|(k, _)| self.get(k))
+  }
+
+  /// Flips a filter; "all" turns every type on, or off when all are on, as Fusion's Select All.
+  pub fn toggle(&mut self, name: &str) {
+    if name == "all" {
+      let on = !self.all_on();
+      for (k, _) in FILTER_TYPES {
+        *self.slot(k) = on;
+      }
+      return;
+    }
+    let slot = self.slot(name);
     *slot = !*slot;
   }
 
   /// Can this pick be hovered and selected with this priority?
   pub fn allows(&self, p: &Pick, priority: Priority) -> bool {
-    let whole = matches!(priority, Priority::Body | Priority::Component);
-    match p {
-      Pick::Face { .. } if whole => self.bodies,
-      Pick::Edge { .. } if whole => self.bodies,
-      Pick::Vertex { .. } if whole => self.bodies && self.vertices,
-      Pick::Vertex { .. } => self.vertices,
-      Pick::Face { .. } => self.faces && priority != Priority::Edge,
-      Pick::Edge { .. } => self.edges,
-      Pick::Profile { .. } => self.profiles,
-      Pick::SketchPoint { .. } | Pick::SketchCurve { .. } => self.sketches,
+    let whole = match priority {
+      Priority::Body => Some(self.bodies),
+      Priority::Component => Some(self.components),
+      _ => None,
+    };
+    match (p, whole) {
+      (Pick::Face { .. } | Pick::Edge { .. }, Some(w)) => w,
+      (Pick::Vertex { .. }, Some(w)) => w && self.vertices,
+      (Pick::Vertex { .. }, None) => self.vertices,
+      (Pick::Face { .. }, None) => self.faces && priority != Priority::Edge,
+      (Pick::Edge { .. }, None) => self.edges,
+      (Pick::Profile { .. }, _) => self.profiles,
+      (Pick::SketchPoint { .. }, _) => self.sketch_points,
+      (Pick::SketchCurve { .. }, _) => self.sketches,
     }
   }
 }
@@ -206,18 +294,35 @@ fn face_loop(edges: &[EdgeInfo], face: u32, edge: u32) -> Option<Vec<u32>> {
   closed.then(|| lp.iter().map(|e| e.id).collect())
 }
 
-/// The Select Other list: what lies under a point of the viewport, front to back.
+/// A row of the Select Other list: what picking it selects, the pick to highlight while it is
+/// hovered, and its type ("Face", "Body").
+pub(crate) type OtherRow = (Vec<Sel>, Option<Pick>, String);
+
+/// The Select Other list's tabs, as Fusion's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OtherTab {
+  /// What lies under the pointer, front to back.
+  #[default]
+  Depth,
+  /// The bodies and components those belong to.
+  Parents,
+}
+
+/// The Select Other list: what lies under a point of the viewport, front to back, with one row
+/// per entity named by its type, and a Parents tab for what they belong to.
 pub(crate) struct OtherMenu {
   pub pos: Pos2,
-  /// Entries: what selecting them selects, the pick to highlight while hovered, and a label.
-  pub items: Vec<(Vec<Sel>, Option<Pick>, String)>,
+  pub tab: OtherTab,
+  pub depth: Vec<OtherRow>,
+  pub parents: Vec<OtherRow>,
 }
 
 impl OtherMenu {
-  /// Builds the list from the picks under the cursor (nearest first): each face, the edge under
-  /// the cursor, and the bodies and components they belong to.
+  /// Builds the list from the picks under the cursor (nearest first): Depth holds the edge (or
+  /// sketch entity) under the cursor then each face, Parents the bodies and components they
+  /// belong to.
   pub fn new(s: &Session, pos: Pos2, hover: Option<Pick>, hits: &[(f64, Pick)]) -> OtherMenu {
-    let mut items: Vec<(Vec<Sel>, Option<Pick>, String)> = Vec::new();
+    let mut depth: Vec<OtherRow> = Vec::new();
     let mut bodies: Vec<BodyId> = Vec::new();
     if let Some(
       h @ (Pick::Edge { .. }
@@ -227,58 +332,65 @@ impl OtherMenu {
       | Pick::Vertex { .. }),
     ) = hover
     {
-      items.push((vec![h.to_sel()], Some(h), label(s, h)));
-      if let Pick::Edge { body, .. } = h {
+      depth.push((vec![h.to_sel()], Some(h), type_name(h).to_string()));
+      if let Pick::Edge { body, .. } | Pick::Vertex { body, .. } = h {
         bodies.push(body);
       }
     }
     for (_, p) in hits {
-      items.push((vec![p.to_sel()], Some(*p), label(s, *p)));
+      depth.push((vec![p.to_sel()], Some(*p), type_name(*p).to_string()));
       if let Pick::Face { body, .. } = p
         && !bodies.contains(body)
       {
         bodies.push(*body);
       }
     }
+    let mut parents: Vec<OtherRow> = Vec::new();
     for b in &bodies {
-      items.push((vec![Sel::Body { body: *b }], None, format!("Body: {}", s.body_name(*b))));
+      parents.push((vec![Sel::Body { body: *b }], None, "Body".to_string()));
     }
+    let mut seen = Vec::new();
     for b in &bodies {
       if let Some(c) = s.design.components.iter().find(|c| c.bodies.contains(b))
-        && !items.iter().any(|i| i.2 == format!("Component: {}", c.name))
+        && !seen.contains(&c.id)
       {
+        seen.push(c.id);
         let all = c.bodies.iter().map(|body| Sel::Body { body: *body }).collect();
-        items.push((all, None, format!("Component: {}", c.name)));
+        parents.push((all, None, "Component".to_string()));
       }
     }
-    OtherMenu { pos, items }
+    OtherMenu { pos, tab: OtherTab::Depth, depth, parents }
+  }
+
+  /// The rows of the open tab.
+  pub fn rows(&self) -> &[OtherRow] {
+    match self.tab {
+      OtherTab::Depth => &self.depth,
+      OtherTab::Parents => &self.parents,
+    }
   }
 }
 
-fn label(s: &Session, p: Pick) -> String {
+/// The type a Select Other row names a pick by.
+fn type_name(p: Pick) -> &'static str {
   match p {
-    Pick::Face { body, face } => {
-      let kind = s
-        .model
-        .body(body)
-        .and_then(|b| b.faces().iter().find(|f| f.id == face).map(|f| format!("{:?}", f.kind)))
-        .unwrap_or_default();
-      format!("Face {face} ({kind}) of {}", s.body_name(body))
-    }
-    Pick::Edge { body, edge } => format!("Edge {edge} of {}", s.body_name(body)),
-    Pick::SketchCurve { curve, .. } => format!("Sketch curve {}", curve.0),
-    Pick::SketchPoint { point, .. } => format!("Sketch point {}", point.0),
-    Pick::Profile { index, .. } => format!("Profile {}", index + 1),
-    Pick::Vertex { body, edge, end } => {
-      format!("Vertex at the {} of edge {edge} of {}", if end { "end" } else { "start" }, s.body_name(body))
-    }
+    Pick::Face { .. } => "Face",
+    Pick::Edge { .. } => "Edge",
+    Pick::Vertex { .. } => "Vertex",
+    Pick::SketchCurve { .. } => "Sketch Curve",
+    Pick::SketchPoint { .. } => "Sketch Point",
+    Pick::Profile { .. } => "Profile",
   }
 }
+
+/// How long a still press on the model takes to open the Select Other list (seconds).
+pub const HOLD_SECS: f64 = 0.5;
 
 /// Shows the Select Other list; picking an entry selects it (Shift/Ctrl adds), hovering
-/// highlights it in the viewport.
+/// highlights it in the viewport. The list stays until a row is picked, a click lands outside
+/// it or Escape.
 pub(crate) fn show_other(app: &mut App, ctx: &egui::Context) {
-  let Some(menu) = app.other.take() else { return };
+  let Some(mut menu) = app.other.take() else { return };
   let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command);
   let mut keep = true;
   let mut chosen: Option<Vec<Sel>> = None;
@@ -288,13 +400,28 @@ pub(crate) fn show_other(app: &mut App, ctx: &egui::Context) {
     .order(egui::Order::Foreground)
     .show(ctx, |ui| {
       crate::panels::dialog_frame().show(ui, |ui| {
-        ui.set_min_width(220.0);
-        ui.label(RichText::new("SELECT OTHER").small().color(theme::GROUP_LABEL));
+        ui.set_min_width(120.0);
+        ui.horizontal(|ui| {
+          for (tab, name) in [(OtherTab::Depth, "Depth"), (OtherTab::Parents, "Parents")] {
+            let on = menu.tab == tab;
+            let r = ui.selectable_label(on, RichText::new(name).size(12.0));
+            if on {
+              let b = r.rect.bottom();
+              ui.painter().line_segment(
+                [egui::pos2(r.rect.left(), b), egui::pos2(r.rect.right(), b)],
+                egui::Stroke::new(2.0, theme::ACCENT),
+              );
+            }
+            if r.clicked() {
+              menu.tab = tab;
+            }
+          }
+        });
         ui.separator();
-        if menu.items.is_empty() {
+        if menu.rows().is_empty() {
           ui.label(RichText::new("Nothing under the cursor").color(theme::MUTED));
         }
-        for (sel, pick, text) in &menu.items {
+        for (sel, pick, text) in menu.rows() {
           let r = ui.selectable_label(sel.iter().all(|x| app.s.selection.contains(x)), text);
           if r.hovered() {
             hovered = *pick;
@@ -632,6 +759,211 @@ pub(crate) fn region_overlay(app: &App, painter: &egui::Painter) {
   }
 }
 
+// ---------------------------------------------------------------- SELECT > Selection Tools
+
+/// The Selection Tools commands that open a dialog, as Fusion's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelTool {
+  ByName,
+  ByBoundary,
+  BySize,
+  SeedAndBoundary,
+}
+
+impl SelTool {
+  /// The command's name, as the menu shows it.
+  pub fn name(self) -> &'static str {
+    match self {
+      SelTool::ByName => "Select By Name",
+      SelTool::ByBoundary => "Select By Boundary",
+      SelTool::BySize => "Select By Size",
+      SelTool::SeedAndBoundary => "Seed And Boundary",
+    }
+  }
+
+  /// The dialog's title (upper case, as Fusion's).
+  fn title(self) -> &'static str {
+    match self {
+      SelTool::ByName => "SELECT BY NAME",
+      SelTool::ByBoundary => "SELECT BY BOUNDARY",
+      SelTool::BySize => "SELECT BY SIZE",
+      SelTool::SeedAndBoundary => "SEED AND BOUNDARY",
+    }
+  }
+
+  /// The engine command the dialog's OK runs.
+  pub fn command(self) -> &'static str {
+    match self {
+      SelTool::ByName => "select.by_name",
+      SelTool::ByBoundary => "select.by_boundary",
+      SelTool::BySize => "select.by_size",
+      SelTool::SeedAndBoundary => "select.seed_boundary",
+    }
+  }
+
+  /// The cursor prompt while the dialog waits for picks.
+  pub fn prompt(self) -> &'static str {
+    match self {
+      SelTool::ByName => "Type a name (* and ? are wildcards), then OK",
+      SelTool::ByBoundary => "Select the edges of a closed boundary, then OK",
+      SelTool::BySize => "Enter the largest size to select, then OK",
+      SelTool::SeedAndBoundary => "Select a seed face and the boundary edges, then OK",
+    }
+  }
+}
+
+/// An open Selection Tools dialog and its fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDialog {
+  pub tool: SelTool,
+  /// Select By Name: the pattern.
+  pub name: String,
+  /// Select By Name: all, bodies or components; Select By Size: bodies or faces.
+  pub kind: &'static str,
+  /// Select By Size: the largest size (an expression in the design's unit).
+  pub size: String,
+  pub error: Option<String>,
+}
+
+impl ToolDialog {
+  pub fn new(tool: SelTool) -> ToolDialog {
+    let kind = if tool == SelTool::ByName { "all" } else { "bodies" };
+    ToolDialog { tool, name: String::new(), kind, size: "10 mm".into(), error: None }
+  }
+
+  /// The command's parameters from the fields (the picks come from the selection).
+  pub fn params(&self) -> serde_json::Value {
+    match self.tool {
+      SelTool::ByName => serde_json::json!({"name": self.name, "kind": self.kind}),
+      SelTool::BySize => serde_json::json!({"max": self.size, "kind": self.kind}),
+      SelTool::ByBoundary | SelTool::SeedAndBoundary => serde_json::json!({}),
+    }
+  }
+}
+
+/// Opens a Selection Tools dialog (closing the Select Other list).
+pub(crate) fn open_tool(app: &mut App, tool: SelTool) {
+  app.other = None;
+  app.sel_tool = Some(ToolDialog::new(tool));
+  app.hint(tool.prompt());
+}
+
+/// Runs the open Selection Tools dialog's command: on success the dialog closes with the
+/// result selected; an error stays in the dialog.
+pub(crate) fn apply_tool(app: &mut App) {
+  let Some(d) = app.sel_tool.as_ref() else { return };
+  let (cmd, params) = (d.tool.command(), d.params());
+  match app.s.execute(cmd, &params) {
+    Ok(v) => {
+      app.sel_tool = None;
+      app.end_hint();
+      let n = v.get("selected").and_then(serde_json::Value::as_u64).unwrap_or(0);
+      app.status = Some((format!("{n} selected"), false));
+    }
+    Err(e) => {
+      if let Some(d) = app.sel_tool.as_mut() {
+        d.error = Some(e.to_string());
+      }
+    }
+  }
+}
+
+/// Shows the open Selection Tools dialog where command dialogs dock.
+pub(crate) fn show_tool(app: &mut App, ctx: &egui::Context) {
+  let Some(mut d) = app.sel_tool.take() else { return };
+  let mut ok = false;
+  let mut cancel = false;
+  let (edges, faces) = app.s.selection.iter().fold((0, 0), |(e, f), x| match x {
+    Sel::Edge { .. } => (e + 1, f),
+    Sel::Face { .. } => (e, f + 1),
+    _ => (e, f),
+  });
+  egui::Area::new(egui::Id::new("selection-tool"))
+    .fixed_pos(app.canvas.right_top() + egui::vec2(-34.0 - 260.0, 10.0))
+    .order(egui::Order::Foreground)
+    .show(ctx, |ui| {
+      crate::panels::dialog_frame().show(ui, |ui| {
+        ui.set_min_width(260.0);
+        ui.label(RichText::new(d.tool.title()).small().color(theme::GROUP_LABEL));
+        ui.separator();
+        egui::Grid::new("selection-tool-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| match d.tool {
+          SelTool::ByName => {
+            ui.label("Name");
+            ui.text_edit_singleline(&mut d.name);
+            ui.end_row();
+            ui.label("Object Type");
+            egui::ComboBox::from_id_salt("by-name-kind").selected_text(kind_name(d.kind)).show_ui(ui, |ui| {
+              for k in ["all", "bodies", "components"] {
+                ui.selectable_value(&mut d.kind, k, kind_name(k));
+              }
+            });
+            ui.end_row();
+          }
+          SelTool::BySize => {
+            ui.label("Object Type");
+            egui::ComboBox::from_id_salt("by-size-kind").selected_text(kind_name(d.kind)).show_ui(ui, |ui| {
+              for k in ["bodies", "faces"] {
+                ui.selectable_value(&mut d.kind, k, kind_name(k));
+              }
+            });
+            ui.end_row();
+            ui.label("Size");
+            ui.text_edit_singleline(&mut d.size);
+            ui.end_row();
+          }
+          SelTool::ByBoundary => {
+            ui.label("Boundary");
+            ui.label(picked(edges, "edge"));
+            ui.end_row();
+          }
+          SelTool::SeedAndBoundary => {
+            ui.label("Seed");
+            ui.label(picked(faces, "face"));
+            ui.end_row();
+            ui.label("Boundary");
+            ui.label(picked(edges, "edge"));
+            ui.end_row();
+          }
+        });
+        if let Some(e) = &d.error {
+          ui.label(RichText::new(e).color(theme::ERROR));
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            cancel = ui.button("Cancel").clicked();
+            ok = ui.button("OK").clicked();
+          });
+        });
+      });
+    });
+  app.sel_tool = Some(d);
+  if cancel {
+    app.sel_tool = None;
+    app.end_hint();
+  } else if ok {
+    apply_tool(app);
+  }
+}
+
+fn kind_name(kind: &str) -> &'static str {
+  match kind {
+    "bodies" => "Bodies",
+    "components" => "Components",
+    "faces" => "Faces",
+    _ => "All",
+  }
+}
+
+/// "1 edge selected", "2 faces selected", "Select" when none.
+fn picked(n: usize, what: &str) -> String {
+  match n {
+    0 => "Select".to_string(),
+    1 => format!("1 {what} selected"),
+    n => format!("{n} {what}s selected"),
+  }
+}
+
 // ---------------------------------------------------------------- joints and saved joint origins
 
 /// Glyph radius of a joint or joint origin (points).
@@ -768,6 +1100,92 @@ mod tests {
       .collect();
     out.sort();
     out
+  }
+
+  /// Fusion's filters: every type on by default, Select All flips them all and reads as on only
+  /// while all are, Select Through stands apart.
+  #[test]
+  fn filters_default_on_with_select_all() {
+    let mut f = Filters::default();
+    assert!(f.all_on() && f.get("all") && f.vertices && f.select_through);
+    for (k, _) in FILTER_TYPES {
+      assert!(f.get(k), "{k} starts on");
+    }
+    f.toggle("all");
+    assert!(!f.all_on() && FILTER_TYPES.iter().all(|(k, _)| !f.get(k)));
+    assert!(f.select_through, "Select All leaves Select Through alone");
+    f.toggle("all");
+    assert!(f.all_on());
+    f.toggle("tspline");
+    assert!(!f.get("tspline") && !f.get("all"));
+    f.toggle("tspline");
+    assert!(f.get("all"));
+    f.toggle("through");
+    assert!(!f.select_through && f.get("all"));
+    // the old key still names the sketch curves
+    f.toggle("sketches");
+    assert!(!f.sketches && !f.get("sketch_curves"));
+    // vertices pick under the face priority now that they are on by default
+    let f = Filters::default();
+    let v = Pick::Vertex { body: BodyId(1), edge: 1, end: false };
+    assert!(f.allows(&v, Priority::Face) && f.allows(&v, Priority::Body));
+    let mut g = f;
+    g.components = false;
+    let face = Pick::Face { body: BodyId(1), face: 1 };
+    assert!(g.allows(&face, Priority::Body) && !g.allows(&face, Priority::Component));
+  }
+
+  /// The Select Other list names each row by type on its Depth tab, and lists the body and the
+  /// component on Parents.
+  #[test]
+  fn select_other_rows_by_type_with_parents() {
+    let mut app = cube();
+    let b = app.s.model.bodies[0].id;
+    let hits = fox_engine::scene::ray_hits(&app.s, DVec3::new(10.0, 10.0, 50.0), DVec3::new(0.0, 0.0, -1.0));
+    assert_eq!(hits.len(), 2, "top and bottom faces: {hits:?}");
+    let m = OtherMenu::new(&app.s, Pos2::ZERO, None, &hits);
+    assert_eq!(m.tab, OtherTab::Depth);
+    assert_eq!(m.rows().iter().map(|r| r.2.as_str()).collect::<Vec<_>>(), ["Face", "Face"]);
+    assert_eq!(m.parents.iter().map(|r| r.2.as_str()).collect::<Vec<_>>(), ["Body"]);
+    assert_eq!(m.parents[0].0, [Sel::Body { body: b }]);
+    // the hovered edge leads; a component joins the parents
+    app.run("component.create", serde_json::json!({"name": "Bracket", "bodies": [b.0]}));
+    let edge = edge_at(&app, [10.0, 0.0, 20.0]);
+    let m = OtherMenu::new(&app.s, Pos2::ZERO, Some(Pick::Edge { body: b, edge }), &hits);
+    assert_eq!(m.depth.iter().map(|r| r.2.as_str()).collect::<Vec<_>>(), ["Edge", "Face", "Face"]);
+    assert_eq!(m.parents.iter().map(|r| r.2.as_str()).collect::<Vec<_>>(), ["Body", "Component"]);
+  }
+
+  /// A Selection Tools dialog runs its command on OK and keeps the result selected; an error
+  /// stays in the dialog.
+  #[test]
+  fn selection_tool_dialogs_run_their_commands() {
+    let mut app = cube();
+    let b = app.s.model.bodies[0].id;
+    open_tool(&mut app, SelTool::ByName);
+    assert_eq!(app.sel_tool.as_ref().map(|d| d.tool), Some(SelTool::ByName));
+    assert_eq!(app.status.as_ref().map(|(t, _)| t.as_str()), Some(SelTool::ByName.prompt()));
+    app.sel_tool.as_mut().unwrap().name = "bod*".into();
+    apply_tool(&mut app);
+    assert!(app.sel_tool.is_none(), "closed on success");
+    assert_eq!(app.s.selection, [Sel::Body { body: b }]);
+    open_tool(&mut app, SelTool::BySize);
+    app.sel_tool.as_mut().unwrap().size = "nonsense".into();
+    apply_tool(&mut app);
+    assert!(app.sel_tool.as_ref().is_some_and(|d| d.error.is_some()), "the error stays in the dialog");
+    app.sel_tool.as_mut().unwrap().size = "40 mm".into();
+    apply_tool(&mut app);
+    assert!(app.sel_tool.is_none() && app.s.selection == [Sel::Body { body: b }]);
+    // Seed And Boundary takes the selected face and edges
+    let body = app.s.model.body(b).unwrap();
+    let top = body.faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let rim: Vec<Sel> =
+      body.edges().iter().filter(|e| e.faces.contains(&top)).map(|e| Sel::Edge { body: b, edge: e.id }).collect();
+    app.s.selection = vec![Sel::Face { body: b, face: top }];
+    app.s.selection.extend(rim);
+    open_tool(&mut app, SelTool::SeedAndBoundary);
+    apply_tool(&mut app);
+    assert_eq!(app.s.selection, [Sel::Face { body: b, face: top }]);
   }
 
   #[test]

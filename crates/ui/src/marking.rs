@@ -1366,15 +1366,15 @@ mod tests {
     let body = app.s.model.bodies[0].id;
     let face = app.s.model.bodies[0].faces()[0].id;
     app.s.selection = vec![Sel::Face { body, face }];
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area: 100.00 mm^2"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area : 100.00 mm^2"));
     let edges: Vec<u32> = app.s.model.bodies[0].edges().iter().take(2).map(|e| e.id).collect();
     app.s.selection = edges.iter().map(|e| Sel::Edge { body, edge: *e }).collect();
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length: 20.00 mm"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length : 20.00 mm"));
     // in the design's unit
     app.s.design.units = fox_engine::model::LengthUnit::Cm;
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length: 2.00 cm"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("2 Edges | Length : 2.00 cm"));
     app.s.selection = vec![Sel::Face { body, face }];
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area: 1.00 cm^2"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Face | Area : 1.00 cm^2"));
     app.s.design.units = fox_engine::model::LengthUnit::Mm;
     app.s.selection = vec![Sel::Body { body }];
     assert_eq!(panels::selection_text(&app), Some(app.s.body_name(body)));
@@ -1395,10 +1395,10 @@ mod tests {
     app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [40, 20]}));
     let sketch = fox_engine::model::FeatureId(sk as u32);
     app.s.selection = vec![Sel::Profile { sketch, index: 0 }];
-    // 800 mm² in an inch design: Fusion reads "1 Profile | Area: 1.24 in^2"
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area: 1.24 in^2"));
+    // 800 mm² in an inch design: Fusion reads "1 Profile | Area : 1.24 in^2"
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area : 1.24 in^2"));
     app.run("design.units", json!({"unit": "mm"}));
-    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area: 800.00 mm^2"));
+    assert_eq!(panels::selection_text(&app).as_deref(), Some("1 Profile | Area : 800.00 mm^2"));
   }
 
   #[test]

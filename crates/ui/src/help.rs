@@ -25,7 +25,7 @@ const MOUSE: [(&str, &str); 6] = [
   ("Right-drag", "Orbit"),
   ("Wheel", "Zoom"),
   ("Right-click", "Marking menu"),
-  ("Alt+click", "Select Other"),
+  ("Click and hold", "Select Other"),
 ];
 
 /// Opens a page or folder, saying so in the status line if it can't.

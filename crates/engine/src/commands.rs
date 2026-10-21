@@ -509,6 +509,10 @@ cmds! {
   "sheet.collect_flat" => "All flat patterns on one sheet: every sheet metal body's flat pattern outline (bend lines as construction) in one new sketch, or one DXF, in rows that wrap before a part runs past max_width", "{bodies?: [body] (default every sheet metal body), max_width? (default 48 in), gap? (default 0.25 in), sketch_name? (default \"Cut File\"), path?: .dxf}";
   "body.classify" => "Whether points are inside a body, outside it or on its surface (which side of an edge the material is on, what a ray would hit)", "{body, points: [[x, y, z], ...]}";
   "sketch.centerline" => "Toggle the Centerline linetype: construction geometry drawn dash-dot (off makes the curve normal again)", "{sketch?, curves: [id], on?: bool}";
+  "select.by_name" => "Select the visible bodies (and the bodies of components) whose name matches a pattern (* any run, ? one character, case ignored)", "{name, kind?: all|bodies|components}";
+  "select.by_size" => "Select the visible bodies (bounding box diagonal) or faces (square root of the area) between min and max", "{max, min?, kind?: bodies|faces}";
+  "select.by_boundary" => "Select the faces enclosed by a closed chain of edges of one body (the smaller side); default the selected edges", "{edges?: [{body, edge}]}";
+  "select.seed_boundary" => "Select the faces connected to a seed face without crossing the boundary edges; defaults: the selected face and edges", "{seed?: {body, face}, edges?: [{body, edge}]}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {

@@ -106,7 +106,7 @@ pub(crate) struct Group {
 
 use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
-use crate::select::Priority;
+use crate::select::{Priority, SelTool};
 use Cmd::Dialog as D;
 
 const PATTERN: &[E] = &[
@@ -298,27 +298,58 @@ const ASSEMBLE: &[E] = &[
   c("Cam Follower", Icon::DriveJoint, D(Kind::Form(&assembly_forms::CAM_FOLLOWER))),
 ];
 
+// Fusion's Selection Tools (Select All and Select Other stay as commands: Select All is a
+// filter row below, Select Other opens by holding the button on the model)
 const SELECTION_TOOLS: &[E] = &[
-  c("Select All", Icon::Select, Cmd::SelectAll).k("Ctrl+A"),
-  c("Select Other", Icon::Select, Cmd::SelectOther).k("Alt+click"),
+  c("Select By Name", Icon::Select, Cmd::SelTool(SelTool::ByName)),
+  c("Select By Boundary", Icon::Select, Cmd::SelTool(SelTool::ByBoundary)),
+  c("Select By Size", Icon::Select, Cmd::SelTool(SelTool::BySize)),
   c("Invert Selection", Icon::Select, Cmd::SelectInvert),
+  c("Seed And Boundary", Icon::Select, Cmd::SelTool(SelTool::SeedAndBoundary)),
 ];
 
+// three, with no mark on the current one, as Fusion's (the component priority stays reachable
+// through the Measure dialog's filter buttons)
 const SELECTION_PRIORITY: &[E] = &[
   c("Select Body Priority", Icon::Body, Cmd::Priority(Priority::Body)),
   c("Select Face Priority", Icon::SplitFace, Cmd::Priority(Priority::Face)),
   c("Select Edge Priority", Icon::Line, Cmd::Priority(Priority::Edge)),
-  c("Select Component Priority", Icon::Component, Cmd::Priority(Priority::Component)),
 ];
 
+/// What the Selection Filters submenu says when hovered, as Fusion's.
+const SELECTION_FILTERS_TIP: &str = "Specifies which object types can be selected. Use Select All to include or \
+  exclude all object types. Check only specific types to limit selection to those types. Check Select Through to \
+  enable selection of hidden objects during Window or Freeform selection.";
+
+// Fusion's list, every type checked by default (see `select::FILTER_TYPES`)
 const SELECTION_FILTERS: &[E] = &[
+  c("Select All", Icon::Select, Cmd::Filter("all")),
+  c("Select Through", Icon::Eye, Cmd::Filter("through")),
   c("Bodies", Icon::Body, Cmd::Filter("bodies")),
-  c("Faces", Icon::SplitFace, Cmd::Filter("faces")),
-  c("Edges", Icon::Line, Cmd::Filter("edges")),
-  c("Vertices", Icon::Point, Cmd::Filter("vertices")),
-  c("Sketches", Icon::SketchSmall, Cmd::Filter("sketches")),
+  c("Body Edges", Icon::Line, Cmd::Filter("edges")),
+  c("Body Faces", Icon::SplitFace, Cmd::Filter("faces")),
+  c("Body Vertices", Icon::Point, Cmd::Filter("vertices")),
+  c("Canvas", Icon::Canvas, Cmd::Filter("canvas")),
+  c("Components", Icon::Component, Cmd::Filter("components")),
+  c("Construction Geometry", Icon::Plane, Cmd::Filter("construction")),
+  c("Coordinate Systems", Icon::Ucs, Cmd::Filter("coordinate_systems")),
+  c("Custom Graphics", Icon::Display, Cmd::Filter("custom_graphics")),
+  c("Decal", Icon::Decal, Cmd::Filter("decal")),
+  c("Dimension", Icon::Dimension, Cmd::Filter("dimension")),
+  c("Features", Icon::History, Cmd::Filter("features")),
+  c("Joint Origins", Icon::JointOrigin, Cmd::Filter("joint_origins")),
+  c("Joints", Icon::DriveJoint, Cmd::Filter("joints")),
+  c("Mesh Bodies", Icon::InsertMesh, Cmd::Filter("mesh_bodies")),
+  c("Mesh Face Groups", Icon::FaceGroups, Cmd::Filter("mesh_face_groups")),
+  c("Mesh Faces", Icon::Tessellate, Cmd::Filter("mesh_faces")),
+  c("PMI", Icon::FeatureControl, Cmd::Filter("pmi")),
+  c("Sketch Curves", Icon::SketchSmall, Cmd::Filter("sketch_curves")),
+  c("Sketch Geometry Constraint", Icon::Coincident, Cmd::Filter("sketch_constraints")),
+  c("Sketch Points", Icon::Point, Cmd::Filter("sketch_points")),
   c("Sketch Profiles", Icon::Rect, Cmd::Filter("profiles")),
-  c("Construction", Icon::Plane, Cmd::Filter("construction")),
+  c("Sketch Surface", Icon::Patch, Cmd::Filter("sketch_surface")),
+  c("T-Spline Body", Icon::CreateForm, Cmd::Filter("tspline")),
+  c("Text Selection", Icon::SkText, Cmd::Filter("text")),
 ];
 
 const SELECT: &[E] = &[
@@ -627,17 +658,28 @@ const SKETCH_MODIFY: &[E] = &[
   c("Extend", Icon::SkExtend, T(Tool::Extend)),
   c("Break", Icon::SkBreak, T(Tool::Break)),
   c("Sketch Scale", Icon::SkScale, D(Kind::Form(&forms::SK_SCALE))),
-  c("Scale to Size", Icon::SkScaleTo, D(Kind::Form(&forms::SK_SCALE_TO))),
   c("Move/Copy", Icon::Move, D(Kind::Move)).k("M"),
   E::Sep,
   c("Change Parameters", Icon::Params, Cmd::Params),
-  E::Sep,
+];
+
+/// Sketch commands FissionOxide has that Fusion's MODIFY dropdown doesn't list: not in the
+/// dropdown, still found by the S toolbox and the keyboard shortcuts.
+const SKETCH_MODIFY_MORE: &[E] = &[
+  c("Scale to Size", Icon::SkScaleTo, D(Kind::Form(&forms::SK_SCALE_TO))),
   c("Edit Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EDIT))),
   c("Explode Text", Icon::SkText, D(Kind::Form(&forms::SK_TEXT_EXPLODE))),
-  E::Sep,
   c("Remove Duplicates", Icon::SkRemoveDuplicates, D(Kind::Form(&forms::SK_REMOVE_DUPLICATES))),
   c("Clean Up", Icon::SkCleanup, D(Kind::Form(&forms::SK_CLEANUP))),
 ];
+
+/// A tab's commands that its dropdowns don't show (see [`SKETCH_MODIFY_MORE`]).
+fn extra_commands(tab: Tab) -> &'static [E] {
+  match tab {
+    Tab::Sketch => SKETCH_MODIFY_MORE,
+    _ => &[],
+  }
+}
 
 const SKETCH_CONSTRAINTS: &[E] = &[
   c("Horizontal/Vertical", Icon::HorizVert, Cmd::Constraint("hv")),
@@ -1175,12 +1217,15 @@ const ALL_TABS: [Tab; 14] = [
 pub(crate) fn bindings() -> &'static [Binding] {
   static ALL: std::sync::LazyLock<Vec<Binding>> = std::sync::LazyLock::new(|| {
     let mut out: Vec<Binding> = Vec::new();
-    for e in commands(&ALL_TABS) {
-      let id = e.id();
-      match out.iter_mut().find(|b| b.id == id) {
-        Some(b) if b.default.is_empty() => b.default = e.key,
-        Some(_) => {}
-        None => out.push(Binding { id, scope: Scope::of(e.tab), label: e.label, default: e.key }),
+    // tab by tab, so a command on two toolbars (Move/Copy on SOLID and SKETCH) binds on each
+    for tab in ALL_TABS {
+      for e in commands(&[tab]) {
+        let id = e.id();
+        match out.iter_mut().find(|b| b.id == id) {
+          Some(b) if b.default.is_empty() => b.default = e.key,
+          Some(_) => {}
+          None => out.push(Binding { id, scope: Scope::of(e.tab), label: e.label, default: e.key }),
+        }
       }
     }
     out
@@ -1267,6 +1312,7 @@ pub(crate) fn commands(tabs: &[Tab]) -> Vec<Entry> {
     for g in own.iter().chain(shared.iter()) {
       walk(g.menu, tab, &mut out);
     }
+    walk(extra_commands(tab), tab, &mut out);
   }
   out
 }
@@ -1464,12 +1510,13 @@ fn show_group(
   panels::separator(ui);
 }
 
-/// The toggle commands in a menu (and its submenus).
+/// The toggle commands in a menu (and its submenus): the selection filters get a check mark
+/// when on; the selection priorities show none, as Fusion's.
 fn toggles(menu: &'static [E]) -> Vec<Item> {
   let mut out = Vec::new();
   for e in menu {
     match e {
-      E::I(i) if matches!(i.cmd, Some(Cmd::Priority(_) | Cmd::Filter(_))) => out.push(*i),
+      E::I(i) if matches!(i.cmd, Some(Cmd::Filter(_))) => out.push(*i),
       E::Sub(_, sub) => out.extend(toggles(sub)),
       _ => {}
     }
@@ -1548,6 +1595,7 @@ fn entries(
       }
       E::Sub(label, sub) => {
         let resp = row(ui, width, None, "", label, true);
+        let resp = if *label == "Selection Filters" { resp.on_hover_text(SELECTION_FILTERS_TIP) } else { resp };
         egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| entries(ui, at, sub, pick, act, on));
       }
     }
@@ -1731,7 +1779,6 @@ mod tests {
     let wired = [
       (Tab::Sketch, "MODIFY", "Move/Copy", D(Kind::Move)),
       (Tab::Sketch, "MODIFY", "Sketch Scale", D(Kind::Form(&forms::SK_SCALE))),
-      (Tab::Sketch, "MODIFY", "Scale to Size", D(Kind::Form(&forms::SK_SCALE_TO))),
       (Tab::Sketch, "INSERT", "Sketch Library...", Cmd::SketchLibrary),
       (Tab::Sketch, "CREATE", "Project To Surface", D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
       (Tab::Sketch, "CREATE", "Intersection Curve", D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),
@@ -1743,9 +1790,7 @@ mod tests {
       (Tab::Surface, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::SheetMetal, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::Solid, "CREATE", "Create Base Feature", D(Kind::Form(&config_ui::BASE_START))),
-      (Tab::Solid, "SELECT", "Construction", Cmd::Filter("construction")),
-      (Tab::Sketch, "MODIFY", "Remove Duplicates", D(Kind::Form(&forms::SK_REMOVE_DUPLICATES))),
-      (Tab::Sketch, "MODIFY", "Clean Up", D(Kind::Form(&forms::SK_CLEANUP))),
+      (Tab::Solid, "SELECT", "Construction Geometry", Cmd::Filter("construction")),
     ];
     for (tab, group, label, cmd) in wired {
       assert_eq!(cmd_of(tab, group, label), Some(cmd), "{tab:?} {group} > {label}");
@@ -1776,6 +1821,94 @@ mod tests {
     Cmd::Filter("construction").run(&mut app);
     assert!(!app.sel_filter.construction && !Cmd::Filter("construction").active(&app));
     assert!(app.sel_filter.bodies && app.sel_filter.profiles, "only Construction changes");
+  }
+
+  /// The labels of a menu's rows (submenus flattened), with their keys.
+  fn rows(menu: &[E]) -> Vec<(&'static str, &'static str)> {
+    let mut out = Vec::new();
+    for e in menu {
+      match e {
+        E::I(i) => out.push((i.label, i.key)),
+        E::Sub(l, _) => out.push((*l, "")),
+        E::Sep => {}
+      }
+    }
+    out
+  }
+
+  /// SELECT's submenus list what Fusion's do: the full filter set, all on by default and with a
+  /// check mark; three priorities with no mark; the five selection tools.
+  #[test]
+  fn select_submenus_match_fusion() {
+    let names: Vec<&str> = rows(SELECTION_FILTERS).into_iter().map(|(l, _)| l).collect();
+    let mut want = vec!["Select All", "Select Through"];
+    want.extend(crate::select::FILTER_TYPES.iter().map(|(_, n)| *n));
+    assert_eq!(names, want);
+    let mut app = App::with_session(fox_engine::Session::default());
+    for e in SELECTION_FILTERS {
+      if let E::I(i) = e {
+        assert!(i.cmd.unwrap().active(&app), "{} starts checked", i.label);
+      }
+    }
+    // Select All unchecks every type, and comes back once all are on again
+    Cmd::Filter("all").run(&mut app);
+    assert!(!app.sel_filter.bodies && !app.sel_filter.vertices && !Cmd::Filter("all").active(&app));
+    Cmd::Filter("all").run(&mut app);
+    assert!(app.sel_filter.bodies && app.sel_filter.vertices && Cmd::Filter("all").active(&app));
+    Cmd::Filter("mesh_faces").run(&mut app);
+    assert!(!Cmd::Filter("mesh_faces").active(&app) && !Cmd::Filter("all").active(&app), "one off: Select All off");
+    assert!(Cmd::Filter("through").active(&app), "Select Through is its own flag");
+    assert_eq!(
+      rows(SELECTION_PRIORITY).into_iter().map(|(l, _)| l).collect::<Vec<_>>(),
+      ["Select Body Priority", "Select Face Priority", "Select Edge Priority"]
+    );
+    assert!(toggles(SELECTION_PRIORITY).is_empty(), "no check mark on the current priority");
+    assert_eq!(toggles(SELECTION_FILTERS).len(), SELECTION_FILTERS.len());
+    assert_eq!(
+      rows(SELECTION_TOOLS).into_iter().map(|(l, _)| l).collect::<Vec<_>>(),
+      ["Select By Name", "Select By Boundary", "Select By Size", "Invert Selection", "Seed And Boundary"]
+    );
+    assert_eq!(cmd_of(Tab::Solid, "SELECT", "Select By Size"), Some(Cmd::SelTool(SelTool::BySize)));
+    assert!(!rows(SELECTION_TOOLS).iter().any(|(l, _)| *l == "Select All" || *l == "Select Other"));
+  }
+
+  /// The sketch commands dropped from the MODIFY dropdown are still commands of the SKETCH tab
+  /// (the S toolbox finds them).
+  #[test]
+  fn dropped_sketch_commands_stay_reachable() {
+    use crate::forms;
+    assert!(cmd_of(Tab::Sketch, "MODIFY", "Scale to Size").is_none());
+    for (label, kind) in [
+      ("Scale to Size", Kind::Form(&forms::SK_SCALE_TO)),
+      ("Remove Duplicates", Kind::Form(&forms::SK_REMOVE_DUPLICATES)),
+      ("Clean Up", Kind::Form(&forms::SK_CLEANUP)),
+    ] {
+      assert!(offers(Tab::Sketch, D(kind)), "{label}");
+      assert!(commands(&[Tab::Sketch]).iter().any(|e| e.label == label), "{label}");
+    }
+  }
+
+  /// The sketch MODIFY dropdown lists Fusion's ten commands, Move/Copy with its M.
+  #[test]
+  fn sketch_modify_lists_fusions_commands() {
+    assert_eq!(
+      rows(SKETCH_MODIFY),
+      [
+        ("Fillet", ""),
+        ("Chamfer", ""),
+        ("Blend Curve", ""),
+        ("Offset", "O"),
+        ("Trim", "T"),
+        ("Extend", ""),
+        ("Break", ""),
+        ("Sketch Scale", ""),
+        ("Move/Copy", "M"),
+        ("Change Parameters", ""),
+      ]
+    );
+    // the key column shows it on the SKETCH toolbar too, not only on SOLID's
+    assert_eq!(key_of(&Prefs::default(), Scope::Sketch, "Move/Copy"), "M");
+    assert_eq!(key_of(&Prefs::default(), Scope::Design, "Move/Copy"), "M");
   }
 
   #[test]

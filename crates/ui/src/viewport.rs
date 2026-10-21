@@ -76,6 +76,12 @@ impl Tool {
   }
 }
 
+/// The window box (left to right), as Fusion draws it: a peach fill with a solid purple-grey
+/// 1 px border.
+pub const WINDOW_BOX: (Color32, Color32) = (Color32::from_rgb(253, 223, 185), Color32::from_rgb(170, 152, 195));
+/// The crossing box (right to left): a pale yellow fill with a dashed dark border.
+pub const CROSSING_BOX: (Color32, Color32) = (Color32::from_rgb(255, 253, 202), Color32::from_rgb(55, 61, 47));
+
 #[derive(Debug, Clone, Copy)]
 pub enum Drag {
   Orbit,
@@ -87,11 +93,11 @@ pub enum Drag {
     point: PointId,
   },
   /// Window selection from `start` to `now`: left to right selects what is fully inside, right to
-  /// left what the box touches. A press held without moving opens Select Other instead.
+  /// left what the box touches. (A press held still opens Select Other before a box can start;
+  /// see [`crate::select::HOLD_SECS`].)
   Box {
     start: Pos2,
     now: Pos2,
-    since: f64,
   },
   /// Dragging a command dialog's arrow (extrude distance, plane offset).
   Manip,
@@ -405,11 +411,17 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   heads_up(app, &painter, &resp, &view, &ctx);
   measure_overlay(app, &painter, &view);
   cursor_prompt(app, &resp);
-  if let Some(Drag::Box { start, now, .. }) = app.drag {
+  if let Some(Drag::Box { start, now }) = app.drag {
     let r = Rect::from_two_pos(start, now);
-    // left to right: window (blue, solid); right to left: crossing (green)
-    let col = if now.x >= start.x { Color32::from_rgb(40, 120, 230) } else { Color32::from_rgb(40, 170, 90) };
-    painter.rect(r, 0.0, col.gamma_multiply(0.12), Stroke::new(1.0, col), egui::StrokeKind::Inside);
+    // as Fusion's: left to right, the window box is peach with a solid purple-grey border; right
+    // to left, the crossing box is pale yellow with a dashed dark border
+    if now.x >= start.x {
+      painter.rect(r, 0.0, WINDOW_BOX.0, Stroke::new(1.0, WINDOW_BOX.1), egui::StrokeKind::Inside);
+    } else {
+      painter.rect_filled(r, 0.0, CROSSING_BOX.0);
+      let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+      painter.add(egui::Shape::dashed_line(&corners, Stroke::new(1.0, CROSSING_BOX.1), 4.0, 3.0));
+    }
   }
   if let Some(Drag::ZoomWindow { start, now }) = app.drag {
     let col = Color32::from_rgb(40, 120, 230);
@@ -420,6 +432,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   }
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
+  crate::select::show_tool(app, &ctx);
 
   // right-click without dragging opens the marking menu; while it's open it owns the clicks
   if resp.secondary_clicked()
@@ -532,14 +545,9 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
     match drag {
       Drag::SketchPoint { sketch, point } => finish_point_drag(app, sketch, point),
       Drag::Component => crate::comp_drag::finish(app),
-      Drag::Box { start, now, since } => {
-        let held = ctx.input(|i| i.time) - since;
-        if (now - start).length() < 4.0 && held > 0.45 {
-          open_select_other(app, view, start);
-        } else {
-          let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
-          finish_box(app, view, start, now, add);
-        }
+      Drag::Box { start, now } => {
+        let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
+        finish_box(app, view, start, now, add);
       }
       Drag::Lasso => {
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
@@ -942,10 +950,34 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     *now = pos;
     return;
   }
-  if resp.drag_started_by(egui::PointerButton::Primary) && app.drag.is_none() && app.tool == Tool::Select {
+  // Select Other, as in Fusion: a press held still on the model opens the list while the
+  // button is down, and the release then selects nothing (a sketch point is for dragging)
+  if app.tool == Tool::Select
+    && app.drag.is_none()
+    && app.other.is_none()
+    && app.hover.is_some_and(|h| !matches!(h, Pick::SketchPoint { .. }))
+    && !app.dialog.as_ref().is_some_and(|d| d.wants_text_frame())
+  {
+    let held = ctx.input(|i| {
+      let origin = i.pointer.press_origin()?;
+      let still = i.pointer.primary_down() && resp.rect.contains(origin) && (pos - origin).length() < 4.0;
+      still.then_some((origin, i.pointer.press_start_time().unwrap_or(i.time), i.time))
+    });
+    if let Some((origin, since, now)) = held {
+      if now - since >= crate::select::HOLD_SECS {
+        open_select_other(app, view, origin);
+        return;
+      }
+      ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+  }
+  if resp.drag_started_by(egui::PointerButton::Primary)
+    && app.drag.is_none()
+    && app.other.is_none()
+    && app.tool == Tool::Select
+  {
     let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or(pos);
-    let since = ctx.input(|i| i.pointer.press_start_time()).unwrap_or(0.0);
-    app.drag = Some(Drag::Box { start, now: pos, since });
+    app.drag = Some(Drag::Box { start, now: pos });
   }
   if let Some(Drag::Box { now, .. }) = &mut app.drag {
     *now = pos;
@@ -958,11 +990,11 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if !resp.clicked() {
     return;
   }
-  app.last_click = Some(pos);
-  if ctx.input(|i| i.modifiers.alt) && app.tool == Tool::Select {
-    open_select_other(app, view, pos);
+  // the release of the press that opened Select Other picks nothing
+  if app.other.is_some() {
     return;
   }
+  app.last_click = Some(pos);
   // Trim picking pieces: a click on a trimmed surface marks the piece under the cursor to remove
   if let Some(Pick::Face { body, .. }) = app.hover
     && let Some(d) = app.dialog.as_mut()
@@ -996,7 +1028,7 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   }
   if !sketching || app.tool == Tool::Select {
     // with a command dialog open, picks add to (or toggle out of) its selection, as in Fusion
-    select_click(app, add || app.dialog.is_some());
+    select_click(app, add || app.dialog.is_some() || app.sel_tool.is_some());
     // double-clicking an edge selects its loop
     if resp.double_clicked()
       && let Some(Pick::Edge { body, edge }) = app.hover
@@ -4167,19 +4199,6 @@ fn open_select_other(app: &mut App, view: &View, pos: Pos2) {
   let (o, d) = view.ray(&app.cam, pos);
   let hits = fox_engine::scene::ray_hits(&app.s, o, d);
   app.other = Some(crate::select::OtherMenu::new(&app.s, pos, app.hover, &hits));
-}
-
-/// Select Other from the menu: at the last click, or the middle of the viewport.
-pub(crate) fn select_other_at_last_click(app: &mut App) {
-  let pos = app.last_click.unwrap_or(app.canvas.center());
-  let ppp = app.frame.as_ref().map(|f| f.width as f32 / app.canvas.width().max(1.0)).unwrap_or(1.0);
-  let view = View {
-    rect: app.canvas,
-    ppp,
-    w: app.frame.as_ref().map(|f| f.width).unwrap_or(1),
-    h: app.frame.as_ref().map(|f| f.height).unwrap_or(1),
-  };
-  open_select_other(app, &view, pos);
 }
 
 // ---------------------------------------------------------------- manipulators, measure line

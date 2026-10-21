@@ -5,7 +5,7 @@ use fox_kernel::{CurveKind as EdgeKind, Shape, SurfaceKind};
 use fox_model::BodyId;
 use serde_json::{Value, json};
 
-use crate::commands::{edge_at, face_at, req_u32, req_vec3};
+use crate::commands::{edge_at, expr_of, face_at, req_u32, req_vec3};
 use crate::{CmdError, CmdResult, Sel, Session};
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
@@ -13,6 +13,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "measure" => measure(s, p),
     "select.all" => select_all(s, p),
     "select.invert" => select_invert(s),
+    "select.by_name" => select_by_name(s, p),
+    "select.by_size" => select_by_size(s, p),
+    "select.by_boundary" => select_by_boundary(s, p),
+    "select.seed_boundary" => select_seed_boundary(s, p),
     "inspect.center_of_mass" => center_of_mass(s, p),
     "body.classify" => classify(s, p),
     _ => return None,
@@ -261,4 +265,179 @@ fn center_of_mass(s: &Session, p: &Value) -> CmdResult {
     "mass_g": mass,
     "bodies": used,
   }))
+}
+
+// ---------------------------------------------------------------- SELECT > Selection Tools
+
+/// Does `name` match the wildcard `pattern` (`*` any run of characters, `?` any one), ignoring
+/// case? A pattern without wildcards matches the whole name.
+pub fn name_matches(pattern: &str, name: &str) -> bool {
+  fn go(p: &[char], n: &[char]) -> bool {
+    match p.split_first() {
+      None => n.is_empty(),
+      Some(('*', rest)) => (0..=n.len()).any(|i| go(rest, &n[i..])),
+      Some(('?', rest)) => !n.is_empty() && go(rest, &n[1..]),
+      Some((c, rest)) => n.first() == Some(c) && go(rest, &n[1..]),
+    }
+  }
+  let p: Vec<char> = pattern.trim().to_lowercase().chars().collect();
+  let n: Vec<char> = name.to_lowercase().chars().collect();
+  go(&p, &n)
+}
+
+/// `select.by_name`: the visible bodies, and the bodies of the components, whose name matches
+/// the pattern (`*` and `?` wildcards, case ignored).
+fn select_by_name(s: &mut Session, p: &Value) -> CmdResult {
+  let pattern = p
+    .get("name")
+    .and_then(Value::as_str)
+    .map(str::trim)
+    .filter(|t| !t.is_empty())
+    .ok_or_else(|| CmdError::new("'name' is required"))?;
+  let kind = p.get("kind").and_then(Value::as_str).unwrap_or("all");
+  if !matches!(kind, "all" | "bodies" | "components") {
+    return Err(CmdError::new(format!("unknown kind '{kind}' (all, bodies, components)")));
+  }
+  let mut out: Vec<Sel> = Vec::new();
+  if kind != "components" {
+    for b in s.model.bodies.iter().filter(|b| s.body_visible(b.id)) {
+      if name_matches(pattern, &s.body_name(b.id)) {
+        out.push(Sel::Body { body: b.id });
+      }
+    }
+  }
+  if kind != "bodies" {
+    for c in s.design.components.iter().filter(|c| name_matches(pattern, &c.name)) {
+      for b in c.bodies.iter().filter(|b| s.model.body(**b).is_some() && s.body_visible(**b)) {
+        let sel = Sel::Body { body: *b };
+        if !out.contains(&sel) {
+          out.push(sel);
+        }
+      }
+    }
+  }
+  s.selection = out;
+  Ok(json!({"selected": s.selection.len()}))
+}
+
+/// A size parameter: a number (mm) or an expression ("0.5 in", "width/2").
+fn size_of(s: &Session, p: &Value, k: &str) -> Result<Option<f64>, CmdError> {
+  let Some(v) = p.get(k).filter(|v| !v.is_null()) else { return Ok(None) };
+  Ok(Some(fox_expr::eval(&expr_of(v)?, fox_expr::Kind::Length, &s.model.params)?))
+}
+
+/// `select.by_size`: the visible bodies (by the diagonal of their bounding box) or faces (by the
+/// square root of their area) no bigger than `max` and no smaller than `min`.
+fn select_by_size(s: &mut Session, p: &Value) -> CmdResult {
+  let kind = p.get("kind").and_then(Value::as_str).unwrap_or("bodies");
+  let max = size_of(s, p, "max")?.ok_or_else(|| CmdError::new("'max' is required"))?;
+  let min = size_of(s, p, "min")?.unwrap_or(0.0);
+  let fits = |size: f64| size >= min && size <= max;
+  let mut out = Vec::new();
+  for b in s.model.bodies.iter().filter(|b| s.body_visible(b.id)) {
+    match kind {
+      "bodies" | "body" => {
+        if let Ok(m) = b.shape.mass()
+          && fits((m.bbox_max - m.bbox_min).length())
+        {
+          out.push(Sel::Body { body: b.id });
+        }
+      }
+      "faces" | "face" => out.extend(
+        b.faces().iter().filter(|f| fits(f.area.max(0.0).sqrt())).map(|f| Sel::Face { body: b.id, face: f.id }),
+      ),
+      o => return Err(CmdError::new(format!("unknown kind '{o}' (bodies, faces)"))),
+    }
+  }
+  s.selection = out;
+  Ok(json!({"selected": s.selection.len()}))
+}
+
+/// The `{body, edge}` entries of `k`, else the selected edges.
+fn boundary_edges(s: &Session, p: &Value, k: &str) -> Vec<(BodyId, u32)> {
+  let given: Vec<(BodyId, u32)> = p
+    .get(k)
+    .and_then(Value::as_array)
+    .map(|a| {
+      a.iter()
+        .filter_map(|e| Some((BodyId(e.get("body")?.as_u64()? as u32), e.get("edge")?.as_u64()? as u32)))
+        .collect()
+    })
+    .unwrap_or_default();
+  if !given.is_empty() {
+    return given;
+  }
+  s.selection
+    .iter()
+    .filter_map(|x| match x {
+      Sel::Edge { body, edge } => Some((*body, *edge)),
+      _ => None,
+    })
+    .collect()
+}
+
+/// The faces of `body` reachable from `seed` without crossing a boundary edge.
+fn flood_faces(s: &Session, body: BodyId, seed: u32, boundary: &[u32]) -> Vec<u32> {
+  let Some(b) = s.model.body(body) else { return Vec::new() };
+  let mut out = vec![seed];
+  let mut i = 0;
+  while i < out.len() {
+    let f = out[i];
+    for e in b.edges().iter().filter(|e| !boundary.contains(&e.id) && e.faces.contains(&f)) {
+      for g in e.faces {
+        if g != 0 && !out.contains(&g) {
+          out.push(g);
+        }
+      }
+    }
+    i += 1;
+  }
+  out
+}
+
+/// `select.by_boundary`: the faces enclosed by a closed chain of edges of one body (the smaller
+/// of the two sides, by face count then by area); `edges` default to the selected edges.
+fn select_by_boundary(s: &mut Session, p: &Value) -> CmdResult {
+  let edges = boundary_edges(s, p, "edges");
+  let Some(&(body, first)) = edges.first() else {
+    return Err(CmdError::new("select the boundary edges first"));
+  };
+  if edges.iter().any(|(b, _)| *b != body) {
+    return Err(CmdError::new("the boundary edges must belong to one body"));
+  }
+  let ids: Vec<u32> = edges.iter().map(|(_, e)| *e).collect();
+  let b = s.model.body(body).ok_or_else(|| CmdError::new(format!("no body {}", body.0)))?;
+  let edge = b.edges().iter().find(|e| e.id == first).ok_or_else(|| CmdError::new("no such edge"))?;
+  let sides: Vec<Vec<u32>> = edge.faces.iter().filter(|f| **f != 0).map(|f| flood_faces(s, body, *f, &ids)).collect();
+  let [a, c] = sides.as_slice() else {
+    return Err(CmdError::new("the edges don't bound a region of the body"));
+  };
+  if a.len() == b.faces().len() || a.contains(&c[0]) {
+    return Err(CmdError::new("the edges don't form a closed boundary"));
+  }
+  let area = |side: &[u32]| b.faces().iter().filter(|f| side.contains(&f.id)).map(|f| f.area).sum::<f64>();
+  let inside = if (a.len(), area(a)) <= (c.len(), area(c)) { a } else { c };
+  s.selection = inside.iter().map(|f| Sel::Face { body, face: *f }).collect();
+  Ok(json!({"selected": s.selection.len()}))
+}
+
+/// `select.seed_boundary`: the faces connected to the seed face without crossing the boundary
+/// edges (no boundary: every face of its body); the seed defaults to the selected face.
+fn select_seed_boundary(s: &mut Session, p: &Value) -> CmdResult {
+  let seed = match p.get("seed") {
+    Some(v) => Some((BodyId(req_u32(v, "body")?), req_u32(v, "face")?)),
+    None => s.selection.iter().find_map(|x| match x {
+      Sel::Face { body, face } => Some((*body, *face)),
+      _ => None,
+    }),
+  };
+  let Some((body, face)) = seed else {
+    return Err(CmdError::new("select the seed face first"));
+  };
+  let ids: Vec<u32> = boundary_edges(s, p, "edges").into_iter().filter(|(b, _)| *b == body).map(|(_, e)| e).collect();
+  if s.model.body(body).is_none_or(|b| !b.faces().iter().any(|f| f.id == face)) {
+    return Err(CmdError::new("no such face"));
+  }
+  s.selection = flood_faces(s, body, face, &ids).into_iter().map(|f| Sel::Face { body, face: f }).collect();
+  Ok(json!({"selected": s.selection.len()}))
 }

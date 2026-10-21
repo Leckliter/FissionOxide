@@ -195,6 +195,8 @@ pub struct App {
   pub sel_filter: select::Filters,
   /// The open Select Other list.
   pub(crate) other: Option<select::OtherMenu>,
+  /// The open Selection Tools dialog (Select By Name, By Boundary, By Size, Seed And Boundary).
+  pub(crate) sel_tool: Option<select::ToolDialog>,
   /// Where the last viewport click was (Select Other from the menu opens there).
   pub(crate) last_click: Option<egui::Pos2>,
   /// The Measure dialog's result line: closest points and the label.
@@ -443,6 +445,7 @@ impl App {
       sel_priority: select::Priority::Face,
       sel_filter: select::Filters::default(),
       other: None,
+      sel_tool: None,
       last_click: None,
       measure: None,
       measure_fmt: dialogs::MeasureFmt::default(),
@@ -895,6 +898,9 @@ impl App {
       {
         self.cancel_dialog();
         self.s.selection.clear();
+      } else if self.sel_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        self.sel_tool = None;
+        self.end_hint();
       }
       return;
     }
@@ -928,7 +934,13 @@ impl App {
       self.new_design();
     }
     if pressed(Key::Escape, Modifiers::NONE) {
-      if self.canvas_ui.cancel() || self.library_ui.cancel() {
+      if self.other.is_some() {
+        // the Select Other list closes, keeping the selection
+        self.other = None;
+      } else if self.sel_tool.is_some() {
+        self.sel_tool = None;
+        self.end_hint();
+      } else if self.canvas_ui.cancel() || self.library_ui.cancel() {
       } else if self.marking.is_some() {
         self.marking = None;
       } else if self.dim_edit.is_some() {
