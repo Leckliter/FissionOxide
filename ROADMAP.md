@@ -31,4 +31,4 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 ## Later
 
 - Render workspace (materials beyond flat appearance colours, ray tracing)
-- Simulation (FEA), generative design
+- Simulation (FEA)

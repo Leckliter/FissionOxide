@@ -127,6 +127,12 @@ change a parameter and watch the whole history rebuild.
   tabs, ramp and helix entries, drilling (G81/G83), 3D parallel and scallop finishing, a stock
   removal simulation with gouge and collision warnings, and G-code for Fanuc, Haas, GRBL,
   LinuxCNC and Mach3/4 in mm or inches. See [Manufacture](#manufacture-cam).
+- **Generative design.** A Generative Design workspace: preserve and obstacle geometry, a
+  starting shape, load cases with forces, pressures and fixed constraints, maximum stiffness or
+  minimum mass with safety factor and displacement limits, materials, and unrestricted, 3-axis
+  or 2.5-axis milling outcomes with symmetry planes and a minimum member size. Topology
+  optimisation (SIMP) on a voxel grid, smoothed into outcomes you compare and insert as mesh or
+  B-rep bodies. See [Generative design](#generative-design).
 - **Background regeneration.** Parameter changes and Compute All (Ctrl+B) recompute on another
   thread; the window shows the last image and a progress note instead of freezing.
 - **Sketch tools.** Fillet, chamfer, offset, trim, extend, break, mirror (symmetry-constrained),
@@ -757,6 +763,50 @@ regulator, an LED and a programming header, routed with ground pours. Not there 
 schematic sheets, differential pairs and length tuning, thermal reliefs on pours (pads join
 them solidly), push-and-shove routing, and board cutouts in the fab outline.
 
+## Generative design
+
+Switch the workspace to **Generative Design** (or script the `gen.*` commands). A study needs a
+design space and the loads it has to carry:
+
+- **Preserve geometry**: bodies the outcomes keep (bolt bosses, mounting pads); loads and
+  constraints go on their faces. **Obstacle geometry**: bodies they stay out of (bolt holes,
+  clearance for other parts). A **starting shape** is where the optimisation begins. The design
+  space is the box around the preserve geometry and starting shape, plus a margin, or bounds
+  you give.
+- **Load cases**: forces (N, spread over faces or the nodes near a point), pressures (MPa,
+  pushing into faces) and fixed constraints (any of X, Y, Z). A new case copies the first
+  case's constraints; the outcome has to carry all of them.
+- **Objectives and limits**: maximise stiffness at a mass target (the solid fraction of the
+  design space), or minimise mass: the target steps down, each step warm started from the
+  last, and the lightest design that still meets the safety factor (yield over peak von Mises
+  stress) and displacement limit wins.
+- **Materials** (aluminium, steel, stainless, titanium, ABS, nylon, PLA, or your own) and
+  **manufacturing**: unrestricted (additive), 3-axis milling from one or more tool directions
+  (nothing the tool can't reach), 2.5-axis milling (prismatic along the tool axis), symmetry
+  planes and a minimum member size. Every material with every method is one outcome.
+
+**Pre-check** shows the grid and warns about loads that miss the geometry; **Generate** runs
+in the background with a progress bar and can be stopped. The solver is density-based topology
+optimisation (`fox-gen`): SIMP with penalty 3 on a voxel grid of 8-node bricks, a cone density
+filter (its radius is half the minimum member size), Heaviside projection made sharper as it
+goes, the milling and symmetry constraints, optimality-criteria updates, and a threaded
+matrix-free conjugate-gradient finite element solve. The outcome is the 0.5 iso-surface of the
+densities (marching cubes on a tetrahedral split, so it's closed and manifold) with Taubin
+smoothing. **Explore** lists each outcome's mass, volume, maximum displacement, peak stress
+and safety factor (peak stress leaves out the most stressed 0.5 % of elements, the corners of
+the voxels), whether it meets the limits; **Insert** puts one into the design as a mesh body,
+or reduced, converted to B-rep, joined with the exact preserve geometry and with the obstacles
+cut, so bolt holes come out round. `gen.export` writes an outcome as STL, OBJ, 3MF or PLY.
+
+```sh
+fissionoxide-cli run examples/generative_bracket.jsonl --save bracket_gd.fox
+fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.outcomes"}'
+fissionoxide-cli exec bracket_gd.fox '{"cmd": "gen.insert", "outcome": 3, "brep": true, "merge_preserve": true}' --save bracket_gd.fox
+```
+
+The analysis is linear static on a voxel model, a guide to the shape and not a validation:
+check the inserted part with a proper simulation before trusting its safety factor.
+
 ## Headless CLI and scripting
 
 ```sh
@@ -945,6 +995,7 @@ Design History off collapses the timeline into one base feature holding the bodi
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
 | `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 | `fox-ecad`          | Electronics: library format, KiCad import, schematics and ERC, PCB layout, DRC, autorouter, Gerber/Excellon/BOM/pick-and-place |
+| `fox-gen`           | Generative design: SIMP topology optimisation on a voxel grid (threaded matrix-free FE), milling and symmetry constraints, iso-surfaces |
 
 Why OpenCASCADE: the pure-Rust B-rep kernels (truck, monstertruck) fail the coplanar booleans
 that everyday modeling depends on (a boss standing on a face, a hole flush with a face).
