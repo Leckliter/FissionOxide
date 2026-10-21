@@ -1,0 +1,17 @@
+{
+  "ui:sketch:polygon-tool-flow": "ui-sketch-tools-2",
+  "ui:sketch:diameter-glyph": "ui-sketch-tools-2",
+  "ui:sketch:line-hud-angle-precision": "ui-sketch-tools-2",
+  "ui:sketch:dim-edit-param-name": "ui-sketch-tools-2",
+  "ui:sketch:offset-dimension": "ui-sketch-tools-2",
+  "ui:sketch:trim-hover-color": "ui-sketch-tools-2",
+  "ui:sketch:create-menu-extras": "ui-sketch-tools-2",
+  "ui:chrome:data-panel-reopens": "ui-sketch-tools-2",
+  "ui:sketch:horizontal-conflict": "ui-sketch-solver",
+  "ui:dialogs:offset-sketch-fields": "ui-feature-dialogs-2",
+  "ui:dialogs:chamfer-fields-2": "ui-feature-dialogs-2",
+  "ui:dialogs:shell-type-toggles": "ui-feature-dialogs-2",
+  "ui:dialogs:press-pull-offset-face": "ui-feature-dialogs-2",
+  "ui:dialogs:move-set-pivot": "ui-feature-dialogs-2",
+  "ui:dialogs:hole-fields-2": "ui-feature-dialogs-2"
+}

@@ -255,3 +255,11 @@ the right side of the screen (1372..1908 x 20..748 on this display). Clicks ther
 app under test and the OS caption tooltips show instead. Item 1 above ("clicks in the top-right
 are ignored") and this run's first hour of right-side failures were that window, not
 FissionOxide. Snap the app under test to the left half before probing.
+
+### Second pass, 2026-10-21 (sketch tools and Modify commands)
+
+On the rebuilt `main` (`2356d5a`): a sketch on the body's top face (circle, diameter edit, line,
+Trim, Offset, Horizontal, polygon) and Chamfer, Shell, Press Pull, Move and Hole. 15 more rows
+(2 P1: the polygon tool creates nothing, and Horizontal refuses a line touching a circle) in
+three batches (`map-wave5.json`). Report:
+[parity/reports/2026-10-21-sketch-and-modify.md](../parity/reports/2026-10-21-sketch-and-modify.md).

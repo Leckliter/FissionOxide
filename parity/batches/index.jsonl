@@ -26,3 +26,6 @@
 {"name": "ui-preferences-full", "items": 2, "status": "ready", "pr": null}
 {"name": "ui-ribbon-responsive", "items": 4, "status": "ready", "pr": null}
 {"name": "ui-sketch-entry-polish", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-feature-dialogs-2", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-sketch-solver", "items": 1, "status": "ready", "pr": null}
+{"name": "ui-sketch-tools-2", "items": 8, "status": "ready", "pr": null}
