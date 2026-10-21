@@ -1,0 +1,33 @@
+{
+  "source": "analytic",
+  "method": "block + r4 and r5 bosses - the r1 fillet ring on the r4 rim (Pappus)",
+  "body_count": 1,
+  "volume_mm3": 49282.96064110071,
+  "area_mm2": 0.0,
+  "center_of_mass": [
+    29.798079307,
+    20.0,
+    10.389994536
+  ],
+  "bbox": {
+    "min": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "max": [
+      60.0,
+      40.0,
+      30.0
+    ]
+  },
+  "compare": [
+    "body_count",
+    "volume_mm3",
+    "center_of_mass",
+    "bbox"
+  ],
+  "tolerance": {
+    "rel": 1e-06
+  }
+}

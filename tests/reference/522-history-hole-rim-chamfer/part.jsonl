@@ -1,0 +1,13 @@
+# 522-history-hole-rim-chamfer: 60x40x20 block; two holes through it from one sketch (r3 at (10,20), dimensioned, and r4 at (25,20)); the r3 hole's top rim chamfered 1.
+# Its variant moves the r3 hole past the r4 one: the chamfer must stay on the r3 hole (the r4 rim is then the edge nearest where the chamfered one was).
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.rect", "corner1": [0, 0], "corner2": [60, 40]}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 1, "distance": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0.0, 0.0, 20.0], "normal": [0.0, 0.0, 1.0], "x": [1.0, 0.0, 0.0]}}
+{"cmd": "sketch.circle", "center": [10, 20], "radius": 3}
+{"cmd": "sketch.circle", "center": [25, 20], "radius": 4}
+{"cmd": "sketch.dimension", "type": "horizontal", "points": [0, 1], "value": 10}
+{"cmd": "sketch.finish"}
+{"cmd": "extrude", "sketch": 3, "extent": "through_all", "flip": true, "operation": "cut"}
+{"cmd": "chamfer", "edges": [{"point": [10, 23, 20]}], "distance": 1}

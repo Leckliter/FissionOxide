@@ -1,0 +1,49 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "boss-past-other-boss",
+      "edits": [
+        {
+          "cmd": "sketch.set_dimension",
+          "sketch": 3,
+          "constraint": 5,
+          "value": "50"
+        }
+      ],
+      "note": "the fillet's edge, found by position, would be the r5 boss's rim",
+      "expected": {
+        "method": "r4 boss moved from x 10 to 50, past the r5 boss: block + bosses - the r1 fillet ring on the r4 rim, (1 - pi/4) r^2 swept at its centroid (Pappus)",
+        "body_count": 1,
+        "volume_mm3": 49282.96064110071,
+        "area_mm2": 0.0,
+        "center_of_mass": [
+          30.201920693,
+          20.0,
+          10.389994536
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            60.0,
+            40.0,
+            30.0
+          ]
+        },
+        "compare": [
+          "body_count",
+          "volume_mm3",
+          "center_of_mass",
+          "bbox"
+        ],
+        "tolerance": {
+          "rel": 1e-06
+        }
+      }
+    }
+  ]
+}

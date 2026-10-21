@@ -1,0 +1,33 @@
+{
+  "source": "analytic",
+  "method": "block + round boss + wide boss + pin, as boxes and cylinders",
+  "body_count": 1,
+  "volume_mm3": 76565.48667764616,
+  "area_mm2": 0.0,
+  "center_of_mass": [
+    41.34571599,
+    20.0,
+    12.467868321
+  ],
+  "bbox": {
+    "min": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "max": [
+      80.0,
+      40.0,
+      35.0
+    ]
+  },
+  "compare": [
+    "body_count",
+    "volume_mm3",
+    "center_of_mass",
+    "bbox"
+  ],
+  "tolerance": {
+    "rel": 1e-06
+  }
+}

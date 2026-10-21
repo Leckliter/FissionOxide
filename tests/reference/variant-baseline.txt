@@ -30,3 +30,6 @@
 68-sm-edge-flange/height-30
 76-sm-thickness-variant/thickness-2
 82-thin-extrude-frame/inner-wall-2
+520-history-boss-rim-fillet/boss-past-other-boss
+521-history-sketch-on-short-boss/round-boss-4-tall
+522-history-hole-rim-chamfer/hole-past-other-hole

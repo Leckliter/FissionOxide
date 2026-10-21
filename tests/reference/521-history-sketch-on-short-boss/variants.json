@@ -1,0 +1,53 @@
+{
+  "comment": "Edit checks, written by tools/reference-variants/variants.py; see tests/reference/README.md.",
+  "variants": [
+    {
+      "name": "round-boss-4-tall",
+      "edits": [
+        {
+          "cmd": "feature.edit",
+          "feature": 4,
+          "set": {
+            "extent": {
+              "kind": "one_side",
+              "distance": "4"
+            }
+          }
+        }
+      ],
+      "note": "the pin's sketch face, found by position, would be the wide boss's top",
+      "expected": {
+        "method": "round boss 10 -> 4 tall, the pin r2 x 5 still standing on it: block + bosses + pin, as boxes and cylinders",
+        "body_count": 1,
+        "volume_mm3": 76263.89378290153,
+        "area_mm2": 0.0,
+        "center_of_mass": [
+          41.469675635,
+          20.0,
+          12.405456365
+        ],
+        "bbox": {
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            80.0,
+            40.0,
+            30.0
+          ]
+        },
+        "compare": [
+          "body_count",
+          "volume_mm3",
+          "center_of_mass",
+          "bbox"
+        ],
+        "tolerance": {
+          "rel": 1e-06
+        }
+      }
+    }
+  ]
+}

@@ -609,7 +609,103 @@ def case_82():
   ]
 
 
+
+# ---------------------------------------------- references the position lookup would get wrong
+# (cases 520-522: each edit leaves a look-alike where the referenced edge or face was)
+
+HISTORY_COMPARE = ["body_count", "volume_mm3", "center_of_mass", "bbox"]
+# the wrong rim changes the volume by a few parts in 1e5: tighter than the default 1e-3
+HISTORY_TOLERANCE = {"rel": 1e-6}
+
+
+def spandrel_ring(m, x, y, top, big, r):
+  """Takes a convex fillet of radius r off the rim (radius big, at height top) of a round boss:
+  the corner outside a quarter circle, (1 - pi/4) r^2, centroid r / (6 (1 - pi/4)) from the
+  circle's centre along each axis, swept round (Pappus)."""
+  k = 1 - PI / 4
+  c = r / (6 * k)
+  m.add(k * r * r * 2 * PI * (big - r + c), [x, y, top - r + c], -1)
+
+
+def boss_rim_fillet(ax, method):
+  m = Mass().box([0, 0, 0], [60, 40, 20])
+  m.cyl_z(ax, 20, 4, 20, 30).cyl_z(30, 20, 5, 20, 30)
+  spandrel_ring(m, ax, 20, 30, 4, 1)
+  e = expected(method, m.v, 0.0, m.com(), [0, 0, 0], [60, 40, 30])
+  e["compare"] = HISTORY_COMPARE
+  e["tolerance"] = HISTORY_TOLERANCE
+  return e
+
+
+def case_520():
+  return [
+    variant(
+      "boss-past-other-boss",
+      [{"cmd": "sketch.set_dimension", "sketch": 3, "constraint": 5, "value": "50"}],
+      boss_rim_fillet(50, "r4 boss moved from x 10 to 50, past the r5 boss: block + bosses - the r1 fillet ring on the r4 rim, (1 - pi/4) r^2 swept at its centroid (Pappus)"),
+      note="the fillet's edge, found by position, would be the r5 boss's rim",
+    )
+  ]
+
+
+def short_boss(h, method):
+  m = Mass().box([0, 0, 0], [80, 40, 20]).cyl_z(10, 20, 4, 20, 20 + h).box([30, 5, 20], [70, 35, 30])
+  m.cyl_z(10, 20, 2, 20 + h, 25 + h)
+  e = expected(method, m.v, 0.0, m.com(), [0, 0, 0], [80, 40, max(30, 25 + h)])
+  e["compare"] = HISTORY_COMPARE
+  e["tolerance"] = HISTORY_TOLERANCE
+  return e
+
+
+def case_521():
+  return [
+    variant(
+      "round-boss-4-tall",
+      [edit(4, extent=extent(4))],
+      short_boss(4, "round boss 10 -> 4 tall, the pin r2 x 5 still standing on it: block + bosses + pin, as boxes and cylinders"),
+      note="the pin's sketch face, found by position, would be the wide boss's top",
+    )
+  ]
+
+
+def hole_rim_chamfer(ax, method):
+  d = 1
+  m = Mass().box([0, 0, 0], [60, 40, 20]).cyl_z(ax, 20, 3, 0, 20, -1).cyl_z(25, 20, 4, 0, 20, -1)
+  # 45 degree ring: triangle d x d at the rim, centroid d/3 out and d/3 down
+  m.add(PI * d * d * (3 + d / 3), [ax, 20, 20 - d / 3], -1)
+  e = expected(method, m.v, 0.0, m.com(), [0, 0, 0], [60, 40, 20])
+  e["compare"] = HISTORY_COMPARE
+  e["tolerance"] = HISTORY_TOLERANCE
+  return e
+
+
+def case_522():
+  return [
+    variant(
+      "hole-past-other-hole",
+      [{"cmd": "sketch.set_dimension", "sketch": 3, "constraint": 5, "value": "50"}],
+      hole_rim_chamfer(50, "r3 hole moved from x 10 to 50, past the r4 hole: block - holes - the 1 mm chamfer ring on the r3 rim, pi d^2 (r + d/3)"),
+      note="the chamfer's edge, found by position, would be the r4 hole's rim",
+    )
+  ]
+
+
+def write_expected():
+  """expected.json of cases 520-522 (the parts as built)."""
+  for name, e in [
+    ("520-history-boss-rim-fillet", boss_rim_fillet(10, "block + r4 and r5 bosses - the r1 fillet ring on the r4 rim (Pappus)")),
+    ("521-history-sketch-on-short-boss", short_boss(10, "block + round boss + wide boss + pin, as boxes and cylinders")),
+    ("522-history-hole-rim-chamfer", hole_rim_chamfer(10, "block - two holes - the 1 mm chamfer ring on the r3 rim, pi d^2 (r + d/3)")),
+  ]:
+    e = {"source": "analytic", **e}
+    with open(os.path.join(REF, name, "expected.json"), "w") as f:
+      json.dump(e, f, indent=2)
+      f.write("\n")
+
 CASES = {
+  "520-history-boss-rim-fillet": case_520,
+  "521-history-sketch-on-short-boss": case_521,
+  "522-history-hole-rim-chamfer": case_522,
   "01-box": case_01,
   "02-cylinder": case_02,
   "03-box-through-hole": case_03,
@@ -638,6 +734,7 @@ CASES = {
 
 def main():
   filters = sys.argv[1:]
+  write_expected()
   for name, fn in CASES.items():
     if filters and not any(f in name for f in filters):
       continue

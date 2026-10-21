@@ -299,6 +299,9 @@
 511-body-free-move
 512-body-copy-rotate
 52-circular-pattern-fillet
+520-history-boss-rim-fillet
+521-history-sketch-on-short-boss
+522-history-hole-rim-chamfer
 53-path-pattern
 54-mirror-body-fillets
 55-tapped-hole-cosmetic
