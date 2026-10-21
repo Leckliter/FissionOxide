@@ -2,8 +2,8 @@
 //! Fusion's Form workspace. The cage, its edits and the limit surface's B-spline patches live in
 //! `fox-form`; this turns the patches into kernel surfaces.
 
-use fox_kernel::BSplineSurface;
 pub use fox_form::{Cage as FormCage, Display, MAX_FACES, Selection, SymPlane, Symmetry, edit, prim};
+use fox_kernel::BSplineSurface;
 
 /// The limit surface as B-spline surfaces, one per B-rep face (see `fox_form::subd`).
 pub fn surfaces(cage: &FormCage) -> Result<Vec<BSplineSurface>, String> {

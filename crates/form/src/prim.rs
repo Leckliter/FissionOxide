@@ -64,28 +64,43 @@ pub fn quad_box(length: f64, width: f64, height: f64, counts: [u32; 3]) -> Resul
   // each side's quads, outward
   for a in 0..nx {
     for c in 0..ny {
-      let f = vec![vid(a, c, 0, &mut b), vid(a, c + 1, 0, &mut b), vid(a + 1, c + 1, 0, &mut b), vid(a + 1, c, 0, &mut b)];
-      b.face(f);
       let f =
-        vec![vid(a, c, nz, &mut b), vid(a + 1, c, nz, &mut b), vid(a + 1, c + 1, nz, &mut b), vid(a, c + 1, nz, &mut b)];
+        vec![vid(a, c, 0, &mut b), vid(a, c + 1, 0, &mut b), vid(a + 1, c + 1, 0, &mut b), vid(a + 1, c, 0, &mut b)];
+      b.face(f);
+      let f = vec![
+        vid(a, c, nz, &mut b),
+        vid(a + 1, c, nz, &mut b),
+        vid(a + 1, c + 1, nz, &mut b),
+        vid(a, c + 1, nz, &mut b),
+      ];
       b.face(f);
     }
   }
   for a in 0..nx {
     for c in 0..nz {
-      let f = vec![vid(a, 0, c, &mut b), vid(a + 1, 0, c, &mut b), vid(a + 1, 0, c + 1, &mut b), vid(a, 0, c + 1, &mut b)];
-      b.face(f);
       let f =
-        vec![vid(a, ny, c, &mut b), vid(a, ny, c + 1, &mut b), vid(a + 1, ny, c + 1, &mut b), vid(a + 1, ny, c, &mut b)];
+        vec![vid(a, 0, c, &mut b), vid(a + 1, 0, c, &mut b), vid(a + 1, 0, c + 1, &mut b), vid(a, 0, c + 1, &mut b)];
+      b.face(f);
+      let f = vec![
+        vid(a, ny, c, &mut b),
+        vid(a, ny, c + 1, &mut b),
+        vid(a + 1, ny, c + 1, &mut b),
+        vid(a + 1, ny, c, &mut b),
+      ];
       b.face(f);
     }
   }
   for a in 0..ny {
     for c in 0..nz {
-      let f = vec![vid(0, a, c, &mut b), vid(0, a, c + 1, &mut b), vid(0, a + 1, c + 1, &mut b), vid(0, a + 1, c, &mut b)];
-      b.face(f);
       let f =
-        vec![vid(nx, a, c, &mut b), vid(nx, a + 1, c, &mut b), vid(nx, a + 1, c + 1, &mut b), vid(nx, a, c + 1, &mut b)];
+        vec![vid(0, a, c, &mut b), vid(0, a, c + 1, &mut b), vid(0, a + 1, c + 1, &mut b), vid(0, a + 1, c, &mut b)];
+      b.face(f);
+      let f = vec![
+        vid(nx, a, c, &mut b),
+        vid(nx, a + 1, c, &mut b),
+        vid(nx, a + 1, c + 1, &mut b),
+        vid(nx, a, c + 1, &mut b),
+      ];
       b.face(f);
     }
   }
@@ -240,7 +255,12 @@ pub fn face(points: &[[f64; 3]]) -> Result<Cage, String> {
 
 /// Scales the cage about `radial(p)`'s origin so the limit surface's mean distance from it (over
 /// limit points passing `use_pt`) is `r`.
-fn fit_radius(cage: &mut Cage, radial: impl Fn(DVec3) -> DVec3, r: f64, use_pt: impl Fn(DVec3) -> bool) -> Result<(), String> {
+fn fit_radius(
+  cage: &mut Cage,
+  radial: impl Fn(DVec3) -> DVec3,
+  r: f64,
+  use_pt: impl Fn(DVec3) -> bool,
+) -> Result<(), String> {
   let (pos, _) = limit_mesh(cage, 3)?;
   let pts: Vec<f64> = pos.iter().filter(|p| use_pt(**p)).map(|p| radial(*p).length()).collect();
   if pts.is_empty() {

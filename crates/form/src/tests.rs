@@ -26,10 +26,13 @@ fn smooth_volume(c: &Cage) -> f64 {
 
 fn smooth_volume_at(c: &Cage, levels: u32) -> f64 {
   let (pos, quads) = limit_mesh(c, levels).unwrap();
-  quads.iter().map(|q| {
-    let [a, b, cc, d] = q.map(|i| pos[i as usize]);
-    (a.dot(b.cross(cc)) + a.dot(cc.cross(d))) / 6.0
-  }).sum()
+  quads
+    .iter()
+    .map(|q| {
+      let [a, b, cc, d] = q.map(|i| pos[i as usize]);
+      (a.dot(b.cross(cc)) + a.dot(cc.cross(d))) / 6.0
+    })
+    .sum()
 }
 
 /// Checks the patches meet without gaps and (away from creases) without kinks.
@@ -64,7 +67,8 @@ fn primitives_are_valid_cages() {
     c.check().unwrap();
     assert!(!c.is_closed());
   }
-  let f = prim::face(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 2.0], [0.0, 10.0, 0.0], [-3.0, 5.0, 0.0]]).unwrap();
+  let f =
+    prim::face(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 2.0], [0.0, 10.0, 0.0], [-3.0, 5.0, 0.0]]).unwrap();
   assert_eq!(f.faces[0].len(), 5);
   assert!(patches(&f).unwrap().len() == 5);
 }
@@ -127,7 +131,8 @@ fn creases_stay_sharp() {
   assert!((smooth_volume(&c) - 8000.0).abs() < 1e-6 && soft < 8000.0 * 0.6);
   // crease only the top's edges: corners at the top stay put
   let mut c = prim::quad_box(20.0, 20.0, 20.0, [2, 2, 2]).unwrap();
-  let top: Vec<u32> = (0..c.faces.len() as u32).filter(|&f| c.faces[f as usize].iter().all(|&v| c.pos(v).z == 20.0)).collect();
+  let top: Vec<u32> =
+    (0..c.faces.len() as u32).filter(|&f| c.faces[f as usize].iter().all(|&v| c.pos(v).z == 20.0)).collect();
   let rim: Vec<[u32; 2]> = c
     .edges()
     .into_iter()
@@ -166,7 +171,8 @@ fn edit_form_moves_with_soft_falloff_and_symmetry() {
 
   // mirror symmetry in x = 0: moving a vertex on +x moves its partner on -x
   let mut c = prim::quad_box(40.0, 40.0, 20.0, [4, 4, 2]).unwrap();
-  edit::set_symmetry(&mut c, Symmetry::Mirror { planes: vec![SymPlane { origin: [0.0; 3], normal: [1.0, 0.0, 0.0] }] }).unwrap();
+  edit::set_symmetry(&mut c, Symmetry::Mirror { planes: vec![SymPlane { origin: [0.0; 3], normal: [1.0, 0.0, 0.0] }] })
+    .unwrap();
   let a = c.nearest_vertex([10.0, 10.0, 20.0]).unwrap() as u32;
   let b = c.nearest_vertex([-10.0, 10.0, 20.0]).unwrap() as u32;
   let m = edit::compose(DVec3::new(3.0, 0.0, 5.0), DVec3::Z, 0.0, DVec3::ONE, DVec3::ZERO);
@@ -178,7 +184,13 @@ fn edit_form_moves_with_soft_falloff_and_symmetry() {
   edit::transform(&mut c, &Selection { vertices: vec![mid], ..Default::default() }, m, 0.0).unwrap();
   assert!(c.pos(mid).x.abs() < 1e-12 && (c.pos(mid).z - 25.0).abs() < 1e-12);
   // a symmetry the cage doesn't have is refused
-  assert!(edit::set_symmetry(&mut c, Symmetry::Mirror { planes: vec![SymPlane { origin: [5.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0] }] }).is_err());
+  assert!(
+    edit::set_symmetry(
+      &mut c,
+      Symmetry::Mirror { planes: vec![SymPlane { origin: [5.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0] }] }
+    )
+    .is_err()
+  );
 
   // rotate and scale a face about its centre
   let mut c = prim::quad_box(40.0, 40.0, 20.0, [1, 1, 1]).unwrap();
@@ -207,7 +219,8 @@ fn insert_and_delete_edge_loops() {
   let new_z: Vec<f64> = new.iter().map(|&v| c.pos(v).z).collect();
   assert!(new_z.iter().any(|z| (z - 5.0).abs() < 1e-9 || (z - 15.0).abs() < 1e-9), "{new_z:?}");
   // deleting the loop's edges gives the box back
-  let loop_edges: Vec<[u32; 2]> = c.edges().into_iter().filter(|e| new.contains(&e[0]) && new.contains(&e[1])).collect();
+  let loop_edges: Vec<[u32; 2]> =
+    c.edges().into_iter().filter(|e| new.contains(&e[0]) && new.contains(&e[1])).collect();
   assert_eq!(loop_edges.len(), new.len());
   edit::delete(&mut c, &Selection { edges: loop_edges, ..Default::default() }).unwrap();
   assert_eq!((c.faces.len(), c.vertices.len()), (faces, verts));
@@ -224,7 +237,8 @@ fn insert_and_delete_edge_loops() {
 #[test]
 fn delete_faces_and_fill_holes() {
   let mut c = prim::quad_box(30.0, 30.0, 30.0, [2, 2, 2]).unwrap();
-  let top: Vec<u32> = (0..c.faces.len() as u32).filter(|&f| c.faces[f as usize].iter().all(|&v| c.pos(v).z == 30.0)).collect();
+  let top: Vec<u32> =
+    (0..c.faces.len() as u32).filter(|&f| c.faces[f as usize].iter().all(|&v| c.pos(v).z == 30.0)).collect();
   edit::delete(&mut c, &Selection { faces: top, ..Default::default() }).unwrap();
   assert!(!c.is_closed());
   let b = c.boundary_edges();
@@ -342,7 +356,13 @@ fn mirror_and_circular_duplicates() {
   assert_eq!(ring.faces.len(), 32);
   // an edit on one copy shows on all four
   let v = ring.nearest_vertex([38.0, 0.0, 0.0]).unwrap() as u32;
-  edit::transform(&mut ring, &Selection { vertices: vec![v], ..Default::default() }, DMat4::from_translation(DVec3::new(0.0, 0.0, 4.0)), 0.0).unwrap();
+  edit::transform(
+    &mut ring,
+    &Selection { vertices: vec![v], ..Default::default() },
+    DMat4::from_translation(DVec3::new(0.0, 0.0, 4.0)),
+    0.0,
+  )
+  .unwrap();
   let lifted = ring.vertices.iter().filter(|p| (p[2] - ring.pos(v).z).abs() < 1e-9).count();
   assert_eq!(lifted, 4);
 }
@@ -370,7 +390,8 @@ fn pull_onto_a_plane_and_make_uniform() {
 
 #[test]
 fn old_quad_cages_still_load() {
-  let c: Cage = serde_json::from_str(r#"{"vertices": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]], "faces": [[0,1,2,3]]}"#).unwrap();
+  let c: Cage =
+    serde_json::from_str(r#"{"vertices": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]], "faces": [[0,1,2,3]]}"#).unwrap();
   assert_eq!(c.faces[0], vec![0, 1, 2, 3]);
   assert!(c.creases.is_empty() && c.symmetry.is_none() && c.display.is_smooth());
   let s = serde_json::to_string(&c).unwrap();

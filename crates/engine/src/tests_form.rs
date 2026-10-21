@@ -112,7 +112,11 @@ fn round_primitives_convert_to_valid_solids() {
 #[test]
 fn sculpting_a_box_through_the_commands() {
   let mut s = Session::default();
-  run(&mut s, "form.box", json!({"length": 60, "width": 60, "height": 20, "length_faces": 3, "width_faces": 3, "height_faces": 1}));
+  run(
+    &mut s,
+    "form.box",
+    json!({"length": 60, "width": 60, "height": 20, "length_faces": 3, "width_faces": 3, "height_faces": 1}),
+  );
   let v0 = volume(&s);
   // pull the top's middle face up with a soft falloff
   let r = run(&mut s, "form.edit", json!({"faces": [[0, 0, 20]], "move": [0, 0, 15], "soft": 25}));
@@ -134,7 +138,7 @@ fn sculpting_a_box_through_the_commands() {
   // the B-rep matches the limit surface's volume
   let cage = match &s.design.features.last().unwrap().kind {
     fox_model::FeatureKind::Form { cage, .. } => cage.clone(),
-    _ => unreachable!(),
+    _ => panic!("not a form"),
   };
   let (pos, quads) = fox_form::subd::limit_mesh(&cage, 4).unwrap();
   let mesh_v: f64 = quads
@@ -161,9 +165,17 @@ fn sculpting_a_box_through_the_commands() {
 #[test]
 fn holes_bridges_and_symmetry() {
   let mut s = Session::default();
-  run(&mut s, "form.box", json!({"length": 40, "width": 20, "height": 20, "length_faces": 2, "width_faces": 1, "height_faces": 1}));
+  run(
+    &mut s,
+    "form.box",
+    json!({"length": 40, "width": 20, "height": 20, "length_faces": 2, "width_faces": 1, "height_faces": 1}),
+  );
   // cut it in half on x = 0, mirror it back as one body that stays symmetric
-  run(&mut s, "form.delete", json!({"faces": [[-10, 0, 0], [-10, 0, 20], [-10, -10, 10], [-10, 10, 10], [-20, 0, 10]]}));
+  run(
+    &mut s,
+    "form.delete",
+    json!({"faces": [[-10, 0, 0], [-10, 0, 20], [-10, -10, 10], [-10, 10, 10], [-20, 0, 10]]}),
+  );
   assert_eq!(info(&mut s)["closed"], json!(false));
   assert_eq!(s.model.bodies[0].shape.solid_count(), 0);
   run(&mut s, "form.mirror_duplicate", json!({"plane": "yz"}));
@@ -196,7 +208,7 @@ fn pull_a_form_onto_a_solid() {
   assert!(r["gap"].as_f64().unwrap() < 1e-3, "{r}");
   let cage = match &s.design.features.last().unwrap().kind {
     fox_model::FeatureKind::Form { cage, .. } => cage.clone(),
-    _ => unreachable!(),
+    _ => panic!("not a form"),
   };
   let (lim, _) = fox_form::subd::limit_mesh(&cage, 1).unwrap();
   let centre = cage.nearest_vertex([0.0, 0.0, 0.0]).unwrap();
@@ -225,4 +237,24 @@ fn forms_save_and_load_with_their_cages() {
   assert_eq!(before["symmetry"], after["symmetry"]);
   assert!((volume(&s) - volume(&t)).abs() < 1e-6);
   std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_form_mouse_example_builds_a_valid_solid() {
+  let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/form_mouse.jsonl");
+  let mut s = Session::default();
+  for line in std::fs::read_to_string(path).unwrap().lines().filter(|l| l.starts_with('{')) {
+    let mut v: Value = serde_json::from_str(line).unwrap();
+    let cmd = v["cmd"].as_str().unwrap().to_string();
+    v.as_object_mut().unwrap().remove("cmd");
+    run(&mut s, &cmd, v);
+  }
+  assert_eq!(s.model.bodies.len(), 1);
+  let b = &s.model.bodies[0];
+  assert!(b.shape.is_valid());
+  assert_eq!(b.shape.solid_count(), 1);
+  let m = b.shape.mass().unwrap();
+  // mirror-symmetric left to right, flat on the ground, the hump above the cage's top
+  assert!((m.bbox_max.y + m.bbox_min.y).abs() < 1e-3, "{m:?}");
+  assert!(m.bbox_min.z.abs() < 1e-3 && m.bbox_max.z > 30.0, "{m:?}");
 }

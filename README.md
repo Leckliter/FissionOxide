@@ -65,6 +65,10 @@ change a parameter and watch the whole history rebuild.
   untrimmed boundary), extend open edges (natural, tangent or perpendicular), stitch surfaces
   into a solid, unstitch, reverse normals, and thicken faces or surfaces into solids
   (`examples/surface_shroud.jsonl`).
+- **Form (T-spline sculpting).** Box, plane, cylinder, sphere, torus, quadball and face
+  primitives; Edit Form with a triad and soft modification; insert/delete edges, insert point,
+  subdivide, extrude, bridge, fill hole, crease, mirror and circular symmetry, pull onto a body,
+  Make Uniform, box/frame/smooth display. The body is an exact B-rep. See [Form](#form).
 - **Meshes.** Imported meshes become faceted bodies; reduce, smooth, or convert them back to
   clean B-rep (coplanar triangles merged into faces).
 - **Sheet metal.** Sheet metal rules (thickness, bend radius, K-factor, driven by parameters);
@@ -267,6 +271,45 @@ after it was extruded (`sketch.text_edit`): the letters regenerate and the extru
 Text stays a text entity in the sketch (string, font, height, angle and an anchor point you can
 dimension or drag); `sketch.text_explode` turns it into plain curves, and older files with
 exploded text open unchanged.
+
+## Form
+
+**Create Form** (SOLID ▸ CREATE) opens the **FORM** tab, as in Fusion. Its primitives add a form
+body, which is a polygon control cage whose smooth Catmull-Clark limit surface is the body. You
+pick the cage's vertices, edges and faces in the viewport (Shift adds to the picks, and the FORM
+panel can limit picks to one kind) and edit them:
+
+| Tool | What it does |
+|------|--------------|
+| Box, Plane, Cylinder, Sphere, Torus, Quadball, Face | New form bodies. Plane, Face and uncapped cylinders are open and make surface bodies |
+| Edit Form | A triad at the picks: arrows move them, rings rotate them, the centre scales them. A soft radius drags nearby vertices part of the way |
+| Insert Edge / Insert Point | A new edge loop across the quads through an edge, or points on edges joined across faces |
+| Subdivide | Picked faces split into quads, with T-points on their neighbours. *Exact* subdivides the whole cage and keeps the shape |
+| Delete | Faces leave holes. Deleting edges joins the faces on each side, so deleting an inserted loop gives the old faces back. Deleting vertices joins the faces around them |
+| Extrude, Bridge, Fill Hole | Push faces out with a wall around them or grow faces off open edges, join two chains of open edges, close a hole with a star point or one face |
+| Crease / UnCrease | Sharp edges in the smooth body (the limit follows the crease as a B-spline curve) |
+| Mirror / Circular, Internal or Duplicate | Symmetry kept on the body. Edits on one side are copied to the others, and vertices on a mirror plane stay on it. *Duplicate* adds the mirrored or rotated copies, welded together |
+| Pull | Snaps the smooth surface (or the control points) over picked vertices onto another body |
+| Make Uniform, Weld Vertices, Reverse Normal | Even out control-point spacing, merge touching points, turn the form inside out |
+| Box / Control Frame / Smooth display | **Alt+1 / 2 / 3** |
+
+**Finish Form** goes back to the timeline. There the form is one feature (double-click it to edit
+it again), and its body is an exact B-rep. The limit surface is split into faces along the star
+lines, creases and open edges, as Fusion splits a T-spline body (a box cage gives six faces).
+Each face is a bicubic B-spline through exact limit points. Neighbouring faces share whole sides,
+so they sew watertight into a valid OpenCASCADE solid, and they are tangent across seams. Fillets,
+booleans, STEP export and the rest work on the body like on any other. The cage, its creases,
+symmetry and display mode are saved in the `.fox` file, and every tool is a `form.*` command for
+scripts, the CLI and MCP agents (`fissionoxide-cli help`):
+
+```sh
+fissionoxide-cli run examples/form_mouse.jsonl --save mouse.fox --png mouse.png
+```
+
+The cage geometry, edits and patch fitting are in the pure-Rust `fox-form` crate.
+Simplifications compared with Fusion: knot intervals are always uniform. Make Uniform evens out
+vertex spacing rather than knot intervals, and creases are fully sharp, with no partial
+sharpness.
 
 ## Sheet metal
 
@@ -843,6 +886,7 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `fox-sketch`        | Sketch geometry, constraint solver, profile (region) detection         |
 | `fox-kernel`        | Own cxx bridge to OpenCASCADE: modeling, meshing, STEP/IGES/BRep       |
 | `fox-model`         | The design document, feature timeline, regeneration and references     |
+| `fox-form`          | Form (T-spline) cages: primitives, sculpting edits, symmetry, Catmull-Clark limit surfaces as B-spline patches |
 | `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
 | `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
 | `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash, edit locks, presence; safe sharing through sync folders; the hub server client |

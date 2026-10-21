@@ -21,6 +21,7 @@ impl Scope {
       Scope::Sketch => "sketch",
       Scope::Drawing => "drawing",
       Scope::Manufacture => "manufacture",
+      Scope::Form => "form",
     }
   }
 
@@ -30,6 +31,7 @@ impl Scope {
       Tab::Sketch => Scope::Sketch,
       Tab::Drawing => Scope::Drawing,
       Tab::Milling => Scope::Manufacture,
+      Tab::Form => Scope::Form,
       _ => Scope::Design,
     }
   }

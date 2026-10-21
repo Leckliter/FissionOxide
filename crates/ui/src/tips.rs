@@ -9,6 +9,8 @@ pub(crate) enum Scope {
   Sketch,
   Drawing,
   Manufacture,
+  /// The Form workspace's FORM tab.
+  Form,
 }
 
 /// A command's tooltip text.
@@ -23,6 +25,10 @@ pub(crate) struct Tip {
 /// The tooltip for the command `label` on the `scope` toolbar.
 pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
   use Scope::*;
+  if scope == Form {
+    let (line, more) = crate::form_ui::tip(label)?;
+    return Some(Tip { line, more });
+  }
   let (line, more) = match (scope, label) {
     // SKETCH CREATE
     (_, "Line") => (

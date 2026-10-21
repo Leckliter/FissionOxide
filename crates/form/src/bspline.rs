@@ -166,20 +166,18 @@ mod tests {
   #[test]
   fn interpolation_passes_through_the_points() {
     let f = |u: f64, v: f64| DVec3::new(u, v, (3.0 * u).sin() * v * v);
-    let grid: Vec<Vec<DVec3>> =
-      (0..9).map(|i| (0..7).map(|j| f(i as f64 / 8.0, j as f64 / 6.0)).collect()).collect();
+    let grid: Vec<Vec<DVec3>> = (0..9).map(|i| (0..7).map(|j| f(i as f64 / 8.0, j as f64 / 6.0)).collect()).collect();
     let s = interpolate(&grid).unwrap();
     assert_eq!(s.poles.len(), 9);
     assert_eq!(s.u_mults.iter().sum::<u32>() as usize, 9 + 4);
-    for i in 0..9 {
-      for j in 0..7 {
-        assert!(s.eval(i as f64 / 8.0, j as f64 / 6.0).distance(grid[i][j]) < 1e-9);
+    for (i, row) in grid.iter().enumerate() {
+      for (j, p) in row.iter().enumerate() {
+        assert!(s.eval(i as f64 / 8.0, j as f64 / 6.0).distance(*p) < 1e-9);
       }
     }
     // cubics are reproduced exactly between the points
     let g = |u: f64, v: f64| DVec3::new(u, v, u * u * u - v * v);
-    let grid: Vec<Vec<DVec3>> =
-      (0..9).map(|i| (0..7).map(|j| g(i as f64 / 8.0, j as f64 / 6.0)).collect()).collect();
+    let grid: Vec<Vec<DVec3>> = (0..9).map(|i| (0..7).map(|j| g(i as f64 / 8.0, j as f64 / 6.0)).collect()).collect();
     let s = interpolate(&grid).unwrap();
     assert!(s.eval(0.37, 0.71).distance(g(0.37, 0.71)) < 1e-9);
   }

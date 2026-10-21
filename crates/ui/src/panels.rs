@@ -31,6 +31,8 @@ pub enum Tab {
   Drawing,
   /// The Manufacture workspace's milling tab.
   Milling,
+  /// The Form workspace's contextual tab (T-spline sculpting).
+  Form,
 }
 
 impl Tab {
@@ -49,6 +51,7 @@ impl Tab {
       Tab::Sketch => "SKETCH",
       Tab::Drawing => "DRAWING",
       Tab::Milling => "MILLING",
+      Tab::Form => "FORM",
     }
   }
 }
@@ -433,12 +436,15 @@ pub(crate) enum Cmd {
   Canvas,
   /// INSPECT > Properties: show or hide the docked Properties panel.
   Properties,
+  /// A Form workspace command (see [`crate::form_ui`]).
+  Form(crate::form_ui::Act),
 }
 
 impl Cmd {
   pub(crate) fn info(self) -> (Icon, &'static str, &'static str) {
     match self {
       Cmd::NewSketch => (Icon::Sketch, "Create Sketch", "Pick a plane or planar face to sketch on"),
+      Cmd::Form(a) => crate::form_ui::info(a),
       Cmd::Dialog(k) => match k {
         Kind::Extrude => (Icon::Extrude, "Extrude", "Add depth to a sketch profile (E)"),
         Kind::Revolve => (Icon::Revolve, "Revolve", "Revolve a sketch profile around an axis"),
@@ -628,6 +634,7 @@ impl Cmd {
     app.note_cmd(self);
     match self {
       Cmd::NewSketch => app.new_sketch(),
+      Cmd::Form(a) => crate::form_ui::run(app, a),
       Cmd::Dialog(k) => app.start(k),
       Cmd::Params => app.show_params = !app.show_params,
       Cmd::InsertStep => app.import(),
@@ -768,6 +775,9 @@ pub(crate) fn separator(ui: &mut egui::Ui) {
 pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
   let sketching = app.s.edit_sketch.is_some();
   if !sketching && app.tab == Tab::Sketch {
+    app.tab = Tab::Solid;
+  }
+  if !app.form.active && app.tab == Tab::Form {
     app.tab = Tab::Solid;
   }
   egui::Panel::top("toolbar")
@@ -919,6 +929,9 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if sketching {
       tabs.push(Tab::Sketch);
     }
+    if app.form.active {
+      tabs.push(Tab::Form);
+    }
     for t in tabs {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
@@ -926,14 +939,14 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let tw = ui.painter().layout_no_wrap(t.label().into(), font.clone(), color).size().x;
       let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
       let pill = rect.shrink2(vec2(0.0, 3.0));
-      if t == Tab::Sketch {
+      if matches!(t, Tab::Sketch | Tab::Form) {
         // the contextual tab keeps its light blue background
         ui.painter().rect_filled(pill, 2.0, theme::CONTEXT_TAB);
       } else if resp.hovered() && !active {
         ui.painter().rect_filled(pill, 2.0, theme::HOVER);
       }
       ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, t.label(), font, color);
-      if active && t != Tab::Sketch {
+      if active && !matches!(t, Tab::Sketch | Tab::Form) {
         ui.painter().line_segment(
           [
             pos2(rect.center().x - tw / 2.0 - 4.0, rect.bottom() - 2.0),
@@ -3113,6 +3126,7 @@ pub fn edit_feature(app: &mut App, id: FeatureId) {
   match &f.kind {
     FeatureKind::Sketch { .. } => app.edit_sketch(id),
     FeatureKind::Canvas { .. } => crate::canvas_ui::start_edit(app, id),
+    FeatureKind::Form { .. } => crate::form_ui::enter(app, Some(id)),
     _ => {
       app.cancel_dialog();
       app.dialog = crate::dialogs::Dialog::edit(app, id);

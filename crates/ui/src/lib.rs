@@ -16,6 +16,7 @@ mod cut_ui;
 mod data_panel;
 mod dialogs;
 mod ecad_ui;
+mod form_ui;
 mod forms;
 mod gpu;
 mod help;
@@ -176,6 +177,8 @@ pub struct App {
   pub(crate) rebuild: Option<(fox_engine::Rebuild, f64)>,
   /// In the Manufacture workspace: the MILLING tab, toolpaths and stock drawn.
   pub manufacture: bool,
+  /// The Form workspace's FORM tab, while open.
+  pub form: form_ui::FormEdit,
   /// The tool library window, while open.
   pub tool_library: Option<cam_ui::ToolLibrary>,
   /// The GPU viewport renderer and its setting.
@@ -387,6 +390,7 @@ impl App {
       analysis: None,
       rebuild: None,
       manufacture: false,
+      form: form_ui::FormEdit::default(),
       tool_library: None,
       gpu: gpu::Gpu::new(None),
       sel_mode: select::Mode::default(),
@@ -1511,6 +1515,7 @@ impl App {
         panels::comments(self, &ctx);
       }
       panels::browser(self, &ctx);
+      form_ui::panel(self, &ctx);
       panels::isolate_banner(self, &ctx);
       if self.show_navbar {
         panels::nav_bar(self, &ctx);

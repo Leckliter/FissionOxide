@@ -229,7 +229,12 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         Symmetry::Circular {
           origin: opt_vec3(c, "origin")?.unwrap_or(DVec3::ZERO).to_array(),
           axis: opt_vec3(c, "axis")?.unwrap_or(DVec3::Z).to_array(),
-          count: c.get("count").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).filter(|n| (2..=64).contains(n)).ok_or(CmdError::new("'count' must be 2 to 64"))?,
+          count: c
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| (2..=64).contains(n))
+            .ok_or(CmdError::new("'count' must be 2 to 64"))?,
         }
       } else {
         let planes = match p.get("mirror") {
@@ -250,7 +255,11 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       let id = form_feature(s, p)?;
       let o = opt_vec3(p, "origin")?.unwrap_or(DVec3::ZERO);
       let a = opt_vec3(p, "axis")?.unwrap_or(DVec3::Z);
-      let n = p.get("count").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).ok_or(CmdError::new("missing 'count'"))?;
+      let n = p
+        .get("count")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(CmdError::new("missing 'count'"))?;
       change(s, id, |c| edit::circular_duplicate(c, o, a, n).map(|_| json!({})))
     })(),
     "form.pull" => (|| {
@@ -266,12 +275,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
           let b = BodyId(u32::try_from(b).map_err(|_| CmdError::new("bad 'body'"))?);
           s.model.body(b).ok_or(CmdError::new("no such body"))?
         }
-        None => s
-          .model
-          .bodies
-          .iter()
-          .find(|b| b.feature != id)
-          .ok_or(CmdError::new("pass the 'body' to pull onto"))?,
+        None => s.model.bodies.iter().find(|b| b.feature != id).ok_or(CmdError::new("pass the 'body' to pull onto"))?,
       };
       let shape = target.shape.clone();
       let closest = |q: DVec3| -> Option<DVec3> {
@@ -392,7 +396,11 @@ fn edge_pair(v: &Value) -> Option<[u32; 2]> {
 fn pick_edge(cage: &FormCage, v: &Value) -> Result<[u32; 2], CmdError> {
   if let Some(e) = edge_pair(v) {
     let k = [e[0].min(e[1]), e[0].max(e[1])];
-    return if cage.edges().contains(&k) { Ok(e) } else { Err(CmdError::new(format!("{}-{} isn't an edge", e[0], e[1]))) };
+    return if cage.edges().contains(&k) {
+      Ok(e)
+    } else {
+      Err(CmdError::new(format!("{}-{} isn't an edge", e[0], e[1])))
+    };
   }
   as_point(v).and_then(|p| cage.nearest_edge(p)).ok_or(CmdError::new("an edge is [a, b] or a point [x, y, z] near it"))
 }
@@ -455,7 +463,10 @@ fn sym_plane(v: &Value) -> Result<SymPlane, CmdError> {
   if normal.length() < 1e-12 {
     return Err(CmdError::new("the mirror plane's normal is zero"));
   }
-  Ok(SymPlane { origin: opt_vec3(v, "origin")?.unwrap_or(DVec3::ZERO).to_array(), normal: normal.normalize().to_array() })
+  Ok(SymPlane {
+    origin: opt_vec3(v, "origin")?.unwrap_or(DVec3::ZERO).to_array(),
+    normal: normal.normalize().to_array(),
+  })
 }
 
 /// A length: a number (mm) or an expression ("80 mm", "w / 2").

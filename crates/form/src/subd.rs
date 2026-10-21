@@ -41,7 +41,11 @@ struct Step {
 }
 
 /// Per vertex: the other ends of its sharp (creased or open) edges and its face count.
-fn sharpness(pos_len: usize, polys: &[Vec<u32>], creases: &HashSet<(u32, u32)>) -> (Vec<Vec<u32>>, Vec<u32>, HashMap<(u32, u32), u32>) {
+fn sharpness(
+  pos_len: usize,
+  polys: &[Vec<u32>],
+  creases: &HashSet<(u32, u32)>,
+) -> (Vec<Vec<u32>>, Vec<u32>, HashMap<(u32, u32), u32>) {
   let mut count: HashMap<(u32, u32), u32> = HashMap::new();
   let mut nfaces = vec![0u32; pos_len];
   for p in polys {
@@ -430,7 +434,7 @@ impl Layout<'_> {
       return None;
     }
     // no cut edge between two of its cells
-    for (&(i, j), _) in cells.iter() {
+    for &(i, j) in cells.keys() {
       for (di, dj, a, b) in [(1, 0, (i + 1, j), (i + 1, j + 1)), (0, 1, (i, j + 1), (i + 1, j + 1))] {
         if cells.contains_key(&(i + di, j + dj)) && self.cut.contains(&key(at[&a], at[&b])) {
           return None;

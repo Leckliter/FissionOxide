@@ -294,6 +294,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
+  consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   if app.objects.joints {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);

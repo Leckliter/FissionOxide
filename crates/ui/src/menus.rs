@@ -102,6 +102,7 @@ pub(crate) struct Group {
   menu: &'static [E],
 }
 
+use crate::form_ui::{self, Act as FormAct};
 use crate::forms;
 use crate::select::Priority;
 use Cmd::Dialog as D;
@@ -122,7 +123,7 @@ const CREATE_PCB: &[E] = &[x("Associative PCB", Icon::InsertComponent), x("Creat
 
 const SOLID_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
+  c("Create Form", Icon::CreateForm, Cmd::Form(FormAct::Enter)),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Extrude)).k("E"),
@@ -333,7 +334,7 @@ const SELECT: &[E] = &[
 
 const SURFACE_CREATE: &[E] = &[
   c("Create Sketch", Icon::Sketch, Cmd::NewSketch),
-  c("Create Form", Icon::CreateForm, D(Kind::Form(&forms::FORM_BOX))),
+  c("Create Form", Icon::CreateForm, Cmd::Form(FormAct::Enter)),
   x("Derive", Icon::Derive),
   E::Sep,
   c("Extrude", Icon::Extrude, D(Kind::Form(&forms::SURFACE_EXTRUDE))).o(),
@@ -889,6 +890,73 @@ const UTILITIES: [Group; 5] = [
   Group { label: "SELECT", quick: &["Select"], menu: SELECT },
 ];
 
+const FORM_CREATE: &[E] = &[
+  c("Box", Icon::Box, Cmd::Form(FormAct::Primitive(&forms::FORM_BOX))),
+  c("Plane", Icon::Plane, Cmd::Form(FormAct::Primitive(&form_ui::FORM_PLANE))),
+  c("Cylinder", Icon::Cylinder, Cmd::Form(FormAct::Primitive(&form_ui::FORM_CYLINDER))),
+  c("Sphere", Icon::Sphere, Cmd::Form(FormAct::Primitive(&form_ui::FORM_SPHERE))),
+  c("Torus", Icon::Torus, Cmd::Form(FormAct::Primitive(&form_ui::FORM_TORUS))),
+  c("Quadball", Icon::Sphere, Cmd::Form(FormAct::Primitive(&form_ui::FORM_QUADBALL))),
+  c("Face", Icon::Patch, Cmd::Form(FormAct::Primitive(&form_ui::FORM_FACE))),
+];
+
+const FORM_MODIFY: &[E] = &[
+  c("Edit Form", Icon::Move, Cmd::Form(FormAct::EditForm)),
+  c("Insert Edge", Icon::SplitFace, Cmd::Form(FormAct::InsertEdge)),
+  c("Insert Point", Icon::CPoint, Cmd::Form(FormAct::InsertPoint)),
+  c("Subdivide", Icon::Grid, Cmd::Form(FormAct::Subdivide)),
+  c("Delete", Icon::Remove, Cmd::Form(FormAct::Delete)),
+  E::Sep,
+  c("Extrude", Icon::Extrude, Cmd::Form(FormAct::Extrude)),
+  c("Bridge", Icon::Loft, Cmd::Form(FormAct::Bridge)),
+  c("Fill Hole", Icon::Patch, Cmd::Form(FormAct::FillHole)),
+  c("Weld Vertices", Icon::Stitch, Cmd::Form(FormAct::Weld)),
+  E::Sep,
+  c("Crease", Icon::Chamfer, Cmd::Form(FormAct::Crease)),
+  c("UnCrease", Icon::Fillet, Cmd::Form(FormAct::Uncrease)),
+  c("Pull", Icon::ProjectSurface, Cmd::Form(FormAct::Pull)),
+  c("Make Uniform", Icon::Smooth, Cmd::Form(FormAct::MakeUniform)),
+  c("Reverse Normal", Icon::ReverseNormal, Cmd::Form(FormAct::Flip)),
+];
+
+const FORM_SYMMETRY: &[E] = &[
+  c("Mirror - Internal", Icon::Mirror, Cmd::Form(FormAct::MirrorInternal)),
+  c("Circular - Internal", Icon::CircPattern, Cmd::Form(FormAct::CircularInternal)),
+  c("Mirror - Duplicate", Icon::Mirror, Cmd::Form(FormAct::MirrorDuplicate)),
+  c("Circular - Duplicate", Icon::CircPattern, Cmd::Form(FormAct::CircularDuplicate)),
+  c("Clear Symmetry", Icon::Remove, Cmd::Form(FormAct::ClearSymmetry)),
+];
+
+const FORM_UTILITIES: &[E] = &[
+  c("Box Display", Icon::Box, Cmd::Form(FormAct::Display(fox_engine::model::form::Display::Box))).k("Alt+1"),
+  c(
+    "Control Frame Display",
+    Icon::Display,
+    Cmd::Form(FormAct::Display(fox_engine::model::form::Display::ControlFrame)),
+  )
+  .k("Alt+2"),
+  c("Smooth Display", Icon::Sphere, Cmd::Form(FormAct::Display(fox_engine::model::form::Display::Smooth))).k("Alt+3"),
+];
+
+const FORM_FINISH: &[E] = &[c("Finish Form", Icon::Finish, Cmd::Form(FormAct::Finish))];
+
+/// The Form workspace's contextual tab.
+const FORM: [Group; 5] = [
+  Group {
+    label: "CREATE",
+    quick: &["Box", "Plane", "Cylinder", "Sphere", "Torus", "Quadball", "Face"],
+    menu: FORM_CREATE,
+  },
+  Group {
+    label: "MODIFY",
+    quick: &["Edit Form", "Insert Edge", "Subdivide", "Extrude", "Bridge", "Fill Hole", "Crease", "Pull"],
+    menu: FORM_MODIFY,
+  },
+  Group { label: "SYMMETRY", quick: &["Mirror - Internal", "Circular - Internal"], menu: FORM_SYMMETRY },
+  Group { label: "UTILITIES", quick: &["Box Display", "Smooth Display", "Make Uniform"], menu: FORM_UTILITIES },
+  Group { label: "FINISH FORM", quick: &["Finish Form"], menu: FORM_FINISH },
+];
+
 const SHEET_METAL: [Group; 2] = [
   Group { label: "CREATE", quick: &["Flange (Base/Edge/Contour)", "Create Flat Pattern"], menu: SHEET_CREATE },
   Group {
@@ -954,6 +1022,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Sketch => (&SKETCH, &[]),
     Tab::Drawing => (&DRAWING, &[]),
     Tab::Milling => (&MILLING, &[]),
+    Tab::Form => (&FORM, &[]),
   }
 }
 
@@ -977,7 +1046,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 10] = [
+const ALL_TABS: [Tab; 11] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -988,6 +1057,7 @@ const ALL_TABS: [Tab; 10] = [
   Tab::Sketch,
   Tab::Drawing,
   Tab::Milling,
+  Tab::Form,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that

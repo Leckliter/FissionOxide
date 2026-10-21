@@ -126,7 +126,8 @@ fn split_face(cage: &mut Cage, f: usize, u: u32, w: u32) -> Result<(), String> {
 fn edge_ring(cage: &Cage, topo: &Topo, a: u32, b: u32) -> (Vec<(u32, u32)>, Vec<(usize, (u32, u32), (u32, u32))>) {
   let mut edges = vec![(a, b)];
   let mut crossed = Vec::new();
-  let start_faces: Vec<usize> = [topo.half.get(&(a, b)), topo.half.get(&(b, a))].into_iter().flatten().map(|h| h.0).collect();
+  let start_faces: Vec<usize> =
+    [topo.half.get(&(a, b)), topo.half.get(&(b, a))].into_iter().flatten().map(|h| h.0).collect();
   let mut closed = false;
   for (dir, &f0) in start_faces.iter().enumerate() {
     if closed {
@@ -378,10 +379,7 @@ pub fn subdivide(cage: &mut Cage, faces: &[u32], exact: bool) -> Result<(), Stri
     for face in &originals {
       for k in 0..face.len() {
         let (a, b) = (face[k], face[(k + 1) % face.len()]);
-        if !mid.contains_key(&key(a, b)) {
-          let n = split_edge(cage, a, b, 0.5);
-          mid.insert(key(a, b), n);
-        }
+        mid.entry(key(a, b)).or_insert_with(|| split_edge(cage, a, b, 0.5));
       }
     }
     let mut remove = Vec::new();
@@ -392,7 +390,9 @@ pub fn subdivide(cage: &mut Cage, faces: &[u32], exact: bool) -> Result<(), Stri
       let fi = cage
         .faces
         .iter()
-        .position(|f| f.len() >= 2 * n && face.iter().all(|v| f.contains(v)) && f.iter().any(|v| mid.values().any(|m| m == v)))
+        .position(|f| {
+          f.len() >= 2 * n && face.iter().all(|v| f.contains(v)) && f.iter().any(|v| mid.values().any(|m| m == v))
+        })
         .ok_or("lost a face while subdividing")?;
       remove.push(fi);
       for i in 0..n {
@@ -427,11 +427,14 @@ pub fn extrude_faces(cage: &mut Cage, faces: &[u32], distance: f64) -> Result<Ve
         *normal.entry(v).or_default() += n;
       }
     }
-    let directed: HashSet<(u32, u32)> =
-      picked.iter().flat_map(|&f| cage.faces[f].iter().enumerate().map(move |(k, _)| (f, k))).map(|(f, k)| {
+    let directed: HashSet<(u32, u32)> = picked
+      .iter()
+      .flat_map(|&f| cage.faces[f].iter().enumerate().map(move |(k, _)| (f, k)))
+      .map(|(f, k)| {
         let face = &cage.faces[f];
         (face[k], face[(k + 1) % face.len()])
-      }).collect();
+      })
+      .collect();
     let mut new_of: HashMap<u32, u32> = HashMap::new();
     let mut verts: Vec<u32> = normal.keys().copied().collect();
     verts.sort_unstable();
@@ -489,7 +492,12 @@ fn boundary_directed(cage: &Cage, edges: &[[u32; 2]]) -> Result<Vec<(u32, u32, u
 
 /// Extrude open edges: new faces off the picked boundary edges, moved by `offset` if given, else
 /// `distance` straight out from their faces. Returns the new vertices.
-pub fn extrude_edges(cage: &mut Cage, edges: &[[u32; 2]], distance: f64, offset: Option<DVec3>) -> Result<Vec<u32>, String> {
+pub fn extrude_edges(
+  cage: &mut Cage,
+  edges: &[[u32; 2]],
+  distance: f64,
+  offset: Option<DVec3>,
+) -> Result<Vec<u32>, String> {
   let sel = cage.symmetry.expand(cage, &Selection { edges: edges.to_vec(), ..Selection::default() });
   let dir = boundary_directed(cage, &sel.edges)?;
   if dir.is_empty() {
@@ -614,10 +622,10 @@ pub fn fill_hole(cage: &mut Cage, edge: [u32; 2], mode: Fill) -> Result<Vec<u32>
   let sym = cage.symmetry.clone();
   let mut starts = vec![(dir[0].0, dir[0].1)];
   for (_, p) in sym.partners(cage) {
-    if let (Some(Some(x)), Some(Some(y))) = (p.get(edge[0] as usize), p.get(edge[1] as usize)) {
-      if let Ok(d) = boundary_directed(cage, &[[*x, *y]]) {
-        starts.push((d[0].0, d[0].1));
-      }
+    if let (Some(Some(x)), Some(Some(y))) = (p.get(edge[0] as usize), p.get(edge[1] as usize))
+      && let Ok(d) = boundary_directed(cage, &[[*x, *y]])
+    {
+      starts.push((d[0].0, d[0].1));
     }
   }
   guarded(cage, |cage| {
@@ -819,7 +827,9 @@ pub fn make_uniform(cage: &mut Cage, iterations: u32) -> Result<usize, String> {
   let topo = Topo::of(cage)?;
   let n = cage.vertices.len();
   let fixed: Vec<bool> = (0..n as u32)
-    .map(|v| topo.is_boundary_vertex(v) || cage.creases.iter().any(|c| c.contains(&v)) || topo.nbrs[v as usize].is_empty())
+    .map(|v| {
+      topo.is_boundary_vertex(v) || cage.creases.iter().any(|c| c.contains(&v)) || topo.nbrs[v as usize].is_empty()
+    })
     .collect();
   for _ in 0..iterations.clamp(1, 100) {
     let mut moves = Vec::new();
@@ -844,7 +854,12 @@ pub fn make_uniform(cage: &mut Cage, iterations: u32) -> Result<usize, String> {
 /// Pull: snaps the picked vertices onto a target, given as its closest point to any point. With
 /// `limit`, the smooth surface's points over the vertices are pulled onto it instead of the
 /// control points. Returns the largest distance left between a pulled point and the target.
-pub fn pull(cage: &mut Cage, vertices: &[u32], limit: bool, closest: impl Fn(DVec3) -> Option<DVec3>) -> Result<f64, String> {
+pub fn pull(
+  cage: &mut Cage,
+  vertices: &[u32],
+  limit: bool,
+  closest: impl Fn(DVec3) -> Option<DVec3>,
+) -> Result<f64, String> {
   let sel = cage.symmetry.expand(cage, &Selection { vertices: vertices.to_vec(), ..Selection::default() });
   let picked = sel.vertex_set(cage);
   if picked.is_empty() {

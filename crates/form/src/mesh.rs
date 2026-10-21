@@ -125,7 +125,14 @@ impl Cage {
 
   /// A vertex's normal: the mean of its faces' normals.
   pub fn vertex_normal(&self, v: u32) -> DVec3 {
-    self.faces.iter().enumerate().filter(|(_, f)| f.contains(&v)).map(|(i, _)| self.face_normal(i)).sum::<DVec3>().normalize_or_zero()
+    self
+      .faces
+      .iter()
+      .enumerate()
+      .filter(|(_, f)| f.contains(&v))
+      .map(|(i, _)| self.face_normal(i))
+      .sum::<DVec3>()
+      .normalize_or_zero()
   }
 
   pub fn is_creased(&self, a: u32, b: u32) -> bool {
@@ -254,8 +261,7 @@ impl Topo {
       let mut seen = vec![start];
       for dir in [false, true] {
         let mut f = start;
-        loop {
-          let Some(g) = topo.turn(cage, f, v, dir) else { break };
+        while let Some(g) = topo.turn(cage, f, v, dir) {
           if g == start || seen.contains(&g) {
             break;
           }
