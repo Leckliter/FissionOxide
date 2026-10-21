@@ -157,6 +157,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       }
       s.execute("feature.edit", &json!({"feature": id.0, "set": set}))
     })(),
+    "component.drag" => crate::drag::drag(s, p),
     "motion.study" => motion_study(s, p),
     "assembly.interference" => interference(s, p),
     "assembly.bom" => crate::subassembly::bom(s, p),
@@ -411,11 +412,9 @@ fn drive_to_contact(s: &mut Session, id: FeatureId, set: serde_json::Map<String,
     to.push((k.clone(), fox_expr::eval(v.as_str().unwrap_or_default(), kind(k), &scope)?));
   }
   let mut trial = mates::Trial::new(s, id);
-  let clash = trial.clash(&set);
-  if clash.is_empty() {
+  let Some((t, clash)) = mates::first_contact(&mut trial, &from, &to) else {
     return s.execute("feature.edit", &json!({"feature": id.0, "set": set}));
-  }
-  let t = mates::last_clear(&mut trial, &from, &to);
+  };
   let stop = mates::between(&from, &to, t);
   let mut out = s.execute("feature.edit", &json!({"feature": id.0, "set": stop}))?;
   out["contact"] = json!(true);

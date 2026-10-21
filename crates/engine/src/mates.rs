@@ -263,26 +263,46 @@ pub(crate) struct Trial<'a> {
 
 impl<'a> Trial<'a> {
   pub fn new(s: &'a Session, joint: FeatureId) -> Trial<'a> {
-    Trial { design: &s.design, joint, regen: Regenerator::default(), before: contacts(&s.design, &s.model.bodies) }
+    Trial::over(&s.design, joint, contacts(&s.design, &s.model.bodies))
   }
 
-  /// The design with these motion values (field → expression), regenerated.
+  /// Trials of `design`'s joint or Move feature `joint`, where the contacts `before` were there
+  /// already.
+  pub fn over(design: &'a Design, joint: FeatureId, before: Vec<(BodyId, BodyId)>) -> Trial<'a> {
+    Trial { design, joint, regen: Regenerator::default(), before }
+  }
+
+  /// The design with these motion values (field → expression; a Move's "x", "y" and "z"),
+  /// regenerated.
   pub fn model(&mut self, set: &Map<String, Value>) -> (Design, Model) {
     let mut d = self.design.clone();
-    if let Some(FeatureKind::Joint { rotation, slide, slide2, pitch, .. }) =
-      d.feature_mut(self.joint).map(|f| &mut f.kind)
-    {
-      for (k, v) in set {
-        let slot = match k.as_str() {
-          "rotation" => &mut *rotation,
-          "slide" => &mut *slide,
-          "slide2" => &mut *slide2,
-          _ => &mut *pitch,
-        };
-        if let Some(v) = v.as_str() {
-          *slot = v.to_string();
+    match d.feature_mut(self.joint).map(|f| &mut f.kind) {
+      Some(FeatureKind::Joint { rotation, slide, slide2, pitch, .. }) => {
+        for (k, v) in set {
+          let slot = match k.as_str() {
+            "rotation" => &mut *rotation,
+            "slide" => &mut *slide,
+            "slide2" => &mut *slide2,
+            _ => &mut *pitch,
+          };
+          if let Some(v) = v.as_str() {
+            *slot = v.to_string();
+          }
         }
       }
+      Some(FeatureKind::Move { translate, .. }) => {
+        for (k, v) in set {
+          let i = match k.as_str() {
+            "x" => 0,
+            "y" => 1,
+            _ => 2,
+          };
+          if let Some(v) = v.as_str() {
+            translate[i] = v.to_string();
+          }
+        }
+      }
+      _ => {}
     }
     let m = self.regen.regenerate(&mut d);
     (d, m)
@@ -312,9 +332,33 @@ pub(crate) fn between(from: &[(String, f64)], to: &[(String, f64)], t: f64) -> M
     .collect()
 }
 
+/// The first contact on the way from `from` to `to` (looked for in steps, so a motion can't
+/// jump through a thin part): how far is clear (0 to 1) and the bodies that touch there.
+pub(crate) fn first_contact(
+  trial: &mut Trial,
+  from: &[(String, f64)],
+  to: &[(String, f64)],
+) -> Option<(f64, Vec<(BodyId, BodyId)>)> {
+  const STEPS: usize = 12;
+  for i in 1..=STEPS {
+    let t = i as f64 / STEPS as f64;
+    let clash = trial.clash(&between(from, to, t));
+    if !clash.is_empty() {
+      let lo = (i - 1) as f64 / STEPS as f64;
+      return Some((clear_between(trial, from, to, lo, t), clash));
+    }
+  }
+  None
+}
+
 /// Bisects for the furthest point short of a contact between `from` (clear) and `to` (clashing).
 pub(crate) fn last_clear(trial: &mut Trial, from: &[(String, f64)], to: &[(String, f64)]) -> f64 {
-  let (mut lo, mut hi) = (0.0, 1.0);
+  clear_between(trial, from, to, 0.0, 1.0)
+}
+
+/// [`last_clear`] between fractions `lo` (clear) and `hi` (clashing) of the way.
+fn clear_between(trial: &mut Trial, from: &[(String, f64)], to: &[(String, f64)], lo: f64, hi: f64) -> f64 {
+  let (mut lo, mut hi) = (lo, hi);
   for _ in 0..14 {
     let mid = (lo + hi) / 2.0;
     if trial.clash(&between(from, to, mid)).is_empty() {

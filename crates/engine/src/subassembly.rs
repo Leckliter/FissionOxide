@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use fox_model::assembly::JointGeometry;
+use fox_model::assembly::{JointGeometry, MotionAxis};
 use fox_model::regen::Regenerator;
 use fox_model::subassembly::{SubAssembly, SubComponent, SubMate};
 use fox_model::{BodyId, ComponentId, Design, FeatureId, FeatureKind};
@@ -33,8 +33,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       Ok(feature_json(s, fid))
     })(),
     "component.sub_joints" => (|| {
-      let (_, sub) = insert_for(s, p)?;
-      Ok(json!(sub_joints(&s.design, &sub)))
+      let (fid, sub) = insert_for(s, p)?;
+      Ok(json!(sub_joints(&s.design, fid, &sub)))
     })(),
     "component.drive" => drive(s, p),
     "component.parent" => (|| {
@@ -196,7 +196,8 @@ impl Source {
     Ok(())
   }
 
-  /// The source's joint origins and joints, renamed to the host and with values frozen.
+  /// The source's joint origins, joints, motion links and cam followers, renamed to the host
+  /// and with values frozen (a sub-assembly's joints are named [`SubAssembly::origin_id`] too).
   fn mates(
     &self,
     fid: FeatureId,
@@ -205,6 +206,7 @@ impl Source {
   ) -> Vec<SubMate> {
     let mut out: Vec<SubMate> = Vec::new();
     let mut origins: HashMap<FeatureId, FeatureId> = HashMap::new();
+    let mut joints: HashMap<FeatureId, FeatureId> = HashMap::new();
     let d = &self.design;
     for f in d.features[..d.active_len()].iter().filter(|f| !f.suppressed) {
       let mut kind = f.kind.clone();
@@ -252,13 +254,48 @@ impl Source {
       if !ok {
         continue;
       }
-      if matches!(kind, FeatureKind::JointOrigin { .. }) {
-        origins.insert(f.id, SubAssembly::origin_id(fid, out.len()));
-      }
+      match kind {
+        FeatureKind::JointOrigin { .. } => origins.insert(f.id, SubAssembly::origin_id(fid, out.len())),
+        _ => joints.insert(f.id, SubAssembly::origin_id(fid, out.len())),
+      };
       out.push(SubMate { name: f.name.clone(), kind });
     }
     if !out.iter().any(|m| matches!(m.kind, FeatureKind::Joint { .. })) {
       out.clear();
+      return out;
+    }
+    // motion links and cam followers between the joints that came along (after them all: a
+    // link may come before its joints in the source's timeline)
+    for f in d.features[..d.active_len()].iter().filter(|f| !f.suppressed) {
+      let mut kind = f.kind.clone();
+      let ok = match &mut kind {
+        FeatureKind::MotionLink {
+          leader,
+          follower,
+          leader_motion,
+          follower_motion,
+          leader_value,
+          follower_value,
+          ..
+        } => {
+          let (la, fa) = (leader_motion.is_angle(), follower_motion.is_angle());
+          relink(leader, &joints)
+            && relink(follower, &joints)
+            && self.freeze(leader_value, la)
+            && self.freeze(follower_value, fa)
+        }
+        FeatureKind::CamFollower { cam, follower, clearance, tip, roller, .. } => {
+          remap(cam, comps)
+            && relink(follower, &joints)
+            && self.freeze(clearance, false)
+            && (roller.is_empty() || self.freeze(roller, false))
+            && tip.as_mut().is_none_or(|g| regeo(g, host_body, &origins))
+        }
+        _ => continue,
+      };
+      if ok {
+        out.push(SubMate { name: f.name.clone(), kind });
+      }
     }
     out
   }
@@ -278,6 +315,10 @@ impl Source {
 
 fn round(v: f64) -> f64 {
   (v * 1e9).round() / 1e9
+}
+
+fn relink(j: &mut FeatureId, joints: &HashMap<FeatureId, FeatureId>) -> bool {
+  joints.get(j).map(|n| *j = *n).is_some()
 }
 
 fn remap(c: &mut ComponentId, map: &HashMap<ComponentId, ComponentId>) -> bool {
@@ -324,23 +365,48 @@ fn insert_for(s: &Session, p: &Value) -> Result<(FeatureId, SubAssembly), CmdErr
     .ok_or_else(|| CmdError::new(format!("{} isn't an inserted sub-assembly", comp.name)))
 }
 
-fn sub_joints(d: &Design, sub: &SubAssembly) -> Vec<Value> {
+fn sub_joints(d: &Design, fid: FeatureId, sub: &SubAssembly) -> Vec<Value> {
   let comp = |c: ComponentId| d.component(c).map(|c| c.name.clone());
   sub
     .mates
     .iter()
-    .filter_map(|m| match &m.kind {
-      FeatureKind::Joint { kind, moving, fixed, rotation, slide, slide2, pitch, .. } => Some(json!({
-        "name": m.name,
-        "kind": serde_json::to_value(kind).unwrap_or_default(),
-        "moving": comp(*moving),
-        "fixed": fixed.and_then(comp),
-        "rotation": rotation, "slide": slide, "slide2": slide2, "pitch": pitch,
-        "flexible": sub.flexible,
-      })),
+    .enumerate()
+    .filter_map(|(k, m)| match &m.kind {
+      FeatureKind::Joint { kind, moving, fixed, rotation, slide, slide2, pitch, .. } => {
+        let (links, cam) = driven(sub, SubAssembly::origin_id(fid, k));
+        Some(json!({
+          "name": m.name,
+          "kind": serde_json::to_value(kind).unwrap_or_default(),
+          "moving": comp(*moving),
+          "fixed": fixed.and_then(comp),
+          "rotation": rotation, "slide": slide, "slide2": slide2, "pitch": pitch,
+          "flexible": sub.flexible,
+          "linked": links.iter().map(|(motion, name)| json!({"motion": motion.name(), "by": name})).collect::<Vec<_>>(),
+          "cam": cam.map(|(motion, name)| json!({"motion": motion.name(), "by": name})),
+        }))
+      }
       _ => None,
     })
     .collect()
+}
+
+/// The motions of a sub-assembly's joint (named `key`) that its motion links and cam follower
+/// set, with their names.
+fn driven(sub: &SubAssembly, key: FeatureId) -> (Vec<(MotionAxis, String)>, Option<(MotionAxis, String)>) {
+  let mut links = Vec::new();
+  let mut cam = None;
+  for m in &sub.mates {
+    match &m.kind {
+      FeatureKind::MotionLink { follower, follower_motion, .. } if *follower == key => {
+        links.push((*follower_motion, m.name.clone()))
+      }
+      FeatureKind::CamFollower { follower, motion, .. } if *follower == key => {
+        cam = Some((motion.unwrap_or(MotionAxis::Slide), m.name.clone()))
+      }
+      _ => {}
+    }
+  }
+  (links, cam)
 }
 
 /// Sets motion values of a joint inside a flexible sub-assembly.
@@ -355,9 +421,14 @@ fn drive(s: &mut Session, p: &Value) -> CmdResult {
     .iter()
     .position(|m| m.name == joint && matches!(m.kind, FeatureKind::Joint { .. }))
     .ok_or_else(|| CmdError::new(format!("the sub-assembly has no joint '{joint}'")))?;
+  let (links, cam) = driven(&sub, SubAssembly::origin_id(fid, k));
   let mut set = Vec::new();
   for key in ["rotation", "slide", "slide2", "pitch"] {
     if let Some(v) = p.get(key) {
+      let by = links.iter().chain(&cam).find(|(m, _)| m.name() == key);
+      if let Some((_, name)) = by {
+        return Err(CmdError::new(format!("{joint}'s {key} is set by {name}")));
+      }
       set.push((key, expr_of(v)?));
     }
   }
@@ -411,7 +482,28 @@ fn cam_follower(s: &mut Session, p: &Value) -> CmdResult {
     None => "0 mm".into(),
   };
   let flat = p.get("flat").and_then(Value::as_bool).unwrap_or(false);
-  let id = s.edit(|d| Ok(d.add_feature(FeatureKind::CamFollower { cam, follower, flat, clearance })?))?;
+  let motion = match opt_str(p, "motion") {
+    None | Some("") | Some("slide") => None,
+    Some(m) => match MotionAxis::parse(m) {
+      Some(a @ (MotionAxis::Rotation | MotionAxis::Slide2)) => Some(a),
+      _ => return Err(CmdError::new(format!("unknown motion '{m}' (slide, slide2, rotation)"))),
+    },
+  };
+  // a geometry, or picked faces (the first: a roller face)
+  let tip = match p.get("tip") {
+    None | Some(Value::Null) => None,
+    Some(Value::Array(a)) => match a.first() {
+      Some(f) => Some(crate::assembly::geometry(s, &json!({"face": f}))?),
+      None => None,
+    },
+    Some(v) => Some(crate::assembly::geometry(s, v)?),
+  };
+  let roller = match p.get("roller") {
+    None | Some(Value::Null) => String::new(),
+    Some(v) => expr_of(v)?,
+  };
+  let kind = FeatureKind::CamFollower { cam, follower, flat, clearance, motion, tip, roller };
+  let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
   rename(s, id, p)?;
   let mut out = feature_json(s, id);
   let joint_error = s.model.status(follower).and_then(|x| x.error.clone());

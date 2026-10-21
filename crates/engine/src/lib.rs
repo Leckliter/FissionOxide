@@ -15,6 +15,7 @@ mod commands;
 pub mod config;
 mod cut;
 pub mod diff;
+mod drag;
 mod drawings;
 pub mod ecad;
 mod features;
@@ -563,6 +564,8 @@ mod tests_fillet;
 mod tests_form;
 #[cfg(test)]
 mod tests_include;
+#[cfg(test)]
+mod tests_mechanism;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
