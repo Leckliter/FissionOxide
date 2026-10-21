@@ -142,7 +142,10 @@ change a parameter and watch the whole history rebuild.
   Create or Insert menu, or drop/open a picture) previews the outlines over the image as you
   adjust threshold, detail and corners, and writes lines, arcs, circles and splines that are
   closed by construction — every shape is a profile, ready to extrude, flange or cut. Colour
-  mode traces each of N colours on its own. See [Image tracing](#image-tracing).
+  mode traces each of N colours on its own; Centre line mode gives single-line strokes for
+  engraving. Traced curves get horizontal, vertical, tangent, coincident, equal and concentric
+  constraints where they are unambiguous, and a calibrated canvas traces where it lies. See
+  [Image tracing](#image-tracing).
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
   scripts all drive the same engine — and `fissionoxide-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
@@ -625,6 +628,21 @@ It returns the counts, each colour layer, and `ink`: a point inside each traced 
 `extrude`'s `profiles`. `trace.info` reports the same without changing the design, and
 [`examples/trace_logo.jsonl`](examples/trace_logo.jsonl) traces and extrudes a badge. The
 pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
+
+- **Centre line** (`"mode": "centerline"`) thins the strokes of a drawing or single-line lettering
+  to their middle and writes open lines, arcs and splines along it, for engraving, V-carving and
+  pen plotters. Strokes meeting at a junction share one sketch point; short side branches left
+  by thinning are pruned (`spurs`), free ends reach back out to the stroke's ends, and the result
+  reports the mean `stroke_width` so a cutter can be picked.
+- **Constraints**: unless `"constraints": false`, the traced curves get horizontal and vertical
+  constraints on straight edges, tangent where a line or arc runs smoothly into an arc,
+  coincident and point-on-curve where ends nearly meet, concentric centres, and equal radii and
+  lengths. Every inferred constraint is checked by solving; any the solver can't satisfy with
+  the rest are dropped, so tracing never leaves the sketch failing.
+- **Canvas**: Insert > Canvas keeps a picture on a plane or planar face (saved in the design,
+  with opacity and a visibility eye in the browser's Canvases folder). Calibrate rescales it from
+  two picked points and their real distance; right-click > Trace Canvas (or
+  `"canvas": <feature>` instead of `image`) traces it where it lies, at its calibrated size.
 
 ## Viewport renderer
 

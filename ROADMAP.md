@@ -21,7 +21,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 | View      | Silhouette edges and hidden-line (dashed) display styles; GPU frustum culling and level of detail for huge assemblies |
 | Manufacture | Holder and fixture collision checks; turning and 4/5-axis; rest roughing after a larger tool in 3D; more pencil passes either side of a corner |
 | Plugins   | Installable `.foxplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
-| Tracing   | Canvas (an image kept on a plane, calibrated); centre-line tracing for engraving; constraints on traced geometry; see [docs/TRACING.md](docs/TRACING.md) |
 | Fabrication | Nesting on sheets (`jagua-rs`); 2D cuts kept in the design with a viewport preview; Langmuir FireControl and Ruida posts checked on real machines; per-contour lead positions |
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |
 | Sketch    | Remove duplicate/overlapping curves; Clean Up (break links, delete constraints, splines to arcs/lines); Scale to Size and Fit in Box; a sketch library placed where you click |
