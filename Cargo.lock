@@ -1671,6 +1671,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fox-raytrace"
+version = "0.1.0"
+dependencies = [
+ "fox-render",
+ "glam",
+ "image",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fox-render"
 version = "0.1.0"
 dependencies = [

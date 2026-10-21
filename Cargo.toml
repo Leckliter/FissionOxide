@@ -29,6 +29,7 @@ fox-plugin = { path = "crates/plugin" }
 fox-sim = { path = "crates/sim" }
 fox-form = { path = "crates/form" }
 fox-gen = { path = "crates/gen" }
+fox-raytrace = { path = "crates/raytrace" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
