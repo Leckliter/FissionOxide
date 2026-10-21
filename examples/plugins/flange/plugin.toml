@@ -1,0 +1,127 @@
+# Example FissionOxide plugin. Build and pack it with ./build.sh, then install flange.foxplugin
+# from File → Plugins, by dropping it on the window, or with
+#   fissionoxide-cli plugin install examples/plugins/flange/flange.foxplugin
+id = "org.fissionoxide.examples.flange"
+name = "Flange Tools"
+version = "1.0.0"
+author = "FissionOxide"
+description = "Bolt flanges in one step, and a CSV report of the bodies in a design"
+homepage = "https://github.com/leckliter/FissionOxide"
+fissionoxide = ">=0.1"
+api = 1
+permissions = ["write-files"]
+
+[[panels]]
+id = "make"
+label = "FLANGES"
+tab = "Flange Tools"
+
+[[panels]]
+id = "report"
+label = "REPORT"
+tab = "Flange Tools"
+
+[[commands]]
+id = "flange"
+label = "Bolt Flange"
+tooltip = "A round plate with a centre bore and a circle of bolt holes"
+icon = "icons/flange.png"
+panel = "make"
+promoted = true
+repeatable = true
+
+  [[commands.inputs]]
+  id = "plane"
+  type = "choice"
+  label = "Plane"
+  options = ["XY", "XZ", "YZ"]
+  default = "XY"
+
+  [[commands.inputs]]
+  id = "outer"
+  type = "value"
+  label = "Outer diameter"
+  unit = "length"
+  default = "100 mm"
+  min = 1
+
+  [[commands.inputs]]
+  id = "bore"
+  type = "value"
+  label = "Bore diameter"
+  unit = "length"
+  default = "30 mm"
+  min = 0
+
+  [[commands.inputs]]
+  id = "thickness"
+  type = "value"
+  label = "Thickness"
+  unit = "length"
+  default = "10 mm"
+  min = 0.01
+
+  [[commands.inputs]]
+  id = "holes_group"
+  type = "group"
+  label = "Bolt holes"
+
+  [[commands.inputs]]
+  id = "holes"
+  type = "integer"
+  label = "Holes"
+  default = 6
+  min = 0
+  max = 72
+  group = "holes_group"
+
+  [[commands.inputs]]
+  id = "pitch"
+  type = "value"
+  label = "Bolt circle diameter"
+  unit = "length"
+  default = "70 mm"
+  group = "holes_group"
+  enabled_when = { custom_pitch = true }
+
+  [[commands.inputs]]
+  id = "custom_pitch"
+  type = "checkbox"
+  label = "Set bolt circle"
+  default = false
+  group = "holes_group"
+
+  [[commands.inputs]]
+  id = "hole"
+  type = "value"
+  label = "Hole diameter"
+  unit = "length"
+  default = "8 mm"
+  min = 0.01
+  group = "holes_group"
+
+  [[commands.inputs]]
+  id = "spacing"
+  type = "label"
+  default = "A hole every 60°"
+  group = "holes_group"
+
+[[commands]]
+id = "report"
+label = "Body Report"
+tooltip = "Write each body's volume, area and size to a CSV file in a folder you pick"
+icon = "icons/report.png"
+panel = "report"
+promoted = true
+
+  [[commands.inputs]]
+  id = "file"
+  type = "text"
+  label = "File name"
+  default = "bodies.csv"
+
+  [[commands.inputs]]
+  id = "hidden"
+  type = "checkbox"
+  label = "Include hidden bodies"
+  default = true

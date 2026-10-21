@@ -27,6 +27,7 @@ mod menus;
 mod navbar;
 mod panels;
 mod params_ui;
+mod plugins_ui;
 mod preferences;
 mod preview;
 mod select;
@@ -197,6 +198,8 @@ pub struct App {
   close_menus: bool,
   /// What Ctrl+C copied, for Ctrl+V.
   pub(crate) clipboard: Option<clipboard::Clip>,
+  /// Installed plugins: the Plugins window, their toolbar tabs and command dialogs.
+  pub(crate) plugins: plugins_ui::PluginsUi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -380,6 +383,7 @@ impl App {
       help: help::Help::default(),
       close_menus: false,
       clipboard: None,
+      plugins: plugins_ui::PluginsUi::default(),
     }
   }
 
@@ -746,13 +750,15 @@ impl App {
     }
   }
 
-  /// Files dropped on the window: uploaded when the data panel is open, otherwise opened (into
-  /// an empty design) or inserted.
+  /// Files dropped on the window: a `.foxplugin` asks to be installed; others are uploaded when
+  /// the data panel is open, otherwise opened (into an empty design) or inserted.
   fn dropped_files(&mut self, ctx: &egui::Context) {
     let files: Vec<PathBuf> =
       ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| p.is_absolute()).collect());
     for p in files {
-      if self.data.open {
+      if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(fox_plugin::package::EXTENSION)) {
+        plugins_ui::offer_file(self, &p);
+      } else if self.data.open {
         let (project, folder) = self.data.location();
         if let Some(r) = self.run("hub.upload", json!({"path": p, "project": project, "folder": folder}))
           && r.get("warning").is_none()
@@ -1417,6 +1423,7 @@ impl App {
       self.s.toolpaths_of = Some((self.s.toolpaths_of.map(|t| t.0).unwrap_or(0), self.s.revision));
     }
     self.dropped_files(&ctx);
+    plugins_ui::sync(self);
     panels::app_bar(self, ui);
     panels::toolbar(self, ui);
     if self.drawing.is_none() {
@@ -1472,6 +1479,7 @@ impl App {
     cut_ui::cut_window(self, &ctx);
     canvas_ui::windows(self, &ctx);
     help::window(self, &ctx);
+    plugins_ui::window(self, &ctx);
     if std::mem::take(&mut self.close_menus) {
       egui::Popup::close_all(&ctx);
     }

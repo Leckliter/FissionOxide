@@ -1,0 +1,19 @@
+[package]
+name = "fox-plugin"
+description = "Plugins: .foxplugin packages, the installed-plugin registry and the sandboxed WebAssembly runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fox-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+zip = { workspace = true }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+semver = "1"
+wasmtime = { version = "37", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
+
+[lints]
+workspace = true

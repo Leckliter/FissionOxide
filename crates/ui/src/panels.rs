@@ -31,6 +31,8 @@ pub enum Tab {
   Drawing,
   /// The Manufacture workspace's milling tab.
   Milling,
+  /// A tab named by installed plugins (an index into their tab names).
+  Plugin(u8),
 }
 
 impl Tab {
@@ -49,6 +51,7 @@ impl Tab {
       Tab::Sketch => "SKETCH",
       Tab::Drawing => "DRAWING",
       Tab::Milling => "MILLING",
+      Tab::Plugin(_) => "PLUGINS",
     }
   }
 }
@@ -142,7 +145,9 @@ pub fn app_bar(app: &mut App, ui: &mut egui::Ui) {
           if resp.on_hover_text("Autodesk Assistant").clicked() {
             app.status = Some(("The Autodesk Assistant isn't part of FissionOxide".into(), false));
           }
-          let _ = icons::icon_button(ui, Icon::Configure, 28.0, "Extensions", false, None);
+          if icons::icon_button(ui, Icon::Configure, 28.0, "Plugins", app.plugins.open, None).clicked() {
+            crate::plugins_ui::open_window(app);
+          }
         });
       });
     });
@@ -274,6 +279,10 @@ fn file_menu(app: &mut App, ui: &mut egui::Ui) {
     ui.checkbox(&mut app.show_viewcube, "Show ViewCube");
   });
   ui.separator();
+  if ui.button("Plugins...").on_hover_text("Install, update and manage plugins (.foxplugin)").clicked() {
+    ui.close();
+    crate::plugins_ui::open_window(app);
+  }
   if ui.button("Preferences...").on_hover_text("Units, navigation, design, sketch and graphics settings").clicked() {
     ui.close();
     crate::preferences::open(app);
@@ -431,6 +440,8 @@ pub(crate) enum Cmd {
   Cut2d,
   /// INSERT > Canvas: a reference image on a plane.
   Canvas,
+  /// UTILITIES > ADD-INS: the Plugins window.
+  Plugins,
 }
 
 impl Cmd {
@@ -588,6 +599,7 @@ impl Cmd {
       Cmd::Canvas => {
         (Icon::Canvas, "Canvas", "Place an image on a plane to model over; right-click it to Calibrate its size")
       }
+      Cmd::Plugins => (Icon::Scripts, "Scripts and Add-Ins", "Install, update and manage plugins (.foxplugin)"),
     }
   }
 
@@ -711,6 +723,7 @@ impl Cmd {
       }
       Cmd::Cut2d => app.open_cut_window(),
       Cmd::Canvas => crate::canvas_ui::start_insert(app),
+      Cmd::Plugins => crate::plugins_ui::open_window(app),
     }
   }
 }
@@ -781,6 +794,7 @@ pub fn toolbar(app: &mut App, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let tab = app.tab;
                 match tab {
+                  Tab::Plugin(i) => crate::plugins_ui::toolbar(app, ui, i),
                   other if crate::menus::tab_toolbar(app, ui, other) => {}
                   other => {
                     ui.add_space(12.0);
@@ -888,6 +902,14 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     } else if matches!(app.tab, Tab::Drawing | Tab::Milling) {
       app.tab = Tab::Solid;
     }
+    if app.drawing.is_none() && !app.manufacture {
+      tabs.extend((0..app.plugins.tabs.len().min(usize::from(u8::MAX))).map(|i| Tab::Plugin(i as u8)));
+    }
+    if let Tab::Plugin(i) = app.tab
+      && usize::from(i) >= app.plugins.tabs.len()
+    {
+      app.tab = Tab::Solid;
+    }
     if sketching {
       tabs.push(Tab::Sketch);
     }
@@ -895,7 +917,11 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       let font = egui::FontId::proportional(12.5);
       let active = app.tab == t;
       let color = if active { theme::ACCENT } else { Color32::from_gray(45) };
-      let tw = ui.painter().layout_no_wrap(t.label().into(), font.clone(), color).size().x;
+      let label = match t {
+        Tab::Plugin(i) => crate::plugins_ui::tab_label(app, i),
+        _ => t.label().to_string(),
+      };
+      let tw = ui.painter().layout_no_wrap(label.clone(), font.clone(), color).size().x;
       let (rect, resp) = ui.allocate_exact_size(vec2(tw + 26.0, 28.0), egui::Sense::click());
       let pill = rect.shrink2(vec2(0.0, 3.0));
       if t == Tab::Sketch {
@@ -904,7 +930,7 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
       } else if resp.hovered() && !active {
         ui.painter().rect_filled(pill, 2.0, theme::HOVER);
       }
-      ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, t.label(), font, color);
+      ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, font, color);
       if active && t != Tab::Sketch {
         ui.painter().line_segment(
           [

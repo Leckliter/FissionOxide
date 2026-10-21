@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 fox-engine.workspace = true
+fox-plugin.workspace = true
 serde_json.workspace = true
 env_logger.workspace = true
 log.workspace = true

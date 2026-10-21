@@ -1,11 +1,12 @@
-# Plugin system plan
+# Plugins
 
-FissionOxide needs plugins so that tool suites built for other CAD apps — starting with the LumenArt
-Tool Suite, a Fusion 360 add-in of about 22 sheet-metal and sign-making commands — can live on in
-FissionOxide, and so that anyone can extend the app without rebuilding it.
+FissionOxide has plugins so that tool suites built for other CAD apps — starting with the
+LumenArt Tool Suite, a Fusion 360 add-in of about 22 sheet-metal and sign-making commands — can
+live on in FissionOxide, and so that anyone can extend the app without rebuilding it.
 
-This document is the plan: what a plugin is, how it is installed, how it runs, and what the
-engine has to grow before the first real plugin can be ported.
+This document describes what a plugin is, how it is installed, how it runs and the interface its
+code sees. The host is the `fox-plugin` crate (`crates/plugin`); a complete example plugin is in
+[examples/plugins/flange](../examples/plugins/flange).
 
 ## Goals
 
@@ -27,11 +28,15 @@ A `.foxplugin` is a zip:
 
 ```
 plugin.toml          manifest (below)
-plugin.wasm          the code (a WebAssembly component)
-icons/               one SVG or PNG per command
+plugin.wasm          the code (a WebAssembly module, see "Host interface")
+icons/               one PNG per command (32×32 or larger, square)
 resources/           anything the plugin reads at run time (DXF parts, presets.json, …)
-README.md            shown in the plugin manager
+README.md            shown in the install dialog
 ```
+
+Paths inside the zip must be relative and stay inside it; a package is at most 4096 files and
+256 MB unpacked. `fissionoxide-cli plugin pack DIR OUT.foxplugin` builds one from a folder laid
+out like this, checking it first.
 
 ### Manifest
 
@@ -42,11 +47,11 @@ version = "1.0.0"                  # semver; installing a newer version updates 
 author = "LumenArt"
 description = "Sheet metal tabs, slots and cut-file checks"
 homepage = "https://lumenart.shop"
-fissionoxide = ">=0.2"                 # app versions it works with
+fissionoxide = ">=0.1"             # app versions it works with (a semver requirement)
 api = 1                            # plugin API version
 
 # What the plugin may do beyond running design commands. Shown to the user at install.
-permissions = ["write-files", "render"]   # also: "network", "read-files"
+permissions = ["write-files", "render"]   # also: "read-files", "hub"
 
 # Toolbar placement. Panels are created on demand in this order; tabs group panels.
 [[panels]]
@@ -63,7 +68,7 @@ tab = "LumenArt"
 id = "line_cleaner"                # full id becomes com.lumenart.tools/line_cleaner
 label = "Clean Duplicate Lines"
 tooltip = "Remove overlapping lines, arcs and circles from a sketch"
-icon = "icons/line_cleaner.svg"
+icon = "icons/line_cleaner.png"
 panel = "design"
 promoted = true                    # shown in the panel's main row, not only its menu
 repeatable = true                  # stays open for another run after OK
@@ -90,96 +95,172 @@ repeatable = true                  # stays open for another run after OK
   visible_when = { tolerance = "Custom" }
 ```
 
-Input types: `selection` (filters: sketch, curve, point, profile, body, face, edge, component;
-min/max; returns ids and the picked point), `value` (with unit: length, angle, unitless),
-`integer`, `slider`, `checkbox`, `choice`, `text`, `button`, `label` (read-only text the plugin
-can update) and `group`. `visible_when` / `enabled_when` cover the conditional inputs the
-current add-in builds by hand.
+Input types and what the plugin receives for them:
+
+| Type | Keys | Value passed to the plugin |
+|------|------|----------------------------|
+| `selection` | `filter` (sketch, curve, point, profile, body, face, edge, vertex, feature; none = any), `min` (default 1), `max` | a list of picks as the `selection` command returns them (`{"type": "face", "body": 1, "face": 3}`) |
+| `value` | `unit` (length, angle, unitless), `default` (number or expression), `min`, `max` | a number: mm, degrees or plain. Expressions such as `"0.5 in"` or `"width / 2"` are evaluated with the design's parameters |
+| `integer` | `default`, `min`, `max`, `step` | an integer |
+| `slider` | `min`, `max` (both required), `step`, `default` | a number |
+| `checkbox` | `default` | `true` / `false` |
+| `choice` | `options`, `default` (one of them) | the option |
+| `text` | `default` | the text |
+| `button` | | nothing; pressing it calls `fox_input_changed` with its id |
+| `label` | `default` (the text) | nothing; the plugin can change its text |
+| `group` | | nothing; inputs with `group = "<id>"` are shown under it |
+
+Every input may have `label`, `prompt` (hover text; a selection's empty text), `group`, and
+`visible_when` / `enabled_when` (`{ other_input = value, ... }`). These cover the conditional
+inputs the current add-in builds by hand. A selection left out when a command is run from the
+CLI is taken from the current selection. Values are checked (counts, ranges, options, unknown
+inputs) before the plugin is called.
+
+Ids are lower case (`a-z`, `0-9`, `_`, `-`); a plugin id is reverse-DNS. Unknown manifest keys
+are an error, so typos don't pass silently. A command without `panel` goes in a panel named
+after the plugin, on a tab named after the plugin; a panel without `tab` sits on that tab too.
 
 ### Where installed plugins live
 
-Installing copies the package into the app's data directory (next to the data hub), unpacked,
-under `plugins/<id>/<version>/`, and records it in `plugins/installed.json` (enabled flag,
-granted permissions, install date). The folder is an implementation detail: the UI never asks
-the user to find it. A bundled-plugins folder next to the executable is read too, for plugins
-shipped with the app.
+Installing unpacks the package into the data hub's directory under
+`plugins/<id>/<version>/`, and records it in `plugins/installed.json` (version, enabled flag,
+granted permissions, install date, where it came from). Beside the versions sit the plugin's
+`storage.json` and `log.txt`, so both survive updates; uninstalling removes them too. The folder
+is an implementation detail: the UI never asks the user to find it. A `plugins/` folder next to
+the executable holds bundled plugins (each unpacked in its own folder): they are enabled with
+the permissions they ask for, can be turned off but not removed, and an installed copy of the
+same id wins over them.
 
-## Installing ("upload")
+## Installing
 
-1. The user picks File → Plugins → Install… or drags a `.foxplugin` onto the window.
+1. The user picks File → Plugins → Install from file…, drags a `.foxplugin` onto the window, or
+   picks one in the Plugins window's data hub list.
 2. The app checks the package: manifest parses, ids are unique, `api` and `fissionoxide` versions
-   are supported, the wasm module compiles, every icon and command input is valid.
-3. The install dialog shows name, version, author, what it adds (commands and panels) and the
-   permissions it asks for. Same id with a newer version shows as an update; older asks first.
+   are supported, the wasm module compiles and imports and exports only what the host has (see
+   below), every icon and command input is valid.
+3. The install dialog shows name, version, author, what it adds (commands with their tab and
+   panel), the permissions it asks for (each can be unticked) and the README. The same id with
+   a newer version shows as an update; the same or an older version asks first.
 4. On Install the package is unpacked into the plugin directory and its commands appear in the
-   toolbar immediately — no restart.
+   toolbar immediately — no restart. An update keeps the enabled flag, storage and log.
 
-The **Plugins** panel (File → Plugins) lists installed plugins with enable/disable, update
-(install a newer file), remove, permissions and the plugin's log. A plugin that fails to load
-is shown with its error and skipped; it never stops the app or other plugins from loading.
+The **Plugins** window (File → Plugins, the app bar's plugins button, UTILITIES → ADD-INS)
+lists installed plugins with enable/disable, remove, details (commands, permissions as
+checkboxes, the plugin's log) and the data hub's plugins with Install / Update. A plugin that
+fails to load is shown with its error and skipped; it never stops the app or other plugins
+from loading.
 
-The same package and install path will work for a future download page or a shared hub server;
-"upload" there just ends in the same install step.
+### The data hub
+
+A plugin published to the data hub (`fissionoxide-cli plugin publish FILE`, or the MCP tool
+`plugin_publish`) is a file item whose versions are the plugin's releases: publishing a newer
+package adds a version to the item already holding that plugin id. Everyone sharing the hub
+(a synced folder today) sees it in the Plugins window and can install it; `plugin update` (or
+Update in the window) installs the newest release. An update grants only what the user had
+granted before; new permissions stay off until granted in the Plugins window.
+
+### Command line and MCP
+
+```text
+fissionoxide-cli plugin list | commands | hub | log ID
+fissionoxide-cli plugin install FILE.foxplugin|DIR [--grant a,b] [--force]   (--force: same or older)
+fissionoxide-cli plugin install --item ITEM [--version N]
+fissionoxide-cli plugin update [ID]
+fissionoxide-cli plugin uninstall | enable | disable ID
+fissionoxide-cli plugin check FILE.foxplugin|DIR
+fissionoxide-cli plugin pack DIR OUT.foxplugin
+fissionoxide-cli plugin publish FILE.foxplugin|DIR [--project P] [--folder F]
+fissionoxide-cli plugin run PLUGIN/COMMAND ['{inputs}'] [--open IN.fox] [--save OUT.fox] [--folder DIR] [--dev DIR]
+```
+
+`run --dev DIR` runs a plugin straight from its source folder without installing it (with the
+permissions it asks for), for development. `--folder` is the run's folder (default: the current
+directory). The same commands are JSON commands (`plugin.list`, `plugin.install`, `plugin.run`
+...: `fissionoxide-cli commands` lists them) and MCP tools (`plugin_list`, `plugin_run` ...).
 
 ## Running plugin code
 
-**Runtime: WebAssembly components on Wasmtime.** Chosen because:
+**Runtime: WebAssembly on Wasmtime.** Chosen because:
 
-- **Sandboxed.** A plugin can only call the host functions it is given. No file system, network
-  or process access unless the matching permission was granted, and then only through narrow
-  host functions (e.g. write into a folder the user picked).
-- **Can't crash the app.** Traps, panics and infinite loops (fuel/epoch limits) end the plugin
-  run with an error; the design is restored as it was before the run.
+- **Sandboxed.** A plugin can only call the host functions below. No file system, network or
+  process access: files go through `execute` and `write_file`, checked against the permissions
+  the user granted and kept inside the folder picked for the run.
+- **Can't crash the app.** Traps, panics and endless loops end the run with an error (each call
+  has a fuel budget of about 20 billion instructions and a 1 GB memory cap); the design is
+  restored as it was before the run.
 - **One file for every platform.** No per-OS builds, no ABI break when the app is rebuilt
   (FissionOxide forbids `unsafe`, which rules out loading native libraries anyway).
-- **Any language.** Plugins can be written in Rust, or in **Python via `componentize-py`**,
-  which keeps porting the existing Python add-in close to the original code. JavaScript, Go and
-  C also compile to components.
+- **Any language** that compiles to a plain WebAssembly module without WASI: Rust
+  (`wasm32-unknown-unknown`), C/C++ (clang `--target=wasm32`), Zig, AssemblyScript, TinyGo.
 
 Rejected alternatives: embedded Python (closest to the old code, but no sandbox and the app
 would have to ship Python), Lua/Rhai (sandboxable, but a rewrite in a new language), native
-dylibs (unsafe, unsandboxed, ABI-fragile).
+dylibs (unsafe, unsandboxed, ABI-fragile). The first plan used WebAssembly *components* (WIT);
+API 1 is a plain module instead, because building components still needs extra tools on top of
+the compiler and the host gains nothing from them for a JSON interface. Python via
+`componentize-py` would need components, so it can come with a later API version.
 
-### Host interface (WIT)
+### Host interface (API 1)
 
-```wit
-package fissionoxide:plugin@1.0.0;
+Every string crosses as UTF-8 bytes: a (pointer, length) pair of `i32`s in the module's memory.
+The host passes data in by calling the module's `fox_alloc` and writing into the block it
+returns; it hands data back the same way and returns it packed in an `i64` as
+`(pointer << 32) | length`, with `-1` meaning "none". The module is instantiated afresh for every
+call, so nothing needs freeing; anything to keep goes in storage.
 
-interface host {
-  /// Run any engine command; returns its JSON result or an error message.
-  execute: func(command: string, params: string) -> result<string, string>;
-  /// Read a file bundled in the plugin's resources/ folder.
-  resource: func(path: string) -> result<list<u8>, string>;
-  /// Plugin-private key/value storage that survives restarts (user libraries, presets).
-  storage-get: func(key: string) -> option<string>;
-  storage-set: func(key: string, value: string);
-  /// Write a file under the output folder the user chose for this run ("write-files").
-  write-file: func(relative-path: string, data: list<u8>) -> result<_, string>;
-  /// Dialog feedback while running.
-  progress: func(fraction: f32, message: string) -> bool;   // false = user cancelled
-  log: func(level: u8, message: string);
-}
+The module **exports**:
 
-world plugin {
-  import host;
-  /// Called when the user presses OK. `inputs` is the dialog's values as JSON.
-  export run: func(command: string, inputs: string) -> result<string, string>;
-  /// Called when an input changes while the dialog is open (live update, previews,
-  /// enabling inputs, filling a selection). Returns input updates as JSON.
-  export input-changed: func(command: string, input: string, inputs: string) -> result<string, string>;
-}
-```
+| Export | Signature | |
+|--------|-----------|-|
+| `memory` | memory | |
+| `fox_alloc` | `(len: i32) -> i32` | a block of `len` bytes for the host to write |
+| `fox_run` | `(command, inputs) -> i64` | the user pressed OK: the command's id and the dialog's values as JSON (see the input table). Returns a packed reply |
+| `fox_input_changed` | `(command, input, inputs) -> i64` | optional: an input changed while the dialog is open (`input` is `""` when it opens, or a button's id). Returns a packed reply whose `ok` is the updates |
 
-Rendering and file export go through `execute` (`view.render`, `export`) with paths relative to
-the chosen output folder; the host rewrites and checks every path a plugin passes, so a plugin
-can't write outside that folder.
+A reply is JSON: `{"ok": <anything>}` or `{"error": "message"}`. `fox_run`'s `ok` value is the
+run's result (a `"message"` key in it is shown in the status bar). `fox_input_changed`'s is
+`{"<input id>": {"value"?, "visible"?, "enabled"?, "text"?, "label"?, "options"?}}`: a new value,
+showing, enabling, a label input's text, a row's label, a choice's options.
+
+The module may **import** these from `fox`, nothing else:
+
+| Import | Signature | |
+|--------|-----------|-|
+| `execute` | `(cmd, params) -> i64` | runs an engine command; returns `{"ok": result}` or `{"error": message}` |
+| `resource` | `(path) -> i64` | the bytes of `resources/<path>` in the package, or -1 |
+| `storage_get` | `(key) -> i64` | the plugin's stored string, or -1 |
+| `storage_set` | `(key, value)` | stores a string (a negative value length removes the key); 16 MB in all |
+| `write_file` | `(path, data) -> i64` | writes into the run's folder ("write-files"); 0, or a packed error message |
+| `progress` | `(fraction: f32, message) -> i32` | 1 to go on, 0 if the user cancelled (the run is then rolled back) |
+| `log` | `(level: i32, message)` | 0 error, 1 warning, 2 info, 3 debug; shown in the Plugins window |
+
+[examples/plugins/flange/src/fox.rs](../examples/plugins/flange/src/fox.rs) wraps all of this
+for Rust (`fox::execute("extrude", json!({...}))`, `fox::write_file`, ...); copy it to start a
+plugin.
+
+### What `execute` may do
+
+- Never: `new`, `open`, `save`, `undo`, `redo`, `transaction.*`, `hub.open` and `plugin.*`
+  (they would replace the design or the run's undo step).
+- `hub.*` needs **hub**; `view.render` needs **render**.
+- File paths in parameters are relative to the folder the user picked for the run; absolute
+  paths and `..` are refused, as are symbolic links leading out of it. Commands that write
+  (`export`, `drawing.export`, `cam.post`, `cut.gcode`, `sheet.flat_pattern` and `hub.download`
+  with a path) need **write-files** (`view.render` only **render**). Commands that read
+  (`import`, `inspect`, `sketch.insert`, `sketch.trace`, `canvas.insert`, `sheet.check_dxf`,
+  font files) need **read-files**, except that `resources/...` reads the plugin's own resources.
+  A command the host doesn't know that has a file-like `path`/`file`/`image`/`dir` is treated as
+  a write.
+- A run without a folder (the CLI defaults to the current directory; the UI asks for one when a
+  plugin has file permissions) can't touch files at all.
 
 ### One run, one undo step
 
 Each OK press runs inside an engine transaction: everything the plugin does is one undo step
-named after the command, and if the plugin returns an error, traps or the user cancels, the
-whole run is rolled back. Previews while the dialog is open run in a scratch transaction that
-is discarded on every change and on Cancel.
+named after the command, and if the plugin returns an error, traps, runs out of fuel or the user
+cancels, the whole run is rolled back. `fox_input_changed` also runs in a transaction that is
+always rolled back, so a plugin may build geometry to measure it there, but nothing it makes
+stays; showing such geometry as a live preview is not in API 1.
 
 ## Plugin features (later)
 
@@ -243,9 +324,10 @@ multi-body DXF cut file, ellipse curves, curve/surface evaluation on freeform ge
 
 1. **Engine readiness** — the gap table above, each with tests and CLI/MCP exposure (done).
 2. **Plugin host** — `fox-plugin` crate: package reader and validator, installed-plugin
-   registry, Wasmtime runtime with the WIT host interface, transactions, permissions.
-3. **UI** — Plugins panel, install dialog and drag-and-drop, manifest-driven toolbar panels and
-   dialogs, progress and result messages, plugin log.
-4. **SDK** — WIT file, a Rust and a Python template, `fissionoxide-cli plugin pack|check|run` for
-   development (run a plugin headless against a design).
+   registry, Wasmtime runtime with the host interface, transactions, permissions, data hub
+   publishing and updates (done).
+3. **UI** — Plugins window, install dialog and drag-and-drop, manifest-driven toolbar tabs,
+   panels and dialogs, result messages, plugin log (done).
+4. **SDK** — the Rust bindings and example plugin in `examples/plugins/flange`,
+   `fissionoxide-cli plugin pack|check|run --dev` for development (done).
 5. **First ports** — Clean Duplicate Lines, then the rest of LumenArt Tools in the order above.

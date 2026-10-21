@@ -832,7 +832,7 @@ const MANAGE: [Group; 1] =
   [Group { label: "BOM", quick: &["Bill of Materials"], menu: &[c("Bill of Materials", Icon::Bom, D(Kind::Bom))] }];
 
 const ADD_INS: &[E] =
-  &[x("Scripts and Add-Ins...", Icon::Scripts).k("Shift+S"), x("Design and Make Marketplace", Icon::Marketplace)];
+  &[c("Scripts and Add-Ins...", Icon::Scripts, Cmd::Plugins), x("Design and Make Marketplace", Icon::Marketplace)];
 
 const UTILITY: &[E] = &[
   x("Manage Materials", Icon::ManageMaterials),
@@ -950,6 +950,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Sketch => (&SKETCH, &[]),
     Tab::Drawing => (&DRAWING, &[]),
     Tab::Milling => (&MILLING, &[]),
+    Tab::Plugin(_) => (&[], &[]),
   }
 }
 

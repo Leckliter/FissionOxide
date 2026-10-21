@@ -330,6 +330,16 @@ impl Session {
     Ok(changed)
   }
 
+  /// Ends the open transaction like [`Session::commit_transaction`], naming its undo step (a
+  /// plugin run is undone as the plugin command).
+  pub fn commit_transaction_named(&mut self, name: &str) -> Result<bool, CmdError> {
+    let start = self.txn.ok_or(CmdError::new("no transaction is open"))?;
+    if let Some(step) = self.undo.get_mut(start) {
+      step.1 = Some(name.to_string());
+    }
+    self.commit_transaction()
+  }
+
   /// Ends the open transaction, restoring the design as it was when it began.
   pub fn rollback_transaction(&mut self) -> Result<bool, CmdError> {
     let start = self.txn.take().ok_or(CmdError::new("no transaction is open"))?;
