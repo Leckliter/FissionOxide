@@ -459,7 +459,13 @@ pub(crate) fn pick_body(p: &Pick) -> Option<BodyId> {
 }
 
 pub(crate) fn select_ids(app: &mut App, inside: &HashMap<u32, usize>, window: bool, add: bool) {
-  let Some(frame) = &app.frame else { return };
+  let Some(frame) = &app.frame else {
+    // nothing drawn to pick from yet: the box still replaces the selection, as in Fusion
+    if !add {
+      app.s.selection.clear();
+    }
+    return;
+  };
   let mut total: HashMap<u32, usize> = HashMap::new();
   if window {
     for id in &frame.ids {
@@ -889,6 +895,23 @@ mod tests {
     assert!(!got.contains_key(&1));
     // degenerate loops cover nothing
     assert!(ids_in_polygon(&ids, 10, 10, &[[0.0, 0.0], [9.0, 9.0]]).is_empty());
+  }
+
+  /// Before anything was drawn to pick from, a selection box still replaces the selection (a
+  /// Shift box keeps it), so a stale pick never survives a box over empty space.
+  #[test]
+  fn a_box_with_nothing_drawn_yet_still_replaces_the_selection() {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", serde_json::json!({"plane": "xy"}));
+    let c = app.run("sketch.line", serde_json::json!({"points": [[0, 0], [10, 0]]})).unwrap()["curves"][0].clone();
+    let sk = app.s.edit_sketch.unwrap();
+    let curve = fox_engine::sketch::CurveId(c.as_u64().unwrap() as u32);
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve }];
+    assert!(app.frame.is_none());
+    select_ids(&mut app, &HashMap::new(), false, true);
+    assert_eq!(app.s.selection.len(), 1, "an additive box keeps the selection");
+    select_ids(&mut app, &HashMap::new(), false, false);
+    assert!(app.s.selection.is_empty());
   }
 
   #[test]

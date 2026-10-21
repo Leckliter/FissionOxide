@@ -931,9 +931,13 @@ impl App {
       } else if self.nav_mode.is_some() {
         self.nav_mode = None;
       } else if !self.tstate.is_empty() {
-        // an unfinished spline is discarded (Enter or its check mark commits it)
+        // an unfinished spline is discarded (Enter or its check mark commits it); with the
+        // Select tool a stray pick state never keeps the selection
         self.end_hint();
         viewport::reset_tool_state(self);
+        if self.tool == Tool::Select {
+          self.s.selection.clear();
+        }
       } else if self.tool != Tool::Select {
         self.end_hint();
         self.tool = Tool::Select;

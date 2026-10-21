@@ -17,6 +17,9 @@ use crate::{App, RenderKey};
 
 /// Screen-space snap radius for sketch points (points, logical pixels).
 const SNAP_PX: f32 = 9.0;
+/// Selecting in a sketch, a curve takes the pointer within this many logical pixels of its
+/// stroke (Fusion needs about one), while points keep the snap radius.
+const CURVE_PICK_PX: f32 = 1.0;
 /// Lines within this angle of horizontal/vertical snap to it (degrees).
 const HV_SNAP_DEG: f64 = 2.5;
 /// The cursor lines up with a sketch point within this many logical pixels (inference lines).
@@ -583,20 +586,32 @@ fn update_hover(app: &mut App, resp: &egui::Response, view: &View) {
   let (x, y) = view.to_px(pos);
   let sketching = app.s.edit_sketch.is_some();
   let r = ((if sketching { SNAP_PX } else { 5.0 }) * view.ppp).round() as i32;
+  // selecting or dimensioning in a sketch, a curve needs the pointer within about a pixel of
+  // its stroke
+  let curve_r = if sketching && matches!(app.tool, Tool::Select | Tool::Dimension) {
+    (CURVE_PICK_PX * view.ppp).round() as i32
+  } else {
+    r
+  };
   let picks = &app.picks;
   // preferred kinds win within the search radius
-  let pick_kind = |want: fn(&Pick) -> bool| -> Option<Pick> {
+  let pick_within = |r: i32, want: fn(&Pick) -> bool| -> Option<Pick> {
     let id = frame.pick(x, y, r, |id| picks.get(id).is_some_and(|p| want(&p)));
     picks.get(id).filter(want)
   };
+  let pick_kind = |want: fn(&Pick) -> bool| pick_within(r, want);
   let exact = picks.get(frame.pick(x, y, 0, |_| true));
   app.hover = if sketching {
     pick_kind(|p| matches!(p, Pick::SketchPoint { .. }))
-      .or_else(|| pick_kind(|p| matches!(p, Pick::SketchCurve { .. })))
+      .or_else(|| pick_within(curve_r, |p| matches!(p, Pick::SketchCurve { .. })))
       .or(exact)
   } else {
-    // vertices (drawn only with their filter on) before edges before faces
-    pick_kind(|p| matches!(p, Pick::Vertex { .. })).or_else(|| pick_kind(|p| matches!(p, Pick::Edge { .. }))).or(exact)
+    // a visible sketch's points before vertices (drawn only with their filter on) before edges
+    // before faces
+    pick_kind(|p| matches!(p, Pick::SketchPoint { .. }))
+      .or_else(|| pick_kind(|p| matches!(p, Pick::Vertex { .. })))
+      .or_else(|| pick_kind(|p| matches!(p, Pick::Edge { .. })))
+      .or(exact)
   };
   // while a sketch tool draws, only points matter for snapping
   if sketching && app.tool.picks_curves() {
@@ -1398,7 +1413,7 @@ fn hud_display(unit: fox_engine::model::LengthUnit, field: Field, v: f64) -> Str
 }
 
 /// Fusion's default display precision for a unit (Document Settings → Units).
-fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
+pub(crate) fn display_decimals(unit: fox_engine::model::LengthUnit) -> usize {
   use fox_engine::model::LengthUnit;
   match unit {
     LengthUnit::Mm | LengthUnit::Cm => 2,
@@ -2032,8 +2047,7 @@ fn dim_place_preview(app: &mut App, painter: &egui::Painter, resp: &egui::Respon
   let Some(shape) = dim_shape_at(sketch, &place.kind, cur, size, wpp, &to_screen) else { return };
   paint_dim(painter, &shape, DIM_INK);
   let rect = Rect::from_center_size(shape.label, size);
-  painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
-  text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_INK);
+  text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_TEXT);
 }
 
 /// A length (mm) in the design's unit at Fusion's document precision, without the unit.
@@ -2305,8 +2319,7 @@ fn shown_dims_overlay(app: &App, painter: &egui::Painter, view: &View) {
         paint_dim(painter, s, DIM_INK);
       }
       let rect = Rect::from_center_size(at, size);
-      painter.rect_filled(rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
-      text.paint(painter, rect.min + Vec2::new(4.0, 2.0), Color32::BLACK);
+      text.paint(painter, rect.min + Vec2::new(4.0, 2.0), DIM_TEXT);
     }
   }
 }
@@ -2341,22 +2354,18 @@ fn sketch_overlay(app: &mut App, ui: &mut egui::Ui, painter: &egui::Painter, vie
       };
       let r = Rect::from_center_size(at, size);
       let resp = ui.interact(r, ui.id().with(("dim", c.id.0)), Sense::click());
+      // plain dark text with no box, as Fusion draws it; the text and line turn blue under the
+      // cursor or selected
+      let hot = selected || resp.hovered();
       if let Some(s) = &shape {
-        let ink = if selected || resp.hovered() { crate::theme::ACCENT } else { DIM_INK };
-        paint_dim(painter, s, ink);
+        paint_dim(painter, s, if hot { DIM_INK_HOT } else { DIM_INK });
       }
-      let bg = if selected {
-        crate::theme::SELECTED
-      } else if resp.hovered() {
-        crate::theme::HOVER
-      } else {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 225)
+      text.paint(painter, r.min + Vec2::new(4.0, 2.0), if hot { DIM_TEXT_HOT } else { DIM_TEXT });
+      // Fusion's tooltip under the text names the parameter with its full value
+      let resp = match dim_param_name(app, c.id.0) {
+        Some(name) => resp.on_hover_text(dim_tooltip(&name, c.kind.is_angle(), dim.value, app.s.design.units)),
+        None => resp,
       };
-      painter.rect_filled(r, 1.0, bg);
-      if selected || resp.hovered() {
-        painter.rect_stroke(r, 1.0, Stroke::new(1.0, crate::theme::ACCENT), egui::StrokeKind::Inside);
-      }
-      text.paint(painter, r.min + Vec2::new(4.0, 2.0), Color32::BLACK);
       if resp.double_clicked() || (resp.clicked() && app.tool == Tool::Dimension) {
         let text = dim_edit_text(&c.kind, dim, app.s.design.units);
         app.dim_edit = Some((c.id.0, text, at));
@@ -2409,7 +2418,7 @@ impl DimText {
       Some(rest) => (true, rest),
       None => (false, label),
     };
-    DimText { glyph, em: font.size, galley: painter.layout_no_wrap(rest.to_string(), font, Color32::BLACK) }
+    DimText { glyph, em: font.size, galley: painter.layout_no_wrap(rest.to_string(), font, Color32::PLACEHOLDER) }
   }
 
   fn glyph_width(&self) -> f32 {
@@ -2487,7 +2496,26 @@ struct DimShape {
 }
 
 /// Dimension ink (Fusion draws dimensions in black).
-const DIM_INK: Color32 = Color32::from_rgb(25, 25, 30);
+/// Fusion's dimension colours: the line and the text, and both under the cursor or selected.
+const DIM_INK: Color32 = Color32::from_rgb(64, 64, 64);
+const DIM_INK_HOT: Color32 = Color32::from_rgb(69, 92, 149);
+const DIM_TEXT: Color32 = Color32::from_rgb(43, 43, 43);
+const DIM_TEXT_HOT: Color32 = Color32::from_rgb(70, 113, 219);
+
+/// A dimension's tooltip, as Fusion shows it: its model parameter and the full value with the
+/// unit ("d9 = 0.4787837888 in", "d3 = 45.0 deg"). `value` is millimetres, or radians for an
+/// angle.
+pub(crate) fn dim_tooltip(name: &str, angle: bool, value: f64, unit: fox_engine::model::LengthUnit) -> String {
+  let (value, symbol) = if angle { (value.to_degrees(), "deg") } else { (unit.from_mm(value), unit.symbol()) };
+  format!("{name} = {} {symbol}", full_number(value))
+}
+
+/// A value to ten decimals without trailing zeros, one decimal at least ("0.4787837888", "0.5").
+fn full_number(v: f64) -> String {
+  let s = format!("{v:.10}");
+  let s = s.trim_end_matches('0');
+  if s.ends_with('.') { format!("{s}0") } else { s.to_string() }
+}
 /// How far a linear dimension sits off its geometry (points).
 const DIM_OFFSET_PX: f64 = 30.0;
 
@@ -4158,6 +4186,16 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 mod tests {
   use super::*;
   use fox_engine::Session;
+
+  /// A dimension's tooltip names its parameter with the full value and unit, as Fusion's does.
+  #[test]
+  fn dimension_tooltip_names_the_parameter_with_its_full_value() {
+    use fox_engine::model::LengthUnit;
+    assert_eq!(dim_tooltip("d9", false, 0.4787837888 * 25.4, LengthUnit::In), "d9 = 0.4787837888 in");
+    assert_eq!(dim_tooltip("d1", false, 12.7, LengthUnit::In), "d1 = 0.5 in");
+    assert_eq!(dim_tooltip("d2", false, 40.0, LengthUnit::Mm), "d2 = 40.0 mm");
+    assert_eq!(dim_tooltip("d3", true, std::f64::consts::FRAC_PI_4, LengthUnit::Mm), "d3 = 45.0 deg");
+  }
 
   /// The origin planes keep about 120 px on screen whatever the zoom: their half size follows
   /// the camera's distance.
