@@ -1,0 +1,11 @@
+# Direct Move Face on a plate with history off: the pin hole slides sideways and then tilts 15°
+# (a curved face moved and turned), and the top face is turned 5° about its edge, its neighbours
+# extending to meet it. Every edit goes into the one base feature.
+{"cmd": "new", "name": "Tilted plate"}
+{"cmd": "box", "width": 60, "depth": 40, "height": 10, "at": [0, 0]}
+{"cmd": "cylinder", "radius": 4, "height": 30, "at": [-15, 0], "operation": "cut"}
+{"cmd": "design.history", "capture": false}
+{"cmd": "direct.move_face", "faces": [{"point": [-11, 0, 5]}], "translate": [25, 5, 0]}
+{"cmd": "direct.move_face", "faces": [{"point": [14, 5, 5]}], "rotate": {"axis": [1, 0, 0], "origin": [10, 5, 5], "angle": "15 deg"}}
+{"cmd": "direct.move_face", "faces": [{"point": [-20, -10, 10]}], "rotate": {"axis": [0, 1, 0], "origin": [-30, 0, 10], "angle": -5}}
+{"cmd": "info"}

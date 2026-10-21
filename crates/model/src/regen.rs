@@ -2575,6 +2575,8 @@ mod subasm;
 #[cfg(test)]
 mod tests_config;
 #[cfg(test)]
+mod tests_config2;
+#[cfg(test)]
 mod tests_project;
 #[cfg(test)]
 mod tests_subasm;

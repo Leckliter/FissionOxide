@@ -74,6 +74,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       Ok(json!(links(s, &st)))
     })(),
     "component.update_link" => update_links(s, p),
+    "component.configuration" => component_configuration(s, p),
     "component.break_link" => (|| {
       let fid = inserted_by(s, p)?;
       s.edit(|d| {
@@ -372,16 +373,29 @@ fn clear_between(trial: &mut Trial, from: &[(String, f64)], to: &[(String, f64)]
 
 // ---- inserted designs ----
 
-/// The bodies of a hub design version, as BRep text, with its first physical material and its
-/// assembly structure.
-fn source_bodies(st: &Store, item: &str, version: u32) -> Result<(Vec<String>, String, Source), CmdError> {
+/// A hub design version as stored.
+fn source_design(st: &Store, item: &str, version: u32) -> Result<Design, CmdError> {
   let it = st.item(item)?;
   if it.kind != ItemKind::Design {
     return Err(CmdError::new(format!("{} is a file, not a design; open it and save it as a design first", it.name)));
   }
   let text = String::from_utf8(st.read_version(item, Some(version))?)
     .map_err(|_| CmdError::new("the stored design isn't UTF-8"))?;
-  let src = Session::new(Design::from_json(&text)?);
+  Ok(Design::from_json(&text)?)
+}
+
+/// The bodies of a hub design version in one of its configurations (`None`: as modelled), as
+/// BRep text, with its first physical material and its assembly structure.
+fn source_bodies(
+  st: &Store,
+  item: &str,
+  version: u32,
+  configuration: Option<&str>,
+) -> Result<(Vec<String>, String, Source), CmdError> {
+  let it = st.item(item)?;
+  let d = source_design(st, item, version)?;
+  let d = d.with_configuration(configuration).map_err(|e| CmdError::new(format!("{} v{version}: {e}", it.name)))?;
+  let src = Session::new(d);
   let mut breps = Vec::new();
   for b in &src.model.bodies {
     breps.push(b.shape.to_brep().map_err(|e| CmdError::new(e.to_string()))?);
@@ -402,13 +416,29 @@ fn insert_bodies(fid: FeatureId, n: usize) -> Vec<BodyId> {
 fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let item = req_str(p, "item")?;
   let st = hub::open_store(s)?;
-  let item = st.item(item)?.clone();
+  let item = match st.item(item) {
+    Ok(it) => it.clone(),
+    // or a design's name, when exactly one design in the hub has it
+    Err(e) => {
+      let named: Vec<_> =
+        st.search(item).into_iter().filter(|i| i.name == item && !i.trashed && i.kind == ItemKind::Design).collect();
+      match named.as_slice() {
+        [one] => (*one).clone(),
+        [] => return Err(e.into()),
+        _ => return Err(CmdError::new(format!("more than one design is named '{item}'; pass its item id"))),
+      }
+    }
+  };
   let version = match p.get("version").and_then(Value::as_u64) {
     Some(v) => v as u32,
     None => item.latest().map(|v| v.number).ok_or(CmdError::new("the item has no versions"))?,
   };
   item.version(version).ok_or(CmdError::new(format!("{} has no version {version}", item.name)))?;
-  let (breps, material, structure) = source_bodies(&st, &item.id, version)?;
+  let configuration = match p.get("configuration") {
+    None | Some(Value::Null) => None,
+    Some(v) => Some(v.as_str().ok_or(CmdError::new("'configuration' is a name"))?.to_string()),
+  };
+  let (breps, material, structure) = source_bodies(&st, &item.id, version, configuration.as_deref())?;
   let t = match p.get("translate").and_then(Value::as_array) {
     Some(a) if a.len() == 3 => [expr_of(&a[0])?, expr_of(&a[1])?, expr_of(&a[2])?],
     Some(_) => return Err(CmdError::new("translate needs [x, y, z]")),
@@ -417,7 +447,7 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let linked = p.get("link").and_then(Value::as_bool).unwrap_or(true);
   let name = opt_str(p, "name").map(str::to_string).unwrap_or_else(|| item.name.clone());
   let n = breps.len();
-  let source = linked.then(|| HubSource { item: item.id.clone(), version });
+  let source = linked.then(|| HubSource { item: item.id.clone(), version, configuration: configuration.clone() });
   let (fid, cid) = s.edit(|d| {
     let fid =
       d.add_feature(FeatureKind::InsertDesign { name: name.clone(), source, breps, translate: t, sub: None })?;
@@ -432,6 +462,7 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   out["component"] = json!(cid.0);
   out["version"] = json!(version);
   out["linked"] = json!(linked);
+  out["configuration"] = json!(configuration);
   Ok(out)
 }
 
@@ -482,6 +513,7 @@ fn links(s: &Session, st: &Store) -> Vec<Value> {
         "item": item,
         "source_name": it.map(|i| i.name.clone()),
         "version": version,
+        "configuration": source.as_ref().and_then(|h| h.configuration.clone()),
         "latest": latest,
         "out_of_date": matches!((version, latest), (Some(v), Some(l)) if l > v),
         "missing": source.is_some() && it.is_none(),
@@ -514,27 +546,78 @@ fn update_links(s: &mut Session, p: &Value) -> CmdResult {
     }
     let item = l["item"].as_str().unwrap_or_default().to_string();
     let latest = l["latest"].as_u64().unwrap_or(0) as u32;
-    let (breps, _, structure) = source_bodies(&st, &item, latest)?;
+    let configuration = l["configuration"].as_str().map(str::to_string);
     let cid = ComponentId(l["component"].as_u64().unwrap_or(0) as u32);
-    let n = breps.len();
-    s.edit(|d| {
-      if let Some(FeatureKind::InsertDesign { source: Some(h), breps: b, .. }) = d.feature_mut(fid).map(|f| &mut f.kind)
-      {
-        h.version = latest;
-        *b = breps;
-      }
-      // the source may have gained or lost bodies
-      let bodies = insert_bodies(fid, n);
-      for c in &mut d.components {
-        c.bodies.retain(|b| !bodies.contains(b));
-      }
-      if let Some(c) = d.component_mut(cid) {
-        c.bodies = bodies;
-      }
-      structure.attach(d, fid, cid)?;
-      Ok(())
-    })?;
+    reload(s, &st, fid, cid, &item, latest, configuration)?;
     updated.push(json!({"component": cid.0, "version": latest}));
   }
   Ok(json!({"updated": updated}))
+}
+
+/// Replaces a linked component's bodies with its source's (`version`, `configuration`).
+fn reload(
+  s: &mut Session,
+  st: &Store,
+  fid: FeatureId,
+  cid: ComponentId,
+  item: &str,
+  version: u32,
+  configuration: Option<String>,
+) -> Result<(), CmdError> {
+  let (breps, _, structure) = source_bodies(st, item, version, configuration.as_deref())?;
+  let n = breps.len();
+  s.edit(|d| {
+    if let Some(FeatureKind::InsertDesign { source: Some(h), breps: b, .. }) = d.feature_mut(fid).map(|f| &mut f.kind) {
+      h.version = version;
+      h.configuration = configuration;
+      *b = breps;
+    }
+    // the source may have gained or lost bodies
+    let bodies = insert_bodies(fid, n);
+    for c in &mut d.components {
+      c.bodies.retain(|b| !bodies.contains(b));
+    }
+    if let Some(c) = d.component_mut(cid) {
+      c.bodies = bodies;
+    }
+    structure.attach(d, fid, cid)?;
+    Ok(())
+  })
+}
+
+/// Lists the configurations of a linked component's source, or (with `configuration`) switches
+/// the component to one (`null`: the source as modelled), at the version it is linked to.
+fn component_configuration(s: &mut Session, p: &Value) -> CmdResult {
+  let fid = inserted_by(s, p)?;
+  let cid = ComponentId(req_u32(p, "component")?);
+  let Some(FeatureKind::InsertDesign { source, .. }) = s.design.feature(fid).map(|f| &f.kind) else {
+    return Err(CmdError::new("that component wasn't inserted from another design"));
+  };
+  let h = source.clone().ok_or(CmdError::new(
+    "the component's link to its source is broken, so its configuration can't change; insert it again",
+  ))?;
+  let st = hub::open_store(s)?;
+  let src = source_design(&st, &h.item, h.version)?;
+  let names: Vec<String> = src.configurations.list.iter().map(|c| c.name.clone()).collect();
+  let Some(v) = p.get("configuration") else {
+    return Ok(json!({"component": cid.0, "configuration": h.configuration, "configurations": names}));
+  };
+  let want = match v {
+    Value::Null => None,
+    v => Some(v.as_str().ok_or(CmdError::new("'configuration' is a name"))?.to_string()),
+  };
+  if let Some(w) = &want
+    && !names.contains(w)
+  {
+    return Err(CmdError::new(format!("the source has no configuration '{w}' (it has: {})", names.join(", "))));
+  }
+  if want != h.configuration {
+    reload(s, &st, fid, cid, &h.item, h.version, want.clone())?;
+  }
+  let mut out = feature_json(s, fid);
+  out["component"] = json!(cid.0);
+  out["configuration"] = json!(want);
+  out["configurations"] = json!(names);
+  out["bodies"] = json!(s.design.component(cid).map(|c| c.bodies.len()));
+  Ok(out)
 }

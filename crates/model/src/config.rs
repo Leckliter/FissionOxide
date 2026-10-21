@@ -5,6 +5,10 @@
 //! A configuration is a sparse row of [`Override`]s; whatever it doesn't override keeps the
 //! design's own value. Overrides never change the stored design: regeneration runs on
 //! [`effective`], a copy with the active row applied.
+//!
+//! A column can be driven by a [`Rule`]: its cell in every row is computed from the row's
+//! parameter values (`if(length > 100 mm, 8 mm, 5 mm)`) whenever the row is resolved, which
+//! is when it is activated, exported or shown in the table.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +26,30 @@ pub struct ConfigTable {
   pub active: Option<String>,
   #[serde(default)]
   pub list: Vec<Configuration>,
+  /// Driven columns, evaluated in order (a rule sees the values earlier rules set).
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub rules: Vec<Rule>,
+}
+
+/// A driven column: every row's cell in `column` is computed from that row's parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rule {
+  pub column: Column,
+  /// A parameter or joint column: the value's formula. A suppression column: a condition
+  /// (true = suppressed). An appearance column: a condition choosing `color` or `otherwise`.
+  pub expr: String,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub color: Option<[u8; 3]>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub otherwise: Option<[u8; 3]>,
+}
+
+/// A row with its rules applied: every cell, and the rules that could not be evaluated.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Resolved {
+  pub overrides: Vec<Override>,
+  /// `(column label source, message)`: a failed rule leaves its cell at the design's value.
+  pub errors: Vec<(Column, String)>,
 }
 
 /// One row of the table.
@@ -105,7 +133,27 @@ impl Column {
 
 impl ConfigTable {
   pub fn is_empty(&self) -> bool {
-    self.list.is_empty() && self.active.is_none()
+    self.list.is_empty() && self.active.is_none() && self.rules.is_empty()
+  }
+
+  /// The rule driving `col`, if any.
+  pub fn rule(&self, col: &Column) -> Option<&Rule> {
+    self.rules.iter().find(|r| r.column == *col)
+  }
+
+  /// Adds or replaces the rule for its column.
+  pub fn set_rule(&mut self, rule: Rule) {
+    match self.rules.iter_mut().find(|r| r.column == rule.column) {
+      Some(r) => *r = rule,
+      None => self.rules.push(rule),
+    }
+  }
+
+  /// Removes the rule driving `col`; returns whether there was one.
+  pub fn clear_rule(&mut self, col: &Column) -> bool {
+    let n = self.rules.len();
+    self.rules.retain(|r| r.column != *col);
+    self.rules.len() != n
   }
 
   pub fn get(&self, name: &str) -> Option<&Configuration> {
@@ -121,9 +169,10 @@ impl ConfigTable {
     self.active.as_deref().and_then(|n| self.get(n))
   }
 
-  /// Every column any row overrides, in a stable order.
+  /// Every column any row overrides or a rule drives, in a stable order.
   pub fn columns(&self) -> Vec<Column> {
     let mut cols: Vec<Column> = self.list.iter().flat_map(|c| c.overrides.iter().map(Override::column)).collect();
+    cols.extend(self.rules.iter().map(|r| r.column.clone()));
     cols.sort();
     cols.dedup();
     cols
@@ -143,10 +192,22 @@ impl ConfigTable {
         _ => {}
       }
     }
+    for r in &mut self.rules {
+      if let Column::Parameter { name } = &mut r.column
+        && name == old
+      {
+        *name = new.to_string();
+      }
+      r.expr = crate::rename_ident(&r.expr, old, new);
+    }
   }
 
-  /// Does any override expression use the parameter `name`? (Returns the row's name.)
+  /// Does any override or rule expression use the parameter `name`? (Returns the row's name,
+  /// or "rules".)
   pub fn uses_parameter(&self, name: &str) -> Option<String> {
+    if self.rules.iter().any(|r| fox_expr::identifiers(&r.expr).iter().any(|i| i == name)) {
+      return Some("rules".into());
+    }
     self.list.iter().find_map(|c| {
       c.overrides
         .iter()
@@ -184,9 +245,87 @@ impl Configuration {
 }
 
 impl Design {
+  /// A row's cells with the table's rules applied (driven cells replace the row's own).
+  pub fn resolve_configuration(&self, row: &Configuration) -> Resolved {
+    let rules = &self.configurations.rules;
+    let mut out = Resolved { overrides: row.overrides.clone(), errors: Vec::new() };
+    if rules.is_empty() {
+      return out;
+    }
+    out.overrides.retain(|o| self.configurations.rule(&o.column()).is_none());
+    for r in rules {
+      match self.eval_rule(r, &out.overrides) {
+        Ok(Some(o)) => out.overrides.push(o),
+        Ok(None) => {}
+        Err(e) => out.errors.push((r.column.clone(), e)),
+      }
+    }
+    out
+  }
+
+  /// The active row, resolved (see [`Design::resolve_configuration`]).
+  pub fn active_overrides(&self) -> Option<Resolved> {
+    self.configurations.active().map(|c| self.resolve_configuration(c))
+  }
+
+  /// The parameter values with `cells`' parameter overrides applied (base units).
+  fn row_parameters(&self, cells: &[Override]) -> std::collections::HashMap<String, f64> {
+    let list: Vec<(String, String, crate::ParamKind)> = self
+      .parameters
+      .iter()
+      .map(|p| {
+        let expr = cells.iter().find_map(|o| match o {
+          Override::Parameter { name, expr } if *name == p.name => Some(expr.clone()),
+          _ => None,
+        });
+        (p.name.clone(), expr.unwrap_or_else(|| p.expr.clone()), p.kind)
+      })
+      .collect();
+    fox_expr::eval_parameters(&list).into_iter().filter_map(|(k, v)| v.ok().map(|v| (k, v))).collect()
+  }
+
+  /// One rule's cell for a row whose other cells are `cells`. `None`: the column's target is gone.
+  fn eval_rule(&self, r: &Rule, cells: &[Override]) -> Result<Option<Override>, String> {
+    use fox_expr::Kind;
+    let scope = self.row_parameters(cells);
+    let eval = |kind| fox_expr::eval(&r.expr, kind, &scope).map_err(|e| e.to_string());
+    let text = |v: f64, kind| match kind {
+      Kind::Length => fox_expr::format_length(v),
+      Kind::Angle => fox_expr::format_angle(v),
+      Kind::Unitless => fox_expr::trim_number(v),
+    };
+    Ok(Some(match &r.column {
+      Column::Parameter { name } => {
+        let Some(p) = self.parameter(name) else { return Ok(None) };
+        Override::Parameter { name: name.clone(), expr: text(eval(p.kind)?, p.kind) }
+      }
+      Column::Suppress { feature } => Override::Suppress { feature: *feature, suppressed: eval(Kind::Unitless)? != 0.0 },
+      Column::Appearance { body } => {
+        let color = if eval(Kind::Unitless)? != 0.0 { r.color } else { r.otherwise };
+        Override::Appearance { body: *body, color }
+      }
+      Column::Joint { joint, motion } => {
+        let kind = match motion {
+          MotionAxis::Rotation | MotionAxis::Pitch => Kind::Angle,
+          MotionAxis::Slide | MotionAxis::Slide2 => Kind::Length,
+        };
+        Override::Joint { joint: *joint, motion: *motion, value: text(eval(kind)?, kind) }
+      }
+    }))
+  }
+
   /// A body's colour as shown: the active configuration's appearance, else the body's own.
   pub fn body_color(&self, body: BodyId) -> Option<[u8; 3]> {
-    if let Some(c) = self.configurations.active() {
+    let driven = self.configurations.rules.iter().any(|r| matches!(r.column, Column::Appearance { .. }));
+    if driven && let Some(r) = self.active_overrides() {
+      for o in &r.overrides {
+        if let Override::Appearance { body: b, color } = o
+          && *b == body
+        {
+          return *color;
+        }
+      }
+    } else if let Some(c) = self.configurations.active() {
       for o in &c.overrides {
         if let Override::Appearance { body: b, color } = o
           && *b == body
@@ -214,7 +353,7 @@ impl Design {
 /// The design with the active configuration applied, ready to regenerate (no configuration is
 /// active in the copy). `None` when nothing is overridden: regenerate the design itself.
 pub fn effective(design: &Design) -> Option<Design> {
-  let c = design.configurations.active()?;
+  let c = design.active_overrides()?;
   if !c.overrides.iter().any(|o| !matches!(o, Override::Appearance { .. })) {
     return None;
   }
@@ -248,8 +387,7 @@ pub fn effective(design: &Design) -> Option<Design> {
 /// configuration overrode.
 pub fn write_back(design: &mut Design, eff: &Design) {
   let overridden: Vec<(FeatureId, MotionAxis)> = design
-    .configurations
-    .active()
+    .active_overrides()
     .map(|c| {
       c.overrides
         .iter()

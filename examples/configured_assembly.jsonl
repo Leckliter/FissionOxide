@@ -1,0 +1,21 @@
+# A configured component: a plate saved to the data hub in two configurations is inserted into
+# an assembly as its Long configuration, then switched to Thick. Run it against a fresh hub
+# (the insert finds the plate by its name):
+#   fissionoxide-cli run examples/configured_assembly.jsonl --hub /tmp/fox-example-hub
+{"cmd": "new", "name": "Plate"}
+{"cmd": "param.add", "name": "length", "expr": "60 mm"}
+{"cmd": "param.add", "name": "thickness", "expr": "5 mm"}
+{"cmd": "box", "width": "length", "depth": 20, "height": "thickness", "at": [0, 0]}
+{"cmd": "cylinder", "radius": 3, "height": 50, "at": [0, 0], "operation": "cut"}
+{"cmd": "config.create", "name": "Long"}
+{"cmd": "config.set", "configuration": "Long", "parameter": "length", "expr": "150 mm"}
+{"cmd": "config.create", "name": "Thick"}
+{"cmd": "config.set", "configuration": "Thick", "parameter": "thickness", "expr": "12 mm"}
+{"cmd": "hub.save", "name": "Plate"}
+{"cmd": "new", "name": "Frame"}
+{"cmd": "box", "width": 200, "depth": 60, "height": 10, "at": [0, 0]}
+{"cmd": "component.insert", "item": "Plate", "configuration": "Long", "translate": [0, 0, 10]}
+{"cmd": "component.configuration", "component": 1}
+{"cmd": "component.configuration", "component": 1, "configuration": "Thick"}
+{"cmd": "component.links"}
+{"cmd": "info"}

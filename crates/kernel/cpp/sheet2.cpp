@@ -1,8 +1,15 @@
-// More sheet metal geometry: the smooth (die-formed) surface of a lofted flange.
+// More sheet metal geometry: the smooth (die-formed) surface of a lofted flange, and an edge's
+// exact curve as a NURBS (for SPLINE entities in flat pattern DXFs).
 
 #include "kernel.hxx"
 
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRep_Tool.hxx>
+#include <GeomConvert.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <GeomFill.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -59,6 +66,43 @@ std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<co
     throw std::runtime_error(std::string("lofted flange: ") + e.what());
   } catch (...) {
     throw std::runtime_error("lofted flange: unknown kernel error");
+  }
+}
+
+// Edge `edge` (1-based, as in edges()) as a NURBS over its own range: [degree, rational (0/1),
+// knot count, knots (with multiplicity)..., pole count, (x, y, z, weight) per pole].
+rust::Vec<double> edge_nurbs(const Shape &s, uint32_t edge) {
+  try {
+    TopTools_IndexedMapOfShape map;
+    TopExp::MapShapes(s.s, TopAbs_EDGE, map);
+    if (edge < 1 || static_cast<int>(edge) > map.Extent()) throw std::runtime_error("no such edge");
+    const TopoDS_Edge &e = TopoDS::Edge(map(static_cast<int>(edge)));
+    double f = 0, l = 0;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, f, l);
+    if (c.IsNull()) throw std::runtime_error("the edge has no 3D curve");
+    Handle(Geom_TrimmedCurve) tc = new Geom_TrimmedCurve(c, f, l);
+    Handle(Geom_BSplineCurve) bs = GeomConvert::CurveToBSplineCurve(tc);
+    if (bs.IsNull()) throw std::runtime_error("the edge could not be converted to a NURBS");
+    rust::Vec<double> out;
+    out.push_back(bs->Degree());
+    out.push_back(bs->IsRational() ? 1.0 : 0.0);
+    const TColStd_Array1OfReal &knots = bs->KnotSequence();
+    out.push_back(knots.Length());
+    for (int i = knots.Lower(); i <= knots.Upper(); ++i) out.push_back(knots(i));
+    out.push_back(bs->NbPoles());
+    for (int i = 1; i <= bs->NbPoles(); ++i) {
+      gp_Pnt p = bs->Pole(i);
+      out.push_back(p.X());
+      out.push_back(p.Y());
+      out.push_back(p.Z());
+      out.push_back(bs->Weight(i));
+    }
+    return out;
+  } catch (const Standard_Failure &e) {
+    const char *msg = e.GetMessageString();
+    throw std::runtime_error(std::string("edge curve: ") + (msg && *msg ? msg : e.DynamicType()->Name()));
+  } catch (const std::exception &e) {
+    throw std::runtime_error(std::string("edge curve: ") + e.what());
   }
 }
 

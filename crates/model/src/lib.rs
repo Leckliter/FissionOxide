@@ -2400,6 +2400,7 @@ impl Design {
     for c in &mut self.configurations.list {
       c.clear(&config::Column::Parameter { name: name.to_string() });
     }
+    self.configurations.clear_rule(&config::Column::Parameter { name: name.to_string() });
     self.parameters.retain(|p| p.name != name);
     Ok(())
   }

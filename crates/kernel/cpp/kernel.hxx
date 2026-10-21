@@ -145,5 +145,6 @@ std::unique_ptr<Shape> loft_point_tangent(const Shape &profile, const Shape &ape
 // sheet2.cpp
 std::unique_ptr<Shape> ruled_bspline(rust::Slice<const double> a, rust::Slice<const double> b,
                                      rust::Slice<const double> u);
+rust::Vec<double> edge_nurbs(const Shape &s, uint32_t edge);
 
 } // namespace fox

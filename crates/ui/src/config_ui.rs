@@ -13,13 +13,17 @@ use crate::{App, theme};
 pub static DIRECT_MOVE_FACE: Form = Form {
   title: "MOVE FACE",
   name: "Move Face (direct)",
-  hint: "Move flat faces by a vector, without history: the edit goes into a base feature",
+  hint: "Move or turn faces, flat or curved (a hole, a boss), without history: the edit goes into a base \
+         feature",
   icon: Icon::Move,
   cmd: "direct.move_face",
   fixed: &[],
   inputs: &[
     Input::Faces { key: "faces", label: "Faces" },
     Input::Vec3 { key: "translate", label: "Move", default: ["0", "0", "1"] },
+    Input::Expr { key: "angle", label: "Turn", default: "0 deg" },
+    Input::Vec3 { key: "axis", label: "Turn axis", default: ["0", "0", "1"] },
+    Input::Vec3 { key: "origin", label: "Axis through", default: ["0", "0", "0"] },
   ],
   picks_model: true,
 };
@@ -99,6 +103,55 @@ pub fn toggle_history(app: &mut App) {
   }
 }
 
+/// The keys naming a table column in `config.set` / `config.rule`.
+fn column_params(column: &Value) -> serde_json::Map<String, Value> {
+  let mut p = serde_json::Map::new();
+  match column["type"].as_str().unwrap_or("") {
+    "parameter" => {
+      p.insert("parameter".into(), column["name"].clone());
+    }
+    "suppress" => {
+      p.insert("feature".into(), column["feature"].clone());
+    }
+    "appearance" => {
+      p.insert("body".into(), column["body"].clone());
+    }
+    _ => {
+      p.insert("joint".into(), column["joint"].clone());
+      p.insert("motion".into(), column["motion"].clone());
+    }
+  }
+  p
+}
+
+/// A colour as typed in a rule: an appearance name, `#rrggbb`, or empty/"none" for none.
+fn typed_color(text: &str) -> Value {
+  match text.trim() {
+    "" | "none" => Value::Null,
+    t => json!(t),
+  }
+}
+
+/// `config.rule` parameters for a column's rule (`expr` empty: remove the rule).
+fn rule_params(column: &Value, expr: &str, color: &str, otherwise: &str) -> Value {
+  let mut p = column_params(column);
+  let expr = expr.trim();
+  p.insert("expr".into(), if expr.is_empty() { Value::Null } else { json!(expr) });
+  if column["type"] == "appearance" && !expr.is_empty() {
+    p.insert("color".into(), typed_color(color));
+    p.insert("otherwise".into(), typed_color(otherwise));
+  }
+  Value::Object(p)
+}
+
+/// A rule colour as text for its field.
+fn color_text(c: &Value) -> String {
+  match c.as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0)).collect::<Vec<_>>()) {
+    Some(rgb) if rgb.len() == 3 => format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]),
+    _ => String::new(),
+  }
+}
+
 /// The value a typed cell sets: `None` clears it (the design's own value).
 fn cell_params(column: &Value, text: &str) -> Value {
   let text = text.trim();
@@ -162,7 +215,14 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
         ui.label("");
         ui.label(RichText::new("Configuration").strong());
         for c in &cols {
-          ui.label(RichText::new(c["label"].as_str().unwrap_or("")).strong());
+          let label = c["label"].as_str().unwrap_or("");
+          if c["rule"].is_null() {
+            ui.label(RichText::new(label).strong());
+          } else {
+            let rule = c["rule"]["expr"].as_str().unwrap_or("");
+            ui.label(RichText::new(format!("ƒ {label}")).strong().color(theme::ACCENT))
+              .on_hover_text(format!("Driven by a rule: {rule}"));
+          }
         }
         ui.label("");
         ui.end_row();
@@ -190,6 +250,20 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
           });
           for (i, c) in cols.iter().enumerate() {
             let cur = r["cells"][i].as_str().unwrap_or("").to_string();
+            if !c["rule"].is_null() {
+              // computed from the row: shown, not typed
+              let failed = r["errors"].as_array().and_then(|e| e.iter().find(|e| e["column"] == c["column"]));
+              match failed {
+                Some(e) => {
+                  ui.label(RichText::new("error").color(theme::ERROR))
+                    .on_hover_text(e["error"].as_str().unwrap_or(""));
+                }
+                None => {
+                  ui.label(RichText::new(if cur.is_empty() { "default" } else { &cur }).italics());
+                }
+              }
+              continue;
+            }
             edit_text(ui, ("config-cell", &name, i), &cur, 90.0, |text| {
               if text.trim() != cur {
                 let mut p = cell_params(&c["column"], &text);
@@ -208,10 +282,107 @@ pub fn table_window(app: &mut App, ctx: &egui::Context) {
     ui.separator();
     add_row(app, ui);
     add_column(app, ui, rows.first().and_then(|r| r["name"].as_str()).map(str::to_string));
+    ui.separator();
+    rules(app, ui, &cols);
   });
   if !open {
     TABLE_OPEN.store(false, Ordering::Relaxed);
   }
+}
+
+/// The rules section: a driven column's cell in every row comes from its rule, evaluated with
+/// that row's parameters (`if(length > 100 mm, 8 mm, 5 mm)`, `length < 50 mm`).
+fn rules(app: &mut App, ui: &mut egui::Ui, cols: &[Value]) {
+  ui.label(RichText::new("Rules").strong()).on_hover_text(
+    "A rule drives a column from each row's parameters: a formula for a parameter or joint, a condition \
+     for suppression (true = suppressed), a condition choosing between two colours for an appearance",
+  );
+  for c in cols.iter().filter(|c| !c["rule"].is_null()) {
+    let rule = &c["rule"];
+    let label = c["label"].as_str().unwrap_or("").to_string();
+    let expr = rule["expr"].as_str().unwrap_or("").to_string();
+    let appearance = c["column"]["type"] == "appearance";
+    let (color, otherwise) = (color_text(&rule["color"]), color_text(&rule["otherwise"]));
+    let mut send = None;
+    ui.horizontal(|ui| {
+      ui.label(format!("{label} ="));
+      edit_text(ui, ("config-rule", &label), &expr, 220.0, |text| {
+        if text.trim() != expr && !text.trim().is_empty() {
+          send = Some(rule_params(&c["column"], &text, &color, &otherwise));
+        }
+      });
+      if appearance {
+        ui.label("then");
+        edit_text(ui, ("config-rule-color", &label), &color, 90.0, |text| {
+          if text.trim() != color {
+            send = Some(rule_params(&c["column"], &expr, &text, &otherwise));
+          }
+        });
+        ui.label("else");
+        edit_text(ui, ("config-rule-else", &label), &otherwise, 90.0, |text| {
+          if text.trim() != otherwise {
+            send = Some(rule_params(&c["column"], &expr, &color, &text));
+          }
+        });
+      }
+      if ui.small_button("🗑").on_hover_text("Remove the rule: the column takes typed values again").clicked() {
+        send = Some(rule_params(&c["column"], "", "", ""));
+      }
+    });
+    if let Some(p) = send {
+      app.run("config.rule", p);
+    }
+  }
+  // a new rule on any column the table could have
+  let choices = column_choices(app);
+  let id = egui::Id::new("config-new-rule");
+  let (mut pick, mut expr) = ui.data_mut(|d| d.get_temp::<(usize, String)>(id)).unwrap_or_default();
+  pick = pick.min(choices.len().saturating_sub(1));
+  let mut add = false;
+  ui.horizontal(|ui| {
+    ui.label("New rule:");
+    egui::ComboBox::from_id_salt("config-rule-pick")
+      .selected_text(choices.get(pick).map(|c| c.0.as_str()).unwrap_or("nothing to drive"))
+      .width(180.0)
+      .show_ui(ui, |ui| {
+        for (i, (label, _)) in choices.iter().enumerate() {
+          ui.selectable_value(&mut pick, i, label);
+        }
+      });
+    ui.add(egui::TextEdit::singleline(&mut expr).hint_text("if(length > 100 mm, 8 mm, 5 mm)").desired_width(200.0));
+    add = ui.button("＋ Add").clicked() && !expr.trim().is_empty();
+  });
+  if add && let Some((_, col)) = choices.get(pick) {
+    // an appearance rule starts red when true, no colour otherwise (edit them above)
+    let p = rule_params(col, &expr, "#ff0000", "");
+    if app.run("config.rule", p).is_some() {
+      expr.clear();
+    }
+  }
+  ui.data_mut(|d| d.insert_temp(id, (pick, expr)));
+}
+
+/// Every column a rule could drive, as `(label, column JSON)`.
+fn column_choices(app: &App) -> Vec<(String, Value)> {
+  let d = &app.s.design;
+  let mut out = Vec::new();
+  for p in &d.parameters {
+    out.push((format!("Parameter {}", p.name), json!({"type": "parameter", "name": p.name})));
+  }
+  for f in &d.features {
+    out.push((format!("Suppress {}", f.name), json!({"type": "suppress", "feature": f.id.0})));
+    if let fox_engine::model::FeatureKind::Joint { kind, .. } = &f.kind {
+      for m in ["rotation", "slide", "slide2", "pitch"] {
+        if fox_engine::model::assembly::MotionAxis::parse(m).is_some_and(|a| a.allowed(*kind)) {
+          out.push((format!("{} {m}", f.name), json!({"type": "joint", "joint": f.id.0, "motion": m})));
+        }
+      }
+    }
+  }
+  for b in &app.s.model.bodies {
+    out.push((format!("Appearance of {}", app.s.body_name(b.id)), json!({"type": "appearance", "body": b.id.0})));
+  }
+  out
 }
 
 /// A text field that reports its text when editing ends (Enter or focus lost).
@@ -322,6 +493,28 @@ mod tests {
     assert!(cell_params(&json!({"type": "appearance", "body": 7}), "").get("color").is_none());
     let j = cell_params(&json!({"type": "joint", "joint": 4, "motion": "slide"}), "5 mm");
     assert_eq!(j, json!({"joint": 4, "motion": "slide", "value": "5 mm"}));
+  }
+
+  #[test]
+  fn rule_fields_become_config_rule_parameters() {
+    let col = json!({"type": "parameter", "name": "h"});
+    assert_eq!(rule_params(&col, " w / 2 ", "", ""), json!({"parameter": "h", "expr": "w / 2"}));
+    assert_eq!(rule_params(&col, "", "", "")["expr"], Value::Null);
+    let col = json!({"type": "appearance", "body": 7});
+    let p = rule_params(&col, "w > 1", "ABS (Red)", "none");
+    assert_eq!(p, json!({"body": 7, "expr": "w > 1", "color": "ABS (Red)", "otherwise": null}));
+    assert_eq!(color_text(&json!([255, 0, 16])), "#ff0010");
+    assert_eq!(color_text(&Value::Null), "");
+    let mut s = fox_engine::Session::default();
+    s.execute("param.add", &json!({"name": "w", "expr": "10 mm"})).unwrap();
+    s.execute("box", &json!({"width": "w", "depth": 10, "height": 10})).unwrap();
+    s.execute("config.create", &json!({"name": "A"})).unwrap();
+    s.execute("config.set", &json!({"configuration": "A", "parameter": "w", "expr": "30 mm"})).unwrap();
+    let b = s.model.bodies[0].id.0;
+    let p = rule_params(&json!({"type": "appearance", "body": b}), "w > 20 mm", "#102030", "");
+    let t = s.execute("config.rule", &p).unwrap();
+    assert_eq!(t["rows"][0]["cells"][1], "#102030", "{t}");
+    assert_eq!(color_text(&t["columns"][1]["rule"]["color"]), "#102030");
   }
 
   #[test]

@@ -164,9 +164,11 @@ fn linked_components(app: &mut App, ui: &mut egui::Ui) {
     let name = l["name"].as_str().unwrap_or_default().to_string();
     let linked = l["linked"].as_bool().unwrap_or(false);
     let stale = l["out_of_date"].as_bool().unwrap_or(false);
+    let config = l["configuration"].as_str().map(str::to_string);
+    let shown = config.as_ref().map(|c| format!(", {c}")).unwrap_or_default();
     let label = match (linked, l["version"].as_u64()) {
-      (true, Some(v)) if stale => format!("{name}  (v{v}, newer version)"),
-      (true, Some(v)) => format!("{name}  (v{v})"),
+      (true, Some(v)) if stale => format!("{name}  (v{v}{shown}, newer version)"),
+      (true, Some(v)) => format!("{name}  (v{v}{shown})"),
       _ => format!("{name}  (not linked)"),
     };
     let color = if stale || l["missing"].as_bool().unwrap_or(false) { theme::WARNING } else { theme::TEXT };
@@ -178,6 +180,38 @@ fn linked_components(app: &mut App, ui: &mut egui::Ui) {
           ui.close();
           app.run("component.update_link", json!({"component": cid}));
           ui.data_mut(|d| d.remove::<(f64, (usize, usize), Value)>(id.with("links")));
+        }
+        // the source's configurations, read from the hub once per linked version
+        if linked {
+          ui.menu_button("Configuration", |ui| {
+            let key = id.with(("configs", cid, l["version"].as_u64()));
+            let names: Vec<String> = match ui.data(|d| d.get_temp::<Vec<String>>(key)) {
+              Some(n) => n,
+              None => {
+                let v = app.s.execute("component.configuration", &json!({"component": cid})).unwrap_or(Value::Null);
+                let n: Vec<String> = v["configurations"]
+                  .as_array()
+                  .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                  .unwrap_or_default();
+                ui.data_mut(|d| d.insert_temp(key, n.clone()));
+                n
+              }
+            };
+            let mut pick = |ui: &mut egui::Ui, label: &str, value: Option<&String>| {
+              if ui.radio(config.as_ref() == value, label).clicked() {
+                ui.close();
+                app.run("component.configuration", json!({"component": cid, "configuration": value}));
+                ui.data_mut(|d| d.remove::<(f64, (usize, usize), Value)>(id.with("links")));
+              }
+            };
+            pick(ui, "As modelled", None);
+            if names.is_empty() {
+              ui.weak("The source has no configurations");
+            }
+            for n in &names {
+              pick(ui, n, Some(n));
+            }
+          });
         }
         if ui.add_enabled(linked, egui::Button::new("Break Link")).clicked() {
           ui.close();
