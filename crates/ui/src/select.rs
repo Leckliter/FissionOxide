@@ -81,7 +81,8 @@ pub struct Filters {
   pub sketches: bool,
   pub sketch_points: bool,
   pub profiles: bool,
-  /// Body vertices (drawn as dots while it is on).
+  /// Body vertices (Fusion's Body Vertices filter): on by default, as in Fusion; a vertex draws
+  /// a mark only while hovered or selected.
   pub vertices: bool,
   /// Construction planes, axes and points.
   pub construction: bool,
