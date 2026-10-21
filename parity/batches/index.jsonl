@@ -17,3 +17,12 @@
 {"name": "ui-components", "items": 3, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/117"}
 {"name": "ui-sketch-polish", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/115"}
 {"name": "ui-units-and-parameters", "items": 2, "status": "fixing", "pr": "https://github.com/Leckliter/FissionOxide/pull/119"}
+{"name": "ui-browser-rows", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-chrome-menus-2", "items": 8, "status": "ready", "pr": null}
+{"name": "ui-cursor-prompts", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-dialog-docking", "items": 6, "status": "ready", "pr": null}
+{"name": "ui-feature-manipulators", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-marking-menu-placement", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-preferences-full", "items": 2, "status": "ready", "pr": null}
+{"name": "ui-ribbon-responsive", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-sketch-entry-polish", "items": 8, "status": "ready", "pr": null}

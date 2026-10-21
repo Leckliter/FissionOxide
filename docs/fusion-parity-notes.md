@@ -233,3 +233,25 @@ These groups touch mostly separate code and can run in parallel:
 Assemblies and joints, drawings, sheet metal, surface, mesh, CAM, the data panel and versioning,
 file import/export, parameters, and the rest of the sketch tools (constraints, trim, offset,
 patterns). Testing them the same way is a good next step.
+
+---
+
+## 2026-10-21 session
+
+A second side-by-side run on `main` at `1f7c4f8`, with the same session (sketch, dimensioned
+rectangle, finish, extrude, fillet) and then every tab, menu, context menu, the S key, browser,
+timeline, ViewCube, navigation bar and Preferences. The full report with code pointers is
+[parity/reports/2026-10-21.md](../parity/reports/2026-10-21.md); the 41 new ledger rows are in
+`parity/ui-features.jsonl` and the nine batches in `parity/batches/` (`map-wave4.json`).
+
+What changed since the 10-19 list above: items 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12 (faces), 14
+(overflow), 16, 17, 18 and 19 (hover highlight) are fixed and were re-checked. Still open from
+this list: 3 is not a bug (see below), 13's Taper/Start rows exist but the Flip row is extra,
+15's face list is now padded with navigation items, 20's grid and 21's dev status messages and
+sketch hint remain.
+
+**Test-rig warning.** During desktop control the Claude desktop app keeps a topmost window over
+the right side of the screen (1372..1908 x 20..748 on this display). Clicks there never reach the
+app under test and the OS caption tooltips show instead. Item 1 above ("clicks in the top-right
+are ignored") and this run's first hour of right-side failures were that window, not
+FissionOxide. Snap the app under test to the left half before probing.
