@@ -212,7 +212,7 @@ void main() {
 "#;
 
 /// A triangle covering the viewport, from `gl_VertexID` alone.
-const FULLSCREEN_VS: &str = r#"
+pub(crate) const FULLSCREEN_VS: &str = r#"
 out vec2 v_uv;
 void main() {
   vec2 p = vec2(float((gl_VertexID & 1) * 4 - 1), float((gl_VertexID & 2) * 2 - 1));
@@ -246,21 +246,21 @@ void main() {
 "#;
 
 /// Pick ids as the bytes of an RGBA8 attachment (alpha 1, so blending leaves them intact).
-const ID_COLOR: &str = r#"
+pub(crate) const ID_COLOR: &str = r#"
 vec4 id_color(uint id) {
   return vec4(float(id & 255u), float((id >> 8) & 255u), float((id >> 16) & 255u), 255.0) / 255.0;
 }
 "#;
 
-type Gl = glow::Context;
+pub(crate) type Gl = glow::Context;
 
-struct Prog {
-  program: glow::Program,
+pub(crate) struct Prog {
+  pub(crate) program: glow::Program,
   uniforms: Vec<(&'static str, Option<glow::UniformLocation>)>,
 }
 
 impl Prog {
-  fn loc(&self, name: &str) -> Option<&glow::UniformLocation> {
+  pub(crate) fn loc(&self, name: &str) -> Option<&glow::UniformLocation> {
     self.uniforms.iter().find(|(n, _)| *n == name).and_then(|(_, l)| l.as_ref())
   }
 }
@@ -317,6 +317,11 @@ pub struct Renderer {
   analysis: Option<Analysis>,
   style: VisualStyle,
   target: Option<Target>,
+  /// The GLSL version line the shaders were built with (for the PBR shaders, made on demand).
+  header: &'static str,
+  /// Physically based shading of the meshes that have a material (the Render workspace).
+  pbr: Option<crate::pbr::Pbr>,
+  pbr_on: bool,
 }
 
 fn unit(c: [u8; 4]) -> [f32; 4] {
@@ -387,6 +392,9 @@ impl Renderer {
         analysis: None,
         style: VisualStyle::default(),
         target: None,
+        header,
+        pbr: None,
+        pbr_on: false,
       };
       Ok(r)
     }
@@ -431,13 +439,39 @@ impl Renderer {
     Ok(())
   }
 
+  /// Shades the meshes that `look` gives a material with physically based materials, over its
+  /// environment (the Render workspace); `None` goes back to the usual shading. Call it after
+  /// [`Renderer::set_scene`], with a material per mesh of that scene.
+  pub fn set_look(&mut self, gl: &Gl, look: Option<&crate::pbr::Look>) -> Result<(), String> {
+    let Some(look) = look else {
+      self.pbr_on = false;
+      return Ok(());
+    };
+    if self.pbr.is_none() {
+      self.pbr = Some(crate::pbr::Pbr::new(gl, self.header)?);
+    }
+    if let Some(p) = self.pbr.as_mut() {
+      p.set(gl, look)?;
+    }
+    self.pbr_on = true;
+    Ok(())
+  }
+
+  /// The PBR passes, when on and the style shades surfaces.
+  fn pbr(&self) -> Option<&crate::pbr::Pbr> {
+    self.pbr.as_ref().filter(|_| self.pbr_on && self.style.shaded())
+  }
+
+  fn pbr_meshes(&self) -> Vec<(glow::VertexArray, i32, Option<u32>, [u8; 4])> {
+    self.meshes.iter().map(|m| (m.vao, m.count, m.highlight, m.highlight_color)).collect()
+  }
+
   /// Renders the uploaded scene into the offscreen target (resized to `width` × `height`), in the
   /// CPU rasterizer's order: background, opaque meshes, lines and markers, transparent meshes,
   /// then what's drawn on top.
   pub fn draw(&mut self, gl: &Gl, cam: &Camera, width: u32, height: u32) -> Result<(), String> {
     let (w, h) = (width.clamp(1, fox_render::MAX_DIM), height.clamp(1, fox_render::MAX_DIM));
     self.ensure_target(gl, w, h)?;
-    let Some(t) = &self.target else { return Err("no render target".into()) };
     let vp = cam.view_proj(w, h).as_mat4().to_cols_array();
     let size = [w as f32, h as f32];
     let (right, up, back) = cam.basis();
@@ -445,6 +479,14 @@ impl Renderer {
     let head = back.as_vec3();
     let fill = (right * 0.7 - up * 0.2 + back * 0.3).normalize().as_vec3();
     let eye = cam.eye().as_vec3();
+    if self.pbr_on && self.style.shaded() {
+      let casters: Vec<_> =
+        self.meshes.iter().map(|m| (m.vao, m.count, m.analyze && m.color[3] == 255)).collect();
+      if let Some(p) = self.pbr.as_mut() {
+        p.shadow_pass(gl, &casters)?;
+      }
+    }
+    let Some(t) = &self.target else { return Err("no render target".into()) };
     unsafe {
       gl.bind_framebuffer(glow::FRAMEBUFFER, Some(t.fbo));
       gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
@@ -468,6 +510,10 @@ impl Renderer {
       gl.uniform_4_f32_slice(p.loc("u_bottom"), &bottom);
       gl.bind_vertex_array(Some(self.empty_vao));
       gl.draw_arrays(glow::TRIANGLES, 0, 3);
+      if let Some(pbr) = self.pbr() {
+        let inv = cam.view_proj(w, h).inverse().as_mat4();
+        pbr.draw_background(gl, &inv, size, self.empty_vao);
+      }
 
       // meshes
       gl.enable(glow::DEPTH_TEST);
@@ -483,6 +529,10 @@ impl Renderer {
       let style = self.style;
       let bodies = (!style.shaded()).then_some(false);
       self.draw_meshes(gl, false, bodies);
+      let view = crate::pbr::MeshView { vp, eye: eye.to_array(), head: head.to_array(), persp: !cam.ortho };
+      if let Some(pbr) = self.pbr() {
+        pbr.draw_meshes(gl, &self.pbr_meshes(), &view, false);
+      }
       if !style.shaded() && style.occludes() {
         // wireframe surfaces only hide what's behind them
         gl.color_mask(false, false, false, false);
@@ -509,6 +559,12 @@ impl Renderer {
       let p = &self.mesh;
       gl.use_program(Some(p.program));
       self.draw_meshes(gl, true, bodies);
+      if let Some(pbr) = self.pbr() {
+        // glass: its reflections added over what's behind it
+        gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ZERO, glow::ONE);
+        pbr.draw_meshes(gl, &self.pbr_meshes(), &view, true);
+        gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ZERO);
+      }
 
       // sketch geometry in sketch mode and other on-top overlays
       gl.disable(glow::DEPTH_TEST);
@@ -528,8 +584,13 @@ impl Renderer {
   fn draw_meshes(&self, gl: &Gl, transparent: bool, bodies: Option<bool>) {
     let p = &self.mesh;
     unsafe {
-      let wanted = |m: &&GpuMesh| (m.color[3] < 255) == transparent && bodies.is_none_or(|b| m.analyze == b);
-      for m in self.meshes.iter().filter(wanted) {
+      let pbr = self.pbr();
+      let wanted = |m: &(usize, &GpuMesh)| {
+        (m.1.color[3] < 255) == transparent
+          && bodies.is_none_or(|b| m.1.analyze == b)
+          && !pbr.is_some_and(|p| p.has(m.0))
+      };
+      for (_, m) in self.meshes.iter().enumerate().filter(wanted) {
         let (mode, param) = match self.analysis.filter(|_| m.analyze) {
           None => (0, [0.0; 4]),
           Some(Analysis::Zebra { stripes }) => (1, [stripes, 0.0, 0.0, 0.0]),
@@ -772,6 +833,9 @@ impl Renderer {
     if let Some(t) = self.target.take() {
       free_target(gl, t);
     }
+    if let Some(p) = self.pbr.take() {
+      p.destroy(gl);
+    }
     unsafe {
       for p in [&self.mesh, &self.line, &self.marker, &self.background, &self.composite] {
         gl.delete_program(p.program);
@@ -786,7 +850,7 @@ fn shape(m: &fox_render::Mesh) -> (usize, usize, usize) {
   (m.positions.len(), m.indices.len(), m.tri_ids.len())
 }
 
-fn program(gl: &Gl, header: &str, vs: &str, fs: &str, uniforms: &[&'static str]) -> Result<Prog, String> {
+pub(crate) fn program(gl: &Gl, header: &str, vs: &str, fs: &str, uniforms: &[&'static str]) -> Result<Prog, String> {
   unsafe {
     let program = gl.create_program()?;
     let mut shaders = Vec::new();
