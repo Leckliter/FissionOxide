@@ -200,7 +200,7 @@ fn ray_z(a: V3, b: V3, c: V3, x: f64, y: f64) -> Option<f64> {
 }
 
 /// Distance from p to triangle abc.
-pub(crate) fn dist_point_triangle(p: V3, a: V3, b: V3, c: V3) -> f64 {
+pub fn dist_point_triangle(p: V3, a: V3, b: V3, c: V3) -> f64 {
   let (ab, ac, ap) = (sub(b, a), sub(c, a), sub(p, a));
   let (d1, d2) = (dot(ab, ap), dot(ac, ap));
   let closest = if d1 <= 0.0 && d2 <= 0.0 {

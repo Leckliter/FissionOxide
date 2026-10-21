@@ -845,6 +845,10 @@ and safety factor (peak stress leaves out the most stressed 0.5 % of elements, t
 the voxels), whether it meets the limits; **Insert** puts one into the design as a mesh body,
 or reduced, converted to B-rep, joined with the exact preserve geometry and with the obstacles
 cut, so bolt holes come out round. `gen.export` writes an outcome as STL, OBJ, 3MF or PLY.
+**Verify** (`gen.verify`) checks an inserted outcome with `fox-sim`'s quadratic tetrahedra: the
+body is meshed, the study's loads and constraints move onto the body's faces that lie on them,
+every load case is solved, and the worst displacement, stress and safety factor are kept with
+the outcome in the explorer.
 
 ```sh
 fissionoxide-cli run examples/generative_bracket.jsonl --save bracket_gd.fox

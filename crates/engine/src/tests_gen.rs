@@ -135,7 +135,7 @@ fn outcome_as_brep_joined_with_the_preserve_geometry() {
   run(&mut s, "gen.manufacturing", json!({"methods": ["unrestricted"], "symmetry": []}));
   run(&mut s, "gen.design_space", json!({"resolution": 4, "iterations": 20}));
   run(&mut s, "gen.generate", json!({}));
-  let m = run(&mut s, "gen.insert", json!({"reduce": 0.5, "brep": true, "merge_preserve": true}));
+  let m = run(&mut s, "gen.insert", json!({"triangles": 800, "brep": true, "merge_preserve": true}));
   // one body, no slivers left over from the booleans
   assert_eq!(s.model.bodies.len(), 7, "{m}");
   assert_eq!(m["steps"], json!(["mesh body", "reduce", "B-rep", "join preserve", "cut obstacles"]), "{m}");
@@ -149,6 +149,14 @@ fn outcome_as_brep_joined_with_the_preserve_geometry() {
   };
   assert!(!solid_at(0.0, 0.0) && !solid_at(100.0, 25.0), "the holes are cut");
   assert!(solid_at(6.5, 0.0) && solid_at(100.0, 31.0), "the bosses are there");
+  // checked with finite elements on the real body
+  let v = run(&mut s, "gen.verify", json!({"size": 6}));
+  assert!(v["elements"].as_u64().unwrap() > 100, "{v}");
+  assert_eq!(v["cases"].as_array().unwrap().len(), 2);
+  let sf = v["safety_factor"].as_f64().unwrap();
+  assert!(sf > 1.0 && v["max_displacement"].as_f64().unwrap() > 0.0, "{v}");
+  assert_eq!(run(&mut s, "gen.outcomes", json!({}))[0]["verified"]["safety_factor"], json!(sf));
+  s.undo();
   // one undo step takes the whole insert back
   let n = s.model.bodies.len();
   s.undo();

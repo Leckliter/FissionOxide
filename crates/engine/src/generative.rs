@@ -11,7 +11,7 @@ use std::sync::Arc;
 use fox_gen::{Cell, Dir, Grid, Material, Method, Problem};
 use fox_kernel::TriMesh;
 use fox_model::construct::MeshOp;
-use fox_model::generative::{Constraint, Goal, Load, LoadCase, LoadKind, Outcome, Study, Target};
+use fox_model::generative::{Constraint, Goal, Load, LoadCase, LoadKind, Outcome, Study, Target, Verification};
 use fox_model::{BodyId, FeatureKind, MeshData, Operation};
 use serde_json::{Value, json};
 
@@ -68,6 +68,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
     "gen.outcomes" => study_of(s, p).map(|i| outcomes_json(&s.design.generative[i])),
     "gen.insert" => insert(s, p),
     "gen.export" => export(s, p),
+    "gen.verify" => verify(s, p),
     _ => return None,
   })
 }
@@ -536,7 +537,8 @@ fn outcome_json(o: &Outcome) -> Value {
     "compliance": o.compliance, "stiffness": if o.compliance > 0.0 { 1.0 / o.compliance } else { 0.0 },
     "max_displacement": o.max_displacement, "peak_stress": o.peak_stress, "safety_factor": o.safety_factor,
     "meets_limits": o.meets_limits, "converged": o.converged, "iterations": o.iterations,
-    "triangles": o.mesh.triangles(),
+    "triangles": o.mesh.triangles(), "body": o.body.map(|b| b.0),
+    "verified": o.verified.as_ref().map(verification_json),
   })
 }
 
@@ -826,6 +828,8 @@ pub fn finish(s: &mut Session, results: Vec<(Job, fox_gen::Outcome)>) -> CmdResu
         grid: p.grid,
         density: Arc::new(o.density),
         mesh: Arc::new(mesh),
+        body: None,
+        verified: None,
       }
     })
     .collect();
@@ -917,6 +921,7 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   let reduced = target.map(|t| fox_gen::surface::decimate(&o.mesh, t));
   let surface = reduced.as_ref().unwrap_or(&o.mesh);
   let (preserve, obstacles) = (st.preserve.clone(), st.obstacles.clone());
+  let (study, outcome) = (st.id, o.id);
   let name = format!("{} outcome {} ({})", st.name, o.id, o.material.name);
   let mesh = MeshData {
     name: name.clone(),
@@ -969,6 +974,18 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
         )?;
       }
     }
+    s.edit(|d| {
+      if let Some(o) = d
+        .generative
+        .iter_mut()
+        .find(|st| st.id == study)
+        .and_then(|st| st.outcomes.iter_mut().find(|o| o.id == outcome))
+      {
+        o.body = Some(body);
+        o.verified = None;
+      }
+      Ok(())
+    })?;
     let b = s.model.body(body).ok_or(CmdError::new("the outcome's body is gone"))?;
     let mass = b.shape.mass().ok();
     Ok(json!({
@@ -1001,4 +1018,146 @@ fn export(s: &mut Session, p: &Value) -> CmdResult {
   let bytes = fox_exchange::write_mesh(&ext, &[mesh]).map_err(|e| CmdError::new(e.to_string()))?;
   std::fs::write(&path, bytes)?;
   Ok(json!({"path": path.display().to_string(), "triangles": o.mesh.triangles()}))
+}
+
+fn verification_json(v: &Verification) -> Value {
+  json!({
+    "body": v.body.0, "elements": v.elements, "max_displacement": v.max_displacement,
+    "max_stress": v.max_stress, "safety_factor": v.safety_factor, "meets_limits": v.meets_limits,
+  })
+}
+
+/// Faces of `mesh` with a triangle centre within `tol` of one of `tris` (triangles as corners).
+fn faces_on(mesh: &TriMesh, tris: &[[[f64; 3]; 3]], tol: f64) -> Vec<u32> {
+  let mut out: Vec<u32> = Vec::new();
+  for (t, f) in mesh.indices.chunks_exact(3).zip(&mesh.tri_face) {
+    if out.contains(f) {
+      continue;
+    }
+    let p = |i: u32| mesh.positions[i as usize].map(f64::from);
+    let c = [0, 1, 2].map(|k| (p(t[0])[k] + p(t[1])[k] + p(t[2])[k]) / 3.0);
+    if tris.iter().any(|[a, b, d]| fox_gen::grid::dist_point_triangle(c, *a, *b, *d) <= tol) {
+      out.push(*f);
+    }
+  }
+  out
+}
+
+/// The faces of the outcome's body a load or constraint target lands on.
+fn target_faces(s: &Session, mesh: &TriMesh, t: &Target, tol: f64) -> Result<Vec<u32>, CmdError> {
+  Ok(match t {
+    Target::Point { at, radius } => {
+      let r = radius.max(tol);
+      let mut out: Vec<u32> = Vec::new();
+      for (tr, f) in mesh.indices.chunks_exact(3).zip(&mesh.tri_face) {
+        let p = |i: u32| mesh.positions[i as usize].map(f64::from);
+        if !out.contains(f) && fox_gen::grid::dist_point_triangle(*at, p(tr[0]), p(tr[1]), p(tr[2])) <= r {
+          out.push(*f);
+        }
+      }
+      out
+    }
+    Target::Face { face } => {
+      let b = s.model.body(face.body).ok_or_else(|| CmdError::new(format!("body {} no longer exists", face.body.0)))?;
+      let m = b.mesh().ok_or(CmdError::new("a load's body can't be meshed"))?;
+      let id = face.resolve(b.faces(), Some(m), b.diagonal()).ok_or(CmdError::new("a load's face can't be found"))?;
+      let tris: Vec<[[f64; 3]; 3]> = m
+        .indices
+        .chunks_exact(3)
+        .zip(&m.tri_face)
+        .filter(|(_, f)| **f == id)
+        .map(|(t, _)| [0, 1, 2].map(|k| m.positions[t[k] as usize].map(f64::from)))
+        .collect();
+      faces_on(mesh, &tris, tol)
+    }
+  })
+}
+
+/// A finite element check of an inserted outcome: its body meshed in quadratic tetrahedra and
+/// solved for every load case with `fox-sim`, the study's loads and constraints moved onto the
+/// body's faces that lie on them.
+fn verify(s: &mut Session, p: &Value) -> CmdResult {
+  let (st, o) = outcome_of(s, p)?;
+  let (study, outcome) = (st.id, o.id);
+  let body = match p.get("body") {
+    Some(v) => body_id(s, v)?,
+    None => {
+      o.body.filter(|b| s.model.body(*b).is_some()).ok_or(CmdError::new("insert the outcome first (gen.insert)"))?
+    }
+  };
+  let b = s.model.body(body).ok_or(CmdError::new("no such body"))?;
+  let mesh = b.mesh().ok_or(CmdError::new("the body can't be meshed"))?;
+  let pts: Vec<[f64; 3]> = mesh.positions.iter().map(|p| p.map(f64::from)).collect();
+  let surface = fox_sim::surface::SurfaceMesh::weld(&pts, &mesh.indices, &mesh.tri_face, b.diagonal() * 1e-7);
+  let (lo, hi) = pts.iter().fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), p| {
+    ([0, 1, 2].map(|k| lo[k].min(p[k])), [0, 1, 2].map(|k| hi[k].max(p[k])))
+  });
+  let opts = match opt_num(p, "size")? {
+    Some(sz) => fox_sim::MeshOptions::new(sz),
+    None => fox_sim::MeshOptions::auto(lo, hi),
+  };
+  let (tets, _) =
+    fox_sim::mesh_solid(&surface, &opts).map_err(|e| CmdError::new(format!("meshing the outcome: {e}")))?;
+  let m = &o.material;
+  let material = fox_sim::Material {
+    name: m.name.clone(),
+    youngs: m.youngs,
+    poisson: m.poisson,
+    density: m.density,
+    yield_strength: m.yield_strength,
+    ..fox_sim::Material::named("Steel")
+  };
+  let elements = tets.tets.len();
+  let tol = 0.02 * opts.size.max(0.05);
+  let part = fox_sim::Part { name: "outcome".into(), mesh: tets, material, size: opts.size };
+  let sel = |faces: Vec<u32>| faces.into_iter().map(|face| fox_sim::FaceSel { part: 0, face }).collect::<Vec<_>>();
+  let (mut disp, mut stress, mut sf) = (0.0f64, 0.0f64, f64::INFINITY);
+  let mut cases = Vec::new();
+  for case in &st.cases {
+    let mut model =
+      fox_sim::Model { parts: vec![part.clone()], contacts: fox_sim::Contacts::None, ..Default::default() };
+    for c in &case.constraints {
+      let faces = sel(target_faces(s, mesh, &c.target, tol)?);
+      if faces.is_empty() {
+        return Err(CmdError::new(format!("a constraint of '{}' lands on no face of the body", case.name)));
+      }
+      model.constraints.push(fox_sim::Constraint::Fixed { faces, x: c.fix[0], y: c.fix[1], z: c.fix[2] });
+    }
+    for l in &case.loads {
+      let faces = sel(target_faces(s, mesh, &l.target, tol)?);
+      if faces.is_empty() {
+        return Err(CmdError::new(format!("a load of '{}' lands on no face of the body", case.name)));
+      }
+      model.loads.push(match l.kind {
+        LoadKind::Force { force } => fox_sim::Load::Force { faces, force },
+        LoadKind::Pressure { pressure } => fox_sim::Load::Pressure { faces, pressure },
+      });
+    }
+    // slivers from a faceted surface can stop the direct factorisation; conjugate gradients
+    // still converge
+    let r = fox_sim::solve_static(&model, fox_sim::SolveOptions::default())
+      .or_else(|_| fox_sim::solve_static(&model, fox_sim::SolveOptions { direct_limit: 0, ..Default::default() }))
+      .map_err(|e| CmdError::new(format!("'{}': {e}", case.name)))?;
+    let d = r.displacement.iter().map(|u| (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt()).fold(0.0, f64::max);
+    let vm = r.von_mises.iter().copied().fold(0.0, f64::max);
+    let f = r.safety_factor.iter().copied().fold(f64::INFINITY, f64::min);
+    cases.push(json!({"name": case.name, "max_displacement": d, "max_stress": vm, "safety_factor": f}));
+    disp = disp.max(d);
+    stress = stress.max(vm);
+    sf = sf.min(f);
+  }
+  let meets = sf >= st.safety_factor && st.max_displacement.is_none_or(|l| disp <= l);
+  let v =
+    Verification { body, elements, max_displacement: disp, max_stress: stress, safety_factor: sf, meets_limits: meets };
+  let mut out = verification_json(&v);
+  out["cases"] = json!(cases);
+  s.edit(|d| {
+    if let Some(o) =
+      d.generative.iter_mut().find(|x| x.id == study).and_then(|x| x.outcomes.iter_mut().find(|o| o.id == outcome))
+    {
+      o.verified = Some(v);
+    }
+    Ok(())
+  })?;
+  Ok(out)
 }

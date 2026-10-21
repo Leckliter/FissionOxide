@@ -385,6 +385,7 @@ cmds! {
   "gen.generate" => "Generate outcomes: topology optimisation (SIMP, density filter, Heaviside projection, optimality criteria) for every material and method, then a smoothed iso-surface of each", "{study?}";
   "gen.outcomes" => "Outcomes explorer: mass, volume, stiffness, displacement, peak stress and safety factor per outcome", "{study?}";
   "gen.insert" => "Insert an outcome into the design as a mesh body; optionally decimated (quadric edge collapses), converted to B-rep and joined with the exact preserve geometry (obstacles cut)", "{study?, outcome?, reduce?: 0..1 | triangles?, brep?, merge_preserve?}";
+  "gen.verify" => "Check an inserted outcome with finite elements (quadratic tetrahedra): the study's loads and constraints on the body's faces that lie on them, every load case; the worst displacement, stress and safety factor", "{study?, outcome?, body?, size?: element size}";
   "gen.export" => "Export an outcome's mesh (.stl .obj .3mf .ply)", "{study?, outcome?, path}";
   "cut.machines" => "Laser, plasma and waterjet machine profiles (built in, and the hub's machines.json) with their processes", "{}";
   "cut.machine.add" => "Add or replace a machine profile in the hub: G-code templates and any number of processes", "{machine: {id, name, kind?: laser|plasma|waterjet|dxf, extension?, arcs?, header?, pierce?, off?, footer?, rapid?, line?, arc_cw?, arc_ccw?, max_power?, rapid_rate?, processes?: [{name, kerf?, feed?, power?, pierce_delay?, ...}]}}";

@@ -181,4 +181,21 @@ pub struct Outcome {
   #[serde(skip)]
   pub density: Arc<Vec<f32>>,
   pub mesh: Arc<SurfaceMesh>,
+  /// The body it was last inserted as.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub body: Option<BodyId>,
+  /// A finite element check of that body (quadratic tetrahedra, `fox-sim`).
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub verified: Option<Verification>,
+}
+
+/// The worst over the load cases of a finite element analysis of an inserted outcome.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Verification {
+  pub body: BodyId,
+  pub elements: usize,
+  pub max_displacement: f64,
+  pub max_stress: f64,
+  pub safety_factor: f64,
+  pub meets_limits: bool,
 }

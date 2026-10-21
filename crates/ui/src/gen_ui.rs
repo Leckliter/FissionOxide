@@ -513,13 +513,24 @@ pub fn window(app: &mut App, ctx: &egui::Context) {
           }
         }
       }
-      _ => {
-        if let Some(v) = app.run(cmd, p)
-          && cmd == "gen.insert"
-        {
+      _ => match (app.run(cmd, p), cmd) {
+        (Some(v), "gen.insert") => {
           app.status = Some((format!("Inserted body {} ({})", v["body"], v["name"].as_str().unwrap_or("")), false));
         }
-      }
+        (Some(v), "gen.verify") => {
+          let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
+          app.status = Some((
+            format!(
+              "Finite elements: safety factor {:.2}, max stress {:.1} MPa, max displacement {:.4} mm",
+              f("safety_factor"),
+              f("max_stress"),
+              f("max_displacement")
+            ),
+            false,
+          ));
+        }
+        _ => {}
+      },
     }
   }
 }
@@ -554,8 +565,8 @@ fn explorer(app: &mut App, ui: &mut egui::Ui, calls: &mut Vec<(&'static str, Val
   }
   ui.separator();
   ui.strong("Outcomes");
-  egui::Grid::new("gen-outcomes").striped(true).num_columns(8).spacing([10.0, 3.0]).show(ui, |ui| {
-    for h in ["#", "Material", "Method", "Mass (g)", "Volume", "Max disp (mm)", "Safety factor", "Limits"] {
+  egui::Grid::new("gen-outcomes").striped(true).num_columns(9).spacing([10.0, 3.0]).show(ui, |ui| {
+    for h in ["#", "Material", "Method", "Mass (g)", "Volume", "Max disp (mm)", "Safety factor", "Limits", "FEA"] {
       ui.strong(h);
     }
     ui.end_row();
@@ -576,6 +587,23 @@ fn explorer(app: &mut App, ui: &mut egui::Ui, calls: &mut Vec<(&'static str, Val
       } else {
         ui.colored_label(Color32::from_rgb(220, 80, 60), "✘");
       }
+      match o["verified"].as_object() {
+        Some(v) => {
+          let sf = v.get("safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
+          let ok = v.get("meets_limits").and_then(Value::as_bool).unwrap_or(false);
+          let c = if ok { Color32::from_rgb(60, 160, 80) } else { Color32::from_rgb(220, 80, 60) };
+          ui.colored_label(c, format!("SF {sf:.2}")).on_hover_text(format!(
+            "Finite element check of body {}: {} elements, max stress {:.1} MPa, max displacement {:.4} mm",
+            v.get("body").and_then(Value::as_u64).unwrap_or(0),
+            v.get("elements").and_then(Value::as_u64).unwrap_or(0),
+            v.get("max_stress").and_then(Value::as_f64).unwrap_or(0.0),
+            v.get("max_displacement").and_then(Value::as_f64).unwrap_or(0.0),
+          ));
+        }
+        None => {
+          ui.label("–");
+        }
+      }
       ui.end_row();
     }
   });
@@ -594,6 +622,14 @@ fn explorer(app: &mut App, ui: &mut egui::Ui, calls: &mut Vec<(&'static str, Val
       .clicked()
     {
       calls.push(("gen.insert", json!({"outcome": id, "reduce": 0.5, "brep": true, "merge_preserve": true})));
+    }
+    let inserted = outcomes.iter().any(|o| o["outcome"].as_u64() == Some(id) && o["body"].is_u64());
+    if ui
+      .add_enabled(inserted, egui::Button::new("Verify (FEA)"))
+      .on_hover_text("Check the inserted body with finite elements under the study's loads (insert it first)")
+      .clicked()
+    {
+      calls.push(("gen.verify", json!({"outcome": id})));
     }
     if ui.button("Export STL…").clicked() {
       calls.push(("export", json!({"outcome": id})));
