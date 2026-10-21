@@ -69,6 +69,8 @@ enum Action {
   EditFeature(FeatureId),
   /// Calibrate a canvas: pick two points on it, type their real distance.
   Calibrate(FeatureId),
+  /// Trace a canvas's image into sketch curves where it lies.
+  TraceCanvas(FeatureId),
   EditSketch(FeatureId),
   /// Create a sketch on the selected planar face and start a sketch tool in it.
   SketchOnFace(Tool),
@@ -543,6 +545,7 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
       // Fusion's canvas menu: Edit Canvas (opacity, size, position) and Calibrate
       v.push(Some(Item::new(Action::EditFeature(f), Icon::Canvas, "Edit Canvas")));
       v.push(Some(Item::new(Action::Calibrate(f), Icon::Measure, "Calibrate")));
+      v.push(Some(Item::new(Action::TraceCanvas(f), Icon::TraceImage, "Trace Canvas")));
     } else {
       v.push(Some(Item::new(Action::EditFeature(f), Icon::Gear, &format!("Edit {}", feature_name(app, f)))));
     }
@@ -600,6 +603,7 @@ fn run(app: &mut App, action: Action) {
     Action::Repeat(c) => app.launch(c),
     Action::EditFeature(f) => panels::edit_feature(app, f),
     Action::Calibrate(f) => crate::canvas_ui::start_calibrate(app, f),
+    Action::TraceCanvas(f) => app.trace_canvas(f),
     Action::EditSketch(f) => app.edit_sketch(f),
     Action::SketchOnFace(t) => {
       app.new_sketch();

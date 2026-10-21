@@ -102,10 +102,10 @@ cmds! {
   "sketch.drag" => "Drag a sketch point (solver keeps constraints)", "{point, to: [x,y]}";
   "sketch.transform" => "Move, rotate and/or scale sketch curves (scale and rotation about 'center'); dimensions inside the moved geometry scale with it", "{sketch?, curves?: [id] (default all), translate?: [x,y], angle?, scale?, center?: [x,y]}";
   "sketch.insert" => "Copy curves into a sketch from another sketch, a DXF or SVG file or a sketch in a .fox/.foxz design, transformed", "{sketch?, from: {sketch: id} | {path, sketch?: name|id, units?: px|document (SVG; px = 96 dpi, 0,0 on the origin, as Fusion)}, curves?: [id], translate?, angle?, scale?, center?}";
-  "sketch.trace" => "Trace an image (photo, logo, scan) into closed sketch curves: one colour's outlines, or each of N colours", "{sketch?, image: path, mode?: outline|colors, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles')";
+  "sketch.trace" => "Trace an image (photo, logo, scan) into sketch curves: one colour's closed outlines, each of N colours, or single-line centre-line strokes for engraving; infers horizontal/vertical/tangent/coincident/equal/concentric constraints", "{sketch?, image: path | canvas: feature (its image, place and calibrated size), mode?: outline|colors|centerline, threshold?: 0-255 (auto), invert?, colors?: 2-16, layers?: [index] (default all but the background), blur?: px, specks?: px² ignored, holes?: px² filled, tolerance?: px, corners?: deg, fit?: lines|arcs|curves, spurs?: px (centerline: side branches shorter than this are dropped; default 1.5 × stroke width), constraints?: bool (default true), width? | height? (expressions) | scale?: mm per px (default 100 mm wide), at?: [x,y] (image centre), angle?} → ink: inside points of the traced shapes (extrude's 'profiles'); strokes, stroke_width (centerline); constraints, constraint_counts";
   "trace.info" => "What tracing an image would give (size, colour layers, shape counts) without changing the design", "{image, ...sketch.trace options}";
   "canvas.insert" => "Insert > Canvas: a reference image on a plane (adds no geometry); height follows the image aspect", "{image: path, plane?: (default xy), width?: mm (default 100) | height?, at?: [x,y] (image centre), angle?: deg, opacity?: 0-1, name?}";
-  "canvas.edit" => "Edit a canvas: opacity, size (keeps the aspect unless both given), centre, angle, plane", "{feature, opacity?, width?, height?, at?, angle?, plane?}";
+  "canvas.edit" => "Edit a canvas: opacity, visibility, size (keeps the aspect unless both given), centre, angle, plane", "{feature, opacity?, visible?: bool, width?, height?, at?, angle?, plane?}";
   "canvas.calibrate" => "Calibrate a canvas: scale it about 'from' so the two picked points (plane coordinates) are 'distance' apart", "{feature, from: [x,y], to: [x,y], distance: mm}";
   "sketch.visible" => "Show or hide a sketch (null = automatic: hidden once a feature uses it)", "{sketch, visible: bool | null}";
   "sketch.info" => "Sketch geometry (with the sketch plane, curve lengths and boxes), constraints, profiles (box, perimeter, bounding curves), curves outside every profile, degrees of freedom", "{sketch?, samples?: bool (points along each curve), loops?: bool (profile boundary segments)}";
@@ -608,15 +608,49 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     }
     "sketch.trace" => {
       let sk = sketch_id(s, p)?;
-      let at = opt_pt(p, "at")?.unwrap_or([0.0, 0.0]);
-      let angle = opt_expr(p, "angle")
-        .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &params_scope(s)))
-        .transpose()?
-        .unwrap_or(0.0);
+      // tracing a canvas: its image, where it lies and its (calibrated) size
+      let mut p = p.clone();
+      let (at, angle) = if let Some(c) = p.get("canvas").and_then(Value::as_u64) {
+        let c = FeatureId(u32::try_from(c).map_err(|_| CmdError::new("bad canvas"))?);
+        let (image, at, angle, width) = crate::canvas::placement(s, sk, c)?;
+        if let Some(o) = p.as_object_mut() {
+          o.insert("image".into(), json!(image));
+          o.insert("width".into(), json!(width));
+          o.remove("height");
+          o.remove("scale");
+        }
+        (at, angle)
+      } else {
+        let at = opt_pt(&p, "at")?.unwrap_or([0.0, 0.0]);
+        let angle = opt_expr(&p, "angle")
+          .map(|e| fox_expr::eval(&e, fox_expr::Kind::Angle, &params_scope(s)))
+          .transpose()?
+          .unwrap_or(0.0);
+        (at, angle)
+      };
+      let p = &p;
       let (src, mut out, placed) = crate::trace::sketch(p, at, angle, &params_scope(s))?;
       let t = fox_sketch::Xform2 { angle, center: at, ..Default::default() };
-      let added = s.edit(|d| Ok(d.sketch_mut(sk)?.insert_from(&src, &[], &t)?))?;
+      // constraints on the traced curves, unless turned off; tolerances follow the trace's own
+      let infer = p.get("constraints").and_then(Value::as_bool).unwrap_or(true);
+      let tol = fox_sketch::InferTolerance {
+        distance: crate::trace::options(p)?.tolerance * placed.mm_per_px() * 0.5,
+        ..Default::default()
+      };
+      let (added, inferred) = s.edit(|d| {
+        let sketch = d.sketch_mut(sk)?;
+        let added = sketch.insert_from(&src, &[], &t)?;
+        let inferred = infer.then(|| sketch.infer_constraints(&added, &tol));
+        Ok((added, inferred))
+      })?;
       out["curves"] = json!(added.iter().map(|c| c.0).collect::<Vec<_>>());
+      if let Some(inf) = inferred {
+        out["constraints"] = json!(inf.constraints.iter().map(|(c, _)| c.0).collect::<Vec<_>>());
+        out["constraint_counts"] = Value::Object(inf.counts().into_iter().map(|(k, n)| (k.to_string(), json!(n))).collect());
+        if let Some(w) = inf.warning {
+          out["constraint_warning"] = json!(w);
+        }
+      }
       let profiles = s.model.sketches.get(&sk).map(|r| r.profiles.as_slice()).unwrap_or_default();
       let ink = crate::trace::ink_profiles(&placed, profiles);
       out["ink"] = json!(ink.iter().map(|i| profiles[*i].interior_point()).collect::<Vec<_>>());

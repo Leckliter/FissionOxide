@@ -227,3 +227,145 @@ fn svg_sketches_round_trip_with_exact_curves() {
   assert!(r["warning"].as_str().is_some_and(|w| w.contains("SVG")), "{r}");
   let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The sketch being edited (the first one).
+fn first_sketch(s: &Session) -> (fox_model::FeatureId, fox_sketch::Sketch) {
+  let f = s.design.features.iter().find(|f| matches!(f.kind, fox_model::FeatureKind::Sketch { .. })).unwrap();
+  (f.id, s.design.sketch(f.id).unwrap().clone())
+}
+
+#[test]
+fn centerline_strokes_are_single_connected_lines_with_constraints() {
+  let dir = temp_dir("centerline");
+  let image = dir.join("t.png");
+  // a T: an 8 px bar along y = 30 from x = 40 to 160, and a stem down to y = 85 (y down)
+  png(&image, |x, y| {
+    let bar = (40.0..160.0).contains(&x) && (26.0..34.0).contains(&y);
+    let stem = (96.0..104.0).contains(&x) && (26.0..85.0).contains(&y);
+    (bar || stem).then_some([0, 0, 0])
+  });
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 200, "mode": "centerline"}));
+  assert_eq!(r["strokes"], 3, "{r}");
+  let w = r["stroke_width"].as_f64().unwrap();
+  assert!((w - 8.0).abs() < 1.5, "{r}");
+  let (_, sk) = first_sketch(&s);
+  assert_eq!(sk.curves.len(), 3, "{:?}", sk.curves);
+  // the three lines meet at one sketch point, on the bar's middle above the stem
+  let mut uses: std::collections::HashMap<fox_sketch::PointId, usize> = Default::default();
+  for c in &sk.curves {
+    for p in sk.curve_points(c.id) {
+      *uses.entry(p).or_default() += 1;
+    }
+  }
+  let (&junction, _) = uses.iter().find(|(_, n)| **n == 3).expect("a shared junction point");
+  let j = sk.pos(junction).unwrap();
+  // pixel (100, 30) of a 200 × 100 image centred on the origin, y up: (0, 20)
+  assert!(j[0].abs() < 1.5 && (j[1] - 20.0).abs() < 1.5, "{j:?}");
+  // the bar's two halves are horizontal (and equal), the stem vertical
+  let counts = &r["constraint_counts"];
+  assert_eq!(counts["horizontal"], 2, "{r}");
+  assert_eq!(counts["vertical"], 1, "{r}");
+  // strokes are open: nothing to extrude, so no ink
+  assert_eq!(r["ink"], json!([]));
+  let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn traced_outlines_get_constraints_unless_turned_off() {
+  let dir = temp_dir("constraints");
+  let image = dir.join("plate.png");
+  // a 120 × 60 rectangle with a 15 px-radius hole and a second, equal hole
+  png(&image, |x, y| {
+    let rect = (40.0..160.0).contains(&x) && (20.0..80.0).contains(&y);
+    let holes = (x - 70.0).hypot(y - 50.0) < 15.0 || (x - 130.0).hypot(y - 50.0) < 15.0;
+    (rect && !holes).then_some([0, 0, 0])
+  });
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 200}));
+  let counts = &r["constraint_counts"];
+  assert_eq!(counts["horizontal"], 2, "{r}");
+  assert_eq!(counts["vertical"], 2, "{r}");
+  // the opposite sides, and the two holes' radii
+  assert_eq!(counts["equal"], 3, "{r}");
+  assert!(r.get("constraint_warning").is_none(), "{r}");
+  assert_eq!(profiles(&mut s).len(), 3);
+  // the sketch solves with them, and the edges are exactly straight now
+  let (id, sk) = first_sketch(&s);
+  assert!(s.model.sketches[&id].report.ok());
+  for c in &sk.curves {
+    if let fox_sketch::CurveKind::Line { a, b } = c.kind {
+      let (a, b) = (sk.pos(a).unwrap(), sk.pos(b).unwrap());
+      assert!((a[0] - b[0]).abs() < 1e-7 || (a[1] - b[1]).abs() < 1e-7, "{a:?} {b:?}");
+    }
+  }
+  // turned off: plain geometry
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 200, "constraints": false}));
+  assert!(r.get("constraints").is_none(), "{r}");
+  assert!(first_sketch(&s).1.constraints.is_empty());
+  let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rounded_corners_trace_tangent() {
+  let dir = temp_dir("rounded");
+  let image = dir.join("rounded.png");
+  // a 120 × 60 rectangle with 15 px corner radii
+  png(&image, |x, y| {
+    let (cx, cy) = (x.clamp(55.0, 145.0), y.clamp(35.0, 65.0));
+    ((x - cx).hypot(y - cy) < 15.0).then_some([0, 0, 0])
+  });
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"image": image, "width": 200, "fit": "arcs"}));
+  let counts = &r["constraint_counts"];
+  assert!(counts["tangent"].as_u64().unwrap_or(0) >= 4, "{r}");
+  assert_eq!(counts["horizontal"], 2, "{r}");
+  assert_eq!(counts["vertical"], 2, "{r}");
+  assert_eq!(profiles(&mut s).len(), 1);
+  let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_canvas_traces_where_it_lies_at_its_calibrated_size() {
+  let dir = temp_dir("canvas");
+  let image = dir.join("shapes.png");
+  png(&image, plate_and_disc);
+  let mut s = Session::default();
+  let c = run(&mut s, "canvas.insert", json!({"image": image, "width": 100, "at": [30, 10]}))["feature"].clone();
+  // calibrate: 50 mm on the canvas is really 100 mm, scaled about its centre → 200 mm wide
+  run(&mut s, "canvas.calibrate", json!({"feature": c, "from": [30, 10], "to": [80, 10], "distance": 100}));
+  run(&mut s, "canvas.edit", json!({"feature": c, "opacity": 0.5, "visible": false}));
+  let v = run(&mut s, "canvas.edit", json!({"feature": c}));
+  assert_eq!(v["visible"], false, "{v}");
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"canvas": c}));
+  assert_eq!(r["size"], json!([200.0, 100.0]), "{r}");
+  assert_eq!(r["at"], json!([30.0, 10.0]), "{r}");
+  // the disc (pixel 140 of 200) lands 40 mm right of the canvas centre
+  let p = profiles(&mut s);
+  let disc = p.iter().find(|p| p["bbox"][0][0].as_f64().unwrap() > 50.0).unwrap();
+  let cx = (disc["bbox"][0][0].as_f64().unwrap() + disc["bbox"][1][0].as_f64().unwrap()) / 2.0;
+  assert!((cx - 70.0).abs() < 0.5, "{disc}");
+  run(&mut s, "sketch.finish", json!({}));
+  // a sketch on another plane can't trace it
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  assert!(s.execute("sketch.trace", &json!({"canvas": c})).is_err());
+  // a rotated canvas on a parallel offset plane: the trace turns with it
+  let mut s = Session::default();
+  let plane = json!({"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]});
+  let c = run(&mut s, "canvas.insert", json!({"image": image, "plane": plane, "width": 200, "angle": 90}))["feature"]
+    .clone();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let r = run(&mut s, "sketch.trace", json!({"canvas": c}));
+  assert!((r["angle"].as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{r}");
+  let p = profiles(&mut s);
+  let disc = p.iter().find(|p| p["bbox"][0][1].as_f64().unwrap() > 10.0).unwrap();
+  let cy = (disc["bbox"][0][1].as_f64().unwrap() + disc["bbox"][1][1].as_f64().unwrap()) / 2.0;
+  assert!((cy - 40.0).abs() < 0.5, "{disc}");
+  let _ = std::fs::remove_dir_all(&dir);
+}

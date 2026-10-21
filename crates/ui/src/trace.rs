@@ -1,5 +1,6 @@
 //! Trace Image: the dialog's settings and the traced image drawn on the sketch plane under the
 //! preview. The tracing itself is the engine's `sketch.trace`, previewed like any other dialog.
+//! It traces a picked image file, or a canvas of the design where the canvas lies.
 
 use std::path::{Path, PathBuf};
 
@@ -24,7 +25,15 @@ pub fn is_image(p: &Path) -> bool {
 
 pub struct TraceState {
   pub path: Option<PathBuf>,
+  /// Tracing a canvas: its image, place and size come from it.
+  pub canvas: Option<fox_engine::model::FeatureId>,
   colors_mode: bool,
+  /// Centre-line strokes (engraving) instead of closed outlines.
+  centerline: bool,
+  auto_spurs: bool,
+  spurs: f64,
+  /// Infer horizontal/vertical/tangent/… constraints on the result.
+  constraints: bool,
   auto_threshold: bool,
   threshold: f64,
   invert: bool,
@@ -49,7 +58,12 @@ impl Default for TraceState {
   fn default() -> Self {
     TraceState {
       path: None,
+      canvas: None,
       colors_mode: false,
+      centerline: false,
+      auto_spurs: true,
+      spurs: 10.0,
+      constraints: true,
       auto_threshold: true,
       threshold: 128.0,
       invert: false,
@@ -75,13 +89,26 @@ impl TraceState {
     TraceState { path: Some(path), ..Default::default() }
   }
 
+  /// Tracing canvas `id`, whose image is `path`.
+  pub fn with_canvas(id: fox_engine::model::FeatureId, path: PathBuf) -> Self {
+    TraceState { path: Some(path), canvas: Some(id), show_image: false, ..Default::default() }
+  }
+
   /// `sketch.trace` parameters.
   pub fn params(&self) -> Option<Value> {
     let path = self.path.as_ref()?;
     let num = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let mode = if self.colors_mode {
+      "colors"
+    } else if self.centerline {
+      "centerline"
+    } else {
+      "outline"
+    };
     let mut p = json!({
       "image": path,
-      "mode": if self.colors_mode { "colors" } else { "outline" },
+      "mode": mode,
+      "constraints": self.constraints,
       "invert": self.invert,
       "specks": self.specks,
       "holes": self.holes,
@@ -100,6 +127,16 @@ impl TraceState {
     } else if !self.auto_threshold {
       p["threshold"] = json!(self.threshold.round());
     }
+    if self.centerline && !self.auto_spurs {
+      p["spurs"] = json!(self.spurs);
+    }
+    if let (Some(c), Some(o)) = (self.canvas, p.as_object_mut()) {
+      // the canvas says where the image lies and how big it is
+      for k in ["image", "width", "at", "angle"] {
+        o.remove(k);
+      }
+      o.insert("canvas".into(), json!(c.0));
+    }
     Some(p)
   }
 
@@ -108,6 +145,7 @@ impl TraceState {
     match picked {
       Some(p) => {
         self.path = Some(p);
+        self.canvas = None;
         self.layers = None;
         self.result = None;
         true
@@ -164,11 +202,16 @@ fn text(ui: &mut egui::Ui, label: &str, v: &mut String, dirty: &mut bool) {
 
 /// The dialog's rows (inside its two-column grid).
 pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
-  ui.label("Image");
+  ui.label(if t.canvas.is_some() { "Canvas" } else { "Image" });
   ui.horizontal(|ui| {
     let name = t.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
     let label = name.as_deref().unwrap_or("Select…");
-    if ui.button(label).on_hover_text("Pick a PNG, JPEG, BMP or WebP image").clicked() && t.pick_file() {
+    let tip = if t.canvas.is_some() {
+      "Tracing the canvas where it lies, at its calibrated size; click to trace another image instead"
+    } else {
+      "Pick a PNG, JPEG, BMP or WebP image"
+    };
+    if ui.button(label).on_hover_text(tip).clicked() && t.pick_file() {
       *dirty = true;
     }
   });
@@ -176,17 +219,26 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
 
   ui.label("Mode");
   ui.horizontal(|ui| {
-    if ui.selectable_label(!t.colors_mode, "Outline").on_hover_text("Dark shapes on a light background").clicked()
-      && t.colors_mode
+    let outline = !t.colors_mode && !t.centerline;
+    if ui.selectable_label(outline, "Outline").on_hover_text("Dark shapes on a light background").clicked() && !outline
     {
-      t.colors_mode = false;
+      (t.colors_mode, t.centerline) = (false, false);
       *dirty = true;
     }
     if ui.selectable_label(t.colors_mode, "Colours").on_hover_text("Each colour traced as its own shapes").clicked()
       && !t.colors_mode
     {
-      t.colors_mode = true;
+      (t.colors_mode, t.centerline) = (true, false);
       t.layers = None;
+      *dirty = true;
+    }
+    if ui
+      .selectable_label(t.centerline, "Centre line")
+      .on_hover_text("Single lines along the middle of the strokes, for engraving and V-carving")
+      .clicked()
+      && !t.centerline
+    {
+      (t.colors_mode, t.centerline) = (false, true);
       *dirty = true;
     }
   });
@@ -256,6 +308,25 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
       *dirty = true;
     }
     ui.end_row();
+    if t.centerline {
+      ui.label("Ignore spurs");
+      ui.horizontal(|ui| {
+        if ui
+          .checkbox(&mut t.auto_spurs, "Auto")
+          .on_hover_text("Side branches shorter than 1.5 × the stroke width are thinning noise")
+          .changed()
+        {
+          *dirty = true;
+        }
+        if !t.auto_spurs {
+          let r = ui.add(egui::Slider::new(&mut t.spurs, 0.0..=100.0).suffix(" px"));
+          if r.drag_stopped() || (r.changed() && !r.dragged()) {
+            *dirty = true;
+          }
+        }
+      });
+      ui.end_row();
+    }
   }
 
   slider_with(
@@ -288,18 +359,29 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
   });
   ui.end_row();
 
-  text(ui, "Width", &mut t.width, dirty);
-  ui.label("Centre X, Y");
-  ui.horizontal(|ui| {
-    for v in &mut t.at {
-      if ui.add(egui::TextEdit::singleline(v).desired_width(66.0)).lost_focus() {
-        *dirty = true;
+  if t.canvas.is_none() {
+    text(ui, "Width", &mut t.width, dirty);
+    ui.label("Centre X, Y");
+    ui.horizontal(|ui| {
+      for v in &mut t.at {
+        if ui.add(egui::TextEdit::singleline(v).desired_width(66.0)).lost_focus() {
+          *dirty = true;
+        }
       }
-    }
-  });
-  ui.end_row();
-  text(ui, "Angle", &mut t.angle, dirty);
+    });
+    ui.end_row();
+    text(ui, "Angle", &mut t.angle, dirty);
+  }
 
+  ui.label("");
+  if ui
+    .checkbox(&mut t.constraints, "Add constraints")
+    .on_hover_text("Horizontal, vertical, tangent, coincident, equal and concentric, where the trace is unambiguous")
+    .changed()
+  {
+    *dirty = true;
+  }
+  ui.end_row();
   ui.label("");
   ui.checkbox(&mut t.show_image, "Show image");
   ui.end_row();
@@ -309,7 +391,20 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
     let curves = r["curves"].as_array().map(Vec::len).unwrap_or(0);
     let size = |i: usize| r["size"][i].as_f64().unwrap_or(0.0);
     ui.label("");
-    let text = if n("shapes") == 0 {
+    let text = if t.centerline {
+      if n("strokes") == 0 {
+        RichText::new("Nothing traced").color(theme::WARNING)
+      } else {
+        RichText::new(format!(
+          "{} strokes, {curves} curves, ≈ {:.2} mm wide\n{:.1} × {:.1} mm",
+          n("strokes"),
+          r["stroke_width"].as_f64().unwrap_or(0.0),
+          size(0),
+          size(1)
+        ))
+        .color(theme::MUTED)
+      }
+    } else if n("shapes") == 0 {
       RichText::new("Nothing traced").color(theme::WARNING)
     } else {
       RichText::new(format!(
@@ -323,7 +418,13 @@ pub fn fields(t: &mut TraceState, ui: &mut egui::Ui, dirty: &mut bool) {
     };
     ui.label(text);
     ui.end_row();
-    if let Some(w) = r["warning"].as_str() {
+    if let Some(c) = r["constraint_counts"].as_object().filter(|c| !c.is_empty()) {
+      let list: Vec<String> = c.iter().map(|(k, v)| format!("{} {}", v, k.replace('_', " "))).collect();
+      ui.label("");
+      ui.label(RichText::new(format!("Constraints: {}", list.join(", "))).color(theme::MUTED));
+      ui.end_row();
+    }
+    for w in [r["warning"].as_str(), r["constraint_warning"].as_str()].into_iter().flatten() {
       ui.label("");
       ui.label(RichText::new(w).color(theme::WARNING));
       ui.end_row();

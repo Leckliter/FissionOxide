@@ -90,8 +90,8 @@ fn insert(s: &mut Session, p: &Value) -> CmdResult {
   Ok(r)
 }
 
-/// Changes a canvas's opacity, size (width keeps the aspect unless height is given too),
-/// centre, angle or plane.
+/// Changes a canvas's opacity, visibility, size (width keeps the aspect unless height is given
+/// too), centre, angle or plane.
 fn edit(s: &mut Session, p: &Value) -> CmdResult {
   let id = FeatureId(req_u32(p, "feature")?);
   let (_, w0, h0) = canvas(s, id)?;
@@ -109,6 +109,12 @@ fn edit(s: &mut Session, p: &Value) -> CmdResult {
   let at = opt_pt(p, "at")?;
   let angle = num(p, "angle")?;
   let opacity = num(p, "opacity")?.map(|o| o.clamp(0.0, 1.0));
+  if let Some(v) = p.get("visible").and_then(Value::as_bool) {
+    s.edit(|d| {
+      d.feature_mut(id).ok_or(CmdError::new("no such feature"))?.visible = Some(v);
+      Ok(())
+    })?;
+  }
   set(s, id, |k| {
     if let FeatureKind::Canvas { plane: pl, at: a, width: w, height: h, angle: an, opacity: o, .. } = k {
       if let Some(v) = plane {
@@ -122,6 +128,30 @@ fn edit(s: &mut Session, p: &Value) -> CmdResult {
     }
   })?;
   Ok(canvas_json(s, id))
+}
+
+/// Where canvas `id` lies in sketch `sketch`'s coordinates, for tracing it: the image file, the
+/// image centre, its rotation (radians) and its width (mm). The sketch must lie on the canvas's
+/// plane or a parallel one facing the same way (the image is projected straight onto it).
+pub(crate) fn placement(
+  s: &Session,
+  sketch: FeatureId,
+  id: FeatureId,
+) -> Result<(String, [f64; 2], f64, f64), CmdError> {
+  let Some(FeatureKind::Canvas { image, at, width, angle, .. }) = s.design.feature(id).map(|f| &f.kind) else {
+    return Err(CmdError::new("that feature is not a canvas"));
+  };
+  let cp = s.model.canvases.get(&id).ok_or(CmdError::new("the canvas has no plane (is it suppressed?)"))?;
+  let sp = &s.model.sketches.get(&sketch).ok_or(CmdError::new("the sketch isn't built"))?.plane;
+  let (nc, ns) = (cp.x.cross(cp.y), sp.x.cross(sp.y));
+  if nc.dot(ns) < 1.0 - 1e-6 {
+    return Err(CmdError::new("the sketch isn't on the canvas's plane (or one parallel to it, facing the same way)"));
+  }
+  let centre = cp.origin + cp.x * at[0] + cp.y * at[1];
+  let local = [(centre - sp.origin).dot(sp.x), (centre - sp.origin).dot(sp.y)];
+  let a = angle.to_radians();
+  let ux = cp.x * a.cos() + cp.y * a.sin();
+  Ok((image.clone(), local, ux.dot(sp.y).atan2(ux.dot(sp.x)), *width))
 }
 
 /// A canvas's centre, width and height.
@@ -140,9 +170,11 @@ fn set(s: &mut Session, id: FeatureId, f: impl FnOnce(&mut FeatureKind)) -> Resu
 }
 
 fn canvas_json(s: &Session, id: FeatureId) -> Value {
+  let visible = s.design.feature(id).is_some_and(|f| f.visible != Some(false));
   match s.design.feature(id).map(|f| &f.kind) {
     Some(FeatureKind::Canvas { image, at, width, height, angle, opacity, .. }) => json!({
       "feature": id.0, "image": image, "at": at, "width": width, "height": height, "angle": angle, "opacity": opacity,
+      "visible": visible,
     }),
     _ => json!({}),
   }

@@ -1102,6 +1102,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
         FeatureKind::Sketch { .. } => Some("tree-sketches"),
         FeatureKind::ConstructionPlane { .. } => Some("tree-construction"),
         FeatureKind::Joint { .. } => Some("tree-joints"),
+        FeatureKind::Canvas { .. } => Some("tree-canvases"),
         _ => None,
       }),
       _ => None,
@@ -1203,6 +1204,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   }
   components_section(app, ui);
   bodies_section(app, ui);
+  browser_canvas::section(app, ui);
   sketches_section(app, ui);
   planes_section(app, ui);
   joints_section(app, ui);
@@ -3144,6 +3146,7 @@ pub fn toggle_sel(s: &mut Session, item: Sel, add: bool) {
 }
 
 mod browser_assembly;
+mod browser_canvas;
 mod browser_config;
 mod browser_edit;
 mod timeline_groups;

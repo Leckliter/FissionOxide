@@ -1,6 +1,7 @@
-//! Image tracing: a photo or logo traced into closed sketch curves (`sketch.trace`), or just
-//! measured (`trace.info`). The tracer itself is [`fox_trace`]; this maps its pixel contours
-//! onto the sketch, centred on `at` and scaled to the requested size.
+//! Image tracing: a photo or logo traced into closed sketch curves, or a drawing into single-line
+//! centre-line strokes for engraving (`sketch.trace`), or just measured (`trace.info`). The
+//! tracer itself is [`fox_trace`]; this maps its pixel contours onto the sketch, centred on `at`
+//! and scaled to the requested size.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use fox_sketch::{CurveKind, PointId, Sketch};
-use fox_trace::{Contour, Fit, Image, Mode, Options, Seg, Trace};
+use fox_trace::{Contour, Fit, Image, Mode, Options, Seg, Stroke, Trace};
 use serde_json::{Value, json};
 
 use crate::CmdError;
@@ -60,7 +61,8 @@ pub(crate) fn options(p: &Value) -> Result<Options, CmdError> {
       }
       Mode::Colors { count: n.round() as u8 }
     }
-    m => return Err(CmdError::new(format!("unknown mode '{m}' (outline, colors)"))),
+    "centerline" | "centreline" => Mode::Centerline { threshold: num(p, "threshold")?.map(level).transpose()? },
+    m => return Err(CmdError::new(format!("unknown mode '{m}' (outline, colors, centerline)"))),
   };
   if let Some(b) = p.get("invert").and_then(Value::as_bool) {
     o.invert = b;
@@ -86,6 +88,9 @@ pub(crate) fn options(p: &Value) -> Result<Options, CmdError> {
     }
     o.tolerance = v;
   }
+  if let Some(v) = non_negative("spurs")? {
+    o.spurs = Some(v);
+  }
   if let Some(v) = num(p, "corners")? {
     o.corner_angle = v.clamp(0.0, 180.0);
   }
@@ -98,6 +103,11 @@ pub(crate) fn options(p: &Value) -> Result<Options, CmdError> {
     };
   }
   Ok(o)
+}
+
+/// Whether the parameters ask for centre-line strokes rather than outlines.
+pub(crate) fn centerline(p: &Value) -> bool {
+  matches!(opt_str(p, "mode"), Some("centerline" | "centreline"))
 }
 
 /// Runs the tracer on the `image` parameter.
@@ -163,7 +173,9 @@ fn summary(t: &Trace, k: f64) -> Value {
         "background": l.background,
         "shapes": l.contours.len() - holes,
         "holes": holes,
-        "segments": l.contours.iter().map(|c| c.segs.len()).sum::<usize>(),
+        "segments": l.contours.iter().map(|c| c.segs.len()).sum::<usize>()
+          + l.strokes.iter().map(|s| s.segs.len()).sum::<usize>(),
+        "strokes": l.strokes.len(),
       })
     })
     .collect();
@@ -244,6 +256,53 @@ fn add_contour(sk: &mut Sketch, c: &Contour, place: &Place) -> Result<(), CmdErr
         prev = b;
       }
       Seg::Circle { .. } => return Err(CmdError::new("the tracer returned a circle inside a contour")),
+    }
+  }
+  Ok(())
+}
+
+/// Adds a centre-line stroke. Points are shared through `cache` (keyed by their exact pixel
+/// coordinates), so strokes meeting at a junction meet at one sketch point.
+fn add_stroke(
+  sk: &mut Sketch,
+  st: &Stroke,
+  place: &Place,
+  cache: &mut HashMap<(u64, u64), PointId>,
+) -> Result<(), CmdError> {
+  let err = |e: fox_sketch::SketchError| CmdError::new(e.to_string());
+  let mut pt = |sk: &mut Sketch, q: [f64; 2]| -> PointId {
+    *cache.entry((q[0].to_bits(), q[1].to_bits())).or_insert_with(|| {
+      let m = place.map(q);
+      sk.add_point(m[0], m[1])
+    })
+  };
+  for seg in &st.segs {
+    match *seg {
+      Seg::Line { a, b } => {
+        let (a, b) = (pt(sk, a), pt(sk, b));
+        if a != b {
+          sk.add_curve(CurveKind::Line { a, b }).map_err(err)?;
+        }
+      }
+      Seg::Arc { a, b, center, ccw } => {
+        let c = on_bisector(place.map(center), place.map(a), place.map(b));
+        let (a, b) = (pt(sk, a), pt(sk, b));
+        let center = sk.add_point(c[0], c[1]);
+        let (start, end) = if ccw { (a, b) } else { (b, a) };
+        sk.add_curve(CurveKind::Arc { center, start, end }).map_err(err)?;
+      }
+      Seg::Cubic { a, c1, c2, b } => {
+        let (q1, q2) = (place.map(c1), place.map(c2));
+        let a = pt(sk, a);
+        let (p1, p2) = (sk.add_point(q1[0], q1[1]), sk.add_point(q2[0], q2[1]));
+        let b = pt(sk, b);
+        sk.add_curve(CurveKind::control_spline(vec![a, p1, p2, b])).map_err(err)?;
+      }
+      Seg::Circle { center, radius } => {
+        let q = place.map(center);
+        let center = sk.add_point(q[0], q[1]);
+        sk.add_curve(CurveKind::Circle { center, radius: radius * place.k }).map_err(err)?;
+      }
     }
   }
   Ok(())
@@ -345,6 +404,13 @@ pub(crate) struct Placed {
   polygons: Vec<Vec<Vec<[f64; 2]>>>,
 }
 
+impl Placed {
+  /// Sketch millimetres per traced pixel.
+  pub(crate) fn mm_per_px(&self) -> f64 {
+    self.place.k
+  }
+}
+
 /// The traced curves of the chosen layers as a standalone sketch (merged into the target sketch
 /// by `insert_from`), with the summary the command returns.
 pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Result<(Sketch, Value, Placed), CmdError> {
@@ -354,7 +420,14 @@ pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Resu
   let layers = chosen_layers(p, &t)?;
   let mut sk = Sketch::new();
   let (mut shapes, mut holes) = (0, 0);
+  let (mut strokes, mut width_sum) = (0, 0.0);
   for &i in &layers {
+    let mut cache = HashMap::new();
+    for st in &t.layers[i].strokes {
+      add_stroke(&mut sk, st, &place, &mut cache)?;
+      strokes += 1;
+      width_sum += st.width * k;
+    }
     for c in &t.layers[i].contours {
       add_contour(&mut sk, c, &place)?;
       if c.hole {
@@ -368,7 +441,13 @@ pub(crate) fn sketch(p: &Value, at: [f64; 2], angle: f64, scope: &Scope) -> Resu
   out["shapes"] = json!(shapes);
   out["holes"] = json!(holes);
   out["drawn_layers"] = json!(layers);
-  if shapes == 0 {
+  if centerline(p) {
+    out["strokes"] = json!(strokes);
+    out["stroke_width"] = json!(if strokes > 0 { width_sum / f64::from(strokes) } else { 0.0 });
+    if strokes == 0 {
+      out["warning"] = json!("no strokes were found: try another threshold, Invert, or fewer ignored specks");
+    }
+  } else if shapes == 0 {
     out["warning"] = json!("nothing was traced: try another threshold, Invert, or fewer ignored specks");
   }
   let polygons = layers.iter().map(|&i| t.layers[i].contours.iter().map(polygon).collect()).collect();

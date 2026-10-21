@@ -1126,6 +1126,43 @@ impl App {
     self.dialog = Some(d);
   }
 
+  /// Opens Trace Image on canvas `id`: in the sketch being edited, or in a new sketch on the
+  /// canvas's plane. The trace lands on the image where the canvas lies, at its calibrated size.
+  pub fn trace_canvas(&mut self, id: fox_engine::model::FeatureId) {
+    let Some(fox_engine::model::FeatureKind::Canvas { image, plane, .. }) =
+      self.s.design.feature(id).map(|f| f.kind.clone())
+    else {
+      return;
+    };
+    if self.s.edit_sketch.is_none() {
+      let on = match plane {
+        fox_engine::model::PlaneRef::Origin { plane } => json!(match plane {
+          fox_engine::model::OriginPlane::Xy => "xy",
+          fox_engine::model::OriginPlane::Xz => "xz",
+          fox_engine::model::OriginPlane::Yz => "yz",
+        }),
+        fox_engine::model::PlaneRef::Construction { feature } => json!({"feature": feature.0}),
+        _ => match self.s.model.canvases.get(&id) {
+          Some(p) => {
+            let n = p.x.cross(p.y);
+            json!({"origin": p.origin.to_array(), "normal": n.to_array(), "x": p.x.to_array()})
+          }
+          None => return,
+        },
+      };
+      self.create_sketch(on);
+      if self.s.edit_sketch.is_none() {
+        return;
+      }
+    }
+    self.cancel_dialog();
+    self.tool = Tool::Select;
+    let mut d = Dialog::open(self, dialogs::Kind::TraceImage);
+    d.trace = Some(Box::new(trace::TraceState::with_canvas(id, PathBuf::from(image))));
+    d.preview(&mut self.s);
+    self.dialog = Some(d);
+  }
+
   pub fn cancel_dialog(&mut self) {
     if let Some(mut d) = self.dialog.take() {
       d.cancel(&mut self.s);

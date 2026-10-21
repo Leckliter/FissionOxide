@@ -453,6 +453,36 @@ mod tests {
   }
 
   #[test]
+  fn hidden_canvases_are_not_drawn_and_canvases_trace_where_they_lie() {
+    let dir = temp_dir("trace");
+    let mut app = App::with_session(Session::default());
+    let r = app.run("canvas.insert", json!({"image": png(&dir), "plane": "xz", "width": 80})).unwrap();
+    let id = FeatureId(r["feature"].as_u64().unwrap() as u32);
+    app.run("canvas.edit", json!({"feature": id.0, "visible": false}));
+    assert!(shown(&app).is_empty());
+    app.run("canvas.edit", json!({"feature": id.0, "visible": true}));
+    assert_eq!(shown(&app).len(), 1);
+    // Trace Canvas with no sketch open starts one on the canvas's plane and previews the trace
+    app.trace_canvas(id);
+    let sk = app.s.edit_sketch.expect("a sketch on the canvas's plane");
+    match app.s.design.feature(sk).map(|f| &f.kind) {
+      Some(FeatureKind::Sketch { plane, .. }) => {
+        assert!(matches!(plane, fox_engine::model::PlaneRef::Origin { plane: fox_engine::model::OriginPlane::Xz }))
+      }
+      k => panic!("{k:?}"),
+    }
+    let t = app.dialog.as_ref().and_then(|d| d.trace.as_ref()).unwrap();
+    let p = t.params().unwrap();
+    assert_eq!(p["canvas"], json!(id.0), "{p}");
+    assert!(p.get("width").is_none() && p.get("image").is_none(), "{p}");
+    // the dark image traces to one 80 × 40 rectangle
+    let r = t.result.as_ref().expect("previewed");
+    assert_eq!(r["shapes"], 1, "{r}");
+    assert_eq!(r["size"], json!([80.0, 40.0]), "{r}");
+    let _ = std::fs::remove_dir_all(dir);
+  }
+
+  #[test]
   fn placed_images_map_corners_and_rotation() {
     let placed =
       Placed { plane: fox_engine::kernel::Plane::XY, at: [10.0, 0.0], size: [20.0, 10.0], angle: 90f64.to_radians() };
