@@ -606,6 +606,58 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        Use it for lettering and decoration.",
     ),
 
+    // GENERATIVE DESIGN
+    (_, "New Generative Study") => (
+      "Starts a generative design study.",
+      "A study holds the design space, load cases, objectives, materials and manufacturing methods, \
+       and the outcomes it generates. The Generative Design window sets them up.",
+    ),
+    (_, "Preserve Geometry") => (
+      "Marks the selected bodies as geometry every outcome keeps.",
+      "Select bosses, pads and mounting faces' bodies first. Loads and constraints go on their faces; \
+       the design space is the box around them plus the margin.",
+    ),
+    (_, "Obstacle Geometry") => (
+      "Marks the selected bodies as space the outcomes stay out of.",
+      "Use bodies filling bolt holes, tool access and clearance for other parts. Inserting an outcome \
+       as B-rep cuts them out exactly, so holes come out round.",
+    ),
+    (_, "Starting Shape") => (
+      "Uses the selected body as the shape the optimisation starts from.",
+      "Its bounds join the design space. Starting from a rough version of the part can steer the \
+       outcome towards it.",
+    ),
+    (_, "Structural Loads") => (
+      "Puts a force or a pressure on the selected faces.",
+      "Set the force (N, X Y Z) or pressure (MPa) in the Generative Design window, select faces of \
+       preserve geometry, then run it. Loads go into the load case picked in the window.",
+    ),
+    (_, "Structural Constraints") => (
+      "Holds the selected faces fixed.",
+      "Pick which axes are fixed in the Generative Design window. A constraint without a load case \
+       named goes into every case.",
+    ),
+    (_, "Study Settings") => (
+      "Objectives, limits, materials and manufacturing methods of the study.",
+      "Maximise stiffness at a mass target or minimise mass within a safety factor; pick materials \
+       and unrestricted, 3-axis or 2.5-axis milling, symmetry planes and a minimum member size.",
+    ),
+    (_, "Pre-check") => (
+      "Checks the study is ready to generate.",
+      "Shows the grid and element counts and warns about loads or constraints that touch no \
+       geometry and load cases without loads.",
+    ),
+    (Design, "Generate") => (
+      "Generates the study's outcomes in the background.",
+      "Every material with every manufacturing method is one outcome, found by topology \
+       optimisation. Watch the progress bar in the window; Stop keeps what's done.",
+    ),
+    (_, "Explore") => (
+      "Compares the outcomes and inserts one into the design.",
+      "The explorer lists each outcome's mass, volume, displacement and safety factor, and whether \
+       it meets the limits. Insert one as a mesh body or as B-rep joined with the preserve geometry.",
+    ),
+
     // MANUFACTURE 3D
     (Manufacture, "Parallel") => (
       "Finishes 3D surfaces with parallel passes across the part.",

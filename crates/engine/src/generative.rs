@@ -25,6 +25,8 @@ const PLANES: [&str; 3] = ["yz", "xz", "xy"];
 
 /// Density of the iso-surface the outcome's body follows.
 pub const ISO: f64 = 0.47;
+/// Most triangles an outcome's surface keeps.
+const MAX_TRIANGLES: usize = 60_000;
 /// Smoothing passes on the outcome's surface.
 const SMOOTHING: usize = 10;
 
@@ -804,6 +806,8 @@ pub fn finish(s: &mut Session, results: Vec<(Job, fox_gen::Outcome)>) -> CmdResu
       let p = job.problem;
       let mesh = fox_gen::surface::extract(&p.grid, &o.density, ISO, SMOOTHING);
       let mesh = fox_gen::surface::drop_islands(&mesh, 0.01);
+      // kept in the design: a few MB at most
+      let mesh = if mesh.triangles() > MAX_TRIANGLES { fox_gen::surface::decimate(&mesh, MAX_TRIANGLES) } else { mesh };
       let volume = mesh.volume();
       Outcome {
         id: s.design.generative[i].next_outcome + 1 + k as u32,
