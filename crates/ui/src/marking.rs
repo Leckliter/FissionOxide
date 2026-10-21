@@ -89,6 +89,8 @@ enum Action {
   Unisolate,
   FindInBrowser(Sel),
   FindInWindow,
+  /// Selectable/Unselectable: stop the canvas picking the body (or let it again).
+  ToggleSelectable(BodyId),
   Workspace(&'static str),
   /// A row that only opens its sub-list.
   Open,
@@ -102,11 +104,18 @@ struct Item {
   /// Shortcut key, drawn on the right of overflow rows.
   hint: Option<String>,
   children: Vec<Item>,
+  /// A greyed row: listed as Fusion lists it, but it can't run here.
+  enabled: bool,
 }
 
 impl Item {
   fn new(action: Action, icon: Icon, label: &str) -> Item {
-    Item { action, icon, label: label.into(), hint: None, children: Vec::new() }
+    Item { action, icon, label: label.into(), hint: None, children: Vec::new(), enabled: true }
+  }
+
+  /// A row Fusion lists that FissionOxide can't run yet, greyed out.
+  fn greyed(icon: Icon, label: &str) -> Item {
+    Item { enabled: false, ..Item::new(Action::Open, icon, label) }
   }
 
   fn cmd(c: Cmd) -> Item {
@@ -520,26 +529,44 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   let properties = || Item::with_label(Cmd::Dialog(Kind::Inspect), "Properties");
   let show_hide = || Item::new(Action::ShowHide, Icon::Eye, "Show/Hide");
   if let Some((body, _)) = cx.face {
+    // Fusion's face list, and only it: no navigation section and no recent commands
+    v.push(Some(Item::greyed(Icon::Select, "Create Selection Set")));
     if cx.planar_face {
       v.push(Some(Item::cmd(Cmd::NewSketch)));
-      // Fusion's Extrude on a face is a press pull of the face
-      v.push(Some(Item::new(Action::Cmd(Cmd::Dialog(Kind::PressPull)), Icon::Extrude, "Extrude")));
+      // Fusion's Extrude on a face extrudes the face: a press pull here, under Extrude's key
+      let mut extrude = Item::new(Action::Cmd(Cmd::Dialog(Kind::PressPull)), Icon::Extrude, "Extrude");
+      extrude.hint = app.key_for(Cmd::Dialog(Kind::Extrude));
+      v.push(Some(extrude));
       v.push(Some(Item::cmd(Cmd::Dialog(Kind::OffsetPlane))));
     }
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Shell))));
     sep(&mut v);
-    if let Some(f) = body_feature(app, body) {
-      edit_feature(&mut v, f);
-      sep(&mut v);
+    match body_feature(app, body) {
+      Some(f) => {
+        v.push(Some(Item::new(
+          Action::EditFeature(f),
+          Icon::Gear,
+          &format!("Edit Feature ({})", feature_name(app, f)),
+        )));
+        match profile_sketch(app, f) {
+          Some(sk) => v.push(Some(Item::new(Action::EditSketch(sk), Icon::Sketch, "Edit Profile Sketch"))),
+          None => v.push(Some(Item::greyed(Icon::Sketch, "Edit Profile Sketch"))),
+        }
+      }
+      None => {
+        v.push(Some(Item::greyed(Icon::Gear, "Edit Feature")));
+        v.push(Some(Item::greyed(Icon::Sketch, "Edit Profile Sketch")));
+      }
     }
+    sep(&mut v);
     v.push(Some(Item::cmd(APPEARANCE)));
+    v.push(Some(Item::greyed(Icon::SurfaceTexture, "Texture Map Controls")));
     v.push(Some(properties()));
     sep(&mut v);
     v.push(Some(show_hide()));
-    if cx.planar_face {
-      v.push(Some(Item::cmd(Cmd::LookAt)));
-    }
+    v.push(Some(Item::new(Action::ToggleSelectable(body), Icon::Select, "Selectable/Unselectable")));
     find(&mut v, Some(Sel::Body { body }));
+    return v;
   } else if cx.edge {
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Fillet))));
     v.push(Some(Item::cmd(Cmd::Dialog(Kind::Chamfer))));
@@ -683,6 +710,17 @@ fn run(app: &mut App, action: Action) {
         _ => find_in_window(app, &bodies, None),
       }
     }
+    Action::ToggleSelectable(body) => {
+      let m = &mut app.ctx_menu;
+      if m.unselectable.contains(&body) {
+        m.unselectable.retain(|b| *b != body);
+      } else {
+        m.unselectable.push(body);
+        app.s.selection.retain(
+          |s| !matches!(s, Sel::Body { body: b } | Sel::Face { body: b, .. } | Sel::Edge { body: b, .. } if *b == body),
+        );
+      }
+    }
     Action::Workspace(w) => panels::switch_workspace(app, w),
     Action::Open => {}
   }
@@ -761,9 +799,10 @@ fn row_top(rect: Rect, items: &[Option<Item>], k: usize) -> f32 {
 }
 
 /// Where the menu goes for a right-click at `center`: the ring centre and the overflow list's
-/// box. Like Fusion, the ring is never covered. The ring is kept inside the canvas and the list
-/// sits under it; when the list won't fit below, the whole menu moves up, and when it can't move
-/// far enough the list opens beside the ring instead.
+/// box. Like Fusion, the ring stays centred on the click (moved only as far as its own boxes
+/// need to be inside the canvas; the slot directions are what the hand remembers) and the list
+/// never covers it: it sits under the ring, flips above it when it won't fit below, and opens
+/// beside it when it fits neither way. Near an edge the list slides sideways; the ring doesn't.
 fn layout(canvas: Rect, center: Pos2, ring: &[Option<Vec2>; 8], list: Vec2) -> (Pos2, Rect) {
   const GAP: f32 = 8.0;
   let inner = canvas.shrink(4.0);
@@ -791,24 +830,24 @@ fn layout(canvas: Rect, center: Pos2, ring: &[Option<Vec2>; 8], list: Vec2) -> (
   center.y += shift(b.top(), b.bottom(), inner.top(), inner.bottom());
   let b = bounds(center);
 
-  // under the ring, moving the menu up as far as it needs and can
-  let over = b.bottom() + GAP + list.y - inner.bottom();
-  let room = (b.top() - inner.top()).max(0.0);
-  if over <= room {
-    let lift = over.max(0.0);
-    let c = center - vec2(0.0, lift);
-    return (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - lift + GAP), list));
+  let centred = center.x - list.x / 2.0;
+  // under the ring
+  if b.bottom() + GAP + list.y <= inner.bottom() {
+    return (center, clamp(canvas, pos2(centred, b.bottom() + GAP), list));
   }
-  // beside the ring, right then left, its top level with the ring's
+  // above it
+  if b.top() - GAP - list.y >= inner.top() {
+    return (center, clamp(canvas, pos2(centred, b.top() - GAP - list.y), list));
+  }
+  // beside it, right then left, its top level with the ring's
   if b.right() + GAP + list.x <= inner.right() {
     return (center, clamp(canvas, pos2(b.right() + GAP, b.top()), list));
   }
   if b.left() - GAP - list.x >= inner.left() {
     return (center, clamp(canvas, pos2(b.left() - GAP - list.x, b.top()), list));
   }
-  // no room anywhere: as high as it goes, the list under it
-  let c = center - vec2(0.0, room);
-  (c, clamp(canvas, pos2(c.x - list.x / 2.0, b.bottom() - room + GAP), list))
+  // no room anywhere: under the ring, kept on the canvas
+  (center, clamp(canvas, pos2(centred, b.bottom() + GAP), list))
 }
 
 /// Keeps a list's box inside the canvas.
@@ -832,20 +871,21 @@ fn draw_list(painter: &egui::Painter, font: &egui::FontId, rect: Rect, items: &[
     match it {
       Some(it) => {
         let row = Rect::from_min_size(pos2(rect.left() + 1.0, y), vec2(rect.width() - 2.0, ROW_H));
-        if hot == Some(k) {
+        if hot == Some(k) && it.enabled {
           painter.rect_filled(row, 0.0, theme::HOVER);
         }
-        icons::draw_color(
-          painter,
-          Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0)),
-          it.icon,
-        );
+        let icon_rect = Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), Vec2::splat(16.0));
+        if it.enabled {
+          icons::draw_color(painter, icon_rect, it.icon);
+        } else {
+          icons::draw(painter, icon_rect, it.icon, theme::MUTED);
+        }
         painter.text(
           row.left_center() + vec2(32.0, 0.0),
           egui::Align2::LEFT_CENTER,
           &it.label,
           font.clone(),
-          theme::TEXT,
+          if it.enabled { theme::TEXT } else { theme::MUTED },
         );
         let mut right = row.right() - 10.0;
         if !it.children.is_empty() {
@@ -1035,11 +1075,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
   let picked: Option<&Item> = if !pointer.is_some_and(|p| canvas.contains(p)) {
     None
   } else if let Some(k) = hot_sub {
+    if sub_items[k].as_ref().is_some_and(|it| !it.enabled) {
+      return;
+    }
     sub_items[k].as_ref()
   } else if pointer.is_some_and(|p| sub_rect.is_some_and(|r| r.contains(p))) {
     // a click between a sub-list's rows keeps the menu open
     return;
   } else if let Some(k) = hot_row {
+    if overflow[k].as_ref().is_some_and(|it| !it.enabled) {
+      // a greyed row does nothing and keeps the menu open
+      return;
+    }
     overflow[k].as_ref()
   } else {
     hot_slot.and_then(|i| ring[i].as_ref())
@@ -1108,25 +1155,58 @@ mod tests {
   }
 
   #[test]
-  fn menu_moves_up_when_the_list_wont_fit_below() {
-    // a face in the middle of the canvas: the ~460 px list doesn't fit under the ring
-    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 800.0));
-    let at = pos2(700.0, 400.0);
+  fn list_flips_above_the_ring_when_it_wont_fit_below() {
+    // Fusion: a right-click at y = 600 of a 790 px window keeps the ring there, the list above
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 790.0));
+    let at = pos2(900.0, 600.0);
     let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
-    assert!(c.y < at.y && (c.x - at.x).abs() < 0.5, "the whole menu moves up: {c:?}");
-    assert!(list.top() > c.y, "the list stays under the ring");
+    assert_eq!(c, at, "the ring stays on the click");
+    assert!(list.bottom() < c.y, "the list opens above the ring: {list:?}");
+    assert!((list.center().x - at.x).abs() < 0.5, "{list:?}");
     ring_clear(canvas, c, &full_ring(), list);
+    // where it fits neither below nor above, it opens beside the ring; the ring still never moves
+    for at in [pos2(650.0, 300.0), pos2(717.0, 430.0)] {
+      let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+      assert_eq!(c, at, "the ring stays on the click");
+      assert!(list.left() > c.x, "the list opens beside the ring: {list:?}");
+      ring_clear(canvas, c, &full_ring(), list);
+    }
   }
 
   #[test]
-  fn list_opens_beside_the_ring_near_the_bottom_of_a_short_canvas() {
+  fn list_slides_sideways_near_the_right_edge_and_the_ring_stays() {
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 1000.0));
+    // the ring's own boxes fit here, so the click is the centre; a wide list shifts left to fit
+    let at = pos2(1150.0, 300.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(600.0, 460.0));
+    assert_eq!(c, at);
+    assert!(list.center().x < at.x && list.top() > at.y, "{list:?}");
+    ring_clear(canvas, c, &full_ring(), list);
+    // the ring moves only as far as its own boxes need, never for the list
+    let at = pos2(1390.0, 300.0);
+    let (c, _) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    let (c_small, _) = layout(canvas, at, &full_ring(), vec2(220.0, 40.0));
+    assert_eq!(c, c_small, "the list's size never moves the ring");
+    assert!(c.x < at.x && c.y == at.y, "{c:?}");
+  }
+
+  #[test]
+  fn list_opens_beside_the_ring_on_a_short_canvas() {
     let canvas = Rect::from_min_size(pos2(40.0, 90.0), vec2(1200.0, 520.0));
-    for x in [200.0, 640.0, 1100.0] {
-      let at = pos2(x, 590.0);
+    // (clicks whose ring boxes fit the canvas, so the ring clamp has nothing to do)
+    for x in [300.0, 640.0, 990.0] {
+      let at = pos2(x, 350.0);
       let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
-      assert!(c.y < at.y, "the ring is lifted inside the canvas");
+      assert_eq!(c, at, "the ring stays on the click");
+      assert!(list.left() > c.x || list.right() < c.x, "the list opens beside the ring: {list:?}");
       ring_clear(canvas, c, &full_ring(), list);
     }
+    // off the bottom: the ring is lifted only so its own boxes are inside, however long the list
+    let at = pos2(640.0, 590.0);
+    let (c, list) = layout(canvas, at, &full_ring(), vec2(220.0, 460.0));
+    let (c_small, _) = layout(canvas, at, &full_ring(), vec2(220.0, 40.0));
+    assert!(c.y < at.y && c == c_small, "{c:?} vs {c_small:?}");
+    ring_clear(canvas, c, &full_ring(), list);
   }
 
   #[test]
@@ -1148,12 +1228,36 @@ mod tests {
     let face = app.s.model.bodies[0].faces().iter().find(|f| f.kind == SurfaceKind::Plane).unwrap().id;
     app.s.selection = vec![Sel::Face { body, face }];
     let cx = context(&app);
-    let list = labels(&overflow(&app, &cx));
-    for want in ["Create Sketch", "Extrude", "Offset Plane", "Shell", "Appearance", "Properties", "Show/Hide"] {
-      assert!(list.iter().any(|l| l == want), "{want} missing from {list:?}");
+    let items = overflow(&app, &cx);
+    let list = labels(&items);
+    // Fusion's face list, and nothing after it: no navigation section, no recent commands
+    assert_eq!(
+      list,
+      [
+        "Create Selection Set",
+        "Create Sketch",
+        "Extrude",
+        "Offset Plane",
+        "Shell",
+        "Edit Feature (Box1)",
+        "Edit Profile Sketch",
+        "Appearance",
+        "Texture Map Controls",
+        "Properties",
+        "Show/Hide",
+        "Selectable/Unselectable",
+        "Find in Browser",
+        "Find in Window",
+      ]
+    );
+    let row = |l: &str| items.iter().flatten().find(|i| i.label == l).unwrap();
+    assert_eq!(row("Extrude").hint.as_deref(), Some("E"), "Extrude under Extrude's key, not Press Pull's");
+    assert_eq!(row("Show/Hide").hint.as_deref(), Some("V"));
+    // rows FissionOxide can't run yet are listed greyed; a box has no profile sketch
+    for l in ["Create Selection Set", "Edit Profile Sketch", "Texture Map Controls"] {
+      assert!(!row(l).enabled, "{l} is greyed");
     }
-    assert!(list.iter().any(|l| l.starts_with("Edit Feature")), "{list:?}");
-    assert!(list.iter().any(|l| l == "Find in Browser") && list.iter().any(|l| l == "Find in Window"));
+    assert!(row("Edit Feature (Box1)").enabled && row("Selectable/Unselectable").enabled);
 
     let edge = app.s.model.bodies[0].edges()[0].id;
     app.s.selection = vec![Sel::Edge { body, edge }];
@@ -1214,6 +1318,35 @@ mod tests {
     assert!(!sc.lines.iter().any(|l| l.color == scene::HOVER_COLOR));
     end_frame(&mut app, &ctx);
     assert!(app.ctx_menu.peek_sketches.is_empty(), "the highlight goes when the pointer leaves");
+  }
+
+  #[test]
+  fn face_list_toggles_the_body_selectable() {
+    let mut app = boxed();
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    run(&mut app, Action::ToggleSelectable(body));
+    assert_eq!(app.ctx_menu.unselectable, vec![body]);
+    assert!(app.s.selection.is_empty(), "an unselectable body's face is dropped from the selection");
+    run(&mut app, Action::ToggleSelectable(body));
+    assert!(app.ctx_menu.unselectable.is_empty());
+  }
+
+  #[test]
+  fn extruded_face_lists_edit_profile_sketch() {
+    let mut app = App::with_session(Session::default());
+    let sk = app.run("sketch.create", json!({"plane": "xy"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rect", json!({"corner1": [0, 0], "corner2": [10, 10]}));
+    app.run("extrude", json!({"sketch": sk, "profiles": [0], "distance": 5}));
+    assert_eq!(app.s.model.bodies.len(), 1, "no extrusion");
+    let body = app.s.model.bodies[0].id;
+    let face = app.s.model.bodies[0].faces()[0].id;
+    app.s.selection = vec![Sel::Face { body, face }];
+    let cx = context(&app);
+    let items = overflow(&app, &cx);
+    let row = items.iter().flatten().find(|i| i.label == "Edit Profile Sketch").expect("Edit Profile Sketch");
+    assert!(row.enabled && matches!(row.action, Action::EditSketch(f) if f.0 == sk as u32));
   }
 
   #[test]
