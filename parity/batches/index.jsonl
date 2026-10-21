@@ -23,7 +23,7 @@
 {"name": "ui-dialog-docking", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_915e617c (requested 2026-10-21)"}
 {"name": "ui-feature-manipulators", "items": 3, "status": "fixing", "pr": null, "fixer": "cloud task_629d4f2b (requested 2026-10-21)"}
 {"name": "ui-marking-menu-placement", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_8d3500f4 (requested 2026-10-21)"}
-{"name": "ui-preferences-full", "items": 2, "status": "fixing", "pr": null, "fixer": "cloud task_b94c16e9 (requested 2026-10-21)"}
+{"name": "ui-preferences-full", "items": 2, "status": "done", "pr": "41a35c6", "fixer": "cloud task_b94c16e9 (requested 2026-10-21)"}
 {"name": "ui-ribbon-responsive", "items": 4, "status": "done", "pr": "dfb5102", "fixer": "cloud task_730ea855 (requested 2026-10-21)"}
 {"name": "ui-sketch-entry-polish", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_f00a618b (requested 2026-10-21)"}
 {"name": "ui-feature-dialogs-2", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_908f51b6 (requested 2026-10-21)"}
