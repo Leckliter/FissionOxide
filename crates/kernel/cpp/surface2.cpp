@@ -250,7 +250,7 @@ TopoDS_Face ruled_strip(const TopoDS_Face &f, const TopoDS_Edge &e, double d, bo
 
 // The side edge of an extension strip that leaves the point v (not the strip's copy of the
 // extended edge `base`), and its far end. Null when the strip has none there.
-TopoDS_Edge side_edge(const TopoDS_Face &strip, const TopoDS_Edge &base, const gp_Pnt &v, double tol, gp_Pnt &far) {
+TopoDS_Edge side_edge(const TopoDS_Face &strip, const TopoDS_Edge &base, const gp_Pnt &v, double tol, gp_Pnt &far_end) {
   for (TopExp_Explorer ex(strip, TopAbs_EDGE); ex.More(); ex.Next()) {
     TopoDS_Edge e = TopoDS::Edge(ex.Current());
     if (BRep_Tool::Degenerated(e)) continue;
@@ -272,7 +272,7 @@ TopoDS_Edge side_edge(const TopoDS_Face &strip, const TopoDS_Edge &base, const g
     gp_Pnt mid = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
     BRepExtrema_DistShapeShape dist(BRepBuilderAPI_MakeVertex(mid).Vertex(), base);
     if (dist.IsDone() && dist.NbSolution() > 0 && dist.Value() < tol) continue;
-    far = other;
+    far_end = other;
     return e;
   }
   return TopoDS_Edge();
