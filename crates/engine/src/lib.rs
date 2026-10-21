@@ -551,6 +551,8 @@ mod tests_curves3d;
 #[cfg(test)]
 mod tests_cut;
 #[cfg(test)]
+mod tests_ecad;
+#[cfg(test)]
 mod tests_files;
 #[cfg(test)]
 mod tests_hub_server;

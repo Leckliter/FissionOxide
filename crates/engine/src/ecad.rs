@@ -337,7 +337,11 @@ fn wire(s: &mut Session, p: &Value) -> CmdResult {
     let mut ps: Vec<P> = list.iter().map(|v| sch_point(pr, v)).collect::<Result<_, _>>()?;
     // two pins straight to each other: an L through the corner
     if ps.len() == 2 && (ps[0][0] - ps[1][0]).abs() > 1e-6 && (ps[0][1] - ps[1][1]).abs() > 1e-6 && p.get("direct") != Some(&Value::Bool(true)) {
-      ps.insert(1, [ps[1][0], ps[0][1]]);
+      // the corner that lands on no other pin
+      let pins = fox_ecad::schematic::placed_pins(&pr.schematic, &pr.libs());
+      let free = |c: P| !pins.iter().any(|q| fox_ecad::geom::near(q.at, c));
+      let (c1, c2) = ([ps[1][0], ps[0][1]], [ps[0][0], ps[1][1]]);
+      ps.insert(1, if free(c1) || !free(c2) { c1 } else { c2 });
     }
     let n = ps.len() - 1;
     for w in ps.windows(2) {
@@ -433,8 +437,11 @@ fn schematic_delete(s: &mut Session, p: &Value) -> CmdResult {
 fn outline_source(s: &Session, src: &Value) -> Result<(Vec<P>, PcbOutline, Option<fox_model::PlaneRef>), CmdError> {
   if let Some(id) = src.get("sketch").and_then(Value::as_u64) {
     let id = FeatureId(u32::try_from(id).map_err(|_| CmdError::new("bad sketch id"))?);
-    let sk = s.design.sketch(id)?;
-    let profiles = find_profiles(sk);
+    // the solved sketch's regions (the stored sketch, when it hasn't been solved yet)
+    let profiles = match s.model.sketches.get(&id) {
+      Some(r) => r.profiles.clone(),
+      None => find_profiles(s.design.sketch(id)?),
+    };
     let prof = match src.get("point").and_then(pt) {
       Some(q) => profiles.iter().filter(|pr| pr.contains(q)).min_by(|a, b| a.area().abs().total_cmp(&b.area().abs())),
       None => profiles.iter().max_by(|a, b| a.area().abs().total_cmp(&b.area().abs())),
