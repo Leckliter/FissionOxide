@@ -85,7 +85,7 @@ fn groups(n: &[bool; 8]) -> usize {
     }
     a
   }
-  let mut join = |p: &mut [usize; 8], a: usize, b: usize| {
+  let join = |p: &mut [usize; 8], a: usize, b: usize| {
     let (ra, rb) = (find(p, a), find(p, b));
     p[ra] = rb;
   };
@@ -459,9 +459,9 @@ fn extend(pts: &mut Vec<P>, at_end: bool, grid: &Grid, reach: f64) {
   }
 }
 
-/// Bend angle (degrees, 180 = straight) at `i`, measured over [`CORNER_REACH`] points.
-fn bend(q: &[P], i: usize) -> f64 {
-  let r = CORNER_REACH.min(i).min(q.len() - 1 - i);
+/// Bend angle (degrees, 180 = straight) at `i`, measured over `reach` points either side.
+fn bend(q: &[P], i: usize, reach: usize) -> f64 {
+  let r = reach.min(i).min(q.len() - 1 - i);
   if r == 0 {
     return 180.0;
   }
@@ -473,21 +473,74 @@ fn bend(q: &[P], i: usize) -> f64 {
   ((a[0] * b[0] + a[1] * b[1]) / (la * lb)).clamp(-1.0, 1.0).acos().to_degrees()
 }
 
-/// Indices of sharp corners: bends under `limit` that are the sharpest nearby.
-fn corners(q: &[P], limit: f64) -> Vec<usize> {
-  if limit <= 0.0 || q.len() < 2 * CORNER_REACH + 1 {
+/// Indices of sharp corners: bends under `limit` that are the sharpest nearby. Thinning rounds a
+/// stroke's corners over about half its width, so `reach` grows with it.
+fn corners(q: &[P], limit: f64, reach: usize) -> Vec<usize> {
+  if limit <= 0.0 || q.len() < 2 * reach + 1 {
     return Vec::new();
   }
-  let b: Vec<f64> = (0..q.len()).map(|i| bend(q, i)).collect();
+  let b: Vec<f64> = (0..q.len()).map(|i| bend(q, i, reach)).collect();
   let mut out: Vec<usize> = Vec::new();
-  for i in CORNER_REACH..q.len() - CORNER_REACH {
-    let lo = i.saturating_sub(CORNER_REACH);
-    let hi = (i + CORNER_REACH).min(q.len() - 1);
+  for i in reach..q.len() - reach {
+    let lo = i.saturating_sub(reach);
+    let hi = (i + reach).min(q.len() - 1);
     if b[i] < limit && (lo..=hi).all(|j| b[j] > b[i] || (b[j] == b[i] && j >= i)) {
-      if out.last().is_some_and(|&l| i - l <= CORNER_REACH) {
+      if out.last().is_some_and(|&l| i - l <= reach) {
         continue;
       }
       out.push(i);
+    }
+  }
+  out
+}
+
+/// Where the lines `a`–`b` and `c`–`d` cross, if they aren't parallel.
+fn intersect(a: P, b: P, c: P, d: P) -> Option<P> {
+  let (u, v) = (sub(b, a), sub(d, c));
+  let den = u[0] * v[1] - u[1] * v[0];
+  if den.abs() < 1e-9 * u[0].hypot(u[1]) * v[0].hypot(v[1]) {
+    return None;
+  }
+  let w = sub(c, a);
+  let t = (w[0] * v[1] - w[1] * v[0]) / den;
+  Some([a[0] + u[0] * t, a[1] + u[1] * t])
+}
+
+/// Fits `q` run by run between the corners `cs`; where two lines meet at a corner, their shared
+/// point moves to where the lines cross (thinning rounded it). `wrap`: `q` is a loop starting
+/// and ending at a corner.
+fn fit_runs(q: &[P], cs: &[usize], reach: usize, wrap: bool, options: &Options) -> Vec<Seg> {
+  let mut out = Vec::new();
+  let mut joins: Vec<(usize, usize)> = Vec::new();
+  let mut from = 0;
+  for &k in cs.iter().chain(std::iter::once(&(q.len() - 1))) {
+    if k > from {
+      fit_run(&q[from..=k], options.tolerance, options.fit, reach, &mut out);
+      if k + 1 < q.len() && !out.is_empty() {
+        joins.push((out.len() - 1, k));
+      }
+      from = k;
+    }
+  }
+  if wrap && out.len() >= 2 {
+    joins.push((out.len() - 1, 0));
+  }
+  for (si, k) in joins {
+    let next = (si + 1) % out.len();
+    let (Seg::Line { a: a0, b: b0 }, Seg::Line { a: a1, b: b1 }) = (out[si], out[next]) else { continue };
+    let n = q.len() - 1;
+    let r = (2 * reach).min(n / 2).max(1);
+    let (before, after) = if k == 0 { (q[n - r], q[r]) } else { (q[k.saturating_sub(r)], q[(k + r).min(n)]) };
+    let (far0, far1) = (a0, b1);
+    if dist(far0, before) < 1e-9 || dist(after, far1) < 1e-9 {
+      continue;
+    }
+    if let Some(x) = intersect(far0, before, after, far1)
+      && dist(x, b0) <= 2.0 * r as f64 + 1.0
+    {
+      out[si] = Seg::Line { a: a0, b: x };
+      out[next] = Seg::Line { a: x, b: b1 };
+      let _ = a1;
     }
   }
   out
@@ -567,14 +620,24 @@ fn tangent(q: &[P], i: usize, forward: bool) -> P {
   [d[0] / l, d[1] / l]
 }
 
-/// Fits one run between corners (or a junction and a corner) within `tol`.
-fn fit_run(q: &[P], tol: f64, fit: Fit, out: &mut Vec<Seg>) {
+/// Fits one run between corners (or a junction and a corner) within `tol`. The `trim` points at
+/// each end of a long run may stray further from a line: thinning pulls a skeleton about near
+/// its corners and junctions.
+fn fit_run(q: &[P], tol: f64, fit: Fit, trim: usize, out: &mut Vec<Seg>) {
   if q.len() < 2 {
     return;
   }
   let (a, b) = (q[0], q[q.len() - 1]);
   let (worst, at) = chord_worst(q);
-  if worst <= tol && dist(a, b) > 1e-9 {
+  // the line through the run's inner part, against which its ends may stray a little more
+  let trimmed = q.len() > 6 * trim.max(1) && {
+    let (ia, ib) = (q[trim], q[q.len() - 1 - trim]);
+    let d = sub(ib, ia);
+    let l = d[0].hypot(d[1]);
+    let off = |p: &P| ((p[0] - ia[0]) * d[1] - (p[1] - ia[1]) * d[0]).abs() / l;
+    l > 1e-9 && q[trim..q.len() - trim].iter().all(|p| off(p) <= tol) && q.iter().all(|p| off(p) <= 3.0 * tol)
+  };
+  if (worst <= tol || trimmed) && dist(a, b) > 1e-9 {
     out.push(Seg::Line { a, b });
     return;
   }
@@ -598,8 +661,8 @@ fn fit_run(q: &[P], tol: f64, fit: Fit, out: &mut Vec<Seg>) {
     return;
   }
   let k = at.clamp(1, q.len() - 2);
-  fit_run(&q[..=k], tol, fit, out);
-  fit_run(&q[k..], tol, fit, out);
+  fit_run(&q[..=k], tol, fit, trim, out);
+  fit_run(&q[k..], tol, fit, trim, out);
 }
 
 /// Least-squares circle (Kåsa) through the points: centre and radius.
@@ -628,11 +691,11 @@ fn circle(q: &[P]) -> Option<(P, f64)> {
   Some(([mx + uc, my + vc], r))
 }
 
-/// Fits a branch: split at corners, each run fitted.
-fn fit_path(pts: &[P], closed: bool, options: &Options) -> Vec<Seg> {
+/// Fits a branch of a stroke `width` px wide: split at corners, each run fitted.
+fn fit_path(pts: &[P], closed: bool, width: f64, options: &Options) -> Vec<Seg> {
   let tol = options.tolerance;
-  let mut cs = corners(pts, options.corner_angle);
-  let mut out = Vec::new();
+  let reach = ((width / 2.0).round() as usize + 1).clamp(CORNER_REACH, 3 * CORNER_REACH);
+  let cs = corners(pts, options.corner_angle, reach);
   if closed {
     let ring = &pts[..pts.len() - 1];
     if cs.is_empty()
@@ -647,27 +710,14 @@ fn fit_path(pts: &[P], closed: bool, options: &Options) -> Vec<Seg> {
     let s = cs.first().copied().unwrap_or(0);
     let mut q: Vec<P> = ring[s..].iter().chain(&ring[..s]).copied().collect();
     q.push(q[0]);
-    cs = corners(&q, options.corner_angle);
+    let mut cs = corners(&q, options.corner_angle, reach);
+    let wrap = !cs.is_empty() || s != 0;
     if cs.is_empty() {
       cs.push(q.len() / 2);
     }
-    let mut from = 0;
-    for &k in cs.iter().chain(std::iter::once(&(q.len() - 1))) {
-      if k > from {
-        fit_run(&q[from..=k], tol, options.fit, &mut out);
-        from = k;
-      }
-    }
-    return out;
+    return fit_runs(&q, &cs, reach, wrap && corners(pts, options.corner_angle, reach).first() == Some(&s), options);
   }
-  let mut from = 0;
-  for &k in cs.iter().chain(std::iter::once(&(pts.len() - 1))) {
-    if k > from {
-      fit_run(&pts[from..=k], tol, options.fit, &mut out);
-      from = k;
-    }
-  }
-  out
+  fit_runs(pts, &cs, reach, false, options)
 }
 
 /// The strokes of a mask's centre lines.
@@ -726,7 +776,7 @@ pub(crate) fn strokes(mask: &[bool], w: usize, h: usize, options: &Options) -> V
     if length(&p.pts) < 1.0 && !closed {
       continue;
     }
-    let segs = fit_path(&p.pts, closed, options);
+    let segs = fit_path(&p.pts, closed, width, options);
     if !segs.is_empty() {
       out.push(Stroke { segs, closed, width });
     }

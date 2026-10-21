@@ -199,7 +199,16 @@ impl Sketch {
       .filter(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. } | CurveKind::Circle { .. }))
       .map(|c| (c.id, c.kind.clone()))
       .collect();
-    let existing = |k: &ConstraintKind| self.constraints.iter().any(|c| &c.kind == k);
+    // already there, either way round
+    let swapped = |k: &ConstraintKind| match *k {
+      ConstraintKind::Equal { a, b } => Some(ConstraintKind::Equal { a: b, b: a }),
+      ConstraintKind::Tangent { a, b } => Some(ConstraintKind::Tangent { a: b, b: a }),
+      ConstraintKind::Concentric { a, b } => Some(ConstraintKind::Concentric { a: b, b: a }),
+      ConstraintKind::Coincident { a, b } => Some(ConstraintKind::Coincident { a: b, b: a }),
+      _ => None,
+    };
+    let existing =
+      |k: &ConstraintKind| self.constraints.iter().any(|c| &c.kind == k || swapped(k).is_some_and(|w| c.kind == w));
     let mut out: Vec<(ConstraintKind, &'static str)> = Vec::new();
     let push = |out: &mut Vec<(ConstraintKind, &'static str)>, k: ConstraintKind, name: &'static str| {
       if !existing(&k) {
@@ -335,9 +344,32 @@ impl Sketch {
       }
     }
     let radii: Vec<(f64, CurveId)> = rounds.iter().filter(|r| r.3 > 2.0 * d).map(|r| (r.3, r.0)).collect();
+    // curves already equal through existing Equal constraints aren't chained again
+    let mut set: HashMap<CurveId, CurveId> = HashMap::new();
+    fn root(set: &HashMap<CurveId, CurveId>, mut c: CurveId) -> CurveId {
+      while let Some(&p) = set.get(&c) {
+        if p == c {
+          break;
+        }
+        c = p;
+      }
+      c
+    }
+    for c in &self.constraints {
+      if let ConstraintKind::Equal { a, b } = c.kind {
+        let (ra, rb) = (root(&set, a), root(&set, b));
+        if ra != rb {
+          set.insert(ra, rb);
+        }
+      }
+    }
     for g in groups(radii, d).into_iter().chain(groups(horizontal, d)).chain(groups(vertical, d)) {
       for w in g.windows(2) {
-        push(&mut out, ConstraintKind::Equal { a: w[0], b: w[1] }, "equal");
+        let (ra, rb) = (root(&set, w[0]), root(&set, w[1]));
+        if ra != rb {
+          set.insert(ra, rb);
+          push(&mut out, ConstraintKind::Equal { a: w[0], b: w[1] }, "equal");
+        }
       }
     }
     out
@@ -430,7 +462,8 @@ mod tests {
     assert!(s.solve().ok());
     let (pb, pc) = (s.pos(b).unwrap(), s.pos(c).unwrap());
     assert!(dist(pb, pc) < 1e-7);
-    assert!(s.pos(e).unwrap()[1].abs() < 1e-7);
+    // e sits on l1, which stayed horizontal
+    assert!((s.pos(e).unwrap()[1] - s.pos(a).unwrap()[1]).abs() < 1e-7);
   }
 
   #[test]

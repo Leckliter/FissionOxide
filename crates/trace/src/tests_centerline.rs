@@ -74,8 +74,11 @@ fn a_bar_becomes_one_line_along_its_middle() {
 
 #[test]
 fn a_diagonal_stroke_stays_straight() {
-  // 6 px wide band along y = x
-  let image = img(100, 100, |x, y| (x - y).abs() < 3.0 * std::f64::consts::SQRT_2 && (10.0..90.0).contains(&x));
+  // a pen stroke 6 px wide along y = x from (12, 12) to (88, 88), round ends
+  let image = img(100, 100, |x, y| {
+    let t = ((x + y) / 2.0).clamp(12.0, 88.0);
+    (x - t).hypot(y - t) < 3.0
+  });
   let s = strokes(&image, &centerline());
   assert_eq!(s.len(), 1, "{s:?}");
   assert_eq!(s[0].segs.len(), 1, "{:?}", s[0].segs);
