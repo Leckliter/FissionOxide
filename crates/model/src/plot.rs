@@ -15,6 +15,8 @@ pub enum Pen {
   Center,
   /// Sheet border and title block.
   Border,
+  /// Datum target lines and alternate positions (long, short, short).
+  Phantom,
 }
 
 impl Pen {
@@ -23,7 +25,7 @@ impl Pen {
       Pen::Visible => 0.5,
       Pen::Border => 0.7,
       Pen::Hidden => 0.3,
-      Pen::Thin | Pen::Center => 0.18,
+      Pen::Thin | Pen::Center | Pen::Phantom => 0.18,
     }
   }
 
@@ -32,6 +34,7 @@ impl Pen {
     match self {
       Pen::Hidden => &[3.0, 1.5],
       Pen::Center => &[8.0, 1.5, 1.5, 1.5],
+      Pen::Phantom => &[8.0, 1.5, 1.5, 1.5, 1.5, 1.5],
       _ => &[],
     }
   }
@@ -43,6 +46,7 @@ impl Pen {
       Pen::Thin => "THIN",
       Pen::Center => "CENTER",
       Pen::Border => "BORDER",
+      Pen::Phantom => "PHANTOM",
     }
   }
 }

@@ -1,7 +1,7 @@
 //! Drawing commands for sheets, revisions, baseline and chain dimensions, welding symbols and
 //! datum targets.
 
-use fox_model::drawing::{DrawingDim, Revision, SheetSize, WeldKind, WeldSide, WeldSymbol};
+use fox_model::drawing::{BackWeld, DrawingDim, Revision, SheetSize, WeldContour, WeldKind, WeldSide, WeldSymbol};
 use serde_json::{Value, json};
 
 use super::{annotate, axis_of, drawing_id, offset_of, opt_num, parse_scale, points_of, sheet_of, view_of};
@@ -105,15 +105,32 @@ pub(super) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
         Some(v) => v.to_string(),
       };
       let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+      let contour = |k: &str| match opt_str(p, k).map(str::trim) {
+        None | Some("") | Some("none") => Ok(None),
+        Some(t) => WeldContour::parse(t)
+          .map(Some)
+          .ok_or(CmdError::new(format!("unknown contour '{t}' (flush, convex, concave)"))),
+      };
+      let back = match opt_str(p, "back").map(str::trim) {
+        None | Some("") | Some("none") => None,
+        Some(t) => {
+          Some(BackWeld::parse(t).ok_or(CmdError::new(format!("unknown back weld '{t}' (back, melt_through)")))?)
+        }
+      };
       let symbol = WeldSymbol {
-        kind,
-        side,
         size: text("size"),
         length: text("length"),
         all_around: flag("all_around"),
         field: flag("field"),
         tail: text("tail"),
+        contour: contour("contour")?,
+        finish: text("finish").to_ascii_uppercase(),
+        other_contour: contour("other_contour")?,
+        other_finish: text("other_finish").to_ascii_uppercase(),
+        back,
+        ..WeldSymbol::new(kind, side)
       };
+      symbol.check().map_err(CmdError::new)?;
       let dim = DrawingDim::Weld {
         view: view_of(s, id, p)?,
         point: req_vec3(p, "point")?,
@@ -138,9 +155,23 @@ pub(super) fn run(s: &mut Session, name: &str, p: &Value) -> Option<CmdResult> {
       if area < 0.0 {
         return Err(CmdError::new("the target area can't be negative"));
       }
+      let point = req_vec3(p, "point")?;
+      let end = match p.get("end") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(req_vec3(p, "end")?),
+      };
+      if let Some(e) = end {
+        if area > 0.0 {
+          return Err(CmdError::new("a datum target is a point, a line ('end') or an area, not both"));
+        }
+        if (0..3).map(|i| (e[i] - point[i]).powi(2)).sum::<f64>().sqrt() < 1e-9 {
+          return Err(CmdError::new("a target line needs 'end' apart from 'point'"));
+        }
+      }
       let dim = DrawingDim::DatumTarget {
         view: view_of(s, id, p)?,
-        point: req_vec3(p, "point")?,
+        point,
+        end,
         offset: offset_of(p)?.unwrap_or([12.0, 12.0]),
         label,
         area,

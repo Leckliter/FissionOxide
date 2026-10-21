@@ -557,6 +557,108 @@ fn weld_symbols_datum_targets_and_composite_frames() {
 }
 
 #[test]
+fn weld_contours_finishes_and_back_welds() {
+  let mut s = Session::default();
+  bar(&mut s);
+  let weld = |extra: Value| {
+    let mut p = json!({"view": 1, "point": [100, 0, 10], "kind": "v", "size": 6});
+    for (k, v) in extra.as_object().unwrap() {
+      p[k] = v.clone();
+    }
+    p
+  };
+  let thin = |e: &[Ent]| lines(e, "THIN").len();
+  let t0 = thin(&dxf(&mut s));
+  run(&mut s, "drawing.weld", weld(json!({"contour": "convex", "finish": "g", "back": "melt_through"})));
+  let e = dxf(&mut s);
+  assert!(texts(&e).iter().any(|t| t == "G"), "{:?}", texts(&e));
+  // the symbol, its contour and the half circle all drawn
+  assert!(thin(&e) > t0 + 20);
+  run(
+    &mut s,
+    "drawing.weld",
+    weld(json!({"side": "both", "contour": "flush", "finish": "M", "other_contour": "concave", "other_finish": "R"})),
+  );
+  let t = info_text(&mut s);
+  for want in ["G", "M", "R"] {
+    assert!(t.iter().any(|x| x == want), "missing {want}: {t:?}");
+  }
+  for bad in [
+    json!({"finish": "G"}),
+    json!({"contour": "flush", "finish": "Q"}),
+    json!({"contour": "wavy"}),
+    json!({"other_contour": "flush"}),
+    json!({"kind": "fillet", "back": "back"}),
+    json!({"side": "both", "back": "melt_through"}),
+    json!({"back": "sideways"}),
+  ] {
+    assert!(s.execute("drawing.weld", &weld(bad.clone())).is_err(), "{bad}");
+  }
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.drawings, s.design.drawings);
+}
+
+#[test]
+fn datum_target_lines() {
+  let mut s = Session::default();
+  bar(&mut s);
+  run(&mut s, "drawing.datum_target", json!({"view": 1, "point": [20, 0, 10], "end": [180, 0, 10], "label": "A3"}));
+  let e = dxf(&mut s);
+  let phantom = lines(&e, "PHANTOM");
+  assert_eq!(phantom.len(), 1);
+  let (a, b) = phantom[0];
+  // 160 model mm at 1:1, along the bar's top edge
+  assert!(((b[0] - a[0]).abs() - 160.0).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-9, "{a:?} {b:?}");
+  assert!(texts(&e).iter().any(|t| t == "A3"));
+  // ISO 5459: a thin line between crosses
+  run(&mut s, "drawing.set", json!({"standard": "iso"}));
+  assert!(lines(&dxf(&mut s), "PHANTOM").is_empty());
+  for bad in [
+    json!({"view": 1, "point": [20, 0, 10], "end": [180, 0, 10], "area": 4, "label": "A4"}),
+    json!({"view": 1, "point": [20, 0, 10], "end": [20, 0, 10], "label": "A4"}),
+  ] {
+    assert!(s.execute("drawing.datum_target", &bad).is_err(), "{bad}");
+  }
+  let back = fox_model::Design::from_json(&s.design.to_json()).unwrap();
+  assert_eq!(back.drawings, s.design.drawings);
+}
+
+#[test]
+fn snap_points_on_the_sheet() {
+  use fox_model::drawing::{nearest_snap, render_sheet_snaps};
+  let mut s = Session::default();
+  bar(&mut s);
+  let snaps = |s: &Session| {
+    let d = &s.design.drawings[0];
+    render_sheet_snaps(d, &s.design, &s.model, d.sheet_list()[0].id).unwrap().1
+  };
+  let all = snaps(&s);
+  let at = |p: [f64; 3]| all.iter().find(|x| x.point == p).map(|x| x.at);
+  // the front view sees the y = 0 face: the corners behind it don't snap
+  let (a, b) = (at([0.0, 0.0, 0.0]).unwrap(), at([200.0, 0.0, 10.0]).unwrap());
+  assert!(at([200.0, 20.0, 10.0]).is_none());
+  assert!(((b[0] - a[0]) - 200.0).abs() < 1e-6 && ((b[1] - a[1]) - 10.0).abs() < 1e-6, "{a:?} {b:?}");
+  // the middle of the bottom edge
+  assert!(at([100.0, 0.0, 0.0]).is_some());
+  // a click near a corner finds it; one in the middle of nowhere doesn't
+  let hit = nearest_snap(&all, [b[0] + 0.8, b[1] - 0.5], 2.0).unwrap();
+  assert_eq!((hit.view, hit.point), (1, [200.0, 0.0, 10.0]));
+  assert!(nearest_snap(&all, [b[0] + 30.0, b[1] + 30.0], 2.0).is_none());
+  // a picked pair dimensions the true length
+  run(
+    &mut s,
+    "drawing.dimension",
+    json!({"view": hit.view, "a": [0, 0, 0], "b": hit.point, "orientation": "horizontal"}),
+  );
+  assert!(info_text(&mut s).iter().any(|t| t == "200"));
+  // nothing snaps inside a broken-out stretch
+  run(&mut s, "drawing.break", json!({"view": 1, "from": 50, "to": 150}));
+  let broken = snaps(&s);
+  assert!(!broken.iter().any(|x| x.point == [100.0, 0.0, 0.0]));
+  assert!(broken.iter().any(|x| x.point == [200.0, 0.0, 10.0]));
+}
+
+#[test]
 fn revision_table() {
   let mut s = Session::default();
   bar(&mut s);

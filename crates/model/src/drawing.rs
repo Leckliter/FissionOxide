@@ -25,7 +25,7 @@ pub use annotate::{Characteristic, Datums, FinishProcess, MaterialCondition, Sta
 pub use breaks::{BreakDirection, DEFAULT_GAP, ViewBreak};
 pub use follow::{EdgeAt, EdgePoint};
 pub use sheets::{FIRST_SHEET, Revision, Sheet};
-pub use weld::{FrameTier, WeldKind, WeldSide, WeldSymbol};
+pub use weld::{BackWeld, FINISHES, FrameTier, WeldContour, WeldKind, WeldSide, WeldSymbol};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Drawing {
@@ -371,10 +371,13 @@ pub enum DrawingDim {
     offset: [f64; 2],
     symbol: WeldSymbol,
   },
-  /// A datum target: a point (`area` 0) or a circular area of `area` model mm across.
+  /// A datum target: a point (`area` 0), a line from `point` to `end`, or a circular area of
+  /// `area` model mm across.
   DatumTarget {
     view: u32,
     point: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end: Option<[f64; 3]>,
     #[serde(default = "leader_offset")]
     offset: [f64; 2],
     label: String,
@@ -507,6 +510,8 @@ struct Projected {
   cuts: [Vec<breaks::Cut>; 2],
   /// Position in the drawing's view list (section and detail letters).
   n: usize,
+  /// Model points a click on the view snaps to (see [`SnapPoint`]).
+  snaps: Vec<DVec3>,
 }
 
 impl Projected {
@@ -551,6 +556,32 @@ pub fn render_sheets(d: &Drawing, design: &Design, model: &Model) -> Result<Vec<
 /// Lays one sheet of the drawing out: its views, their dimensions and annotations, its notes and
 /// its title block (the first sheet also gets the parts list and the revision table).
 pub fn render_sheet(d: &Drawing, design: &Design, model: &Model, sheet: u32) -> Result<Plot, String> {
+  render_sheet_snaps(d, design, model, sheet).map(|r| r.0)
+}
+
+/// A model point a click on the sheet snaps to: a vertex, the middle of an edge or a circle's
+/// centre, where a view shows it (`at`, sheet mm). Where points stack up along the line of
+/// sight, the one nearest the viewer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapPoint {
+  pub view: u32,
+  pub point: [f64; 3],
+  pub at: [f64; 2],
+}
+
+/// The snap point nearest `at` (sheet mm), no further than `within`.
+pub fn nearest_snap(snaps: &[SnapPoint], at: [f64; 2], within: f64) -> Option<SnapPoint> {
+  let dist = |s: &SnapPoint| (s.at[0] - at[0]).hypot(s.at[1] - at[1]);
+  snaps.iter().filter(|s| dist(s) <= within).min_by(|a, b| dist(a).total_cmp(&dist(b))).copied()
+}
+
+/// [`render_sheet`], and the points a click on the sheet snaps to.
+pub fn render_sheet_snaps(
+  d: &Drawing,
+  design: &Design,
+  model: &Model,
+  sheet: u32,
+) -> Result<(Plot, Vec<SnapPoint>), String> {
   let sheets = d.sheet_list();
   let ordinal = sheets.iter().position(|s| s.id == sheet).ok_or(format!("no sheet {sheet} in the drawing"))?;
   let this = &sheets[ordinal];
@@ -710,9 +741,10 @@ pub fn render_sheet(d: &Drawing, design: &Design, model: &Model, sheet: u32) -> 
           weld::weld(&mut plot, std, anchor(point), *offset, symbol);
         }
       }
-      DrawingDim::DatumTarget { point, offset, label, area, .. } => {
+      DrawingDim::DatumTarget { point, end, offset, label, area, .. } => {
         let Some(pv) = pv else { continue };
-        weld::datum_target(&mut plot, std, anchor(point), *offset, label, *area, scale * pv.mul);
+        let end = end.as_ref().map(anchor);
+        weld::datum_target(&mut plot, std, anchor(point), end, *offset, label, *area, scale * pv.mul);
       }
     }
   }
@@ -723,7 +755,52 @@ pub fn render_sheet(d: &Drawing, design: &Design, model: &Model, sheet: u32) -> 
     sheets::revision_table(&mut plot, &d.revisions);
   }
   frame(&mut plot, d, design, scale, size, (ordinal, sheets.len()));
-  Ok(plot)
+  let snaps = views.iter().flat_map(|pv| view_snaps(pv, scale)).collect();
+  Ok((plot, snaps))
+}
+
+/// A view's snap points on the sheet: none in broken-out stretches, the nearest of those that
+/// project to one spot.
+fn view_snaps(pv: &Projected, scale: f64) -> Vec<SnapPoint> {
+  let toward = pv.right.cross(pv.up);
+  let mut seen: std::collections::HashMap<[i64; 2], usize> = std::collections::HashMap::new();
+  let mut out: Vec<(SnapPoint, f64)> = Vec::new();
+  for p in &pv.snaps {
+    let v = pv.to_view(*p);
+    if (0..2).any(|i| pv.cuts[i].iter().any(|k| v[i] > k.from + 1e-9 && v[i] < k.to - 1e-9)) {
+      continue;
+    }
+    let at = sheet_pt(pv, scale, v);
+    let snap = SnapPoint { view: pv.view.id, point: p.to_array(), at };
+    let depth = p.dot(toward);
+    match seen.entry(at.map(|x| (x * 1e4).round() as i64)) {
+      std::collections::hash_map::Entry::Occupied(e) => {
+        let o = &mut out[*e.get()];
+        if depth > o.1 + 1e-9 {
+          *o = (snap, depth);
+        }
+      }
+      std::collections::hash_map::Entry::Vacant(e) => {
+        e.insert(out.len());
+        out.push((snap, depth));
+      }
+    }
+  }
+  out.into_iter().map(|o| o.0).collect()
+}
+
+/// The points of a shape a click can snap to: edge ends and middles, circle centres.
+fn snap_candidates(shape: &Shape) -> Vec<DVec3> {
+  let mut out = Vec::new();
+  for e in shape.edges().unwrap_or_default() {
+    match e.kind {
+      fox_kernel::CurveKind::Degenerate => continue,
+      fox_kernel::CurveKind::Circle => out.push(e.center),
+      _ => {}
+    }
+    out.extend([e.start, e.end, e.mid]);
+  }
+  out
 }
 
 fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Result<Projected, String> {
@@ -791,6 +868,7 @@ fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Resu
   }
   let proj = shape.project(z, right, defl).map_err(|e| e.to_string())?;
   let (lo, hi) = proj.bounds().ok_or("the view is empty")?;
+  let snaps = snap_candidates(&shape);
   Ok(Projected {
     view: v.clone(),
     proj,
@@ -803,6 +881,7 @@ fn project_view(v: &DrawingView, part: &Shape, model: &Model, defl: f64) -> Resu
     mul: 1.0,
     cuts: [Vec::new(), Vec::new()],
     n: 0,
+    snaps,
   })
 }
 
@@ -820,6 +899,8 @@ fn detail(v: &DrawingView, mut base: Projected, center: DVec3, radius: f64, fact
     }
   }
   base.proj.circles.retain(|k| inside(k.center) && k.radius < radius);
+  let snaps = std::mem::take(&mut base.snaps);
+  base.snaps = snaps.into_iter().filter(|p| inside(base.to_view(*p))).collect();
   base.proj.lines = lines;
   // the boundary circle
   let ring: Vec<[f64; 2]> = (0..=96)
