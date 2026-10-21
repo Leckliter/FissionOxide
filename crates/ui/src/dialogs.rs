@@ -520,6 +520,8 @@ pub struct Dialog {
   live: live::Live,
   /// Sketch Offset: the distance and side follow the cursor until a click places the offset.
   follow: bool,
+  /// Drawing Dimension: points picked on the sheet so far.
+  sheet_picks: usize,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -634,6 +636,7 @@ impl Dialog {
       mv: move_copy::MoveForm::default(),
       live: live::Live::default(),
       follow: false,
+      sheet_picks: 0,
     }
   }
 
@@ -2390,6 +2393,9 @@ impl Dialog {
     let accent = self.accent();
     let s = &app.s;
     for (i, input) in f.inputs.iter().enumerate() {
+      if !self.form.shown(f, i) {
+        continue;
+      }
       let v = self.form.values[i].clone();
       match input {
         Input::Faces { label, .. }
@@ -2520,6 +2526,11 @@ impl Dialog {
           self.solid_form_field(f, i, app, ui, dirty);
         }
       }
+    }
+    if crate::forms::takes_sheet_points(f) {
+      ui.label("");
+      ui.label(RichText::new("click points on the sheet to fill them").small().color(theme::MUTED));
+      ui.end_row();
     }
   }
 
@@ -3267,7 +3278,7 @@ impl Dialog {
         Self::choose(ui, "Orientation", "orient", &mut self.choice, &ORIENT, dirty);
         Self::field(ui, "Offset (sheet mm)", &mut self.distance, dirty);
         ui.label("");
-        ui.label(RichText::new("a selected model edge fills the points").small().color(theme::MUTED));
+        ui.label(RichText::new("click points on the sheet, or select a model edge").small().color(theme::MUTED));
         ui.end_row();
       }
       Kind::DrawingNote => {
@@ -3420,6 +3431,40 @@ impl Dialog {
   }
 
   /// A drop-down of the open drawing's views.
+  /// Does the dialog take model points picked on the drawing sheet?
+  pub fn takes_sheet_points(&self) -> bool {
+    match self.kind {
+      Kind::DrawingDimension => true,
+      Kind::Form(f) => crate::forms::takes_sheet_points(f),
+      _ => false,
+    }
+  }
+
+  /// A model point picked on the drawing sheet, as `view` shows it: Dimension takes its two
+  /// points in turn, forms fill their point inputs (see [`crate::forms::State::sheet_pick`]).
+  pub fn sheet_pick(&mut self, view: u32, point: [f64; 3]) {
+    match self.kind {
+      Kind::DrawingDimension => {
+        if self.view != Some(view) {
+          self.view = Some(view);
+          self.sheet_picks = 0;
+        }
+        let xyz = point.map(crate::forms::short);
+        if self.sheet_picks % 2 == 0 {
+          self.translate = xyz;
+        } else {
+          self.xyz = xyz;
+        }
+        self.sheet_picks += 1;
+      }
+      Kind::Form(f) => self.form.sheet_pick(f, view, point),
+      _ => return,
+    }
+    if !self.picks() || self.applied {
+      self.dirty = true;
+    }
+  }
+
   fn view_combo(&mut self, app: &App, ui: &mut egui::Ui, label: &str, dirty: &mut bool) -> bool {
     let views = self.target.map(|id| drawing_views(&app.s, id)).unwrap_or_default();
     ui.label(label);
@@ -5164,6 +5209,123 @@ mod tests {
     for want in ["Ø0.1", "A", "1.6", "1"] {
       assert!(text.texts().contains(&want), "missing {want}: {:?}", text.texts());
     }
+  }
+
+  #[test]
+  fn drawing_symbol_forms() {
+    use crate::forms::*;
+    use crate::sheet::{DRAWING_DATUM_TARGET, DRAWING_WELD};
+    use fox_engine::model::drawing::{BackWeld, DrawingDim, WeldContour};
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 200, "depth": 20, "height": 10, "at": [100, 10]}));
+    run(&mut s, "drawing.create", json!({"views": ["front"]}));
+    let id = s.design.drawings[0].id;
+    let add = |s: &mut Session, f: &'static Form, set: Vec<(&str, Value)>| {
+      let mut d = form(s, f, vec![], &set);
+      d.form.set_drawing(f, s, Some(id));
+      apply(s, &mut d);
+      d.applied = false;
+      s.design.drawings[0].dimensions.last().cloned().unwrap()
+    };
+    let fcf = |composite: bool| {
+      vec![
+        ("characteristic", json!("position")),
+        ("tolerance", json!("0.5")),
+        ("diameter", json!(true)),
+        ("datums", json!("A B")),
+        ("composite", json!(composite)),
+        ("lower_tolerance", json!("0.1")),
+        ("lower_datums", json!("A")),
+      ]
+    };
+    // a composite frame: the lower tier has the upper's zone shape
+    let DrawingDim::FeatureControl { lower: Some(t), .. } = add(&mut s, &DRAWING_FCF, fcf(true)) else { panic!() };
+    assert_eq!((t.tolerance, t.diameter, t.datums.clone()), (0.1, true, vec!["A".to_string()]));
+    // unticked, the lower tier's fields don't count
+    let DrawingDim::FeatureControl { lower, .. } = add(&mut s, &DRAWING_FCF, fcf(false)) else { panic!() };
+    assert!(lower.is_none());
+
+    // a weld's contour, finish and melt-through; the other side's fields only for both sides
+    let weld = vec![
+      ("kind", json!("v")),
+      ("contour", json!("convex")),
+      ("finish", json!("G")),
+      ("other_contour", json!("flush")),
+      ("back", json!("melt_through")),
+    ];
+    let DrawingDim::Weld { symbol: w, .. } = add(&mut s, &DRAWING_WELD, weld) else { panic!() };
+    assert_eq!((w.contour, w.finish.as_str()), (Some(WeldContour::Convex), "G"));
+    assert_eq!((w.other_contour, w.back), (None, Some(BackWeld::MeltThrough)));
+    // no finish without a contour
+    let DrawingDim::Weld { symbol: w, .. } = add(&mut s, &DRAWING_WELD, vec![("finish", json!("G"))]) else { panic!() };
+    assert!(w.finish.is_empty());
+
+    // datum targets: a line, and a point that keeps no area
+    let line = vec![
+      ("target", json!("line")),
+      ("point", json!(["20", "0", "10"])),
+      ("end", json!(["180", "0", "10"])),
+      ("label", json!("A1")),
+    ];
+    let DrawingDim::DatumTarget { end, area, .. } = add(&mut s, &DRAWING_DATUM_TARGET, line) else { panic!() };
+    assert_eq!((end, area), (Some([180.0, 0.0, 10.0]), 0.0));
+    let point = vec![("target", json!("point")), ("area", json!("6")), ("label", json!("A2"))];
+    let DrawingDim::DatumTarget { end, area, .. } = add(&mut s, &DRAWING_DATUM_TARGET, point) else { panic!() };
+    assert_eq!((end, area), (None, 0.0));
+  }
+
+  #[test]
+  fn picking_points_on_the_sheet() {
+    use crate::forms::*;
+    use fox_engine::model::drawing::{DrawingDim, render_sheet_snaps};
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 200, "depth": 20, "height": 10, "at": [100, 10]}));
+    run(&mut s, "drawing.create", json!({"views": ["front", "top"]}));
+    let id = s.design.drawings[0].id;
+    let (_, snaps) = {
+      let d = &s.design.drawings[0];
+      render_sheet_snaps(d, &s.design, &s.model, d.sheet_list()[0].id).unwrap()
+    };
+    let snap = |view: u32, p: [f64; 3]| *snaps.iter().find(|x| x.view == view && x.point == p).unwrap();
+
+    // Dimension: two picks, its view from the picks
+    let mut d = Dialog::blank(Kind::DrawingDimension);
+    d.target = Some(id);
+    d.choice = "horizontal";
+    d.distance = "10".into();
+    assert!(d.takes_sheet_points());
+    for p in [[0.0, 0.0, 0.0], [200.0, 0.0, 10.0]] {
+      let x = snap(1, p);
+      d.sheet_pick(x.view, x.point);
+    }
+    apply(&mut s, &mut d);
+    let DrawingDim::Distance { view, a, b, .. } = s.design.drawings[0].dimensions[0].clone() else { panic!() };
+    assert_eq!((view, a, b), (1, [0.0, 0.0, 0.0], [200.0, 0.0, 10.0]));
+
+    // a form: the origin first, then the list of points grows; another view starts over
+    let mut d = form(&mut s, &DRAWING_ORDINATE, vec![], &[]);
+    d.form.set_drawing(&DRAWING_ORDINATE, &s, Some(id));
+    assert!(d.takes_sheet_points());
+    let top = s.design.drawings[0].views[1].id;
+    let x = snap(top, [200.0, 20.0, 10.0]);
+    d.sheet_pick(x.view, x.point);
+    for p in [[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [200.0, 0.0, 0.0]] {
+      let x = snap(1, p);
+      d.sheet_pick(x.view, x.point);
+    }
+    let get =
+      |d: &Dialog, k: &str| d.form.values[DRAWING_ORDINATE.inputs.iter().position(|i| i.key() == k).unwrap()].clone();
+    assert_eq!(get(&d, "view"), json!(1));
+    assert_eq!(get(&d, "origin"), json!(["0", "0", "0"]));
+    assert_eq!(get(&d, "points"), json!("100 0 0; 200 0 0"));
+    apply(&mut s, &mut d);
+    assert!(matches!(&s.design.drawings[0].dimensions[1], DrawingDim::Ordinate { points, .. } if points.len() == 2));
+
+    // dialogs without model points don't take picks
+    assert!(!Dialog::blank(Kind::DrawingNote).takes_sheet_points());
+    assert!(!Dialog::blank(Kind::Form(&crate::sheet::DRAWING_REVISION)).takes_sheet_points());
+    assert_eq!(short(-0.0001), "0");
+    assert_eq!(short(12.5), "12.5");
   }
 
   #[test]

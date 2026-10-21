@@ -1,9 +1,12 @@
 //! The Drawing workspace's canvas: the open drawing's sheet, drawn from the same vector plot the
 //! PDF / DXF / SVG exports are written from. Wheel zooms, right- or middle-drag pans,
 //! double-click fits the sheet. Tabs along the bottom switch sheets; the + tab adds one.
+//! While a dialog takes model points (Dimension, the annotation forms), the pointer snaps to the
+//! views' vertices, edge middles and circle centres, and a click fills the dialog's next point.
 
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
-use fox_engine::model::plot::{Anchor, Item, Pen};
+use fox_engine::model::drawing::SnapPoint;
+use fox_engine::model::plot::{Anchor, Item, Pen, Plot};
 use serde_json::json;
 
 use crate::forms::{Form, Input};
@@ -11,6 +14,11 @@ use crate::icons::Icon;
 use crate::{App, theme};
 
 const BACKDROP: Color32 = Color32::from_rgb(214, 218, 224);
+/// How far (screen points) the pointer reaches for a snap point.
+const SNAP_REACH: f32 = 10.0;
+
+/// A sheet drawn, with the points a click on it snaps to.
+pub type Rendered = (Plot, Vec<SnapPoint>);
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let Some(id) = app.drawing else { return };
@@ -25,11 +33,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   };
   let key = (app.s.revision, id, on);
   if app.sheet_cache.as_ref().map(|c| c.0) != Some(key) {
-    let plot = fox_engine::model::drawing::render_sheet(d, &app.s.design, &app.s.model, on);
+    let plot = fox_engine::model::drawing::render_sheet_snaps(d, &app.s.design, &app.s.model, on);
     app.sheet_cache = Some((key, plot));
   }
   let (w, h) = match app.sheet_cache.as_ref().map(|c| &c.1) {
-    Some(Ok(plot)) => (plot.width, plot.height),
+    Some(Ok((plot, _))) => (plot.width, plot.height),
     _ => d.sheet.size(),
   };
 
@@ -71,7 +79,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   p.rect_filled(sheet, 0.0, Color32::WHITE);
 
   match app.sheet_cache.as_ref().map(|c| &c.1) {
-    Some(Ok(plot)) => {
+    Some(Ok((plot, _))) => {
       for item in &plot.items {
         draw_item(&p, item, k, &to);
       }
@@ -82,7 +90,28 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     None => {}
   }
 
+  pick(app, &p, &resp, sheet, k);
   tabs(app, ui, rect, id, &sheets, on);
+}
+
+/// Snaps the pointer to a model point while the dialog takes points; a click hands it over.
+fn pick(app: &mut App, p: &egui::Painter, resp: &egui::Response, sheet: Rect, k: f32) {
+  if !app.dialog.as_ref().is_some_and(|d| d.takes_sheet_points()) {
+    return;
+  }
+  let (Some(Ok((_, snaps))), Some(m)) = (app.sheet_cache.as_ref().map(|c| &c.1), resp.hover_pos()) else { return };
+  let at = [((m.x - sheet.left()) / k) as f64, ((sheet.bottom() - m.y) / k) as f64];
+  let Some(snap) = fox_engine::model::drawing::nearest_snap(snaps, at, (SNAP_REACH / k) as f64) else { return };
+  let c = pos2(sheet.left() + snap.at[0] as f32 * k, sheet.bottom() - snap.at[1] as f32 * k);
+  p.circle_stroke(c, 5.0, Stroke::new(2.0, theme::ACCENT));
+  p.circle_filled(c, 2.0, theme::ACCENT);
+  let label = snap.point.map(crate::forms::short).join(", ");
+  p.text(c + vec2(8.0, -8.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(11.0), theme::ACCENT);
+  if resp.clicked()
+    && let Some(d) = app.dialog.as_mut()
+  {
+    d.sheet_pick(snap.view, snap.point);
+  }
 }
 
 /// The sheet tabs under the drawing, as Fusion's: click one to show it, right-click to delete
@@ -190,6 +219,18 @@ pub static DRAWING_CHAIN: Form = Form {
   picks_model: false,
 };
 
+const CONTOURS: &[(&str, &str)] =
+  &[("none", "None"), ("flush", "Flush (flat)"), ("convex", "Convex"), ("concave", "Concave")];
+const FINISHES: &[(&str, &str)] = &[
+  ("", "None"),
+  ("C", "C chip"),
+  ("G", "G grind"),
+  ("H", "H hammer"),
+  ("M", "M machine"),
+  ("R", "R roll"),
+  ("U", "U unspecified"),
+];
+
 pub static DRAWING_WELD: Form = Form {
   title: "WELD SYMBOL",
   name: "Weld Symbol",
@@ -225,6 +266,15 @@ pub static DRAWING_WELD: Form = Form {
     Input::Check { key: "all_around", label: "All around" },
     Input::Check { key: "field", label: "Field weld" },
     Input::Text { key: "tail", label: "Tail (process)", default: "" },
+    Input::Choice { key: "contour", label: "Contour", options: CONTOURS },
+    Input::Choice { key: "finish", label: "  Finish", options: FINISHES },
+    Input::Choice { key: "other_contour", label: "Other side contour", options: CONTOURS },
+    Input::Choice { key: "other_finish", label: "  Other side finish", options: FINISHES },
+    Input::Choice {
+      key: "back",
+      label: "Back of a groove weld",
+      options: &[("none", "None"), ("back", "Back weld"), ("melt_through", "Melt-through")],
+    },
     Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "12" },
     Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
   ],
@@ -234,15 +284,21 @@ pub static DRAWING_WELD: Form = Form {
 pub static DRAWING_DATUM_TARGET: Form = Form {
   title: "DATUM TARGET",
   name: "Datum Target",
-  hint: "A datum target point (area 0) or area on a feature",
+  hint: "A datum target point, line or circular area on a feature",
   icon: Icon::DatumId,
   cmd: "drawing.datum_target",
   fixed: &[],
   inputs: &[
     Input::DrawingView { key: "view", label: "View" },
+    Input::Choice {
+      key: "target",
+      label: "Target",
+      options: &[("point", "Point"), ("line", "Line"), ("area", "Circular area")],
+    },
     Input::Vec3 { key: "point", label: "Target point (model)", default: ["0", "0", "0"] },
-    Input::Text { key: "label", label: "Target", default: "A1" },
-    Input::Expr { key: "area", label: "Area diameter (model mm)", default: "0" },
+    Input::Vec3 { key: "end", label: "  Line end (model)", default: ["10", "0", "0"] },
+    Input::Text { key: "label", label: "Label", default: "A1" },
+    Input::Expr { key: "area", label: "  Area diameter (model mm)", default: "5" },
     Input::Expr { key: "offset_x", label: "Offset X (sheet mm)", default: "12" },
     Input::Expr { key: "offset_y", label: "Offset Y (sheet mm)", default: "12" },
   ],
@@ -274,12 +330,19 @@ fn draw_item(p: &egui::Painter, item: &Item, k: f32, to: &impl Fn([f64; 2]) -> P
         Pen::Visible => 0.5,
         Pen::Border => 0.7,
         Pen::Hidden => 0.3,
-        Pen::Thin | Pen::Center => 0.18,
+        Pen::Thin | Pen::Center | Pen::Phantom => 0.18,
       };
       let stroke = Stroke::new((mm * k).max(0.6), if *pen == Pen::Thin { Color32::from_gray(60) } else { ink });
       match pen {
         Pen::Hidden => p.extend(Shape::dashed_line(&pts, stroke, 3.0 * k, 1.5 * k)),
         Pen::Center => p.extend(Shape::dashed_line(&pts, stroke, 8.0 * k, 3.0 * k)),
+        Pen::Phantom => p.extend(Shape::dashed_line_with_offset(
+          &pts,
+          stroke,
+          &[8.0 * k, 1.5 * k, 1.5 * k],
+          &[1.5 * k, 1.5 * k, 1.5 * k],
+          0.0,
+        )),
         _ => {
           p.add(Shape::line(pts, stroke));
         }

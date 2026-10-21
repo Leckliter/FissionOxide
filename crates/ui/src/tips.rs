@@ -488,8 +488,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     // DRAWING SYMBOLS
     (_, "Feature Control Frame") => (
       "Adds a geometric tolerance to a feature.",
-      "Pick the feature, then choose the tolerance type, its value and the datums it refers to. It \
-       follows the drawing's standard.",
+      "Pick the feature, then choose the tolerance type, its value and the datums it refers to; tick \
+       Composite for a lower tier that refines a position or profile tolerance. It follows the \
+       drawing's standard.",
     ),
     (_, "Datum Identifier") => (
       "Marks a feature as a datum for geometric tolerances.",
@@ -502,8 +503,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
     ),
     (_, "Weld Symbol") => (
       "Adds a welding symbol with an arrow to a joint.",
-      "Pick the joint and set the weld type, size and side. Use it to tell the fabricator how parts are \
-       to be joined.",
+      "Click the joint on the sheet and set the weld type, size and side, a contour with its finish, \
+       or a back weld or melt-through behind a groove weld. Use it to tell the fabricator how parts \
+       are to be joined.",
     ),
     (_, "Datum Target") => (
       "Marks a point, line or area used as a datum on a part.",

@@ -142,7 +142,7 @@ pub struct App {
   /// The drawing open in the Drawing workspace; None = the Design workspace.
   pub drawing: Option<u32>,
   /// The open drawing's rendered sheet, keyed by (design revision, drawing, sheet).
-  sheet_cache: Option<((u64, u32, u32), Result<fox_engine::model::plot::Plot, String>)>,
+  sheet_cache: Option<((u64, u32, u32), Result<crate::sheet::Rendered, String>)>,
   /// Sheet zoom and pan in the Drawing workspace.
   sheet_view: (f32, egui::Vec2),
   /// What clicks and window selection pick: faces (default), edges, bodies or components.

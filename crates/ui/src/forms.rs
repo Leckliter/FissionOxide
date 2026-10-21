@@ -179,6 +179,8 @@ pub struct State {
   pub cells: Vec<([f64; 3], f64)>,
   /// The tools those cells were found for.
   pub cells_for: Value,
+  /// Model points picked on the drawing sheet so far (see [`State::sheet_pick`]).
+  picks: usize,
 }
 
 impl State {
@@ -212,7 +214,35 @@ impl State {
       drawing: None,
       cells: Vec::new(),
       cells_for: Value::Null,
+      picks: 0,
     }
+  }
+
+  /// A model point picked on the drawing sheet: the view input takes its view, then the point
+  /// inputs fill in turn, and a list of points grows after them. A pick in another view starts
+  /// over.
+  pub fn sheet_pick(&mut self, form: &Form, view: u32, point: [f64; 3]) {
+    if let Some(vi) = form.inputs.iter().position(|x| matches!(x, Input::DrawingView { .. }))
+      && self.values[vi].as_u64() != Some(view as u64)
+    {
+      self.values[vi] = json!(view);
+      self.picks = 0;
+    }
+    let xyz = point.map(short);
+    let slots: Vec<usize> =
+      (0..form.inputs.len()).filter(|&i| matches!(form.inputs[i], Input::Vec3 { .. }) && self.shown(form, i)).collect();
+    let list = form.inputs.iter().position(|x| matches!(x, Input::Text { key: "points", .. }));
+    let n = slots.len();
+    match list {
+      Some(li) if self.picks >= n => {
+        let text = xyz.join(" ");
+        let old = self.values[li].as_str().unwrap_or("").trim().to_string();
+        self.values[li] = json!(if self.picks == n || old.is_empty() { text } else { format!("{old}; {text}") });
+      }
+      _ if n > 0 => self.values[slots[self.picks % n]] = json!(xyz),
+      _ => return,
+    }
+    self.picks += 1;
   }
 
   /// Refills the pick inputs from the selection. Returns whether anything changed.
@@ -338,6 +368,33 @@ impl State {
     self.values != before
   }
 
+  /// Does input `i` count? Some only do when another is set: a composite frame's lower tier,
+  /// a weld's finish letter (with its contour), a both-sides weld's other side, a datum target
+  /// line's end and an area target's diameter.
+  pub fn shown(&self, form: &Form, i: usize) -> bool {
+    let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+    let set = |k: &str| get(k).and_then(Value::as_str).is_some_and(|c| !c.is_empty() && c != "none");
+    let both = || get("side").and_then(Value::as_str) == Some("both");
+    let key = form.inputs[i].key();
+    match form.cmd {
+      "drawing.feature_control" if key.starts_with("lower_") => {
+        get("composite").and_then(Value::as_bool).unwrap_or(false)
+      }
+      "drawing.datum_target" => match key {
+        "end" => get("target").and_then(Value::as_str) == Some("line"),
+        "area" => get("target").and_then(Value::as_str) == Some("area"),
+        _ => true,
+      },
+      "drawing.weld" => match key {
+        "finish" => set("contour"),
+        "other_contour" => both(),
+        "other_finish" => both() && set("other_contour"),
+        _ => true,
+      },
+      _ => true,
+    }
+  }
+
   /// Is everything the command needs there?
   pub fn missing(&self, form: &Form) -> Option<&'static str> {
     for (input, v) in form.inputs.iter().zip(&self.values) {
@@ -372,6 +429,9 @@ impl State {
     }
     for (i, (input, v)) in form.inputs.iter().zip(&self.values).enumerate() {
       let key = input.key();
+      if !self.shown(form, i) {
+        continue;
+      }
       match input {
         Input::Curves { .. } | Input::FacesOpt { .. } | Input::Profiles { .. } | Input::Cells { .. }
           if v.as_array().is_some_and(Vec::is_empty) =>
@@ -421,6 +481,19 @@ impl State {
       }
     }
   }
+}
+
+/// Does a drawing form take model points picked on the sheet?
+pub fn takes_sheet_points(form: &Form) -> bool {
+  form.inputs.iter().any(|x| matches!(x, Input::DrawingView { .. }))
+    && form.inputs.iter().any(|x| matches!(x, Input::Vec3 { .. } | Input::Text { key: "points", .. }))
+}
+
+/// A model coordinate as a field shows it: up to three decimals, no trailing zeros.
+pub fn short(x: f64) -> String {
+  let t = format!("{x:.3}");
+  let t = t.trim_end_matches('0').trim_end_matches('.');
+  if t == "-0" { "0".into() } else { t.into() }
 }
 
 fn planar(s: &Session, body: BodyId, face: u32) -> bool {
@@ -1103,7 +1176,8 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       }
       ("sketch.text", q)
     }
-    // drawing annotations: the frame's or symbol's offset from its point, in sheet mm
+    // drawing annotations: the frame's or symbol's offset from its point, in sheet mm; a
+    // composite frame's lower tier
     c if c.starts_with("drawing.") && p.get("offset_x").is_some() => {
       let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
       let mut q = p.clone();
@@ -1111,6 +1185,16 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
         m.remove("offset_x");
         m.remove("offset_y");
         m.insert("offset".into(), json!([num("offset_x"), num("offset_y")]));
+        let mut lower = Map::new();
+        // the lower tier's zone is the upper's shape (Ø or not)
+        for k in ["tolerance", "modifier", "datums"] {
+          if let Some(v) = m.remove(&format!("lower_{k}")) {
+            lower.insert(k.into(), v);
+          }
+        }
+        if m.remove("composite") == Some(json!(true)) {
+          m.insert("lower".into(), Value::Object(lower));
+        }
       }
       (form.cmd, q)
     }
@@ -1528,6 +1612,14 @@ pub static DRAWING_FCF: Form = Form {
       options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
     },
     Input::Text { key: "datums", label: "Datums", default: "A" },
+    Input::Check { key: "composite", label: "Composite (lower tier)" },
+    Input::Expr { key: "lower_tolerance", label: "  Lower tolerance", default: "0.05" },
+    Input::Choice {
+      key: "lower_modifier",
+      label: "  Lower material condition",
+      options: &[("none", "None"), ("mmc", "MMC Ⓜ"), ("lmc", "LMC Ⓛ")],
+    },
+    Input::Text { key: "lower_datums", label: "  Lower datums", default: "A" },
     Input::Expr { key: "offset_x", label: "Frame offset X (sheet mm)", default: "12" },
     Input::Expr { key: "offset_y", label: "Frame offset Y (sheet mm)", default: "12" },
   ],
