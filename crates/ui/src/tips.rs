@@ -1598,9 +1598,9 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
 
     // ADD-INS
     (_, "Scripts and Add-Ins...") => (
-      "Runs and manages scripts and add-ins that extend the app.",
-      "Run a script once, or turn add-ins on so they start with the app. Write your own with the \
-       programming interface.",
+      "Installs and manages plugins that extend the app.",
+      "Install a .foxplugin file (or drop it on the window) or one shared in your data hub, update it, \
+       turn it off, change what it may do and read its log. Its commands get their own toolbar tab.",
     ),
     (_, "Design and Make Marketplace") => (
       "Browses an online store of add-ins and content.",

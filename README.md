@@ -150,6 +150,10 @@ change a parameter and watch the whole history rebuild.
 - **Scriptable, and AI-drivable.** Everything is a JSON command, so the GUI, the CLI and
   scripts all drive the same engine — and `fissionoxide-cli mcp` serves every command as a Model
   Context Protocol tool, so an AI agent such as Claude can model with it directly.
+- **Plugins.** Install a `.foxplugin` (File → Plugins, or drop it on the window) and its
+  commands get their own toolbar tab and dialogs. Plugin code is WebAssembly, sandboxed: it
+  drives the same JSON commands and may touch files or the data hub only with the permissions
+  you grant. Share and update plugins through the data hub; see [Plugins](#plugins).
 - **Configurations and base features.** A configuration table of named variants that override
   parameters, feature suppression, appearances and joint values; switch the active one from the
   browser, edit them in a table, export any of them. Turn design history off (the timeline
@@ -715,6 +719,39 @@ These exist so code driving the engine can inspect and tag what it builds (see
   DXF, an SVG or a `.fox`); `sketch.trace` (an image); `sketch.visible`; `selection`; `body.appearance` also takes `"#rrggbb"`.
 - `view.render` writes a PNG with a chosen camera, only some bodies, no sketches or grid.
 - Anywhere a plane is taken, `{"origin": [x,y,z], "normal": [x,y,z]}` is a free plane.
+
+## Plugins
+
+A plugin is a `.foxplugin` file: a zip of `plugin.toml` (id, version, permissions, toolbar
+panels, commands and their dialog inputs), `plugin.wasm` (its code, a WebAssembly module) and
+optional `icons/`, `resources/` and `README.md`. The full format and the host interface are in
+[docs/PLUGINS.md](docs/PLUGINS.md); [examples/plugins/flange](examples/plugins/flange) is a
+complete plugin in Rust (Bolt Flange and Body Report).
+
+- **Install** from File → Plugins → Install from file…, by dropping the file on the window, or
+  from the data hub. The install dialog lists what it adds and the permissions it asks for
+  (`read-files`, `write-files`, `render`, `hub`); untick any you don't want. A newer version
+  updates in place, keeping its settings and storage; an older one asks first.
+- **Use**: each tab a plugin names appears after UTILITIES, with a group per panel. A command
+  opens a dialog drawn from its inputs (selections, values with units or expressions, whole
+  numbers, sliders, checkboxes, choices, text), which the plugin can update as you type. OK runs
+  it as one undo step; if it fails, the design is left as it was.
+- **Manage** in the Plugins window (also UTILITIES → ADD-INS): turn plugins off, remove them,
+  change their permissions, read their log, install or update from the data hub.
+- **Sandboxed**: plugin code can only call the host's functions. It can't run `open`, `save`,
+  `undo` or anything that replaces the design; file paths go into the folder you pick for the
+  run; endless loops are stopped and crashes are rolled back.
+
+```sh
+fissionoxide-cli plugin pack examples/plugins/flange flange.foxplugin
+fissionoxide-cli plugin install flange.foxplugin            # --grant write-files to grant less
+fissionoxide-cli plugin run org.fissionoxide.examples.flange/flange '{"holes": 8}' --open part.fox --save part.fox
+fissionoxide-cli plugin run org.fissionoxide.examples.flange/flange --dev examples/plugins/flange   # without installing
+fissionoxide-cli plugin publish flange.foxplugin            # into the data hub; others: plugin hub, plugin update
+fissionoxide-cli plugin list | commands | check FILE | log ID | enable ID | disable ID | uninstall ID
+```
+
+The MCP server has the same commands as tools (`plugin_list`, `plugin_install`, `plugin_run` ...).
 
 ## Image tracing
 

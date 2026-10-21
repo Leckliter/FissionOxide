@@ -2,7 +2,8 @@
 //!
 //! Every engine command is a tool (dots become underscores: `sheet.edge_flange` →
 //! `sheet_edge_flange`) taking the command's JSON parameters; `view_render` returns a PNG of the
-//! model. One design session lives for the life of the server.
+//! model. One design session lives for the life of the server. The `plugin.*` commands are tools
+//! too (`plugin_run` runs an installed plugin's command on the design).
 
 use std::io::{BufRead, Write};
 
@@ -18,6 +19,7 @@ fn tool_name(cmd: &str) -> String {
 fn tools() -> Vec<Value> {
   COMMANDS
     .iter()
+    .chain(fox_plugin::commands::COMMANDS)
     .map(|c| {
       let help = if c.id == "view.render" {
         format!("{} Omit 'path' to get the image back. Parameters: {}", c.help, c.params)
@@ -74,6 +76,13 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
           Err(e) => json!({"content": [{"type": "text", "text": e.0}], "isError": true}),
         }
       } else {
+        if let Some(c) = fox_plugin::commands::COMMANDS.iter().find(|c| tool_name(c.id) == name) {
+          let mut plugins = fox_plugin::Plugins::for_hub(&s.hub_root());
+          return Some(reply(id, Ok(match fox_plugin::commands::run(&mut plugins, s, c.id, &args) {
+            Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "isError": false}),
+            Err(e) => json!({"content": [{"type": "text", "text": e}], "isError": true}),
+          })));
+        }
         match COMMANDS.iter().find(|c| tool_name(c.id) == name) {
           None => json!({"content": [{"type": "text", "text": format!("unknown tool '{name}'")}], "isError": true}),
           Some(c) => match s.execute(c.id, &args) {
@@ -88,10 +97,14 @@ pub fn handle(s: &mut Session, msg: &Value) -> Option<Value> {
     }
     _ => Err(json!({"code": -32601, "message": format!("method '{method}' not found")})),
   };
-  Some(match result {
+  Some(reply(id, result))
+}
+
+fn reply(id: Value, result: Result<Value, Value>) -> Value {
+  match result {
     Ok(r) => json!({"jsonrpc": "2.0", "id": id, "result": r}),
     Err(e) => json!({"jsonrpc": "2.0", "id": id, "error": e}),
-  })
+  }
 }
 
 /// Serves newline-delimited JSON-RPC on stdin/stdout until stdin closes.
@@ -141,6 +154,11 @@ mod tests {
     let r = call(&mut s, "view_render", json!({"width": 64, "height": 64}));
     assert_eq!(r["result"]["content"][0]["type"], "image");
     let r = call(&mut s, "nope", json!({}));
+    assert_eq!(r["result"]["isError"], true);
+    assert!(names.contains(&"plugin_run") && names.contains(&"plugin_install"));
+    let r = call(&mut s, "plugin_list", json!({}));
+    assert_eq!(r["result"]["isError"], false, "{r}");
+    let r = call(&mut s, "plugin_run", json!({"command": "com.nobody.nothing/go"}));
     assert_eq!(r["result"]["isError"], true);
     assert_eq!(base64(b"Man"), "TWFu");
     assert_eq!(base64(b"Ma"), "TWE=");

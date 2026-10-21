@@ -17,7 +17,24 @@
 //! fissionoxide-cli cut IN.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] ['{json}']
 //!                                                 (flat pattern, faces or sketch to cut G-code or DXF)
 //! fissionoxide-cli cut machines                   (laser, plasma and waterjet machine profiles)
+//! fissionoxide-cli plugin SUBCOMMAND ...           (install, manage, pack and run plugins; below)
 //! ```
+//!
+//! ```text
+//! fissionoxide-cli plugin list | commands | hub | log ID
+//! fissionoxide-cli plugin install FILE.foxplugin|DIR [--grant read-files,write-files,render,hub] [--force]
+//! fissionoxide-cli plugin install --item ITEM [--version N]      (from the data hub)
+//! fissionoxide-cli plugin update [ID]                            (newest releases in the data hub)
+//! fissionoxide-cli plugin uninstall|enable|disable ID
+//! fissionoxide-cli plugin check FILE.foxplugin|DIR
+//! fissionoxide-cli plugin pack DIR OUT.foxplugin
+//! fissionoxide-cli plugin publish FILE.foxplugin|DIR [--project P] [--folder F]
+//! fissionoxide-cli plugin run PLUGIN/COMMAND ['{inputs}'] [--open IN.fox] [--save OUT.fox] [--folder DIR] [--dev DIR]
+//! ```
+//!
+//! `plugin run --dev DIR` runs a plugin straight from its folder (plugin.toml, plugin.wasm ...)
+//! without installing it, granting what it asks for. `--folder` is where it reads and writes
+//! files (default: the current directory).
 //!
 //! `check-dxf` checks a flat pattern DXF (or a design's sheet metal flat pattern) against shop
 //! rules (`sheet.check_dxf`) and fails when it finds a problem.
@@ -160,7 +177,7 @@ fn run(args: &[String]) -> Result<(), String> {
       Ok(())
     }
     "commands" | "help" => {
-      for c in COMMANDS {
+      for c in COMMANDS.iter().chain(fox_plugin::commands::COMMANDS) {
         out(&json!({"cmd": c.id, "help": c.help, "params": c.params}));
       }
       Ok(())
@@ -270,12 +287,87 @@ fn run(args: &[String]) -> Result<(), String> {
       out(&exec(&mut s, "cut.gcode", &params)?);
       Ok(())
     }
+    "plugin" => plugin(rest),
     _ => Err(usage()),
   }
 }
 
+fn plugin(rest: &[String]) -> Result<(), String> {
+  use fox_plugin::{Plugins, commands::run as plugin_cmd};
+  let sub = rest.first().ok_or_else(usage)?.as_str();
+  let arg = rest.get(1).filter(|a| !a.starts_with("--")).cloned();
+  let need = || arg.clone().ok_or_else(usage);
+  let mut s = match flag(rest, "--open") {
+    Some(p) => open(&p)?,
+    None => session(Session::default()),
+  };
+  // --dev: a scratch registry holding just the plugin being developed
+  let dev = flag(rest, "--dev");
+  let scratch = std::env::temp_dir().join(format!("fissionoxide-cli-plugins-{}", std::process::id()));
+  let mut plugins = match &dev {
+    Some(_) => Plugins::open(&scratch, vec![]),
+    None => Plugins::for_hub(&s.hub_root()),
+  };
+  if let Some(d) = &dev {
+    plugin_cmd(&mut plugins, &mut s, "plugin.install", &json!({"path": d}))?;
+  }
+  let (name, params) = match sub {
+    "list" | "commands" | "hub" => (sub, json!({})),
+    "log" => ("log", json!({"id": need()?})),
+    "uninstall" => ("uninstall", json!({"id": need()?})),
+    "enable" | "disable" => ("enable", json!({"id": need()?, "enabled": sub == "enable"})),
+    "update" => ("update", arg.as_ref().map_or(json!({}), |id| json!({"id": id}))),
+    "check" => ("check", json!({"path": need()?})),
+    "pack" => ("pack", json!({"dir": need()?, "path": rest.get(2).ok_or_else(usage)?})),
+    "publish" => ("publish", json!({"path": need()?, "project": flag(rest, "--project"), "folder": flag(rest, "--folder")})),
+    "install" => {
+      let mut p = match flag(rest, "--item") {
+        Some(item) => json!({"item": item}),
+        None => json!({"path": need()?}),
+      };
+      if let Some(v) = flag(rest, "--version") {
+        p["version"] = json!(v.parse::<u32>().map_err(|_| "bad --version")?);
+      }
+      if let Some(g) = flag(rest, "--grant") {
+        p["grant"] = json!(g.split(',').map(str::trim).filter(|x| !x.is_empty()).collect::<Vec<_>>());
+      }
+      p["allow_downgrade"] = json!(rest.iter().any(|a| a == "--force"));
+      ("install", p)
+    }
+    "run" => {
+      let inputs: Value = match rest.get(2).filter(|a| !a.starts_with("--")) {
+        Some(j) => serde_json::from_str(j).map_err(|e| format!("bad JSON inputs: {e}"))?,
+        None => json!({}),
+      };
+      let folder = match flag(rest, "--folder") {
+        Some(f) => PathBuf::from(f),
+        None => std::env::current_dir().map_err(|e| e.to_string())?,
+      };
+      ("run", json!({"command": need()?, "inputs": inputs, "folder": folder}))
+    }
+    _ => return Err(usage()),
+  };
+  let result = plugin_cmd(&mut plugins, &mut s, &format!("plugin.{name}"), &params);
+  if dev.is_some() {
+    let _ = std::fs::remove_dir_all(&scratch);
+  }
+  let v = result?;
+  match v.as_array() {
+    _ if name == "log" => {
+      use std::io::Write;
+      let _ = write!(std::io::stdout(), "{}", v["log"].as_str().unwrap_or_default());
+    }
+    Some(rows) if matches!(name, "list" | "commands" | "hub" | "update") => rows.iter().for_each(out),
+    _ => out(&v),
+  }
+  if let Some(p) = flag(rest, "--save") {
+    s.save_to(Path::new(&p)).map_err(|e| e.0)?;
+  }
+  Ok(())
+}
+
 fn usage() -> String {
-  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | check-dxf F.dxf|F.fox  (all take --hub DIR|URL [--token T]; export, convert, render, info and run take --configuration NAME)".into()
+  "usage: fissionoxide-cli run SCRIPT [--open F.fox] [--save F.fox] [--export F.step] [--png F.png] | exec F.fox JSON | info F.fox | export F.fox OUT | convert IN OUT | inspect FILE | render F.fox OUT.png | hub CMD [JSON] [--open F] | mcp [F.fox] | formats | commands | cut F.fox OUT.nc [--machine ID] [--process NAME] [--units mm|inch] [JSON] | cut machines | check-dxf F.dxf|F.fox | plugin list|install|uninstall|enable|disable|update|check|pack|publish|run|log ...  (all take --hub DIR|URL [--token T]; export, convert, render, info and run take --configuration NAME)".into()
 }
 
 thread_local! {
