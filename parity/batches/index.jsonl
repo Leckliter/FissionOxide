@@ -36,3 +36,8 @@
 {"name": "ui-select-menus-and-other", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_44a98b0c (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-sketch-selection-feedback", "items": 6, "status": "fixing", "pr": null, "fixer": "cloud task_8fdf60e3 (requested 2026-10-21 by the coordinator)"}
 {"name": "ui-vertex-and-construction", "items": 5, "status": "fixing", "pr": null, "fixer": "cloud task_86cd55d8 (requested 2026-10-21 by the coordinator)"}
+{"name": "ui-sketch-fillet-chamfer-blend", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-sketch-modify-tooltips", "items": 3, "status": "ready", "pr": null}
+{"name": "ui-sketch-offset-value-box", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-sketch-scale-move-params", "items": 4, "status": "ready", "pr": null}
+{"name": "ui-sketch-trim-extend-break", "items": 4, "status": "ready", "pr": null}

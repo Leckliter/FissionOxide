@@ -1,0 +1,22 @@
+{
+  "ui:sketch:fillet-flow": "ui-sketch-fillet-chamfer-blend",
+  "ui:sketch:chamfer-flow": "ui-sketch-fillet-chamfer-blend",
+  "ui:sketch:chamfer-submenu": "ui-sketch-fillet-chamfer-blend",
+  "ui:sketch:fillet-result-glyphs": "ui-sketch-fillet-chamfer-blend",
+  "ui:sketch:blend-curve-flow": "ui-sketch-fillet-chamfer-blend",
+  "ui:sketch:offset-dialog-rows": "ui-sketch-offset-value-box",
+  "ui:sketch:offset-default-follow": "ui-sketch-offset-value-box",
+  "ui:sketch:value-box-stale-selection": "ui-sketch-offset-value-box",
+  "ui:sketch:status-readout-under-palette": "ui-sketch-offset-value-box",
+  "ui:sketch:trim-prompt": "ui-sketch-trim-extend-break",
+  "ui:sketch:extend-preview": "ui-sketch-trim-extend-break",
+  "ui:sketch:break-preview": "ui-sketch-trim-extend-break",
+  "ui:sketch:modify-warning-toast": "ui-sketch-trim-extend-break",
+  "ui:sketch:scale-dialog": "ui-sketch-scale-move-params",
+  "ui:sketch:move-copy-shortcut": "ui-sketch-scale-move-params",
+  "ui:sketch:move-copy-dialog": "ui-sketch-scale-move-params",
+  "ui:sketch:change-parameters-dialog": "ui-sketch-scale-move-params",
+  "ui:sketch:modify-tooltips": "ui-sketch-modify-tooltips",
+  "ui:menus:row-options-glyph": "ui-sketch-modify-tooltips",
+  "ui:menus:tooltip-style": "ui-sketch-modify-tooltips"
+}

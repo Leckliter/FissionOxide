@@ -293,3 +293,16 @@ construction planes have no hover/selected colours; the Selection Filters list h
 Fusion's 27. Three batches in `parity/batches/map-wave8.json` (18 rows); five earlier `match` rows
 reopened. Fusion's box colours: window peach (253,223,185) with a solid purple-grey border, crossing
 pale yellow (255,253,202) with a dashed dark border.
+
+## 2026-10-21, prober 4: every sketch MODIFY tool
+
+Fillet, Chamfer (and its submenu), Blend Curve, Offset, Trim by drag, Extend, Break, Sketch
+Scale, Move/Copy and Change Parameters run with the same picks in both apps (report
+`parity/reports/2026-10-21-sketch-modify-tools.md`). Fusion's Fillet, Chamfer and Blend Curve
+have no dialog: first pick, second pick, applied at once with a floating value box and an arrow,
+prompt back to the first pick; FissionOxide gives each a docked dialog and a preview. Offset in
+FissionOxide follows the pointer from the start and its value box kept a stale select-all range
+("3" became "3m", a 3 m offset); M does nothing in the sketch; Sketch Scale has typed point
+fields instead of a point pick and manipulator. 20 rows in five batches
+(`parity/batches/map-wave9.json`), six match rows, Trim's hover colour and the OFFSET rows
+verified, Move's Set Pivot reopened for the sketch case.
