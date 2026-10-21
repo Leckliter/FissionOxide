@@ -2930,12 +2930,14 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
       _ => None,
     })
     .map(|l| format!("Length : {}", u.fixed(l, crate::viewport::display_decimals(u)))),
-    // "Sketch Point | X: -1.974 Y: 0.00 Z: -0.259 in": the point's world coordinates
-    Sel::SketchPoint { sketch, point } if n == 1 => model.sketches.get(&sketch).and_then(|r| {
-      let w = r.plane.to_world(r.sketch.pos(point)?);
-      let c = |v: f64| sketch_coord(u, v);
-      Some(format!("X: {} Y: {} Z: {} {}", c(w.x), c(w.y), c(w.z), u.symbol()))
-    }),
+    // "Sketch Point | X: -1.974 Y: 0.00 Z: -0.259 in": one point's world coordinates, no count
+    Sel::SketchPoint { sketch, point } if n == 1 => {
+      if let Some(w) = model.sketches.get(&sketch).and_then(|r| Some(r.plane.to_world(r.sketch.pos(point)?))) {
+        let c = |v: f64| sketch_coord(u, v);
+        return Some(format!("Sketch Point | X: {} Y: {} Z: {} {}", c(w.x), c(w.y), c(w.z), u.symbol()));
+      }
+      None
+    }
     _ => None,
   };
   Some(match readout {
