@@ -17,6 +17,11 @@ pub(super) struct Extra {
   /// Fillet radius given as the chord length (the round's width).
   chord: bool,
   rail: Option<FeatureId>,
+  /// Sweep: a second guide rail (with `rail`), how the profile follows the rails ("" = the
+  /// default: stretch between two rails, else scale) and a guide surface (`{body, face}`).
+  pub(super) rail2: Option<FeatureId>,
+  pub(super) scaling: &'static str,
+  pub(super) guide_surface: Value,
   twist: String,
   /// Sweep taper angle, and whether the profile keeps its orientation (parallel).
   taper: String,
@@ -564,7 +569,38 @@ impl Dialog {
   pub(super) fn sweep_rows(&mut self, app: &App, ui: &mut egui::Ui, dirty: &mut bool) {
     let list = Self::sketches(app, self.sketch);
     sketch_combo(ui, "Guide rail", "sweep-rail", &list, &mut self.solid.rail, dirty);
-    if self.solid.rail.is_none() {
+    if self.solid.rail.is_some() {
+      // Path + two rails: each section spans from the first rail to the second
+      let others: Vec<(FeatureId, String)> =
+        list.iter().filter(|(id, _)| Some(*id) != self.solid.rail).cloned().collect();
+      sketch_combo(ui, "Second rail", "sweep-rail2", &others, &mut self.solid.rail2, dirty);
+      let two = self.solid.rail2.is_some();
+      if self.solid.scaling.is_empty() || (!two && self.solid.scaling == "stretch") {
+        self.solid.scaling = if two { "stretch" } else { "scale" };
+      }
+      let options: &[(&'static str, &str)] = if two {
+        &[("stretch", "Stretch"), ("scale", "Scale"), ("none", "None")]
+      } else {
+        &[("scale", "Scale"), ("none", "None")]
+      };
+      ui.label("Profile scaling");
+      *dirty |= choice(ui, "sweep-scaling", &mut self.solid.scaling, options);
+      ui.end_row();
+      return;
+    }
+    // Path + guide surface: the profile keeps its angle to the surface normal
+    ui.label("Guide surface");
+    let accent = self.accent();
+    ui.horizontal(|ui| {
+      let has = !self.solid.guide_surface.is_null();
+      sel_chip(ui, accent, if has { "1 face" } else { "None (select a face)" }, has);
+      if has && ui.small_button("✕").on_hover_text("Sweep without a guide surface").clicked() {
+        self.solid.guide_surface = Value::Null;
+        *dirty = true;
+      }
+    });
+    ui.end_row();
+    if self.solid.guide_surface.is_null() {
       if !self.solid.parallel {
         Self::field(ui, "Twist angle", &mut self.solid.twist, dirty);
       }
@@ -613,6 +649,14 @@ impl Dialog {
       Kind::Sweep => {
         if let Some(r) = self.solid.rail {
           p["rail"] = json!(r.0);
+          if let Some(r2) = self.solid.rail2.filter(|r2| *r2 != r) {
+            p["rail2"] = json!(r2.0);
+          }
+          if !self.solid.scaling.is_empty() {
+            p["profile_scaling"] = json!(self.solid.scaling);
+          }
+        } else if !self.solid.guide_surface.is_null() {
+          p["guide_surface"] = self.solid.guide_surface.clone();
         } else {
           if self.solid.parallel {
             p["orientation"] = json!("parallel");
@@ -636,6 +680,21 @@ impl Dialog {
     p
   }
 
+  /// The face last picked in the viewport, as a sweep's guide surface.
+  pub(super) fn sync_guide_surface(&mut self, s: &Session) {
+    let picked = s.selection.iter().rev().find_map(|x| match x {
+      Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
+      _ => None,
+    });
+    if let Some(f) = picked
+      && f != self.solid.guide_surface
+      && self.solid.rail.is_none()
+    {
+      self.solid.guide_surface = f;
+      self.dirty = true;
+    }
+  }
+
   // ---- extrude to an object ----
 
   pub(super) fn object_row(&mut self, ui: &mut egui::Ui) {
@@ -645,9 +704,13 @@ impl Dialog {
     } else {
       let has = !self.solid.to.is_null();
       let text = if !has {
-        "Select a face or body"
+        "Select a face, body or vertex"
       } else if self.solid.to.get("face").is_some() {
         "1 face"
+      } else if self.solid.to.get("vertex").is_some() {
+        "1 vertex"
+      } else if is_point(&self.solid.to) {
+        "1 point"
       } else {
         "1 body"
       };
@@ -665,6 +728,13 @@ impl Dialog {
       .filter_map(|x| match x {
         Sel::Face { body, face } => Some(json!({"body": body.0, "face": face})),
         Sel::Body { body } => Some(json!({"body": body.0})),
+        // to a vertex: the plane through it parallel to the sketch
+        Sel::Vertex { body, edge, end } => Some(json!({"vertex": {"body": body.0, "edge": edge}, "end": end})),
+        Sel::SketchPoint { sketch, point } => {
+          let r = s.model.sketches.get(sketch)?;
+          Some(json!({"at": r.plane.to_world(r.sketch.pos(*point)?).to_array()}))
+        }
+        Sel::Feature { feature } if s.model.points.contains_key(feature) => Some(json!({"point": feature.0})),
         _ => None,
       })
       .collect();
@@ -693,7 +763,13 @@ impl Dialog {
     if self.solid.to.is_null() {
       return None;
     }
-    p["extent"] = json!(if self.solid.to.get("face").is_some() { "to_face" } else { "to_body" });
+    p["extent"] = json!(if self.solid.to.get("face").is_some() {
+      "to_face"
+    } else if is_point(&self.solid.to) {
+      "to_vertex"
+    } else {
+      "to_body"
+    });
     p["to"] = self.solid.to.clone();
     Some(p)
   }
@@ -708,7 +784,7 @@ impl Dialog {
   pub(super) fn edit_extent(&self, mut extent: Value) -> Value {
     if self.extent == "to_object" {
       extent["kind"] = json!(if self.solid.to_kind.is_empty() { "to_face" } else { self.solid.to_kind });
-      extent["to"] = self.solid.to_ref.clone();
+      extent[if self.solid.to_kind == "to_vertex" { "to_point" } else { "to" }] = self.solid.to_ref.clone();
     }
     extent
   }
@@ -932,6 +1008,11 @@ pub(super) fn form_edit_set(f: &Form, values: &[Value]) -> Value {
     }
   }
   Value::Object(set)
+}
+
+/// Whether a "to object" pick is a point (a vertex, sketch point or construction point).
+fn is_point(to: &Value) -> bool {
+  ["vertex", "at", "point"].iter().any(|k| to.get(*k).is_some())
 }
 
 #[cfg(test)]
@@ -1313,5 +1394,86 @@ mod tests {
     apply(&mut s, &mut d);
     let under = 5.0 * 375.0f64.sqrt() + 400.0 * 0.25f64.asin();
     assert!((volume(&s) - v0 - 20.0 * (400.0 - under)).abs() < 1.0, "{}", volume(&s) - v0);
+  }
+
+  #[test]
+  fn sweep_two_rails_guide_surface_and_extrude_to_a_vertex() {
+    // a 10 × 4 rectangle stretched between a straight rail and one leaning out
+    let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+    let line = |s: &mut Session, a: [f64; 2], b: [f64; 2]| {
+      run(s, "sketch.create", json!({"plane": "xz"}));
+      run(s, "sketch.line", json!({"points": [a, b]}));
+      s.edit_sketch.unwrap()
+    };
+    let path = line(&mut s, [5.0, 0.0], [5.0, 50.0]);
+    let rail = line(&mut s, [0.0, 0.0], [0.0, 50.0]);
+    let rail2 = line(&mut s, [10.0, 0.0], [20.0, 50.0]);
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [0, -2], "corner2": [10, 2]}));
+    let mut d = Dialog::blank(Kind::Sweep);
+    d.sketch = s.edit_sketch;
+    d.path = Some(path);
+    d.solid.rail = Some(rail);
+    d.solid.rail2 = Some(rail2);
+    let (_, p) = d.command().unwrap();
+    assert_eq!((p["rail"].clone(), p["rail2"].clone()), (json!(rail.0), json!(rail2.0)), "{p}");
+    apply(&mut s, &mut d);
+    assert!((volume(&s) - 3000.0).abs() < 30.0, "{}", volume(&s));
+
+    // a strip standing out from a cylinder, swept round it with the side face as guide surface
+    let mut s = Session::default();
+    s.design.behaviours = fox_engine::model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+    run(&mut s, "cylinder", json!({"radius": 20, "height": 20}));
+    run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 10}));
+    let mid = s.design.features.last().unwrap().id.0;
+    run(&mut s, "sketch.create", json!({"plane": {"feature": mid}}));
+    let h = 20.0 / 2f64.sqrt();
+    run(&mut s, "sketch.arc", json!({"start": [20, 0], "mid": [h, h], "end": [0, 20]}));
+    let path = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "xz"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [20, 9], "corner2": [22, 11]}));
+    let mut d = Dialog::blank(Kind::Sweep);
+    d.sketch = s.edit_sketch;
+    run(&mut s, "sketch.finish", json!({}));
+    d.path = Some(path);
+    d.op = "new_body";
+    let b = &s.model.bodies[0];
+    let side = b.faces().iter().find(|f| f.kind == SurfaceKind::Cylinder).unwrap().id;
+    s.selection = vec![Sel::Face { body: b.id, face: side }];
+    d.sync_guide_surface(&s);
+    assert_eq!(d.command().unwrap().1["guide_surface"], json!({"body": b.id.0, "face": side}));
+    apply(&mut s, &mut d);
+    let swept = s.model.bodies.last().unwrap().shape.mass().unwrap().volume;
+    let expected = std::f64::consts::PI / 2.0 * 21.0 * 4.0;
+    assert!((swept - expected).abs() < 0.01 * expected, "{swept} vs {expected}");
+
+    // a square extruded up to the plane through the top corner of a box beside it
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    run(&mut s, "sketch.rect", json!({"corner1": [30, 0], "corner2": [40, 10]}));
+    let mut d = Dialog::blank(Kind::Extrude);
+    d.sketch = s.edit_sketch;
+    run(&mut s, "sketch.finish", json!({}));
+    d.op = "new_body";
+    d.extent = "to_object";
+    d.distance = "0 mm".into(); // no offset past the vertex
+    let b = &s.model.bodies[0];
+    let e = b.edges().iter().find(|e| e.end.z > 19.0).unwrap().id;
+    s.selection = vec![Sel::Vertex { body: b.id, edge: e, end: true }];
+    d.sync_object(&s);
+    assert_eq!(d.command().unwrap().1["extent"], json!("to_vertex"));
+    apply(&mut s, &mut d);
+    let tall = |s: &Session| s.model.bodies.last().unwrap().shape.mass().unwrap();
+    assert!((tall(&s).volume - 2000.0).abs() < 1e-3, "{:?}", tall(&s));
+    // reopened from the timeline: still to the vertex, now 5 mm past it
+    let (mut app, mut e) = edit_last(s);
+    assert_eq!((e.extent, e.solid.to_kind), ("to_object", "to_vertex"));
+    e.editing = Some(app.s.design.features.last().unwrap().id);
+    e.distance = "5 mm".into();
+    e.dirty = true;
+    apply(&mut app.s, &mut e);
+    assert!((tall(&app.s).bbox_max.z - 25.0).abs() < 1e-6, "{:?}", tall(&app.s));
   }
 }

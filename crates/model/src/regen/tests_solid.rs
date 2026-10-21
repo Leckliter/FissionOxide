@@ -76,6 +76,8 @@ fn sweep_along_a_rail_then_twisted() {
       taper: String::new(),
       orientation: Default::default(),
       profile_scaling: Default::default(),
+      rail2: None,
+      guide_surface: None,
     })
     .unwrap();
   let m = regenerate(&mut d);
@@ -101,6 +103,113 @@ fn sweep_along_a_rail_then_twisted() {
   let b = bodies_of(&m, sw)[0];
   assert!(close(vol(b), 10_000.0, 0.01), "{}", vol(b));
   assert!(b.shape.mass().unwrap().bbox_max.y > 8.0);
+}
+
+#[test]
+fn sweep_between_two_rails() {
+  let mut d = Design::new("rails");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  // a 10 × 4 rectangle spanning the rails at x = 0 and x = 10 (the second leans out to x = 20)
+  let prof = sketch(&mut d, XY, rect([0.0, -2.0], [10.0, 2.0]));
+  let mut ps = Sketch::new();
+  let path = ps.add_line(PtSpec::At(5.0, 0.0), PtSpec::At(5.0, 50.0)).unwrap().0;
+  let rail = ps.add_line(PtSpec::At(0.0, 0.0), PtSpec::At(0.0, 50.0)).unwrap().0;
+  let path_sketch = sketch(&mut d, XZ, ps);
+  let mut r2 = Sketch::new();
+  r2.add_line(PtSpec::At(10.0, 0.0), PtSpec::At(20.0, 50.0)).unwrap();
+  let rail2 = sketch(&mut d, XZ, r2);
+  let sw = d
+    .add_feature(FeatureKind::Sweep {
+      sketch: prof,
+      profiles: vec![],
+      path_sketch,
+      path_curves: vec![path],
+      operation: Operation::NewBody,
+      rail: Some(PathRef { sketch: path_sketch, curves: vec![rail] }),
+      twist: String::new(),
+      taper: String::new(),
+      orientation: Default::default(),
+      profile_scaling: ProfileScaling::Stretch,
+      rail2: Some(PathRef { sketch: rail2, curves: vec![] }),
+      guide_surface: None,
+    })
+    .unwrap();
+  assert!(d.feature(sw).unwrap().kind.depends_on().contains(&rail2));
+  let set = |d: &mut Design, k: ProfileScaling| {
+    if let Some(FeatureKind::Sweep { profile_scaling, .. }) = d.feature_mut(sw).map(|f| &mut f.kind) {
+      *profile_scaling = k;
+    }
+  };
+  for (k, expected) in [
+    (ProfileScaling::Stretch, 3000.0),
+    (ProfileScaling::Scale, 40.0 * 50.0 * 7.0 / 3.0),
+    (ProfileScaling::None, 2000.0),
+  ] {
+    set(&mut d, k);
+    let m = regenerate(&mut d);
+    ok(&m);
+    let b = bodies_of(&m, sw)[0];
+    assert!(close(vol(b), expected, 0.01), "{k:?}: {} vs {expected}", vol(b));
+  }
+  // a twist doesn't go with two rails; stretching needs both
+  if let Some(FeatureKind::Sweep { twist, .. }) = d.feature_mut(sw).map(|f| &mut f.kind) {
+    *twist = "30 deg".into();
+  }
+  let m = regenerate(&mut d);
+  assert!(m.status(sw).unwrap().error.as_deref().is_some_and(|e| e.contains("twist")));
+  if let Some(FeatureKind::Sweep { twist, rail2, profile_scaling, .. }) = d.feature_mut(sw).map(|f| &mut f.kind) {
+    twist.clear();
+    *rail2 = None;
+    *profile_scaling = ProfileScaling::Stretch;
+  }
+  let m = regenerate(&mut d);
+  assert!(m.status(sw).unwrap().error.as_deref().is_some_and(|e| e.contains("two guide rails")));
+}
+
+#[test]
+fn sweep_along_a_guide_surface() {
+  let mut d = Design::new("surface");
+  d.behaviours = Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  let cyl = primitive(&mut d, Primitive::Cylinder { radius: "20".into(), height: "20".into() }, XY, [0.0, 0.0]);
+  let m = regenerate(&mut d);
+  let cb = bodies_of(&m, cyl)[0];
+  let side = cb.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap();
+  let surface = FaceRef::from_face(cb.id, side, DVec3::new(20.0, 0.0, 10.0));
+  // a strip standing out from the cylinder, swept a quarter turn round it halfway up
+  let prof = sketch(&mut d, XZ, rect([20.0, 9.0], [22.0, 11.0]));
+  let mid = offset_plane(&mut d, XY, "10");
+  let mut ps = Sketch::new();
+  ps.add_arc_center(PtSpec::At(0.0, 0.0), PtSpec::At(20.0, 0.0), [0.0, 20.0]).unwrap();
+  let path_sketch = sketch(&mut d, mid, ps);
+  let sw = d
+    .add_feature(FeatureKind::Sweep {
+      sketch: prof,
+      profiles: vec![],
+      path_sketch,
+      path_curves: vec![],
+      operation: Operation::NewBody,
+      rail: None,
+      twist: String::new(),
+      taper: String::new(),
+      orientation: Default::default(),
+      profile_scaling: Default::default(),
+      rail2: None,
+      guide_surface: Some(surface),
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  let b = bodies_of(&m, sw)[0];
+  let expected = PI / 2.0 * 21.0 * 4.0;
+  assert!(close(vol(b), expected, 0.01), "{} vs {expected}", vol(b));
+  let bb = b.shape.mass().unwrap();
+  assert!((bb.bbox_max.y - 22.0).abs() < 0.05 && (bb.bbox_max.z - 11.0).abs() < 0.05, "{bb:?}");
+  // a guide surface turns the profile on its own: no parallel orientation with it
+  if let Some(FeatureKind::Sweep { orientation, .. }) = d.feature_mut(sw).map(|f| &mut f.kind) {
+    *orientation = SweepOrientation::Parallel;
+  }
+  let m = regenerate(&mut d);
+  assert!(m.status(sw).unwrap().error.as_deref().is_some_and(|e| e.contains("guide surface")));
 }
 
 #[test]
@@ -313,6 +422,46 @@ fn extrude_to(d: &mut Design, sk: FeatureId, kind: ExtentKind, to: FaceRef, dist
     operation: Operation::NewBody,
   })
   .unwrap()
+}
+
+#[test]
+fn extrude_to_a_vertex() {
+  let mut d = Design::new("vertex");
+  let sk = sketch(&mut d, XY, rect([0.0, 0.0], [10.0, 10.0]));
+  let point = |at: [f64; 3]| Some(construct::PointRef::At { at });
+  let e = d
+    .add_feature(FeatureKind::Extrude {
+      sketch: sk,
+      profiles: vec![],
+      extent: Extent { kind: ExtentKind::ToVertex, to_point: point([50.0, -20.0, 12.0]), ..Extent::distance("0") },
+      operation: Operation::NewBody,
+    })
+    .unwrap();
+  let m = regenerate(&mut d);
+  ok(&m);
+  assert!((vol(bodies_of(&m, e)[0]) - 1200.0).abs() < 1e-6);
+  // below the sketch it goes down, with the offset past the point
+  if let Some(FeatureKind::Extrude { extent, .. }) = d.feature_mut(e).map(|f| &mut f.kind) {
+    extent.to_point = point([0.0, 0.0, -4.0]);
+    extent.distance = "1".into();
+  }
+  let m = regenerate(&mut d);
+  ok(&m);
+  let bb = bodies_of(&m, e)[0].shape.mass().unwrap();
+  assert!((bb.bbox_min.z + 5.0).abs() < 1e-6 && bb.bbox_max.z.abs() < 1e-6, "{bb:?}");
+  // a point in the sketch plane can't be extruded to
+  if let Some(FeatureKind::Extrude { extent, .. }) = d.feature_mut(e).map(|f| &mut f.kind) {
+    extent.to_point = point([3.0, 3.0, 0.0]);
+  }
+  let m = regenerate(&mut d);
+  assert!(m.status(e).unwrap().error.as_deref().is_some_and(|x| x.contains("sketch plane")));
+  // a construction point is a dependency; old files have no point
+  if let Some(FeatureKind::Extrude { extent, .. }) = d.feature_mut(e).map(|f| &mut f.kind) {
+    extent.to_point = Some(construct::PointRef::Construction { feature: FeatureId(77) });
+  }
+  assert!(d.feature(e).unwrap().kind.depends_on().contains(&FeatureId(77)));
+  let old: Extent = serde_json::from_str(r#"{"kind":"one_side","distance":"5"}"#).unwrap();
+  assert!(old.to_point.is_none());
 }
 
 #[test]

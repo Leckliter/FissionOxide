@@ -396,7 +396,7 @@ fn plane_of(s: &Session, p: &Value, k: &str) -> Result<PlaneRef, CmdError> {
 }
 
 /// {"at": [x,y,z]} | {"vertex": edge, "end"?: bool} | {"center": edge} | {"point": feature}.
-fn point_ref(s: &Session, v: &Value) -> Result<PointRef, CmdError> {
+pub(crate) fn point_ref(s: &Session, v: &Value) -> Result<PointRef, CmdError> {
   if v.get("at").is_some() {
     return Ok(PointRef::At { at: req_vec3(v, "at")? });
   }

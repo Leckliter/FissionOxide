@@ -1032,11 +1032,15 @@ impl Dialog {
           ExtentKind::TwoSides => "two_sides",
           ExtentKind::ThroughAll => "through_all",
           ExtentKind::ThroughAllBoth => "through_all_both",
-          ExtentKind::ToFace | ExtentKind::ToBody => "to_object",
+          ExtentKind::ToFace | ExtentKind::ToBody | ExtentKind::ToVertex => "to_object",
         };
-        if let ExtentKind::ToFace | ExtentKind::ToBody = extent.kind {
-          let kind = if extent.kind == ExtentKind::ToBody { "to_body" } else { "to_face" };
-          d.load_object(kind, serde_json::to_value(&extent.to).unwrap_or_default());
+        match extent.kind {
+          ExtentKind::ToFace => d.load_object("to_face", serde_json::to_value(&extent.to).unwrap_or_default()),
+          ExtentKind::ToBody => d.load_object("to_body", serde_json::to_value(&extent.to).unwrap_or_default()),
+          ExtentKind::ToVertex => {
+            d.load_object("to_vertex", serde_json::to_value(&extent.to_point).unwrap_or_default());
+          }
+          _ => {}
         }
         d.load_extrude_rows(extent);
         d.op = op_str(*operation);
@@ -1814,6 +1818,9 @@ impl Dialog {
         }
         if self.kind == Kind::Extrude {
           self.sync_object(s);
+        }
+        if self.kind == Kind::Sweep {
+          self.sync_guide_surface(s);
         }
         if self.kind == Kind::Revolve {
           self.sync_revolve_axis(s);

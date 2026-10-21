@@ -187,6 +187,9 @@ pub(crate) mod ffi {
       taper: f64,
       parallel: bool,
     ) -> Result<UniquePtr<Shape>>;
+    fn sweep_rails(profile: &Shape, spine: &Shape, rail1: &Shape, rail2: &Shape, mode: i32)
+    -> Result<UniquePtr<Shape>>;
+    fn sweep_surface(profile: &Shape, spine: &Shape, surface: &Shape) -> Result<UniquePtr<Shape>>;
     fn sweep_sections(sections: &Shape, spine: &Shape) -> Result<UniquePtr<Shape>>;
     fn loft_rails(sections: &Shape, rails: &Shape, spread: bool) -> Result<UniquePtr<Shape>>;
     fn emboss_tool(

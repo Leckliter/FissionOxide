@@ -643,6 +643,19 @@ impl Ctx<'_> {
             trim = Some(solid::Trim::Body { body: bi });
             (0.0, self.through_all(&sk.plane))
           }
+          ExtentKind::ToVertex => {
+            let pr = extent.to_point.as_mut().ok_or("pick the vertex or point to extrude to")?;
+            let at = self.point_of(pr)?;
+            let mut d = (at - sk.plane.origin).dot(n);
+            if d.abs() < 1e-9 {
+              return Err("the point lies in the sketch plane".into());
+            }
+            if d < 0.0 {
+              n = -n;
+              d = -d;
+            }
+            (0.0, d + self.len(&extent.distance)?)
+          }
         };
         let taper = if extent.taper.trim().is_empty() { 0.0 } else { self.angle(&extent.taper)? };
         // the far side of a two-sided extent tapers on its own (symmetric: as the first side)
@@ -1198,6 +1211,8 @@ impl Ctx<'_> {
         taper,
         orientation,
         profile_scaling,
+        rail2,
+        guide_surface,
       } => {
         let sk = self.state.sketches.get(sketch).ok_or("the profile sketch failed")?.clone();
         let ps = self.state.sketches.get(path_sketch).ok_or("the path sketch failed")?;
@@ -1206,7 +1221,8 @@ impl Ctx<'_> {
         if chosen.is_empty() {
           return Err("no profiles to sweep".into());
         }
-        let guide = self.sweep_guide(rail.as_ref(), twist, taper, *orientation, *profile_scaling)?;
+        let rails = solid::Rails { rail: rail.as_ref(), rail2: rail2.as_ref(), surface: guide_surface.as_mut() };
+        let guide = self.sweep_guide(rails, twist, taper, *orientation, *profile_scaling)?;
         let mut tools = Vec::new();
         for p in &chosen {
           let mut face = Shape::face(&sk.plane, p).map_err(ke)?;

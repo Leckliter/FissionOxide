@@ -18,6 +18,7 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -91,6 +92,8 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Pln.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <TColStd_Array2OfReal.hxx>
@@ -549,6 +552,146 @@ std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, co
   }
   return out(valid(result, "sweep"));
   FOX2_CATCH("sweep")
+}
+
+namespace {
+// A wire sampled at n points equally spaced by arc length, from the end nearest `from`.
+std::vector<gp_Pnt> sample_from(const TopoDS_Wire &w, int n, const gp_Pnt &from, const char *what) {
+  BRepAdaptor_CompCurve c(w);
+  GCPnts_UniformAbscissa ua(c, n);
+  if (!ua.IsDone() || ua.NbPoints() != n) throw std::runtime_error(std::string(what) + " could not be sampled");
+  std::vector<gp_Pnt> p;
+  for (int i = 1; i <= n; ++i) p.push_back(c.Value(ua.Parameter(i)));
+  if (p.back().Distance(from) < p.front().Distance(from)) std::reverse(p.begin(), p.end());
+  return p;
+}
+
+gp_Pnt box_center(const TopoDS_Shape &s) {
+  Bnd_Box b;
+  BRepBndLib::Add(s, b);
+  if (b.IsVoid()) throw std::runtime_error("the profile is empty");
+  double x0, y0, z0, x1, y1, z1;
+  b.Get(x0, y0, z0, x1, y1, z1);
+  return gp_Pnt((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+}
+
+// Lofts each loop of a profile through copies of it mapped by `maps`, in order; holes are cut
+// from the outer solid.
+TopoDS_Shape loft_mapped(const TopoDS_Shape &profile, const std::vector<gp_GTrsf> &maps) {
+  bool holes = false;
+  std::vector<TopoDS_Wire> ws = loops(profile, holes);
+  TopoDS_Shape result;
+  for (size_t i = 0; i < ws.size(); ++i) {
+    BRepOffsetAPI_ThruSections ts(Standard_True, Standard_False, 1e-6);
+    ts.CheckCompatibility(Standard_False);
+    for (const gp_GTrsf &g : maps) {
+      BRepBuilderAPI_GTransform gt(ws[i], g, Standard_True);
+      if (!gt.IsDone()) throw std::runtime_error("a section could not be placed");
+      TopoDS_Wire w;
+      for (TopExp_Explorer ex(gt.Shape(), TopAbs_WIRE); ex.More() && w.IsNull(); ex.Next()) w = TopoDS::Wire(ex.Current());
+      if (w.IsNull()) throw std::runtime_error("a section could not be placed");
+      ts.AddWire(w);
+    }
+    ts.Build();
+    if (!ts.IsDone()) throw std::runtime_error("the sweep along the rails failed");
+    TopoDS_Shape s = ts.Shape();
+    if (volume(s) < 0) s.Reverse();
+    if (i == 0) {
+      result = s;
+    } else {
+      BRepAlgoAPI_Cut cut(result, s);
+      if (!cut.IsDone()) throw std::runtime_error("the sweep's hole could not be cut");
+      result = cut.Shape();
+    }
+  }
+  return result;
+}
+} // namespace
+
+// Sweeps a profile along a path between two guide rails. Each section lies across the path (its
+// normal the path's tangent, as at the start); its x direction runs from the first rail to the
+// second, and it is anchored on the first rail. `mode` 0 keeps its size, 1 scales it uniformly and
+// 2 stretches it along x only, so that it keeps spanning the rails (matched to the path by
+// relative arc length, from the ends nearest the profile).
+std::unique_ptr<Shape> sweep_rails(const Shape &profile, const Shape &spine, const Shape &rail1, const Shape &rail2,
+                                   int32_t mode) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  const int n = 121, every = 5;
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  sample_wire(path, n, pts, tans);
+  if (static_cast<int>(pts.size()) != n) throw std::runtime_error("the path could not be sampled");
+  // from the end of the path the profile is at
+  gp_Pnt c = box_center(profile.s);
+  if (pts.back().Distance(c) < pts.front().Distance(c)) {
+    std::reverse(pts.begin(), pts.end());
+    std::reverse(tans.begin(), tans.end());
+    for (gp_Vec &t : tans) t.Reverse();
+  }
+  std::vector<gp_Pnt> a = sample_from(as_wire(rail1, "the first guide rail"), n, pts[0], "the first guide rail");
+  std::vector<gp_Pnt> b = sample_from(as_wire(rail2, "the second guide rail"), n, pts[0], "the second guide rail");
+  // the section frame at sample i: columns x (rail to rail), y, z (path tangent), and the span
+  auto frame = [&](int i, gp_Mat &m, double &span) {
+    gp_Vec t = tans[i];
+    gp_Vec d(a[i], b[i]);
+    gp_Vec x = d - t * d.Dot(t);
+    span = x.Magnitude();
+    if (span < 1e-6) throw std::runtime_error("the guide rails meet (or cross the path's direction)");
+    x /= span;
+    gp_Vec y = t.Crossed(x);
+    m = gp_Mat(x.XYZ(), y.XYZ(), t.XYZ());
+  };
+  gp_Mat m0;
+  double s0 = 0;
+  frame(0, m0, s0);
+  gp_Mat back = m0.Transposed();
+  std::vector<gp_GTrsf> maps;
+  for (int i = 0; i < n; i += every) {
+    gp_Mat m;
+    double span = 0;
+    frame(i, m, span);
+    double k = span / s0;
+    double sx = mode == 0 ? 1.0 : k, sy = mode == 1 ? k : 1.0;
+    gp_Mat l = m * gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sy) * back;
+    gp_XYZ v = a[i].XYZ() - a[0].XYZ().Multiplied(l);
+    maps.emplace_back(l, v);
+  }
+  return out(valid(loft_mapped(profile.s, maps), "sweep along two rails"));
+  FOX2_CATCH("sweep along two rails")
+}
+
+// Sweeps a profile along a path, turning it about the path so that it keeps the same angle to a
+// guide surface's normal (taken at the surface point nearest each point of the path).
+std::unique_ptr<Shape> sweep_surface(const Shape &profile, const Shape &spine, const Shape &surface) {
+  FOX2_TRY
+  const TopoDS_Wire &path = as_wire(spine, "the sweep path");
+  TopoDS_Face f;
+  for (TopExp_Explorer ex(surface.s, TopAbs_FACE); ex.More() && f.IsNull(); ex.Next()) f = TopoDS::Face(ex.Current());
+  if (f.IsNull()) throw std::runtime_error("the guide surface must be a face");
+  std::vector<gp_Pnt> pts;
+  std::vector<gp_Vec> tans;
+  sample_wire(path, 121, pts, tans);
+  double length = 0;
+  for (size_t i = 1; i < pts.size(); ++i) length += pts[i].Distance(pts[i - 1]);
+  if (length < 1e-9) throw std::runtime_error("the path has no length");
+  // an auxiliary spine just off the path along the surface normal: the sections face it
+  double d = 0.05 * length + 0.5;
+  std::vector<gp_Pnt> aux;
+  for (size_t i = 0; i < pts.size(); ++i) {
+    gp_Pnt at;
+    gp_Vec nrm;
+    if (!surface_normal(f, pts[i], at, nrm)) throw std::runtime_error("the guide surface has no normal near the path");
+    gp_Vec r = nrm - tans[i] * nrm.Dot(tans[i]);
+    if (r.Magnitude() < 1e-6) throw std::runtime_error("the path runs along the guide surface's normal");
+    aux.push_back(pts[i].Translated(r.Normalized() * d));
+  }
+  TopoDS_Wire auxw = BRepBuilderAPI_MakeWire(interp_edge(aux, false));
+  TopoDS_Shape s = sweep_loops(path, profile.s, [&](BRepOffsetAPI_MakePipeShell &ps) {
+    ps.SetMode(auxw, Standard_True, BRepFill_NoContact);
+  });
+  return out(valid(s, "sweep along a guide surface"));
+  FOX2_CATCH("sweep along a guide surface")
 }
 
 // Lofts through sections (faces or wires of a compound, in order) placed along a centre line.

@@ -752,7 +752,7 @@ impl Ctx<'_> {
     Err("the edge has no length".into())
   }
 
-  fn point_of(&mut self, p: &mut PointRef) -> Result<DVec3, String> {
+  pub(super) fn point_of(&mut self, p: &mut PointRef) -> Result<DVec3, String> {
     match p {
       PointRef::At { at } => Ok(DVec3::from(*at)),
       PointRef::Vertex { edge, end } => {
@@ -824,6 +824,30 @@ impl Ctx<'_> {
       }
     }
     dir
+  }
+
+  /// A face's area-weighted mean outward normal, from the body's mesh (None without one, or when
+  /// the face curves so far round that its normals cancel out).
+  pub(super) fn mean_normal(&self, bi: usize, face: u32) -> Option<DVec3> {
+    let m = self.state.bodies[bi].mesh()?;
+    let (mut sum, mut area) = (DVec3::ZERO, 0.0);
+    let at = |i: u32| m.positions.get(i as usize).map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+    for (t, tri) in m.indices.chunks_exact(3).enumerate() {
+      if m.tri_face.get(t) != Some(&face) {
+        continue;
+      }
+      let (Some(a), Some(b), Some(c)) = (at(tri[0]), at(tri[1]), at(tri[2])) else { continue };
+      let mut n = (b - a).cross(c - a);
+      // the triangle's winding may not be outward: the vertex normals are
+      if let Some(v) = m.normals.get(tri[0] as usize)
+        && n.dot(DVec3::new(v[0] as f64, v[1] as f64, v[2] as f64)) < 0.0
+      {
+        n = -n;
+      }
+      area += n.length();
+      sum += n;
+    }
+    (area > 0.0 && sum.length() > 0.05 * area).then(|| sum.normalize())
   }
 
   /// A cylinder face's extent along its axis (from `o` along `d`), and whether it is external

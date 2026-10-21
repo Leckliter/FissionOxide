@@ -128,6 +128,9 @@ std::unique_ptr<Shape> sweep_rail_legacy(const Shape &profile, const Shape &spin
 std::unique_ptr<Shape> sweep_twist_legacy(const Shape &profile, const Shape &spine, double twist);
 std::unique_ptr<Shape> sweep_guided(const Shape &profile, const Shape &spine, const Shape &rail, bool has_rail,
                                     bool scale, double twist, double taper, bool parallel);
+std::unique_ptr<Shape> sweep_rails(const Shape &profile, const Shape &spine, const Shape &rail1, const Shape &rail2,
+                                   int32_t mode);
+std::unique_ptr<Shape> sweep_surface(const Shape &profile, const Shape &spine, const Shape &surface);
 std::unique_ptr<Shape> sweep_sections(const Shape &sections, const Shape &spine);
 std::unique_ptr<Shape> loft_rails(const Shape &sections, const Shape &rails, bool spread);
 std::unique_ptr<Shape> emboss_tool(const Shape &body, uint32_t face, const Shape &profiles,

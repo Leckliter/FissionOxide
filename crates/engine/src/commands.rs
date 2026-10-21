@@ -124,10 +124,10 @@ cmds! {
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's silhouette (or one face's edges, which follow the body) into the sketch", "{body, face?, associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body|to_vertex, to?: face (flat or curved) | {body} | point for to_vertex ({at} | {vertex: edge, end?} | {center: edge} | {point: id}; stops on the plane through it parallel to the sketch), start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
-  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), profile_scaling?: scale|none (with a rail), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
+  "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), rail2?: sketch id | {sketch, curves?} (second guide rail: sections anchored on rail, reaching rail2), guide_surface?: face (the profile keeps its angle to the surface normal), profile_scaling?: scale|stretch|none (with rails; stretch, the two-rail default, only across them), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
   "hole" => "Holes at sketch points (into the face the sketch is on), or one hole on a face (Fusion's single hole) held at offsets from its edges", "{sketch?, points?: [id] | face: {body, face}, at?: [x,y,z], offsets?: [{edge, distance}], diameter, depth? | through_all? | to?: plane, kind?: simple|counterbore|countersink, head_diameter?, head_depth?, head_angle?, tip_angle?, drill_point?: angle|flat, tap?: simple|clearance|tapped (tapped: a cosmetic thread on the walls), pitch? (tapped; default ISO coarse), flip?}";
   "split" => "Split bodies along a plane", "{plane, bodies?}";
   "draft" => "Taper faces about a neutral plane; symmetric or angle2 split the faces at the plane and taper both sides away from it (angle2 on the side against the normal)", "{faces: [{body, face} | {point}], plane, angle, flip?, symmetric?: bool, angle2?}";
@@ -292,7 +292,7 @@ cmds! {
   "deboss" => "Sink sketch profiles or text into a face (emboss with deboss: true)", "{sketch?, profiles?, face, depth, wrap?, horizontal?, vertical?, rotation?: deg}";
   "boundary_fill" => "Solids from the closed cells bodies and planes bound; cells are points inside the cells to keep (default all)", "{tools: [body], planes?: [plane], cells?: [[x,y,z]], operation?, remove_tools?}";
   "boundary_fill.cells" => "The cells a boundary fill would offer: a point inside each and its volume", "{tools: [body], planes?: [plane]}";
-  "replace_face" => "Replace flat faces with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
+  "replace_face" => "Replace faces (flat or curved: a curved face moves along its mean normal) with a surface (a face of another body) or a plane; neighbours extend or trim", "{faces: [face], target?: face, plane?}";
   "surface.extend" => "Extend open surface edges: natural (the surface carries on), tangent or perpendicular; close_corners fills the gap between extensions meeting at a corner", "{edges, distance, mode?: natural|tangent|perpendicular, close_corners?: bool}";
   "surface.untrim" => "Untrim faces: remove holes (inner), restore the untrimmed outer boundary (outer) or both (all); extension grows the restored boundary outward by a distance", "{faces? | bodies?, loops?: all|inner|outer, extension?}";
   "sheet.lofted_flange" => "Sheet metal between two profiles (closed profiles are opened by the rule's gap); die-formed (smooth) or press-brake (facets and bends)", "{from: sketch | {sketch, curves?}, to: sketch | {sketch, curves?}, method?: die_formed|press_brake, bends?, flip?, rule?, rounded?: bool (press brake: round the bends)}";
@@ -849,11 +849,14 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         "through_all_both" | "all_both" => ExtentKind::ThroughAllBoth,
         "to_face" | "to" => ExtentKind::ToFace,
         "to_body" | "to_object" => ExtentKind::ToBody,
+        "to_vertex" | "to_point" => ExtentKind::ToVertex,
         other => return Err(CmdError::new(format!("unknown extent '{other}'"))),
       };
       let distance = match kind {
         ExtentKind::ThroughAll | ExtentKind::ThroughAllBoth => "0".to_string(),
-        ExtentKind::ToFace | ExtentKind::ToBody => opt_expr(p, "distance").unwrap_or_else(|| "0".into()),
+        ExtentKind::ToFace | ExtentKind::ToBody | ExtentKind::ToVertex => {
+          opt_expr(p, "distance").unwrap_or_else(|| "0".into())
+        }
         _ => req_expr(p, "distance")?,
       };
       let to = match (kind, p.get("to")) {
@@ -861,6 +864,15 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         (ExtentKind::ToFace, None) => return Err(CmdError::new("to_face needs 'to': a face")),
         (ExtentKind::ToBody, Some(b)) => Some(crate::solid::body_face_ref(s, b)?),
         (ExtentKind::ToBody, None) => return Err(CmdError::new("to_body needs 'to': a body")),
+        _ => None,
+      };
+      let to_point = match (kind, p.get("to")) {
+        (ExtentKind::ToVertex, Some(v)) => Some(crate::features::point_ref(s, v)?),
+        (ExtentKind::ToVertex, None) => {
+          return Err(CmdError::new(
+            "to_vertex needs 'to': a point ({at}, {vertex: edge, end?}, {center: edge} or {point: id})",
+          ));
+        }
         _ => None,
       };
       let thin_side = match opt_str(p, "thin_side").unwrap_or("inside") {
@@ -881,6 +893,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
         to,
         start: opt_expr(p, "start").unwrap_or_default(),
         start_face: p.get("start_face").map(|f| face_ref(s, f)).transpose()?,
+        to_point,
       };
       let operation = operation(p)?;
       add_op_feature(s, FeatureKind::Extrude { sketch: sk, profiles, extent, operation }, p)
@@ -944,15 +957,22 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
       let profiles = profile_points(s, sk, p)?;
       let path_curves = ids(p, "path_curves").into_iter().map(CurveId).collect();
       let rail = p.get("rail").map(|v| crate::solid::path_ref(s, v)).transpose()?;
+      let rail2 = p.get("rail2").map(|v| crate::solid::path_ref(s, v)).transpose()?;
+      if rail2.is_some() && rail.is_none() {
+        return Err(CmdError::new("'rail2' is the second guide rail: give 'rail' too"));
+      }
+      let guide_surface = p.get("guide_surface").map(|v| face_ref(s, v)).transpose()?;
       let orientation = match opt_str(p, "orientation").unwrap_or("perpendicular") {
         "perpendicular" => SweepOrientation::Perpendicular,
         "parallel" => SweepOrientation::Parallel,
         o => return Err(CmdError::new(format!("unknown sweep orientation '{o}' (perpendicular, parallel)"))),
       };
-      let profile_scaling = match opt_str(p, "profile_scaling").unwrap_or("scale") {
+      let default_scaling = if rail2.is_some() { "stretch" } else { "scale" };
+      let profile_scaling = match opt_str(p, "profile_scaling").unwrap_or(default_scaling) {
         "scale" => ProfileScaling::Scale,
         "none" => ProfileScaling::None,
-        o => return Err(CmdError::new(format!("unknown profile scaling '{o}' (scale, none)"))),
+        "stretch" => ProfileScaling::Stretch,
+        o => return Err(CmdError::new(format!("unknown profile scaling '{o}' (scale, stretch, none)"))),
       };
       add_op_feature(
         s,
@@ -967,6 +987,8 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           taper: opt_expr(p, "taper").unwrap_or_default(),
           orientation,
           profile_scaling,
+          rail2,
+          guide_surface,
         },
         p,
       )

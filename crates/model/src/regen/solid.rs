@@ -3,11 +3,11 @@
 //! body, emboss/deboss, boundary fill and replace face.
 
 use fox_kernel::glam::DVec3;
-use fox_kernel::{BoolOp, Inside, KernelError, Plane, Shape, SurfaceKind, SweepOptions};
+use fox_kernel::{BoolOp, Inside, KernelError, Plane, RailScaling, Shape, SurfaceKind, SweepOptions};
 
 use super::{Ctx, FResult, Model, ke, pick_profiles, union_all};
 use crate::{
-  BodyId, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef, ProfileScaling, SweepOrientation,
+  BodyId, FaceRef, FeatureId, FeatureKind, LoftEnd, LoftSection, PathRef, PlaneRef, ProfileScaling, SweepOrientation,
 };
 use fox_sketch::behaviour::{LOFT_CLOSED_SMOOTH, LOFT_RAIL_SPREAD};
 
@@ -19,6 +19,13 @@ pub(super) enum Trim {
   Body { body: usize },
 }
 
+/// What steers a sweep's profile besides the path: one or two guide rails, or a guide surface.
+pub(super) struct Rails<'a> {
+  pub rail: Option<&'a PathRef>,
+  pub rail2: Option<&'a PathRef>,
+  pub surface: Option<&'a mut FaceRef>,
+}
+
 /// How a sweep's profile is steered and shaped along the path.
 pub(super) enum Guide {
   Plain,
@@ -27,6 +34,14 @@ pub(super) enum Guide {
   LegacyRail(Shape),
   /// Designs without `SWEEP_UNIFIED`: twisted (radians), sampled as before the unified sweep.
   LegacyTwist(f64),
+  /// Between two guide rails.
+  TwoRails {
+    rail: Shape,
+    rail2: Shape,
+    scaling: RailScaling,
+  },
+  /// Turned to follow a guide surface's normal (the surface as a face).
+  Surface(Shape),
   /// Along a guide rail, or twisted, tapered or kept parallel (radians).
   Shaped {
     rail: Option<Shape>,
@@ -42,6 +57,8 @@ pub(super) fn sweep(face: &Shape, path: &Shape, guide: &Guide) -> Result<Shape, 
     Guide::Plain => face.sweep(path),
     Guide::LegacyRail(rail) => face.sweep_rail_legacy(path, rail),
     Guide::LegacyTwist(a) => face.sweep_twisted_legacy(path, *a),
+    Guide::TwoRails { rail, rail2, scaling } => face.sweep_rails(path, rail, rail2, *scaling),
+    Guide::Surface(surface) => face.sweep_on_surface(path, surface),
     Guide::Shaped { rail, scale, twist, taper, parallel } => face.sweep_guided(
       path,
       &SweepOptions { rail: rail.as_ref(), scale: *scale, twist: *twist, taper: *taper, parallel: *parallel },
@@ -225,10 +242,12 @@ impl Ctx<'_> {
         let mut by_body: Vec<(usize, Vec<(u32, DVec3, DVec3)>)> = Vec::new();
         for fr in faces.iter_mut() {
           let (bi, info) = self.face_info(fr)?;
-          if info.kind != SurfaceKind::Plane {
-            return Err("only flat faces can be replaced".into());
-          }
-          let f = (info.id, info.normal, info.center);
+          // a curved face moves along its mean outward normal
+          let n = match info.kind {
+            SurfaceKind::Plane => info.normal,
+            _ => self.mean_normal(bi, info.id).ok_or("a face that curves all the way round can't be replaced")?,
+          };
+          let f = (info.id, n, info.center);
           match by_body.iter_mut().find(|(b, _)| *b == bi) {
             Some((_, v)) => v.push(f),
             None => by_body.push((bi, vec![f])),
@@ -252,8 +271,8 @@ impl Ctx<'_> {
   }
 
   pub(super) fn sweep_guide(
-    &self,
-    rail: Option<&PathRef>,
+    &mut self,
+    rails: Rails,
     twist: &str,
     taper: &str,
     orientation: SweepOrientation,
@@ -266,6 +285,36 @@ impl Ctx<'_> {
       return Err("the taper angle must be under 90 degrees".into());
     }
     let (twisted, tapered) = (twist.abs() > 1e-12, taper.abs() > 1e-12);
+    let Rails { rail, rail2, surface } = rails;
+    // two rails and a guide surface steer the profile on their own
+    if (rail2.is_some() || surface.is_some()) && (twisted || tapered || parallel) {
+      let what = if surface.is_some() { "a guide surface" } else { "two guide rails" };
+      return Err(format!("a sweep along {what} can't twist, taper or keep a parallel orientation"));
+    }
+    match (rail, rail2, surface) {
+      (_, Some(_), Some(_)) => return Err("a sweep follows two guide rails or a guide surface, not both".into()),
+      (Some(_), None, Some(_)) => return Err("a sweep follows a guide rail or a guide surface, not both".into()),
+      (None, Some(_), None) => return Err("pick the first guide rail".into()),
+      (Some(r1), Some(r2), None) => {
+        return Ok(Guide::TwoRails {
+          rail: self.path_shape(r1)?,
+          rail2: self.path_shape(r2)?,
+          scaling: match scaling {
+            ProfileScaling::Scale => RailScaling::Scale,
+            ProfileScaling::None => RailScaling::Keep,
+            ProfileScaling::Stretch => RailScaling::Stretch,
+          },
+        });
+      }
+      (None, None, Some(fr)) => {
+        let (bi, info) = self.face_info(fr)?;
+        return Ok(Guide::Surface(self.state.bodies[bi].shape.face_shape(info.id).map_err(ke)?));
+      }
+      (_, None, None) => {}
+    }
+    if scaling == ProfileScaling::Stretch {
+      return Err("stretching the profile needs two guide rails".into());
+    }
     // designs from before SWEEP_UNIFIED build the rail and twist sweeps they could express with
     // the old kernel code (the new options have no old form and always take the new path)
     if !self.behaviours.has(fox_sketch::behaviour::SWEEP_UNIFIED) && !tapered && !parallel {
@@ -380,8 +429,9 @@ impl Ctx<'_> {
   }
 }
 
-/// A body with flat faces (id, outward normal, centre) moved to an (extended) surface: each face
-/// is pushed out past the surface, then everything beyond the surface above the faces cut away.
+/// A body with faces (id, outward normal, centre; a curved face's mean normal) moved to an
+/// (extended) surface: each face is pushed out along its normal past the surface, then everything
+/// beyond the surface over the faces cut away.
 fn replace(body: &Shape, faces: &[(u32, DVec3, DVec3)], surface: &Shape, size: f64) -> Result<Shape, String> {
   let mut grown = body.clone();
   let mut columns = Vec::new();

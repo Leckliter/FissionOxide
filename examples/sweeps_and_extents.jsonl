@@ -1,0 +1,34 @@
+# Sweeps steered by two guide rails or a guide surface, an extrude up to a vertex and a curved
+# face replaced by a plane. Sketch planes are given explicitly (the front ones with sketch x = X
+# and y = Z) so the script does not depend on how the origin planes are framed.
+{"cmd": "new", "name": "Sweeps and extents"}
+# a blade stretched between a straight rail (x = 0) and a curved one (x = 10 bowing out to 16)
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[5, 0], [5, 50]]}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[0, 0], [0, 50]]}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "start": [10, 0], "mid": [16, 25], "end": [12, 50]}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [0, -2], "corner2": [10, 2]}
+{"cmd": "sweep", "path": 1, "rail": 2, "rail2": 3, "profile_scaling": "stretch"}
+# a strip standing out from a cylinder, swept a quarter turn round it: the cylinder's side is
+# the guide surface, so the strip keeps square to it
+{"cmd": "cylinder", "plane": {"origin": [60, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}, "radius": 20, "height": 20, "operation": "new_body"}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.arc", "center": [60, 0], "start": [80, 0], "end": [60, 20]}
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [80, 9], "corner2": [82, 11]}
+{"cmd": "sweep", "path": 7, "guide_surface": {"point": [40, 0, 5]}, "operation": "new_body"}
+# a post beside the cylinder up to the plane through the centre of its top: taller cylinder,
+# taller post
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "x": [1, 0, 0]}}
+{"cmd": "sketch.rect", "corner1": [90, -5], "corner2": [100, 5]}
+{"cmd": "extrude", "extent": "to_vertex", "to": {"center": {"point": [80, 0, 20]}}, "operation": "new_body"}
+# a block with an arched top, the arch replaced by a flat at z = 12 (its sides extend to meet it)
+{"cmd": "sketch.create", "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "x": [1, 0, 0]}}
+{"cmd": "sketch.line", "points": [[-20, 10], [-20, 0], [-60, 0], [-60, 10]]}
+{"cmd": "sketch.arc", "start": [-60, 10], "mid": [-40, 14], "end": [-20, 10]}
+{"cmd": "extrude", "distance": 20, "operation": "new_body"}
+{"cmd": "replace_face", "faces": [{"point": [-40, -10, 14]}], "plane": {"origin": [0, 0, 12], "normal": [0, 0, 1]}}
+{"cmd": "info"}

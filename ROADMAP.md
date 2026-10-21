@@ -11,7 +11,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 
 | Area      | Item                                                                         |
 |-----------|------------------------------------------------------------------------------|
-| Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Manufacture | Turning and 4/5-axis |
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |
 | Add-ins   | Compiled-in add-ins under `addins/` with an add-in manager; an add-in's tab can list built-in commands in workflow order; LumenArt as the first (see [docs/LUMENART.md](docs/LUMENART.md)) |

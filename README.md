@@ -39,7 +39,8 @@ change a parameter and watch the whole history rebuild.
   rectangle with a circle in it gives you the ring and the disc. Curves that cross mid-span
   split each other, so two overlapping rectangles give three regions without trimming.
 - **Solid features.** Extrude (one side, symmetric, two sides, through all one or both ways, to a
-  face — flat or curved, with an offset past it — or to a body; starting at the sketch plane, an
+  face — flat or curved, with an offset past it — to a body, or to a vertex or point (the plane
+  through it parallel to the sketch); starting at the sketch plane, an
   offset from it or a parallel face; taper angle; thin walls inside/outside/centred; new body,
   join, cut, intersect), revolve, fillet (edges or whole faces, tangent chains, several selection
   sets each with its own radius, constant or variable radius, setback corners where three filleted
@@ -59,11 +60,13 @@ change a parameter and watch the whole history rebuild.
 - **Faces.** Split faces with a plane, remove faces (fillets, holes, bosses) and heal the body.
 - **More solid features.** Loft (smooth or ruled, open or closed, along rails or a centre line),
   sweep along a path of lines and arcs (with a guide rail that turns and optionally scales the
-  profile, a twist or taper angle, and perpendicular or parallel orientation), holes at sketch
+  profile, two guide rails the profile is stretched, scaled or turned between, a guide surface
+  whose normal the profile follows, a twist or taper angle, and perpendicular or parallel
+  orientation), holes at sketch
   points (simple, counterbore, countersink, drill point, through all), split body by a plane or by another body, draft, emboss/deboss of sketch profiles or text
   on flat or curved faces (projected, or wrapped around a cylinder), boundary fill (pick the
-  closed cells bodies and planes bound), and replace face (a body's flat faces moved to a curved
-  surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
+  closed cells bodies and planes bound), and replace face (a body's faces, flat or curved, moved to a
+  curved surface or a plane, its neighbours extended or trimmed). See `examples/solid_features.jsonl`.
 - **Surfaces.** Extrude and revolve open curves into surfaces, patch a boundary of edges or a
   sketch, ruled surfaces between edges, offset surfaces (with per-face distances for a variable
   offset), trim with a plane, a solid, another surface or sketch curves projected onto them

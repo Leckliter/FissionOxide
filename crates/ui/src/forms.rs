@@ -1906,7 +1906,7 @@ pub static BOUNDARY_FILL: Form = Form {
 pub static REPLACE_FACE: Form = Form {
   title: "REPLACE FACE",
   name: "Replace Face",
-  hint: "Replace flat faces with a face of another body (or a plane); neighbours extend or trim",
+  hint: "Replace faces (flat or curved) with a face of another body (or a plane); neighbours extend or trim",
   icon: Icon::ReplaceFace,
   cmd: "replace_face",
   fixed: &[],

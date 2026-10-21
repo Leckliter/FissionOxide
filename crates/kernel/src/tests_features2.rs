@@ -305,3 +305,78 @@ fn shell_inside_outside_and_both() {
   let hollow = b.shell_sides(&[], 1.0, 2.0, false).unwrap();
   assert!(close(volume(&hollow), 24.0f64.powi(3) - 18.0f64.powi(3), 1e-6), "{}", volume(&hollow));
 }
+
+#[test]
+fn sweep_between_two_rails_stretches_scales_or_keeps_the_profile() {
+  // a 10 × 4 rectangle from the first rail (x = 0) to the second (x = 10), swept up 50 mm while
+  // the second rail leans out to x = 20
+  let face = rect(&Plane::XY, [0.0, -2.0], [10.0, 2.0]);
+  let path = Shape::path(&Plane::XZ, &[Seg::Line { a: [5.0, 0.0], b: [5.0, 50.0] }]).unwrap();
+  let r1 = Shape::path(&Plane::XZ, &[Seg::Line { a: [0.0, 0.0], b: [0.0, 50.0] }]).unwrap();
+  // drawn top down: rails start at the end nearest the profile
+  let r2 = Shape::path(&Plane::XZ, &[Seg::Line { a: [20.0, 50.0], b: [10.0, 0.0] }]).unwrap();
+  for (scaling, expected, ymax) in [
+    (RailScaling::Stretch, 3000.0, 2.0),
+    (RailScaling::Scale, 40.0 * 50.0 * 7.0 / 3.0, 4.0),
+    (RailScaling::Keep, 2000.0, 2.0),
+  ] {
+    let s = face.sweep_rails(&path, &r1, &r2, scaling).unwrap();
+    assert!(s.is_valid(), "{scaling:?}");
+    assert!(close(volume(&s), expected, 0.01), "{scaling:?}: {} vs {expected}", volume(&s));
+    let m = s.mass().unwrap();
+    let xmax = if scaling == RailScaling::Keep { 10.0 } else { 20.0 };
+    assert!((m.bbox_max.x - xmax).abs() < 0.05 && (m.bbox_max.y - ymax).abs() < 0.05, "{scaling:?}: {m:?}");
+  }
+  // rails that meet can't be spanned
+  assert!(face.sweep_rails(&path, &r1, &r1, RailScaling::Stretch).is_err());
+}
+
+#[test]
+fn sweep_between_two_curved_rails() {
+  // a quarter turn about the Y axis between arcs of radius 20 and 30: a quarter of a ring
+  let arc = |r: f64| {
+    Shape::path(&Plane::XZ, &[Seg::Arc { center: [0.0, 0.0], radius: r, start_angle: 0.0, sweep: FRAC_PI_2 }]).unwrap()
+  };
+  let face = rect(&Plane::XY, [20.0, -2.0], [30.0, 2.0]);
+  let s = face.sweep_rails(&arc(25.0), &arc(20.0), &arc(30.0), RailScaling::Stretch).unwrap();
+  assert!(s.is_valid());
+  let expected = FRAC_PI_2 * 40.0 * 25.0;
+  assert!(close(volume(&s), expected, 0.01), "{} vs {expected}", volume(&s));
+  let m = s.mass().unwrap();
+  assert!((m.bbox_max.z - 30.0).abs() < 0.1 && m.bbox_min.x.abs() < 0.1, "{m:?}");
+}
+
+#[test]
+fn sweep_follows_a_guide_surface_normal() {
+  // z = x·y / 10: along the Y axis its normal turns from +Z to 45° towards −X over 10 mm
+  let surface = Shape::bspline_face(&BSplineSurface {
+    degree: 1,
+    poles: vec![
+      vec![DVec3::new(-5.0, 0.0, 0.0), DVec3::new(-5.0, 10.0, -5.0)],
+      vec![DVec3::new(5.0, 0.0, 0.0), DVec3::new(5.0, 10.0, 5.0)],
+    ],
+    u_knots: vec![0.0, 1.0],
+    u_mults: vec![2, 2],
+    v_knots: vec![0.0, 1.0],
+    v_mults: vec![2, 2],
+  })
+  .unwrap();
+  let path = Shape::path(&Plane::YZ, &[Seg::Line { a: [0.0, 0.0], b: [10.0, 0.0] }]).unwrap();
+  // a strip lying on the surface at the start
+  let strip = rect(&Plane::XZ, [-5.0, 0.0], [5.0, 1.0]);
+  let plain = strip.sweep(&path).unwrap();
+  assert!((plain.mass().unwrap().bbox_max.z - 1.0).abs() < 1e-6);
+  let s = strip.sweep_on_surface(&path, &surface).unwrap();
+  assert!(s.is_valid());
+  assert!(close(volume(&s), 100.0, 0.01), "{}", volume(&s));
+  // the strip ends turned 45° about the path, as the surface is
+  let m = s.mass().unwrap();
+  let corner = 6.0 / 2f64.sqrt();
+  assert!((m.bbox_max.z - corner).abs() < 0.1, "{m:?} vs {corner}");
+  let end = s.split(DVec3::new(0.0, 9.5, 0.0), DVec3::Y).unwrap();
+  let last = end.iter().find(|p| p.mass().unwrap().center_of_mass.y > 9.5).unwrap().mass().unwrap();
+  assert!(last.bbox_max.z > 3.3 && last.bbox_min.z < -3.0, "{last:?}");
+  // a path along the surface normal can't be followed
+  let up = Shape::path(&Plane::XZ, &[Seg::Line { a: [0.0, 0.0], b: [0.0, 10.0] }]).unwrap();
+  assert!(rect(&Plane::XY, [-1.0, -1.0], [1.0, 1.0]).sweep_on_surface(&up, &surface).is_err());
+}

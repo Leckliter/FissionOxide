@@ -22,6 +22,18 @@ pub struct SweepOptions<'a> {
   pub parallel: bool,
 }
 
+/// How a sweep between two guide rails keeps its profile spanning them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RailScaling {
+  /// The profile keeps its size; the rails only turn it.
+  Keep,
+  /// The profile scales uniformly.
+  Scale,
+  /// The profile stretches across the rails only.
+  #[default]
+  Stretch,
+}
+
 /// Where a point lies relative to a solid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inside {
@@ -111,6 +123,25 @@ impl Shape {
       opts.parallel,
     )?;
     Shape::wrap(r)?.solid_or("sweep")
+  }
+
+  /// Sweeps this profile along a path wire between two guide rails: each section stays across the
+  /// path, anchored on `rail1` and turned (and scaled or stretched, by `scaling`) so that it keeps
+  /// reaching from `rail1` to `rail2`. The rails are matched to the path by relative arc length,
+  /// from their ends nearest the profile.
+  pub fn sweep_rails(&self, path: &Shape, rail1: &Shape, rail2: &Shape, scaling: RailScaling) -> Result<Shape> {
+    let mode = match scaling {
+      RailScaling::Keep => 0,
+      RailScaling::Scale => 1,
+      RailScaling::Stretch => 2,
+    };
+    Shape::wrap(sys::sweep_rails(self.get()?, path.get()?, rail1.get()?, rail2.get()?, mode)?)?.solid_or("sweep")
+  }
+
+  /// Sweeps this profile along a path wire, turning it about the path so that it keeps its angle
+  /// to the normal of a guide surface (a face; the normal is taken at the nearest surface point).
+  pub fn sweep_on_surface(&self, path: &Shape, surface: &Shape) -> Result<Shape> {
+    Shape::wrap(sys::sweep_surface(self.get()?, path.get()?, surface.get()?)?)?.solid_or("sweep")
   }
 
   /// A loft through the outer boundaries of `sections`, in order, along a centre line wire.

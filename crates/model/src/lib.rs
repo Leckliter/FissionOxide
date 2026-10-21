@@ -551,6 +551,9 @@ pub enum ExtentKind {
   ToFace,
   /// Up to the body `to` is on: the extrusion stops where it meets the body.
   ToBody,
+  /// Up to the plane through a point (`to_point`: a vertex, point or construction point)
+  /// parallel to the sketch plane, plus `distance` past it.
+  ToVertex,
 }
 
 /// Which way a thin extrusion's wall grows from the profile's outline.
@@ -595,6 +598,9 @@ pub struct Extent {
   /// Start at a flat face parallel to the sketch (Fusion's Start: Object); `start` is added to it.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub start_face: Option<FaceRef>,
+  /// The point a `to_vertex` extent stops at.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub to_point: Option<construct::PointRef>,
 }
 
 fn zero() -> String {
@@ -615,6 +621,7 @@ impl Extent {
       to: None,
       start: String::new(),
       start_face: None,
+      to_point: None,
     }
   }
 }
@@ -687,6 +694,8 @@ pub enum ProfileScaling {
   Scale,
   /// The profile keeps its size and only turns to face the rail.
   None,
+  /// With two rails: the profile stretches across them only (its other direction keeps its size).
+  Stretch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1023,6 +1032,13 @@ pub enum FeatureKind {
     /// With a rail: whether the profile scales to keep touching it.
     #[serde(default)]
     profile_scaling: ProfileScaling,
+    /// A second guide rail (with `rail`): each section is anchored on the first rail and turned,
+    /// and stretched or scaled by `profile_scaling`, to keep reaching the second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rail2: Option<PathRef>,
+    /// A guide surface: the profile turns about the path to keep its angle to the surface normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    guide_surface: Option<FaceRef>,
   },
   /// Drilled holes at sketch points, into the material (against the sketch normal).
   Hole {
@@ -2061,17 +2077,20 @@ impl FeatureKind {
     match self {
       FeatureKind::Sketch { plane, .. } => plane_dep(plane),
       FeatureKind::Revolve { sketch, axis, .. } => std::iter::once(*sketch).chain(axis_dep(axis)).collect(),
-      FeatureKind::Extrude { sketch, .. }
-      | FeatureKind::Flange { sketch, .. }
+      FeatureKind::Extrude { sketch, extent, .. } => {
+        std::iter::once(*sketch).chain(extent.to_point.as_ref().and_then(construct::PointRef::feature)).collect()
+      }
+      FeatureKind::Flange { sketch, .. }
       | FeatureKind::ContourFlange { sketch, .. }
       | FeatureKind::Bend { sketch, .. } => vec![*sketch],
       FeatureKind::Hole { sketch, to, .. } => std::iter::once(*sketch).chain(to.iter().flat_map(plane_dep)).collect(),
       FeatureKind::Loft { sections, rails, centerline, .. } => {
         sections.iter().map(|s| s.sketch).chain(rails.iter().chain(centerline).map(|r| r.sketch)).collect()
       }
-      FeatureKind::Sweep { sketch, path_sketch, rail, .. } => {
-        std::iter::once(*sketch).chain(std::iter::once(*path_sketch)).chain(rail.iter().map(|r| r.sketch)).collect()
-      }
+      FeatureKind::Sweep { sketch, path_sketch, rail, rail2, .. } => std::iter::once(*sketch)
+        .chain(std::iter::once(*path_sketch))
+        .chain(rail.iter().chain(rail2).map(|r| r.sketch))
+        .collect(),
       FeatureKind::SplitBody { plane, .. } | FeatureKind::Draft { plane, .. } => plane_dep(plane),
       FeatureKind::Primitive { plane, .. } => plane_dep(plane),
       FeatureKind::Mirror { plane, features, .. } => {

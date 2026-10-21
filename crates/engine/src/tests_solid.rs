@@ -367,3 +367,104 @@ fn legacy_designs_keep_the_old_rail_and_twist_sweeps() {
     }
   }
 }
+
+#[test]
+fn sweep_between_two_rails_and_along_a_guide_surface_by_command() {
+  let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  let path = run(&mut s, "sketch.line", json!({"points": [[5, 0], [5, 50]]}))["curves"][0].clone();
+  let rail = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 50]]}))["curves"][0].clone();
+  let rail2 = run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 50]]}))["curves"][0].clone();
+  let paths = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, -2], "corner2": [10, 2]}));
+  let rails = json!({
+    "path": paths, "path_curves": [path],
+    "rail": {"sketch": paths, "curves": [rail]}, "rail2": {"sketch": paths, "curves": [rail2]},
+  });
+  // stretched across the rails by default
+  run(&mut s, "sweep", rails.clone());
+  assert!(close(volume(&s), 3000.0, 0.01), "{}", volume(&s));
+  let sw = s.design.features.last().unwrap().id.0;
+  run(&mut s, "feature.edit", json!({"feature": sw, "set": {"profile_scaling": "scale"}}));
+  assert!(close(volume(&s), 40.0 * 50.0 * 7.0 / 3.0, 0.01), "{}", volume(&s));
+  let mut bad = rails.clone();
+  bad.as_object_mut().unwrap().remove("rail");
+  assert!(s.execute("sweep", &bad).is_err(), "a second rail needs a first");
+
+  // round a cylinder halfway up, its side face the guide surface
+  let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  run(&mut s, "cylinder", json!({"radius": 20, "height": 20}));
+  let b = &s.model.bodies[0];
+  let side = b.faces().iter().find(|f| f.kind == fox_kernel::SurfaceKind::Cylinder).unwrap().id;
+  let side = json!({"body": b.id.0, "face": side});
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 10}));
+  let mid = s.design.features.last().unwrap().id.0;
+  run(&mut s, "sketch.create", json!({"plane": {"feature": mid}}));
+  run(&mut s, "sketch.arc", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20]}));
+  let path = s.edit_sketch.unwrap().0;
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [20, 9], "corner2": [22, 11]}));
+  let v0 = volume(&s);
+  run(&mut s, "sweep", json!({"path": path, "guide_surface": side, "operation": "new_body"}));
+  let expected = PI / 2.0 * 21.0 * 4.0;
+  assert!(close(volume(&s) - v0, expected, 0.01), "{} vs {expected}", volume(&s) - v0);
+  let r = s.execute("sweep", &json!({"path": path, "guide_surface": side, "twist": "10 deg", "operation": "new_body"}));
+  assert!(r.is_err() || r.unwrap()["error"].as_str().is_some_and(|e| e.contains("twist")));
+}
+
+#[test]
+fn extrude_to_a_vertex_or_point() {
+  let mut s = Session::default();
+  run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+  let b = &s.model.bodies[0];
+  let (bid, top) = (b.id.0, b.edges().iter().find(|e| e.end.z > 19.0).unwrap().id);
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [30, 0], "corner2": [40, 10]}));
+  let sk = s.edit_sketch.unwrap().0;
+  let to = json!({"vertex": {"body": bid, "edge": top}, "end": true});
+  run(&mut s, "extrude", json!({"sketch": sk, "extent": "to_vertex", "to": to, "operation": "new_body"}));
+  let last = |s: &Session| s.model.bodies.last().unwrap().shape.mass().unwrap();
+  assert!((last(&s).volume - 2000.0).abs() < 1e-3, "{:?}", last(&s));
+  // the extent follows the box: a taller box extrudes further
+  let bx = s.design.features[0].id.0;
+  let taller = json!({"shape": {"type": "box", "width": "20", "depth": "20", "height": "30"}});
+  run(&mut s, "feature.edit", json!({"feature": bx, "set": taller}));
+  assert!((last(&s).bbox_max.z - 30.0).abs() < 1e-6, "{:?}", last(&s));
+  // a point below the sketch goes the other way, plus an offset past it
+  run(
+    &mut s,
+    "extrude",
+    json!({"sketch": sk, "extent": "to_vertex", "to": {"at": [0, 0, -15]}, "distance": 5, "operation": "new_body"}),
+  );
+  let m = last(&s);
+  assert!((m.bbox_min.z + 20.0).abs() < 1e-6 && m.bbox_max.z.abs() < 1e-6, "{m:?}");
+  assert!(s.execute("extrude", &json!({"sketch": sk, "extent": "to_vertex"})).is_err(), "a point is needed");
+  let r = s.execute("extrude", &json!({"sketch": sk, "extent": "to_vertex", "to": [5, 5, 0], "operation": "new_body"}));
+  assert!(r.is_err() || r.unwrap()["error"].as_str().is_some_and(|e| e.contains("sketch plane")));
+}
+
+#[test]
+fn replace_a_curved_face() {
+  // a 40 × 20 block whose top arches from z = 10 at the sides to 14 in the middle
+  let mut s = Session::default();
+  s.design.behaviours = fox_model::Behaviours::legacy(); // a design saved before Fusion's sketch frames
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  run(&mut s, "sketch.line", json!({"points": [[40, 10], [40, 0], [0, 0], [0, 10]]}));
+  run(&mut s, "sketch.arc", json!({"start": [0, 10], "mid": [20, 14], "end": [40, 10]}));
+  run(&mut s, "extrude", json!({"distance": 20}));
+  let b = &s.model.bodies[0];
+  let arch = b.faces().iter().find(|f| f.kind != fox_kernel::SurfaceKind::Plane).unwrap().id;
+  let arch = json!({"body": b.id.0, "face": arch});
+  run(&mut s, "plane.offset", json!({"plane": "xy", "offset": 15}));
+  let up = s.design.features.last().unwrap().id.0;
+  run(&mut s, "replace_face", json!({"faces": [arch], "plane": {"feature": up}}));
+  assert!((volume(&s) - 12_000.0).abs() < 1e-3, "{}", volume(&s));
+  // below the arch: the block is cut down flat
+  run(&mut s, "feature.edit", json!({"feature": up, "set": {"offset": "8 mm"}}));
+  assert!((volume(&s) - 6400.0).abs() < 1e-3, "{}", volume(&s));
+  let m = s.model.bodies[0].shape.mass().unwrap();
+  assert!((m.bbox_max.z - 8.0).abs() < 1e-6, "{m:?}");
+}
