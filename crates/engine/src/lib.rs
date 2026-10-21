@@ -555,6 +555,8 @@ mod tests_canvas;
 #[cfg(test)]
 mod tests_config;
 #[cfg(test)]
+mod tests_config2;
+#[cfg(test)]
 mod tests_curves3d;
 #[cfg(test)]
 mod tests_cut;

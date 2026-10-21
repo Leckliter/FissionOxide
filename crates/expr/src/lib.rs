@@ -2,6 +2,9 @@
 //!
 //! `"40 mm"`, `"width / 2 + 3"`, `"1.5 in"`, `"30 deg"`, `"sqrt(a^2 + b^2)"`.
 //!
+//! Comparisons (`<`, `<=`, `>`, `>=`, `==`, `!=`) give 1 or 0, and `if(cond, a, b)`, `and`, `or`
+//! and `not` combine them, for configuration rules such as `if(length > 100 mm, 8 mm, 5 mm)`.
+//!
 //! Lengths evaluate to millimetres and angles to radians. A value written without any unit takes
 //! the default unit of the quantity being asked for (millimetres for a length, degrees for an
 //! angle), so `"45"` typed into an angle field means 45°.
@@ -152,8 +155,10 @@ pub fn is_valid_parameter_name(name: &str) -> bool {
     && name != "pi"
 }
 
-const FUNCTIONS: &[&str] =
-  &["sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil"];
+const FUNCTIONS: &[&str] = &[
+  "sqrt", "abs", "sin", "cos", "tan", "asin", "acos", "atan", "min", "max", "round", "floor", "ceil", "if", "and", "or",
+  "not",
+];
 
 /// Unit multiplier into base units (mm, rad).
 fn unit_factor(name: &str) -> Option<f64> {
@@ -224,6 +229,20 @@ fn lex(src: &str) -> Result<Vec<Token>, ExprError> {
     } else if "+-*/^(),".contains(c) {
       out.push(Token::Op(c));
       i += 1;
+    } else if "<>=!".contains(c) {
+      // comparisons: `<=` `>=` `==` `!=` are one token each (`≤` `≥` `=` `≠`)
+      let eq = chars.get(i + 1) == Some(&'=');
+      let op = match (c, eq) {
+        ('<', false) => '<',
+        ('>', false) => '>',
+        ('<', true) => '≤',
+        ('>', true) => '≥',
+        ('=', true) => '=',
+        ('!', true) => '≠',
+        _ => return Err(ExprError::UnexpectedChar(c)),
+      };
+      out.push(Token::Op(op));
+      i += if eq { 2 } else { 1 };
     } else if c == '°' {
       out.push(Token::Ident("deg".into()));
       i += 1;
@@ -269,8 +288,27 @@ impl Parser<'_> {
     if self.depth > MAX_DEPTH { Err(ExprError::TooDeep) } else { Ok(()) }
   }
 
-  // expr := term (('+'|'-') term)*
+  // expr := sum (cmp sum)?   (a comparison is 1 or 0, without a unit)
   fn expr(&mut self) -> Result<Value, ExprError> {
+    let a = self.sum()?;
+    let Some(Token::Op(op @ ('<' | '>' | '≤' | '≥' | '=' | '≠'))) = self.peek().cloned() else { return Ok(a) };
+    self.pos += 1;
+    let b = self.sum()?;
+    // equal within a relative tolerance, so `0.1 + 0.2 == 0.3` and `1 in == 25.4 mm` hold
+    let same = (a.value - b.value).abs() <= 1e-9 * a.value.abs().max(b.value.abs()).max(1.0);
+    let t = match op {
+      '<' => a.value < b.value && !same,
+      '>' => a.value > b.value && !same,
+      '≤' => a.value < b.value || same,
+      '≥' => a.value > b.value || same,
+      '=' => same,
+      _ => !same,
+    };
+    Ok(Value { value: if t { 1.0 } else { 0.0 }, has_unit: false })
+  }
+
+  // sum := term (('+'|'-') term)*
+  fn sum(&mut self) -> Result<Value, ExprError> {
     let mut acc = self.term()?;
     loop {
       if self.eat('+') {
@@ -432,6 +470,22 @@ impl Parser<'_> {
         let v = if name == "min" { a.value.min(b.value) } else { a.value.max(b.value) };
         Value { value: v, has_unit: a.has_unit || b.has_unit }
       }
+      "if" => match args.as_slice() {
+        [c, a, b] => {
+          if c.value != 0.0 {
+            *a
+          } else {
+            *b
+          }
+        }
+        _ => return Err(ExprError::Arity(name.to_string(), 3)),
+      },
+      "and" | "or" => {
+        let (a, b) = two(&args)?;
+        let (a, b) = (a.value != 0.0, b.value != 0.0);
+        unitless(if (name == "and" && a && b) || (name == "or" && (a || b)) { 1.0 } else { 0.0 })
+      }
+      "not" => unitless(if one(&args)?.value == 0.0 { 1.0 } else { 0.0 }),
       _ => return Err(ExprError::UnknownFunction(name.to_string())),
     })
   }
@@ -551,6 +605,26 @@ mod tests {
     let neg = "-".repeat(10_000) + "1";
     assert!(eval(&neg, Kind::Length, &Empty).is_err());
     assert_eq!(eval("1/0", Kind::Length, &Empty), Err(ExprError::NotFinite));
+  }
+
+  #[test]
+  fn comparisons_and_conditions() {
+    let scope: HashMap<String, f64> = [("length".to_string(), 120.0)].into_iter().collect();
+    let u = |s: &str| eval(s, Kind::Unitless, &scope).unwrap();
+    assert_eq!(u("length > 100 mm"), 1.0);
+    assert_eq!(u("length <= 100"), 0.0);
+    assert_eq!(u("length >= 120 mm"), 1.0);
+    assert_eq!(u("length == 12 cm"), 1.0);
+    assert_eq!(u("length != 12 cm"), 0.0);
+    assert_eq!(u("0.1 + 0.2 == 0.3"), 1.0);
+    assert_eq!(u("and(length > 100, not(length > 200))"), 1.0);
+    assert_eq!(u("or(length < 10, 0)"), 0.0);
+    assert_eq!(eval("if(length > 100 mm, 8 mm, 5 mm)", Kind::Length, &scope).unwrap(), 8.0);
+    assert_eq!(eval("if(length < 100 mm, 8, 5) * 2", Kind::Length, &scope).unwrap(), 10.0);
+    assert!(eval("if(1, 2)", Kind::Length, &scope).is_err());
+    assert!(eval("length = 3", Kind::Length, &scope).is_err());
+    assert!(eval("1 < 2 < 3", Kind::Length, &scope).is_err());
+    assert_eq!(identifiers("if(a >= b, c, 1 mm)"), ["if", "a", "b", "c", "mm"]);
   }
 
   #[test]

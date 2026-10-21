@@ -19,12 +19,39 @@ pub struct BaseBody {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DirectEdit {
-  /// Moves flat faces by a vector (the part along each face's normal).
-  MoveFaces { faces: Vec<FaceRef>, translate: [f64; 3] },
+  /// Moves faces by a rigid motion: `rotate` (if any) first, then `translate`. Flat faces that
+  /// only translate move by the part of the vector along each face's normal; otherwise the
+  /// faces move as a group (curved faces, holes and bosses included) and their neighbours
+  /// extend or trim to meet them.
+  MoveFaces {
+    faces: Vec<FaceRef>,
+    translate: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotate: Option<Rotation>,
+  },
   /// Pushes (−) or pulls (+) faces along their normals; curved faces are offset.
   PressPull { faces: Vec<FaceRef>, distance: f64 },
   /// Deletes faces and heals the body around them.
   DeleteFaces { faces: Vec<FaceRef> },
+}
+
+/// A turn about an axis through `origin` (millimetres), by `angle` degrees.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rotation {
+  #[serde(default)]
+  pub origin: [f64; 3],
+  pub axis: [f64; 3],
+  pub angle: f64,
+}
+
+impl Rotation {
+  /// The turn as a matrix (`None` for a zero axis).
+  pub fn matrix(&self) -> Option<fox_kernel::glam::DMat4> {
+    use fox_kernel::glam::{DMat4, DVec3};
+    let axis = DVec3::from(self.axis).try_normalize()?;
+    let o = DVec3::from(self.origin);
+    Some(DMat4::from_translation(o) * DMat4::from_axis_angle(axis, self.angle.to_radians()) * DMat4::from_translation(-o))
+  }
 }
 
 impl DirectEdit {
@@ -71,6 +98,11 @@ impl Design {
         _ => true,
       });
     }
+    self.configurations.rules.retain(|r| match r.column {
+      crate::config::Column::Suppress { feature } => !removed.contains(&feature),
+      crate::config::Column::Joint { joint, .. } => !removed.contains(&joint),
+      _ => true,
+    });
     self.attributes.retain(|a| a.target.feature().is_none());
     // keep ids growing past the removed features (their body ids stay in use)
     self.alloc();

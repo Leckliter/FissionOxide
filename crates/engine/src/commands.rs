@@ -294,8 +294,9 @@ cmds! {
   "contact_set.enable" => "Turn a contact set on or off", "{contact_set, enabled?}";
   "contact_set.delete" => "Delete a contact set", "{contact_set}";
   "contact_set.list" => "List the contact sets", "{}";
-  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version", "{item, version?, name?, translate?: [x,y,z], link?: bool}";
-  "component.links" => "Inserted components: source item, version and whether a newer version is in the hub", "{}";
+  "component.insert" => "Insert a hub design as a component; linked (default) it can be updated to the source's newest version; a configured source inserts the named configuration", "{item, version?, configuration?, name?, translate?: [x,y,z], link?: bool}";
+  "component.configuration" => "Switch which configuration of its source design a linked component uses (null: the design as modelled); without 'configuration' lists the source's configurations", "{component, configuration?: name | null}";
+  "component.links" => "Inserted components: source item, version, configuration and whether a newer version is in the hub", "{}";
   "component.update_link" => "Update linked components (one or all) to their source's newest version", "{component?}";
   "component.break_link" => "Break an inserted component's link to its source (keeps the bodies as they are)", "{component}";
   "sketch.text_edit" => "Change a text's string, height, angle, font, style, position or path (its glyphs regenerate)", "{text_id? | curve?, text?, height?, angle?: deg, font?, bold?, italic?, underline?, halign?, valign?, spacing?, at?: [x,y], path?: curve id | null, above?, align?}";
@@ -309,12 +310,13 @@ cmds! {
   "config.rename" => "Rename a configuration", "{name, new_name}";
   "config.activate" => "Make a configuration active (no name: the design as modelled)", "{name?}";
   "config.set" => "Set one cell of a configuration; a null value clears it back to the design's own", "{configuration, parameter, expr} | {configuration, feature, suppressed} | {configuration, body, appearance? | color?} | {configuration, joint, motion?: rotation|slide|slide2|pitch, value}";
-  "config.table" => "The configuration table: a row per configuration, a column per overridden parameter, feature, appearance or joint", "{}";
+  "config.rule" => "Drive a column by a rule evaluated per configuration from that row's parameters: a formula for a parameter or joint, a condition for suppression, a condition choosing color or otherwise for an appearance; expr null removes the rule", "{parameter, expr} | {feature, expr} | {body, expr, color? | appearance?, otherwise?} | {joint, motion?, expr}";
+  "config.table" => "The configuration table: a row per configuration, a column per overridden or rule-driven parameter, feature, appearance or joint (driven cells computed per row)", "{}";
   "design.history" => "Capture design history on or off; turning it off collapses the timeline into a base feature", "{capture: bool}";
   "base.start" => "Add an empty base feature at the marker: direct edits go into it", "{}";
   "base.edit" => "Edit a base feature: roll the marker back to just after it", "{feature}";
   "base.finish" => "Finish editing a base feature: move the marker back to the end", "{}";
-  "direct.move_face" => "Move flat faces by a vector (direct edit in a base feature, not parametric)", "{faces: [{body, face} | {point}], translate: [x,y,z]}";
+  "direct.move_face" => "Move or rotate faces, flat or curved (direct edit in a base feature, not parametric): neighbours extend to meet them", "{faces: [{body, face} | {point}], translate?: [x,y,z], rotate?: {axis: [x,y,z], origin?: [x,y,z], angle}}";
   "direct.press_pull" => "Push (−) or pull (+) faces by a fixed distance (direct edit in a base feature)", "{faces: [{body, face} | {point}], distance}";
   "direct.delete_face" => "Delete faces and heal the body (direct edit in a base feature)", "{faces: [{body, face} | {point}]}";
   "hub.comment" => "Comment on a version (default: the open one, else the latest)", "{item?, version?, text}";

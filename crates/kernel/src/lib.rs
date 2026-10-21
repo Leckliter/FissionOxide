@@ -1136,3 +1136,6 @@ mod tests_offsetfaces;
 pub use history::FaceLabels;
 #[cfg(test)]
 mod tests_history;
+mod movefaces;
+#[cfg(test)]
+mod tests_movefaces;

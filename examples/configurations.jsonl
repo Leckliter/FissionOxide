@@ -1,5 +1,6 @@
-# A mounting plate in three configurations: Large overrides the size parameters and colours the
-# plate, Plain suppresses the hole. Export one with --configuration NAME.
+# A mounting plate in three configurations: Large overrides the width and colours the plate,
+# Plain suppresses the hole. The thickness column is driven by a rule: wide plates are 8 mm,
+# the rest 5 mm. Export one with --configuration NAME.
 {"cmd": "new", "name": "Mounting plate"}
 {"cmd": "param.add", "name": "width", "expr": "60 mm"}
 {"cmd": "param.add", "name": "thickness", "expr": "5 mm"}
@@ -7,10 +8,10 @@
 {"cmd": "cylinder", "radius": 6, "height": 50, "at": [0, 0], "operation": "cut"}
 {"cmd": "config.create", "name": "Large"}
 {"cmd": "config.set", "configuration": "Large", "parameter": "width", "expr": "120 mm"}
-{"cmd": "config.set", "configuration": "Large", "parameter": "thickness", "expr": "8 mm"}
 {"cmd": "config.set", "configuration": "Large", "body": 1000, "appearance": "Aluminum - Anodized Blue"}
 {"cmd": "config.create", "name": "Plain"}
 {"cmd": "config.set", "configuration": "Plain", "feature": 2, "suppressed": true}
+{"cmd": "config.rule", "parameter": "thickness", "expr": "if(width > 100 mm, 8 mm, 5 mm)"}
 {"cmd": "config.table"}
 {"cmd": "config.activate", "name": "Large"}
 {"cmd": "info"}
