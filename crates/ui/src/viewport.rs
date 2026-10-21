@@ -293,7 +293,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     consumed |= sketch_overlay(app, ui, &painter, &view);
   }
-  let hot_plane = sketch_planes_overlay(app, planes, &resp, &painter, &view);
+  let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
   offset_plane_overlay(app, &painter, &view);
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
   if app.preferences.values.camera_pivot
@@ -3240,7 +3240,6 @@ fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<Plane
 fn sketch_planes_overlay(
   app: &App,
   pick: Option<PlanePick>,
-  resp: &egui::Response,
   painter: &egui::Painter,
   view: &View,
 ) -> Option<serde_json::Value> {
