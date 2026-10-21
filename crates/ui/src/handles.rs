@@ -280,26 +280,27 @@ pub(crate) fn show(
   // Fusion's floating value box beside the first handle that edits a field (Shell's thickness);
   // a dialog with a drag arrow has the box there instead (see `viewport::manipulator`)
   let arrow_box = app.dialog.as_mut().is_some_and(|d| d.value_box_field().is_some());
+  let every = app.dialog.as_ref().is_some_and(|d| d.boxes_every_handle());
   let params = crate::value_box::params_of(&app.s);
-  let mut shown = None;
+  let mut shown = 0;
   for (k, (h, p)) in handles.iter().zip(&placed).enumerate() {
     let Some(p) = p else { continue };
     let mut boxed = false;
     if !arrow_box
-      && shown.is_none()
+      && (shown == 0 || every)
       && let Some(dlg) = app.dialog.as_mut()
       && let Some(field) = dlg.handle_field(k)
     {
       let at = label_at(p);
-      if crate::value_box::show(ctx, &mut app.manip.value_box, at, field, &params).changed {
+      if crate::value_box::show_nth(ctx, &mut app.manip.value_box, shown, at, field, &params).changed {
         dlg.value_box_edited();
       }
-      shown = Some(k);
+      shown += 1;
       boxed = true;
     }
     draw(painter, h, p, hot == Some(k), false, !boxed);
   }
-  if !arrow_box && shown.is_none() {
+  if !arrow_box && shown == 0 {
     app.manip.value_box.hide();
   }
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())

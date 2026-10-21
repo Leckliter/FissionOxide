@@ -7,7 +7,7 @@ use fox_kernel::glam::DVec3;
 use fox_kernel::{EdgeLine, Plane, Shape, TriMesh};
 use fox_model::{BodyId, FeatureId, FeatureKind};
 use fox_render::{Marker, Mesh, Polyline, Scene};
-use fox_sketch::{CurveKind, PointId, Sketch};
+use fox_sketch::{CurveId, CurveKind, PointId, Sketch};
 
 use crate::{Sel, Session};
 
@@ -206,6 +206,9 @@ pub struct ViewOptions {
   /// Sketch curves and points also drawn in the hover colour: what a hovered constraint glyph
   /// constrains.
   pub hover_more: Vec<Pick>,
+  /// Curves of the edited sketch drawn as a thin grey outline: a sketch Mirror's or pattern's
+  /// preview before OK, as Fusion shows it.
+  pub preview_curves: Vec<u32>,
 }
 
 /// Caches tessellations between frames (keyed by session revision).
@@ -450,6 +453,7 @@ impl SceneBuilder {
         peeked,
         pickable,
         &opts.hover_more,
+        if is_edit { &opts.preview_curves } else { &[] },
       );
     }
 
@@ -691,8 +695,13 @@ fn sketch_lines(
   peeked: bool,
   pickable: bool,
   hover_more: &[Pick],
+  preview: &[u32],
 ) {
   let w = |p: [f64; 2]| plane.to_world(p).as_vec3().to_array();
+  // a text's outlines are blue while the text can still move (its anchor is free), as in
+  // Fusion, though its glyph points are placed, not solved
+  let text_free: std::collections::HashSet<CurveId> =
+    sk.texts.iter().filter(|t| report.free_points.contains(&t.anchor)).flat_map(|t| t.curves.iter().copied()).collect();
   // a curve's colour and width: in its sketch a selected curve draws Fusion's vivid blue about
   // 4 px wide and a hovered one a darker blue as wide; outside the sketch a selected curve is
   // bright blue over a halo and a hovered one a thicker darker blue, picked over the face it
@@ -726,8 +735,13 @@ fn sketch_lines(
       continue;
     }
     let pick = Pick::SketchCurve { sketch: sid, curve: c.id };
-    let idle = if report.curve_free(sk, c.id) { SKETCH_FREE } else { SKETCH_FIXED };
+    let idle = if report.curve_free(sk, c.id) || text_free.contains(&c.id) { SKETCH_FREE } else { SKETCH_FIXED };
     let id = if pickable { picks.id(pick) } else { 0 };
+    if preview.contains(&c.id.0) && !selected.contains(&pick) {
+      // a previewed copy: a thin grey outline until OK draws it blue
+      push(scene, pts.into_iter().map(w).collect(), (SKETCH_CONSTRUCTION, 1.0, false), id, false);
+      continue;
+    }
     push(scene, pts.into_iter().map(w).collect(), look(pick, idle, c.construction), id, c.construction);
   }
   // included 3D geometry, at its world position

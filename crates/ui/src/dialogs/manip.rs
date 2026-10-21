@@ -276,9 +276,80 @@ impl Dialog {
       Kind::Draft => self.draft_handles(s),
       Kind::RectPattern => self.pattern_centre().and_then(|c| self.pattern_handles(s, c)),
       Kind::CircPattern => self.pattern_centre().and_then(|c| self.circ_handles(s, c)),
+      Kind::SkCircPattern => self.sk_circ_handles(s),
+      Kind::SkRectPattern => self.sk_rect_handles(s),
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.text_handles(s),
       _ => None,
     }
     .unwrap_or_default()
+  }
+
+  /// Sketch Mirror / patterns: the picked objects' centre (sketch coordinates) and the sketch's
+  /// plane, while the sketch is open.
+  fn sketch_objects_centre(&self, s: &Session) -> Option<([f64; 2], Plane)> {
+    let r = s.model.sketches.get(&s.edit_sketch?)?;
+    let pts: Vec<[f64; 2]> =
+      self.curves.iter().flat_map(|c| r.sketch.curve_points(CurveId(*c))).filter_map(|p| r.sketch.pos(p)).collect();
+    if pts.is_empty() {
+      return None;
+    }
+    let n = pts.len() as f64;
+    Some(([pts.iter().map(|p| p[0]).sum::<f64>() / n, pts.iter().map(|p| p[1]).sum::<f64>() / n], r.plane))
+  }
+
+  /// Sketch Circular Pattern: a dot at the next instance for the quantity (its floating box has
+  /// the spinner), round the centre through the objects' centre, and for the Angle and
+  /// Symmetric distributions a dial for the total angle.
+  fn sk_circ_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (c, plane) = self.sketch_objects_centre(s)?;
+    let at = [self.at[0].trim().parse::<f64>().ok()?, self.at[1].trim().parse::<f64>().ok()?];
+    let centre = plane.to_world(at);
+    let spoke = plane.to_world(c) - centre;
+    let zero = spoke.try_normalize()?;
+    let r = Some(spoke.length());
+    let total = if self.choice == "full" { std::f64::consts::TAU } else { self.ang(s, &self.angle)? };
+    let n = count_of(&self.count);
+    let step = circ_step(total, n);
+    let axis = plane.normal();
+    let mut out = vec![Handle::dial(centre, axis, zero, r, step, format!("{n} instances")).dot()];
+    if self.choice != "full" {
+      out.push(Handle::dial(centre, axis, zero, r, total, deg(total)));
+    }
+    Some(out)
+  }
+
+  /// Sketch Rectangular Pattern: along each picked direction from the objects' centre, an arrow
+  /// for the distance and a dot for the quantity (both with floating boxes), once a direction
+  /// is picked, as Fusion's boxes appear then.
+  fn sk_rect_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (c, plane) = self.sketch_objects_centre(s)?;
+    let origin = plane.to_world(c);
+    let d1 = self.dir_lines.first()?.1;
+    let d2 = self.dir_lines.get(1).map(|l| l.1).unwrap_or([-d1[1], d1[0]]);
+    let mut out = Vec::new();
+    for (k, d) in [d1, d2].into_iter().enumerate().take(if self.use_dir2 { 2 } else { 1 }) {
+      let (field, count) = if k == 0 { (&self.spacing, &self.count) } else { (&self.spacing2, &self.count2) };
+      let dist = self.len(s, field)?;
+      let n = count_of(count);
+      let steps = f64::from(n.max(2) - 1);
+      let (step, total) = if self.pattern_extent { (dist / steps, dist) } else { (dist, dist * steps) };
+      let dir = (plane.x * d[0] + plane.y * d[1]).try_normalize()?;
+      let (at_dist, at_count) = if self.pattern_extent { (total, step) } else { (step, total) };
+      out.push(Handle::arrow(origin, dir, at_dist, mm(self.unit, dist)));
+      out.push(Handle::arrow(origin, dir, at_count, format!("{n} instances")).dot());
+    }
+    Some(out)
+  }
+
+  /// Text: the rotate handle at the frame's corner, a dial about the frame's first corner that
+  /// turns the text (and reads its angle).
+  fn text_handles(&self, s: &Session) -> Option<Vec<Handle>> {
+    let (a, b, angle) = self.text_frame()?;
+    let plane = s.model.sketches.get(&s.edit_sketch?)?.plane;
+    let sign = if b[0] >= a[0] { 1.0 } else { -1.0 };
+    let r = (b[0] - a[0]).abs();
+    let value = angle.to_radians();
+    Some(vec![Handle::dial(plane.to_world(a), plane.normal(), plane.x * sign, Some(r), value, deg(value))])
   }
 
   /// Takes handle `i`'s dragged value (not yet snapped; lengths snap to `step` world units,
@@ -306,6 +377,32 @@ impl Dialog {
         if !self.set_circ_handle(s, i, v, step) {
           return;
         }
+      }
+      Kind::SkCircPattern => {
+        let total = if self.choice == "full" { Some(std::f64::consts::TAU) } else { self.ang(s, &self.angle) };
+        let Some(total) = total else { return };
+        if i == 0 {
+          // the quantity that puts the next instance nearest the dot
+          if v * total <= 0.0 {
+            return;
+          }
+          let n = (total / v).round() + if is_full_turn(total) { 0.0 } else { 1.0 };
+          self.count = (n.clamp(2.0, MAX_COUNT) as u32).to_string();
+        } else {
+          let a = snap(v, step);
+          if a.abs() < 1e-9 {
+            return;
+          }
+          self.angle = deg(a);
+        }
+      }
+      Kind::SkRectPattern => {
+        if !self.set_pattern_handle(s, i, v, step) {
+          return;
+        }
+      }
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => {
+        self.set_text_angle(snap(v, step).to_degrees());
       }
       _ => return,
     }
@@ -427,8 +524,20 @@ impl Dialog {
     match (self.kind, i) {
       (Kind::Shell, 0) => Some(&mut self.radius),
       (Kind::Shell, 1) => Some(&mut self.solid.thickness_out),
+      // the sketch patterns' quantity (with its spinner) and distance boxes
+      (Kind::SkCircPattern, 0) => Some(&mut self.count),
+      (Kind::SkRectPattern, 0) => Some(&mut self.spacing),
+      (Kind::SkRectPattern, 1) => Some(&mut self.count),
+      (Kind::SkRectPattern, 2) => Some(&mut self.spacing2),
+      (Kind::SkRectPattern, 3) => Some(&mut self.count2),
       _ => None,
     }
+  }
+
+  /// Does every handle with a field get its own floating box (the sketch Rectangular Pattern's
+  /// distance and quantity boxes), rather than the first alone?
+  pub fn boxes_every_handle(&self) -> bool {
+    self.kind == Kind::SkRectPattern
   }
 
   /// Does Sketch Offset follow the cursor (curves picked, not placed by a click yet)?

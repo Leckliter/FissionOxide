@@ -204,6 +204,8 @@ pub struct State {
   picks: usize,
   /// Viewport clicks on the trimmed surfaces pick pieces to remove.
   pub picking_pieces: bool,
+  /// Text: the frame's first corner has been clicked (in `x`, `y`); the second is awaited.
+  pub text_corner: bool,
 }
 
 impl State {
@@ -242,6 +244,7 @@ impl State {
       cells_for: Value::Null,
       picks: 0,
       picking_pieces: false,
+      text_corner: false,
     }
   }
 
@@ -442,7 +445,8 @@ impl State {
   pub fn hidden(form: &Form, i: usize) -> bool {
     let key = form.inputs[i].key();
     match form.cmd {
-      "sketch.text.form" => matches!(key, "placement" | "x" | "y" | "x2" | "y2"),
+      // (the angle is set by the frame's rotate handle, not a row, as in Fusion)
+      "sketch.text.form" => matches!(key, "placement" | "x" | "y" | "x2" | "y2" | "angle"),
       "sketch.project_to_surface" | "sketch.intersection_curve" => key == "sketch",
       "sketch.intersect.form" => key == "faces",
       _ => false,
@@ -456,7 +460,7 @@ impl State {
       && get("y2").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
   }
 
-  /// Text: the frame dragged on the canvas, from corner `a` to corner `b` (sketch coordinates),
+  /// Text: the frame placed on the canvas, from corner `a` to corner `b` (sketch coordinates),
   /// and the angle (degrees) the text reads at, so it lies in the frame as drawn.
   pub fn text_frame(&mut self, form: &Form, a: [f64; 2], b: [f64; 2], angle: f64) {
     for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
@@ -470,6 +474,50 @@ impl State {
         _ => {}
       }
     }
+    self.text_corner = false;
+  }
+
+  /// Text: the frame's first corner clicked at `a` (sketch coordinates); the prompt moves on to
+  /// the second corner, which a rubber-band frame follows the pointer to.
+  pub fn text_first_corner(&mut self, form: &Form, a: [f64; 2]) {
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      match input.key() {
+        "placement" => *v = json!("box"),
+        "x" => *v = json!(short(a[0])),
+        "y" => *v = json!(short(a[1])),
+        _ => {}
+      }
+    }
+    self.text_corner = true;
+  }
+
+  /// Text: the frame's first corner while the second is awaited (sketch coordinates).
+  pub fn text_corner_at(&self, form: &Form) -> Option<[f64; 2]> {
+    if !self.text_corner || self.text_framed(form) {
+      return None;
+    }
+    let (a, _) = self.text_corners(form)?;
+    Some(a)
+  }
+
+  /// Text: the frame's two corners once it is placed (sketch coordinates), and the angle
+  /// (degrees) the text reads at.
+  pub fn text_corners(&self, form: &Form) -> Option<([f64; 2], [f64; 2])> {
+    let num = |k: &str| {
+      let i = form.inputs.iter().position(|x| x.key() == k)?;
+      self.values.get(i)?.as_str()?.trim().parse::<f64>().ok()
+    };
+    Some(([num("x")?, num("y")?], [num("x2").unwrap_or(0.0), num("y2").unwrap_or(0.0)]))
+  }
+
+  /// Text: the angle (degrees) the text reads at, from the hidden angle input.
+  pub fn text_angle(&self, form: &Form) -> f64 {
+    form
+      .inputs
+      .iter()
+      .position(|x| x.key() == "angle")
+      .and_then(|i| self.values.get(i)?.as_str()?.trim().parse::<f64>().ok())
+      .unwrap_or(0.0)
   }
 
   /// Selection Filter set to faces: the form's picks are faces, not whole bodies.
@@ -549,7 +597,11 @@ impl State {
         return Some("Select path");
       }
       if !on_path && !self.text_framed(form) {
-        return Some("Place first corner of text frame");
+        return Some(if self.text_corner {
+          "Place second corner of text frame"
+        } else {
+          "Place first corner of text frame"
+        });
       }
     }
     for (input, v) in form.inputs.iter().zip(&self.values) {
@@ -1226,28 +1278,31 @@ pub static APPEARANCE: Form = Form {
 };
 
 /// Fusion's Text: the dialog opens with the Type row alone (a text box, or text on a path) and the
-/// prompt to place the frame's first corner; the frame is dragged on the canvas (or the path
-/// picked), and only then the text, font, size and alignment rows appear with the text in the
-/// frame. The frame's corners are hidden inputs the drag fills (see [`State::text_frame`]).
+/// prompt to place the frame's first corner; two clicks on the canvas place the frame (or the
+/// path is picked), and only then the Text, Font, Typeface, Height, Character Spacing, Flip and
+/// Alignment rows appear with "Sample Text" in the frame. The frame's corners and the angle its
+/// rotate handle sets are hidden inputs (see [`State::text_frame`]). The Typeface, Flip and
+/// Alignment rows are drawn as icon toggles (see `Dialog::form_fields`).
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Editable text whose outlines you can extrude, in a frame dragged on the sketch or along a picked curve",
+  hint: "Editable text whose outlines you can extrude, in a frame placed on the sketch or along a picked curve",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
   inputs: &[
     Input::Icons { key: "type", label: "Type", options: TEXT_TYPES },
     Input::Curves { key: "path", label: "Path" },
-    Input::Text { key: "text", label: "Text", default: "FissionOxide" },
+    Input::Text { key: "text", label: "Text", default: "Sample Text" },
     Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
-    Input::Expr { key: "height", label: "Height", default: "5" },
-    Input::Check { key: "bold", label: "Bold" },
+    Input::Check { key: "bold", label: "Typeface" },
     Input::Check { key: "italic", label: "Italic" },
-    Input::Check { key: "underline", label: "Underline" },
-    Input::Choice { key: "halign", label: "Horizontal Alignment", options: TEXT_HALIGN },
+    Input::Expr { key: "height", label: "Height", default: "10 mm" },
+    Input::Expr { key: "spacing", label: "Character Spacing", default: "0.00" },
+    Input::Check { key: "flip_h", label: "Flip" },
+    Input::Check { key: "flip_v", label: "Flip vertical" },
+    Input::Choice { key: "halign", label: "Alignment", options: TEXT_HALIGN },
     Input::Choice { key: "valign", label: "Vertical Alignment", options: TEXT_VALIGN },
-    Input::Expr { key: "spacing", label: "Character Spacing (%)", default: "0" },
     Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
     Input::Check { key: "below", label: "Below the path" },
     Input::Choice {
@@ -1306,10 +1361,15 @@ fn text_params(p: &Value) -> Value {
     [num("x"), num("y")]
   };
   let flag = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
+  // the height is an expression ("10 mm", "0.394 in", a parameter), which the engine evaluates
+  let height = match p.get("height").and_then(Value::as_str).map(str::trim) {
+    Some(t) if !t.is_empty() => json!(t),
+    _ => json!(5.0),
+  };
   json!({
     "at": at,
     "text": p.get("text").cloned().unwrap_or(json!("")),
-    "height": num("height").max(0.01),
+    "height": height,
     "angle": num("angle"),
     "font": p.get("font").cloned().unwrap_or(json!("sans")),
     "bold": flag("bold"),
@@ -1839,7 +1899,31 @@ pub static DRAWING_BREAK: Form = Form {
   picks_model: false,
 };
 
+/// The fonts the Font drop-down always offers: the two built in; the system's fonts (Fusion
+/// lists them, "Arial" first) are added when the row is drawn (see [`font_choices`]).
 const TEXT_FONTS: &[(&str, &str)] = &[("sans", "Sans (Ubuntu Light)"), ("mono", "Mono (Hack)")];
+
+/// Fusion's default font.
+pub const DEFAULT_FONT: &str = "Arial";
+
+/// The Font drop-down's choices: Arial first when the system has it (Fusion's default), the
+/// other system fonts by name, then the built-in two. Found once per run.
+pub fn font_choices() -> &'static [(String, String)] {
+  static FONTS: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+  FONTS.get_or_init(|| {
+    let mut names: Vec<String> = fox_engine::sketch::system_fonts().into_iter().map(|(n, _)| n).collect();
+    names.sort_by_key(|n| (!n.eq_ignore_ascii_case(DEFAULT_FONT), n.to_lowercase()));
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let mut out: Vec<(String, String)> = names.into_iter().map(|n| (n.clone(), n)).collect();
+    out.extend(TEXT_FONTS.iter().map(|(k, l)| (k.to_string(), l.to_string())));
+    out
+  })
+}
+
+/// The font a new Text starts with: Arial when the system has it, else the built-in sans.
+pub fn default_font() -> &'static str {
+  if font_choices().iter().any(|(k, _)| k == DEFAULT_FONT) { DEFAULT_FONT } else { "sans" }
+}
 
 pub static SK_TEXT_EDIT: Form = Form {
   title: "EDIT TEXT",
@@ -2367,6 +2451,15 @@ pub static SK_TEXT_EXPLODE: Form = Form {
 
 /// Fills a form from what it edits when it opens (Edit Text: the selected text's values).
 pub fn prefill(form: &Form, state: &mut State, s: &Session) {
+  if std::ptr::eq(form, &SK_TEXT) {
+    // Fusion's new text is in Arial (when the system has it)
+    if let Some(i) = form.inputs.iter().position(|x| x.key() == "font")
+      && let Some(slot) = state.values.get_mut(i)
+    {
+      *slot = json!(default_font());
+    }
+    return;
+  }
   if !std::ptr::eq(form, &SK_TEXT_EDIT) {
     return;
   }

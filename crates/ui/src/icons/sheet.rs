@@ -277,6 +277,23 @@ const ALL: &[Icon] = &[
   Icon::TextOnPath,
   Icon::FilterBodies,
   Icon::FilterFaces,
+  Icon::Bold,
+  Icon::Italic,
+  Icon::FlipH,
+  Icon::FlipV,
+  Icon::AlignLeft,
+  Icon::AlignCenter,
+  Icon::AlignRight,
+  Icon::AlignTop,
+  Icon::AlignMiddle,
+  Icon::AlignBottom,
+  Icon::DistFull,
+  Icon::DistAngle,
+  Icon::DistSymmetric,
+  Icon::DistExtent,
+  Icon::DistSpacing,
+  Icon::DirOne,
+  Icon::DirSymmetric,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

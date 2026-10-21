@@ -154,6 +154,41 @@ fn a_dialog_takes_clicks_where_it_opens() {
   assert!(h.app.dialog.is_none(), "Cancel closes the dialog");
 }
 
+/// Fusion's Text frame is placed by two clicks on the sketch (a drag's release places nothing):
+/// the first corner moves the prompt on to the second, the second places the frame with
+/// "Sample Text" in it, and the Text box then has the keyboard, so typing replaces the sample.
+#[test]
+fn text_frame_is_placed_by_two_clicks_and_typing_replaces_the_sample() {
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.cam.set_view(fox_engine::render::StandardView::Top);
+  h.app.start(crate::dialogs::Kind::Form(&crate::forms::SK_TEXT));
+  h.frame(vec![]);
+  let c = h.app.canvas.center();
+  assert!(h.prompt_at(c, "Place first corner of text frame"));
+  // a drag places nothing
+  h.drag(c, c + vec2(120.0, -60.0));
+  let d = h.app.dialog.as_ref().expect("the dialog stays open");
+  assert!(d.text_frame_start().is_none() && d.text_frame().is_none());
+  h.move_then_click(c);
+  assert!(h.app.dialog.as_ref().unwrap().text_frame_start().is_some(), "the first corner is placed");
+  assert!(h.prompt_at(c + vec2(60.0, -30.0), "Place second corner of text frame"));
+  h.move_then_click(c + vec2(120.0, -60.0));
+  let d = h.app.dialog.as_ref().unwrap();
+  assert!(d.text_frame().is_some(), "the second click places the frame");
+  assert_eq!(d.form_value("text"), Some(&json!("Sample Text")));
+  let sk = h.app.s.edit_sketch.unwrap();
+  let texts = &h.app.s.design.sketch(sk).unwrap().texts;
+  assert_eq!(texts.first().map(|t| t.text.as_str()), Some("Sample Text"), "the sample text is in the frame");
+  // the Text box has the keyboard: typing replaces the sample text live
+  h.frame(typing("Hi"));
+  h.frame(vec![]);
+  assert_eq!(h.app.dialog.as_ref().unwrap().form_value("text"), Some(&json!("Hi")));
+  h.frame(vec![]);
+  let texts = &h.app.s.design.sketch(sk).unwrap().texts;
+  assert_eq!(texts.first().map(|t| t.text.as_str()), Some("Hi"));
+}
+
 /// Tab with nothing focused used to give egui's keyboard focus to the first widget drawn, the Data
 /// Panel button, which Enter then pressed: the panel opened on its own mid-sketch. Fusion's Tab
 /// never reaches the toolbar.

@@ -557,6 +557,9 @@ pub struct Dialog {
   center: Option<Sel>,
   /// Sketch Rectangular Pattern: the lines picked as directions, with their unit directions.
   dir_lines: Vec<(u32, [f64; 2])>,
+  /// Text: the frame was just placed, so the Text box takes the keyboard on the next frame (its
+  /// sample text selected, so typing replaces it), as in Fusion.
+  focus_text: bool,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -679,6 +682,7 @@ impl Dialog {
       pick_row: 0,
       center: None,
       dir_lines: Vec::new(),
+      focus_text: false,
     }
   }
 
@@ -930,15 +934,20 @@ impl Dialog {
         d.follow = true;
       }
       Kind::SkCircPattern => {
-        d.count = "6".into();
+        // Fusion: three instances all the way round (Distribution "Full")
+        d.count = "3".into();
         d.angle = "360 deg".into();
+        d.choice = "full";
       }
       Kind::SkScale => d.a = "1".into(),
       Kind::SkRectPattern => {
-        // Fusion patterns in two directions from the start
+        // Fusion: two directions of three instances over an extent of 0 until a direction is
+        // picked and the distance set
         d.count = "3".into();
         d.count2 = "3".into();
-        d.spacing2 = d.spacing.clone();
+        d.spacing = "0 mm".into();
+        d.spacing2 = "0 mm".into();
+        d.pattern_extent = true;
         d.use_dir2 = true;
       }
       Kind::Project => {
@@ -1402,13 +1411,27 @@ impl Dialog {
       }
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
-      Kind::SkCircPattern => (
-        "sketch.pattern_circ",
-        json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?, "angle": self.angle,
-          "symmetric": self.flag}),
-      ),
+      Kind::SkCircPattern => {
+        // Distribution: Full is a whole turn, Angle the typed total angle, Symmetric that angle
+        // shared either side of the original
+        let angle = if self.choice == "full" { "360 deg".to_string() } else { self.angle.clone() };
+        (
+          "sketch.pattern_circ",
+          json!({"curves": self.curves, "center": self.at_pt()?, "count": self.count.trim().parse::<u64>().ok()?,
+            "angle": angle, "symmetric": self.choice == "symmetric"}),
+        )
+      }
       Kind::SkScale => ("sketch.transform", json!({"curves": self.curves, "center": self.at_pt()?, "scale": self.a})),
       Kind::SkRectPattern => {
+        // nothing to pattern (or preview) until the first distance is set, as Fusion's starts at
+        // 0 and draws no instances
+        let zero = |t: &str| {
+          fox_engine::expr::eval(t, fox_engine::expr::Kind::Length, &fox_engine::expr::Empty)
+            .is_ok_and(|d| d.abs() < 1e-9)
+        };
+        if zero(&self.spacing) {
+          return None;
+        }
         let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
         // picked lines set the directions (the second at right angles to a lone first), else
         // the dialog's choice, else the sketch axes
@@ -1423,7 +1446,8 @@ impl Dialog {
           "spacing": self.spacing, "symmetric": self.symmetric[0],
           "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
-        if self.use_dir2 {
+        // a second distance of 0 patterns one way
+        if self.use_dir2 && !zero(&self.spacing2) {
           p["direction2"] = json!(d2);
           p["count2"] = json!(self.count2.trim().parse::<u64>().ok()?);
           p["spacing2"] = json!(self.spacing2);
@@ -1719,7 +1743,9 @@ impl Dialog {
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
       Kind::SkCircPattern | Kind::SkScale => !self.curves.is_empty() && self.center.is_some(),
-      Kind::SkOffset | Kind::SkRectPattern => !self.curves.is_empty(),
+      // Fusion's OK waits for a direction line
+      Kind::SkRectPattern => !self.curves.is_empty() && !self.dir_lines.is_empty(),
+      Kind::SkOffset => !self.curves.is_empty(),
       Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
       Kind::DriveJoint | Kind::CopyComponent => self.target.is_some(),
       Kind::NewDrawing => self.view_on.iter().any(|v| *v),
@@ -2079,9 +2105,9 @@ impl Dialog {
         && !self.kind.reports()
         && match ctx.memory(|m| m.focused()) {
           None => true,
-          Some(id) => {
-            ctx.read_response(id).is_some_and(|r| r.layer_id == dialog_layer || r.layer_id == crate::value_box::layer())
-          }
+          Some(id) => ctx
+            .read_response(id)
+            .is_some_and(|r| r.layer_id == dialog_layer || crate::value_box::is_box_layer(r.layer_id)),
         };
     let mut cancel = false;
     let base = match self.kind {
@@ -2266,6 +2292,10 @@ impl Dialog {
       Kind::RectPattern | Kind::CircPattern => "Specify quantity and distance",
       Kind::Move => "Specify distance or angle",
       Kind::SkScale => "Specify scale factor",
+      // Text with its frame placed: the rows are live and the frame's handle turns it
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) && self.form.text_framed(f) => {
+        "Adjust text formatting or rotate text frame"
+      }
       _ => return None,
     };
     Some(specify.into())
@@ -2350,11 +2380,12 @@ impl Dialog {
       Kind::Material => "select a body of a component",
       Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
-      Kind::SkMirror if self.curves.is_empty() => "select sketch curves to mirror",
+      Kind::SkMirror if self.curves.is_empty() => "select sketch objects to mirror",
       Kind::SkMirror => "select the mirror line",
-      Kind::SkCircPattern if self.curves.is_empty() => "select sketch curves to pattern",
+      Kind::SkCircPattern if self.curves.is_empty() => "select sketch objects to pattern",
       Kind::SkCircPattern => "select the center point",
-      Kind::SkRectPattern => "select sketch curves to pattern",
+      Kind::SkRectPattern if self.curves.is_empty() => "select sketch objects to pattern",
+      Kind::SkRectPattern => "select a line for the direction",
       Kind::SkScale if self.curves.is_empty() => "select the sketch geometry to scale",
       Kind::SkScale => "select the point to scale from",
       Kind::SkOffset => "select sketch curves",
@@ -2639,8 +2670,13 @@ impl Dialog {
       .position(|x| x.key() == "faces")
       .and_then(|j| self.form.values[j].as_array().map(Vec::len))
       .unwrap_or(0);
+    let text_form = f.cmd == "sketch.text.form";
+    let params = if text_form { crate::value_box::params_of(&app.s) } else { Vec::new() };
     for (i, input) in f.inputs.iter().enumerate() {
       if !self.form.shown(f, i) || crate::forms::State::hidden(f, i) {
+        continue;
+      }
+      if text_form && self.text_form_field(f, i, &params, ui, dirty) {
         continue;
       }
       let v = self.form.values[i].clone();
@@ -2825,6 +2861,138 @@ impl Dialog {
     if let Some(mut f) = filter {
       self.filter_row_apply(app, &mut f);
     }
+  }
+
+  /// Text's own rows, drawn as Fusion draws them: a multi-line Text box with an fx button, the
+  /// Font drop-down (the system's fonts, then the built-in two), the Typeface (B and I)
+  /// toggles, the Flip toggles (greyed: the engine can't flip a text yet) and the Alignment
+  /// toggles (three horizontal, three vertical). True when input `i` was drawn here (or belongs
+  /// to a row drawn with another input).
+  fn text_form_field(
+    &mut self,
+    f: &'static crate::forms::Form,
+    i: usize,
+    params: &[String],
+    ui: &mut egui::Ui,
+    dirty: &mut bool,
+  ) -> bool {
+    use icon_row::{choice, greyed, icon_row};
+    let at = |k: &str| f.inputs.iter().position(|x| x.key() == k);
+    match f.inputs[i].key() {
+      "text" => {
+        ui.label("Text");
+        let mut t = self.form.values[i].as_str().unwrap_or("").to_string();
+        let focus = self.take_text_focus();
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 4.0;
+          let r = ui.add(egui::TextEdit::multiline(&mut t).desired_rows(2).desired_width(112.0));
+          if focus {
+            // the sample text selected, so typing replaces it
+            crate::viewport::focus_text(ui.ctx(), &r, &t, true);
+          }
+          if r.changed() {
+            *dirty = true;
+          }
+          // fx: a user parameter's name as the text (its value is what Fusion shows)
+          ui.menu_button(RichText::new("fx").italics().small(), |ui| {
+            if params.is_empty() {
+              ui.add_enabled(false, egui::Label::new("No user parameters"));
+            }
+            for p in params {
+              if ui.button(p).clicked() {
+                t = p.clone();
+                *dirty = true;
+                ui.close();
+              }
+            }
+          })
+          .response
+          .on_hover_text("Insert a user parameter");
+        });
+        self.form.values[i] = json!(t);
+        ui.end_row();
+      }
+      "font" => {
+        ui.label("Font");
+        let cur = self.form.values[i].as_str().unwrap_or("").to_string();
+        let choices = crate::forms::font_choices();
+        let shown = choices.iter().find(|(k, _)| *k == cur).map(|(_, l)| l.clone()).unwrap_or_else(|| cur.clone());
+        egui::ComboBox::from_id_salt("text-font").selected_text(shown).width(140.0).show_ui(ui, |ui| {
+          for (k, l) in choices {
+            if ui.selectable_label(*k == cur, l).clicked() {
+              self.form.values[i] = json!(k);
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+      }
+      "bold" => {
+        ui.label("Typeface");
+        let Some(it) = at("italic") else { return false };
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 2.0;
+          for (j, icon, name) in [(i, Icon::Bold, "Bold"), (it, Icon::Italic, "Italic")] {
+            let on = self.form.values[j].as_bool().unwrap_or(false);
+            if crate::icons::icon_button(ui, icon, 26.0, name, on, None).clicked() {
+              self.form.values[j] = json!(!on);
+              *dirty = true;
+            }
+          }
+        });
+        ui.end_row();
+      }
+      "flip_h" => {
+        ui.label("Flip");
+        const FLIPS: [icon_row::Choice; 2] =
+          [greyed("h", Icon::FlipH, "Flip Horizontal"), greyed("v", Icon::FlipV, "Flip Vertical")];
+        let mut none: &'static str = "";
+        icon_row(ui, &mut none, &FLIPS, "flipping text isn't in FissionOxide yet");
+        ui.end_row();
+      }
+      "halign" => {
+        ui.label("Alignment");
+        let Some(vi) = at("valign") else { return false };
+        const H: [icon_row::Choice; 3] = [
+          choice("left", Icon::AlignLeft, "Left"),
+          choice("center", Icon::AlignCenter, "Center"),
+          choice("right", Icon::AlignRight, "Right"),
+        ];
+        const V: [icon_row::Choice; 3] = [
+          choice("top", Icon::AlignTop, "Top"),
+          choice("middle", Icon::AlignMiddle, "Middle"),
+          choice("bottom", Icon::AlignBottom, "Bottom"),
+        ];
+        let mut h: &'static str = match self.form.values[i].as_str() {
+          Some("center") => "center",
+          Some("right") => "right",
+          _ => "left",
+        };
+        // (a box text's baseline alignment is its top)
+        let mut v: &'static str = match self.form.values[vi].as_str() {
+          Some("middle") => "middle",
+          Some("bottom") => "bottom",
+          _ => "top",
+        };
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 2.0;
+          if icon_row(ui, &mut h, &H, "") {
+            *dirty = true;
+          }
+          ui.add_space(6.0);
+          if icon_row(ui, &mut v, &V, "") {
+            *dirty = true;
+          }
+        });
+        self.form.values[i] = json!(h);
+        self.form.values[vi] = json!(v);
+        ui.end_row();
+      }
+      // drawn with their row's first toggle
+      "italic" | "flip_v" | "valign" => {}
+      _ => return false,
+    }
+    true
   }
 
   /// Fields of the loft … sketch-modify dialogs.
@@ -3399,12 +3567,23 @@ impl Dialog {
         self.pick_row_chip(ui, "Objects", 0, &objects, !self.curves.is_empty());
         let centre = if self.center.is_some() { "1 selected" } else { "Select" };
         self.pick_row_chip(ui, "Center Point", 1, centre, self.center.is_some());
-        // the quantity, angle and suppress rows appear once both are picked
+        // Fusion's rows once both are picked: Distribution (Full, Angle or Symmetric; the angle
+        // row only for the last two), Suppression and the Quantity spinner
         if !self.curves.is_empty() && self.center.is_some() {
-          Self::field(ui, "Quantity", &mut self.count, dirty);
-          Self::field(ui, "Total Angle", &mut self.angle, dirty);
-          Self::check(ui, "Symmetric", &mut self.flag, dirty);
-          Self::check_greyed(ui, "Suppress", "Suppressing pattern instances isn't in FissionOxide yet");
+          const DISTRIBUTIONS: [(&str, Icon, &str); 3] = [
+            ("full", Icon::DistFull, "Full"),
+            ("angle", Icon::DistAngle, "Angle"),
+            ("symmetric", Icon::DistSymmetric, "Symmetric"),
+          ];
+          if self.choice.is_empty() {
+            self.choice = "full";
+          }
+          Self::icon_choose(ui, "Distribution", "skcirc-dist", &mut self.choice, &DISTRIBUTIONS, dirty);
+          Self::check_greyed(ui, "Suppression", "Suppressing pattern instances isn't in FissionOxide yet");
+          Self::count_field(ui, "Quantity", &mut self.count, dirty);
+          if self.choice != "full" {
+            Self::field(ui, "Total Angle", &mut self.angle, dirty);
+          }
         }
       }
       Kind::SkRectPattern => {
@@ -3416,21 +3595,26 @@ impl Dialog {
           n => format!("{n} Lines"),
         };
         self.pick_row_chip(ui, "Direction/s", 1, &dirs, !self.dir_lines.is_empty());
-        // the distance rows (both directions) appear once objects are picked
+        // Fusion's rows once objects are picked: Distribution and Suppression, then Quantity,
+        // Distance and Direction for the first direction and the same three for the second
         if !self.curves.is_empty() {
-          const TYPES: [(&str, &str); 2] = [("spacing", "Spacing"), ("extent", "Extent")];
+          const DISTRIBUTIONS: [(&str, Icon, &str); 2] =
+            [("extent", Icon::DistExtent, "Extent"), ("spacing", Icon::DistSpacing, "Spacing")];
+          const DIRECTIONS: [(&str, Icon, &str); 2] =
+            [("one", Icon::DirOne, "One Direction"), ("symmetric", Icon::DirSymmetric, "Symmetric")];
           let mut ty: &'static str = if self.pattern_extent { "extent" } else { "spacing" };
-          Self::choose(ui, "Distance Type", "sdtype", &mut ty, &TYPES, dirty);
+          Self::icon_choose(ui, "Distribution", "skrect-dist", &mut ty, &DISTRIBUTIONS, dirty);
           self.pattern_extent = ty == "extent";
-          Self::field(ui, "Quantity", &mut self.count, dirty);
-          Self::field(ui, "Distance", &mut self.spacing, dirty);
-          Self::check(ui, "Symmetric", &mut self.symmetric[0], dirty);
-          Self::check_greyed(ui, "Suppress", "Suppressing pattern instances isn't in FissionOxide yet");
-          ui.push_id("dir2", |ui| {
-            Self::field(ui, "Quantity", &mut self.count2, dirty);
-            Self::field(ui, "Distance", &mut self.spacing2, dirty);
-            Self::check(ui, "Symmetric", &mut self.symmetric[1], dirty);
-          });
+          Self::check_greyed(ui, "Suppression", "Suppressing pattern instances isn't in FissionOxide yet");
+          for k in 0..2 {
+            let (count, spacing) =
+              if k == 0 { (&mut self.count, &mut self.spacing) } else { (&mut self.count2, &mut self.spacing2) };
+            Self::count_field(ui, "Quantity", count, dirty);
+            Self::field(ui, "Distance", spacing, dirty);
+            let mut dir: &'static str = if self.symmetric[k] { "symmetric" } else { "one" };
+            Self::icon_choose(ui, "Direction", &format!("skrect-dir{k}"), &mut dir, &DIRECTIONS, dirty);
+            self.symmetric[k] = dir == "symmetric";
+          }
           // a second quantity of 1 patterns one way
           self.use_dir2 = self.count2.trim().parse::<u64>().ok().is_none_or(|n| n > 1);
         }
@@ -3744,6 +3928,12 @@ impl Dialog {
     let used = self.other_row_curves();
     let objects: Vec<u32> = picked.into_iter().filter(|c| !used.contains(c)).collect();
     if !objects.is_empty() && objects != self.curves {
+      // Mirror: the first objects pick moves the active row on to the mirror line with the
+      // prompt, so the next line clicked is the line (Fusion); the other rows keep Objects
+      // active for more picks
+      if self.kind == Kind::SkMirror && self.curves.is_empty() && self.pick_row == 0 && self.line.is_none() {
+        self.pick_row = 1;
+      }
       self.curves = objects;
       self.dirty = true;
     }
@@ -3761,17 +3951,91 @@ impl Dialog {
     }
   }
 
-  /// Text: is the dialog waiting for its frame to be dragged on the sketch?
+  /// Text: is the dialog waiting for a corner of its frame to be clicked on the sketch?
   pub(crate) fn wants_text_frame(&self) -> bool {
-    matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT))
-      && self.form.missing(&crate::forms::SK_TEXT) == Some("Place first corner of text frame")
+    let form = &crate::forms::SK_TEXT;
+    matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, form))
+      && matches!(
+        self.form.missing(form),
+        Some("Place first corner of text frame" | "Place second corner of text frame")
+      )
   }
 
-  /// Text: the frame dragged on the sketch, from corner `a` to `b`, and the angle (degrees) the
-  /// text reads at; the dialog grows and the text appears in the frame.
+  /// Text: the frame's first corner (sketch coordinates) while the second is awaited, for the
+  /// rubber-band frame that follows the pointer.
+  pub(crate) fn text_frame_start(&self) -> Option<[f64; 2]> {
+    match self.kind {
+      Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT) => self.form.text_corner_at(f),
+      _ => None,
+    }
+  }
+
+  /// Text: a click at `at` (sketch coordinates) places the frame's first corner, then its second
+  /// (with the angle, degrees, the text reads at); a second corner on the first's row or column
+  /// is ignored (no frame).
+  pub(crate) fn place_text_corner(&mut self, at: [f64; 2], angle: f64) {
+    let Kind::Form(f) = self.kind else { return };
+    match self.form.text_corner_at(f) {
+      None => self.form.text_first_corner(f, at),
+      Some(a) => {
+        if (a[0] - at[0]).abs() < 1e-9 || (a[1] - at[1]).abs() < 1e-9 {
+          return;
+        }
+        self.set_text_frame(a, at, angle);
+      }
+    }
+  }
+
+  /// Text: the placed frame's corners (sketch coordinates) and the angle (degrees) the text
+  /// reads at, for the frame drawn round the text with its rotate handle.
+  pub(crate) fn text_frame(&self) -> Option<([f64; 2], [f64; 2], f64)> {
+    let Kind::Form(f) = self.kind else { return None };
+    if !std::ptr::eq(f, &crate::forms::SK_TEXT) || !self.form.text_framed(f) {
+      return None;
+    }
+    let (a, b) = self.form.text_corners(f)?;
+    Some((a, b, self.form.text_angle(f)))
+  }
+
+  /// Text: turns the frame (and the text in it) to read at `angle` degrees.
+  pub(crate) fn set_text_angle(&mut self, angle: f64) {
+    if let Kind::Form(f) = self.kind
+      && let Some(i) = f.inputs.iter().position(|x| x.key() == "angle")
+    {
+      self.form.values[i] = json!(crate::forms::short(angle));
+      self.dirty = true;
+    }
+  }
+
+  /// A form dialog's value for input `key` (tests).
+  #[cfg(test)]
+  pub(crate) fn form_value(&self, key: &str) -> Option<&Value> {
+    let Kind::Form(f) = self.kind else { return None };
+    self.form.values.get(f.inputs.iter().position(|x| x.key() == key)?)
+  }
+
+  /// Text: does the Text box take the keyboard this frame (the frame was just placed)?
+  fn take_text_focus(&mut self) -> bool {
+    std::mem::take(&mut self.focus_text)
+  }
+
+  /// The sketch curves this dialog's preview made, drawn as thin grey outlines until OK (the
+  /// sketch Mirror's and patterns' copies, as Fusion previews them).
+  pub(crate) fn preview_curves(&self) -> &[u32] {
+    if self.applied && matches!(self.kind, Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern) {
+      &self.made
+    } else {
+      &[]
+    }
+  }
+
+  /// Text: the frame placed on the sketch, from corner `a` to `b`, and the angle (degrees) the
+  /// text reads at; the dialog grows, the text appears in the frame and the Text box takes the
+  /// keyboard.
   pub(crate) fn set_text_frame(&mut self, a: [f64; 2], b: [f64; 2], angle: f64) {
     if let Kind::Form(f) = self.kind {
       self.form.text_frame(f, a, b, angle);
+      self.focus_text = true;
       self.dirty = true;
     }
   }
@@ -4043,6 +4307,65 @@ impl Dialog {
           *cur = k;
           *dirty = true;
         }
+      }
+    });
+    ui.end_row();
+  }
+
+  /// Fusion's icon drop-down (the sketch patterns' Distribution and Direction rows): a
+  /// drop-down whose entries are an icon and a name, the chosen one's icon and name on the
+  /// button. Re-previews when changed.
+  fn icon_choose(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    cur: &mut &'static str,
+    items: &[(&'static str, Icon, &'static str)],
+    dirty: &mut bool,
+  ) {
+    ui.label(label);
+    let shown = items.iter().find(|(k, _, _)| k == cur).map(|(_, _, l)| *l).unwrap_or(cur);
+    let icon = items.iter().find(|(k, _, _)| k == cur).map(|(_, i, _)| *i);
+    let entry = |ui: &mut egui::Ui, icon: Icon, name: &str, on: bool| -> egui::Response {
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (r, resp) = ui.allocate_exact_size(egui::Vec2::splat(18.0), egui::Sense::hover());
+        crate::icons::draw(ui.painter(), r, icon, theme::ICON_INK);
+        ui.selectable_label(on, name).union(resp)
+      })
+      .inner
+    };
+    let mut combo = egui::ComboBox::from_id_salt(id).width(140.0);
+    combo = match icon {
+      Some(i) => combo.icon(move |ui: &egui::Ui, rect: egui::Rect, _: &egui::style::WidgetVisuals, _: bool| {
+        crate::icons::draw(ui.painter(), rect, i, theme::ICON_INK);
+      }),
+      None => combo,
+    };
+    combo.selected_text(shown).show_ui(ui, |ui| {
+      for (k, i, l) in items {
+        if entry(ui, *i, l, *cur == *k).clicked() {
+          *cur = k;
+          *dirty = true;
+        }
+      }
+    });
+    ui.end_row();
+  }
+
+  /// A whole-number field with Fusion's spinner (up and down arrows) beside it, re-previewing
+  /// when edited.
+  fn count_field(ui: &mut egui::Ui, label: &str, v: &mut String, dirty: &mut bool) {
+    ui.label(label);
+    ui.horizontal(|ui| {
+      ui.spacing_mut().item_spacing.x = 2.0;
+      if value_edit(ui, v).changed() {
+        *dirty = true;
+      }
+      if let Some(step) = spinner(ui) {
+        let n = v.trim().parse::<i64>().unwrap_or(1);
+        *v = (n + step).max(1).to_string();
+        *dirty = true;
       }
     });
     ui.end_row();
@@ -5079,6 +5402,29 @@ fn value_edit(ui: &mut egui::Ui, text: &mut String) -> egui::Response {
 }
 
 /// [alue_edit] at a given width.
+/// Fusion's spinner beside a whole-number box: up and down arrows, one above the other. Returns
+/// +1 or -1 for the arrow clicked.
+pub(crate) fn spinner(ui: &mut egui::Ui) -> Option<i64> {
+  let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 20.0), egui::Sense::hover());
+  let mut out = None;
+  for (k, step) in [(0, 1), (1, -1)] {
+    let r = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 10.0 * k as f32), egui::vec2(12.0, 10.0));
+    let resp = ui.interact(r, ui.id().with(("spin", k)), egui::Sense::click());
+    let col = if resp.hovered() { theme::ACCENT } else { theme::GROUP_LABEL };
+    let c = r.center();
+    let pts = if step > 0 {
+      vec![c + egui::vec2(-3.5, 2.0), c + egui::vec2(3.5, 2.0), c + egui::vec2(0.0, -2.0)]
+    } else {
+      vec![c + egui::vec2(-3.5, -2.0), c + egui::vec2(3.5, -2.0), c + egui::vec2(0.0, 2.0)]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(pts, col, egui::Stroke::NONE));
+    if resp.clicked() {
+      out = Some(step);
+    }
+  }
+  out
+}
+
 pub(super) fn value_edit_w(ui: &mut egui::Ui, text: &mut String, width: f32) -> egui::Response {
   let mut r = ui.add(egui::TextEdit::singleline(text).desired_width(width));
   if let Some(typed) = ui.data_mut(|d| d.remove_temp::<String>(egui::Id::new(TYPING))) {
@@ -5334,24 +5680,30 @@ mod tests {
     let pt = s.design.sketch(sk).unwrap().points.iter().find(|p| (p.x - 50.0).abs() < 1e-9).unwrap().id.0;
     let curve = |c: u32| Sel::SketchCurve { sketch: sk, curve: CurveId(c) };
 
-    // Mirror: the circle picked as an object, then (Mirror Line row active) the line
+    // Mirror: the circle picked as an object moves the active row on to the mirror line with
+    // the prompt (Fusion), so the next line clicked is the line and OK comes live
     let mut d = Dialog::blank(Kind::SkMirror);
-    assert!(!d.ready() && d.prompt(false).as_deref() == Some("Select sketch curves to mirror"));
+    assert!(!d.ready() && d.prompt(false).as_deref() == Some("Select sketch objects to mirror"));
+    assert_eq!(d.pick_row, 0);
     s.selection = vec![curve(circle)];
     d.sync_selection(&s);
     assert_eq!((d.curves.clone(), d.line), (vec![circle], None));
     assert!(!d.ready() && d.prompt(false).as_deref() == Some("Select the mirror line"));
-    // with Objects still active a line pick is another object
-    s.selection = vec![curve(circle), curve(slant)];
+    assert_eq!(d.pick_row, 1, "the Mirror Line row is active after the objects pick");
+    s.selection = vec![curve(circle), curve(line)];
     d.sync_selection(&s);
-    assert_eq!((d.curves.clone(), d.line), (vec![circle, slant], None));
-    d.pick_row = 1;
-    s.selection = vec![curve(circle), curve(slant), curve(line)];
-    d.sync_selection(&s);
-    assert_eq!((d.curves.clone(), d.line), (vec![circle, slant], Some(line)));
+    assert_eq!((d.curves.clone(), d.line), (vec![circle], Some(line)));
     assert!(d.ready());
     assert_eq!(d.command().unwrap().0, "sketch.mirror");
+    // with the Objects row made active again, a further pick (a line too) is another object
+    d.pick_row = 0;
+    s.selection = vec![curve(circle), curve(line), curve(slant)];
+    d.sync_selection(&s);
+    assert_eq!((d.curves.clone(), d.line), (vec![circle, slant], Some(line)));
+    assert!(d.preview_curves().is_empty(), "nothing previewed yet");
     apply(&mut s, &mut d);
+    // the mirrored copies preview as grey outlines (the curves the command made) until OK
+    assert!(!d.made.is_empty() && d.preview_curves() == d.made.as_slice());
     d.withdraw(&mut s);
 
     // Circular pattern: a sketch point as the centre; the rows wait for both picks
@@ -5375,7 +5727,8 @@ mod tests {
     d.sync_selection(&s);
     assert!(d.curves.is_empty() && d.at == ["20".to_string(), "40".to_string()]);
 
-    // Rectangular pattern: the picked lines are the directions, both ways by default
+    // Rectangular pattern: the picked lines are the directions, both ways by default; OK waits
+    // for a direction line (Fusion)
     let mut d = Dialog::blank(Kind::SkRectPattern);
     d.count = "3".into();
     d.count2 = "3".into();
@@ -5383,13 +5736,15 @@ mod tests {
     d.use_dir2 = true;
     s.selection = vec![curve(circle)];
     d.sync_selection(&s);
-    assert!(d.ready() && d.dir_lines.is_empty());
+    assert!(!d.ready() && d.dir_lines.is_empty());
+    assert_eq!(d.prompt(false).as_deref(), Some("Select a line for the direction"));
     let (_, p) = d.command().unwrap();
     assert_eq!((&p["direction"], &p["direction2"]), (&json!([1.0, 0.0]), &json!([0.0, 1.0])));
     d.pick_row = 1;
     s.selection = vec![curve(circle), curve(slant)];
     d.sync_selection(&s);
     assert_eq!(d.dir_lines.len(), 1);
+    assert!(d.ready(), "a direction line makes OK live");
     let (_, p) = d.command().unwrap();
     let r = 0.5f64.sqrt();
     let near = |v: &Value, want: [f64; 2]| {
@@ -5406,7 +5761,131 @@ mod tests {
     apply(&mut s, &mut d);
   }
 
-  /// Fusion's Text opens with the Type row alone and the prompt to place the frame; the dragged
+  /// Fusion's Text frame is placed by two clicks: the first corner moves the prompt on to the
+  /// second (a rubber-band frame follows the pointer from it), the second places the frame, the
+  /// dialog grows with "Sample Text" in the frame, the Text box takes the keyboard and the prompt
+  /// asks to adjust the formatting or rotate the frame.
+  #[test]
+  fn text_frame_is_placed_by_two_clicks() {
+    use crate::forms::SK_TEXT;
+    let mut d = Dialog::blank(Kind::Form(&SK_TEXT));
+    crate::forms::prefill(&SK_TEXT, &mut d.form, &Session::default());
+    assert!(d.wants_text_frame() && d.text_frame_start().is_none() && d.text_frame().is_none());
+    assert_eq!(d.prompt(false).as_deref(), Some("Place first corner of text frame"));
+    d.place_text_corner([10.0, 5.0], 0.0);
+    assert!(d.wants_text_frame() && !d.ready());
+    assert_eq!(d.text_frame_start(), Some([10.0, 5.0]));
+    assert_eq!(d.prompt(false).as_deref(), Some("Place second corner of text frame"));
+    // a second corner in the first's column makes no frame: still waiting
+    d.place_text_corner([10.0, 30.0], 0.0);
+    assert!(d.wants_text_frame() && d.text_frame_start() == Some([10.0, 5.0]));
+    d.place_text_corner([50.0, 15.0], 0.0);
+    assert!(!d.wants_text_frame() && d.ready() && d.text_frame_start().is_none());
+    assert_eq!(d.text_frame(), Some(([10.0, 5.0], [50.0, 15.0], 0.0)));
+    assert_eq!(d.prompt(false).as_deref(), Some("Adjust text formatting or rotate text frame"));
+    assert!(d.take_text_focus(), "the Text box takes the keyboard once the frame is placed");
+    assert!(!d.take_text_focus(), "only once");
+    let (cmd, p) = d.command().unwrap();
+    // Fusion's sample text, 10 mm (0.394 in) tall, in its default font, the height an expression
+    assert_eq!((cmd, &p["text"], &p["height"]), ("sketch.text", &json!("Sample Text"), &json!("10 mm")));
+    assert_eq!(p["font"], json!(crate::forms::default_font()));
+    assert_eq!(p["at"], json!([10.0, 15.0]));
+    // the rotate handle turns the text: a dial at the frame's first corner
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let h = d.handles(&app.s);
+    assert_eq!(h.len(), 1);
+    assert!(matches!(h[0].shape, crate::handles::Shape::Dial { radius: Some(r), .. } if (r - 40.0).abs() < 1e-9));
+    d.set_handle(&app.s, 0, 30f64.to_radians(), 1f64.to_radians());
+    assert_eq!(d.text_frame().map(|f| f.2), Some(30.0));
+    assert_eq!(d.command().unwrap().1["angle"], json!(30.0));
+    // the rows Fusion shows once the frame is placed, in its order
+    let shown: Vec<&str> = SK_TEXT
+      .inputs
+      .iter()
+      .enumerate()
+      .filter(|(i, _)| d.form.shown(&SK_TEXT, *i) && !crate::forms::State::hidden(&SK_TEXT, *i))
+      .map(|(_, x)| x.key())
+      .collect();
+    assert_eq!(
+      shown,
+      vec!["type", "text", "font", "bold", "italic", "height", "spacing", "flip_h", "flip_v", "halign", "valign"]
+    );
+  }
+
+  /// Fusion's sketch patterns open with three instances: the circular one distributed "Full"
+  /// (its Quantity box has a spinner), the rectangular one over an extent of 0 in two
+  /// directions, with nothing previewed and OK off until a direction line is picked.
+  #[test]
+  fn sketch_patterns_open_with_fusions_defaults() {
+    use fox_engine::sketch::CurveId;
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let circle =
+      app.run("sketch.circle", json!({"center": [20, 0], "radius": 3})).unwrap()["curves"][0].as_u64().unwrap() as u32;
+    let line =
+      app.run("sketch.line", json!({"start": [0, 10], "end": [40, 10]})).unwrap()["curves"][0].as_u64().unwrap() as u32;
+    let sk = app.s.edit_sketch.unwrap();
+    let curve = |c: u32| Sel::SketchCurve { sketch: sk, curve: CurveId(c) };
+    app.start(Kind::SkCircPattern);
+    let mut d = app.dialog.take().unwrap();
+    assert_eq!((d.count.as_str(), d.choice, d.angle.as_str()), ("3", "full", "360 deg"));
+    assert_eq!(d.prompt(false).as_deref(), Some("Select sketch objects to pattern"));
+    d.curves = vec![circle];
+    let origin = app.s.design.sketch(sk).unwrap().points.iter().find(|p| p.x == 0.0 && p.y == 0.0).unwrap().id;
+    d.center = Some(Sel::SketchPoint { sketch: sk, point: origin });
+    d.at = ["0".into(), "0".into()];
+    let (_, p) = d.command().unwrap();
+    assert_eq!((&p["count"], &p["angle"], &p["symmetric"]), (&json!(3), &json!("360 deg"), &json!(false)));
+    // Angle and Symmetric distributions send the typed angle
+    d.choice = "symmetric";
+    d.angle = "90 deg".into();
+    let (_, p) = d.command().unwrap();
+    assert_eq!((&p["angle"], &p["symmetric"]), (&json!("90 deg"), &json!(true)));
+    d.choice = "full";
+    // the quantity dot at the next instance round the centre, with the quantity's floating box
+    let h = d.handles(&app.s);
+    assert_eq!(h.len(), 1);
+    assert!(matches!(h[0].head, crate::handles::Head::Dot));
+    assert_eq!(d.handle_field(0).map(|f| f.clone()), Some("3".to_string()));
+    d.set_handle(&app.s, 0, std::f64::consts::TAU / 6.0, 0.01);
+    assert_eq!(d.count, "6");
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none() && d.preview_curves().len() == 5, "{:?}", d.error);
+    d.withdraw(&mut app.s);
+
+    app.start(Kind::SkRectPattern);
+    let mut d = app.dialog.take().unwrap();
+    assert_eq!((d.count.as_str(), d.count2.as_str(), d.spacing.as_str()), ("3", "3", "0 mm"));
+    assert!(d.pattern_extent && d.use_dir2 && d.spacing2 == "0 mm");
+    app.s.selection = vec![curve(circle)];
+    d.sync_selection(&app.s);
+    assert!(!d.ready(), "OK waits for a direction line");
+    assert!(d.command().is_none(), "nothing previews at a distance of 0");
+    assert!(d.handles(&app.s).is_empty(), "no floating boxes before a direction is picked");
+    d.pick_row = 1;
+    app.s.selection = vec![curve(circle), curve(line)];
+    d.sync_selection(&app.s);
+    assert!(d.ready() && d.dir_lines.len() == 1);
+    assert!(d.command().is_none(), "still nothing at a distance of 0");
+    // the distance and quantity boxes along the direction, one per handle
+    let h = d.handles(&app.s);
+    assert_eq!(h.len(), 4);
+    assert!(d.boxes_every_handle());
+    assert_eq!(d.handle_field(0).map(|f| f.clone()), Some("0 mm".to_string()));
+    assert_eq!(d.handle_field(1).map(|f| f.clone()), Some("3".to_string()));
+    d.spacing = "30 mm".into();
+    let (_, p) = d.command().unwrap();
+    assert_eq!((&p["distance_type"], &p["count"]), (&json!("extent"), &json!(3)));
+    assert!(p.get("direction2").is_none(), "a second distance of 0 patterns one way");
+    d.spacing2 = "20 mm".into();
+    let (_, p) = d.command().unwrap();
+    assert_eq!(p["count2"], json!(3));
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none() && d.preview_curves().len() == 8, "{:?}", d.error);
+  }
+
+  /// Fusion's Text opens with the Type row alone and the prompt to place the frame; the placed
   /// frame fills the hidden corners, grows the dialog and places the text in the frame, turned to
   /// read left to right on screen.
   #[test]
@@ -5792,6 +6271,7 @@ mod tests {
     d.use_dir2 = true;
     d.pattern_extent = true;
     d.symmetric = [true, false];
+    d.dir_lines = vec![(lines[0], [1.0, 0.0])];
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::Project);
@@ -6501,7 +6981,6 @@ mod tests {
       ("halign", json!("right")),
       ("valign", json!("bottom")),
       ("bold", json!(true)),
-      ("underline", json!(true)),
       ("spacing", json!("10")),
     ];
     let mut d = form(&mut s, &SK_TEXT, vec![], &vals);
@@ -6509,7 +6988,7 @@ mod tests {
     d.applied = false;
     let sketch = s.design.sketch(FeatureId(sk)).unwrap();
     let t = &sketch.texts[0];
-    assert!(t.style.bold && t.style.underline && !t.style.italic && t.style.spacing == 10.0);
+    assert!(t.style.bold && !t.style.underline && !t.style.italic && t.style.spacing == 10.0);
     // right and bottom of the box: the anchor is its lower right corner
     assert_eq!(sketch.pos(t.anchor), Some([50.0, 0.0]));
     let (lo, hi) = sketch.bounds().unwrap();

@@ -327,6 +327,25 @@ pub enum Icon {
   Duplicate,
   Trash,
   Export,
+  // Text's Typeface, Flip and Alignment rows
+  Bold,
+  Italic,
+  FlipH,
+  FlipV,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignTop,
+  AlignMiddle,
+  AlignBottom,
+  // the sketch patterns' Distribution and Direction drop-downs
+  DistFull,
+  DistAngle,
+  DistSymmetric,
+  DistExtent,
+  DistSpacing,
+  DirOne,
+  DirSymmetric,
 }
 
 #[derive(Clone, Copy)]
@@ -2404,6 +2423,107 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.08, 0.6), (0.92, 0.6), (0.92, 0.92), (0.08, 0.92)], Fill);
       k.thick((0.5, 0.52), (0.5, 0.06), Blue, 1.6);
       k.arrow_head((0.5, 0.04), (0.0, -1.0), 0.2, Blue);
+    }
+    Icon::Bold => {
+      k.text((0.5, 0.5), "B", 0.78, Ink);
+      k.text((0.52, 0.5), "B", 0.78, Ink);
+    }
+    Icon::Italic => {
+      k.text((0.5, 0.5), "I", 0.78, Ink);
+      k.line((0.3, 0.86), (0.7, 0.14), Ink);
+    }
+    Icon::FlipH => {
+      // two mirrored triangles about a vertical dashed axis
+      k.dashed((0.5, 0.08), (0.5, 0.92), Slate);
+      k.solid(&[(0.42, 0.26), (0.42, 0.74), (0.1, 0.74)], Teal);
+      k.sk(&[(0.58, 0.26), (0.58, 0.74), (0.9, 0.74), (0.58, 0.26)], Slate);
+    }
+    Icon::FlipV => {
+      k.dashed((0.08, 0.5), (0.92, 0.5), Slate);
+      k.solid(&[(0.26, 0.42), (0.74, 0.42), (0.74, 0.1)], Teal);
+      k.sk(&[(0.26, 0.58), (0.74, 0.58), (0.74, 0.9), (0.26, 0.58)], Slate);
+    }
+    Icon::AlignLeft => {
+      for (y, w) in [(0.2, 0.8), (0.4, 0.5), (0.6, 0.8), (0.8, 0.5)] {
+        k.thick((0.1, y), (0.1 + w, y), Ink, 1.3);
+      }
+    }
+    Icon::AlignCenter => {
+      for (y, w) in [(0.2, 0.8), (0.4, 0.5), (0.6, 0.8), (0.8, 0.5)] {
+        k.thick((0.5 - w / 2.0, y), (0.5 + w / 2.0, y), Ink, 1.3);
+      }
+    }
+    Icon::AlignRight => {
+      for (y, w) in [(0.2, 0.8), (0.4, 0.5), (0.6, 0.8), (0.8, 0.5)] {
+        k.thick((0.9 - w, y), (0.9, y), Ink, 1.3);
+      }
+    }
+    Icon::AlignTop => {
+      k.thick((0.1, 0.14), (0.9, 0.14), Ink, 1.3);
+      k.text((0.5, 0.58), "A", 0.6, Teal);
+    }
+    Icon::AlignMiddle => {
+      k.dashed((0.1, 0.5), (0.9, 0.5), Slate);
+      k.text((0.5, 0.5), "A", 0.6, Teal);
+    }
+    Icon::AlignBottom => {
+      k.thick((0.1, 0.86), (0.9, 0.86), Ink, 1.3);
+      k.text((0.5, 0.44), "A", 0.6, Teal);
+    }
+    Icon::DistFull => {
+      // instances all the way round
+      k.circle((0.5, 0.5), 0.36, None, Some(Slate));
+      for i in 0..6 {
+        let a = i as f32 * PI / 3.0;
+        k.circle((0.5 + 0.36 * a.cos(), 0.5 + 0.36 * a.sin()), 0.07, Some(Teal), None);
+      }
+    }
+    Icon::DistAngle => {
+      // instances over a swept angle from the first
+      k.ska((0.5, 0.5), 0.36, -PI / 2.0, PI / 2.0, Slate);
+      k.line((0.5, 0.5), (0.5, 0.14), Slate);
+      k.line((0.5, 0.5), (0.5, 0.86), Slate);
+      for a in [-PI / 2.0, -PI / 6.0, PI / 6.0, PI / 2.0] {
+        k.circle((0.5 + 0.36 * a.cos(), 0.5 + 0.36 * a.sin()), 0.07, Some(Teal), None);
+      }
+    }
+    Icon::DistSymmetric => {
+      // instances either side of the first
+      k.ska((0.5, 0.5), 0.36, -PI / 2.0, PI / 2.0, Slate);
+      k.dashed((0.5, 0.5), (0.86, 0.5), Slate);
+      for a in [-PI / 2.0, 0.0, PI / 2.0] {
+        k.circle((0.5 + 0.36 * a.cos(), 0.5 + 0.36 * a.sin()), 0.07, Some(Teal), None);
+      }
+    }
+    Icon::DistExtent => {
+      // the whole pattern's size: a bar across every instance
+      k.line((0.1, 0.3), (0.9, 0.3), Slate);
+      k.line((0.1, 0.22), (0.1, 0.38), Slate);
+      k.line((0.9, 0.22), (0.9, 0.38), Slate);
+      for x in [0.16, 0.5, 0.84] {
+        k.solid(&[(x - 0.08, 0.56), (x + 0.08, 0.56), (x + 0.08, 0.84), (x - 0.08, 0.84)], Teal);
+      }
+    }
+    Icon::DistSpacing => {
+      // the step between neighbours
+      k.line((0.16, 0.3), (0.5, 0.3), Slate);
+      k.line((0.16, 0.22), (0.16, 0.38), Slate);
+      k.line((0.5, 0.22), (0.5, 0.38), Slate);
+      for x in [0.16, 0.5, 0.84] {
+        k.solid(&[(x - 0.08, 0.56), (x + 0.08, 0.56), (x + 0.08, 0.84), (x - 0.08, 0.84)], Teal);
+      }
+    }
+    Icon::DirOne => {
+      k.solid(&[(0.1, 0.36), (0.3, 0.36), (0.3, 0.64), (0.1, 0.64)], Teal);
+      k.line((0.38, 0.5), (0.84, 0.5), Slate);
+      k.arrow_head((0.9, 0.5), (1.0, 0.0), 0.16, Slate);
+    }
+    Icon::DirSymmetric => {
+      k.solid(&[(0.4, 0.36), (0.6, 0.36), (0.6, 0.64), (0.4, 0.64)], Teal);
+      k.line((0.34, 0.5), (0.14, 0.5), Slate);
+      k.arrow_head((0.08, 0.5), (-1.0, 0.0), 0.14, Slate);
+      k.line((0.66, 0.5), (0.86, 0.5), Slate);
+      k.arrow_head((0.92, 0.5), (1.0, 0.0), 0.14, Slate);
     }
   }
 }

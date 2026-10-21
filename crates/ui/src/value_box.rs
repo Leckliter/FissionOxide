@@ -15,9 +15,19 @@ pub(crate) fn id() -> egui::Id {
   egui::Id::new("floating-value-box")
 }
 
+/// The `n`th box's id (a dialog may show one beside each of its handles).
+fn id_nth(n: usize) -> egui::Id {
+  if n == 0 { id() } else { id().with(n) }
+}
+
 /// The box's layer: a focused box counts as the dialog's own for Enter = OK.
 pub(crate) fn layer() -> egui::LayerId {
   egui::LayerId::new(egui::Order::Foreground, id())
+}
+
+/// Is `layer` one of the boxes' (see [`layer`])?
+pub(crate) fn is_box_layer(layer: egui::LayerId) -> bool {
+  (0..8).any(|n| layer == egui::LayerId::new(egui::Order::Foreground, id_nth(n)))
 }
 
 /// Whether the box has taken the keyboard since it appeared, and the text it showed last frame.
@@ -69,8 +79,21 @@ pub struct Shown {
 /// Shows the box with its left edge at `at` (beside the arrow's head), editing `text`. `params`
 /// are the user parameters its ⋮ menu offers.
 pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut String, params: &[String]) -> Shown {
+  show_nth(ctx, state, 0, at, text, params)
+}
+
+/// [`show`] for the `n`th box of a dialog with several (one beside each handle): only the first
+/// takes the keyboard when it appears. A whole-number box (a quantity) gets Fusion's spinner.
+pub(crate) fn show_nth(
+  ctx: &egui::Context,
+  state: &mut State,
+  n: usize,
+  at: Pos2,
+  text: &mut String,
+  params: &[String],
+) -> Shown {
   let mut out = Shown::default();
-  egui::Area::new(id()).fixed_pos(at).pivot(Align2::LEFT_CENTER).order(egui::Order::Foreground).show(ctx, |ui| {
+  egui::Area::new(id_nth(n)).fixed_pos(at).pivot(Align2::LEFT_CENTER).order(egui::Order::Foreground).show(ctx, |ui| {
     egui::Frame::new()
       .fill(Color32::from_rgba_unmultiplied(255, 255, 255, 240))
       .stroke(Stroke::new(1.0, INK))
@@ -79,7 +102,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
       .show(ui, |ui| {
         ui.horizontal(|ui| {
           ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
-          let edit_id = id().with("edit");
+          let edit_id = id_nth(n).with("edit");
           // the field changed under a box that has the keyboard: select the whole new value
           // before the edit box reads this frame's typing, so a digit replaces all of it
           if state.focused && state.last.as_deref().is_some_and(|l| l != text.as_str()) {
@@ -100,13 +123,20 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
             r.mark_changed();
             state.focused = true;
             out.focused = true;
-          } else if !state.focused {
+          } else if !state.focused && n == 0 {
             crate::viewport::focus_text(ctx, &r, text, true);
             state.focused = true;
             out.focused = true;
           }
           crate::units::pin(ui, &mut r, text);
           out.changed |= r.changed();
+          if text.trim().parse::<u64>().is_ok()
+            && let Some(step) = crate::dialogs::spinner(ui)
+          {
+            let v = text.trim().parse::<i64>().unwrap_or(1);
+            *text = (v + step).max(1).to_string();
+            out.changed = true;
+          }
           state.last = Some(text.clone());
           if r.has_focus() || r.lost_focus() {
             let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));

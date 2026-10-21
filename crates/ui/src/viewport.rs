@@ -137,11 +137,6 @@ pub enum Drag {
   Triad,
   /// Dragging a component (see [`crate::comp_drag`]).
   Component,
-  /// Text: dragging the text frame on the sketch, from `start` to `now` (screen positions).
-  TextFrame {
-    start: Pos2,
-    now: Pos2,
-  },
   /// Dragging one of the dialog's feature handles (see [`crate::handles`]).
   Handle,
   /// Zoom Window: the box being dragged.
@@ -483,9 +478,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = Color32::from_rgb(40, 120, 230);
     painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
-  if let Some(Drag::TextFrame { start, now }) = app.drag {
-    text_frame_preview(app, &painter, &view, start, now);
-  }
+  text_frame_overlay(app, &painter, &view, resp.hover_pos());
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
   crate::select::show_tool(app, &ctx);
@@ -609,7 +602,6 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
       }
-      Drag::TextFrame { start, now } => finish_text_frame(app, view, start, now),
       Drag::ZoomWindow { start, now } => {
         let bx = Rect::from_two_pos(start, now);
         let (o, d) = view.ray(&app.cam, bx.center());
@@ -758,6 +750,7 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     // Offset Plane's preview is filled over the image (see `offset_plane_overlay`)
     hide_planes: app.dialog.as_ref().and_then(|d| d.previewed_plane()).into_iter().collect(),
     hover_more: app.glyph_hover.clone(),
+    preview_curves: app.dialog.as_ref().map(|d| d.preview_curves().to_vec()).unwrap_or_default(),
     ..analysis
   }
 }
@@ -1010,18 +1003,6 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   if crate::comp_drag::handle(app, resp, ctx, pos, &|p| view.ray(&cam, p)) {
     return;
   }
-  // Text waits for its frame: a drag on the sketch places it instead of window-selecting
-  if resp.drag_started_by(egui::PointerButton::Primary)
-    && app.drag.is_none()
-    && app.dialog.as_ref().is_some_and(|d| d.wants_text_frame())
-  {
-    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or(pos);
-    app.drag = Some(Drag::TextFrame { start, now: pos });
-  }
-  if let Some(Drag::TextFrame { now, .. }) = &mut app.drag {
-    *now = pos;
-    return;
-  }
   // Select Other, as in Fusion: a press held still on the model opens the list while the
   // button is down, and the release then selects nothing (a sketch point is for dragging)
   if app.tool == Tool::Select
@@ -1096,6 +1077,12 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
     && !matches!(app.hover, Some(Pick::SketchCurve { .. }))
   {
     d.stop_following();
+    return;
+  }
+  // Text waits for its frame: a click on the sketch places a corner (two clicks place the
+  // frame; a drag's release places nothing), as in Fusion
+  if sketching && app.dialog.as_ref().is_some_and(|d| d.wants_text_frame()) {
+    place_text_corner(app, view, pos);
     return;
   }
   if !sketching || app.tool == Tool::Select {
@@ -1934,39 +1921,48 @@ fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
   }
 }
 
-/// Text's frame as it is dragged: the sketch-aligned rectangle between the two corners.
-fn text_frame_preview(app: &App, painter: &egui::Painter, view: &View, start: Pos2, now: Pos2) {
+/// Text's frame on the sketch: while the second corner is awaited, a dashed rubber-band frame
+/// from the first corner to the pointer; once placed, the frame round the text (its rotate
+/// handle is a feature handle, see `handles`).
+fn text_frame_overlay(app: &App, painter: &egui::Painter, view: &View, pointer: Option<Pos2>) {
+  let Some(d) = app.dialog.as_ref() else { return };
   let Some((_, plane)) = sketch_plane(app) else { return };
-  let corner = |p: Pos2| {
-    let (o, d) = view.ray(&app.cam, p);
-    ray_plane(o, d, plane.origin, plane.normal()).map(|hit| plane.to_local(hit))
+  let corners = |a: [f64; 2], b: [f64; 2]| -> Vec<Pos2> {
+    [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]
+      .iter()
+      .filter_map(|q| view.to_screen(&app.cam, plane.to_world(*q)))
+      .collect()
   };
-  let (Some(a), Some(b)) = (corner(start), corner(now)) else { return };
-  let pts: Vec<Pos2> = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]
-    .iter()
-    .filter_map(|q| view.to_screen(&app.cam, plane.to_world(*q)))
-    .collect();
-  if pts.len() == 4 {
-    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, crate::theme::ACCENT)));
+  if let Some(a) = d.text_frame_start()
+    && let Some(p) = pointer
+  {
+    let (o, dir) = view.ray(&app.cam, p);
+    if let Some(hit) = ray_plane(o, dir, plane.origin, plane.normal()) {
+      let mut pts = corners(a, plane.to_local(hit));
+      if pts.len() == 4 {
+        pts.push(pts[0]);
+        painter.extend(egui::Shape::dashed_line(&pts, Stroke::new(1.0, crate::theme::ACCENT), 5.0, 4.0));
+      }
+    }
+  }
+  if let Some((a, b, _)) = d.text_frame() {
+    let pts = corners(a, b);
+    if pts.len() == 4 {
+      painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, crate::theme::ACCENT)));
+    }
   }
 }
 
-/// Text: the frame drag ended; its corners (sketch coordinates) go to the dialog with the angle
-/// the text reads at on screen.
-fn finish_text_frame(app: &mut App, view: &View, start: Pos2, now: Pos2) {
+/// Text: a click at `pos` places a corner of the frame (sketch coordinates), the second with
+/// the angle the text reads at on screen.
+fn place_text_corner(app: &mut App, view: &View, pos: Pos2) {
   let Some((_, plane)) = sketch_plane(app) else { return };
-  let corner = |p: Pos2| {
-    let (o, d) = view.ray(&app.cam, p);
-    ray_plane(o, d, plane.origin, plane.normal()).map(|hit| plane.to_local(hit))
-  };
-  let (Some(a), Some(b)) = (corner(start), corner(now)) else { return };
-  if (a[0] - b[0]).abs() < 1e-9 || (a[1] - b[1]).abs() < 1e-9 {
-    return;
-  }
+  let (o, d) = view.ray(&app.cam, pos);
+  let Some(hit) = ray_plane(o, d, plane.origin, plane.normal()) else { return };
   let (right, _, _) = app.cam.basis();
   let angle = reading_angle(&plane, right);
-  if let Some(d) = app.dialog.as_mut() {
-    d.set_text_frame(a, b, angle);
+  if let Some(dlg) = app.dialog.as_mut() {
+    dlg.place_text_corner(plane.to_local(hit), angle);
   }
 }
 
