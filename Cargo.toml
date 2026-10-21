@@ -27,6 +27,7 @@ fox-hub-server = { path = "crates/hub-server" }
 fox-ecad = { path = "crates/ecad" }
 fox-sim = { path = "crates/sim" }
 fox-form = { path = "crates/form" }
+fox-gen = { path = "crates/gen" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -58,6 +59,10 @@ type_complexity = "allow"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# the topology optimisation solver is all number crunching
+[profile.dev.package.fox-gen]
+opt-level = 3
 
 [profile.dev]
 opt-level = 1
