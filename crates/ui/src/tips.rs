@@ -219,6 +219,18 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        sketch plane and the lines where they cross the faces become 3D curves. A pipe or sweep can \
        follow them, and they update when the body changes.",
     ),
+    (_, "Spun Profile") => (
+      "Draws the outline bodies sweep through as they turn about an axis.",
+      "Pick the bodies and an axis; the profile of everything they pass through while turning is \
+       drawn on the sketch plane, on their side of the axis (Flip Result for the other). The outline \
+       follows the bodies when they change.",
+    ),
+    (_, "Isoparametric Curve") => (
+      "Makes a 3D sketch curve along a face at a constant U or V.",
+      "Pick a face; a curve of constant parameter runs across it, for a sweep path or a split line. \
+       Not available yet in FissionOxide: the dialog opens, but the kernel can't evaluate a face's \
+       iso-curves.",
+    ),
 
     // SKETCH CHAMFER
     (_, "Equal Distance Chamfer") => (

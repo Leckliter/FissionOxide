@@ -441,6 +441,8 @@ cmds! {
   "sketch.project_to_surface" => "Project To Surface: drape sketch curves onto faces as 3D curves, pushed along a direction (both ways) or each point to the closest point of the faces; a pipe can follow them (path: this feature)", "{sketch?, curves?: [curve], faces: [face], type?: closest_point|along_vector, direction?: x|y|z|{axis}|{line}|{body, edge}}";
   "sketch.intersection_curve" => "Intersection curve: 3D curves where sketch curves, pushed along their sketch's normal, cross faces or other sketches' curves (pushed along theirs); pipe can follow them; they follow the body", "{sketch?, curves?: [id] (default all), faces?: [face], with?: [sketch id | {sketch, curves?}]}";
   "sketch.include" => "Include 3D Geometry: body edges and earlier sketches' curves at their real positions; off-plane ones stay 3D (sweep paths, rails), in-plane ones form profiles; they follow their source", "{sketch?, edges?: [{body, edge} | {point}], curves?: [{sketch, curve}], associative?}";
+  "sketch.intersect" => "Intersect: the curves where bodies, or chosen faces of them, cut the sketch plane (fixed lines, arcs, circles and splines that form profiles); with associative (default) they follow the bodies", "{sketch?, bodies?: [id | name], faces?: [{body, face}], associative?}";
+  "sketch.isoparametric_curve" => "Isoparametric Curve: a curve of constant U or V across a face as a 3D sketch curve. Not available yet: the kernel can't evaluate a face's iso-curves, so this always fails", "{face: {body, face}, curve?: single|multiple}";
   "form.box" => "Form > Box: a T-spline body, the smooth limit surface of a box control cage (centred on 'at', standing on the plane) with the given faces per side", "{plane?, at?: [x, y(, z)], length, width, height, length_faces?, width_faces?, height_faces? (default 2), operation?}";
   "form.plane" => "Form > Plane: an open T-spline surface, a flat grid of control faces centred on 'at'", "{plane?, at?, length, width, length_faces?, width_faces? (default 2)}";
   "form.cylinder" => "Form > Cylinder: a T-spline tube standing on the plane, open at both ends unless capped; its smooth body has the diameter given", "{plane?, at?, diameter, height, around_faces? (8), height_faces? (2), capped?: bool, operation?}";
@@ -1582,6 +1584,10 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     | "sketch.blend" => sketch_tools::run(s, name, p),
     "sketch.elliptical_arc" | "sketch.fonts" => sketch_curves::run(s, name, p),
     "sketch.include" => sketch_include::include(s, p),
+    "sketch.intersect" => sketch_intersect::intersect(s, p),
+    "sketch.isoparametric_curve" => {
+      Err(CmdError::new("Isoparametric Curve isn't in FissionOxide yet: the kernel can't evaluate a face's iso-curves"))
+    }
     "canvas.insert" | "canvas.edit" | "canvas.calibrate" => crate::canvas::run(s, name, p),
     "sketch.scale_to" => sketch_fit::scale_to(s, p),
     "sketch.centerline" => {
@@ -3614,6 +3620,7 @@ mod sketch_tools;
 mod sketch_curves;
 
 mod sketch_include;
+mod sketch_intersect;
 
 mod sketch_cleanup;
 mod sketch_fit;

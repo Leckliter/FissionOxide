@@ -273,6 +273,10 @@ const ALL: &[Icon] = &[
   Icon::OpIntersect,
   Icon::OpNewBody,
   Icon::OpNewComponent,
+  Icon::TextBox,
+  Icon::TextOnPath,
+  Icon::FilterBodies,
+  Icon::FilterFaces,
 ];
 
 fn render(icons: &[Icon], cell: f32, icon: f32, cols: usize, ppp: f32) -> image::RgbaImage {

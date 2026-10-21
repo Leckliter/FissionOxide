@@ -141,6 +141,18 @@ pub enum Input {
     key: &'static str,
     label: &'static str,
   },
+  /// A choice shown as a row of icon toggles (Fusion's Type and Selection Filter rows): key,
+  /// icon and name (the tooltip) of each; the first is the default.
+  Icons {
+    key: &'static str,
+    label: &'static str,
+    options: &'static [(&'static str, Icon, &'static str)],
+  },
+  /// A check box that starts ticked (Projection Link).
+  CheckOn {
+    key: &'static str,
+    label: &'static str,
+  },
 }
 
 impl Input {
@@ -167,7 +179,9 @@ impl Input {
       | Input::FaceOther { key, .. }
       | Input::PlaneOpt { key, .. }
       | Input::Cells { key, .. }
-      | Input::Pieces { key, .. } => key,
+      | Input::Pieces { key, .. }
+      | Input::Icons { key, .. }
+      | Input::CheckOn { key, .. } => key,
     }
   }
 }
@@ -200,7 +214,9 @@ impl State {
       .map(|i| match i {
         Input::Expr { default, .. } | Input::Text { default, .. } => json!(default),
         Input::Check { .. } => json!(false),
+        Input::CheckOn { .. } => json!(true),
         Input::Choice { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
+        Input::Icons { options, .. } => json!(options.first().map(|o| o.0).unwrap_or("")),
         Input::Vec3 { default, .. } => json!(default),
         Input::Faces { .. }
         | Input::FacesOpt { .. }
@@ -381,13 +397,27 @@ impl State {
 
   /// Does input `i` count? Some only do when another is set: a composite frame's lower tier,
   /// a weld's finish letter (with its contour), a both-sides weld's other side, a datum target
-  /// line's end and an area target's diameter.
+  /// line's end and an area target's diameter; Text's fields once its frame is placed (or its
+  /// path picked), Project To Surface's direction with Along Vector.
   pub fn shown(&self, form: &Form, i: usize) -> bool {
     let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
     let set = |k: &str| get(k).and_then(Value::as_str).is_some_and(|c| !c.is_empty() && c != "none");
     let both = || get("side").and_then(Value::as_str) == Some("both");
     let key = form.inputs[i].key();
     match form.cmd {
+      "sketch.text.form" => {
+        let on_path = get("type").and_then(Value::as_str) == Some("path");
+        let picked = get("path").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+        match key {
+          "type" => true,
+          "path" => on_path,
+          "below" | "align" => on_path && picked,
+          "angle" | "placement" | "x" | "y" | "x2" | "y2" => !on_path && self.text_framed(form),
+          _ if on_path => picked,
+          _ => self.text_framed(form),
+        }
+      }
+      "sketch.project_to_surface" if key == "direction" => get("type").and_then(Value::as_str) == Some("along_vector"),
       "drawing.feature_control" if key.starts_with("lower_") => {
         get("composite").and_then(Value::as_bool).unwrap_or(false)
       }
@@ -404,6 +434,53 @@ impl State {
       },
       _ => true,
     }
+  }
+
+  /// Is input `i` passed to the command but not drawn as a row? Text's frame corners (placed by
+  /// a drag on the canvas) and the sketch of Project To Surface's and Intersection Curve's
+  /// curves (the picked curves' own, or the active sketch).
+  pub fn hidden(form: &Form, i: usize) -> bool {
+    let key = form.inputs[i].key();
+    match form.cmd {
+      "sketch.text.form" => matches!(key, "placement" | "x" | "y" | "x2" | "y2"),
+      "sketch.project_to_surface" | "sketch.intersection_curve" => key == "sketch",
+      "sketch.intersect.form" => key == "faces",
+      _ => false,
+    }
+  }
+
+  /// Text: has its frame been placed (two corners dragged on the canvas)?
+  pub fn text_framed(&self, form: &Form) -> bool {
+    let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+    get("x2").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
+      && get("y2").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
+  }
+
+  /// Text: the frame dragged on the canvas, from corner `a` to corner `b` (sketch coordinates),
+  /// and the angle (degrees) the text reads at, so it lies in the frame as drawn.
+  pub fn text_frame(&mut self, form: &Form, a: [f64; 2], b: [f64; 2], angle: f64) {
+    for (input, v) in form.inputs.iter().zip(self.values.iter_mut()) {
+      match input.key() {
+        "placement" => *v = json!("box"),
+        "x" => *v = json!(short(a[0])),
+        "y" => *v = json!(short(a[1])),
+        "x2" => *v = json!(short(b[0])),
+        "y2" => *v = json!(short(b[1])),
+        "angle" => *v = json!(short(angle)),
+        _ => {}
+      }
+    }
+  }
+
+  /// Selection Filter set to faces: the form's picks are faces, not whole bodies.
+  pub fn filter_faces(&self, form: &Form) -> bool {
+    form
+      .inputs
+      .iter()
+      .position(|x| matches!(x, Input::Icons { key: "filter", .. }))
+      .and_then(|j| self.values.get(j))
+      .and_then(Value::as_str)
+      == Some("faces")
   }
 
   /// The model picks behind the form's values, as a selection that [`State::sync`] reads back
@@ -464,6 +541,17 @@ impl State {
 
   /// Is everything the command needs there?
   pub fn missing(&self, form: &Form) -> Option<&'static str> {
+    if form.cmd == "sketch.text.form" {
+      let get = |k: &str| form.inputs.iter().position(|x| x.key() == k).and_then(|j| self.values.get(j));
+      let on_path = get("type").and_then(Value::as_str) == Some("path");
+      let picked = get("path").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+      if on_path && !picked {
+        return Some("Select path");
+      }
+      if !on_path && !self.text_framed(form) {
+        return Some("Place first corner of text frame");
+      }
+    }
     for (input, v) in form.inputs.iter().zip(&self.values) {
       let empty = v.is_null() || v.as_array().is_some_and(Vec::is_empty);
       match input {
@@ -1137,42 +1225,50 @@ pub static APPEARANCE: Form = Form {
   picks_model: false,
 };
 
+/// Fusion's Text: the dialog opens with the Type row alone (a text box, or text on a path) and the
+/// prompt to place the frame's first corner; the frame is dragged on the canvas (or the path
+/// picked), and only then the text, font, size and alignment rows appear with the text in the
+/// frame. The frame's corners are hidden inputs the drag fills (see [`State::text_frame`]).
 pub static SK_TEXT: Form = Form {
   title: "TEXT",
   name: "Text",
-  hint: "Editable text whose outlines you can extrude, at a point or along a picked curve",
+  hint: "Editable text whose outlines you can extrude, in a frame dragged on the sketch or along a picked curve",
   icon: Icon::SkText,
   cmd: "sketch.text.form",
   fixed: &[],
   inputs: &[
+    Input::Icons { key: "type", label: "Type", options: TEXT_TYPES },
+    Input::Curves { key: "path", label: "Path" },
     Input::Text { key: "text", label: "Text", default: "FissionOxide" },
-    Input::Choice { key: "placement", label: "Placement", options: TEXT_PLACEMENTS },
-    Input::Expr { key: "x", label: "X", default: "0" },
-    Input::Expr { key: "y", label: "Y", default: "0" },
-    Input::Expr { key: "x2", label: "Corner 2 X (box)", default: "40" },
-    Input::Expr { key: "y2", label: "Corner 2 Y (box)", default: "10" },
-    Input::Expr { key: "height", label: "Height", default: "5" },
-    Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
     Input::Choice { key: "font", label: "Font", options: TEXT_FONTS },
+    Input::Expr { key: "height", label: "Height", default: "5" },
     Input::Check { key: "bold", label: "Bold" },
     Input::Check { key: "italic", label: "Italic" },
     Input::Check { key: "underline", label: "Underline" },
-    Input::Choice { key: "halign", label: "Horizontal alignment", options: TEXT_HALIGN },
-    Input::Choice { key: "valign", label: "Vertical alignment", options: TEXT_VALIGN },
-    Input::Expr { key: "spacing", label: "Character spacing (%)", default: "0" },
-    Input::Curves { key: "path", label: "Along path (optional)" },
+    Input::Choice { key: "halign", label: "Horizontal Alignment", options: TEXT_HALIGN },
+    Input::Choice { key: "valign", label: "Vertical Alignment", options: TEXT_VALIGN },
+    Input::Expr { key: "spacing", label: "Character Spacing (%)", default: "0" },
+    Input::Expr { key: "angle", label: "Angle (deg)", default: "0" },
     Input::Check { key: "below", label: "Below the path" },
     Input::Choice {
       key: "align",
       label: "Path alignment",
       options: &[("left", "Left"), ("center", "Center"), ("right", "Right")],
     },
+    Input::Choice { key: "placement", label: "Placement", options: TEXT_PLACEMENTS },
+    Input::Expr { key: "x", label: "X", default: "0" },
+    Input::Expr { key: "y", label: "Y", default: "0" },
+    Input::Expr { key: "x2", label: "Corner 2 X", default: "" },
+    Input::Expr { key: "y2", label: "Corner 2 Y", default: "" },
   ],
   picks_model: false,
 };
 
-/// Sketch Text: at a point, or in a box between two corners (the alignment places it in the box).
-const TEXT_PLACEMENTS: &[(&str, &str)] = &[("point", "Point"), ("box", "Two-corner box")];
+/// Fusion's Type row: a text box dragged on the sketch, or text along a picked curve.
+const TEXT_TYPES: &[(&str, Icon, &str)] =
+  &[("box", Icon::TextBox, "Text Box"), ("path", Icon::TextOnPath, "Text On Path")];
+/// Sketch Text: in a box between two corners (the alignment places it in the box), or at a point.
+const TEXT_PLACEMENTS: &[(&str, &str)] = &[("box", "Two-corner box"), ("point", "Point")];
 const TEXT_HALIGN: &[(&str, &str)] = &[("left", "Left"), ("center", "Center"), ("right", "Right")];
 const TEXT_VALIGN: &[(&str, &str)] =
   &[("baseline", "Baseline"), ("top", "Top"), ("middle", "Middle"), ("bottom", "Bottom")];
@@ -1183,9 +1279,15 @@ fn text_params(p: &Value) -> Value {
   let num = |k: &str| p.get(k).and_then(Value::as_str).and_then(|t| t.trim().parse::<f64>().ok()).unwrap_or(0.0);
   let get = |k: &str, d: &str| p.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
   let (halign, mut valign) = (get("halign", "left"), get("valign", "baseline"));
-  let at = if get("placement", "point") == "box" {
-    let (x0, x1) = (num("x").min(num("x2")), num("x").max(num("x2")));
-    let (y0, y1) = (num("y").min(num("y2")), num("y").max(num("y2")));
+  let framed = ["x2", "y2"].iter().all(|k| p.get(k).and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty()));
+  let at = if get("placement", "point") == "box" && framed {
+    // the frame's corners in the text's own frame (turned back by its angle), so a text that
+    // reads at an angle still sits in the frame as dragged
+    let (sa, ca) = num("angle").to_radians().sin_cos();
+    let turn = |q: [f64; 2], s: f64| [q[0] * ca + q[1] * s, -q[0] * s + q[1] * ca];
+    let (c1, c2) = (turn([num("x"), num("y")], sa), turn([num("x2"), num("y2")], sa));
+    let (x0, x1) = (c1[0].min(c2[0]), c1[0].max(c2[0]));
+    let (y0, y1) = (c1[1].min(c2[1]), c1[1].max(c2[1]));
     if valign == "baseline" {
       valign = "top".into();
     }
@@ -1199,7 +1301,7 @@ fn text_params(p: &Value) -> Value {
       "bottom" => y0,
       _ => y1,
     };
-    [x, y]
+    turn([x, y], -sa).map(|v| if v.abs() < 1e-9 { 0.0 } else { v })
   } else {
     [num("x"), num("y")]
   };
@@ -1230,6 +1332,21 @@ pub fn engine_command(form: &Form, p: Value) -> (&'static str, Value) {
       "point",
       json!({"method": "vertex", "point": {"vertex": p.get("edge").cloned().unwrap_or(Value::Null), "end": p.get("end") == Some(&json!("end"))}}),
     ),
+    "sketch.intersect.form" | "sketch.spun_profile.form" => {
+      // the Selection Filter decides what Geometry holds: whole bodies, or just the picked faces
+      // (Spun Profile spins their bodies: the engine spins bodies only)
+      let mut q = p.clone();
+      if let Some(o) = q.as_object_mut() {
+        let faces = o.get("filter").and_then(Value::as_str) == Some("faces");
+        o.remove("filter");
+        if faces && form.cmd == "sketch.intersect.form" {
+          o.remove("bodies");
+        } else {
+          o.remove("faces");
+        }
+      }
+      (if form.cmd == "sketch.intersect.form" { "sketch.intersect" } else { "sketch.spun_profile" }, q)
+    }
     "sketch.text.form" => {
       let mut q = text_params(&p);
       // a picked curve lays the text along it instead of at the point
@@ -2379,7 +2496,10 @@ pub static SK_INCLUDE: Form = Form {
   icon: Icon::Include3D,
   cmd: "sketch.include",
   fixed: &[],
-  inputs: &[Input::Edges { key: "edges", label: "Edges" }],
+  inputs: &[
+    Input::Edges { key: "edges", label: "Geometry" },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
+  ],
   picks_model: true,
 };
 
@@ -2461,10 +2581,11 @@ pub static SK_PROJECT_SURFACE: Form = Form {
   fixed: &[],
   inputs: &[
     Input::Faces { key: "faces", label: "Faces" },
-    Input::Curves { key: "curves", label: "Curves (default all)" },
+    Input::Curves { key: "curves", label: "Curves" },
     Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Choice { key: "type", label: "Projection type", options: PROJECTION_TYPES },
-    Input::Axis { key: "direction", label: "Direction (Along Vector)" },
+    Input::Choice { key: "type", label: "Project Type", options: PROJECTION_TYPES },
+    Input::Axis { key: "direction", label: "Direction" },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
   ],
   picks_model: true,
 };
@@ -2477,12 +2598,91 @@ pub static SK_INTERSECTION_CURVE: Form = Form {
   cmd: "sketch.intersection_curve",
   fixed: &[],
   inputs: &[
-    Input::Curves { key: "curves", label: "Sketch curves (default all)" },
+    Input::Curves { key: "curves", label: "Curve" },
     Input::Sketch { key: "sketch", label: "Sketch" },
-    Input::Faces { key: "faces", label: "Faces" },
+    Input::Faces { key: "faces", label: "Curves or faces" },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
   ],
   picks_model: true,
 };
+
+/// Fusion's Selection Filter row: whole bodies, or faces and edges.
+const GEOMETRY_FILTERS: &[(&str, Icon, &str)] =
+  &[("bodies", Icon::FilterBodies, "Bodies"), ("faces", Icon::FilterFaces, "Faces and edges")];
+
+/// Project / Include > Intersect: the curves where picked bodies (or faces) cut the sketch plane.
+pub static SK_INTERSECT: Form = Form {
+  title: "INTERSECT",
+  name: "Intersect",
+  hint: "Curves where bodies or faces cut the sketch plane; they follow the bodies",
+  icon: Icon::Intersect,
+  cmd: "sketch.intersect.form",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Geometry", required: true },
+    Input::FacesOpt { key: "faces", label: "Faces" },
+    Input::Icons { key: "filter", label: "Selection Filter", options: GEOMETRY_FILTERS },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
+  ],
+  picks_model: true,
+};
+
+/// Project / Include > Spun Profile, with Fusion's rows (Project Axis and Tolerance are greyed:
+/// the engine draws the outline exactly and adds the axis as a centre line).
+pub static SK_SPUN_PROFILE: Form = Form {
+  title: "SPUN PROFILE",
+  name: "Spun Profile",
+  hint: "The outline bodies sweep through as they turn about an axis, on the sketch plane; it follows the bodies",
+  icon: Icon::Revolve,
+  cmd: "sketch.spun_profile.form",
+  fixed: &[],
+  inputs: &[
+    Input::Bodies { key: "bodies", label: "Geometry", required: true },
+    Input::Icons { key: "filter", label: "Selection Filter", options: GEOMETRY_FILTERS },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
+    Input::Axis { key: "axis", label: "Axis" },
+    Input::CheckOn { key: "project_axis", label: "Project Axis" },
+    Input::CheckOn { key: "centerline", label: "Add Centerline" },
+    Input::Expr { key: "tolerance", label: "Tolerance", default: "0 mm" },
+    Input::Check { key: "flip", label: "Flip Result" },
+  ],
+  picks_model: true,
+};
+
+/// Project / Include > Isoparametric Curve: Fusion's dialog, greyed until the kernel can
+/// evaluate a face's iso-curves (the engine has no command for it yet).
+pub static SK_ISOPARAMETRIC: Form = Form {
+  title: "ISOPARAMETRIC CURVE",
+  name: "Isoparametric Curve",
+  hint: "A curve of constant U or V on a face, as a 3D sketch curve",
+  icon: Icon::Intersect,
+  cmd: "sketch.isoparametric_curve",
+  fixed: &[],
+  inputs: &[
+    Input::Choice { key: "curve", label: "Curve", options: &[("single", "Single"), ("multiple", "Multiple")] },
+    Input::Face { key: "face", label: "Face", near: None },
+    Input::CheckOn { key: "associative", label: "Projection Link" },
+  ],
+  picks_model: true,
+};
+
+/// Why a form's input is drawn greyed: what FissionOxide can't act on yet, or always does.
+pub fn greyed(form: &Form, key: &str) -> Option<&'static str> {
+  match (form.cmd, key) {
+    ("sketch.project_to_surface" | "sketch.intersection_curve", "associative") => {
+      Some("These curves always follow the model in FissionOxide")
+    }
+    ("sketch.spun_profile.form", "associative") => Some("A spun profile always follows its bodies in FissionOxide"),
+    ("sketch.spun_profile.form", "project_axis") => Some("Projecting the axis isn't in FissionOxide yet"),
+    ("sketch.spun_profile.form", "tolerance") => {
+      Some("The outline is drawn exactly; a tolerance isn't in FissionOxide yet")
+    }
+    ("sketch.isoparametric_curve", "curve" | "associative") => {
+      Some("Isoparametric curves aren't in FissionOxide yet: the kernel can't evaluate a face's iso-curves")
+    }
+    _ => None,
+  }
+}
 
 const ALIGN_RELATIONS: &[(&str, &str)] =
   &[("auto", "Automatic"), ("flush", "Flush"), ("coincident", "Coincident"), ("concentric", "Concentric")];

@@ -104,6 +104,11 @@ pub enum Drag {
   Triad,
   /// Dragging a component (see [`crate::comp_drag`]).
   Component,
+  /// Text: dragging the text frame on the sketch, from `start` to `now` (screen positions).
+  TextFrame {
+    start: Pos2,
+    now: Pos2,
+  },
   /// Dragging one of the dialog's feature handles (see [`crate::handles`]).
   Handle,
   /// Zoom Window: the box being dragged.
@@ -409,6 +414,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let col = Color32::from_rgb(40, 120, 230);
     painter.rect_stroke(Rect::from_two_pos(start, now), 0.0, Stroke::new(1.0, col), egui::StrokeKind::Inside);
   }
+  if let Some(Drag::TextFrame { start, now }) = app.drag {
+    text_frame_preview(app, &painter, &view, start, now);
+  }
   crate::select::region_overlay(app, &painter);
   crate::select::show_other(app, &ctx);
 
@@ -536,6 +544,7 @@ fn navigate(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::Conte
         let add = ctx.input(|i| i.modifiers.shift || i.modifiers.command) || app.dialog.is_some();
         crate::select::finish_lasso(app, add, &|p| view.to_px(p).into());
       }
+      Drag::TextFrame { start, now } => finish_text_frame(app, view, start, now),
       Drag::ZoomWindow { start, now } => {
         let bx = Rect::from_two_pos(start, now);
         let (o, d) = view.ray(&app.cam, bx.center());
@@ -916,6 +925,18 @@ fn handle_clicks(app: &mut App, resp: &egui::Response, view: &View, ctx: &egui::
   // dragging a component, else window selection with the select tool
   let cam = app.cam;
   if crate::comp_drag::handle(app, resp, ctx, pos, &|p| view.ray(&cam, p)) {
+    return;
+  }
+  // Text waits for its frame: a drag on the sketch places it instead of window-selecting
+  if resp.drag_started_by(egui::PointerButton::Primary)
+    && app.drag.is_none()
+    && app.dialog.as_ref().is_some_and(|d| d.wants_text_frame())
+  {
+    let start = ctx.input(|i| i.pointer.press_origin()).unwrap_or(pos);
+    app.drag = Some(Drag::TextFrame { start, now: pos });
+  }
+  if let Some(Drag::TextFrame { now, .. }) = &mut app.drag {
+    *now = pos;
     return;
   }
   if resp.drag_started_by(egui::PointerButton::Primary) && app.drag.is_none() && app.tool == Tool::Select {
@@ -1761,6 +1782,59 @@ fn trim_preview(app: &App, painter: &egui::Painter, resp: &egui::Response, view:
     let pts: Vec<Pos2> = run.iter().filter_map(|p| view.to_screen(&app.cam, plane.to_world(*p))).collect();
     painter.add(egui::Shape::line(pts, stroke));
   }
+}
+
+/// Text's frame as it is dragged: the sketch-aligned rectangle between the two corners.
+fn text_frame_preview(app: &App, painter: &egui::Painter, view: &View, start: Pos2, now: Pos2) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let corner = |p: Pos2| {
+    let (o, d) = view.ray(&app.cam, p);
+    ray_plane(o, d, plane.origin, plane.normal()).map(|hit| plane.to_local(hit))
+  };
+  let (Some(a), Some(b)) = (corner(start), corner(now)) else { return };
+  let pts: Vec<Pos2> = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]
+    .iter()
+    .filter_map(|q| view.to_screen(&app.cam, plane.to_world(*q)))
+    .collect();
+  if pts.len() == 4 {
+    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, crate::theme::ACCENT)));
+  }
+}
+
+/// Text: the frame drag ended; its corners (sketch coordinates) go to the dialog with the angle
+/// the text reads at on screen.
+fn finish_text_frame(app: &mut App, view: &View, start: Pos2, now: Pos2) {
+  let Some((_, plane)) = sketch_plane(app) else { return };
+  let corner = |p: Pos2| {
+    let (o, d) = view.ray(&app.cam, p);
+    ray_plane(o, d, plane.origin, plane.normal()).map(|hit| plane.to_local(hit))
+  };
+  let (Some(a), Some(b)) = (corner(start), corner(now)) else { return };
+  if (a[0] - b[0]).abs() < 1e-9 || (a[1] - b[1]).abs() < 1e-9 {
+    return;
+  }
+  let (right, _, _) = app.cam.basis();
+  let angle = reading_angle(&plane, right);
+  if let Some(d) = app.dialog.as_mut() {
+    d.set_text_frame(a, b, angle);
+  }
+}
+
+/// The angle (degrees, a multiple of 90) at which text on `plane` reads left to right on a screen
+/// whose right-hand direction is `right`: 0 when the sketch's x axis points right, as on the XY
+/// plane, else turned so the text is never drawn up the screen.
+pub(crate) fn reading_angle(plane: &Plane, right: DVec3) -> f64 {
+  let along = |deg: f64| {
+    let (s, c) = deg.to_radians().sin_cos();
+    (plane.x * c + plane.y * s).dot(right)
+  };
+  let mut best = 0.0;
+  for deg in [90.0, 180.0, 270.0] {
+    if along(deg) > along(best) + 1e-9 {
+      best = deg;
+    }
+  }
+  best
 }
 
 /// Sketch Offset: until a click places it, the offset's distance and side follow the cursor.
@@ -4171,6 +4245,20 @@ fn measure_overlay(app: &App, painter: &egui::Painter, view: &View) {
 
 #[cfg(test)]
 mod tests {
+  /// Text reads along the sketch's x axis on the XY plane; on a plane whose x axis runs up or
+  /// across the screen the text is turned to read left to right.
+  #[test]
+  fn text_reads_left_to_right_on_screen() {
+    use fox_engine::kernel::Plane;
+    use fox_engine::kernel::glam::DVec3;
+    assert_eq!(super::reading_angle(&Plane::XY, DVec3::X), 0.0);
+    // Fusion's YZ frame (x = -Z, y = +Y) seen with Z up and Y to the right
+    let yz = Plane { origin: DVec3::ZERO, x: -DVec3::Z, y: DVec3::Y };
+    assert_eq!(super::reading_angle(&yz, DVec3::Y), 90.0);
+    assert_eq!(super::reading_angle(&yz, -DVec3::Y), 270.0);
+    assert_eq!(super::reading_angle(&Plane::XY, -DVec3::X), 180.0);
+  }
+
   use super::*;
   use fox_engine::Session;
 

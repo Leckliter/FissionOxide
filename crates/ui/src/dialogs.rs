@@ -156,7 +156,7 @@ impl Kind {
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "SKETCH CHAMFER",
       Kind::SkOffset => "OFFSET",
       Kind::TraceImage => "TRACE IMAGE",
-      Kind::SkMirror => "SKETCH MIRROR",
+      Kind::SkMirror => "MIRROR",
       Kind::SkCircPattern => "CIRCULAR PATTERN",
       Kind::SkRectPattern => "RECTANGULAR PATTERN",
       Kind::Project => "PROJECT",
@@ -542,6 +542,13 @@ pub struct Dialog {
   /// The canvas the dialog was last docked to (its top-right corner): None until the first
   /// frame, so a dialog opens docked and docks again when the window is resized, as in Fusion.
   docked: Option<egui::Rect>,
+  /// Sketch Mirror / patterns: the selection row the next picks go to (0 = Objects, 1 = the
+  /// mirror line, centre point or directions), as Fusion's active (blue) row.
+  pick_row: usize,
+  /// Sketch Circular Pattern: the centre picked (a sketch point, or a circle's centre).
+  center: Option<Sel>,
+  /// Sketch Rectangular Pattern: the lines picked as directions, with their unit directions.
+  dir_lines: Vec<(u32, [f64; 2])>,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -661,6 +668,9 @@ impl Dialog {
       summary: None,
       made: Vec::new(),
       docked: None,
+      pick_row: 0,
+      center: None,
+      dir_lines: Vec::new(),
     }
   }
 
@@ -914,10 +924,16 @@ impl Dialog {
         d.angle = "360 deg".into();
       }
       Kind::SkRectPattern => {
+        // Fusion patterns in two directions from the start
         d.count = "3".into();
-        d.count2 = "2".into();
+        d.count2 = "3".into();
+        d.spacing2 = d.spacing.clone();
+        d.use_dir2 = true;
       }
-      Kind::Project => d.flag = true,
+      Kind::Project => {
+        d.flag = true;
+        d.choice = "bodies";
+      }
       Kind::Extrude => {
         // extruding from a face sketch defaults to Join, like Fusion
         if let Some(sk) = d.sketch
@@ -1371,13 +1387,21 @@ impl Dialog {
       ),
       Kind::SkRectPattern => {
         let v = |a: &str| if a == "y" { [0.0, 1.0] } else { [1.0, 0.0] };
+        // picked lines set the directions (the second at right angles to a lone first), else
+        // the dialog's choice, else the sketch axes
+        let d1 = self.dir_lines.first().map(|l| l.1).unwrap_or_else(|| v(&self.dir));
+        let d2 = self
+          .dir_lines
+          .get(1)
+          .map(|l| l.1)
+          .unwrap_or_else(|| if self.dir_lines.is_empty() { v(&self.dir2) } else { [-d1[1], d1[0]] });
         let mut p = json!({
-          "curves": self.curves, "direction": v(&self.dir), "count": self.count.trim().parse::<u64>().ok()?,
+          "curves": self.curves, "direction": d1, "count": self.count.trim().parse::<u64>().ok()?,
           "spacing": self.spacing, "symmetric": self.symmetric[0],
           "distance_type": if self.pattern_extent { "extent" } else { "spacing" },
         });
         if self.use_dir2 {
-          p["direction2"] = json!(v(&self.dir2));
+          p["direction2"] = json!(d2);
           p["count2"] = json!(self.count2.trim().parse::<u64>().ok()?);
           p["spacing2"] = json!(self.spacing2);
           p["symmetric2"] = json!(self.symmetric[1]);
@@ -1666,7 +1690,8 @@ impl Dialog {
       Kind::Material => self.comps.iter().any(Option::is_some),
       Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => self.curves.len() == 2,
       Kind::SkMirror => !self.curves.is_empty() && self.line.is_some(),
-      Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => !self.curves.is_empty(),
+      Kind::SkCircPattern => !self.curves.is_empty() && self.center.is_some(),
+      Kind::SkOffset | Kind::SkRectPattern => !self.curves.is_empty(),
       Kind::TraceImage => self.trace.as_ref().is_some_and(|t| t.path.is_some()),
       Kind::DriveJoint | Kind::CopyComponent => self.target.is_some(),
       Kind::NewDrawing => self.view_on.iter().any(|v| *v),
@@ -1950,18 +1975,9 @@ impl Dialog {
           self.origins = o;
         }
       }
-      Kind::SkFillet
-      | Kind::SkChamfer
-      | Kind::SkChamfer2
-      | Kind::SkChamferAngle
-      | Kind::SkOffset
-      | Kind::SkMirror
-      | Kind::SkCircPattern
-      | Kind::SkRectPattern => {
-        let mut c = if self.kind == Kind::SkOffset { self.offset_picks(s) } else { sel_curves(s) };
-        if self.kind == Kind::SkMirror {
-          c.retain(|x| Some(*x) != self.line);
-        }
+      Kind::SkMirror | Kind::SkCircPattern | Kind::SkRectPattern => self.sync_sketch_picks(s),
+      Kind::SkFillet | Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle | Kind::SkOffset => {
+        let c = if self.kind == Kind::SkOffset { self.offset_picks(s) } else { sel_curves(s) };
         if !c.is_empty() && c != self.curves {
           self.curves = c;
           self.dirty = true;
@@ -2248,11 +2264,12 @@ impl Dialog {
       )
   }
 
-  /// Is OK live? Extrude greys it until a profile is picked, as in Fusion.
+  /// Is OK live? Greyed while the dialog lacks its input, as in Fusion: Extrude until a profile
+  /// is picked, the others until what they need (`ready`) is there.
   fn ok_enabled(&self) -> bool {
     match self.kind {
       Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
-      _ => true,
+      _ => self.ready(),
     }
   }
 
@@ -2284,8 +2301,12 @@ impl Dialog {
       Kind::Material => "select a body of a component",
       Kind::SkFillet => "select two lines or arcs that meet",
       Kind::SkChamfer | Kind::SkChamfer2 | Kind::SkChamferAngle => "select two lines",
-      Kind::SkMirror => "select curves and a mirror line",
-      Kind::SkOffset | Kind::SkCircPattern | Kind::SkRectPattern => "select sketch curves",
+      Kind::SkMirror if self.curves.is_empty() => "select sketch curves to mirror",
+      Kind::SkMirror => "select the mirror line",
+      Kind::SkCircPattern if self.curves.is_empty() => "select sketch curves to pattern",
+      Kind::SkCircPattern => "select the center point",
+      Kind::SkRectPattern => "select sketch curves to pattern",
+      Kind::SkOffset => "select sketch curves",
       Kind::TraceImage => "pick an image to trace",
       Kind::DriveJoint => "the design has no joints",
       Kind::CopyComponent => "the design has no components",
@@ -2559,11 +2580,20 @@ impl Dialog {
     use crate::forms::Input;
     let accent = self.accent();
     let s = &app.s;
+    let faces_mode = self.form.filter_faces(f);
+    let mut filter: Option<&'static str> = None;
+    let faces_picked = f
+      .inputs
+      .iter()
+      .position(|x| x.key() == "faces")
+      .and_then(|j| self.form.values[j].as_array().map(Vec::len))
+      .unwrap_or(0);
     for (i, input) in f.inputs.iter().enumerate() {
-      if !self.form.shown(f, i) {
+      if !self.form.shown(f, i) || crate::forms::State::hidden(f, i) {
         continue;
       }
       let v = self.form.values[i].clone();
+      let greyed = crate::forms::greyed(f, input.key());
       match input {
         Input::Faces { label, .. }
         | Input::FacesOpt { label, .. }
@@ -2578,11 +2608,13 @@ impl Dialog {
           ui.label(*label);
           let n = v.as_array().map(Vec::len).unwrap_or(0);
           let text = match n {
+            // with the Selection Filter on faces, the picks are the faces
+            _ if faces_mode => chip_text(faces_picked, if faces_picked == 1 { "face" } else { "faces" }),
             0 => "Select".to_string(),
             1 => v[0].as_u64().map(|b| s.body_name(BodyId(b as u32))).unwrap_or_default(),
             n => format!("{n} bodies"),
           };
-          sel_chip(ui, accent, &text, n > 0);
+          sel_chip(ui, accent, &text, if faces_mode { faces_picked > 0 } else { n > 0 });
           ui.end_row();
         }
         Input::Face { label, .. } | Input::Edge { label, .. } => {
@@ -2648,19 +2680,57 @@ impl Dialog {
         }
         Input::Expr { label, .. } | Input::Text { label, .. } => {
           let mut t = v.as_str().unwrap_or("").to_string();
-          Self::field(ui, label, &mut t, dirty);
+          if let Some(why) = greyed {
+            ui.label(*label);
+            ui.add_enabled_ui(false, |ui| value_edit(ui, &mut t)).inner.on_disabled_hover_text(why);
+            ui.end_row();
+          } else {
+            Self::field(ui, label, &mut t, dirty);
+          }
           self.form.values[i] = json!(t);
         }
-        Input::Check { label, .. } => {
+        Input::Check { label, .. } | Input::CheckOn { label, .. } => {
           let mut b = v.as_bool().unwrap_or(false);
-          Self::check(ui, label, &mut b, dirty);
+          if let Some(why) = greyed {
+            ui.label("");
+            ui.add_enabled_ui(false, |ui| ui.checkbox(&mut b, *label)).inner.on_disabled_hover_text(why);
+            ui.end_row();
+          } else {
+            Self::check(ui, label, &mut b, dirty);
+          }
           self.form.values[i] = json!(b);
         }
         Input::Choice { label, options, .. } => {
           let cur = v.as_str().unwrap_or("");
           let mut sel: &'static str = options.iter().find(|(k, _)| *k == cur).map(|(k, _)| *k).unwrap_or("");
-          Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
+          if let Some(why) = greyed {
+            ui.label(*label);
+            let shown = options.iter().find(|(k, _)| *k == sel).map(|(_, l)| *l).unwrap_or(sel);
+            ui.add_enabled_ui(false, |ui| {
+              egui::ComboBox::from_id_salt(("form-choice", i)).selected_text(shown).width(140.0).show_ui(ui, |_| {})
+            })
+            .response
+            .on_disabled_hover_text(why);
+            ui.end_row();
+          } else {
+            Self::choose(ui, label, &format!("form-choice-{i}"), &mut sel, options, dirty);
+          }
           self.form.values[i] = json!(sel);
+        }
+        Input::Icons { key, label, options } => {
+          ui.label(*label);
+          let cur = v.as_str().unwrap_or("");
+          let mut sel: &'static str = options.iter().find(|(k, _, _)| *k == cur).map(|(k, _, _)| *k).unwrap_or("");
+          let choices: Vec<icon_row::Choice> =
+            options.iter().map(|(k, icon, name)| icon_row::choice(k, *icon, name)).collect();
+          if icon_row::icon_row(ui, &mut sel, &choices, "") {
+            *dirty = true;
+          }
+          if *key == "filter" {
+            filter = Some(sel);
+          }
+          self.form.values[i] = json!(sel);
+          ui.end_row();
         }
         Input::Vec3 { label, .. } => {
           let mut xyz: [String; 3] = [0, 1, 2].map(|k| v.get(k).and_then(Value::as_str).unwrap_or("0").to_string());
@@ -2699,6 +2769,10 @@ impl Dialog {
       ui.label("");
       ui.label(RichText::new("click points on the sheet to fill them").small().color(theme::MUTED));
       ui.end_row();
+    }
+    // the Selection Filter decides what a click on the model picks while the dialog is open
+    if let Some(mut f) = filter {
+      self.filter_row_apply(app, &mut f);
     }
   }
 
@@ -3239,63 +3313,52 @@ impl Dialog {
         ui.end_row();
       }
       Kind::SkMirror => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        ui.label("Mirror line");
-        let lines = self.sketch_lines_of(app.s.edit_sketch, app);
-        let cur = self.line.map(|l| format!("Sketch line {l}")).unwrap_or("Pick a line".into());
-        egui::ComboBox::from_id_salt("mline").selected_text(cur).width(140.0).show_ui(ui, |ui| {
-          for (id, label) in lines {
-            if ui.selectable_label(self.line == Some(id), label).clicked() {
-              self.line = Some(id);
-              self.curves.retain(|c| *c != id);
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
+        // Fusion: Objects and Mirror Line pick buttons (a click on a row makes it the one the
+        // next pick goes to), nothing else
+        let objects = chip_text(self.curves.len(), "selected");
+        self.pick_row_chip(ui, "Objects", 0, &objects, !self.curves.is_empty());
+        let line = if self.line.is_some() { "1 selected" } else { "Select" };
+        self.pick_row_chip(ui, "Mirror Line", 1, line, self.line.is_some());
       }
       Kind::SkCircPattern => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        ui.label("Center X, Y");
-        ui.horizontal(|ui| {
-          for v in self.at.iter_mut() {
-            if ui.add(egui::TextEdit::singleline(v).desired_width(64.0)).changed() {
-              *dirty = true;
-            }
-          }
-        });
-        ui.end_row();
-        Self::field(ui, "Quantity", &mut self.count, dirty);
-        Self::field(ui, "Total angle", &mut self.angle, dirty);
-        Self::check(ui, "Symmetric", &mut self.flag, dirty);
+        let objects = chip_text(self.curves.len(), "selected");
+        self.pick_row_chip(ui, "Objects", 0, &objects, !self.curves.is_empty());
+        let centre = if self.center.is_some() { "1 selected" } else { "Select" };
+        self.pick_row_chip(ui, "Center Point", 1, centre, self.center.is_some());
+        // the quantity, angle and suppress rows appear once both are picked
+        if !self.curves.is_empty() && self.center.is_some() {
+          Self::field(ui, "Quantity", &mut self.count, dirty);
+          Self::field(ui, "Total Angle", &mut self.angle, dirty);
+          Self::check(ui, "Symmetric", &mut self.flag, dirty);
+          Self::check_greyed(ui, "Suppress", "Suppressing pattern instances isn't in FissionOxide yet");
+        }
       }
       Kind::SkRectPattern => {
-        ui.label("Objects");
-        chip(ui, self.curves.len(), "selected");
-        ui.end_row();
-        const DIRS: [(&str, &str); 2] = [("x", "Horizontal"), ("y", "Vertical")];
-        let mut d1: &'static str = if self.dir == "y" { "y" } else { "x" };
-        Self::choose(ui, "Direction", "sdir1", &mut d1, &DIRS, dirty);
-        self.dir = d1.into();
-        const TYPES: [(&str, &str); 2] = [("spacing", "Spacing"), ("extent", "Extent")];
-        let mut ty: &'static str = if self.pattern_extent { "extent" } else { "spacing" };
-        Self::choose(ui, "Distance type", "sdtype", &mut ty, &TYPES, dirty);
-        self.pattern_extent = ty == "extent";
-        Self::field(ui, "Quantity", &mut self.count, dirty);
-        Self::field(ui, "Distance", &mut self.spacing, dirty);
-        Self::check(ui, "Symmetric", &mut self.symmetric[0], dirty);
-        Self::check(ui, "Second direction", &mut self.use_dir2, dirty);
-        if self.use_dir2 {
-          let mut d2: &'static str = if self.dir2 == "x" { "x" } else { "y" };
-          Self::choose(ui, "Direction 2", "sdir2", &mut d2, &DIRS, dirty);
-          self.dir2 = d2.into();
-          Self::field(ui, "Quantity 2", &mut self.count2, dirty);
-          Self::field(ui, "Distance 2", &mut self.spacing2, dirty);
-          Self::check(ui, "Symmetric 2", &mut self.symmetric[1], dirty);
+        let objects = chip_text(self.curves.len(), "selected");
+        self.pick_row_chip(ui, "Objects", 0, &objects, !self.curves.is_empty());
+        let dirs = match self.dir_lines.len() {
+          0 => "Select".to_string(),
+          1 => "1 Line".to_string(),
+          n => format!("{n} Lines"),
+        };
+        self.pick_row_chip(ui, "Direction/s", 1, &dirs, !self.dir_lines.is_empty());
+        // the distance rows (both directions) appear once objects are picked
+        if !self.curves.is_empty() {
+          const TYPES: [(&str, &str); 2] = [("spacing", "Spacing"), ("extent", "Extent")];
+          let mut ty: &'static str = if self.pattern_extent { "extent" } else { "spacing" };
+          Self::choose(ui, "Distance Type", "sdtype", &mut ty, &TYPES, dirty);
+          self.pattern_extent = ty == "extent";
+          Self::field(ui, "Quantity", &mut self.count, dirty);
+          Self::field(ui, "Distance", &mut self.spacing, dirty);
+          Self::check(ui, "Symmetric", &mut self.symmetric[0], dirty);
+          Self::check_greyed(ui, "Suppress", "Suppressing pattern instances isn't in FissionOxide yet");
+          ui.push_id("dir2", |ui| {
+            Self::field(ui, "Quantity", &mut self.count2, dirty);
+            Self::field(ui, "Distance", &mut self.spacing2, dirty);
+            Self::check(ui, "Symmetric", &mut self.symmetric[1], dirty);
+          });
+          // a second quantity of 1 patterns one way
+          self.use_dir2 = self.count2.trim().parse::<u64>().ok().is_none_or(|n| n > 1);
         }
       }
       Kind::Refold => {
@@ -3493,9 +3556,147 @@ impl Dialog {
         let what = if self.faces.is_empty() { "body" } else { "face" };
         chip(ui, self.bodies.len().min(1), what);
         ui.end_row();
-        Self::check(ui, "Projected link (follows the body)", &mut self.flag, dirty);
+        // Fusion's Selection Filter: whole bodies, or faces and edges
+        let mut filter: &'static str = if self.choice == "faces" { "faces" } else { "bodies" };
+        ui.label("Selection Filter");
+        if self.filter_row(app, ui, &mut filter) {
+          self.choice = filter;
+        }
+        ui.end_row();
+        Self::check(ui, "Projection Link", &mut self.flag, dirty);
       }
       _ => {}
+    }
+  }
+
+  /// A selection row of the sketch Mirror and pattern dialogs: its chip is lit while it is the
+  /// row the next picks go to (Fusion's blue active row), and a click on another row's chip
+  /// makes that one the active row.
+  fn pick_row_chip(&mut self, ui: &mut egui::Ui, label: &str, row: usize, text: &str, has: bool) {
+    ui.label(label);
+    let active = self.pick_row == row;
+    let chip = sel_chip(ui, self.accent(), text, active || has);
+    if !active && chip.interact(egui::Sense::click()).on_hover_text("Pick for this row").clicked() {
+      self.pick_row = row;
+    }
+    ui.end_row();
+  }
+
+  /// Fusion's Selection Filter row (bodies, or faces and edges) as two icon toggles; while the
+  /// dialog is open the choice decides what a click on the model picks. Returns true on a change.
+  fn filter_row(&mut self, app: &mut App, ui: &mut egui::Ui, cur: &mut &'static str) -> bool {
+    use icon_row::{choice, icon_row};
+    const FILTERS: [icon_row::Choice; 2] =
+      [choice("bodies", Icon::FilterBodies, "Bodies"), choice("faces", Icon::FilterFaces, "Faces and edges")];
+    let changed = icon_row(ui, cur, &FILTERS, "");
+    self.filter_row_apply(app, cur);
+    changed
+  }
+
+  /// Makes the Selection Filter's choice the pick priority (put back when the dialog closes).
+  fn filter_row_apply(&mut self, app: &mut App, cur: &mut &'static str) {
+    use crate::select::Priority;
+    if self.saved_filter.is_none() {
+      self.saved_filter = Some((app.sel_priority, app.sel_filter.vertices));
+    }
+    app.sel_priority = if *cur == "faces" { Priority::Face } else { Priority::Body };
+  }
+
+  /// A check box FissionOxide can't act on yet, drawn greyed with the reason as its tooltip.
+  fn check_greyed(ui: &mut egui::Ui, label: &str, why: &str) {
+    ui.label("");
+    let mut off = false;
+    ui.add_enabled_ui(false, |ui| ui.checkbox(&mut off, label)).inner.on_disabled_hover_text(why);
+    ui.end_row();
+  }
+
+  /// Sketch Mirror and patterns: the picks, routed by the active row. Objects take every picked
+  /// curve not used by the other row; the other row takes the newest pick that fits it (a line
+  /// for the mirror line or a direction, a sketch point or circle for the centre).
+  fn sync_sketch_picks(&mut self, s: &Session) {
+    use fox_engine::sketch::{CurveId, CurveKind};
+    let Some(sk) = s.edit_sketch else { return };
+    let Some(r) = s.model.sketches.get(&sk) else { return };
+    let line_dir = |c: u32| -> Option<[f64; 2]> {
+      let CurveKind::Line { a, b } = r.sketch.curve(CurveId(c))?.kind else { return None };
+      let (pa, pb) = (r.sketch.pos(a)?, r.sketch.pos(b)?);
+      let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+      let len = dx.hypot(dy);
+      (len > 1e-9).then(|| [dx / len, dy / len])
+    };
+    let picked = sel_curves(s);
+    if self.pick_row == 1 {
+      let used = self.other_row_curves();
+      let fresh = picked.iter().copied().find(|c| !self.curves.contains(c) && !used.contains(c));
+      match self.kind {
+        Kind::SkMirror => {
+          if let Some(c) = fresh.filter(|c| line_dir(*c).is_some()) {
+            self.line = Some(c);
+            self.dirty = true;
+          }
+        }
+        Kind::SkRectPattern => {
+          if let Some((c, d)) = fresh.and_then(|c| Some((c, line_dir(c)?)))
+            && self.dir_lines.len() < 2
+          {
+            self.dir_lines.push((c, d));
+            self.dirty = true;
+          }
+        }
+        _ => {
+          // a sketch point, or a circle's or arc's centre
+          let point = s.selection.iter().rev().find_map(|x| match x {
+            Sel::SketchPoint { sketch, point } if *sketch == sk => Some((*x, r.sketch.pos(*point)?)),
+            _ => None,
+          });
+          let circle = fresh.and_then(|c| match r.sketch.curve(CurveId(c))?.kind {
+            CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => {
+              Some((Sel::SketchCurve { sketch: sk, curve: CurveId(c) }, r.sketch.pos(center)?))
+            }
+            _ => None,
+          });
+          if let Some((sel, at)) = point.or(circle)
+            && self.center.as_ref() != Some(&sel)
+          {
+            self.at = [crate::forms::short(at[0]), crate::forms::short(at[1])];
+            self.center = Some(sel);
+            self.dirty = true;
+          }
+        }
+      }
+    }
+    let used = self.other_row_curves();
+    let objects: Vec<u32> = picked.into_iter().filter(|c| !used.contains(c)).collect();
+    if !objects.is_empty() && objects != self.curves {
+      self.curves = objects;
+      self.dirty = true;
+    }
+  }
+
+  /// The curves the sketch Mirror's or patterns' second row holds (not objects to copy).
+  fn other_row_curves(&self) -> Vec<u32> {
+    match self.kind {
+      Kind::SkMirror => self.line.into_iter().collect(),
+      Kind::SkRectPattern => self.dir_lines.iter().map(|l| l.0).collect(),
+      _ => match self.center {
+        Some(Sel::SketchCurve { curve, .. }) => vec![curve.0],
+        _ => Vec::new(),
+      },
+    }
+  }
+
+  /// Text: is the dialog waiting for its frame to be dragged on the sketch?
+  pub(crate) fn wants_text_frame(&self) -> bool {
+    matches!(self.kind, Kind::Form(f) if std::ptr::eq(f, &crate::forms::SK_TEXT))
+      && self.form.missing(&crate::forms::SK_TEXT) == Some("Place first corner of text frame")
+  }
+
+  /// Text: the frame dragged on the sketch, from corner `a` to `b`, and the angle (degrees) the
+  /// text reads at; the dialog grows and the text appears in the frame.
+  pub(crate) fn set_text_frame(&mut self, a: [f64; 2], b: [f64; 2], angle: f64) {
+    if let Kind::Form(f) = self.kind {
+      self.form.text_frame(f, a, b, angle);
+      self.dirty = true;
     }
   }
 
@@ -4830,6 +5031,11 @@ fn ok_button(ui: &mut egui::Ui, accent: egui::Color32, enabled: bool) -> egui::R
   )
 }
 
+/// A selection chip's text: "Select" until something is picked, then the count.
+fn chip_text(n: usize, what: &str) -> String {
+  if n == 0 { "Select".to_string() } else { format!("{n} {what}") }
+}
+
 /// A selection input: a white "Select" chip until something is picked, then a chip tinted with
 /// the command's accent showing the count, with a ✕ beside it.
 fn sel_chip(ui: &mut egui::Ui, accent: egui::Color32, text: &str, has: bool) -> egui::Response {
@@ -5033,6 +5239,173 @@ mod tests {
 
   fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd} {p}: {}", e.0))
+  }
+
+  /// Fusion's sketch Mirror and patterns: Objects and a second pick row (Mirror Line, Center
+  /// Point, Direction/s), picks routed by the active row, OK (ready) only once both are set.
+  #[test]
+  fn sketch_mirror_and_patterns_route_picks_by_the_active_row() {
+    use fox_engine::sketch::{CurveId, PointId};
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let sk = s.edit_sketch.unwrap();
+    let line = run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, 20]]}))["curves"][0].as_u64().unwrap() as u32;
+    let slant = run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 30]]}))["curves"][0].as_u64().unwrap() as u32;
+    let circle =
+      run(&mut s, "sketch.circle", json!({"center": [20, 40], "radius": 3}))["curves"][0].as_u64().unwrap() as u32;
+    run(&mut s, "sketch.point", json!({"at": [50, 50]}));
+    let pt = s.design.sketch(sk).unwrap().points.iter().find(|p| (p.x - 50.0).abs() < 1e-9).unwrap().id.0;
+    let curve = |c: u32| Sel::SketchCurve { sketch: sk, curve: CurveId(c) };
+
+    // Mirror: the circle picked as an object, then (Mirror Line row active) the line
+    let mut d = Dialog::blank(Kind::SkMirror);
+    assert!(!d.ready() && d.prompt(false).as_deref() == Some("Select sketch curves to mirror"));
+    s.selection = vec![curve(circle)];
+    d.sync_selection(&s);
+    assert_eq!((d.curves.clone(), d.line), (vec![circle], None));
+    assert!(!d.ready() && d.prompt(false).as_deref() == Some("Select the mirror line"));
+    // with Objects still active a line pick is another object
+    s.selection = vec![curve(circle), curve(slant)];
+    d.sync_selection(&s);
+    assert_eq!((d.curves.clone(), d.line), (vec![circle, slant], None));
+    d.pick_row = 1;
+    s.selection = vec![curve(circle), curve(slant), curve(line)];
+    d.sync_selection(&s);
+    assert_eq!((d.curves.clone(), d.line), (vec![circle, slant], Some(line)));
+    assert!(d.ready());
+    assert_eq!(d.command().unwrap().0, "sketch.mirror");
+    apply(&mut s, &mut d);
+    d.withdraw(&mut s);
+
+    // Circular pattern: a sketch point as the centre; the rows wait for both picks
+    let mut d = Dialog::blank(Kind::SkCircPattern);
+    d.count = "6".into();
+    s.selection = vec![curve(circle)];
+    d.sync_selection(&s);
+    assert!(!d.ready() && d.center.is_none());
+    d.pick_row = 1;
+    s.selection = vec![curve(circle), Sel::SketchPoint { sketch: sk, point: PointId(pt) }];
+    d.sync_selection(&s);
+    assert!(d.center.is_some() && d.at == ["50".to_string(), "50".to_string()] && d.ready());
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["center"], &p["count"]), ("sketch.pattern_circ", &json!([50.0, 50.0]), &json!(6)));
+    apply(&mut s, &mut d);
+    d.withdraw(&mut s);
+    // a circle picked for the centre gives its centre and isn't patterned
+    let mut d = Dialog::blank(Kind::SkCircPattern);
+    d.pick_row = 1;
+    s.selection = vec![curve(circle)];
+    d.sync_selection(&s);
+    assert!(d.curves.is_empty() && d.at == ["20".to_string(), "40".to_string()]);
+
+    // Rectangular pattern: the picked lines are the directions, both ways by default
+    let mut d = Dialog::blank(Kind::SkRectPattern);
+    d.count = "3".into();
+    d.count2 = "3".into();
+    d.spacing2 = "20 mm".into();
+    d.use_dir2 = true;
+    s.selection = vec![curve(circle)];
+    d.sync_selection(&s);
+    assert!(d.ready() && d.dir_lines.is_empty());
+    let (_, p) = d.command().unwrap();
+    assert_eq!((&p["direction"], &p["direction2"]), (&json!([1.0, 0.0]), &json!([0.0, 1.0])));
+    d.pick_row = 1;
+    s.selection = vec![curve(circle), curve(slant)];
+    d.sync_selection(&s);
+    assert_eq!(d.dir_lines.len(), 1);
+    let (_, p) = d.command().unwrap();
+    let r = 0.5f64.sqrt();
+    let near = |v: &Value, want: [f64; 2]| {
+      let a: Vec<f64> = v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+      (a[0] - want[0]).abs() < 1e-9 && (a[1] - want[1]).abs() < 1e-9
+    };
+    // a lone first direction gets a second at right angles
+    assert!(near(&p["direction"], [r, r]) && near(&p["direction2"], [-r, r]), "{p}");
+    assert_eq!(d.curves, vec![circle], "the direction line isn't an object");
+    s.selection = vec![curve(circle), curve(slant), curve(line)];
+    d.sync_selection(&s);
+    let (_, p) = d.command().unwrap();
+    assert!(near(&p["direction2"], [0.0, 1.0]), "{p}");
+    apply(&mut s, &mut d);
+  }
+
+  /// Fusion's Text opens with the Type row alone and the prompt to place the frame; the dragged
+  /// frame fills the hidden corners, grows the dialog and places the text in the frame, turned to
+  /// read left to right on screen.
+  #[test]
+  fn text_waits_for_its_frame_then_grows() {
+    use crate::forms::{Input, SK_TEXT};
+    let mut d = Dialog::blank(Kind::Form(&SK_TEXT));
+    assert!(!d.ready() && d.wants_text_frame());
+    assert_eq!(d.prompt(false).as_deref(), Some("Place first corner of text frame"));
+    let shown: Vec<&str> = SK_TEXT
+      .inputs
+      .iter()
+      .enumerate()
+      .filter(|(i, _)| d.form.shown(&SK_TEXT, *i) && !crate::forms::State::hidden(&SK_TEXT, *i))
+      .map(|(_, x)| x.key())
+      .collect();
+    assert_eq!(shown, vec!["type"]);
+    assert!(matches!(SK_TEXT.inputs[0], Input::Icons { key: "type", .. }));
+    d.set_text_frame([10.0, 5.0], [50.0, 15.0], 0.0);
+    assert!(d.ready() && !d.wants_text_frame());
+    let (cmd, p) = d.command().unwrap();
+    // left and top of the frame, the frame's corners not sent
+    assert_eq!((cmd, &p["at"], &p["valign"]), ("sketch.text", &json!([10.0, 15.0]), &json!("top")));
+    assert!(p.get("x2").is_none() && p.get("type").is_none(), "{p}");
+    let shown: Vec<&str> = SK_TEXT
+      .inputs
+      .iter()
+      .enumerate()
+      .filter(|(i, _)| d.form.shown(&SK_TEXT, *i) && !crate::forms::State::hidden(&SK_TEXT, *i))
+      .map(|(_, x)| x.key())
+      .collect();
+    assert!(shown.contains(&"text") && shown.contains(&"font") && shown.contains(&"height"));
+    assert!(!shown.contains(&"path") && !shown.contains(&"x2"));
+    // a text reading at 90° (along +y) on a vertical plane still sits in the frame as dragged:
+    // it starts at the frame's low y and its top (towards -x) is the frame's low x
+    let mut d = Dialog::blank(Kind::Form(&SK_TEXT));
+    d.set_text_frame([0.0, 0.0], [10.0, -40.0], 90.0);
+    let (_, p) = d.command().unwrap();
+    let at: Vec<f64> = p["at"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    assert!(at[0].abs() < 1e-9 && (at[1] + 40.0).abs() < 1e-9 && p["angle"] == json!(90.0), "{p}");
+    // text on a path: the path pick is what's waited for
+    let mut d = Dialog::blank(Kind::Form(&SK_TEXT));
+    d.form.values[0] = json!("path");
+    assert_eq!(d.prompt(false).as_deref(), Some("Select path"));
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    let arc = app.run("sketch.arc", json!({"start": [0, 0], "mid": [20, 10], "end": [40, 0]})).unwrap()["curves"][0]
+      .as_u64()
+      .unwrap() as u32;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(arc) }];
+    d.sync_selection(&app.s);
+    assert!(d.ready());
+    let (_, p) = d.command().unwrap();
+    assert_eq!((&p["path"], p.get("at")), (&json!(arc), None));
+    apply(&mut app.s, &mut d);
+  }
+
+  /// Fusion's PROJECT: Geometry, a Selection Filter (bodies, or faces and edges) and Projection
+  /// Link, OK only once something is picked.
+  #[test]
+  fn project_has_a_selection_filter_and_a_projection_link() {
+    let mut app = App::with_session(Session::default());
+    app.run("box", json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+    let d = Dialog::open(&mut app, Kind::Project);
+    assert!((d.choice, d.flag) == ("bodies", true) && !d.ready());
+    let mut d = d;
+    d.bodies = vec![app.s.model.bodies[0].id.0];
+    assert!(d.ready());
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, &p["associative"]), ("sketch.project", &json!(true)));
+    // the form dialogs' Selection Filter decides what the Geometry chip counts
+    let mut d = Dialog::blank(Kind::Form(&crate::forms::SK_INTERSECT));
+    assert!(!d.form.filter_faces(&crate::forms::SK_INTERSECT));
+    d.form.values[2] = json!("faces");
+    assert!(d.form.filter_faces(&crate::forms::SK_INTERSECT));
   }
 
   /// Previews the dialog's command and checks it applied without an error.
@@ -5330,6 +5703,10 @@ mod tests {
     let mut d = Dialog::blank(Kind::SkCircPattern);
     d.curves = vec![circle];
     d.count = "4".into();
+    // the centre is a pick (here the sketch origin point)
+    let sk = s.edit_sketch.unwrap();
+    let origin = s.design.sketch(sk).unwrap().points.iter().find(|p| p.x == 0.0 && p.y == 0.0).map(|p| p.id);
+    d.center = Some(Sel::SketchPoint { sketch: sk, point: origin.unwrap_or(fox_engine::sketch::PointId(0)) });
     apply(&mut s, &mut d);
     d.applied = false;
     let mut d = Dialog::blank(Kind::SkRectPattern);
@@ -5530,6 +5907,7 @@ mod tests {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "xy"}));
     let mut d = form(&mut s, &SK_TEXT, vec![], &[("text", json!("Hi"))]);
+    d.set_text_frame([0.0, 0.0], [40.0, 10.0], 0.0);
     apply(&mut s, &mut d);
     let sk = s.edit_sketch.unwrap();
     assert!(!s.model.sketches[&sk].profiles.is_empty());
@@ -6044,6 +6422,7 @@ mod tests {
     let mut s = Session::default();
     let sk = run(&mut s, "sketch.create", json!({"plane": "xy"}))["sketch"].as_u64().unwrap() as u32;
     let mut d = form(&mut s, &SK_TEXT, vec![], &[("text", json!("AB")), ("font", json!("mono"))]);
+    d.set_text_frame([0.0, 0.0], [40.0, 10.0], 0.0);
     apply(&mut s, &mut d);
     d.applied = false;
     let sketch = s.design.sketch(FeatureId(sk)).unwrap();
@@ -6206,7 +6585,8 @@ mod tests {
       .as_u64()
       .unwrap() as u32;
     let sel = vec![Sel::SketchCurve { sketch: FeatureId(sk), curve: fox_engine::sketch::CurveId(arc) }];
-    let mut d = form(&mut s, &SK_TEXT, sel, &[("text", json!("LL")), ("align", json!("center"))]);
+    let mut d =
+      form(&mut s, &SK_TEXT, sel, &[("type", json!("path")), ("text", json!("LL")), ("align", json!("center"))]);
     apply(&mut s, &mut d);
     let t = &s.design.sketch(FeatureId(sk)).unwrap().texts[0];
     let path = t.path.expect("the text runs along the arc");

@@ -310,6 +310,11 @@ pub enum Icon {
   OpIntersect,
   OpNewBody,
   OpNewComponent,
+  // Text's Type row and the Project / Include dialogs' Selection Filter
+  TextBox,
+  TextOnPath,
+  FilterBodies,
+  FilterFaces,
 }
 
 #[derive(Clone, Copy)]
@@ -2310,6 +2315,25 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.block(0.5, 0.56, 0.74, 0.9, 0.16, BlueLight, Blue, BlueDark);
       k.thick((0.8, 0.08), (0.8, 0.36), Ink, 1.2);
       k.thick((0.66, 0.22), (0.94, 0.22), Ink, 1.2);
+    }
+    Icon::TextBox => {
+      k.dashed((0.08, 0.14), (0.92, 0.14), Slate);
+      k.dashed((0.08, 0.86), (0.92, 0.86), Slate);
+      k.dashed((0.08, 0.14), (0.08, 0.86), Slate);
+      k.dashed((0.92, 0.14), (0.92, 0.86), Slate);
+      k.text((0.5, 0.5), "A", 0.62, Teal);
+    }
+    Icon::TextOnPath => {
+      k.ska((0.5, 1.1), 0.72, 0.5, PI - 0.5, Slate);
+      k.text((0.5, 0.36), "A", 0.56, Teal);
+    }
+    Icon::FilterBodies => {
+      k.block(0.14, 0.34, 0.66, 0.9, 0.2, Light, Blue, Slate);
+    }
+    Icon::FilterFaces => {
+      k.solid(&[(0.1, 0.9), (0.9, 0.9), (0.9, 0.34), (0.1, 0.34)], Light);
+      k.sk(&[(0.1, 0.34), (0.34, 0.1), (0.9, 0.1), (0.9, 0.34)], Slate);
+      k.thick((0.1, 0.34), (0.9, 0.34), Teal, 2.0);
     }
   }
 }

@@ -2531,6 +2531,8 @@ mod sheet2;
 mod sheetmod;
 mod spun;
 pub use spun::outline as spun_outline;
+mod intersect;
+pub use intersect::outline as intersect_outline;
 mod surface;
 /// Offsets along one direction of a rectangular pattern, the original's (zero) included, as
 /// Fusion places them: one way from the original, or with `symmetric` the original at index

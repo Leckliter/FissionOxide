@@ -553,7 +553,7 @@ const SK_CIRCLE: &[E] = &[
 ];
 
 const SK_ARC: &[E] = &[
-  c("3-Point Arc", Icon::Arc3, T(Tool::Arc3)).k("A"),
+  c("3-Point Arc", Icon::Arc3, T(Tool::Arc3)),
   c("Center Point Arc", Icon::CenterArc, T(Tool::CenterArc)),
   c("Tangent Arc", Icon::TangentArc, T(Tool::TangentArc)),
 ];
@@ -579,10 +579,12 @@ const SK_SPLINE: &[E] = &[
 
 const SK_PROJECT: &[E] = &[
   c("Project", Icon::Project, D(Kind::Project)).k("P"),
-  x("Intersect", Icon::Intersect),
+  c("Intersect", Icon::Intersect, D(Kind::Form(&forms::SK_INTERSECT))),
+  c("Spun Profile", Icon::Revolve, D(Kind::Form(&forms::SK_SPUN_PROFILE))),
   c("Include 3D Geometry", Icon::Include3D, D(Kind::Form(&forms::SK_INCLUDE))),
   c("Project To Surface", Icon::ProjectSurface, D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
   c("Intersection Curve", Icon::Intersect, D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),
+  c("Isoparametric Curve", Icon::Intersect, D(Kind::Form(&forms::SK_ISOPARAMETRIC))),
 ];
 
 const SKETCH_CREATE: &[E] = &[
@@ -1638,6 +1640,29 @@ mod tests {
     assert!(missing.is_empty(), "{missing:?}");
   }
 
+  /// Fusion's Project / Include submenu, in its order, and the Arc submenu without a shortcut
+  /// on 3-Point Arc (Fusion's sketch defaults are L, R, C, D, P, X, T, O).
+  #[test]
+  fn project_include_is_fusions_and_three_point_arc_has_no_key() {
+    let mut project = Vec::new();
+    labels(SK_PROJECT, &mut project);
+    assert_eq!(
+      project,
+      [
+        "Project",
+        "Intersect",
+        "Spun Profile",
+        "Include 3D Geometry",
+        "Project To Surface",
+        "Intersection Curve",
+        "Isoparametric Curve"
+      ]
+    );
+    assert!(SK_PROJECT.iter().all(|e| matches!(e, E::I(i) if i.cmd.is_some())), "every entry opens a dialog");
+    let keys: Vec<&str> = SK_ARC.iter().filter_map(|e| if let E::I(i) = e { Some(i.key) } else { None }).collect();
+    assert_eq!(keys, ["", "", ""]);
+  }
+
   #[test]
   fn the_sketch_create_list_is_fusions() {
     let mut create = Vec::new();
@@ -1710,6 +1735,9 @@ mod tests {
       (Tab::Sketch, "INSERT", "Sketch Library...", Cmd::SketchLibrary),
       (Tab::Sketch, "CREATE", "Project To Surface", D(Kind::Form(&forms::SK_PROJECT_SURFACE))),
       (Tab::Sketch, "CREATE", "Intersection Curve", D(Kind::Form(&forms::SK_INTERSECTION_CURVE))),
+      (Tab::Sketch, "CREATE", "Intersect", D(Kind::Form(&forms::SK_INTERSECT))),
+      (Tab::Sketch, "CREATE", "Spun Profile", D(Kind::Form(&forms::SK_SPUN_PROFILE))),
+      (Tab::Sketch, "CREATE", "Isoparametric Curve", D(Kind::Form(&forms::SK_ISOPARAMETRIC))),
       (Tab::Sketch, "CONSTRAINTS", "Polygon", Cmd::Constraint("polygon")),
       (Tab::Solid, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),
       (Tab::Surface, "MODIFY", "Align", D(Kind::Form(&forms::ALIGN))),

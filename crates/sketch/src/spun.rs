@@ -92,6 +92,13 @@ pub struct SketchSpun {
   pub curves: Vec<CurveId>,
   #[serde(default)]
   pub points: Vec<PointId>,
+  /// A plane section (Fusion's Intersect) rather than a spun outline: the curves where the bodies
+  /// (or just `faces` of them) cut the sketch plane. `axis`, `flip` and `centerline` are unused.
+  #[serde(default)]
+  pub section: bool,
+  /// Intersect: the faces sectioned, as `[body, face]` (empty = whole bodies).
+  #[serde(default)]
+  pub faces: Vec<[u32; 2]>,
 }
 
 impl Sketch {
@@ -117,8 +124,35 @@ impl Sketch {
       outline: Vec::new(),
       curves: Vec::new(),
       points: Vec::new(),
+      section: false,
+      faces: Vec::new(),
     });
     id
+  }
+
+  /// Adds a plane section (Fusion's Intersect) of `bodies`, or of `faces` (`[body, face]`) of
+  /// them; it has no curves until the model gives it an outline.
+  pub fn add_section(&mut self, bodies: Vec<u32>, faces: Vec<[u32; 2]>) -> SpunId {
+    let id = SpunId(self.alloc());
+    self.spuns.push(SketchSpun {
+      id,
+      bodies,
+      axis: SpunAxis::World { origin: [0.0; 3], dir: [0.0, 0.0, 1.0] },
+      flip: false,
+      centerline: false,
+      outline: Vec::new(),
+      curves: Vec::new(),
+      points: Vec::new(),
+      section: true,
+      faces,
+    });
+    id
+  }
+
+  /// Adds `outline` as plain fixed curves that belong to no spun profile or section (an Intersect
+  /// without its projection link). Returns the curves made.
+  pub fn add_outline(&mut self, outline: &[SpunSeg]) -> Result<Vec<CurveId>, SketchError> {
+    Ok(self.place_outline(outline)?.0)
   }
 
   /// Replaces a spun profile's curves with `outline`. Returns whether anything changed (an outline

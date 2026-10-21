@@ -1481,7 +1481,8 @@ mod tests {
     assert_eq!(undo.hint.as_deref(), Some("Ctrl+Z"));
     assert_eq!(app.key_for(APPEARANCE).as_deref(), Some("A"));
     app.run("sketch.create", serde_json::json!({"plane": "xy"})).expect("a sketch");
-    assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)).as_deref(), Some("A"));
+    // 3-Point Arc has no shortcut in Fusion
+    assert_eq!(app.key_for(Cmd::SketchTool(Tool::Arc3)), None);
     assert_eq!(app.key_for(Cmd::Dialog(Kind::Project)).as_deref(), Some("P"));
     assert_eq!(app.key_for(Cmd::Construction).as_deref(), Some("X"));
   }

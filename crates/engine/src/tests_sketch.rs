@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::Session;
+use fox_model::FeatureId;
 
 fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
   match s.execute(cmd, &p) {
@@ -414,4 +415,57 @@ fn centerline_is_construction_and_toggles_back() {
   let c = curve(&s);
   assert!(!c.centerline && !c.construction, "{c:?}");
   assert_eq!(crate::history::command_label("sketch.centerline", &json!({})).as_deref(), Some("Centerline"));
+}
+
+/// Intersect sections the bodies with the sketch plane: a box cut half way up gives its four
+/// sides as a profile, a cylinder its circle; the curves follow the body (an edit moves them) and
+/// without the projection link they are plain curves.
+#[test]
+fn intersect_sections_bodies_with_the_sketch_plane_and_follows_them() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.rect", json!({"corner1": [0, 0], "corner2": [20, 10]}));
+  run(&mut s, "sketch.finish", json!({}));
+  let ext = run(&mut s, "extrude", json!({"sketch": 1, "distance": 10}))["feature"].as_u64().unwrap();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  run(&mut s, "sketch.circle", json!({"center": [40, 5], "radius": 3}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "extrude", json!({"sketch": 3, "distance": 4, "operation": "new_body"}));
+  let (b1, b2) = (s.model.bodies[0].id.0, s.model.bodies[1].id.0);
+  // a plane 5 mm up cuts the box, not the 4 mm cylinder
+  let plane = json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]}});
+  let sk = run(&mut s, "sketch.create", plane.clone())["sketch"].as_u64().unwrap();
+  let r = run(&mut s, "sketch.intersect", json!({"bodies": [b1, b2]}));
+  assert_eq!((ids(&r["curves"]).len(), r["profiles"].as_u64()), (4, Some(1)), "{r}");
+  assert!(r["intersect"].is_u64(), "{r}");
+  let sketch = s.design.sketch(FeatureId(sk as u32)).unwrap();
+  assert!(sketch.spuns[0].section && sketch.points.iter().all(|p| p.fixed));
+  // a plane 2 mm up cuts both: the cylinder adds a circle
+  run(&mut s, "sketch.finish", json!({}));
+  let plane2 = json!({"plane": {"origin": [0, 0, 2], "normal": [0, 0, 1], "x": [1, 0, 0]}});
+  run(&mut s, "sketch.create", plane2);
+  let r = run(&mut s, "sketch.intersect", json!({"bodies": [b1, b2], "associative": false}));
+  assert_eq!((ids(&r["curves"]).len(), r["profiles"].as_u64()), (5, Some(2)), "{r}");
+  assert!(r.get("intersect").is_none() && s.design.sketch(s.edit_sketch.unwrap()).unwrap().spuns.is_empty());
+  run(&mut s, "sketch.finish", json!({}));
+  // a plane that misses everything is an error
+  run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+  assert!(s.execute("sketch.intersect", &json!({"bodies": [b1]})).is_err());
+  run(&mut s, "sketch.finish", json!({}));
+  // the linked section follows the box: a longer box makes a longer rectangle
+  run(&mut s, "sketch.create", json!({"plane": "xz"}));
+  run(&mut s, "sketch.finish", json!({}));
+  run(&mut s, "feature.edit", json!({"feature": ext, "set": {"extent": {"kind": "one_side", "distance": "8"}}}));
+  let sketch = s.design.sketch(FeatureId(sk as u32)).unwrap();
+  assert_eq!(sketch.curves.len(), 4);
+  let xs: Vec<f64> = sketch.points.iter().map(|p| p.x).collect();
+  assert!(xs.iter().any(|x| (x - 20.0).abs() < 1e-6), "{xs:?}");
+  // just one face: the box's front face (y = 0) gives one line
+  let r = run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1], "x": [1, 0, 0]}}));
+  let _ = r;
+  let front = s.model.bodies[0].faces().iter().find(|f| f.normal.y < -0.9).map(|f| f.id).unwrap();
+  let r = run(&mut s, "sketch.intersect", json!({"faces": [{"body": b1, "face": front}]}));
+  assert_eq!(ids(&r["curves"]).len(), 1, "{r}");
+  assert!(s.execute("sketch.intersect", &json!({"faces": [{"body": b1, "face": 999}]})).is_err());
+  assert!(s.execute("sketch.intersect", &json!({})).is_err());
 }

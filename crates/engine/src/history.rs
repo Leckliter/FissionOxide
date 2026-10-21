@@ -147,6 +147,8 @@ pub fn command_label(name: &str, p: &Value) -> Option<String> {
     "sketch.intersection_curve" => "Intersection Curve",
     "sketch.include" => "Include 3D Geometry",
     "sketch.spun_profile" => "Spun Profile",
+    "sketch.intersect" => "Intersect",
+    "sketch.isoparametric_curve" => "Isoparametric Curve",
     "sketch.tangent_circle" => "Tangent Circle",
     "sketch.blend" => "Blend Curve",
     "timeline.group" => "Create Group",

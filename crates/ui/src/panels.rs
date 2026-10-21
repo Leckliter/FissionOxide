@@ -525,7 +525,7 @@ impl Cmd {
         Tool::Rect => (Icon::Rect, "2-Point Rectangle", "Rectangle from two corners (R)"),
         Tool::CenterRect => (Icon::CenterRect, "Center Rectangle", "Rectangle from centre and corner"),
         Tool::Circle => (Icon::Circle, "Center Diameter Circle", "Circle from centre and a point (C)"),
-        Tool::Arc3 => (Icon::Arc3, "3-Point Arc", "Arc through start, end and a point (A)"),
+        Tool::Arc3 => (Icon::Arc3, "3-Point Arc", "Arc through start, end and a point"),
         Tool::CenterArc => (Icon::CenterArc, "Center Point Arc", "Arc from centre, start and end"),
         Tool::Polygon => (Icon::Polygon, "Inscribed Polygon", "Hexagon from centre and vertex"),
         Tool::Slot => (Icon::Slot, "Center to Center Slot", "Slot from two centres and a width"),

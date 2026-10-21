@@ -21,11 +21,14 @@ impl Ctx<'_> {
   pub(super) fn refresh_spuns(&self, plane: &Plane, sketch: &mut fox_sketch::Sketch) -> Option<String> {
     let mut errors = Vec::new();
     for sp in sketch.spuns.clone() {
-      let made = self
-        .spun_outline(plane, sketch, &sp)
-        .and_then(|o| sketch.set_spun_outline(sp.id, o).map_err(|e| e.to_string()));
+      let (what, outline) = if sp.section {
+        ("intersect", self.section_outline(plane, &sp))
+      } else {
+        ("spun profile", self.spun_outline(plane, sketch, &sp))
+      };
+      let made = outline.and_then(|o| sketch.set_spun_outline(sp.id, o).map_err(|e| e.to_string()));
       if let Err(e) = made {
-        errors.push(format!("spun profile: {e}"));
+        errors.push(format!("{what}: {e}"));
       }
     }
     (!errors.is_empty()).then(|| errors.join("; "))
