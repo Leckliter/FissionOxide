@@ -33,6 +33,6 @@
 {"name": "ui-sketch-create-dialogs", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_e2e33c81 (requested 2026-10-21)"}
 {"name": "ui-sketch-geometry-bugs", "items": 8, "status": "fixing", "pr": null, "fixer": "cloud task_60e90845 (requested 2026-10-21)"}
 {"name": "ui-sketch-hud-prompts", "items": 7, "status": "fixing", "pr": null, "fixer": "cloud task_f92b6533 (requested 2026-10-21)"}
-{"name": "ui-select-menus-and-other", "items": 7, "status": "ready", "pr": null}
-{"name": "ui-sketch-selection-feedback", "items": 6, "status": "ready", "pr": null}
-{"name": "ui-vertex-and-construction", "items": 5, "status": "ready", "pr": null}
+{"name": "ui-select-menus-and-other", "items": 7, "status": "ready", "pr": null, "fixer": "cloud task_410d5821 (proposed 2026-10-21, card awaits the owner's click)"}
+{"name": "ui-sketch-selection-feedback", "items": 6, "status": "ready", "pr": null, "fixer": "cloud task_86fd63ac (proposed 2026-10-21, card awaits the owner's click)"}
+{"name": "ui-vertex-and-construction", "items": 5, "status": "ready", "pr": null, "fixer": "cloud task_841d2efa (proposed 2026-10-21, card awaits the owner's click)"}
