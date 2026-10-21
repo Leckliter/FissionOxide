@@ -360,8 +360,8 @@ fn remove_duplicates(s: &mut Session, p: &Value) -> CmdResult {
   let dry_run = flag(p, "dry_run", false);
   let mut sketch = s.design.sketch(sk)?.clone();
   let found = find_duplicates(&mut sketch, tol, construction)?;
-  let changed = !found.removed.is_empty() || !found.trimmed.is_empty();
-  if changed && !dry_run {
+  // a real run always records its step, changed or not: a dialog's preview withdraws it with undo
+  if !dry_run {
     s.edit(move |d| {
       if !sketch.solve().ok() {
         return Err(CmdError::new("the result conflicts with the sketch's constraints"));

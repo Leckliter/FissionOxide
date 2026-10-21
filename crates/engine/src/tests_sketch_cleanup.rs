@@ -84,10 +84,13 @@ fn remove_duplicates_keeps_corners_and_the_first_copy() {
   let mut ys = [sketch.pos(a).unwrap()[1], sketch.pos(b).unwrap()[1]];
   ys.sort_by(f64::total_cmp);
   assert!((ys[0] - 10.0).abs() < 1e-9 && (ys[1] - 15.0).abs() < 1e-9, "{ys:?}");
-  // nothing more to do, and one undo brings them all back
+  // nothing more to do: it still records a step (a dialog withdraws its preview with undo), and
+  // the next undo brings them all back
   let again = run(&mut s, "sketch.remove_duplicates", json!({}));
   assert_eq!(again["removed"], 0, "{again}");
   assert_eq!(again["summary"], "No duplicates");
+  run(&mut s, "undo", json!({}));
+  assert_eq!(s.design.sketch(sk).unwrap().curves.len(), before - 7);
   run(&mut s, "undo", json!({}));
   assert_eq!(s.design.sketch(sk).unwrap().curves.len(), before);
 }

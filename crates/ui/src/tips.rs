@@ -273,6 +273,19 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Pick the curves and a base point, then set the scale factor. Dimensions and constraints are \
        kept, so the shape stays the same while its size changes.",
     ),
+    (Sketch, "Remove Duplicates") => (
+      "Deletes curves lying on top of another of the same kind.",
+      "Pick a tolerance (Standard 0.001\" by default, or Exact, Tight, Loose or your own). Copies of \
+       lines, arcs, circles, splines and ellipses go and the first stays; a line overlapping another \
+       part way is cut back to its end, and two lines meeting at a corner are left alone. The dialog \
+       says what will go before you click OK.",
+    ),
+    (Sketch, "Clean Up") => (
+      "Makes an imported or projected sketch ready for a DXF.",
+      "Breaks projection links, deletes the constraints on projected geometry (or all of them) and \
+       optionally the dimensions, removes points no curve uses, turns construction into normal \
+       curves, closes small gaps between curve ends and turns splines into arcs or lines.",
+    ),
     (Sketch, "Move/Copy") => (
       "Moves, rotates or copies sketch geometry.",
       "Pick the curves, then drag the handles or type distances and angles. Turn on copy to keep the \
