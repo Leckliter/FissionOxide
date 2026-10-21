@@ -76,7 +76,8 @@ pub enum Pick {
     sketch: FeatureId,
     index: usize,
   },
-  /// A body vertex (shown while the vertex selection filter is on), named by an edge ending there.
+  /// A body vertex (pickable while the vertex selection filter is on; marked only when hovered or
+  /// selected), named by an edge ending there.
   Vertex {
     body: BodyId,
     edge: u32,
@@ -170,7 +171,8 @@ pub struct ViewOptions {
   /// Draw a simulation study's results (or mesh) instead of its bodies (the Simulation
   /// workspace).
   pub sim: Option<crate::sim::SimView>,
-  /// Draw body vertices as pickable dots (the Vertices selection filter).
+  /// Make body vertices pickable (the Vertices selection filter): the hovered one draws a hollow
+  /// ring and a selected one a blue dot; the rest take a pick id without a mark.
   pub show_vertices: bool,
   /// Draw no construction planes, axes or points (Object Visibility).
   pub hide_construction: bool,
@@ -1385,7 +1387,19 @@ pub fn vertex_pos(s: &Session, body: BodyId, edge: u32, end: bool) -> Option<DVe
   Some(if end { e.end } else { e.start })
 }
 
-const VERTEX_COLOR: [u8; 4] = [40, 44, 52, 255];
+/// A hovered vertex: Fusion's hollow grey ring (about 9 px across) with a light inside.
+pub const VERTEX_HOVER_RING: [u8; 4] = [128, 132, 138, 255];
+/// A selected vertex: a filled light-blue dot (`VERTEX_SELECT_FILL`, a shade darker at the
+/// centre) inside a dark ring.
+pub const VERTEX_SELECT_RING: [u8; 4] = [104, 108, 116, 255];
+pub const VERTEX_SELECT_FILL: [u8; 4] = [191, 214, 237, 255];
+pub const VERTEX_SELECT_CENTRE: [u8; 4] = [147, 167, 185, 255];
+/// A vertex nobody is pointing at draws nothing (as in Fusion) but still takes a pick id, so
+/// hovering near it finds it: a marker with no colour.
+const VERTEX_PICK_ONLY: [u8; 4] = [0, 0, 0, 0];
+/// The radius (pixels) of a hovered or selected vertex's mark, and of the invisible pick disc.
+pub const VERTEX_MARK_RADIUS: f32 = 4.5;
+const VERTEX_PICK_RADIUS: f32 = 3.0;
 
 fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &ViewOptions, selected: &[Pick]) {
   for body in &s.model.bodies {
@@ -1401,21 +1415,19 @@ fn vertex_markers(scene: &mut Scene, picks: &mut PickTable, s: &Session, opts: &
         continue;
       }
       let pick = Pick::Vertex { body: body.id, edge, end };
-      let (color, size) = if selected.contains(&pick) {
-        (EDGE_SELECT_COLOR, 4.5)
+      let id = picks.id(pick);
+      let at = p.as_vec3().to_array();
+      let mark = |color, size, hollow| Marker { at, color, size, id, on_top: false, hollow };
+      if selected.contains(&pick) {
+        // a dark ring, the light-blue fill, a slightly darker centre: drawn in that order
+        scene.markers.push(mark(VERTEX_SELECT_RING, VERTEX_MARK_RADIUS, false));
+        scene.markers.push(mark(VERTEX_SELECT_FILL, VERTEX_MARK_RADIUS - 1.0, false));
+        scene.markers.push(mark(VERTEX_SELECT_CENTRE, 1.0, false));
       } else if opts.hover == Some(pick) {
-        (EDGE_HOVER_COLOR, 4.5)
+        scene.markers.push(mark(VERTEX_HOVER_RING, VERTEX_MARK_RADIUS, true));
       } else {
-        (VERTEX_COLOR, 3.0)
-      };
-      scene.markers.push(Marker {
-        at: p.as_vec3().to_array(),
-        color,
-        size,
-        id: picks.id(pick),
-        on_top: false,
-        hollow: false,
-      });
+        scene.markers.push(mark(VERTEX_PICK_ONLY, VERTEX_PICK_RADIUS, false));
+      }
     }
   }
 }

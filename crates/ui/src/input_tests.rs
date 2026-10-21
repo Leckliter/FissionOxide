@@ -907,3 +907,107 @@ fn the_floating_value_box_takes_typing_and_enter_is_ok() {
   let top = h.app.s.model.bodies[0].shape.mass().unwrap().bbox_max.z;
   assert!((top - 25.0).abs() < 1e-6, "extruded by the typed 25 mm: {top}");
 }
+
+impl Harness {
+  /// Where a world point lands on the window, from the viewport's camera and canvas.
+  fn screen(&self, p: fox_engine::kernel::glam::DVec3) -> Pos2 {
+    let [w, h] = self.app.canvas_px;
+    let ppp = w as f32 / self.app.canvas.width();
+    let (x, y, _) = self.app.cam.project(p, w, h).expect("in view");
+    self.app.canvas.min + vec2(x as f32 / ppp, y as f32 / ppp)
+  }
+
+  /// Lets the first fit and any eased camera move finish, with the frame rendered.
+  fn settle(&mut self) {
+    self.app.fit_view_now();
+    for _ in 0..40 {
+      self.frame(vec![]);
+      if self.app.cam_move.is_none() && self.app.frame.is_some() {
+        break;
+      }
+    }
+    self.frame(vec![]);
+  }
+}
+
+/// With the default filters (Vertices on, as in Fusion), hovering a box corner finds the vertex
+/// rather than an edge, and a click selects it with Fusion's "Vertex | X: … Y: … Z: … mm" readout.
+#[test]
+fn hovering_a_corner_picks_the_vertex_by_default() {
+  use fox_engine::kernel::glam::DVec3;
+  use fox_engine::scene::Pick;
+  let mut h = Harness::new();
+  assert!(h.app.sel_filter.vertices, "the Vertices filter starts on");
+  h.app.run("box", json!({"width": 20, "depth": 20, "height": 20})).unwrap();
+  h.settle();
+  let corner = DVec3::new(10.0, 10.0, 20.0);
+  let at = h.screen(corner);
+  h.frame(vec![Event::PointerMoved(at)]);
+  h.frame(vec![]);
+  let Some(Pick::Vertex { body, edge, end }) = h.app.hover else { panic!("hover {:?}", h.app.hover) };
+  let pos = fox_engine::scene::vertex_pos(&h.app.s, body, edge, end).unwrap();
+  assert!((pos - corner).length() < 1e-6, "{pos}");
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Vertex | X: 10.00 Y: 10.00 Z: 20.00 mm"));
+  h.frame(vec![Harness::button(at, true)]);
+  h.frame(vec![Harness::button(at, false)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.s.selection, vec![fox_engine::Sel::Vertex { body, edge, end }]);
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Vertex | X: 10.00 Y: 10.00 Z: 20.00 mm"));
+}
+
+/// With the Origin folder shown, the origin point, axes and planes are hovered and picked in the
+/// canvas: a click selects one (status "Origin Point | X: 0.00 …"), a second click or Escape
+/// clears it, and it stays visible; while the folder is hidden nothing is picked.
+#[test]
+fn origin_items_are_hovered_and_picked_in_the_canvas() {
+  use crate::origin::{self, OriginItem};
+  use fox_engine::kernel::glam::DVec3;
+  let mut h = Harness::new();
+  h.settle();
+  let at = h.screen(DVec3::ZERO);
+  h.frame(vec![Event::PointerMoved(at)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.hover_origin, None, "the folder is hidden");
+  h.app.origin_shown = true;
+  h.frame(vec![]);
+  h.frame(vec![]);
+  assert_eq!(h.app.hover_origin, Some(OriginItem::Point));
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("Origin Point | X: 0.00 Y: 0.00 Z: 0.00 mm"));
+  h.frame(vec![Harness::button(at, true)]);
+  h.frame(vec![Harness::button(at, false)]);
+  h.frame(vec![]);
+  assert_eq!(origin::picked(&h.app), Some(OriginItem::Point));
+  // clicking it again clears it
+  h.frame(vec![Harness::button(at, true)]);
+  h.frame(vec![Harness::button(at, false)]);
+  h.frame(vec![]);
+  assert_eq!(origin::picked(&h.app), None);
+  // an axis: along X, well clear of the origin point
+  let reach = crate::viewport::origin_plane_half_size(&h.app) * crate::viewport::ORIGIN_AXIS_REACH;
+  let on_x = h.screen(DVec3::X * reach * 0.6);
+  h.frame(vec![Event::PointerMoved(on_x)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.hover_origin, Some(OriginItem::X));
+  h.frame(vec![Harness::button(on_x, true)]);
+  h.frame(vec![Harness::button(on_x, false)]);
+  h.frame(vec![]);
+  assert_eq!(origin::picked(&h.app), Some(OriginItem::X));
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("X Axis"));
+  assert!(origin::visible(&h.app, OriginItem::X), "the picked axis stays visible");
+  // Escape clears the pick; the axis still shows
+  h.frame(vec![key(egui::Key::Escape)]);
+  h.frame(vec![]);
+  assert_eq!(origin::picked(&h.app), None);
+  assert!(origin::visible(&h.app, OriginItem::X));
+  // a plane picked in the browser way, then a click on empty canvas clears it
+  origin::pick(&mut h.app, OriginItem::Xz);
+  assert_eq!(crate::panels::selection_text(&h.app).as_deref(), Some("XZ Plane"));
+  let far = h.app.canvas.right_top() + vec2(-40.0, 300.0);
+  h.frame(vec![Event::PointerMoved(far)]);
+  h.frame(vec![]);
+  assert_eq!(h.app.hover_origin, None);
+  h.frame(vec![Harness::button(far, true)]);
+  h.frame(vec![Harness::button(far, false)]);
+  h.frame(vec![]);
+  assert_eq!(origin::picked(&h.app), None);
+}

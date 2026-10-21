@@ -6514,6 +6514,8 @@ mod tests {
     let b = app.s.model.bodies[0].id;
     let edge = app.s.model.body(b).unwrap().edges()[0].id;
     app.s.selection = vec![Sel::Edge { body: b, edge }];
+    // the Vertices filter is on by default; turned off, Measure turns it on while open
+    app.sel_filter.vertices = false;
     let mut d = Dialog::open(&mut app, Kind::Inspect);
     assert!(show_once(&mut app, &mut d));
     assert!(app.sel_filter.vertices, "Measure picks vertices");

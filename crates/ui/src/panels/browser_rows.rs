@@ -8,10 +8,8 @@ use serde_json::json;
 use super::{RowCmd, RowItem, browser_edit, menu_item, row_item, row_menu};
 use crate::dialogs::Kind;
 use crate::icons::Icon;
-use crate::{App, marking};
-
-/// The three origin planes as `sketch.create` planes.
-const ORIGIN_PLANES: [&str; 3] = ["xy", "xz", "yz"];
+use crate::origin::{self, OriginItem};
+use crate::{App, marking, theme};
 
 // ---------------------------------------------------------------- labels
 
@@ -358,21 +356,13 @@ pub(crate) fn folder_context_menu(ui: &mut egui::Ui, items: &[Option<RowItem>], 
 
 // ---------------------------------------------------------------- the Origin folder
 
-/// Whether the three origin planes are shown in the viewport: by the Origin folder's eye, or
-/// each by its own Show/Hide.
+/// Whether the three origin planes' own eyes are on (they show with the folder's eye too).
 pub(crate) fn origin_planes_shown(app: &App) -> bool {
-  app.origin_shown || ORIGIN_PLANES.iter().all(|p| app.shown_planes.contains(&json!(p)))
-}
-
-fn set_origin_planes(app: &mut App, shown: bool) {
-  app.shown_planes.retain(|p| !ORIGIN_PLANES.iter().any(|o| *p == json!(o)));
-  if shown {
-    app.shown_planes.extend(ORIGIN_PLANES.iter().map(|p| json!(p)));
-  }
+  origin::planes_shown(app)
 }
 
 /// The Origin folder's eye: hidden to start, as in Fusion; shown, the viewport draws the
-/// origin's planes and axes (`App::origin_shown`).
+/// origin's point, axes and planes whose own eyes are on (`App::origin_shown`).
 pub(crate) fn origin_show_hide(app: &mut App) {
   app.origin_shown = !app.origin_shown;
 }
@@ -380,8 +370,8 @@ pub(crate) fn origin_show_hide(app: &mut App) {
 /// The Origin folder's menu, as Fusion's (Create Selection Set greyed).
 pub(crate) fn origin_folder_menu(app: &App) -> Vec<Option<RowItem>> {
   let visible = app.origin_shown;
-  let planes = origin_planes_shown(app);
-  let axes = app.objects.origins;
+  let planes = origin::planes_shown(app);
+  let axes = origin::axes_shown(app);
   vec![
     row_item(Icon::Select, "Create Selection Set", RowCmd::NotYet),
     None,
@@ -393,31 +383,105 @@ pub(crate) fn origin_folder_menu(app: &App) -> Vec<Option<RowItem>> {
   ]
 }
 
-/// Runs an Origin folder menu command. Show/Hide Planes shows the three planes on their own
-/// (the folder stays hidden); Show/Hide Axes is Object Visibility's Origins switch.
+/// Runs an Origin folder menu command. Show/Hide Planes and Show/Hide Axes toggle the three
+/// planes' or axes' own eyes (they show only while the folder's eye is on, as in Fusion); Show
+/// All turns the folder and every child on.
 pub(crate) fn run_origin_folder_cmd(app: &mut App, cmd: RowCmd) {
   match cmd {
     RowCmd::ShowHide => origin_show_hide(app),
     RowCmd::ShowAll => {
       app.origin_shown = true;
       app.objects.origins = true;
-    }
-    RowCmd::ShowHidePlanes => {
-      if app.origin_shown {
-        // the folder's eye showed them: hide the folder, keep nothing but the planes
-        app.origin_shown = false;
-        set_origin_planes(app, false);
-      } else {
-        let shown = origin_planes_shown(app);
-        set_origin_planes(app, !shown);
+      for item in OriginItem::ALL {
+        origin::set_eye(app, item, true);
       }
     }
-    RowCmd::ShowHideAxes => app.objects.origins = !app.objects.origins,
+    RowCmd::ShowHidePlanes => {
+      let shown = origin::planes_shown(app);
+      origin::set_planes(app, !shown);
+    }
+    RowCmd::ShowHideAxes => {
+      let shown = origin::axes_shown(app);
+      origin::set_axes(app, !shown);
+    }
     RowCmd::FindInWindow => {
       let pl = fox_engine::model::OriginPlane::Xy.plane(app.s.design.frames());
       marking::find_plane_in_window(app, &pl);
     }
     _ => {}
+  }
+}
+
+/// The Origin folder's children, as Fusion's: O, X, Y, Z, XY, XZ, YZ, each with its own eye
+/// (greyed while the folder is hidden). A click selects the item (status "XZ Plane") whether or
+/// not it shows; a double-click on a plane sketches on it. Hovering a row highlights nothing.
+pub(crate) fn origin_children(app: &mut App, ui: &mut egui::Ui, folder: egui::Id) {
+  for item in OriginItem::ALL {
+    let picked = origin::picked(app) == Some(item);
+    let eye = origin::eye(app, item);
+    let ev = super::tree_row(
+      ui,
+      folder.with(item.label()),
+      2,
+      None,
+      Some(eye),
+      item.icon(),
+      item.label(),
+      picked,
+      theme::TEXT,
+    );
+    if ev.eye {
+      origin::toggle_eye(app, item);
+    }
+    if let Some(r) = &ev.response
+      && !app.origin_shown
+    {
+      // the child's eye is greyed while the folder's is off
+      ui.painter().rect_filled(super::eye_rect(r.rect, 2), 0.0, egui::Color32::from_white_alpha(150));
+    }
+    let plane = item.sketch_plane();
+    if ev.double_clicked
+      && let Some(plane) = &plane
+    {
+      // the first click already started it if Create Sketch was waiting for a plane
+      if app.s.edit_sketch.is_none() {
+        app.create_sketch(plane.clone());
+      }
+    } else if ev.clicked {
+      match &plane {
+        Some(plane) => super::pick_plane(app, plane.clone()),
+        None => origin::pick(app, item),
+      }
+    }
+    if let Some(r) = ev.response {
+      r.context_menu(|ui| match &plane {
+        Some(plane) => {
+          let plane = plane.as_str().unwrap_or("xy");
+          let items = super::origin_plane_menu(app, plane);
+          if let Some(cmd) = row_menu(ui, &items) {
+            super::run_origin_plane_cmd(app, plane, cmd);
+          }
+        }
+        None => {
+          let items = origin_item_menu(app, item);
+          if let Some(cmd) = row_menu(ui, &items) {
+            run_origin_item_cmd(app, item, cmd);
+          }
+        }
+      });
+    }
+  }
+}
+
+/// An origin point or axis row's menu: its eye, as Show/Hide.
+pub(crate) fn origin_item_menu(app: &App, item: OriginItem) -> Vec<Option<RowItem>> {
+  let shown = origin::eye(app, item);
+  vec![row_item(if shown { Icon::EyeOff } else { Icon::Eye }, "Show/Hide", RowCmd::ShowHide)]
+}
+
+pub(crate) fn run_origin_item_cmd(app: &mut App, item: OriginItem, cmd: RowCmd) {
+  if cmd == RowCmd::ShowHide {
+    origin::toggle_eye(app, item);
   }
 }
 
@@ -597,24 +661,32 @@ mod tests {
       labels(&origin_folder_menu(&app)),
       ["Create Selection Set", "-", "Show/Hide", "Show All", "Show/Hide Planes", "Show/Hide Axes", "Find in Window"]
     );
+    // the children's eyes start on but greyed: a child shows only with the folder's eye too
+    assert!(origin_planes_shown(&app) && origin::axes_shown(&app));
+    assert!(OriginItem::ALL.iter().all(|i| !origin::visible(&app, *i)));
     origin_show_hide(&mut app);
-    assert!(app.origin_shown && origin_planes_shown(&app));
-    assert!(app.shown_planes.is_empty(), "the folder's eye draws the planes on its own");
+    assert!(app.origin_shown && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i)));
     origin_show_hide(&mut app);
-    assert!(!app.origin_shown && !origin_planes_shown(&app));
+    assert!(!app.origin_shown && !origin::visible(&app, OriginItem::Xy));
+    // Show/Hide Planes and Show/Hide Axes toggle the children's own eyes, not the folder's
     run_origin_folder_cmd(&mut app, RowCmd::ShowHidePlanes);
-    assert!(origin_planes_shown(&app) && !app.origin_shown, "the planes alone, the folder still hidden");
-    assert_eq!(app.shown_planes.len(), 3);
+    assert!(!origin_planes_shown(&app) && !app.origin_shown && origin::axes_shown(&app));
+    assert_eq!(labels(&origin_folder_menu(&app))[4], "Show/Hide Planes");
     run_origin_folder_cmd(&mut app, RowCmd::ShowHidePlanes);
-    assert!(!origin_planes_shown(&app) && app.shown_planes.is_empty());
-    origin_show_hide(&mut app);
-    run_origin_folder_cmd(&mut app, RowCmd::ShowHidePlanes);
-    assert!(!app.origin_shown && !origin_planes_shown(&app), "Show/Hide Planes on a shown folder hides them");
-    let axes = app.objects.origins;
+    assert!(origin_planes_shown(&app));
     run_origin_folder_cmd(&mut app, RowCmd::ShowHideAxes);
-    assert_eq!(app.objects.origins, !axes);
+    assert!(!origin::axes_shown(&app) && !origin::eye(&app, OriginItem::Y) && origin::eye(&app, OriginItem::Point));
+    origin_show_hide(&mut app);
+    assert!(origin::visible(&app, OriginItem::Xy) && !origin::visible(&app, OriginItem::Y));
+    run_origin_folder_cmd(&mut app, RowCmd::ShowHidePlanes);
+    assert!(app.origin_shown && !origin_planes_shown(&app), "Show/Hide Planes leaves the folder shown");
+    // the point's and axes' own menus are their eyes
+    assert_eq!(labels(&origin_item_menu(&app, OriginItem::Z)), ["Show/Hide"]);
+    run_origin_item_cmd(&mut app, OriginItem::Z, RowCmd::ShowHide);
+    assert!(origin::eye(&app, OriginItem::Z) && !origin::eye(&app, OriginItem::X));
+    app.objects.origins = false;
     run_origin_folder_cmd(&mut app, RowCmd::ShowAll);
-    assert!(app.origin_shown && origin_planes_shown(&app) && app.objects.origins);
+    assert!(app.origin_shown && app.objects.origins && OriginItem::ALL.iter().all(|i| origin::visible(&app, *i)));
     run_origin_folder_cmd(&mut app, RowCmd::FindInWindow);
     assert!(app.status.as_ref().is_none_or(|(_, err)| !err), "{:?}", app.status);
   }

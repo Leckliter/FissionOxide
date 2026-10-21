@@ -29,7 +29,8 @@ pub struct Filters {
   pub edges: bool,
   pub sketches: bool,
   pub profiles: bool,
-  /// Body vertices: off by default, since they are drawn (as dots) only while it is on.
+  /// Body vertices (Fusion's Body Vertices filter): on by default, as in Fusion; a vertex draws
+  /// a mark only while hovered or selected.
   pub vertices: bool,
   /// Construction planes, axes and points.
   pub construction: bool,
@@ -43,7 +44,7 @@ impl Default for Filters {
       edges: true,
       sketches: true,
       profiles: true,
-      vertices: false,
+      vertices: true,
       construction: true,
     }
   }

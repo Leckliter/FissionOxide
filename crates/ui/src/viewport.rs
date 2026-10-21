@@ -367,6 +367,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     app.glyph_hover.clear();
   }
   let hot_plane = sketch_planes_overlay(app, planes, &painter, &view);
+  crate::origin::overlay(app, &painter, &|p| view.to_screen(&cam, p));
   offset_plane_overlay(app, &painter, &view);
   // Preferences → General → Enable camera pivot: the orbit's centre while orbiting
   if app.preferences.values.camera_pivot
@@ -383,6 +384,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if resp.clicked() {
       app.cancel_dialog();
       app.create_sketch(plane);
+    }
+  }
+  // a click on a visible origin plane, axis or point selects it (again: clears it), as in Fusion
+  if !consumed && let Some(item) = app.hover_origin {
+    consumed = true;
+    if resp.clicked() {
+      crate::origin::pick(app, item);
     }
   }
   let step = app.increments.linear_step(grid_step(app, &view) / 10.0);
@@ -656,9 +664,9 @@ pub(crate) fn scene_options(app: &mut App) -> ViewOptions {
     hover: app.hover,
     hide_edges: !app.visual_style.edges(),
     hide_grid: !app.show_grid,
-    // the origin axes draw only while the browser's Origin folder is shown (and Object Visibility
-    // has origins on), as short stubs matching the origin planes' size
-    hide_origin: !(vis.origins && app.origin_shown),
+    // the origin axes (dashed, each with its own eye under the Origin folder's) are drawn over
+    // the image by `crate::origin`, so the scene draws none of its own
+    hide_origin: true,
     origin_axis_len: Some(origin_plane_half_size(app) * ORIGIN_AXIS_REACH),
     hide_sketches: !vis.sketches || analysis.hide_sketches,
     hide_construction: !vis.construction,
@@ -1960,7 +1968,7 @@ fn point_line_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 
 fn select_click(app: &mut App, add: bool) {
-  app.picked_plane = None;
+  crate::origin::clear(app);
   match app.hover {
     Some(p) if app.s.edit_sketch.is_some() => crate::panels::toggle_sel(&mut app.s, p.to_sel(), add),
     Some(p) => crate::select::pick(app, p, add),
@@ -4025,61 +4033,62 @@ fn plane_under(app: &App, view: &View, pos: Pos2, planes: &[(serde_json::Value, 
   face.is_none_or(|f| t <= f).then_some(i)
 }
 
-/// The planes shown for picking a sketch plane this frame.
+/// The planes Create Sketch offers this frame.
 struct PlanePick {
   planes: Vec<(serde_json::Value, Plane)>,
-  /// Create Sketch is waiting for a plane (else only the plane picked in the browser shows).
-  picking: bool,
   /// The plane under the cursor (index).
   hot: Option<usize>,
 }
 
 /// While Create Sketch waits for a plane: the origin and construction planes, and which one is
-/// under the cursor (that one wins over the face highlight). Otherwise the plane picked in the
-/// browser, if any.
+/// under the cursor (that one wins over the face highlight). Otherwise the Origin folder's
+/// visible point, axes and planes are drawn and picked by [`crate::origin`], and the one under
+/// the cursor is noted here (`App::hover_origin`, winning over the face highlight too).
 fn plane_pick(app: &mut App, resp: &egui::Response, view: &View) -> Option<PlanePick> {
   let picking = app.dialog.as_ref().is_some_and(|d| d.kind == crate::dialogs::Kind::PickPlane);
-  let picked = app.picked_plane.as_ref().filter(|_| app.s.edit_sketch.is_none());
-  let origin_shown = app.origin_shown && app.s.edit_sketch.is_none();
-  if !picking && picked.is_none() && app.shown_planes.is_empty() && !origin_shown {
+  app.hover_origin = None;
+  if !picking {
+    if app.dialog.is_none()
+      && app.drag.is_none()
+      && let Some(pos) = resp.hover_pos()
+    {
+      let cam = app.cam;
+      let project = |p| view.to_screen(&cam, p);
+      let ray = |p| view.ray(&cam, p);
+      app.hover_origin = crate::origin::under(app, pos, &project, &ray);
+      if app.hover_origin.is_some() {
+        app.hover = None;
+      }
+    }
     return None;
   }
   let mut planes = sketch_planes(app);
   // the Construction selection filter turned off: construction planes can't be picked
-  if picking && !app.sel_filter.construction {
+  if !app.sel_filter.construction {
     planes.retain(|(p, _)| p.get("feature").is_none());
   }
-  if !picking {
-    // the plane picked in the browser, the origin planes Show/Hide turned on, and all three
-    // while the Origin folder is shown
-    planes.retain(|(p, _)| {
-      Some(p) == picked || app.shown_planes.contains(p) || (origin_shown && p.get("feature").is_none())
-    });
-  }
-  let hot = if picking && app.drag.is_none() {
-    resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes))
-  } else {
-    None
-  };
+  let hot = if app.drag.is_none() { resp.hover_pos().and_then(|p| plane_under(app, view, p, &planes)) } else { None };
   if hot.is_some() {
     app.hover = None;
   }
-  Some(PlanePick { planes, picking, hot })
+  Some(PlanePick { planes, hot })
 }
 
-/// Draws the planes as see-through orange squares, as in Fusion, the hovered (or browser-picked)
-/// one brighter. Returns the `sketch.create` plane under the cursor.
+/// Draws Create Sketch's planes as see-through orange squares, as in Fusion, the hovered one
+/// brighter. Returns the `sketch.create` plane under the cursor.
 fn sketch_planes_overlay(
   app: &App,
   pick: Option<PlanePick>,
   painter: &egui::Painter,
   view: &View,
 ) -> Option<serde_json::Value> {
-  let PlanePick { planes, picking, hot } = pick?;
+  let PlanePick { planes, hot } = pick?;
   let [r, g, b] = PLANE_RGB;
-  // Create Sketch's small dashed axis triad at the origin (the scene draws solid stubs while the
-  // Origin folder is shown, so it isn't doubled then)
-  if picking && !app.origin_shown && planes.iter().any(|(p, _)| p.get("feature").is_none()) {
+  // Create Sketch's small dashed axis triad at the origin (not doubled while the Origin folder
+  // shows its own axes)
+  if !crate::origin::OriginItem::AXES.iter().any(|a| crate::origin::visible(app, *a))
+    && planes.iter().any(|(p, _)| p.get("feature").is_none())
+  {
     origin_triad(app, painter, view, origin_plane_half_size(app) * ORIGIN_AXIS_REACH);
   }
   for (i, (p, pl)) in planes.iter().enumerate() {
@@ -4089,7 +4098,7 @@ fn sketch_planes_overlay(
     else {
       continue;
     };
-    let lit = hot == Some(i) || (!picking && app.picked_plane.as_ref() == Some(p));
+    let lit = hot == Some(i);
     let fill = Color32::from_rgba_unmultiplied(r, g, b, if lit { 110 } else { 46 });
     let edge = Color32::from_rgba_unmultiplied(r, g, b, if lit { 255 } else { 170 });
     painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(if lit { 2.0 } else { 1.0 }, edge)));

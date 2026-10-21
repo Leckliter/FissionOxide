@@ -33,6 +33,28 @@ fn vertex_picks_show_only_with_the_filter_and_measure_as_points() {
   let (with, picks) = b.build(&s, &ViewOptions { show_vertices: true, ..Default::default() });
   assert_eq!(with.markers.len(), plain.markers.len() + 8);
   assert_eq!(vertex_ids(&picks, 10_000), 8);
+  // as in Fusion, a vertex nobody points at draws nothing: its marker only carries the pick id
+  let new_marks = |sc: &fox_render::Scene| sc.markers[plain.markers.len()..].to_vec();
+  assert!(new_marks(&with).iter().all(|m| m.color[3] == 0 && !m.hollow), "{:?}", new_marks(&with));
+
+  // hovered: one hollow grey ring about 9 px across; selected: a dark ring, a light-blue fill and
+  // a darker centre (drawn in that order, so the fill sits inside the ring)
+  let (edge, end, at) = verts[3];
+  let pick = Pick::Vertex { body: id, edge, end };
+  let (hovered, _) = b.build(&s, &ViewOptions { show_vertices: true, hover: Some(pick), ..Default::default() });
+  let rings: Vec<_> = new_marks(&hovered).into_iter().filter(|m| m.color[3] != 0).collect();
+  assert_eq!(rings.len(), 1, "{rings:?}");
+  assert!(rings[0].hollow && rings[0].color == scene::VERTEX_HOVER_RING && rings[0].size == scene::VERTEX_MARK_RADIUS);
+  assert_eq!(rings[0].at, at.as_vec3().to_array());
+  s.selection = vec![pick.to_sel()];
+  let (picked, _) = b.build(&s, &ViewOptions { show_vertices: true, ..Default::default() });
+  let dots: Vec<_> = new_marks(&picked).into_iter().filter(|m| m.color[3] != 0).collect();
+  assert_eq!(
+    dots.iter().map(|m| (m.color, m.hollow)).collect::<Vec<_>>(),
+    [(scene::VERTEX_SELECT_RING, false), (scene::VERTEX_SELECT_FILL, false), (scene::VERTEX_SELECT_CENTRE, false)]
+  );
+  assert!(dots[0].size > dots[1].size && dots[1].size > dots[2].size, "{dots:?}");
+  s.selection.clear();
 
   // a selected vertex round-trips through the selection and measures as a point
   let (edge, end, at) = verts[3];

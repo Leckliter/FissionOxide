@@ -1269,16 +1269,16 @@ fn tree_triangle(p: &egui::Painter, c: Pos2, open: bool, root: bool, color: Colo
 
 /// What happened to a browser row.
 #[derive(Default)]
-struct RowEvents {
-  clicked: bool,
-  double_clicked: bool,
-  eye: bool,
-  response: Option<egui::Response>,
+pub(super) struct RowEvents {
+  pub(super) clicked: bool,
+  pub(super) double_clicked: bool,
+  pub(super) eye: bool,
+  pub(super) response: Option<egui::Response>,
 }
 
 /// One browser row, drawn straight on the canvas as in Fusion: expander, visibility eye, icon
 /// and the name on a grey pill (a dark pill with an activation radio for the root component).
-fn tree_row(
+pub(super) fn tree_row(
   ui: &mut egui::Ui,
   id: egui::Id,
   depth: usize,
@@ -1310,7 +1310,7 @@ fn tree_row(
     }
   }
   if let Some(visible) = eye {
-    let er = Rect::from_center_size(pos2(x + 24.0, cy), vec2(18.0, 14.0));
+    let er = eye_rect(rect, depth);
     let r = ui.interact(er, id.with("eye"), egui::Sense::click());
     icons::draw_color(&p, er, if visible { Icon::Eye } else { Icon::EyeOff });
     if r.on_hover_text(if visible { "Hide" } else { "Show" }).clicked() {
@@ -1346,6 +1346,12 @@ fn tree_row(
   }
   ev.response = Some(resp);
   ev
+}
+
+/// Where a row's eye sits: right of the expander, at the row's depth.
+pub(super) fn eye_rect(row: Rect, depth: usize) -> Rect {
+  let x = row.min.x + 8.0 + depth as f32 * 16.0;
+  Rect::from_center_size(pos2(x + 24.0, row.center().y), vec2(18.0, 14.0))
 }
 
 fn is_open(ui: &egui::Ui, id: egui::Id, default: bool) -> bool {
@@ -1484,9 +1490,9 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
   }
   // Origin
   let og = egui::Id::new("tree-origin");
-  // a plane picked here stays picked until something else is selected
+  // a plane (or origin item) picked here stays picked until something else is selected
   if !app.s.selection.is_empty() {
-    app.picked_plane = None;
+    crate::origin::clear(app);
   }
   // the folder's light bulb shows the origin planes and short axes in the canvas (off by default)
   let ev = tree_row(ui, og, 1, Some(false), Some(app.origin_shown), Icon::Folder, "Origin", false, theme::TEXT);
@@ -1503,30 +1509,7 @@ fn browser_tree(app: &mut App, ui: &mut egui::Ui) {
     });
   }
   if is_open(ui, og, false) {
-    let ev = tree_row(ui, og.with("o"), 2, None, None, Icon::Origin, "O", false, theme::TEXT);
-    if ev.response.is_some_and(|r| r.hovered()) {
-      marking::peek(app, Vec::new(), "Origin point".into());
-    }
-    for (label, plane) in [("XY", "xy"), ("XZ", "xz"), ("YZ", "yz")] {
-      let picked = app.picked_plane.as_ref().is_some_and(|p| p == plane);
-      let ev = tree_row(ui, og.with(label), 2, None, None, Icon::Plane, label, picked, theme::TEXT);
-      if ev.double_clicked {
-        // the first click already started it if Create Sketch was waiting for a plane
-        if app.s.edit_sketch.is_none() {
-          app.create_sketch(json!(plane));
-        }
-      } else if ev.clicked {
-        pick_plane(app, json!(plane));
-      }
-      if let Some(r) = ev.response {
-        r.on_hover_text("Double-click to sketch on this plane").context_menu(|ui| {
-          let items = origin_plane_menu(app, plane);
-          if let Some(cmd) = row_menu(ui, &items) {
-            run_origin_plane_cmd(app, plane, cmd);
-          }
-        });
-      }
-    }
+    browser_rows::origin_children(app, ui, og);
   }
   components_section(app, ui);
   bodies_section(app, ui);
@@ -2176,7 +2159,7 @@ pub(crate) fn sketch_menu(app: &App, fid: FeatureId) -> Vec<Option<RowItem>> {
 
 /// An origin plane row's menu ("xy", "xz" or "yz"), as Fusion's.
 pub(crate) fn origin_plane_menu(app: &App, plane: &str) -> Vec<Option<RowItem>> {
-  let shown = app.shown_planes.contains(&json!(plane));
+  let shown = crate::origin::OriginItem::from_sketch_plane(&json!(plane)).is_some_and(|p| crate::origin::eye(app, p));
   vec![
     row_item(Icon::Sketch, "Create Sketch", RowCmd::CreateSketch),
     row_item(Icon::Plane, "Offset Plane", RowCmd::OffsetPlane),
@@ -2266,11 +2249,9 @@ pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
       }
     }
     RowCmd::ShowHide => {
-      let v = json!(plane);
-      if let Some(i) = app.shown_planes.iter().position(|p| *p == v) {
-        app.shown_planes.remove(i);
-      } else {
-        app.shown_planes.push(v);
+      // the row's own eye (it shows only while the Origin folder's is on too)
+      if let Some(item) = crate::origin::OriginItem::from_sketch_plane(&json!(plane)) {
+        crate::origin::toggle_eye(app, item);
       }
     }
     RowCmd::LookAt => app.look_at_plane(&pl),
@@ -2406,13 +2387,17 @@ fn planes_section(app: &mut App, ui: &mut egui::Ui) {
 
 /// A click on a plane in the browser: while Create Sketch waits for a plane it starts the sketch
 /// there, else it selects the plane (Create Sketch then starts on it).
-fn pick_plane(app: &mut App, plane: Value) {
+pub(super) fn pick_plane(app: &mut App, plane: Value) {
   if app.dialog.as_ref().is_some_and(|d| d.kind == Kind::PickPlane) {
     app.cancel_dialog();
     app.create_sketch(plane);
   } else {
+    let again = app.picked_plane.as_ref() == Some(&plane);
     app.s.selection.clear();
-    app.picked_plane = if app.picked_plane.as_ref() == Some(&plane) { None } else { Some(plane) };
+    crate::origin::clear(app);
+    if !again {
+      app.picked_plane = Some(plane);
+    }
   }
 }
 
@@ -2872,6 +2857,10 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
   let hovered;
   let sel = match app.s.selection.as_slice() {
     [] => {
+      // a picked or hovered origin plane, axis or point: "XY Plane", "Y Axis", "Origin Point | X: …"
+      if let Some(t) = crate::origin::status(app) {
+        return Some(t);
+      }
       hovered = [app.hover?.to_sel()];
       &hovered[..]
     }
@@ -2917,6 +2906,11 @@ pub(crate) fn selection_text(app: &App) -> Option<String> {
     .map(|a| format!("Area: {}", u.area(a, 2))),
     Sel::Body { body } if n == 1 => return Some(app.s.body_name(body)),
     Sel::Feature { feature } if n == 1 => return app.s.design.feature(feature).map(|f| f.name.clone()),
+    // one vertex reads out where it is: "Vertex | X: -1.974 Y: 0.00 Z: 1.741 in"
+    Sel::Vertex { body, edge, end } if n == 1 => {
+      let at = fox_engine::scene::vertex_pos(&app.s, body, edge, end)?;
+      return Some(format!("{} | {}", first.0, crate::origin::coords(app, at)));
+    }
     _ => None,
   };
   Some(match readout {
@@ -3771,10 +3765,14 @@ mod row_menu_tests {
     let mut app = App::with_session(Session::default());
     let l = labels(&origin_plane_menu(&app, "xz"));
     assert_eq!(l, ["Create Sketch", "Offset Plane", "-", "Show/Hide", "Look At", "Find in Window"]);
+    // Show/Hide is the row's own eye: on to start, and the plane shows only with the folder's
+    use crate::origin::{self, OriginItem};
+    assert!(origin::eye(&app, OriginItem::Xz) && !origin::visible(&app, OriginItem::Xz));
     run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
-    assert_eq!(app.shown_planes, vec![json!("xz")]);
+    assert!(!origin::eye(&app, OriginItem::Xz) && origin::eye(&app, OriginItem::Xy));
+    assert_eq!(labels(&origin_plane_menu(&app, "xz"))[3], "Show/Hide");
     run_origin_plane_cmd(&mut app, "xz", RowCmd::ShowHide);
-    assert!(app.shown_planes.is_empty());
+    assert!(origin::eye(&app, OriginItem::Xz));
     run_origin_plane_cmd(&mut app, "xz", RowCmd::LookAt);
     run_origin_plane_cmd(&mut app, "xz", RowCmd::FindInWindow);
     run_origin_plane_cmd(&mut app, "xz", RowCmd::OffsetPlane);

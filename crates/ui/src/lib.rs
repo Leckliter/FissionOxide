@@ -36,6 +36,7 @@ mod marking;
 mod menus;
 mod navbar;
 mod notifications;
+mod origin;
 mod panels;
 mod params_ui;
 mod plugins_ui;
@@ -167,10 +168,16 @@ pub struct App {
   /// An origin or construction plane selected in the browser (a `sketch.create` plane: "xy" or
   /// `{feature}`); Create Sketch starts on it, and the viewport highlights it.
   pub(crate) picked_plane: Option<Value>,
-  /// Origin planes shown in the viewport (the browser's Show/Hide), as `sketch.create` planes.
-  pub(crate) shown_planes: Vec<Value>,
-  /// The browser's Origin folder is shown (its light bulb): the origin planes and short axes
-  /// draw at the origin. Off by default, as in Fusion.
+  /// The origin point or axis picked in the browser or the canvas (a picked origin plane is
+  /// `picked_plane`); see [`origin`].
+  pub(crate) picked_origin: Option<origin::OriginItem>,
+  /// The origin item under the pointer in the canvas this frame.
+  pub(crate) hover_origin: Option<origin::OriginItem>,
+  /// The Origin folder's children's own eyes (O, X, Y, Z, XY, XZ, YZ), on by default; a child
+  /// shows only when the folder's eye is on too.
+  pub(crate) origin_eyes: [bool; 7],
+  /// The browser's Origin folder is shown (its light bulb): the origin point, axes and planes
+  /// whose own eyes are on draw at the origin. Off by default, as in Fusion.
   pub(crate) origin_shown: bool,
   /// A pending open/closed state for the browser's Sketches folder: Edit Sketch opens it,
   /// Finish Sketch collapses it (the browser applies and clears it).
@@ -433,7 +440,9 @@ impl App {
       pre_sketch_cam: None,
       cube: viewcube::CubeState::default(),
       picked_plane: None,
-      shown_planes: Vec::new(),
+      picked_origin: None,
+      hover_origin: None,
+      origin_eyes: [true; 7],
       origin_shown: false,
       browser_sketches: None,
       pending_export: None,
@@ -947,7 +956,9 @@ impl App {
         self.cancel_dialog();
         self.s.selection.clear();
       } else {
+        // a picked origin plane, axis or point clears too; the item stays visible
         self.s.selection.clear();
+        origin::clear(self);
       }
       self.dim_edit = None;
     }
@@ -1299,7 +1310,7 @@ impl App {
       }
     }
     self.s.selection.clear();
-    self.picked_plane = None;
+    origin::clear(self);
     self.dialog = Some(Dialog::open(self, dialogs::Kind::PickPlane));
   }
 
@@ -1331,7 +1342,7 @@ impl App {
         self.pre_sketch_cam = Some(before);
       }
       self.s.selection.clear();
-      self.picked_plane = None;
+      origin::clear(self);
       self.auto_look_at_sketch();
       self.tab = panels::Tab::Sketch;
       self.browser_sketches = Some(true);
