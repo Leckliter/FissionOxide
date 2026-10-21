@@ -315,6 +315,8 @@ pub enum Icon {
   TextOnPath,
   FilterBodies,
   FilterFaces,
+  // Sketch Offset's Flip button: the offset to the other side
+  Flip,
 }
 
 #[derive(Clone, Copy)]
@@ -2334,6 +2336,14 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.solid(&[(0.1, 0.9), (0.9, 0.9), (0.9, 0.34), (0.1, 0.34)], Light);
       k.sk(&[(0.1, 0.34), (0.34, 0.1), (0.9, 0.1), (0.9, 0.34)], Slate);
       k.thick((0.1, 0.34), (0.9, 0.34), Teal, 2.0);
+    }
+    Icon::Flip => {
+      // the curve, with an arrow out of each side
+      k.thick((0.5, 0.1), (0.5, 0.9), Slate, 1.2);
+      k.thick((0.5, 0.36), (0.78, 0.36), Blue, 1.0);
+      k.arrow_head((0.9, 0.36), (1.0, 0.0), 0.13, Blue);
+      k.thick((0.5, 0.64), (0.22, 0.64), Ink, 1.0);
+      k.arrow_head((0.1, 0.64), (-1.0, 0.0), 0.13, Ink);
     }
   }
 }

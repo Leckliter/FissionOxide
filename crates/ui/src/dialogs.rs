@@ -916,7 +916,9 @@ impl Dialog {
         d.angle = "45 deg".into();
       }
       Kind::SkOffset => {
-        d.distance = "2 mm".into();
+        // Fusion starts the offset at 0.00 on the curve; Two Sides adds a second distance
+        d.distance = "0 mm".into();
+        d.distance2 = "0 mm".into();
         d.follow = true;
       }
       Kind::SkCircPattern => {
@@ -959,6 +961,13 @@ impl Dialog {
       if kind == Kind::SkMirror {
         d.line = mirror_line(s, &d.curves);
         d.curves.retain(|c| Some(*c) != d.line);
+      }
+      // Offset on pre-selected curves, as in Fusion: those curves alone (Chain Selection off) and
+      // the offset on them at 0.00 until the arrow is dragged or a distance typed, instead of
+      // following the pointer
+      if kind == Kind::SkOffset && !d.curves.is_empty() {
+        d.follow = false;
+        d.solid.no_chain = true;
       }
     }
     d.comps = d.bodies.iter().map(|b| s.design.component_of(BodyId(*b)).map(|c| c.id.0)).collect();
@@ -1374,10 +1383,13 @@ impl Dialog {
       Kind::SkChamferAngle => {
         ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "angle": self.angle}))
       }
-      Kind::SkOffset => (
-        "sketch.offset",
-        json!({"curves": self.curves, "distance": self.distance, "both_sides": self.extent == "symmetric"}),
-      ),
+      Kind::SkOffset => {
+        let mut p = json!({"curves": self.curves, "distance": self.distance, "both_sides": self.extent == "symmetric"});
+        if self.extent == "two_sides" {
+          p["distance2"] = json!(self.distance2);
+        }
+        ("sketch.offset", p)
+      }
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
       Kind::SkCircPattern => (
@@ -1621,6 +1633,11 @@ impl Dialog {
       return;
     };
     if !self.ready() {
+      return;
+    }
+    if self.kind == Kind::SkOffset && !self.offset_set() {
+      // at 0.00 (or half typed) the offset sits on its curve: nothing to preview, no complaint
+      self.error = None;
       return;
     }
     self.live_applying(s, cmd, &params);
@@ -2067,7 +2084,7 @@ impl Dialog {
     let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
     // docked at the canvas's top-right corner when it opens and again after the window is
     // resized; in between it stays where it was dragged
-    let dock = app.canvas.right_top() + egui::vec2(-34.0, 190.0);
+    let dock = panels::dialog_dock(app.canvas, app.s.edit_sketch.is_some());
     let area = egui::Area::new(egui::Id::new("feature-dialog"))
       .pivot(egui::Align2::RIGHT_TOP)
       .constrain(true)
@@ -2213,6 +2230,10 @@ impl Dialog {
         _ => sentence(self.missing_input()),
       });
     }
+    // Offset's prompt names its values whatever the pointer is over, as Fusion's does
+    if self.kind == Kind::SkOffset {
+      return Some("Modify offset distance or side settings".into());
+    }
     if hovering && self.selects() {
       return Some("Hold Ctrl to modify selection".into());
     }
@@ -2269,7 +2290,18 @@ impl Dialog {
   fn ok_enabled(&self) -> bool {
     match self.kind {
       Kind::Extrude if self.editing.is_none() => !self.profiles.is_empty(),
+      // an offset of 0.00 sits on its curve: OK waits for a distance
+      Kind::SkOffset => self.ready() && self.offset_set(),
       _ => self.ready(),
+    }
+  }
+
+  /// Sketch Offset: has the distance left 0.00 (a value the arrow, the box or the row set)? A
+  /// distance naming a user parameter counts as set; a half-typed one (".", "-") doesn't.
+  fn offset_set(&self) -> bool {
+    match fox_engine::expr::eval(&self.distance, fox_engine::expr::Kind::Length, &Value::Null) {
+      Ok(v) => v.abs() >= 1e-9,
+      Err(_) => !self.distance.trim().trim_matches(['.', '-', '+', ' ']).is_empty(),
     }
   }
 
@@ -3296,16 +3328,28 @@ impl Dialog {
           }
         }
         ui.end_row();
-        const DIRECTIONS: [(&str, &str); 2] = [("one_side", "One Side"), ("symmetric", "Symmetric")];
-        Self::choose(ui, "Direction", "offset-dir", &mut self.extent, &DIRECTIONS, dirty);
+        // Fusion's Direction values carry the icons Extrude's do
+        const DIRECTIONS: [(&str, &str); 3] =
+          [("one_side", "One Side"), ("two_sides", "Two Sides"), ("symmetric", "Symmetric")];
+        ui.label("Direction");
+        if choice::combo(ui, "offset-dir", &DIRECTIONS, &mut self.extent, choice::extrude_icon) {
+          *dirty = true;
+        }
+        ui.end_row();
         let before = self.distance.clone();
-        Self::field(ui, "Offset Position", &mut self.distance, dirty);
+        Self::field(ui, "Distance", &mut self.distance, dirty);
         if self.distance != before {
           // a typed distance holds: the offset stops following the cursor
           self.follow = false;
         }
+        if self.extent == "two_sides" {
+          Self::field(ui, "Distance 2", &mut self.distance2, dirty);
+        }
+        // Flip is an icon button, as in Fusion
         ui.label("Flip");
-        if ui.button("⇄").on_hover_text("Offset to the other side of the curves").clicked() {
+        let flip =
+          crate::icons::icon_button(ui, Icon::Flip, 24.0, "Offset to the other side of the curves", false, None);
+        if flip.clicked() {
           self.distance = negated(&self.distance);
           self.follow = false;
           *dirty = true;
@@ -6745,6 +6789,57 @@ mod tests {
     d.sync_selection(&s);
     assert_eq!(d.edges.len(), 1);
     assert_eq!(d.command().unwrap().1["tangent_chain"], json!(false));
+  }
+
+  /// `ui:sketch:offset-default-follow`, `ui:sketch:offset-dialog-rows`: Offset on a pre-selected
+  /// curve starts at 0.00 on the curve (no following, nothing previewed, no complaint, OK
+  /// waiting), with Chain Selection off and the prompt naming its values; a typed distance
+  /// previews and OK applies. Two Sides sends a second distance.
+  #[test]
+  fn sketch_offset_starts_at_zero_on_a_preselected_curve() {
+    let mut app = App::with_session(Session::default());
+    app.run("sketch.create", json!({"plane": "xy"}));
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10]]}));
+    let sk = app.s.edit_sketch.unwrap();
+    let first = app.s.design.sketch(sk).unwrap().curves[0].id;
+    app.s.selection = vec![Sel::SketchCurve { sketch: sk, curve: first }];
+    let d = Dialog::open(&mut app, Kind::SkOffset);
+    assert_eq!(d.distance, "0 mm");
+    assert!(!d.follows_cursor(), "the offset stays on the curve until dragged or typed");
+    assert!(d.solid.no_chain, "Chain Selection is off for a pre-selected curve");
+    assert_eq!(d.curves, vec![first.0], "the picked curve alone");
+    assert_eq!(d.prompt(false).as_deref(), Some("Modify offset distance or side settings"));
+    assert_eq!(d.prompt(true).as_deref(), Some("Modify offset distance or side settings"));
+    assert!(!d.ok_enabled(), "OK waits for a distance");
+    assert!(d.box_by_pointer(&app.s), "the value box sits by the pointer");
+    let mut d = d;
+    d.preview(&mut app.s);
+    assert!(d.error.is_none() && !d.applied, "nothing previewed at 0.00, nothing wrong");
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), 2);
+    // a half-typed distance is the same; a typed one previews
+    d.distance = ".".into();
+    assert!(!d.ok_enabled() && !d.offset_set());
+    d.preview(&mut app.s);
+    assert!(d.error.is_none() && !d.applied);
+    d.distance = ".1".into();
+    assert!(d.ok_enabled() && !d.box_by_pointer(&app.s));
+    d.preview(&mut app.s);
+    assert!(d.applied && d.error.is_none(), "{:?}", d.error);
+    assert_eq!(app.s.design.sketch(sk).unwrap().curves.len(), 3);
+    d.unpreview(&mut app.s);
+    // a user parameter counts as a distance
+    d.distance = "d1".into();
+    assert!(d.offset_set());
+    // Two Sides sends the second distance; One Side and Symmetric don't
+    d.distance = "2 mm".into();
+    d.extent = "two_sides";
+    assert_eq!(d.command().unwrap().1["distance2"], json!("0 mm"));
+    d.extent = "one_side";
+    assert!(d.command().unwrap().1.get("distance2").is_none());
+    // with nothing pre-selected the offset follows the pointer once a curve is picked, chained
+    app.s.selection.clear();
+    let d = Dialog::open(&mut app, Kind::SkOffset);
+    assert!(d.follow && !d.solid.no_chain && d.curves.is_empty());
   }
 
   #[test]

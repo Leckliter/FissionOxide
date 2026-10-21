@@ -2537,6 +2537,24 @@ pub(crate) fn palette_pos(canvas: Rect, dialog: Option<Rect>) -> egui::Pos2 {
   }
 }
 
+/// Where a command dialog's top-right corner docks: the canvas's top-right corner, or, while a
+/// sketch is open, beside the SKETCH PALETTE on its left (Fusion shows the two side by side, the
+/// palette at its usual place).
+pub(crate) fn dialog_dock(canvas: Rect, sketching: bool) -> egui::Pos2 {
+  let home = canvas.right_top() + vec2(-34.0, 190.0);
+  if sketching { home - vec2(270.0 + 8.0, 0.0) } else { home }
+}
+
+/// Where the selection readout's bottom-right corner goes: the canvas's bottom-right corner, or
+/// left of the SKETCH PALETTE (`palette`, its rect while a sketch is open), never under it.
+pub(crate) fn readout_anchor(canvas: Rect, palette: Option<Rect>) -> egui::Pos2 {
+  let at = canvas.right_bottom() - vec2(14.0, 12.0);
+  match palette {
+    Some(p) if p.left() < at.x => egui::pos2(p.left() - 14.0, at.y),
+    _ => at,
+  }
+}
+
 /// The SKETCH PALETTE shown on the right of the canvas while a sketch is open.
 pub fn sketch_palette(app: &mut App, ctx: &egui::Context) {
   let Some(sk) = app.s.edit_sketch else { return };
@@ -2867,15 +2885,11 @@ pub fn selection_info(app: &mut App, ctx: &egui::Context) {
       t
     }
   };
-  let canvas = app.canvas;
+  let palette =
+    app.s.edit_sketch.is_some().then(|| ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette")))).flatten();
+  let at = readout_anchor(app.canvas, palette);
   let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("selection-info")));
-  painter.text(
-    canvas.right_bottom() - vec2(14.0, 12.0),
-    egui::Align2::RIGHT_BOTTOM,
-    text,
-    egui::FontId::proportional(12.5),
-    Color32::from_gray(50),
-  );
+  painter.text(at, egui::Align2::RIGHT_BOTTOM, text, egui::FontId::proportional(12.5), Color32::from_gray(50));
 }
 
 /// The selection readout, as Fusion's: `1 Face | Area : 100.00 mm^2` (one face's area, two faces

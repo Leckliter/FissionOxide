@@ -1016,4 +1016,55 @@ impl Harness {
     out.drop_without_applying_deltas();
     all
   }
+/// `ui:sketch:offset-default-follow`, `ui:sketch:offset-dialog-rows`,
+/// `ui:sketch:status-readout-under-palette`: O on a pre-selected line opens OFFSET beside the
+/// Sketch Palette on its left, the offset at 0 mm on the line (the pointer doesn't move it), the
+/// value box by the pointer with the keyboard, and the readout left of the palette; typing ".1"
+/// and Enter makes the offset line and ends the tool.
+#[test]
+fn offset_on_a_preselected_line_starts_at_zero_and_takes_a_typed_distance() {
+  use serde_json::json;
+  let mut h = Harness::new();
+  h.app.run("sketch.create", json!({"plane": "xy"})).unwrap();
+  h.app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+  let sk = h.app.s.edit_sketch.unwrap();
+  let line = h.app.s.design.sketch(sk).unwrap().curves[0].id;
+  h.app.s.selection = vec![fox_engine::Sel::SketchCurve { sketch: sk, curve: line }];
+  h.app.start(crate::dialogs::Kind::SkOffset);
+  h.app.fit_view_now();
+  let c = h.app.canvas.center() + vec2(0.0, 120.0);
+  h.frame(vec![Event::PointerMoved(c)]);
+  let texts = h.frame_texts(1.0 / 60.0, vec![]);
+  h.frame(vec![]);
+  // the dialog docks beside the palette, on its left
+  let dialog = h.dialog_rect();
+  let palette = h.ctx.memory(|m| m.area_rect(egui::Id::new("sketch-palette"))).expect("the palette");
+  assert!(dialog.right() <= palette.left(), "side by side: {dialog:?} {palette:?}");
+  assert!((dialog.top() - palette.top()).abs() < 1.0, "{dialog:?} {palette:?}");
+  // the readout sits left of the palette
+  let readout = texts.iter().find(|(_, t)| t == "1 Sketch Curve").expect("the readout");
+  assert!(readout.0.right() <= palette.left(), "{readout:?} {palette:?}");
+  // the value box has the keyboard, says 0 mm and sits by the pointer
+  let focused = h.ctx.memory(|m| m.focused()).expect("the value box has the keyboard");
+  assert_eq!(h.ctx.read_response(focused).map(|r| r.layer_id), Some(crate::value_box::layer()));
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), "0 mm");
+  let value_box = h.ctx.memory(|m| m.area_rect(crate::value_box::id())).expect("the value box");
+  assert!((value_box.left() - (c.x + 18.0)).abs() < 2.0 && (value_box.center().y - c.y).abs() < 12.0, "{value_box:?}");
+  // the pointer moving doesn't move the offset
+  h.frame(vec![Event::PointerMoved(c + vec2(80.0, -60.0))]);
+  h.frame(vec![]);
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), "0 mm");
+  assert_eq!(h.app.s.design.sketch(sk).unwrap().curves.len(), 1, "nothing previewed at 0 mm");
+  // typing replaces the value; Enter applies it and the tool ends
+  h.frame(typing(".1"));
+  h.frame(vec![]);
+  assert_eq!(h.app.dialog.as_mut().unwrap().value_box_field().unwrap().clone(), ".1");
+  h.frame(vec![key(egui::Key::Enter)]);
+  h.frame(vec![]);
+  assert!(h.app.dialog.is_none(), "Enter is OK");
+  let sketch = h.app.s.design.sketch(sk).unwrap();
+  assert_eq!(sketch.curves.len(), 2, "the line and its offset");
+  let ys: Vec<f64> =
+    sketch.curves.iter().flat_map(|c| sketch.curve_points(c.id)).filter_map(|p| sketch.pos(p)).map(|p| p[1]).collect();
+  assert!(ys.iter().any(|y| (y - 0.1).abs() < 1e-6), "offset by 0.1 mm: {ys:?}");
 }

@@ -11,7 +11,7 @@ use egui::{Align2, Color32, Pos2, Stroke, Vec2};
 /// The box's border and the ⋮ glyph, Fusion's manipulator blue.
 const INK: Color32 = Color32::from_rgb(30, 110, 235);
 
-fn id() -> egui::Id {
+pub(crate) fn id() -> egui::Id {
   egui::Id::new("floating-value-box")
 }
 
@@ -20,16 +20,36 @@ pub(crate) fn layer() -> egui::LayerId {
   egui::LayerId::new(egui::Order::Foreground, id())
 }
 
-/// Whether the box has taken the keyboard since it appeared.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// Whether the box has taken the keyboard since it appeared, and the text it showed last frame.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct State {
   focused: bool,
+  /// The text the box showed last frame: when the field changes under the box (the arrow was
+  /// dragged, the dialog's row was edited) the whole new value is selected again, so typing
+  /// still replaces it all (a select-all range kept from a longer text left part of the new one).
+  last: Option<String>,
+  /// Where the box was pinned when it appeared by the pointer (see [`show_pinned`]).
+  pinned: Option<Pos2>,
 }
 
 impl State {
   /// No box this frame: the next one to appear takes the keyboard again.
   pub fn hide(&mut self) {
     self.focused = false;
+    self.last = None;
+    self.pinned = None;
+  }
+
+  /// The box pinned where it first appeared (Sketch Offset's, by the pointer, while the offset
+  /// still sits on its curve): `at` the first time, then the same place until it is hidden or
+  /// [`State::unpin`] lets it go back to the arrow's head.
+  pub fn pin(&mut self, at: Pos2) -> Pos2 {
+    *self.pinned.get_or_insert(at)
+  }
+
+  /// The box goes back to the arrow's head.
+  pub fn unpin(&mut self) {
+    self.pinned = None;
   }
 }
 
@@ -55,8 +75,15 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
       .show(ui, |ui| {
         ui.horizontal(|ui| {
           ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+          let edit_id = id().with("edit");
+          // the field changed under a box that has the keyboard: select the whole new value
+          // before the edit box reads this frame's typing, so a digit replaces all of it
+          if state.focused && state.last.as_deref().is_some_and(|l| l != text.as_str()) {
+            crate::viewport::select_text(ctx, edit_id, text, true);
+          }
           let mut r = ui.add(
             egui::TextEdit::singleline(text)
+              .id(edit_id)
               .desired_width(62.0)
               .font(egui::FontId::proportional(12.0))
               .margin(egui::Margin::symmetric(3, 1)),
@@ -76,6 +103,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
           }
           crate::units::pin(ui, &mut r, text);
           out.changed |= r.changed();
+          state.last = Some(text.clone());
           ui.menu_button(egui::RichText::new("⋮").color(INK), |ui| {
             if params.is_empty() {
               ui.add_enabled(false, egui::Label::new("No user parameters"));
@@ -88,6 +116,9 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut State, at: Pos2, text: &mut 
               }
             }
           });
+          if out.changed {
+            state.last = Some(text.clone());
+          }
         });
       });
   });
@@ -148,5 +179,41 @@ mod tests {
     // the focused box is on its own layer, which the dialog counts as its own for Enter
     let id = ctx.memory(|m| m.focused()).unwrap();
     assert_eq!(ctx.read_response(id).map(|r| r.layer_id), Some(layer()));
+  }
+
+  /// `ui:sketch:value-box-stale-selection`: the field changes under the focused box (the offset
+  /// followed the pointer from "53.5 mm" to "-6 mm"); typing a digit still replaces the whole
+  /// value, as in Fusion, instead of leaving the tail the old select-all range didn't cover.
+  #[test]
+  fn typing_after_the_value_changed_under_the_box_replaces_all_of_it() {
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    let mut text = "53.5 mm".to_string();
+    frame(&ctx, &mut state, &mut text, vec![]);
+    frame(&ctx, &mut state, &mut text, vec![]);
+    // the value changes between frames and a digit is typed in the next one
+    text = "-6 mm".to_string();
+    frame(&ctx, &mut state, &mut text, vec![]);
+    let shown = frame(&ctx, &mut state, &mut text, vec![egui::Event::Text("3".into())]);
+    assert!(shown.changed);
+    assert_eq!(text, "3");
+    // the value changes and the digit arrives in the same frame
+    text = "-6 mm".to_string();
+    frame(&ctx, &mut state, &mut text, vec![]);
+    text = "12.25 mm".to_string();
+    frame(&ctx, &mut state, &mut text, vec![]);
+    text = "-6 mm".to_string();
+    frame(&ctx, &mut state, &mut text, vec![egui::Event::Text("4".into())]);
+    assert_eq!(text, "4");
+    // typing on keeps going (the box's own edits don't reselect)
+    frame(&ctx, &mut state, &mut text, vec![egui::Event::Text("5".into())]);
+    assert_eq!(text, "45");
+    // the pin holds the first place it is given until the box is hidden
+    assert_eq!(state.pin(Pos2::new(10.0, 10.0)), Pos2::new(10.0, 10.0));
+    assert_eq!(state.pin(Pos2::new(50.0, 50.0)), Pos2::new(10.0, 10.0));
+    state.unpin();
+    assert_eq!(state.pin(Pos2::new(50.0, 50.0)), Pos2::new(50.0, 50.0));
+    state.hide();
+    assert_eq!(state.pin(Pos2::new(1.0, 1.0)), Pos2::new(1.0, 1.0));
   }
 }

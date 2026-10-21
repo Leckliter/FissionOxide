@@ -185,7 +185,24 @@ impl Dialog {
       return None;
     }
     let field = if matches!(self.kind, Kind::PressPull | Kind::SkOffset) { &self.distance } else { &self.radius };
-    Some(Manipulator { origin: *origin, dir: *dir, value: self.len(s, field)? })
+    let value = match self.len(s, field) {
+      Some(v) => v,
+      // Sketch Offset's arrow stays on its curve (and its value box stays put) while the distance
+      // is half typed (".") rather than vanishing and taking the keyboard with it
+      None if self.kind == Kind::SkOffset => 0.0,
+      None => return None,
+    };
+    Some(Manipulator { origin: *origin, dir: *dir, value })
+  }
+
+  /// Does the floating value box sit by the pointer rather than at the arrow's head? Sketch
+  /// Offset's does while the offset still sits on its curve (a zero or half-typed distance), as
+  /// Fusion shows it when the command starts on a pre-selected curve.
+  pub(crate) fn box_by_pointer(&self, s: &Session) -> bool {
+    self.kind == Kind::SkOffset
+      && self.editing.is_none()
+      && !self.curves.is_empty()
+      && self.len(s, &self.distance).is_none_or(|v| v.abs() < 1e-9)
   }
 
   /// Edit Feature: an edited fillet's or chamfer's arrow hangs on the midpoint of the first edge

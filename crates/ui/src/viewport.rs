@@ -2487,14 +2487,20 @@ fn dim_edit_text(k: &ConstraintKind, dim: &fox_engine::sketch::Dim, unit: fox_en
 /// Gives a text box the keyboard, with all its text selected (typing replaces it) or the caret
 /// at the end.
 pub(crate) fn focus_text(ctx: &egui::Context, r: &egui::Response, text: &str, select_all: bool) {
-  use egui::text::{CCursor, CCursorRange};
   r.request_focus();
+  select_text(ctx, r.id, text, select_all);
+}
+
+/// Sets the text edit `id`'s cursor for `text`: the whole text selected (so typing replaces it)
+/// or the cursor at its end.
+pub(crate) fn select_text(ctx: &egui::Context, id: egui::Id, text: &str, select_all: bool) {
+  use egui::text::{CCursor, CCursorRange};
   let n = text.chars().count();
-  let mut state = egui::text_edit::TextEditState::load(ctx, r.id).unwrap_or_default();
+  let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
   let range =
     if select_all { CCursorRange::two(CCursor::new(0), CCursor::new(n)) } else { CCursorRange::one(CCursor::new(n)) };
   state.cursor.set_char_range(Some(range));
-  state.store(ctx, r.id);
+  state.store(ctx, id);
 }
 
 // ---------------------------------------------------------------- overlays
@@ -4364,6 +4370,20 @@ fn open_select_other(app: &mut App, view: &View, pos: Pos2) {
 
 // ---------------------------------------------------------------- manipulators, measure line
 
+/// The screen direction a drag arrow's head points: along the drawn arrow, or along its axis
+/// (`along`, the projection of a unit step along the arrow) while the arrow is too short to tell,
+/// so a zero-length arrow still points the way a positive value goes; up when neither tells.
+fn arrow_dir(drawn: Vec2, along: Option<Vec2>) -> Vec2 {
+  let dir = drawn.normalized();
+  if dir.is_finite() && drawn.length() > 1.0 {
+    return dir;
+  }
+  match along.map(|v| v.normalized()) {
+    Some(v) if v.is_finite() && v.length() > 0.5 => v,
+    _ => Vec2::new(0.0, -1.0),
+  }
+}
+
 /// The open dialog's drag arrow: drawn from its base along its direction to the current value,
 /// with the floating value box at its head (see [`crate::value_box`]); dragging the head changes
 /// the value (snapped to a tenth of the grid). Returns true while the arrow has the pointer.
@@ -4390,13 +4410,23 @@ fn manipulator(
   let active = matches!(app.drag, Some(Drag::Manip));
   let col = if hot || active { Color32::from_rgb(255, 140, 20) } else { Color32::from_rgb(30, 110, 235) };
   painter.line_segment([a, b], Stroke::new(2.0, col));
-  let dir2 = (b - a).normalized();
-  let dir2 = if dir2.is_finite() && (b - a).length() > 1.0 { dir2 } else { Vec2::new(0.0, -1.0) };
+  // a zero-length arrow (Sketch Offset's, still on its curve) points along its axis
+  let along = view.to_screen(&app.cam, m.origin + m.dir).map(|c| c - a);
+  let dir2 = arrow_dir(b - a, along);
   let side = Vec2::new(-dir2.y, dir2.x);
   let head = [b + dir2 * 12.0, b + side * 6.0, b - side * 6.0];
   painter.add(egui::Shape::convex_polygon(head.to_vec(), col, Stroke::NONE));
   // the value box beside the head edits the dialog's field; a dialog without one gets a label
-  let label_at = b + side * 14.0 + dir2 * 4.0;
+  let head_at = b + side * 14.0 + dir2 * 4.0;
+  // Sketch Offset's box sits by the pointer while the offset is still on its curve, as Fusion
+  // puts it, and moves to the arrow's head once the arrow is dragged or a distance typed
+  let label_at = if app.dialog.as_ref().is_some_and(|d| d.box_by_pointer(&app.s)) {
+    let at = resp.hover_pos().map(|p| p + Vec2::new(18.0, 0.0)).unwrap_or(head_at);
+    app.manip.value_box.pin(at)
+  } else {
+    app.manip.value_box.unpin();
+    head_at
+  };
   let params = crate::value_box::params_of(&app.s);
   let mut boxed = false;
   if let Some(dlg) = app.dialog.as_mut()
@@ -5570,5 +5600,17 @@ mod tests {
       }
     }
     assert!(s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Polygon { .. })));
+  }
+
+  /// `ui:sketch:offset-default-follow`: a zero-length arrow (the offset still on its curve)
+  /// points the way a positive value goes, not straight up.
+  #[test]
+  fn a_zero_length_arrow_points_along_its_axis() {
+    assert_eq!(arrow_dir(Vec2::new(0.0, 30.0), Some(Vec2::new(0.0, 5.0))), Vec2::new(0.0, 1.0));
+    assert_eq!(arrow_dir(Vec2::ZERO, Some(Vec2::new(4.0, 0.0))), Vec2::new(1.0, 0.0));
+    assert_eq!(arrow_dir(Vec2::ZERO, Some(Vec2::new(-3.0, 0.0))), Vec2::new(-1.0, 0.0));
+    // nothing to go by (the axis points straight at the camera): up
+    assert_eq!(arrow_dir(Vec2::ZERO, Some(Vec2::ZERO)), Vec2::new(0.0, -1.0));
+    assert_eq!(arrow_dir(Vec2::ZERO, None), Vec2::new(0.0, -1.0));
   }
 }

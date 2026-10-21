@@ -1318,3 +1318,30 @@ fn body_classify_tells_inside_from_outside() {
   assert_eq!(r["inside"], json!(["in", "out", "on"]));
   assert!(s.execute("body.classify", &json!({"body": b, "points": [[0, 0]]})).is_err());
 }
+
+/// `ui:sketch:offset-dialog-rows`: Offset's Two Sides takes a second distance for the other
+/// side (`distance2`), where `both_sides` uses the one distance on both.
+#[test]
+fn sketch_offset_two_sides_takes_a_second_distance() {
+  let mut s = Session::default();
+  run(&mut s, "sketch.create", json!({"plane": "xy"}));
+  let l = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+  let line = l["curves"][0].as_u64().unwrap();
+  let r = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": 2, "distance2": "5 mm"}));
+  let made: Vec<u64> = r["curves"].as_array().unwrap().iter().map(|c| c.as_u64().unwrap()).collect();
+  assert_eq!(made.len(), 2);
+  let sk = s.design.sketch(s.edit_sketch.unwrap()).unwrap();
+  let mut ys: Vec<f64> = made
+    .iter()
+    .map(|c| {
+      let sketch::CurveKind::Line { a, .. } = sk.curve(sketch::CurveId(*c as u32)).unwrap().kind else {
+        panic!("a line")
+      };
+      sk.pos(a).unwrap()[1]
+    })
+    .collect();
+  ys.sort_by(f64::total_cmp);
+  assert!((ys[0] + 5.0).abs() < 1e-9 && (ys[1] - 2.0).abs() < 1e-9, "2 mm to the left, 5 mm to the right: {ys:?}");
+  // a zero second distance is refused like a zero distance
+  assert!(s.execute("sketch.offset", &json!({"curves": [line], "distance": 2, "distance2": 0})).is_err());
+}

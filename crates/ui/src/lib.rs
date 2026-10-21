@@ -2141,6 +2141,33 @@ mod tests {
     assert_eq!(panels::palette_pos(canvas, Some(moved)), home);
   }
 
+  /// `ui:sketch:offset-dialog-rows`: while a sketch is open a command dialog docks beside the
+  /// palette on its left, the two side by side, so the palette stays at its usual place.
+  #[test]
+  fn a_sketch_dialog_docks_left_of_the_palette() {
+    let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+    assert_eq!(panels::dialog_dock(canvas, false), egui::pos2(1166.0, 190.0));
+    let dock = panels::dialog_dock(canvas, true);
+    assert_eq!(dock, egui::pos2(888.0, 190.0));
+    // a 300 px dialog docked there doesn't reach the palette's place: the palette stays home
+    let dialog = egui::Rect::from_min_max(egui::pos2(dock.x - 300.0, dock.y), egui::pos2(dock.x, dock.y + 200.0));
+    assert_eq!(panels::palette_pos(canvas, Some(dialog)), panels::palette_pos(canvas, None));
+  }
+
+  /// `ui:sketch:status-readout-under-palette`: the selection readout sits at the canvas's lower
+  /// right, left of the Sketch Palette when there is one, never under it.
+  #[test]
+  fn the_selection_readout_keeps_left_of_the_palette() {
+    let canvas = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+    assert_eq!(panels::readout_anchor(canvas, None), egui::pos2(1186.0, 788.0));
+    // the palette pushed down by a dialog reaches the canvas's bottom: the readout moves left of it
+    let palette = egui::Rect::from_min_max(egui::pos2(896.0, 338.0), egui::pos2(1166.0, 820.0));
+    assert_eq!(panels::readout_anchor(canvas, Some(palette)), egui::pos2(882.0, 788.0));
+    // so does a palette at its usual place
+    let home = egui::Rect::from_min_max(egui::pos2(896.0, 190.0), egui::pos2(1166.0, 700.0));
+    assert_eq!(panels::readout_anchor(canvas, Some(home)), egui::pos2(882.0, 788.0));
+  }
+
   /// `ui:sketch:horizontal-conflict`: the palette's Horizontal/Vertical on a line trimmed onto a
   /// circle applies (Fusion turns the line about the end on the circle) instead of reporting a
   /// conflict.
