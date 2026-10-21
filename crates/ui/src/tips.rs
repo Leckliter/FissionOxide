@@ -711,6 +711,58 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
        drilling or tapping, and the depth. Pick a drill matching the hole size from the tool library.",
     ),
 
+    // MANUFACTURE MULTI-AXIS
+    (_, "Rotary") => (
+      "Wraps passes around the part as it turns on a 4th axis.",
+      "Needs a setup on a rotary 4th axis. The tool stays square to the A axis and drops onto the part \
+       as it turns: passes along X a step-over apart around it, or rings around it, in levels from the \
+       stock down.",
+    ),
+    (_, "Swarf") => (
+      "Cuts drafted or conical walls with the side of the tool, all five axes moving.",
+      "Needs a setup on a 5-axis machine. Pick the walls; a flat end mill runs along them with its axis \
+       on each wall's line from bottom to top, in passes a step-down apart. The post writes A/B and C \
+       with inverse-time feeds.",
+    ),
+
+    // MANUFACTURE TURNING
+    (_, "New Turning Setup") => (
+      "Holds a bar in the lathe's chuck about the part's axis.",
+      "The bar is the part's largest diameter plus the side stock; leave stock in front to face off and \
+       a gap before the chuck to part off in. Z0 goes on the part's front face (or the stock front, or \
+       the back face) and X0 on the spindle axis.",
+    ),
+    (_, "Turning Face") => (
+      "Faces the front of the bar down to the part.",
+      "Uses the library's turning insert unless you pick one; passes a depth apart from the stock front \
+       to the part's front face, out past the centre.",
+    ),
+    (_, "Profile Roughing") => (
+      "Roughs the outside down to the part in passes along the axis.",
+      "Each pass takes the depth of cut off the diameter, climbs the shoulder it ends at and backs off at \
+       45°, leaving the stock to leave for finishing. Undercuts behind a larger diameter are left for \
+       grooving.",
+    ),
+    (_, "Profile Finishing") => (
+      "Finishes the front face and the outside in one pass.",
+      "Takes the finishing insert (the smallest nose radius in the library) from the centre up the face \
+       and along the profile, compensated for the nose radius.",
+    ),
+    (_, "Groove") => (
+      "Plunges the grooves and undercuts the profile passes can't reach.",
+      "A grooving insert plunges across each groove, overlapping by the step-over and pecking; grooves \
+       narrower than the insert are reported.",
+    ),
+    (_, "Turning Thread") => (
+      "Cuts an outside thread on a cylindrical face.",
+      "Pick the face and give the pitch; passes of equal chip area reach the ISO depth (or the depth \
+       given) with a spring pass at the end, stopping short of a shoulder.",
+    ),
+    (_, "Part Off") => (
+      "Parts the finished part off the bar at its back face.",
+      "A part-off blade plunges through to the centre in pecks; it must fit in the gap before the chuck.",
+    ),
+
     // MANUFACTURE ACTIONS
     (_, "Generate") => (
       "Computes the setup's toolpaths and machining time.",
