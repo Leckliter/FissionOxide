@@ -25,7 +25,7 @@ user meets them. Add areas when you find ones that are missing; never delete one
 
 ## Design workspace: sketch
 - [done (2026-10-21)] Create Sketch flow, rectangle, circle, line, trim, offset, polygon, dimension edit, Horizontal
-- [in progress (2026-10-21, prober 2)] Every CREATE tool: midpoint line, 3-point/center rectangles, every circle and arc type, inscribed/edge polygon, ellipse, every slot, spline (fit and control point), conic, point, text, mirror, circular and rectangular pattern, project/include, sketch dimension (every type)
+- [done (2026-10-21), remainder todo: 2-/3-Tangent Circle, Text after the frame, Mirror/pattern previews, angular and diameter dimensions] Every CREATE tool: midpoint line, 3-point/center rectangles, every circle and arc type, inscribed/edge polygon, ellipse, every slot, spline (fit and control point), conic, point, text, mirror, circular and rectangular pattern, project/include, sketch dimension (every type)
 - [todo] Every MODIFY tool: fillet, trim (drag), extend, break, offset (chain, both sides), scale, move/copy, change parameters
 - [todo] Every constraint: coincident, collinear, concentric, midpoint, fix/unfix, parallel, perpendicular, horizontal/vertical, tangent, curvature, equal, symmetry, lock; glyph positions and hover; constraint deletion
 - [todo] Sketch Palette: every option, linetype, look at, slice, 3D sketch; Feature Options per tool

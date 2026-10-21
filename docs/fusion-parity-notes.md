@@ -271,3 +271,13 @@ curves in both apps: Fusion lightens a hovered face and draws a hovered edge bla
 tints both blue; sketch curves on a face are not pickable over the face. Eight rows in
 `ui-selection-colors` (`map-wave6.json`). Report:
 [parity/reports/2026-10-21-selection-colors.md](../parity/reports/2026-10-21-selection-colors.md).
+
+### Fourth pass, 2026-10-21 (every sketch CREATE tool)
+
+Every entry of the sketch CREATE menu driven with the same clicks in both apps on a vertical
+origin plane. Two geometry bugs (Three Point Arc Slot builds a three-quarter ring; Edge Polygon
+ignores the side pick), no cursor prompts or heads-up boxes on any create tool, no spline
+check-mark, Sketch Dimension without a placement step, Text opening as a full form, Intersect
+inert, and the construction geometry, glyphs and dialog rows Fusion's tools leave behind.
+23 rows in three batches (`map-wave7.json`), eight match rows. Report:
+[parity/reports/2026-10-21-sketch-create-tools.md](../parity/reports/2026-10-21-sketch-create-tools.md).
