@@ -37,6 +37,8 @@ pub enum Tab {
   Form,
   /// The Generative Design workspace's tab.
   Generative,
+  /// The Render workspace's tab.
+  Render,
 }
 
 impl Tab {
@@ -58,6 +60,7 @@ impl Tab {
       Tab::Plugin(_) => "PLUGINS",
       Tab::Form => "FORM",
       Tab::Generative => "GENERATIVE",
+      Tab::Render => "RENDER",
     }
   }
 }
@@ -458,6 +461,8 @@ pub(crate) enum Cmd {
   Gen(&'static str),
   /// INSERT > Sketch Library: pick a part, then click in the sketch to place it.
   SketchLibrary,
+  /// The Render workspace's commands.
+  Render(crate::render_ui::RenderCmd),
 }
 
 impl Cmd {
@@ -639,6 +644,7 @@ impl Cmd {
       Cmd::SketchLibrary => {
         (Icon::SketchLibrary, "Sketch Library...", "Place DXF, SVG or .fox library parts where you click in the sketch")
       }
+      Cmd::Render(r) => r.info(),
     }
   }
 
@@ -653,6 +659,7 @@ impl Cmd {
       Cmd::WindowSelect => app.sel_mode == crate::select::Mode::Window,
       Cmd::SelectMode(m) => app.sel_mode == m,
       Cmd::Properties => crate::props_ui::is_open(),
+      Cmd::Render(r) => r.active(app),
       _ => false,
     }
   }
@@ -768,6 +775,7 @@ impl Cmd {
       Cmd::Plugins => crate::plugins_ui::open_window(app),
       Cmd::Properties => crate::props_ui::toggle(),
       Cmd::SketchLibrary => crate::library_ui::open(app),
+      Cmd::Render(r) => r.run(app),
     }
   }
 }
@@ -880,6 +888,8 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
         "DRAWING"
       } else if app.generative {
         "GENERATIVE"
+      } else if app.render.active {
+        "RENDER"
       } else if app.manufacture {
         "MANUFACTURE"
       } else {
@@ -906,10 +916,11 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
           "Manufacture" => app.manufacture && !drawing && !ecad,
           "Electronics" => ecad,
           "Generative Design" => app.generative && !drawing && !ecad,
-          _ => i == 0 && !drawing && !app.manufacture && !ecad && !app.generative,
+          "Render" => app.render.active && !drawing && !ecad,
+          _ => i == 0 && !drawing && !app.manufacture && !ecad && !app.generative && !app.render.active,
         };
         let r = ui.add_enabled(
-          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design"),
+          matches!(*w, "Design" | "Drawing" | "Manufacture" | "Electronics" | "Generative Design" | "Render"),
           egui::Button::selectable(current, *w),
         );
         if r.clicked() {
@@ -921,9 +932,10 @@ fn workspace_switcher(app: &mut App, ui: &mut egui::Ui) {
   });
 }
 
-/// Switches to the Design, Manufacture or Drawing workspace.
+/// Switches to the Design, Render, Manufacture or Drawing workspace.
 pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   let drawing = app.drawing.is_some();
+  app.render.active = w == "Render";
   if w == "Electronics" {
     if drawing {
       app.close_drawing();
@@ -935,6 +947,17 @@ pub(crate) fn switch_workspace(app: &mut App, w: &str) {
   }
   app.electronics = None;
   match w {
+    "Render" => {
+      app.manufacture = false;
+      app.generative = false;
+      if drawing {
+        app.close_drawing();
+      }
+      app.cancel_dialog();
+      if app.s.edit_sketch.is_some() {
+        app.finish_sketch();
+      }
+    }
     "Drawing" if !drawing => {
       app.manufacture = false;
       app.generative = false;
@@ -981,16 +1004,19 @@ fn tab_row(app: &mut App, ui: &mut egui::Ui, sketching: bool) {
     if app.drawing.is_some() {
       tabs = vec![Tab::Drawing];
       app.tab = Tab::Drawing;
+    } else if app.render.active {
+      tabs = vec![Tab::Render];
+      app.tab = Tab::Render;
     } else if app.generative {
       tabs = vec![Tab::Generative];
       app.tab = Tab::Generative;
     } else if app.manufacture {
       tabs = vec![Tab::Milling];
       app.tab = Tab::Milling;
-    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Generative) {
+    } else if matches!(app.tab, Tab::Drawing | Tab::Milling | Tab::Generative | Tab::Render) {
       app.tab = Tab::Solid;
     }
-    if app.drawing.is_none() && !app.manufacture {
+    if app.drawing.is_none() && !app.manufacture && !app.render.active {
       tabs.extend((0..app.plugins.tabs.len().min(usize::from(u8::MAX))).map(|i| Tab::Plugin(i as u8)));
     }
     if let Tab::Plugin(i) = app.tab

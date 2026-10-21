@@ -39,6 +39,9 @@ pub(crate) fn workspace_tabs(app: &App) -> Vec<Tab> {
   if app.generative {
     return vec![Tab::Generative];
   }
+  if app.render.active {
+    return vec![Tab::Render];
+  }
   if app.manufacture {
     return vec![Tab::Milling];
   }

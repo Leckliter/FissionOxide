@@ -582,13 +582,15 @@ fn overflow_items(app: &App, cx: &Context) -> Vec<Option<Item>> {
   for (w, icon) in [
     ("Design", Icon::Component),
     ("Generative Design", Icon::Gauge),
+    ("Render", Icon::Appearance),
     ("Manufacture", Icon::MotionStudy),
     ("Drawing", Icon::NewDrawing),
   ] {
     let current = match w {
       "Manufacture" => app.manufacture,
       "Generative Design" => app.generative,
-      _ => w == "Design" && !app.manufacture && !app.generative,
+      "Render" => app.render.active,
+      _ => w == "Design" && !app.manufacture && !app.generative && !app.render.active,
     };
     let label = if current { format!("{w}  ✔") } else { w.to_string() };
     ws.children.push(Item::new(Action::Workspace(w), icon, &label));

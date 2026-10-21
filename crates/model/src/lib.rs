@@ -33,6 +33,7 @@ pub mod pcb;
 pub mod plot;
 pub mod refs;
 pub mod regen;
+pub mod render;
 pub mod sheet;
 pub mod sheet2;
 pub mod sheet3;
@@ -155,6 +156,9 @@ pub struct Design {
   /// The exploded view shown (`view.explode`): display only, never in the timeline.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub exploded_view: Option<explode::ExplodedView>,
+  /// The Render workspace: materials, environment, camera, settings and the render gallery.
+  #[serde(default, skip_serializing_if = "render::RenderDoc::is_empty")]
+  pub render: render::RenderDoc,
   #[serde(default)]
   next_id: u32,
 }
@@ -2186,6 +2190,7 @@ impl Design {
       timeline_groups: Vec::new(),
       electronics: None,
       exploded_view: None,
+      render: render::RenderDoc::default(),
       next_id: 1,
     }
   }

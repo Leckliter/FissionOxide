@@ -2,7 +2,7 @@
 //! checked against the offline path tracer it previews. Skipped (with a note) where no OpenGL
 //! context can be created.
 
-use fox_raytrace::{Environment, EnvMap, Material, RenderCamera, RenderMesh, RenderScene, RenderSettings, material};
+use fox_raytrace::{EnvMap, Environment, Material, RenderCamera, RenderMesh, RenderScene, RenderSettings, material};
 use fox_render::{Camera, Mesh, Scene};
 use fox_render_gl::Renderer;
 use fox_render_gl::pbr::Look;

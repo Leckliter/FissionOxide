@@ -34,6 +34,7 @@ mod mates;
 mod newcomp;
 mod params;
 pub mod properties;
+pub mod rendering;
 pub mod scene;
 mod sheet2;
 mod solid;
@@ -600,6 +601,8 @@ mod tests_more;
 mod tests_properties;
 #[cfg(test)]
 mod tests_newcomp;
+#[cfg(test)]
+mod tests_render;
 #[cfg(test)]
 mod tests_scene;
 #[cfg(test)]

@@ -733,7 +733,6 @@ impl Renderer {
         }))
       })
       .collect();
-    let Some(t) = &self.target else { return Err("no render target".into()) };
     let vp = vp_mat.to_cols_array();
     let size = [w as f32, h as f32];
     let (right, up, back) = cam.basis();

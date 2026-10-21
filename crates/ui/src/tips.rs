@@ -717,6 +717,33 @@ pub(crate) fn tip(scope: Scope, label: &str) -> Option<Tip> {
       "Run it after changing operations or the design; operations show a warning until they're \
        regenerated. Check the result with Simulate before posting.",
     ),
+    // RENDER
+    (_, "Scene Settings") => (
+      "Sets the lighting environment, background, ground plane and camera for renders.",
+      "Pick a preset environment or an HDRI image and turn it; show the environment, a colour, a \
+       gradient or nothing behind the model; let the ground catch shadows and reflections; and set the \
+       camera's projection, field of view, depth of field and exposure.",
+    ),
+    (_, "In-Canvas Render") => (
+      "Shades the viewport with the render materials and environment in real time.",
+      "The GPU viewport draws each body in its physically based material, lit by the environment, \
+       with the ground's shadows, so you see roughly what a render gives while you set it up.",
+    ),
+    (_, "Render") => (
+      "Path-traces a final image of the design.",
+      "Choose the image size and quality (samples per pixel); the render refines on every core and is \
+       denoised at the end. Finished renders are kept in the Render Gallery inside the design.",
+    ),
+    (_, "Render Gallery") => (
+      "Shows the renders kept with the design.",
+      "Open a render to see it full size, rename it, export it as a PNG or delete it. The gallery is \
+       saved in the design file.",
+    ),
+    (_, "Finish Render") => (
+      "Leaves the Render workspace.",
+      "Goes back to the Design workspace. Materials, scene settings and the gallery stay with the \
+       design for next time.",
+    ),
     (_, "Simulate") => (
       "Cuts the stock with the toolpaths and checks for gouges and collisions.",
       "Play the toolpaths and watch the stock being removed. Problems such as gouges or holder \

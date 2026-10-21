@@ -13,6 +13,7 @@ fox-ecad.workspace = true
 fox-form.workspace = true
 fox-exchange.workspace = true
 fox-gen.workspace = true
+fox-raytrace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

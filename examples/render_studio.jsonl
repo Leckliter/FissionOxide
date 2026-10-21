@@ -1,0 +1,19 @@
+# The Render workspace from a script: physically based materials on bodies and a face, a studio
+# environment with a shadow-catching ground, a camera with depth of field, and a path-traced
+# final render kept in the design's render gallery (and written to render_studio.png).
+{"cmd": "new", "name": "Render studio"}
+{"cmd": "box", "width": 90, "depth": 60, "height": 6}
+{"cmd": "cylinder", "at": [-22, 0], "radius": 14, "height": 36, "plane": {"point": [0, 0, 6], "normal": [0, 0, 1]}}
+{"cmd": "sphere", "at": [22, 0], "radius": 15, "plane": {"origin": [0, 0, 21], "normal": [0, 0, 1]}}
+# a design material of our own: brushed copper, made from a library one
+{"cmd": "render.material.define", "name": "Brushed Copper", "from": "Copper", "roughness": 0.3, "texture": {"pattern": "brushed", "color2": [150, 80, 50], "projection": "cylindrical", "axis": "z", "scale": 20, "roughness_variation": 0.2}}
+{"cmd": "render.material.apply", "material": "Wood - Walnut", "body": 1000}
+{"cmd": "render.material.apply", "material": "Brushed Copper", "body": 2000}
+{"cmd": "render.material.apply", "material": "Glass - Clear", "body": 3000}
+# the cylinder's top cap gets its own material
+{"cmd": "render.material.apply", "material": "Paint - Metallic Red", "faces": [{"point": [-22, 0, 42]}]}
+{"cmd": "render.environment", "preset": "studio", "rotation": 30}
+{"cmd": "render.camera", "view": "home", "fstop": 2.8, "exposure": 0.3}
+{"cmd": "render.settings", "width": 640, "height": 400, "samples": 64}
+{"cmd": "render.image", "path": "render_studio.png", "name": "Studio shot"}
+{"cmd": "render.gallery"}

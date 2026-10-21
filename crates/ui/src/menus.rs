@@ -12,6 +12,7 @@ use crate::customize::{self, Action, Binding, Prefs};
 use crate::dialogs::Kind;
 use crate::icons::{self, Icon, Tint};
 use crate::panels::{self, Cmd, Tab};
+use crate::render_ui::RenderCmd;
 use crate::tips::{self, Scope};
 use crate::{App, Tool, assembly_forms, config_ui, theme};
 
@@ -858,6 +859,25 @@ const GENERATIVE: [Group; 4] = [
   Group { label: "EXPLORE", quick: &["Explore"], menu: GEN_EXPLORE },
 ];
 
+const RENDER_SETUP: &[E] = &[
+  c("Appearance", Icon::Appearance, Cmd::Render(RenderCmd::Appearance)),
+  c("Scene Settings", Icon::EnvMap, Cmd::Render(RenderCmd::SceneSettings)),
+];
+const RENDER_IN_CANVAS: &[E] = &[c("In-Canvas Render", Icon::Display, Cmd::Render(RenderCmd::InCanvas))];
+const RENDER_RENDER: &[E] = &[
+  c("Render", Icon::Play, Cmd::Render(RenderCmd::Render)),
+  c("Render Gallery", Icon::Folder, Cmd::Render(RenderCmd::Gallery)),
+];
+const RENDER_EXIT: &[E] = &[c("Finish Render", Icon::Finish, Cmd::Render(RenderCmd::Finish))];
+
+/// The Render workspace's RENDER tab.
+const RENDER: [Group; 4] = [
+  Group { label: "SETUP", quick: &["Appearance", "Scene Settings"], menu: RENDER_SETUP },
+  Group { label: "IN-CANVAS RENDER", quick: &["In-Canvas Render"], menu: RENDER_IN_CANVAS },
+  Group { label: "RENDER", quick: &["Render", "Render Gallery"], menu: RENDER_RENDER },
+  Group { label: "EXIT", quick: &["Finish Render"], menu: RENDER_EXIT },
+];
+
 /// The Manufacture workspace's MILLING tab.
 const MILLING: [Group; 5] = [
   Group { label: "SETUP", quick: &["New Setup", "Tool Library"], menu: CAM_SETUP },
@@ -1061,6 +1081,7 @@ fn groups(tab: Tab) -> (&'static [Group], &'static [Group]) {
     Tab::Plugin(_) => (&[], &[]),
     Tab::Form => (&FORM, &[]),
     Tab::Generative => (&GENERATIVE, &[]),
+    Tab::Render => (&RENDER, &[]),
   }
 }
 
@@ -1084,7 +1105,7 @@ impl Entry {
 }
 
 /// Every tab with a toolbar.
-const ALL_TABS: [Tab; 12] = [
+const ALL_TABS: [Tab; 13] = [
   Tab::Solid,
   Tab::Surface,
   Tab::Mesh,
@@ -1097,6 +1118,7 @@ const ALL_TABS: [Tab; 12] = [
   Tab::Milling,
   Tab::Form,
   Tab::Generative,
+  Tab::Render,
 ];
 
 /// Every command that can have a keyboard shortcut, with the key its menus show (a label that

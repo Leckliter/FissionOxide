@@ -981,6 +981,44 @@ pipeline and its guarantees are described in [docs/TRACING.md](docs/TRACING.md).
   spots a cut that wide can't make: details and shapes thinner than the kerf, gaps narrower than
   it and holes it can't fit in. Corners a round tool merely rounds aren't flagged.
 
+## Render
+
+Switch the workspace to **Render** for pictures of the design. The RENDER tab has:
+
+- **Appearance**: a library of physically based materials (metallic/roughness, clear coat,
+  transmission for glass and clear plastics, emission for lights, and textures: an image or a
+  built-in pattern such as wood, brushed metal, carbon fibre or knurling, projected box,
+  planar, cylindrical or spherical with a scale in mm and a rotation). Every Design workspace
+  appearance is in it under the same name, so painted bodies render as what they're painted
+  as. Pick a material, select bodies or faces and Apply; **Edit Copy** makes a material of the
+  design's own.
+- **Scene Settings**: lighting from a preset environment (Photo Booth, Soft Light, Sky, Warm
+  Sunset, Dark Sky, Plain White) or an HDRI image, its brightness and rotation; the background
+  (the environment, a colour, a gradient or transparent); a ground plane that catches shadows
+  and reflections; and the camera: perspective or orthographic, field of view, depth of field
+  (f-stop and focus distance), exposure and tone mapping.
+- **In-Canvas Render**: the GPU viewport shades the materials in real time, lit by the
+  environment, with the ground's shadows. Picking and selection work as usual.
+- **Render**: the path tracer (CPU, every core) renders at a chosen size and quality
+  (samples per pixel), progressively, with a denoiser. Renders are deterministic: the same
+  design and settings give the same image. Finished renders go into the **Render Gallery**,
+  which is saved inside the design (`.fox`/`.foxz`), and export as PNG.
+
+The same from a script, the CLI or an agent (`render.materials`, `render.material.define`,
+`render.material.apply`, `render.environment`, `render.camera`, `render.settings`,
+`render.image`, `render.gallery*`):
+
+```sh
+fissionoxide-cli run examples/render_studio.jsonl --save studio.fox   # writes render_studio.png
+fissionoxide-cli exec part.fox '{"cmd": "render.material.apply", "material": "Brass - Polished", "body": 1}' --save part.fox
+fissionoxide-cli exec part.fox '{"cmd": "render.image", "path": "part.png", "resolution": "1080p", "samples": 256}' --save part.fox
+```
+
+The denoiser is an edge-avoiding à-trous filter guided by albedo, normals and depth (no
+pure-Rust learned denoiser exists). Lighting comes from the environment only: there are no
+point or spot lights besides emissive materials, and the viewport's glass shows the
+environment rather than the model behind it.
+
 ## Viewport renderer
 
 The desktop viewport draws on the GPU (OpenGL 3.3 or ES 3.0, through egui's glow painter): the
@@ -1059,6 +1097,7 @@ Design History off collapses the timeline into one base feature holding the bodi
 | `apps/fissionoxide`     | Desktop app                                                            |
 | `apps/fissionoxide-cli` | Headless runner, exporter and renderer                                 |
 | `fox-render-gl`     | OpenGL renderer of the same scenes, with an id buffer for picking      |
+| `fox-raytrace`      | Render workspace: PBR materials, environments, the path tracer and denoiser |
 | `fox-cut`           | 2D cutting: kerf offsets (`cavalier_contours`), leads, micro-joints, cut order, laser/plasma/waterjet posts |
 | `fox-ecad`          | Electronics: library format, KiCad import, schematics and ERC, PCB layout, DRC, autorouter, Gerber/Excellon/BOM/pick-and-place |
 | `fox-gen`           | Generative design: SIMP topology optimisation on a voxel grid (threaded matrix-free FE), milling and symmetry constraints, iso-surfaces |

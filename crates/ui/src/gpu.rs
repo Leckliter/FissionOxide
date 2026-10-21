@@ -54,6 +54,8 @@ struct Shared {
   read: Option<(u64, Camera, [u32; 2])>,
   /// The id buffer of a drawn image, for the UI to collect.
   ids: Option<(u64, Frame)>,
+  /// The Render workspace's look for the next scene uploaded (`Some(None)`: the usual shading).
+  look: Option<Option<crate::render_ui::LookData>>,
 }
 
 impl Gpu {
@@ -100,6 +102,14 @@ pub fn set_scene(app: &mut App, scene: Scene, picks: PickTable, key: RenderKey) 
     sh.scene = Some((g.generation, scene, reuse));
   }
   app.render_key = Some(key);
+}
+
+/// The look the next scene is drawn with (materials and environment in the Render workspace,
+/// `None` for the usual shading).
+pub fn set_look(app: &mut App, look: Option<crate::render_ui::LookData>) {
+  if let Ok(mut sh) = app.gpu.shared.lock() {
+    sh.look = Some(look);
+  }
 }
 
 /// Draws the viewport image (when the GPU renderer is active) and collects the pick ids of the
@@ -193,6 +203,9 @@ fn draw(gl: &glow::Context, sh: &mut Shared, view: Option<(Camera, [u32; 2], boo
   if let Some((generation, scene, reuse)) = sh.scene.take() {
     r.set_scene(gl, &scene, reuse)?;
     sh.uploaded = generation;
+    if let Some(look) = sh.look.take() {
+      r.set_look(gl, look.as_ref().map(|l| l.look()).as_ref())?;
+    }
   }
   let Some((cam, size, read)) = view else { return Ok(()) };
   let state = Some((sh.uploaded, cam, size));

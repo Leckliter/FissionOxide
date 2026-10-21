@@ -39,6 +39,7 @@ mod preferences;
 mod preview;
 mod props_ui;
 mod scale_to_ui;
+mod render_ui;
 mod select;
 mod sheet;
 mod theme;
@@ -230,6 +231,8 @@ pub struct App {
   pub(crate) library_ui: library_ui::LibraryUi,
   /// View ▸ Render Components….
   pub(crate) render_components: explode_ui::RenderComponents,
+  /// The Render workspace.
+  pub render: render_ui::RenderUi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -430,6 +433,7 @@ impl App {
       plugins: plugins_ui::PluginsUi::default(),
       library_ui: library_ui::LibraryUi::default(),
       render_components: explode_ui::RenderComponents::default(),
+      render: render_ui::RenderUi::default(),
     }
   }
 
@@ -1586,6 +1590,7 @@ impl App {
     preferences::window(self, &ctx);
     cut_ui::cut_window(self, &ctx);
     gen_ui::window(self, &ctx);
+    render_ui::windows(self, &ctx);
     canvas_ui::windows(self, &ctx);
     library_ui::window(self, &ctx);
     help::window(self, &ctx);
