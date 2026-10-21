@@ -19,6 +19,7 @@ mod live;
 mod manip;
 mod move_copy;
 pub(crate) use move_copy::Paste;
+mod newcomp;
 mod solid;
 
 /// What Create Sketch asks for, in its dialog and the viewport tooltip (Fusion's wording).
@@ -405,7 +406,13 @@ fn plane_of(s: &Session, v: &Value) -> Option<fox_engine::kernel::Plane> {
   fox_engine::model::regen::sketch_plane_on(f.normal, f.origin, s.design.frames()).ok()
 }
 
-const OPS: [(&str, &str); 4] = [("new_body", "New body"), ("join", "Join"), ("cut", "Cut"), ("intersect", "Intersect")];
+const OPS: [(&str, &str); 5] = [
+  ("new_body", "New body"),
+  ("join", "Join"),
+  ("cut", "Cut"),
+  ("intersect", "Intersect"),
+  ("new_component", "New component"),
+];
 const REVOLVE_DIRECTIONS: [(&str, &str); 3] =
   [("one_side", "One side"), ("two_sides", "Two sides"), ("symmetric", "Symmetric")];
 
@@ -522,6 +529,8 @@ pub struct Dialog {
   follow: bool,
   /// Drawing Dimension: points picked on the sheet so far.
   sheet_picks: usize,
+  /// New Component operation: the new component's name (empty = the next default name).
+  comp_name: String,
 }
 
 const CORNERS: [(&str, &str); 5] =
@@ -637,6 +646,7 @@ impl Dialog {
       live: live::Live::default(),
       follow: false,
       sheet_picks: 0,
+      comp_name: String::new(),
     }
   }
 
@@ -1142,6 +1152,10 @@ impl Dialog {
 
   /// The command (name, params) this dialog applies.
   fn command(&self) -> Option<(&'static str, Value)> {
+    self.with_comp_name(self.command_base())
+  }
+
+  fn command_base(&self) -> Option<(&'static str, Value)> {
     if let Some(id) = self.editing {
       return Some(("feature.edit", json!({"feature": id.0, "set": self.edit_set()?})));
     }
@@ -2189,6 +2203,7 @@ impl Dialog {
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
+        self.comp_name_row(ui);
       }
       Kind::Fillet => {
         self.fillet_rows(app, ui, creating);
@@ -2240,6 +2255,7 @@ impl Dialog {
         ui.label("Operation");
         self.combo(ui, "op", &OPS, false);
         ui.end_row();
+        self.comp_name_row(ui);
       }
       Kind::OffsetPlane | Kind::Mirror => {
         ui.label("Plane");
@@ -2352,7 +2368,7 @@ impl Dialog {
         ui.label(format!("{}", self.bodies.len().saturating_sub(1)));
         ui.end_row();
         ui.label("Operation");
-        self.combo(ui, "op", &OPS[1..], false);
+        self.combo(ui, "op", &OPS[1..4], false);
         ui.end_row();
         ui.label("");
         ui.checkbox(&mut self.keep_tools, "Keep tools");
@@ -2569,6 +2585,7 @@ impl Dialog {
         Self::check(ui, "Closed (back to the first)", &mut self.flag2, dirty);
         self.loft_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
+        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
       }
       Kind::Sweep => {
         ui.label("Profile");
@@ -2591,6 +2608,7 @@ impl Dialog {
         ui.end_row();
         self.sweep_rows(app, ui, dirty);
         Self::choose(ui, "Operation", "op", &mut self.op, &OPS, dirty);
+        newcomp::comp_name_field(ui, self.editing.is_none(), self.op, &mut self.comp_name, dirty);
       }
       Kind::Hole => self.hole_fields(app, ui, dirty),
       Kind::PressPull => {
@@ -4287,6 +4305,7 @@ fn op_str(o: Operation) -> &'static str {
     Operation::Join => "join",
     Operation::Cut => "cut",
     Operation::Intersect => "intersect",
+    Operation::NewComponent => "new_component",
   }
 }
 

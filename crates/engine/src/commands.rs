@@ -124,7 +124,7 @@ cmds! {
   "sketch.pattern_circ" => "Circular pattern of sketch curves", "{curves, center?: [x,y], count, angle?, symmetric?}";
   "sketch.project" => "Project a body's silhouette (or one face's edges, which follow the body) into the sketch", "{body, face?, associative?}";
   "sketch.spun_profile" => "Spun Profile: draw the outline bodies sweep through as they turn about an axis, on the side of the axis they are on (flip: the other side); it follows the bodies", "{bodies: [id | name], axis: \"x\"|\"y\"|\"z\"|{line: curve}|{axis: feature}|{body, edge}, flip?, centerline?: add the axis as a construction line (default true)}";
-  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect, targets?: [body] (bodies join/cut may change)}";
+  "extrude" => "Extrude sketch profiles", "{sketch?, profiles?: [[x,y]] (points inside regions) | indices, distance, extent?: one_side|symmetric|two_sides|through_all|through_all_both|to_face|to_body, to?: face (flat or curved) | {body}, start?: offset from the sketch plane, start_face?: flat face parallel to the sketch to start at, distance2?, flip?, taper?: angle (positive narrows), taper2?: angle for the second side of two_sides (default taper), thin?: thickness, thin_side?: inside|outside|center, operation?: new_body|join|cut|intersect|new_component, component_name?: (new_component; default the next ComponentN), targets?: [body] (bodies join/cut may change)}";
   "revolve" => "Revolve sketch profiles around an axis", "{sketch?, profiles?, axis: \"x\"|\"y\"|\"z\"|{line: curve}|{body, edge}, angle?, symmetric?: bool (angle turns each way), angle2? (two sides: the angle the other way), operation?, targets?: [body] (bodies join/cut may change)}";
   "loft" => "Loft through profiles of several sketches, in order", "{sections: [sketch id | {sketch, profile?: [x,y], end_condition?: free|point_sharp|point_tangent, weight?}], ruled?, closed?, rails?: [sketch id | {sketch, curves?}], centerline?: sketch id | {sketch, curves?}, operation?, targets?: [body] (bodies join/cut may change)}";
   "sweep" => "Sweep sketch profiles along a path (open lines/arcs of another sketch)", "{sketch?, profiles?, path: sketch id, path_curves?: [id], rail?: sketch id | {sketch, curves?} (guide rail), profile_scaling?: scale|none (with a rail), twist?: angle, taper?: angle (outward per path length), orientation?: perpendicular|parallel, operation?, targets?: [body] (bodies join/cut may change)}";
@@ -451,6 +451,7 @@ cmds! {
   "arrange" => "Arrange: copies of components laid flat on their largest planar face and packed on a rectangular envelope on a plane (length along its X, width along its Y) for manufacturing, by bounding rectangle or true shape; the sources stay put and the copies go under a new Arrange<n> > Envelope<n> component", "{components: [id | {component, rotation?, quantity?}], plane?: (default xy), length, width, solver?: rectangular|true_shape, spacing?, frame?, rotation?: none|180|90|all (default all)}";
   "inspect.properties" => "Properties of entities (default the selection): type, id, parent component and geometry (face area, surface, normal at centre, box; edge length, curve, ends; vertex point; body kind, volume, area, mass with a material, box; component totals; sketch plane; sketch curve ends, centre, radius, length); export writes .json or .txt", "{items?: [selection item | {type: component, component} | {type: sketch, sketch}], export?: path}";
   "inspect.overall_size" => "Overall width, height and thickness of bodies (default every visible one): in the frame of the largest planar face (thickness along its normal; mode planar), else the box extents largest first (mode box); export writes .json, .csv or .txt in units (default the design's)", "{bodies?: [id], components?: [id], export?: path, units?: mm|cm|m|in|ft}";
+  "component.next_number" => "The smallest unused leading number among top-level component names (01, 02 - Letters, …; fills gaps), for tools that number their components", "{prefix_digits?: (default 2)}";
 }
 
 pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
@@ -510,6 +511,9 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
     return r;
   }
   if let Some(r) = crate::properties::run(s, name, p) {
+    return r;
+  }
+  if let Some(r) = crate::newcomp::run(s, name, p) {
     return r;
   }
   match name {
@@ -1585,6 +1589,7 @@ pub(crate) fn operation(p: &Value) -> Result<Operation, CmdError> {
     "join" | "union" => Operation::Join,
     "cut" | "subtract" => Operation::Cut,
     "intersect" => Operation::Intersect,
+    "new_component" | "component" => Operation::NewComponent,
     o => return Err(CmdError::new(format!("unknown operation '{o}'"))),
   })
 }
@@ -1598,7 +1603,12 @@ pub(crate) fn body_sel(p: &Value) -> BodySel {
 }
 
 pub(crate) fn add_feature(s: &mut Session, kind: FeatureKind) -> CmdResult {
-  let id = s.edit(|d| Ok(d.add_feature(kind)?))?;
+  let active = s.active_component;
+  let id = s.edit(|d| {
+    let id = d.add_feature(kind)?;
+    crate::newcomp::attach(d, id, None, active)?;
+    Ok(id)
+  })?;
   Ok(feature_status(s, id))
 }
 
@@ -1608,11 +1618,14 @@ fn add_op_feature(s: &mut Session, kind: FeatureKind, p: &Value) -> CmdResult {
   if let Some(b) = targets.iter().find(|b| s.model.body(**b).is_none()) {
     return Err(CmdError::new(format!("no body {}", b.0)));
   }
+  let active = s.active_component;
+  let name = crate::newcomp::name_param(p);
   let id = s.edit(|d| {
     let id = d.add_feature(kind)?;
     if let Some(f) = d.feature_mut(id) {
       f.targets = targets;
     }
+    crate::newcomp::attach(d, id, name, active)?;
     Ok(id)
   })?;
   Ok(feature_status(s, id))

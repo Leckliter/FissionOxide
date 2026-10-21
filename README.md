@@ -198,6 +198,11 @@ change a parameter and watch the whole history rebuild.
   length, plane), plus the overall width, height and thickness of the selected (or all visible)
   bodies, measured across their largest flat face. Copy it, or export JSON, TXT or CSV
   (`inspect.properties`, `inspect.overall_size`).
+- **New Component.** Extrude, Revolve, Loft, Sweep and the primitives take a New component
+  operation (`"operation": "new_component"`, optional `component_name`): the result goes into a
+  new component (inside the active one, if any) that the feature keeps rebuilding it in, as in
+  Fusion. `component.next_number` gives the smallest unused leading number among top-level
+  component names (`01`, `02 - Letters`, …) for tools that number their parts or layers.
 
 ## Install
 

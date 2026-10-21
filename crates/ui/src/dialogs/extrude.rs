@@ -164,6 +164,7 @@ impl Dialog {
     ui.label("Operation");
     self.combo(ui, "op", &OPS, false);
     ui.end_row();
+    self.comp_name_row(ui);
     if dirty {
       self.dirty = true;
     }

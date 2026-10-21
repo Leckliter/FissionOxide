@@ -29,6 +29,7 @@ pub mod history;
 pub mod hub;
 mod inspect;
 mod mates;
+mod newcomp;
 mod params;
 pub mod properties;
 pub mod scene;
@@ -593,6 +594,8 @@ mod tests_mechanism;
 mod tests_more;
 #[cfg(test)]
 mod tests_properties;
+#[cfg(test)]
+mod tests_newcomp;
 #[cfg(test)]
 mod tests_scene;
 #[cfg(test)]

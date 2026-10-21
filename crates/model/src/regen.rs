@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// New bodies one feature may create.
-const MAX_BODIES_PER_FEATURE: u32 = 1000;
+pub(crate) const MAX_BODIES_PER_FEATURE: u32 = 1000;
 /// Pattern instance cap.
 const MAX_INSTANCES: usize = 500;
 
@@ -344,6 +344,7 @@ impl Regenerator {
     if let Some(mut eff) = crate::config::effective(design) {
       let model = self.regenerate(&mut eff);
       crate::config::write_back(design, &eff);
+      crate::newcomp::sync(design, &model.bodies);
       return model;
     }
     let (params, param_errors) = eval_params(design);
@@ -419,6 +420,10 @@ impl Regenerator {
         log::info!("{} failed: {e}", st.name);
       }
       status.push(st);
+    }
+    // New Component features put their new bodies in their components, which joints then move
+    if crate::newcomp::sync(design, &state.bodies) {
+      return self.regenerate(design);
     }
     // cached statuses must carry their warnings/errors too
     Model {
@@ -1103,7 +1108,7 @@ impl Ctx<'_> {
         let ti = self.body_index(*target)?;
         let mut shape = self.state.bodies[ti].shape.clone();
         let op = match operation {
-          Operation::Join | Operation::NewBody => BoolOp::Union,
+          Operation::Join | Operation::NewBody | Operation::NewComponent => BoolOp::Union,
           Operation::Cut => BoolOp::Subtract,
           Operation::Intersect => BoolOp::Intersect,
         };
@@ -2271,7 +2276,7 @@ impl Ctx<'_> {
       .filter(|&i| self.state.bodies[i].bbox().is_some_and(|b| boxes_touch(b, tool_box)))
       .collect();
     match op {
-      Operation::NewBody => {
+      Operation::NewBody | Operation::NewComponent => {
         for s in tool.solids().map_err(ke)? {
           self.new_body(feature, s);
         }

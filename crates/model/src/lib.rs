@@ -26,6 +26,7 @@ pub mod include;
 pub mod mechanism;
 pub mod meshops;
 pub mod naming;
+pub mod newcomp;
 pub mod pathpattern;
 pub mod pcb;
 pub mod plot;
@@ -367,6 +368,9 @@ pub struct Feature {
   /// Deleted sketches this feature still builds from (Fusion's "cached geometry").
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub cached: Vec<CachedSketch>,
+  /// New Component features: the component they created, which holds the bodies they make.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub component: Option<ComponentId>,
   pub kind: FeatureKind,
 }
 
@@ -513,6 +517,8 @@ pub enum Operation {
   Join,
   Cut,
   Intersect,
+  /// A new body in a new component the feature creates (see [`newcomp`]).
+  NewComponent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -2217,7 +2223,16 @@ impl Design {
     let at = self.active_len();
     self.features.insert(
       at,
-      Feature { id, name, suppressed: false, visible: None, targets: Vec::new(), cached: Vec::new(), kind },
+      Feature {
+        id,
+        name,
+        suppressed: false,
+        visible: None,
+        targets: Vec::new(),
+        cached: Vec::new(),
+        component: None,
+        kind,
+      },
     );
     if let Some(m) = self.marker.as_mut() {
       *m += 1;
