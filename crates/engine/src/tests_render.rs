@@ -56,7 +56,7 @@ fn materials_go_on_bodies_and_faces_and_undo() {
   s.undo();
   assert!(s.design.render.faces.is_empty());
   assert!(s.revision >= rev);
-  assert!(s.execute("render.material.apply", &json!({"material": "Unobtainium", "body": 1})).is_err());
+  assert!(s.execute("render.material.apply", &json!({"material": "Unobtainium", "body": bodies[0]})).is_err());
 }
 
 #[test]
@@ -71,7 +71,8 @@ fn design_materials_with_textures() {
   assert_eq!(m["texture"]["scale"], 5.0);
   assert!(s.execute("render.material.define", &json!({"name": "Bad", "metallic": 3})).is_err());
   assert!(s.execute("render.material.define", &json!({"name": "Bad", "texture": {"pattern": "plaid"}})).is_err());
-  run(&mut s, "render.material.apply", json!({"material": "floor", "body": 1}));
+  let body = s.model.bodies[0].id.0;
+  run(&mut s, "render.material.apply", json!({"material": "floor", "body": body}));
   assert_eq!(s.design.render.bodies[0].material, "Floor");
   run(&mut s, "render.material.delete", json!({"name": "Floor"}));
   assert!(s.design.render.bodies.is_empty(), "bodies using a deleted material go back to their appearance");
