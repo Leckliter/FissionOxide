@@ -3185,7 +3185,10 @@ fn manipulator(
   ctx: &egui::Context,
 ) -> bool {
   let Some(m) = app.dialog.as_ref().and_then(|d| d.manipulator(&app.s)) else {
-    app.manip.value_box.hide();
+    // a dialog without an arrow may show the box at a feature handle instead (see `handles::show`)
+    if !app.dialog.as_mut().is_some_and(|d| d.handle_field(0).is_some()) {
+      app.manip.value_box.hide();
+    }
     return false;
   };
   let tip = m.origin + m.dir * m.value;

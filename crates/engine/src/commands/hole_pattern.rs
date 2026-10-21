@@ -83,6 +83,7 @@ fn hole(s: &mut Session, p: &Value) -> CmdResult {
       let (sk, pt) = place(s, face, p)?;
       q["sketch"] = json!(sk.0);
       q["points"] = json!([pt]);
+      q["placed"] = json!(true);
       Some(sk)
     }
     None => None,

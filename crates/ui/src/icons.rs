@@ -267,6 +267,28 @@ pub enum Icon {
   SkCleanup,
   /// The Sketch Palette's Centerline linetype toggle (dash-dot).
   Centerline,
+  // Move/Copy's Move Type and Set Pivot
+  MoveFree,
+  MoveTranslate,
+  MoveRotate,
+  MovePointToPoint,
+  MovePointToPosition,
+  SetPivot,
+  // Shell Type: sharp or rounded corners
+  ShellSharp,
+  ShellRound,
+  // Hole: Placement, Hole Type, Hole Tap Type and Drill Point
+  HoleSingle,
+  HoleAtPoints,
+  HoleSimple,
+  HoleCounterbore,
+  HoleCountersink,
+  TapSimple,
+  TapClearance,
+  TapTapped,
+  TapTaper,
+  DrillAngle,
+  DrillFlat,
 }
 
 #[derive(Clone, Copy)]
@@ -2003,6 +2025,162 @@ fn paint(p: &Painter, r: Rect, icon: Icon, mono: Option<Color32>, tint: Tint) {
       k.thick((0.1, 0.9), (0.36, 0.64), Orange, 1.0);
       k.dot((0.5, 0.5), Orange);
       k.thick((0.64, 0.36), (0.9, 0.1), Orange, 1.0);
+    }
+    // ---- Move/Copy ----
+    Icon::MoveFree => {
+      // the triad: three arrows from one point
+      k.thick((0.3, 0.7), (0.3, 0.12), Red, 1.2);
+      k.arrow_head((0.3, 0.06), (0.0, -1.0), 0.14, Red);
+      k.thick((0.3, 0.7), (0.9, 0.7), Green, 1.2);
+      k.arrow_head((0.96, 0.7), (1.0, 0.0), 0.14, Green);
+      k.thick((0.3, 0.7), (0.08, 0.94), Blue, 1.2);
+      k.arrow_head((0.04, 0.98), (-0.7, 0.7), 0.14, Blue);
+      k.circle((0.3, 0.7), 0.06, Some(Ink), None);
+    }
+    Icon::MoveTranslate => {
+      k.solid(&[(0.08, 0.3), (0.42, 0.3), (0.42, 0.64), (0.08, 0.64)], Light);
+      k.closed(&[(0.52, 0.3), (0.86, 0.3), (0.86, 0.64), (0.52, 0.64)], Blue);
+      k.thick((0.2, 0.82), (0.72, 0.82), Blue, 1.2);
+      k.arrow_head((0.8, 0.82), (1.0, 0.0), 0.14, Blue);
+    }
+    Icon::MoveRotate => {
+      k.solid(&[(0.3, 0.46), (0.7, 0.46), (0.7, 0.86), (0.3, 0.86)], Light);
+      k.arc((0.5, 0.5), 0.4, 0.3, 2.9, Blue);
+      k.arrow_head((0.9, 0.42), (0.1, 1.0), 0.14, Blue);
+      k.dashed((0.5, 0.04), (0.5, 0.98), Ink);
+    }
+    Icon::MovePointToPoint => {
+      k.circle((0.18, 0.74), 0.08, Some(Blue), Some(BlueDark));
+      k.circle((0.82, 0.26), 0.08, Some(White), Some(Blue));
+      k.thick((0.28, 0.66), (0.66, 0.38), Blue, 1.2);
+      k.arrow_head((0.72, 0.34), (0.8, -0.6), 0.14, Blue);
+    }
+    Icon::MovePointToPosition => {
+      k.circle((0.24, 0.7), 0.08, Some(Blue), Some(BlueDark));
+      k.thick((0.34, 0.62), (0.62, 0.42), Blue, 1.2);
+      k.arrow_head((0.68, 0.38), (0.8, -0.6), 0.14, Blue);
+      k.line((0.56, 0.18), (0.94, 0.18), Ink);
+      k.line((0.94, 0.18), (0.94, 0.56), Ink);
+      k.text((0.8, 0.36), "xyz", 0.3, Ink);
+    }
+    Icon::SetPivot => {
+      // a cross hair with a dot: where the move turns about
+      k.circle((0.5, 0.5), 0.3, None, Some(Ink));
+      k.line((0.5, 0.06), (0.5, 0.32), Ink);
+      k.line((0.5, 0.68), (0.5, 0.94), Ink);
+      k.line((0.06, 0.5), (0.32, 0.5), Ink);
+      k.line((0.68, 0.5), (0.94, 0.5), Ink);
+      k.circle((0.5, 0.5), 0.09, Some(Blue), None);
+    }
+    // ---- Shell Type ----
+    Icon::ShellSharp => {
+      // a hollow box with square corners
+      k.solid(&[(0.1, 0.18), (0.9, 0.18), (0.9, 0.9), (0.1, 0.9)], Light);
+      k.solid(&[(0.3, 0.38), (0.7, 0.38), (0.7, 0.9), (0.3, 0.9)], White);
+      k.closed(&[(0.3, 0.38), (0.7, 0.38), (0.7, 0.9), (0.3, 0.9)], Blue);
+    }
+    Icon::ShellRound => {
+      // the same with rounded corners inside
+      k.solid(&[(0.1, 0.18), (0.9, 0.18), (0.9, 0.9), (0.1, 0.9)], Light);
+      let mut pts = vec![(0.3, 0.9), (0.3, 0.52)];
+      for i in 0..=6 {
+        let t = PI - FRAC_PI_2 * i as f32 / 6.0;
+        pts.push((0.44 + t.cos() * 0.14, 0.52 - t.sin() * 0.14));
+      }
+      for i in 0..=6 {
+        let t = FRAC_PI_2 - FRAC_PI_2 * i as f32 / 6.0;
+        pts.push((0.56 + t.cos() * 0.14, 0.52 - t.sin() * 0.14));
+      }
+      pts.push((0.7, 0.9));
+      k.solid(&pts, White);
+      k.path(&pts, Blue);
+    }
+    // ---- Hole ----
+    Icon::HoleSingle => {
+      k.solid(&[(0.08, 0.3), (0.92, 0.3), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.ellipse((0.5, 0.3), 0.14, 0.06, Some(White), Blue);
+    }
+    Icon::HoleAtPoints => {
+      k.solid(&[(0.08, 0.3), (0.92, 0.3), (0.92, 0.9), (0.08, 0.9)], Light);
+      for x in [0.26, 0.5, 0.74] {
+        k.ellipse((x, 0.3), 0.08, 0.035, Some(White), Blue);
+        k.vtx((x, 0.14));
+      }
+    }
+    Icon::HoleSimple => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.38, 0.1), (0.62, 0.1), (0.62, 0.72), (0.5, 0.84), (0.38, 0.72)], White);
+      k.path(&[(0.38, 0.1), (0.38, 0.72), (0.5, 0.84), (0.62, 0.72), (0.62, 0.1)], Blue);
+    }
+    Icon::HoleCounterbore => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.fill(&[(0.24, 0.1), (0.76, 0.1), (0.76, 0.34), (0.24, 0.34)], White);
+      k.fill(&[(0.38, 0.34), (0.62, 0.34), (0.62, 0.72), (0.5, 0.84), (0.38, 0.72)], White);
+      k.path(
+        &[
+          (0.24, 0.1),
+          (0.24, 0.34),
+          (0.38, 0.34),
+          (0.38, 0.72),
+          (0.5, 0.84),
+          (0.62, 0.72),
+          (0.62, 0.34),
+          (0.76, 0.34),
+          (0.76, 0.1),
+        ],
+        Blue,
+      );
+    }
+    Icon::HoleCountersink => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.fill(&[(0.2, 0.1), (0.8, 0.1), (0.62, 0.34), (0.38, 0.34)], White);
+      k.fill(&[(0.38, 0.34), (0.62, 0.34), (0.62, 0.72), (0.5, 0.84), (0.38, 0.72)], White);
+      k.path(&[(0.2, 0.1), (0.38, 0.34), (0.38, 0.72), (0.5, 0.84), (0.62, 0.72), (0.62, 0.34), (0.8, 0.1)], Blue);
+    }
+    Icon::TapSimple => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.36, 0.1), (0.64, 0.1), (0.64, 0.9), (0.36, 0.9)], White);
+      k.line((0.36, 0.1), (0.36, 0.9), Blue);
+      k.line((0.64, 0.1), (0.64, 0.9), Blue);
+    }
+    Icon::TapClearance => {
+      // a plain hole with the bolt's shank through it, clear of the walls
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.3, 0.1), (0.7, 0.1), (0.7, 0.9), (0.3, 0.9)], White);
+      k.line((0.3, 0.1), (0.3, 0.9), Blue);
+      k.line((0.7, 0.1), (0.7, 0.9), Blue);
+      k.solid(&[(0.42, 0.04), (0.58, 0.04), (0.58, 0.96), (0.42, 0.96)], Dark);
+    }
+    Icon::TapTapped => {
+      // threads on the walls
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.36, 0.1), (0.64, 0.1), (0.64, 0.9), (0.36, 0.9)], White);
+      for i in 0..5 {
+        let y = 0.18 + i as f32 * 0.15;
+        k.line((0.3, y), (0.42, y + 0.06), Blue);
+        k.line((0.58, y + 0.06), (0.7, y), Blue);
+      }
+    }
+    Icon::TapTaper => {
+      // threads on walls that narrow towards the bottom
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.32, 0.1), (0.68, 0.1), (0.6, 0.9), (0.4, 0.9)], White);
+      for i in 0..5 {
+        let y = 0.18 + i as f32 * 0.15;
+        let dx = 0.04 * i as f32 / 4.0;
+        k.line((0.26 + dx, y), (0.38 + dx, y + 0.06), Blue);
+        k.line((0.62 - dx, y + 0.06), (0.74 - dx, y), Blue);
+      }
+    }
+    Icon::DrillAngle => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.36, 0.1), (0.64, 0.1), (0.64, 0.66), (0.5, 0.82), (0.36, 0.66)], White);
+      k.path(&[(0.36, 0.1), (0.36, 0.66), (0.5, 0.82), (0.64, 0.66), (0.64, 0.1)], Blue);
+    }
+    Icon::DrillFlat => {
+      k.solid(&[(0.08, 0.1), (0.92, 0.1), (0.92, 0.9), (0.08, 0.9)], Light);
+      k.solid(&[(0.36, 0.1), (0.64, 0.1), (0.64, 0.78), (0.36, 0.78)], White);
+      k.path(&[(0.36, 0.1), (0.36, 0.78), (0.64, 0.78), (0.64, 0.1)], Blue);
     }
   }
 }

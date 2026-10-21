@@ -1045,6 +1045,7 @@ pub(crate) fn run(s: &mut Session, name: &str, p: &Value) -> CmdResult {
           head_depth: opt_expr(p, "head_depth").unwrap_or_else(|| "0".into()),
           head_angle: opt_expr(p, "head_angle").unwrap_or_else(|| "90 deg".into()),
           flip: p.get("flip").and_then(Value::as_bool).unwrap_or(false),
+          placed: p.get("placed").and_then(Value::as_bool).unwrap_or(false),
         },
       )
     }

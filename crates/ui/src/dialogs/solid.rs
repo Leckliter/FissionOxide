@@ -6,9 +6,12 @@ use fox_engine::model::{BodyId, FeatureId, FeatureKind, OriginPlane, PlaneRef};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
+use super::icon_row::{Choice, choice as ic, icon_row};
 use super::{Dialog, Kind, sel_chip};
 use crate::App;
 use crate::forms::{Form, Input};
+use crate::icons::Icon;
+use crate::theme;
 
 /// Values the solid feature extensions add to a dialog.
 #[derive(Debug, Clone, Default)]
@@ -89,6 +92,15 @@ pub(super) const CHAMFER_TYPES: [(&str, &str); 3] =
   [("equal", "Equal distance"), ("two", "Two distances"), ("angle", "Distance and angle")];
 /// Fusion's Shell Direction.
 pub(super) const SHELL_DIRECTIONS: [(&str, &str); 3] = [("inside", "Inside"), ("outside", "Outside"), ("both", "Both")];
+/// Fusion's Shell Type: how the offset faces meet at the corners (the engine's `corners`).
+const SHELL_TYPES: [Choice; 2] =
+  [ic("sharp", Icon::ShellSharp, "Sharp corners"), ic("round", Icon::ShellRound, "Rounded corners")];
+/// Fusion's Chamfer Corner Type; the engine chamfers the corners, so the rest are greyed.
+const CORNER_TYPES: [(&str, &str); 3] = [("chamfer", "Chamfer"), ("miter", "Miter"), ("blend", "Blend")];
+/// Fusion's Offset Face Offset Type (Press Pull on a face). Automatic and New Offset both add an
+/// Offset Face feature; Modify Existing Feature needs the engine to edit the face's feature.
+const OFFSET_TYPES: [(&str, &str, bool); 3] =
+  [("automatic", "Automatic", true), ("modify", "Modify Existing Feature", false), ("new", "New Offset", true)];
 
 /// A combo box over `(key, label)` choices; true when the choice changed.
 fn choice(ui: &mut egui::Ui, id: &str, cur: &mut &'static str, options: &[(&'static str, &str)]) -> bool {
@@ -563,30 +575,93 @@ impl Dialog {
 
   // ---- chamfer ----
 
-  /// Fusion's Chamfer Type with its distances or angle.
-  pub(super) fn chamfer_rows(&mut self, ui: &mut egui::Ui, creating: bool) {
+  /// The picked edges with their tangent chains (Fusion's Tangent Chain, on by default).
+  pub(super) fn chamfer_picks(&self, s: &Session) -> Vec<Value> {
+    let picked = super::sel_edges(s);
+    if self.solid.no_chain { picked } else { super::with_tangent_chain(s, &picked) }
+  }
+
+  /// Fusion's Chamfer dialog: the selection-set table (the edges with their distances, + and ✕),
+  /// Type, the Edges chip, Tangent Chain and Corner Type.
+  pub(super) fn chamfer_rows(&mut self, app: &mut App, ui: &mut egui::Ui, creating: bool) {
     if self.solid.chamfer_type.is_empty() {
       self.solid.chamfer_type = "equal";
     }
-    ui.label("Chamfer type");
-    let mut changed = choice(ui, "chamfer-type", &mut self.solid.chamfer_type, &CHAMFER_TYPES);
-    ui.end_row();
-    let two = self.solid.chamfer_type == "two";
-    ui.label(if two { "Distance 1" } else { "Distance" });
-    changed |= super::value_edit(ui, &mut self.radius).changed();
-    ui.end_row();
-    let second = match self.solid.chamfer_type {
-      "two" => Some(("Distance 2", &mut self.solid.distance2)),
-      "angle" => Some(("Angle", &mut self.solid.chamfer_angle)),
-      _ => None,
-    };
-    if let Some((label, v)) = second {
-      ui.label(label);
-      if v.is_empty() {
-        *v = if two { self.radius.clone() } else { "45 deg".into() };
+    let kind = self.solid.chamfer_type;
+    let n = self.edges.len();
+    let edges = if n == 0 { "Select".to_string() } else { format!("{n} Edge{}", if n == 1 { "" } else { "s" }) };
+    // the table: one set, its edges and the two distances (or the distance and angle)
+    let mut changed = false;
+    let mut clear = false;
+    ui.label("");
+    ui.horizontal(|ui| {
+      ui.spacing_mut().item_spacing.x = 4.0;
+      ui.label(egui::RichText::new(&edges).color(if n > 0 { theme::TEXT } else { theme::MUTED }));
+      ui.label(egui::RichText::new("|").color(theme::MUTED));
+      changed |= super::value_edit_w(ui, &mut self.radius, 56.0).changed();
+      ui.label(egui::RichText::new("|").color(theme::MUTED));
+      match kind {
+        "two" => {
+          if self.solid.distance2.is_empty() {
+            self.solid.distance2 = self.radius.clone();
+          }
+          let mut r = ui.add(egui::TextEdit::singleline(&mut self.solid.distance2).desired_width(56.0));
+          crate::units::pin(ui, &mut r, &mut self.solid.distance2);
+          changed |= r.changed();
+        }
+        "angle" => {
+          if self.solid.chamfer_angle.is_empty() {
+            self.solid.chamfer_angle = "45 deg".into();
+          }
+          changed |= ui.add(egui::TextEdit::singleline(&mut self.solid.chamfer_angle).desired_width(56.0)).changed();
+        }
+        // equal distance: the second column reads the same as the first
+        _ => {
+          let mut same = self.radius.clone();
+          ui.add_enabled(false, egui::TextEdit::singleline(&mut same).desired_width(56.0));
+        }
       }
-      changed |= super::value_edit(ui, v).changed();
-      ui.end_row();
+      ui.add_enabled(false, egui::Button::new("+").small())
+        .on_disabled_hover_text("Selection sets with their own distances need chamfer sets in the engine");
+      if creating && ui.add_enabled(n > 0, egui::Button::new("✕").small()).on_hover_text("Clear this set").clicked() {
+        clear = true;
+      }
+    });
+    ui.end_row();
+    ui.label("Type");
+    let type_changed = choice(ui, "chamfer-type", &mut self.solid.chamfer_type, &CHAMFER_TYPES);
+    changed |= type_changed;
+    ui.end_row();
+    ui.label("Edges");
+    if creating {
+      sel_chip(ui, self.accent(), &edges, n > 0);
+    } else {
+      ui.label(format!("{n} (unchanged)"));
+    }
+    ui.end_row();
+    ui.label("Tangent Chain");
+    let mut chain = !self.solid.no_chain;
+    if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
+      self.solid.no_chain = !chain;
+      if !self.applied {
+        self.edges = self.chamfer_picks(&app.s);
+      }
+      changed = true;
+    }
+    ui.end_row();
+    ui.label("Corner Type");
+    ui.add_enabled_ui(false, |ui| {
+      let mut corner: &'static str = "chamfer";
+      choice(ui, "chamfer-corner", &mut corner, &CORNER_TYPES);
+    })
+    .response
+    .on_disabled_hover_text("Corner Type needs engine support; the corners are chamfered");
+    ui.end_row();
+    if clear {
+      self.withdraw(&mut app.s);
+      self.edges.clear();
+      app.s.selection.clear();
+      self.live_reset();
     }
     if changed && (!creating || self.applied) {
       self.dirty = true;
@@ -646,32 +721,73 @@ impl Dialog {
       ui.label(format!("{text} (unchanged)"));
     }
     ui.end_row();
-    ui.label("Tangent chain");
+    ui.label("Tangent Chain");
     let mut chain = !self.solid.shell_no_chain;
     if ui.add_enabled(creating, egui::Checkbox::without_text(&mut chain)).changed() {
       self.solid.shell_no_chain = !chain;
     }
     ui.end_row();
-    ui.label("Direction");
-    let mut changed = choice(ui, "shell-dir", &mut self.solid.shell_dir, &SHELL_DIRECTIONS);
+    ui.label("Shell Type");
+    let mut shell_type: &'static str = if self.flag { "round" } else { "sharp" };
+    let mut changed = icon_row(ui, &mut shell_type, &SHELL_TYPES, "");
+    self.flag = shell_type == "round";
     ui.end_row();
     let dir = self.solid.shell_dir;
-    ui.label(if dir == "outside" { "Outside thickness" } else { "Inside thickness" });
+    ui.label(if dir == "outside" { "Outside Thickness" } else { "Inside Thickness" });
     changed |= super::value_edit(ui, &mut self.radius).changed();
     ui.end_row();
     if dir == "both" {
-      ui.label("Outside thickness");
+      ui.label("Outside Thickness");
       if self.solid.thickness_out.is_empty() {
         self.solid.thickness_out = self.radius.clone();
       }
       changed |= super::value_edit(ui, &mut self.solid.thickness_out).changed();
       ui.end_row();
     }
-    ui.label("");
-    changed |= ui.checkbox(&mut self.flag, "Round corners").changed();
+    ui.label("Direction");
+    changed |= choice(ui, "shell-dir", &mut self.solid.shell_dir, &SHELL_DIRECTIONS);
     ui.end_row();
     if changed && (!creating || self.applied) {
       self.dirty = true;
+    }
+  }
+
+  // ---- press pull / offset face ----
+
+  /// Fusion's Offset Type row (Press Pull on a face).
+  pub(super) fn offset_type_row(&mut self, ui: &mut egui::Ui) {
+    ui.label("Offset Type");
+    let shown = OFFSET_TYPES.iter().find(|(k, _, _)| *k == self.choice).map_or("Automatic", |(_, l, _)| *l);
+    egui::ComboBox::from_id_salt("offset-type")
+      .selected_text(shown)
+      .width(140.0)
+      .show_ui(ui, |ui| {
+        for (k, l, ok) in OFFSET_TYPES {
+          ui.add_enabled_ui(ok, |ui| {
+            if ui.selectable_label(self.choice == k, l).clicked() {
+              self.choice = k;
+            }
+          })
+          .response
+          .on_disabled_hover_text("Editing the face's own feature needs engine support");
+        }
+      })
+      .response
+      .on_hover_text("Automatic and New Offset add an Offset Face feature");
+    ui.end_row();
+  }
+
+  // ---- sketch offset ----
+
+  /// The picked curves, with the curves chained to them when Chain Selection is on.
+  pub(super) fn offset_picks(&self, s: &Session) -> Vec<u32> {
+    let picked = super::sel_curves(s);
+    if self.solid.no_chain {
+      return picked;
+    }
+    match s.edit_sketch.and_then(|sk| s.design.sketch(sk).ok()) {
+      Some(sketch) => super::with_curve_chain(sketch, &picked),
+      None => picked,
     }
   }
 

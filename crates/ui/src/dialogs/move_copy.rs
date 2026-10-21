@@ -16,21 +16,23 @@ use fox_engine::model::{BodyId, BodySel, ComponentId, FeatureId, FeatureKind};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
+use super::icon_row::{Choice, choice as ic, icon_row};
 use super::manip::{axis_line, centre, deg, mm};
 use super::{Dialog, sel_chip, value_edit};
 use crate::App;
+use crate::icons::{self, Icon};
 use crate::manipulators::{Triad, TriadEdit, from_xyz, xyz_of};
 
 /// Move Object choices.
 const OBJECTS: [(&str, &str); 4] =
   [("bodies", "Bodies"), ("components", "Components"), ("faces", "Faces"), ("sketch", "Sketch Objects")];
-/// Move Type choices.
-const TYPES: [(&str, &str); 5] = [
-  ("free", "Free Move"),
-  ("translate", "Translate"),
-  ("rotate", "Rotate"),
-  ("point_to_point", "Point to Point"),
-  ("point_to_position", "Point to Position"),
+/// Move Type choices, Fusion's row of icons.
+const TYPES: [Choice; 5] = [
+  ic("free", Icon::MoveFree, "Free Move"),
+  ic("translate", Icon::MoveTranslate, "Translate"),
+  ic("rotate", Icon::MoveRotate, "Rotate"),
+  ic("point_to_point", Icon::MovePointToPoint, "Point to Point"),
+  ic("point_to_position", Icon::MovePointToPosition, "Point to Position"),
 ];
 const AXES: [&str; 3] = ["x", "y", "z"];
 
@@ -69,6 +71,12 @@ pub(super) struct MoveForm {
   pub(super) pivot: Option<(Value, DVec3)>,
   /// Opened by Paste: what it placed (Create Copy stays on and what moves can't change).
   pub(super) paste: Option<Paste>,
+  /// Set Pivot: the picked point the move turns about and the triad sits on (its pick, and
+  /// where it was), instead of the picks' centre.
+  pub(super) pivot_at: Option<(Sel, DVec3)>,
+  /// Set Pivot is picking: the selection as it was when it started (the next point picked is
+  /// the pivot).
+  pub(super) picking_pivot: Option<Vec<Sel>>,
 }
 
 impl Default for MoveForm {
@@ -84,6 +92,8 @@ impl Default for MoveForm {
       sketch: None,
       pivot: None,
       paste: None,
+      pivot_at: None,
+      picking_pivot: None,
     }
   }
 }
@@ -250,6 +260,15 @@ impl Dialog {
 
   /// Takes the selection: bodies (and their components), faces, sketch curves and points.
   pub(super) fn sync_move(&mut self, s: &Session) {
+    // Set Pivot: the first point picked since it started is the pivot
+    if let Some(seen) = &self.mv.picking_pivot
+      && let Some((sel, p)) = s.selection.iter().filter(|x| !seen.contains(x)).find_map(|x| Some((*x, point_of(s, x)?)))
+    {
+      self.mv.pivot_at = Some((sel, p));
+      self.mv.picking_pivot = None;
+      self.mv.pivot = None;
+      self.dirty = true;
+    }
     match self.mv.object {
       "faces" => {
         let f = super::sel_faces(s);
@@ -297,7 +316,7 @@ impl Dialog {
       return;
     }
     for sel in &s.selection {
-      if self.mv.points.iter().any(|(x, _)| x == sel) {
+      if self.mv.points.iter().any(|(x, _)| x == sel) || self.mv.pivot_at.as_ref().is_some_and(|(x, _)| x == sel) {
         continue;
       }
       let Some(p) = point_of(s, sel) else { continue };
@@ -409,6 +428,10 @@ impl Dialog {
   pub(super) fn refresh_move(&mut self, s: &Session) {
     let key = self.move_key();
     if self.mv.pivot.as_ref().is_some_and(|p| p.0 == key) {
+      return;
+    }
+    if let Some((_, p)) = self.mv.pivot_at {
+      self.mv.pivot = Some((key, p));
       return;
     }
     let Some(now) = self.move_centre(s) else {
@@ -604,6 +627,35 @@ impl Dialog {
     set
   }
 
+  /// Fusion's Set Pivot row: the pivot button starts a pick (the next vertex or sketch point
+  /// picked is where the move turns about and the triad sits), ✓ ends it, ✕ goes back to the
+  /// picks' centre.
+  fn set_pivot_row(&mut self, app: &mut App, ui: &mut egui::Ui) {
+    ui.label("Set Pivot");
+    ui.horizontal(|ui| {
+      ui.spacing_mut().item_spacing.x = 4.0;
+      let picking = self.mv.picking_pivot.is_some();
+      if icons::icon_button(ui, Icon::SetPivot, 26.0, "Pick a vertex or sketch point to move about", picking, None)
+        .clicked()
+      {
+        self.mv.picking_pivot = if picking { None } else { Some(app.s.selection.clone()) };
+      }
+      if picking {
+        ui.label(egui::RichText::new("Select a point").color(crate::theme::MUTED).small());
+        if ui.small_button("✓").on_hover_text("Done").clicked() {
+          self.mv.picking_pivot = None;
+        }
+      } else if self.mv.pivot_at.is_some()
+        && ui.small_button("✕").on_hover_text("Back to the selection's centre").clicked()
+      {
+        self.mv.pivot_at = None;
+        self.mv.pivot = None;
+        self.dirty = true;
+      }
+    });
+    ui.end_row();
+  }
+
   fn move_combo(&mut self, ui: &mut egui::Ui, id: &str, items: &[(&'static str, &'static str)], types: bool) {
     let cur = if types { self.mv.mtype } else { self.mv.object };
     let label = items.iter().find(|(k, _)| *k == cur).map_or(cur, |(_, l)| *l);
@@ -660,9 +712,18 @@ impl Dialog {
     sel_chip(ui, self.accent(), if has { &text } else { "Select" }, has);
     ui.end_row();
     ui.label("Move Type");
-    self.move_combo(ui, "move-type", &TYPES, true);
+    let mut mtype = self.mv.mtype;
+    ui.add_enabled_ui(self.editing.is_none(), |ui| icon_row(ui, &mut mtype, &TYPES, ""));
+    if mtype != self.mv.mtype {
+      self.mv.mtype = mtype;
+      self.mv.points.clear();
+      self.dirty = true;
+    }
     ui.end_row();
     let sketch = self.mv.object == "sketch";
+    if !sketch && self.editing.is_none() {
+      self.set_pivot_row(app, ui);
+    }
     let n = if sketch { 2 } else { 3 };
     const DIST: [&str; 3] = ["X Distance", "Y Distance", "Z Distance"];
     const ANGLE: [&str; 3] = ["X Angle", "Y Angle", "Z Angle"];
@@ -1025,5 +1086,53 @@ mod tests {
     d.axis = format!("axis:{}", ax["feature"]);
     let t = d.triad(&s).unwrap();
     assert!(close(t.axes[2], DVec3::new(1.0, 1.0, 0.0).normalize()));
+  }
+
+  #[test]
+  fn set_pivot_turns_about_the_picked_point() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 10, "depth": 20, "height": 30}));
+    let b = s.model.bodies[0].id;
+    let (lo, hi) = bbox(&s, 0);
+    let mut d = move_dialog(&mut s, vec![Sel::Body { body: b }]);
+    d.refresh_manip(&s);
+    assert!(close(d.triad(&s).unwrap().home, centre(&s, &[b.0]).unwrap()));
+    // Set Pivot: the next point picked (the box's low corner) is the pivot
+    d.mv.picking_pivot = Some(s.selection.clone());
+    let edges = s.model.bodies[0].edges();
+    let (corner, end) = edges
+      .iter()
+      .find_map(|e| {
+        if close(e.start, lo) {
+          Some((e.id, false))
+        } else if close(e.end, lo) {
+          Some((e.id, true))
+        } else {
+          None
+        }
+      })
+      .unwrap();
+    s.selection.push(Sel::Vertex { body: b, edge: corner, end });
+    d.sync_move(&s);
+    assert!(d.mv.picking_pivot.is_none() && d.mv.pivot_at.is_some());
+    assert_eq!(d.mv.points.len(), 0, "the pivot pick isn't a move point");
+    d.refresh_manip(&s);
+    let t = d.triad(&s).unwrap();
+    assert!(close(t.home, lo) && close(t.origin, lo));
+    // a quarter turn on the Z ring turns the box about that corner, which stays put
+    d.set_triad(&s, TriadEdit::Rotate(2, std::f64::consts::FRAC_PI_2));
+    apply(&mut s, &mut d);
+    let (lo2, hi2) = bbox(&s, 0);
+    let (w, dp) = (hi.x - lo.x, hi.y - lo.y);
+    assert!(
+      close(lo2, lo + DVec3::new(-dp, 0.0, 0.0)) && close(hi2, lo + DVec3::new(0.0, w, hi.z - lo.z)),
+      "{lo2:?} {hi2:?}"
+    );
+    assert!(close(d.triad(&s).unwrap().origin, lo));
+    // ✕: back to the picks' centre
+    d.mv.pivot_at = None;
+    d.mv.pivot = None;
+    d.refresh_manip(&s);
+    assert!(!close(d.triad(&s).unwrap().home, lo));
   }
 }

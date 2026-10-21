@@ -1245,6 +1245,7 @@ impl Ctx<'_> {
         head_depth,
         head_angle,
         flip,
+        placed: _,
       } => {
         let sk = self.state.sketches.get(sketch).ok_or("its sketch failed")?.clone();
         let r = self.len(diameter)? / 2.0;

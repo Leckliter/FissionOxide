@@ -178,7 +178,14 @@ fn hit(placed: &[Option<Placed>], p: Pos2) -> Option<usize> {
     .map(|(i, _)| i)
 }
 
-fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool) {
+/// Where a handle's label (or floating value box) sits: beside the head.
+fn label_at(p: &Placed) -> Pos2 {
+  let (b, d) = (p.head, p.dir);
+  let side = Vec2::new(-d.y, d.x);
+  b + side * 14.0 + d * 4.0
+}
+
+fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool, label: bool) {
   let col = if lit { ACTIVE } else { IDLE };
   if p.circle.len() > 1 {
     painter.add(egui::Shape::line(p.circle.clone(), Stroke::new(1.0, col.gamma_multiply(0.35))));
@@ -197,8 +204,10 @@ fn draw(painter: &egui::Painter, h: &Handle, p: &Placed, lit: bool, active: bool
       painter.circle_stroke(b, 6.0, Stroke::new(1.5, Color32::WHITE));
     }
   }
-  let side = Vec2::new(-d.y, d.x);
-  let at = b + side * 14.0 + d * 4.0;
+  let at = label_at(p);
+  if !label {
+    return;
+  }
   if active {
     let galley = painter.layout_no_wrap(h.label.clone(), egui::FontId::proportional(12.0), Color32::WHITE);
     let r = egui::Rect::from_min_size(
@@ -248,7 +257,7 @@ pub(crate) fn show(
     let now = app.dialog.as_ref().map(|d| d.handles(&app.s)).unwrap_or_default();
     for (k, h) in now.iter().enumerate() {
       if let Some(p) = place(h, right, project) {
-        draw(painter, h, &p, k == i, k == i);
+        draw(painter, h, &p, k == i, k == i, true);
       }
     }
     ctx.request_repaint();
@@ -268,10 +277,30 @@ pub(crate) fn show(
       app.drag = Some(Drag::Handle);
     }
   }
+  // Fusion's floating value box beside the first handle that edits a field (Shell's thickness);
+  // a dialog with a drag arrow has the box there instead (see `viewport::manipulator`)
+  let arrow_box = app.dialog.as_mut().is_some_and(|d| d.value_box_field().is_some());
+  let params = crate::value_box::params_of(&app.s);
+  let mut shown = None;
   for (k, (h, p)) in handles.iter().zip(&placed).enumerate() {
-    if let Some(p) = p {
-      draw(painter, h, p, hot == Some(k), false);
+    let Some(p) = p else { continue };
+    let mut boxed = false;
+    if !arrow_box
+      && shown.is_none()
+      && let Some(dlg) = app.dialog.as_mut()
+      && let Some(field) = dlg.handle_field(k)
+    {
+      let at = label_at(p);
+      if crate::value_box::show(ctx, &mut app.manip.value_box, at, field, &params).changed {
+        dlg.value_box_edited();
+      }
+      shown = Some(k);
+      boxed = true;
     }
+    draw(painter, h, p, hot == Some(k), false, !boxed);
+  }
+  if !arrow_box && shown.is_none() {
+    app.manip.value_box.hide();
   }
   hot.is_some() || pressed.is_some() && ctx.input(|i| i.pointer.primary_down())
 }

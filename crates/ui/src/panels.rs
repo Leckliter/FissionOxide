@@ -2278,12 +2278,14 @@ pub(crate) fn run_origin_plane_cmd(app: &mut App, plane: &str, cmd: RowCmd) {
 }
 
 fn sketches_section(app: &mut App, ui: &mut egui::Ui) {
+  // a sketch made to place a single hole isn't a sketch of the user's: Fusion shows none
+  let placed = crate::dialogs::placement_sketches(&app.s);
   let sketches: Vec<(FeatureId, String)> = app
     .s
     .design
     .features
     .iter()
-    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+    .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && !placed.contains(&f.id))
     .map(|f| (f.id, f.name.clone()))
     .collect();
   if sketches.is_empty() {

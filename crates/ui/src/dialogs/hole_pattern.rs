@@ -9,9 +9,11 @@ use fox_engine::model::{BodyId, FeatureId};
 use fox_engine::{Sel, Session};
 use serde_json::{Value, json};
 
+use super::icon_row::{Choice, choice as ic, greyed, icon_row};
 use super::manip::mm;
 use super::{Dialog, Kind, axis_label, axis_vec, is_planar, sel_chip, value_edit_w};
 use crate::handles::Handle;
+use crate::icons::Icon;
 use crate::{App, theme};
 
 /// The dialogs' extra values (kept in [`super::solid::Extra`]).
@@ -29,6 +31,8 @@ pub(super) struct State {
   /// Hole: the drill point's tip angle; flat ("" = angled).
   tip: String,
   flat: bool,
+  /// Hole: the Shape Settings group is folded up.
+  shape_closed: bool,
   /// Pattern type: "bodies" ("") or "components".
   pub(super) kind: &'static str,
   /// Directions picked as edges: the edge and its unit direction.
@@ -55,7 +59,21 @@ const SIZES: [(&str, f64, f64, f64); 11] = [
   ("M20", 22.0, 17.5, 2.5),
 ];
 
-const TAPS: [(&str, &str); 3] = [("simple", "Simple"), ("clearance", "Clearance"), ("tapped", "Tapped")];
+/// Fusion's Hole Placement, Hole Type, Hole Tap Type and Drill Point, as rows of icons.
+const PLACEMENTS: [Choice; 2] =
+  [ic("single", Icon::HoleSingle, "Single Hole"), ic("points", Icon::HoleAtPoints, "Multiple Holes")];
+const HOLES: [Choice; 3] = [
+  ic("simple", Icon::HoleSimple, "Simple"),
+  ic("counterbore", Icon::HoleCounterbore, "Counterbore"),
+  ic("countersink", Icon::HoleCountersink, "Countersink"),
+];
+const TAPS: [Choice; 4] = [
+  ic("simple", Icon::TapSimple, "Simple"),
+  ic("clearance", Icon::TapClearance, "Clearance"),
+  ic("tapped", Icon::TapTapped, "Tapped"),
+  greyed("taper", Icon::TapTaper, "Taper Tapped"),
+];
+const DRILL_POINTS: [Choice; 2] = [ic("angle", Icon::DrillAngle, "Angle"), ic("flat", Icon::DrillFlat, "Flat")];
 
 /// Fusion's pattern types: key, label and whether Fox can pattern them yet.
 const PATTERN_TYPES: [(&str, &str, bool); 4] = [
@@ -130,6 +148,19 @@ pub(super) fn free_points(s: &Session, sketch: FeatureId) -> usize {
   let Some(r) = s.model.sketches.get(&sketch) else { return 0 };
   let used: Vec<_> = r.sketch.curves.iter().flat_map(|c| r.sketch.curve_points(c.id)).collect();
   r.sketch.points.iter().filter(|p| p.id != fox_engine::sketch::ORIGIN && !used.contains(&p.id)).count()
+}
+
+/// Sketches made to place a single hole on a face (Fusion shows no sketch for those): the
+/// browser leaves them out.
+pub(crate) fn placement_sketches(s: &Session) -> Vec<FeatureId> {
+  s.design
+    .features
+    .iter()
+    .filter_map(|f| match &f.kind {
+      fox_engine::model::FeatureKind::Hole { sketch, placed: true, .. } => Some(*sketch),
+      _ => None,
+    })
+    .collect()
 }
 
 impl Dialog {
@@ -257,22 +288,21 @@ impl Dialog {
     Some(p)
   }
 
-  /// Placement, the picks, Hole / Tap Type, Drill Point, Extents and the hole diagram.
+  /// Fusion's Hole dialog: Placement (icons), Face and the two Reference rows (or the sketch and
+  /// its points), then the Shape Settings group: Extents, Hole Type, Hole Tap Type, Drill Point
+  /// and the hole diagram with its value boxes.
   pub(super) fn hole_fields(&mut self, app: &mut App, ui: &mut egui::Ui, dirty: &mut bool) {
     let accent = self.accent();
     ui.label("Placement");
-    let mut single = self.solid.hp.single;
-    ui.horizontal(|ui| {
-      ui.radio_value(&mut single, true, "Single hole");
-      ui.radio_value(&mut single, false, "At points");
-    });
+    let mut placement: &'static str = if self.solid.hp.single { "single" } else { "points" };
+    let switched = icon_row(ui, &mut placement, &PLACEMENTS, "");
     ui.end_row();
-    if single != self.solid.hp.single {
+    if switched {
       self.withdraw(&mut app.s);
-      self.solid.hp.single = single;
+      self.solid.hp.single = placement == "single";
       *dirty = true;
     }
-    if single {
+    if self.solid.hp.single {
       ui.label("Face");
       let text = match self.faces.first().and_then(|f| ref_of(f, "body")) {
         Some(b) => format!("Face of {}", app.s.body_name(BodyId(b))),
@@ -280,16 +310,18 @@ impl Dialog {
       };
       sel_chip(ui, accent, &text, !self.faces.is_empty()).on_hover_text("Click a planar face where the hole goes");
       ui.end_row();
-      ui.label("References");
-      let n = self.edges.len();
-      let text = if n == 0 { "Select".into() } else { format!("{n} edge{}", if n == 1 { "" } else { "s" }) };
-      sel_chip(ui, accent, &text, n > 0).on_hover_text("Up to two straight edges to dimension the hole from");
-      ui.end_row();
-      for i in 0..self.edges.len().min(2) {
-        ui.label(format!("  Offset {}", i + 1));
-        if ui.add(egui::TextEdit::singleline(&mut self.solid.hp.offsets[i]).desired_width(140.0)).changed() {
-          *dirty = true;
-        }
+      // two references, each a straight edge the hole is held at a distance from
+      for i in 0..2 {
+        ui.label(format!("Reference {}", i + 1));
+        ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 4.0;
+          let has = i < self.edges.len();
+          sel_chip(ui, accent, if has { "1 Edge" } else { "Select" }, has)
+            .on_hover_text("A straight edge to dimension the hole from");
+          if has && ui.add(egui::TextEdit::singleline(&mut self.solid.hp.offsets[i]).desired_width(60.0)).changed() {
+            *dirty = true;
+          }
+        });
         ui.end_row();
       }
     } else {
@@ -301,12 +333,42 @@ impl Dialog {
       ui.label(RichText::new(format!("{n} sketch point{}", if n == 1 { "" } else { "s" })).color(theme::MUTED));
       ui.end_row();
     }
-    const HOLES: [(&str, &str); 3] =
-      [("simple", "Simple"), ("counterbore", "Counterbore"), ("countersink", "Countersink")];
-    Self::choose(ui, "Hole type", "hole", &mut self.choice, &HOLES, dirty);
+    // the Shape Settings group, folded up by its header
+    let open = !self.solid.hp.shape_closed;
+    ui.label("");
+    let header = ui.horizontal(|ui| {
+      ui.spacing_mut().item_spacing.x = 4.0;
+      let (r, resp) = ui.allocate_exact_size(vec2(12.0, 12.0), egui::Sense::click());
+      let c = r.center();
+      let col = theme::GROUP_LABEL;
+      let tri = if open {
+        vec![pos2(c.x - 4.0, c.y - 2.0), pos2(c.x + 4.0, c.y - 2.0), pos2(c.x, c.y + 3.0)]
+      } else {
+        vec![pos2(c.x - 2.0, c.y - 4.0), pos2(c.x + 3.0, c.y), pos2(c.x - 2.0, c.y + 4.0)]
+      };
+      ui.painter().add(egui::Shape::convex_polygon(tri, col, Stroke::NONE));
+      let label =
+        ui.add(egui::Label::new(RichText::new("Shape Settings").color(col).strong()).sense(egui::Sense::click()));
+      resp.clicked() || label.clicked()
+    });
+    ui.end_row();
+    if header.inner {
+      self.solid.hp.shape_closed = open;
+    }
+    if !open {
+      return;
+    }
+    let mut extent = if self.flag { "all" } else { "distance" };
+    Self::choose(ui, "Extents", "holeextent", &mut extent, &[("distance", "Distance"), ("all", "All")], dirty);
+    self.flag = extent == "all";
+    ui.label("Hole Type");
+    *dirty |= icon_row(ui, &mut self.choice, &HOLES, "");
+    ui.end_row();
+    ui.label("Hole Tap Type");
     let tap_before = self.solid.hp.tap;
     let mut tap = if tap_before.is_empty() { "simple" } else { tap_before };
-    Self::choose(ui, "Tap type", "tap", &mut tap, &TAPS, dirty);
+    *dirty |= icon_row(ui, &mut tap, &TAPS, "needs engine support");
+    ui.end_row();
     self.solid.hp.tap = tap;
     if tap != "simple" {
       ui.label("Size");
@@ -333,21 +395,16 @@ impl Dialog {
         self.a = mm(self.unit, if tap == "tapped" { *drill } else { *clear });
       }
     }
-    let mut extent = if self.flag { "all" } else { "distance" };
-    Self::choose(ui, "Extents", "holeextent", &mut extent, &[("distance", "Distance"), ("all", "All")], dirty);
-    self.flag = extent == "all";
     if !self.flag {
-      ui.label("Drill point");
-      ui.horizontal(|ui| {
-        *dirty |= ui.radio_value(&mut self.solid.hp.flat, false, "Angle").changed();
-        *dirty |= ui.radio_value(&mut self.solid.hp.flat, true, "Flat").changed();
-      });
+      ui.label("Drill Point");
+      let mut point: &'static str = if self.solid.hp.flat { "flat" } else { "angle" };
+      *dirty |= icon_row(ui, &mut point, &DRILL_POINTS, "");
+      self.solid.hp.flat = point == "flat";
       ui.end_row();
     }
     ui.label("");
     self.hole_diagram(ui, dirty);
     ui.end_row();
-    Self::check(ui, "Flip direction", &mut self.flip, dirty);
   }
 
   /// Fusion's hole diagram: a section through the hole with its value boxes on the dimensions
@@ -1004,5 +1061,25 @@ mod tests {
     assert!(d.applied && d.error.is_none(), "{:?} {:?}", d.error, d.command());
     assert_eq!(d.handles(&app.s).len(), 4, "a distance arrow and a quantity dot per direction");
     assert_eq!(app.s.model.bodies.len(), 6);
+  }
+
+  #[test]
+  fn a_single_holes_sketch_stays_out_of_the_browser() {
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 60, "depth": 40, "height": 10}));
+    let body = s.model.bodies[0].id.0;
+    let top = s.model.bodies[0].faces().iter().find(|f| f.normal.z > 0.9).unwrap().id;
+    let r =
+      run(&mut s, "hole", json!({"face": {"body": body, "face": top}, "at": [20, 20, 10], "diameter": 4, "depth": 5}));
+    let placed = FeatureId(r["sketch"].as_u64().unwrap() as u32);
+    assert_eq!(placement_sketches(&s), vec![placed]);
+    // holes at a sketch's own points keep their sketch in the browser
+    run(&mut s, "sketch.create", json!({"plane": {"body": body, "face": top}}));
+    run(&mut s, "sketch.point", json!({"at": [40, 20]}));
+    let own = s.edit_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "hole", json!({"sketch": own.0, "diameter": 4, "depth": 5}));
+    assert_eq!(placement_sketches(&s), vec![placed]);
+    assert!(!State::default().shape_closed, "Shape Settings starts open");
   }
 }

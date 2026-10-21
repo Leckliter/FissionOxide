@@ -354,6 +354,16 @@ impl Dialog {
     true
   }
 
+  /// The field feature handle `i`'s floating value box (see [`crate::value_box`]) edits: Shell's
+  /// inside (or only) thickness, and its outside one for Both.
+  pub fn handle_field(&mut self, i: usize) -> Option<&mut String> {
+    match (self.kind, i) {
+      (Kind::Shell, 0) => Some(&mut self.radius),
+      (Kind::Shell, 1) => Some(&mut self.solid.thickness_out),
+      _ => None,
+    }
+  }
+
   /// Does Sketch Offset follow the cursor (curves picked, not placed by a click yet)?
   pub(crate) fn follows_cursor(&self) -> bool {
     self.kind == Kind::SkOffset && self.follow && !self.curves.is_empty() && self.editing.is_none()

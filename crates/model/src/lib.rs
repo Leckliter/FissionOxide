@@ -1070,6 +1070,10 @@ pub enum FeatureKind {
     head_angle: String,
     #[serde(default)]
     flip: bool,
+    /// The sketch was made to place this hole (Fusion's single hole on a face): the browser
+    /// doesn't list it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    placed: bool,
   },
   /// Splits bodies in two along a plane.
   SplitBody {

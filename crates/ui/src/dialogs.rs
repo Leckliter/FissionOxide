@@ -15,10 +15,12 @@ use crate::{App, panels};
 
 mod extrude;
 mod hole_pattern;
+mod icon_row;
 mod live;
 mod manip;
 mod move_copy;
 mod pieces;
+pub(crate) use hole_pattern::placement_sketches;
 pub(crate) use move_copy::Paste;
 mod newcomp;
 mod solid;
@@ -123,7 +125,7 @@ impl Kind {
       Kind::CircPattern => "CIRCULAR PATTERN",
       Kind::Mirror => "MIRROR",
       Kind::Combine => "COMBINE",
-      Kind::Move => "MOVE / ROTATE",
+      Kind::Move => "MOVE/COPY",
       Kind::OffsetPlane => "OFFSET PLANE",
       Kind::Inspect => "MEASURE",
       Kind::Appearance => "APPEARANCE",
@@ -679,6 +681,9 @@ impl Dialog {
     // Appearance (A) opens Fusion's panel of swatches rather than its command form
     let kind = match kind {
       Kind::Form(f) if std::ptr::eq(f, &crate::forms::APPEARANCE) => Kind::Appearance,
+      // Press Pull (Q) is the command for what is picked: Extrude on a profile, Fillet on an edge,
+      // Offset Face on a face
+      Kind::PressPull => press_pull_kind(&app.s),
       k => k,
     };
     let mut d = Dialog::blank(kind);
@@ -778,7 +783,10 @@ impl Dialog {
         d.op = "cut";
         d.hole_defaults(s);
       }
-      Kind::PressPull => d.distance = "2 mm".into(),
+      Kind::PressPull => {
+        d.distance = "2 mm".into();
+        d.choice = "automatic";
+      }
       Kind::Draft => {
         d.angle = "3 deg".into();
         d.plane = json!("xy");
@@ -1341,7 +1349,10 @@ impl Dialog {
       Kind::SkChamferAngle => {
         ("sketch.chamfer", json!({"curves": self.curves, "distance": self.distance, "angle": self.angle}))
       }
-      Kind::SkOffset => ("sketch.offset", json!({"curves": self.curves, "distance": self.distance})),
+      Kind::SkOffset => (
+        "sketch.offset",
+        json!({"curves": self.curves, "distance": self.distance, "both_sides": self.extent == "symmetric"}),
+      ),
       Kind::TraceImage => ("sketch.trace", self.trace.as_ref()?.params()?),
       Kind::SkMirror => ("sketch.mirror", json!({"curves": self.curves, "line": self.line?})),
       Kind::SkCircPattern => (
@@ -1466,7 +1477,9 @@ impl Dialog {
         )
       }
       Kind::Fillet => ("fillet", self.fillet_params()),
-      Kind::Chamfer => ("chamfer", self.chamfer_params(json!({"edges": self.edges}), false)),
+      Kind::Chamfer => {
+        ("chamfer", self.chamfer_params(json!({"edges": self.edges, "tangent_chain": !self.solid.no_chain}), false))
+      }
       Kind::Shell => ("shell", self.shell_params()),
       Kind::Box => (
         "box",
@@ -1845,13 +1858,7 @@ impl Dialog {
         }
       }
       Kind::Chamfer if !self.applied => {
-        let e: Vec<Value> = s
-          .selection
-          .iter()
-          .filter_map(
-            |x| if let Sel::Edge { body, edge } = x { Some(json!({"body": body.0, "edge": edge})) } else { None },
-          )
-          .collect();
+        let e = self.chamfer_picks(s);
         if e != self.edges {
           self.edges = e;
         }
@@ -1931,7 +1938,7 @@ impl Dialog {
       | Kind::SkMirror
       | Kind::SkCircPattern
       | Kind::SkRectPattern => {
-        let mut c = sel_curves(s);
+        let mut c = if self.kind == Kind::SkOffset { self.offset_picks(s) } else { sel_curves(s) };
         if self.kind == Kind::SkMirror {
           c.retain(|x| Some(*x) != self.line);
         }
@@ -2007,7 +2014,12 @@ impl Dialog {
           }
         };
     let mut cancel = false;
-    let base = self.move_title().filter(|_| self.kind == Kind::Move).unwrap_or(self.kind.title());
+    let base = match self.kind {
+      Kind::Move => self.move_title().unwrap_or(self.kind.title()),
+      // Press Pull on a face is Fusion's Offset Face
+      Kind::PressPull if !self.faces.is_empty() => "OFFSET FACE",
+      _ => self.kind.title(),
+    };
     let title = if self.editing.is_some() { format!("EDIT {base}") } else { base.to_string() };
     // FILLET's selection table needs the extra width, as in Fusion
     let width = if self.kind == Kind::Fillet { 360.0 } else { 300.0 };
@@ -2246,17 +2258,7 @@ impl Dialog {
         self.fillet_rows(app, ui, creating);
         self.setback_row(ui, creating);
       }
-      Kind::Chamfer => {
-        let n = self.edges.len();
-        ui.label("Edges");
-        if creating {
-          sel_chip(ui, self.accent(), &if n == 0 { "Select".to_string() } else { format!("{n} selected") }, n > 0);
-        } else {
-          ui.label(format!("{n} (unchanged)"));
-        }
-        ui.end_row();
-        self.chamfer_rows(ui, creating);
-      }
+      Kind::Chamfer => self.chamfer_rows(app, ui, creating),
       Kind::Shell => self.shell_rows(ui, creating),
       Kind::Box | Kind::Cylinder | Kind::Sphere | Kind::Torus => {
         ui.label("Plane");
@@ -2653,6 +2655,7 @@ impl Dialog {
         ui.label("Faces");
         chip(ui, self.faces.len(), "selected");
         ui.end_row();
+        self.offset_type_row(ui);
         Self::field(ui, "Distance", &mut self.distance, dirty);
       }
       Kind::Draft => {
@@ -3092,12 +3095,36 @@ impl Dialog {
         ui.label("Curves");
         chip(ui, self.curves.len(), "selected");
         ui.end_row();
+        ui.label("Chain Selection");
+        let mut chain = !self.solid.no_chain;
+        if ui
+          .checkbox(&mut chain, "")
+          .on_hover_text("Picking a curve picks the curves joined to it end to end")
+          .changed()
+        {
+          self.solid.no_chain = !chain;
+          let c = self.offset_picks(&app.s);
+          if !c.is_empty() && c != self.curves {
+            self.curves = c;
+            *dirty = true;
+          }
+        }
+        ui.end_row();
+        const DIRECTIONS: [(&str, &str); 2] = [("one_side", "One Side"), ("symmetric", "Symmetric")];
+        Self::choose(ui, "Direction", "offset-dir", &mut self.extent, &DIRECTIONS, dirty);
         let before = self.distance.clone();
-        Self::field(ui, "Offset position", &mut self.distance, dirty);
+        Self::field(ui, "Offset Position", &mut self.distance, dirty);
         if self.distance != before {
           // a typed distance holds: the offset stops following the cursor
           self.follow = false;
         }
+        ui.label("Flip");
+        if ui.button("⇄").on_hover_text("Offset to the other side of the curves").clicked() {
+          self.distance = negated(&self.distance);
+          self.follow = false;
+          *dirty = true;
+        }
+        ui.end_row();
       }
       Kind::SkMirror => {
         ui.label("Objects");
@@ -4400,6 +4427,95 @@ fn sel_only_bodies(s: &Session) -> Vec<u32> {
 
 fn sel_curves(s: &Session) -> Vec<u32> {
   s.selection.iter().filter_map(|x| if let Sel::SketchCurve { curve, .. } = x { Some(curve.0) } else { None }).collect()
+}
+
+/// The command Press Pull (Q) runs for what is picked, as in Fusion: Extrude on a sketch
+/// profile, Fillet on an edge (with no face picked), else Offset Face.
+fn press_pull_kind(s: &Session) -> Kind {
+  if s.selection.iter().any(|x| matches!(x, Sel::Profile { .. })) {
+    Kind::Extrude
+  } else if s.selection.iter().any(|x| matches!(x, Sel::Edge { .. }))
+    && !s.selection.iter().any(|x| matches!(x, Sel::Face { .. }))
+  {
+    Kind::Fillet
+  } else {
+    Kind::PressPull
+  }
+}
+
+/// `edges` (`{body, edge}`) with the edges that continue each of them smoothly, as Fusion's
+/// Tangent Chain picks them.
+fn with_tangent_chain(s: &Session, edges: &[Value]) -> Vec<Value> {
+  let mut out = edges.to_vec();
+  let mut i = 0;
+  while i < out.len() {
+    let get = |k: &str| out[i].get(k).and_then(Value::as_u64).map(|v| v as u32);
+    if let (Some(b), Some(e)) = (get("body"), get("edge"))
+      && let Some(body) = s.model.body(BodyId(b))
+    {
+      for n in fox_engine::tangent_neighbours(body.edges(), e) {
+        let v = json!({"body": b, "edge": n});
+        if !out.contains(&v) {
+          out.push(v);
+        }
+      }
+    }
+    i += 1;
+  }
+  out
+}
+
+/// The two ends of a sketch curve (none for a circle or a closed spline).
+fn curve_ends(c: &fox_engine::sketch::Curve) -> Vec<fox_engine::sketch::PointId> {
+  use fox_engine::sketch::CurveKind as K;
+  match &c.kind {
+    K::Line { a, b } => vec![*a, *b],
+    K::Arc { start, end, .. } => vec![*start, *end],
+    K::Spline { points, .. } if points.len() >= 2 && points.first() != points.last() => {
+      vec![points[0], points[points.len() - 1]]
+    }
+    _ => Vec::new(),
+  }
+}
+
+/// `curves` with the curves of `sketch` joined to them end to end, as Fusion's Chain Selection
+/// picks them: a chain runs on through a point where exactly two curves meet.
+fn with_curve_chain(sketch: &fox_engine::sketch::Sketch, curves: &[u32]) -> Vec<u32> {
+  use fox_engine::sketch::CurveId;
+  let mut out = curves.to_vec();
+  let mut i = 0;
+  while i < out.len() {
+    let Some(c) = sketch.curves.iter().find(|c| c.id == CurveId(out[i])) else {
+      i += 1;
+      continue;
+    };
+    for end in curve_ends(c) {
+      let at: Vec<&fox_engine::sketch::Curve> =
+        sketch.curves.iter().filter(|x| !x.construction && curve_ends(x).contains(&end)).collect();
+      if let [a, b] = at.as_slice() {
+        let other = if a.id == c.id { b } else { a };
+        if !out.contains(&other.id.0) {
+          out.push(other.id.0);
+        }
+      }
+    }
+    i += 1;
+  }
+  out
+}
+
+/// `expr` with its sign flipped: "2 mm" ↔ "-2 mm", anything else wrapped as "-(…)".
+fn negated(expr: &str) -> String {
+  let t = expr.trim();
+  if let Some(rest) = t.strip_prefix('-') {
+    let rest = rest.trim();
+    return match rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+      Some(inner) => inner.to_string(),
+      None => rest.to_string(),
+    };
+  }
+  let simple = t.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == ' ');
+  if simple { format!("-{t}") } else { format!("-({t})") }
 }
 
 /// Loft sections from the selected profiles, one per sketch, in pick order.
@@ -5911,5 +6027,117 @@ mod tests {
     let mut d = form(&mut s, &SK_CLEANUP, vec![], &[]);
     apply(&mut s, &mut d);
     assert_eq!(s.design.sketch(sk).unwrap().points.len(), points - 1);
+  }
+
+  #[test]
+  fn press_pull_opens_the_command_for_the_pick() {
+    // a face: Offset Face (the Press Pull dialog); an edge: Fillet; a profile: Extrude
+    let mut app = App::with_session(Session::default());
+    app.s.execute("box", &json!({"width": 20, "depth": 20, "height": 10})).unwrap();
+    let b = app.s.model.bodies[0].id;
+    let top = face(&app.s, 0, |f| f.normal.z > 0.9)["face"].as_u64().unwrap() as u32;
+    app.s.selection = vec![Sel::Face { body: b, face: top }];
+    let d = Dialog::open(&mut app, Kind::PressPull);
+    assert_eq!((d.kind, d.faces.len(), d.choice), (Kind::PressPull, 1, "automatic"));
+    assert_eq!(d.command().unwrap().0, "press_pull");
+    let mut d = d;
+    d.choice = "new";
+    assert_eq!(d.command().unwrap().0, "press_pull", "New Offset adds an Offset Face feature too");
+    let e = app.s.model.bodies[0].edges()[0].id;
+    app.s.selection = vec![Sel::Edge { body: b, edge: e }];
+    assert_eq!(Dialog::open(&mut app, Kind::PressPull).kind, Kind::Fillet);
+    app.s.execute("sketch.create", &json!({"plane": "xy"})).unwrap();
+    app.s.execute("sketch.rect", &json!({"corner1": [30, 30], "corner2": [40, 40]})).unwrap();
+    let sk = app.s.edit_sketch.unwrap();
+    app.s.execute("sketch.finish", &json!({})).unwrap();
+    app.s.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    assert_eq!(Dialog::open(&mut app, Kind::PressPull).kind, Kind::Extrude);
+    assert_eq!(press_pull_kind(&Session::default()), Kind::PressPull);
+  }
+
+  #[test]
+  fn chamfer_picks_the_tangent_chain() {
+    // a box with one vertical edge rounded: a top edge meeting the round chains on round it
+    let mut s = Session::default();
+    run(&mut s, "box", json!({"width": 20, "depth": 20, "height": 20}));
+    // the box is centred on the origin: its corner edge is at (10, 10)
+    let corner = edge(&s, 0, |e| e.mid.x > 9.9 && e.mid.y > 9.9);
+    run(&mut s, "fillet", json!({"edges": [corner], "radius": 5}));
+    let b = s.model.bodies[0].id;
+    let top_right = s.model.bodies[0]
+      .edges()
+      .iter()
+      .find(|e| e.mid.z > 19.9 && e.mid.x > 9.9 && e.kind == fox_engine::kernel::CurveKind::Line)
+      .unwrap()
+      .id;
+    s.selection = vec![Sel::Edge { body: b, edge: top_right }];
+    let mut d = Dialog::blank(Kind::Chamfer);
+    d.radius = "1 mm".into();
+    d.sync_selection(&s);
+    assert_eq!(d.edges.len(), 3, "the line, the arc and the line past it: {:?}", d.edges);
+    let (cmd, p) = d.command().unwrap();
+    assert_eq!((cmd, p["tangent_chain"].as_bool()), ("chamfer", Some(true)));
+    apply(&mut s, &mut d);
+    d.unpreview(&mut s);
+    // Tangent Chain off: just the pick (the withdrawn preview put all three back in the selection)
+    d.solid.no_chain = true;
+    s.selection = vec![Sel::Edge { body: b, edge: top_right }];
+    d.sync_selection(&s);
+    assert_eq!(d.edges.len(), 1);
+    assert_eq!(d.command().unwrap().1["tangent_chain"], json!(false));
+  }
+
+  #[test]
+  fn sketch_offset_chains_curves_and_flips() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "xy"}));
+    let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10], [0, 10]]}));
+    let chain: Vec<u32> = r["curves"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [30, 0]]}));
+    let sk = s.edit_sketch.unwrap();
+    s.selection = vec![Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(chain[1]) }];
+    let mut d = Dialog::blank(Kind::SkOffset);
+    d.distance = "1 mm".into();
+    d.sync_selection(&s);
+    let mut got = d.curves.clone();
+    got.sort();
+    let mut want = chain.clone();
+    want.sort();
+    assert_eq!(got, want, "Chain Selection picks the curves joined end to end");
+    assert_eq!(d.command().unwrap().1["both_sides"], json!(false));
+    apply(&mut s, &mut d);
+    d.unpreview(&mut s);
+    // Direction Symmetric offsets both sides; Flip turns the distance round
+    d.extent = "symmetric";
+    assert_eq!(d.command().unwrap().1["both_sides"], json!(true));
+    d.distance = negated(&d.distance);
+    assert_eq!(d.distance, "-1 mm");
+    assert_eq!(negated(&d.distance), "1 mm");
+    assert_eq!(negated("a + b"), "-(a + b)");
+    assert_eq!(negated("-(a + b)"), "a + b");
+    // Chain Selection off: the pick alone
+    d.solid.no_chain = true;
+    s.selection = vec![Sel::SketchCurve { sketch: sk, curve: fox_engine::sketch::CurveId(chain[1]) }];
+    assert_eq!(d.offset_picks(&s), vec![chain[1]]);
+  }
+
+  #[test]
+  fn shell_type_and_floating_boxes_edit_the_fields() {
+    let mut d = Dialog::blank(Kind::Shell);
+    d.radius = "2 mm".into();
+    assert_eq!(d.shell_params()["corners"], json!("sharp"));
+    d.flag = true;
+    assert_eq!(d.shell_params()["corners"], json!("round"));
+    // Shell's handles edit the inside, then the outside thickness
+    *d.handle_field(0).unwrap() = "3 mm".into();
+    d.solid.thickness_out = "1 mm".into();
+    *d.handle_field(1).unwrap() = "4 mm".into();
+    assert_eq!((d.radius.as_str(), d.solid.thickness_out.as_str()), ("3 mm", "4 mm"));
+    assert!(d.handle_field(2).is_none());
+    // the drag arrows' boxes
+    let mut c = Dialog::blank(Kind::Chamfer);
+    *c.value_box_field().unwrap() = "5 mm".into();
+    assert_eq!(c.radius, "5 mm");
+    assert!(Dialog::blank(Kind::Box).value_box_field().is_none());
   }
 }
