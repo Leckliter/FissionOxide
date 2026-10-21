@@ -17,8 +17,6 @@
 //! 6. A node goes at the middle of every edge (straight-sided quadratic tetrahedra), and the
 //!    boundary triangles keep the CAD face they lie on, for loads and constraints.
 
-
-
 use serde::{Deserialize, Serialize};
 
 use crate::delaunay::{Delaunay, FACES};
@@ -416,7 +414,10 @@ pub fn mesh_solid(surface: &SurfaceMesh, opts: &MeshOptions) -> Result<(TetMesh,
     return Err("the body has no surface to mesh".into());
   }
   if !surface.is_closed() {
-    return Err(format!("the body's surface isn't closed ({} open edges): only solids can be meshed", surface.open_edges()));
+    return Err(format!(
+      "the body's surface isn't closed ({} open edges): only solids can be meshed",
+      surface.open_edges()
+    ));
   }
   if !(opts.size > 0.0) || !opts.size.is_finite() {
     return Err("the mesh size must be positive".into());
@@ -640,7 +641,6 @@ pub fn mesh_solid(surface: &SurfaceMesh, opts: &MeshOptions) -> Result<(TetMesh,
   stats.unrecovered = unrecovered;
   Ok((mesh, stats))
 }
-
 
 /// Improves the worst tetrahedra in place: 2–3 and 3–2 flips where they raise the smallest
 /// shape quality around them, then interior points moved towards the middle of their neighbours

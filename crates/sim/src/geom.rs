@@ -60,8 +60,9 @@ pub fn tet_volume(a: V3, b: V3, c: V3, d: V3) -> f64 {
 /// the root-mean-square edge length, normalised).
 pub fn tet_quality(a: V3, b: V3, c: V3, d: V3) -> f64 {
   let v = tet_volume(a, b, c, d);
-  let l2 = [(a, b), (a, c), (a, d), (b, c), (b, d), (c, d)].iter().map(|(p, q)| dot(sub(*p, *q), sub(*p, *q))).sum::<f64>()
-    / 6.0;
+  let l2 =
+    [(a, b), (a, c), (a, d), (b, c), (b, d), (c, d)].iter().map(|(p, q)| dot(sub(*p, *q), sub(*p, *q))).sum::<f64>()
+      / 6.0;
   if l2 <= 0.0 { 0.0 } else { 6.0 * std::f64::consts::SQRT_2 * v / (l2 * l2.sqrt()) }
 }
 
@@ -339,5 +340,7 @@ pub fn column(m: &[[f64; 3]; 3], k: usize) -> V3 {
 
 /// Hash maps and sets with a fixed hasher: iteration order (and so every mesh) is the same
 /// from run to run.
-pub type Map<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>>;
-pub type Set<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>>;
+pub type Map<K, V> =
+  std::collections::HashMap<K, V, std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>>;
+pub type Set<K> =
+  std::collections::HashSet<K, std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>>;
