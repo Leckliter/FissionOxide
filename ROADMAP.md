@@ -34,7 +34,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 |----------|--------------------------------------------------------------------------------|
 | Formats  | ACIS SAT/SMT, Parasolid (x_t), DWG, FBX: need closed-source or licensed SDKs   |
 | Formats  | STEP: nested sub-assemblies and instanced parts kept as such (flattened into components today); colours per face |
-| Data     | A hub server (sharing works through sync folders today); real-time presence and locking of designs being edited |
 
 ## Later
 

@@ -136,7 +136,8 @@ change a parameter and watch the whole history rebuild.
 - **Data panel with version history.** Every save is a new version in a project, never an
   overwrite: open or compare any old version (also as a coloured diff in the viewport),
   promote it back to latest, mark milestones, comment on versions, browse recent designs,
-  search, see the activity feed, restore from the trash, share the hub through a sync folder. See
+  search, see the activity feed, restore from the trash, share the hub through a sync folder or
+  a self-hosted hub server with live presence and edit locks. See
   [Data panel](#data-panel-projects-and-versions).
 - **Trace images.** Turn a photo, logo or scan into clean sketch geometry: Trace Image (sketch
   Create or Insert menu, or drop/open a picture) previews the outlines over the image as you
@@ -461,6 +462,47 @@ the conflict copies sync tools make (`hub (conflicted copy).json`, `hub.sync-con
 …), are merged into `hub.json` the next time the hub is opened. A version whose index entry
 arrived before its file says it is still syncing.
 
+**Edit locks and presence.** Select a design to see who holds its edit lock and who has it open
+right now (👥). **Lock** takes the lock: until you **Release** it nobody else can save, promote,
+delete versions of or trash the design (comments still work); someone who must go on can
+**Steal lock**, which the activity feed records. A locked design shows 🔒 and its holder in the
+lists. On a local or sync-folder hub a lock belongs to your user name (`$FOX_USER`, else your
+login name); on a hub server, to your token's user. The design open in the app is announced to the hub every 30 seconds; on a local or
+sync-folder hub that is a small file per app in `presence/`, gone after 90 seconds without a
+heartbeat. From scripts: `hub.lock` (`{"steal": true}` to steal), `hub.unlock`, `hub.presence`,
+`hub.here`.
+
+### Hub server
+
+`fox-hub-server` serves one hub to everyone with a token, over HTTP and a WebSocket: the same
+projects, folders, designs, versions, comments, activity, trash and locks, with presence and
+changes pushed to every client as they happen. It is one self-contained binary:
+
+```sh
+cargo run --release -p fox-hub-server -- --root /srv/fox-hub --listen 0.0.0.0:7474 \
+  --token alice=$(openssl rand -hex 16) --token bob=$(openssl rand -hex 16)
+```
+
+- `--root DIR` is an ordinary hub directory (an existing one works); `--listen ADDR` defaults
+  to `127.0.0.1:7474`. `$FOX_HUB_ROOT` and `$FOX_HUB_LISTEN` work too.
+- Tokens: `--token USER=TOKEN` (repeatable), `$FOX_HUB_TOKENS` (`alice=…,bob=…`) or a tokens
+  file (`--tokens FILE`, default `DIR/tokens.txt`, one `user=token` per line). With none the
+  server makes a token for `admin`, prints it and keeps it in `DIR/tokens.txt`. What each
+  request does (versions, comments, locks, activity) is recorded as its token's user.
+  `--open` serves without tokens, for a trusted network only.
+- It speaks plain HTTP: for `https://` and `wss://` put it behind a TLS proxy, e.g. Caddy with
+  `hub.example.com { reverse_proxy 127.0.0.1:7474 }`.
+- The hub directory keeps working as one: the CLI or a sync folder writing to it beside the
+  server is picked up within two seconds and pushed to the clients.
+
+To use it from the app, open the data panel's **Hub ▾** menu, **Connect to a hub server…**, and
+give the URL and your token. The token is remembered for that server and the app reconnects to
+it at the next start, until **Use the local hub** goes back. The panel shows the server and
+whether the live connection is up. From the CLI, add
+`--hub https://hub.example.com --token TOKEN` to any subcommand (or set `FOX_HUB_TOKEN`, or put
+the token in the URL: `https://TOKEN@hub.example.com`); `hub connect '{"url": …, "token": …}'`
+remembers the token. Version files are cached locally once fetched.
+
 ## Manufacture (CAM)
 
 Switch the workspace to **Manufacture**. **New Setup** puts stock around the part (side and top
@@ -564,7 +606,7 @@ fissionoxide-cli formats         # every file format and what FissionOxide can d
 fissionoxide-cli convert part.step part.3mf
 fissionoxide-cli inspect part.f3d
 
-# the data hub (add --hub DIR to use another hub)
+# the data hub (add --hub DIR, or --hub https://HOST --token T for a hub server)
 fissionoxide-cli hub save '{"description": "first cut"}' --open bracket.fox
 fissionoxide-cli hub list
 fissionoxide-cli hub versions '{"item": "i3"}'
@@ -572,6 +614,8 @@ fissionoxide-cli hub compare '{"item": "i3", "a": 1}'
 fissionoxide-cli hub comment '{"item": "i3", "version": 2, "text": "wall too thin at the boss"}'
 fissionoxide-cli hub comments '{"item": "i3"}'
 fissionoxide-cli hub download '{"item": "i3", "version": 2, "path": "bracket-v2.step"}'
+fissionoxide-cli hub lock '{"item": "i3"}' --hub https://hub.example.com --token T0K3N
+fissionoxide-cli hub presence --hub https://hub.example.com --token T0K3N
 ```
 
 ### AI agents (MCP)
@@ -701,7 +745,8 @@ on again, new features follow it. The design note is [docs/CONFIGURATIONS.md](do
 | `fox-model`         | The design document, feature timeline, regeneration and references     |
 | `fox-exchange`      | Mesh formats, DXF, SVG, `.foxz` archives, Fusion archive inspection    |
 | `fox-trace`         | Image tracing: pixels to closed lines, arcs, circles and Béziers       |
-| `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash; safe sharing through sync folders |
+| `fox-store`         | The data hub: projects, folders, items, versions, comments, activity, trash, edit locks, presence; safe sharing through sync folders; the hub server client |
+| `fox-hub-server`    | Self-hostable hub server (HTTP + WebSocket, token auth)                |
 | `fox-render`        | CPU rasterizer with depth and picking buffers (same images in the CLI) |
 | `fox-engine`        | Session, undo/redo, the JSON command set, scene building               |
 | `fox-ui`            | The egui desktop UI                                                    |
