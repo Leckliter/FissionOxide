@@ -109,9 +109,14 @@ change a parameter and watch the whole history rebuild.
   picked in the viewport by their glyphs, Select All and Invert. Measure between two bodies, faces or edges (distance, closest points, deltas, angle,
   drawn in the view); centre of mass; section analysis capped with the exact cut face; zebra,
   draft, accessibility and curvature-map analyses.
-- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset
-  and the fillet and chamfer size; a move/rotate triad (three arrows, three rings, three planar
-  handles) for Move, and an offset arrow and angle ring for Joint. A drag writes its dialog's
+- **Drag manipulators.** Arrows for the extrude and press pull distance, the offset plane offset,
+  the fillet and chamfer size and the shell thickness (inside, outside or both); an angle dial
+  for draft; distance arrows and quantity dots along each direction of a rectangular pattern, and
+  total-angle and quantity dials round a circular pattern's axis; a move/rotate triad (three
+  arrows, three rings, three planar handles) for Move, and an offset arrow and angle ring for
+  Joint. Free Move's triad turns about any axis: its outer view ring turns about the line of
+  sight and a drag inside it rolls the objects like a trackball; Rotate puts its ring on a world
+  or construction axis or a straight edge picked in the viewport. A drag writes its dialog's
   fields, which still take typed values. While a command previews its result, the bodies as they
   were show through it as transparent ghosts.
 - **Appearances.** Steel, aluminium (brushed or anodised), brass, copper, gold, ABS, plastic,
@@ -245,8 +250,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, CI and how to add a feature en
 | Freeform / paint selection | 2 / 3 (1 for window again), or SELECT ▾; a lasso that sets off to the right takes what's inside, to the left what it touches |
 | Select Other           | Alt+click, or hold the mouse button still; SELECT ▾ also sets selection priority and filters |
 | Measure                | Select one or two bodies, faces or edges, then I            |
-| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer or Offset Plane, drag the arrow head |
-| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square |
+| Drag arrow             | In Extrude, Press Pull, Fillet, Chamfer, Shell or Offset Plane, drag the arrow head |
+| Draft / pattern handles | Draft: drag the dial's head (1° steps); Rectangular Pattern: the arrow sets the distance, the dot the quantity; Circular Pattern: the dial's arrow sets the total angle, its dot the quantity |
+| Move / rotate triad    | In Move or Joint: drag an arrow, a ring (5° steps) or a square; in Free Move drag the outer ring to turn about the line of sight, or inside it to turn like a trackball; in Rotate pick a straight edge for the axis |
 | Joints in the viewport | Click a joint origin's glyph to use it in Joint, a joint's to drive it (or select it) |
 | Appearance             | A                                                           |
 | Compute All            | Ctrl+B (in the background)                                  |

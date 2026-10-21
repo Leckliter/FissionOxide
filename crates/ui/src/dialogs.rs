@@ -3677,8 +3677,12 @@ impl Dialog {
     };
     let _ = first;
     // construction axes can be revolve axes (not pattern directions)
-    let extra: Vec<String> =
+    let mut extra: Vec<String> =
       if id == "dir1" || id == "dir2" { Vec::new() } else { axes.iter().map(|a| format!("axis:{a}")).collect() };
+    // Move's Rotate also turns about a straight edge picked in the viewport
+    if self.kind == Kind::Move && !self.solid.axis_edge.is_null() {
+      extra.push("edge".into());
+    }
     egui::ComboBox::from_id_salt(id).selected_text(axis_label(&cur)).width(140.0).show_ui(ui, |ui| {
       for a in ["x", "y", "z"].into_iter().map(str::to_string).chain(extra) {
         if ui.selectable_label(cur == a, axis_label(&a)).clicked() {

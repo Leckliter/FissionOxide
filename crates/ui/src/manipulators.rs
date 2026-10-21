@@ -1,6 +1,9 @@
 //! Drag manipulators in the viewport beyond the single arrow (see `viewport::manipulator`): the
 //! move/rotate triad, as in Fusion's Move and Joint commands. Three arrows move along X, Y and Z,
-//! three rings rotate about them and three square handles move in the plane across each axis.
+//! three rings rotate about them and three square handles move in the plane across each axis. A
+//! free triad (Free Move) also turns about any axis: its outer view ring turns about the line of
+//! sight, and dragging inside it turns the objects like a trackball, about the axis across the
+//! drag; view the model down an axis to turn about it.
 //! The open dialog says where the triad sits and which handles it has
 //! ([`crate::Dialog::triad`]) and takes the dragged result back into its fields
 //! ([`crate::Dialog::set_triad`]), so a typed value and a drag always agree.
@@ -9,7 +12,7 @@
 //! renderer.
 
 use egui::{Color32, Pos2, Stroke, Vec2};
-use fox_engine::kernel::glam::DVec3;
+use fox_engine::kernel::glam::{DQuat, DVec3, EulerRot};
 use fox_engine::render::ray_plane;
 
 use crate::App;
@@ -20,6 +23,8 @@ const SIZE_PX: f64 = 95.0;
 /// Ring radius and planar handle extent, as fractions of the arrow length.
 const RING: f64 = 0.62;
 const PLANE: (f64, f64) = (0.2, 0.36);
+/// Radius of a free triad's view ring (and its trackball sphere), as a fraction of the arrow length.
+const VIEW: f64 = 0.85;
 /// Pointer distance that catches a handle (points).
 const CATCH_PX: f32 = 7.0;
 /// Rotation snap (radians) without Incremental Move: 5°.
@@ -28,6 +33,7 @@ const ANGLE_STEP: f64 = std::f64::consts::PI / 36.0;
 const AXIS_COLORS: [Color32; 3] =
   [Color32::from_rgb(220, 70, 60), Color32::from_rgb(60, 165, 70), Color32::from_rgb(45, 100, 230)];
 const ACTIVE: Color32 = Color32::from_rgb(255, 140, 20);
+const VIEW_COLOR: Color32 = Color32::from_gray(140);
 
 /// A part of the triad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +44,10 @@ pub enum Handle {
   Ring(usize),
   /// Move in the plane across axis `i` (spanned by the other two).
   Plane(usize),
+  /// Free triads: turn about the line of sight (the outer ring).
+  View,
+  /// Free triads: turn like a trackball, about the axis across the drag (inside the view ring).
+  Sphere,
 }
 
 /// A move/rotate triad and the handles it offers.
@@ -53,6 +63,10 @@ pub struct Triad {
   pub home: DVec3,
   /// The current rotation (radians) about each axis: dragging a ring continues from it.
   pub angles: [f64; 3],
+  /// Offers the view ring and trackball, which turn about any axis.
+  pub free: bool,
+  /// The current orientation (a free triad's): a free turn continues from it.
+  pub orient: DQuat,
 }
 
 impl Triad {
@@ -66,6 +80,8 @@ impl Triad {
       planes: [true; 3],
       home: origin,
       angles: [0.0; 3],
+      free: false,
+      orient: DQuat::IDENTITY,
     }
   }
 
@@ -79,8 +95,21 @@ impl Triad {
       Handle::Arrow(i) => self.arrows[i],
       Handle::Ring(i) => self.rings[i],
       Handle::Plane(i) => self.planes[i],
+      Handle::View | Handle::Sphere => self.free,
     }
   }
+}
+
+/// The rotation of turning about world X by `a[0]`, then Y by `a[1]`, then Z by `a[2]` (Free
+/// Move's angles).
+pub fn from_xyz(a: [f64; 3]) -> DQuat {
+  DQuat::from_euler(EulerRot::ZYX, a[2], a[1], a[0])
+}
+
+/// The X, Y and Z angles (as [`from_xyz`] takes them) of a rotation.
+pub fn xyz_of(q: DQuat) -> [f64; 3] {
+  let (z, y, x) = q.normalize().to_euler(EulerRot::ZYX);
+  [x, y, z]
 }
 
 /// What a triad drag asks for: put the triad's origin here, or turn it to this angle about one
@@ -89,6 +118,8 @@ impl Triad {
 pub enum TriadEdit {
   Move(DVec3),
   Rotate(usize, f64),
+  /// Turn to this orientation (free triads), keeping the origin.
+  Orient(DQuat),
 }
 
 /// A triad drag in progress.
@@ -104,13 +135,24 @@ pub struct TriadDrag {
   /// round more than half a turn).
   last: f64,
   turned: f64,
+  /// View ring and trackball: the line of sight at the grab, and the trackball's radius.
+  view: DVec3,
+  radius: f64,
 }
 
 impl TriadDrag {
-  /// Grabs a handle where the pointer ray `ro + rd·s` meets it.
-  pub fn begin(t: Triad, handle: Handle, ro: DVec3, rd: DVec3) -> Option<TriadDrag> {
-    let mut d = TriadDrag { handle, start: t, grab: 0.0, grab_pt: t.origin, last: 0.0, turned: 0.0 };
+  /// Grabs a handle where the pointer ray `ro + rd·s` meets it; `size` is the triad's arrow
+  /// length in world units.
+  pub fn begin(t: Triad, handle: Handle, ro: DVec3, rd: DVec3, size: f64) -> Option<TriadDrag> {
+    let view = rd.try_normalize()?;
+    let mut d =
+      TriadDrag { handle, start: t, grab: 0.0, grab_pt: t.origin, last: 0.0, turned: 0.0, view, radius: size * VIEW };
     match handle {
+      Handle::View => {
+        d.grab = ring_angle(t.origin, view, view.any_orthonormal_vector(), ro, rd)?;
+        d.last = d.grab;
+      }
+      Handle::Sphere => d.grab_pt = ray_plane(ro, rd, t.origin, view)?,
       Handle::Arrow(i) => d.grab = axis_param(t.origin, t.axes[i], ro, rd)?,
       Handle::Plane(i) => d.grab_pt = ray_plane(ro, rd, t.origin, t.axes[i])?,
       Handle::Ring(i) => {
@@ -141,6 +183,19 @@ impl TriadDrag {
         self.last = a;
         Some(TriadEdit::Rotate(i, snap(t.angles[i] + self.turned, turn)))
       }
+      Handle::View => {
+        let a = ring_angle(t.origin, self.view, self.view.any_orthonormal_vector(), ro, rd)?;
+        self.turned += wrap(a - self.last);
+        self.last = a;
+        Some(TriadEdit::Orient(DQuat::from_axis_angle(self.view, snap(self.turned, turn)) * t.orient))
+      }
+      Handle::Sphere => {
+        // the point under the pointer rolls with it: a drag of one radius turns a radian
+        let v = ray_plane(ro, rd, t.origin, self.view)? - self.grab_pt;
+        let Some(axis) = v.cross(self.view).try_normalize() else { return Some(TriadEdit::Orient(t.orient)) };
+        let a = snap(v.length() / self.radius.max(1e-9), turn);
+        Some(TriadEdit::Orient(DQuat::from_axis_angle(axis, a) * t.orient))
+      }
     }
   }
 }
@@ -151,6 +206,8 @@ pub struct State {
   pub drag: Option<TriadDrag>,
   /// After a drag, as in Fusion: the dragged handle's value in a box that takes typing.
   pub typed: Option<Typed>,
+  /// The feature handle being dragged (see [`crate::handles`]).
+  pub handle: Option<crate::handles::HandleDrag>,
 }
 
 /// The value box of a handle: its text while it is being typed.
@@ -172,15 +229,19 @@ pub fn value_text_in(unit: fox_engine::model::LengthUnit, t: &Triad, h: Handle) 
   let mm = |v: f64| unit.format((v * 1e4).round() / 1e4);
   match h {
     Handle::Arrow(i) => mm(t.moved(i)),
-    Handle::Ring(i) => {
-      format!("{} deg", fox_engine::sketch::Dim::new((t.angles[i].to_degrees() * 1e4).round() / 1e4).expr)
-    }
+    Handle::Ring(i) => deg(t.angles[i]),
     Handle::Plane(i) => format!("{}, {}", mm(t.moved((i + 1) % 3)), mm(t.moved((i + 2) % 3))),
+    Handle::View | Handle::Sphere => xyz_of(t.orient).map(deg).join(", "),
   }
 }
 
+fn deg(a: f64) -> String {
+  format!("{} deg", fox_engine::sketch::Dim::new((a.to_degrees() * 1e4).round() / 1e4).expr)
+}
+
 /// The edit a typed value asks for: values in model units (mm, radians), two of them for a
-/// planar handle. None when the count is wrong or a value isn't finite.
+/// planar handle, the X, Y and Z angles for the view ring and trackball. None when the count is
+/// wrong or a value isn't finite.
 pub fn typed_edit(t: &Triad, h: Handle, values: &[f64]) -> Option<TriadEdit> {
   if values.iter().any(|v| !v.is_finite()) {
     return None;
@@ -190,6 +251,7 @@ pub fn typed_edit(t: &Triad, h: Handle, values: &[f64]) -> Option<TriadEdit> {
     (Handle::Arrow(i), [v]) => Some(TriadEdit::Move(t.origin + to(i, *v))),
     (Handle::Ring(i), [a]) => Some(TriadEdit::Rotate(i, *a)),
     (Handle::Plane(i), [a, b]) => Some(TriadEdit::Move(t.origin + to((i + 1) % 3, *a) + to((i + 2) % 3, *b))),
+    (Handle::View | Handle::Sphere, [x, y, z]) => Some(TriadEdit::Orient(from_xyz([*x, *y, *z]))),
     _ => None,
   }
 }
@@ -198,7 +260,7 @@ pub fn typed_edit(t: &Triad, h: Handle, values: &[f64]) -> Option<TriadEdit> {
 /// parameters; a bare length means the design's unit.
 fn parse_typed(s: &fox_engine::Session, h: Handle, text: &str) -> Option<Vec<f64>> {
   use fox_engine::expr::{Kind, eval};
-  let ring = matches!(h, Handle::Ring(_));
+  let ring = matches!(h, Handle::Ring(_) | Handle::View | Handle::Sphere);
   let kind = if ring { Kind::Angle } else { Kind::Length };
   let unit = s.design.units;
   text
@@ -258,9 +320,13 @@ struct Layout {
   arrows: [Option<(Pos2, Pos2)>; 3],
   rings: [Vec<Pos2>; 3],
   planes: [Option<[Pos2; 4]>; 3],
+  /// Free triads: the view ring, and the trackball's centre and radius on screen.
+  view: Vec<Pos2>,
+  sphere: Option<(Pos2, f32)>,
 }
 
-fn layout(t: &Triad, size: f64, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Layout {
+/// The triad's handles on screen; `right` and `up` span the screen (for the view ring).
+fn layout(t: &Triad, size: f64, (right, up): (DVec3, DVec3), project: &dyn Fn(DVec3) -> Option<Pos2>) -> Layout {
   let o = t.origin;
   let arrows = [0, 1, 2].map(|i| {
     if !t.arrows[i] {
@@ -293,7 +359,20 @@ fn layout(t: &Triad, size: f64, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Layo
       project(o + u * a + v * b)?,
     ])
   });
-  Layout { arrows, rings, planes }
+  let (view, sphere) = if t.free {
+    let r = size * VIEW;
+    let view: Vec<Pos2> = (0..=72)
+      .filter_map(|k| {
+        let a = std::f64::consts::TAU * k as f64 / 72.0;
+        project(o + (right * a.cos() + up * a.sin()) * r)
+      })
+      .collect();
+    let sphere = project(o).zip(project(o + right * r)).map(|(c, e)| (c, (e - c).length()));
+    (view, sphere)
+  } else {
+    (Vec::new(), None)
+  };
+  Layout { arrows, rings, planes, view, sphere }
 }
 
 fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -318,18 +397,33 @@ fn hit(l: &Layout, p: Pos2) -> Option<Handle> {
       first.push((0.0, Handle::Plane(i)));
     }
   }
-  nearest(first).or_else(|| {
-    let rings = l
-      .rings
-      .iter()
-      .enumerate()
-      .map(|(i, r)| (r.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::INFINITY, f32::min), Handle::Ring(i)));
-    nearest(rings.collect())
-  })
+  nearest(first)
+    .or_else(|| {
+      let rings = l
+        .rings
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::INFINITY, f32::min), Handle::Ring(i)));
+      nearest(rings.collect())
+    })
+    .or_else(|| {
+      let d = l.view.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::INFINITY, f32::min);
+      (d <= CATCH_PX).then_some(Handle::View)
+    })
+    .or_else(|| l.sphere.filter(|(c, r)| (p - *c).length() < *r).map(|_| Handle::Sphere))
 }
 
 fn draw(painter: &egui::Painter, l: &Layout, lit: Option<Handle>) {
   let color = |h: Handle, i: usize| if lit == Some(h) { ACTIVE } else { AXIS_COLORS[i] };
+  if let Some((c, r)) = l.sphere
+    && lit == Some(Handle::Sphere)
+  {
+    painter.circle_filled(c, r, ACTIVE.gamma_multiply(0.12));
+  }
+  if l.view.len() > 1 {
+    let (w, c) = if lit == Some(Handle::View) { (3.0, ACTIVE) } else { (1.5, VIEW_COLOR) };
+    painter.add(egui::Shape::line(l.view.clone(), Stroke::new(w, c)));
+  }
   for (i, r) in l.rings.iter().enumerate() {
     if r.len() > 1 {
       let w = if lit == Some(Handle::Ring(i)) { 3.0 } else { 1.5 };
@@ -393,7 +487,7 @@ pub(crate) fn triad(
     app.manip.typed = None;
     return false;
   };
-  let (right, _, _) = app.cam.basis();
+  let (right, up, _) = app.cam.basis();
   let Some(size) = world_size(project, right, t.origin, SIZE_PX) else { return false };
   if dragging && let Some(drag) = app.manip.drag.as_mut() {
     let handle = drag.handle;
@@ -407,13 +501,13 @@ pub(crate) fn triad(
       }
     }
     let shown = app.dialog.as_ref().and_then(|d| d.triad(&app.s)).unwrap_or(t);
-    let l = layout(&shown, size, project);
+    let l = layout(&shown, size, (right, up), project);
     draw(painter, &l, Some(handle));
     readout(painter, &shown, handle, &l, project);
     ctx.request_repaint();
     return true;
   }
-  let l = layout(&t, size, project);
+  let l = layout(&t, size, (right, up), project);
   let hot = resp.hover_pos().and_then(|p| hit(&l, p)).filter(|h| t.has(*h));
   let press = ctx.input(|i| i.pointer.press_origin());
   let pressed = press.and_then(|p| hit(&l, p)).filter(|h| t.has(*h));
@@ -422,7 +516,7 @@ pub(crate) fn triad(
     && app.drag.is_none()
   {
     let (o, d) = ray(p);
-    if let Some(dr) = TriadDrag::begin(t, h, o, d) {
+    if let Some(dr) = TriadDrag::begin(t, h, o, d, size) {
       app.manip.drag = Some(dr);
       app.manip.typed = None;
       app.drag = Some(Drag::Triad);
@@ -437,7 +531,8 @@ pub(crate) fn triad(
 /// the centre for a ring.
 fn value_at(t: &Triad, h: Handle, l: &Layout, project: &dyn Fn(DVec3) -> Option<Pos2>) -> Option<Pos2> {
   match h {
-    Handle::Ring(_) => project(t.origin),
+    Handle::Ring(_) | Handle::Sphere => project(t.origin),
+    Handle::View => l.view.first().copied(),
     Handle::Arrow(i) => l.arrows[i].map(|a| a.1),
     Handle::Plane(i) => l.planes[i].map(|q| q[2]),
   }
@@ -540,11 +635,11 @@ mod tests {
   fn arrow_and_plane_drags_move_the_origin() {
     let t = Triad::world(DVec3::new(10.0, 0.0, 0.0));
     // grab the X arrow at x = 30 and drag to x = 41.3: moves 11.3, snapped to 0.5 → 11.5
-    let mut d = TriadDrag::begin(t, Handle::Arrow(0), DVec3::new(30.0, 0.0, 50.0), DVec3::NEG_Z).unwrap();
+    let mut d = TriadDrag::begin(t, Handle::Arrow(0), DVec3::new(30.0, 0.0, 50.0), DVec3::NEG_Z, 100.0).unwrap();
     let e = d.update(DVec3::new(41.3, 6.0, 50.0), DVec3::NEG_Z, 0.5, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(21.5, 0.0, 0.0)));
     // the XY planar handle (across Z) follows the pointer in both directions
-    let mut d = TriadDrag::begin(t, Handle::Plane(2), DVec3::new(12.0, 2.0, 50.0), DVec3::NEG_Z).unwrap();
+    let mut d = TriadDrag::begin(t, Handle::Plane(2), DVec3::new(12.0, 2.0, 50.0), DVec3::NEG_Z, 100.0).unwrap();
     let e = d.update(DVec3::new(15.0, -4.0, 50.0), DVec3::NEG_Z, 1.0, ANGLE_STEP).unwrap();
     assert_eq!(e, TriadEdit::Move(DVec3::new(13.0, -6.0, 0.0)));
   }
@@ -558,7 +653,7 @@ mod tests {
     };
     // grab the Z ring at 0° and sweep round to 200° in steps: 200°, not -160°
     let (o, d) = at(0.0);
-    let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d).unwrap();
+    let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d, 100.0).unwrap();
     let mut last = None;
     for deg in (20..=200).step_by(20) {
       let (o, d) = at(deg as f64);
@@ -569,13 +664,13 @@ mod tests {
     // a ring already turned 30° continues from there; snapping to 5°
     t.angles[2] = 30f64.to_radians();
     let (o, d) = at(90.0);
-    let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d).unwrap();
+    let mut drag = TriadDrag::begin(t, Handle::Ring(2), o, d, 100.0).unwrap();
     let (o, d) = at(101.0);
     let Some(TriadEdit::Rotate(2, a)) = drag.update(o, d, 1.0, ANGLE_STEP) else { panic!() };
     assert!((a.to_degrees() - 40.0).abs() < 1e-6, "{}", a.to_degrees());
     // another ring starts from zero
     let (o, d) = (DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X);
-    let mut drag = TriadDrag::begin(t, Handle::Ring(0), o, d).unwrap();
+    let mut drag = TriadDrag::begin(t, Handle::Ring(0), o, d, 100.0).unwrap();
     let e = drag.update(DVec3::new(50.0, 0.0, 10.0), DVec3::NEG_X, 1.0, ANGLE_STEP);
     assert_eq!(e, Some(TriadEdit::Rotate(0, 0.0)));
   }
@@ -625,7 +720,7 @@ mod tests {
   #[test]
   fn handles_are_hit_on_screen() {
     let t = Triad::world(DVec3::ZERO);
-    let l = layout(&t, 100.0, &top);
+    let l = layout(&t, 100.0, (DVec3::X, DVec3::Y), &top);
     // seen from the top the Z arrow collapses to a point and its ring is edge-on... but the
     // Z ring is the circle round the origin
     assert_eq!(hit(&l, Pos2::new(180.0, 101.0)), Some(Handle::Arrow(0)));
@@ -638,14 +733,74 @@ mod tests {
     assert_eq!(hit(&l, Pos2::new(150.0, 150.0 + 30.0)), None);
     // a triad without planar handles or rings offers only its arrows
     let only = Triad { rings: [false; 3], planes: [false; 3], ..t };
-    let l = layout(&only, 100.0, &top);
+    let l = layout(&only, 100.0, (DVec3::X, DVec3::Y), &top);
     assert_eq!(hit(&l, Pos2::new(128.0, 72.0)), None);
     assert!(l.rings.iter().all(Vec::is_empty));
     // grabbing through the screen: the ray of a screen point drives the drag
     let (o, d) = top_ray(Pos2::new(150.0, 100.0));
-    let mut drag = TriadDrag::begin(t, Handle::Arrow(0), o, d).unwrap();
+    let mut drag = TriadDrag::begin(t, Handle::Arrow(0), o, d, 100.0).unwrap();
     let (o, d) = top_ray(Pos2::new(162.0, 90.0));
     assert_eq!(drag.update(o, d, 1.0, ANGLE_STEP), Some(TriadEdit::Move(DVec3::new(12.0, 0.0, 0.0))));
     assert!((world_size(&top, DVec3::X, DVec3::ZERO, 95.0).unwrap() - 95.0).abs() < 1e-6);
+  }
+
+  #[test]
+  fn free_triads_turn_about_the_line_of_sight_and_like_a_trackball() {
+    // X, Y, Z angles: X first, then Y, then Z, all about the world axes
+    let q = from_xyz([0.3, -0.4, 1.1]);
+    let v = DVec3::new(1.0, 2.0, 3.0);
+    let by_hand = DQuat::from_rotation_z(1.1) * (DQuat::from_rotation_y(-0.4) * (DQuat::from_rotation_x(0.3) * v));
+    assert!((q * v - by_hand).length() < 1e-9);
+    let a = xyz_of(q);
+    assert!((a[0] - 0.3).abs() < 1e-9 && (a[1] + 0.4).abs() < 1e-9 && (a[2] - 1.1).abs() < 1e-9, "{a:?}");
+
+    let mut t = Triad::world(DVec3::ZERO);
+    t.free = true;
+    // the view ring, seen from the top: a turn about the line of sight (-Z), continuing from the
+    // current orientation; snapped to 5°
+    t.orient = from_xyz([0.0, 0.0, 10f64.to_radians()]);
+    let at = |deg: f64| {
+      let a = deg.to_radians();
+      (DVec3::new(85.0 * a.cos(), 85.0 * a.sin(), 50.0), DVec3::NEG_Z)
+    };
+    let (o, d) = at(0.0);
+    let mut drag = TriadDrag::begin(t, Handle::View, o, d, 100.0).unwrap();
+    let (o, d) = at(-31.0);
+    let Some(TriadEdit::Orient(q)) = drag.update(o, d, 1.0, ANGLE_STEP) else { panic!() };
+    // turning clockwise on screen seen from above turns about +Z by -30°: 10° - 30° = -20°
+    let a = xyz_of(q);
+    assert!(a[0].abs() < 1e-9 && a[1].abs() < 1e-9 && (a[2].to_degrees() + 20.0).abs() < 1e-6, "{a:?}");
+    // the trackball: dragging right (+X on screen) by one radius turns the front (+Z, toward the
+    // viewer) to the right, about +Y by a radian (snapping off)
+    let t = Triad { orient: DQuat::IDENTITY, ..t };
+    let mut drag = TriadDrag::begin(t, Handle::Sphere, DVec3::new(0.0, 0.0, 50.0), DVec3::NEG_Z, 100.0).unwrap();
+    let Some(TriadEdit::Orient(q)) = drag.update(DVec3::new(85.0, 0.0, 50.0), DVec3::NEG_Z, 1.0, 0.0) else { panic!() };
+    assert!((q * DVec3::Z - DVec3::new(1f64.sin(), 0.0, 1f64.cos())).length() < 1e-9, "{:?}", q * DVec3::Z);
+    // dragging up turns it about -X; a drag back to the grab leaves it as it was
+    let Some(TriadEdit::Orient(q)) = drag.update(DVec3::new(0.0, 42.5, 50.0), DVec3::NEG_Z, 1.0, 0.0) else { panic!() };
+    assert!((q * DVec3::Z - DVec3::new(0.0, 0.5f64.sin(), 0.5f64.cos())).length() < 1e-9);
+    assert_eq!(
+      drag.update(DVec3::new(0.0, 0.0, 50.0), DVec3::NEG_Z, 1.0, 0.0),
+      Some(TriadEdit::Orient(DQuat::IDENTITY))
+    );
+    // on screen: the view ring round the outside, the trackball inside it, the rings first
+    let l = layout(&t, 100.0, (DVec3::X, DVec3::Y), &top);
+    let a = 225f32.to_radians();
+    assert_eq!(hit(&l, Pos2::new(100.0 + 85.0 * a.cos(), 100.0 - 85.0 * a.sin())), Some(Handle::View));
+    assert_eq!(hit(&l, Pos2::new(100.0 - 30.0, 100.0 + 20.0)), Some(Handle::Sphere));
+    let a = 200f32.to_radians();
+    assert_eq!(hit(&l, Pos2::new(100.0 + 62.0 * a.cos(), 100.0 - 62.0 * a.sin())), Some(Handle::Ring(2)));
+    assert_eq!(hit(&l, Pos2::new(100.0, 100.0 + 95.0)), None);
+    // a triad that isn't free has neither
+    let fixed = Triad { free: false, ..t };
+    let l = layout(&fixed, 100.0, (DVec3::X, DVec3::Y), &top);
+    assert!(l.view.is_empty() && l.sphere.is_none());
+    assert_eq!(hit(&l, Pos2::new(100.0 - 30.0, 100.0 + 20.0)), None);
+    // its value box shows and takes the three angles
+    let t = Triad { orient: from_xyz([0.0, 90f64.to_radians(), 0.0]), ..t };
+    assert_eq!(value_text(&t, Handle::View), "0 deg, 90 deg, 0 deg");
+    let Some(TriadEdit::Orient(q)) = typed_edit(&t, Handle::Sphere, &[0.5, 0.0, 0.0]) else { panic!() };
+    assert!((xyz_of(q)[0] - 0.5).abs() < 1e-9);
+    assert_eq!(typed_edit(&t, Handle::View, &[0.5]), None);
   }
 }

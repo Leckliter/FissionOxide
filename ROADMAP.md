@@ -13,7 +13,6 @@ is what's missing compared with Fusion, roughly in the order it would pay off.
 |-----------|------------------------------------------------------------------------------|
 | Features  | Sweep with two guide rails or a guide surface; replace face with curved source faces; extrude to a vertex |
 | Surface   | Extend with corner closing between adjacent edges; untrim with an extension amount; trim by picking pieces to remove in the viewport |
-| UI        | Manipulators for more commands (shell, draft, patterns); a triad that turns about any axis |
 | Manufacture | Holder and fixture collision checks; turning and 4/5-axis; rest roughing after a larger tool in 3D; more pencil passes either side of a corner |
 | Plugins   | Installable `.foxplugin` packages running sandboxed; see [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Fabrication | Langmuir FireControl and Ruida posts checked on real machines |

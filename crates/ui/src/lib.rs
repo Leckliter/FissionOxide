@@ -19,6 +19,7 @@ mod ecad_ui;
 mod form_ui;
 mod forms;
 mod gpu;
+mod handles;
 mod help;
 mod icons;
 #[cfg(test)]

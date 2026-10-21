@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use super::manip::mm;
 use super::{Dialog, Kind, axis_label, axis_vec, is_planar, sel_chip, value_edit_w};
+use crate::handles::Handle;
 use crate::{App, theme};
 
 /// The dialogs' extra values (kept in [`super::solid::Extra`]).
@@ -72,7 +73,7 @@ fn ref_of(v: &Value, k: &str) -> Option<u32> {
 }
 
 /// A straight edge's ends.
-fn line_of(s: &Session, e: &Value) -> Option<(DVec3, DVec3)> {
+pub(super) fn line_of(s: &Session, e: &Value) -> Option<(DVec3, DVec3)> {
   let b = s.model.body(BodyId(ref_of(e, "body")?))?;
   let e = b.edges().iter().find(|x| Some(x.id) == ref_of(e, "edge"))?;
   (e.kind == fox_engine::kernel::CurveKind::Line).then_some((e.start, e.end))
@@ -731,20 +732,50 @@ impl Dialog {
     ui.end_row();
   }
 
-  /// The pattern's drag arrow: along the first direction from the objects' centre, its value
-  /// the whole pattern's length (spacing × instances after the first).
-  pub(super) fn pattern_arrow(&self, s: &Session, origin: DVec3) -> Option<super::Manipulator> {
-    let (n1, _) = self.pattern_counts();
-    let spacing = fox_engine::expr::eval(&self.spacing, fox_engine::expr::Kind::Length, &s.model.params).ok()?;
-    let steps = f64::from(n1.max(2) - 1);
-    Some(super::Manipulator { origin, dir: self.pattern_vec(0)?, value: spacing * steps })
+  /// The pattern's handles along each direction from the objects' centre `origin`: an arrow for
+  /// the Distance field and a dot for the Quantity. With Distance as the spacing the arrow sits
+  /// at the second instance and the dot at the last; with Distance as the extent, the other way
+  /// round. Handles `2k` and `2k + 1` are direction `k`'s.
+  pub(super) fn pattern_handles(&self, s: &Session, origin: DVec3) -> Option<Vec<Handle>> {
+    let (n1, n2) = self.pattern_counts();
+    let mut out = Vec::new();
+    for (k, n) in [n1, n2].into_iter().enumerate().take(if self.use_dir2 { 2 } else { 1 }) {
+      let field = if k == 0 { &self.spacing } else { &self.spacing2 };
+      let d = fox_engine::expr::eval(field, fox_engine::expr::Kind::Length, &s.model.params).ok()?;
+      let steps = f64::from(n.max(2) - 1);
+      let (step, total) = if self.pattern_extent { (d / steps, d) } else { (d, d * steps) };
+      let dir = self.pattern_vec(k)?;
+      let (at_dist, at_count) = if self.pattern_extent { (total, step) } else { (step, total) };
+      out.push(Handle::arrow(origin, dir, at_dist, mm(self.unit, d)));
+      out.push(Handle::arrow(origin, dir, at_count, format!("{n} instances")).dot());
+    }
+    Some(out)
   }
 
-  /// Takes a dragged pattern length back into the spacing.
-  pub(super) fn set_pattern_arrow(&mut self, v: f64, step: f64) {
-    let (n1, _) = self.pattern_counts();
-    let steps = f64::from(n1.max(2) - 1);
-    self.spacing = mm(self.unit, (v / steps).max(step.max(1e-3)));
+  /// Takes a dragged pattern handle (see [`Dialog::pattern_handles`]) into the Distance or
+  /// Quantity field of its direction; false when the value can't apply.
+  pub(super) fn set_pattern_handle(&mut self, s: &Session, i: usize, v: f64, step: f64) -> bool {
+    let k = i / 2;
+    let field = if k == 0 { &mut self.spacing } else { &mut self.spacing2 };
+    if i.is_multiple_of(2) {
+      // a distance can't reach zero: the smallest step is as far as it goes
+      *field = mm(self.unit, crate::manipulators::snap(v, step).max(step.max(1e-3)));
+      return true;
+    }
+    let Ok(d) = fox_engine::expr::eval(field, fox_engine::expr::Kind::Length, &s.model.params) else { return false };
+    if v <= 0.0 || d <= 0.0 {
+      return false;
+    }
+    // the count that puts the dot's instance nearest the pointer: the extent shared out in steps
+    // of the dot's distance, or the dot's distance in steps of the spacing
+    let steps = if self.pattern_extent { d / v } else { v / d };
+    let count = ((steps.round() + 1.0).min(super::manip::MAX_COUNT) as u32).to_string();
+    if k == 0 {
+      self.count = count;
+    } else {
+      self.count2 = count;
+    }
+    true
   }
 }
 
@@ -869,10 +900,41 @@ mod tests {
     assert!(d.pattern_ready());
     let v = d.pattern_vec(0).unwrap();
     assert!(v.y.abs() > 0.999, "{v}");
-    let m = d.pattern_arrow(&s, DVec3::ZERO).unwrap();
-    assert!((m.value - 120.0).abs() < 1e-9);
-    d.set_pattern_arrow(90.0, 1.0);
+    // the distance arrow at the second instance, the quantity dot at the last
+    let h = d.pattern_handles(&s, DVec3::ZERO).unwrap();
+    assert_eq!(h.len(), 2);
+    assert!((h[0].value - 60.0).abs() < 1e-9 && (h[1].value - 120.0).abs() < 1e-9, "{h:?}");
+    assert_eq!(h[1].label, "3 instances");
+    assert!(d.set_pattern_handle(&s, 0, 44.6, 1.0));
     assert_eq!(d.spacing, "45 mm");
+    // the dot dragged to 4 spacings out: 5 instances; it never goes below the original
+    assert!(d.set_pattern_handle(&s, 1, 170.0, 1.0));
+    assert_eq!(d.count, "5");
+    assert!(d.set_pattern_handle(&s, 1, 3.0, 1.0));
+    assert_eq!(d.count, "1");
+    assert!(!d.set_pattern_handle(&s, 1, -20.0, 1.0));
+    // Distance as the extent: the arrow at the last instance sets it, the dot at the second
+    // shares it out
+    d.count = "3".into();
+    d.spacing = "100 mm".into();
+    d.pattern_extent = true;
+    let h = d.pattern_handles(&s, DVec3::ZERO).unwrap();
+    assert!((h[0].value - 100.0).abs() < 1e-9 && (h[1].value - 50.0).abs() < 1e-9, "{h:?}");
+    assert!(d.set_pattern_handle(&s, 1, 26.0, 1.0));
+    assert_eq!(d.count, "5");
+    // a second direction adds its own pair
+    d.pattern_extent = false;
+    d.use_dir2 = true;
+    d.dir2 = "z".into();
+    d.count2 = "2".into();
+    d.spacing2 = "15 mm".into();
+    let h = d.pattern_handles(&s, DVec3::ZERO).unwrap();
+    assert_eq!(h.len(), 4);
+    assert!(matches!(h[2].shape, crate::handles::Shape::Arrow { dir, .. } if dir == DVec3::Z));
+    assert!(d.set_pattern_handle(&s, 3, 46.0, 1.0));
+    assert_eq!(d.count2, "4");
+    d.use_dir2 = false;
+    d.count = "3".into();
     d.spacing = "60 mm".into();
     preview(&mut s, &mut d);
     assert_eq!(s.model.bodies.len(), 3);
@@ -940,7 +1002,7 @@ mod tests {
     d.dirty = true;
     frame(&ctx, &mut app, &mut d);
     assert!(d.applied && d.error.is_none(), "{:?} {:?}", d.error, d.command());
-    assert!(d.manipulator(&app.s).is_some(), "the drag arrow");
+    assert_eq!(d.handles(&app.s).len(), 4, "a distance arrow and a quantity dot per direction");
     assert_eq!(app.s.model.bodies.len(), 6);
   }
 }

@@ -104,6 +104,8 @@ pub enum Drag {
   Triad,
   /// Dragging a component (see [`crate::comp_drag`]).
   Component,
+  /// Dragging one of the dialog's feature handles (see [`crate::handles`]).
+  Handle,
   /// Zoom Window: the box being dragged.
   ZoomWindow {
     start: Pos2,
@@ -295,6 +297,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
   let (project, ray) = (|p| view.to_screen(&cam, p), |p| view.ray(&cam, p));
   consumed |= crate::manipulators::triad(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= crate::form_ui::overlay(app, &resp, &painter, &ctx, &project, &ray);
+  consumed |= crate::handles::show(app, &resp, &painter, &ctx, &project, &ray, step);
   consumed |= manipulator(app, &resp, &painter, &view, &ctx);
   if app.objects.joints {
     consumed |= crate::select::joint_glyphs(app, &resp, &painter, &project);
