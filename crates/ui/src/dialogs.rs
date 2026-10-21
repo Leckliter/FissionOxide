@@ -3450,7 +3450,7 @@ impl Dialog {
           self.sheet_picks = 0;
         }
         let xyz = point.map(crate::forms::short);
-        if self.sheet_picks % 2 == 0 {
+        if self.sheet_picks.is_multiple_of(2) {
           self.translate = xyz;
         } else {
           self.xyz = xyz;
